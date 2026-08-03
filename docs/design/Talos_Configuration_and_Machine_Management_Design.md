@@ -4,7 +4,7 @@
 
 | **Document status**    | Working architecture concept - not yet an implementation specification                                                               |
 |------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| **Revision**           | 0.3                                                                                                                                  |
+| **Revision**           | 0.4                                                                                                                                  |
 | **Date**               | 3 August 2026                                                                                                                        |
 | **Technical baseline** | Talos Linux 1.13 (v1.13.6); Omni 1.9 (v1.9.3); OpenBao 2.6 (v2.6.1) documentation                                                  |
 | **Scope**              | Talos configuration, secrets and machine lifecycle as an open alternative control plane, without CAPI or infrastructure provisioning |
@@ -16,6 +16,7 @@
 | 0.1          | Initial concept notes. |
 | 0.2          | Consolidated design, lifecycle workflows, backend and security model, Omni comparison. |
 | 0.3          | External technical review: version baseline updated (Omni 1.7 -> 1.9.3, OpenBao 2.6.1, Talos v1.13.6); corrected SideroLink endpoint/port wording, Talos apply-mode list and reset-wipe defaults; citation and reference-URL fixes; added installer-image sourcing, etcd backups, multi-version renderer, implementation language and project licence considerations; Omni comparison refreshed for 1.8/1.9. |
+| 0.4          | Decisions recorded from the 0.3 review Q&A: build gate evaluated (three hard differentiators confirmed); Go decided as implementation language; version 1 scale target ~100 machines; scheduled etcd snapshots moved into version 1 scope (SnapshotEtcd); installer images via public Image Factory with a per-site platform proxy reserved for later; normative site egress requirement added (10.10); figure corrections identified (Figures 2-4). |
 
 ## Contents
 
@@ -56,7 +57,7 @@ The emerging architecture uses native Talos multi-document YAML and Talos APIs a
 
 The connectivity layer is deliberately transport-independent. For routed internal environments, direct access to each machine on the Talos API is the simplest baseline. SideroLink remains an optional call-home transport for NAT, edge or less trusted networks; its grpc_tunnel mode avoids UDP by carrying WireGuard traffic over the long-lived SideroLink gRPC connection on TCP; the SideroLink endpoint URL and port are deployment-defined, commonly exposed on 443. A site relay is another option for reaching an entire remote network through one outbound web-compatible connector. [T1]
 
-> **Current recommended baseline:** First prove the configuration-specific differentiators on direct internal networks: native fragment/profile reuse, OpenBao custody, immutable releases, approvals, provenance, drift handling and reset/reuse. Add SideroLink-over-gRPC and site-relay transports later. If these differentiators are not hard requirements, Omni is the rational choice and rebuilding it would be unjustified.
+> **Current recommended baseline:** First prove the configuration-specific differentiators on direct internal networks: native fragment/profile reuse, OpenBao custody, immutable releases, approvals, provenance, drift handling and reset/reuse. Add SideroLink-over-gRPC and site-relay transports later. If these differentiators are not hard requirements, Omni is the rational choice and rebuilding it would be unjustified. Revision 0.4 records that three differentiators are confirmed hard requirements (open-source production licence, explicit releases and approvals, direct Talos access with optional SideroLink), so the build path is currently justified.
 
 ## 1. Problem statement and design intent
 
@@ -148,10 +149,13 @@ The discussion initially surveyed known Talos tools. Those tools were useful for
 | Drift correction                 | Report by default; operator chooses revert or adopt                                                                    | Preferred          |
 | Automatic rollout                | Conservative, policy-controlled; destructive and control-plane actions require approval                                | Preferred          |
 | Omni relationship                | Primary reference implementation and competitor; avoiding CAPI is not by itself a distinction from Omni                | Decided            |
-| Build/no-build gate              | Proceed only if several differentiators are hard requirements; otherwise adopt Omni                                    | Architectural gate |
+| Build/no-build gate              | Evaluated 3 Aug 2026: open-source production licence, explicit releases/approvals and direct Talos access with optional SideroLink are hard requirements; OpenBao custody is a preference. Currently favours build; re-check each Omni release | Architectural gate |
 | Configuration source classes     | Separate machine configuration, identity/secrets, image/extensions, kernel/early-boot arguments and platform injection | Preferred          |
-| Implementation language          | Go, single static management binary; aligns with upstream Talos client machinery and talosctl                          | Preferred          |
-| Project licence                  | OSI-approved licence required; exact licence (Apache-2.0, AGPLv3, MPL-2.0) not yet chosen                              | Open point         |
+| Implementation language          | Go; aligns with upstream Talos client machinery and talosctl. Single static management binary preferred, not final     | Decided (Go)       |
+| Scale target (version 1)         | Roughly 100 machines across several sites and 5-15 clusters; design and test at this order of magnitude                | Decided            |
+| etcd backups                     | Scheduled snapshots to S3-compatible object storage with retention; RecoverEtcd starts from platform-owned snapshots   | Decided            |
+| Installer image sourcing         | Public Image Factory in version 1; per-site platform image proxy/cache reserved for a later phase                      | Decided            |
+| Project licence                  | OSI-approved licence required; exact licence (Apache-2.0, AGPLv3, MPL-2.0) not yet chosen; must be selected before first public release | Open point         |
 
 > **Important:** “Open option” does not mean the architecture is undefined. It means the core is deliberately designed so that the option can be selected per environment without changing configuration, secrets or lifecycle semantics.
 
@@ -206,7 +210,7 @@ The platform separates user-facing management, persistent desired state, secret 
 
 ![High-level component architecture.](assets/figure-2-system-architecture.png)
 
-*Figure 2 - High-level component architecture.*
+*Figure 2 - High-level component architecture. (Diagram revision pending: the edge labels between OpenBao/PostgreSQL and the operation engine/compiler overlap and are illegible, and the transparent background renders poorly on dark backgrounds.)*
 
 ### 5.1 Core components
 
@@ -276,7 +280,7 @@ The first implementation can invoke a pinned talosctl in an isolated process. A 
 
 ![Draft-to-release and rollout pipeline.](assets/figure-3-release-pipeline.png)
 
-*Figure 3 - Draft-to-release and rollout pipeline.*
+*Figure 3 - Draft-to-release and rollout pipeline. (Diagram revision pending: Transit encryption must precede the immutable-release commit, as specified in 7.4; the current image shows the reverse order.)*
 
 Publication should compile and validate the complete per-machine configurations before a release becomes available. The exact full configuration is secret-bearing and should be encrypted before persistence. The release also stores a redacted canonical form, digest, source graph and validation results.
 
@@ -298,7 +302,7 @@ Not every input that changes a Talos machine should be forced into one generic p
 
 Omni independently models patches, ExtensionsConfigurations, KernelArgs, Kubernetes manifests, platform injection and Talos defaults. That separation is operationally correct. The proposed platform should not appear cleaner by collapsing inputs that require different lifecycle behaviour. [M2] [M3]
 
-Installer images and schematics are a sourcing dependency in their own right. Talos images that include system extensions are normally produced by the public Image Factory or a self-hosted Image Factory instance; Omni 1.8 added an Image Factory proxy for exactly this reason. [T15] [M9] Version 1 should treat schematic IDs and installer image references as opaque, pinned release inputs, but the deployment documentation must state where images are built and whether air-gapped sites require a local Image Factory.
+Installer images and schematics are a sourcing dependency in their own right. Talos images that include system extensions are normally produced by the public Image Factory or a self-hosted Image Factory instance; Omni 1.8 added an Image Factory proxy for exactly this reason. [T15] [M9] Version 1 treats schematic IDs and installer image references as opaque, pinned release inputs sourced from the public Image Factory; a per-site platform image proxy/cache (in the style of the Omni 1.8 factory proxy) is reserved as a later-phase option, and air-gapped sites are not a version 1 target.
 
 ### 6.8 What the configuration design does and does not add
 
@@ -547,6 +551,7 @@ The system should not hide unrelated lifecycle actions under a generic “reconc
 | ResetMachine      | Graceful cluster removal and selective partition wipe.                |
 | WipeDisks         | Explicitly sanitize selected user or system disks.                    |
 | RecoverEtcd       | Restore or repair etcd from a known snapshot/workflow.                |
+| SnapshotEtcd      | Take a scheduled or on-demand etcd snapshot into S3-compatible object storage with retention. |
 | AdoptCluster      | Establish an authoritative baseline for an existing cluster.          |
 
 ## 10. Connectivity and transport options
@@ -555,7 +560,7 @@ The northbound web API and the southbound machine transport are separate. Users 
 
 ![Southbound connectivity options behind a common transport interface.](assets/figure-4-transport-options.png)
 
-*Figure 4 - Southbound connectivity options. These are alternatives behind a common transport interface.*
+*Figure 4 - Southbound connectivity options. These are alternatives behind a common transport interface. (Diagram revision pending: the SideroLink gRPC tunnel box should read "WireGuard over gRPC/HTTP-2, endpoint deployment-defined, typically exposed on 443" rather than a fixed TCP 443.)*
 
 ### 10.1 Direct internal Talos API
 
@@ -611,6 +616,10 @@ Talos explicitly states that the **maintenance-mode** API becomes SideroLink-onl
 Bare SideroLink is not a documented high-availability Kubernetes endpoint. It provides a host-level point-to-point network path, and Talos ingress firewall rules always allow the siderolink interface. A headend may therefore be able to reach a control-plane host service such as TCP 6443 if its own packet filtering permits it, but this is an **implementation inference that requires proof**, not a complete product feature. [T1] [T9]
 
 A production design would still need a stable frontend, healthy control-plane selection, certificate/SAN handling and user authentication. For internal sites, the normal cluster VIP or load balancer is preferable. For a SideroLink-only or relayed site, build an explicit Kubernetes API proxy through the same connectivity component.
+
+### 10.10 Site egress requirement
+
+No concrete restricted remote site exists yet. To keep client-side requirements short and precise, the target requirement for a remote site is: **outbound TCP 443 with TLS, permitting either HTTP CONNECT or, preferably, long-lived gRPC/HTTP-2 streams.** Sites that meet the preferred form can use SideroLink grpc_tunnel or a streaming site relay; the REST-polling connector remains the documented fallback for stricter environments. This requirement statement should appear verbatim in customer-facing deployment documentation.
 
 ## 11. Northbound web API
 
@@ -783,7 +792,7 @@ A reference deployment can use CloudNativePG for PostgreSQL. OpenBao should run 
 
 ### 14.3 Transport HA
 
-Direct transport is naturally stateless apart from credentials and inventory. SideroLink headends and relays have more state: machine identity, stable overlay addressing, connection/session ownership and packet filtering. Version 1 should prefer a single active headend with a warm standby or another deliberately simple model until active/active semantics are proven.
+Direct transport is naturally stateless apart from credentials and inventory. SideroLink headends and relays have more state: machine identity, stable overlay addressing, connection/session ownership and packet filtering. Version 1 should prefer a single active headend with a warm standby or another deliberately simple model until active/active semantics are proven. At the version 1 scale target of roughly 100 machines across a handful of sites, this simple model is sufficient.
 
 ### 14.4 Consistent recovery set
 
@@ -842,7 +851,7 @@ The platform should generate redacted support bundles containing machine invento
 | **Option**                      | **Alternatives**                                                                                 | **Current leaning**                                                                           |
 |---------------------------------|--------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
 | Default connectivity policy     | Direct-only first versus shipping direct and SideroLink in the initial release.                  | Start direct; preserve transport interface.                                                   |
-| Restricted remote network       | SideroLink gRPC tunnel versus site relay versus REST-polling connector.                          | Determine whether native HTTP/2 long-lived streams are allowed.                               |
+| Restricted remote network       | SideroLink gRPC tunnel versus site relay versus REST-polling connector.                          | No concrete site yet; target egress requirement stated in 10.10; REST polling kept as fallback. |
 | SideroLink headend              | Build on open SideroLink packages or implement only a site relay initially.                      | Prototype before committing to production support.                                            |
 | Configuration compiler          | Pinned talosctl subprocess versus Talos Go machinery.                                            | Subprocess for first vertical slice; library later if needed.                                 |
 | Compiled artifact retention     | Persist Transit-encrypted full config or re-render at apply time.                                | Persist exact encrypted artifact for rollback and reproducibility.                            |
@@ -857,10 +866,10 @@ The platform should generate redacted support bundles containing machine invento
 | Patch scope model               | Copy Omni's four scopes versus fixed layers with profiles.                                       | Preserve the same semantic distinctions; use fixed layers and explicit order within a layer.  |
 | Configuration activation        | Immediate reconciliation versus explicit release/approval.                                       | Explicit immutable releases first; allow policy-based automatic publication or rollout later. |
 | Extensions and kernel arguments | Treat as generic YAML fragments versus dedicated inputs.                                         | Dedicated inputs because image, reboot and early-boot semantics differ.                       |
-| Build versus adopt Omni         | Implement this platform versus deploy self-hosted Omni.                                          | Treat as a continuing architecture gate, not a foregone conclusion.                           |
-| etcd backups                    | Platform-owned scheduled snapshots versus external tooling.                                      | Lean in-scope: RecoverEtcd presupposes snapshots exist; Omni treats backups as core.          |
-| Installer image sourcing        | Public Image Factory, self-hosted Image Factory or static image list.                            | Opaque pinned schematic/image inputs in v1; decide the air-gap story explicitly.              |
-| Project licence                 | Apache-2.0 versus AGPLv3 versus MPL-2.0.                                                         | Choose before first public release; the open licence is a stated differentiator.              |
+| Build versus adopt Omni         | Implement this platform versus deploy self-hosted Omni.                                          | Gate evaluated 3 Aug 2026: three hard differentiators confirmed; currently favours build.     |
+| etcd backups                    | Platform-owned scheduled snapshots versus external tooling.                                      | Decided: in scope for version 1 (SnapshotEtcd operation).                                     |
+| Installer image sourcing        | Public Image Factory, self-hosted Image Factory or static image list.                            | Decided: public Image Factory in v1; per-site platform image proxy/cache in a later phase.    |
+| Project licence                 | Apache-2.0 versus AGPLv3 versus MPL-2.0.                                                         | Open; must be chosen before first public release; fork-and-SaaS stance undecided.             |
 
 ## 17. Recommended baseline and initial scope
 
@@ -883,6 +892,8 @@ The platform should generate redacted support bundles containing machine invento
 - Existing-cluster adoption, full release publication, drift detection and conservative manual approval.
 
 - Machine enrolment, worker addition, cluster bootstrap from available machines and selective reset-to-pool.
+
+- Scheduled etcd snapshots to S3-compatible object storage with retention, as the precondition for RecoverEtcd.
 
 - Independent break-glass credentials and export/backup procedures.
 
@@ -976,6 +987,8 @@ The platform should generate redacted support bundles containing machine invento
 
 - Durable drain/reset/bootstrap operation workflows.
 
+- Scheduled etcd snapshots (SnapshotEtcd) with retention in S3-compatible object storage.
+
 - Kubernetes observer for readiness, drain and PDB failures.
 
 ### 18.4 Phase 3 - remote connectivity
@@ -1036,11 +1049,11 @@ The most revealing proof is an end-to-end reuse loop rather than a polished UI:
 
 ### 19.2 Questions for the next design round
 
-- For the restrictive use case, is **native gRPC over HTTP/2 with a long-lived outbound connection** allowed, or only ordinary stateless REST through an explicit proxy?
+- For the restrictive use case, is **native gRPC over HTTP/2 with a long-lived outbound connection** allowed, or only ordinary stateless REST through an explicit proxy? *Answered in 0.4: no concrete site exists yet; the target egress requirement is stated in 10.10 and REST polling remains the fallback.*
 
 - Must remote machines individually call home, or is one independent site relay acceptable?
 
-- What is the expected scale: machines, clusters, sites and concurrent operations?
+- What is the expected scale: machines, clusters, sites and concurrent operations? *Answered in 0.4: roughly 100 machines across several sites and 5-15 clusters.*
 
 - Which initial networking patterns must be supported: DHCP only, static IP, separate management NIC, NoCloud or other metadata?
 
@@ -1060,7 +1073,7 @@ The most revealing proof is an end-to-end reuse loop rather than a polished UI:
 
 - How much automatic rollout is desired after the first safe release: report-only, no-reboot workers, or broader policy-driven reconciliation?
 
-- Which Omni differentiators are non-negotiable enough to justify a new platform: production licence, OpenBao custody, direct Talos access, optional overlay, reusable profiles, explicit releases, or all of these?
+- Which Omni differentiators are non-negotiable enough to justify a new platform: production licence, OpenBao custody, direct Talos access, optional overlay, reusable profiles, explicit releases, or all of these? *Answered in 0.4: production licence, explicit releases/approvals and direct access with optional overlay are hard requirements; OpenBao custody is a preference.*
 
 - Should the fixed configuration layers map almost exactly to Omni's Machine, Cluster, MachineSet and ClusterMachine semantics?
 
@@ -1070,11 +1083,11 @@ The most revealing proof is an end-to-end reuse loop rather than a polished UI:
 
 - Which open-source licence should the project itself use, and is preventing a proprietary fork-and-SaaS a goal?
 
-- Are air-gapped sites a target environment, making a self-hosted Image Factory a supported dependency?
+- Are air-gapped sites a target environment, making a self-hosted Image Factory a supported dependency? *Answered in 0.4: not in version 1; a per-site platform image proxy/cache is reserved for a later phase.*
 
-- Should scheduled etcd snapshots be a version 1 platform feature or remain external?
+- Should scheduled etcd snapshots be a version 1 platform feature or remain external? *Answered in 0.4: version 1 platform feature (SnapshotEtcd).*
 
-- Is Go with a single static management binary confirmed as the implementation baseline?
+- Is Go with a single static management binary confirmed as the implementation baseline? *Answered in 0.4: Go is decided; the single-binary form is preferred but not final.*
 
 ## 20. Comparison with Omni
 
@@ -1198,6 +1211,8 @@ The strongest reasons to build are not that Omni cannot manage Talos configurati
 
 > **Build/no-build gate:** If only one or two of these are mild preferences, deploy Omni. If several are hard architectural or legal requirements, the proposed platform has a defensible product boundary.
 
+As of revision 0.4 the gate has been evaluated: production under an open-source licence, immutable releases with approvals, and direct Talos access with SideroLink as an optional transport are confirmed hard requirements; operator OpenBao custody is a strong preference rather than a hard requirement. Three hard differentiators satisfy the gate, so the current decision is to build, re-validated against each Omni release.
+
 The configuration-specific pitch is therefore: Omni offers centrally owned, immediately reconciled Talos configuration through scoped patches. The proposed platform offers operator-owned, reusable and versioned Talos configuration with external secrets, explicit releases, provenance, direct access and a clean exit path.
 
 ## Appendix A. Example data and API shapes
@@ -1293,6 +1308,7 @@ type MachineTransport interface {
 | UpgradeTalos      | Drain, upgrade, reconnect and verify.                                | Machine + rollout slot                   |
 | UpgradeKubernetes | Apply version change and verify control-plane/node convergence.      | Cluster rollout lock                     |
 | RecoverEtcd       | Restore snapshot or remove failed member according to recovery plan. | Exclusive cluster recovery lock          |
+| SnapshotEtcd      | Scheduled/on-demand etcd snapshot to object storage with retention.  | Cluster snapshot slot (non-exclusive)    |
 | RotateSecrets     | Create generation and coordinate release rollout.                    | Cluster PKI lock + multi-party approval  |
 
 ## Appendix C. References
