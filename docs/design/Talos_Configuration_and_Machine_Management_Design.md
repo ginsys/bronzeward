@@ -4,12 +4,18 @@
 
 | **Document status**    | Working architecture concept - not yet an implementation specification                                                               |
 |------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| **Revision**           | 0.2                                                                                                                                  |
+| **Revision**           | 0.3                                                                                                                                  |
 | **Date**               | 3 August 2026                                                                                                                        |
-| **Technical baseline** | Talos Linux 1.13 documentation; Omni 1.7 documentation; OpenBao 2.6.x documentation                                                  |
+| **Technical baseline** | Talos Linux 1.13 (v1.13.6); Omni 1.9 (v1.9.3); OpenBao 2.6 (v2.6.1) documentation                                                  |
 | **Scope**              | Talos configuration, secrets and machine lifecycle as an open alternative control plane, without CAPI or infrastructure provisioning |
 
 > **Purpose:** This document consolidates the full design discussion so far: the problem being solved, the architecture and lifecycle workflows, the backend and security model, the comparison with Omni, and the design alternatives that remain open.
+
+| **Revision** | **Changes** |
+|--------------|-------------|
+| 0.1          | Initial concept notes. |
+| 0.2          | Consolidated design, lifecycle workflows, backend and security model, Omni comparison. |
+| 0.3          | External technical review: version baseline updated (Omni 1.7 -> 1.9.3, OpenBao 2.6.1, Talos v1.13.6); corrected SideroLink endpoint/port wording, Talos apply-mode list and reset-wipe defaults; citation and reference-URL fixes; added installer-image sourcing, etcd backups, multi-version renderer, implementation language and project licence considerations; Omni comparison refreshed for 1.8/1.9. |
 
 ## Contents
 
@@ -48,7 +54,7 @@ The intended differentiators are operator custody of native Talos configuration 
 
 The emerging architecture uses native Talos multi-document YAML and Talos APIs as the canonical configuration model, PostgreSQL as the authoritative operational and revision database, and OpenBao for Talos secret bundles, management credentials, key material and cryptographic services. Git is not the backend. Talhelper is not required. CAPI is explicitly avoided.
 
-The connectivity layer is deliberately transport-independent. For routed internal environments, direct access to each machine on the Talos API is the simplest baseline. SideroLink remains an optional call-home transport for NAT, edge or less trusted networks; its grpc_tunnel mode avoids UDP by carrying WireGuard traffic over a long-lived gRPC connection on TCP 443. A site relay is another option for reaching an entire remote network through one outbound web-compatible connector. [T1]
+The connectivity layer is deliberately transport-independent. For routed internal environments, direct access to each machine on the Talos API is the simplest baseline. SideroLink remains an optional call-home transport for NAT, edge or less trusted networks; its grpc_tunnel mode avoids UDP by carrying WireGuard traffic over the long-lived SideroLink gRPC connection on TCP; the SideroLink endpoint URL and port are deployment-defined, commonly exposed on 443. A site relay is another option for reaching an entire remote network through one outbound web-compatible connector. [T1]
 
 > **Current recommended baseline:** First prove the configuration-specific differentiators on direct internal networks: native fragment/profile reuse, OpenBao custody, immutable releases, approvals, provenance, drift handling and reset/reuse. Add SideroLink-over-gRPC and site-relay transports later. If these differentiators are not hard requirements, Omni is the rational choice and rebuilding it would be unjustified.
 
@@ -144,6 +150,8 @@ The discussion initially surveyed known Talos tools. Those tools were useful for
 | Omni relationship                | Primary reference implementation and competitor; avoiding CAPI is not by itself a distinction from Omni                | Decided            |
 | Build/no-build gate              | Proceed only if several differentiators are hard requirements; otherwise adopt Omni                                    | Architectural gate |
 | Configuration source classes     | Separate machine configuration, identity/secrets, image/extensions, kernel/early-boot arguments and platform injection | Preferred          |
+| Implementation language          | Go, single static management binary; aligns with upstream Talos client machinery and talosctl                          | Preferred          |
+| Project licence                  | OSI-approved licence required; exact licence (Apache-2.0, AGPLv3, MPL-2.0) not yet chosen                              | Open point         |
 
 > **Important:** “Open option” does not mean the architecture is undefined. It means the core is deliberately designed so that the option can be selected per environment without changing configuration, secrets or lifecycle semantics.
 
@@ -244,7 +252,7 @@ A **fragment** is an immutable revision of native Talos YAML. A **profile** is a
 
 This makes reuse visible and traceable. The UI should be able to show which fragment last set any field. Field provenance is more valuable than clever templating because it makes the final configuration explainable.
 
-The layer hierarchy should remain small and fixed. Profiles provide reuse inside those layers; they should not permit an arbitrary 47-stage patch lasagne that is harder to reason about than the machine configuration it replaces.
+The layer hierarchy should remain small and fixed. Profiles provide reuse inside those layers; they should not permit an arbitrary 47-stage patch lasagne that is harder to reason about than the machine configuration it replaces. The seven layers in the composition order above are the fixed superset: deployments select among them but must not define additional layers.
 
 Omni's precedence model - Machine, Cluster, MachineSet, then ClusterMachine - captures a useful semantic distinction. Intrinsic machine properties survive reassignment but have lower precedence than the machine's current cluster role and assignment. This platform should preserve that distinction even if its resource names differ. [M2]
 
@@ -260,7 +268,7 @@ A future importer could accept an existing Talhelper project and translate it in
 
 ### 6.5 Renderer and contract pinning
 
-Every published release must record the target Talos version, Kubernetes version, Talos configuration contract, renderer implementation/version, installer image or schematic, and system extensions. Regenerating a historical release with a newer manager must not silently produce different output.
+Every published release must record the target Talos version, Kubernetes version, Talos configuration contract, renderer implementation/version, installer image or schematic, and system extensions. Regenerating a historical release with a newer manager must not silently produce different output. Because different clusters will run different Talos versions at any given time, the renderer must support multiple pinned Talos contract versions concurrently; with the subprocess approach this means one pinned talosctl binary per contract in use.
 
 The first implementation can invoke a pinned talosctl in an isolated process. A later implementation can use Talos Go machinery directly for better typed errors, redaction and provenance. Both are upstream-only approaches; the trade-off is subprocess simplicity versus library integration and compatibility maintenance.
 
@@ -289,6 +297,8 @@ Not every input that changes a Talos machine should be forced into one generic p
 | Kubernetes manifests            | Bootstrap or continuously reconciled workloads                            | Outside version 1; managed by a Kubernetes workload system rather than hidden inside machine configuration.        |
 
 Omni independently models patches, ExtensionsConfigurations, KernelArgs, Kubernetes manifests, platform injection and Talos defaults. That separation is operationally correct. The proposed platform should not appear cleaner by collapsing inputs that require different lifecycle behaviour. [M2] [M3]
+
+Installer images and schematics are a sourcing dependency in their own right. Talos images that include system extensions are normally produced by the public Image Factory or a self-hosted Image Factory instance; Omni 1.8 added an Image Factory proxy for exactly this reason. [T15] [M9] Version 1 should treat schematic IDs and installer image references as opaque, pinned release inputs, but the deployment documentation must state where images are built and whether air-gapped sites require a local Image Factory.
 
 ### 6.8 What the configuration design does and does not add
 
@@ -345,6 +355,8 @@ OpenBao KV v2 provides versioned secret storage and check-and-set semantics. The
 OpenBao Transit is designed to encrypt application data that remains stored in another primary datastore. It is therefore suitable for encrypting complete rendered Talos configurations stored as ciphertext in PostgreSQL. OpenBao does not store the submitted plaintext. [O2]
 
 OpenBao itself should use its integrated Raft storage, which provides HA and backup/restore workflows, rather than sharing the application PostgreSQL database. This keeps the secret system and the application database independently recoverable. [O1]
+
+OpenBao also officially supports PostgreSQL as a storage backend. Sharing the application PostgreSQL instance would nonetheless couple secret availability, failure modes and recovery to the application database, and upstream recommends integrated storage for most deployments, so this design keeps OpenBao on its own Raft cluster. [O1] Recent OpenBao releases add capabilities worth tracking: namespaces (2.3) and per-namespace sealing (2.6) align with a possible later hard multi-tenancy requirement, and declarative self-initialization (2.4) simplifies a reproducible reference deployment.
 
 ### 7.4 Publication without distributed transactions
 
@@ -489,7 +501,7 @@ The Kubernetes API endpoint itself is a separate design concern. It may be a Tal
 
 ### 9.4 Add or replace a node
 
-Adding a worker or control-plane node does not require re-bootstrapping the cluster. The manager applies a configuration generated from the current secret generation and role; the node joins automatically. [T4]
+Adding a worker or control-plane node does not require re-bootstrapping the cluster. The manager applies a configuration generated from the current secret generation and role; the node joins automatically. [T11]
 
 Replacement policy differs by role and failure mode. For a healthy control-plane replacement, adding the new member before removing the old can be safest. For a failed control-plane member, remove the failed member before adding its replacement to avoid quorum complications. The operation engine should encode these as explicit workflows rather than generic “replace” buttons.
 
@@ -503,7 +515,7 @@ Reset is not one red button. The normal reuse workflow should:
 >
 > **3.** Leave etcd gracefully when the machine is a reachable control-plane member.
 >
-> **4.** Apply a selective reset policy, normally wiping STATE and optionally EPHEMERAL rather than blindly erasing every disk.
+> **4.** Apply an explicit selective reset policy that wipes STATE and EPHEMERAL by label. The wipe specification must always be explicit: an unqualified default reset wipes the whole system disk.
 >
 > **5.** Reboot and wait for maintenance-mode reachability through the expected transport.
 >
@@ -511,7 +523,7 @@ Reset is not one red button. The normal reuse workflow should:
 >
 > **7.** Preserve the stable manager machine ID and, where appropriate, a separate enrolment identity.
 
-Talos supports graceful reset and selective system-partition wipe by label. A full disk wipe can remove boot assets and make the machine unable to return without an external provisioning mechanism. [T7]
+Talos supports graceful reset (cordon/drain and etcd leave) and selective system-partition wipe by label, with STATE and EPHEMERAL as the documented examples. An unqualified default reset wipes the system disk, removing boot assets and leaving the machine unable to return without an external provisioning mechanism. The operation engine must therefore refuse a ResetMachine request that lacks an explicit, typed wipe specification. [T7]
 
 ### 9.6 Full wipe and retirement
 
@@ -551,13 +563,15 @@ For routed internal networks, the manager connects to each machine on the Talos 
 
 Direct access is the least complex option and keeps reset recovery independent of a SideroLink headend. Its main costs are inventory/address discovery, routing to every machine, and the security burden of maintenance-mode API reachability.
 
+If the manager itself runs inside a Kubernetes cluster, Talos also documents service-account-based Talos API access from within a cluster, which can be relevant for a Kubernetes-hosted manager reaching the Talos nodes of its own hosting cluster. [T14]
+
 ### 10.2 SideroLink over UDP
 
-SideroLink provides a Talos-native point-to-point WireGuard management overlay. The machine initiates registration through gRPC and normally carries WireGuard packets over UDP. It is useful for NAT, overlapping networks and remote sites. It is not KubeSpan: SideroLink connects each machine only to the management server, while KubeSpan is a node-to-node cluster mesh. [T1] [T10]
+SideroLink provides a Talos-native point-to-point WireGuard management overlay. The machine initiates registration through gRPC and normally carries WireGuard packets over UDP. It is useful for NAT, overlapping networks and remote sites. It is not KubeSpan: SideroLink connects each machine only to the management server, while KubeSpan is a node-to-node cluster mesh. [T1] [T10] The SideroLink protocol and agent/headend building blocks are published as open packages. [G1]
 
-### 10.3 SideroLink gRPC tunnel over TCP 443
+### 10.3 SideroLink gRPC tunnel over TCP
 
-The UDP concern does not automatically exclude SideroLink. With grpc_tunnel=true, WireGuard traffic is sent over the existing SideroLink gRPC connection instead of plain UDP. This can fit environments that allow outbound TLS/HTTP/2 on TCP 443, though Talos warns that it adds significant overhead. [T1]
+The UDP concern does not automatically exclude SideroLink. With grpc_tunnel=true, WireGuard traffic is sent over the existing SideroLink gRPC connection instead of plain UDP. The SideroLink API endpoint is a deployment-defined URL rather than a fixed port, so the headend can be exposed on TCP 443 to fit environments that allow outbound TLS/HTTP/2, though Talos warns that the tunnel adds significant overhead. [T1]
 
 > **Protocol distinction:** SideroLink gRPC tunnelling is web-firewall-friendly, but it is not an ordinary stateless REST API. It requires native gRPC/HTTP/2, a long-lived connection and intermediaries that do not downgrade or terminate the stream.
 
@@ -583,7 +597,7 @@ Talos extension services can run privileged containers as part of a custom Talos
 |--------------------|--------------------|---------|----------------------|------------------|-------------------------------------------------------|
 | Direct internal    | No                 | No      | Yes                  | No               | Lowest complexity; requires routed trusted network    |
 | SideroLink UDP     | Machine            | Yes     | Yes                  | No               | Best NAT/edge fit; UDP may be blocked                 |
-| SideroLink gRPC    | Machine            | No      | Yes                  | No               | TCP 443/HTTP2; not ordinary REST                      |
+| SideroLink gRPC    | Machine            | No      | Yes                  | No               | TCP/HTTP2 (typically exposed on 443); not ordinary REST                      |
 | Site relay stream  | Relay              | No      | Yes                  | No               | One connector per site; supports Talos and Kubernetes |
 | REST polling relay | Relay              | No      | Yes                  | No               | Strict web boundaries; privileged local executor      |
 | Custom extension   | Machine            | No      | Potentially          | Yes              | Per-node call-home; highest ownership cost            |
@@ -613,6 +627,10 @@ The product requires a proper web API independent of machine transport. UI, auto
 - Idempotency keys for every mutating operation that might be retried by clients or proxies.
 
 - Optimistic concurrency using entity revision or ETag/If-Match on mutable drafts.
+
+- Versioned API surface (/api/v1) with an explicit deprecation policy.
+
+- Cursor-based pagination on all collection resources.
 
 - Explicit approval resources instead of hidden boolean flags.
 
@@ -665,7 +683,7 @@ These values must be stored separately. “Apply succeeded” does not prove the
 
 ### 12.2 Plan before apply
 
-For each machine, the reconciler should compile a plan containing: current and desired digest, redacted structural diff, Talos version compatibility, upstream validation, Talos dry-run result, expected reboot requirement, risk classification, rollout policy and approval status. Talos supports live configuration updates and modes such as automatic, reboot, staged and try; network/firewall changes should use try where appropriate. [T5] [T9]
+For each machine, the reconciler should compile a plan containing: current and desired digest, redacted structural diff, Talos version compatibility, upstream validation, Talos dry-run result, expected reboot requirement, risk classification, rollout policy and approval status. Talos supports live configuration updates with apply modes auto (the default), no-reboot, reboot, staged and try; network/firewall changes should use try where appropriate. [T5] [T9]
 
 ### 12.3 Rollout policy
 
@@ -717,7 +735,7 @@ Configuration desired state can collapse to the latest approved release. Command
 
 ### 13.2 OpenBao access separation
 
-OpenBao supports Kubernetes service-account authentication and TLS certificate authentication. A Kubernetes-hosted compiler can use Kubernetes auth; independent relays or external components can use certificate or another machine auth method. Policies should be component-specific. [O4] [O5]
+OpenBao supports Kubernetes service-account authentication and TLS certificate authentication. A Kubernetes-hosted compiler can use Kubernetes auth; independent relays or external components can use certificate or another machine auth method. Policies should be component-specific. [O4] [O6]
 
 - API/UI: no secret read permission.
 
@@ -747,7 +765,7 @@ Direct maintenance access is intentionally insecure in the TLS identity sense. I
 
 ### 13.5 Break-glass access
 
-Keep independently encrypted Talos and Kubernetes emergency credentials outside the normal manager path, with strict access and audit procedures. The platform should detect use of break-glass credentials where possible and require a follow-up credential/CA review. Omni’s own break-glass design demonstrates the importance of retaining direct recovery access when the management plane is unavailable. [T15]
+Keep independently encrypted Talos and Kubernetes emergency credentials outside the normal manager path, with strict access and audit procedures. The platform should detect use of break-glass credentials where possible and require a follow-up credential/CA review. Omni’s own break-glass design demonstrates the importance of retaining direct recovery access when the management plane is unavailable. [M10]
 
 ### 13.6 Audit
 
@@ -840,6 +858,9 @@ The platform should generate redacted support bundles containing machine invento
 | Configuration activation        | Immediate reconciliation versus explicit release/approval.                                       | Explicit immutable releases first; allow policy-based automatic publication or rollout later. |
 | Extensions and kernel arguments | Treat as generic YAML fragments versus dedicated inputs.                                         | Dedicated inputs because image, reboot and early-boot semantics differ.                       |
 | Build versus adopt Omni         | Implement this platform versus deploy self-hosted Omni.                                          | Treat as a continuing architecture gate, not a foregone conclusion.                           |
+| etcd backups                    | Platform-owned scheduled snapshots versus external tooling.                                      | Lean in-scope: RecoverEtcd presupposes snapshots exist; Omni treats backups as core.          |
+| Installer image sourcing        | Public Image Factory, self-hosted Image Factory or static image list.                            | Opaque pinned schematic/image inputs in v1; decide the air-gap story explicitly.              |
+| Project licence                 | Apache-2.0 versus AGPLv3 versus MPL-2.0.                                                         | Choose before first public release; the open licence is a stated differentiator.              |
 
 ## 17. Recommended baseline and initial scope
 
@@ -1047,13 +1068,21 @@ The most revealing proof is an end-to-end reuse loop rather than a polished UI:
 
 - What level of import/export or migration interoperability with Omni is desirable?
 
+- Which open-source licence should the project itself use, and is preventing a proprietary fork-and-SaaS a goal?
+
+- Are air-gapped sites a target environment, making a self-hosted Image Factory a supported dependency?
+
+- Should scheduled etcd snapshots be a version 1 platform feature or remain external?
+
+- Is Go with a single static management binary confirmed as the implementation baseline?
+
 ## 20. Comparison with Omni
 
 At its current scope, the proposed system is much closer to Omni than to Talhelper or a narrow configuration renderer. It is an alternative Talos control plane. Omni must therefore be treated as the reference implementation and primary build-versus-adopt comparison, not as an unrelated provisioning product.
 
 ### 20.1 Honest positioning
 
-Omni already manages machine registration, maintenance-mode inventory, cluster assignment, generated Talos configuration, scoped native patches, reconciliation, upgrades, cluster import, reset/reuse, Kubernetes access and optional infrastructure providers. Avoiding CAPI is not a decisive distinction because Omni exposes its own Talos-specific resources and controllers rather than asking users to operate CAPI objects. Likewise, Git is optional to Omni: cluster templates can support Git-managed workflows, but Omni's live control plane is API-driven. [M1] [M3] [M8]
+Omni already manages machine registration, maintenance-mode inventory, cluster assignment, generated Talos configuration, scoped native patches, reconciliation, upgrades, cluster import, reset/reuse, Kubernetes access and optional infrastructure providers. Avoiding CAPI is not a decisive distinction because Omni exposes its own Talos-specific resources and controllers rather than asking users to operate CAPI objects. Likewise, Git is optional to Omni: cluster templates can support Git-managed workflows, but Omni's live control plane is API-driven. [M1] [M3] [M8] Machine registration itself is SideroLink-based and remains so through the current release. [M7] Omni 1.9 additionally installs, upgrades and patches machines while they are still in maintenance mode through a streaming management API, and gates Talos upgrade rollouts on cluster health checks; as of 1.9.3 there is still no draft/approve release gate and no SideroLink-free management mode, so the differentiators claimed here remain valid but must be rechecked against each Omni release. [M9]
 
 > **Positioning:** an open, configuration-centric and transport-agnostic Talos control plane for organisations that already own their infrastructure and require operator custody of native configuration and secrets, explicit releases, direct access and a clean exit path.
 
@@ -1072,7 +1101,7 @@ Omni already manages machine registration, maintenance-mode inventory, cluster a
 | Kubernetes API            | Omni supplies an authenticated managed endpoint/proxy.                                                                          | Use each cluster's normal VIP/LB/DNS endpoint; proxy only where transport requires it.                           |
 | Existing-cluster adoption | Supported through generated base + derived patches, locked handover and optional CA rotation.                                   | Exact baseline first, then optional reconstruction into shared profiles and explicit authority cut-over.         |
 | Maintenance pool          | Unassigned machines remain connected and can be assigned/reused.                                                                | Same lifecycle concept, with direct or optional call-home transport.                                             |
-| Licence                   | BUSL; production use requires a commercial licence.                                                                             | Target should be an OSI-approved open-source licence if this is a core justification.                            |
+| Licence                   | BUSL 1.1 (client library MPL-2.0); production use requires a commercial licence; self-hosting requires an Enterprise subscription; the lowest tier is a paid, non-commercial Hobby plan. [M1] [M11] | Target should be an OSI-approved open-source licence if this is a core justification.                            |
 | Maturity                  | Shipping product, SaaS/on-prem options, UI, support and proven workflows.                                                       | Architecture-stage project whose safety and lifecycle semantics still need implementation.                       |
 
 ### 20.3 Talos configuration pipeline
@@ -1115,7 +1144,7 @@ Operator ownership does not mean every sensitive field becomes editable in arbit
 
 ### 20.6 Change workflow, history and drift
 
-In Omni, creating or saving a configuration patch changes desired state and Omni applies it to the target machines. Omni exposes pending and applied configuration history, node locks and rolling machine-set strategies. Direct configuration writes through talosctl are blocked so Omni remains the sole desired-state authority. [M2] [M3] [M6]
+In Omni, creating or saving a configuration patch changes desired state and Omni applies it to the target machines. Omni exposes pending and applied configuration history, node locks and rolling machine-set strategies. Direct configuration writes through talosctl are blocked so Omni remains the sole desired-state authority; Omni 1.7 added direct node access via SideroLink endpoints for emergencies when the Omni load balancer is down, but this path remains Omni-mediated. [M2] [M3] [M6] [M9]
 
 The proposed platform makes a stricter separation between a mutable draft, an immutable published release, an approved rollout and the observed machine state. Direct emergency Talos changes remain possible; the platform then offers revert, adopt or temporary freeze rather than silently undoing the intervention.
 
@@ -1138,6 +1167,10 @@ The proposed platform should support two adoption modes: an exact encrypted base
 - Separate handling for system extensions, kernel arguments and Kubernetes manifests.
 
 - Automatic reconciliation, node locks, rolling strategies and configuration history.
+
+- Maintenance-mode install, upgrade and machine patching through a streaming management API, and health-check-gated Talos upgrade rollouts (1.9). [M9]
+
+- Image Factory proxying and installation-media tooling for infrastructure providers (1.8). [M9]
 
 - Existing-cluster import with backup, dry-run, locked handover and CA rotation.
 
@@ -1264,7 +1297,7 @@ type MachineTransport interface {
 
 ## Appendix C. References
 
-Technical behaviour statements in this document were checked against official Talos/Sidero, Omni and OpenBao documentation available on 3 August 2026. Design recommendations and architectural conclusions remain proposals rather than vendor guarantees.
+Technical behaviour statements in this document were checked against official Talos/Sidero, Omni and OpenBao documentation available on 3 August 2026, and re-verified (including all reference URLs below) during the 0.3 review on the same date. Design recommendations and architectural conclusions remain proposals rather than vendor guarantees.
 
 > **[T1]** [Talos 1.13 - SideroLink](https://docs.siderolabs.com/talos/v1.13/networking/siderolink). Point-to-point management overlay, gRPC tunnel and maintenance-mode behaviour.
 >
@@ -1274,13 +1307,13 @@ Technical behaviour statements in this document were checked against official Ta
 >
 > **[T4]** [Talos 1.13 - Configuration Patches](https://docs.siderolabs.com/talos/v1.13/configure-your-talos-cluster/system-configuration/patching). Strategic merge, JSON patch and multi-document patching.
 >
-> **[T5]** [Talos - Editing Machine Configuration](https://docs.siderolabs.com/talos/v1.12/configure-your-talos-cluster/system-configuration/editing-machine-configuration). Live application and apply modes.
+> **[T5]** [Talos 1.13 - Editing Machine Configuration](https://docs.siderolabs.com/talos/v1.13/configure-your-talos-cluster/system-configuration/editing-machine-configuration). Live application and apply modes (auto, no-reboot, reboot, staged, try).
 >
 > **[T6]** [Talos 1.13 - The insecure flag](https://docs.siderolabs.com/talos/v1.13/configure-your-talos-cluster/system-configuration/insecure). Maintenance-mode TLS and restricted API access.
 >
 > **[T7]** [Talos 1.13 - Resetting a Machine](https://docs.siderolabs.com/talos/v1.13/configure-your-talos-cluster/lifecycle-management/resetting-a-machine). Graceful reset and selective system partition wipe.
 >
-> **[T8]** [Talos - Network Connectivity](https://docs.siderolabs.com/talos/v1.12/learn-more/talos-network-connectivity). Talos API ports and connectivity requirements.
+> **[T8]** [Talos 1.13 - Production Notes](https://docs.siderolabs.com/talos/v1.13/getting-started/prodnotes). Talos API ports (TCP 50000 apid, TCP 50001 trustd) and connectivity requirements.
 >
 > **[T9]** [Talos 1.13 - Ingress Firewall](https://docs.siderolabs.com/talos/v1.13/networking/ingress-firewall). Host-service filtering and automatic allowance on SideroLink/KubeSpan interfaces.
 >
@@ -1294,25 +1327,29 @@ Technical behaviour statements in this document were checked against official Ta
 >
 > **[T14]** [Talos API access from Kubernetes](https://docs.siderolabs.com/kubernetes-guides/advanced-guides/talos-api-access-from-k8s). Service-account-based Talos API access from Kubernetes.
 >
-> **[T15]** [Omni - Break Glass Emergency Access](https://docs.siderolabs.com/omni/security-and-authentication/break-glass-emergency-access). Independent emergency access when management plane is unavailable.
+> **[T15]** [Sidero Labs - Image Factory](https://github.com/siderolabs/image-factory). Builds Talos boot and installer images with selected system extensions; public instance at factory.talos.dev.
 
-[M1] Omni - What is Omni. Product scope, API-driven management model and BUSL production licensing.
+[M1] [Omni documentation - What is Omni](https://docs.siderolabs.com/omni). Product scope, API-driven management model and BUSL production licensing.
 
-[M2] Omni - How configuration works in Omni. Configuration sources, patch scopes and precedence, reserved fields, version pinning and direct-write policy.
+[M2] [Omni - How configuration works in Omni](https://docs.siderolabs.com/omni/omni-cluster-setup/how-configuration-works-in-omni). Configuration sources, patch scopes and precedence (scope before weight; weights 100-900, default 500), reserved fields, version pinning and direct-write policy.
 
-[M3] Omni - Cluster Templates. Declarative cluster resources, native patch files, system extensions, kernel arguments and rolling strategies.
+[M3] [Omni - Cluster Templates](https://docs.siderolabs.com/omni/reference/cluster-templates). Declarative cluster resources, native patch files, system extensions, kernel arguments and rolling strategies.
 
-[M4] Omni - Talos Config Overrides. Fields reserved, stripped or managed by dedicated Omni resources.
+[M4] [Omni - Talos Config Overrides](https://docs.siderolabs.com/omni/cluster-management/talos-config-overrides). Fields reserved, stripped or managed by dedicated Omni resources.
 
-[M5] Omni - Import Talos Clusters. Backup, generated-base comparison, derived patches, locked handover and CA rotation.
+[M5] [Omni - Importing Talos Clusters](https://docs.siderolabs.com/omni/cluster-management/importing-talos-clusters). Backup, generated-base comparison, derived patches, locked handover and CA rotation.
 
-[M6] Omni - Create a Patch for Cluster Machines. Target scopes, save-and-apply behaviour, pending and applied configuration history.
+[M6] [Omni - Create a Patch for Cluster Machines](https://docs.siderolabs.com/omni/omni-cluster-setup/create-a-patch-for-cluster-machines). Target scopes, save-and-apply behaviour, pending and applied configuration history.
 
-[M7] Omni - Join Machines to Omni. SideroLink registration and normal Talos API access policy.
+[M7] [Omni - Join Machines to Omni](https://docs.siderolabs.com/omni/omni-cluster-setup/registering-machines/join-machines-to-omni). SideroLink registration; the local Talos API is disabled once a machine joins Omni.
 
-[M8] Omni - Manage Omni Resources with omnictl. API resource and controller model.
+[M8] [Omni - Manage Omni Resources with omnictl](https://docs.siderolabs.com/omni). API resource and controller model.
 
-[M9] Sidero Product Updates - Omni 1.7.0. Current configuration validation, direct Talos node access through SideroLink and related lifecycle features.
+[M9] [Omni release notes, v1.7.0 through v1.9.3](https://github.com/siderolabs/omni/releases). Version baseline for this document. v1.7: configuration validation, direct Talos node access through SideroLink, EULA acceptance. v1.8: Image Factory proxy, installation-media tooling, join-token tightening. v1.9: maintenance-mode install/upgrade/patching via streaming management API, health-check-gated Talos upgrades.
+
+[M10] [Omni - Break Glass Emergency Access](https://docs.siderolabs.com/omni/security-and-authentication/break-glass-emergency-access). Independent emergency access when the management plane is unavailable.
+
+[M11] [Sidero Labs - Pricing](https://www.siderolabs.com/pricing). Omni editions; no free tier; self-hosted Omni requires an Enterprise subscription.
 
 > **[O1]** [OpenBao - Integrated Storage and Raft backend](https://openbao.org/docs/next/configuration/storage/raft/). HA, replicated integrated storage and production readiness.
 >
@@ -1323,5 +1360,7 @@ Technical behaviour statements in this document were checked against official Ta
 > **[O4]** [OpenBao - Kubernetes authentication method](https://openbao.org/docs/next/auth/kubernetes/). Kubernetes service-account authentication for workloads.
 >
 > **[O5]** [OpenBao - Audit devices](https://openbao.org/docs/next/audit/). Comprehensive API audit records and audit-device reliability considerations.
+>
+> **[O6]** [OpenBao - TLS certificate auth method](https://openbao.org/docs/auth/cert/). Client certificate authentication for non-Kubernetes components.
 >
 > **[G1]** [Sidero Labs - open SideroLink repository](https://github.com/siderolabs/siderolink). Protocol, agent/headend and WireGuard-over-gRPC building blocks.
