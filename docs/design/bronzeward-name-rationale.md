@@ -205,17 +205,60 @@ The public API should use ordinary technical resource names:
 
 Mythological names may be used sparingly for internal components, but should not make the API difficult to understand.
 
-Possible internal codenames:
+---
 
-| Name | Responsibility |
-|---|---|
-| **Forge** | Native Talos configuration compilation |
-| **Tablets** | Fragments, profiles, revisions, and releases |
-| **Ichor** | OpenBao, PKI, and secret generations |
-| **Circuit** | Reconciliation and rollout engine |
-| **Watch** | Machine observation and connectivity |
+## A coherent mythological component family
 
-These names should remain optional implementation terminology rather than public domain objects.
+A restrained internal naming scheme could look like this:
+
+```text
+Bronzeward
+├── Forge
+│   configuration generation and compilation
+│
+├── Tablets
+│   fragments, profiles, revisions, and releases
+│
+├── Ichor
+│   OpenBao, PKI, and secret generations
+│
+├── Circuit
+│   reconciliation, rollout, and durable operations
+│
+├── Watch
+│   machine observation and connectivity
+│
+└── Registry
+    machine identity, enrolment, and assignment
+```
+
+The names have a consistent relationship to the Talos mythology while still describing recognizable technical responsibilities:
+
+| Component | Mythological connection | Technical responsibility |
+|---|---|---|
+| **Forge** | Hephaestus' workshop and the creation of the bronze guardian | Combines upstream Talos generation, native configuration fragments, cluster identity, and secret inputs into complete machine configurations |
+| **Tablets** | The bronze tablets carrying the laws enforced by Talos | Stores and manages fragments, profiles, revisions, immutable releases, structural diffs, and provenance |
+| **Ichor** | The life-fluid that gave Talos identity and power | Integrates with OpenBao and manages PKI, Talos secret generations, credentials, and rotation workflows |
+| **Circuit** | Talos' repeated patrol around Crete | Runs reconciliation, rollout, retry, approval, reset, upgrade, and other durable operation workflows |
+| **Watch** | The guardian observing the coastline | Maintains machine connectivity, observations, health, drift detection, logs, and events |
+| **Registry** | The record of which guardian is entrusted with which territory | Manages stable machine identity, enrolment, approval, cluster assignment, role, and lifecycle state |
+
+This family is coherent without turning the product into a mythology puzzle. The internal names can make architecture discussions memorable, but they should remain secondary to plain technical terminology.
+
+The public API should therefore stay deliberately boring and self-explanatory:
+
+```http
+/api/v1/machines
+/api/v1/clusters
+/api/v1/config-fragments
+/api/v1/profiles
+/api/v1/releases
+/api/v1/operations
+```
+
+Public objects should be named `Machine`, `Cluster`, `ConfigFragment`, `Profile`, `Release`, and `Operation`—not `Guardian`, `Tablet`, or `IchorVessel`. Mythology is useful branding; it is a poor substitute for an understandable API.
+
+These component names should also remain optional implementation boundaries rather than prematurely forcing the codebase into separate deployable services. For example, `Forge` and `Tablets` may initially be packages inside the Bronzeward controller rather than independent processes. The names describe responsibilities, not a mandatory microservice diagram.
 
 ---
 
