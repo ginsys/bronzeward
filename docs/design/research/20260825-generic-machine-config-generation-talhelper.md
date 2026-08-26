@@ -112,6 +112,17 @@ native network-interface and VIP fields emit the *new-style* multi-document netw
 *legacy* inline `machine.network.interfaces[]` style for compatibility reasons. Both are valid
 Talos config. Neither the tool nor validation flagged the divergence — the abstraction quietly made
 a version-representation decision on the operator's behalf.
+>
+> **Correction (26 August 2026, from source reading — see
+> [20260826-talhelper-internals-and-topf-successor.md](20260826-talhelper-internals-and-topf-successor.md)
+> §2):** the generator's source shows this is not a hard-coded choice — the representation is
+> version-addressed, tied to the declared `talosVersion:` contract via
+> `MultidocNetworkConfigSupported()` (`pkg/talos/nodeconfig.go:88-92` vs
+> `pkg/talos/multidocs.go:129-135` in `budimanjojo/talhelper`). What is genuinely unavailable is
+> choosing the legacy representation *while* declaring a contract new enough to support the
+> multidoc form. The lesson below is unaffected — a convenience field still pins a representation,
+> just to the declared contract rather than unconditionally — but "silently pins" here means "pins
+> per the declared version," not "hard-codes one layout regardless of version."
 
 For this project the lesson is not "avoid ergonomics" but: **any convenience abstraction over a
 Talos field must be version-addressed in the same way the renderer is** (§2), or it becomes a
