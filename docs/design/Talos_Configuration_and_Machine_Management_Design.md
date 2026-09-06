@@ -1,11 +1,11 @@
 # Talos Configuration and Machine Management Platform
 
-*Complete design concept, Omni comparison and option analysis*
+*Working design concept, staged delivery and option analysis*
 
 | **Document status**    | Working architecture concept - not yet an implementation specification                                                               |
 |------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| **Revision**           | 0.4                                                                                                                                  |
-| **Date**               | 3 August 2026                                                                                                                        |
+| **Revision**           | 0.5                                                                                                                                  |
+| **Date**               | 6 September 2026                                                                                                                        |
 | **Technical baseline** | Talos Linux 1.13 (v1.13.6); Omni 1.9 (v1.9.3); OpenBao 2.6 (v2.6.1) documentation                                                  |
 | **Scope**              | Talos configuration, secrets and machine lifecycle as an open alternative control plane, without CAPI or infrastructure provisioning |
 
@@ -17,6 +17,9 @@
 | 0.2          | Consolidated design, lifecycle workflows, backend and security model, Omni comparison. |
 | 0.3          | External technical review: version baseline updated (Omni 1.7 -> 1.9.3, OpenBao 2.6.1, Talos v1.13.6); corrected SideroLink endpoint/port wording, Talos apply-mode list and reset-wipe defaults; citation and reference-URL fixes; added installer-image sourcing, etcd backups, multi-version renderer, implementation language and project licence considerations; Omni comparison refreshed for 1.8/1.9. |
 | 0.4          | Decisions recorded from the 0.3 review Q&A: build gate evaluated (three hard differentiators confirmed); Go decided as implementation language; version 1 scale target ~100 machines; scheduled etcd snapshots moved into version 1 scope (SnapshotEtcd); installer images via public Image Factory with a per-site platform proxy reserved for later; normative site egress requirement added (10.10); figure corrections identified (Figures 2-4). |
+| 0.5 | Existing-cluster configuration control first; secret extraction before persistence; structural references; provider and database investigations; dependency retention; application approval boundary; evidence-based operation recovery; explicit restoration recovery mode; native Talos compatibility. |
+
+Revision 0.5 reconciles the [September discussion and peer review](research/20260906-design-discussion-and-peer-review.md). The [0.4 to 0.5 transition review](Design_Review_v0.4_to_v0.5.md) records the changes and remaining investigations. This is a design, not evidence of implemented guarantees or passing experiments. The technical baseline and Omni comparison remain the 3 August snapshot; this revision does not claim a fresh product or licensing comparison.
 
 ## Contents
 
@@ -27,7 +30,7 @@
 - [4. Terminology and state model](#4-terminology-and-state-model)
 - [5. System architecture](#5-system-architecture)
 - [6. Talos-native configuration model](#6-talos-native-configuration-model)
-- [7. PostgreSQL and OpenBao backend design](#7-postgresql-and-openbao-backend-design)
+- [7. Database and secret-provider design](#7-database-and-secret-provider-design)
 - [8. Machine identity, discovery and enrolment](#8-machine-identity-discovery-and-enrolment)
 - [9. Machine and cluster lifecycle workflows](#9-machine-and-cluster-lifecycle-workflows)
 - [10. Connectivity and transport options](#10-connectivity-and-transport-options)
@@ -53,11 +56,11 @@ At this scope, Omni is the reference implementation and primary comparison. Omni
 
 The intended differentiators are operator custody of native Talos configuration and cluster secrets, first-class reusable fragments and profiles across clusters, explicit draft/publish/approve releases, source provenance and managed drift, optional rather than constitutive transport, retained direct Talos access, infrastructure provisioning outside the product, and an open-source licensing target.
 
-The emerging architecture uses native Talos multi-document YAML and Talos APIs as the canonical configuration model, PostgreSQL as the authoritative operational and revision database, and OpenBao for Talos secret bundles, management credentials, key material and cryptographic services. Git is not the backend. Talhelper is not required. CAPI is explicitly avoided.
+The emerging architecture uses native Talos multi-document YAML and Talos APIs as the canonical configuration model, an authoritative relational database, and versioned secret and encryption providers. PostgreSQL is the server option; SQLite for small single-instance setups is to be investigated. OpenBao is the primary provider direction, with simpler local encryption alternatives under investigation. Git is not the backend. Talhelper is not required. CAPI is explicitly avoided.
 
 The connectivity layer is deliberately transport-independent. For routed internal environments, direct access to each machine on the Talos API is the simplest baseline. SideroLink remains an optional call-home transport for NAT, edge or less trusted networks; its grpc_tunnel mode avoids UDP by carrying WireGuard traffic over the long-lived SideroLink gRPC connection on TCP; the SideroLink endpoint URL and port are deployment-defined, commonly exposed on 443. A site relay is another option for reaching an entire remote network through one outbound web-compatible connector. [T1]
 
-> **Current recommended baseline:** First prove the configuration-specific differentiators on direct internal networks: native fragment/profile reuse, OpenBao custody, immutable releases, approvals, provenance, drift handling and reset/reuse. Add SideroLink-over-gRPC and site-relay transports later. If these differentiators are not hard requirements, Omni is the rational choice and rebuilding it would be unjustified. Revision 0.4 records that three differentiators are confirmed hard requirements (open-source production licence, explicit releases and approvals, direct Talos access with optional SideroLink), so the build path is currently justified.
+> **Current recommended baseline:** First prove the configuration-specific differentiators on direct internal networks: existing-cluster adoption, native fragment/profile reuse, secret custody, immutable releases, approvals, provenance, drift handling and recovery. Reset/reuse and cluster creation belong to later lifecycle delivery. Add SideroLink-over-gRPC and site-relay transports later. If these differentiators are not hard requirements, Omni is the rational choice and rebuilding it would be unjustified. Revision 0.4 records that three differentiators are confirmed hard requirements (open-source production licence, explicit releases and approvals, direct Talos access with optional SideroLink), so the build path is currently justified.
 
 ## 1. Problem statement and design intent
 
@@ -72,13 +75,13 @@ The desired product is therefore best understood as a configuration-centric, tra
 | **Goal**                                         | **Meaning**                                                                                                                       |
 |--------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
 | Manage complete Talos configuration              | Compose, validate, version, approve, apply and verify full native machine configuration, including secret-bearing fields.         |
-| Manage secrets correctly                         | Keep cluster PKI and credentials in OpenBao, track immutable secret generations, and bind each release to an exact generation.    |
+| Manage secrets correctly                         | Extract known/marked secrets to the selected provider before plaintext persistence; pin every release dependency and retain required versions.    |
 | Support reusable YAML                            | Use focused native Talos YAML fragments, named profiles, explicit merge order and local YAML anchors where useful.                |
 | Manage both unconfigured and configured machines | Handle maintenance-mode candidates, available machines, active cluster nodes, failed provisioning, reset-to-pool and retirement.  |
 | Operate existing clusters                        | Adopt running clusters without resetting them, establish a baseline, add management connectivity and preserve break-glass access. |
 | Create clusters without CAPI                     | Assign available machines, generate role-specific configuration, apply it, bootstrap etcd once and verify Kubernetes.             |
 | Expose a real web API                            | Provide a stable REST/JSON API for users, automation and a future UI, independent of the southbound Talos transport.              |
-| Survive management-plane failure                 | Managed clusters must continue running normally if PostgreSQL, OpenBao or the manager is temporarily unavailable.                 |
+| Survive management-plane failure                 | Managed clusters must continue running normally if the database, secret/encryption provider or manager is temporarily unavailable.                 |
 
 ### 1.3 Explicit non-goals
 
@@ -90,6 +93,7 @@ The desired product is therefore best understood as a configuration-centric, tra
 | No Talhelper runtime dependency         | Talhelper may later be an import adapter, but the core consumes native Talos semantics directly.                             |
 | No Kubernetes workload GitOps           | The platform may observe Kubernetes for health and drain operations, but it is not Flux, Argo CD or an application platform. |
 | No mandatory KubeSpan                   | Cluster data-plane networking remains outside this design unless a specific cluster independently chooses KubeSpan.          |
+| No database or vault service operation | Operators provision and operate database/vault services, HA, backups and restoration; Bronzeward owns its schema, migrations and application recovery. |
 | No proprietary Talos replacement schema | Do not recreate every Talos option behind another platform API.                                                              |
 
 ### 1.4 Guiding principles
@@ -100,13 +104,13 @@ The desired product is therefore best understood as a configuration-centric, tra
 
 - **Transport is a replaceable implementation detail.** Direct TCP, SideroLink and site relay must feed the same operation engine.
 
-- **Destructive actions are workflows.** Reset, wipe, bootstrap and upgrades require durable state, locks, idempotency and explicit verification.
+- **Destructive actions are workflows.** Reset, wipe, bootstrap and upgrades require durable intent, coordination, operation-specific retry decisions and explicit verification; a lock is not remote fencing.
 
 - **Configuration publication is immutable.** Drafts are mutable; releases, source references, renderer versions and secret generations are not.
 
 - **Break-glass independence.** The manager should improve control without becoming the only remaining route to recovery.
 
-- **Boring data integrity beats cleverness.** PostgreSQL handles relational state and transactional publication; OpenBao handles secrets and cryptography.
+- **Boring data integrity beats cleverness.** The selected database handles relational state and transactional publication; the selected secret/encryption providers protect secret values and artifacts.
 
 - **Omni is the reference baseline, not a straw man.** Reuse proven scope, safety, import and lifecycle ideas; do not rebuild features merely to be different.
 
@@ -128,6 +132,8 @@ The discussion initially surveyed known Talos tools. Those tools were useful for
 | Omni reframed as the reference implementation | The concept overlaps substantially with Omni. The comparison shifted from a supposedly missing category to an alternative ownership, release and transport model.                                                       |
 | Configuration novelty narrowed                | Generated base plus native patches plus effective config plus reconciliation is not new. Candidate value lies in profiles, explicit releases, external secret custody, provenance, direct access and a clean exit path. |
 
+The September review then narrowed first delivery to existing-cluster configuration control, made OpenBao the primary rather than mandatory provider, and introduced the SQLite/local-encryption investigations. Sections 6–7 and 12–14 state the reconciled contracts; the earlier PostgreSQL/OpenBao steps above describe how the concept began.
+
 ## 3. Current decisions, preferences and open points
 
 | **Topic**                        | **Current position**                                                                                                   | **Status**         |
@@ -136,8 +142,12 @@ The discussion initially surveyed known Talos tools. Those tools were useful for
 | Reusable configuration           | Named fragments and ordered profiles; YAML anchors only within a stored document                                       | Preferred          |
 | Talhelper                        | Not required; possible import adapter later                                                                            | Decided            |
 | Git                              | Not the backend; export/import only                                                                                    | Decided            |
-| Relational backend               | PostgreSQL, preferably CloudNativePG in the reference deployment                                                       | Preferred          |
-| Secret backend                   | OpenBao KV v2 plus Transit; OpenBao itself uses integrated Raft                                                        | Preferred          |
+| Relational backend | PostgreSQL server option; investigate SQLite single-instance; MySQL/MariaDB only if required semantics come at negligible extra cost | Direction decided; support unproven |
+| Secret backend | OpenBao primary; investigate local age-backed storage and SOPS/age; provider-neutral references | Direction decided; local choice open |
+| Secret authoring | Automatic Talos bundle extraction; operator marking for other secrets; whole-value structural references | Decided; syntax and resolution timing open |
+| Approval | Trusted controller enforces immutable approved plans; self/multi-party policy remains open | Boundary decided |
+| Recovery | Evidence-based interrupted-operation handling; explicit recovery mode after restoration | Decided |
+| First milestone | Configuration control on an existing cluster | Decided |
 | CAPI                             | Avoided and outside scope                                                                                              | Decided            |
 | Infrastructure provisioning      | Outside initial scope                                                                                                  | Decided            |
 | Northbound interface             | REST/JSON web API with asynchronous operations and event streaming                                                     | Preferred          |
@@ -208,37 +218,39 @@ A single giant enum would produce an unmanageable number of combinations. The da
 
 The platform separates user-facing management, persistent desired state, secret handling, configuration compilation, durable operations and network transport. This separation prevents any one transport or authoring convenience from becoming the product architecture.
 
-![High-level component architecture.](assets/figure-2-system-architecture.png)
+```mermaid
+flowchart LR
+  API[Management API] --> C[Trusted controller]
+  C --> DB[Application database]
+  C --> P[Secret and encryption providers]
+  C --> T[Transport interface]
+  T --> D[Direct Talos API first]
+  T -. later .-> R[SideroLink or site relay]
+```
 
-*Figure 2 - High-level component architecture. (Diagram revision pending: the edge labels between OpenBao/PostgreSQL and the operation engine/compiler overlap and are illegible, and the transparent background renders poorly on dark backgrounds.)*
+*Figure 2 - Logical components. Compiler and executor permissions are scoped roles within the trusted controller; process isolation is a deployment choice.*
 
 ### 5.1 Core components
 
 | **Component**           | **Responsibility**                                                                                                                                            |
 |-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Management API and UI   | Authentication, RBAC, drafts, review, release publication, operations, inventory and audit views.                                                             |
-| PostgreSQL              | Authoritative inventory, YAML sources, profiles, immutable revisions, assignments, releases, operation journals and observations.                             |
-| OpenBao                 | Talos secret bundles, management credentials, enrolment signing material, Transit encryption and component authentication.                                    |
+| Application database    | Authoritative inventory, YAML sources, profiles, immutable revisions, assignments, releases, operation journals and observations.                             |
+| Secret/crypto providers | Talos secret bundles, management credentials, enrolment signing material, Transit encryption and component authentication.                                    |
 | Configuration compiler  | Resolves ordered native fragments, retrieves an exact secret generation, uses a pinned Talos contract, validates and produces per-machine full configuration. |
 | Release publisher       | Creates immutable releases and encrypted per-machine artifacts, including redacted structural diffs and source provenance.                                    |
-| Operation engine        | Executes idempotent, resumable workflows: apply, install, bootstrap, reset, upgrade, wipe and recovery.                                                       |
+| Operation engine        | Journals intent, dispatch and evidence; resumes proven-safe steps and stops ambiguous apply/lifecycle operations.                                                       |
 | Machine transport layer | Direct TCP, SideroLink or site relay; exposes a uniform Talos API connection to the operation engine.                                                         |
 | Kubernetes observer     | Uses the normal Kubernetes API or a proxied path for drain, Node readiness, PDB failures and cluster health.                                                  |
 | Observability and audit | Metrics, event streams, machine logs, operation timeline, application audit and OpenBao audit records.                                                        |
 
 ### 5.2 Hard architectural boundaries
 
-- The API/UI must never receive raw access to all OpenBao secret material.
-
-- The configuration compiler may read selected secret generations but should not execute machine operations.
-
-- The reconciler should normally decrypt only already-approved compiled artifacts, not freely browse all Talos cluster secrets.
-
-- The transport layer moves authenticated Talos API traffic; it does not decide desired state.
-
-- The Kubernetes observer informs lifecycle decisions but does not own workloads.
-
-- Managed clusters must not depend on the management platform for normal Kubernetes control-plane or data-plane operation.
+- Normal API/UI access does not grant bulk secret reads. Deliberate secret ingestion is privileged and protected before any ordinary draft write.
+- The compiler reads scoped, pinned secret versions and encrypts outputs. The executor decrypts approved artifacts and obtains operation-specific credentials.
+- These are least-privilege roles inside an application-enforced trust boundary. OpenBao does not independently interpret release approvals stored in the application database.
+- Transport carries authenticated Talos traffic; it does not select desired state. The Kubernetes observer informs health and lifecycle decisions without owning workloads.
+- Managed clusters do not depend on the management platform for normal control-plane or data-plane operation.
 
 ## 6. Talos-native configuration model
 
@@ -250,7 +262,7 @@ Talos machine configuration is a multi-document YAML configuration. Talos parses
 
 ### 6.2 Fragments, profiles and assignments
 
-A **fragment** is an immutable revision of native Talos YAML. A **profile** is an ordered list of fragment revisions. A **machine assignment** selects cluster-wide, role, site, hardware and machine-specific profiles/fragments. The compiler evaluates them in an explicit order.
+A **fragment** is an immutable revision of native Talos YAML with explicitly declared secret references where needed. References must be materialized before the result is a complete upstream-validatable configuration. A **profile** is an ordered list of fragment revisions. A **machine assignment** selects cluster-wide, role, site, hardware and machine-specific profiles/fragments. The compiler evaluates them in an explicit order.
 
 > Composition order: machine-intrinsic -> global defaults -> site -> cluster -> role or machine set -> workload profile -> cluster-machine override. Fragment order is explicit inside each layer.
 
@@ -272,19 +284,29 @@ A future importer could accept an existing Talhelper project and translate it in
 
 ### 6.5 Renderer and contract pinning
 
-Every published release must record the target Talos version, Kubernetes version, Talos configuration contract, renderer implementation/version, installer image or schematic, and system extensions. Regenerating a historical release with a newer manager must not silently produce different output. Because different clusters will run different Talos versions at any given time, the renderer must support multiple pinned Talos contract versions concurrently; with the subprocess approach this means one pinned talosctl binary per contract in use.
+A release records target Talos and Kubernetes versions, configuration contract, exact renderer build, installer image/schematic, extensions and source revisions. Distinguish the observed running version, desired image, generation contract and renderer version. Applying a retained release uses its exact encrypted artifact; the manager must not silently regenerate it with a newer renderer.
 
-The first implementation can invoke a pinned talosctl in an isolated process. A later implementation can use Talos Go machinery directly for better typed errors, redaction and provenance. Both are upstream-only approaches; the trade-off is subprocess simplicity versus library integration and compatibility maintenance.
+Compatibility mirrors native talosctl capabilities. A pinned machinery version may generate several older contracts; one binary per target contract is not required. The machinery minor being at least the target contract minor is a prerequisite, not a sufficient compatibility test. Backward-generation constants, upstream release-support policy and working machine operations are separate axes. The pinned v1.13.6 contract code includes older contracts through v1.0; this is not a promise to support every historical fleet or RPC. [T16]
+
+The compatibility investigation must cover rendered output, validation, patch/prerelease boundaries and operation/RPC combinations for the intended fleet. The [renderer research](research/20260826-talhelper-internals-and-topf-successor.md) already records the version-gated legacy Upgrade versus LifecycleClient path around v1.13. A subprocess or Go machinery implementation remains open pending this evidence.
+
+Retain artifact bytes and provenance for the chosen retention period. Preserving historical toolchains or extending compatibility beyond upstream is not a product requirement. A retained artifact still needs current credentials, usable encryption dependencies and an applicable approved plan.
 
 ### 6.6 Release pipeline
 
-![Draft-to-release and rollout pipeline.](assets/figure-3-release-pipeline.png)
+```mermaid
+flowchart LR
+  D[Drafts with references] --> C[Resolve and compose using Talos semantics]
+  C --> V[Validate and redact in protected processing]
+  V --> E[Encrypt full artifacts]
+  E --> P[Atomically publish immutable release]
+  P --> A[Plan and approval]
+  A --> X[Authorized dispatch and verification]
+```
 
-*Figure 3 - Draft-to-release and rollout pipeline. (Diagram revision pending: Transit encryption must precede the immutable-release commit, as specified in 7.4; the current image shows the reverse order.)*
+*Figure 3 - Encryption precedes release persistence. Reference resolution relative to upstream typed composition remains an investigation; this diagram does not prescribe that ordering.*
 
-Publication should compile and validate the complete per-machine configurations before a release becomes available. The exact full configuration is secret-bearing and should be encrypted before persistence. The release also stores a redacted canonical form, digest, source graph and validation results.
-
-Compared with Omni, publication deliberately decouples authoring from activation. In Omni, saving or syncing a patch updates desired state and the controller applies it to the targeted machines; configuration history shows pending and applied changes. Here, an immutable Release is an explicit review boundary before rollout. [M2] [M6]
+Publication produces encrypted exact full configurations, redacted structural diffs, source provenance and validation evidence. It does not authorize or cause machine mutation. The application separately plans and approves deployment of the exact published artifacts.
 
 ### 6.7 Configuration source classes
 
@@ -312,77 +334,93 @@ The intended additions are operator-owned identity and secrets, a first-class cr
 
 Without those features, this subsystem would largely be a younger and less capable reproduction of Omni's configuration controller.
 
-## 7. PostgreSQL and OpenBao backend design
+### 6.9 Secret references and validation stages
 
-### 7.1 Responsibility split
+The Talos-generated secret bundle is the default automated extraction case. Other secrets, including registry passwords, provider tokens and secrets inside inline YAML, remain the operator's responsibility to mark. Bronzeward should assist where upstream schema or redaction metadata identifies them reliably. Unknown, unmarked values cannot be promised automatic detection. Handling embedded software credentials does not extend scope into Kubernetes workload GitOps.
 
-| **Data or concern**                      | **System**                         | **Reason**                                         |
-|------------------------------------------|------------------------------------|----------------------------------------------------|
-| Clusters, machines and assignments       | PostgreSQL                         | Relationships, queries and transactional updates   |
-| Native YAML source and revision history  | PostgreSQL                         | Original text plus canonical parsed representation |
-| Drafts, approvals and immutable releases | PostgreSQL                         | Optimistic concurrency and append-only publication |
-| Operation journal and observations       | PostgreSQL                         | Durable workflows and queryable status             |
-| Talos cluster secret bundles             | OpenBao KV v2                      | Versioned, policy-controlled secret storage        |
-| Talos API and Kubernetes credentials     | OpenBao                            | Restricted component access                        |
-| Enrolment keys and signing material      | OpenBao                            | Revocable machine identity and token issuance      |
-| Compiled full machine config             | Encrypted ciphertext in PostgreSQL | Transit key/version stored with artifact           |
-| Application audit metadata               | PostgreSQL                         | Who changed, approved and executed what            |
-| Secret access audit                      | OpenBao audit devices              | Every OpenBao API request/response is auditable    |
+References replace complete parsed values. They name a scoped logical secret and resolve to an exact version; provider layout is separate from authoring syntax. No loops, conditionals, includes, arbitrary functions, recursive evaluation or general string interpolation are allowed. Literal text must remain literal unless explicitly declared as a reference. Any encoding modifier must come from a closed enum; the enum and declaration mechanism are still open.
 
-### 7.2 PostgreSQL revision model
+| Candidate syntax | Distinguishing tradeoff |
+|---|---|
+| Explicit YAML tag | Clear structural marker; upstream typed decoding may reject it before patching. |
+| Opted-in marked string | Convenient in string fields; literal collisions need explicit declaration and non-string targets may reject the placeholder. |
+| External path binding | Keeps placeholders out of native values; bindings must track document identity, paths and composition changes. |
 
-The database must deliberately reproduce the useful properties that Git would otherwise provide: immutable commits, diffs, authorship, optimistic conflict detection and rollback. A single mutable machine_config row is insufficient.
+Embedded YAML/JSON is opaque to all three forms unless explicitly identified and parsed. For identified embedded documents, replace structural values and serialize with sensitivity provenance intact. For arbitrary scripts/text, initially reference the entire content rather than interpolate substrings. No syntax is selected by this comparison.
 
-```text
-config_fragments
-config_fragment_revisions
-profiles
-profile_revisions
-profile_revision_fragments
-cluster_drafts
-machine_assignments
-secret_generations
-config_releases
-compiled_machine_configs
-rollouts
-rollout_steps
-machine_observations
-audit_events
-```
+Prefer resolving only effective references after upstream composition if upstream typed machinery permits it. Experiment E2 must also test early materialization with a recorded provenance superset, non-string targets, overridden references and embedded content. Distinguish effective artifact dependencies from dependencies needed to reproduce the complete source graph. A custom merge engine is excluded; if no candidate works within that constraint, revise the reference design before implementation.
 
-Store the original YAML as TEXT so comments, formatting and anchors can be preserved for editing. Also store a canonical parsed representation, likely JSONB, for structural diffing, validation results and targeted queries. The canonical representation is an index and analysis aid, not the authoring language.
+Validation must state its guarantee:
 
-### 7.3 OpenBao usage
+1. **Authoring checks:** YAML syntax, reference declarations, source structure and schema checks possible without values. A draft with references is not a fully validated native config.
+2. **Composition and materialization:** pin versions, resolve values under the compiler identity and use upstream Talos composition semantics. Typed placeholders must be addressed before upstream unmarshal rejects them. Dummy substitution is an investigation option, not a selected remedy.
+3. **Release validation:** validate the actual complete materialized config with the pinned upstream implementation, then derive redacted review data and encrypt the full artifact.
+4. **Execution checks:** validate the current plan, target and operation preconditions; verify credential access and decryption under the executor identity at use.
 
-OpenBao KV v2 provides versioned secret storage and check-and-set semantics. The platform should still treat each Talos secret generation as a separate immutable application-level object rather than relying only on “latest version” at a mutable path. [O3]
+Record sensitive paths at resolution and carry them through composition, list changes, aliases and embedded serialization. Redact diffs, validation errors, logs and support data using that provenance and reliably identified secret fields. Value matching alone is insufficient.
 
-OpenBao Transit is designed to encrypt application data that remains stored in another primary datastore. It is therefore suitable for encrypting complete rendered Talos configurations stored as ciphertext in PostgreSQL. OpenBao does not store the submitted plaintext. [O2]
+## 7. Database and secret-provider design
 
-OpenBao itself should use its integrated Raft storage, which provides HA and backup/restore workflows, rather than sharing the application PostgreSQL database. This keeps the secret system and the application database independently recoverable. [O1]
+### 7.1 Responsibility split and secret ingress
 
-OpenBao also officially supports PostgreSQL as a storage backend. Sharing the application PostgreSQL instance would nonetheless couple secret availability, failure modes and recovery to the application database, and upstream recommends integrated storage for most deployments, so this design keeps OpenBao on its own Raft cluster. [O1] Recent OpenBao releases add capabilities worth tracking: namespaces (2.3) and per-namespace sealing (2.6) align with a possible later hard multi-tenancy requirement, and declarative self-initialization (2.4) simplifies a reproducible reference deployment.
+The application database stores inventory, sanitized YAML sources, revisions, assignments, immutable releases, ciphertext, approval/operation journals and observations. Secret providers hold Talos bundles, other marked secrets and management credentials; encryption providers protect rendered artifacts. OpenBao KV v2 and Transit are the primary deployment profile. The interfaces must also permit a simpler local provider if the investigation proves the required properties.
+
+**Known or operator-marked secrets must be extracted before any ordinary plaintext persistence.** This applies to initial import, drift adoption, draft updates, original YAML text, parsed indexes, request logs, error reports and staging. Retaining the observed effective config in a plaintext draft and redacting it later is forbidden. Database backups and historical records would already contain it.
+
+If operator review is needed, keep unresolved input in protected transient processing or explicitly encrypted staging with defined ownership, expiry and interruption recovery. Ordinary persisted sources contain references. Preserve an exact imported baseline only as an encrypted artifact. Do not blanket-encrypt every ordinary source fragment to avoid designing extraction. Test successful, failed and interrupted ingestion, including incidental logs and temporary files; operator responsibility for unidentified secrets remains explicit.
+
+### 7.2 Relational revision model and backend contract
+
+The database provides immutable fragment/profile revisions, relationships, optimistic conflict detection, transactional publication, approvals, operation intent and observation history. Mutable drafts remain distinct from releases. Original **sanitized** YAML text preserves editing form; a canonical parsed representation supports diffing and queries. PostgreSQL JSONB is an optional backend implementation, not a required authoring or portability contract.
+
+PostgreSQL is the server option. Investigate SQLite for small single-instance deployments using the same required semantics. MySQL/MariaDB are conditional candidates only if they satisfy the contract with negligible additional implementation and maintenance cost. No ORM, driver abstraction or supported matrix is selected merely by naming these databases.
+
+The investigation must prove revision conflicts, all-or-nothing publication, unique operation intent, ownership transitions, safe queue claims, migrations and restoration behavior on each proposed backend. Do not assume PostgreSQL-specific locking or JSON features have portable equivalents. Bronzeward owns application schema, migrations and correct connection/transaction behavior; database provisioning, HA, replication, failover, backup operation and server restoration belong to the operator.
+
+### 7.3 Secret and encryption provider candidates
+
+OpenBao KV v2 supports versioned values and CAS; Talos bundles remain separate immutable application-level generations rather than implicit latest values at a mutable path. Extend the retention discipline to **every** referenced secret, including operator-supplied software credentials. Logical naming does not choose mutable paths or immutable objects; the physical layout remains open. [O3]
+
+Transit is the primary artifact encryption candidate. A user-operated OpenBao deployment can use integrated Raft independently of the application database. Bronzeward will document required policies and recovery dependencies; it will not operate that vault or its HA services. [O1] [O2]
+
+Investigate a local age-backed encrypted store for home installations and SOPS/age as an alternative or import/export mechanism. These are candidates, not supported implementations. Inventory secret creation/read/versioning, artifact encryption, any signing needs, key custody, startup unlock, rotation, metadata-only checks, backup/restore and migration before selecting a provider. A local file's presence does not prove ciphertext validity or possession of its private key. [G2] [G3]
 
 ### 7.4 Publication without distributed transactions
 
-PostgreSQL and OpenBao do not share a transaction. Avoid two-phase commit. Use a monotonic publication protocol:
+The database and provider do not share a transaction. Use an application publication protocol:
 
-> **1.** Create or select an immutable OpenBao secret generation.
->
-> **2.** Confirm the exact generation is readable under the compiler identity.
->
-> **3.** Compile and validate every per-machine configuration.
->
-> **4.** Encrypt each full configuration through Transit.
->
-> **5.** Commit the immutable release, source references and ciphertext in one PostgreSQL transaction.
->
-> **6.** Only then make the release eligible for rollout.
+1. Snapshot source and assignment revisions; select or create immutable secret generations and pin every required version.
+2. Check dependencies and resolve required values under the compiler identity; compose and validate each actual configuration using upstream semantics.
+3. Derive protected provenance/redacted review data and encrypt every full artifact. Record provider/key/version dependencies as applicable.
+4. Atomically commit release metadata, source references, dependency records and ciphertext in the application database, rejecting stale input revisions or conflicts.
+5. Make the committed release available for planning and approval. Publication alone never authorizes dispatch.
 
-If the PostgreSQL transaction fails, the result is an unused OpenBao generation or encryption operation, not a published broken release. A consistency controller can identify and garbage-collect unreferenced secret generations according to retention policy.
+A failed transaction may leave unused provider objects. Cleanup requires proof that no retained release, source revision, in-flight publication, active assignment or retained recovery set still depends on them. A reference graph and explicit retention windows govern application-controlled cleanup; age alone is insufficient. External administrator actions remain outside Bronzeward's enforcement boundary.
 
-### 7.5 Secret rotation
+### 7.5 Rotation and retention contract
 
-Secret rotation creates a new immutable generation and a new configuration release. The manager must track which machines still use the old generation and must not retire it until the appropriate Talos PKI rotation procedure has completed. “Newest secret” is never an acceptable implicit runtime reference.
+Rotation creates a new generation and release, never a floating runtime reference. Track machines still using old Talos material and follow the relevant PKI rotation workflow before retirement. A retained release is not automatically safe to reapply after cluster identity or credentials have changed.
+
+Retain all dependencies needed for the promised action and recovery window. Losing a source secret version can block regeneration while a retained encrypted artifact remains applicable. Losing the only usable artifact decryption key blocks application of that artifact. Preserving ciphertext alone does not preserve executability; authorization, credentials and machine compatibility must also hold.
+
+OpenBao KV v2 normally limits version history to ten; a zero/unset maximum does not mean unlimited retention. Separate immutable bundle objects avoid repeated overwrite pruning at that path, but other secret layouts still need an explicit retention policy. Soft deletion and decryption-version restrictions differ from permanent destruction/pruning/trim. See the provider APIs for exact behavior. [O7] [O8]
+
+For user-operated OpenBao, restricting delete/destroy/trim, whole-key deletion and dangerous configuration/metadata writes is a **documented deployment requirement**, not an enforcement guarantee against administrators. Monitor dependency state and policy changes; alarms cannot prevent an administrator destroying the only remaining key. Backup retention must preserve the corresponding secret/key material as well as application data.
+
+### 7.6 Metadata-only dependency checks
+
+A provider must expose enough metadata, without secret values, to classify each referenced secret or encryption dependency:
+
+| State | Meaning |
+|---|---|
+| **retained** | Metadata establishes presence with no known retention block. It does not prove the current caller can read or decrypt. |
+| **blocked** | Present with a known reversible restriction, such as an effective soft delete or a decryption-version floor excluding the version. |
+| **lost** | Evidence establishes irreversible removal from the current provider, such as destruction, pruning or trim. Separate backup recovery may still exist. |
+| **unknown** | The check could not be completed or metadata is insufficient to distinguish the other states. |
+
+An absent listing, denied access or unreachable provider is not by itself proof of loss. Providers must document the evidence and metadata permissions needed for classification; archives, scheduled deletion timestamps and key versions need provider-aware interpretation. `unknown` never counts as a pass or becomes `lost` by timeout. Persistent unknown state is itself alertable after a defined interval; the interval and other alert thresholds remain to be specified.
+
+This check establishes retention status only. Readability, authorization and successful decryption are checked under the identity performing compilation or execution **at the point of use**. A passing monitor check neither authorizes dispatch nor replaces these checks. OpenBao's separate metadata/data access paths are one implementation basis; a local provider must prove equivalent metadata behavior without claiming cryptographic usability from file presence. [O7] [O8]
 
 ## 8. Machine identity, discovery and enrolment
 
@@ -443,25 +481,16 @@ When SideroLink is configured, the maintenance-mode API listens exclusively on t
 
 ### 9.1 Adopt an existing configured cluster
 
-Adoption is a distinct workflow because current running configuration is initially authoritative. A safe process is:
+Adoption begins with observation, while the running cluster remains authoritative:
 
-> **1.** Import an administrative Talos client configuration and Kubernetes kubeconfig into a temporary privileged adoption session.
->
-> **2.** Connect to each known node directly and record machine evidence, effective configuration, Talos version and cluster membership.
->
-> **3.** Import or reconstruct the Talos cluster secret bundle and store it as an OpenBao secret generation.
->
-> **4.** Create an immutable baseline release representing the current state, including per-node differences.
->
-> **5.** Optionally refactor that baseline into shared fragments and profiles, proving the regenerated output is equivalent before publication.
->
-> **6.** Add the desired long-term management transport and observability configuration through a controlled live apply.
->
-> **7.** Verify all machines and the Kubernetes API are reachable through the selected management paths.
->
-> **8.** Declare the manager release authoritative and retain an independently encrypted break-glass Talos configuration.
+1. Establish a privileged adoption session using operator-supplied Talos and Kubernetes credentials through protected ingestion.
+2. Observe node identity, membership, running versions and effective configs. Keep secret-bearing inputs out of ordinary persistence and logs.
+3. Extract the Talos bundle and reliably identified/operator-marked additional secrets into the selected provider. Resolve incomplete operator review only in protected processing or encrypted staging (§7.1).
+4. Publish an exact encrypted baseline plus sanitized sources/references and provenance. The import must leave existing machine state unchanged.
+5. Review differences and explicitly authorize management handover. Refactoring into profiles is a later draft change that must prove equivalent output.
+6. Apply any management-connectivity changes only through an approved plan and verify reachability. Retain independent encrypted break-glass credentials.
 
-Two import modes should eventually exist: **exact adoption**, which preserves current per-node configuration verbatim, and **reconstructed adoption**, which builds a cleaner shared model after equivalence checks.
+Exact adoption preserves full configuration only as ciphertext. Reconstructed adoption can follow once native composition proves equivalence. A baseline publication or handover does not approve arbitrary future mutations.
 
 ### 9.2 Enrol and assign a maintenance-mode machine
 
@@ -477,7 +506,7 @@ Two import modes should eventually exist: **exact adoption**, which preserves cu
 >
 > **6.** Validate and publish an immutable release or machine assignment revision.
 >
-> **7.** Apply the configuration through the selected maintenance transport.
+> **7.** Approve the exact plan, then apply the published configuration through the selected maintenance transport.
 >
 > **8.** Observe installation/reboot, then switch to authenticated Talos mTLS access.
 >
@@ -491,11 +520,11 @@ Cluster creation is a Talos-specific operation over already-available machines:
 >
 > **2.** Assign available machines as control planes and workers.
 >
-> **3.** Compile and apply per-machine native configurations.
+> **3.** Compile, publish, plan and approve per-machine native configurations before applying them.
 >
 > **4.** Wait for the selected control planes to be ready for bootstrap.
 >
-> **5.** Issue Talos bootstrap exactly once to one control plane. Other control planes join afterwards. [T11]
+> **5.** Target one control plane for the one-time Talos bootstrap intent; other control planes join afterwards. Journal intent and verify completion. An ambiguous response must not trigger a blind replay (§12.5). [T11]
 >
 > **6.** Wait for the Kubernetes API endpoint, retrieve/store kubeconfig material and run health checks.
 >
@@ -558,13 +587,22 @@ The system should not hide unrelated lifecycle actions under a generic “reconc
 
 The northbound web API and the southbound machine transport are separate. Users and automation always talk to the management API. The manager may reach a Talos machine directly, through SideroLink, or through a relay.
 
-![Southbound connectivity options behind a common transport interface.](assets/figure-4-transport-options.png)
+```mermaid
+flowchart LR
+  E[Operation engine] --> T[Transport interface]
+  T --> D[Direct routed Talos API]
+  T -. later .-> S[SideroLink UDP or gRPC tunnel]
+  T -. later .-> R[Site relay or REST connector]
+  D --> M[Talos machines]
+  S --> M
+  R --> M
+```
 
-*Figure 4 - Southbound connectivity options. These are alternatives behind a common transport interface. (Diagram revision pending: the SideroLink gRPC tunnel box should read "WireGuard over gRPC/HTTP-2, endpoint deployment-defined, typically exposed on 443" rather than a fixed TCP 443.)*
+*Figure 4 - Alternative southbound transports. SideroLink tunnel endpoints and ports are deployment-defined, commonly exposed on 443; remote transports are later delivery options.*
 
 ### 10.1 Direct internal Talos API
 
-For routed internal networks, the manager connects to each machine on the Talos API port. Configured nodes use Talos mTLS credentials from OpenBao. Maintenance-mode nodes use the restricted insecure setup API and therefore require strong network isolation. Talos documents TCP 50000 as the apid port. [T6] [T8]
+For routed internal networks, the manager connects to each machine on the Talos API port. Configured nodes use scoped Talos mTLS credentials from the selected secret provider (OpenBao in the primary deployment profile). Maintenance-mode nodes use the restricted insecure setup API and therefore require strong network isolation. Talos documents TCP 50000 as the apid port. [T6] [T8]
 
 Direct access is the least complex option and keeps reset recovery independent of a SideroLink headend. Its main costs are inventory/address discovery, routing to every machine, and the security burden of maintenance-mode API reachability.
 
@@ -645,13 +683,16 @@ The product requires a proper web API independent of machine transport. UI, auto
 
 - Redacted diffs and plans in API responses; secrets never appear in normal API payloads.
 
+This request shape is illustrative. The server must resolve the immutable plan and reject fields that differ from its approved binding (§12.7).
+
 ```http
 POST /api/v1/machines/{machine}/operations/apply-config
 Idempotency-Key: 7fe9...
 
 {
+  "planId": "plan_23",
   "releaseId": "rel_42",
-  "mode": "auto",
+  "mode": "no-reboot",
   "approvalId": "apr_19"
 }
 
@@ -679,7 +720,7 @@ Location: /api/v1/operations/op_01K...
 
 ```text
 desired release
-  what PostgreSQL says should run
+  what the application database records as the selected desired release
 
 applied release
   what the manager last successfully sent and verified
@@ -692,11 +733,13 @@ These values must be stored separately. “Apply succeeded” does not prove the
 
 ### 12.2 Plan before apply
 
-For each machine, the reconciler should compile a plan containing: current and desired digest, redacted structural diff, Talos version compatibility, upstream validation, Talos dry-run result, expected reboot requirement, risk classification, rollout policy and approval status. Talos supports live configuration updates with apply modes auto (the default), no-reboot, reboot, staged and try; network/firewall changes should use try where appropriate. [T5] [T9]
+Plan from a published artifact rather than re-rendering at dispatch. Bind the release/artifact identity, secret and crypto references, target machines and assignment revisions, operation **and mode**, parameters, relevant observed preconditions, rollout limits, expiry and approval policy. Include a redacted diff, upstream validation and available dry-run evidence; distinguish these from checks performed against live state at execution.
+
+Talos supports `auto`, `no-reboot`, `reboot`, `staged` and `try`. `try` is an automatic revert timer (one minute by default unless configured), not a separate human-confirmation transaction; another config update is needed to prevent the timed revert. `staged` does not immediately replace the running config. Record mode-specific evidence for acceptance, activation and observed convergence; RPC success alone is not completion. The first milestone uses a safe `no-reboot` worker change. Other modes require their own recovery tests before support. [T5]
 
 ### 12.3 Rollout policy
 
-- Apply no-reboot worker changes automatically only when policy explicitly permits it.
+- Require explicit plan approval in the first milestone. Policy-based automatic no-reboot worker rollout is a later option.
 
 - Require approval for control-plane changes, reboots, cluster endpoint changes, PKI changes and destructive operations.
 
@@ -712,21 +755,41 @@ For each machine, the reconciler should compile a plan containing: current and d
 
 Out-of-band talosctl changes will happen during emergencies. Automatically reverting them immediately may make an incident worse. The default policy should detect and report drift, then allow an operator to choose:
 
-- **Revert** to the currently published release.
+- **Revert** through a new approved plan to the selected applicable release, after checking current assignment and cluster state.
 
-- **Adopt** the observed effective configuration into a new draft, with an explicit diff and approval.
+- **Adopt** only after extracting known/marked secrets from the observed effective config (§7.1). Persist a sanitized draft with references and an encrypted exact baseline, then review, publish and approve changes. Failed or interrupted adoption must not leave plaintext secrets in drafts, indexes, staging or logs.
 
 - **Freeze** reconciliation temporarily while incident work continues.
 
 - **Ignore** a known difference for a bounded time, with audit history.
 
-### 12.5 Durable operations
+### 12.5 Durable operations and uncertain outcomes
 
-Reset, bootstrap and upgrade are multi-step workflows. Every operation needs a unique ID, idempotency key, machine and cluster locks, a durable step journal, retry policy, cancellation semantics, deadlines and post-condition verification. A manager restart should resume or safely classify the workflow, not forget that it removed an etcd member five seconds earlier.
+Every mutation needs durable intent before send, operation/attempt identity, assignment revision, coordination ownership, deadlines, cancellation rules and expected postconditions. Idempotency keys prevent duplicate application requests; they do not make remote side effects exactly once.
+
+After restart, loss of ownership or transport failure, classify each step from evidence:
+
+- **Completed:** postconditions establish completion for the intended assignment and operation; continue allowed dependent work.
+- **Safe to retry:** evidence establishes retry safety for this operation, mode, assignment revision and intervening state; use a bounded retry.
+- **Unresolved:** completion or retry safety cannot be established. Preserve the assignment, stop dependent mutations and observe further or require operator resolution.
+
+Duplicate ApplyConfig is not universally harmless: a stale executor applying A after B can revert newer configuration, and `try`/`reboot` can repeat side effects. Reset, wipe, bootstrap and upgrade require their own ambiguity rules. A database lease or fencing token coordinates database ownership; it is not a fence enforced by Talos apid. A stale worker checking its own stale lease view does not establish safety.
+
+The implementation must define per-operation safety properties and prove how it prevents conflicting dispatch when an old executor may still act. Until a safe ownership/dispatch boundary is established, stop conflicting work rather than promise no stale RPC can occur. Mechanism selection remains part of E4; no exactly-once or universal retry guarantee is made here.
 
 ### 12.6 Offline semantics
 
-Configuration desired state can collapse to the latest approved release. Commands cannot. A machine reconnecting after weeks should not receive a queue containing an old reboot, then an old reset, then a superseded upgrade. The operation engine should distinguish convergent desired state from expiring commands.
+Convergent configuration can select the latest applicable **approved** release after checking current assignment and state. Commands cannot collapse or replay blindly. A returning machine must not receive a queue of expired reboot/reset/upgrade commands. Replan when assumptions changed; unresolved prior execution also blocks conflicting new work.
+
+### 12.7 Application approval and dispatch boundary
+
+The privileged controller is trusted to enforce approvals. A published artifact, a successful provider check or access to a Transit key does not itself authorize execution. Self-approval and multi-party rules remain owner policy choices; coordination requirements must not silently choose them.
+
+An immutable plan binds all dispatch-relevant inputs (§12.2). A changed artifact, target assignment, operation/mode, parameter, relevant precondition or expired authority requires re-evaluation and, where the approved scope changes, a new approval. The specification must define the transaction/protocol that binds approval, plan validity, ownership and durable dispatch intent at a precise **dispatch commitment boundary**.
+
+Revocation before that commitment prevents a new authorized dispatch. Revocation cannot undo work already accepted or in flight; the protocol must explain the gap between commitment and RPC send and how stale executors are handled. Merely checking an approval and later sending an RPC is insufficient. These are required semantics to prove in E4, not an implemented race-free guarantee.
+
+Direct emergency Talos access remains independent of this application policy and is handled as observed drift afterward.
 
 ## 13. Security model
 
@@ -737,24 +800,24 @@ Configuration desired state can collapse to the latest approved release. Command
 | Human/API client        | Authenticates to management API; never receives broad OpenBao access.                        |
 | API/UI                  | Manages metadata and workflow; cannot decrypt all compiled configs by default.               |
 | Compiler/publisher      | Can read selected secret generations and encrypt artifacts; cannot operate machines.         |
-| Reconciler              | Can decrypt approved artifacts and use scoped Talos/Kubernetes credentials.                  |
+| Executor                | Application checks approval before using scoped artifact decryption and Talos/Kubernetes credentials.                  |
 | Transport headend/relay | Moves traffic and enforces peer identity; should not become desired-state authority.         |
 | Maintenance machine     | Not mutually authenticated on direct insecure API; must be quarantined and network-isolated. |
 | Configured node         | Uses Talos mTLS and cluster-specific credentials.                                            |
 
-### 13.2 OpenBao access separation
+### 13.2 Provider access separation
 
-OpenBao supports Kubernetes service-account authentication and TLS certificate authentication. A Kubernetes-hosted compiler can use Kubernetes auth; independent relays or external components can use certificate or another machine auth method. Policies should be component-specific. [O4] [O6]
+OpenBao supports Kubernetes service-account and certificate authentication; use scoped component policies in that deployment profile. Local-provider designs must identify which role boundaries are actually enforceable in their process/deployment model. [O4] [O6]
 
-- API/UI: no secret read permission.
+| Role | Intended capabilities |
+|---|---|
+| Normal API/UI | Metadata and workflow access; no general secret browsing. |
+| Privileged ingestion/compiler | Protected ingestion, selected secret versions, artifact encryption; no machine-operation authority in this role. |
+| Executor | Scoped artifact decryption and operation-specific credentials, gated by application approval checks. |
+| Dependency monitor | Sufficient metadata for §7.6 classifications, without secret-value access. |
+| Rotation/recovery tooling | Explicitly scoped creation or recovery capabilities; no implicit rollout approval. |
 
-- Compiler: read only the selected cluster secret path; encrypt through the selected Transit key.
-
-- Reconciler: decrypt only published artifact contexts and read only operation-specific credentials.
-
-- Rotation controller: create new secret generations without permission to roll them out.
-
-- Backup process: snapshot or recovery-specific capabilities only.
+OpenBao policies constrain paths and operations but do not know which database plan is approved. Encryption contexts are not a substitute for that application check. The controller's trust and deployment boundary must be explicit; naming separate roles does not prove isolation within one process.
 
 ### 13.3 Enrolment security
 
@@ -762,7 +825,7 @@ OpenBao supports Kubernetes service-account authentication and TLS certificate a
 
 - Issue a stable per-machine enrolment identity after approval.
 
-- Store only token hashes in PostgreSQL where plaintext recovery is unnecessary.
+- Store only token hashes in the application database where plaintext recovery is unnecessary.
 
 - Record every claim, re-claim, identity mismatch and revocation.
 
@@ -778,7 +841,7 @@ Keep independently encrypted Talos and Kubernetes emergency credentials outside 
 
 ### 13.6 Audit
 
-PostgreSQL audit events explain the human and application intent: draft changed, release published, approval granted, operation executed. OpenBao audit devices record secret access and cryptographic requests. OpenBao recommends multiple audit devices because failed audit logging can block requests. [O5]
+Application audit events explain the human and application intent: draft changed, release published, approval granted, operation executed. OpenBao audit devices record secret access and cryptographic requests. OpenBao recommends multiple audit devices because failed audit logging can block requests. [O5]
 
 ## 14. Reliability, high availability and disaster recovery
 
@@ -786,33 +849,33 @@ PostgreSQL audit events explain the human and application intent: draft changed,
 
 The management platform is not in the Kubernetes runtime path. If it is down, clusters continue to run with their persisted Talos and Kubernetes state. New configuration, lifecycle operations, remote proxy access and secret rotation pause until recovery.
 
-### 14.2 PostgreSQL and OpenBao
+### 14.2 Operator-owned database and vault services
 
-A reference deployment can use CloudNativePG for PostgreSQL. OpenBao should run its own integrated Raft cluster. Their backups and recovery tests must be independent. OpenBao integrated storage replicates data with Raft and supports HA and backup/restore workflows. [O1]
+Operators run database/vault services and choose HA, replication, backups and restoration procedures. CloudNativePG is an optional PostgreSQL deployment example, not a Bronzeward dependency or managed service. OpenBao integrated Raft is the primary vault deployment recommendation. Bronzeward owns schema/migrations, safe connection behavior, backup prerequisites and application recovery instructions. SQLite investigation includes safe file-backup guidance, not database server management.
+
+Managed-cluster etcd snapshots are a separate, later lifecycle feature already in version 1 scope; they do not replace backups of Bronzeward's database or secret/encryption providers.
 
 ### 14.3 Transport HA
 
-Direct transport is naturally stateless apart from credentials and inventory. SideroLink headends and relays have more state: machine identity, stable overlay addressing, connection/session ownership and packet filtering. Version 1 should prefer a single active headend with a warm standby or another deliberately simple model until active/active semantics are proven. At the version 1 scale target of roughly 100 machines across a handful of sites, this simple model is sufficient.
+Direct transport depends on credentials and inventory but does not require a tunnel headend. When remote transports are added, specify identity, overlay addressing, session ownership and failover. Prefer a simple single-active model until concurrent headend semantics are proven; it remains a later investigation at the target scale of roughly 100 machines.
 
-### 14.4 Consistent recovery set
+### 14.4 Recovery dependencies
 
-- PostgreSQL backup including immutable releases and operation journals.
+A usable recovery set includes application revisions/releases and operation journals, required secret versions, artifact encryption keys, credentials, provider unlock/recovery material and any enabled enrolment/transport identity state. Preserve independently encrypted break-glass access. Backups need not have identical timestamps, but every dependency required by the selected recovery action must be available.
 
-- OpenBao Raft snapshot and unseal/recovery material.
-
-- Transit key history required to decrypt stored artifacts.
-
-- Enrolment signing keys and machine identity mappings.
-
-- SideroLink server identity/address allocation state if that transport is enabled.
-
-- Independent break-glass Talos and Kubernetes credentials.
-
-- Configuration export for verification and manager migration.
+Distinguish observation, applying an existing artifact and regenerating a release: they require different dependencies. Restoration may recover a source version or key absent from the current provider; an alarm alone cannot recover it. Test key-loss and secret-leak prevention with equal priority because either may have irreversible consequences.
 
 ### 14.5 Self-management
 
 > **Risk:** The first production deployment should not make this platform the only recovery mechanism for the cluster hosting the platform itself. Self-management may be supported later, but independent network, credentials and restoration procedures are mandatory.
+
+### 14.6 Explicit recovery mode after restoration
+
+After externally restoring management state, the operator must explicitly enter recovery mode before normal startup/dispatch. Do not assume Bronzeward can detect every rollback of an external database. Recovery mode pauses mutation and automatic resumption while allowing the observation and checks needed to reconcile restored state.
+
+Check retained dependencies (§7.6), verify required decryption/credentials under the actual recovery identities, refresh machine identity, assignment, running version/configuration and cluster membership, and classify pending operations against current evidence. Mark each scope ready, blocked or unresolved. Restored desired state is not proof of current machine state.
+
+The operator explicitly releases eligible scopes from recovery mode. This is not blanket approval for pending mutations; plans, preconditions and normal approval still apply. Missing dependencies or unresolved old execution keep the affected scope blocked without inventing a new assignment or blindly replaying journal entries.
 
 ## 15. Observability and operational support
 
@@ -834,7 +897,9 @@ Every operation should have a single timeline containing the approved plan, mach
 
 - OpenBao errors or audit-device blocking.
 
-- PostgreSQL release publication or queue lag.
+- Database release publication or queue lag.
+
+- Blocked/lost dependencies, provider metadata-check failure and unknown dependencies beyond the configured interval; never report monitor silence as health.
 
 - Cluster etcd/API health during rollout.
 
@@ -853,8 +918,8 @@ The platform should generate redacted support bundles containing machine invento
 | Default connectivity policy     | Direct-only first versus shipping direct and SideroLink in the initial release.                  | Start direct; preserve transport interface.                                                   |
 | Restricted remote network       | SideroLink gRPC tunnel versus site relay versus REST-polling connector.                          | No concrete site yet; target egress requirement stated in 10.10; REST polling kept as fallback. |
 | SideroLink headend              | Build on open SideroLink packages or implement only a site relay initially.                      | Prototype before committing to production support.                                            |
-| Configuration compiler          | Pinned talosctl subprocess versus Talos Go machinery.                                            | Subprocess for first vertical slice; library later if needed.                                 |
-| Compiled artifact retention     | Persist Transit-encrypted full config or re-render at apply time.                                | Persist exact encrypted artifact for rollback and reproducibility.                            |
+| Configuration compiler          | Pinned talosctl subprocess versus Talos Go machinery.                                            | Open pending typed-reference composition and native compatibility experiments.                                 |
+| Artifact retention | Retention windows and provider layout remain open | Exact encrypted artifacts decided; no silent re-render at apply; retain secret/key dependencies for promised actions |
 | Adoption baseline               | Exact current per-node configurations versus immediate refactor into profiles.                   | Exact baseline first, refactor later.                                                         |
 | Drift response                  | Automatic revert versus report/adopt/freeze.                                                     | Report by default.                                                                            |
 | Machine discovery               | Pre-created inventory, DHCP integration, subnet discovery, talos.config call-home or SideroLink. | Support inventory + manual claim first.                                                       |
@@ -871,13 +936,17 @@ The platform should generate redacted support bundles containing machine invento
 | Installer image sourcing        | Public Image Factory, self-hosted Image Factory or static image list.                            | Decided: public Image Factory in v1; per-site platform image proxy/cache in a later phase.    |
 | Project licence                 | Apache-2.0 versus AGPLv3 versus MPL-2.0.                                                         | Open; must be chosen before first public release; fork-and-SaaS stance undecided.             |
 
+Additional decisions still open: reference grammar/declaration, resolution timing, closed encoding enum, provider layout and retention windows, unknown-alert interval, local encryption/key custody, SQLite suitability and any cost-free additional database support, approval identity/policy and dispatch/ownership protocol. Section 18.1 assigns evidence rather than pretending these are settled implementations.
+
 ## 17. Recommended baseline and initial scope
 
 ### 17.1 Recommended version 1 architecture
 
-- PostgreSQL as authoritative inventory, desired-state, release and operation database.
+This is the eventual version 1 envelope. The first milestone is the narrower existing-cluster configuration-control slice in §18.2; lifecycle and remote capabilities below are not all first-milestone requirements.
 
-- OpenBao KV v2 for immutable Talos secret generations and credentials; Transit for compiled-config encryption; OpenBao integrated Raft.
+- Relational inventory, revisions, releases and operations: PostgreSQL server option; SQLite small-setup investigation with required semantics.
+
+- OpenBao KV v2 and Transit as the primary secret/encryption profile; simpler local providers under investigation, with the same retention and recovery requirements.
 
 - Native Talos multi-document YAML fragments and profiles; no Talhelper dependency.
 
@@ -941,39 +1010,34 @@ The platform should generate redacted support bundles containing machine invento
 
 ## 18. Phased implementation and proof of concept
 
-### 18.1 Phase 0 - technical spikes
+### 18.1 Phase 0 - evidence before implementation contracts
 
-- Render a complete Talos configuration using a pinned upstream toolchain from PostgreSQL fragments plus an OpenBao secret generation.
+These are planned experiments, not completed tests or adopted estimates from an unseen review. E1 and E5 have equal early priority: leaked plaintext and loss of the only usable key can both be irreversible. E2–E4 establish feasibility before committing the milestone-1 specification; E6 integrates the selected mechanisms. Narrow prototypes are allowed to obtain that evidence. Each experiment records exact tool versions, inputs, expected behavior and observed failure cases.
 
-- Validate, redact, hash and Transit-encrypt the result; prove exact decrypt and rollback.
+| ID | Experiment | Required evidence and decision enabled |
+|---|---|---|
+| E1 | Secret ingress and redaction | Import and drift adoption with Talos bundle and marked inline secrets; inspect ordinary drafts/indexes, logs, temporary/staged files and backup-visible writes on success, rejection, crash and restart. Prove extraction precedes writes and protected staging has a recovery owner; assess reliable schema detection without claiming completeness. |
+| E2 | Structural references through upstream composition | Compare tag, marked string and external binding candidates with a non-string typed target, an overridden reference, aliases and embedded YAML/JSON. Show native merge parity, materialized validation and sensitivity provenance. Test effective-only dependencies versus early-resolution source supersets. Reject custom merge semantics; select syntax/order only from results. |
+| E3 | Native Talos compatibility | Pin renderer builds and exercise the intended older/current contracts, patch/prerelease edges, validation and operation/RPC combinations, including the Upgrade/LifecycleClient transition. Distinguish render capability, operation compatibility and upstream support policy. Publish the tested matrix and unsupported behavior. |
+| E4 | Database, approval and execution concurrency | Test PostgreSQL and SQLite revision conflicts, publication atomicity, durable intent and migrations. Inject revocation around dispatch commitment, ownership loss, A-after-B stale apply, interrupted RPCs and reconnects. Demonstrate per-operation/mode/assignment safety or stop as unresolved. Additional SQL backends require the same semantics and a credible negligible-cost case. |
+| E5 | Providers, retention and encryption recovery | Compare OpenBao and local age/SOPS candidates for capabilities, unlock/key custody, migration and metadata-only classification. Exercise KV pruning/soft deletion/destruction, reversible decryption restrictions, permanent key loss and unknown monitor results. Restore application/provider backups with differing ages; distinguish applying stored ciphertext from regeneration. Select retention and recovery contracts from evidence. |
+| E6 | Existing-cluster vertical slice | Adopt without mutation; publish/review/approve one safe worker change; apply and verify; exercise drift freeze/adopt/revert plus interrupted execution and explicit post-restore recovery. Prove publication alone cannot dispatch and unresolved recovery blocks conflicting mutations. |
 
-- Directly query a configured node and a maintenance-mode node through the same transport interface.
+Refresh the Omni build-gate comparison before implementation commitment; the August snapshot is not current-market verification. Reset/network-reachability and real remote proxy/tunnel spikes remain prerequisites for their later lifecycle/transport phases.
 
-- Prove reset of STATE/EPHEMERAL while retaining predictable network reachability.
+### 18.2 Phase 1 - configuration control on an existing cluster
 
-- Test whether the target “web-only” environment permits native gRPC/HTTP/2 long-lived connections.
+First-milestone acceptance is:
 
-- Prototype SideroLink grpc_tunnel and measure operational overhead for logs/support bundles.
+1. Import an existing configured cluster without resetting or mutating it, extract known/marked secrets before persistence, and publish an exact encrypted baseline.
+2. Edit native fragments/profiles and references; preserve revisions, provenance and upstream semantics with named validation stages.
+3. Publish immutable encrypted per-machine artifacts, exact dependencies and redacted review data without triggering apply.
+4. Through a minimal authenticated API, plan and explicitly approve one safe worker `no-reboot` change against the exact artifact and assignment.
+5. Dispatch through direct Talos access using the proven E4 mechanism, verify the result, and maintain separate desired/applied/observed state.
+6. Detect an external change and exercise freeze, sanitized adoption and approved revert.
+7. Recover from interrupted execution and external restoration using evidence and explicit recovery mode; stop unresolved/conflicting work.
 
-- Run the same adoption, configuration-change and reset/reuse scenarios against self-hosted Omni and record which requirements are genuinely unmet.
-
-### 18.2 Phase 1 - core configuration control
-
-- PostgreSQL schema for machines, clusters, fragments, profiles, drafts, releases and operations.
-
-- OpenBao integration and component policies.
-
-- Native YAML editor/import API and immutable publication.
-
-- Existing cluster exact adoption.
-
-- Direct configured-node apply with validation, dry-run, approval and verification.
-
-- Desired/applied/observed digests and drift reporting.
-
-- Basic REST API and operation event stream.
-
-- Implement fixed configuration layers, field provenance and separate image/extension/kernel input handling.
+This milestone requires selected database/provider behavior, scoped authorization and a usable operation timeline. It excludes new-machine enrolment, reset/reuse, cluster bootstrap, upgrades, remote transports and managed-cluster etcd recovery until the later phases prove those operation classes.
 
 ### 18.3 Phase 2 - machine lifecycle
 
@@ -1003,9 +1067,9 @@ The platform should generate redacted support bundles containing machine invento
 
 - Optional REST polling connector if required by an actual network policy.
 
-### 18.5 Best vertical proof
+### 18.5 Later lifecycle acceptance proof
 
-The most revealing proof is an end-to-end reuse loop rather than a polished UI:
+Preserve the end-to-end reuse loop as the later lifecycle acceptance proof. It extends the configuration-control milestone; the optional remote repetition belongs to its own transport phase:
 
 > **1.** Adopt one existing Talos cluster and establish an exact baseline release.
 >
@@ -1025,7 +1089,7 @@ The most revealing proof is an end-to-end reuse loop rather than a polished UI:
 >
 > **9.** Repeat the same connection through SideroLink gRPC tunnel or a site relay as a separate spike.
 
-> **Acceptance criterion:** The platform can reliably move one physical or virtual Talos machine from available -> cluster node -> available -> cluster node without CAPI, Git, Talhelper, VM creation or manual secret handling.
+> **Later lifecycle acceptance criterion:** The platform can reliably move one physical or virtual Talos machine from available -> cluster node -> available -> cluster node without CAPI, Git, Talhelper, VM creation or manual secret handling.
 
 ## 19. Risks, unknowns and next design questions
 
@@ -1039,13 +1103,15 @@ The most revealing proof is an end-to-end reuse loop rather than a polished UI:
 | Renderer compatibility                 | Talos configuration contracts evolve; pinned versions and historical reproducibility are essential.                                                                                      |
 | PKI rotation complexity                | Secret storage is easy compared with safe coordinated CA and certificate rotation.                                                                                                       |
 | Storage-node wiping                    | Reset policy must distinguish Talos partitions, user volumes and disks owned by TopoLVM, Longhorn or other systems.                                                                      |
-| Operation recovery                     | A crash between etcd leave, reset and reconnect can create ambiguous state unless every step is journalled and idempotent.                                                               |
+| Operation recovery                     | A crash between etcd leave, reset and reconnect can create ambiguous state unless intent, observed completion and ambiguous outcomes are explicitly distinguished.                                                               |
 | Management-plane bootstrap             | The platform itself needs independent recovery and must not become a circular dependency.                                                                                                |
 | Strict web proxy behaviour             | TCP 443 alone does not prove native gRPC/HTTP2 streams are allowed; real proxy testing is required.                                                                                      |
 | Kubernetes proxy semantics             | SideroLink does not automatically provide a stable, authenticated Kubernetes API endpoint.                                                                                               |
 | Undifferentiated Omni reimplementation | Most configuration and lifecycle mechanics already exist in Omni. The project must prove hard ownership, licensing, release or transport requirements rather than merely reproduce them. |
 | Control-plane scope creep              | A configuration-centred product can gradually absorb proxies, backups, workload management and infrastructure until it becomes a full Omni clone.                                        |
 | Patch-model complexity                 | Unrestricted profiles and ordering can become less understandable than Omni's fixed scopes; fixed layers and provenance are mandatory.                                                   |
+
+Additional critical risks are plaintext entering persistent history before extraction, secret/key dependency loss despite retained ciphertext, metadata checks becoming unknown without alerting, stale executors applying superseded intent, and assuming portable SQL semantics from a shared driver API. Experiments E1–E5 address these before implementation contracts are finalized.
 
 ### 19.2 Questions for the next design round
 
@@ -1069,7 +1135,7 @@ The most revealing proof is an end-to-end reuse loop rather than a polished UI:
 
 - What exact break-glass custody and audit procedure is acceptable?
 
-- Should configuration releases retain encrypted full configs indefinitely, or under a retention policy after supersession?
+- Should configuration releases retain encrypted full configs indefinitely, or under a retention policy after supersession, and which secret/key dependencies and recovery sets must that policy preserve?
 
 - How much automatic rollout is desired after the first safe release: report-only, no-reboot workers, or broader policy-driven reconciliation?
 
@@ -1091,11 +1157,13 @@ The most revealing proof is an end-to-end reuse loop rather than a polished UI:
 
 ## 20. Comparison with Omni
 
+**Historical comparison baseline: 3 August 2026, Omni v1.9.3.** Revision 0.5 updates Bronzeward decisions here but does not re-verify current Omni features, pricing or licensing. Refresh those claims before relying on this comparison for a new build/adopt decision.
+
 At its current scope, the proposed system is much closer to Omni than to Talhelper or a narrow configuration renderer. It is an alternative Talos control plane. Omni must therefore be treated as the reference implementation and primary build-versus-adopt comparison, not as an unrelated provisioning product.
 
 ### 20.1 Honest positioning
 
-Omni already manages machine registration, maintenance-mode inventory, cluster assignment, generated Talos configuration, scoped native patches, reconciliation, upgrades, cluster import, reset/reuse, Kubernetes access and optional infrastructure providers. Avoiding CAPI is not a decisive distinction because Omni exposes its own Talos-specific resources and controllers rather than asking users to operate CAPI objects. Likewise, Git is optional to Omni: cluster templates can support Git-managed workflows, but Omni's live control plane is API-driven. [M1] [M3] [M8] Machine registration itself is SideroLink-based and remains so through the current release. [M7] Omni 1.9 additionally installs, upgrades and patches machines while they are still in maintenance mode through a streaming management API, and gates Talos upgrade rollouts on cluster health checks; as of 1.9.3 there is still no draft/approve release gate and no SideroLink-free management mode, so the differentiators claimed here remain valid but must be rechecked against each Omni release. [M9]
+Omni already manages machine registration, maintenance-mode inventory, cluster assignment, generated Talos configuration, scoped native patches, reconciliation, upgrades, cluster import, reset/reuse, Kubernetes access and optional infrastructure providers. Avoiding CAPI is not a decisive distinction because Omni exposes its own Talos-specific resources and controllers rather than asking users to operate CAPI objects. Likewise, Git is optional to Omni: cluster templates can support Git-managed workflows, but Omni's live control plane is API-driven. [M1] [M3] [M8] Machine registration itself is SideroLink-based and remains so through the reviewed v1.9.3 release. [M7] Omni 1.9 additionally installs, upgrades and patches machines while they are still in maintenance mode through a streaming management API, and gates Talos upgrade rollouts on cluster health checks; as of 1.9.3 there is still no draft/approve release gate and no SideroLink-free management mode, so the differentiators claimed here remain valid but must be rechecked against each Omni release. [M9]
 
 > **Positioning:** an open, configuration-centric and transport-agnostic Talos control plane for organisations that already own their infrastructure and require operator custody of native configuration and secrets, explicit releases, direct access and a clean exit path.
 
@@ -1105,9 +1173,9 @@ Omni already manages machine registration, maintenance-mode inventory, cluster a
 |---------------------------|---------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
 | Primary scope             | Integrated Talos/Kubernetes management platform covering enrolment, clusters, upgrades, access and optional infrastructure.     | Talos configuration and machine lifecycle on already-available infrastructure.                                   |
 | Infrastructure ownership  | Optional infrastructure providers can create or control machines.                                                               | Explicitly outside the initial product boundary.                                                                 |
-| Control model             | Omni API resources and continuously reconciling controllers.                                                                    | PostgreSQL domain model plus durable Talos-specific operation engine; no CAPI.                                   |
+| Control model             | Omni API resources and continuously reconciling controllers.                                                                    | Relational domain model plus durable Talos-specific operation engine; no CAPI.                                   |
 | Talos configuration       | Omni-generated base plus scoped native patches and dedicated extension/kernel resources.                                        | Upstream-generated base inputs plus fixed-layer native fragments/profiles and dedicated extension/kernel inputs. |
-| Secrets and identity      | Cluster identity, CAs, tokens and endpoint are owned and protected by Omni.                                                     | Operator-owned dedicated resources; secret generations held in OpenBao and protected from ordinary fragments.    |
+| Secrets and identity      | Cluster identity, CAs, tokens and endpoint are owned and protected by Omni.                                                     | Operator-owned dedicated resources; secret generations held in the selected provider (primarily OpenBao) and protected from ordinary fragments.    |
 | Change activation         | Saving/syncing desired state causes controller reconciliation; pending and applied diffs are visible.                           | Draft -> compile -> publish immutable release -> approve -> controlled rollout.                              |
 | Machine transport         | SideroLink is constitutive; UDP or WireGuard-over-gRPC.                                                                         | Direct internal Talos API by default; optional SideroLink or site relay.                                         |
 | Direct Talos access       | Normal configuration writes go through Omni; node access is mediated through Omni/SideroLink, with break-glass for emergencies. | Direct Talos mTLS remains supported; out-of-band changes are detected as drift.                                  |
@@ -1121,7 +1189,7 @@ Omni already manages machine registration, maintenance-mode inventory, cluster a
 
 > **Omni:** Omni-owned base and reserved identity/secrets + scoped native patches + dedicated extension/kernel resources + Talos defaults -> effective per-machine configuration -> automatic controller reconciliation.
 
-> **Proposed:** operator-owned cluster inputs and OpenBao secret generation + fixed-layer native fragments/profiles + dedicated image/extension/kernel inputs -> immutable compiled per-machine release -> approved rollout through the Talos API.
+> **Proposed:** operator-owned cluster inputs and pinned secret generations + fixed-layer native fragments/profiles + dedicated image/extension/kernel inputs -> immutable compiled per-machine release -> approved rollout through the Talos API.
 
 The fundamental Talos mechanism is the same. The proposal is not a new configuration language or a new apply protocol. Its intended difference is who owns critical inputs, how reuse is modelled, when desired state becomes deployable, how provenance is preserved, and whether direct access and export remain available. [M2] [M4]
 
@@ -1146,7 +1214,7 @@ Omni reserves cluster identity, secrets, CAs, machine credentials, endpoint and 
 | **Field class**                 | **Omni**                                                     | **Proposed platform**                                                                           |
 |---------------------------------|--------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
 | Cluster identity and name       | Generated and reserved by Omni.                              | Operator-owned cluster resource, immutable after publication except through explicit migration. |
-| Talos/Kubernetes CAs and tokens | Generated, stored and rotated by Omni.                       | Versioned OpenBao secret generation selected by the release.                                    |
+| Talos/Kubernetes CAs and tokens | Generated, stored and rotated by Omni.                       | Immutable secret generation selected by the release; OpenBao is the primary provider.                                    |
 | Control-plane endpoint          | Managed by Omni and not patchable.                           | Operator-owned dedicated cluster property; normal fragments cannot overwrite it.                |
 | Machine credentials             | Managed internally by Omni.                                  | Generated from the selected secret generation and used by the reconciler.                       |
 | System extensions/image         | ExtensionsConfigurations and image lifecycle.                | Dedicated release input with Talos upgrade/install semantics.                                   |
@@ -1191,11 +1259,11 @@ The proposed platform should support two adoption modes: an exact encrypted base
 
 ### 20.9 Proposed differentiators and build/no-build gate
 
-The strongest reasons to build are not that Omni cannot manage Talos configuration. They are hard requirements that change the control model:
+The reasons to build concern the control model. The list combines requirements and preferences; the gate outcome below distinguishes their status:
 
 - Production operation under an open-source licence.
 
-- Talos cluster secrets and PKI must remain in operator-controlled OpenBao.
+- Talos cluster secrets and PKI must remain in operator-controlled secret storage; OpenBao is the primary provider direction, with simpler alternatives under investigation.
 
 - Native Talos fragments and shared profiles must be first-class reusable database objects across clusters.
 
@@ -1211,7 +1279,7 @@ The strongest reasons to build are not that Omni cannot manage Talos configurati
 
 > **Build/no-build gate:** If only one or two of these are mild preferences, deploy Omni. If several are hard architectural or legal requirements, the proposed platform has a defensible product boundary.
 
-As of revision 0.4 the gate has been evaluated: production under an open-source licence, immutable releases with approvals, and direct Talos access with SideroLink as an optional transport are confirmed hard requirements; operator OpenBao custody is a strong preference rather than a hard requirement. Three hard differentiators satisfy the gate, so the current decision is to build, re-validated against each Omni release.
+As of revision 0.4 the gate has been evaluated: production under an open-source licence, immutable releases with approvals, and direct Talos access with SideroLink as an optional transport are confirmed hard requirements; operator OpenBao custody is a strong preference rather than a hard requirement. Three hard differentiators satisfy the gate, so the recorded decision is to build, subject to re-validation against subsequent Omni releases.
 
 The configuration-specific pitch is therefore: Omni offers centrally owned, immediately reconciled Talos configuration through scoped patches. The proposed platform offers operator-owned, reusable and versioned Talos configuration with external secrets, explicit releases, provenance, direct access and a clean exit path.
 
@@ -1267,16 +1335,24 @@ release: rel_42
 cluster: production
 renderer:
   implementation: talosctl
-  version: v1.13.4
+  version: v1.13.6
   contract: v1.13
 secretGeneration: secgen_07
+# Illustrative metadata, not a finalized provider/reference schema.
+effectiveSecretDependencies:
+  - logicalName: registry-password
+    versionRef: immutable-version-12
 sources:
   - fragmentRevision: fragrev_common_12
   - profileRevision: profrev_worker_8
 machines:
   worker-3:
     plaintextDigest: sha256:...
-    encryptedArtifact: transit:v1:...
+    encryptedArtifactRef: artifact_worker_3
+    encryption:
+      provider: openbao-transit
+      keyRef: compiled-configs
+      keyVersion: 7
     expectedEffect: no-reboot
 ```
 
@@ -1295,25 +1371,27 @@ type MachineTransport interface {
 
 ## Appendix B. Operation catalogue
 
-| **Operation**     | **Purpose**                                                          | **Required lock**                        |
-|-------------------|----------------------------------------------------------------------|------------------------------------------|
-| AdoptCluster      | Import running state, secrets and credentials; publish baseline.     | Cluster lock                             |
-| PublishRelease    | Compile, validate, encrypt and commit immutable release.             | Draft/cluster revision lock              |
-| ApplyConfig       | Dry-run and apply approved machine config.                           | Machine lock; cluster rollout slot       |
-| AddNode           | Apply role config and verify join.                                   | Machine + cluster membership lock        |
-| BootstrapCluster  | Issue one-time etcd bootstrap and verify API.                        | Exclusive cluster bootstrap lock         |
-| DrainNode         | Cordon/drain and record blockers.                                    | Machine + Kubernetes Node lock           |
-| ResetMachine      | Leave cluster, selectively wipe and wait for maintenance.            | Machine + cluster membership lock        |
-| WipeDisks         | Explicit destructive disk selection and sanitisation.                | Exclusive machine lock + strong approval |
-| UpgradeTalos      | Drain, upgrade, reconnect and verify.                                | Machine + rollout slot                   |
-| UpgradeKubernetes | Apply version change and verify control-plane/node convergence.      | Cluster rollout lock                     |
-| RecoverEtcd       | Restore snapshot or remove failed member according to recovery plan. | Exclusive cluster recovery lock          |
-| SnapshotEtcd      | Scheduled/on-demand etcd snapshot to object storage with retention.  | Cluster snapshot slot (non-exclusive)    |
-| RotateSecrets     | Create generation and coordinate release rollout.                    | Cluster PKI lock + multi-party approval  |
+This catalogue includes later lifecycle work. Coordination identifies competing work to exclude; it is not a remote fencing guarantee. Every mutation uses the application approval boundary in §12.7. Self-approval and multi-party policy are open; no row selects them implicitly.
+
+| Operation | Purpose | Coordination scope | Authorization |
+|---|---|---|---|
+| AdoptCluster | Observe/import secrets; publish protected baseline | Cluster adoption and revision | Privileged ingestion and explicit handover; any mutation separately approved |
+| PublishRelease | Compose, validate, encrypt and atomically publish | Source/assignment revision checks | Publish capability; no dispatch authority |
+| ApplyConfig | Apply exact artifact and verify mode-specific outcome | Machine assignment and rollout slot | Exact operation/mode plan |
+| AddNode | Apply role config and verify join | Machine and cluster membership | Membership-change plan |
+| BootstrapCluster | One-time bootstrap intent; verify outcome | Exclusive cluster bootstrap coordination | Explicit bootstrap plan; ambiguous completion stops replay |
+| DrainNode | Drain and record blockers | Machine and Kubernetes Node | Approved lifecycle plan |
+| ResetMachine | Leave cluster, selectively wipe and verify maintenance | Machine and membership | Exact reset/wipe parameters |
+| WipeDisks | Explicit disk sanitisation | Exclusive machine coordination | Explicit destructive plan; approver policy open |
+| UpgradeTalos | Upgrade, reconnect and verify | Machine and rollout slot | Version/image-specific plan |
+| UpgradeKubernetes | Update and verify convergence | Cluster rollout | Version-specific plan |
+| RecoverEtcd | Restore or repair membership | Exclusive cluster recovery | Explicit recovery plan |
+| SnapshotEtcd | Scheduled/on-demand snapshot with retention | Cluster snapshot slot | Scoped configured schedule or request authority |
+| RotateSecrets | Create generation and coordinate transition | Cluster PKI workflow | Separate creation and rollout authority; multi-party policy open |
 
 ## Appendix C. References
 
-Technical behaviour statements in this document were checked against official Talos/Sidero, Omni and OpenBao documentation available on 3 August 2026, and re-verified (including all reference URLs below) during the 0.3 review on the same date. Design recommendations and architectural conclusions remain proposals rather than vendor guarantees.
+The original technical behaviour statements in this document were checked against official Talos/Sidero, Omni and OpenBao documentation available on 3 August 2026, and re-verified (including all reference URLs below) during the 0.3 review on the same date. Design recommendations and architectural conclusions remain proposals rather than vendor guarantees.
 
 > **[T1]** [Talos 1.13 - SideroLink](https://docs.siderolabs.com/talos/v1.13/networking/siderolink). Point-to-point management overlay, gRPC tunnel and maintenance-mode behaviour.
 >
@@ -1379,4 +1457,16 @@ Technical behaviour statements in this document were checked against official Ta
 >
 > **[O6]** [OpenBao - TLS certificate auth method](https://openbao.org/docs/auth/cert/). Client certificate authentication for non-Kubernetes components.
 >
-> **[G1]** [Sidero Labs - open SideroLink repository](https://github.com/siderolabs/siderolink). Protocol, agent/headend and WireGuard-over-gRPC building blocks.
+[G1] [Sidero Labs - open SideroLink repository](https://github.com/siderolabs/siderolink). Protocol, agent/headend and WireGuard-over-gRPC building blocks.
+
+Revision 0.5 additionally consulted the following primary sources on 6 September 2026 for the reviewed topics; the provider API documentation is versioned independently of the historical baseline above.
+
+[T16] [Talos v1.13.6 generation contracts](https://github.com/siderolabs/talos/blob/v1.13.6/pkg/machinery/config/contract.go). Native generation capabilities, separate from fleet support policy.
+
+[O7] [OpenBao KV v2 API](https://openbao.org/docs/api/secret/kv/kv-v2/). Version limits, metadata, soft deletion, destruction and metadata-path access.
+
+[O8] [OpenBao Transit API](https://openbao.org/docs/api/secret/transit/). Key metadata, decryption restrictions, trimming and key deletion.
+
+[G2] [age implementation and library](https://github.com/FiloSottile/age). Candidate local encryption building block; not a complete Bronzeward provider.
+
+[G3] [SOPS documentation](https://getsops.io/docs/). Candidate structured encrypted-file workflow and age integration.
