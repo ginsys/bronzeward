@@ -10,7 +10,7 @@ Work from a GitHub issue with an explicit objective, scope, exclusions, delivera
 | Blocking relationships | Native GitHub dependencies |
 | Delivery grouping and completion criteria | GitHub milestone |
 | Architecture and product constraints | [Current main design](https://github.com/ginsys/bronzeward/blob/main/docs/design/Talos_Configuration_and_Machine_Management_Design.md) |
-| Detailed PoC contracts | Specification produced during [milestone 02](https://github.com/ginsys/bronzeward/milestone/2) |
+| Detailed PoC contracts | [Specification index and reserved contract locations](docs/spec/README.md), produced during [milestone 02](https://github.com/ginsys/bronzeward/milestone/2) |
 | Reproducible experimental evidence | Repository research documents and prototypes |
 | Historical discussion | [Historical report](docs/design/research/20260906-design-discussion-and-peer-review.md) |
 
@@ -18,13 +18,25 @@ Do not maintain parallel status checklists in repository documents or chat. Issu
 
 The working design is not an implementation specification or proof of passing experiments. Keep observed evidence, proposed behavior and unsupported behavior distinct. The first PoC selects one database/provider profile after investigation. Do not assume every investigated option is supported.
 
+## Delivery terminology
+
+| Design terminology | GitHub delivery grouping |
+| --- | --- |
+| Phase 0: evidence before implementation contracts (§18.1) | [01 - Feasibility evidence](https://github.com/ginsys/bronzeward/milestone/1) |
+| “milestone-1 specification” (§18.1) | [02 - PoC specification](https://github.com/ginsys/bronzeward/milestone/2) |
+| Phase 1 / “first milestone”: configuration control (§18.2) | [03 - Working configuration-control PoC](https://github.com/ginsys/bronzeward/milestone/3) |
+
+The [design's configuration-control scope](docs/design/Talos_Configuration_and_Machine_Management_Design.md#182-phase-1---configuration-control-on-an-existing-cluster) owns acceptance and exclusions. GitHub milestone numbers do not renumber the design phases.
+
 ## Triage and labels
 
 Use the work-item form. Select investigation, decision, specification, implementation or validation; during triage apply exactly one corresponding `type/investigation`, `type/decision`, `type/specification`, `type/implementation` or `type/validation` label. A form dropdown does not dynamically apply a label.
 
+During triage, require investigations to describe alternatives and the decision their evidence enables. That field is optional at submission so other work types can omit it; incomplete investigations need refinement before work starts. Outcome links are optional and describe enabled decisions or artifacts, never a second blocker list. Form-generated headings may use `###` while seeded bodies use `##`; section names and meaning are the contract, not heading depth.
+
 Keep the existing GitHub default labels. Issue open/closed state is authoritative for completion. Use `status::in-progress` when accepted work is underway and `status::needs-review` when it awaits review; these two labels are mutually exclusive. Use `status::needs-refinement` while implementation detail or acceptance verification remains incomplete. It may coexist with either workflow label.
 
-All initial PoC implementation and acceptance issues need refinement. The [specification review](https://github.com/ginsys/bronzeward/issues/20) must refine or subdivide them, establish concrete contracts/checks and preserve acceptance coverage before removing refinement labels. Preserve native dependencies when subdividing. Stable `bronzeward-key` markers identify seeded issues and must not be changed or duplicated. A `bronzeward-seed` marker records the seeded body hash for setup recovery; human edits are allowed and must never be silently overwritten by a seeding rerun.
+Refine or subdivide incomplete implementation and acceptance issues with concrete contracts and checks before removing refinement labels. Preserve native dependencies and acceptance coverage when subdividing. Stable `bronzeward-key` markers identify seeded issues and must not be changed or duplicated. Preserve human edits.
 
 The [licence decision](https://github.com/ginsys/bronzeward/issues/16) is independent owner work in milestone 02 and does not block the PoC specification review. Completing a milestone still requires its own issue completion criteria; this independence does not mark the licence work done.
 
@@ -34,20 +46,26 @@ Investigations compare alternatives and identify the decision their evidence ena
 
 Implementation follows finalized contracts and includes meaningful verification of applicable success, rejection, interruption and recovery behavior. Update code and related documentation together. Closure requires every specified acceptance criterion, the required evidence and landed artifacts, assessed by the owner or designated reviewer. An open draft PR or a local passing check alone is not closure evidence.
 
-The [PoC compatibility investigation](https://github.com/ginsys/bronzeward/issues/5) explicitly defers Upgrade/LifecycleClient execution testing. The [feasibility review](https://github.com/ginsys/bronzeward/issues/12) must retain that limitation; the [specification review](https://github.com/ginsys/bronzeward/issues/20) must record its disposition and reconcile affected design wording before closure. Do not claim the full design E3 experiment passed.
+The [PoC compatibility investigation](https://github.com/ginsys/bronzeward/issues/5) defers Upgrade/LifecycleClient execution testing; full design experiment E3 is not claimed complete. The [specification review](https://github.com/ginsys/bronzeward/issues/20) owns the disposition and related closure criteria.
 
 ## Change and review workflow
 
 1. Prepare a scoped change on a feature branch; preserve unrelated work and keep the default branch unchanged.
-2. Run appropriate checks and review the actual diff against the issue and current design/specification. For documentation changes, check links, Markdown structure, issue-form YAML and `git diff --check`. Record exact checks and limitations. Use project-defined tasks when available.
+2. Run the [documentation checks](#documentation-checks) and any checks required by the issue, then review the actual diff against the current design/specification. Record exact checks and limitations.
 3. Open a draft PR stating the problem, scope, linked issues, validation evidence and outstanding limitations. Include related documentation in the same PR.
 4. Have the owner or designated reviewer assess correctness, scope, safety, evidence and documentation. Record findings and resolve them or explicitly record an accepted disposition.
-5. Complete required evidence before seeking readiness or merge authorization. Do not merge your own PR or change branch protection as part of routine work.
+5. Complete required evidence before seeking readiness or merge authorization. The owner may merge their own PR after review. Agents require explicit authorization to change PR readiness, merge or change branch protection.
 
-No review automation or CI pipeline is established by this tracking setup. Do not claim CI success without an actual pipeline result. The setup PR remains draft for owner review; review and merge are separate actions.
+No review automation or CI pipeline exists yet. Do not claim CI success without an actual pipeline result. Review and merge are separate actions.
 
-## PoC acceptance boundary
+## Documentation checks
 
-The [working PoC milestone](https://github.com/ginsys/bronzeward/milestone/3) requires adoption without mutation, native editing and encrypted publication, exact plan approval, direct safe no-reboot worker apply/verification, separate desired/applied/observed state and a usable operation timeline. It also requires drift freeze/sanitized adoption/approved revert, interrupted-operation recovery and explicit restoration recovery that blocks unresolved/conflicting mutations. A happy-path demo alone is insufficient.
+With Python 3.9 or newer and PyYAML 6 installed in your Python environment, run from the repository root:
 
-New-machine enrolment, reset/reuse, bootstrap, upgrades, remote transports and managed-cluster etcd recovery remain later work. The PoC is not a production-readiness claim.
+```sh
+python3 scripts/verify-docs.py
+git diff --check
+git diff --cached --check
+```
+
+The verifier checks root guidance and Markdown under `docs/spec/`: inline relative links and anchors, local equivalents of this repository's `blob/main` document links, balanced fenced blocks and trailing whitespace. It also checks issue-form YAML, field names/types/requiredness, disabled blank issues and the CLAUDE delegation. It does not fetch external links, verify live tracker state, fully lint Markdown or validate design semantics. Review changed external references and the actual diff separately; for a committed PR, also run `git diff --check <base-commit>...HEAD` using its actual base commit.

@@ -7,6 +7,7 @@ body:
         Scope and acceptance live in this issue; blockers live in native GitHub dependencies.
         During triage, apply the type/* label matching the selected work type. The dropdown does not apply labels automatically.
         Leave unassigned until someone accepts responsibility.
+        Investigations must describe alternatives and the decision enabled before triage is complete.
   - type: dropdown
     id: work-type
     attributes:
@@ -22,7 +23,7 @@ body:
   - type: textarea
     id: objective
     attributes:
-      label: Objective and relevant design references
+      label: Objective and design references
       description: State the outcome and link the relevant current design/specification sections.
     validations:
       required: true
@@ -57,7 +58,14 @@ body:
   - type: textarea
     id: alternatives
     attributes:
-      label: Investigation alternatives and decision enabled
-      description: For investigations, list alternatives and the decision the evidence will enable. For other work types, state not applicable with a brief reason.
+      label: Alternatives and decision enabled
+      description: Required during investigation triage; list alternatives and the decision the evidence will enable. Other work types may leave this blank.
     validations:
-      required: true
+      required: false
+  - type: textarea
+    id: outcome-links
+    attributes:
+      label: Outcome links
+      description: Optionally link decisions or artifacts this work enables. Record blockers only in native GitHub dependencies.
+    validations:
+      required: false
