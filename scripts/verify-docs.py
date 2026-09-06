@@ -30,12 +30,23 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def prose(path):
+def read_text(path, root=ROOT):
+    """Read repository UTF-8 without exposing checkout paths in file errors."""
+    try:
+        return path.read_text(encoding='utf-8')
+    except OSError as error:
+        raise ValueError(f'{path.relative_to(root)}: {error.strerror}') from None
+    except UnicodeError:
+        raise ValueError(f'{path.relative_to(root)}: invalid UTF-8') from None
+
+
+def prose(path, root=ROOT):
     """Exclude fenced examples from link checks; verify fences and whitespace."""
     lines = []
     fence = None
-    for number, line in enumerate(path.read_text().splitlines(), 1):
-        require(line == line.rstrip(), f'{path}:{number}: trailing whitespace')
+    label = path.relative_to(root)
+    for number, line in enumerate(read_text(path, root).splitlines(), 1):
+        require(line == line.rstrip(), f'{label}:{number}: trailing whitespace')
         marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line)
         if marker:
             run, suffix = marker.groups()
@@ -45,7 +56,7 @@ def prose(path):
                 fence = None
         elif fence is None:
             lines.append(line)
-    require(fence is None, f'{path}: unclosed code fence')
+    require(fence is None, f'{label}: unclosed code fence')
     return '\n'.join(lines)
 
 
@@ -63,7 +74,8 @@ def anchors(text):
 
 
 def check_markdown(path, root=ROOT):
-    for destination in re.findall(r'\[[^\]\n]+\]\(([^)\s]+)\)', prose(path)):
+    label = path.relative_to(root)
+    for destination in re.findall(r'\[[^\]\n]+\]\(([^)\s]+)\)', prose(path, root)):
         if destination.startswith(MAIN_DOCUMENT):
             parts = urlsplit(destination[len(MAIN_DOCUMENT):])
             target = root / unquote(parts.path)
@@ -73,15 +85,15 @@ def check_markdown(path, root=ROOT):
                 continue
             target = path.parent / unquote(parts.path) if parts.path else path
         target = target.resolve()
-        require(target.is_relative_to(root.resolve()), f'{path}: link escapes repository: {destination}')
-        require(target.exists(), f'{path}: missing link target: {destination}')
+        require(target.is_relative_to(root.resolve()), f'{label}: link escapes repository: {destination}')
+        require(target.exists(), f'{label}: missing link target: {destination}')
         if parts.fragment and target.suffix == '.md':
-            require(unquote(parts.fragment) in anchors(prose(target)), f'{path}: missing anchor: {destination}')
+            require(unquote(parts.fragment) in anchors(prose(target, root)), f'{label}: missing anchor: {destination}')
 
 
 def check_form(root=ROOT):
     templates = root / '.github/ISSUE_TEMPLATE'
-    form = yaml.safe_load((templates / 'work-item.yml').read_text())
+    form = yaml.safe_load(read_text(templates / 'work-item.yml', root))
     require(isinstance(form, dict) and form.get('name') and form.get('description'), 'Form needs a name and description')
     elements = form.get('body')
     require(isinstance(elements, list), 'Form body must be a list')
@@ -102,7 +114,7 @@ def check_form(root=ROOT):
         require(field.get('validations', {}).get('required') is required, f'{key}: incorrect requiredness')
     require(fields['work-type']['attributes'].get('options') ==
             ['Investigation', 'Decision', 'Specification', 'Implementation', 'Validation'], 'Incorrect work types')
-    require(yaml.safe_load((templates / 'config.yml').read_text()) == {'blank_issues_enabled': False},
+    require(yaml.safe_load(read_text(templates / 'config.yml', root)) == {'blank_issues_enabled': False},
             'Blank issues must remain disabled')
 
 
@@ -112,9 +124,11 @@ def main():
     for document in documents:
         check_markdown(document)
     check_form()
-    require((ROOT / 'CLAUDE.md').read_text() == '@AGENTS.md\n', 'CLAUDE.md must delegate to AGENTS.md')
+    require(read_text(ROOT / 'CLAUDE.md') == '@AGENTS.md\n', 'CLAUDE.md must delegate to AGENTS.md')
+    required = sum(field[2] for field in FIELDS.values())
     print(f'PASS: {len(documents)} guidance/specification documents; local links/anchors, fences, whitespace; '
-          'issue-form YAML and 8 fields (6 required, 2 optional); blank issues disabled; CLAUDE delegation. '
+          f'issue-form YAML and {len(FIELDS)} fields ({required} required, {len(FIELDS) - required} optional); '
+          'blank issues disabled; CLAUDE delegation. '
           'External URLs, live tracker state and design semantics require separate review.')
 
 
