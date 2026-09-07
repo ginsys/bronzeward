@@ -32,13 +32,15 @@ description = "Conventional-commit subjects on this branch's commits since origi
 run = "scripts/ci/commit-lint.sh \"$(git merge-base origin/main HEAD)\" HEAD"
 
 [tasks.upstream-sync]
-description = "Clone or fast-forward go-kure/.github into upstream/ (gitignored) for the action-pin checker"
+description = "Check out go-kure/.github into upstream/ (gitignored) at the commit ci.yml pins the action-pin checker to"
+# Single source of truth for the revision: the `check-action-pins@<sha>` pin in ci.yml, so the
+# local check and CI run the same checker. Bumping the pin there is the only edit needed.
 run = """
-if [ -d upstream/.git ]; then
-  git -C upstream pull --ff-only --quiet
-else
-  git clone --quiet --depth 1 https://github.com/go-kure/.github upstream
-fi
+sha=$(grep -oE 'check-action-pins@[0-9a-f]{40}' .github/workflows/ci.yml | head -1 | cut -d@ -f2)
+[ -n "$sha" ] || { echo "upstream-sync: no 40-char check-action-pins pin in .github/workflows/ci.yml" >&2; exit 1; }
+[ -d upstream/.git ] || git clone --quiet --no-checkout https://github.com/go-kure/.github upstream
+git -C upstream rev-parse --quiet --verify "$sha^{commit}" >/dev/null || git -C upstream fetch --quiet origin
+git -C upstream checkout --quiet --detach "$sha"
 """
 
 [tasks.action-pins]
