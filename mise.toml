@@ -29,7 +29,10 @@ git diff --check
 
 [tasks.commit-lint]
 description = "Conventional-commit subjects on this branch's commits since origin/main (fetch it first)"
-run = "scripts/ci/commit-lint.sh \"$(git merge-base origin/main HEAD)\" HEAD"
+run = """
+base=$(git merge-base origin/main HEAD) || { echo "commit-lint: no merge-base with origin/main; fetch it first" >&2; exit 1; }
+scripts/ci/commit-lint.sh "$base" HEAD
+"""
 
 [tasks.upstream-sync]
 description = "Check out go-kure/.github into upstream/ (gitignored) at the commit ci.yml pins the action-pin checker to"
