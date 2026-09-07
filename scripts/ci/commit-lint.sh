@@ -29,6 +29,12 @@ fi
 
 base=$1
 head=$2
+# Walk first, outside any pipeline or process substitution, so an unreachable revision (a
+# force-pushed-away SHA, a typo) fails the check instead of silently linting nothing.
+if ! commits=$(git log --no-merges --format='%H %s' "$base..$head"); then
+  echo "cannot walk $base..$head" >&2
+  exit 2
+fi
 failed=0
 checked=0
 while IFS= read -r line; do
@@ -42,7 +48,7 @@ while IFS= read -r line; do
     echo "FAIL ${sha:0:8} $subject" >&2
     failed=$((failed + 1))
   fi
-done < <(git log --no-merges --format='%H %s' "$base..$head")
+done <<< "$commits"
 
 echo "checked $checked commit(s), $failed failing"
 [ "$failed" -eq 0 ]

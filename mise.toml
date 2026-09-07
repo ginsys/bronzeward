@@ -20,6 +20,32 @@ run = "bash scripts/test/commit-lint-test.sh"
 description = "Documentation checks (needs Python 3.9+ with PyYAML 6)"
 run = "python3 scripts/verify-docs.py"
 
+[tasks.whitespace]
+description = "git diff --check over the whole tree at HEAD and over the working tree, as ci.yml's docs job does"
+run = """
+git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+git diff --check
+"""
+
+[tasks.commit-lint]
+description = "Conventional-commit subjects on this branch's commits since origin/main (fetch it first)"
+run = "scripts/ci/commit-lint.sh \"$(git merge-base origin/main HEAD)\" HEAD"
+
+[tasks.upstream-sync]
+description = "Clone or fast-forward go-kure/.github into upstream/ (gitignored) for the action-pin checker"
+run = """
+if [ -d upstream/.git ]; then
+  git -C upstream pull --ff-only --quiet
+else
+  git clone --quiet --depth 1 https://github.com/go-kure/.github upstream
+fi
+"""
+
+[tasks.action-pins]
+description = "Every third-party action ref is a 40-char commit SHA (go-kure's checker, ginsys reusables admitted at @main)"
+depends = ["upstream-sync"]
+run = "FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@' bash upstream/scripts/check-action-pins.sh ."
+
 [tasks.verify]
-description = "Everything ci.yml runs that can run locally"
-depends = ["lint", "test", "docs"]
+description = "Everything ci.yml runs: lint, tests, docs, whitespace, commit subjects, action pins"
+depends = ["lint", "test", "docs", "whitespace", "commit-lint", "action-pins"]
