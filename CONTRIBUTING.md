@@ -34,7 +34,7 @@ Use the work-item form. Select investigation, decision, specification, implement
 
 During triage, require investigations to describe alternatives and the decision their evidence enables. That field is optional at submission so other work types can omit it; incomplete investigations need refinement before work starts. Outcome links are optional and describe enabled decisions or artifacts, never a second blocker list. Form-generated headings may use `###` while seeded bodies use `##`; section names and meaning are the contract, not heading depth.
 
-Keep the existing GitHub default labels. Issue open/closed state is authoritative for completion. Use `status::in-progress` when accepted work is underway and `status::needs-review` when it awaits review; these two labels are mutually exclusive. Use `status::needs-refinement` while implementation detail or acceptance verification remains incomplete. It may coexist with either workflow label.
+The label set is managed from [ginsys/.github](https://github.com/ginsys/.github) (`standards/labels.json`); its daily audit reports drift and a manual apply deletes labels it does not know. Issue open/closed state is authoritative for completion. Use `status/in-progress` when accepted work is underway and `status/needs-review` when it awaits review; these two labels are mutually exclusive. Use `status/needs-refinement` while implementation detail or acceptance verification remains incomplete. It may coexist with either workflow label. Add one or more `area/` labels during triage for the design component or repository concern the work touches; a new `area/` value is created live to unblock triage and back-filled into the label registry in the same unit of work.
 
 Refine or subdivide incomplete implementation and acceptance issues with concrete contracts and checks before removing refinement labels. Preserve native dependencies and acceptance coverage when subdividing. Stable `bronzeward-key` markers identify seeded issues and must not be changed or duplicated. Preserve human edits.
 
@@ -56,7 +56,7 @@ The [PoC compatibility investigation](https://github.com/ginsys/bronzeward/issue
 4. Have the owner or designated reviewer assess correctness, scope, safety, evidence and documentation. Record findings and resolve them or explicitly record an accepted disposition.
 5. Complete required evidence before seeking readiness or merge authorization. The owner may merge their own PR after review. Agents require explicit authorization to change PR readiness, merge or change branch protection.
 
-No review automation or CI pipeline exists yet. Do not claim CI success without an actual pipeline result. Review and merge are separate actions.
+Every PR runs the `CI` workflow (documentation checks, `actionlint`, conventional-commit subjects, action pins; aggregated as the `checks` context), a Codex review and an advisory Claude review (`PR Review`). Review threads must be resolved before merge. Merges are rebase-only through the merge queue: after review, the owner runs `gh pr merge --auto` and the queue lands the PR once `checks` and `PR Review` report on the merged result. Do not claim CI success without an actual run result. Review and merge are separate actions.
 
 ## Documentation checks
 
@@ -67,6 +67,8 @@ python3 scripts/verify-docs.py
 git diff --check
 git diff --cached --check
 ```
+
+With [mise](https://mise.jdx.dev/) installed, `mise run verify` runs the same documentation check plus `actionlint`, `shellcheck` and the commit-lint fixture tests, which is what the `CI` workflow runs.
 
 The verifier reads repository files as UTF-8 and reports file locations relative to the repository root. It checks root guidance and Markdown under `docs/spec/`: inline relative links and anchors, local equivalents of this repository's `blob/main` document links, balanced fenced blocks and trailing whitespace. It also checks issue-form YAML, field names/types/requiredness, disabled blank issues and the CLAUDE delegation.
 

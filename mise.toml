@@ -1,0 +1,25 @@
+[tools]
+# ci.yml installs from this list (jdx/mise-action); a bump here is the only edit needed.
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+
+[tasks.lint]
+description = "actionlint on the workflows, shellcheck on the scripts"
+# SHELLCHECK_OPTS is cleared so a shell default such as --exclude=SC2086 cannot hide locally a
+# finding CI reports with a clean environment.
+run = """
+env -u SHELLCHECK_OPTS actionlint
+env -u SHELLCHECK_OPTS shellcheck scripts/ci/*.sh scripts/test/*.sh
+"""
+
+[tasks.test]
+description = "Fixture tests for scripts/ci/commit-lint.sh"
+run = "bash scripts/test/commit-lint-test.sh"
+
+[tasks.docs]
+description = "Documentation checks (needs Python 3.9+ with PyYAML 6)"
+run = "python3 scripts/verify-docs.py"
+
+[tasks.verify]
+description = "Everything ci.yml runs that can run locally"
+depends = ["lint", "test", "docs"]
