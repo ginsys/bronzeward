@@ -1,0 +1,23 @@
+name: PR Review
+
+# Caller of ginsys/.github's Claude review reusable (advisory by default; the repo variable
+# PR_REVIEW_THREADS_MODE switches it — see that workflow's header). `@main` is the first-party
+# reusable-workflow policy; the review logic behind it is a commit-pinned upstream action.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # Required so this check reports (as skipped, via the callee's fork `if:`) on the merge queue's
+  # temporary ref. A required context that never triggers stays pending forever and stalls every
+  # queue entry until the queue's timeout ejects it.
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pr-review:
+    uses: ginsys/.github/.github/workflows/pr-review.yml@main
+    with:
+      pr_review_context: "Operator-owned Talos Linux control plane and machine-lifecycle platform, design phase: documentation, specifications and research evidence; Go implementation to follow. Read AGENTS.md for the tracking and evidence rules."

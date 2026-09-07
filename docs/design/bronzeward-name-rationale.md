@@ -4,7 +4,8 @@
 
 The project will be called **Bronzeward**.
 
-> **Bronzeward**  
+> **Bronzeward**
+>
 > *An operator-owned control plane for Talos configuration and machine lifecycle.*
 
 The name connects directly to the mythology behind **Talos**, while remaining independent enough not to suggest that the project is an official Sidero Labs product.
