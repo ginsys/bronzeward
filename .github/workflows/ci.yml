@@ -21,7 +21,9 @@ permissions:
   contents: read
 
 env:
-  MISE_EXEC_AUTO_INSTALL: "false"
+  # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
+  # not stop a task run from installing. Tools come from jdx/mise-action's install step only.
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
 
 jobs:
   docs:
@@ -79,8 +81,9 @@ jobs:
     timeout-minutes: 5
     env:
       # Callers of ginsys/.github reusables use `@main`, the same first-party policy go-kure's
-      # checker applies to its own; the upstream default admits only go-kure/... refs.
-      FIRST_PARTY_WORKFLOW_RE: '^(go-kure|ginsys)/[^/]+/\.github/workflows/[^@]+@'
+      # checker applies to its own; the upstream default admits only go-kure/... refs. Anchored
+      # on `@main$`: any other first-party ref (a branch, a tag) is a pin-check failure.
+      FIRST_PARTY_WORKFLOW_RE: '^(go-kure|ginsys)/[^/]+/\.github/workflows/[^@]+@main$'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: go-kure/.github/.github/actions/check-action-pins@ae10bfb8f99fd5ddcee3185d1a420be14b201e3c # main 2026-09-07 (go-kure/.github#154 merge)
