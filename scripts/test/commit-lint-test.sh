@@ -34,5 +34,20 @@ expect 1 'fix(api) handle nil'
 expect 1 'wip'
 expect 1 ''
 
+# Range mode, against this repository's own history.
+expect_range() {
+  local want=$1 base=$2 head=$3 rc=0
+  "$lint" "$base" "$head" >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq "$want" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "FAIL: expected rc=$want got rc=$rc for range: $base..$head" >&2
+  fi
+}
+expect_range 2 0000000000000000000000000000000000000000 HEAD   # unreachable base: walk fails, never green
+expect_range 2 HEAD no-such-ref                                # bad head, same
+expect_range 0 HEAD HEAD                                       # empty range: nothing to lint, not an error
+
 echo "commit-lint-test: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

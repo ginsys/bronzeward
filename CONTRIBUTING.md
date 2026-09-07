@@ -68,7 +68,7 @@ git diff --check
 git diff --cached --check
 ```
 
-With [mise](https://mise.jdx.dev/) installed, `mise run verify` runs the same documentation check plus `actionlint`, `shellcheck` and the commit-lint fixture tests, which is what the `CI` workflow runs.
+With [mise](https://mise.jdx.dev/) installed and `origin/main` fetched, `mise run verify` runs everything the `CI` workflow runs: the documentation check, `actionlint` and `shellcheck`, the commit-lint fixture tests, the whole-tree whitespace check, the conventional-commit check on this branch's commits, and the action-pin check (which clones go-kure/.github into the gitignored `upstream/`).
 
 The verifier reads repository files as UTF-8 and reports file locations relative to the repository root. It checks root guidance and Markdown under `docs/spec/`: inline relative links and anchors, local equivalents of this repository's `blob/main` document links, balanced fenced blocks and trailing whitespace. It also checks issue-form YAML, field names/types/requiredness, disabled blank issues and the CLAUDE delegation.
 
