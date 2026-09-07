@@ -4,7 +4,9 @@
 #        scripts/ci/commit-lint.sh --subject '<subject>'   (single subject, used by the tests)
 set -euo pipefail
 
-PATTERN='^(feat|fix|docs|refactor|perf|test|build|ci|chore|release)(\([a-zA-Z0-9_./-]+\))?!?: .+$|^Merge '
+# Merge commits are not exempted here: range mode walks with --no-merges, so a subject starting
+# with "Merge " on an ordinary commit is just a non-conventional subject.
+PATTERN='^(feat|fix|docs|refactor|perf|test|build|ci|chore|release)(\([a-zA-Z0-9_./-]+\))?!?: .+$'
 
 check_subject() {
   if [[ "$1" =~ $PATTERN ]]; then

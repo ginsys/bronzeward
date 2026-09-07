@@ -46,7 +46,7 @@ git -C upstream checkout --quiet --detach "$sha"
 [tasks.action-pins]
 description = "Every third-party action ref is a 40-char commit SHA (go-kure's checker, ginsys reusables admitted at @main)"
 depends = ["upstream-sync"]
-run = "FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@' bash upstream/scripts/check-action-pins.sh ."
+run = "FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@main$' bash upstream/scripts/check-action-pins.sh ."
 
 [tasks.verify]
 description = "Everything ci.yml runs: lint, tests, docs, whitespace, commit subjects, action pins"

@@ -23,7 +23,7 @@ expect 0 'feat(ci)!: drop old input'
 expect 0 'docs!: rewrite'
 expect 0 'chore(deps): bump actions/checkout'
 expect 0 'release: v0.1.0'
-expect 0 'Merge branch main into feature'
+expect 1 'Merge branch main into feature'   # no merge exemption: range mode skips real merges
 expect 1 'Add thing'
 expect 1 'feat add thing'
 expect 1 'feat:'
