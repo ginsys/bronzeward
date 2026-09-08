@@ -21,10 +21,13 @@ permissions:
   contents: read
 
 # Runner choice: the org's in-cluster runners for this repository's own branches, GitHub-hosted
-# (free on a public repo) for pull requests from forks, so contributor-controlled files
-# (scripts/verify-docs.py, mise.toml, the workflows themselves) never execute inside the cluster.
-# The org-level fork-PR approval gate still applies on top. The Claude review job is a separate
-# workflow whose reusable skips forks outright (the proxy is in-cluster only).
+# (free on a public repo) for pull requests from forks and for merge-queue candidates, so
+# contributor-controlled files (scripts/verify-docs.py, mise.toml, the workflows themselves) never
+# execute inside the cluster before they are on main. A merge_group event carries no
+# github.event.pull_request, so it cannot tell a fork's candidate from an own-branch one; routing
+# every candidate to a hosted runner is the only branch-independent rule. The org-level fork-PR
+# approval gate still applies on top. The Claude review job is a separate workflow whose reusable
+# skips forks and merge groups outright (the proxy is in-cluster only).
 
 env:
   # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
@@ -33,7 +36,7 @@ env:
 
 jobs:
   docs:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -46,7 +49,7 @@ jobs:
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
 
   actionlint:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -58,7 +61,7 @@ jobs:
   test:
     # The commit-lint fixtures: every accepted and rejected subject shape, plus the range-walk
     # failure cases. `commit-lint` below checks only this PR's own subjects.
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -70,7 +73,7 @@ jobs:
   commit-lint:
     # PR commits only: a push to main or a merge-group ref has no PR range to lint.
     if: github.event_name == 'pull_request'
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -83,7 +86,7 @@ jobs:
         run: scripts/ci/commit-lint.sh "$BASE_SHA" "$HEAD_SHA"
 
   action-pins:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 5
     env:
       # Callers of ginsys/.github reusables use `@main`, the same first-party policy go-kure's
@@ -99,7 +102,7 @@ jobs:
     # pull requests, so `skipped` counts as success only for that job.
     if: always()
     needs: [docs, actionlint, test, commit-lint, action-pins]
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:
       - name: Fail unless every job succeeded
