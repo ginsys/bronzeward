@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Create the disposable fixture: synthetic secrets, PostgreSQL, OpenBao, a two-node Talos cluster.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$(dirname "$0")/../lib.sh"
+
+need docker curl jq tar sha256sum install
+docker compose version >/dev/null || die "missing prerequisite: docker compose v2"
+[ "$(uname -sm)" = "Linux x86_64" ] || die "pinned CLI assets are linux/amd64 only"
+[ ! -e "$STATE" ] || die "$STATE exists: run fixtures/bin/down first"
+
+trap 'say "fixtures: up failed; run fixtures/bin/down to remove what was created"' ERR
+
+synthetic() { printf 'BWSYNTH-%s' "$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"; }
+
+umask 077
+mkdir -p "$STATE/data" "$STATE/backups"
+{
+  printf 'BW_CANARY=%s\n' "$(synthetic)"
+  printf 'BW_POSTGRES_PASSWORD=%s\n' "$(synthetic)"
+} >"$STATE/secrets.env"
+set -a
+# shellcheck disable=SC1091  # just generated
+. "$STATE/secrets.env"
+set +a
+
+fetch_tools
+
+say "starting postgres and openbao"
+compose up --detach --quiet-pull --wait postgres
+compose up --detach --quiet-pull openbao
+
+bao_answers() {
+  local rc=0
+  bao status >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] # 2 = reachable but sealed
+}
+wait_for 60 "the OpenBao API" bao_answers
+
+say "initializing openbao (one synthetic unseal key)"
+bao operator init -key-shares=1 -key-threshold=1 -format=json >"$STATE/bao-init.json"
+printf 'BW_BAO_ROOT_TOKEN=%s\n' "$(jq -r .root_token "$STATE/bao-init.json")" >>"$STATE/secrets.env"
+BW_BAO_ROOT_TOKEN=$(jq -r .root_token "$STATE/bao-init.json")
+export BW_BAO_ROOT_TOKEN
+bao_unseal
+wait_for 60 "an active OpenBao node" bao token lookup
+
+bao secrets enable -path=secret -version=2 kv >/dev/null
+bao secrets enable transit >/dev/null
+bao write -force transit/keys/bw-artifact >/dev/null
+bao kv put secret/fixture/inline value="$BW_CANARY" >/dev/null
+
+# A metadata-only identity: the classification experiment must not be able to read values.
+docker exec -i -e BAO_TOKEN="$BW_BAO_ROOT_TOKEN" "$BAO" bao policy write bw-metadata-only - >/dev/null <<'POLICY'
+path "secret/metadata/*" { capabilities = ["read", "list"] }
+path "transit/keys/*"    { capabilities = ["read", "list"] }
+POLICY
+printf 'BW_BAO_METADATA_TOKEN=%s\n' \
+  "$(bao token create -policy=bw-metadata-only -format=json | jq -r .auth.client_token)" >>"$STATE/secrets.env"
+
+say "creating the talos cluster (several minutes on a cold image cache)"
+talosctl cluster create docker \
+  --name "$FIXTURE_NAME" \
+  --state "$STATE/talos" \
+  --image "$TALOS_IMAGE" \
+  --kubernetes-version "$KUBERNETES_VERSION" \
+  --subnet "$TALOS_SUBNET" \
+  --workers 1 \
+  --talosconfig-destination "$TALOSCONFIG"
+
+# The cluster's own secrets bundle, for import experiments and as leak-scan patterns.
+talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" \
+  get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$STATE/controlplane.yaml"
+talosctl gen secrets --from-controlplane-config "$STATE/controlplane.yaml" \
+  --output-file "$STATE/talos-secrets.yaml"
+
+# Leak-scan patterns: every synthetic secret this run produced.
+{
+  printf 'BWSYNTH-\n'
+  jq -r '.root_token, .unseal_keys_b64[]' "$STATE/bao-init.json"
+  awk '$1 == "key:" || $1 == "secret:" || $1 == "token:" || $1 == "secretboxEncryptionSecret:" {print $2}' \
+    "$STATE/talos-secrets.yaml"
+} | sort -u >"$STATE/scan-patterns.txt"
+
+# Positive control: the scan must find this, or an empty result elsewhere proves nothing.
+printf 'planted on purpose: %s\n' "$BW_CANARY" >"$STATE/data/canary-control.txt"
+
+# Something outside the fixture may have stopped a container meanwhile, for example a host hook
+# that restarts the Docker daemon when a new bridge appears. Never report a half-dead fixture as up.
+for c in "$PG" "$BAO" "$CP" "$WORKER"; do
+  [ "$(docker inspect --format '{{.State.Running}}' "$c")" = true ] ||
+    die "$c stopped while the fixture was starting (see 'Known limits' in fixtures/README.md)"
+done
+
+trap - ERR
+cat >&2 <<EOF
+fixture is up
+  postgres      127.0.0.1:$POSTGRES_PORT  db/user bronzeward, password in .state/secrets.env
+  openbao       http://127.0.0.1:$OPENBAO_PORT  root and metadata-only tokens in .state/secrets.env
+  talos         controlplane $TALOS_CONTROLPLANE_IP, worker $TALOS_WORKER_IP
+                TALOSCONFIG=$TALOSCONFIG
+  local stores  $STATE/data (SQLite files, age/SOPS stores)
+EOF

@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Prove the fixture end to end: up, every injection once with an assertion, evidence, down.
+# Usage: selftest [--keep]   (--keep skips up and down, to rerun against a running fixture)
+set -euo pipefail
+here=$(dirname "$0")
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+keep=${1:-}
+passed=0
+ok() {
+  passed=$((passed + 1))
+  say "ok $passed - $*"
+}
+fail() { die "selftest FAILED: $*"; }
+
+worker_talos() { timeout 10 "$CACHE/talosctl" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" "$@"; }
+worker_digest() {
+  local config
+  config=$(worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}')
+  printf '%s\n' "$config" | sha256sum | cut -d' ' -f1
+}
+sql() { pg psql -U bronzeward -d bronzeward -v ON_ERROR_STOP=1 -Atc "$1"; }
+kv_version() { # kv_version <field>: a field of version 1 of the test secret's metadata
+  bao kv metadata get -mount=secret -format=json selftest/item | jq -r ".data.versions[\"1\"].$1"
+}
+
+if [ "$keep" != --keep ]; then
+  "$here/up"
+  # lib.sh was sourced before the secrets existed
+  set -a
+  # shellcheck disable=SC1091
+  . "$STATE/secrets.env"
+  set +a
+fi
+need_state
+
+for c in "$PG" "$BAO" "$CP" "$WORKER"; do
+  [ "$(docker inspect --format '{{.State.Running}}' "$c")" = true ] ||
+    fail "$c is not running after up (see 'Known limits' in fixtures/README.md)"
+done
+ok "all four containers are running"
+
+# Talos: a full-config no-reboot apply on the worker lands byte for byte.
+before=$(worker_digest)
+worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$STATE/data/selftest-worker.yaml"
+talosctl machineconfig patch "$STATE/data/selftest-worker.yaml" \
+  --patch "{\"machine\":{\"nodeLabels\":{\"bronzeward.test/selftest\":\"r$RANDOM\"}}}" \
+  --output "$STATE/data/selftest-worker-next.yaml"
+sent=$(sha256sum <"$STATE/data/selftest-worker-next.yaml" | cut -d' ' -f1)
+worker_talos apply-config --mode=no-reboot --file "$STATE/data/selftest-worker-next.yaml" >/dev/null
+after=$(worker_digest)
+[ "$after" = "$sent" ] && [ "$after" != "$before" ] || fail "observed digest $after, sent $sent, before $before"
+rm -f "$STATE/data/selftest-worker.yaml" "$STATE/data/selftest-worker-next.yaml"
+ok "no-reboot apply: observed config digest equals the sent one"
+
+# PostgreSQL: snapshot, diverge, restore.
+sql "drop table if exists bw_selftest; create table bw_selftest (v text); insert into bw_selftest values ('$BW_CANARY')" >/dev/null
+"$here/inject" db-snapshot selftest
+sql "insert into bw_selftest values ('after-snapshot')" >/dev/null
+"$here/inject" db-restore selftest
+[ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "db-restore did not return to the snapshot"
+ok "db-snapshot / db-restore"
+
+# OpenBao: snapshot, soft delete, destroy, key loss, restore.
+bao kv put -mount=secret selftest/item value="$BW_CANARY" >/dev/null
+bao write -force transit/keys/selftest >/dev/null
+"$here/inject" bao-snapshot selftest
+"$here/inject" bao-soft-delete selftest/item 1
+[ -n "$(kv_version deletion_time)" ] && [ "$(kv_version destroyed)" = false ] || fail "soft delete not visible in metadata"
+ok "bao-soft-delete is visible as a reversible state"
+"$here/inject" bao-destroy selftest/item 1
+[ "$(kv_version destroyed)" = true ] || fail "destroy not visible in metadata"
+ok "bao-destroy is visible as a permanent state"
+"$here/inject" bao-delete-key selftest
+! bao read transit/keys/selftest >/dev/null 2>&1 || fail "transit key still present after bao-delete-key"
+ok "bao-delete-key removes the transit key"
+"$here/inject" bao-restore selftest
+[ "$(kv_version destroyed)" = false ] || fail "bao-restore did not bring back the destroyed secret version"
+bao read transit/keys/selftest >/dev/null || fail "bao-restore did not bring back the deleted transit key"
+ok "bao-snapshot / bao-restore"
+
+# Local stores.
+printf 'x\n' >"$STATE/data/selftest-store"
+"$here/inject" store-snapshot selftest
+rm "$STATE/data/selftest-store"
+"$here/inject" store-restore selftest
+[ -f "$STATE/data/selftest-store" ] || fail "store-restore did not bring the file back"
+rm "$STATE/data/selftest-store"
+ok "store-snapshot / store-restore"
+
+# Crash and restart.
+"$here/inject" kill postgres
+! sql 'select 1' >/dev/null 2>&1 || fail "postgres answers after kill"
+"$here/inject" start postgres
+[ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "postgres lost committed data over a crash"
+ok "kill / start postgres keeps committed data"
+"$here/inject" kill openbao
+"$here/inject" start openbao
+[ "$(kv_version destroyed)" = false ] || fail "openbao state differs after crash and unseal"
+ok "kill / start openbao comes back sealed, unseals, keeps state"
+
+# Hung and unreachable Talos peer.
+"$here/inject" pause worker
+! worker_talos version --short >/dev/null 2>&1 || fail "paused worker still answers"
+"$here/inject" unpause worker
+wait_for 60 "the worker after unpause" worker_talos version --short
+ok "pause / unpause worker"
+"$here/inject" netsplit worker
+! worker_talos version --short >/dev/null 2>&1 || fail "partitioned worker still answers"
+"$here/inject" netjoin worker
+wait_for 120 "the worker after netjoin" worker_talos version --short
+ok "netsplit / netjoin worker returns on the same address"
+
+# Evidence: the scan must see the canary that was deliberately written to the database.
+bundle=$("$here/evidence")
+grep --quiet --fixed-strings "$bundle/postgres.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database dump"
+grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database backup"
+! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
+ok "evidence bundle written; leak scan finds the planted database canary and nothing in the logs"
+
+if [ "$keep" != --keep ]; then
+  "$here/down" || fail "down reported leftovers"
+  ok "down left nothing behind"
+fi
+say "selftest PASSED: $passed checks"

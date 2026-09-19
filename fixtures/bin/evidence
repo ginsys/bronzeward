@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Capture an evidence bundle into .state/evidence/<utc>/ and scan it for leaked synthetic secrets.
+# Usage: evidence [extra-path-to-scan ...]   e.g. a prototype's temp, staging or log directory
+# Exit 1 when the scan's positive control is not found: an empty scan would then prove nothing.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$(dirname "$0")/../lib.sh"
+
+need_state
+need docker jq tar sha256sum git
+out=$STATE/evidence/$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "$out/logs" "$out/backups"
+
+{
+  printf 'captured        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'manifest commit %s%s\n' "$(git -C "$FIXTURES" rev-parse HEAD)" \
+    "$([ -z "$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES")" ] || printf ' (fixtures/ differs from it)')"
+  printf 'host            %s\n' "$(uname -srm)"
+  printf 'docker          %s\n' "$(docker version --format 'client {{.Client.Version}} server {{.Server.Version}}')"
+  printf 'compose         %s\n' "$(docker compose version --short)"
+  printf 'talosctl        %s\n' "$(talosctl version --client --short | tr '\n' ' ')"
+  printf 'talos nodes     %s\n' "$(talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP,$TALOS_WORKER_IP" \
+    version --short 2>&1 | awk '/Tag:/ {print $2}' | tr '\n' ' ')"
+  printf 'kubernetes      %s (requested)\n' "$KUBERNETES_VERSION"
+  printf 'openbao         %s\n' "$(bao version)"
+  printf 'postgres        %s\n' "$(pg psql -U bronzeward -d bronzeward -Atc 'show server_version')"
+  printf 'sops            %s\n' "$("$CACHE/sops" --version | head -1)"
+  printf 'age             %s\n' "$("$CACHE/age" --version)"
+  for c in "$PG" "$BAO" "$CP" "$WORKER"; do
+    printf 'image           %s %s\n' "$c" "$(docker inspect --format '{{.Config.Image}} -> {{.Image}}' "$c")"
+  done
+} >"$out/versions.txt"
+
+for c in "$PG" "$BAO" "$CP" "$WORKER"; do
+  docker logs "$c" >"$out/logs/$c.log" 2>&1
+done
+
+pg pg_dump -U bronzeward bronzeward >"$out/postgres.sql"
+
+# Backups are compressed; a scan of the raw files would be clean for the wrong reason.
+for dump in "$STATE"/backups/pg-*.dump; do
+  [ -f "$dump" ] || continue
+  as_sql=$out/backups/$(basename "$dump").sql
+  docker exec -i "$PG" pg_restore --file=- <"$dump" >"$as_sql"
+done
+for store in "$STATE"/backups/store-*.tgz; do
+  [ -f "$store" ] || continue
+  mkdir -p "$out/backups/$(basename "$store" .tgz)"
+  tar -xzf "$store" -C "$out/backups/$(basename "$store" .tgz)"
+done
+
+# Provider state through the metadata-only identity: names and versions, never values.
+(
+  export BAO_TOKEN=$BW_BAO_METADATA_TOKEN
+  walk() {
+    local prefix=$1 entry
+    while IFS= read -r entry; do
+      case $entry in
+        */) walk "$prefix$entry" ;;
+        *) bao kv metadata get -mount=secret -format=json "$prefix$entry" |
+          jq -c --arg path "$prefix$entry" '{path: $path, versions: .data.versions}' ;;
+      esac
+    done < <(bao kv list -mount=secret -format=json "$prefix" 2>/dev/null | jq -r '.[]')
+  }
+  walk ""
+  bao list -format=json transit/keys 2>/dev/null | jq -r '.[]' | while IFS= read -r key; do
+    bao read -format=json "transit/keys/$key" |
+      jq -c --arg key "$key" '{transit_key: $key, latest: .data.latest_version, min_decryption: .data.min_decryption_version, deletion_allowed: .data.deletion_allowed}'
+  done
+) >"$out/openbao-metadata.jsonl"
+
+# Digest of each node's machine config, normalized to exactly one trailing newline (the jsonpath
+# output adds one). The config itself holds cluster secrets and is not copied into the bundle.
+for node in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
+  config=$(talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$node" get machineconfig v1alpha1 -o jsonpath='{.spec}')
+  printf '%s %s\n' "$(printf '%s\n' "$config" | sha256sum | cut -d' ' -f1)" "$node"
+done >"$out/talos-config-sha256.txt"
+unset config
+
+[ ! -f "$STATE/injections.log" ] || cp "$STATE/injections.log" "$out/injections.log"
+
+# Leak scan. Counts only: a matched line is never printed.
+scan=$out/leak-scan.txt
+: >"$scan"
+while IFS= read -r -d '' file; do
+  [ "$file" != "$scan" ] || continue
+  hits=$(grep --text --fixed-strings --count --file="$STATE/scan-patterns.txt" "$file" || true)
+  [ "$hits" -eq 0 ] || printf '%s %s\n' "$hits" "$file" >>"$scan"
+done < <(find "$out" "$STATE/data" "$@" -type f -print0)
+
+control=$STATE/data/canary-control.txt
+grep --quiet --fixed-strings " $control" "$scan" ||
+  die "leak scan did not find its positive control $control: the scan is broken, results void"
+# Copies of the control inside store snapshots are the control too, not leaks.
+leaks=$(grep --count --invert-match '/canary-control\.txt$' "$scan" || true)
+
+say "leak scan: positive control found; $leaks other file(s) contain synthetic secret material"
+[ "$leaks" -eq 0 ] || grep --invert-match '/canary-control\.txt$' "$scan" >&2
+printf '%s\n' "$out" # the only line on stdout: the bundle path

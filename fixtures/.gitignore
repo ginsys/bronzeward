@@ -1,0 +1,4 @@
+# Disposable run state: synthetic secrets, unseal keys, cluster state, backups, evidence.
+.state/
+# Downloaded, checksum-verified CLIs. Kept across runs; removed by `bin/down --purge`.
+.cache/

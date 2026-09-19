@@ -1,0 +1,43 @@
+# Database and provider candidates for the feasibility experiments. Started by bin/up, which
+# passes versions.env and the generated .state/secrets.env. Both services publish on localhost only.
+name: ${FIXTURE_NAME}
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE}
+    container_name: ${FIXTURE_NAME}-postgres
+    environment:
+      POSTGRES_USER: bronzeward
+      POSTGRES_DB: bronzeward
+      POSTGRES_PASSWORD: ${BW_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "bronzeward", "-d", "bronzeward"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # Not dev mode: dev mode is in-memory and unseals itself, so it cannot show startup unlock,
+  # backup/restore or key loss. Single-node integrated Raft gives a real snapshot API.
+  openbao:
+    image: ${OPENBAO_IMAGE}
+    container_name: ${FIXTURE_NAME}-openbao
+    command: ["server"]
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+      BAO_LOCAL_CONFIG: >-
+        {"storage":{"raft":{"path":"/openbao/file","node_id":"fixture"}},
+        "listener":[{"tcp":{"address":"0.0.0.0:8200","tls_disable":true}}],
+        "api_addr":"http://127.0.0.1:8200","cluster_addr":"http://127.0.0.1:8201",
+        "disable_mlock":true,"ui":false}
+    ports:
+      - "127.0.0.1:${OPENBAO_PORT}:8200"
+    volumes:
+      - openbao-data:/openbao/file
+
+volumes:
+  postgres-data:
+  openbao-data:

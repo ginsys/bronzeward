@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# Failure injection and backup/restore primitives. Every action is logged with a UTC timestamp to
+# .state/injections.log so an experiment's timeline can be reconstructed.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$(dirname "$0")/../lib.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: inject <action> [args]
+
+  targets: postgres | openbao | controlplane | worker
+
+  kill <target>                 SIGKILL the container (crash, no shutdown hooks)
+  start <target>                start it again; openbao comes back sealed and is unsealed
+  pause <target>                freeze every process (hung peer, connections stay open)
+  unpause <target>
+  netsplit <target>             detach from its network (unreachable, process keeps running)
+  netjoin <target>              reattach with the same address
+
+  db-snapshot <name>            pg_dump of the bronzeward database to .state/backups
+  db-restore <name>             drop the database and restore that dump
+  bao-snapshot <name>           OpenBao Raft snapshot to .state/backups
+  bao-restore <name>            force-restore that snapshot
+  store-snapshot <name>         tar of .state/data (SQLite files, age/SOPS stores)
+  store-restore <name>          replace .state/data with that tar
+
+  bao-soft-delete <kv-path> <version>    reversible KV v2 delete
+  bao-destroy <kv-path> <version>        permanent KV v2 version destruction
+  bao-delete-key <transit-key>           permanent loss of a Transit key
+EOF
+  exit 2
+}
+
+[ $# -ge 1 ] || usage
+need_state
+need docker curl jq tar
+action=$1
+shift
+printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$action" "$*" >>"$STATE/injections.log"
+
+network_of() {
+  case $1 in
+    postgres | openbao) printf '%s_default\n' "$FIXTURE_NAME" ;;
+    *) printf '%s\n' "$FIXTURE_NAME" ;;
+  esac
+}
+
+bao_http() { # bao_http <method> <api-path> [curl args]
+  local method=$1 path=$2
+  shift 2
+  curl --fail --silent --show-error --request "$method" \
+    --header "X-Vault-Token: $BW_BAO_ROOT_TOKEN" "http://127.0.0.1:$OPENBAO_PORT/v1/$path" "$@"
+}
+
+case $action in
+  kill)
+    [ $# -eq 1 ] || usage
+    docker kill --signal KILL "$(container "$1")" >/dev/null
+    ;;
+  start)
+    [ $# -eq 1 ] || usage
+    docker start "$(container "$1")" >/dev/null
+    case $1 in
+      postgres) wait_for 60 "postgres" pg pg_isready -U bronzeward -d bronzeward ;;
+      openbao)
+        bao_sealed() {
+          local rc=0
+          bao status >/dev/null 2>&1 || rc=$?
+          [ "$rc" -eq 2 ]
+        }
+        wait_for 60 "a sealed OpenBao" bao_sealed
+        bao_unseal
+        wait_for 60 "an active OpenBao node" bao token lookup
+        ;;
+    esac
+    ;;
+  pause | unpause)
+    [ $# -eq 1 ] || usage
+    docker "$action" "$(container "$1")" >/dev/null
+    ;;
+  netsplit)
+    [ $# -eq 1 ] || usage
+    docker network disconnect "$(network_of "$1")" "$(container "$1")"
+    ;;
+  netjoin)
+    [ $# -eq 1 ] || usage
+    case $1 in
+      controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$(network_of "$1")" "$(container "$1")" ;;
+      worker) docker network connect --ip "$TALOS_WORKER_IP" "$(network_of "$1")" "$(container "$1")" ;;
+      *) docker network connect --alias "$1" "$(network_of "$1")" "$(container "$1")" ;;
+    esac
+    ;;
+  db-snapshot)
+    [ $# -eq 1 ] || usage
+    pg pg_dump --format=custom -U bronzeward bronzeward >"$STATE/backups/pg-$1.dump"
+    ;;
+  db-restore)
+    [ $# -eq 1 ] || usage
+    [ -f "$STATE/backups/pg-$1.dump" ] || die "no such snapshot: pg-$1.dump"
+    pg dropdb --force -U bronzeward --maintenance-db=postgres bronzeward
+    pg createdb -U bronzeward --maintenance-db=postgres bronzeward
+    docker exec -i -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" \
+      pg_restore -U bronzeward --dbname=bronzeward --exit-on-error <"$STATE/backups/pg-$1.dump"
+    ;;
+  bao-snapshot)
+    [ $# -eq 1 ] || usage
+    bao_http GET sys/storage/raft/snapshot --output "$STATE/backups/bao-$1.snap"
+    ;;
+  bao-restore)
+    [ $# -eq 1 ] || usage
+    [ -f "$STATE/backups/bao-$1.snap" ] || die "no such snapshot: bao-$1.snap"
+    bao_http POST sys/storage/raft/snapshot-force --data-binary "@$STATE/backups/bao-$1.snap"
+    wait_for 60 "an active OpenBao node" bao token lookup
+    ;;
+  store-snapshot)
+    [ $# -eq 1 ] || usage
+    tar -czf "$STATE/backups/store-$1.tgz" -C "$STATE" data
+    ;;
+  store-restore)
+    [ $# -eq 1 ] || usage
+    [ -f "$STATE/backups/store-$1.tgz" ] || die "no such snapshot: store-$1.tgz"
+    rm -rf -- "$STATE/data"
+    tar -xzf "$STATE/backups/store-$1.tgz" -C "$STATE"
+    ;;
+  bao-soft-delete)
+    [ $# -eq 2 ] || usage
+    bao kv delete -mount=secret -versions="$2" "$1" >/dev/null
+    ;;
+  bao-destroy)
+    [ $# -eq 2 ] || usage
+    bao kv destroy -mount=secret -versions="$2" "$1" >/dev/null
+    ;;
+  bao-delete-key)
+    [ $# -eq 1 ] || usage
+    bao write "transit/keys/$1/config" deletion_allowed=true >/dev/null
+    bao delete "transit/keys/$1" >/dev/null
+    ;;
+  *) usage ;;
+esac
