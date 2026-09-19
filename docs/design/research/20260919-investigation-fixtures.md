@@ -84,9 +84,9 @@ list of files containing secret material, or none.
 
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
-`up` and `down` included. Review of that revision added checks 9, 11 and 15 and widened 16
-(section 5, item 8); the revision described here passed 17 of 17 once from clean. That run was not
-timed.
+`up` and `down` included. Review added checks 9, 11 and 15 and widened 16 (section 5, items 8 and
+9); the revision described here passed 17 of 17 from clean, and `selftest --keep` passed twice in a
+row against one fixture. Those runs were not timed.
 
 | # | Check | Expected | Observed |
 |---|---|---|---|
@@ -105,7 +105,7 @@ timed.
 | 13 | `pause` / `unpause` worker | No Talos API answer while paused, answers after | pass |
 | 14 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
 | 15 | `bin/evidence` with a scan path that does not exist | Refuses, non-zero exit | pass |
-| 16 | Evidence and leak scan on the healthy fixture | No `unavailable.txt`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token; finds nothing in container logs | pass |
+| 16 | Evidence and leak scan on the healthy fixture | No `unavailable.txt`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
 | 17 | `bin/down` | No container, network, volume or state directory left | pass |
 
 After the second run of the first revision, an independent `docker volume ls --filter dangling=true` showed exactly the
@@ -171,6 +171,17 @@ Each of these is reproducible and each changed the fixture.
    unreadable scan input as fatal, and writes an explicit `unknown` record for a provider it
    cannot ask; `bin/up` refuses a pattern list that is implausibly short and drops patterns under
    eight characters, since an empty pattern matches every line. Checks 9, 11, 15 and 16 hold these.
+9. **"Nothing found" and "could not look" kept collapsing into each other.** A second review round
+   found three more instances of the same defect class. A Transit key listing that failed became
+   an empty list. OpenBao snapshots were claimed to be scanned but lay outside the scan roots.
+   `bin/down` reported "nothing left" when its Docker queries failed, because a failed query lists
+   nothing. Now a listing that returns non-zero is recorded as unknown and marks the bundle
+   incomplete (the CLI uses one exit code for empty and for failed, so empty is never assumed);
+   `.state/backups` is scanned as written; and `bin/down` refuses to start without a Docker daemon
+   and exits non-zero when any verification query fails. Observed with a token denied the Transit
+   listing (unknown record, bundle marked incomplete) and with a stand-in `docker` that fails,
+   first from the start and then only on the verification queries (exit 1 both times, and no
+   "nothing left" message).
 
 ## 6. What each experiment gets
 
@@ -197,6 +208,11 @@ Each of these is reproducible and each changed the fixture.
   secret (re-encoded, split, hashed), so a clean scan is necessary evidence for E1, not sufficient.
   Talos key material is matched in the base64 form the secrets bundle and machine configuration
   carry; a decoded PEM copy would not match.
+- `bin/evidence` observes PostgreSQL and OpenBao out of band, from inside their containers. With
+  `netsplit openbao` a client on the published port gets connection refused while the bundle still
+  shows the provider's true metadata, and the partition shows as `networks=[]` in `versions.txt`
+  (observed). The `unknown` classification under partition is therefore the experiment's own
+  client's to make; the bundle supplies the ground truth to judge it against.
 - Evidence capture with a paused or partitioned Talos node is bounded by a 20-second timeout per
   read and records the node as unavailable. That path was read, not exercised by `bin/selftest`.
 - CI shellchecks the scripts and does not run them. "Reproducible" is claimed for a host meeting

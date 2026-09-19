@@ -53,7 +53,8 @@ node_tag() { # node_tag <ip>: bounded, so a paused or partitioned node cannot ha
   printf 'sops            %s\n' "$(reported "$CACHE/sops" --version --disable-version-check)"
   printf 'age             %s\n' "$(reported "$CACHE/age" --version)"
   for c in "$PG" "$BAO" "$CP" "$WORKER"; do
-    printf 'image           %s %s\n' "$c" "$(reported docker inspect --format '{{.Config.Image}} -> {{.Image}} running={{.State.Running}} paused={{.State.Paused}}' "$c")"
+    # shellcheck disable=SC2016  # $name is a Go template variable, not a shell one
+    printf 'image          %s %s\n' "$c" "$(reported docker inspect --format '{{.Config.Image}} -> {{.Image}} running={{.State.Running}} paused={{.State.Paused}} networks=[{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}]' "$c")"
   done
 } >"$out/versions.txt"
 
@@ -86,18 +87,26 @@ done
 # Provider state through the metadata-only identity: names and versions, never values. A provider
 # that cannot be asked yields an explicit unknown record, never an empty file that reads as "no
 # secrets".
+# This is an out-of-band observer: it asks from inside the container, so it still answers while
+# `inject netsplit openbao` has the provider unreachable for every client. That is deliberate. An
+# experiment needs the true provider state to judge what its own client concluded from outside.
+# versions.txt records each container's network attachments, so a partition is visible there.
 (
   export BAO_TOKEN=$BW_BAO_METADATA_TOKEN
   if ! running "$BAO" || ! timeout 20 docker exec -e BAO_TOKEN="$BAO_TOKEN" "$BAO" bao token lookup >/dev/null 2>&1; then
     jq -cn '{unknown: "openbao stopped, sealed, paused or unreachable; no metadata could be read"}'
     exit 3
   fi
+  # The CLI uses one exit code for "nothing here" and for a failed request, so a listing that
+  # returns non-zero is recorded as unknown and the bundle is marked incomplete. An empty list is
+  # never assumed.
+  incomplete=0
   walk() {
     local prefix=$1 entry listing rc=0
     listing=$(bao kv list -mount=secret -format=json "$prefix" 2>/dev/null) || rc=$?
     if [ "$rc" -ne 0 ]; then
-      # The CLI uses one exit code for "nothing here" and for a failed request.
-      jq -cn --arg path "$prefix" --argjson rc "$rc" '{path: $path, listing: "empty-or-failed", exit_code: $rc}'
+      jq -cn --arg path "$prefix" --argjson rc "$rc" '{path: $path, unknown: "listing empty or failed", exit_code: $rc}'
+      incomplete=1
       return 0
     fi
     while IFS= read -r entry; do
@@ -105,20 +114,31 @@ done
         */) walk "$prefix$entry" ;;
         *)
           bao kv metadata get -mount=secret -format=json "$prefix$entry" 2>/dev/null |
-            jq -c --arg path "$prefix$entry" '{path: $path, versions: .data.versions}' ||
+            jq -c --arg path "$prefix$entry" '{path: $path, versions: .data.versions}' || {
             jq -cn --arg path "$prefix$entry" '{path: $path, unknown: "metadata read failed"}'
+            incomplete=1
+          }
           ;;
       esac
     done < <(jq -r '.[]' <<<"$listing")
   }
   walk ""
-  keys=$(bao list -format=json transit/keys 2>/dev/null) || keys='[]'
-  jq -r '.[]' <<<"$keys" | while IFS= read -r key; do
+  rc=0
+  keys=$(bao list -format=json transit/keys 2>/dev/null) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    jq -cn --argjson rc "$rc" '{transit_keys: null, unknown: "listing empty or failed", exit_code: $rc}'
+    incomplete=1
+    keys='[]'
+  fi
+  while IFS= read -r key; do
     bao read -format=json "transit/keys/$key" 2>/dev/null |
-      jq -c --arg key "$key" '{transit_key: $key, latest: .data.latest_version, min_decryption: .data.min_decryption_version, deletion_allowed: .data.deletion_allowed}' ||
+      jq -c --arg key "$key" '{transit_key: $key, latest: .data.latest_version, min_decryption: .data.min_decryption_version, deletion_allowed: .data.deletion_allowed}' || {
       jq -cn --arg key "$key" '{transit_key: $key, unknown: "key read failed"}'
-  done
-) >"$out/openbao-metadata.jsonl" || unavailable "openbao metadata (see the unknown record in openbao-metadata.jsonl)"
+      incomplete=1
+    }
+  done < <(jq -r '.[]' <<<"$keys")
+  [ "$incomplete" -eq 0 ] || exit 4
+) >"$out/openbao-metadata.jsonl" || unavailable "openbao metadata incomplete (see the unknown records in openbao-metadata.jsonl)"
 
 # Digest of each node's machine config, normalized to exactly one trailing newline (the jsonpath
 # output adds one). The config itself holds cluster secrets and is not copied into the bundle.
@@ -139,7 +159,9 @@ unset config
 # is fatal, because a skipped file reads exactly like a clean one.
 scan=$out/leak-scan.txt
 list=$STATE/scan-list.tmp
-find "$out" "$STATE/data" "$@" -type f -print0 >"$list" || die "leak scan could not walk every path; results void"
+# .state/backups is scanned as written too: that is the only form in which OpenBao snapshots, which
+# OpenBao encrypts, are covered.
+find "$out" "$STATE/data" "$STATE/backups" "$@" -type f -print0 >"$list" || die "leak scan could not walk every path; results void"
 : >"$scan"
 while IFS= read -r -d '' file; do
   [ "$file" != "$scan" ] || continue
