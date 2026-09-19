@@ -10,9 +10,10 @@ so the experiments can compare them.
 
 ## Prerequisites
 
-Linux on x86-64, Docker Engine with the compose v2 plugin, and `bash`, `curl`, `jq`, `tar`,
-`sha256sum`. The user must be able to run `docker` without `sudo`. About 4 GiB of free memory and
-1.5 GiB of image downloads on first run. No other tool is taken from the host: `talosctl`, `sops`
+Linux on x86-64, Docker Engine with the compose v2 plugin, and `bash`, `curl`, `jq`, `git`, `tar`,
+`find`, `awk` and GNU coreutils (`sha256sum`, `timeout`, `install`). Each command checks for what
+it needs before doing anything. The user must be able to run `docker` without `sudo`. About 4 GiB
+of free memory and 1.5 GiB of image downloads on first run. No other tool is taken from the host: `talosctl`, `sops`
 and `age` are downloaded into `fixtures/.cache/` and refused on a checksum mismatch.
 
 ## Commands
@@ -59,9 +60,14 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
 - `scan-patterns.txt`: every one of the above as a fixed string. `bin/evidence` reports the files
   that contain any of them, by count only; a matched line is never printed.
 
-The scan has a positive control, `.state/data/canary-control.txt`. If the scan does not find it the
-command fails, because an empty result would then prove nothing. Compressed backups are expanded
-before scanning. OpenBao snapshots are encrypted by OpenBao and are scanned as they are.
+The scan has a positive control, `.state/data/canary-control.txt`. If the scan does not find it, or
+cannot read a path or file it was given, the command fails, because an empty result would then
+prove nothing. `bin/evidence` is meant to run while parts of the fixture are down: a source it
+cannot read, such as the live database after `inject kill postgres`, is named in
+`unavailable.txt` in the bundle and everything else is still captured and scanned. Compressed
+backups are expanded before scanning, without needing the database server. OpenBao snapshots are
+encrypted by OpenBao and are scanned as they are. Talos key material is matched in the base64 form
+the secrets bundle carries, so a decoded PEM copy would not match.
 
 Use only these values in experiments. Never point a prototype at a real cluster, vault or database
 from here.

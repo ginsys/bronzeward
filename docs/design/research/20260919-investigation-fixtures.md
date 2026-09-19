@@ -46,7 +46,9 @@ See [`fixtures/README.md`](../../../fixtures/README.md) for the commands. In sho
   directory; soft-deletes and destroys a KV version; deletes a Transit key.
 - `bin/evidence` records versions, logs, a database dump, OpenBao metadata read through the
   metadata-only identity, and a digest of each node's machine configuration, then scans all of it
-  for synthetic secret material, with a positive control.
+  for synthetic secret material, with a positive control. It runs while parts of the fixture are
+  down: a source it cannot read is named in `unavailable.txt`, and a scan input it cannot read
+  fails the command.
 - `bin/down` removes everything and fails if anything is left.
 - `bin/selftest` exercises all of the above with assertions.
 
@@ -80,9 +82,11 @@ list of files containing secret material, or none.
 
 ## 4. Expected and observed
 
-`fixtures/bin/selftest`, run twice in a row from a host with no fixture state, 19 September 2026,
-images already pulled: 14 of 14 checks passed both times, in 2 min 35 s each, `up` and `down`
-included.
+`fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
+pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
+`up` and `down` included. Review of that revision added checks 9, 11 and 15 and widened 16
+(section 5, item 8); the revision described here passed 17 of 17 once from clean. That run was not
+timed.
 
 | # | Check | Expected | Observed |
 |---|---|---|---|
@@ -94,14 +98,17 @@ included.
 | 6 | `bao-delete-key` | Transit key no longer readable | pass |
 | 7 | `bao-restore` of the earlier snapshot | Destroyed version and deleted key are back | pass |
 | 8 | `store-snapshot` / `store-restore` | Deleted file is back | pass |
-| 9 | `kill` / `start` PostgreSQL | No answer while dead; committed row survives | pass |
-| 10 | `kill` / `start` OpenBao | Comes back sealed, unseals with the stored key, state intact | pass |
-| 11 | `pause` / `unpause` worker | No Talos API answer while paused, answers after | pass |
-| 12 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
-| 13 | Evidence and leak scan | Finds the canary deliberately written to the database, in the live dump and in the expanded backup; finds nothing in container logs | pass |
-| 14 | `bin/down` | No container, network, volume or state directory left | pass |
+| 9 | `bin/evidence` while PostgreSQL is dead | Does not abort; `unavailable.txt` names the missing live dump; the database backup is still expanded and scanned | pass |
+| 10 | `kill` / `start` PostgreSQL | No answer while dead; committed row survives | pass |
+| 11 | `bin/evidence` while OpenBao is dead | `unavailable.txt` names the provider metadata; `openbao-metadata.jsonl` holds an `unknown` record, not an empty file | pass |
+| 12 | `kill` / `start` OpenBao | Comes back sealed, unseals with the stored key, state intact | pass |
+| 13 | `pause` / `unpause` worker | No Talos API answer while paused, answers after | pass |
+| 14 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
+| 15 | `bin/evidence` with a scan path that does not exist | Refuses, non-zero exit | pass |
+| 16 | Evidence and leak scan on the healthy fixture | No `unavailable.txt`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token; finds nothing in container logs | pass |
+| 17 | `bin/down` | No container, network, volume or state directory left | pass |
 
-After the second run, an independent `docker volume ls --filter dangling=true` showed exactly the
+After the second run of the first revision, an independent `docker volume ls --filter dangling=true` showed exactly the
 volumes that existed on the host before the first run.
 
 Check 7 is worth a note for [key-loss testing](https://github.com/ginsys/bronzeward/issues/10): a
@@ -153,6 +160,17 @@ Each of these is reproducible and each changed the fixture.
    and the README names the symptom. Before the hook was corrected a run from clean failed at
    check 1 every time; the two passing runs in section 4 were made after the hook was changed to
    ignore `br-*`, `veth*` and `docker*` interfaces.
+8. **The first revision's evidence capture failed exactly when it was needed.** Review of the
+   first revision found that `bin/evidence` aborted on the live database dump when PostgreSQL was
+   killed, so no bundle existed for the crash cases E1 and E4 are about; that a file or path the
+   scan could not read was skipped and read as clean; that a failed OpenBao listing produced an
+   empty metadata file, which reads as "no secrets"; and that the OpenBao metadata-only token was
+   not a scan pattern. Checking the pattern list against the real secrets bundle then showed the
+   Talos bootstrap token was missing as well. `bin/evidence` now records each unreadable source
+   in `unavailable.txt` and continues, expands database backups without the server, treats any
+   unreadable scan input as fatal, and writes an explicit `unknown` record for a provider it
+   cannot ask; `bin/up` refuses a pattern list that is implausibly short and drops patterns under
+   eight characters, since an empty pattern matches every line. Checks 9, 11, 15 and 16 hold these.
 
 ## 6. What each experiment gets
 
@@ -177,6 +195,10 @@ Each of these is reproducible and each changed the fixture.
 - Kubernetes component images inside the nodes are pinned by version, not digest.
 - The leak scan finds exact copies of known synthetic values. It does not find a transformed
   secret (re-encoded, split, hashed), so a clean scan is necessary evidence for E1, not sufficient.
+  Talos key material is matched in the base64 form the secrets bundle and machine configuration
+  carry; a decoded PEM copy would not match.
+- Evidence capture with a paused or partitioned Talos node is bounded by a 20-second timeout per
+  read and records the node as unavailable. That path was read, not exercised by `bin/selftest`.
 - CI shellchecks the scripts and does not run them. "Reproducible" is claimed for a host meeting
   the README prerequisites, and was exercised on one machine.
 - Recovery ownership: `.state/` belongs to the person who ran `bin/up` and lives for one run.

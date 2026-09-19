@@ -37,7 +37,6 @@ need_state
 need docker curl jq tar
 action=$1
 shift
-printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$action" "$*" >>"$STATE/injections.log"
 
 network_of() {
   case $1 in
@@ -53,14 +52,23 @@ bao_http() { # bao_http <method> <api-path> [curl args]
     --header "X-Vault-Token: $BW_BAO_ROOT_TOKEN" "http://127.0.0.1:$OPENBAO_PORT/v1/$path" "$@"
 }
 
+# Resolve the target in an assignment: `die` inside a command substitution only ends the subshell,
+# and as a bare argument that failure would be lost.
+case $action in
+  kill | start | pause | unpause | netsplit | netjoin)
+    [ $# -eq 1 ] || usage
+    target=$(container "$1")
+    ;;
+esac
+# Logged when the action starts, so the timeline shows when a failure began, not when it returned.
+printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$action" "$*" >>"$STATE/injections.log"
+
 case $action in
   kill)
-    [ $# -eq 1 ] || usage
-    docker kill --signal KILL "$(container "$1")" >/dev/null
+    docker kill --signal KILL "$target" >/dev/null
     ;;
   start)
-    [ $# -eq 1 ] || usage
-    docker start "$(container "$1")" >/dev/null
+    docker start "$target" >/dev/null
     case $1 in
       postgres) wait_for 60 "postgres" pg pg_isready -U bronzeward -d bronzeward ;;
       openbao)
@@ -76,19 +84,18 @@ case $action in
     esac
     ;;
   pause | unpause)
-    [ $# -eq 1 ] || usage
-    docker "$action" "$(container "$1")" >/dev/null
+    docker "$action" "$target" >/dev/null
     ;;
   netsplit)
-    [ $# -eq 1 ] || usage
-    docker network disconnect "$(network_of "$1")" "$(container "$1")"
+    network=$(network_of "$1")
+    docker network disconnect "$network" "$target"
     ;;
   netjoin)
-    [ $# -eq 1 ] || usage
+    network=$(network_of "$1")
     case $1 in
-      controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$(network_of "$1")" "$(container "$1")" ;;
-      worker) docker network connect --ip "$TALOS_WORKER_IP" "$(network_of "$1")" "$(container "$1")" ;;
-      *) docker network connect --alias "$1" "$(network_of "$1")" "$(container "$1")" ;;
+      controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$network" "$target" ;;
+      worker) docker network connect --ip "$TALOS_WORKER_IP" "$network" "$target" ;;
+      *) docker network connect --alias "$1" "$network" "$target" ;;
     esac
     ;;
   db-snapshot)

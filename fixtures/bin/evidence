@@ -1,92 +1,154 @@
 #!/usr/bin/env bash
 # Capture an evidence bundle into .state/evidence/<utc>/ and scan it for leaked synthetic secrets.
 # Usage: evidence [extra-path-to-scan ...]   e.g. a prototype's temp, staging or log directory
-# Exit 1 when the scan's positive control is not found: an empty scan would then prove nothing.
+#
+# Works while parts of the fixture are killed, paused or partitioned: a source that cannot be read
+# is named in <bundle>/unavailable.txt and the rest is still captured and scanned.
+# Exit 1 when the scan itself is not trustworthy: a path or file it could not read, or a positive
+# control it did not find. An empty scan would then prove nothing.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
 need_state
-need docker jq tar sha256sum git
+need docker jq tar sha256sum git find awk timeout
+for extra in "$@"; do
+  [ -e "$extra" ] || die "extra scan path does not exist: $extra"
+done
+
 out=$STATE/evidence/$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$out/logs" "$out/backups"
+
+unavailable() {
+  printf '%s\n' "$*" >>"$out/unavailable.txt"
+  say "evidence: unavailable: $*"
+}
+running() { [ "$(docker inspect --format '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
+# reported <command...>: the command's one-line output, or UNAVAILABLE
+reported() {
+  local value
+  if value=$("$@" 2>/dev/null) && [ -n "$value" ]; then
+    printf '%s' "$value" | tr '\n' ' '
+  else
+    printf 'UNAVAILABLE'
+  fi
+}
+node_tag() { # node_tag <ip>: bounded, so a paused or partitioned node cannot hang the capture
+  timeout 20 "$CACHE/talosctl" -e "$TALOS_CONTROLPLANE_IP" -n "$1" version --short | awk '/Tag:/ {print $2}'
+}
 
 {
   printf 'captured        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'manifest commit %s%s\n' "$(git -C "$FIXTURES" rev-parse HEAD)" \
     "$([ -z "$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES")" ] || printf ' (fixtures/ differs from it)')"
   printf 'host            %s\n' "$(uname -srm)"
-  printf 'docker          %s\n' "$(docker version --format 'client {{.Client.Version}} server {{.Server.Version}}')"
-  printf 'compose         %s\n' "$(docker compose version --short)"
-  printf 'talosctl        %s\n' "$(talosctl version --client --short | tr '\n' ' ')"
-  printf 'talos nodes     %s\n' "$(talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP,$TALOS_WORKER_IP" \
-    version --short 2>&1 | awk '/Tag:/ {print $2}' | tr '\n' ' ')"
+  printf 'docker          %s\n' "$(reported docker version --format 'client {{.Client.Version}} server {{.Server.Version}}')"
+  printf 'compose         %s\n' "$(reported docker compose version --short)"
+  printf 'talosctl        %s\n' "$(reported talosctl version --client --short)"
+  printf 'talos nodes     %s %s, %s %s\n' "$TALOS_CONTROLPLANE_IP" "$(reported node_tag "$TALOS_CONTROLPLANE_IP")" \
+    "$TALOS_WORKER_IP" "$(reported node_tag "$TALOS_WORKER_IP")"
   printf 'kubernetes      %s (requested)\n' "$KUBERNETES_VERSION"
-  printf 'openbao         %s\n' "$(bao version)"
-  printf 'postgres        %s\n' "$(pg psql -U bronzeward -d bronzeward -Atc 'show server_version')"
-  printf 'sops            %s\n' "$("$CACHE/sops" --version | head -1)"
-  printf 'age             %s\n' "$("$CACHE/age" --version)"
+  printf 'openbao         %s\n' "$(reported bao version)"
+  printf 'postgres        %s\n' "$(reported pg psql -U bronzeward -d bronzeward -Atc 'show server_version')"
+  printf 'sops            %s\n' "$(reported "$CACHE/sops" --version --disable-version-check)"
+  printf 'age             %s\n' "$(reported "$CACHE/age" --version)"
   for c in "$PG" "$BAO" "$CP" "$WORKER"; do
-    printf 'image           %s %s\n' "$c" "$(docker inspect --format '{{.Config.Image}} -> {{.Image}}' "$c")"
+    printf 'image           %s %s\n' "$c" "$(reported docker inspect --format '{{.Config.Image}} -> {{.Image}} running={{.State.Running}} paused={{.State.Paused}}' "$c")"
   done
 } >"$out/versions.txt"
 
+# Logs survive a kill, so they are read from stopped containers too.
 for c in "$PG" "$BAO" "$CP" "$WORKER"; do
-  docker logs "$c" >"$out/logs/$c.log" 2>&1
+  docker logs "$c" >"$out/logs/$c.log" 2>&1 || unavailable "logs of $c"
 done
 
-pg pg_dump -U bronzeward bronzeward >"$out/postgres.sql"
+if ! { running "$PG" && timeout 60 docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" \
+  pg_dump -U bronzeward bronzeward >"$out/postgres.sql" 2>/dev/null; }; then
+  rm -f "$out/postgres.sql"
+  unavailable "live database dump (postgres stopped, paused or unreachable): current database content NOT scanned"
+fi
 
-# Backups are compressed; a scan of the raw files would be clean for the wrong reason.
+# Backups are compressed; a scan of the raw files would be clean for the wrong reason. Expanding a
+# dump needs no server, so it runs in a throwaway container and works while postgres is down.
 for dump in "$STATE"/backups/pg-*.dump; do
   [ -f "$dump" ] || continue
   as_sql=$out/backups/$(basename "$dump").sql
-  docker exec -i "$PG" pg_restore --file=- <"$dump" >"$as_sql"
+  docker run --rm --interactive --network none "$POSTGRES_IMAGE" pg_restore --file=- <"$dump" >"$as_sql" ||
+    die "could not expand $dump: the backup would go unscanned"
 done
 for store in "$STATE"/backups/store-*.tgz; do
   [ -f "$store" ] || continue
   mkdir -p "$out/backups/$(basename "$store" .tgz)"
-  tar -xzf "$store" -C "$out/backups/$(basename "$store" .tgz)"
+  tar -xzf "$store" -C "$out/backups/$(basename "$store" .tgz)" ||
+    die "could not expand $store: the backup would go unscanned"
 done
 
-# Provider state through the metadata-only identity: names and versions, never values.
+# Provider state through the metadata-only identity: names and versions, never values. A provider
+# that cannot be asked yields an explicit unknown record, never an empty file that reads as "no
+# secrets".
 (
   export BAO_TOKEN=$BW_BAO_METADATA_TOKEN
+  if ! running "$BAO" || ! timeout 20 docker exec -e BAO_TOKEN="$BAO_TOKEN" "$BAO" bao token lookup >/dev/null 2>&1; then
+    jq -cn '{unknown: "openbao stopped, sealed, paused or unreachable; no metadata could be read"}'
+    exit 3
+  fi
   walk() {
-    local prefix=$1 entry
+    local prefix=$1 entry listing rc=0
+    listing=$(bao kv list -mount=secret -format=json "$prefix" 2>/dev/null) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      # The CLI uses one exit code for "nothing here" and for a failed request.
+      jq -cn --arg path "$prefix" --argjson rc "$rc" '{path: $path, listing: "empty-or-failed", exit_code: $rc}'
+      return 0
+    fi
     while IFS= read -r entry; do
       case $entry in
         */) walk "$prefix$entry" ;;
-        *) bao kv metadata get -mount=secret -format=json "$prefix$entry" |
-          jq -c --arg path "$prefix$entry" '{path: $path, versions: .data.versions}' ;;
+        *)
+          bao kv metadata get -mount=secret -format=json "$prefix$entry" 2>/dev/null |
+            jq -c --arg path "$prefix$entry" '{path: $path, versions: .data.versions}' ||
+            jq -cn --arg path "$prefix$entry" '{path: $path, unknown: "metadata read failed"}'
+          ;;
       esac
-    done < <(bao kv list -mount=secret -format=json "$prefix" 2>/dev/null | jq -r '.[]')
+    done < <(jq -r '.[]' <<<"$listing")
   }
   walk ""
-  bao list -format=json transit/keys 2>/dev/null | jq -r '.[]' | while IFS= read -r key; do
-    bao read -format=json "transit/keys/$key" |
-      jq -c --arg key "$key" '{transit_key: $key, latest: .data.latest_version, min_decryption: .data.min_decryption_version, deletion_allowed: .data.deletion_allowed}'
+  keys=$(bao list -format=json transit/keys 2>/dev/null) || keys='[]'
+  jq -r '.[]' <<<"$keys" | while IFS= read -r key; do
+    bao read -format=json "transit/keys/$key" 2>/dev/null |
+      jq -c --arg key "$key" '{transit_key: $key, latest: .data.latest_version, min_decryption: .data.min_decryption_version, deletion_allowed: .data.deletion_allowed}' ||
+      jq -cn --arg key "$key" '{transit_key: $key, unknown: "key read failed"}'
   done
-) >"$out/openbao-metadata.jsonl"
+) >"$out/openbao-metadata.jsonl" || unavailable "openbao metadata (see the unknown record in openbao-metadata.jsonl)"
 
 # Digest of each node's machine config, normalized to exactly one trailing newline (the jsonpath
 # output adds one). The config itself holds cluster secrets and is not copied into the bundle.
 for node in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
-  config=$(talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$node" get machineconfig v1alpha1 -o jsonpath='{.spec}')
-  printf '%s %s\n' "$(printf '%s\n' "$config" | sha256sum | cut -d' ' -f1)" "$node"
+  if config=$(timeout 20 "$CACHE/talosctl" -e "$TALOS_CONTROLPLANE_IP" -n "$node" \
+    get machineconfig v1alpha1 -o jsonpath='{.spec}' 2>/dev/null) && [ -n "$config" ]; then
+    printf '%s %s\n' "$(printf '%s\n' "$config" | sha256sum | cut -d' ' -f1)" "$node"
+  else
+    printf 'UNAVAILABLE %s\n' "$node"
+    unavailable "machine config digest of $node"
+  fi
 done >"$out/talos-config-sha256.txt"
 unset config
 
 [ ! -f "$STATE/injections.log" ] || cp "$STATE/injections.log" "$out/injections.log"
 
-# Leak scan. Counts only: a matched line is never printed.
+# Leak scan. Counts only: a matched line is never printed. Any path or file the scan cannot read
+# is fatal, because a skipped file reads exactly like a clean one.
 scan=$out/leak-scan.txt
+list=$STATE/scan-list.tmp
+find "$out" "$STATE/data" "$@" -type f -print0 >"$list" || die "leak scan could not walk every path; results void"
 : >"$scan"
 while IFS= read -r -d '' file; do
   [ "$file" != "$scan" ] || continue
-  hits=$(grep --text --fixed-strings --count --file="$STATE/scan-patterns.txt" "$file" || true)
+  rc=0
+  hits=$(grep --text --fixed-strings --count --file="$STATE/scan-patterns.txt" "$file") || rc=$?
+  [ "$rc" -le 1 ] || die "leak scan could not read $file; results void"
   [ "$hits" -eq 0 ] || printf '%s %s\n' "$hits" "$file" >>"$scan"
-done < <(find "$out" "$STATE/data" "$@" -type f -print0)
+done <"$list"
+rm -f "$list"
 
 control=$STATE/data/canary-control.txt
 grep --quiet --fixed-strings " $control" "$scan" ||
@@ -96,4 +158,5 @@ leaks=$(grep --count --invert-match '/canary-control\.txt$' "$scan" || true)
 
 say "leak scan: positive control found; $leaks other file(s) contain synthetic secret material"
 [ "$leaks" -eq 0 ] || grep --invert-match '/canary-control\.txt$' "$scan" >&2
+[ ! -f "$out/unavailable.txt" ] || say "evidence: INCOMPLETE, see $out/unavailable.txt"
 printf '%s\n' "$out" # the only line on stdout: the bundle path
