@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Remove everything bin/up created, including after a failed or interrupted up, then prove it.
+# Usage: down [--purge]   (--purge also deletes the downloaded CLI cache)
+set -uo pipefail
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$(dirname "$0")/../lib.sh"
+
+need docker
+talos_label=talos.cluster.name=$FIXTURE_NAME
+compose_label=com.docker.compose.project=$FIXTURE_NAME
+
+# Talos node volumes are anonymous and unlabelled, so collect their names while the containers
+# still exist. After a create that failed before the container existed they cannot be attributed:
+# see "Known limits" in fixtures/README.md.
+mapfile -t node_volumes < <(
+  docker ps --all --quiet --filter "label=$talos_label" |
+    xargs --no-run-if-empty docker inspect \
+      --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' |
+    sed '/^$/d'
+)
+
+docker compose --project-name "$FIXTURE_NAME" down --volumes --remove-orphans 2>&1 | sed 's/^/  /' >&2
+
+if [ -x "$CACHE/talosctl" ] && [ -f "$STATE/talos/$FIXTURE_NAME/state.yaml" ]; then
+  talosctl cluster destroy --name "$FIXTURE_NAME" --state "$STATE/talos" 2>&1 | sed 's/^/  /' >&2
+fi
+# What talosctl cannot see: a create that failed before it wrote state.yaml.
+docker ps --all --quiet --filter "label=$talos_label" | xargs --no-run-if-empty docker rm --force --volumes >/dev/null
+docker network ls --quiet --filter "label=$talos_label" | xargs --no-run-if-empty docker network rm >/dev/null
+for volume in "${node_volumes[@]}"; do
+  docker volume rm "$volume" >/dev/null 2>&1
+done
+
+case $STATE in
+  */fixtures/.state) rm -rf -- "$STATE" ;;
+  *) die "refusing to delete unexpected state path $STATE" ;;
+esac
+if [ "${1:-}" = --purge ]; then
+  case $CACHE in
+    */fixtures/.cache) rm -rf -- "$CACHE" ;;
+    *) die "refusing to delete unexpected cache path $CACHE" ;;
+  esac
+fi
+
+left=$(
+  docker ps --all --filter "label=$talos_label" --format 'container {{.Names}}'
+  docker ps --all --filter "label=$compose_label" --format 'container {{.Names}}'
+  docker network ls --filter "label=$talos_label" --format 'network {{.Name}}'
+  docker network ls --filter "label=$compose_label" --format 'network {{.Name}}'
+  docker volume ls --filter "label=$compose_label" --format 'volume {{.Name}}'
+  for volume in "${node_volumes[@]}"; do
+    docker volume ls --quiet --filter "name=^${volume}$" | sed 's/^/volume /'
+  done
+  [ ! -e "$STATE" ] || printf 'directory %s\n' "$STATE"
+)
+if [ -n "$left" ]; then
+  say "fixtures: leftovers after down:"
+  say "$left"
+  exit 1
+fi
+say "fixture is down: no containers, networks, volumes or state left"
