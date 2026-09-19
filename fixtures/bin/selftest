@@ -193,5 +193,17 @@ ok "evidence bundle complete; leak scan finds the planted canary and token, noth
 if [ "$keep" != --keep ]; then
   "$here/down" || fail "down reported leftovers"
   ok "down left nothing behind"
+  # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
+  # command before it reads or writes through the link.
+  ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"
+  for cmd in up evidence down; do
+    if "$here/$cmd" >/dev/null 2>&1; then
+      rm -f -- "$STATE"
+      fail "$cmd accepted a symlinked state directory"
+    fi
+  done
+  rm -f -- "$STATE"
+  [ ! -e "$FIXTURES/.selftest-no-such-dir" ] || fail "a command wrote through the symlinked state directory"
+  ok "a symlinked state directory is refused by up, evidence and down"
 fi
 say "selftest PASSED: $passed checks"

@@ -80,7 +80,9 @@ from here.
 `.state/` belongs to whoever ran `bin/up`, and its lifetime is one run. Nothing in it is backed up
 or recoverable by design: losing `bao-init.json` loses that OpenBao instance, which is the
 intended way to study key loss. `bin/down` is the only cleanup and is safe to run at any time,
-including after a failed or interrupted `up`. Evidence worth keeping must be copied out of `.state/`
+including after a failed or interrupted `up`. `.state` must be a real directory: every command
+refuses to run while it is a symlink, because secrets would be read or written outside the
+checkout. Evidence worth keeping must be copied out of `.state/`
 before `down`.
 
 ## Known limits
