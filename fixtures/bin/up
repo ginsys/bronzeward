@@ -41,9 +41,9 @@ wait_for 60 "the OpenBao API" bao_answers
 
 say "initializing openbao (one synthetic unseal key)"
 bao operator init -key-shares=1 -key-threshold=1 -format=json >"$STATE/bao-init.json"
-printf 'BW_BAO_ROOT_TOKEN=%s\n' "$(jq -r .root_token "$STATE/bao-init.json")" >>"$STATE/secrets.env"
-BW_BAO_ROOT_TOKEN=$(jq -r .root_token "$STATE/bao-init.json")
+BW_BAO_ROOT_TOKEN=$(jq -er .root_token "$STATE/bao-init.json") || die "OpenBao init returned no root token"
 export BW_BAO_ROOT_TOKEN
+printf 'BW_BAO_ROOT_TOKEN=%s\n' "$BW_BAO_ROOT_TOKEN" >>"$STATE/secrets.env"
 bao_unseal
 wait_for 60 "an active OpenBao node" bao token lookup
 
@@ -57,8 +57,10 @@ docker exec -i -e BAO_TOKEN="$BW_BAO_ROOT_TOKEN" "$BAO" bao policy write bw-meta
 path "secret/metadata/*" { capabilities = ["read", "list"] }
 path "transit/keys/*"    { capabilities = ["read", "list"] }
 POLICY
-printf 'BW_BAO_METADATA_TOKEN=%s\n' \
-  "$(bao token create -policy=bw-metadata-only -format=json | jq -r .auth.client_token)" >>"$STATE/secrets.env"
+# Assigned first: a command substitution that is only a printf argument cannot fail the script.
+metadata_token=$(bao token create -policy=bw-metadata-only -format=json | jq -er .auth.client_token) ||
+  die "could not create the metadata-only OpenBao token"
+printf 'BW_BAO_METADATA_TOKEN=%s\n' "$metadata_token" >>"$STATE/secrets.env"
 
 say "creating the talos cluster (several minutes on a cold image cache)"
 talosctl cluster create docker \

@@ -6,18 +6,21 @@ set -uo pipefail
 . "$(dirname "$0")/../lib.sh"
 
 need docker
+# Every removal and every check below asks Docker. If it does not answer, nothing can be removed
+# or verified, and the state directory that names what to remove must survive.
+docker info >/dev/null 2>&1 || die "the Docker daemon does not answer; nothing was removed"
 talos_label=talos.cluster.name=$FIXTURE_NAME
 compose_label=com.docker.compose.project=$FIXTURE_NAME
 
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
 # see "Known limits" in fixtures/README.md.
-mapfile -t node_volumes < <(
+volume_names=$(
   docker ps --all --quiet --filter "label=$talos_label" |
     xargs --no-run-if-empty docker inspect \
-      --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' |
-    sed '/^$/d'
-)
+      --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'
+) || die "could not list the Talos node volumes; nothing was removed"
+mapfile -t node_volumes < <(sed '/^$/d' <<<"$volume_names")
 
 # Name the project directory and file, so a compose.yaml in the caller's working directory can
 # never be the one that is torn down. The password is only interpolated, never used, by `down`.
@@ -46,20 +49,33 @@ if [ "${1:-}" = --purge ]; then
   esac
 fi
 
-left=$(
-  docker ps --all --filter "label=$talos_label" --format 'container {{.Names}}'
-  docker ps --all --filter "label=$compose_label" --format 'container {{.Names}}'
-  docker network ls --filter "label=$talos_label" --format 'network {{.Name}}'
-  docker network ls --filter "label=$compose_label" --format 'network {{.Name}}'
-  docker volume ls --filter "label=$compose_label" --format 'volume {{.Name}}'
-  for volume in "${node_volumes[@]}"; do
-    docker volume ls --quiet --filter "name=^${volume}$" | sed 's/^/volume /'
-  done
-  [ ! -e "$STATE" ] || printf 'directory %s\n' "$STATE"
-)
+# A query that fails lists nothing, which reads exactly like "nothing left". Keep the two apart.
+left=
+unverified=0
+probe() { # probe <kind> <command...>: the command lists names, one per line
+  local kind=$1 names name
+  shift
+  if names=$("$@"); then
+    while IFS= read -r name; do
+      [ -z "$name" ] || left+="$kind $name"$'\n'
+    done <<<"$names"
+  else
+    unverified=1
+  fi
+}
+probe container docker ps --all --filter "label=$talos_label" --format '{{.Names}}'
+probe container docker ps --all --filter "label=$compose_label" --format '{{.Names}}'
+probe network docker network ls --filter "label=$talos_label" --format '{{.Name}}'
+probe network docker network ls --filter "label=$compose_label" --format '{{.Name}}'
+probe volume docker volume ls --filter "label=$compose_label" --format '{{.Name}}'
+for volume in "${node_volumes[@]}"; do
+  probe volume docker volume ls --quiet --filter "name=^${volume}$"
+done
+[ ! -e "$STATE" ] || left+="directory $STATE"$'\n'
 if [ -n "$left" ]; then
   say "fixtures: leftovers after down:"
-  say "$left"
-  exit 1
+  say "${left%$'\n'}"
 fi
+[ "$unverified" -eq 0 ] || say "fixtures: a Docker query failed, so what is left could not be verified"
+[ -z "$left" ] && [ "$unverified" -eq 0 ] || exit 1
 say "fixture is down: no containers, networks, volumes or state left"

@@ -128,9 +128,14 @@ ok "netsplit / netjoin worker returns on the same address"
 ! "$here/evidence" "$STATE/no-such-path" >/dev/null 2>&1 || fail "evidence accepted a scan path that does not exist"
 ok "evidence refuses a scan path it cannot read"
 printf 'token=%s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/selftest-token-leak"
+printf 'plain=%s\n' "$BW_CANARY" >"$STATE/backups/selftest-plain-backup"
 bundle=$("$here/evidence")
 grep --quiet --fixed-strings "$STATE/data/selftest-token-leak" "$bundle/leak-scan.txt" || fail "leak scan missed the OpenBao metadata token"
-rm "$STATE/data/selftest-token-leak"
+grep --quiet --fixed-strings "$STATE/backups/selftest-plain-backup" "$bundle/leak-scan.txt" ||
+  fail "leak scan does not cover .state/backups as written (OpenBao snapshots live there)"
+rm "$STATE/data/selftest-token-leak" "$STATE/backups/selftest-plain-backup"
+jq -es 'any(.[]; .transit_key == "bw-artifact" and .latest >= 1)' "$bundle/openbao-metadata.jsonl" >/dev/null ||
+  fail "OpenBao metadata does not list the Transit key"
 [ ! -e "$bundle/unavailable.txt" ] || fail "evidence reports missing sources on a healthy fixture: $(cat "$bundle/unavailable.txt")"
 grep --quiet --fixed-strings "$bundle/postgres.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database dump"
 grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database backup"
