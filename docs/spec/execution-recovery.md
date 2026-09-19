@@ -53,7 +53,8 @@ silently substitutes a newer artifact. The immutable plan binds:
 - operation `apply-config`, mode `no-reboot` and every operation parameter
   value that reaches the Talos request;
 - expected preconditions, including the maximum age of the execution-time
-  observation and the validity window of the dependency check (§3), and
+  observation and the validity window of the use-time dependency check (§3),
+  and
   expected postconditions;
 - rollout scope and limits, expiry, idempotency key and approval policy;
 - the plan revision and authorization identity.
@@ -91,8 +92,16 @@ The executor gathers and durably records on the operation timeline:
 1. a fresh machine observation taken for this dispatch: identity, assignment,
    configuration digest, and the health and capacity evidence named by the
    plan's preconditions, with its observation revision and time; and
-2. a dependency check showing the bound secret and encryption dependencies are
-   retained and usable under the executing identity, with its time.
+2. a use-time check, with its time, of the dependencies dispatch itself needs
+   under the executing identity: decryption of the bound artifact and the
+   operation credentials for the target.
+
+Item 2 is deliberately narrow. The executor holds scoped artifact decryption
+and operation credentials, not compiler-level secret access. Source secret
+versions are tracked by metadata-only retention checks
+([§7.6](../design/Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks));
+losing one can block regeneration but does not make a retained, decryptable
+artifact inapplicable, and is not a dispatch precondition.
 
 A stored observation older than the plan's maximum age never satisfies item 1,
 whatever it says. A machine that cannot be observed cannot be dispatched to.
@@ -115,7 +124,16 @@ The database transaction that creates the durable dispatch intent is the
    operation of that scope in `committed`, `sending`, `verifying` or
    `unresolved` against the bound rollout limit.
 
-If any comparison fails, nothing is committed and nothing is sent. The PoC
+If any comparison fails, nothing is committed and nothing is sent.
+
+The machine scope also protects the binding it was taken for. Any transaction
+that changes a machine's assignment must check that machine's coordination
+scope and is refused while an operation on it is `committed`, `sending`,
+`verifying` or `unresolved`. Detecting a changed assignment revision only
+during verification would be too late: the artifact for the old revision
+would already have reached the machine.
+
+The PoC
 default rollout limit is one. Drain does not apply to a `no-reboot` apply; the
 cluster health and capacity gate is a bound precondition checked under item 3.
 
@@ -123,7 +141,12 @@ cluster health and capacity gate is a bound precondition checked under item 3.
 
 The owning executor durably records an attempt identity before each send; the
 operation timeline therefore shows the commitment and the attempt before any
-Talos request.
+Talos request. The first attempt is authorized by the commitment transaction.
+Every later attempt is recorded by its own **retry transaction**, which
+repeats comparisons 1–3 of §3.2 against newly gathered §3.1 evidence and
+confirms that this operation still holds the machine scope and rollout slot.
+A revocation that commits before the retry transaction therefore prevents the
+retry; reading the approval and recording the attempt later is not sufficient.
 
 Revocation or cancellation before the transaction commits prevents dispatch.
 After commitment it is recorded on the timeline and controls future steps
@@ -132,11 +155,17 @@ attempt must not send. An operation with no recorded attempt then becomes
 `unresolved` (§4) with its scope still held; an attempt already recorded runs
 to its own classification. It is not a guarantee that no request is sent.
 
-The residual window is explicit. The machine or a provider dependency can
-change after §3.1 and before the request arrives. Such a change surfaces as a
-failure before any attempt is recorded, as a definitive rejection, or as a
-postcondition mismatch, and is classified under §5; it is never silently
-absorbed.
+The residual window is explicit. The machine or a dependency can change after
+§3.1 and before the request arrives. Some such changes surface: as a failure
+before any attempt is recorded, as a definitive rejection, or as a
+postcondition mismatch, each classified under §5. Not all do. `apply-config`
+sends a full configuration, so an out-of-band change that lands inside the
+window, such as an emergency `talosctl` edit, can be overwritten by a request
+that then verifies and completes normally, leaving no trace in this operation's
+evidence. The bound maximum observation age narrows this window; it does not
+close it, and this contract claims no detection of such a change. Closing it
+needs a compare-and-apply mechanism on the Talos side, which is outside the
+PoC and is not assumed.
 
 This boundary does not claim that a stale worker can be prevented from sending
 an already committed request after it loses database ownership. E4 must prove
@@ -180,7 +209,7 @@ append-only facts with a current projection.
 | `verifying` | `completed` | Postconditions observed. |
 | `verifying` | `unresolved` | Postconditions contradicted, or not established before the deadline. |
 | `unresolved` | `completed` | Later evidence establishes the postconditions for this operation's assignment revision and artifact. |
-| `unresolved` | `sending` | Classified safe to retry (§5): a new recorded attempt, after repeating the §3.1 evidence. |
+| `unresolved` | `sending` | Classified safe to retry (§5) and the §3.3 retry transaction succeeds. |
 | `unresolved` | `cancelled` | Evidence establishes that no request was sent and none can still be sent. |
 
 No other transition is valid. The machine scope and rollout slot are released
@@ -204,7 +233,7 @@ the manager classifies the outcome:
 | Classification | Required action |
 | --- | --- |
 | Completed | Record completion, persist the bound release and artifact as `Applied`, and release the scope and slot. |
-| Safe to retry | Create a bounded retry within the original plan, expiry and unrevoked approval, repeating the §3.1 evidence first. |
+| Safe to retry | Create a bounded retry within the original plan, expiry and unrevoked approval, admitted only by the §3.3 retry transaction. |
 | Unresolved | Preserve the assignment and stop dependent or conflicting mutations; observe further or request a specific operator decision. |
 | Rejected | Record the response as proof of non-mutation, release the scope and slot, and require a corrected plan; the unchanged plan is not retried. |
 
@@ -306,7 +335,8 @@ An implementation and its reviewer can check these directly:
 1. **One uncertain operation per machine.** At most one operation per machine
    coordination scope is `committed`, `sending`, `verifying` or `unresolved`.
 2. **Commitment and attempt precede send.** No Talos request is sent without a
-   durably recorded commitment and attempt earlier on the same timeline.
+   durably recorded commitment and attempt earlier on the same timeline, and
+   every attempt after the first was admitted by its own retry transaction.
 3. **`Applied` follows evidence.** `Applied` changes only on entering
    `completed`, to that operation's bound release and artifact.
 4. **Plans do not change.** Any change to a binding is a new plan that needs a
@@ -320,6 +350,9 @@ An implementation and its reviewer can check these directly:
    backup-visible write in plaintext.
 8. **Restored approvals authorize nothing.** An approval recorded before
    recovery-mode entry never satisfies §3.2.
+9. **A held scope freezes the assignment.** A machine's assignment does not
+   change while an operation on it is `committed`, `sending`, `verifying` or
+   `unresolved`.
 
 ### 8.1 Revocation racing commitment
 
@@ -371,7 +404,8 @@ retry is safe. E1 must show that extraction precedes backup-visible writes. E6
 must exercise the complete existing-cluster slice, including drift and
 restoration. Until those experiments pass, implementation must expose
 unresolved outcomes and stop conflicting work rather than claim safe retry,
-exactly-once execution, or universal stale-worker prevention.
+exactly-once execution, universal stale-worker prevention, or detection of an
+out-of-band change overwritten inside the §3.3 residual window.
 
 The Talos Upgrade/LifecycleClient compatibility deferral remains explicit:
 this contract does not claim full E3, upgrade support or lifecycle execution.
