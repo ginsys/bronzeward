@@ -54,6 +54,13 @@ silently substitutes a newer artifact. The immutable plan binds:
 - plan, release and exact per-machine artifact identities;
 - renderer/provenance and all secret and encryption dependency versions;
 - machine identity and assignment revision;
+- the machine's **baseline revision**, a per-machine counter advanced by every
+  change of `Applied`, whether by a completed operation or by an adoption
+  record (§6). A machine with no `Applied` has no baseline revision, so no
+  plan can be made for it before its baseline is accepted;
+- the expected pre-dispatch configuration digest. This is mandatory for every
+  `apply-config` plan, not an optional precondition, because the request
+  replaces the whole configuration;
 - operation `apply-config`, mode `no-reboot` and every operation parameter
   value that reaches the Talos request;
 - expected preconditions, including the maximum age of the execution-time
@@ -71,8 +78,8 @@ informs review and approval. It is never a substitute for the execution-time
 checks against live state in §3, and the timeline records the two separately.
 
 The plan is invalid if any dispatch-relevant binding changes, including the
-artifact, assignment, operation, mode, a parameter value, a relevant
-precondition, expiry or approval. The executor must replan and obtain approval
+artifact, assignment, baseline revision, operation, mode, a parameter value, a
+relevant precondition, expiry or approval. The executor must replan and obtain approval
 again rather than repairing the plan in place.
 
 Approval authorizes exactly this binding. Publication and a green dependency
@@ -127,10 +134,14 @@ The database transaction that creates the durable dispatch intent is the
 1. the plan is unexpired and approved, its approval is not revoked, and the
    approval was recorded in the current recovery epoch (§7);
 2. the artifact, assignment, operation, mode and parameter bindings are
-   unchanged;
+   unchanged, and the machine's baseline revision equals the bound one, so a
+   plan made before an adoption or another operation's completion, or for a
+   machine whose baseline was never accepted, cannot commit;
 3. the evidence recorded under §3.1 belongs to this operation, satisfies the
    plan's preconditions, is inside its bound maximum age or validity window,
-   and no newer observation of the machine contradicts it;
+   and no newer observation of the machine contradicts it. The observed
+   configuration digest must equal the bound pre-dispatch digest; on a retry
+   it may instead equal the bound artifact's digest;
 4. this operation takes the machine's coordination scope, and no other
    operation on that scope is `committed`, `sending`, `verifying` or
    `unresolved`;
@@ -163,7 +174,12 @@ Every attempt, the first included, is recorded by an **attempt transaction**
 before its request is sent; the operation timeline therefore shows the
 commitment and the attempt before any Talos request. The attempt transaction
 repeats comparisons 1–3 and 6 of §3.2, against newly gathered §3.1 evidence
-when it is a retry, confirms that this operation still holds the machine scope
+when it is a retry. A retry also binds the timeline revision at which the
+operation was classified safe to retry (§5), and the transaction fails if an
+attempt response, ownership transition or reclassification was recorded on the
+timeline after that revision; a late acceptance of the earlier attempt
+therefore forces reclassification instead of a duplicate request. The
+transaction also confirms that this operation still holds the machine scope
 and rollout slot and has attempts left under the bound maximum, confirms that
 the executor recording it is the operation's current owner at the ownership
 revision on the timeline, and records the attempt identity with that revision
@@ -377,7 +393,10 @@ transaction that requires:
 
 The same transaction selects the adopted release as `Desired`; otherwise the
 machine would at once be pending convergence towards the release it drifted
-from, and a later plan could undo the adoption. The record sets `Applied` to
+from, and a later plan could undo the adoption. It also advances the machine's
+baseline revision (§2), so every plan made before the adoption, such as an
+approved Revert to the previous release, fails comparison 2 of §3.2 and must
+be replanned and approved again. The record sets `Applied` to
 the adopted release, marked as adopted by observation rather than dispatched,
 as first-milestone import establishes its baseline without mutating the
 machine. If a newer observation shows the machine has changed again, it is the
