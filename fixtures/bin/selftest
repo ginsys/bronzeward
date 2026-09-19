@@ -46,7 +46,7 @@ ok "all four containers are running"
 before=$(worker_digest)
 worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$STATE/data/selftest-worker.yaml"
 talosctl machineconfig patch "$STATE/data/selftest-worker.yaml" \
-  --patch "{\"machine\":{\"nodeLabels\":{\"bronzeward.test/selftest\":\"r$RANDOM\"}}}" \
+  --patch "{\"machine\":{\"nodeLabels\":{\"bronzeward.test/selftest\":\"r$(date -u +%s%N)\"}}}" \
   --output "$STATE/data/selftest-worker-next.yaml"
 sent=$(sha256sum <"$STATE/data/selftest-worker-next.yaml" | cut -d' ' -f1)
 worker_talos apply-config --mode=no-reboot --file "$STATE/data/selftest-worker-next.yaml" >/dev/null
@@ -87,8 +87,13 @@ printf 'x\n' >"$STATE/data/selftest-store"
 rm "$STATE/data/selftest-store"
 "$here/inject" store-restore selftest
 [ -f "$STATE/data/selftest-store" ] || fail "store-restore did not bring the file back"
-rm "$STATE/data/selftest-store"
-ok "store-snapshot / store-restore"
+# A snapshot that cannot be read must not cost the live directory.
+printf 'not a tar archive\n' >"$STATE/backups/store-selftest-corrupt.tgz"
+! "$here/inject" store-restore selftest-corrupt 2>/dev/null || fail "store-restore accepted a corrupt archive"
+[ -f "$STATE/data/selftest-store" ] && [ -f "$STATE/data/canary-control.txt" ] ||
+  fail "a failed store-restore destroyed the live store directory"
+rm "$STATE/data/selftest-store" "$STATE/backups/store-selftest-corrupt.tgz"
+ok "store-snapshot / store-restore; a corrupt snapshot leaves the live directory alone"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -118,6 +123,19 @@ ok "evidence records OpenBao state as unknown, not empty, while openbao is down"
 "$here/inject" start openbao
 [ "$(kv_version destroyed)" = false ] || fail "openbao state differs after crash and unseal"
 ok "kill / start openbao comes back sealed, unseals, keeps state"
+
+# Hung provider: a paused OpenBao still accepts the connection and never answers. The action must
+# end on its own and say that it failed.
+"$here/inject" pause openbao
+rc=0
+"$here/inject" bao-snapshot selftest-hung 2>/dev/null || rc=$?
+"$here/inject" unpause openbao
+[ "$rc" -ne 0 ] || fail "bao-snapshot succeeded against a paused openbao"
+[ -z "$(find "$STATE/backups" -name 'bao-selftest-hung*')" ] || fail "a failed bao-snapshot left a file behind"
+grep --quiet --extended-regexp ' failed rc=[0-9]+ bao-snapshot selftest-hung$' "$STATE/injections.log" ||
+  fail "injections.log does not record the hung bao-snapshot as failed"
+wait_for 60 "openbao after unpause" bao token lookup
+ok "bao-snapshot against a paused openbao ends, is recorded as failed and leaves no file"
 
 # Partitioned provider: clients lose it, the out-of-band observer does not, and the bundle says both.
 bao_published() { curl --noproxy '*' --silent --max-time 5 --output /dev/null "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health"; }
@@ -168,9 +186,11 @@ printf 'dashed=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/-delete"
 # And a leak in a file that only shares the positive control's name: it is not the control.
 mkdir -p "$STATE/selftest-outside/-delete.d"
 printf 'imposter=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/-delete.d/canary-control.txt"
-# The control itself with a second secret on the same line: one matching line, two secrets.
+# The control itself with its canary replaced by another secret: still one hit, no longer the control.
 cp "$STATE/data/canary-control.txt" "$STATE/selftest-outside/control-as-planted"
-printf 'planted on purpose: %s and not on purpose: %s\n' "$BW_CANARY" "$BW_BAO_METADATA_TOKEN" >"$STATE/data/canary-control.txt"
+printf 'planted on purpose: %s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/canary-control.txt"
+# A secret in a file name, over benign content.
+printf 'nothing to see\n' >"$STATE/selftest-outside/-delete.d/named-$BW_BAO_METADATA_TOKEN"
 # A client private key from the generated talosconfig, which the secrets bundle does not hold.
 awk '$1 == "key:" {print "client-key=" $2}' "$TALOSCONFIG" >"$STATE/data/selftest-client-key-leak"
 rc=0
@@ -179,8 +199,12 @@ cp "$STATE/selftest-outside/control-as-planted" "$STATE/data/canary-control.txt"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
 grep --quiet --fixed-strings "$STATE/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
   fail "leak scan took a file named like its positive control for the control"
-grep --quiet --line-regexp --fixed-strings "2 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
-  fail "leak scan excused a positive control that held a second secret"
+grep --quiet --line-regexp --fixed-strings "1 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
+  fail "leak scan excused a positive control whose canary had been replaced by another secret"
+grep --quiet 'a path whose name holds secret material' "$bundle/leak-scan.txt" ||
+  fail "leak scan missed a secret in a file name"
+! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$bundle/leak-scan.txt" "$STATE/selftest-evidence.err" ||
+  fail "the leak scan wrote a secret into its own report"
 rm "$STATE/selftest-evidence.err"
 grep --quiet --fixed-strings "$STATE/data/selftest-client-key-leak" "$bundle/leak-scan.txt" ||
   fail "leak scan missed a client private key from the talosconfig"

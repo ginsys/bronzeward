@@ -11,7 +11,7 @@ so the experiments can compare them.
 ## Prerequisites
 
 Linux on x86-64, Docker Engine with the compose v2 plugin, and `bash`, `curl`, `jq`, `git`, `tar`,
-`find`, `awk` and GNU coreutils (`sha256sum`, `timeout`, `install`). Each command checks for what
+`find`, `awk`, `cmp` and GNU coreutils (`sha256sum`, `timeout`, `install`, `stat`, `mktemp`). Each command checks for what
 it needs before doing anything. The user must be able to run `docker` without `sudo`. About 4 GiB
 of free memory and 1.5 GiB of image downloads on first run. No other tool is taken from the host: `talosctl`, `sops`
 and `age` are downloaded into `fixtures/.cache/` and refused on a checksum mismatch.
@@ -63,8 +63,11 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
 
 The scan has a positive control, `.state/data/canary-control.txt`. If the scan does not find it, or
 cannot read a path or file it was given, the command fails, because an empty result would then
-prove nothing. Only that file and its copies inside expanded store snapshots count as the control;
-any other file of the same name is reported like every other hit. Symlinks are followed, so a linked file or directory is scanned through its link and
+prove nothing. Only that file and its copies inside expanded store snapshots count as the control,
+and only while they hold exactly what `bin/up` planted; any other file of the same name, or a
+control whose content changed, is reported like every other hit. Names of files and directories
+are matched as well as file contents; a name that holds a secret is withheld from the report, which
+gives the inode instead. Symlinks are followed, so a linked file or directory is scanned through its link and
 a link that cannot be followed fails the command; extra paths may be relative and may have any
 name. `bin/evidence` is meant to run while parts of the fixture are down: a source it
 cannot read, such as the live database after `inject kill postgres`, is named in
@@ -110,10 +113,13 @@ before `down`.
 - One fixture per Docker daemon. Names, ports and subnet are pinned so that evidence reproduces,
   which means two checkouts on one daemon would share them. `bin/up` refuses to start while
   fixture containers, networks or volumes exist: a leftover PostgreSQL volume keeps the password
-  of the run that created it. `bin/down` refuses when Compose recorded another directory as the
-  project's origin, or when any of those resources exist and this checkout has no `.state/`; run
-  `down` in the checkout that owns them, or `down --adopt` if that checkout is gone. Only
-  containers carry the origin directory, so networks and volumes are attributed by `.state/` alone.
+  of the run that created it. It then takes the claim: a container named `bw-fixture-claim` that
+  is created, labelled with this checkout's path and never started. Docker refuses a second one
+  of that name atomically, so of two `up` started together, from one checkout or two, only one
+  proceeds. `bin/down` refuses when the claim or Compose names another directory as the origin,
+  or when fixture resources exist and neither a claim from this checkout nor `.state/` shows them
+  to be its own; run `down` in the checkout that owns them, or `down --adopt` if that checkout is
+  gone.
 - `bin/evidence` observes OpenBao and PostgreSQL out of band, from inside their containers. After
   `inject netsplit openbao` every client finds the provider unreachable while
   `openbao-metadata.jsonl` still shows its true metadata. The bundle records both sides:

@@ -13,7 +13,8 @@ docker compose version >/dev/null || die "missing prerequisite: docker compose v
 # a state directory here belong to another checkout, or to a run whose state was lost. Volumes
 # matter as much as containers: PostgreSQL keeps the password of whoever initialized the volume.
 foreign=$(
-  docker ps --all --filter "label=com.docker.compose.project=$FIXTURE_NAME" --format '{{.Names}}' &&
+  claim_names &&
+    docker ps --all --filter "label=com.docker.compose.project=$FIXTURE_NAME" --format '{{.Names}}' &&
     docker ps --all --filter "label=talos.cluster.name=$FIXTURE_NAME" --format '{{.Names}}' &&
     docker network ls --filter "label=com.docker.compose.project=$FIXTURE_NAME" --format '{{.Name}}' &&
     docker network ls --filter "label=talos.cluster.name=$FIXTURE_NAME" --format '{{.Name}}' &&
@@ -25,9 +26,15 @@ Run fixtures/bin/down in the checkout that created it; see 'Known limits' in fix
 synthetic() { printf 'BWSYNTH-%s' "$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"; }
 
 umask 077
-# A plain mkdir is the claim: the checks above are only a look, and of two `up` started together
-# both can pass them. Only one can create the directory.
-mkdir "$STATE" 2>/dev/null || die "$STATE appeared meanwhile: another fixtures/bin/up is running in this checkout"
+# The checks above are only a look, and of two `up` started together both can pass them, from one
+# checkout or from two. The claim container is what only one of them can create; the plain mkdir
+# then cannot race any more, and stays plain so that it never adopts a directory it did not make.
+claim_error=$(claim_take 2>&1) ||
+  die "could not take the fixture claim $CLAIM on this Docker daemon, which another fixtures/bin/up may hold; nothing was created. Docker said: $claim_error"
+mkdir "$STATE" 2>/dev/null || {
+  claim_drop
+  die "$STATE appeared meanwhile; nothing was created"
+}
 # From here on a failure leaves something behind. Not earlier: an `up` that was refused created
 # nothing, and the hint would send its caller to tear down a fixture that is not theirs.
 # EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
@@ -122,7 +129,7 @@ kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG")
   die "only $(wc -l <"$STATE/scan-patterns.txt") leak-scan patterns were collected; the Talos bundle was not read"
 
 # Positive control: the scan must find this, or an empty result elsewhere proves nothing.
-printf 'planted on purpose: %s\n' "$BW_CANARY" >"$STATE/data/canary-control.txt"
+control_content >"$STATE/data/canary-control.txt"
 
 # Something outside the fixture may have stopped a container meanwhile, for example a host hook
 # that restarts the Docker daemon when a new bridge appears. Never report a half-dead fixture as up.
