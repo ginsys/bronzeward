@@ -9,6 +9,15 @@ docker compose version >/dev/null || die "missing prerequisite: docker compose v
 [ "$(uname -sm)" = "Linux x86_64" ] || die "pinned CLI assets are linux/amd64 only"
 [ ! -e "$STATE" ] || die "$STATE exists: run fixtures/bin/down first"
 
+# One fixture per Docker daemon: names, ports and subnet are pinned. Containers that exist without
+# a state directory here belong to another checkout, or to a run whose state was lost.
+foreign=$(
+  docker ps --all --filter "label=com.docker.compose.project=$FIXTURE_NAME" --format '{{.Names}}' &&
+    docker ps --all --filter "label=talos.cluster.name=$FIXTURE_NAME" --format '{{.Names}}'
+) || die "cannot ask Docker for existing fixture containers"
+[ -z "$foreign" ] || die "a fixture already exists on this Docker daemon ($(tr '\n' ' ' <<<"$foreign")). \
+Run fixtures/bin/down in the checkout that created it; see 'Known limits' in fixtures/README.md"
+
 # EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
 # ERR trap, so neither would print the hint.
 trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; run fixtures/bin/down to remove what was created"' EXIT

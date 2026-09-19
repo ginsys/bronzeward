@@ -1,9 +1,21 @@
 #!/usr/bin/env bash
 # Remove everything bin/up created, including after a failed or interrupted up, then prove it.
-# Usage: down [--purge]   (--purge also deletes the downloaded CLI cache)
+# Usage: down [--purge] [--adopt]
+#   --purge  also delete the downloaded CLI cache
+#   --adopt  also remove a fixture this checkout cannot show to be its own (see below)
 set -uo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
+
+purge=0
+adopt=0
+for arg in "$@"; do
+  case $arg in
+    --purge) purge=1 ;;
+    --adopt) adopt=1 ;;
+    *) die "usage: down [--purge] [--adopt]" ;;
+  esac
+done
 
 need docker
 # Every removal and every check below asks Docker. If it does not answer, nothing can be removed
@@ -11,6 +23,27 @@ need docker
 docker info >/dev/null 2>&1 || die "the Docker daemon does not answer; nothing was removed"
 talos_label=talos.cluster.name=$FIXTURE_NAME
 compose_label=com.docker.compose.project=$FIXTURE_NAME
+
+# Names, ports and subnet are pinned, so every checkout on one Docker daemon shares them, and the
+# labels above select another checkout's fixture just as well. Compose records the directory a
+# project was started from; the Talos containers carry no such mark, so for them the only sign of
+# ownership is a state directory here.
+existing=$(
+  docker ps --all --quiet --filter "label=$compose_label" &&
+    docker ps --all --quiet --filter "label=$talos_label"
+) || die "could not list the fixture containers; nothing was removed"
+owners=$(
+  docker ps --all --quiet --filter "label=$compose_label" |
+    xargs --no-run-if-empty docker inspect \
+      --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' | sort -u
+) || die "could not read who owns the fixture containers; nothing was removed"
+foreign=$(grep --invert-match --line-regexp --fixed-strings -- "$FIXTURES" <<<"$owners" | sed '/^$/d')
+if [ "$adopt" -eq 0 ] && [ -n "$existing" ]; then
+  [ -z "$foreign" ] ||
+    die "the running fixture was started from $foreign, not from here; nothing was removed. Run its own fixtures/bin/down, or pass --adopt if that checkout is gone"
+  [ -e "$STATE" ] ||
+    die "fixture containers exist but there is no $STATE, so they cannot be shown to belong to this checkout; nothing was removed. Pass --adopt to remove them anyway"
+fi
 
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
@@ -42,7 +75,7 @@ case $STATE in
   */fixtures/.state) rm -rf -- "$STATE" ;;
   *) die "refusing to delete unexpected state path $STATE" ;;
 esac
-if [ "${1:-}" = --purge ]; then
+if [ "$purge" -eq 1 ]; then
   case $CACHE in
     */fixtures/.cache) rm -rf -- "$CACHE" ;;
     *) die "refusing to delete unexpected cache path $CACHE" ;;

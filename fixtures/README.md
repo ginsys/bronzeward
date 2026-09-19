@@ -23,7 +23,7 @@ and `age` are downloaded into `fixtures/.cache/` and refused on a checksum misma
 | `fixtures/bin/up` | Generates synthetic secrets, starts PostgreSQL and OpenBao, initializes and unseals OpenBao, creates the Talos cluster. Takes about two minutes once images are cached. |
 | `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. Every action is timestamped in `.state/injections.log`. |
 | `fixtures/bin/evidence [path ...]` | Writes versions, container logs, a database dump, OpenBao metadata and Talos config digests to `.state/evidence/<utc>/`, then scans them, and any extra paths given, for synthetic secret material. Prints the bundle path. |
-| `fixtures/bin/down [--purge]` | Removes every container, network, volume and `.state/`, then checks that nothing is left and fails if something is. `--purge` also removes `.cache/`. |
+| `fixtures/bin/down [--purge] [--adopt]` | Removes every container, network, volume and `.state/`, then checks that nothing is left and fails if something is, or if Docker could not be asked. `--purge` also removes `.cache/`. It refuses a fixture it cannot show to be this checkout's own; `--adopt` overrides that. |
 | `fixtures/bin/selftest [--keep]` | `up`, each injection once with an assertion, `evidence`, `down`. `--keep` runs the checks against a fixture that is already up. |
 
 An experiment uses the fixture like this:
@@ -62,7 +62,9 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
 
 The scan has a positive control, `.state/data/canary-control.txt`. If the scan does not find it, or
 cannot read a path or file it was given, the command fails, because an empty result would then
-prove nothing. `bin/evidence` is meant to run while parts of the fixture are down: a source it
+prove nothing. Symlinks are followed, so a linked file or directory is scanned through its link and
+a link that cannot be followed fails the command; extra paths may be relative and may have any
+name. `bin/evidence` is meant to run while parts of the fixture are down: a source it
 cannot read, such as the live database after `inject kill postgres`, is named in
 `unavailable.txt` in the bundle and everything else is still captured and scanned. Compressed
 backups are expanded before scanning, without needing the database server. OpenBao snapshots are
@@ -100,6 +102,11 @@ before `down`.
   a NetworkManager dispatcher script, stops the containers that were already running each time a
   fixture network is created. `bin/up` detects this and fails. Fix the host hook so that it ignores
   `br-*`, `veth*` and `docker0`; the fixture does not work around it.
+- One fixture per Docker daemon. Names, ports and subnet are pinned so that evidence reproduces,
+  which means two checkouts on one daemon would share them. `bin/up` refuses to start while
+  fixture containers exist. `bin/down` refuses when Compose recorded another directory as the
+  project's origin, or when containers exist and this checkout has no `.state/`; run `down` in
+  the checkout that owns them, or `down --adopt` if that checkout is gone.
 - `bin/evidence` observes OpenBao and PostgreSQL out of band, from inside their containers. After
   `inject netsplit openbao` every client finds the provider unreachable while
   `openbao-metadata.jsonl` still shows its true metadata. The bundle records both sides:
