@@ -11,13 +11,27 @@ set -euo pipefail
 . "$(dirname "$0")/../lib.sh"
 
 need_state
-need docker curl jq tar sha256sum git find awk timeout
+need docker curl jq tar sha256sum git find awk timeout realpath mktemp
+# Extra scan paths become absolute: find would read a relative name such as -delete as an
+# expression, not as a path.
+extras=()
 for extra in "$@"; do
   [ -e "$extra" ] || die "extra scan path does not exist: $extra"
+  resolved=$(realpath -- "$extra") || die "cannot resolve extra scan path: $extra"
+  extras+=("$resolved")
 done
 
-out=$STATE/evidence/$(date -u +%Y%m%dT%H%M%SZ)
-mkdir -p "$out/logs" "$out/backups"
+# mkdir without -p is atomic, so two captures started in the same second get a directory each.
+mkdir -p "$STATE/evidence"
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+out=$STATE/evidence/$stamp
+attempt=1
+until mkdir "$out" 2>/dev/null; do
+  attempt=$((attempt + 1))
+  [ "$attempt" -le 50 ] || die "cannot create a bundle directory under $STATE/evidence"
+  out=$STATE/evidence/$stamp-$attempt
+done
+mkdir "$out/logs" "$out/backups"
 
 unavailable() {
   printf '%s\n' "$*" >>"$out/unavailable.txt"
@@ -33,8 +47,11 @@ reported() {
     printf 'UNAVAILABLE'
   fi
 }
-node_tag() { # node_tag <ip>: bounded, so a paused or partitioned node cannot hang the capture
-  timeout 20 "$CACHE/talosctl" -e "$TALOS_CONTROLPLANE_IP" -n "$1" version --short | awk '/Tag:/ {print $2}'
+# Each node is asked on its own address, not through the control plane, so that a dead control
+# plane does not make a healthy worker look dead. Bounded, so a paused or partitioned node cannot
+# hang the capture.
+node_tag() { # node_tag <ip>
+  timeout 20 "$CACHE/talosctl" -e "$1" -n "$1" version --short | awk '/Tag:/ {print $2}'
 }
 
 {
@@ -157,7 +174,7 @@ fi >"$out/openbao-client-view.txt"
 # Digest of each node's machine config, normalized to exactly one trailing newline (the jsonpath
 # output adds one). The config itself holds cluster secrets and is not copied into the bundle.
 for node in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
-  if config=$(timeout 20 "$CACHE/talosctl" -e "$TALOS_CONTROLPLANE_IP" -n "$node" \
+  if config=$(timeout 20 "$CACHE/talosctl" -e "$node" -n "$node" \
     get machineconfig v1alpha1 -o jsonpath='{.spec}' 2>/dev/null) && [ -n "$config" ]; then
     printf '%s %s\n' "$(printf '%s\n' "$config" | sha256sum | cut -d' ' -f1)" "$node"
   else
@@ -172,10 +189,16 @@ unset config
 # Leak scan. Counts only: a matched line is never printed. Any path or file the scan cannot read
 # is fatal, because a skipped file reads exactly like a clean one.
 scan=$out/leak-scan.txt
-list=$STATE/scan-list.tmp
+list=$(mktemp "$STATE/scan-list.XXXXXX")
+trap 'rm -f -- "$list"' EXIT
 # .state/backups is scanned as written too: that is the only form in which OpenBao snapshots, which
 # OpenBao encrypts, are covered.
-find "$out" "$STATE/data" "$STATE/backups" "$@" -type f -print0 >"$list" || die "leak scan could not walk every path; results void"
+# -L: a symlinked path or file is followed and its target scanned. Without it find skips the link
+# silently and the target reads as clean. A link that cannot be followed is therefore fatal too.
+roots=("$out" "$STATE/data" "$STATE/backups" "${extras[@]}")
+dangling=$(find -L "${roots[@]}" -type l -print -quit) || die "leak scan could not walk every path; results void"
+[ -z "$dangling" ] || die "leak scan cannot follow the symlink $dangling; results void"
+find -L "${roots[@]}" -type f -print0 >"$list" || die "leak scan could not walk every path; results void"
 : >"$scan"
 while IFS= read -r -d '' file; do
   [ "$file" != "$scan" ] || continue

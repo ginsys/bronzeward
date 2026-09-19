@@ -5,6 +5,10 @@ FIXTURES=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 STATE=$FIXTURES/.state
 CACHE=$FIXTURES/.cache
 
+# A BAO_TOKEN from the caller's own OpenBao or Vault work would win over the fixture's root token in
+# bao() below. bin/evidence sets it on purpose, after this point.
+unset BAO_TOKEN
+
 set -a
 # shellcheck source-path=SCRIPTDIR source=versions.env
 . "$FIXTURES/versions.env"

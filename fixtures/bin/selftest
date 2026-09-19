@@ -2,7 +2,7 @@
 # Prove the fixture end to end: up, every injection once with an assertion, evidence, down.
 # Usage: selftest [--keep]   (--keep skips up and down, to rerun against a running fixture)
 set -euo pipefail
-here=$(dirname "$0")
+here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
@@ -123,6 +123,16 @@ jq -es 'any(.[]; .path == "selftest/item")' "$split/openbao-metadata.jsonl" >/de
 wait_for 60 "openbao on its published port after netjoin" bao_published
 ok "netsplit / netjoin openbao: bundle holds the client view (unreachable) and the true metadata"
 
+# A hung control plane must not make the healthy worker look dead in the evidence.
+"$here/inject" pause controlplane
+hung=$("$here/evidence") || fail "evidence aborted while the control plane was paused"
+"$here/inject" unpause controlplane
+grep --quiet "^UNAVAILABLE $TALOS_CONTROLPLANE_IP\$" "$hung/talos-config-sha256.txt" || fail "evidence claims to have read the paused control plane"
+grep --quiet --extended-regexp "^[0-9a-f]{64} $TALOS_WORKER_IP\$" "$hung/talos-config-sha256.txt" ||
+  fail "evidence could not read the worker while only the control plane was paused"
+wait_for 60 "the worker through the control plane after unpause" worker_talos version --short
+ok "evidence reads each Talos node on its own address: paused control plane, worker still read"
+
 # Hung and unreachable Talos peer.
 "$here/inject" pause worker
 ! worker_talos version --short >/dev/null 2>&1 || fail "paused worker still answers"
@@ -141,7 +151,17 @@ ok "netsplit / netjoin worker returns on the same address"
 ok "evidence refuses a scan path it cannot read"
 printf 'token=%s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/selftest-token-leak"
 printf 'plain=%s\n' "$BW_CANARY" >"$STATE/backups/selftest-plain-backup"
-bundle=$("$here/evidence")
+# Two inputs find would mishandle if passed along as they are: a file reached only through a
+# symlink, and a relative scan path whose name find reads as an action.
+mkdir -p "$STATE/selftest-outside"
+printf 'linked=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/linked-target"
+ln -sf "$STATE/selftest-outside/linked-target" "$STATE/data/selftest-link"
+printf 'dashed=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/-delete"
+bundle=$(cd "$STATE/selftest-outside" && "$here/evidence" -delete)
+grep --quiet --fixed-strings "$STATE/data/selftest-link" "$bundle/leak-scan.txt" || fail "leak scan skipped a symlinked file"
+grep --quiet --fixed-strings "$STATE/selftest-outside/-delete" "$bundle/leak-scan.txt" ||
+  fail "leak scan mishandled a scan path named like a find action"
+rm -r "$STATE/selftest-outside" "$STATE/data/selftest-link"
 grep --quiet --fixed-strings "$STATE/data/selftest-token-leak" "$bundle/leak-scan.txt" || fail "leak scan missed the OpenBao metadata token"
 grep --quiet --fixed-strings "$STATE/backups/selftest-plain-backup" "$bundle/leak-scan.txt" ||
   fail "leak scan does not cover .state/backups as written (OpenBao snapshots live there)"
