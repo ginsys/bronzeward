@@ -33,8 +33,9 @@ The manager stores three distinct values:
 | Observed | The latest machine-reported identity, running version, configuration digest and health evidence, with its observation revision and time. |
 
 `Applied` changes only when an operation reaches `completed` (§4), and then to
-that operation's bound release and artifact, or by a drift adoption record
-(§6). The adoption record is the approved, observation-verified baseline that
+that operation's bound release and artifact, or by an adoption record (§6),
+which resolves drift or establishes the first `Applied` of a machine that has
+none. The adoption record is the approved, observation-verified baseline that
 [design §12.1](../design/Talos_Configuration_and_Machine_Management_Design.md#121-desired-applied-and-observed-state)
 allows as the second source of the applied release. An RPC response alone does
 not update `Applied`. `Desired` differing from `Applied` is pending convergence,
@@ -255,9 +256,12 @@ deciding identity and the evidence relied on.
 
 A **completion observation** is taken after every recorded attempt of the
 operation is accounted for (below), and recorded on its timeline with its
-observation revision and time. It must show the expected machine identity,
+observation revision and time. It records the actual machine identity,
 assignment revision, artifact/configuration digest and applicable health
-checks. An observation taken earlier, including one ordered after the attempt
+results. Values matching the bound postconditions establish them and yield
+`completed`; a value that contradicts them, such as another digest or a failed
+health check, yields `failed`; an observation that could not read a value does
+neither. An observation taken earlier, including one ordered after the attempt
 record but before the attempt's request settled, or one not tied to this
 operation, never completes or fails it: a stalled executor may send after such
 an observation, and the apply may change or degrade the machine. A timeout is
@@ -362,10 +366,12 @@ transaction that requires:
 1. the adopted release is published and the adoption is approved in the
    current recovery epoch, the approval binding the machine, its assignment
    revision, the adopted release and artifact digest, a maximum observation
-   age and its own expiry;
-2. an observation taken after that approval, no older than the age the
-   approval binds, shows the machine's digest equal to the adopted release's
-   artifact for that machine and its assignment revision unchanged; and
+   age and its own expiry, and that approval is unexpired and not revoked when
+   the transaction commits;
+2. the machine's latest recorded observation, by observation revision, was
+   taken after that approval, is no older than the age the approval binds, and
+   shows the machine's digest equal to the adopted release's artifact for that
+   machine and its assignment revision unchanged; and
 3. no operation holds the machine scope, and the scope gate is open apart from
    a freeze placed for this drift.
 
@@ -374,9 +380,17 @@ machine would at once be pending convergence towards the release it drifted
 from, and a later plan could undo the adoption. The record sets `Applied` to
 the adopted release, marked as adopted by observation rather than dispatched,
 as first-milestone import establishes its baseline without mutating the
-machine. If the machine has changed again,
-comparison 2 fails and the scope stays drifted. Publishing and approving an
-adopted release does not by itself resolve drift.
+machine. If a newer observation shows the machine has changed again, it is the
+latest one, comparison 2 fails and the scope stays drifted. Publishing and
+approving an adopted release does not by itself resolve drift.
+
+The same transaction establishes the first `Applied` for a machine that has
+none, which is how existing-cluster adoption
+([design §9.1](../design/Talos_Configuration_and_Machine_Management_Design.md#91-adopt-an-existing-configured-cluster))
+hands a machine over. Such a machine is not drifted, since there is no
+`Applied` to differ from; the approval is the handover authorization, and the
+three requirements apply unchanged. The rest of that workflow is outside this
+contract.
 
 Extraction precedes every backup-visible write. Adoption success, failure or
 interruption must not leave plaintext in drafts, indexes, staging, database or
@@ -454,8 +468,9 @@ An implementation and its reviewer can check these directly:
    durably recorded commitment and attempt earlier on the same timeline, and
    every attempt was admitted by an attempt transaction.
 3. **`Applied` follows evidence.** `Applied` changes only on entering
-   `completed`, to that operation's bound release and artifact, or by a drift
-   adoption record (§6). Both need an observation taken for that purpose:
+   `completed`, to that operation's bound release and artifact, or by an
+   adoption record (§6), for drift or for a machine with no `Applied` yet.
+   Both need an observation taken for that purpose:
    after every recorded attempt is accounted for, or after the adoption
    approval and inside the age it binds.
 4. **Plans do not change.** Any change to a binding is a new plan that needs a
