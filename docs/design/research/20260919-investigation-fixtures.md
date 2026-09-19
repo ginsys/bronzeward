@@ -86,9 +86,10 @@ list of files containing secret material, or none.
 
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
-`up` and `down` included. Review added checks 9, 10, 12, 14, 15 and 18 and widened 19 (section 5,
-items 8 to 11); the revision described here passed 20 of 20 from clean, and `selftest --keep` passed
-twice in a row against one fixture. Those runs were not timed.
+`up` and `down` included. Review added checks 9, 10, 12, 14, 15, 18 and 21 and widened 19 (section 5,
+items 8 to 11); the revision described here passed 21 of 21 from clean. `selftest --keep`, which
+skips `up` and checks 20 and 21, passed twice in a row against one fixture one revision earlier,
+before check 21 existed. Those runs were not timed.
 
 | # | Check | Expected | Observed |
 |---|---|---|---|
@@ -112,6 +113,7 @@ twice in a row against one fixture. Those runs were not timed.
 | 18 | `bin/evidence` with a scan path that does not exist | Refuses, non-zero exit | pass |
 | 19 | Evidence and leak scan on the healthy fixture, run from another directory with the relative scan paths `-delete` and `-delete.d`, a symlinked file under `.state/data`, and a leaking file named `canary-control.txt` outside `.state/data` | All are scanned and reported, nothing is deleted; the file that only shares the control's name is reported as a leak; no `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
 | 20 | `bin/down` | No container, network, volume or state directory left | pass |
+| 21 | `up`, `evidence` and `down` with `.state` replaced by a dangling symlink | Each refuses; nothing is created at the link's target | pass |
 
 After the second run of the first revision, an independent `docker volume ls --filter dangling=true` showed exactly the
 volumes that existed on the host before the first run.
@@ -230,7 +232,10 @@ Each of these is reproducible and each changed the fixture.
     the `name` in `compose.yaml`, which would have put the services under another project label
     than the one every ownership check and teardown probe selects by. The project name is now
     passed explicitly; `selftest` passed 20 of 20 from clean with that variable set to another
-    name.
+    name. And a `.state` that is a symlink: every command loads the shared setup first, which
+    sourced `secrets.env` through the link, and a dangling link read as "no state" to `up`. The
+    fixture never creates such a link, so the shared setup now refuses one before it reads
+    anything (check 21).
 ## 6. What each experiment gets
 
 | Experiment | Uses | Must add itself |
