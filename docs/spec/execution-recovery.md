@@ -163,10 +163,14 @@ before its request is sent; the operation timeline therefore shows the
 commitment and the attempt before any Talos request. The attempt transaction
 repeats comparisons 1–3 and 6 of §3.2, against newly gathered §3.1 evidence
 when it is a retry, confirms that this operation still holds the machine scope
-and rollout slot and has attempts left under the bound maximum, and records
-the attempt identity with the absolute verification deadline derived from the
-plan. The first attempt transaction may be the commitment transaction itself.
-Reading the approval and recording the attempt later is not sufficient.
+and rollout slot and has attempts left under the bound maximum, confirms that
+the executor recording it is the operation's current owner at the ownership
+revision on the timeline, and records the attempt identity with that revision
+and the absolute verification deadline derived from the plan. An executor that
+lost ownership before its attempt transaction therefore records no attempt and
+sends nothing. The first attempt transaction may be the commitment transaction
+itself. Reading the approval or the ownership and recording the attempt later
+is not sufficient.
 
 Every request carries a transport deadline no later than its recorded
 verification deadline. The **maximum request lifetime** that bounds both is a
@@ -219,8 +223,8 @@ append-only facts with a current projection.
 | `sending` | An attempt is recorded; the request is in flight or its outcome is unknown. |
 | `verifying` | The request was accepted; the manager is collecting identity, digest and health evidence. |
 | `completed` | Terminal. Postconditions prove the bound artifact is applied and healthy; `Applied` is updated. |
-| `rejected` | Terminal. A recorded, definitive Talos response proves the request was refused before any mutation. |
-| `failed` | Terminal. The request took effect or was accepted, every attempt is accounted for, and evidence contradicts the postconditions. `Applied` is not updated. |
+| `rejected` | Terminal. Every recorded attempt has a recorded, definitive Talos response proving its request was refused before any mutation. |
+| `failed` | Terminal. At least one attempt was recorded, every attempt is accounted for, and a completion observation contradicts the postconditions, whether a request changed the machine wrongly or an attempt's executor was stopped before it had any effect. `Applied` is not updated. |
 | `cancelled` | Terminal. No request was sent. This is never an undo of remote work. |
 | `unresolved` | Evidence cannot yet establish a terminal state or safe retry. Scope and slot stay held. |
 
@@ -232,7 +236,7 @@ append-only facts with a current projection.
 | `committed` | `sending` | The §3.3 attempt transaction succeeds; the executor then sends. |
 | `committed` | `unresolved` | Restart, ownership loss, or a revocation, cancellation or closed scope gate after commitment. |
 | `sending` | `verifying` | An acceptance response is recorded. |
-| `sending` | `rejected` | A definitive pre-mutation rejection response is recorded (§5). |
+| `sending` | `rejected` | A definitive pre-mutation rejection response is recorded (§5) for this attempt, and every earlier attempt has one too. Otherwise the response only accounts for this attempt and the operation becomes `unresolved`. |
 | `sending` | `unresolved` | Lost response, timeout, restart or ownership loss. |
 | `verifying` | `completed` | Postconditions established by a completion observation, and every recorded attempt accounted for (both below). |
 | `verifying` | `failed` | A completion observation contradicts the postconditions, and every recorded attempt is accounted for. |
@@ -240,7 +244,7 @@ append-only facts with a current projection.
 | `committed`, `sending`, `verifying` | `unresolved` | Recovery-mode entry (§7). |
 | `unresolved` | `completed` | Postconditions later established by a completion observation, and every recorded attempt accounted for. |
 | `unresolved` | `failed` | A completion observation contradicts the postconditions, and every recorded attempt is accounted for. |
-| `unresolved` | `rejected` | A delayed definitive pre-mutation rejection response is recorded for the only outstanding attempt. |
+| `unresolved` | `rejected` | A delayed definitive pre-mutation rejection response is recorded, and with it every recorded attempt has one. An attempt that was accepted, or whose outcome is unknown, rules `rejected` out; the operation is then classified from a completion observation. |
 | `unresolved` | `sending` | Classified safe to retry (§5) and the §3.3 attempt transaction succeeds. |
 | `unresolved` | `cancelled` | No attempt transaction ever committed for this operation, and none can: the approval is revoked or expired, or the plan is cancelled. |
 
@@ -249,12 +253,15 @@ only on entering a terminal state. An operator decision may resolve an
 `unresolved` operation only into one of the listed targets, recorded with the
 deciding identity and the evidence relied on.
 
-A **completion observation** is taken after the operation's latest recorded
-attempt and recorded on its timeline with its observation revision and time.
-It must show the expected machine identity, assignment revision,
-artifact/configuration digest and applicable health checks. An observation
-taken before that attempt, or not tied to this operation, never completes it.
-A timeout is not proof of failure, completion or retry permission.
+A **completion observation** is taken after every recorded attempt of the
+operation is accounted for (below), and recorded on its timeline with its
+observation revision and time. It must show the expected machine identity,
+assignment revision, artifact/configuration digest and applicable health
+checks. An observation taken earlier, including one ordered after the attempt
+record but before the attempt's request settled, or one not tied to this
+operation, never completes or fails it: a stalled executor may send after such
+an observation, and the apply may change or degrade the machine. A timeout is
+not proof of failure, completion or retry permission.
 
 An observation ordered after an attempt does not show that the attempt's
 request has executed or can no longer execute. The scope is therefore released
@@ -287,17 +294,19 @@ the manager classifies the outcome:
 | Safe to retry | Create a bounded retry within the original plan, expiry and unrevoked approval, admitted only by the §3.3 attempt transaction. |
 | Unresolved | Preserve the assignment and stop dependent or conflicting mutations; observe further or request a specific operator decision. |
 | Rejected | Record the response as proof of non-mutation, release the scope and slot, and require a corrected plan; the unchanged plan is not retried. |
-| Failed | Record the contradicting completion observation, leave `Applied` unchanged, release the scope and slot, and require a corrective plan; the machine's state is then handled as drift (§6). |
+| Failed | Record the contradicting completion observation, leave `Applied` unchanged, release the scope and slot, and require a corrective plan; any difference between the machine's state and `Applied` is then handled as drift (§6). |
 
 Completed, safe to retry and unresolved are the design's classifications for
 an outcome made uncertain by restart, ownership loss or transport failure.
 `Rejected` and `Failed` cover the different case of an outcome that is known.
-`Rejected` needs a definitive response that was received and recorded; it is
-never assigned after an interruption without that response, and only response
-classes shown by evidence to precede any mutation qualify. `Failed` needs
-evidence that contradicts the postconditions, not evidence that is merely
-missing, and every attempt accounted for (§4). Every other error or gap is
-`unresolved`.
+`Rejected` needs a definitive response that was received and recorded for
+every recorded attempt; it is never assigned after an interruption without
+those responses, never when an earlier attempt was accepted or is unknown, and
+only response classes shown by evidence to precede any mutation qualify.
+`Failed` needs a completion observation that contradicts the postconditions,
+not evidence that is merely missing, and every attempt accounted for (§4); it
+includes the case where no request took effect because the executor was
+stopped before sending. Every other error or gap is `unresolved`.
 
 The manager must observe after a lost response, restart, ownership loss or
 reconnect. Before a retry or dependent mutation it rechecks identity,
@@ -351,10 +360,12 @@ has. Adoption instead ends with an **adoption record**, written by one
 transaction that requires:
 
 1. the adopted release is published and the adoption is approved in the
-   current recovery epoch;
-2. an observation taken after that approval, inside the maximum observation
-   age, shows the machine's digest equal to the adopted release's artifact for
-   that machine and its assignment revision unchanged; and
+   current recovery epoch, the approval binding the machine, its assignment
+   revision, the adopted release and artifact digest, a maximum observation
+   age and its own expiry;
+2. an observation taken after that approval, no older than the age the
+   approval binds, shows the machine's digest equal to the adopted release's
+   artifact for that machine and its assignment revision unchanged; and
 3. no operation holds the machine scope, and the scope gate is open apart from
    a freeze placed for this drift.
 
@@ -445,7 +456,8 @@ An implementation and its reviewer can check these directly:
 3. **`Applied` follows evidence.** `Applied` changes only on entering
    `completed`, to that operation's bound release and artifact, or by a drift
    adoption record (§6). Both need an observation taken for that purpose:
-   after the latest recorded attempt, or after the adoption approval.
+   after every recorded attempt is accounted for, or after the adoption
+   approval and inside the age it binds.
 4. **Plans do not change.** Any change to a binding is a new plan that needs a
    new approval.
 5. **Release only on a terminal state.** The machine scope and rollout slot
@@ -495,8 +507,9 @@ network partitions and X loses ownership. The manager restarts as Y; A becomes
 - Y observes M after A's recorded attempt. Matching identity, assignment
   revision, digest and health establish A's postconditions but do not account
   for A's attempt: X may be stalled rather than finished. Once X's response is
-  recorded, or evidence shows X can no longer send, A becomes `completed`,
-  `Applied` becomes *a*, the scope is released, and B may then run its own §3.
+  recorded, or evidence shows X can no longer send, Y observes M again; if
+  that completion observation still matches, A becomes `completed`, `Applied`
+  becomes *a*, the scope is released, and B may then run its own §3.
 - If M still reports the previous digest, Y cannot tell "never delivered" from
   "still in flight". A stays `unresolved`. It becomes safe to retry only if
   evidence establishes retry safety for `apply-config`/`no-reboot`, this
