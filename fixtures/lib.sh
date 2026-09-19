@@ -58,6 +58,14 @@ bao() {
 
 pg() { docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" "$@"; }
 
+# pg_client <psql args>: psql from a throwaway container on the fixture network. The image trusts
+# every connection that starts inside the server's own container, so pg() proves nothing about the
+# password; only a connection from another host is asked for it.
+pg_client() {
+  PGPASSWORD=$BW_POSTGRES_PASSWORD docker run --rm --network "${FIXTURE_NAME}_default" \
+    --env PGPASSWORD "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
+}
+
 # container <target>: map an injection target to a container name.
 container() {
   case $1 in

@@ -98,6 +98,14 @@ grep --quiet 'live database dump' "$degraded/unavailable.txt" || fail "evidence 
 grep --quiet --fixed-strings "$degraded/backups/pg-selftest.dump.sql" "$degraded/leak-scan.txt" ||
   fail "evidence did not scan the database backup while postgres was down"
 ok "evidence still captures and scans while postgres is down, and names what is missing"
+# A snapshot that fails must not leave a file a later restore would accept, and the timeline must
+# tell it apart from the kill above, which did happen.
+! "$here/inject" db-snapshot selftest-broken 2>/dev/null || fail "db-snapshot succeeded while postgres was down"
+[ -z "$(find "$STATE/backups" -name 'pg-selftest-broken*')" ] || fail "a failed db-snapshot left a file behind"
+grep --quiet --extended-regexp ' failed rc=[0-9]+ db-snapshot selftest-broken$' "$STATE/injections.log" ||
+  fail "injections.log does not record the failed db-snapshot as failed"
+grep --quiet ' done kill postgres$' "$STATE/injections.log" || fail "injections.log does not record the kill as done"
+ok "a failed snapshot leaves no file behind, and injections.log records done and failed apart"
 "$here/inject" start postgres
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "postgres lost committed data over a crash"
 ok "kill / start postgres keeps committed data"
@@ -157,7 +165,14 @@ mkdir -p "$STATE/selftest-outside"
 printf 'linked=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/linked-target"
 ln -sf "$STATE/selftest-outside/linked-target" "$STATE/data/selftest-link"
 printf 'dashed=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/-delete"
-bundle=$(cd "$STATE/selftest-outside" && "$here/evidence" -delete)
+# And a leak in a file that only shares the positive control's name: it is not the control.
+mkdir -p "$STATE/selftest-outside/-delete.d"
+printf 'imposter=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/-delete.d/canary-control.txt"
+bundle=$(cd "$STATE/selftest-outside" && "$here/evidence" -delete -delete.d 2>"$STATE/selftest-evidence.err") ||
+  fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
+grep --quiet --fixed-strings "$STATE/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
+  fail "leak scan took a file named like its positive control for the control"
+rm "$STATE/selftest-evidence.err"
 grep --quiet --fixed-strings "$STATE/data/selftest-link" "$bundle/leak-scan.txt" || fail "leak scan skipped a symlinked file"
 grep --quiet --fixed-strings "$STATE/selftest-outside/-delete" "$bundle/leak-scan.txt" ||
   fail "leak scan mishandled a scan path named like a find action"

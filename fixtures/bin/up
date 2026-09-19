@@ -9,12 +9,16 @@ docker compose version >/dev/null || die "missing prerequisite: docker compose v
 [ "$(uname -sm)" = "Linux x86_64" ] || die "pinned CLI assets are linux/amd64 only"
 [ ! -e "$STATE" ] || die "$STATE exists: run fixtures/bin/down first"
 
-# One fixture per Docker daemon: names, ports and subnet are pinned. Containers that exist without
-# a state directory here belong to another checkout, or to a run whose state was lost.
+# One fixture per Docker daemon: names, ports and subnet are pinned. Resources that exist without
+# a state directory here belong to another checkout, or to a run whose state was lost. Volumes
+# matter as much as containers: PostgreSQL keeps the password of whoever initialized the volume.
 foreign=$(
   docker ps --all --filter "label=com.docker.compose.project=$FIXTURE_NAME" --format '{{.Names}}' &&
-    docker ps --all --filter "label=talos.cluster.name=$FIXTURE_NAME" --format '{{.Names}}'
-) || die "cannot ask Docker for existing fixture containers"
+    docker ps --all --filter "label=talos.cluster.name=$FIXTURE_NAME" --format '{{.Names}}' &&
+    docker network ls --filter "label=com.docker.compose.project=$FIXTURE_NAME" --format '{{.Name}}' &&
+    docker network ls --filter "label=talos.cluster.name=$FIXTURE_NAME" --format '{{.Name}}' &&
+    docker volume ls --filter "label=com.docker.compose.project=$FIXTURE_NAME" --format '{{.Name}}'
+) || die "cannot ask Docker for existing fixture resources"
 [ -z "$foreign" ] || die "a fixture already exists on this Docker daemon ($(tr '\n' ' ' <<<"$foreign")). \
 Run fixtures/bin/down in the checkout that created it; see 'Known limits' in fixtures/README.md"
 
@@ -92,7 +96,8 @@ talosctl gen secrets --from-controlplane-config "$STATE/controlplane.yaml" \
 # must still hold more than the prefix.
 {
   printf 'BWSYNTH-\n'
-  jq -r '.root_token, .unseal_keys_b64[]' "$STATE/bao-init.json"
+  # Both encodings of the unseal key: they share no substring, and either is the credential.
+  jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json"
   awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env"
   awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \
     "$STATE/talos-secrets.yaml"
@@ -109,6 +114,11 @@ for c in "$PG" "$BAO" "$CP" "$WORKER"; do
   [ "$(docker inspect --format '{{.State.Running}}' "$c")" = true ] ||
     die "$c stopped while the fixture was starting (see 'Known limits' in fixtures/README.md)"
 done
+# Running is not usable. Several minutes of Talos creation have passed since both services were
+# last asked, so ask again, with credentials: an OpenBao that sealed itself and a PostgreSQL that
+# does not accept this run's password both still count as running.
+bao token lookup >/dev/null 2>&1 || die "OpenBao no longer answers an authenticated request"
+[ "$(pg_client -Atc 'select 1')" = 1 ] || die "PostgreSQL does not accept this run's password over the network"
 
 cat >&2 <<EOF
 fixture is up

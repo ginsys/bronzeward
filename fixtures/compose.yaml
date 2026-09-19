@@ -14,8 +14,10 @@ services:
       - "127.0.0.1:${POSTGRES_PORT}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    # Over TCP on purpose: while the image initializes a new data directory it runs a temporary
+    # server on the unix socket only, and a check through that socket reports healthy too early.
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "bronzeward", "-d", "bronzeward"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "bronzeward", "-d", "bronzeward"]
       interval: 2s
       timeout: 2s
       retries: 30

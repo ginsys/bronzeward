@@ -28,10 +28,15 @@ compose_label=com.docker.compose.project=$FIXTURE_NAME
 # labels above select another checkout's fixture just as well. Compose records the directory a
 # project was started from; the Talos containers carry no such mark, so for them the only sign of
 # ownership is a state directory here.
+# Networks and named volumes count too: they outlive containers that were removed by hand, and
+# `compose down --volumes` would delete them just the same.
 existing=$(
   docker ps --all --quiet --filter "label=$compose_label" &&
-    docker ps --all --quiet --filter "label=$talos_label"
-) || die "could not list the fixture containers; nothing was removed"
+    docker ps --all --quiet --filter "label=$talos_label" &&
+    docker network ls --quiet --filter "label=$compose_label" &&
+    docker network ls --quiet --filter "label=$talos_label" &&
+    docker volume ls --quiet --filter "label=$compose_label"
+) || die "could not list the fixture's Docker resources; nothing was removed"
 owners=$(
   docker ps --all --quiet --filter "label=$compose_label" |
     xargs --no-run-if-empty docker inspect \
@@ -42,7 +47,7 @@ if [ "$adopt" -eq 0 ] && [ -n "$existing" ]; then
   [ -z "$foreign" ] ||
     die "the running fixture was started from $foreign, not from here; nothing was removed. Run its own fixtures/bin/down, or pass --adopt if that checkout is gone"
   [ -e "$STATE" ] ||
-    die "fixture containers exist but there is no $STATE, so they cannot be shown to belong to this checkout; nothing was removed. Pass --adopt to remove them anyway"
+    die "fixture containers, networks or volumes exist but there is no $STATE, so they cannot be shown to belong to this checkout; nothing was removed. Pass --adopt to remove them anyway"
 fi
 
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
@@ -53,7 +58,13 @@ volume_names=$(
     xargs --no-run-if-empty docker inspect \
       --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'
 ) || die "could not list the Talos node volumes; nothing was removed"
-mapfile -t node_volumes < <(sed '/^$/d' <<<"$volume_names")
+# Remembered in the state directory, so that a second run after a partial teardown, when the
+# containers are gone but a volume is not, still knows which volumes were the fixture's.
+if [ -d "$STATE" ]; then
+  printf '%s\n' "$volume_names" >>"$STATE/down-node-volumes"
+  volume_names=$(cat "$STATE/down-node-volumes")
+fi
+mapfile -t node_volumes < <(sed '/^$/d' <<<"$volume_names" | sort -u)
 
 # Name the project directory and file, so a compose.yaml in the caller's working directory can
 # never be the one that is torn down. The password is only interpolated, never used, by `down`.
@@ -70,17 +81,6 @@ docker network ls --quiet --filter "label=$talos_label" | xargs --no-run-if-empt
 for volume in "${node_volumes[@]}"; do
   docker volume rm "$volume" >/dev/null 2>&1
 done
-
-case $STATE in
-  */fixtures/.state) rm -rf -- "$STATE" ;;
-  *) die "refusing to delete unexpected state path $STATE" ;;
-esac
-if [ "$purge" -eq 1 ]; then
-  case $CACHE in
-    */fixtures/.cache) rm -rf -- "$CACHE" ;;
-    *) die "refusing to delete unexpected cache path $CACHE" ;;
-  esac
-fi
 
 # A query that fails lists nothing, which reads exactly like "nothing left". Keep the two apart.
 left=
@@ -104,11 +104,27 @@ probe volume docker volume ls --filter "label=$compose_label" --format '{{.Name}
 for volume in "${node_volumes[@]}"; do
   probe volume docker volume ls --quiet --filter "name=^${volume}$"
 done
-[ ! -e "$STATE" ] || left+="directory $STATE"$'\n'
 if [ -n "$left" ]; then
   say "fixtures: leftovers after down:"
   say "${left%$'\n'}"
 fi
 [ "$unverified" -eq 0 ] || say "fixtures: a Docker query failed, so what is left could not be verified"
-[ -z "$left" ] && [ "$unverified" -eq 0 ] || exit 1
+# The state directory goes last, and only after a verified clean teardown: it is what shows a
+# second run that the leftovers are this checkout's own, and it names the node volumes.
+if [ -n "$left" ] || [ "$unverified" -ne 0 ]; then
+  [ ! -e "$STATE" ] || say "fixtures: $STATE is kept, so that down can be run again"
+  exit 1
+fi
+
+case $STATE in
+  */fixtures/.state) rm -rf -- "$STATE" ;;
+  *) die "refusing to delete unexpected state path $STATE" ;;
+esac
+if [ "$purge" -eq 1 ]; then
+  case $CACHE in
+    */fixtures/.cache) rm -rf -- "$CACHE" ;;
+    *) die "refusing to delete unexpected cache path $CACHE" ;;
+  esac
+fi
+[ ! -e "$STATE" ] || die "could not remove $STATE"
 say "fixture is down: no containers, networks, volumes or state left"
