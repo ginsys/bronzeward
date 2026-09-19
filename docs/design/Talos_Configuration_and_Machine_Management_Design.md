@@ -731,6 +731,8 @@ observed digest
 
 These values must be stored separately. “Apply succeeded” does not prove the machine later remained on that configuration, and “desired changed” does not mean an offline machine received it.
 
+The applied release has one other source: an explicitly approved baseline that the manager verified by observation without sending anything, recorded as such. Existing-cluster adoption (§9.1) and drift adoption (§12.4) both accept a configuration the machine already runs, and sending it again would mutate a machine whose state is being accepted. The alternative, a separate reconciled-baseline value beside the applied release, was rejected because every drift and recovery rule would then have to carry a fourth state value.
+
 ### 12.2 Plan before apply
 
 Plan from a published artifact rather than re-rendering at dispatch. Bind the release/artifact identity, secret and crypto references, target machines and assignment revisions, operation **and mode**, parameters, relevant observed preconditions, rollout limits, expiry and approval policy. Include a redacted diff, upstream validation and available dry-run evidence; distinguish these from checks performed against live state at execution.

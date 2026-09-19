@@ -34,7 +34,10 @@ The manager stores three distinct values:
 
 `Applied` changes only when an operation reaches `completed` (§4), and then to
 that operation's bound release and artifact, or by a drift adoption record
-(§6). An RPC response alone does not update `Applied`. `Desired` differing from `Applied` is pending convergence,
+(§6). The adoption record is the approved, observation-verified baseline that
+[design §12.1](../design/Talos_Configuration_and_Machine_Management_Design.md#121-desired-applied-and-observed-state)
+allows as the second source of the applied release. An RPC response alone does
+not update `Applied`. `Desired` differing from `Applied` is pending convergence,
 not drift (§6). A newer observation does not invalidate a plan unless it
 contradicts one of the plan's declared preconditions; observation freshness at
 dispatch is governed by §3.
@@ -89,7 +92,14 @@ this contract states rather than hides.
 
 ### 3.1 Execution-time evidence, gathered before the transaction
 
-The executor gathers and durably records on the operation timeline:
+Before touching any protected resource, the executor checks that the plan is
+currently approved, unrevoked and unexpired and that the scope gate is open
+(comparisons 1 and 6 of §3.2). Artifact decryption and operation credentials
+are gated by that application approval check; an executor whose approval was
+revoked while it was queued reads neither. The check is not atomic with what
+follows, which is why §3.2 repeats it.
+
+The executor then gathers and durably records on the operation timeline:
 
 1. a fresh machine observation taken for this dispatch: identity, assignment,
    configuration digest, and the health and capacity evidence named by the
@@ -250,17 +260,17 @@ An observation ordered after an attempt does not show that the attempt's
 request has executed or can no longer execute. The scope is therefore released
 only when every recorded attempt is **accounted for**, meaning one of:
 
-- its response is recorded on the timeline;
-- its effect is observed: it is the operation's only recorded attempt, the
-  §3.1 observation it was admitted on showed a digest different from the bound
-  artifact's, and a completion observation shows the bound digest; or
+- its response is recorded on the timeline; or
 - evidence establishes that its executor can no longer send. What counts for
   the selected ownership mechanism is an E4 result; until then it needs a
   specific operator decision.
 
-An operation with an unaccounted attempt stays `unresolved` with its scope
-held, however well the machine's state matches, because releasing the scope
-would let a newer operation be overwritten by the late request.
+A matching digest is not such evidence, even when the digest differed before
+the attempt: direct Talos access can apply the same artifact independently
+while the attempt's executor is merely stalled. An operation with an
+unaccounted attempt stays `unresolved` with its scope held, however well the
+machine's state matches, because releasing the scope would let a newer
+operation be overwritten by the late request.
 
 ## 5. Interruption and retry classification
 
@@ -336,9 +346,8 @@ observed, drifted digest, approved and dispatched under §3, advancing `Applied`
 when it reaches `completed`.
 
 Adopt sends nothing to the machine. Dispatching the adopted release would
-mutate a machine whose state is being accepted, and its attempt could never be
-accounted for by observed effect (§4), since the digest is the same before and
-after. Adoption instead ends with an **adoption record**, written by one
+mutate a machine whose state is being accepted, to reach a digest it already
+has. Adoption instead ends with an **adoption record**, written by one
 transaction that requires:
 
 1. the adopted release is published and the adoption is approved in the
@@ -349,9 +358,12 @@ transaction that requires:
 3. no operation holds the machine scope, and the scope gate is open apart from
    a freeze placed for this drift.
 
-The record sets `Applied` to the adopted release, marked as adopted by
-observation rather than dispatched, as first-milestone import establishes its
-baseline without mutating the machine. If the machine has changed again,
+The same transaction selects the adopted release as `Desired`; otherwise the
+machine would at once be pending convergence towards the release it drifted
+from, and a later plan could undo the adoption. The record sets `Applied` to
+the adopted release, marked as adopted by observation rather than dispatched,
+as first-milestone import establishes its baseline without mutating the
+machine. If the machine has changed again,
 comparison 2 fails and the scope stays drifted. Publishing and approving an
 adopted release does not by itself resolve drift.
 
@@ -480,11 +492,11 @@ network partitions and X loses ownership. The manager restarts as Y; A becomes
   `unresolved` (invariant 1). This is the contract's A-after-B protection.
   Because nothing newer than *a* can be dispatched while A is uncertain, a
   late delivery of X's request cannot overwrite newer configuration.
-- Y observes M after A's recorded attempt. If identity, assignment revision,
-  digest and health match A's postconditions, A's single attempt is accounted
-  for by its observed effect, because the observation it was admitted on
-  showed the previous digest. A becomes `completed`, `Applied` becomes *a*, the scope is
-  released, and B may then run its own §3.
+- Y observes M after A's recorded attempt. Matching identity, assignment
+  revision, digest and health establish A's postconditions but do not account
+  for A's attempt: X may be stalled rather than finished. Once X's response is
+  recorded, or evidence shows X can no longer send, A becomes `completed`,
+  `Applied` becomes *a*, the scope is released, and B may then run its own §3.
 - If M still reports the previous digest, Y cannot tell "never delivered" from
   "still in flight". A stays `unresolved`. It becomes safe to retry only if
   evidence establishes retry safety for `apply-config`/`no-reboot`, this
