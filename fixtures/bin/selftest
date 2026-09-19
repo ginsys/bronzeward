@@ -2,7 +2,7 @@
 # Prove the fixture end to end: up, every injection once with an assertion, evidence, down.
 # Usage: selftest [--keep]   (--keep skips up and down, to rerun against a running fixture)
 set -euo pipefail
-here=$(cd "$(dirname "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
@@ -120,7 +120,7 @@ ok "evidence records OpenBao state as unknown, not empty, while openbao is down"
 ok "kill / start openbao comes back sealed, unseals, keeps state"
 
 # Partitioned provider: clients lose it, the out-of-band observer does not, and the bundle says both.
-bao_published() { curl --silent --max-time 5 --output /dev/null "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health"; }
+bao_published() { curl --noproxy '*' --silent --max-time 5 --output /dev/null "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health"; }
 "$here/inject" netsplit openbao
 ! bao_published || fail "partitioned openbao still answers on its published port"
 split=$("$here/evidence") || fail "evidence aborted while openbao was partitioned"
@@ -168,11 +168,23 @@ printf 'dashed=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/-delete"
 # And a leak in a file that only shares the positive control's name: it is not the control.
 mkdir -p "$STATE/selftest-outside/-delete.d"
 printf 'imposter=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/-delete.d/canary-control.txt"
-bundle=$(cd "$STATE/selftest-outside" && "$here/evidence" -delete -delete.d 2>"$STATE/selftest-evidence.err") ||
-  fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
+# The control itself with a second secret on the same line: one matching line, two secrets.
+cp "$STATE/data/canary-control.txt" "$STATE/selftest-outside/control-as-planted"
+printf 'planted on purpose: %s and not on purpose: %s\n' "$BW_CANARY" "$BW_BAO_METADATA_TOKEN" >"$STATE/data/canary-control.txt"
+# A client private key from the generated talosconfig, which the secrets bundle does not hold.
+awk '$1 == "key:" {print "client-key=" $2}' "$TALOSCONFIG" >"$STATE/data/selftest-client-key-leak"
+rc=0
+bundle=$(cd "$STATE/selftest-outside" && "$here/evidence" -delete -delete.d 2>"$STATE/selftest-evidence.err") || rc=$?
+cp "$STATE/selftest-outside/control-as-planted" "$STATE/data/canary-control.txt" # before anything can fail
+[ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
 grep --quiet --fixed-strings "$STATE/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
   fail "leak scan took a file named like its positive control for the control"
+grep --quiet --line-regexp --fixed-strings "2 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
+  fail "leak scan excused a positive control that held a second secret"
 rm "$STATE/selftest-evidence.err"
+grep --quiet --fixed-strings "$STATE/data/selftest-client-key-leak" "$bundle/leak-scan.txt" ||
+  fail "leak scan missed a client private key from the talosconfig"
+rm "$STATE/data/selftest-client-key-leak"
 grep --quiet --fixed-strings "$STATE/data/selftest-link" "$bundle/leak-scan.txt" || fail "leak scan skipped a symlinked file"
 grep --quiet --fixed-strings "$STATE/selftest-outside/-delete" "$bundle/leak-scan.txt" ||
   fail "leak scan mishandled a scan path named like a find action"

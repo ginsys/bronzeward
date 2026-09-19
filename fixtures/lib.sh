@@ -1,7 +1,9 @@
 # shellcheck shell=bash
 # Shared setup for the fixture commands. Sourced, never executed.
 
-FIXTURES=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# CDPATH emptied: with it set, `cd` to a relative path prints the directory it found, and the
+# substitution would capture that line as well as the one from pwd.
+FIXTURES=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 STATE=$FIXTURES/.state
 CACHE=$FIXTURES/.cache
 
@@ -75,6 +77,16 @@ pg() { docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" "$@"; }
 pg_client() {
   PGPASSWORD=$BW_POSTGRES_PASSWORD docker run --rm --network "${FIXTURE_NAME}_default" \
     --env PGPASSWORD "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
+}
+
+# Talos node volumes are anonymous and unlabelled: once their container is gone nothing ties them to
+# the fixture. bin/up records these names right after creating the cluster, bin/down adds what it
+# still sees, and the list in .state is what teardown removes and verifies.
+talos_volume_names() {
+  # shellcheck disable=SC2016  # a Go template, not a shell expansion
+  docker ps --all --quiet --filter "label=talos.cluster.name=$FIXTURE_NAME" |
+    xargs --no-run-if-empty docker inspect \
+      --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'
 }
 
 # container <target>: map an injection target to a container name.

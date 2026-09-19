@@ -57,8 +57,9 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
 - `bao-init.json`: the single OpenBao unseal key, in base64 and in hex, and the root token.
 - `talos-secrets.yaml`, `controlplane.yaml`, `talosconfig`, `kubeconfig`: the cluster's own
   generated secrets bundle and client configs.
-- `scan-patterns.txt`: every one of the above as a fixed string. `bin/evidence` reports the files
-  that contain any of them, by count only; a matched line is never printed.
+- `scan-patterns.txt`: every one of the above as a fixed string, the client private keys in
+  `talosconfig` and `kubeconfig` included. `bin/evidence` reports the files that contain any of
+  them, with the number of occurrences only; a matched line is never printed.
 
 The scan has a positive control, `.state/data/canary-control.txt`. If the scan does not find it, or
 cannot read a path or file it was given, the command fails, because an empty result would then
@@ -98,7 +99,8 @@ before `down`.
   a valid SQLite backup while no process has the database open.
 - The Talos subnet must not overlap the Kubernetes pod or service ranges. With an overlapping
   subnet Talos leaves the node address out of its API certificate and the cluster never bootstraps.
-- Talos node volumes are anonymous. `bin/down` removes the ones attached to fixture containers. If
+- Talos node volumes are anonymous. `bin/up` records their names in `.state/` once the cluster
+  exists, and `bin/down` removes those and any still attached to fixture containers. If
   `talosctl cluster create` fails before a container exists, its empty volumes cannot be told apart
   from anyone else's and are left behind; `docker volume ls --filter dangling=true` shows them.
 - A host that restarts the Docker daemon when a new bridge interface appears, for example through

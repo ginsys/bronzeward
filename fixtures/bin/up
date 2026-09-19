@@ -22,14 +22,18 @@ foreign=$(
 [ -z "$foreign" ] || die "a fixture already exists on this Docker daemon ($(tr '\n' ' ' <<<"$foreign")). \
 Run fixtures/bin/down in the checkout that created it; see 'Known limits' in fixtures/README.md"
 
-# EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
-# ERR trap, so neither would print the hint.
-trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; run fixtures/bin/down to remove what was created"' EXIT
-
 synthetic() { printf 'BWSYNTH-%s' "$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"; }
 
 umask 077
-mkdir -p "$STATE/data" "$STATE/backups"
+# A plain mkdir is the claim: the checks above are only a look, and of two `up` started together
+# both can pass them. Only one can create the directory.
+mkdir "$STATE" 2>/dev/null || die "$STATE appeared meanwhile: another fixtures/bin/up is running in this checkout"
+# From here on a failure leaves something behind. Not earlier: an `up` that was refused created
+# nothing, and the hint would send its caller to tear down a fixture that is not theirs.
+# EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
+# ERR trap, so neither would print the hint.
+trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; run fixtures/bin/down to remove what was created"' EXIT
+mkdir "$STATE/data" "$STATE/backups"
 {
   printf 'BW_CANARY=%s\n' "$(synthetic)"
   printf 'BW_POSTGRES_PASSWORD=%s\n' "$(synthetic)"
@@ -84,6 +88,10 @@ talosctl cluster create docker \
   --subnet "$TALOS_SUBNET" \
   --workers 1 \
   --talosconfig-destination "$TALOSCONFIG"
+# While the containers certainly exist: see talos_volume_names in lib.sh.
+volume_names=$(talos_volume_names) || die "could not list the Talos node volumes"
+[ -n "$volume_names" ] || die "the Talos nodes have no volumes to record; teardown could not verify them"
+printf '%s\n' "$volume_names" >"$STATE/down-node-volumes"
 
 # The cluster's own secrets bundle, for import experiments and as leak-scan patterns.
 talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" \
@@ -94,8 +102,16 @@ talosctl gen secrets --from-controlplane-config "$STATE/controlplane.yaml" \
 # Leak-scan patterns: every synthetic secret this run produced. An empty or very short pattern
 # would match every line of every file, so anything under 8 characters is dropped, and the list
 # must still hold more than the prefix.
+# The client configs hold private keys of their own, generated for this cluster's admin clients and
+# absent from the secrets bundle. Collected first, so that a config whose key is not where it is
+# expected fails the run instead of thinning the list.
+talos_client_key=$(awk '$1 == "key:" {print $2}' "$TALOSCONFIG")
+kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG")
+[ -n "$talos_client_key" ] || die "no client key found in $TALOSCONFIG; it would go unscanned"
+[ -n "$kube_client_key" ] || die "no client key found in $KUBECONFIG; it would go unscanned"
 {
   printf 'BWSYNTH-\n'
+  printf '%s\n' "$talos_client_key" "$kube_client_key"
   # Both encodings of the unseal key: they share no substring, and either is the credential.
   jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json"
   awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env"

@@ -49,7 +49,8 @@ network_of() {
 bao_http() { # bao_http <method> <api-path> [curl args]
   local method=$1 path=$2
   shift 2
-  curl --fail --silent --show-error --request "$method" \
+  # --noproxy: a proxy from the caller's shell must never stand between this and localhost.
+  curl --noproxy '*' --fail --silent --show-error --request "$method" \
     --header "X-Vault-Token: $BW_BAO_ROOT_TOKEN" "http://127.0.0.1:$OPENBAO_PORT/v1/$path" "$@"
 }
 

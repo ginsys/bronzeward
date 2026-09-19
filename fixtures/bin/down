@@ -53,13 +53,10 @@ fi
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
 # see "Known limits" in fixtures/README.md.
-volume_names=$(
-  docker ps --all --quiet --filter "label=$talos_label" |
-    xargs --no-run-if-empty docker inspect \
-      --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'
-) || die "could not list the Talos node volumes; nothing was removed"
-# Remembered in the state directory, so that a second run after a partial teardown, when the
-# containers are gone but a volume is not, still knows which volumes were the fixture's.
+volume_names=$(talos_volume_names) || die "could not list the Talos node volumes; nothing was removed"
+# Remembered in the state directory, where bin/up already put the names it saw after creating the
+# cluster: containers that were removed by hand, or by an earlier down that could not finish, leave
+# volumes that only this list still ties to the fixture.
 if [ -d "$STATE" ]; then
   printf '%s\n' "$volume_names" >>"$STATE/down-node-volumes"
   volume_names=$(cat "$STATE/down-node-volumes")
