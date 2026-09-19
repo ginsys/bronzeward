@@ -11,7 +11,7 @@ set -euo pipefail
 . "$(dirname "$0")/../lib.sh"
 
 need_state
-need docker curl jq tar sha256sum git find awk timeout realpath mktemp
+need docker curl jq tar sha256sum git find awk timeout realpath mktemp cmp stat
 # Extra scan paths become absolute: find would read a relative name such as -delete as an
 # expression, not as a path.
 extras=()
@@ -38,6 +38,12 @@ unavailable() {
   say "evidence: unavailable: $*"
 }
 running() { [ "$(docker inspect --format '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
+# Evidence is captured while things are broken on purpose, so every request to a service is
+# bounded here, in place of the unbounded helpers of lib.sh: a provider paused between two requests
+# would otherwise hang the capture for good. A request that times out fails, and a failed one is
+# recorded as unknown or unavailable like any other.
+bao() { timeout 20 docker exec -e BAO_TOKEN="${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}}" "$BAO" bao "$@"; }
+pg() { timeout 60 docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" "$@"; }
 # reported <command...>: the command's one-line output, or UNAVAILABLE
 reported() {
   local value
@@ -111,7 +117,7 @@ done
 # container's network attachments, so a partition cannot be missed.
 (
   export BAO_TOKEN=$BW_BAO_METADATA_TOKEN
-  if ! running "$BAO" || ! timeout 20 docker exec -e BAO_TOKEN="$BAO_TOKEN" "$BAO" bao token lookup >/dev/null 2>&1; then
+  if ! running "$BAO" || ! bao token lookup >/dev/null 2>&1; then
     jq -cn '{unknown: "openbao stopped, sealed, paused or unreachable; no metadata could be read"}'
     exit 3
   fi
@@ -200,36 +206,69 @@ trap 'rm -f -- "$list"' EXIT
 roots=("$out" "$STATE/data" "$STATE/backups" "${extras[@]}")
 dangling=$(find -L "${roots[@]}" -type l -print -quit) || die "leak scan could not walk every path; results void"
 [ -z "$dangling" ] || die "leak scan cannot follow the symlink $dangling; results void"
+
+# The positive control is one file, plus its copy at the same place inside an expanded store
+# snapshot, and only while it holds exactly what bin/up planted. A file that merely shares the
+# name is a leak like any other, and so is a control whose content changed: one that gained a
+# second secret, or whose canary was replaced by another credential.
+control=$STATE/data/canary-control.txt
+store_copy="^$out/backups/store-[^/]+/data/canary-control\\.txt\$"
+is_control() { # is_control <file>
+  [ "$1" = "$control" ] || [[ $1 =~ $store_copy ]] || return 1
+  cmp --silent -- "$1" <(control_content)
+}
+secret_in_name() { # secret_in_name <path>
+  local rc=0
+  grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" <<<"$1" || rc=$?
+  [ "$rc" -le 1 ] || die "leak scan could not match a path name against the patterns; results void"
+  [ "$rc" -eq 0 ]
+}
+# shown <path>: the path as the bundle may record it. A name that holds a secret is never written
+# out, for the same reason a matched line is not; the entry is identified by its inode instead.
+# It runs inside command substitutions, where `die` would only end the subshell, so it decides for
+# itself and withholds the name whenever the match did not plainly say "no secret".
+shown() {
+  local rc=0
+  grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" <<<"$1" || rc=$?
+  if [ "$rc" -eq 1 ]; then
+    printf '%s' "$1"
+  else
+    printf '(a path whose name holds secret material, withheld; inode %s)' "$(stat --format=%i -- "$1")"
+  fi
+}
+
 find -L "${roots[@]}" -type f -print0 >"$list" || die "leak scan could not walk every path; results void"
 : >"$scan"
+control_seen=0
+others=
 while IFS= read -r -d '' file; do
   [ "$file" != "$scan" ] || continue
-  # Occurrences, not matching lines: two secrets on one line are two hits. The count is what tells
-  # the positive control, which holds exactly one, from a control that gained a second secret.
+  # Occurrences, not matching lines: two secrets on one line are two hits.
   rc=0
   found=$(grep --text --fixed-strings --only-matching --file="$STATE/scan-patterns.txt" "$file") || rc=$?
   [ "$rc" -le 1 ] || die "leak scan could not read $file; results void"
   hits=$(sed '/^$/d' <<<"$found" | wc -l)
   unset found
-  [ "$hits" -eq 0 ] || printf '%s %s\n' "$hits" "$file" >>"$scan"
+  [ "$hits" -gt 0 ] || continue
+  printf '%s %s\n' "$hits" "$(shown "$file")" >>"$scan"
+  [ "$file" != "$control" ] || control_seen=1
+  is_control "$file" || others+="$hits $(shown "$file")"$'\n'
+done <"$list"
+
+# A secret can sit in a name as well as in a file: every directory entry under the same paths,
+# directories included, is matched too.
+find -L "${roots[@]}" -print0 >"$list" || die "leak scan could not walk every path; results void"
+while IFS= read -r -d '' entry; do
+  secret_in_name "$entry" || continue
+  printf '1 %s\n' "$(shown "$entry")" >>"$scan"
+  others+="1 $(shown "$entry")"$'\n'
 done <"$list"
 rm -f "$list"
 
-control=$STATE/data/canary-control.txt
-CONTROL=$control awk '{ if (substr($0, index($0, " ") + 1) == ENVIRON["CONTROL"]) found = 1 } END { exit !found }' "$scan" ||
+[ "$control_seen" -eq 1 ] ||
   die "leak scan did not find its positive control $control: the scan is broken, results void"
-# The control is that one file, and its copy at the same place inside an expanded store snapshot,
-# each with the single hit bin/up planted. A file that merely shares the name, anywhere else, is a
-# leak like any other; so is a control that gained a second secret, which is why it is excluded
-# below only when its count is exactly one.
-others=$(CONTROL=$control STORES=$out/backups/store- awk '{
-  path = substr($0, index($0, " ") + 1)
-  if ($1 == 1 && path == ENVIRON["CONTROL"]) next
-  if ($1 == 1 && index(path, ENVIRON["STORES"]) == 1 &&
-      substr(path, length(ENVIRON["STORES"]) + 1) ~ /^[^\/]+\/data\/canary-control\.txt$/) next
-  print
-}' "$scan") || die "leak scan could not be summarized; results void"
 leaks=$(sed '/^$/d' <<<"$others" | wc -l)
+others=${others%$'\n'}
 
 say "leak scan: positive control found; $leaks other file(s) contain synthetic secret material"
 [ "$leaks" -eq 0 ] || say "$others"

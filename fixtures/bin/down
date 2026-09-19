@@ -31,23 +31,28 @@ compose_label=com.docker.compose.project=$FIXTURE_NAME
 # Networks and named volumes count too: they outlive containers that were removed by hand, and
 # `compose down --volumes` would delete them just the same.
 existing=$(
-  docker ps --all --quiet --filter "label=$compose_label" &&
+  claim_names &&
+    docker ps --all --quiet --filter "label=$compose_label" &&
     docker ps --all --quiet --filter "label=$talos_label" &&
     docker network ls --quiet --filter "label=$compose_label" &&
     docker network ls --quiet --filter "label=$talos_label" &&
     docker volume ls --quiet --filter "label=$compose_label"
 ) || die "could not list the fixture's Docker resources; nothing was removed"
+claimed_by=$(claim_owner) || die "could not read who holds the fixture claim; nothing was removed"
 owners=$(
-  docker ps --all --quiet --filter "label=$compose_label" |
+  printf '%s\n' "$claimed_by" &&
+    docker ps --all --quiet --filter "label=$compose_label" |
     xargs --no-run-if-empty docker inspect \
-      --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' | sort -u
+      --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
 ) || die "could not read who owns the fixture containers; nothing was removed"
-foreign=$(grep --invert-match --line-regexp --fixed-strings -- "$FIXTURES" <<<"$owners" | sed '/^$/d')
+foreign=$(grep --invert-match --line-regexp --fixed-strings -- "$FIXTURES" <<<"$owners" | sed '/^$/d' | sort -u)
 if [ "$adopt" -eq 0 ] && [ -n "$existing" ]; then
   [ -z "$foreign" ] ||
-    die "the running fixture was started from $foreign, not from here; nothing was removed. Run its own fixtures/bin/down, or pass --adopt if that checkout is gone"
-  [ -e "$STATE" ] ||
-    die "fixture containers, networks or volumes exist but there is no $STATE, so they cannot be shown to belong to this checkout; nothing was removed. Pass --adopt to remove them anyway"
+    die "the fixture on this Docker daemon was started from $foreign, not from here; nothing was removed. Run its own fixtures/bin/down, or pass --adopt if that checkout is gone"
+  # Either mark shows the resources to be this checkout's own: the claim `up` took here, or, for a
+  # fixture that lost its claim, the state directory.
+  [ "$claimed_by" = "$FIXTURES" ] || [ -e "$STATE" ] ||
+    die "fixture containers, networks or volumes exist, but neither a claim taken from this checkout nor $STATE shows them to belong to it; nothing was removed. Pass --adopt to remove them anyway"
 fi
 
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
@@ -58,8 +63,10 @@ volume_names=$(talos_volume_names) || die "could not list the Talos node volumes
 # cluster: containers that were removed by hand, or by an earlier down that could not finish, leave
 # volumes that only this list still ties to the fixture.
 if [ -d "$STATE" ]; then
-  printf '%s\n' "$volume_names" >>"$STATE/down-node-volumes"
-  volume_names=$(cat "$STATE/down-node-volumes")
+  printf '%s\n' "$volume_names" >>"$STATE/down-node-volumes" ||
+    die "could not record the Talos node volumes in $STATE; nothing was removed"
+  volume_names=$(cat "$STATE/down-node-volumes") ||
+    die "could not read the recorded Talos node volumes; nothing was removed"
 fi
 mapfile -t node_volumes < <(sed '/^$/d' <<<"$volume_names" | sort -u)
 
@@ -79,6 +86,7 @@ docker network ls --quiet --filter "label=$talos_label" | xargs --no-run-if-empt
 for volume in "${node_volumes[@]}"; do
   docker volume rm "$volume" >/dev/null 2>&1
 done
+claim_drop
 
 # A query that fails lists nothing, which reads exactly like "nothing left". Keep the two apart.
 left=
@@ -94,6 +102,7 @@ probe() { # probe <kind> <command...>: the command lists names, one per line
     unverified=1
   fi
 }
+probe container claim_names
 probe container docker ps --all --filter "label=$talos_label" --format '{{.Names}}'
 probe container docker ps --all --filter "label=$compose_label" --format '{{.Names}}'
 probe network docker network ls --filter "label=$talos_label" --format '{{.Name}}'

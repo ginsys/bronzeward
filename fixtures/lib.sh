@@ -32,6 +32,13 @@ set +a
 export TALOSCONFIG=$STATE/talosconfig
 export KUBECONFIG=$STATE/kubeconfig
 
+# The daemon-wide claim: a container that is created and never started. Docker refuses a second
+# container of the same name atomically, which no look-before check across checkouts can do, and
+# its label names the checkout the fixture belongs to.
+CLAIM=$FIXTURE_NAME-claim
+CLAIM_LABEL=bronzeward.fixture=$FIXTURE_NAME
+CLAIM_OWNER_LABEL=bronzeward.fixture.checkout
+
 PG=$FIXTURE_NAME-postgres
 BAO=$FIXTURE_NAME-openbao
 CP=$FIXTURE_NAME-controlplane-1
@@ -78,6 +85,26 @@ pg_client() {
   PGPASSWORD=$BW_POSTGRES_PASSWORD docker run --rm --network "${FIXTURE_NAME}_default" \
     --env PGPASSWORD "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
 }
+
+# claim_take: fails when any checkout on this daemon already holds the claim.
+claim_take() {
+  docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=$FIXTURES" \
+    --network none "$POSTGRES_IMAGE" true >/dev/null
+}
+# claim_names: the claim container, if any (its name, or nothing).
+claim_names() { docker ps --all --filter "label=$CLAIM_LABEL" --format '{{.Names}}'; }
+# claim_owner: the checkout that took the claim (nothing when there is no claim).
+claim_owner() {
+  docker ps --all --quiet --filter "label=$CLAIM_LABEL" |
+    xargs --no-run-if-empty docker inspect --format "{{index .Config.Labels \"$CLAIM_OWNER_LABEL\"}}"
+}
+claim_drop() {
+  docker ps --all --quiet --filter "label=$CLAIM_LABEL" | xargs --no-run-if-empty docker rm --force >/dev/null
+}
+
+# The exact content of the leak scan's positive control. bin/up writes it and bin/evidence compares
+# against it: a control file that holds anything else is not the control any more.
+control_content() { printf 'planted on purpose: %s\n' "$BW_CANARY"; }
 
 # Talos node volumes are anonymous and unlabelled: once their container is gone nothing ties them to
 # the fixture. bin/up records these names right after creating the cluster, bin/down adds what it

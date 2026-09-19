@@ -35,7 +35,7 @@ EOF
 
 [ $# -ge 1 ] || usage
 need_state
-need docker curl jq tar
+need docker curl jq tar mktemp
 action=$1
 shift
 
@@ -50,7 +50,9 @@ bao_http() { # bao_http <method> <api-path> [curl args]
   local method=$1 path=$2
   shift 2
   # --noproxy: a proxy from the caller's shell must never stand between this and localhost.
-  curl --noproxy '*' --fail --silent --show-error --request "$method" \
+  # --max-time: a paused OpenBao accepts the connection and never answers; the action must end,
+  # and be logged as failed, all the same.
+  curl --noproxy '*' --connect-timeout 5 --max-time 30 --fail --silent --show-error --request "$method" \
     --header "X-Vault-Token: $BW_BAO_ROOT_TOKEN" "http://127.0.0.1:$OPENBAO_PORT/v1/$path" "$@"
 }
 
@@ -67,9 +69,11 @@ esac
 # refused reads exactly like one that happened. EXIT, not ERR: `die` leaves through `exit`.
 record() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$STATE/injections.log"; }
 partial=
+staging=
 finish() {
   local rc=$?
   [ -z "$partial" ] || rm -f -- "$partial"
+  [ -z "$staging" ] || rm -rf -- "$staging"
   if [ "$rc" -eq 0 ]; then record "done $action $logged"; else record "failed rc=$rc $action $logged"; fi
 }
 logged=$*
@@ -151,8 +155,14 @@ case $action in
   store-restore)
     [ $# -eq 1 ] || usage
     [ -f "$STATE/backups/store-$1.tgz" ] || die "no such snapshot: store-$1.tgz"
+    # Extracted aside first: an archive that cannot be read must not cost the live directory.
+    staging=$(mktemp -d "$STATE/store-restore.XXXXXX")
+    tar -xzf "$STATE/backups/store-$1.tgz" -C "$staging"
+    [ -d "$staging/data" ] || die "store-$1.tgz holds no data directory; the live one was left alone"
     rm -rf -- "$STATE/data"
-    tar -xzf "$STATE/backups/store-$1.tgz" -C "$STATE"
+    mv -- "$staging/data" "$STATE/data"
+    rmdir -- "$staging"
+    staging=
     ;;
   bao-soft-delete)
     [ $# -eq 2 ] || usage
