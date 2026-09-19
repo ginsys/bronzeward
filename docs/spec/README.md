@@ -2,7 +2,7 @@
 
 This directory reserves the location for detailed contracts produced during [02 - PoC specification](https://github.com/ginsys/bronzeward/milestone/2). This index contains no implementation contracts and does not establish specification approval or implementation readiness.
 
-| Contract artifact to create | Work item |
+| Contract artifact | Work item |
 | --- | --- |
 | `docs/spec/compilation.md` | [Secret ingress and compilation](https://github.com/ginsys/bronzeward/issues/17) |
 | `docs/spec/persistence-api.md` | [Persistence and API contracts](https://github.com/ginsys/bronzeward/issues/18) |
