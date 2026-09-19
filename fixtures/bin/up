@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-need docker curl jq tar sha256sum install awk
+need docker curl jq tar sha256sum install awk timeout
 docker compose version >/dev/null || die "missing prerequisite: docker compose v2"
 [ "$(uname -sm)" = "Linux x86_64" ] || die "pinned CLI assets are linux/amd64 only"
 [ ! -e "$STATE" ] || die "$STATE exists: run fixtures/bin/down first"
@@ -77,7 +77,7 @@ bao write -force transit/keys/bw-artifact >/dev/null
 bao kv put secret/fixture/inline value="$BW_CANARY" >/dev/null
 
 # A metadata-only identity: the classification experiment must not be able to read values.
-docker exec -i -e BAO_TOKEN="$BW_BAO_ROOT_TOKEN" "$BAO" bao policy write bw-metadata-only - >/dev/null <<'POLICY'
+timeout "$REQUEST_LIMIT" docker exec -i -e BAO_TOKEN="$BW_BAO_ROOT_TOKEN" "$BAO" bao policy write bw-metadata-only - >/dev/null <<'POLICY'
 path "secret/metadata/*" { capabilities = ["read", "list"] }
 path "transit/keys/*"    { capabilities = ["read", "list"] }
 POLICY
