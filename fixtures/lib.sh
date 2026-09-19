@@ -57,8 +57,19 @@ need() {
   done
 }
 
+# need_state: this checkout has a fixture, and the fixture on the daemon is that one. The state
+# directory alone does not show it: container names are fixed, so after this checkout's resources
+# were removed by hand another checkout's fixture answers to the same names, and the stale
+# secrets.env here would send a kill or a restore to it.
 need_state() {
+  local owner
   [ -f "$STATE/secrets.env" ] || die "no running fixture: run fixtures/bin/up first"
+  need docker
+  owner=$(claim_owner) || die "could not ask Docker who holds the fixture claim"
+  [ -n "$owner" ] ||
+    die "$STATE exists but no fixture claim does: the state is stale. Run fixtures/bin/down, then up"
+  [ "$owner" = "$FIXTURES" ] ||
+    die "the fixture on this daemon belongs to $owner, so $STATE is stale. Remove that directory by hand: fixtures/bin/down refuses here, rightly, because the running fixture is not this checkout's"
 }
 
 # The project name is forced: a COMPOSE_PROJECT_NAME in the caller's shell wins over the `name` in
@@ -71,18 +82,24 @@ compose() {
 
 talosctl() { "$CACHE/talosctl" "$@"; }
 
+# Every request to a service is bounded. The fixture exists to be broken on purpose, and a provider
+# that accepts a request and never answers would otherwise hang the command for good; a request
+# that times out fails like any other. wait_for shortens the limits to what is left of its own.
+REQUEST_LIMIT=20
+PG_LIMIT=60
+
 # bao <args>: the OpenBao CLI inside the pinned container, as root token unless BAO_TOKEN is set.
 bao() {
-  docker exec -e BAO_TOKEN="${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}}" "$BAO" bao "$@"
+  timeout "$REQUEST_LIMIT" docker exec -e BAO_TOKEN="${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}}" "$BAO" bao "$@"
 }
 
-pg() { docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" "$@"; }
+pg() { timeout "$PG_LIMIT" docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" "$@"; }
 
 # pg_client <psql args>: psql from a throwaway container on the fixture network. The image trusts
 # every connection that starts inside the server's own container, so pg() proves nothing about the
 # password; only a connection from another host is asked for it.
 pg_client() {
-  PGPASSWORD=$BW_POSTGRES_PASSWORD docker run --rm --network "${FIXTURE_NAME}_default" \
+  PGPASSWORD=$BW_POSTGRES_PASSWORD timeout "$PG_LIMIT" docker run --rm --network "${FIXTURE_NAME}_default" \
     --env PGPASSWORD "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
 }
 
@@ -98,8 +115,11 @@ claim_owner() {
   docker ps --all --quiet --filter "label=$CLAIM_LABEL" |
     xargs --no-run-if-empty docker inspect --format "{{index .Config.Labels \"$CLAIM_OWNER_LABEL\"}}"
 }
+# claim_drop: --volumes, because the image declares a data volume and Docker creates an anonymous
+# one for the claim although it never starts. Nothing else would ever find that volume again.
 claim_drop() {
-  docker ps --all --quiet --filter "label=$CLAIM_LABEL" | xargs --no-run-if-empty docker rm --force >/dev/null
+  docker ps --all --quiet --filter "label=$CLAIM_LABEL" |
+    xargs --no-run-if-empty docker rm --force --volumes >/dev/null
 }
 
 # The exact content of the leak scan's positive control. bin/up writes it and bin/evidence compares
@@ -157,11 +177,19 @@ bao_unseal() {
 }
 
 # wait_for <seconds> <description> <command...>
+# The deadline holds for an attempt that hangs as well as for one that fails: each attempt gets what
+# is left of the limit as its own request limit. The command is a shell function, which `timeout`
+# cannot run, so it must make its requests through bao, pg or another bounded call.
 wait_for() {
-  local limit=$1 what=$2 start=$SECONDS
+  local limit=$1 what=$2 start=$SECONDS left
   shift 2
-  until "$@" >/dev/null 2>&1; do
-    [ $((SECONDS - start)) -lt "$limit" ] || die "timed out after ${limit}s waiting for $what"
+  while :; do
+    left=$((limit - (SECONDS - start)))
+    [ "$left" -gt 0 ] || die "timed out after ${limit}s waiting for $what"
+    if REQUEST_LIMIT=$((left < REQUEST_LIMIT ? left : REQUEST_LIMIT)) PG_LIMIT=$((left < PG_LIMIT ? left : PG_LIMIT)) \
+      "$@" >/dev/null 2>&1; then
+      return 0
+    fi
     sleep 1
   done
 }

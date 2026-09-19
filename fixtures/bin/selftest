@@ -6,7 +6,7 @@ here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
-need docker curl jq timeout sha256sum
+need docker curl jq timeout sha256sum comm stat head
 keep=${1:-}
 passed=0
 ok() {
@@ -27,6 +27,8 @@ kv_version() { # kv_version <field>: a field of version 1 of the test secret's m
 }
 
 if [ "$keep" != --keep ]; then
+  # Every volume on the daemon, to tell afterwards whether the run left one that no label finds.
+  volumes_before=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   "$here/up"
   # lib.sh was sourced before the secrets existed
   set -a
@@ -41,6 +43,25 @@ for c in "$PG" "$BAO" "$CP" "$WORKER"; do
     fail "$c is not running after up (see 'Known limits' in fixtures/README.md)"
 done
 ok "all four containers are running"
+
+# The state directory alone is not ownership: with the claim gone, or held by another checkout, the
+# fixed container names may be someone else's fixture, and nothing here may touch them.
+refused=0
+claim_drop
+"$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
+"$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
+docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=/another/checkout/fixtures" \
+  --network none "$POSTGRES_IMAGE" true >/dev/null
+"$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
+"$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
+claim_drop
+claim_take # this checkout's claim again, before anything can fail
+if [ "$refused" -ne 4 ]; then
+  docker unpause "$PG" >/dev/null 2>&1 || true
+  fail "inject or evidence ran without this checkout's claim ($refused of 4 refused)"
+fi
+[ "$(docker inspect --format '{{.State.Paused}}' "$PG")" = false ] || fail "a refused inject paused postgres all the same"
+ok "inject and evidence refuse when the claim is missing or names another checkout"
 
 # Talos: a full-config no-reboot apply on the worker lands byte for byte.
 before=$(worker_digest)
@@ -61,7 +82,21 @@ sql "drop table if exists bw_selftest; create table bw_selftest (v text); insert
 sql "insert into bw_selftest values ('after-snapshot')" >/dev/null
 "$here/inject" db-restore selftest
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "db-restore did not return to the snapshot"
-ok "db-snapshot / db-restore"
+# A dump that cannot be restored must not cost the live database. Removed at once: evidence expands
+# every dump in backups and rightly fails on one it cannot read.
+sql "insert into bw_selftest values ('after-restore')" >/dev/null
+head --bytes=$(($(stat --format=%s "$STATE/backups/pg-selftest.dump") / 2)) "$STATE/backups/pg-selftest.dump" \
+  >"$STATE/backups/pg-selftest-corrupt.dump"
+rc=0
+"$here/inject" db-restore selftest-corrupt 2>/dev/null || rc=$?
+rm "$STATE/backups/pg-selftest-corrupt.dump"
+[ "$rc" -ne 0 ] || fail "db-restore accepted a truncated dump"
+[ "$(sql 'select count(*) from bw_selftest')" = 2 ] || fail "a failed db-restore cost the live database"
+[ -z "$(sql "select 1 from pg_database where datname = 'bronzeward_restore'")" ] ||
+  fail "a failed db-restore left its scratch database behind"
+"$here/inject" db-restore selftest
+[ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "db-restore did not return to the snapshot a second time"
+ok "db-snapshot / db-restore; a truncated dump leaves the live database alone"
 
 # OpenBao: snapshot, soft delete, destroy, key loss, restore.
 bao kv put -mount=secret selftest/item value="$BW_CANARY" >/dev/null
@@ -137,6 +172,21 @@ grep --quiet --extended-regexp ' failed rc=[0-9]+ bao-snapshot selftest-hung$' "
 wait_for 60 "openbao after unpause" bao token lookup
 ok "bao-snapshot against a paused openbao ends, is recorded as failed and leaves no file"
 
+# The same from inside the container, where a pause does not reach: with the server process
+# stopped, `docker exec` still runs the CLI, which connects and is never answered. A wait must end
+# at its deadline even though the attempt itself never returns.
+# shellcheck disable=SC2016  # expanded by the shell in the container
+docker exec "$BAO" sh -c 'kill -STOP $(pidof bao)'
+began=$SECONDS
+rc=0
+(wait_for 5 "an OpenBao that never answers" bao token lookup) 2>/dev/null || rc=$?
+# shellcheck disable=SC2016
+docker exec "$BAO" sh -c 'kill -CONT $(pidof bao)'
+[ "$rc" -ne 0 ] || fail "a stopped openbao answered"
+[ $((SECONDS - began)) -le 10 ] || fail "wait_for 5 took $((SECONDS - began))s against an openbao that never answers"
+wait_for 60 "openbao after SIGCONT" bao token lookup
+ok "wait_for ends at its deadline when the attempt itself hangs"
+
 # Partitioned provider: clients lose it, the out-of-band observer does not, and the bundle says both.
 bao_published() { curl --noproxy '*' --silent --max-time 5 --output /dev/null "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health"; }
 "$here/inject" netsplit openbao
@@ -174,7 +224,25 @@ ok "netsplit / netjoin worker returns on the same address"
 # Evidence: the scan must see the canary that was deliberately written to the database, and a
 # secret the fixture did not choose itself.
 ! "$here/evidence" "$STATE/no-such-path" >/dev/null 2>&1 || fail "evidence accepted a scan path that does not exist"
-ok "evidence refuses a scan path it cannot read"
+# The refusal itself must not leak: a file the scan cannot read, whose name holds a secret, is
+# reported without that name. root reads a mode-000 file, so there the case cannot be built.
+if [ "$(id -u)" -ne 0 ]; then
+  mkdir "$STATE/selftest-unreadable"
+  printf 'nothing to see\n' >"$STATE/selftest-unreadable/named-$BW_BAO_METADATA_TOKEN"
+  chmod 000 "$STATE/selftest-unreadable/named-$BW_BAO_METADATA_TOKEN"
+  rc=0
+  "$here/evidence" "$STATE/selftest-unreadable" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
+  rm -rf "$STATE/selftest-unreadable"
+  [ "$rc" -ne 0 ] || fail "evidence accepted a file it could not read"
+  grep --quiet 'could not read (a path whose name holds secret material' "$STATE/selftest-evidence.err" ||
+    fail "evidence did not fail on the unreadable file: $(grep --invert-match --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" | tail -n 1)"
+  ! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
+    fail "evidence wrote a secret-bearing file name into its error message"
+  rm "$STATE/selftest-evidence.err"
+else
+  say "skipped as root: the unreadable-file case"
+fi
+ok "evidence refuses a scan path it cannot read, and withholds a secret-bearing name when it does"
 printf 'token=%s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/selftest-token-leak"
 printf 'plain=%s\n' "$BW_CANARY" >"$STATE/backups/selftest-plain-backup"
 # Two inputs find would mishandle if passed along as they are: a file reached only through a
@@ -228,7 +296,12 @@ ok "evidence bundle complete; leak scan finds the planted canary and token, noth
 
 if [ "$keep" != --keep ]; then
   "$here/down" || fail "down reported leftovers"
-  ok "down left nothing behind"
+  # down looks for what it can name. A volume no label or record points at, such as the anonymous
+  # one Docker makes for the claim container, only shows up as a difference on the whole daemon.
+  volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
+  new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
+  [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
+  ok "down left nothing behind, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

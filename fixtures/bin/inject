@@ -34,8 +34,8 @@ EOF
 }
 
 [ $# -ge 1 ] || usage
+need docker curl jq tar mktemp timeout
 need_state
-need docker curl jq tar mktemp
 action=$1
 shift
 
@@ -73,7 +73,14 @@ staging=
 finish() {
   local rc=$?
   [ -z "$partial" ] || rm -f -- "$partial"
-  [ -z "$staging" ] || rm -rf -- "$staging"
+  if [ -n "$staging" ]; then
+    # store-restore ended between its two renames: the earlier store goes back before the staging
+    # directory is removed. If it cannot, the staging directory stays, because it holds the only copy.
+    if [ -d "$staging/previous" ] && [ ! -e "$STATE/data" ]; then
+      mv -- "$staging/previous" "$STATE/data" || staging=
+    fi
+    [ -z "$staging" ] || rm -rf -- "$staging"
+  fi
   if [ "$rc" -eq 0 ]; then record "done $action $logged"; else record "failed rc=$rc $action $logged"; fi
 }
 logged=$*
@@ -128,15 +135,25 @@ case $action in
     ;;
   db-snapshot)
     [ $# -eq 1 ] || usage
-    snapshot "$STATE/backups/pg-$1.dump" pg pg_dump --format=custom -U bronzeward bronzeward
+    PG_LIMIT=600 snapshot "$STATE/backups/pg-$1.dump" pg pg_dump --format=custom -U bronzeward bronzeward
     ;;
   db-restore)
     [ $# -eq 1 ] || usage
     [ -f "$STATE/backups/pg-$1.dump" ] || die "no such snapshot: pg-$1.dump"
+    # Restored aside first: a dump that cannot be read must not cost the live database. It is
+    # dropped only once the restore succeeded, and the restored one then takes its name. Between
+    # those two steps the data exists under the other name, never nowhere.
+    pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_restore
+    pg createdb -U bronzeward --maintenance-db=postgres bronzeward_restore
+    if ! timeout 600 docker exec -i -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" \
+      pg_restore -U bronzeward --dbname=bronzeward_restore --exit-on-error <"$STATE/backups/pg-$1.dump"; then
+      pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_restore ||
+        say "fixtures: the half-restored database bronzeward_restore could not be dropped"
+      die "pg-$1.dump could not be restored; the live database was left alone"
+    fi
     pg dropdb --force -U bronzeward --maintenance-db=postgres bronzeward
-    pg createdb -U bronzeward --maintenance-db=postgres bronzeward
-    docker exec -i -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" \
-      pg_restore -U bronzeward --dbname=bronzeward --exit-on-error <"$STATE/backups/pg-$1.dump"
+    pg psql -U bronzeward -d postgres -v ON_ERROR_STOP=1 --quiet \
+      -c 'alter database bronzeward_restore rename to bronzeward'
     ;;
   bao-snapshot)
     [ $# -eq 1 ] || usage
@@ -155,13 +172,21 @@ case $action in
   store-restore)
     [ $# -eq 1 ] || usage
     [ -f "$STATE/backups/store-$1.tgz" ] || die "no such snapshot: store-$1.tgz"
-    # Extracted aside first: an archive that cannot be read must not cost the live directory.
+    # An earlier run that was killed outright between its two renames left the only copy of the
+    # store there. It is not guessed at.
+    for left in "$STATE"/store-restore.*/previous; do
+      [ ! -e "$left" ] || die "an interrupted store-restore left the earlier store at $left; move it back to $STATE/data or remove it"
+    done
+    # Extracted aside first: an archive that cannot be read must not cost the live directory. The
+    # live directory is then renamed aside, not removed, and goes only once the new one is in place;
+    # if the action ends in between, `finish` puts it back.
     staging=$(mktemp -d "$STATE/store-restore.XXXXXX")
     tar -xzf "$STATE/backups/store-$1.tgz" -C "$staging"
     [ -d "$staging/data" ] || die "store-$1.tgz holds no data directory; the live one was left alone"
-    rm -rf -- "$STATE/data"
+    [ ! -e "$staging/previous" ] || die "store-$1.tgz holds an entry named previous next to data; the live one was left alone"
+    mv -- "$STATE/data" "$staging/previous"
     mv -- "$staging/data" "$STATE/data"
-    rmdir -- "$staging"
+    rm -rf -- "$staging"
     staging=
     ;;
   bao-soft-delete)

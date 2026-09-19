@@ -10,14 +10,33 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-need_state
 need docker curl jq tar sha256sum git find awk timeout realpath mktemp cmp stat
+need_state
+# shown <path>: the path as a message or the bundle may record it. A name that holds a secret is
+# never written out, for the same reason a matched line is not; the entry is identified by its inode
+# instead. That holds for error messages as much as for the report, so every path this command
+# prints goes through here. It runs inside command substitutions, where `die` would only end the
+# subshell, so it decides for itself and withholds the name whenever the match did not plainly say
+# "no secret".
+shown() {
+  local rc=0
+  grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" <<<"$1" || rc=$?
+  if [ "$rc" -eq 1 ]; then
+    printf '%s' "$1"
+  else
+    printf '(a path whose name holds secret material, withheld; inode %s)' \
+      "$(stat --format=%i -- "$1" 2>/dev/null || printf unknown)"
+  fi
+}
 # Extra scan paths become absolute: find would read a relative name such as -delete as an
 # expression, not as a path.
 extras=()
 for extra in "$@"; do
-  [ -e "$extra" ] || die "extra scan path does not exist: $extra"
-  resolved=$(realpath -- "$extra") || die "cannot resolve extra scan path: $extra"
+  [ -e "$extra" ] || die "extra scan path does not exist: $(shown "$extra")"
+  # 2>/dev/null here and on tar, find and grep below: each names the path it fails on in its own
+  # message, which would bypass `shown`. The exit status still decides, and the message that
+  # follows says what failed.
+  resolved=$(realpath -- "$extra" 2>/dev/null) || die "cannot resolve extra scan path: $(shown "$extra")"
   extras+=("$resolved")
 done
 
@@ -38,12 +57,9 @@ unavailable() {
   say "evidence: unavailable: $*"
 }
 running() { [ "$(docker inspect --format '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
-# Evidence is captured while things are broken on purpose, so every request to a service is
-# bounded here, in place of the unbounded helpers of lib.sh: a provider paused between two requests
-# would otherwise hang the capture for good. A request that times out fails, and a failed one is
-# recorded as unknown or unavailable like any other.
-bao() { timeout 20 docker exec -e BAO_TOKEN="${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}}" "$BAO" bao "$@"; }
-pg() { timeout 60 docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" "$@"; }
+# Evidence is captured while things are broken on purpose. bao and pg from lib.sh are bounded, so
+# a provider paused between two requests cannot hang the capture: the request times out and fails,
+# and a failed one is recorded as unknown or unavailable like any other.
 # reported <command...>: the command's one-line output, or UNAVAILABLE
 reported() {
   local value
@@ -98,13 +114,13 @@ for dump in "$STATE"/backups/pg-*.dump; do
   [ -f "$dump" ] || continue
   as_sql=$out/backups/$(basename "$dump").sql
   docker run --rm --interactive --network none "$POSTGRES_IMAGE" pg_restore --file=- <"$dump" >"$as_sql" ||
-    die "could not expand $dump: the backup would go unscanned"
+    die "could not expand $(shown "$dump"): the backup would go unscanned"
 done
 for store in "$STATE"/backups/store-*.tgz; do
   [ -f "$store" ] || continue
   mkdir -p "$out/backups/$(basename "$store" .tgz)"
-  tar -xzf "$store" -C "$out/backups/$(basename "$store" .tgz)" ||
-    die "could not expand $store: the backup would go unscanned"
+  tar -xzf "$store" -C "$out/backups/$(basename "$store" .tgz)" 2>/dev/null ||
+    die "could not expand $(shown "$store"): the backup would go unscanned"
 done
 
 # Provider state through the metadata-only identity: names and versions, never values. A provider
@@ -204,8 +220,9 @@ trap 'rm -f -- "$list"' EXIT
 # -L: a symlinked path or file is followed and its target scanned. Without it find skips the link
 # silently and the target reads as clean. A link that cannot be followed is therefore fatal too.
 roots=("$out" "$STATE/data" "$STATE/backups" "${extras[@]}")
-dangling=$(find -L "${roots[@]}" -type l -print -quit) || die "leak scan could not walk every path; results void"
-[ -z "$dangling" ] || die "leak scan cannot follow the symlink $dangling; results void"
+dangling=$(find -L "${roots[@]}" -type l -print -quit 2>/dev/null) ||
+  die "leak scan could not walk every path (a directory it may not read, most likely); results void"
+[ -z "$dangling" ] || die "leak scan cannot follow the symlink $(shown "$dangling"); results void"
 
 # The positive control is one file, plus its copy at the same place inside an expanded store
 # snapshot, and only while it holds exactly what bin/up planted. A file that merely shares the
@@ -223,21 +240,8 @@ secret_in_name() { # secret_in_name <path>
   [ "$rc" -le 1 ] || die "leak scan could not match a path name against the patterns; results void"
   [ "$rc" -eq 0 ]
 }
-# shown <path>: the path as the bundle may record it. A name that holds a secret is never written
-# out, for the same reason a matched line is not; the entry is identified by its inode instead.
-# It runs inside command substitutions, where `die` would only end the subshell, so it decides for
-# itself and withholds the name whenever the match did not plainly say "no secret".
-shown() {
-  local rc=0
-  grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" <<<"$1" || rc=$?
-  if [ "$rc" -eq 1 ]; then
-    printf '%s' "$1"
-  else
-    printf '(a path whose name holds secret material, withheld; inode %s)' "$(stat --format=%i -- "$1")"
-  fi
-}
 
-find -L "${roots[@]}" -type f -print0 >"$list" || die "leak scan could not walk every path; results void"
+find -L "${roots[@]}" -type f -print0 2>/dev/null >"$list" || die "leak scan could not walk every path; results void"
 : >"$scan"
 control_seen=0
 others=
@@ -245,8 +249,10 @@ while IFS= read -r -d '' file; do
   [ "$file" != "$scan" ] || continue
   # Occurrences, not matching lines: two secrets on one line are two hits.
   rc=0
-  found=$(grep --text --fixed-strings --only-matching --file="$STATE/scan-patterns.txt" "$file") || rc=$?
-  [ "$rc" -le 1 ] || die "leak scan could not read $file; results void"
+  # --no-messages: grep names the file it cannot read, and that name may hold a secret. Its exit
+  # status says the same, and the message below goes through `shown`.
+  found=$(grep --no-messages --text --fixed-strings --only-matching --file="$STATE/scan-patterns.txt" "$file") || rc=$?
+  [ "$rc" -le 1 ] || die "leak scan could not read $(shown "$file"); results void"
   hits=$(sed '/^$/d' <<<"$found" | wc -l)
   unset found
   [ "$hits" -gt 0 ] || continue
@@ -257,7 +263,7 @@ done <"$list"
 
 # A secret can sit in a name as well as in a file: every directory entry under the same paths,
 # directories included, is matched too.
-find -L "${roots[@]}" -print0 >"$list" || die "leak scan could not walk every path; results void"
+find -L "${roots[@]}" -print0 2>/dev/null >"$list" || die "leak scan could not walk every path; results void"
 while IFS= read -r -d '' entry; do
   secret_in_name "$entry" || continue
   printf '1 %s\n' "$(shown "$entry")" >>"$scan"

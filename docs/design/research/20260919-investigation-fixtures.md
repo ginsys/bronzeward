@@ -44,7 +44,9 @@ See [`fixtures/README.md`](../../../fixtures/README.md) for the commands. In sho
 - `bin/inject` crashes (`kill`), hangs (`pause`) or partitions (`netsplit`) any of the four
   containers and brings it back; snapshots and restores the database, OpenBao and the local store
   directory; soft-deletes and destroys a KV version; deletes a Transit key. Each action is logged
-  when it begins and again with its outcome.
+  when it begins and again with its outcome. `db-restore` and `store-restore` replace live data only after
+  the snapshot was read in full, and every request to a service is time-bounded. Like `bin/evidence`, it
+  refuses unless the fixture on the daemon is this checkout's own.
 - `bin/evidence` records versions, logs, a database dump, OpenBao metadata read through the
   metadata-only identity, and a digest of each node's machine configuration, then scans all of it
   for synthetic secret material, with a positive control. It runs while parts of the fixture are
@@ -86,46 +88,48 @@ list of files containing secret material, or none.
 
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
-`up` and `down` included. Review added checks 9, 10, 12, 14, 15, 16, 19 and 22 and widened 8 and 20
-(section 5, items 8 to 13); the revision described here passed 22 of 22 from clean. `selftest --keep`,
-which skips `up` and checks 21 and 22, passed 20 of 20 twice in a row against one fixture. Those runs
-were not timed.
+`up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
+4, 9, 21, 22 and 23 (section 5, items 8 to 14); the revision described here passed 24 of 24 from
+clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
+against one fixture. Those runs were not timed.
 
 | # | Check | Expected | Observed |
 |---|---|---|---|
 | 1 | All four containers running | running | pass |
-| 2 | Full-config `no-reboot` apply on the worker | The configuration read back is byte-identical to the one sent | pass: equal SHA-256 once the single extra trailing newline of `-o jsonpath` output is normalized |
-| 3 | `db-snapshot`, diverge, `db-restore` | Row written after the snapshot is gone | pass |
-| 4 | `bao-soft-delete` | Metadata shows a deletion time, `destroyed` false | pass |
-| 5 | `bao-destroy` | Metadata shows `destroyed` true | pass |
-| 6 | `bao-delete-key` | Transit key no longer readable | pass |
-| 7 | `bao-restore` of the earlier snapshot | Destroyed version and deleted key are back | pass |
-| 8 | `store-snapshot` / `store-restore`, then `store-restore` of a corrupt archive | Deleted file is back; the corrupt restore fails and leaves the live directory, positive control included, untouched | pass |
-| 9 | `bin/evidence` while PostgreSQL is dead | Does not abort; `unavailable.txt` names the missing live dump; the database backup is still expanded and scanned | pass |
-| 10 | `db-snapshot` while PostgreSQL is dead | Fails; no file of that snapshot name is left in `.state/backups`; `injections.log` records it as `failed` and the preceding `kill` as `done` | pass |
-| 11 | `kill` / `start` PostgreSQL | No answer while dead; committed row survives | pass |
-| 12 | `bin/evidence` while OpenBao is dead | `unavailable.txt` names the provider metadata; `openbao-metadata.jsonl` holds an `unknown` record, not an empty file | pass |
-| 13 | `kill` / `start` OpenBao | Comes back sealed, unseals with the stored key, state intact | pass |
-| 14 | `bao-snapshot` while OpenBao is paused | The request ends on its own; the action fails, is logged as `failed` and leaves no snapshot file | pass |
-| 15 | `netsplit` / `netjoin` OpenBao, with `bin/evidence` during the split | Published port does not answer; bundle records the client view as `unreachable` and still holds the true metadata; port answers again after `netjoin` | pass |
-| 16 | `bin/evidence` while the control plane is paused | Control-plane config digest `UNAVAILABLE`; worker digest still read, because each node is asked on its own address | pass |
-| 17 | `pause` / `unpause` worker | No Talos API answer while paused, answers after | pass |
-| 18 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
-| 19 | `bin/evidence` with a scan path that does not exist | Refuses, non-zero exit | pass |
-| 20 | Evidence and leak scan on the healthy fixture, run from another directory with the relative scan paths `-delete` and `-delete.d`, a symlinked file under `.state/data`, a leaking file named `canary-control.txt` outside `.state/data`, the control itself with its canary replaced by another secret, a benign file with a secret in its name, and a planted copy of the `talosconfig` client key | All are scanned and reported, nothing is deleted; the file that only shares the control's name and the control with the replaced canary are reported as leaks; the secret in the file name is reported with the name withheld, and the report itself holds no secret; the client key is found; no `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
-| 21 | `bin/down` | No container, network, volume or state directory left | pass |
-| 22 | `up`, `evidence` and `down` with `.state` replaced by a dangling symlink | Each refuses; nothing is created at the link's target | pass |
+| 2 | `inject` and `evidence` with the claim container removed, then with one labelled for another checkout | All four calls refuse; PostgreSQL is not paused | pass |
+| 3 | Full-config `no-reboot` apply on the worker | The configuration read back is byte-identical to the one sent | pass: equal SHA-256 once the single extra trailing newline of `-o jsonpath` output is normalized |
+| 4 | `db-snapshot`, diverge, `db-restore`, then `db-restore` of a dump cut in half | Row written after the snapshot is gone; the truncated restore fails, leaves the live database with its rows and leaves no scratch database | pass |
+| 5 | `bao-soft-delete` | Metadata shows a deletion time, `destroyed` false | pass |
+| 6 | `bao-destroy` | Metadata shows `destroyed` true | pass |
+| 7 | `bao-delete-key` | Transit key no longer readable | pass |
+| 8 | `bao-restore` of the earlier snapshot | Destroyed version and deleted key are back | pass |
+| 9 | `store-snapshot` / `store-restore`, then `store-restore` of a corrupt archive | Deleted file is back; the corrupt restore fails and leaves the live directory, positive control included, untouched | pass |
+| 10 | `bin/evidence` while PostgreSQL is dead | Does not abort; `unavailable.txt` names the missing live dump; the database backup is still expanded and scanned | pass |
+| 11 | `db-snapshot` while PostgreSQL is dead | Fails; no file of that snapshot name is left in `.state/backups`; `injections.log` records it as `failed` and the preceding `kill` as `done` | pass |
+| 12 | `kill` / `start` PostgreSQL | No answer while dead; committed row survives | pass |
+| 13 | `bin/evidence` while OpenBao is dead | `unavailable.txt` names the provider metadata; `openbao-metadata.jsonl` holds an `unknown` record, not an empty file | pass |
+| 14 | `kill` / `start` OpenBao | Comes back sealed, unseals with the stored key, state intact | pass |
+| 15 | `bao-snapshot` while OpenBao is paused | The request ends on its own; the action fails, is logged as `failed` and leaves no snapshot file | pass |
+| 16 | A 5-second wait on an authenticated OpenBao request while the server process inside the container is stopped (`SIGSTOP`), so that the CLI connects and is never answered | The wait fails within 10 seconds; OpenBao answers again after `SIGCONT` | pass |
+| 17 | `netsplit` / `netjoin` OpenBao, with `bin/evidence` during the split | Published port does not answer; bundle records the client view as `unreachable` and still holds the true metadata; port answers again after `netjoin` | pass |
+| 18 | `bin/evidence` while the control plane is paused | Control-plane config digest `UNAVAILABLE`; worker digest still read, because each node is asked on its own address | pass |
+| 19 | `pause` / `unpause` worker | No Talos API answer while paused, answers after | pass |
+| 20 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
+| 21 | `bin/evidence` with a scan path that does not exist, then with a mode-000 file whose name holds a secret (skipped when run as root) | Refuses both, non-zero exit; the second message withholds the name, and stderr holds no secret | pass |
+| 22 | Evidence and leak scan on the healthy fixture, run from another directory with the relative scan paths `-delete` and `-delete.d`, a symlinked file under `.state/data`, a leaking file named `canary-control.txt` outside `.state/data`, the control itself with its canary replaced by another secret, a benign file with a secret in its name, and a planted copy of the `talosconfig` client key | All are scanned and reported, nothing is deleted; the file that only shares the control's name and the control with the replaced canary are reported as leaks; the secret in the file name is reported with the name withheld, and the report itself holds no secret; the client key is found; no `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
+| 23 | `bin/down`, then the daemon's whole volume list against the one taken before `up` | No container, network, volume or state directory left; no volume exists that did not before `up` | pass |
+| 24 | `up`, `evidence` and `down` with `.state` replaced by a dangling symlink | Each refuses; nothing is created at the link's target | pass |
 
 After the second run of the first revision, an independent `docker volume ls --filter dangling=true` showed exactly the
 volumes that existed on the host before the first run.
 
-Check 7 is worth a note for [key-loss testing](https://github.com/ginsys/bronzeward/issues/10): a
+Check 8 is worth a note for [key-loss testing](https://github.com/ginsys/bronzeward/issues/10): a
 provider snapshot restores a *destroyed* secret version and a *deleted* Transit key. "Lost" in the
 current provider and "recoverable from a provider backup" are separate facts, as
 [design §7.6](../Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks)
 already words it.
 
-Check 2 matters for the [execution contract](../../spec/execution-recovery.md): an observed
+Check 3 matters for the [execution contract](../../spec/execution-recovery.md): an observed
 configuration digest can equal the digest of the bound artifact, but only under a stated
 normalization. The read path used here adds one newline.
 
@@ -178,7 +182,7 @@ Each of these is reproducible and each changed the fixture.
    in `unavailable.txt` and continues, expands database backups without the server, treats any
    unreadable scan input as fatal, and writes an explicit `unknown` record for a provider it
    cannot ask; `bin/up` refuses a pattern list that is implausibly short and drops patterns under
-   eight characters, since an empty pattern matches every line. Checks 9, 12, 19 and 20 hold these.
+   eight characters, since an empty pattern matches every line. Checks 10, 13, 21 and 22 hold these.
 9. **"Nothing found" and "could not look" kept collapsing into each other.** A second review round
    found three more instances of the same defect class. A Transit key listing that failed became
    an empty list. OpenBao snapshots were claimed to be scanned but lay outside the scan roots.
@@ -198,12 +202,12 @@ Each of these is reproducible and each changed the fixture.
     own atomically. A `BAO_TOKEN` in the caller's shell overrode the fixture's root token; it is
     now cleared. Every Talos read went through the control plane, so a dead control plane made a
     healthy worker look dead; each node is now asked on its own address, which a worker answers
-    even while the control plane is paused (check 16). And two checkouts on one Docker daemon
+    even while the control plane is paused (check 18). And two checkouts on one Docker daemon
     share every name, so `down` in one would have removed the other's fixture: `up` now refuses
     while fixture containers exist, and `down` refuses a fixture it cannot show to be its own
     unless told to adopt it. Per-checkout names were considered and rejected, because ports and
     subnet are pinned for reproducibility and would collide anyway; the limit is one fixture per
-    daemon. Each was observed once against a live fixture; the first two are held by check 20.
+    daemon. Each was observed once against a live fixture; the first two are held by check 22.
 11. **Success reported before it was earned, and state discarded before it was safe.** A fourth
     round found the remaining places where a step's outcome was assumed. `bin/down` deleted
     `.state/` before it verified the teardown, so a `down` that could not finish left resources
@@ -220,11 +224,11 @@ Each of these is reproducible and each changed the fixture.
     uses TCP. `bin/inject` logged an action before running it and never said how it ended, so a
     refused `kill` read like one that happened; it now adds a `done` or `failed rc=N` record.
     Snapshots were written straight to their final name, so an interrupted one looked like a
-    snapshot to a later restore; they are now written aside and renamed on success (check 10).
+    snapshot to a later restore; they are now written aside and renamed on success (check 11).
     The OpenBao unseal key was a scan pattern in base64 only; its hex form, which
     `operator init` returns next to it, is now one too. And the scan took any file named like its positive
     control for the control; only the control itself and its copies in expanded store snapshots
-    count now (check 20). Observed against a live fixture: with an unrelated container holding
+    count now (check 22). Observed against a live fixture: with an unrelated container holding
     the Compose network, `down` exits 1, names the network and keeps `.state/` with twelve node
     volumes remembered, and a plain `down` afterwards finishes; with only a labelled volume and
     no `.state/`, `up` and `down` refuse and `down --adopt` removes it. The end-of-`up`
@@ -236,13 +240,13 @@ Each of these is reproducible and each changed the fixture.
     name. And a `.state` that is a symlink: every command loads the shared setup first, which
     sourced `secrets.env` through the link, and a dangling link read as "no state" to `up`. The
     fixture never creates such a link, so the shared setup now refuses one before it reads
-    anything (check 22).
+    anything (check 24).
 12. **What the fixture knows about itself was still incomplete.** A fifth round. The client
     private keys in the generated `talosconfig` and `kubeconfig` are made for this cluster's admin
     clients and are not part of the secrets bundle, so the scan could not find them; both are
     patterns now, and `up` fails if either config holds no key where one is expected. The scan
     counted matching lines, so a positive control that gained a second secret on its one line
-    still counted one and was excused; it counts occurrences now (the first held by check 20). `down`
+    still counted one and was excused; it counts occurrences now (the first held by check 22). `down`
     learned the anonymous node volumes only from containers that still existed; `up` now records
     them right after creating the cluster. Observed: with the Talos containers removed by hand
     and all 12 volumes left, `down` removed the 12 and verified it. Two `up` started together
@@ -256,17 +260,17 @@ Each of these is reproducible and each changed the fixture.
     21 from clean, called by relative path with `CDPATH=.` and an `http_proxy` nothing listens on.
 13. **Recovery paths that could destroy, and requests that could hang.** A sixth round.
     `store-restore` deleted the live store directory before it knew the archive could be read; it
-    now extracts aside and swaps only on success (check 8). The OpenBao snapshot and restore
+    now extracts aside and swaps only on success (check 9). The OpenBao snapshot and restore
     requests had no time limit, and a paused OpenBao accepts the connection without ever
-    answering; they are bounded now, so the action ends and is logged as failed (check 14). The
+    answering; they are bounded now, so the action ends and is logged as failed (check 15). The
     same went for every request `bin/evidence` makes after its first, bounded, one: all of them
     now run under a timeout, and one that times out is recorded as unknown or unavailable like any
     other failure. The positive control was recognized by path and hit count, so a control whose
     canary had been replaced by another credential still passed for the control; it is now
     compared byte for byte with what `up` planted, which also covers the two-secrets case of item
-    12 (check 20). A secret in a file or directory name was never looked at; names are matched
+    12 (check 22). A secret in a file or directory name was never looked at; names are matched
     now, and a name that holds a secret is withheld from the report, which records the inode
-    instead (check 20). `down` trusted that its record of the node volumes could be written and
+    instead (check 22). `down` trusted that its record of the node volumes could be written and
     read back; both are checked now. The same-checkout claim of item 12 did not stop two
     checkouts from starting at once, so `up` now first creates a container that is never
     started, `bw-fixture-claim`: Docker refuses a second one of that name atomically, and its
@@ -277,6 +281,34 @@ Each of these is reproducible and each changed the fixture.
     Docker's name conflict. Two checkouts racing were not exercised; the name conflict is the
     same mechanism. And the selftest drew its node label from `$RANDOM`, which can repeat and
     then fails the "digest changed" assertion; it uses the clock now.
+14. **The previous round's fixes, held to their own standard.** A seventh round, six findings, and
+    one the new check for them found. The claim container of item 13 is made from the PostgreSQL
+    image, which declares a data volume, so Docker created an anonymous volume for a container
+    that never starts, and removing the container left it: four such volumes were on the host
+    after the runs of item 13, and `down` had reported a clean teardown each time, because no
+    label or record pointed at them. The claim is now removed with its volumes, and the selftest
+    compares the daemon's whole volume list before `up` and after `down` (check 23).
+    `store-restore` still removed the live directory a moment before it moved the new one into
+    place; it now renames the live one aside and removes it last, and if the action ends between
+    the two renames its exit handler moves the earlier store back. That window was not exercised;
+    observed separately, bash runs the exit handler on `SIGTERM` and `SIGHUP`. After a `SIGKILL`
+    the earlier store stays in the staging directory, and the next `store-restore` names it and
+    refuses (observed with such a directory planted: exit 1, both copies untouched). `db-restore` had the same defect as the `store-restore` of item 13: it dropped the
+    live database before it knew the dump could be read. It restores into a scratch database and
+    swaps only on success (check 4). The waits in `up` and `inject` checked their deadline only
+    between attempts, so an attempt that never returned was never timed out; `bao`, `pg` and
+    `pg_client` are now bounded for every caller, and a wait gives each attempt what is left of
+    its limit (check 16, against an OpenBao server process stopped inside its container, which a
+    container pause does not reproduce because `docker exec` then fails at once). `inject` and
+    `evidence` took the presence of `.state/secrets.env` for ownership; with this checkout's
+    resources removed by hand and another checkout's fixture running under the same fixed names,
+    a kill or a restore would have gone to that one. Both now require the claim to name this
+    checkout (check 2). And the error paths of `evidence` printed raw paths, past the rule of
+    item 13 that a secret-bearing name is never written out; they go through the same function
+    now. The check written for that (21) then failed on a leak nobody had reported: `grep` names
+    the file it cannot read in its own message. The messages of `grep`, `find`, `tar` and
+    `realpath` are suppressed in `evidence`; their exit status still decides, and the message
+    that follows says what failed.
 ## 6. What each experiment gets
 
 | Experiment | Uses | Must add itself |
@@ -305,7 +337,7 @@ Each of these is reproducible and each changed the fixture.
 - `bin/evidence` observes PostgreSQL and OpenBao out of band, from inside their containers. With
   `netsplit openbao` a client on the published port cannot connect while `openbao-metadata.jsonl`
   still shows the provider's true metadata. The bundle records both: `openbao-client-view.txt`
-  says `unreachable`, and `versions.txt` shows `networks=[]` (check 15). The `unknown`
+  says `unreachable`, and `versions.txt` shows `networks=[]` (check 17). The `unknown`
   classification under partition is therefore the experiment's own client's to make; the bundle
   supplies the ground truth to judge it against. Reading the metadata through the partitioned
   path instead was considered and rejected: the bundle could then not tell a classifier that said
@@ -313,7 +345,7 @@ Each of these is reproducible and each changed the fixture.
   no client-view record.
 - Evidence capture with a paused or partitioned Talos node is bounded by a 20-second timeout per
   read and records the node as unavailable. `bin/selftest` exercises the paused control plane
-  (check 16); a partitioned node was not exercised.
+  (check 18); a partitioned node was not exercised.
 - One fixture per Docker daemon, enforced by a claim container that `bin/up` creates first and
   never starts. The ownership check in `bin/down` rests on the checkout that claim names, on the
   origin directory Compose records on its containers, and, for a fixture that lost its claim, on
