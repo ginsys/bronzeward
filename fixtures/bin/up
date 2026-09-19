@@ -9,7 +9,9 @@ docker compose version >/dev/null || die "missing prerequisite: docker compose v
 [ "$(uname -sm)" = "Linux x86_64" ] || die "pinned CLI assets are linux/amd64 only"
 [ ! -e "$STATE" ] || die "$STATE exists: run fixtures/bin/down first"
 
-trap 'say "fixtures: up failed; run fixtures/bin/down to remove what was created"' ERR
+# EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
+# ERR trap, so neither would print the hint.
+trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; run fixtures/bin/down to remove what was created"' EXIT
 
 synthetic() { printf 'BWSYNTH-%s' "$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"; }
 
@@ -97,7 +99,6 @@ for c in "$PG" "$BAO" "$CP" "$WORKER"; do
     die "$c stopped while the fixture was starting (see 'Known limits' in fixtures/README.md)"
 done
 
-trap - ERR
 cat >&2 <<EOF
 fixture is up
   postgres      127.0.0.1:$POSTGRES_PORT  db/user bronzeward, password in .state/secrets.env
