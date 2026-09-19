@@ -84,8 +84,8 @@ list of files containing secret material, or none.
 
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
-`up` and `down` included. Review added checks 9, 11 and 15 and widened 16 (section 5, items 8 and
-9); the revision described here passed 17 of 17 from clean, and `selftest --keep` passed twice in a
+`up` and `down` included. Review added checks 9, 11, 13 and 16 and widened 17 (section 5, items 8 and
+9); the revision described here passed 18 of 18 from clean, and `selftest --keep` passed twice in a
 row against one fixture. Those runs were not timed.
 
 | # | Check | Expected | Observed |
@@ -102,11 +102,12 @@ row against one fixture. Those runs were not timed.
 | 10 | `kill` / `start` PostgreSQL | No answer while dead; committed row survives | pass |
 | 11 | `bin/evidence` while OpenBao is dead | `unavailable.txt` names the provider metadata; `openbao-metadata.jsonl` holds an `unknown` record, not an empty file | pass |
 | 12 | `kill` / `start` OpenBao | Comes back sealed, unseals with the stored key, state intact | pass |
-| 13 | `pause` / `unpause` worker | No Talos API answer while paused, answers after | pass |
-| 14 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
-| 15 | `bin/evidence` with a scan path that does not exist | Refuses, non-zero exit | pass |
-| 16 | Evidence and leak scan on the healthy fixture | No `unavailable.txt`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
-| 17 | `bin/down` | No container, network, volume or state directory left | pass |
+| 13 | `netsplit` / `netjoin` OpenBao, with `bin/evidence` during the split | Published port does not answer; bundle records the client view as `unreachable` and still holds the true metadata; port answers again after `netjoin` | pass |
+| 14 | `pause` / `unpause` worker | No Talos API answer while paused, answers after | pass |
+| 15 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
+| 16 | `bin/evidence` with a scan path that does not exist | Refuses, non-zero exit | pass |
+| 17 | Evidence and leak scan on the healthy fixture | No `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
+| 18 | `bin/down` | No container, network, volume or state directory left | pass |
 
 After the second run of the first revision, an independent `docker volume ls --filter dangling=true` showed exactly the
 volumes that existed on the host before the first run.
@@ -170,7 +171,7 @@ Each of these is reproducible and each changed the fixture.
    in `unavailable.txt` and continues, expands database backups without the server, treats any
    unreadable scan input as fatal, and writes an explicit `unknown` record for a provider it
    cannot ask; `bin/up` refuses a pattern list that is implausibly short and drops patterns under
-   eight characters, since an empty pattern matches every line. Checks 9, 11, 15 and 16 hold these.
+   eight characters, since an empty pattern matches every line. Checks 9, 11, 16 and 17 hold these.
 9. **"Nothing found" and "could not look" kept collapsing into each other.** A second review round
    found three more instances of the same defect class. A Transit key listing that failed became
    an empty list. OpenBao snapshots were claimed to be scanned but lay outside the scan roots.
@@ -209,10 +210,14 @@ Each of these is reproducible and each changed the fixture.
   Talos key material is matched in the base64 form the secrets bundle and machine configuration
   carry; a decoded PEM copy would not match.
 - `bin/evidence` observes PostgreSQL and OpenBao out of band, from inside their containers. With
-  `netsplit openbao` a client on the published port gets connection refused while the bundle still
-  shows the provider's true metadata, and the partition shows as `networks=[]` in `versions.txt`
-  (observed). The `unknown` classification under partition is therefore the experiment's own
-  client's to make; the bundle supplies the ground truth to judge it against.
+  `netsplit openbao` a client on the published port cannot connect while `openbao-metadata.jsonl`
+  still shows the provider's true metadata. The bundle records both: `openbao-client-view.txt`
+  says `unreachable`, and `versions.txt` shows `networks=[]` (check 13). The `unknown`
+  classification under partition is therefore the experiment's own client's to make; the bundle
+  supplies the ground truth to judge it against. Reading the metadata through the partitioned
+  path instead was considered and rejected: the bundle could then not tell a classifier that said
+  `unknown` over an intact secret from one that said it over a destroyed secret. PostgreSQL has
+  no client-view record.
 - Evidence capture with a paused or partitioned Talos node is bounded by a 20-second timeout per
   read and records the node as unavailable. That path was read, not exercised by `bin/selftest`.
 - CI shellchecks the scripts and does not run them. "Reproducible" is claimed for a host meeting

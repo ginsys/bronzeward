@@ -101,9 +101,10 @@ before `down`.
   fixture network is created. `bin/up` detects this and fails. Fix the host hook so that it ignores
   `br-*`, `veth*` and `docker0`; the fixture does not work around it.
 - `bin/evidence` observes OpenBao and PostgreSQL out of band, from inside their containers. After
-  `inject netsplit openbao` every client finds the provider unreachable while the bundle still
-  shows its true metadata; the partition itself is visible as an empty `networks=[]` on that
-  container's line in `versions.txt`. An experiment compares what its own client concluded with
-  that ground truth. The bundle reports `unknown` only when the provider cannot be asked at all:
-  stopped, sealed, paused, or a listing that fails.
+  `inject netsplit openbao` every client finds the provider unreachable while
+  `openbao-metadata.jsonl` still shows its true metadata. The bundle records both sides:
+  `openbao-client-view.txt` says whether the published port answered, and `versions.txt` shows the
+  partition as `networks=[]` on that container's line. An experiment compares what its own client
+  concluded with that ground truth. The metadata file reports `unknown` only when the provider
+  cannot be asked at all: stopped, sealed, paused, or a listing that fails.
 - CI lints these scripts but does not run them.
