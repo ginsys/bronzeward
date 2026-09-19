@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Failure injection and backup/restore primitives. Every action is logged with a UTC timestamp to
-# .state/injections.log so an experiment's timeline can be reconstructed.
+# Failure injection and backup/restore primitives. Every action is logged to .state/injections.log
+# with a UTC timestamp, once when it begins and once with its outcome, so an experiment's timeline
+# can be reconstructed.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
@@ -60,8 +61,30 @@ case $action in
     target=$(container "$1")
     ;;
 esac
-# Logged when the action starts, so the timeline shows when a failure began, not when it returned.
-printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$action" "$*" >>"$STATE/injections.log"
+# Two records per action. The first is written when the action starts, so the timeline shows when a
+# failure began, not when it returned. The second says how it ended: without it a kill that Docker
+# refused reads exactly like one that happened. EXIT, not ERR: `die` leaves through `exit`.
+record() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$STATE/injections.log"; }
+partial=
+finish() {
+  local rc=$?
+  [ -z "$partial" ] || rm -f -- "$partial"
+  if [ "$rc" -eq 0 ]; then record "done $action $logged"; else record "failed rc=$rc $action $logged"; fi
+}
+logged=$*
+record "begin $action $logged"
+trap finish EXIT
+
+# snapshot <file> <command...>: the command writes the snapshot to stdout. It reaches its final name
+# only when the command succeeded, so a restore can never pick up a truncated one.
+snapshot() {
+  local file=$1
+  shift
+  partial=$(mktemp "$file.partial.XXXXXX")
+  "$@" >"$partial"
+  mv -- "$partial" "$file"
+  partial=
+}
 
 case $action in
   kill)
@@ -70,7 +93,7 @@ case $action in
   start)
     docker start "$target" >/dev/null
     case $1 in
-      postgres) wait_for 60 "postgres" pg pg_isready -U bronzeward -d bronzeward ;;
+      postgres) wait_for 60 "postgres" pg pg_isready -h 127.0.0.1 -U bronzeward -d bronzeward ;;
       openbao)
         bao_sealed() {
           local rc=0
@@ -100,7 +123,7 @@ case $action in
     ;;
   db-snapshot)
     [ $# -eq 1 ] || usage
-    pg pg_dump --format=custom -U bronzeward bronzeward >"$STATE/backups/pg-$1.dump"
+    snapshot "$STATE/backups/pg-$1.dump" pg pg_dump --format=custom -U bronzeward bronzeward
     ;;
   db-restore)
     [ $# -eq 1 ] || usage
@@ -112,7 +135,7 @@ case $action in
     ;;
   bao-snapshot)
     [ $# -eq 1 ] || usage
-    bao_http GET sys/storage/raft/snapshot --output "$STATE/backups/bao-$1.snap"
+    snapshot "$STATE/backups/bao-$1.snap" bao_http GET sys/storage/raft/snapshot
     ;;
   bao-restore)
     [ $# -eq 1 ] || usage
@@ -122,7 +145,7 @@ case $action in
     ;;
   store-snapshot)
     [ $# -eq 1 ] || usage
-    tar -czf "$STATE/backups/store-$1.tgz" -C "$STATE" data
+    snapshot "$STATE/backups/store-$1.tgz" tar -czf - -C "$STATE" data
     ;;
   store-restore)
     [ $# -eq 1 ] || usage

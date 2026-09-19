@@ -210,12 +210,21 @@ done <"$list"
 rm -f "$list"
 
 control=$STATE/data/canary-control.txt
-grep --quiet --fixed-strings " $control" "$scan" ||
+grep --quiet --line-regexp --fixed-strings "1 $control" "$scan" ||
   die "leak scan did not find its positive control $control: the scan is broken, results void"
-# Copies of the control inside store snapshots are the control too, not leaks.
-leaks=$(grep --count --invert-match '/canary-control\.txt$' "$scan" || true)
+# The control is that one file, and its copy at the same place inside an expanded store snapshot,
+# each with the single hit bin/up planted. A file that merely shares the name, anywhere else, is a
+# leak like any other; so is a control that gained a second secret.
+others=$(CONTROL=$control STORES=$out/backups/store- awk '{
+  path = substr($0, index($0, " ") + 1)
+  if ($1 == 1 && path == ENVIRON["CONTROL"]) next
+  if ($1 == 1 && index(path, ENVIRON["STORES"]) == 1 &&
+      substr(path, length(ENVIRON["STORES"]) + 1) ~ /^[^\/]+\/data\/canary-control\.txt$/) next
+  print
+}' "$scan") || die "leak scan could not be summarized; results void"
+leaks=$(sed '/^$/d' <<<"$others" | wc -l)
 
 say "leak scan: positive control found; $leaks other file(s) contain synthetic secret material"
-[ "$leaks" -eq 0 ] || grep --invert-match '/canary-control\.txt$' "$scan" >&2
+[ "$leaks" -eq 0 ] || say "$others"
 [ ! -f "$out/unavailable.txt" ] || say "evidence: INCOMPLETE, see $out/unavailable.txt"
 printf '%s\n' "$out" # the only line on stdout: the bundle path
