@@ -6,7 +6,7 @@ here=$(dirname "$0")
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
-need docker jq timeout sha256sum
+need docker curl jq timeout sha256sum
 keep=${1:-}
 passed=0
 ok() {
@@ -111,6 +111,18 @@ ok "evidence records OpenBao state as unknown, not empty, while openbao is down"
 [ "$(kv_version destroyed)" = false ] || fail "openbao state differs after crash and unseal"
 ok "kill / start openbao comes back sealed, unseals, keeps state"
 
+# Partitioned provider: clients lose it, the out-of-band observer does not, and the bundle says both.
+bao_published() { curl --silent --max-time 5 --output /dev/null "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health"; }
+"$here/inject" netsplit openbao
+! bao_published || fail "partitioned openbao still answers on its published port"
+split=$("$here/evidence") || fail "evidence aborted while openbao was partitioned"
+grep --quiet '^unreachable' "$split/openbao-client-view.txt" || fail "evidence did not record that clients cannot reach openbao"
+jq -es 'any(.[]; .path == "selftest/item")' "$split/openbao-metadata.jsonl" >/dev/null ||
+  fail "evidence lost the true provider state while openbao was partitioned"
+"$here/inject" netjoin openbao
+wait_for 60 "openbao on its published port after netjoin" bao_published
+ok "netsplit / netjoin openbao: bundle holds the client view (unreachable) and the true metadata"
+
 # Hung and unreachable Talos peer.
 "$here/inject" pause worker
 ! worker_talos version --short >/dev/null 2>&1 || fail "paused worker still answers"
@@ -136,6 +148,7 @@ grep --quiet --fixed-strings "$STATE/backups/selftest-plain-backup" "$bundle/lea
 rm "$STATE/data/selftest-token-leak" "$STATE/backups/selftest-plain-backup"
 jq -es 'any(.[]; .transit_key == "bw-artifact" and .latest >= 1)' "$bundle/openbao-metadata.jsonl" >/dev/null ||
   fail "OpenBao metadata does not list the Transit key"
+grep --quiet '^reachable' "$bundle/openbao-client-view.txt" || fail "evidence says clients cannot reach a healthy openbao"
 [ ! -e "$bundle/unavailable.txt" ] || fail "evidence reports missing sources on a healthy fixture: $(cat "$bundle/unavailable.txt")"
 grep --quiet --fixed-strings "$bundle/postgres.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database dump"
 grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database backup"

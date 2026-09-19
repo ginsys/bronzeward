@@ -11,7 +11,7 @@ set -euo pipefail
 . "$(dirname "$0")/../lib.sh"
 
 need_state
-need docker jq tar sha256sum git find awk timeout
+need docker curl jq tar sha256sum git find awk timeout
 for extra in "$@"; do
   [ -e "$extra" ] || die "extra scan path does not exist: $extra"
 done
@@ -90,7 +90,8 @@ done
 # This is an out-of-band observer: it asks from inside the container, so it still answers while
 # `inject netsplit openbao` has the provider unreachable for every client. That is deliberate. An
 # experiment needs the true provider state to judge what its own client concluded from outside.
-# versions.txt records each container's network attachments, so a partition is visible there.
+# openbao-client-view.txt records what a client gets at the same moment, and versions.txt each
+# container's network attachments, so a partition cannot be missed.
 (
   export BAO_TOKEN=$BW_BAO_METADATA_TOKEN
   if ! running "$BAO" || ! timeout 20 docker exec -e BAO_TOKEN="$BAO_TOKEN" "$BAO" bao token lookup >/dev/null 2>&1; then
@@ -139,6 +140,19 @@ done
   done < <(jq -r '.[]' <<<"$keys")
   [ "$incomplete" -eq 0 ] || exit 4
 ) >"$out/openbao-metadata.jsonl" || unavailable "openbao metadata incomplete (see the unknown records in openbao-metadata.jsonl)"
+
+# The client view of the same provider: what anything outside the container gets on the published
+# port. It sits next to the out-of-band metadata so that nobody reading healthy metadata can miss
+# that clients could not reach the provider at that moment.
+rc=0
+health=$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' \
+  "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health") || rc=$?
+if [ "$rc" -eq 0 ]; then
+  printf 'reachable: sys/health answered HTTP %s on the published port\n' "$health"
+else
+  printf 'unreachable: curl exit %s on the published port\n' "$rc"
+fi >"$out/openbao-client-view.txt"
+[ "$rc" -eq 0 ] || say "evidence: clients cannot reach openbao on its published port (curl exit $rc)"
 
 # Digest of each node's machine config, normalized to exactly one trailing newline (the jsonpath
 # output adds one). The config itself holds cluster secrets and is not copied into the bundle.
