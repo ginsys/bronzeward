@@ -54,8 +54,9 @@ silently substitutes a newer artifact. The immutable plan binds:
   value that reaches the Talos request;
 - expected preconditions, including the maximum age of the execution-time
   observation and the validity window of the use-time dependency check (§3),
-  and
-  expected postconditions;
+  and expected postconditions;
+- the verification deadline, as a duration from the attempt, and the maximum
+  number of attempts;
 - rollout scope and limits, expiry, idempotency key and approval policy;
 - the plan revision and authorization identity.
 
@@ -111,7 +112,8 @@ whatever it says. A machine that cannot be observed cannot be dispatched to.
 The database transaction that creates the durable dispatch intent is the
 **dispatch commitment boundary**. It compares database facts only, atomically:
 
-1. the plan is unexpired, approved and its approval is not revoked;
+1. the plan is unexpired and approved, its approval is not revoked, and the
+   approval was recorded in the current recovery epoch (§7);
 2. the artifact, assignment, operation, mode and parameter bindings are
    unchanged;
 3. the evidence recorded under §3.1 belongs to this operation, satisfies the
@@ -119,12 +121,18 @@ The database transaction that creates the durable dispatch intent is the
    and no newer observation of the machine contradicts it;
 4. this operation takes the machine's coordination scope, and no other
    operation on that scope is `committed`, `sending`, `verifying` or
-   `unresolved`; and
+   `unresolved`;
 5. this operation takes a slot in the plan's rollout scope, counting every
    operation of that scope in `committed`, `sending`, `verifying` or
-   `unresolved` against the bound rollout limit.
+   `unresolved` against the bound rollout limit; and
+6. the **scope gate** is open: the machine scope is not frozen by drift policy
+   (§6), and either recovery mode is not in effect or the scope was explicitly
+   released in the current recovery epoch (§7).
 
-If any comparison fails, nothing is committed and nothing is sent.
+If any comparison fails, nothing is committed and nothing is sent. Freeze,
+recovery mode and scope release are durable database facts precisely so that
+they can be compared here; checking them before the transaction would leave a
+race in which dispatch proceeds while mutation is meant to be paused.
 
 The machine scope also protects the binding it was taken for. Any transaction
 that changes a machine's assignment must check that machine's coordination
@@ -139,21 +147,24 @@ cluster health and capacity gate is a bound precondition checked under item 3.
 
 ### 3.3 After commitment
 
-The owning executor durably records an attempt identity before each send; the
-operation timeline therefore shows the commitment and the attempt before any
-Talos request. The first attempt is authorized by the commitment transaction.
-Every later attempt is recorded by its own **retry transaction**, which
-repeats comparisons 1–3 of §3.2 against newly gathered §3.1 evidence and
-confirms that this operation still holds the machine scope and rollout slot.
-A revocation that commits before the retry transaction therefore prevents the
-retry; reading the approval and recording the attempt later is not sufficient.
+Every attempt, the first included, is recorded by an **attempt transaction**
+before its request is sent; the operation timeline therefore shows the
+commitment and the attempt before any Talos request. The attempt transaction
+repeats comparisons 1–3 and 6 of §3.2, against newly gathered §3.1 evidence
+when it is a retry, confirms that this operation still holds the machine scope
+and rollout slot and has attempts left under the bound maximum, and records
+the attempt identity with the absolute verification deadline derived from the
+plan. The first attempt transaction may be the commitment transaction itself.
+Reading the approval and recording the attempt later is not sufficient.
 
-Revocation or cancellation before the transaction commits prevents dispatch.
-After commitment it is recorded on the timeline and controls future steps
-only: no retry is permitted, and an owner that sees it before recording an
-attempt must not send. An operation with no recorded attempt then becomes
-`unresolved` (§4) with its scope still held; an attempt already recorded runs
-to its own classification. It is not a guarantee that no request is sent.
+Revocation or cancellation before the commitment transaction commits prevents
+dispatch. After commitment it is recorded on the timeline and prevents every
+attempt whose attempt transaction has not yet committed, so it also permits no
+retry. An operation with no recorded attempt then becomes `unresolved` (§4)
+with its scope still held; an attempt already recorded runs to its own
+classification. Freezing the scope or entering recovery mode closes the scope
+gate with the same effect. None of this guarantees that no request is sent:
+an executor whose attempt transaction committed earlier may still send.
 
 The residual window is explicit. The machine or a dependency can change after
 §3.1 and before the request arrives. Some such changes surface: as a failure
@@ -201,25 +212,30 @@ append-only facts with a current projection.
 | `planned` | `approved` | Approval recorded against the complete binding. |
 | `planned`, `approved` | `cancelled` | Cancellation, expiry or revocation before commitment. |
 | `approved` | `committed` | The §3.2 transaction succeeds. |
-| `committed` | `sending` | The owning executor records an attempt, then sends. |
-| `committed` | `unresolved` | Restart, ownership loss, or revocation/cancellation after commitment: a stale worker may still send. |
+| `committed` | `sending` | The §3.3 attempt transaction succeeds; the executor then sends. |
+| `committed` | `unresolved` | Restart, ownership loss, or a revocation, cancellation or closed scope gate after commitment. |
 | `sending` | `verifying` | An acceptance response is recorded. |
 | `sending` | `rejected` | A definitive pre-mutation rejection response is recorded (§5). |
 | `sending` | `unresolved` | Lost response, timeout, restart or ownership loss. |
-| `verifying` | `completed` | Postconditions observed. |
-| `verifying` | `unresolved` | Postconditions contradicted, or not established before the deadline. |
-| `unresolved` | `completed` | Later evidence establishes the postconditions for this operation's assignment revision and artifact. |
-| `unresolved` | `sending` | Classified safe to retry (§5) and the §3.3 retry transaction succeeds. |
-| `unresolved` | `cancelled` | Evidence establishes that no request was sent and none can still be sent. |
+| `verifying` | `completed` | Postconditions established by a completion observation (below). |
+| `verifying` | `unresolved` | Postconditions contradicted, or not established before the recorded verification deadline. |
+| `committed`, `sending`, `verifying` | `unresolved` | Recovery-mode entry (§7). |
+| `unresolved` | `completed` | Postconditions later established by a completion observation. |
+| `unresolved` | `rejected` | A delayed definitive pre-mutation rejection response is recorded for the only outstanding attempt. |
+| `unresolved` | `sending` | Classified safe to retry (§5) and the §3.3 attempt transaction succeeds. |
+| `unresolved` | `cancelled` | No attempt transaction ever committed for this operation, and none can: the approval is revoked or expired, or the plan is cancelled. |
 
 No other transition is valid. The machine scope and rollout slot are released
 only on entering a terminal state. An operator decision may resolve an
 `unresolved` operation only into one of the listed targets, recorded with the
 deciding identity and the evidence relied on.
 
-`completed` requires the expected machine identity, assignment revision,
-artifact/configuration digest and applicable health checks. A timeout is not
-proof of failure, completion or retry permission.
+A **completion observation** is taken after the operation's latest recorded
+attempt and recorded on its timeline with its observation revision and time.
+It must show the expected machine identity, assignment revision,
+artifact/configuration digest and applicable health checks. An observation
+taken before that attempt, or not tied to this operation, never completes it.
+A timeout is not proof of failure, completion or retry permission.
 
 ## 5. Interruption and retry classification
 
@@ -233,7 +249,7 @@ the manager classifies the outcome:
 | Classification | Required action |
 | --- | --- |
 | Completed | Record completion, persist the bound release and artifact as `Applied`, and release the scope and slot. |
-| Safe to retry | Create a bounded retry within the original plan, expiry and unrevoked approval, admitted only by the §3.3 retry transaction. |
+| Safe to retry | Create a bounded retry within the original plan, expiry and unrevoked approval, admitted only by the §3.3 attempt transaction. |
 | Unresolved | Preserve the assignment and stop dependent or conflicting mutations; observe further or request a specific operator decision. |
 | Rejected | Record the response as proof of non-mutation, release the scope and slot, and require a corrected plan; the unchanged plan is not retried. |
 
@@ -275,13 +291,24 @@ Drift is an observed configuration digest that differs from the last verified
 Drift is never an automatic apply trigger. The affected scope enters the
 policy selected by the operator:
 
-- **Freeze:** pause mutation while incident work continues.
+- **Freeze:** pause mutation while incident work continues. The freeze is a
+  durable fact on the machine scope that closes the scope gate, so an already
+  approved operation fails comparison 6 of §3.2 and no attempt transaction
+  succeeds until the operator lifts it.
 - **Adopt:** extract known/marked secrets before any ordinary persistence,
   retain only sanitized metadata with references plus an encrypted exact
   baseline artifact, then create a reviewed draft that must be published and
   approved.
 - **Revert:** create a new plan from the selected applicable release after
   checking assignment, current state and dependencies; normal approval applies.
+
+Adopt and Revert both end through the normal path: a plan whose preconditions
+bind the observed, drifted digest, approved and dispatched under §3. For Adopt
+the plan applies the adopted release, which is expected to leave the machine's
+configuration unchanged. `Applied` advances only when that operation reaches
+`completed`; there is no separate baseline transition, and until then the
+scope is still reported as drifted. Publishing and approving an adopted
+release does not by itself resolve drift.
 
 Extraction precedes every backup-visible write. Adoption success, failure or
 interruption must not leave plaintext in drafts, indexes, staging, database or
@@ -302,25 +329,45 @@ management. The operator explicitly enters recovery mode; mutation and
 automatic operation resumption are paused while observation and validation
 remain available.
 
+Recovery-mode entry is a durable database fact that starts a new **recovery
+epoch**, a counter incremented by the entry itself and so always greater than
+any value in the restored state. Entry closes the scope gate for every machine
+scope: comparison 6 of §3.2 fails, no attempt transaction succeeds, and every
+operation in `committed`, `sending` or `verifying` becomes `unresolved` (§4).
+Approvals and scope releases carry the epoch in which they were recorded.
+
 The recovery procedure is:
 
-1. Verify schema, revisions, releases, operation journals and provider/key
+1. Stop, or establish as stopped, every executor that ran against the
+   pre-restoration state, and wait out the bound verification deadline of any
+   request that may be in flight.
+2. Verify schema, revisions, releases, operation journals and provider/key
    references from the restored state.
-2. Check retained dependencies and provider unlock/recovery material, and test
+3. Check retained dependencies and provider unlock/recovery material, and test
    required decryption and credentials under the actual recovery identities.
-3. Refresh machine identity, assignment, running version/configuration digest,
-   health and cluster membership for reachable targets.
-4. Reclassify pending operations using the interruption rules above; never
+4. Refresh machine identity, assignment, running version/configuration digest,
+   health and cluster membership for reachable targets, after step 1.
+5. Reclassify pending operations using the interruption rules above; never
    replay a stale journal entry solely because it is pending.
-5. Mark each scope `ready`, `blocked` or `unresolved`, recording the missing
+6. Mark each scope `ready`, `blocked` or `unresolved`, recording the missing
    dependency or evidence.
-6. Require explicit operator release for eligible scopes. Plans, preconditions
-   and approval are still required after release.
+7. Require explicit operator release for eligible scopes. The release is
+   recorded in the current recovery epoch and opens the scope gate for that
+   scope only. Plans, preconditions and approval are still required after
+   release.
+
+The restored journal can omit operations dispatched after the snapshot was
+taken, so step 5 alone cannot preserve the one-uncertain-operation invariant:
+an erased operation A could still land after a new operation B. Step 1 is what
+covers it. A scope for which pre-restoration sends cannot be shown quiesced
+stays `unresolved` and is not eligible for release, and an observed state that
+the restored `Applied` does not explain is drift (§6), not grounds for an
+apply.
 
 A restored database can predate a revocation, and the rollback is not assumed
 to be detectable. Every approval recorded before recovery-mode entry is
-therefore unverified: it authorizes no dispatch, and a plan needs an approval
-recorded after recovery-mode entry before §3.2 can succeed.
+therefore unverified: it carries an older epoch, fails comparison 1 of §3.2,
+and a plan needs an approval recorded in the current recovery epoch.
 
 Observation, applying a retained artifact and compiling a new release have
 different dependencies. A missing historical key may block regeneration or a
@@ -336,9 +383,11 @@ An implementation and its reviewer can check these directly:
    coordination scope is `committed`, `sending`, `verifying` or `unresolved`.
 2. **Commitment and attempt precede send.** No Talos request is sent without a
    durably recorded commitment and attempt earlier on the same timeline, and
-   every attempt after the first was admitted by its own retry transaction.
+   every attempt was admitted by an attempt transaction.
 3. **`Applied` follows evidence.** `Applied` changes only on entering
-   `completed`, to that operation's bound release and artifact.
+   `completed`, to that operation's bound release and artifact, and
+   `completed` needs an observation taken after the latest recorded attempt.
+   Drift adoption is no exception.
 4. **Plans do not change.** Any change to a binding is a new plan that needs a
    new approval.
 5. **Release only on a terminal state.** The machine scope and rollout slot
@@ -348,11 +397,14 @@ An implementation and its reviewer can check these directly:
    `cancelled` or safe to retry.
 7. **No plaintext before extraction.** Known/marked secrets never reach a
    backup-visible write in plaintext.
-8. **Restored approvals authorize nothing.** An approval recorded before
-   recovery-mode entry never satisfies §3.2.
+8. **Restored approvals authorize nothing.** An approval recorded before the
+   current recovery epoch never satisfies §3.2.
 9. **A held scope freezes the assignment.** A machine's assignment does not
    change while an operation on it is `committed`, `sending`, `verifying` or
    `unresolved`.
+10. **No mutation through a closed gate.** No commitment or attempt
+    transaction succeeds for a scope that is frozen, or that is under recovery
+    mode without a release in the current recovery epoch.
 
 ### 8.1 Revocation racing commitment
 
@@ -362,14 +414,14 @@ A revocation R and X's commitment transaction C race.
 - **R commits first.** C fails comparison 1. Nothing is committed or sent, and
   P's operation becomes `cancelled`.
 - **C commits first.** The operation is `committed` and R is recorded on its
-  timeline afterwards. If X has already recorded an attempt, that attempt runs
-  to its own classification and is never retried. Otherwise X does not send,
-  and the operation becomes `unresolved` with M's scope held, because a worker
-  that did not see R may still send. It reaches `cancelled`
-  only on evidence that no request was or can be sent, or `completed` if
-  observation shows the artifact applied. What counts as evidence of
-  non-dispatch for the selected ownership mechanism is an E4 result; until
-  then it needs a specific operator decision.
+  timeline afterwards. If X's attempt transaction had already committed, that
+  attempt runs to its own classification and is never retried. Otherwise the
+  attempt transaction now fails comparison 1, X does not send, and the
+  operation becomes `unresolved` with M's scope held. Because no attempt
+  transaction ever committed and none can, it then becomes `cancelled`. That
+  conclusion is only as strong as invariant 2: E4 must show that every
+  executor of the selected ownership mechanism sends only after its attempt
+  transaction commits.
 
 ### 8.2 Lost response, then a newer plan (stale A-after-B)
 
@@ -381,8 +433,8 @@ network partitions and X loses ownership. The manager restarts as Y; A becomes
   `unresolved` (invariant 1). This is the contract's A-after-B protection.
   Because nothing newer than *a* can be dispatched while A is uncertain, a
   late delivery of X's request cannot overwrite newer configuration.
-- Y observes M. If identity, assignment revision, digest and health match A's
-  postconditions, A becomes `completed`, `Applied` becomes *a*, the scope is
+- Y observes M after A's recorded attempt. If identity, assignment revision,
+  digest and health match A's postconditions, A becomes `completed`, `Applied` becomes *a*, the scope is
   released, and B may then run its own §3.
 - If M still reports the previous digest, Y cannot tell "never delivered" from
   "still in flight". A stays `unresolved`. It becomes safe to retry only if
@@ -398,9 +450,10 @@ Design: [§18.1](../design/Talos_Configuration_and_Machine_Management_Design.md#
 E4 must demonstrate revision conflicts, durable intent, ownership transitions,
 revocation around commitment, stale A-after-B apply, interrupted requests and
 reconnect behavior for the selected database/provider profile, and must supply
-the evidence this contract leaves open: the ownership mechanism, what proves
-non-dispatch, which Talos responses prove pre-mutation rejection, and when a
-retry is safe. E1 must show that extraction precedes backup-visible writes. E6
+the evidence this contract leaves open: the ownership mechanism, that every
+executor sends only after its attempt transaction commits, how
+pre-restoration executors are shown quiesced, which Talos responses prove
+pre-mutation rejection, and when a retry is safe. E1 must show that extraction precedes backup-visible writes. E6
 must exercise the complete existing-cluster slice, including drift and
 restoration. Until those experiments pass, implementation must expose
 unresolved outcomes and stop conflicting work rather than claim safe retry,
