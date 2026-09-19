@@ -225,7 +225,12 @@ Each of these is reproducible and each changed the fixture.
     the Compose network, `down` exits 1, names the network and keeps `.state/` with twelve node
     volumes remembered, and a plain `down` afterwards finishes; with only a labelled volume and
     no `.state/`, `up` and `down` refuse and `down --adopt` removes it. The end-of-`up`
-    readiness checks were observed only in their passing state.
+    readiness checks were observed only in their passing state. One more input from the caller's
+    environment, of the kind in item 10: a `COMPOSE_PROJECT_NAME` in the caller's shell wins over
+    the `name` in `compose.yaml`, which would have put the services under another project label
+    than the one every ownership check and teardown probe selects by. The project name is now
+    passed explicitly; `selftest` passed 20 of 20 from clean with that variable set to another
+    name.
 ## 6. What each experiment gets
 
 | Experiment | Uses | Must add itself |

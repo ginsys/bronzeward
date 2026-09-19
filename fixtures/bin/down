@@ -66,9 +66,10 @@ if [ -d "$STATE" ]; then
 fi
 mapfile -t node_volumes < <(sed '/^$/d' <<<"$volume_names" | sort -u)
 
-# Name the project directory and file, so a compose.yaml in the caller's working directory can
-# never be the one that is torn down. The password is only interpolated, never used, by `down`.
-BW_POSTGRES_PASSWORD=${BW_POSTGRES_PASSWORD:-unused} docker compose \
+# Name the project, its directory and its file, so that neither a compose.yaml in the caller's
+# working directory nor a COMPOSE_PROJECT_NAME in the caller's shell can choose what is torn down.
+# The password is only interpolated, never used, by `down`.
+BW_POSTGRES_PASSWORD=${BW_POSTGRES_PASSWORD:-unused} docker compose --project-name "$FIXTURE_NAME" \
   --project-directory "$FIXTURES" --file "$FIXTURES/compose.yaml" --env-file "$FIXTURES/versions.env" \
   down --volumes --remove-orphans 2>&1 | sed 's/^/  /' >&2
 
