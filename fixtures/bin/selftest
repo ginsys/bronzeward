@@ -6,6 +6,7 @@ here=$(dirname "$0")
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
+need docker jq timeout sha256sum
 keep=${1:-}
 passed=0
 ok() {
@@ -92,10 +93,20 @@ ok "store-snapshot / store-restore"
 # Crash and restart.
 "$here/inject" kill postgres
 ! sql 'select 1' >/dev/null 2>&1 || fail "postgres answers after kill"
+degraded=$("$here/evidence") || fail "evidence aborted while postgres was down"
+grep --quiet 'live database dump' "$degraded/unavailable.txt" || fail "evidence did not say the database dump is missing"
+grep --quiet --fixed-strings "$degraded/backups/pg-selftest.dump.sql" "$degraded/leak-scan.txt" ||
+  fail "evidence did not scan the database backup while postgres was down"
+ok "evidence still captures and scans while postgres is down, and names what is missing"
 "$here/inject" start postgres
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "postgres lost committed data over a crash"
 ok "kill / start postgres keeps committed data"
 "$here/inject" kill openbao
+degraded=$("$here/evidence") || fail "evidence aborted while openbao was down"
+grep --quiet 'openbao metadata' "$degraded/unavailable.txt" || fail "evidence did not say the OpenBao metadata is missing"
+jq -e 'has("unknown")' "$degraded/openbao-metadata.jsonl" >/dev/null ||
+  fail "OpenBao metadata reads as empty instead of unknown while openbao was down"
+ok "evidence records OpenBao state as unknown, not empty, while openbao is down"
 "$here/inject" start openbao
 [ "$(kv_version destroyed)" = false ] || fail "openbao state differs after crash and unseal"
 ok "kill / start openbao comes back sealed, unseals, keeps state"
@@ -112,12 +123,19 @@ ok "pause / unpause worker"
 wait_for 120 "the worker after netjoin" worker_talos version --short
 ok "netsplit / netjoin worker returns on the same address"
 
-# Evidence: the scan must see the canary that was deliberately written to the database.
+# Evidence: the scan must see the canary that was deliberately written to the database, and a
+# secret the fixture did not choose itself.
+! "$here/evidence" "$STATE/no-such-path" >/dev/null 2>&1 || fail "evidence accepted a scan path that does not exist"
+ok "evidence refuses a scan path it cannot read"
+printf 'token=%s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/selftest-token-leak"
 bundle=$("$here/evidence")
+grep --quiet --fixed-strings "$STATE/data/selftest-token-leak" "$bundle/leak-scan.txt" || fail "leak scan missed the OpenBao metadata token"
+rm "$STATE/data/selftest-token-leak"
+[ ! -e "$bundle/unavailable.txt" ] || fail "evidence reports missing sources on a healthy fixture: $(cat "$bundle/unavailable.txt")"
 grep --quiet --fixed-strings "$bundle/postgres.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database dump"
 grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database backup"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle written; leak scan finds the planted database canary and nothing in the logs"
+ok "evidence bundle complete; leak scan finds the planted canary and token, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   "$here/down" || fail "down reported leftovers"
