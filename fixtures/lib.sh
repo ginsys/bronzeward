@@ -44,8 +44,11 @@ need_state() {
   [ -f "$STATE/secrets.env" ] || die "no running fixture: run fixtures/bin/up first"
 }
 
+# The project name is forced: a COMPOSE_PROJECT_NAME in the caller's shell wins over the `name` in
+# compose.yaml, and every ownership check and teardown probe selects by that name's label.
 compose() {
-  docker compose --project-directory "$FIXTURES" --file "$FIXTURES/compose.yaml" \
+  docker compose --project-name "$FIXTURE_NAME" --project-directory "$FIXTURES" \
+    --file "$FIXTURES/compose.yaml" \
     --env-file "$FIXTURES/versions.env" --env-file "$STATE/secrets.env" "$@"
 }
 
