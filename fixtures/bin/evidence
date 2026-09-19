@@ -162,7 +162,9 @@ done
 # port. It sits next to the out-of-band metadata so that nobody reading healthy metadata can miss
 # that clients could not reach the provider at that moment.
 rc=0
-health=$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code}' \
+# --noproxy: with http_proxy set in the caller's shell the request would go to the proxy, and any
+# answer from the proxy would read as a reachable provider.
+health=$(curl --noproxy '*' --silent --max-time 5 --output /dev/null --write-out '%{http_code}' \
   "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health") || rc=$?
 if [ "$rc" -eq 0 ]; then
   printf 'reachable: sys/health answered HTTP %s on the published port\n' "$health"
@@ -202,19 +204,24 @@ find -L "${roots[@]}" -type f -print0 >"$list" || die "leak scan could not walk 
 : >"$scan"
 while IFS= read -r -d '' file; do
   [ "$file" != "$scan" ] || continue
+  # Occurrences, not matching lines: two secrets on one line are two hits. The count is what tells
+  # the positive control, which holds exactly one, from a control that gained a second secret.
   rc=0
-  hits=$(grep --text --fixed-strings --count --file="$STATE/scan-patterns.txt" "$file") || rc=$?
+  found=$(grep --text --fixed-strings --only-matching --file="$STATE/scan-patterns.txt" "$file") || rc=$?
   [ "$rc" -le 1 ] || die "leak scan could not read $file; results void"
+  hits=$(sed '/^$/d' <<<"$found" | wc -l)
+  unset found
   [ "$hits" -eq 0 ] || printf '%s %s\n' "$hits" "$file" >>"$scan"
 done <"$list"
 rm -f "$list"
 
 control=$STATE/data/canary-control.txt
-grep --quiet --line-regexp --fixed-strings "1 $control" "$scan" ||
+CONTROL=$control awk '{ if (substr($0, index($0, " ") + 1) == ENVIRON["CONTROL"]) found = 1 } END { exit !found }' "$scan" ||
   die "leak scan did not find its positive control $control: the scan is broken, results void"
 # The control is that one file, and its copy at the same place inside an expanded store snapshot,
 # each with the single hit bin/up planted. A file that merely shares the name, anywhere else, is a
-# leak like any other; so is a control that gained a second secret.
+# leak like any other; so is a control that gained a second secret, which is why it is excluded
+# below only when its count is exactly one.
 others=$(CONTROL=$control STORES=$out/backups/store- awk '{
   path = substr($0, index($0, " ") + 1)
   if ($1 == 1 && path == ENVIRON["CONTROL"]) next
