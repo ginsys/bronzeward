@@ -246,6 +246,9 @@ is_control() { # is_control <file>
   # .state would excuse a canary that lives there and survives teardown. The same goes for its
   # data directory; everything above that is the fixture's own.
   [ ! -L "$1" ] && [ ! -L "$(dirname -- "$1")" ] || return 1
+  # Nor a second name for a file that also exists elsewhere: a hard link passes both tests above,
+  # and the other name survives teardown just the same. A link count that cannot be read is not 1.
+  [ "$(stat --format=%h -- "$1" 2>/dev/null)" = 1 ] || return 1
   cmp --silent -- "$1" <(control_content)
 }
 secret_in_name() { # secret_in_name <path>

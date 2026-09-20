@@ -21,9 +21,9 @@ and `age` are downloaded into `fixtures/.cache/` and refused on a checksum misma
 | Command | Does |
 |---|---|
 | `fixtures/bin/up` | Generates synthetic secrets, starts PostgreSQL and OpenBao, initializes and unseals OpenBao, creates the Talos cluster, then asks both services again with this run's credentials before it reports the fixture up. Takes about two minutes once images are cached. |
-| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
+| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`. `start` is done only once the service or Talos node answers again. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
 | `fixtures/bin/evidence [path ...]` | Writes versions, container logs, a database dump, OpenBao metadata and Talos config digests to `.state/evidence/<utc>/`, then scans them, and any extra paths given, for synthetic secret material. Prints the bundle path. |
-| `fixtures/bin/down [--purge] [--adopt]` | Removes every container, network and volume, then checks that nothing is left and fails if something is, or if Docker could not be asked. `.state/` is removed last and only after that check passed, so a `down` that could not finish can simply be run again. `--purge` also removes `.cache/`. It refuses a fixture it cannot show to be this checkout's own; `--adopt` overrides that. |
+| `fixtures/bin/down [--purge] [--adopt]` | Removes every container, network and volume, then checks that nothing is left and fails if something is, or if Docker could not be asked. The claim and then `.state/` are removed last and only after that check passed, so a `down` that could not finish can simply be run again. `--purge` also removes `.cache/`. It refuses a fixture it cannot show to be this checkout's own; `--adopt` overrides that. |
 | `fixtures/bin/selftest [--keep]` | `up`, each injection once with an assertion, `evidence`, `down`. `--keep` runs the checks against a fixture that is already up. |
 
 An experiment uses the fixture like this:
@@ -64,8 +64,9 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
 The scan has a positive control, `.state/data/canary-control.txt`. If the scan does not find it, or
 cannot read a path or file it was given, the command fails, because an empty result would then
 prove nothing. Only that file and its copies inside expanded store snapshots count as the control,
-and only while they hold exactly what `bin/up` planted; any other file of the same name, or a
-control whose content changed, is reported like every other hit. Names of files and directories
+and only while they hold exactly what `bin/up` planted; any other file of the same name, a
+control whose content changed, and a control that is a symlink or has a second hard link are
+reported like every other hit. Names of files and directories
 are matched as well as file contents; a name that holds a secret is withheld from the report, which
 gives the inode instead. Symlinks are followed, so a linked file or directory is scanned through its link and
 a link that cannot be followed fails the command; extra paths may be relative and may have any
@@ -84,9 +85,9 @@ from here.
 `.state/` belongs to whoever ran `bin/up`, and its lifetime is one run. Nothing in it is backed up
 or recoverable by design: losing `bao-init.json` loses that OpenBao instance, which is the
 intended way to study key loss. `bin/down` is the only cleanup and is safe to run at any time,
-including after a failed or interrupted `up`. `.state` must be a real directory: every command
-refuses to run while it is a symlink, because secrets would be read or written outside the
-checkout. Evidence worth keeping must be copied out of `.state/`
+including after a failed or interrupted `up`. `.state` and its `data`, `backups` and `evidence`
+directories must be real directories: every command refuses to run while one of them is a symlink,
+because secrets would be read or written outside the checkout. Evidence worth keeping must be copied out of `.state/`
 before `down`.
 
 ## Known limits
@@ -106,6 +107,9 @@ before `down`.
   exists, and `bin/down` removes those and any still attached to fixture containers. If
   `talosctl cluster create` fails before a container exists, its empty volumes cannot be told apart
   from anyone else's and are left behind; `docker volume ls --filter dangling=true` shows them.
+  The same holds for `down --adopt` run without the owning checkout's `.state/` after Talos
+  containers were removed by hand. In both cases `down` says in its last line that it did not
+  look for such volumes, instead of reporting that no volume is left.
 - A host that restarts the Docker daemon when a new bridge interface appears, for example through
   a NetworkManager dispatcher script, stops the containers that were already running each time a
   fixture network is created. `bin/up` detects this and fails. Fix the host hook so that it ignores
@@ -117,9 +121,10 @@ before `down`.
   is created, labelled with this checkout's path and never started. Docker refuses a second one
   of that name atomically, so of two `up` started together, from one checkout or two, only one
   proceeds. `bin/down` refuses when the claim or Compose names another directory as the origin,
-  or when fixture resources exist and neither a claim from this checkout nor `.state/` shows them
-  to be its own; run `down` in the checkout that owns them, or `down --adopt` if that checkout is
-  gone. `bin/inject` and `bin/evidence` refuse unless the claim names this checkout: a `.state/`
+  or when fixture resources exist and no claim from this checkout shows them to be its own; run
+  `down` in the checkout that owns them, or `down --adopt` if that checkout is gone or the claim
+  was removed by hand. A `.state/` alone does not count, because it can be left over from an
+  earlier fixture, and `down` drops the claim only after everything else is verified gone. `bin/inject` and `bin/evidence` refuse unless the claim names this checkout: a `.state/`
   left over here does not make another checkout's fixture, which answers to the same names, fair
   game.
 - `bin/evidence` observes OpenBao and PostgreSQL out of band, from inside their containers. After

@@ -17,10 +17,15 @@ unset TAR_OPTIONS GZIP
 # bin/up only ever creates .state as a directory. A symlink there was put by someone else, and
 # following it would source a secrets.env from outside the checkout, or write this run's secrets
 # there. Checked here, before anything under it is read: every command loads this file first.
-if [ -L "$STATE" ]; then
-  printf 'fixtures: %s is a symlink; the fixture never creates one. Remove the link and run again\n' "$STATE" >&2
-  exit 1
-fi
+# The same holds one level down for the directories the commands write into: through a symlinked
+# evidence or backups directory, dumps and snapshots would land where teardown does not reach.
+for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence"; do
+  if [ -L "$managed" ]; then
+    printf 'fixtures: %s is a symlink; the fixture never creates one. Remove the link and run again\n' "$managed" >&2
+    exit 1
+  fi
+done
+unset managed
 
 set -a
 # shellcheck source-path=SCRIPTDIR source=versions.env

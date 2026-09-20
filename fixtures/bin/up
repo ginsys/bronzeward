@@ -23,7 +23,14 @@ foreign=$(
 [ -z "$foreign" ] || die "a fixture already exists on this Docker daemon ($(tr '\n' ' ' <<<"$foreign")). \
 Run fixtures/bin/down in the checkout that created it; see 'Known limits' in fixtures/README.md"
 
-synthetic() { printf 'BWSYNTH-%s' "$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"; }
+# The random part is assigned and measured before it is used: as a printf argument a failed read of
+# /dev/urandom would leave the constant prefix as this run's password, with exit status 0.
+synthetic() {
+  local hex
+  hex=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n') || return 1
+  [ "${#hex}" -eq 32 ] || return 1
+  printf 'BWSYNTH-%s' "$hex"
+}
 
 umask 077
 # The checks above are only a look, and of two `up` started together both can pass them, from one
@@ -41,9 +48,11 @@ mkdir "$STATE" 2>/dev/null || {
 # ERR trap, so neither would print the hint.
 trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; run fixtures/bin/down to remove what was created"' EXIT
 mkdir "$STATE/data" "$STATE/backups"
+canary=$(synthetic) || die "could not generate the synthetic canary"
+password=$(synthetic) || die "could not generate the synthetic PostgreSQL password"
 {
-  printf 'BW_CANARY=%s\n' "$(synthetic)"
-  printf 'BW_POSTGRES_PASSWORD=%s\n' "$(synthetic)"
+  printf 'BW_CANARY=%s\n' "$canary"
+  printf 'BW_POSTGRES_PASSWORD=%s\n' "$password"
 } >"$STATE/secrets.env"
 set -a
 # shellcheck disable=SC1091  # just generated
