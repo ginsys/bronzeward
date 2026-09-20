@@ -252,7 +252,15 @@ trap 'rm -f -- "$list"' EXIT
 # OpenBao encrypts, are covered.
 # -L: a symlinked path or file is followed and its target scanned. Without it find skips the link
 # silently and the target reads as clean. A link that cannot be followed is therefore fatal too.
-roots=("$out" "$STATE/data" "$STATE/backups" "${extras[@]}")
+roots=("$out" "$STATE/backups" "${extras[@]}")
+# The live store may be gone: a store-restore killed between its two renames leaves it aside as
+# store-restore.*/previous, and losing it is what a store snapshot is for. A root that does not
+# exist fails the walk, which would void the scan of everything else.
+if [ -e "$STATE/data" ]; then
+  roots+=("$STATE/data")
+else
+  unavailable "live store directory $STATE/data is absent: nothing of it scanned but what a store-restore left aside"
+fi
 # What a store-restore killed outright leaves aside: the extracted store and, past its first
 # rename, the earlier live one. Plaintext copies of the store both, scanned like the live directory.
 for staging in "$STATE"/store-restore.*; do
@@ -282,11 +290,29 @@ is_store_copy() {
 # pattern here, and the canary would survive teardown inside it while its copy was excused.
 store_archive_is_own() {
   local middle=${1#"$out/backups/store-"} archive
-  archive=$STATE/backups/store-${middle%/data/canary-control.txt}.tgz
+  middle=${middle%/data/canary-control.txt}
+  # A complete archive that an interrupted store-snapshot left under its temporary name expands
+  # under that name, which ends in .tgz.partial.<suffix> already.
+  case $middle in
+    *.tgz.partial.*) archive=$STATE/backups/store-$middle ;;
+    *) archive=$STATE/backups/store-$middle.tgz ;;
+  esac
   [ ! -L "$archive" ] && [ -f "$archive" ] && [ "$(stat --format=%h -- "$archive" 2>/dev/null)" = 1 ]
 }
+# is_live_control <file>: the control's own place, or, while the live directory is gone, the
+# place a store-restore killed between its two renames moved it to.
+is_live_control() {
+  local rest
+  [ "$1" != "$control" ] || return 0
+  [ ! -e "$STATE/data" ] || return 1
+  rest=${1#"$STATE/store-restore."}
+  [ "$rest" != "$1" ] || return 1
+  [ "${rest%/previous/canary-control.txt}" != "$rest" ] || return 1
+  rest=${rest%/previous/canary-control.txt}
+  [ -n "$rest" ] && [[ $rest != */* ]]
+}
 is_control() { # is_control <file>
-  if [ "$1" != "$control" ]; then
+  if ! is_live_control "$1"; then
     is_store_copy "$1" && store_archive_is_own "$1" || return 1
   fi
   # Not a symlink: find -L and cmp both follow one, and a control that points at a file outside
@@ -321,7 +347,7 @@ while IFS= read -r -d '' file; do
   unset found
   [ "$hits" -gt 0 ] || continue
   printf '%s %s\n' "$hits" "$(shown "$file")" >>"$scan"
-  [ "$file" != "$control" ] || control_seen=1
+  ! is_live_control "$file" || control_seen=1
   is_control "$file" || others+="$hits $(shown "$file")"$'\n'
 done <"$list"
 

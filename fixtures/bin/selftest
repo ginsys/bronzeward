@@ -142,6 +142,16 @@ printf 'not a tar archive\n' >"$STATE/backups/store-selftest-corrupt.tgz"
 [ -f "$STATE/data/selftest-store" ] && [ -f "$STATE/data/canary-control.txt" ] ||
   fail "a failed store-restore destroyed the live store directory"
 rm "$STATE/backups/store-selftest-corrupt.tgz"
+# A snapshot whose final name has a second name: publishing over it would leave the earlier archive
+# alive under the other name, past teardown.
+ln "$STATE/backups/store-selftest.tgz" "$STATE/selftest-snapshot-alias"
+rc=0
+"$here/inject" store-snapshot selftest 2>/dev/null || rc=$?
+same=0
+[ "$STATE/backups/store-selftest.tgz" -ef "$STATE/selftest-snapshot-alias" ] && same=1
+rm "$STATE/selftest-snapshot-alias"
+[ "$rc" -ne 0 ] && [ "$same" -eq 1 ] || fail "store-snapshot replaced a snapshot that has a second name"
+[ -z "$(find "$STATE/backups" -name 'store-selftest.tgz.partial.*')" ] || fail "a refused store-snapshot left its partial file"
 # Defaults for tar in the caller's shell must not reach the snapshot: this one would leave the file
 # out without any error.
 TAR_OPTIONS=--exclude=data/selftest-store "$here/inject" store-snapshot selftest-env
@@ -152,10 +162,13 @@ grep --quiet --line-regexp 'data/selftest-store' <<<"$listing" ||
 # A name with a slash would put the snapshot under another directory, which may be a link to anywhere.
 ! "$here/inject" store-snapshot selftest-escape/out 2>/dev/null || fail "store-snapshot accepted a name with a slash"
 [ ! -e "$STATE/backups/store-selftest-escape" ] || fail "store-snapshot created a directory for a name with a slash"
-# A name with a newline would write records of its own into injections.log.
+# A name or an action with a newline would write records of its own into injections.log, and an
+# action that does not exist is refused before it is recorded.
 records=$(wc -l <"$STATE/injections.log")
 ! "$here/inject" store-snapshot $'selftest-line\nbreak' 2>/dev/null || fail "store-snapshot accepted a name with a newline"
-[ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "a refused name with a newline was still recorded"
+! "$here/inject" $'store-snapshot\nselftest-line' 2>/dev/null || fail "inject accepted an action with a newline"
+! "$here/inject" selftest-no-such-action 2>/dev/null || fail "inject accepted an action that does not exist"
+[ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "a refused action or name was still recorded"
 [ -z "$(find "$STATE/backups" -name 'store-selftest-line*')" ] || fail "store-snapshot wrote a snapshot for a name with a newline"
 # A final name that is a symlink to a directory must not receive the snapshot inside that directory.
 mkdir "$STATE/selftest-snapshot-dir"
@@ -192,8 +205,24 @@ if [ "$rc" -ne 0 ] || [ ! -f "$STATE/data/selftest-store" ]; then
   fail "store-restore did not bring back a store directory that was gone"
 fi
 rm -r "$STATE/selftest-data-aside"
+# An archive holding an entry named previous, restored while the live directory is gone: refused,
+# and the exit handler must not take the archive's entry for a live directory this run moved aside.
+mkdir -p "$STATE/selftest-previous-archive/data" "$STATE/selftest-previous-archive/previous"
+printf 'from the archive\n' >"$STATE/selftest-previous-archive/previous/planted"
+tar -czf "$STATE/backups/store-selftest-previous.tgz" -C "$STATE/selftest-previous-archive" data previous
+rm -r "$STATE/selftest-previous-archive"
+mv "$STATE/data" "$STATE/selftest-data-aside"
+rc=0
+"$here/inject" store-restore selftest-previous 2>/dev/null || rc=$?
+installed=0
+[ ! -e "$STATE/data" ] || installed=1
+rm -rf "$STATE/data" "$STATE/backups/store-selftest-previous.tgz"
+mv "$STATE/selftest-data-aside" "$STATE/data" # before anything can fail
+[ "$rc" -ne 0 ] || fail "store-restore accepted an archive with an entry named previous while the live directory was gone"
+[ "$installed" -eq 0 ] || fail "a refused archive's previous entry was installed as the store directory"
+[ -z "$(find "$STATE" -maxdepth 1 -name 'store-restore.*')" ] || fail "a refused store-restore left its staging directory"
 rm "$STATE/data/selftest-store"
-ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash or a newline refused, no write through a symlinked final name, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored"
+ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash or a newline refused, no write through a symlinked or a hard-linked final name, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored and never replaced by an archive's own previous entry"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -365,6 +394,13 @@ aliased=0
 ! "$here/evidence" >/dev/null 2>&1 || aliased=1
 rm "$STATE/selftest-secrets-alias"
 [ "$aliased" -eq 0 ] || fail "a secrets.env with a second name was accepted"
+# The other generated credential files likewise: a second name for bao-init.json keeps the root
+# token and the unseal key past teardown, and the scan roots never reach the source itself.
+ln "$STATE/bao-init.json" "$STATE/selftest-init-alias"
+aliased=0
+! "$here/evidence" >/dev/null 2>&1 || aliased=1
+rm "$STATE/selftest-init-alias"
+[ "$aliased" -eq 0 ] || fail "a bao-init.json with a second name was accepted"
 # The pattern list thinned after up: a scan against it would pass while a token goes unmatched.
 cp "$STATE/scan-patterns.txt" "$STATE/selftest-patterns-aside"
 printf 'BWSYNTH-\n' >"$STATE/scan-patterns.txt"
@@ -372,27 +408,46 @@ thinned=0
 ! "$here/evidence" >/dev/null 2>&1 || thinned=1
 mv "$STATE/selftest-patterns-aside" "$STATE/scan-patterns.txt" # before anything can fail
 [ "$thinned" -eq 0 ] || fail "evidence scanned with a pattern list that was changed after up"
-# What an interruption leaves, each holding the canary: a dump and an archive under their
-# temporary names, a store-restore staging directory, and a database under a db-restore scratch
-# name. Each is scanned; the archive is truncated, so it marks the bundle incomplete, not void.
+# What an interruption leaves, each holding the canary: a dump and two archives under their
+# temporary names, one complete and one truncated, a store-restore staging directory, and a
+# database under a db-restore scratch name. Each is scanned; the truncated archive marks the
+# bundle incomplete, not void; the control's copy in the complete archive is the control still.
 cp "$STATE/backups/pg-selftest.dump" "$STATE/backups/pg-selftest.dump.partial.selftest"
+cp "$STATE/backups/store-selftest.tgz" "$STATE/backups/store-selftest.tgz.partial.whole"
 head --bytes=64 "$STATE/backups/store-selftest.tgz" >"$STATE/backups/store-selftest.tgz.partial.selftest"
 mkdir -p "$STATE/store-restore.selftest/data"
 cp "$STATE/data/canary-control.txt" "$STATE/store-restore.selftest/data/canary-control.txt"
 pg createdb -U bronzeward --maintenance-db=postgres --template=bronzeward bronzeward_previous
 rc=0
 bundle=$("$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
-rm -r "$STATE/backups/pg-selftest.dump.partial.selftest" "$STATE/backups/store-selftest.tgz.partial.selftest" "$STATE/store-restore.selftest"
+rm -r "$STATE/backups/pg-selftest.dump.partial.selftest" "$STATE/backups/store-selftest.tgz.partial.whole" \
+  "$STATE/backups/store-selftest.tgz.partial.selftest" "$STATE/store-restore.selftest"
 pg dropdb --force -U bronzeward --maintenance-db=postgres bronzeward_previous # before anything can fail
 [ "$rc" -eq 0 ] || fail "evidence aborted on what an interruption leaves: $(tail -n 1 "$STATE/selftest-evidence.err")"
 grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.partial.selftest.sql" "$bundle/leak-scan.txt" ||
   fail "leak scan missed the canary in a dump left under its temporary name"
 grep --quiet --fixed-strings 'store-selftest.tgz.partial.selftest' "$bundle/unavailable.txt" ||
   fail "a truncated archive left under its temporary name was not named as incompletely scanned"
+! grep --quiet --fixed-strings '/backups/store-selftest.tgz.partial.whole/data/canary-control.txt' "$STATE/selftest-evidence.err" ||
+  fail "leak scan reported the control's copy from a complete archive under its temporary name as a leak"
 grep --quiet --line-regexp --fixed-strings "1 $STATE/store-restore.selftest/data/canary-control.txt" "$bundle/leak-scan.txt" ||
   fail "leak scan skipped a store-restore staging directory, or excused the control's copy in it"
 grep --quiet --fixed-strings "$bundle/postgres-bronzeward_previous.sql" "$bundle/leak-scan.txt" ||
   fail "leak scan missed the canary in a database left by an interrupted db-restore"
+rm "$STATE/selftest-evidence.err"
+# The live store gone, as a store-restore killed between its two renames leaves it: aside under
+# the staging directory, where the control still counts as found, and the capture goes on.
+mkdir "$STATE/store-restore.selftest"
+mv "$STATE/data" "$STATE/store-restore.selftest/previous"
+rc=0
+bundle=$("$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
+mv "$STATE/store-restore.selftest/previous" "$STATE/data" # before anything can fail
+rm -r "$STATE/store-restore.selftest"
+[ "$rc" -eq 0 ] || fail "evidence aborted with the live store directory moved aside: $(tail -n 1 "$STATE/selftest-evidence.err")"
+grep --quiet --fixed-strings "$STATE/data is absent" "$bundle/unavailable.txt" ||
+  fail "evidence did not name the absent live store directory"
+! grep --quiet --fixed-strings "$STATE/store-restore.selftest/previous/canary-control.txt" "$STATE/selftest-evidence.err" ||
+  fail "leak scan reported the control moved aside by an interrupted store-restore as a leak"
 rm "$STATE/selftest-evidence.err"
 # A store archive with a second name outside .state keeps the canary where teardown does not reach:
 # the control's copy expanded from it is no longer excused.
@@ -437,8 +492,8 @@ bundle=$(cd "$STATE/selftest-outside" &&
 cp "$STATE/selftest-outside/control-as-planted" "$STATE/data/canary-control.txt" # before anything can fail
 rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
-# Relative scan paths are made absolute from the physical working directory, so with the checkout
-# reached through a symlink they are spelled unlike $STATE. Only the tail is compared.
+# Relative scan paths are made absolute from the working directory; only the tail is compared, so
+# the assertion does not depend on how the checkout path is spelled.
 grep --quiet --fixed-strings "/.state/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
   fail "leak scan took a file named like its positive control for the control"
 grep --quiet --line-regexp --fixed-strings "1 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
@@ -479,11 +534,18 @@ if [ "$keep" != --keep ]; then
   # anything is removed.
   mv "$STATE/down-node-volumes" "$STATE/selftest-record-aside"
   ln -s "$STATE/selftest-record-aside" "$STATE/down-node-volumes"
+  # And the marker down writes when the node volumes are not all known, which it does before the
+  # record is refused: through a link it would truncate someone else's file.
+  printf 'keep\n' >"$FIXTURES/.selftest-marker-target"
+  ln -s "$FIXTURES/.selftest-marker-target" "$STATE/down-node-volumes-incomplete"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
+  kept=$(cat "$FIXTURES/.selftest-marker-target")
+  rm -f "$FIXTURES/.selftest-marker-target" "$STATE/down-node-volumes-incomplete"
   if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down read a symlinked node-volume record"
   fi
+  [ "$kept" = keep ] || fail "down wrote its incomplete-volumes marker through a link"
   rm "$STATE/down-node-volumes"
   mv "$STATE/selftest-record-aside" "$STATE/down-node-volumes"
   # A hard link is no symlink and is a regular file; it is a second name all the same.
@@ -500,7 +562,7 @@ if [ "$keep" != --keep ]; then
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, then leaves nothing behind, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record and writes no marker through a link, then leaves nothing behind, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

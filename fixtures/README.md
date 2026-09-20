@@ -79,7 +79,9 @@ backups are expanded before scanning, without needing the database server. What 
 action leaves is covered too: a dump or archive still under its temporary `.partial.` name is
 expanded as far as it goes (a truncated one is named in `unavailable.txt`), a `store-restore`
 staging directory under `.state` is scanned like the live store, and a database left under a
-`db-restore` scratch name is dumped next to the live one. OpenBao snapshots are encrypted by
+`db-restore` scratch name is dumped next to the live one. With the live store directory gone, as
+a `store-restore` killed between its two renames leaves it, the capture goes on without it, names
+it in `unavailable.txt`, and takes the control from the copy the staging directory holds. OpenBao snapshots are encrypted by
 OpenBao and are scanned as they are. The pattern list in `scan-patterns.txt` is rebuilt from the
 generated credentials at every capture and must equal the file, or the scan is void. Talos key material is matched in the base64 form
 the secrets bundle carries, so a decoded PEM copy would not match.
@@ -94,8 +96,14 @@ or recoverable by design: losing `bao-init.json` loses that OpenBao instance, wh
 intended way to study key loss. `bin/down` is the only cleanup and is safe to run at any time,
 including after a failed or interrupted `up`. `.state` and its `data`, `backups` and `evidence`
 directories must be real directories: every command refuses to run while one of them is a symlink,
-because secrets would be read or written outside the checkout. Evidence worth keeping must be copied out of `.state/`
-before `down`.
+because secrets would be read or written outside the checkout. The files `bin/up` generates
+(`secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
+`controlplane.yaml`, `scan-patterns.txt`, the node-volume record) must each be the regular file it
+wrote, with no second name: a symlink or a hard link there stops `inject`, `evidence` and `down`
+before anything is scanned or removed, since the secret would outlive teardown under the other
+name. The same holds for a snapshot about to be replaced by one of the same name. The checkout is
+identified by its physical path, so the same checkout reached through a symlink is still its own.
+Evidence worth keeping must be copied out of `.state/` before `down`.
 
 ## Known limits
 

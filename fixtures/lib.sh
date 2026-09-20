@@ -2,8 +2,10 @@
 # Shared setup for the fixture commands. Sourced, never executed.
 
 # CDPATH emptied: with it set, `cd` to a relative path prints the directory it found, and the
-# substitution would capture that line as well as the one from pwd.
-FIXTURES=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# substitution would capture that line as well as the one from pwd. -P on both: this path names
+# the checkout in the fixture's claim, and the same checkout reached through a symlink must give
+# the same name, or its own down would refuse it.
+FIXTURES=$(CDPATH='' cd -P -- "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 STATE=$FIXTURES/.state
 CACHE=$FIXTURES/.cache
 
@@ -97,6 +99,22 @@ need_state() {
     die "$STATE exists but no fixture claim does: the state is stale. Run fixtures/bin/down, then up"
   [ "$owner" = "$FIXTURES" ] ||
     die "the fixture on this daemon belongs to $owner, so $STATE is stale. Remove that directory by hand: fixtures/bin/down refuses here, rightly, because the running fixture is not this checkout's"
+  state_files_own
+}
+
+# state_files_own: every credential file bin/up generated is the regular file it wrote, under that
+# one name. Hard-linked outside .state, a bao-init.json or talosconfig keeps the root token or the
+# client key past teardown, and the scan roots never reach the source itself. secrets.env is
+# checked above, before it is read; the rest here, by need_state and by down, before anything is
+# scanned or removed. The node-volume record has its own check in down.
+state_files_own() {
+  local file
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt; do
+    [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
+    if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
+      die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
+    fi
+  done
 }
 
 # The project name is forced: a COMPOSE_PROJECT_NAME in the caller's shell wins over the `name` in
