@@ -108,6 +108,20 @@ manifest=$(git -C "$FIXTURES" rev-parse HEAD) ||
   die "cannot read the manifest commit from git; the bundle could not be tied to a fixture version"
 differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES") ||
   die "cannot ask git whether fixtures/ differs from commit $manifest"
+# An untracked file that only .git/info/exclude or a global excludes file hides: neither the status
+# above nor the listing below sees it, and the bundle would claim that the commit plus the diff say
+# what ran while a helper under fixtures/ is in neither. The repository's own .gitignore files are
+# the one exclusion the bundle stands by (.state and .cache); anything else hidden is refused.
+# Listed into files, so that a listing that fails is not an empty one.
+git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" | sort -z >"$out/.untracked-seen" ||
+  die "cannot list the untracked files under fixtures/; the bundle could not be tied to what ran"
+git -C "$FIXTURES" ls-files --others --exclude-per-directory=.gitignore -z -- "$FIXTURES" | sort -z >"$out/.untracked-all" ||
+  die "cannot list the untracked files under fixtures/; the bundle could not be tied to what ran"
+hidden=$(comm --zero-terminated -13 "$out/.untracked-seen" "$out/.untracked-all" | tr '\0' ' ') ||
+  die "cannot compare the untracked listings of fixtures/; the bundle could not be tied to what ran"
+rm -- "$out/.untracked-seen" "$out/.untracked-all" || die "cannot remove the untracked listings from $out"
+[ -z "$hidden" ] ||
+  die "untracked files under fixtures/ are hidden from git by an excludes file outside the repository: $hidden; the bundle could not say what ran. Track, remove or unhide them"
 # A tree that differs from the commit: the commit alone then does not say what ran. The bundle
 # carries the difference, the status of every changed or untracked file, the diff of the tracked
 # ones and the whole content of the untracked ones (as a diff against nothing), so that the
@@ -121,6 +135,13 @@ fixtures_diff() {
   # a failing listing fails the pipeline, as does the loop when a diff cannot be written.
   git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" |
     while IFS= read -r -d '' file; do
+      # A symlink would be carried as its target's name, not as the bytes that ran, and on another
+      # host the name would point at something else or at nothing. Refused, not recorded.
+      # The listing is relative to fixtures/, where git ran; the test is not.
+      [ ! -L "$FIXTURES/$file" ] || {
+        say "evidence: $(shown "$file") is an untracked symlink; the bundle cannot carry what it points at"
+        exit 1
+      }
       # --no-index exits 1 when the two differ, which a file against /dev/null always does.
       # --binary: a helper or prototype that is not text is carried whole, not as "differ".
       git -C "$FIXTURES" diff --no-index --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
@@ -328,14 +349,19 @@ for staging in "$STATE"/store-restore.*; do
 done
 # What a capture that ended before its scan left: the bundle still marked incomplete holds the
 # dump, the logs and the data directory of its moment, none of it scanned. Listed by find, so a
-# dot-named entry counts; never through a link, as above.
+# dot-named entry counts; never through a link, as above. Listed into a file first: a listing
+# that fails inside a process substitution would read as an empty one, and a sibling holding
+# secret material would go unscanned while this capture reports a clean scan.
+find "$STATE/evidence" -mindepth 1 -maxdepth 1 -print0 >"$out/.siblings" 2>/dev/null ||
+  die "cannot list $STATE/evidence for captures that ended before their scan; results void"
 while IFS= read -r -d '' sibling; do
   [ ! -L "$sibling" ] || die "$(shown "$sibling") is a symlink; the fixture never makes one there. Results void"
   [ "$sibling" = "$out" ] || [ ! -e "$sibling/.incomplete" ] || {
     say "evidence: an earlier capture ended before its leak scan; $(shown "$sibling") is scanned with this one"
     roots+=("$sibling")
   }
-done < <(find "$STATE/evidence" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+done <"$out/.siblings"
+rm -- "$out/.siblings" || die "cannot remove the sibling listing from $out; results void"
 dangling=$(find -L "${roots[@]}" -type l -print -quit 2>/dev/null) ||
   die "leak scan could not walk every path (a directory it may not read, most likely); results void"
 [ -z "$dangling" ] || die "leak scan cannot follow the symlink $(shown "$dangling"); results void"

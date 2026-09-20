@@ -70,6 +70,9 @@ export KUBECONFIG=$STATE/kubeconfig
 CLAIM=$FIXTURE_NAME-claim
 CLAIM_LABEL=bronzeward.fixture=$FIXTURE_NAME
 CLAIM_OWNER_LABEL=bronzeward.fixture.checkout
+# On the Compose volumes bin/up makes: the run that made them, which bin/down holds each to.
+# shellcheck disable=SC2034  # read by bin/up and bin/down, which source this file
+RUN_LABEL=bronzeward.fixture.run
 
 PG=$FIXTURE_NAME-postgres
 BAO=$FIXTURE_NAME-openbao
@@ -234,11 +237,16 @@ control_content() { printf 'planted on purpose: %s\n' "$BW_CANARY"; }
 # Talos node volumes are anonymous and unlabelled: once their container is gone nothing ties them to
 # the fixture. bin/up records these names right after creating the cluster, bin/down adds what it
 # still sees, and the list in .state is what teardown removes and verifies.
-talos_volume_names() {
+talos_volume_names() { # talos_volume_names [container-id ...]: of every labelled container when none is given
+  local ids
+  if [ $# -gt 0 ]; then
+    ids=$(printf '%s\n' "$@")
+  else
+    ids=$(docker ps --all --quiet --filter "label=talos.cluster.name=$FIXTURE_NAME") || return 1
+  fi
   # shellcheck disable=SC2016  # a Go template, not a shell expansion
-  docker ps --all --quiet --filter "label=talos.cluster.name=$FIXTURE_NAME" |
-    xargs --no-run-if-empty docker inspect \
-      --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'
+  xargs --no-run-if-empty docker inspect \
+    --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' <<<"$ids"
 }
 
 # container <target>: map an injection target to a container name.
