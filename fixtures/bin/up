@@ -57,8 +57,12 @@ mkdir "$STATE" 2>/dev/null || {
 # nothing, and the hint would send its caller to tear down a fixture that is not theirs.
 # EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
 # ERR trap, so neither would print the hint.
-trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; run fixtures/bin/down to remove what was created"' EXIT
+# The hint names the down that works: until every record below is published, a plain down refuses
+# a labelled volume, container or network it finds without one, and what it asks for is --adopt.
+recovery='run fixtures/bin/down to remove what was created'
+trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; $recovery"' EXIT
 mkdir "$STATE/data" "$STATE/backups"
+recovery='run fixtures/bin/down --adopt to remove what was created (a plain down refuses what it finds without its record, and the records were not all published)'
 # The named volumes compose.yaml declares are made here, first of all, with a label that names this
 # run. Compose reuses a volume of that name whatever made it, and the look above is only a look: a
 # volume made by anyone between it and `compose up` would be run on and, at teardown, removed. Nor
@@ -122,6 +126,17 @@ fetch_tools
 say "starting postgres and openbao"
 compose up --detach --quiet-pull --wait postgres
 compose up --detach --quiet-pull openbao
+# The Compose network carries only the project's labels, which any network can be given, and its
+# name is fixed: with the containers gone by hand, anyone's network can take the name and the
+# labels, and `compose down` would remove it as this project's. Recorded by ID, exactly the one
+# the project has, and bin/down and inject hold the labelled network to it, as for the Talos one.
+compose_network_ids=$(docker network ls --quiet --no-trunc --filter "label=com.docker.compose.project=$FIXTURE_NAME") ||
+  die "could not list the Compose networks"
+[ "$(sed '/^$/d' <<<"$compose_network_ids" | wc -l)" -eq 1 ] ||
+  die "expected one Compose network to record; teardown could not tell it from another's"
+printf '%s\n' "$compose_network_ids" >"$STATE/down-compose-networks.partial"
+mv --no-target-directory -- "$STATE/down-compose-networks.partial" "$STATE/down-compose-networks"
+unset compose_network_ids
 
 bao_answers() {
   local rc=0
@@ -197,6 +212,8 @@ network_ids=$(docker network ls --quiet --no-trunc --filter "label=talos.cluster
 printf '%s\n' "$network_ids" >"$STATE/down-node-networks.partial"
 mv --no-target-directory -- "$STATE/down-node-networks.partial" "$STATE/down-node-networks"
 rm -- "$STATE/down-node-volumes-incomplete" || die "could not clear the unrecorded-cluster marker in $STATE"
+# Every record is published: a plain down now holds what it finds to them.
+recovery='run fixtures/bin/down to remove what was created'
 
 # The cluster's own secrets bundle, for import experiments and as leak-scan patterns.
 talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" \

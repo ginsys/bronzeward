@@ -127,7 +127,7 @@ need_state() {
 # a fixture name or label may act on.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-volumes; do
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-volumes down-compose-networks; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -140,18 +140,30 @@ state_files_own() {
 # claim still stands, and a kill or a restore would go to it. The Compose containers carry the
 # project and its directory. The Talos nodes carry only the cluster name, which anything can be
 # labelled with, so they are held to the IDs bin/up recorded once it had created them. One that is
-# gone is what a kill or a teardown that could not finish leaves, and is not refused here.
+# gone is what a kill or a teardown that could not finish leaves, and is not refused here; any
+# other failure to ask is not that, and must not read as it, or the container would be acted on
+# unverified.
 containers_own() {
   local name labels id
   for name in "$PG" "$BAO"; do
-    labels=$(docker inspect --format \
+    if ! labels=$(docker inspect --type container --format \
       '{{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
-      "$name" 2>/dev/null) || continue
+      "$name" 2>&1); then
+      case $labels in
+        *[Nn]o\ such\ container*) continue ;;
+        *) die "could not inspect the container $name: $labels; the fixture will not act on what it cannot verify" ;;
+      esac
+    fi
     [ "$labels" = "$FIXTURE_NAME $FIXTURES" ] ||
       die "the container named $name is not this fixture's: its labels do not name this project and checkout. Remove it by hand; the fixture will not act on it"
   done
   for name in "$CP" "$WORKER"; do
-    id=$(docker inspect --format '{{.Id}}' "$name" 2>/dev/null) || continue
+    if ! id=$(docker inspect --type container --format '{{.Id}}' "$name" 2>&1); then
+      case $id in
+        *[Nn]o\ such\ container*) continue ;;
+        *) die "could not inspect the container $name: $id; the fixture will not act on what it cannot verify" ;;
+      esac
+    fi
     [ -f "$STATE/down-node-containers" ] ||
       die "a container named $name exists but bin/up left no record of the Talos containers it created, as an up interrupted right after creating the cluster leaves it. Run fixtures/bin/down --adopt, then up"
     grep --quiet --line-regexp --fixed-strings -- "$id" "$STATE/down-node-containers" ||

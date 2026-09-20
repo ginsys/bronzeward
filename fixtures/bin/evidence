@@ -117,11 +117,23 @@ git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" | sort
   die "cannot list the untracked files under fixtures/; the bundle could not be tied to what ran"
 git -C "$FIXTURES" ls-files --others --exclude-per-directory=.gitignore -z -- "$FIXTURES" | sort -z >"$out/.untracked-all" ||
   die "cannot list the untracked files under fixtures/; the bundle could not be tied to what ran"
-hidden=$(comm --zero-terminated -13 "$out/.untracked-seen" "$out/.untracked-all" | tr '\0' ' ') ||
+hidden=$(comm --zero-terminated -13 "$out/.untracked-seen" "$out/.untracked-all" |
+  while IFS= read -r -d '' file; do
+    # Through shown, like every path this command prints: the name may hold a secret.
+    printf '%s ' "$(shown "$FIXTURES/$file")"
+  done) ||
   die "cannot compare the untracked listings of fixtures/; the bundle could not be tied to what ran"
 rm -- "$out/.untracked-seen" "$out/.untracked-all" || die "cannot remove the untracked listings from $out"
 [ -z "$hidden" ] ||
-  die "untracked files under fixtures/ are hidden from git by an excludes file outside the repository: $hidden; the bundle could not say what ran. Track, remove or unhide them"
+  die "untracked files under fixtures/ are hidden from git by an excludes file outside the repository: ${hidden% }; the bundle could not say what ran. Track, remove or unhide them"
+# A symlink anywhere under fixtures/, tracked or not: a diff carries the target's name, not the
+# bytes that ran, and on another host the name would point at something else or at nothing; a
+# tracked helper replaced by one is what the scripts then source. Refused, not recorded: the tree
+# has no symlink of its own. .state and .cache are this run's, held elsewhere.
+linked=$(find "$FIXTURES" \( -path "$STATE" -o -path "$CACHE" \) -prune -o -type l -print -quit) ||
+  die "cannot look for symlinks under fixtures/; the bundle could not be tied to what ran"
+[ -z "$linked" ] ||
+  die "$(shown "$linked") is a symlink under fixtures/; the bundle cannot carry what it points at, and the commit plus a diff would not say what ran. Replace it with the file"
 # A tree that differs from the commit: the commit alone then does not say what ran. The bundle
 # carries the difference, the status of every changed or untracked file, the diff of the tracked
 # ones and the whole content of the untracked ones (as a diff against nothing), so that the
@@ -130,21 +142,17 @@ rm -- "$out/.untracked-seen" "$out/.untracked-all" || die "cannot remove the unt
 fixtures_diff() {
   local file
   printf '%s\n\n' "$differs"
-  git -C "$FIXTURES" diff HEAD -- "$FIXTURES" || return 1
+  # --no-ext-diff: a diff helper from the caller's configuration (GIT_EXTERNAL_DIFF, diff.external)
+  # would be handed the comparison and may print nothing, with the status git would give; the
+  # bundle needs git's own patch. --binary: a changed file that is not text is carried whole, not
+  # as "differ".
+  git -C "$FIXTURES" diff --no-ext-diff --binary HEAD -- "$FIXTURES" || return 1
   # A pipe, not a substitution: a substitution drops the NULs that end each name. With pipefail
   # a failing listing fails the pipeline, as does the loop when a diff cannot be written.
   git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" |
     while IFS= read -r -d '' file; do
-      # A symlink would be carried as its target's name, not as the bytes that ran, and on another
-      # host the name would point at something else or at nothing. Refused, not recorded.
-      # The listing is relative to fixtures/, where git ran; the test is not.
-      [ ! -L "$FIXTURES/$file" ] || {
-        say "evidence: $(shown "$file") is an untracked symlink; the bundle cannot carry what it points at"
-        exit 1
-      }
       # --no-index exits 1 when the two differ, which a file against /dev/null always does.
-      # --binary: a helper or prototype that is not text is carried whole, not as "differ".
-      git -C "$FIXTURES" diff --no-index --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
+      git -C "$FIXTURES" diff --no-index --no-ext-diff --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
     done
 }
 if [ -n "$differs" ]; then
