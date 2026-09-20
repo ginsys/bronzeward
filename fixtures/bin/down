@@ -103,7 +103,29 @@ fi
 for talos_state in "$STATE/talos/$FIXTURE_NAME" "$STATE/talos/$FIXTURE_NAME/state.yaml"; do
   [ ! -L "$talos_state" ] || die "$talos_state is a symlink; the fixture never makes one there. Nothing was removed"
 done
+# And the file itself with one name: `talosctl cluster destroy` acts on what it describes, and a
+# hard link to someone else's state would have it act on theirs while the other name survives.
+talos_state=$STATE/talos/$FIXTURE_NAME/state.yaml
+if [ -e "$talos_state" ] && { [ ! -f "$talos_state" ] || [ "$(stat --format=%h -- "$talos_state" 2>/dev/null)" != 1 ]; }; then
+  die "$talos_state is not a regular file with that one name; the fixture never makes one there. Nothing was removed"
+fi
 unset talos_state
+# A volume under one of the names compose.yaml gives its own, without the project label, is not
+# the fixture's and never was: Compose does not make one without the label. `compose down
+# --volumes` below would remove it all the same, so it stops the teardown, --adopt or not.
+compose_volumes=$(compose_volume_names) || die "could not read the volume names from compose.yaml; nothing was removed"
+for compose_volume in $compose_volumes; do
+  if project=$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}' "$compose_volume" 2>&1); then
+    [ "$project" = "$FIXTURE_NAME" ] ||
+      die "the volume $compose_volume carries no fixture label and is someone's data under a name compose.yaml uses; nothing was removed. Remove or rename it by hand"
+  else
+    case $project in
+      *[Nn]o\ such\ volume*) ;;
+      *) die "could not inspect the volume $compose_volume: $project; nothing was removed" ;;
+    esac
+  fi
+done
+unset compose_volumes compose_volume project
 
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
@@ -173,7 +195,14 @@ mapfile -t node_volumes < <(sed '/^$/d' <<<"$volume_names" | sort -u)
 for volume in "${node_volumes[@]}"; do
   [[ $volume =~ ^[0-9a-f]{64}$ ]] ||
     die "the recorded node volume '$volume' is not an anonymous volume's name; the record was not written by the fixture. Nothing was removed"
-  labels=$(docker volume inspect --format '{{len .Labels}}' "$volume" 2>/dev/null) || continue
+  # A name that names no volume any more is what an earlier removal leaves and passes; any other
+  # failure to ask is not that, and must not read as it.
+  if ! labels=$(docker volume inspect --format '{{len .Labels}}' "$volume" 2>&1); then
+    case $labels in
+      *[Nn]o\ such\ volume*) continue ;;
+      *) die "could not inspect the recorded node volume $volume: $labels; nothing was removed" ;;
+    esac
+  fi
   [ "$labels" = 0 ] ||
     die "the recorded node volume $volume carries labels, which a Talos node volume never does; nothing was removed"
 done

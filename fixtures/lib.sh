@@ -164,6 +164,22 @@ compose() {
     --env-file "$FIXTURES/versions.env" --env-file "$STATE/secrets.env" "$@"
 }
 
+# compose_volume_names: the daemon-side names of the named volumes compose.yaml declares,
+# <project>_<key>, as Compose derives them. Read from the file, not repeated here. The secrets
+# file may not exist yet, so the password is only interpolated.
+compose_volume_names() {
+  local keys key
+  # Into a variable first: a failed `config` inside a `for` word list would be an empty list and
+  # a clean exit, and an empty list is not what compose.yaml declares.
+  keys=$(BW_POSTGRES_PASSWORD=${BW_POSTGRES_PASSWORD:-unused} docker compose --project-name "$FIXTURE_NAME" \
+    --project-directory "$FIXTURES" --file "$FIXTURES/compose.yaml" --env-file "$FIXTURES/versions.env" \
+    config --volumes) || return 1
+  [ -n "$keys" ] || return 1
+  for key in $keys; do
+    printf '%s_%s\n' "$FIXTURE_NAME" "$key"
+  done
+}
+
 talosctl() { "$CACHE/talosctl" "$@"; }
 
 # Every curl of the fixture ignores the caller's curlrc: an `output` or a `proxy` set there would
