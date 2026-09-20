@@ -29,6 +29,14 @@ kv_version() { # kv_version <field>: a field of version 1 of the test secret's m
 if [ "$keep" != --keep ]; then
   # Every volume on the daemon, to tell afterwards whether the run left one that no label finds.
   volumes_before=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
+  # A volume under a name compose.yaml gives its own, without the label Compose puts on the ones
+  # it makes: Compose would reuse it, and the fixture would run on someone's data.
+  docker volume create "${FIXTURE_NAME}_postgres-data" >/dev/null || fail "cannot create a volume for the test"
+  went=0
+  "$here/up" >/dev/null 2>&1 && went=1
+  docker volume rm "${FIXTURE_NAME}_postgres-data" >/dev/null 2>&1 || true # gone already in the failing case
+  [ "$went" -eq 0 ] || fail "up ran on a volume under a Compose name that is not the fixture's"
+  [ ! -e "$STATE" ] || fail "the refused up left a state directory"
   "$here/up"
   # lib.sh was sourced before the secrets existed
   set -a
@@ -116,9 +124,13 @@ stolen=0
 size=$(stat --format=%s "$STATE/backups/bao-selftest-curlrc.snap")
 rm -r "$STATE/selftest-curl-home" "$STATE/backups/bao-selftest-curlrc.snap"
 [ "$stolen" -eq 0 ] && [ "$size" -gt 0 ] || fail "a curlrc from the caller's environment redirected the OpenBao snapshot"
+# A path with a '..' component would reach another API path than the one the log names.
+! "$here/inject" bao-destroy 'selftest/../selftest/item' 1 2>/dev/null || fail "inject accepted a KV path with a '..' component"
+! grep --quiet --fixed-strings 'selftest/../selftest' "$STATE/injections.log" || fail "a refused KV path was logged"
+[ "$(kv_version destroyed)" = false ] || fail "the refused destroy reached the secret"
 "$here/inject" bao-soft-delete selftest/item 1
 [ -n "$(kv_version deletion_time)" ] && [ "$(kv_version destroyed)" = false ] || fail "soft delete not visible in metadata"
-ok "bao-soft-delete is visible as a reversible state"
+ok "bao-soft-delete is visible as a reversible state; a path with '..' is refused unlogged"
 "$here/inject" bao-destroy selftest/item 1
 [ "$(kv_version destroyed)" = true ] || fail "destroy not visible in metadata"
 ok "bao-destroy is visible as a permanent state"
@@ -788,16 +800,33 @@ if [ "$keep" != --keep ]; then
   if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down followed a symlinked Talos state directory"
   fi
+  # The cluster state file with a second name: destroy would act on what it describes while the
+  # other name survives.
+  ln "$STATE/talos/$FIXTURE_NAME/state.yaml" "$FIXTURES/.selftest-state-alias"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  rm -f "$FIXTURES/.selftest-state-alias"
+  if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down tore down while the Talos cluster state file had a second name"
+  fi
   # A record whose last name lacks its newline, as an append cut short leaves it: read whole,
   # not appended onto.
   printf '%s' "$(cat "$STATE/down-node-volumes")" >"$STATE/down-node-volumes"
   "$here/down" || fail "down reported leftovers"
+  # With the fixture gone, a volume under a Compose name without the label is someone's data that
+  # `compose down --volumes` would remove: down refuses, whatever else is there.
+  docker volume create "${FIXTURE_NAME}_openbao-data" >/dev/null || fail "cannot create a volume for the test"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  stranger=$(docker volume ls --quiet --filter "name=^${FIXTURE_NAME}_openbao-data$")
+  docker volume rm "${FIXTURE_NAME}_openbao-data" >/dev/null 2>&1 || true # gone already in the failing case
+  [ "$went" -eq 0 ] && [ -n "$stranger" ] || fail "down removed, or did not refuse, a volume under a Compose name that is not the fixture's"
   # down looks for what it can name. A volume no label or record points at, such as the anonymous
   # one Docker makes for the claim container, only shows up as a difference on the whole daemon.
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container and network against the records and refuses by label alone, refuses a snapshot with a second name, a dot-named link among the snapshots and a linked Talos state directory, reads a record cut short of its last newline, then leaves nothing behind, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container and network against the records and refuses by label alone, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

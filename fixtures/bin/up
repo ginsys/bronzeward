@@ -22,6 +22,17 @@ foreign=$(
 ) || die "cannot ask Docker for existing fixture resources"
 [ -z "$foreign" ] || die "a fixture already exists on this Docker daemon ($(tr '\n' ' ' <<<"$foreign")). \
 Run fixtures/bin/down in the checkout that created it; see 'Known limits' in fixtures/README.md"
+# The named volumes compose.yaml declares get fixed names, and Compose reuses a volume of that name
+# it did not create, with a warning only: the services would then run on someone's data, and the
+# down that a failed start calls for would remove it with `--volumes`. Labelled ones were listed
+# above; one that remains under the name carries no fixture label and is refused by name.
+compose_volumes=$(compose_volume_names) || die "could not read the volume names from compose.yaml"
+for taken in $compose_volumes; do
+  present=$(docker volume ls --quiet --filter "name=^${taken}$") || die "cannot ask Docker whether the volume $taken exists"
+  [ -z "$present" ] ||
+    die "the volume $taken exists on this Docker daemon without this fixture's label; Compose would reuse it and down would remove it. Remove or rename it first"
+done
+unset compose_volumes taken present
 
 # The random part is assigned and measured before it is used: as a printf argument a failed read of
 # /dev/urandom would leave the constant prefix as this run's password, with exit status 0.

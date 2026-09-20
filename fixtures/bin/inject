@@ -84,7 +84,8 @@ bao_http() { # bao_http <method> <api-path> [curl args]
   # --noproxy: a proxy from the caller's shell must never stand between this and localhost.
   # --max-time: a paused OpenBao accepts the connection and never answers; the action must end,
   # and be logged as failed, all the same.
-  curl --noproxy '*' --connect-timeout 5 --max-time 30 --fail --silent --show-error --request "$method" \
+  # --path-as-is: no '.' or '..' is let through above; this keeps curl from resolving one anyway.
+  curl --noproxy '*' --path-as-is --connect-timeout 5 --max-time 30 --fail --silent --show-error --request "$method" \
     --header "X-Vault-Token: $BW_BAO_ROOT_TOKEN" "http://127.0.0.1:$OPENBAO_PORT/v1/$path" "$@"
 }
 
@@ -105,7 +106,15 @@ case $action in
       *.partial.*) die "snapshot names must not hold '.partial.', which marks an interrupted snapshot" ;;
     esac
     ;;
-  bao-soft-delete | bao-destroy | bao-delete-key) ;;
+  # A KV path or key name reaches OpenBao inside a URL path: slash-separated components of
+  # letters, digits, '_', '-' and '.', none being '.' or '..', which curl would resolve into
+  # another API path than the one the log names. Refused before anything is logged.
+  bao-soft-delete | bao-destroy | bao-delete-key)
+    if [ "$action" = bao-delete-key ]; then [ $# -eq 1 ] || usage; else [ $# -eq 2 ] || usage; fi
+    [[ $1 =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$ && /$1/ != */./* && /$1/ != */../* ]] ||
+      die "a KV path or key is slash-separated components without '.' or '..' among them, not '$1'"
+    [ "$action" = bao-delete-key ] || [[ $2 =~ ^[0-9]+$ ]] || die "a version is a number, not '$2'"
+    ;;
   *) usage ;;
 esac
 # Two records per action. The first is written when the action starts, so the timeline shows when a
@@ -361,8 +370,6 @@ case $action in
   # refused or unreachable one; the CLI's does not. The path and version are held to what an
   # API path can carry unencoded.
   bao-soft-delete | bao-destroy)
-    [ $# -eq 2 ] || usage
-    [[ $1 =~ ^[A-Za-z0-9_./-]+$ && $2 =~ ^[0-9]+$ ]] || usage
     verb=delete
     [ "$action" = bao-soft-delete ] || verb=destroy
     bao_dispatched=1
@@ -370,8 +377,6 @@ case $action in
     bao_dispatched=0
     ;;
   bao-delete-key)
-    [ $# -eq 1 ] || usage
-    [[ $1 =~ ^[A-Za-z0-9_./-]+$ ]] || usage
     bao_dispatched=1
     bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":true}' --output /dev/null
     bao_http DELETE "transit/keys/$1" --output /dev/null
