@@ -147,6 +147,14 @@ else
       unavailable "dump of $db, left by an interrupted db-restore: its content NOT scanned"
   done
 fi
+# A dump is what the server chooses to show. What it wrote to disk, the heap and index files, the
+# write-ahead log, a temporary file it did not remove, is what an extraction has to be judged on,
+# and it is read from the container's storage whether the server runs or not. Copied as files, so
+# that the scan below covers it with the rest of the bundle.
+if ! timeout 120 docker cp --quiet "$PG:/var/lib/postgresql/data" "$out/postgres-data" 2>/dev/null; then
+  rm -rf -- "$out/postgres-data"
+  unavailable "PostgreSQL data directory (container gone or its storage unreadable): what the server wrote to disk NOT scanned"
+fi
 
 # Backups are compressed; a scan of the raw files would be clean for the wrong reason. Expanding a
 # dump needs no server, so it runs in a throwaway container and works while postgres is down.

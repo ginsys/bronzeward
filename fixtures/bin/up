@@ -65,6 +65,14 @@ secrets_publish() {
     rm -f -- "$tmp"
     die "could not write $STATE/secrets.env"
   }
+  # The rename replaces the name, not the file: a second name made for the earlier file between
+  # two stages would keep that file, and its password, reachable past teardown. Refused, and the
+  # values in hand are not published.
+  if [ -L "$STATE/secrets.env" ] || { [ -e "$STATE/secrets.env" ] &&
+    { [ ! -f "$STATE/secrets.env" ] || [ "$(stat --format=%h -- "$STATE/secrets.env" 2>/dev/null)" != 1 ]; }; }; then
+    rm -f -- "$tmp"
+    die "$STATE/secrets.env is not the regular file this run wrote, with that one name; nothing more is published"
+  fi
   mv --no-target-directory -- "$tmp" "$STATE/secrets.env" || {
     rm -f -- "$tmp"
     die "could not publish $STATE/secrets.env"
@@ -127,6 +135,14 @@ volume_names=$(talos_volume_names) || die "could not list the Talos node volumes
 # Under its final name only when complete: bin/down takes a record that exists for the whole list.
 printf '%s\n' "$volume_names" >"$STATE/down-node-volumes.partial"
 mv --no-target-directory -- "$STATE/down-node-volumes.partial" "$STATE/down-node-volumes"
+# The Talos containers carry only the cluster name, which any container can be labelled with. Their
+# IDs, recorded here, are what bin/down holds every container of that label to before removing it.
+container_ids=$(docker ps --all --quiet --no-trunc --filter "label=talos.cluster.name=$FIXTURE_NAME") ||
+  die "could not list the Talos containers"
+[ "$(sed '/^$/d' <<<"$container_ids" | wc -l)" -eq 2 ] ||
+  die "expected two Talos containers to record; teardown could not tell them from another's"
+printf '%s\n' "$container_ids" >"$STATE/down-node-containers.partial"
+mv --no-target-directory -- "$STATE/down-node-containers.partial" "$STATE/down-node-containers"
 
 # The cluster's own secrets bundle, for import experiments and as leak-scan patterns.
 talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" \

@@ -60,6 +60,25 @@ fi
 # anything is removed, so that the fixture stays there to be looked at.
 state_files_own
 
+# The Talos label is a cluster name, and any container can be created with it; the removal below
+# selects by that label. bin/up recorded the IDs of the containers it created, so with that record
+# every container carrying the label must be one of them. Without the record, as after an up that
+# failed before the cluster existed, or a checkout adopting another's, the label is all there is.
+if [ "$adopt" -eq 0 ] && { [ -e "$STATE/down-node-containers" ] || [ -L "$STATE/down-node-containers" ]; }; then
+  if [ -L "$STATE/down-node-containers" ] || [ ! -f "$STATE/down-node-containers" ] ||
+    [ "$(stat --format=%h -- "$STATE/down-node-containers" 2>/dev/null)" != 1 ]; then
+    die "$STATE/down-node-containers is not the regular file bin/up writes, with that one name; nothing was removed"
+  fi
+  recorded=$(cat "$STATE/down-node-containers") || die "could not read the recorded Talos container IDs; nothing was removed"
+  labelled=$(docker ps --all --quiet --no-trunc --filter "label=$talos_label") ||
+    die "could not list the Talos containers; nothing was removed"
+  for id in $labelled; do
+    grep --quiet --line-regexp --fixed-strings -- "$id" <<<"$recorded" ||
+      die "the container $id carries this fixture's Talos label but is not one bin/up created; nothing was removed. Remove it by hand, or pass --adopt"
+  done
+  unset recorded labelled id
+fi
+
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
 # see "Known limits" in fixtures/README.md.

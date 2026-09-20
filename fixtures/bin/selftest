@@ -264,7 +264,11 @@ degraded=$("$here/evidence") || fail "evidence aborted while postgres was down"
 grep --quiet 'live database dump' "$degraded/unavailable.txt" || fail "evidence did not say the database dump is missing"
 grep --quiet --fixed-strings "$degraded/backups/pg-selftest.dump.sql" "$degraded/leak-scan.txt" ||
   fail "evidence did not scan the database backup while postgres was down"
-ok "evidence still captures and scans while postgres is down, and names what is missing"
+# The server is dead, its storage is not: that is the state a crash leaves for an extraction to be
+# judged on, and it must be read from the stopped container.
+grep --quiet --fixed-strings "$degraded/postgres-data/" "$degraded/leak-scan.txt" ||
+  fail "evidence did not read what PostgreSQL wrote to disk while postgres was down"
+ok "evidence still captures and scans while postgres is down, reads the server's storage, and names what is missing"
 # A snapshot that fails must not leave a file a later restore would accept, and the timeline must
 # tell it apart from the kill above, which did happen.
 ! "$here/inject" db-snapshot selftest-broken 2>/dev/null || fail "db-snapshot succeeded while postgres was down"
@@ -592,7 +596,7 @@ rm "$STATE/data/selftest-client-key-leak"
 grep --quiet --fixed-strings "$STATE/data/selftest-link" "$bundle/leak-scan.txt" || fail "leak scan skipped a symlinked file"
 grep --quiet --line-regexp --fixed-strings "1 $STATE/data/selftest-textlink" "$bundle/leak-scan.txt" ||
   fail "leak scan missed a secret held only in the target path of a symlink"
-grep --quiet --fixed-strings "/.state/selftest-outside/-delete" "$bundle/leak-scan.txt" ||
+grep --quiet --extended-regexp '^[0-9]+ .*/\.state/selftest-outside/-delete$' "$bundle/leak-scan.txt" ||
   fail "leak scan mishandled a scan path named like a find action"
 rm -r "$STATE/selftest-outside" "$STATE/data/selftest-link"
 grep --quiet --fixed-strings "$STATE/data/selftest-token-leak" "$bundle/leak-scan.txt" || fail "leak scan missed the OpenBao metadata token"
@@ -609,6 +613,9 @@ grep --quiet '^reachable' "$bundle/openbao-client-view.txt" || fail "evidence sa
 [ ! -e "$bundle/unavailable.txt" ] || fail "evidence reports missing sources on a healthy fixture: $(cat "$bundle/unavailable.txt")"
 grep --quiet --fixed-strings "$bundle/postgres.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database dump"
 grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in the database backup"
+# The canary was committed, so the server's own files hold it: in the write-ahead log at the least.
+[ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
+grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
 ok "evidence bundle complete; leak scan finds the planted canary and token, nothing in the logs"
 
@@ -668,6 +675,17 @@ if [ "$keep" != --keep ]; then
   mv "$STATE/selftest-record-copy" "$STATE/down-node-volumes" # before anything can fail
   if [ "$went" -eq 1 ] || [ -z "$labelled" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a recorded volume that carries a label"
+  fi
+  # The Talos label alone: a container that only carries the cluster name is not one up created,
+  # and down must not remove it with the fixture's own.
+  docker create --quiet --name "$FIXTURE_NAME-selftest-impostor" --label "talos.cluster.name=$FIXTURE_NAME" \
+    --network none "$POSTGRES_IMAGE" true >/dev/null || fail "cannot create a container for the test"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  impostor=$(docker ps --all --quiet --filter "name=^${FIXTURE_NAME}-selftest-impostor$")
+  docker rm --force --volumes "$FIXTURE_NAME-selftest-impostor" >/dev/null 2>&1 || true # gone already in the failing case
+  if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down removed, or did not refuse, a container that only carries the Talos label"
   fi
   "$here/down" || fail "down reported leftovers"
   # down looks for what it can name. A volume no label or record points at, such as the anonymous

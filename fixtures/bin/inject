@@ -212,10 +212,12 @@ case $action in
       die "pg-$1.dump could not be restored; the live database was left alone"
     fi
     # A database cannot be renamed while anyone is connected to it, so its sessions are ended in
-    # the same transaction. A client that reconnects in between makes the rename fail, and the
-    # transaction then leaves the live database as it was.
+    # the same transaction, and each is waited for: the signal alone returns before the backend
+    # has gone, and the rename right after it would then fail on a session already told to leave.
+    # A client that reconnects in between makes the rename fail, and the transaction then leaves
+    # the live database as it was.
     pg psql -U bronzeward -d postgres -v ON_ERROR_STOP=1 --quiet --single-transaction --output=/dev/null \
-      -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = 'bronzeward'" \
+      -c "select pg_terminate_backend(pid, 5000) from pg_stat_activity where datname = 'bronzeward'" \
       -c 'alter database bronzeward rename to bronzeward_previous' \
       -c 'alter database bronzeward_restore rename to bronzeward' ||
       die "could not swap the restored database in; the live database was left alone"
@@ -264,8 +266,13 @@ case $action in
       moved_aside=1
     fi
     mv --no-target-directory -- "$staging/data" "$STATE/data"
-    rm -rf -- "$staging"
+    # The rename above is the commit: the restored store is in place. Cleaning up after it must not
+    # turn a restore that succeeded into one the log says failed; the leftover is named instead,
+    # and bin/evidence scans it like the live directory.
+    staging_left=$staging
     staging=
+    rm -rf -- "$staging_left" ||
+      say "fixtures: the restore is in place; its staging directory $staging_left could not be removed and holds the earlier store under previous"
     ;;
   bao-soft-delete)
     [ $# -eq 2 ] || usage
