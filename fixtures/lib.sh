@@ -10,6 +10,9 @@ CACHE=$FIXTURES/.cache
 # A BAO_TOKEN from the caller's own OpenBao or Vault work would win over the fixture's root token in
 # bao() below. bin/evidence sets it on purpose, after this point.
 unset BAO_TOKEN
+# Likewise defaults the caller set for tar and for the gzip it runs: a TAR_OPTIONS with an --exclude
+# would make store-snapshot write, without any error, an archive that lacks part of the store.
+unset TAR_OPTIONS GZIP
 
 # bin/up only ever creates .state as a directory. A symlink there was put by someone else, and
 # following it would source a secrets.env from outside the checkout, or write this run's secrets

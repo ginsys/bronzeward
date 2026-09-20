@@ -161,7 +161,10 @@ case $action in
       -c 'alter database bronzeward rename to bronzeward_previous' \
       -c 'alter database bronzeward_restore rename to bronzeward' ||
       die "could not swap the restored database in; the live database was left alone"
-    pg dropdb --force -U bronzeward --maintenance-db=postgres bronzeward_previous
+    # The swap above is what decides. A superseded database that cannot be dropped must not make
+    # the log say the restore failed; the next db-restore drops it.
+    pg dropdb --force -U bronzeward --maintenance-db=postgres bronzeward_previous ||
+      say "fixtures: the superseded database bronzeward_previous could not be dropped; the restore itself succeeded"
     ;;
   bao-snapshot)
     [ $# -eq 1 ] || usage

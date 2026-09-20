@@ -128,6 +128,13 @@ printf 'not a tar archive\n' >"$STATE/backups/store-selftest-corrupt.tgz"
 [ -f "$STATE/data/selftest-store" ] && [ -f "$STATE/data/canary-control.txt" ] ||
   fail "a failed store-restore destroyed the live store directory"
 rm "$STATE/backups/store-selftest-corrupt.tgz"
+# Defaults for tar in the caller's shell must not reach the snapshot: this one would leave the file
+# out without any error.
+TAR_OPTIONS=--exclude=data/selftest-store "$here/inject" store-snapshot selftest-env
+listing=$(tar -tzf "$STATE/backups/store-selftest-env.tgz") || fail "cannot list store-selftest-env.tgz"
+rm "$STATE/backups/store-selftest-env.tgz"
+grep --quiet --line-regexp 'data/selftest-store' <<<"$listing" ||
+  fail "a TAR_OPTIONS from the caller's shell left a file out of the store snapshot"
 # The loss a store snapshot exists for: the live directory gone altogether.
 mv "$STATE/data" "$STATE/selftest-data-aside"
 rc=0
@@ -139,7 +146,7 @@ if [ "$rc" -ne 0 ] || [ ! -f "$STATE/data/selftest-store" ]; then
 fi
 rm -r "$STATE/selftest-data-aside"
 rm "$STATE/data/selftest-store"
-ok "store-snapshot / store-restore; a corrupt snapshot leaves the live directory alone, a missing one is restored"
+ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a corrupt snapshot leaves the live directory alone, a missing one is restored"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -254,6 +261,18 @@ else
   say "skipped as root: the unreadable-file case"
 fi
 ok "evidence refuses a scan path it cannot read, and withholds a secret-bearing name when it does"
+# The positive control as a symlink to a file outside the scanned paths that holds exactly the
+# planted content: the canary then lives where teardown does not reach, and that is a leak.
+mv "$STATE/data/canary-control.txt" "$STATE/selftest-control-target"
+ln -s "$STATE/selftest-control-target" "$STATE/data/canary-control.txt"
+rc=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
+rm "$STATE/data/canary-control.txt"
+mv "$STATE/selftest-control-target" "$STATE/data/canary-control.txt" # before anything can fail
+[ "$rc" -eq 0 ] || fail "evidence aborted on a symlinked positive control: $(tail -n 1 "$STATE/selftest-evidence.err")"
+grep --quiet --line-regexp --fixed-strings "1 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
+  fail "leak scan excused a positive control that is a symlink to a file outside .state/data"
+rm "$STATE/selftest-evidence.err"
 printf 'token=%s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/selftest-token-leak"
 printf 'plain=%s\n' "$BW_CANARY" >"$STATE/backups/selftest-plain-backup"
 # Two inputs find would mishandle if passed along as they are: a file reached only through a
