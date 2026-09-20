@@ -54,6 +54,30 @@ network_of() {
   esac
 }
 
+# network_own <target> <network>: the network under the fixture's name must be the fixture's own
+# before a container is connected to it. Once every container is off it, the name is free for
+# anyone's network, and a Talos node would be given its fixed address on that one. The Talos
+# network is held to the ID bin/up recorded; the Compose network to the project's labels.
+network_own() {
+  local id labels
+  case $1 in
+    controlplane | worker)
+      id=$(docker network inspect --format '{{.Id}}' "$2") || die "cannot inspect the network $2"
+      [ -f "$STATE/down-node-networks" ] ||
+        die "no record of the Talos network in $STATE; run fixtures/bin/down --adopt, then up"
+      grep --quiet --line-regexp --fixed-strings -- "$id" "$STATE/down-node-networks" ||
+        die "the network $2 is not the one bin/up recorded; refusing to touch it"
+      ;;
+    *)
+      labels=$(docker network inspect \
+        --format '{{index .Labels "com.docker.compose.project"}}/{{index .Labels "com.docker.compose.network"}}' "$2") ||
+        die "cannot inspect the network $2"
+      [ "$labels" = "$FIXTURE_NAME/default" ] ||
+        die "the network $2 does not carry this fixture's Compose labels; refusing to touch it"
+      ;;
+  esac
+}
+
 bao_http() { # bao_http <method> <api-path> [curl args]
   local method=$1 path=$2
   shift 2
@@ -133,13 +157,13 @@ finish() {
     say "fixtures: interrupted after the restored database was swapped in; recorded as done. bronzeward_previous is left; the next db-restore drops it"
     rc=0
   fi
-  # A restore request that OpenBao may have received and applied without answering: curl's own
+  # A mutating request that OpenBao may have received and applied without answering: curl's own
   # status tells a request that never reached the server (7, no connection) or that the server
   # refused (22, an HTTP error) from a timeout, a dropped connection or a signal, after which
   # the provider's state is whatever the request made of it. Recorded as unknown, not failed.
   if [ "$bao_dispatched" -eq 1 ] && [ "$rc" -ne 0 ] && [ "$rc" -ne 7 ] && [ "$rc" -ne 22 ]; then
     status=unknown
-    say "fixtures: the restore request was sent and not answered; whether OpenBao applied the snapshot is not known"
+    say "fixtures: the request was sent and not answered; whether OpenBao applied it is not known"
   fi
   # A removal that fails must not end the handler before the outcome is recorded: each is guarded.
   if [ -n "$partial" ]; then
@@ -223,10 +247,12 @@ case $action in
     ;;
   netsplit)
     network=$(network_of "$1")
+    network_own "$1" "$network"
     docker network disconnect "$network" "$target"
     ;;
   netjoin)
     network=$(network_of "$1")
+    network_own "$1" "$network"
     case $1 in
       controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$network" "$target" ;;
       worker) docker network connect --ip "$TALOS_WORKER_IP" "$network" "$target" ;;
@@ -280,7 +306,7 @@ case $action in
     # The flag first: once the request is on its way, a failure without an answer from OpenBao
     # says nothing about whether the snapshot was applied, and the exit handler records that.
     bao_dispatched=1
-    bao_http POST sys/storage/raft/snapshot-force --data-binary "@$STATE/backups/bao-$1.snap"
+    bao_http POST sys/storage/raft/snapshot-force --data-binary "@$STATE/backups/bao-$1.snap" --output /dev/null
     bao_dispatched=0
     wait_for 60 "an active OpenBao node" bao token lookup
     ;;
@@ -330,18 +356,26 @@ case $action in
     rm -rf -- "$staging_left" ||
       say "fixtures: the restore is in place; its staging directory $staging_left could not be removed and holds the earlier store under previous"
     ;;
-  bao-soft-delete)
+  # The three mutations below go over HTTP like bao-restore, for the same reason: a request that
+  # went out and got no answer may have been applied, and curl's status tells that case from a
+  # refused or unreachable one; the CLI's does not. The path and version are held to what an
+  # API path can carry unencoded.
+  bao-soft-delete | bao-destroy)
     [ $# -eq 2 ] || usage
-    bao kv delete -mount=secret -versions="$2" "$1" >/dev/null
-    ;;
-  bao-destroy)
-    [ $# -eq 2 ] || usage
-    bao kv destroy -mount=secret -versions="$2" "$1" >/dev/null
+    [[ $1 =~ ^[A-Za-z0-9_./-]+$ && $2 =~ ^[0-9]+$ ]] || usage
+    verb=delete
+    [ "$action" = bao-soft-delete ] || verb=destroy
+    bao_dispatched=1
+    bao_http POST "secret/$verb/$1" --data "{\"versions\":[$2]}" --output /dev/null
+    bao_dispatched=0
     ;;
   bao-delete-key)
     [ $# -eq 1 ] || usage
-    bao write "transit/keys/$1/config" deletion_allowed=true >/dev/null
-    bao delete "transit/keys/$1" >/dev/null
+    [[ $1 =~ ^[A-Za-z0-9_./-]+$ ]] || usage
+    bao_dispatched=1
+    bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":true}' --output /dev/null
+    bao_http DELETE "transit/keys/$1" --output /dev/null
+    bao_dispatched=0
     ;;
   *) usage ;;
 esac

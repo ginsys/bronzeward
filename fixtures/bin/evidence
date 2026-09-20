@@ -73,6 +73,10 @@ until mkdir "$out" 2>/dev/null; do
   out=$STATE/evidence/$stamp-$attempt
 done
 mkdir "$out/logs" "$out/backups"
+# Marked incomplete until the leak scan has run over it: a capture ended before that, by a signal
+# or a refusal, leaves a bundle that holds secret material nothing scanned, and the next capture
+# takes such a sibling as one more root. Removed as the last step, so a kill leaves it in place.
+: >"$out/.incomplete" || die "cannot mark the bundle $out as incomplete"
 
 unavailable() {
   printf '%s\n' "$*" >>"$out/unavailable.txt"
@@ -322,6 +326,16 @@ for staging in "$STATE"/store-restore.*; do
   [ ! -L "$staging" ] || die "$(shown "$staging") is a symlink; the fixture never makes one there. Results void"
   [ ! -e "$staging" ] || roots+=("$staging")
 done
+# What a capture that ended before its scan left: the bundle still marked incomplete holds the
+# dump, the logs and the data directory of its moment, none of it scanned. Listed by find, so a
+# dot-named entry counts; never through a link, as above.
+while IFS= read -r -d '' sibling; do
+  [ ! -L "$sibling" ] || die "$(shown "$sibling") is a symlink; the fixture never makes one there. Results void"
+  [ "$sibling" = "$out" ] || [ ! -e "$sibling/.incomplete" ] || {
+    say "evidence: an earlier capture ended before its leak scan; $(shown "$sibling") is scanned with this one"
+    roots+=("$sibling")
+  }
+done < <(find "$STATE/evidence" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
 dangling=$(find -L "${roots[@]}" -type l -print -quit 2>/dev/null) ||
   die "leak scan could not walk every path (a directory it may not read, most likely); results void"
 [ -z "$dangling" ] || die "leak scan cannot follow the symlink $(shown "$dangling"); results void"
@@ -334,19 +348,25 @@ control=$STATE/data/canary-control.txt
 # is_store_copy <file>: the control's place inside one expanded store snapshot. Compared as strings,
 # not as a regular expression: the bundle path holds the checkout path, and a `+` or a `.` in it
 # would be read as an operator.
-is_store_copy() {
-  local middle=${1#"$out/backups/store-"}
-  [ "$middle" != "$1" ] || return 1
-  [ "${middle%/data/canary-control.txt}" != "$middle" ] || return 1
-  middle=${middle%/data/canary-control.txt}
-  [ -n "$middle" ] && [[ $middle != */* ]]
+# The place may be in this bundle or in an incomplete sibling scanned with it: a copy expanded
+# there by the capture that ended is the same control.
+store_middle() { # store_middle <file>: the snapshot name, for the control's place in a bundle
+  local rest=${1#"$STATE/evidence/"} bundle inside
+  [ "$rest" != "$1" ] || return 1
+  bundle=${rest%%/*}
+  inside=${rest#"$bundle/backups/store-"}
+  [ "$inside" != "$rest" ] || return 1
+  [ "${inside%/data/canary-control.txt}" != "$inside" ] || return 1
+  inside=${inside%/data/canary-control.txt}
+  [ -n "$inside" ] && [[ $inside != */* ]] && printf '%s\n' "$inside"
 }
+is_store_copy() { store_middle "$1" >/dev/null; }
 # store_archive_is_own <file>: the archive the store copy was expanded from is the regular file
 # inject wrote, with no second name. Hard-linked outside .state, its compressed bytes match no
 # pattern here, and the canary would survive teardown inside it while its copy was excused.
 store_archive_is_own() {
-  local middle=${1#"$out/backups/store-"} archive
-  middle=${middle%/data/canary-control.txt}
+  local middle archive
+  middle=$(store_middle "$1") || return 1
   # A complete archive that an interrupted store-snapshot left under its temporary name expands
   # under that name, which ends in .tgz.partial.<suffix> already. Unambiguous, because inject
   # refuses a snapshot name that holds `.partial.`; a file spelled that way was not published.
@@ -448,5 +468,6 @@ others=${others%$'\n'}
 
 say "leak scan: positive control found; $leaks other file(s) contain synthetic secret material"
 [ "$leaks" -eq 0 ] || say "$others"
+rm -- "$out/.incomplete" || die "the scan ran, but the bundle $out could not be marked complete; the next capture scans it again"
 [ ! -f "$out/unavailable.txt" ] || say "evidence: INCOMPLETE, see $out/unavailable.txt"
 printf '%s\n' "$out" # the only line on stdout: the bundle path
