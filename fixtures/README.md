@@ -82,10 +82,16 @@ under `fixtures/` outside `.state` and `.cache`, tracked or not, is refused, sin
 carry the target's name and not the bytes that ran; so is an untracked file that only
 `.git/info/exclude` or a global excludes file hides, since neither the status nor the content
 would show it (the repository's own `.gitignore` files are the one exclusion the bundle stands
-by); the refusal withholds a name that holds secret material, like every path the command prints. `bin/up` makes the same
+by); the refusal withholds a name that holds secret material, like every path the command prints. So is
+what git records nothing of, an empty directory or a special file (a named pipe, a socket, a
+device), since the commit plus a diff would not say it is there, and a clean filter that git's
+attributes give a tracked file, since git would then compare the filter's output and not the bytes
+that run. `bin/up` makes the same
 checks before it records the commit the fixture is made from, so that record stands by what the
 bundle stands by. Each archive expanded into the bundle has its SHA-256 recorded next to the
-expansion, and the control's copy inside one is the control only while the archive under that
+expansion, read from the archive's content so that its name, whatever it holds, is not in the
+record (and `tar` runs with `--no-unquote`, so a backslash in a name is a backslash, not an
+escape), and the control's copy inside one is the control only while the archive under that
 name still has those bytes. Each path is scanned once, however many of the given paths contain
 it, and reported once, whether the secret is in its content, in its name or in both. Names of files and directories,
 and the target path a symlink stores, are matched as well as file contents; a name that holds a secret is withheld from the report, which
@@ -103,7 +109,11 @@ own leak scan ran (it stays marked incomplete, by a `.incomplete` file removed o
 scan) is scanned as one more root by the next capture whose scan completes, since it holds a
 dump, logs and a data-directory copy nothing scanned; that capture then marks it scanned
 (`scanned-by.txt` in the earlier bundle names the one whose `leak-scan.txt` holds the hits), so
-it is scanned once, not at every capture after. With the live store directory gone, as
+it is scanned once, not at every capture after. A capture holds a lock on its marker for as long
+as it runs, and an earlier bundle is taken only when its marker can be locked: one that another
+capture is still writing is left to its own scan and said so, not scanned half-written and
+marked scanned. The OpenBao metadata is recorded from listings parsed as JSON; a listing that is
+not is recorded as unknown, and the bundle stays marked incomplete. With the live store directory gone, as
 a `store-restore` killed between its two renames leaves it, the capture goes on without it, names
 it in `unavailable.txt`, and takes the control from the copy the staging directory holds. OpenBao snapshots are encrypted by
 OpenBao and are scanned as they are. The pattern list in `scan-patterns.txt` is rebuilt from the
@@ -210,8 +220,13 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   is created, labelled with this checkout's path and never started. Docker refuses a second one
   of that name atomically, so of two `up` started together, from one checkout or two, only one
   proceeds. Docker can create the claim and still answer with an error (a connection lost after
-  the request went through); an `up` refused that way looks at the claim, and one that names this
-  checkout is reported as its own, with a plain `down` to remove it. `bin/down` refuses when the claim or Compose names another directory as the origin,
+  the request went through); an `up` refused that way looks at the claim, and one that carries
+  the nonce this very `up` labelled its attempt with is reported as its own, with a plain `down`
+  to remove it; a claim from this checkout under another nonce is a second `up` running here, and
+  is reported as such. The claim's label is what the commands read the claim by, and a container
+  that carries it under another name is nobody's they know: `down` names it, removes nothing,
+  and leaves it to be removed or relabelled by hand; on its way out `down` removes the claim
+  container only, never every carrier of the label. `bin/down` refuses when the claim or Compose names another directory as the origin,
   or when fixture resources exist and no claim from this checkout shows them to be its own; run
   `down` in the checkout that owns them, or `down --adopt` if that checkout is gone or the claim
   was removed by hand. A `.state/` alone does not count, because it can be left over from an

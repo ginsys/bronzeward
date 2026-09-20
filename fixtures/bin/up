@@ -47,15 +47,19 @@ umask 077
 # The checks above are only a look, and of two `up` started together both can pass them, from one
 # checkout or from two. The claim container is what only one of them can create; the plain mkdir
 # then cannot race any more, and stays plain so that it never adopts a directory it did not make.
-claim_error=$(claim_take 2>&1) || {
+attempt=$(synthetic) || die "could not generate the attempt identity"
+claim_error=$(claim_take "$attempt" 2>&1) || {
   # Docker can create the container and still answer with an error, as a connection lost after
-  # the request went through does. A claim that then names this checkout is this up's own and no
-  # one else's, and it would refuse every next up from here for good.
-  if [ "$(claim_owner 2>/dev/null)" = "$FIXTURES" ]; then
-    die "Docker answered the fixture claim with an error, but the claim $CLAIM exists and names this checkout; run fixtures/bin/down to remove it, then up again. Docker said: $claim_error"
+  # the request went through does. A claim that then carries this attempt's label is this up's own
+  # and no one else's, and it would refuse every next up from here for good. One with this
+  # checkout's path and another attempt is another up's from here, started together with this
+  # one, which the name conflict is for: a hint to run down would tear that one's fixture down.
+  if [ "$(claim_label "$CLAIM_ATTEMPT_LABEL" 2>/dev/null)" = "$attempt" ]; then
+    die "Docker answered the fixture claim with an error, but the claim $CLAIM exists and is this up's; run fixtures/bin/down to remove it, then up again. Docker said: $claim_error"
   fi
   die "could not take the fixture claim $CLAIM on this Docker daemon, which another fixtures/bin/up may hold; nothing was created. Docker said: $claim_error"
 }
+unset attempt
 mkdir "$STATE" 2>/dev/null || {
   claim_drop
   die "$STATE appeared meanwhile; nothing was created"

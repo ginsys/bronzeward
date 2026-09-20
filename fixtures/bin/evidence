@@ -10,7 +10,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-need docker curl jq tar sha256sum git find comm awk timeout realpath readlink mktemp cmp stat
+need docker curl jq tar sha256sum git find comm awk timeout realpath readlink mktemp cmp stat flock
 need_state
 # The pattern list every match below relies on is rebuilt from the generated credentials and must
 # be what bin/up wrote: thinned after up, a scan against it would pass while a token or key goes
@@ -79,6 +79,12 @@ mkdir "$out/logs" "$out/backups"
 # in the sibling names this bundle, whose leak-scan.txt holds the hits). Removed as the last step,
 # so a kill leaves it in place.
 : >"$out/.incomplete" || die "cannot mark the bundle $out as incomplete"
+# The marker is held locked for the life of this capture: a later capture takes a sibling still
+# marked only if it can lock the marker, so one still writing, whose bundle is not yet all there
+# to scan, is left to its own scan and never marked scanned by another. The lock goes with the
+# process, so a capture killed leaves its marker free.
+exec {own_lock}<>"$out/.incomplete"
+flock --nonblock "$own_lock" || die "cannot lock the marker of $out"
 
 unavailable() {
   printf '%s\n' "$*" >>"$out/unavailable.txt"
@@ -201,7 +207,9 @@ for store in "$STATE"/backups/store-*.tgz "$STATE"/backups/store-*.tgz.partial.*
   # found in an expanded archive is excused only while the archive under that name still has
   # these bytes (store_archive_is_own below). An archive replaced between the two commands is
   # then a mismatch, and its copy a leak, which is the safe side.
-  { sha256sum -- "$store" | cut -d' ' -f1 >"$expanded.sha256"; } 2>/dev/null ||
+  # From standard input: given the name, sha256sum escapes a backslash in it and marks the line
+  # with one, which would put a 65th character before the digest.
+  { sha256sum <"$store" | cut -d' ' -f1 >"$expanded.sha256"; } 2>/dev/null ||
     die "could not take the digest of $(shown "$store"): its copies could not be told from a leak"
   mkdir -p "$expanded"
   if ! tar -xzf "$store" -C "$expanded" 2>/dev/null; then
@@ -231,14 +239,23 @@ done
   # never assumed.
   incomplete=0
   walk() {
-    local prefix=$1 entry listing rc=0
+    local prefix=$1 entry listing entries rc=0
     listing=$(bao kv list -mount=secret -format=json "$prefix" 2>/dev/null) || rc=$?
     if [ "$rc" -ne 0 ]; then
       jq -cn --arg path "$prefix" --argjson rc "$rc" '{path: $path, unknown: "listing empty or failed", exit_code: $rc}'
       incomplete=1
       return 0
     fi
+    # Parsed first, its status looked at: a listing that is not the JSON array the CLI writes, cut
+    # short or otherwise, would feed the loop nothing from a process substitution, and read as
+    # empty. So would a jq that fails.
+    if ! entries=$(jq -r '.[]' <<<"$listing" 2>/dev/null); then
+      jq -cn --arg path "$prefix" '{path: $path, unknown: "listing could not be parsed"}'
+      incomplete=1
+      return 0
+    fi
     while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
       case $entry in
         */) walk "$prefix$entry" ;;
         *)
@@ -249,7 +266,7 @@ done
           }
           ;;
       esac
-    done < <(jq -r '.[]' <<<"$listing")
+    done <<<"$entries"
   }
   walk ""
   rc=0
@@ -259,13 +276,19 @@ done
     incomplete=1
     keys='[]'
   fi
+  if ! key_names=$(jq -r '.[]' <<<"$keys" 2>/dev/null); then
+    jq -cn '{transit_keys: null, unknown: "listing could not be parsed"}'
+    incomplete=1
+    key_names=
+  fi
   while IFS= read -r key; do
+    [ -n "$key" ] || continue
     bao read -format=json "transit/keys/$key" 2>/dev/null |
       jq -c --arg key "$key" '{transit_key: $key, latest: .data.latest_version, min_decryption: .data.min_decryption_version, deletion_allowed: .data.deletion_allowed}' || {
       jq -cn --arg key "$key" '{transit_key: $key, unknown: "key read failed"}'
       incomplete=1
     }
-  done < <(jq -r '.[]' <<<"$keys")
+  done <<<"$key_names"
   [ "$incomplete" -eq 0 ] || exit 4
 ) >"$out/openbao-metadata.jsonl" || unavailable "openbao metadata incomplete (see the unknown records in openbao-metadata.jsonl)"
 
@@ -340,9 +363,23 @@ siblings=()
 while IFS= read -r -d '' sibling; do
   [ ! -L "$sibling" ] || die "$(shown "$sibling") is a symlink; the fixture never makes one there. Results void"
   [ "$sibling" = "$out" ] || [ ! -e "$sibling/.incomplete" ] || {
-    say "evidence: an earlier capture ended before its leak scan; $(shown "$sibling") is scanned with this one"
-    roots+=("$sibling")
-    siblings+=("$sibling")
+    # The marker locked, or the capture that made it is still running: its bundle is not all
+    # there yet, and it scans itself. Held until the marker is removed below, so that no other
+    # capture takes the same sibling meanwhile. A marker that cannot be opened cannot be told
+    # either way, and a sibling left out by guess would go unscanned.
+    # Looked at before exec opens it: on a redirection that fails, exec ends the shell with bash's
+    # own message, which names the path.
+    [ -f "$sibling/.incomplete" ] && [ ! -L "$sibling/.incomplete" ] && [ -r "$sibling/.incomplete" ] && [ -w "$sibling/.incomplete" ] ||
+      die "the marker of the earlier capture $(shown "$sibling") is not a file this capture can open; results void"
+    exec {sibling_lock}<>"$sibling/.incomplete"
+    if flock --nonblock "$sibling_lock"; then
+      say "evidence: an earlier capture ended before its leak scan; $(shown "$sibling") is scanned with this one"
+      roots+=("$sibling")
+      siblings+=("$sibling")
+    else
+      exec {sibling_lock}>&-
+      say "evidence: another capture is still writing $(shown "$sibling"); it is left to its own scan"
+    fi
   }
 done <"$out/.siblings"
 rm -- "$out/.siblings" || die "cannot remove the sibling listing from $out; results void"
@@ -395,7 +432,7 @@ store_archive_is_own() {
   [ ! -L "$recorded" ] && [ -f "$recorded" ] || return 1
   recorded=$(cat -- "$recorded" 2>/dev/null) || return 1
   [[ $recorded =~ ^[0-9a-f]{64}$ ]] || return 1
-  [ "$recorded" = "$(sha256sum -- "$archive" 2>/dev/null | cut -d' ' -f1)" ]
+  [ "$recorded" = "$(sha256sum <"$archive" 2>/dev/null | cut -d' ' -f1)" ]
 }
 # is_live_control <file>: the control's own place, or, while the live directory is gone, the
 # place a store-restore killed between its two renames moved it to.

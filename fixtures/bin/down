@@ -39,6 +39,12 @@ existing=$(
     docker volume ls --quiet --filter "label=$compose_label"
 ) || die "could not list the fixture's Docker resources; nothing was removed"
 claimed_by=$(claim_owner) || die "could not read who holds the fixture claim; nothing was removed"
+# A container carrying the claim label under another name is not the claim, whatever else it
+# carries, and someone's: refused before anything is removed, --adopt or not, since the claim is
+# dropped by its label's name at the end and the label alone would select this one too.
+strangers=$(claim_strangers) || die "could not list the containers carrying the fixture claim label; nothing was removed"
+[ -z "$strangers" ] ||
+  die "$(tr '\n' ' ' <<<"$strangers")carries the fixture claim label without being the claim $CLAIM; it is not the fixture's, and nothing was removed. Remove or relabel it first"
 owners=$(
   printf '%s\n' "$claimed_by" &&
     docker ps --all --quiet --filter "label=$compose_label" |
