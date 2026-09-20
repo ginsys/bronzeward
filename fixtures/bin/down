@@ -156,6 +156,7 @@ if [ "$purge" -eq 1 ]; then
     */fixtures/.cache) rm -rf -- "$CACHE" ;;
     *) die "refusing to delete unexpected cache path $CACHE" ;;
   esac
+  [ ! -e "$CACHE" ] || die "the fixture is down, but could not remove $CACHE"
 fi
 [ ! -e "$STATE" ] || die "could not remove $STATE"
 if [ "$volumes_known" -eq 1 ]; then

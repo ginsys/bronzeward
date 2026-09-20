@@ -107,7 +107,9 @@ talosctl cluster create docker \
 # While the containers certainly exist: see talos_volume_names in lib.sh.
 volume_names=$(talos_volume_names) || die "could not list the Talos node volumes"
 [ -n "$volume_names" ] || die "the Talos nodes have no volumes to record; teardown could not verify them"
-printf '%s\n' "$volume_names" >"$STATE/down-node-volumes"
+# Under its final name only when complete: bin/down takes a record that exists for the whole list.
+printf '%s\n' "$volume_names" >"$STATE/down-node-volumes.partial"
+mv --no-target-directory -- "$STATE/down-node-volumes.partial" "$STATE/down-node-volumes"
 
 # The cluster's own secrets bundle, for import experiments and as leak-scan patterns.
 talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" \

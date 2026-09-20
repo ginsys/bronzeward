@@ -6,7 +6,7 @@ here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
-need docker curl jq timeout sha256sum comm stat head
+need docker curl jq tar find timeout sha256sum comm stat head
 keep=${1:-}
 passed=0
 ok() {
@@ -106,6 +106,16 @@ ok "db-snapshot / db-restore; a truncated dump leaves the live database alone"
 bao kv put -mount=secret selftest/item value="$BW_CANARY" >/dev/null
 bao write -force transit/keys/selftest >/dev/null
 "$here/inject" bao-snapshot selftest
+# A curlrc of the caller must not reach the request: with `output` set there, curl would exit 0 and
+# the snapshot published under its final name would be empty.
+mkdir "$STATE/selftest-curl-home"
+printf 'output = "%s"\n' "$STATE/selftest-curl-home/stolen" >"$STATE/selftest-curl-home/.curlrc"
+CURL_HOME=$STATE/selftest-curl-home "$here/inject" bao-snapshot selftest-curlrc
+stolen=0
+[ ! -e "$STATE/selftest-curl-home/stolen" ] || stolen=1
+size=$(stat --format=%s "$STATE/backups/bao-selftest-curlrc.snap")
+rm -r "$STATE/selftest-curl-home" "$STATE/backups/bao-selftest-curlrc.snap"
+[ "$stolen" -eq 0 ] && [ "$size" -gt 0 ] || fail "a curlrc from the caller's environment redirected the OpenBao snapshot"
 "$here/inject" bao-soft-delete selftest/item 1
 [ -n "$(kv_version deletion_time)" ] && [ "$(kv_version destroyed)" = false ] || fail "soft delete not visible in metadata"
 ok "bao-soft-delete is visible as a reversible state"
@@ -118,7 +128,7 @@ ok "bao-delete-key removes the transit key"
 "$here/inject" bao-restore selftest
 [ "$(kv_version destroyed)" = false ] || fail "bao-restore did not bring back the destroyed secret version"
 bao read transit/keys/selftest >/dev/null || fail "bao-restore did not bring back the deleted transit key"
-ok "bao-snapshot / bao-restore"
+ok "bao-snapshot / bao-restore; the caller's curlrc ignored"
 
 # Local stores.
 printf 'x\n' >"$STATE/data/selftest-store"
@@ -139,6 +149,31 @@ listing=$(tar -tzf "$STATE/backups/store-selftest-env.tgz") || fail "cannot list
 rm "$STATE/backups/store-selftest-env.tgz"
 grep --quiet --line-regexp 'data/selftest-store' <<<"$listing" ||
   fail "a TAR_OPTIONS from the caller's shell left a file out of the store snapshot"
+# A final name that is a symlink to a directory must not receive the snapshot inside that directory.
+mkdir "$STATE/selftest-snapshot-dir"
+ln -s "$STATE/selftest-snapshot-dir" "$STATE/backups/store-selftest-symlinked.tgz"
+"$here/inject" store-snapshot selftest-symlinked
+escaped=$(find "$STATE/selftest-snapshot-dir" -mindepth 1 | wc -l)
+published=0
+[ ! -f "$STATE/backups/store-selftest-symlinked.tgz" ] || [ -L "$STATE/backups/store-selftest-symlinked.tgz" ] || published=1
+rm -rf "$STATE/selftest-snapshot-dir" "$STATE/backups/store-selftest-symlinked.tgz"
+[ "$escaped" -eq 0 ] && [ "$published" -eq 1 ] ||
+  fail "a snapshot whose final name was a symlink to a directory was written through the link"
+# An archive whose data is a symlink is no store: installed, it would cost the live directory and
+# leave a fixture that every command refuses.
+mkdir "$STATE/selftest-linked-archive"
+ln -s "$STATE/backups" "$STATE/selftest-linked-archive/data"
+tar -czf "$STATE/backups/store-selftest-linked.tgz" -C "$STATE/selftest-linked-archive" data
+rm -r "$STATE/selftest-linked-archive"
+rc=0
+"$here/inject" store-restore selftest-linked 2>/dev/null || rc=$?
+rm "$STATE/backups/store-selftest-linked.tgz"
+if [ -L "$STATE/data" ]; then
+  rm "$STATE/data"
+  mkdir "$STATE/data" # so that down is not refused
+  fail "store-restore installed a symlink as the store directory"
+fi
+[ "$rc" -ne 0 ] && [ -f "$STATE/data/selftest-store" ] || fail "store-restore accepted an archive whose data is a symlink"
 # The loss a store snapshot exists for: the live directory gone altogether.
 mv "$STATE/data" "$STATE/selftest-data-aside"
 rc=0
@@ -150,7 +185,7 @@ if [ "$rc" -ne 0 ] || [ ! -f "$STATE/data/selftest-store" ]; then
 fi
 rm -r "$STATE/selftest-data-aside"
 rm "$STATE/data/selftest-store"
-ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a corrupt snapshot leaves the live directory alone, a missing one is restored"
+ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, no write through a symlinked final name, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -321,12 +356,18 @@ printf 'nothing to see\n' >"$STATE/selftest-outside/-delete.d/named-$BW_BAO_META
 # path before the scan would lose the only place the secret is in.
 mkdir "$STATE/selftest-outside/empty"
 ln -s empty "$STATE/selftest-outside/link-$BW_BAO_METADATA_TOKEN"
+# And in the text of a symlink alone: a benign name, benign content at the other end, and the secret
+# in the path the link stores. That path lies outside everything scanned.
+mkdir "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN"
+printf 'nothing to see\n' >"$STATE/selftest-target-$BW_BAO_METADATA_TOKEN/file"
+ln -s "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN/file" "$STATE/data/selftest-textlink"
 # A client private key from the generated talosconfig, which the secrets bundle does not hold.
 awk '$1 == "key:" {print "client-key=" $2}' "$TALOSCONFIG" >"$STATE/data/selftest-client-key-leak"
 rc=0
 bundle=$(cd "$STATE/selftest-outside" &&
   "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" 2>"$STATE/selftest-evidence.err") || rc=$?
 cp "$STATE/selftest-outside/control-as-planted" "$STATE/data/canary-control.txt" # before anything can fail
+rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
 # Relative scan paths are made absolute from the physical working directory, so with the checkout
 # reached through a symlink they are spelled unlike $STATE. Only the tail is compared.
@@ -347,6 +388,8 @@ grep --quiet --fixed-strings "$STATE/data/selftest-client-key-leak" "$bundle/lea
   fail "leak scan missed a client private key from the talosconfig"
 rm "$STATE/data/selftest-client-key-leak"
 grep --quiet --fixed-strings "$STATE/data/selftest-link" "$bundle/leak-scan.txt" || fail "leak scan skipped a symlinked file"
+grep --quiet --line-regexp --fixed-strings "1 $STATE/data/selftest-textlink" "$bundle/leak-scan.txt" ||
+  fail "leak scan missed a secret held only in the target path of a symlink"
 grep --quiet --fixed-strings "/.state/selftest-outside/-delete" "$bundle/leak-scan.txt" ||
   fail "leak scan mishandled a scan path named like a find action"
 rm -r "$STATE/selftest-outside" "$STATE/data/selftest-link"

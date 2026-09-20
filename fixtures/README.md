@@ -66,8 +66,8 @@ cannot read a path or file it was given, the command fails, because an empty res
 prove nothing. Only that file and its copies inside expanded store snapshots count as the control,
 and only while they hold exactly what `bin/up` planted; any other file of the same name, a
 control whose content changed, and a control that is a symlink or has a second hard link are
-reported like every other hit. Names of files and directories
-are matched as well as file contents; a name that holds a secret is withheld from the report, which
+reported like every other hit. Names of files and directories,
+and the target path a symlink stores, are matched as well as file contents; a name that holds a secret is withheld from the report, which
 gives the inode instead. Symlinks are followed, so a linked file or directory is scanned through its link and
 a link that cannot be followed fails the command; extra paths may be relative and may have any
 name. `bin/evidence` is meant to run while parts of the fixture are down: a source it
