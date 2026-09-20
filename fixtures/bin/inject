@@ -56,26 +56,20 @@ network_of() {
 
 # network_own <target> <network>: the network under the fixture's name must be the fixture's own
 # before a container is connected to it. Once every container is off it, the name is free for
-# anyone's network, and a Talos node would be given its fixed address on that one. The Talos
-# network is held to the ID bin/up recorded; the Compose network to the project's labels.
+# anyone's network, and a Talos node would be given its fixed address on that one. Each network is
+# held to the ID bin/up recorded; the Compose network's labels are only the project's, which any
+# network can be given, so they are no mark.
 network_own() {
-  local id labels
+  local id record
   case $1 in
-    controlplane | worker)
-      id=$(docker network inspect --format '{{.Id}}' "$2") || die "cannot inspect the network $2"
-      [ -f "$STATE/down-node-networks" ] ||
-        die "no record of the Talos network in $STATE; run fixtures/bin/down --adopt, then up"
-      grep --quiet --line-regexp --fixed-strings -- "$id" "$STATE/down-node-networks" ||
-        die "the network $2 is not the one bin/up recorded; refusing to touch it"
-      ;;
-    *)
-      labels=$(docker network inspect \
-        --format '{{index .Labels "com.docker.compose.project"}}/{{index .Labels "com.docker.compose.network"}}' "$2") ||
-        die "cannot inspect the network $2"
-      [ "$labels" = "$FIXTURE_NAME/default" ] ||
-        die "the network $2 does not carry this fixture's Compose labels; refusing to touch it"
-      ;;
+    controlplane | worker) record=$STATE/down-node-networks ;;
+    *) record=$STATE/down-compose-networks ;;
   esac
+  id=$(docker network inspect --format '{{.Id}}' "$2") || die "cannot inspect the network $2"
+  [ -f "$record" ] ||
+    die "no record of the network $2 in $STATE; run fixtures/bin/down --adopt, then up"
+  grep --quiet --line-regexp --fixed-strings -- "$id" "$record" ||
+    die "the network $2 is not the one bin/up recorded; refusing to touch it"
 }
 
 bao_http() { # bao_http <method> <api-path> [curl args]

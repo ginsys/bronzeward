@@ -624,15 +624,29 @@ went=0
 "$here/evidence" >/dev/null 2>&1 && went=1
 rm "$FIXTURES/.selftest-untracked-link"
 [ "$went" -eq 0 ] || fail "evidence recorded an untracked symlink as the file that ran"
-# An untracked file hidden by an excludes file outside the repository: neither the status nor the
-# listing sees it, and the bundle would claim to say what ran without it.
-printf '.selftest-globally-ignored\n' >"$FIXTURES/.selftest-excludes"
-printf '[core]\n\texcludesFile = %s\n' "$FIXTURES/.selftest-excludes" >"$FIXTURES/.selftest-gitconfig"
-: >"$FIXTURES/.selftest-globally-ignored"
+# A tracked file replaced by a symlink: the diff would carry the target's name, and what the
+# scripts read is at the far end.
+mv "$FIXTURES/README.md" "$FIXTURES/.selftest-readme-aside"
+ln -s "$FIXTURES/.selftest-readme-aside" "$FIXTURES/README.md"
 went=0
-GIT_CONFIG_GLOBAL=$FIXTURES/.selftest-gitconfig "$here/evidence" >/dev/null 2>&1 && went=1
-rm "$FIXTURES/.selftest-excludes" "$FIXTURES/.selftest-gitconfig" "$FIXTURES/.selftest-globally-ignored"
+"$here/evidence" >/dev/null 2>&1 && went=1
+rm "$FIXTURES/README.md"
+mv "$FIXTURES/.selftest-readme-aside" "$FIXTURES/README.md" # before anything can fail
+[ "$went" -eq 0 ] || fail "evidence recorded a tracked file replaced by a symlink as the file that ran"
+# An untracked file hidden by an excludes file outside the repository: neither the status nor the
+# listing sees it, and the bundle would claim to say what ran without it. With a secret in its
+# name, which the refusal must not print.
+printf '.selftest-hidden-%s\n' "$BW_BAO_METADATA_TOKEN" >"$FIXTURES/.selftest-excludes"
+printf '[core]\n\texcludesFile = %s\n' "$FIXTURES/.selftest-excludes" >"$FIXTURES/.selftest-gitconfig"
+: >"$FIXTURES/.selftest-hidden-$BW_BAO_METADATA_TOKEN"
+went=0
+GIT_CONFIG_GLOBAL=$FIXTURES/.selftest-gitconfig "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+rm "$FIXTURES/.selftest-excludes" "$FIXTURES/.selftest-gitconfig" "$FIXTURES/.selftest-hidden-$BW_BAO_METADATA_TOKEN"
 [ "$went" -eq 0 ] || fail "evidence captured while an untracked file under fixtures/ was hidden by an excludes file outside the repository"
+grep --quiet 'hidden from git by an excludes file' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the hidden file for another reason: $(grep --invert-match --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" | tail -n 1)"
+! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
+  fail "evidence printed the secret-bearing name of a hidden file"
 # The directory of bundles writable but not readable: the captures that ended before their scan
 # cannot be listed, and this one must not report a scan.
 chmod 300 "$STATE/evidence"
@@ -652,9 +666,10 @@ printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
 # And one that is not text: carried as a binary patch, not as "differ".
 printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
 # The live store given as an extra path as well: it is a root already, and a file under it must
-# still be counted once.
+# still be counted once. Under a diff helper that prints nothing: the bundle must carry git's own
+# patch, not the helper's silence.
 bundle=$(cd "$STATE/selftest-outside" &&
-  "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" 2>"$STATE/selftest-evidence.err") || rc=$?
+  GIT_EXTERNAL_DIFF=/bin/true "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" 2>"$STATE/selftest-evidence.err") || rc=$?
 rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN" "$FIXTURES/.selftest-untracked" "$FIXTURES/.selftest-untracked.bin" \
   "$STATE/evidence/selftest-interrupted"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
@@ -709,7 +724,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete; leak scan finds the planted canary and token, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper, refuses a symlink in the tree and withholds a hidden file's name; leak scan finds the planted canary and token, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the
@@ -815,6 +830,17 @@ if [ "$keep" != --keep ]; then
   if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a network that only carries the Talos label"
   fi
+  # And one with the Compose project's labels, which are only a name: down holds the labelled
+  # network to the ID up recorded.
+  docker network create --label "com.docker.compose.project=$FIXTURE_NAME" --label "com.docker.compose.network=default" \
+    "$FIXTURE_NAME-selftest-cnet" >/dev/null || fail "cannot create a network for the test"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  impostor=$(docker network ls --quiet --filter "name=^${FIXTURE_NAME}-selftest-cnet$")
+  docker network rm "$FIXTURE_NAME-selftest-cnet" >/dev/null 2>&1 || true # gone already in the failing case
+  if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down removed, or did not refuse, a network that only carries the Compose labels"
+  fi
   # A snapshot with a second name outside .state would keep its content past the teardown; so
   # would one whose name in .state/backups starts with a dot, which a glob does not list.
   ln "$STATE/backups/pg-selftest.dump" "$FIXTURES/.selftest-backup-alias"
@@ -868,7 +894,7 @@ if [ "$keep" != --keep ]; then
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container and network against the records and refuses by label alone, holds the Compose volumes to the run recorded, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled container and network and the Compose-labelled network against the records and refuses by label alone, holds the Compose volumes to the run recorded, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

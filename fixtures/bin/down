@@ -65,25 +65,27 @@ state_files_own
 # created (held to the one-name rule by state_files_own above), so everything carrying the label
 # must be among them. With labelled resources and no record, as an up interrupted right after
 # creating the cluster leaves it, the label is all there is, and removing by it is what --adopt
-# asks for, not a plain down.
-# recorded_only <kind> <record> <listing...>: every ID the listing gives is in the record
+# asks for, not a plain down. The Compose network is the same case: its labels are only the
+# project's, which any network can be given, and `compose down` removes it as the project's.
+# recorded_only <kind> <mark> <record> <listing...>: every ID the listing gives is in the record
 recorded_only() {
-  local kind=$1 record=$2 labelled recorded id
-  shift 2
-  labelled=$("$@") || die "could not list the Talos ${kind}s; nothing was removed"
+  local kind=$1 mark=$2 record=$3 labelled recorded id
+  shift 3
+  labelled=$("$@") || die "could not list the $mark ${kind}s; nothing was removed"
   if [ -f "$record" ]; then
-    recorded=$(cat "$record") || die "could not read the recorded Talos $kind IDs; nothing was removed"
+    recorded=$(cat "$record") || die "could not read the recorded $mark $kind IDs; nothing was removed"
     for id in $labelled; do
       grep --quiet --line-regexp --fixed-strings -- "$id" <<<"$recorded" ||
-        die "the $kind $id carries this fixture's Talos label but is not one bin/up created; nothing was removed. Remove it by hand, or pass --adopt"
+        die "the $kind $id carries this fixture's $mark label but is not one bin/up created; nothing was removed. Remove it by hand, or pass --adopt"
     done
   elif [ -n "$labelled" ]; then
-    die "${kind}s carry this fixture's Talos label but bin/up left no record of which it created, as an up interrupted right after creating the cluster leaves it; nothing was removed. Pass --adopt to remove every $kind with the label"
+    die "${kind}s carry this fixture's $mark label but bin/up left no record of which it created, as an up interrupted right after creating them leaves it; nothing was removed. Pass --adopt to remove every $kind with the label"
   fi
 }
 if [ "$adopt" -eq 0 ]; then
-  recorded_only container "$STATE/down-node-containers" docker ps --all --quiet --no-trunc --filter "label=$talos_label"
-  recorded_only network "$STATE/down-node-networks" docker network ls --quiet --no-trunc --filter "label=$talos_label"
+  recorded_only container Talos "$STATE/down-node-containers" docker ps --all --quiet --no-trunc --filter "label=$talos_label"
+  recorded_only network Talos "$STATE/down-node-networks" docker network ls --quiet --no-trunc --filter "label=$talos_label"
+  recorded_only network Compose "$STATE/down-compose-networks" docker network ls --quiet --no-trunc --filter "label=$compose_label"
 fi
 # A snapshot with a second name, or one that is a symlink, keeps its secret past this teardown:
 # the removal of .state below takes the one name here and leaves the other. The one-name rule
