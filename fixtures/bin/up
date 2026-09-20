@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-need docker curl jq tar sha256sum install awk timeout mktemp
+need docker curl jq tar sha256sum install awk timeout mktemp git
 docker compose version >/dev/null || die "missing prerequisite: docker compose v2"
 [ "$(uname -sm)" = "Linux x86_64" ] || die "pinned CLI assets are linux/amd64 only"
 [ ! -e "$STATE" ] || die "$STATE exists: run fixtures/bin/down first"
@@ -62,6 +62,20 @@ mkdir "$STATE" 2>/dev/null || {
 recovery='run fixtures/bin/down to remove what was created'
 trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; $recovery"' EXIT
 mkdir "$STATE/data" "$STATE/backups"
+# The commit the fixture is made from, and how fixtures/ differs from it now: bin/evidence records
+# the commit it captures under, and a checkout switched or committed in between would have the
+# bundle name a commit the running fixture, its generated configuration and its cached tools were
+# not made from. Evidence reads this record, carries it and says when the two are not the same.
+manifest=$(git -C "$FIXTURES" rev-parse HEAD) ||
+  die "cannot read the manifest commit from git; the fixture could not be tied to a fixture version"
+differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES") ||
+  die "cannot ask git whether fixtures/ differs from commit $manifest"
+if [ -n "$differs" ]; then
+  fixtures_manifest_diff "$differs" >"$STATE/up-fixtures-diff.txt" ||
+    die "cannot record how fixtures/ differs from commit $manifest"
+fi
+printf '%s\n' "$manifest" >"$STATE/up-manifest"
+unset manifest differs
 recovery='run fixtures/bin/down --adopt to remove what was created (a plain down refuses what it finds without its record, and the records were not all published)'
 # The named volumes compose.yaml declares are made here, first of all, with a label that names this
 # run. Compose reuses a volume of that name whatever made it, and the look above is only a look: a
@@ -72,6 +86,7 @@ recovery='run fixtures/bin/down --adopt to remove what was created (a plain down
 # only as the run recorded here.
 run_id=$(synthetic) || die "could not generate the run identity"
 compose_volumes=$(compose_volume_names) || die "could not read the volume names from compose.yaml"
+# shellcheck disable=SC2094  # the record is renamed on the failure path, never read: the loop's open file keeps writing to it
 for compose_volume in $compose_volumes; do
   docker volume create --label "com.docker.compose.project=$FIXTURE_NAME" \
     --label "com.docker.compose.volume=${compose_volume#"${FIXTURE_NAME}_"}" \
@@ -79,8 +94,15 @@ for compose_volume in $compose_volumes; do
     die "could not create the volume $compose_volume"
   made_by=$(docker volume inspect --format "{{index .Labels \"$RUN_LABEL\"}}" "$compose_volume") ||
     die "could not read back the volume $compose_volume"
-  [ "$made_by" = "$run_id" ] ||
+  if [ "$made_by" != "$run_id" ]; then
+    # The volumes made so far are published as the record, so that the plain down removes those
+    # and holds this one, which is someone's, against it. Not --adopt: with no record it would
+    # remove this one by the label, as the fixture's.
+    mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes" ||
+      say "fixtures: could not publish the record of the volumes made so far"
+    recovery="remove or rename the volume $compose_volume by hand, then run fixtures/bin/down; not --adopt, which would remove that volume as this fixture's"
     die "the volume $compose_volume existed before this run made it, or another run made it meanwhile; it is not this fixture's, and nothing more is created. Remove or rename it by hand"
+  fi
   printf '%s %s\n' "$compose_volume" "$run_id"
 done >"$STATE/down-compose-volumes.partial"
 mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes"

@@ -119,7 +119,7 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 under `.state/talos` must likewise be a regular file with that one name at teardown. The files `bin/up` generates
 (`secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
-node-network, Compose-volume and Compose-network records) must each be
+node-network, Compose-volume and Compose-network records, `up-manifest` and `up-fixtures-diff.txt`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
@@ -143,9 +143,13 @@ name once every node was off it), and
 labelled ones exist and there is no record, as an `up` interrupted right after creating the
 cluster leaves it. The Compose network is held the same way: its labels are only the project's
 name, which any network can be given, so `up` records its ID after `compose up` and `down` and
-`inject` hold the labelled network to it. Only `down --adopt` removes by label alone, and that is
-what the hint of an `up` that failed names from the first Compose volume until the last record is
-published, since a plain `down` refuses what it finds without its record. The named volumes `compose.yaml`
+`inject` hold the labelled network to it. Only `down --adopt` removes by label alone, and only
+where no record exists: with a record, a labelled container, network or volume the record does not
+name is someone's and no `down` removes it. That is what the hint of an `up` that failed names
+from the first Compose volume until the last record is published, since a plain `down` refuses
+what it finds without its record; an `up` that found a Compose volume name taken (the label read
+back is another run's) publishes the record of the volumes it did make and names that volume to
+remove or rename by hand, then a plain `down`, not `--adopt`. The named volumes `compose.yaml`
 declares get fixed names too (`<fixture>_postgres-data`, `<fixture>_openbao-data`), and Compose
 reuses a volume of that name it did not create: `up` refuses while one exists, and `down`, with
 or without `--adopt`, refuses to run `compose down --volumes` while one exists without the
@@ -154,8 +158,8 @@ run of that name puts on the volumes it makes, and a look before `compose up` ca
 volume made in between, so `up` makes the two volumes itself, first of all, labelled with the
 run, reads the label back (a volume that existed keeps its own labels, and `docker volume create`
 on an existing name says nothing) and refuses when it is not this run's; `down` removes a
-labelled volume only as the run recorded, and without the record, as an `up` interrupted right
-after making the volumes leaves it, only `down --adopt` removes it by the label. The Talos node
+labelled volume only as the run recorded, `--adopt` or not, and without the record, as an `up`
+interrupted right after making the volumes leaves it, only `down --adopt` removes it by the label. The Talos node
 volumes are recorded from the two containers whose IDs were recorded, not from whatever carried
 the label at the time. The checkout is
 identified by its physical path, so the same checkout reached through a symlink is still its own.

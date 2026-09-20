@@ -102,20 +102,42 @@ node_tag() { # node_tag <ip>
   timeout 20 "$CACHE/talosctl" -e "$1" -n "$1" version --short | awk '/Tag:/ {print $2}'
 }
 
+# What git and find say on stderr while listing fixtures/ is collected, not shown: a directory
+# they cannot open is named in the warning as it is, before any of it reaches shown, and its name
+# may hold a secret. A warning also means the listing is incomplete, so it refuses the capture,
+# each line through shown.
+gitwarn=$out/.git-stderr
+git_warnings_refuse() {
+  local line warned=
+  [ -s "$gitwarn" ] || return 0
+  warned=$(while IFS= read -r line; do printf '%s; ' "$(shown "$line")"; done <"$gitwarn")
+  rm -f -- "$gitwarn"
+  die "git or find warned while listing fixtures/, so the listing is incomplete: ${warned%; }. The bundle could not be tied to what ran"
+}
 # Assigned first: a git that fails inside a printf argument would leave the line empty, and a bundle
 # without the manifest commit cannot be tied to the pins it was captured under.
-manifest=$(git -C "$FIXTURES" rev-parse HEAD) ||
+manifest=$(git -C "$FIXTURES" rev-parse HEAD 2>>"$gitwarn") ||
   die "cannot read the manifest commit from git; the bundle could not be tied to a fixture version"
-differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES") ||
+differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES" 2>>"$gitwarn") ||
   die "cannot ask git whether fixtures/ differs from commit $manifest"
+# The commit the fixture was created at, which bin/up recorded with how fixtures/ differed from it
+# then: a checkout switched or committed since would have the bundle name a commit the running
+# fixture, its generated configuration and its cached tools were not made from. Both are in the
+# bundle, and versions.txt says when they are not the same.
+created=$(cat "$STATE/up-manifest" 2>/dev/null) ||
+  die "no record in $STATE of the commit the fixture was created at, as an up interrupted early leaves it; the bundle could not be tied to what ran"
+if [ -e "$STATE/up-fixtures-diff.txt" ]; then
+  cp -- "$STATE/up-fixtures-diff.txt" "$out/up-fixtures-diff.txt" ||
+    die "cannot copy the record of how fixtures/ differed at creation into the bundle"
+fi
 # An untracked file that only .git/info/exclude or a global excludes file hides: neither the status
 # above nor the listing below sees it, and the bundle would claim that the commit plus the diff say
 # what ran while a helper under fixtures/ is in neither. The repository's own .gitignore files are
 # the one exclusion the bundle stands by (.state and .cache); anything else hidden is refused.
 # Listed into files, so that a listing that fails is not an empty one.
-git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" | sort -z >"$out/.untracked-seen" ||
+git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" 2>>"$gitwarn" | sort -z >"$out/.untracked-seen" ||
   die "cannot list the untracked files under fixtures/; the bundle could not be tied to what ran"
-git -C "$FIXTURES" ls-files --others --exclude-per-directory=.gitignore -z -- "$FIXTURES" | sort -z >"$out/.untracked-all" ||
+git -C "$FIXTURES" ls-files --others --exclude-per-directory=.gitignore -z -- "$FIXTURES" 2>>"$gitwarn" | sort -z >"$out/.untracked-all" ||
   die "cannot list the untracked files under fixtures/; the bundle could not be tied to what ran"
 hidden=$(comm --zero-terminated -13 "$out/.untracked-seen" "$out/.untracked-all" |
   while IFS= read -r -d '' file; do
@@ -130,38 +152,29 @@ rm -- "$out/.untracked-seen" "$out/.untracked-all" || die "cannot remove the unt
 # bytes that ran, and on another host the name would point at something else or at nothing; a
 # tracked helper replaced by one is what the scripts then source. Refused, not recorded: the tree
 # has no symlink of its own. .state and .cache are this run's, held elsewhere.
-linked=$(find "$FIXTURES" \( -path "$STATE" -o -path "$CACHE" \) -prune -o -type l -print -quit) ||
-  die "cannot look for symlinks under fixtures/; the bundle could not be tied to what ran"
+# find's status is looked at after its warnings: a directory it cannot open fails it, and the
+# warning names that directory.
+find_rc=0
+linked=$(find "$FIXTURES" \( -path "$STATE" -o -path "$CACHE" \) -prune -o -type l -print -quit 2>>"$gitwarn") || find_rc=$?
+git_warnings_refuse
+[ "$find_rc" -eq 0 ] || die "cannot look for symlinks under fixtures/; the bundle could not be tied to what ran"
 [ -z "$linked" ] ||
   die "$(shown "$linked") is a symlink under fixtures/; the bundle cannot carry what it points at, and the commit plus a diff would not say what ran. Replace it with the file"
 # A tree that differs from the commit: the commit alone then does not say what ran. The bundle
-# carries the difference, the status of every changed or untracked file, the diff of the tracked
-# ones and the whole content of the untracked ones (as a diff against nothing), so that the
-# commit plus this file reproduces what captured the bundle. Ignored files, .state and .cache,
-# are left out: they are this run's secrets and the pinned binaries.
-fixtures_diff() {
-  local file
-  printf '%s\n\n' "$differs"
-  # --no-ext-diff: a diff helper from the caller's configuration (GIT_EXTERNAL_DIFF, diff.external)
-  # would be handed the comparison and may print nothing, with the status git would give; the
-  # bundle needs git's own patch. --binary: a changed file that is not text is carried whole, not
-  # as "differ".
-  git -C "$FIXTURES" diff --no-ext-diff --binary HEAD -- "$FIXTURES" || return 1
-  # A pipe, not a substitution: a substitution drops the NULs that end each name. With pipefail
-  # a failing listing fails the pipeline, as does the loop when a diff cannot be written.
-  git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" |
-    while IFS= read -r -d '' file; do
-      # --no-index exits 1 when the two differ, which a file against /dev/null always does.
-      git -C "$FIXTURES" diff --no-index --no-ext-diff --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
-    done
-}
+# carries the difference (fixtures_manifest_diff in lib.sh, the same record bin/up wrote at
+# creation), so that the commit plus this file reproduces what captured the bundle.
 if [ -n "$differs" ]; then
-  fixtures_diff >"$out/fixtures-diff.txt" ||
+  fixtures_manifest_diff "$differs" >"$out/fixtures-diff.txt" 2>>"$gitwarn" ||
     die "cannot record how fixtures/ differs from commit $manifest; the bundle could not be tied to what ran"
 fi
+git_warnings_refuse
+rm -f -- "$gitwarn"
 {
   printf 'captured        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'manifest commit %s%s\n' "$manifest" "$([ -z "$differs" ] || printf ' (fixtures/ differs from it: see fixtures-diff.txt)')"
+  printf 'created at      %s%s%s\n' "$created" \
+    "$([ ! -e "$STATE/up-fixtures-diff.txt" ] || printf ' (fixtures/ differed from it then: see up-fixtures-diff.txt)')" \
+    "$([ "$created" = "$manifest" ] || printf ' (not the commit captured under: what runs was made from this one)')"
   printf 'host            %s\n' "$(uname -srm)"
   printf 'docker          %s\n' "$(reported docker version --format 'client {{.Client.Version}} server {{.Server.Version}}')"
   printf 'compose         %s\n' "$(reported docker compose version --short)"

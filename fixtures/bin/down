@@ -65,8 +65,10 @@ state_files_own
 # created (held to the one-name rule by state_files_own above), so everything carrying the label
 # must be among them. With labelled resources and no record, as an up interrupted right after
 # creating the cluster leaves it, the label is all there is, and removing by it is what --adopt
-# asks for, not a plain down. The Compose network is the same case: its labels are only the
-# project's, which any network can be given, and `compose down` removes it as the project's.
+# asks for, not a plain down. With a record, --adopt changes nothing: a labelled resource the
+# record does not name is someone's, and is not removed as the fixture's by any down. The Compose
+# network is the same case: its labels are only the project's, which any network can be given,
+# and `compose down` removes it as the project's.
 # recorded_only <kind> <mark> <record> <listing...>: every ID the listing gives is in the record
 recorded_only() {
   local kind=$1 mark=$2 record=$3 labelled recorded id
@@ -76,17 +78,15 @@ recorded_only() {
     recorded=$(cat "$record") || die "could not read the recorded $mark $kind IDs; nothing was removed"
     for id in $labelled; do
       grep --quiet --line-regexp --fixed-strings -- "$id" <<<"$recorded" ||
-        die "the $kind $id carries this fixture's $mark label but is not one bin/up created; nothing was removed. Remove it by hand, or pass --adopt"
+        die "the $kind $id carries this fixture's $mark label but is not one bin/up created; nothing was removed. Remove it by hand"
     done
-  elif [ -n "$labelled" ]; then
+  elif [ -n "$labelled" ] && [ "$adopt" -eq 0 ]; then
     die "${kind}s carry this fixture's $mark label but bin/up left no record of which it created, as an up interrupted right after creating them leaves it; nothing was removed. Pass --adopt to remove every $kind with the label"
   fi
 }
-if [ "$adopt" -eq 0 ]; then
-  recorded_only container Talos "$STATE/down-node-containers" docker ps --all --quiet --no-trunc --filter "label=$talos_label"
-  recorded_only network Talos "$STATE/down-node-networks" docker network ls --quiet --no-trunc --filter "label=$talos_label"
-  recorded_only network Compose "$STATE/down-compose-networks" docker network ls --quiet --no-trunc --filter "label=$compose_label"
-fi
+recorded_only container Talos "$STATE/down-node-containers" docker ps --all --quiet --no-trunc --filter "label=$talos_label"
+recorded_only network Talos "$STATE/down-node-networks" docker network ls --quiet --no-trunc --filter "label=$talos_label"
+recorded_only network Compose "$STATE/down-compose-networks" docker network ls --quiet --no-trunc --filter "label=$compose_label"
 # A snapshot with a second name, or one that is a symlink, keeps its secret past this teardown:
 # the removal of .state below takes the one name here and leaves the other. The one-name rule
 # for the files bin/up generated is checked in state_files_own; the snapshots inject published
@@ -119,9 +119,10 @@ unset talos_state
 # anywhere puts on the volumes it makes, and a volume has no ID: with this run's volume removed
 # by hand, a name could be taken again under the same label. bin/up made the volumes itself,
 # labelled with the run, and recorded name and run (held to the one-name rule by state_files_own
-# above); a labelled volume is removed only as the run recorded. Without the record, as an up
-# interrupted right after making the volumes leaves it, the label is all there is, and that is
-# for --adopt.
+# above); a labelled volume is removed only as the run recorded, --adopt or not: one the record
+# does not name is someone's, made under the name while this fixture's was gone, or the one an up
+# that lost the race for the name found there. Without the record, as an up interrupted right
+# after making the volumes leaves it, the label is all there is, and that is for --adopt.
 compose_volumes=$(compose_volume_names) || die "could not read the volume names from compose.yaml; nothing was removed"
 if [ -f "$STATE/down-compose-volumes" ]; then
   compose_volume_record=$(cat "$STATE/down-compose-volumes") || die "could not read the recorded Compose volumes; nothing was removed"
@@ -132,12 +133,12 @@ for compose_volume in $compose_volumes; do
   if identity=$(docker volume inspect --format "{{index .Labels \"com.docker.compose.project\"}} {{.Name}} {{index .Labels \"$RUN_LABEL\"}}" "$compose_volume" 2>&1); then
     [ "${identity%% *}" = "$FIXTURE_NAME" ] ||
       die "the volume $compose_volume carries no fixture label and is someone's data under a name compose.yaml uses; nothing was removed. Remove or rename it by hand"
-    [ "$adopt" -eq 1 ] || {
-      [ -n "$compose_volume_record" ] ||
-        die "the volume $compose_volume carries this fixture's label but bin/up left no record of the volumes it made, as an up interrupted right after making them leaves it; nothing was removed. Pass --adopt to remove it by the label"
+    if [ -n "$compose_volume_record" ]; then
       grep --quiet --line-regexp --fixed-strings -- "${identity#* }" <<<"$compose_volume_record" ||
-        die "the volume $compose_volume carries this fixture's label but is not the one bin/up made (it does not carry the run recorded); nothing was removed. Remove it by hand, or pass --adopt"
-    }
+        die "the volume $compose_volume carries this fixture's label but is not the one bin/up made (it does not carry the run recorded); nothing was removed. Remove it by hand"
+    elif [ "$adopt" -eq 0 ]; then
+      die "the volume $compose_volume carries this fixture's label but bin/up left no record of the volumes it made, as an up interrupted right after making them leaves it; nothing was removed. Pass --adopt to remove it by the label"
+    fi
   else
     case $identity in
       *[Nn]o\ such\ volume*) ;;
