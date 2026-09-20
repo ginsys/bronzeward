@@ -121,6 +121,14 @@ metadata_token=$(bao token create -policy=bw-metadata-only -format=json | jq -er
 secrets_publish
 
 say "creating the talos cluster (several minutes on a cold image cache)"
+# Before the first node volume can exist, the marker bin/down reads as "not every node volume is
+# known": an up interrupted from here until the record below is published leaves volumes that
+# only the record would name, and a down that found no container left must still not claim
+# that none remain. Removed once the records are in place.
+if ! marker=$(mktemp "$STATE/down-node-volumes-incomplete.XXXXXX") ||
+  ! mv --no-target-directory -- "$marker" "$STATE/down-node-volumes-incomplete"; then
+  die "could not mark $STATE as having an unrecorded cluster"
+fi
 talosctl cluster create docker \
   --name "$FIXTURE_NAME" \
   --state "$STATE/talos" \
@@ -146,9 +154,13 @@ mv --no-target-directory -- "$STATE/down-node-containers.partial" "$STATE/down-n
 # The cluster network carries the same label, and bin/down removes networks by it just the same.
 network_ids=$(docker network ls --quiet --no-trunc --filter "label=talos.cluster.name=$FIXTURE_NAME") ||
   die "could not list the Talos networks"
-[ -n "$network_ids" ] || die "no Talos network to record; teardown could not tell it from another's"
+# Exactly the one the cluster has: a second network of that label, made by someone else while the
+# cluster was being created, must not be recorded as this fixture's and removed with it.
+[ "$(sed '/^$/d' <<<"$network_ids" | wc -l)" -eq 1 ] ||
+  die "expected one Talos network to record; teardown could not tell it from another's"
 printf '%s\n' "$network_ids" >"$STATE/down-node-networks.partial"
 mv --no-target-directory -- "$STATE/down-node-networks.partial" "$STATE/down-node-networks"
+rm -- "$STATE/down-node-volumes-incomplete" || die "could not clear the unrecorded-cluster marker in $STATE"
 
 # The cluster's own secrets bundle, for import experiments and as leak-scan patterns.
 talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" \

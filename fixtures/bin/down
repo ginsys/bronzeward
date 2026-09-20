@@ -143,8 +143,23 @@ if [ -d "$STATE" ]; then
     { [ ! -f "$STATE/down-node-volumes" ] || [ "$(stat --format=%h -- "$STATE/down-node-volumes" 2>/dev/null)" != 1 ]; }; }; then
     die "$STATE/down-node-volumes is not the regular file bin/up writes, with that one name; nothing was removed"
   fi
-  printf '%s\n' "$volume_names" >>"$STATE/down-node-volumes" ||
+  # Merged, then published by rename: an append cut short by a signal or a full disk would leave
+  # a name without its newline for the next run to append onto, and the record it trusts would
+  # then hold a name that is no volume's. A record whose last line lacks its newline (the same
+  # interruption, before this change) is read with one supplied.
+  if [ -f "$STATE/down-node-volumes" ]; then
+    recorded=$(cat "$STATE/down-node-volumes") ||
+      die "could not read the recorded Talos node volumes; nothing was removed"
+  else
+    recorded=
+  fi
+  merged=$(mktemp "$STATE/down-node-volumes.XXXXXX") ||
     die "could not record the Talos node volumes in $STATE; nothing was removed"
+  if ! printf '%s\n%s\n' "$recorded" "$volume_names" | sed '/^$/d' | sort -u >"$merged" ||
+    ! mv --no-target-directory -- "$merged" "$STATE/down-node-volumes"; then
+    rm -f -- "$merged"
+    die "could not record the Talos node volumes in $STATE; nothing was removed"
+  fi
   volume_names=$(cat "$STATE/down-node-volumes") ||
     die "could not read the recorded Talos node volumes; nothing was removed"
 fi

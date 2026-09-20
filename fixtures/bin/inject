@@ -105,8 +105,9 @@ staging=
 moved_aside=0
 committing=0
 db_swapping=0
+bao_dispatched=0
 finish() {
-  local rc=$? left
+  local rc=$? left status=failed
   # A signal that arrives while bash waits for a rename has it finish the child and run this
   # handler before the line that would have cleared the flags. The rename is the commit of a
   # snapshot and of a store restore, so one that did complete is recorded as done, whatever the
@@ -132,6 +133,14 @@ finish() {
     say "fixtures: interrupted after the restored database was swapped in; recorded as done. bronzeward_previous is left; the next db-restore drops it"
     rc=0
   fi
+  # A restore request that OpenBao may have received and applied without answering: curl's own
+  # status tells a request that never reached the server (7, no connection) or that the server
+  # refused (22, an HTTP error) from a timeout, a dropped connection or a signal, after which
+  # the provider's state is whatever the request made of it. Recorded as unknown, not failed.
+  if [ "$bao_dispatched" -eq 1 ] && [ "$rc" -ne 0 ] && [ "$rc" -ne 7 ] && [ "$rc" -ne 22 ]; then
+    status=unknown
+    say "fixtures: the restore request was sent and not answered; whether OpenBao applied the snapshot is not known"
+  fi
   # A removal that fails must not end the handler before the outcome is recorded: each is guarded.
   if [ -n "$partial" ]; then
     rm -f -- "$partial" || say "fixtures: could not remove the partial file $partial"
@@ -150,7 +159,7 @@ finish() {
   fi
   # An outcome that could not be recorded is a failure of its own; the action's status stands
   # otherwise, and is restated here so that nothing above decides it.
-  if [ "$rc" -eq 0 ]; then record "done $action $logged" || rc=1; else record "failed rc=$rc $action $logged" || true; fi
+  if [ "$rc" -eq 0 ]; then record "done $action $logged" || rc=1; else record "$status rc=$rc $action $logged" || true; fi
   exit "$rc"
 }
 logged=$*
@@ -268,7 +277,11 @@ case $action in
   bao-restore)
     [ $# -eq 1 ] || usage
     [ -f "$STATE/backups/bao-$1.snap" ] || die "no such snapshot: bao-$1.snap"
+    # The flag first: once the request is on its way, a failure without an answer from OpenBao
+    # says nothing about whether the snapshot was applied, and the exit handler records that.
+    bao_dispatched=1
     bao_http POST sys/storage/raft/snapshot-force --data-binary "@$STATE/backups/bao-$1.snap"
+    bao_dispatched=0
     wait_for 60 "an active OpenBao node" bao token lookup
     ;;
   store-snapshot)

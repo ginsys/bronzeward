@@ -598,16 +598,22 @@ rc=0
 # An untracked file in the checkout: the commit alone does not say what ran, and the bundle must
 # carry the file's content, not its name alone.
 printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
+# And one that is not text: carried as a binary patch, not as "differ".
+printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
 # The live store given as an extra path as well: it is a root already, and a file under it must
 # still be counted once.
 bundle=$(cd "$STATE/selftest-outside" &&
   "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" 2>"$STATE/selftest-evidence.err") || rc=$?
-rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN" "$FIXTURES/.selftest-untracked"
+rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN" "$FIXTURES/.selftest-untracked" "$FIXTURES/.selftest-untracked.bin"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
 [ -z "$(sort "$bundle/leak-scan.txt" | uniq --repeated)" ] || fail "leak scan reported a file twice: for a scan path under a root it has anyway, or for a secret in its name and another in its content"
 grep --quiet 'differs from it' "$bundle/versions.txt" || fail "versions.txt does not say fixtures/ differs from the commit while an untracked file is there"
 grep --quiet --fixed-strings "+selftest-untracked-content $$" "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt does not carry the content of an untracked file"
+grep --quiet '^GIT binary patch$' "$bundle/fixtures-diff.txt" ||
+  fail "fixtures-diff.txt does not carry the content of an untracked file that is not text"
+! grep --quiet '^Binary files .* differ$' "$bundle/fixtures-diff.txt" ||
+  fail "fixtures-diff.txt only says that an untracked file that is not text differs"
 # Relative scan paths are made absolute from the working directory; only the tail is compared, so
 # the assertion does not depend on how the checkout path is spelled.
 grep --quiet --fixed-strings "/.state/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
@@ -651,6 +657,9 @@ grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" ||
 ok "evidence bundle complete; leak scan finds the planted canary and token, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
+  # up marks the state directory before it creates the cluster and clears the mark once the
+  # records are published; a mark still there would have down keep .state as uncertain.
+  [ ! -e "$STATE/down-node-volumes-incomplete" ] || fail "up left its unrecorded-cluster marker in .state"
   # The record of node volumes is what down removes by name: a link there is refused, before
   # anything is removed.
   mv "$STATE/down-node-volumes" "$STATE/selftest-record-aside"
@@ -764,13 +773,16 @@ if [ "$keep" != --keep ]; then
   if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down followed a symlinked Talos state directory"
   fi
+  # A record whose last name lacks its newline, as an append cut short leaves it: read whole,
+  # not appended onto.
+  printf '%s' "$(cat "$STATE/down-node-volumes")" >"$STATE/down-node-volumes"
   "$here/down" || fail "down reported leftovers"
   # down looks for what it can name. A volume no label or record points at, such as the anonymous
   # one Docker makes for the claim container, only shows up as a difference on the whole daemon.
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container and network against the records and refuses by label alone, refuses a snapshot with a second name, a dot-named link among the snapshots and a linked Talos state directory, then leaves nothing behind, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container and network against the records and refuses by label alone, refuses a snapshot with a second name, a dot-named link among the snapshots and a linked Talos state directory, reads a record cut short of its last newline, then leaves nothing behind, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"
