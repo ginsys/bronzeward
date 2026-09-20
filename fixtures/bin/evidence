@@ -240,8 +240,18 @@ is_store_copy() {
   middle=${middle%/data/canary-control.txt}
   [ -n "$middle" ] && [[ $middle != */* ]]
 }
+# store_archive_is_own <file>: the archive the store copy was expanded from is the regular file
+# inject wrote, with no second name. Hard-linked outside .state, its compressed bytes match no
+# pattern here, and the canary would survive teardown inside it while its copy was excused.
+store_archive_is_own() {
+  local middle=${1#"$out/backups/store-"} archive
+  archive=$STATE/backups/store-${middle%/data/canary-control.txt}.tgz
+  [ ! -L "$archive" ] && [ -f "$archive" ] && [ "$(stat --format=%h -- "$archive" 2>/dev/null)" = 1 ]
+}
 is_control() { # is_control <file>
-  [ "$1" = "$control" ] || is_store_copy "$1" || return 1
+  if [ "$1" != "$control" ]; then
+    is_store_copy "$1" && store_archive_is_own "$1" || return 1
+  fi
   # Not a symlink: find -L and cmp both follow one, and a control that points at a file outside
   # .state would excuse a canary that lives there and survives teardown. The same goes for its
   # data directory; everything above that is the fixture's own.

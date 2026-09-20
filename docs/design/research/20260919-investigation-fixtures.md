@@ -89,7 +89,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-2, 4, 8, 9, 19, 21, 22 and 23 (section 5, items 8 to 18); the revision described here passed 24 of 24 from
+2, 4, 8, 9, 19, 21, 22 and 23 (section 5, items 8 to 19); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed.
 
@@ -103,7 +103,7 @@ against one fixture. Those runs were not timed.
 | 6 | `bao-destroy` | Metadata shows `destroyed` true | pass |
 | 7 | `bao-delete-key` | Transit key no longer readable | pass |
 | 8 | A second `bao-snapshot` under a `CURL_HOME` whose curlrc sets `output`; `bao-restore` of the earlier snapshot | The curlrc is ignored: nothing is written where it points and the snapshot is not empty; destroyed version and deleted key are back | pass |
-| 9 | `store-snapshot` / `store-restore`, then `store-restore` of a corrupt archive, a `store-snapshot` with an excluding `TAR_OPTIONS` in the environment, a `store-snapshot` whose final name is a symlink to a directory, `store-restore` of an archive whose `data` is a symlink, then `store-restore` with the live directory gone | Deleted file is back; the corrupt restore fails and leaves the live directory, positive control included, untouched; the snapshot holds the file `TAR_OPTIONS` named; the symlinked name is replaced by the snapshot and nothing is written into the directory it pointed at; the archive with the symlinked `data` is refused and the live directory stays; the missing directory is restored | pass |
+| 9 | `store-snapshot` / `store-restore`, then `store-restore` of a corrupt archive, a `store-snapshot` with an excluding `TAR_OPTIONS` in the environment, a `store-snapshot` whose final name is a symlink to a directory, `store-restore` of an archive whose `data` is a symlink, a `store-snapshot` whose name holds a slash, then `store-restore` with the live directory gone | Deleted file is back; the corrupt restore fails and leaves the live directory, positive control included, untouched; the snapshot holds the file `TAR_OPTIONS` named; the symlinked name is replaced by the snapshot and nothing is written into the directory it pointed at; the archive with the symlinked `data` is refused and the live directory stays; the name with a slash is refused and nothing is written under it; the missing directory is restored | pass |
 | 10 | `bin/evidence` while PostgreSQL is dead | Does not abort; `unavailable.txt` names the missing live dump; the database backup is still expanded and scanned | pass |
 | 11 | `db-snapshot` while PostgreSQL is dead | Fails; no file of that snapshot name is left in `.state/backups`; `injections.log` records it as `failed` and the preceding `kill` as `done` | pass |
 | 12 | `kill` / `start` PostgreSQL | No answer while dead; committed row survives | pass |
@@ -116,8 +116,8 @@ against one fixture. Those runs were not timed.
 | 19 | `kill` / `start` worker, then `pause` / `unpause` worker | The first request after `start` returns is answered, without a wait; no Talos API answer while paused, answers after | pass |
 | 20 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
 | 21 | `bin/evidence` with a scan path that does not exist, then with a mode-000 file whose name holds a secret (skipped when run as root) | Refuses both, non-zero exit; the second message withholds the name, and stderr holds no secret | pass |
-| 22 | Evidence with the positive control replaced by a symlink to a file of the same content outside the scanned paths, then with a hard link to the control outside them, then with `.state/evidence` replaced by a symlink; then evidence and leak scan on the healthy fixture, run from another directory with the relative scan paths `-delete` and `-delete.d`, a symlinked file under `.state/data`, a leaking file named `canary-control.txt` outside `.state/data`, the control itself with its canary replaced by another secret, a benign file with a secret in its name, a scan path that is a symlink with a secret in its name, a symlink with a benign name and benign content behind it whose stored target path holds a secret, and a planted copy of the `talosconfig` client key | The symlinked and the hard-linked control are each reported as a leak; the symlinked evidence directory is refused and nothing is written through it; in the last run all are scanned and reported, nothing is deleted; the file that only shares the control's name and the control with the replaced canary are reported as leaks, the control's copy inside the expanded store snapshot is not; exactly the two secret-bearing names are reported, with the names withheld, and the report itself holds no secret; the client key is found; no `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
-| 23 | `bin/down`, then the daemon's whole volume list against the one taken before `up` | No container, network, volume or state directory left; no volume exists that did not before `up` | pass |
+| 22 | Evidence with the positive control replaced by a symlink to a file of the same content outside the scanned paths, then with a hard link to the control outside them, then with `.state/evidence` replaced by a symlink, then with `.state/secrets.env` replaced by a symlink and with a command substitution appended to it, then with a hard link to a store snapshot archive; then evidence and leak scan on the healthy fixture, run from another directory with the relative scan paths `-delete` and `-delete.d`, a symlinked file under `.state/data`, a leaking file named `canary-control.txt` outside `.state/data`, the control itself with its canary replaced by another secret, a benign file with a secret in its name, a scan path that is a symlink with a secret in its name, a symlink with a benign name and benign content behind it whose stored target path holds a secret, and a planted copy of the `talosconfig` client key | The symlinked and the hard-linked control are each reported as a leak; the symlinked evidence directory is refused and nothing is written through it; the symlinked and the appended `secrets.env` are each refused and the appended command does not run; the control copy expanded from the hard-linked archive is reported as a leak; in the last run all are scanned and reported, nothing is deleted; the file that only shares the control's name and the control with the replaced canary are reported as leaks, the control's copy inside the expanded store snapshot is not; exactly the two secret-bearing names are reported, with the names withheld, and the report itself holds no secret; the client key is found; no `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
+| 23 | `bin/down` with `.state/down-node-volumes` replaced by a symlink, then `bin/down`, then the daemon's whole volume list against the one taken before `up` | The first `down` refuses, removes nothing and leaves `.state`; after the second no container, network, volume or state directory is left; no volume exists that did not before `up` | pass |
 | 24 | `up`, `evidence` and `down` with `.state` replaced by a dangling symlink | Each refuses; nothing is created at the link's target | pass |
 
 After the second run of the first revision, an independent `docker volume ls --filter dangling=true` showed exactly the
@@ -386,6 +386,22 @@ Each of these is reproducible and each changed the fixture.
     without checking that the cache was gone. Observed outside `selftest`: with an entry in
     `.cache` that cannot be removed, `down --purge` exits 1 and names the directory, and
     finishes once the entry is removable. The interrupted record was not provoked.
+19. **A file of secrets run as code, a name that was a path, and two more links.** A twelfth
+    round, four findings from one reviewer and one accepted from the advisory review. The shared
+    setup sourced `.state/secrets.env` as shell code before any ownership check, so a line added
+    to it, or a file put in its place, ran with every command; the file is now read as data, only
+    the four assignments `bin/up` writes are accepted, and it must be the regular file `up`
+    wrote (check 22). A snapshot name with a slash was a path, so `store-snapshot a/b` wrote
+    outside `.state/backups`; names are one path component (check 9). `bin/down` appended to
+    and read the node-volume record through whatever `.state/down-node-volumes` was, so a
+    symlink there would have chosen which volumes `docker volume rm` removes; a symlink or any
+    non-regular file is refused before anything is removed (check 23). And the leak scan excused
+    a control copy inside an expanded store snapshot without asking whether the archive it came
+    from was the fixture's own; a hard-linked or symlinked archive no longer excuses its copy
+    (check 22). The advisory review also reported that `down` never refuses a symlinked
+    `.state`; that was rejected, since the shared setup refuses it for every command and check 24
+    already exercises `down` (its second finding, a fragile `-newer` comparison in the selftest,
+    was replaced by comparing directory listings).
 
 ## 6. What each experiment gets
 

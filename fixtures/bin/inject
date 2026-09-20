@@ -64,6 +64,14 @@ case $action in
     [ $# -eq 1 ] || usage
     target=$(container "$1")
     ;;
+  db-snapshot | db-restore | bao-snapshot | bao-restore | store-snapshot | store-restore)
+    [ $# -eq 1 ] || usage
+    # One path component, so that the snapshot lands in .state/backups itself: a name with a
+    # slash would put it under some other directory, which may be a link to anywhere.
+    case $1 in
+      '' | . | .. | */*) die "snapshot names are one path component without a slash, not '$1'" ;;
+    esac
+    ;;
 esac
 # Two records per action. The first is written when the action starts, so the timeline shows when a
 # failure began, not when it returned. The second says how it ended: without it a kill that Docker

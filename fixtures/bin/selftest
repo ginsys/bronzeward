@@ -149,6 +149,9 @@ listing=$(tar -tzf "$STATE/backups/store-selftest-env.tgz") || fail "cannot list
 rm "$STATE/backups/store-selftest-env.tgz"
 grep --quiet --line-regexp 'data/selftest-store' <<<"$listing" ||
   fail "a TAR_OPTIONS from the caller's shell left a file out of the store snapshot"
+# A name with a slash would put the snapshot under another directory, which may be a link to anywhere.
+! "$here/inject" store-snapshot selftest-escape/out 2>/dev/null || fail "store-snapshot accepted a name with a slash"
+[ ! -e "$STATE/backups/store-selftest-escape" ] || fail "store-snapshot created a directory for a name with a slash"
 # A final name that is a symlink to a directory must not receive the snapshot inside that directory.
 mkdir "$STATE/selftest-snapshot-dir"
 ln -s "$STATE/selftest-snapshot-dir" "$STATE/backups/store-selftest-symlinked.tgz"
@@ -185,7 +188,7 @@ if [ "$rc" -ne 0 ] || [ ! -f "$STATE/data/selftest-store" ]; then
 fi
 rm -r "$STATE/selftest-data-aside"
 rm "$STATE/data/selftest-store"
-ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, no write through a symlinked final name, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored"
+ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash refused, no write through a symlinked final name, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -329,13 +332,38 @@ rm "$STATE/selftest-evidence.err"
 # A managed directory that is a symlink: bundles would be written where teardown does not reach.
 mv "$STATE/evidence" "$STATE/selftest-evidence-aside"
 ln -s "$STATE/selftest-evidence-aside" "$STATE/evidence"
+bundles_before=$(find "$STATE/selftest-evidence-aside" -mindepth 1 -maxdepth 1 | sort)
 rc=0
 "$here/evidence" >/dev/null 2>&1 || rc=$?
-bundles=$(find "$STATE/selftest-evidence-aside" -mindepth 1 -maxdepth 1 -newer "$STATE/evidence" | wc -l)
+bundles_after=$(find "$STATE/selftest-evidence-aside" -mindepth 1 -maxdepth 1 | sort)
 rm "$STATE/evidence"
 mv "$STATE/selftest-evidence-aside" "$STATE/evidence" # before anything can fail
 [ "$rc" -ne 0 ] || fail "evidence accepted an evidence directory that is a symlink"
-[ "$bundles" -eq 0 ] || fail "evidence wrote a bundle through a symlinked evidence directory"
+[ "$bundles_before" = "$bundles_after" ] || fail "evidence wrote a bundle through a symlinked evidence directory"
+# The generated secrets are data, never code: a secrets.env that is a link, or that holds a line
+# the fixture did not write, stops every command before it is read.
+mv "$STATE/secrets.env" "$STATE/selftest-secrets-aside"
+ln -s "$STATE/selftest-secrets-aside" "$STATE/secrets.env"
+linked=0
+! "$here/evidence" >/dev/null 2>&1 || linked=1
+rm "$STATE/secrets.env"
+cp "$STATE/selftest-secrets-aside" "$STATE/secrets.env"
+printf 'EXTRA=%s(true)\n' '$' >>"$STATE/secrets.env" # a command substitution, were the file sourced
+extra=0
+! "$here/evidence" >/dev/null 2>&1 || extra=1
+mv "$STATE/selftest-secrets-aside" "$STATE/secrets.env" # before anything can fail
+[ "$linked" -eq 0 ] || fail "a symlinked secrets.env was read"
+[ "$extra" -eq 0 ] || fail "a secrets.env with a line the fixture never writes was accepted"
+# A store archive with a second name outside .state keeps the canary where teardown does not reach:
+# the control's copy expanded from it is no longer excused.
+ln "$STATE/backups/store-selftest.tgz" "$STATE/selftest-archive-alias"
+rc=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
+rm "$STATE/selftest-archive-alias" # before anything can fail
+[ "$rc" -eq 0 ] || fail "evidence aborted on a hard-linked store archive: $(tail -n 1 "$STATE/selftest-evidence.err")"
+grep --quiet --fixed-strings '/backups/store-selftest/data/canary-control.txt' "$STATE/selftest-evidence.err" ||
+  fail "leak scan excused the control's copy from a store archive that has a second name outside .state"
+rm "$STATE/selftest-evidence.err"
 printf 'token=%s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/selftest-token-leak"
 printf 'plain=%s\n' "$BW_CANARY" >"$STATE/backups/selftest-plain-backup"
 # Two inputs find would mishandle if passed along as they are: a file reached only through a
@@ -407,13 +435,24 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 ok "evidence bundle complete; leak scan finds the planted canary and token, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
+  # The record of node volumes is what down removes by name: a link there is refused, before
+  # anything is removed.
+  mv "$STATE/down-node-volumes" "$STATE/selftest-record-aside"
+  ln -s "$STATE/selftest-record-aside" "$STATE/down-node-volumes"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down read a symlinked node-volume record"
+  fi
+  rm "$STATE/down-node-volumes"
+  mv "$STATE/selftest-record-aside" "$STATE/down-node-volumes"
   "$here/down" || fail "down reported leftovers"
   # down looks for what it can name. A volume no label or record points at, such as the anonymous
   # one Docker makes for the claim container, only shows up as a difference on the whole daemon.
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down left nothing behind, and no volume exists that did not before up"
+  ok "down refuses a symlinked node-volume record, then leaves nothing behind, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"
