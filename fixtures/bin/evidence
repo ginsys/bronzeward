@@ -118,7 +118,8 @@ fixtures_diff() {
   git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" |
     while IFS= read -r -d '' file; do
       # --no-index exits 1 when the two differ, which a file against /dev/null always does.
-      git -C "$FIXTURES" diff --no-index -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
+      # --binary: a helper or prototype that is not text is carried whole, not as "differ".
+      git -C "$FIXTURES" diff --no-index --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
     done
 }
 if [ -n "$differs" ]; then
