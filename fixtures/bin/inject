@@ -18,7 +18,7 @@ usage: inject <action> [args]
   pause <target>                freeze every process (hung peer, connections stay open)
   unpause <target>
   netsplit <target>             detach from its network (unreachable, process keeps running)
-  netjoin <target>              reattach with the same address
+  netjoin <target>              reattach: a Talos node on its fixed address, a service under its name
 
   db-snapshot <name>            pg_dump of the bronzeward database to .state/backups
   db-restore <name>             drop the database and restore that dump

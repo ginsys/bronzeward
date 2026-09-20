@@ -6,7 +6,7 @@ here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
-need docker curl jq tar find timeout sha256sum comm stat head
+need docker curl jq tar find timeout sha256sum comm stat head flock
 keep=${1:-}
 passed=0
 ok() {
@@ -683,6 +683,25 @@ grep --quiet 'hidden from git by an excludes file' "$STATE/selftest-evidence.err
   fail "evidence failed on the hidden file for another reason: $(grep --invert-match --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" | tail -n 1)"
 ! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
   fail "evidence printed the secret-bearing name of a hidden file"
+# An entry git records nothing of: an empty untracked directory is in no status, no listing and
+# no diff, and code that runs may look at it.
+mkdir "$FIXTURES/.selftest-empty"
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+rmdir "$FIXTURES/.selftest-empty"
+[ "$went" -eq 0 ] || fail "evidence captured while an empty untracked directory was under fixtures/"
+grep --quiet 'git records nothing of it' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the empty directory for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# A clean filter given to a tracked file by an attributes file outside the repository: git would
+# compare the filter's output, and a modified script could read as the committed one.
+printf 'README.md filter=selftest\n' >"$STATE/selftest-attributes"
+printf '[core]\n\tattributesFile = %s\n' "$STATE/selftest-attributes" >"$STATE/selftest-attr.gitconfig"
+went=0
+GIT_CONFIG_GLOBAL=$STATE/selftest-attr.gitconfig "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+rm "$STATE/selftest-attributes" "$STATE/selftest-attr.gitconfig"
+[ "$went" -eq 0 ] || fail "evidence captured while a clean filter applied to a tracked file under fixtures/"
+grep --quiet 'clean filter' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the filter attribute for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 # An untracked directory git cannot open, named with a secret: git and find warn on stderr with
 # the name as it is, and the listing is incomplete. Then the directory of bundles writable but not
 # readable: the captures that ended before their scan cannot be listed, and this one must not
@@ -724,8 +743,17 @@ cp "$STATE/data/canary-control.txt" "$STATE/evidence/selftest-interrupted/backup
 cp "$STATE/data/canary-control.txt" "$STATE/evidence/selftest-interrupted/backups/store-selftest-stale/data/"
 cp "$STATE/backups/store-selftest.tgz" "$STATE/backups/store-selftest-kept.tgz"
 cp "$STATE/backups/store-selftest.tgz" "$STATE/backups/store-selftest-stale.tgz"
-sha256sum "$STATE/backups/store-selftest-kept.tgz" | cut -d' ' -f1 >"$STATE/evidence/selftest-interrupted/backups/store-selftest-kept.sha256"
+sha256sum <"$STATE/backups/store-selftest-kept.tgz" | cut -d' ' -f1 >"$STATE/evidence/selftest-interrupted/backups/store-selftest-kept.sha256"
 printf '%064d\n' 0 >"$STATE/evidence/selftest-interrupted/backups/store-selftest-stale.sha256"
+# And an archive whose name holds a backslash: given the name, sha256sum would escape it and mark
+# the line, and the digest recorded would never equal the archive's.
+cp "$STATE/backups/store-selftest.tgz" "$STATE/backups/store-selftest\\back.tgz"
+# A capture still running, its marker locked: not scanned by this one, not marked scanned by it.
+mkdir "$STATE/evidence/selftest-active"
+: >"$STATE/evidence/selftest-active/.incomplete"
+printf 'active=%s\n' "$BW_CANARY" >"$STATE/evidence/selftest-active/writing.txt"
+flock --nonblock "$STATE/evidence/selftest-active/.incomplete" sleep 300 &
+active_holder=$!
 printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
 # And one that is not text: carried as a binary patch, not as "differ".
 printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
@@ -738,14 +766,26 @@ bundle=$(cd "$STATE/selftest-outside" &&
 sibling_marked=0
 [ ! -e "$STATE/evidence/selftest-interrupted/.incomplete" ] || sibling_marked=1
 sibling_scanned_by=$(cat "$STATE/evidence/selftest-interrupted/scanned-by.txt" 2>/dev/null || printf none)
+active_marked=0
+[ ! -e "$STATE/evidence/selftest-active/.incomplete" ] || active_marked=1
+active_scanned_by=$(cat "$STATE/evidence/selftest-active/scanned-by.txt" 2>/dev/null || printf none)
+kill "$active_holder" 2>/dev/null || true
 rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN" "$FIXTURES/.selftest-untracked" "$FIXTURES/.selftest-untracked.bin" \
-  "$STATE/evidence/selftest-interrupted" "$STATE/backups/store-selftest-kept.tgz" "$STATE/backups/store-selftest-stale.tgz"
+  "$STATE/evidence/selftest-interrupted" "$STATE/evidence/selftest-active" \
+  "$STATE/backups/store-selftest-kept.tgz" "$STATE/backups/store-selftest-stale.tgz" "$STATE/backups/store-selftest\\back.tgz"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
 [ ! -e "$bundle/.incomplete" ] || fail "a completed capture left its bundle marked incomplete"
 grep --quiet --fixed-strings "$STATE/evidence/selftest-interrupted/leftover.txt" "$bundle/leak-scan.txt" ||
   fail "leak scan skipped what a capture that ended before its scan left behind"
 [ "$sibling_marked" -eq 0 ] && [ "$sibling_scanned_by" = "$bundle" ] ||
   fail "the capture that scanned an earlier incomplete bundle did not mark it as scanned by this bundle (marked: $sibling_marked, scanned by: $sibling_scanned_by)"
+[ "$active_marked" -eq 1 ] && [ "$active_scanned_by" = none ] ||
+  fail "the capture marked a bundle another capture was still writing as scanned (marked: $active_marked, scanned by: $active_scanned_by)"
+! grep --quiet --fixed-strings "$STATE/evidence/selftest-active/writing.txt" "$bundle/leak-scan.txt" ||
+  fail "leak scan took a bundle another capture was still writing as abandoned"
+grep --quiet 'still writing' "$STATE/selftest-evidence.err" || fail "evidence did not say it left a running capture's bundle to its own scan"
+! grep --quiet --fixed-strings 'store-selftest\back/data/canary-control.txt' "$STATE/selftest-evidence.err" ||
+  fail "leak scan reported the control's copy from an archive whose name holds a backslash as a leak"
 # The report on stderr, not leak-scan.txt: the file lists every hit, the control's copies included,
 # and the report is what leaves the control out.
 grep --quiet --fixed-strings '/evidence/selftest-interrupted/backups/store-selftest-stale/data/canary-control.txt' "$STATE/selftest-evidence.err" ||
@@ -802,7 +842,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper and names the creating commit, refuses a symlink in the tree, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, holds a sibling's control copy to its archive's digest, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper and names the creating commit, refuses a symlink, an empty directory and a clean filter in the tree, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the
@@ -874,6 +914,17 @@ if [ "$keep" != --keep ]; then
   docker rm --force --volumes "$FIXTURE_NAME-selftest-impostor" >/dev/null 2>&1 || true # gone already in the failing case
   if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a container that only carries the Talos label"
+  fi
+  # A container carrying the claim label under another name: not the claim, not the fixture's,
+  # and down does not know whose it is. It removes nothing and names it.
+  docker create --quiet --name "$FIXTURE_NAME-selftest-claimant" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=$FIXTURES" \
+    --network none "$POSTGRES_IMAGE" true >/dev/null || fail "cannot create a container for the test"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  claimant=$(docker ps --all --quiet --filter "name=^${FIXTURE_NAME}-selftest-claimant$")
+  docker rm --force --volumes "$FIXTURE_NAME-selftest-claimant" >/dev/null 2>&1 || true # gone already in the failing case
+  if [ "$went" -eq 1 ] || [ -z "$claimant" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down removed, or did not refuse, a container that carries the claim label under another name"
   fi
   # And without the record, as an up interrupted right after creating the cluster leaves it: the
   # label is all there is, and removing by it is for --adopt.
@@ -975,7 +1026,7 @@ if [ "$keep" != --keep ]; then
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled container and network and the Compose-labelled network against the records and refuses by label alone, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled container and network and the Compose-labelled network against the records and refuses by label alone, refuses a stranger carrying the claim label, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

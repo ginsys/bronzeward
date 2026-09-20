@@ -70,6 +70,9 @@ export KUBECONFIG=$STATE/kubeconfig
 CLAIM=$FIXTURE_NAME-claim
 CLAIM_LABEL=bronzeward.fixture=$FIXTURE_NAME
 CLAIM_OWNER_LABEL=bronzeward.fixture.checkout
+# The up that made the claim, which two up of one checkout started together share nothing else
+# with: the one Docker refused must not take the winner's claim for its own.
+CLAIM_ATTEMPT_LABEL=bronzeward.fixture.attempt
 # On the Compose volumes bin/up makes: the run that made them, which bin/down holds each to.
 # shellcheck disable=SC2034  # read by bin/up and bin/down, which source this file
 RUN_LABEL=bronzeward.fixture.run
@@ -219,7 +222,7 @@ tree_name() { printf '%s' "$1"; }
 # Listings and the collected stderr go into <workdir> and are removed; a listing that fails is not
 # an empty one.
 fixtures_tree_check() {
-  local workdir=$1 diff_file=$2 name_fn=$3 warn file hidden linked find_rc=0
+  local workdir=$1 diff_file=$2 name_fn=$3 warn file value hidden filtered linked find_rc=0
   warn=$workdir/.git-stderr
   : >"$warn" || die "cannot collect git's warnings in $workdir"
   # Assigned first: a git that fails inside a printf argument would leave the line empty.
@@ -237,15 +240,33 @@ fixtures_tree_check() {
     done) ||
     die "cannot compare the untracked listings of fixtures/; the commit could not be tied to what runs"
   rm -- "$workdir/.untracked-seen" "$workdir/.untracked-all" || die "cannot remove the untracked listings from $workdir"
+  # A clean filter from the attributes has git compare the filter's output, not the bytes that
+  # run: one that maps a modified script back to its committed content leaves the status empty
+  # and the diff with it, and --no-textconv does not turn it off. A tracked file under fixtures/
+  # that any attributes file gives a filter is refused. The output is path, attribute, value.
+  filtered=$(git -C "$FIXTURES" ls-files -z -- "$FIXTURES" 2>>"$warn" |
+    git -C "$FIXTURES" check-attr --stdin -z filter 2>>"$warn" |
+    while IFS= read -r -d '' file && IFS= read -r -d '' _ && IFS= read -r -d '' value; do
+      case $value in
+        unspecified | unset) ;;
+        *) printf '%s ' "$("$name_fn" "$FIXTURES/$file")" ;;
+      esac
+    done) ||
+    die "cannot ask git which attributes apply under fixtures/; the commit could not be tied to what runs"
   # find's status is looked at after its warnings: a directory it cannot open fails it, and the
-  # warning names that directory.
-  linked=$(find "$FIXTURES" \( -path "$STATE" -o -path "$CACHE" \) -prune -o -type l -print -quit 2>>"$warn") || find_rc=$?
+  # warning names that directory. Besides symlinks, what git records nothing of: a named pipe, a
+  # socket, a device, an empty directory. Code that runs may read from any of them, and the commit
+  # plus a diff would not show it.
+  linked=$(find "$FIXTURES" \( -path "$STATE" -o -path "$CACHE" \) -prune -o \
+    \( -type l -o -type p -o -type s -o -type b -o -type c -o \( -type d -empty \) \) -print -quit 2>>"$warn") || find_rc=$?
   tree_warnings_refuse "$warn" "$name_fn"
-  [ "$find_rc" -eq 0 ] || die "cannot look for symlinks under fixtures/; the commit could not be tied to what runs"
+  [ "$find_rc" -eq 0 ] || die "cannot look for symlinks and special files under fixtures/; the commit could not be tied to what runs"
   [ -z "$hidden" ] ||
     die "untracked files under fixtures/ are hidden from git by an excludes file outside the repository: ${hidden% }; the commit plus a diff could not say what runs. Track, remove or unhide them"
+  [ -z "$filtered" ] ||
+    die "a clean filter from git's attributes applies to ${filtered% }; git would compare the filter's output, not the bytes that run. Remove the filter attribute"
   [ -z "$linked" ] ||
-    die "$("$name_fn" "$linked") is a symlink under fixtures/; a diff cannot carry what it points at, and the commit plus a diff would not say what runs. Replace it with the file"
+    die "$("$name_fn" "$linked") is a symlink, a special file or an empty directory under fixtures/; git records nothing of it, and the commit plus a diff would not say what runs. Replace or remove it"
   if [ -n "$differs" ]; then
     fixtures_manifest_diff "$differs" >"$diff_file" 2>>"$warn" ||
       die "cannot record how fixtures/ differs from commit $manifest; the commit could not be tied to what runs"
@@ -286,6 +307,11 @@ talosctl() { "$CACHE/talosctl" "$@"; }
 # only counts as the first argument.
 curl() { command curl --disable "$@"; }
 
+# Every tar of the fixture takes its names literally: GNU tar unquotes backslash escapes in the
+# directory given to -C (`\b` read as a backspace), so an archive or a checkout whose name holds
+# one would be expanded somewhere that does not exist.
+tar() { command tar --no-unquote "$@"; }
+
 # Every request to a service is bounded. The fixture exists to be broken on purpose, and a provider
 # that accepts a request and never answers would otherwise hang the command for good; a request
 # that times out fails like any other. wait_for shortens the limits to what is left of its own.
@@ -307,23 +333,47 @@ pg_client() {
     --env PGPASSWORD "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
 }
 
-# claim_take: fails when any checkout on this daemon already holds the claim.
+# claim_take [attempt]: fails when any checkout on this daemon already holds the claim.
 claim_take() {
   docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=$FIXTURES" \
-    --network none "$POSTGRES_IMAGE" true >/dev/null
+    --label "$CLAIM_ATTEMPT_LABEL=${1:-}" --network none "$POSTGRES_IMAGE" true >/dev/null
 }
-# claim_names: the claim container, if any (its name, or nothing).
+# claim_names: every container carrying the claim label (names, or nothing).
 claim_names() { docker ps --all --filter "label=$CLAIM_LABEL" --format '{{.Names}}'; }
-# claim_owner: the checkout that took the claim (nothing when there is no claim).
-claim_owner() {
-  docker ps --all --quiet --filter "label=$CLAIM_LABEL" |
-    xargs --no-run-if-empty docker inspect --format "{{index .Config.Labels \"$CLAIM_OWNER_LABEL\"}}"
+# claim_strangers: containers carrying the claim label under another name than the claim's. Not
+# the claim, whatever their labels say, and someone's: nothing here removes them.
+claim_strangers() {
+  claim_names | { grep --invert-match --line-regexp --fixed-strings -- "$CLAIM" || [ $? -eq 1 ]; }
 }
-# claim_drop: --volumes, because the image declares a data volume and Docker creates an anonymous
-# one for the claim although it never starts. Nothing else would ever find that volume again.
+# claim_label <key>: that label of the container of the claim's name, if it carries the claim
+# label; nothing when there is no such container or it is not the claim. Fails only when Docker
+# cannot say, on "no such container" it says nothing.
+claim_label() {
+  local out
+  if out=$(docker inspect --type container --format "{{index .Config.Labels \"${CLAIM_LABEL%%=*}\"}} {{index .Config.Labels \"$1\"}}" "$CLAIM" 2>&1); then
+    [ "${out%% *}" = "${CLAIM_LABEL#*=}" ] || return 0
+    printf '%s\n' "${out#* }"
+    return 0
+  fi
+  case $out in
+    *[Nn]o\ such\ container*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+# claim_owner: the checkout that took the claim (nothing when there is no claim).
+claim_owner() { claim_label "$CLAIM_OWNER_LABEL"; }
+# claim_drop: the container of the claim's name, once its label shows it to be the claim, and only
+# that one: the label alone selects any container given it. --volumes, because the image declares
+# a data volume and Docker creates an anonymous one for the claim although it never starts.
+# Nothing else would ever find that volume again.
 claim_drop() {
-  docker ps --all --quiet --filter "label=$CLAIM_LABEL" |
-    xargs --no-run-if-empty docker rm --force --volumes >/dev/null
+  local strangers held
+  strangers=$(claim_strangers) || die "could not list the containers carrying the fixture claim label"
+  [ -z "$strangers" ] ||
+    die "$(tr '\n' ' ' <<<"$strangers")carries the fixture claim label without being the claim $CLAIM; not the fixture's, not removed"
+  held=$(claim_label "$CLAIM_OWNER_LABEL") || die "could not ask Docker about the claim $CLAIM"
+  [ -n "$held" ] || return 0
+  docker rm --force --volumes "$CLAIM" >/dev/null
 }
 
 # The exact content of the leak scan's positive control. bin/up writes it and bin/evidence compares
