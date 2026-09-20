@@ -10,8 +10,10 @@ STATE=$FIXTURES/.state
 CACHE=$FIXTURES/.cache
 
 # A BAO_TOKEN from the caller's own OpenBao or Vault work would win over the fixture's root token in
-# bao() below. bin/evidence sets it on purpose, after this point.
-unset BAO_TOKEN
+# bao() below. bin/evidence sets it on purpose, after this point. The fixture's own variables are
+# cleared too: a secrets.env that lacks one of them, as an interrupted up leaves it, must not fall
+# through to a value from the caller's shell.
+unset BAO_TOKEN BW_CANARY BW_POSTGRES_PASSWORD BW_BAO_ROOT_TOKEN BW_BAO_METADATA_TOKEN
 # Likewise defaults the caller set for tar and for the gzip it runs: a TAR_OPTIONS with an --exclude
 # would make store-snapshot write, without any error, an archive that lacks part of the store.
 unset TAR_OPTIONS GZIP
@@ -21,7 +23,9 @@ unset TAR_OPTIONS GZIP
 # there. Checked here, before anything under it is read: every command loads this file first.
 # The same holds one level down for the directories the commands write into: through a symlinked
 # evidence or backups directory, dumps and snapshots would land where teardown does not reach.
-for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence"; do
+# And for .cache: through a link, downloads would land elsewhere and `down --purge` would remove
+# the link alone while reporting the cache gone.
+for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence" "$CACHE"; do
   if [ -L "$managed" ]; then
     printf 'fixtures: %s is a symlink; the fixture never creates one. Remove the link and run again\n' "$managed" >&2
     exit 1
@@ -93,6 +97,12 @@ need() {
 need_state() {
   local owner
   [ -f "$STATE/secrets.env" ] || die "no running fixture: run fixtures/bin/up first"
+  # All four, from the file: an up interrupted between writing them leaves fewer, and the
+  # variables were cleared above, so a missing one is empty here rather than the caller's.
+  if [ -z "${BW_CANARY:-}" ] || [ -z "${BW_POSTGRES_PASSWORD:-}" ] ||
+    [ -z "${BW_BAO_ROOT_TOKEN:-}" ] || [ -z "${BW_BAO_METADATA_TOKEN:-}" ]; then
+    die "$STATE/secrets.env is incomplete, as an interrupted up leaves it. Run fixtures/bin/down, then up"
+  fi
   need docker
   owner=$(claim_owner) || die "could not ask Docker who holds the fixture claim"
   [ -n "$owner" ] ||
@@ -238,21 +248,21 @@ fetch_tools() {
 # config whose key is not where it is expected fails instead of thinning the list. bin/up writes
 # the list to .state/scan-patterns.txt; bin/evidence rebuilds it from the same sources and refuses
 # a file that differs, since a list thinned after up would let a scan pass with a token unmatched.
+# Each source is read on its own and a source that cannot be read fails the whole list: a jq that
+# stops halfway through bao-init.json would otherwise leave a list that is short and looks whole.
 scan_patterns() {
-  local talos_client_key kube_client_key
-  talos_client_key=$(awk '$1 == "key:" {print $2}' "$TALOSCONFIG")
-  kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG")
+  local talos_client_key kube_client_key bao_keys metadata_token talos_secrets
+  talos_client_key=$(awk '$1 == "key:" {print $2}' "$TALOSCONFIG") || return 1
+  kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG") || return 1
   [ -n "$talos_client_key" ] || die "no client key found in $TALOSCONFIG; it would go unscanned"
   [ -n "$kube_client_key" ] || die "no client key found in $KUBECONFIG; it would go unscanned"
-  {
-    printf 'BWSYNTH-\n'
-    printf '%s\n' "$talos_client_key" "$kube_client_key"
-    # Both encodings of the unseal key: they share no substring, and either is the credential.
-    jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json"
-    awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env"
-    awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \
-      "$STATE/talos-secrets.yaml"
-  } | awk 'length($0) >= 8' | sort -u
+  # Both encodings of the unseal key: they share no substring, and either is the credential.
+  bao_keys=$(jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json") || return 1
+  metadata_token=$(awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env") || return 1
+  talos_secrets=$(awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \
+    "$STATE/talos-secrets.yaml") || return 1
+  printf '%s\n' 'BWSYNTH-' "$talos_client_key" "$kube_client_key" "$bao_keys" "$metadata_token" "$talos_secrets" |
+    awk 'length($0) >= 8' | sort -u
 }
 
 bao_unseal() {

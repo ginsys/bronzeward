@@ -15,8 +15,18 @@ need_state
 # The pattern list every match below relies on is rebuilt from the generated credentials and must
 # be what bin/up wrote: thinned after up, a scan against it would pass while a token or key goes
 # unmatched, and `shown` would print a name that holds one.
-cmp --silent -- <(scan_patterns) "$STATE/scan-patterns.txt" ||
+# Into a file, not a process substitution, whose exit status bash would not report: a source that
+# fails halfway would leave a list short in the same way as a file cut to match it.
+rebuilt=$(mktemp "$STATE/scan-patterns.rebuilt.XXXXXX")
+if ! scan_patterns >"$rebuilt"; then
+  rm -f -- "$rebuilt"
+  die "the leak-scan patterns could not be rebuilt from this run's credentials; results void"
+fi
+if ! cmp --silent -- "$rebuilt" "$STATE/scan-patterns.txt"; then
+  rm -f -- "$rebuilt"
   die "$STATE/scan-patterns.txt is not the list this run's credentials give; results void"
+fi
+rm -f -- "$rebuilt"
 # shown <path>: the path as a message or the bundle may record it. A name that holds a secret is
 # never written out, for the same reason a matched line is not; the entry is identified by its inode
 # instead. That holds for error messages as much as for the report, so every path this command
@@ -27,7 +37,13 @@ shown() {
   local rc=0
   grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" <<<"$1" || rc=$?
   if [ "$rc" -eq 1 ]; then
-    printf '%s' "$1"
+    # The report is one entry per line. A name with a newline or another control character in it
+    # is printed in bash's quoted form ($'...'), one line, rather than as the lines it holds.
+    if [[ $1 == *[[:cntrl:]]* ]]; then
+      printf '%q' "$1"
+    else
+      printf '%s' "$1"
+    fi
   else
     printf '(a path whose name holds secret material, withheld; inode %s)' \
       "$(stat --format=%i -- "$1" 2>/dev/null || printf unknown)"
@@ -292,7 +308,8 @@ store_archive_is_own() {
   local middle=${1#"$out/backups/store-"} archive
   middle=${middle%/data/canary-control.txt}
   # A complete archive that an interrupted store-snapshot left under its temporary name expands
-  # under that name, which ends in .tgz.partial.<suffix> already.
+  # under that name, which ends in .tgz.partial.<suffix> already. Unambiguous, because inject
+  # refuses a snapshot name that holds `.partial.`; a file spelled that way was not published.
   case $middle in
     *.tgz.partial.*) archive=$STATE/backups/store-$middle ;;
     *) archive=$STATE/backups/store-$middle.tgz ;;
