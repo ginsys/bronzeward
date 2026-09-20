@@ -66,12 +66,14 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
   newline or another control character is reported in bash's quoted form, so that the report stays
   one entry per line.
 
-The scan has a positive control, `.state/data/canary-control.txt`. If the scan does not find it, or
-cannot read a path or file it was given, the command fails, because an empty result would then
-prove nothing. Only that file and its copies inside expanded store snapshots count as the control,
-and only while they hold exactly what `bin/up` planted; any other file of the same name, a
-control whose content changed, and a control that is a symlink or has a second hard link are
-reported like every other hit. Names of files and directories,
+The scan has a positive control, `.state/data/canary-control.txt`. If the scan does not find it
+holding exactly what `bin/up` planted, or cannot read a path or file it was given, the command
+fails, because an empty result would then prove nothing. Only that file and its copies inside
+expanded store snapshots count as the control; any other file of the same name is reported like
+every other hit, and a control whose content changed, or that is a symlink or has a second hard
+link, is no control at all: the command then fails, since the planted canary is absent.
+The bundle's `versions.txt` names the manifest commit; a capture that cannot read it from git
+fails rather than write a bundle that cannot be tied to its pins. Names of files and directories,
 and the target path a symlink stores, are matched as well as file contents; a name that holds a secret is withheld from the report, which
 gives the inode instead. Symlinks are followed, so a linked file or directory is scanned through its link and
 a link that cannot be followed fails the command; extra paths may be relative and may have any
@@ -101,11 +103,16 @@ including after a failed or interrupted `up`. `.state`, its `data`, `backups` an
 directories, and `.cache` must be real directories: every command refuses to run while one of them
 is a symlink, because secrets, or the CLIs, would be read or written outside the checkout. The files `bin/up` generates
 (`secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
-`controlplane.yaml`, `scan-patterns.txt`, the node-volume record) must each be the regular file it
-wrote, with no second name: a symlink or a hard link there stops `inject`, `evidence` and `down`
-before anything is scanned or removed, since the secret would outlive teardown under the other
-name. The same holds for a snapshot about to be replaced by one of the same name, and for
-`injections.log`. The node-volume record's content is held against Docker as well: `down` removes
+`controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume record) must each be
+the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
+`evidence` and `down` before anything is scanned or removed, since the secret would outlive
+teardown under the other name. The same holds for a snapshot about to be replaced by one of the
+same name, for a `store-restore` staging directory, and for the marker `down` leaves when the node
+volumes are not all known. `secrets.env` is written whole and renamed into place at each stage of
+`up`, so an interruption leaves it complete or absent, never cut mid-line. The commands also check
+that every container answering to a fixture name carries the fixture's own labels (Compose
+project and directory, or Talos cluster name), since the names are fixed and, once the real
+container was removed by hand, anything can take the name while the claim stands. The node-volume record's content is held against Docker as well: `down` removes
 a recorded name only if it is an anonymous volume's, and the volume, if it still exists, carries
 no label. The checkout is
 identified by its physical path, so the same checkout reached through a symlink is still its own.

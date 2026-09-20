@@ -110,20 +110,43 @@ need_state() {
   [ "$owner" = "$FIXTURES" ] ||
     die "the fixture on this daemon belongs to $owner, so $STATE is stale. Remove that directory by hand: fixtures/bin/down refuses here, rightly, because the running fixture is not this checkout's"
   state_files_own
+  containers_own
 }
 
 # state_files_own: every credential file bin/up generated is the regular file it wrote, under that
 # one name. Hard-linked outside .state, a bao-init.json or talosconfig keeps the root token or the
 # client key past teardown, and the scan roots never reach the source itself. secrets.env is
 # checked above, before it is read; the rest here, by need_state and by down, before anything is
-# scanned or removed. The node-volume record has its own check in down.
+# scanned or removed. The node-volume record has its own check in down. injections.log too: its
+# arguments name snapshots, and bin/evidence copies it into the bundle as the timeline.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt; do
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
     fi
+  done
+}
+
+# containers_own: every container that answers to one of the fixture's names is the fixture's. The
+# names are fixed, so once the real one was removed by hand anything can take the name while the
+# claim still stands, and a kill or a restore would go to it. The Compose containers carry the
+# project and its directory; the Talos nodes carry the cluster name. One that is gone is what a
+# kill or a teardown that could not finish leaves, and is not refused here.
+containers_own() {
+  local name labels
+  for name in "$PG" "$BAO"; do
+    labels=$(docker inspect --format \
+      '{{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
+      "$name" 2>/dev/null) || continue
+    [ "$labels" = "$FIXTURE_NAME $FIXTURES" ] ||
+      die "the container named $name is not this fixture's: its labels do not name this project and checkout. Remove it by hand; the fixture will not act on it"
+  done
+  for name in "$CP" "$WORKER"; do
+    labels=$(docker inspect --format '{{index .Config.Labels "talos.cluster.name"}}' "$name" 2>/dev/null) || continue
+    [ "$labels" = "$FIXTURE_NAME" ] ||
+      die "the container named $name is not this fixture's: its labels do not name this cluster. Remove it by hand; the fixture will not act on it"
   done
 }
 

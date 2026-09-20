@@ -70,12 +70,16 @@ volume_names=$(talos_volume_names) || die "could not list the Talos node volumes
 # the state directory as well: the list written below would pass for the record on a second run.
 talos_containers=$(docker ps --all --quiet --filter "label=$talos_label") ||
   die "could not list the Talos containers; nothing was removed"
+# A marker that is a link, dangling or not: `-e` reads a dangling one as absent, and the
+# uncertainty an earlier run recorded would be dropped. The fixture never makes one there.
+[ ! -L "$STATE/down-node-volumes-incomplete" ] ||
+  die "$STATE/down-node-volumes-incomplete is a symlink; the fixture never makes one there. Nothing was removed"
 volumes_known=1
 if [ -e "$STATE/down-node-volumes-incomplete" ] ||
   { [ -n "$existing" ] && [ ! -f "$STATE/down-node-volumes" ] && [ "$(sed '/^$/d' <<<"$talos_containers" | wc -l)" -lt 2 ]; }; then
   volumes_known=0
-  # Published by rename: a marker that is a link, symbolic or hard, must not have the write go
-  # through it into someone else's file.
+  # Published by rename: a marker that is a hard link must not have the write go through it into
+  # someone else's file.
   if [ -d "$STATE" ]; then
     if ! marker=$(mktemp "$STATE/down-node-volumes-incomplete.XXXXXX") ||
       ! mv --no-target-directory -- "$marker" "$STATE/down-node-volumes-incomplete"; then

@@ -50,10 +50,27 @@ trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; run fixtures/bin/down 
 mkdir "$STATE/data" "$STATE/backups"
 canary=$(synthetic) || die "could not generate the synthetic canary"
 password=$(synthetic) || die "could not generate the synthetic PostgreSQL password"
-{
-  printf 'BW_CANARY=%s\n' "$canary"
-  printf 'BW_POSTGRES_PASSWORD=%s\n' "$password"
-} >"$STATE/secrets.env"
+# secrets_publish: the whole file from the values in hand, written under a temporary name and
+# renamed into place. A write cut short, on a full filesystem say, then leaves the file that was
+# there before, never a cut line, which lib.sh refuses for every later command, down included.
+secrets_publish() {
+  local tmp
+  tmp=$(mktemp "$STATE/secrets.env.XXXXXX") || die "could not write $STATE/secrets.env"
+  {
+    printf 'BW_CANARY=%s\n' "$canary"
+    printf 'BW_POSTGRES_PASSWORD=%s\n' "$password"
+    [ -z "${BW_BAO_ROOT_TOKEN:-}" ] || printf 'BW_BAO_ROOT_TOKEN=%s\n' "$BW_BAO_ROOT_TOKEN"
+    [ -z "${metadata_token:-}" ] || printf 'BW_BAO_METADATA_TOKEN=%s\n' "$metadata_token"
+  } >"$tmp" || {
+    rm -f -- "$tmp"
+    die "could not write $STATE/secrets.env"
+  }
+  mv --no-target-directory -- "$tmp" "$STATE/secrets.env" || {
+    rm -f -- "$tmp"
+    die "could not publish $STATE/secrets.env"
+  }
+}
+secrets_publish
 set -a
 # shellcheck disable=SC1091  # just generated
 . "$STATE/secrets.env"
@@ -76,7 +93,7 @@ say "initializing openbao (one synthetic unseal key)"
 bao operator init -key-shares=1 -key-threshold=1 -format=json >"$STATE/bao-init.json"
 BW_BAO_ROOT_TOKEN=$(jq -er .root_token "$STATE/bao-init.json") || die "OpenBao init returned no root token"
 export BW_BAO_ROOT_TOKEN
-printf 'BW_BAO_ROOT_TOKEN=%s\n' "$BW_BAO_ROOT_TOKEN" >>"$STATE/secrets.env"
+secrets_publish
 bao_unseal
 wait_for 60 "an active OpenBao node" bao token lookup
 
@@ -93,7 +110,7 @@ POLICY
 # Assigned first: a command substitution that is only a printf argument cannot fail the script.
 metadata_token=$(bao token create -policy=bw-metadata-only -format=json | jq -er .auth.client_token) ||
   die "could not create the metadata-only OpenBao token"
-printf 'BW_BAO_METADATA_TOKEN=%s\n' "$metadata_token" >>"$STATE/secrets.env"
+secrets_publish
 
 say "creating the talos cluster (several minutes on a cold image cache)"
 talosctl cluster create docker \
