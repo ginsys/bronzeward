@@ -223,6 +223,16 @@ snapshot() {
   mv --no-target-directory -- "$partial" "$file"
   partial=
 }
+# restore_source <file> <name>: the snapshot a restore reads is the regular file snapshot published,
+# with no second name. A symlink there would have the restore read a file outside .state, and a
+# hard link a file that also exists under another name, neither of which anything here wrote; and
+# what the restore then installs as the live store, database or provider state is not one of the
+# fixture's snapshots.
+restore_source() {
+  [ -e "$1" ] || [ -L "$1" ] || die "no such snapshot: $2"
+  [ ! -L "$1" ] && [ -f "$1" ] && [ "$(stat --format=%h -- "$1" 2>/dev/null)" = 1 ] ||
+    die "$2 is not the regular file a snapshot published, or has a second name; nothing was restored"
+}
 
 case $action in
   # Each Docker mutation is flagged while it is in flight: see docker_dispatched in finish.
@@ -286,7 +296,7 @@ case $action in
     ;;
   db-restore)
     [ $# -eq 1 ] || usage
-    [ -f "$STATE/backups/pg-$1.dump" ] || die "no such snapshot: pg-$1.dump"
+    restore_source "$STATE/backups/pg-$1.dump" "pg-$1.dump"
     # Restored aside first: a dump that cannot be read must not cost the live database. The swap is
     # then two renames in one transaction, so at every moment a database named bronzeward exists
     # and it is either the old one or the new one. What an interrupted run leaves under the two
@@ -323,7 +333,7 @@ case $action in
     ;;
   bao-restore)
     [ $# -eq 1 ] || usage
-    [ -f "$STATE/backups/bao-$1.snap" ] || die "no such snapshot: bao-$1.snap"
+    restore_source "$STATE/backups/bao-$1.snap" "bao-$1.snap"
     # The flag first: once the request is on its way, a failure without an answer from OpenBao
     # says nothing about whether the snapshot was applied, and the exit handler records that.
     bao_dispatched=1
@@ -337,7 +347,7 @@ case $action in
     ;;
   store-restore)
     [ $# -eq 1 ] || usage
-    [ -f "$STATE/backups/store-$1.tgz" ] || die "no such snapshot: store-$1.tgz"
+    restore_source "$STATE/backups/store-$1.tgz" "store-$1.tgz"
     # An earlier run that was killed outright between its two renames left the only copy of the
     # store there. It is not guessed at.
     for left in "$STATE"/store-restore.*/previous; do

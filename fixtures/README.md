@@ -82,7 +82,11 @@ under `fixtures/` outside `.state` and `.cache`, tracked or not, is refused, sin
 carry the target's name and not the bytes that ran; so is an untracked file that only
 `.git/info/exclude` or a global excludes file hides, since neither the status nor the content
 would show it (the repository's own `.gitignore` files are the one exclusion the bundle stands
-by); the refusal withholds a name that holds secret material, like every path the command prints. Each path is scanned once, however many of the given paths contain
+by); the refusal withholds a name that holds secret material, like every path the command prints. `bin/up` makes the same
+checks before it records the commit the fixture is made from, so that record stands by what the
+bundle stands by. Each archive expanded into the bundle has its SHA-256 recorded next to the
+expansion, and the control's copy inside one is the control only while the archive under that
+name still has those bytes. Each path is scanned once, however many of the given paths contain
 it, and reported once, whether the secret is in its content, in its name or in both. Names of files and directories,
 and the target path a symlink stores, are matched as well as file contents; a name that holds a secret is withheld from the report, which
 gives the inode instead. Symlinks are followed, so a linked file or directory is scanned through its link and
@@ -96,8 +100,10 @@ expanded as far as it goes (a truncated one is named in `unavailable.txt`), a `s
 staging directory under `.state` is scanned like the live store, and a database left under a
 `db-restore` scratch name is dumped next to the live one, and a bundle a capture left before its
 own leak scan ran (it stays marked incomplete, by a `.incomplete` file removed only after the
-scan) is scanned as one more root, since it holds a dump, logs and a data-directory copy nothing
-scanned. With the live store directory gone, as
+scan) is scanned as one more root by the next capture whose scan completes, since it holds a
+dump, logs and a data-directory copy nothing scanned; that capture then marks it scanned
+(`scanned-by.txt` in the earlier bundle names the one whose `leak-scan.txt` holds the hits), so
+it is scanned once, not at every capture after. With the live store directory gone, as
 a `store-restore` killed between its two renames leaves it, the capture goes on without it, names
 it in `unavailable.txt`, and takes the control from the copy the staging directory holds. OpenBao snapshots are encrypted by
 OpenBao and are scanned as they are. The pattern list in `scan-patterns.txt` is rebuilt from the
@@ -123,7 +129,8 @@ node-network, Compose-volume and Compose-network records, `up-manifest` and `up-
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
-same name, for every entry in `.state/backups` at teardown (dot-named ones included), for a `store-restore` staging
+same name, for a snapshot about to be restored from (a symlink or a second name there would install
+what nothing here wrote), for every entry in `.state/backups` at teardown (dot-named ones included), for a `store-restore` staging
 directory, and for the marker `down` leaves when the node volumes are not all known. `secrets.env` is written whole and renamed into place at each stage of
 `up`, so an interruption leaves it complete or absent, never cut mid-line, and a second name made
 for it between two stages stops `up` there. The commands also check
@@ -202,7 +209,9 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   of the run that created it. It then takes the claim: a container named `bw-fixture-claim` that
   is created, labelled with this checkout's path and never started. Docker refuses a second one
   of that name atomically, so of two `up` started together, from one checkout or two, only one
-  proceeds. `bin/down` refuses when the claim or Compose names another directory as the origin,
+  proceeds. Docker can create the claim and still answer with an error (a connection lost after
+  the request went through); an `up` refused that way looks at the claim, and one that names this
+  checkout is reported as its own, with a plain `down` to remove it. `bin/down` refuses when the claim or Compose names another directory as the origin,
   or when fixture resources exist and no claim from this checkout shows them to be its own; run
   `down` in the checkout that owns them, or `down --adopt` if that checkout is gone or the claim
   was removed by hand. A `.state/` alone does not count, because it can be left over from an
