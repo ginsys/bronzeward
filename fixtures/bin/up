@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-need docker curl jq tar sha256sum install awk timeout mktemp git
+need docker curl jq tar sha256sum install awk timeout mktemp git find comm
 docker compose version >/dev/null || die "missing prerequisite: docker compose v2"
 [ "$(uname -sm)" = "Linux x86_64" ] || die "pinned CLI assets are linux/amd64 only"
 [ ! -e "$STATE" ] || die "$STATE exists: run fixtures/bin/down first"
@@ -47,8 +47,15 @@ umask 077
 # The checks above are only a look, and of two `up` started together both can pass them, from one
 # checkout or from two. The claim container is what only one of them can create; the plain mkdir
 # then cannot race any more, and stays plain so that it never adopts a directory it did not make.
-claim_error=$(claim_take 2>&1) ||
+claim_error=$(claim_take 2>&1) || {
+  # Docker can create the container and still answer with an error, as a connection lost after
+  # the request went through does. A claim that then names this checkout is this up's own and no
+  # one else's, and it would refuse every next up from here for good.
+  if [ "$(claim_owner 2>/dev/null)" = "$FIXTURES" ]; then
+    die "Docker answered the fixture claim with an error, but the claim $CLAIM exists and names this checkout; run fixtures/bin/down to remove it, then up again. Docker said: $claim_error"
+  fi
   die "could not take the fixture claim $CLAIM on this Docker daemon, which another fixtures/bin/up may hold; nothing was created. Docker said: $claim_error"
+}
 mkdir "$STATE" 2>/dev/null || {
   claim_drop
   die "$STATE appeared meanwhile; nothing was created"
@@ -66,14 +73,11 @@ mkdir "$STATE/data" "$STATE/backups"
 # the commit it captures under, and a checkout switched or committed in between would have the
 # bundle name a commit the running fixture, its generated configuration and its cached tools were
 # not made from. Evidence reads this record, carries it and says when the two are not the same.
-manifest=$(git -C "$FIXTURES" rev-parse HEAD) ||
-  die "cannot read the manifest commit from git; the fixture could not be tied to a fixture version"
-differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES") ||
-  die "cannot ask git whether fixtures/ differs from commit $manifest"
-if [ -n "$differs" ]; then
-  fixtures_manifest_diff "$differs" >"$STATE/up-fixtures-diff.txt" ||
-    die "cannot record how fixtures/ differs from commit $manifest"
-fi
+# The same checks evidence makes before it ties a bundle to what ran (fixtures_tree_check in
+# lib.sh): a tree with an untracked file hidden by an excludes file outside the repository, a
+# symlink, or a directory git cannot open is refused here too, since the commit plus the diff
+# recorded would not say what the fixture was made from.
+fixtures_tree_check "$STATE" "$STATE/up-fixtures-diff.txt" tree_name
 printf '%s\n' "$manifest" >"$STATE/up-manifest"
 unset manifest differs
 recovery='run fixtures/bin/down --adopt to remove what was created (a plain down refuses what it finds without its record, and the records were not all published)'

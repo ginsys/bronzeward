@@ -10,7 +10,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-need docker curl jq tar sha256sum git find awk timeout realpath readlink mktemp cmp stat
+need docker curl jq tar sha256sum git find comm awk timeout realpath readlink mktemp cmp stat
 need_state
 # The pattern list every match below relies on is rebuilt from the generated credentials and must
 # be what bin/up wrote: thinned after up, a scan against it would pass while a token or key goes
@@ -75,7 +75,9 @@ done
 mkdir "$out/logs" "$out/backups"
 # Marked incomplete until the leak scan has run over it: a capture ended before that, by a signal
 # or a refusal, leaves a bundle that holds secret material nothing scanned, and the next capture
-# takes such a sibling as one more root. Removed as the last step, so a kill leaves it in place.
+# whose scan completes takes such a sibling as one more root, then marks it scanned (scanned-by.txt
+# in the sibling names this bundle, whose leak-scan.txt holds the hits). Removed as the last step,
+# so a kill leaves it in place.
 : >"$out/.incomplete" || die "cannot mark the bundle $out as incomplete"
 
 unavailable() {
@@ -102,24 +104,12 @@ node_tag() { # node_tag <ip>
   timeout 20 "$CACHE/talosctl" -e "$1" -n "$1" version --short | awk '/Tag:/ {print $2}'
 }
 
-# What git and find say on stderr while listing fixtures/ is collected, not shown: a directory
-# they cannot open is named in the warning as it is, before any of it reaches shown, and its name
-# may hold a secret. A warning also means the listing is incomplete, so it refuses the capture,
-# each line through shown.
-gitwarn=$out/.git-stderr
-git_warnings_refuse() {
-  local line warned=
-  [ -s "$gitwarn" ] || return 0
-  warned=$(while IFS= read -r line; do printf '%s; ' "$(shown "$line")"; done <"$gitwarn")
-  rm -f -- "$gitwarn"
-  die "git or find warned while listing fixtures/, so the listing is incomplete: ${warned%; }. The bundle could not be tied to what ran"
-}
-# Assigned first: a git that fails inside a printf argument would leave the line empty, and a bundle
-# without the manifest commit cannot be tied to the pins it was captured under.
-manifest=$(git -C "$FIXTURES" rev-parse HEAD 2>>"$gitwarn") ||
-  die "cannot read the manifest commit from git; the bundle could not be tied to a fixture version"
-differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES" 2>>"$gitwarn") ||
-  die "cannot ask git whether fixtures/ differs from commit $manifest"
+# The commit captured under and how fixtures/ differs from it, the difference into the bundle
+# (fixtures_tree_check in lib.sh, the same checks bin/up made before recording the commit the
+# fixture was created at): a bundle without the commit cannot be tied to the pins it was captured
+# under, and a tree with a hidden untracked file, a symlink or a directory git cannot open is
+# refused, since the commit plus the diff would not say what ran. Every name through shown.
+fixtures_tree_check "$out" "$out/fixtures-diff.txt" shown
 # The commit the fixture was created at, which bin/up recorded with how fixtures/ differed from it
 # then: a checkout switched or committed since would have the bundle name a commit the running
 # fixture, its generated configuration and its cached tools were not made from. Both are in the
@@ -130,45 +120,6 @@ if [ -e "$STATE/up-fixtures-diff.txt" ]; then
   cp -- "$STATE/up-fixtures-diff.txt" "$out/up-fixtures-diff.txt" ||
     die "cannot copy the record of how fixtures/ differed at creation into the bundle"
 fi
-# An untracked file that only .git/info/exclude or a global excludes file hides: neither the status
-# above nor the listing below sees it, and the bundle would claim that the commit plus the diff say
-# what ran while a helper under fixtures/ is in neither. The repository's own .gitignore files are
-# the one exclusion the bundle stands by (.state and .cache); anything else hidden is refused.
-# Listed into files, so that a listing that fails is not an empty one.
-git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" 2>>"$gitwarn" | sort -z >"$out/.untracked-seen" ||
-  die "cannot list the untracked files under fixtures/; the bundle could not be tied to what ran"
-git -C "$FIXTURES" ls-files --others --exclude-per-directory=.gitignore -z -- "$FIXTURES" 2>>"$gitwarn" | sort -z >"$out/.untracked-all" ||
-  die "cannot list the untracked files under fixtures/; the bundle could not be tied to what ran"
-hidden=$(comm --zero-terminated -13 "$out/.untracked-seen" "$out/.untracked-all" |
-  while IFS= read -r -d '' file; do
-    # Through shown, like every path this command prints: the name may hold a secret.
-    printf '%s ' "$(shown "$FIXTURES/$file")"
-  done) ||
-  die "cannot compare the untracked listings of fixtures/; the bundle could not be tied to what ran"
-rm -- "$out/.untracked-seen" "$out/.untracked-all" || die "cannot remove the untracked listings from $out"
-[ -z "$hidden" ] ||
-  die "untracked files under fixtures/ are hidden from git by an excludes file outside the repository: ${hidden% }; the bundle could not say what ran. Track, remove or unhide them"
-# A symlink anywhere under fixtures/, tracked or not: a diff carries the target's name, not the
-# bytes that ran, and on another host the name would point at something else or at nothing; a
-# tracked helper replaced by one is what the scripts then source. Refused, not recorded: the tree
-# has no symlink of its own. .state and .cache are this run's, held elsewhere.
-# find's status is looked at after its warnings: a directory it cannot open fails it, and the
-# warning names that directory.
-find_rc=0
-linked=$(find "$FIXTURES" \( -path "$STATE" -o -path "$CACHE" \) -prune -o -type l -print -quit 2>>"$gitwarn") || find_rc=$?
-git_warnings_refuse
-[ "$find_rc" -eq 0 ] || die "cannot look for symlinks under fixtures/; the bundle could not be tied to what ran"
-[ -z "$linked" ] ||
-  die "$(shown "$linked") is a symlink under fixtures/; the bundle cannot carry what it points at, and the commit plus a diff would not say what ran. Replace it with the file"
-# A tree that differs from the commit: the commit alone then does not say what ran. The bundle
-# carries the difference (fixtures_manifest_diff in lib.sh, the same record bin/up wrote at
-# creation), so that the commit plus this file reproduces what captured the bundle.
-if [ -n "$differs" ]; then
-  fixtures_manifest_diff "$differs" >"$out/fixtures-diff.txt" 2>>"$gitwarn" ||
-    die "cannot record how fixtures/ differs from commit $manifest; the bundle could not be tied to what ran"
-fi
-git_warnings_refuse
-rm -f -- "$gitwarn"
 {
   printf 'captured        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'manifest commit %s%s\n' "$manifest" "$([ -z "$differs" ] || printf ' (fixtures/ differs from it: see fixtures-diff.txt)')"
@@ -246,6 +197,12 @@ for store in "$STATE"/backups/store-*.tgz "$STATE"/backups/store-*.tgz.partial.*
   [ -f "$store" ] || continue
   expanded=$out/backups/$(basename "$store")
   expanded=${expanded%.tgz}
+  # The archive's digest, recorded before it is expanded, next to the expansion: a control copy
+  # found in an expanded archive is excused only while the archive under that name still has
+  # these bytes (store_archive_is_own below). An archive replaced between the two commands is
+  # then a mismatch, and its copy a leak, which is the safe side.
+  { sha256sum -- "$store" | cut -d' ' -f1 >"$expanded.sha256"; } 2>/dev/null ||
+    die "could not take the digest of $(shown "$store"): its copies could not be told from a leak"
   mkdir -p "$expanded"
   if ! tar -xzf "$store" -C "$expanded" 2>/dev/null; then
     case $store in
@@ -373,13 +330,19 @@ done
 # dot-named entry counts; never through a link, as above. Listed into a file first: a listing
 # that fails inside a process substitution would read as an empty one, and a sibling holding
 # secret material would go unscanned while this capture reports a clean scan.
+# Scanned once: at the end, once this scan ran, each such sibling is marked scanned by this
+# bundle. A sibling scanned at every later capture would have the copy of a store archive it
+# expanded reported as a leak from the first snapshot taken under that name since, although the
+# capture that scanned it, and its report, were there before.
 find "$STATE/evidence" -mindepth 1 -maxdepth 1 -print0 >"$out/.siblings" 2>/dev/null ||
   die "cannot list $STATE/evidence for captures that ended before their scan; results void"
+siblings=()
 while IFS= read -r -d '' sibling; do
   [ ! -L "$sibling" ] || die "$(shown "$sibling") is a symlink; the fixture never makes one there. Results void"
   [ "$sibling" = "$out" ] || [ ! -e "$sibling/.incomplete" ] || {
     say "evidence: an earlier capture ended before its leak scan; $(shown "$sibling") is scanned with this one"
     roots+=("$sibling")
+    siblings+=("$sibling")
   }
 done <"$out/.siblings"
 rm -- "$out/.siblings" || die "cannot remove the sibling listing from $out; results void"
@@ -409,10 +372,14 @@ store_middle() { # store_middle <file>: the snapshot name, for the control's pla
 }
 is_store_copy() { store_middle "$1" >/dev/null; }
 # store_archive_is_own <file>: the archive the store copy was expanded from is the regular file
-# inject wrote, with no second name. Hard-linked outside .state, its compressed bytes match no
-# pattern here, and the canary would survive teardown inside it while its copy was excused.
+# inject wrote, with no second name, and still the archive it was expanded from. Hard-linked
+# outside .state, its compressed bytes match no pattern here, and the canary would survive
+# teardown inside it while its copy was excused. And the copy in an incomplete sibling bundle
+# was expanded from whatever carried the name then: the digest recorded next to the expansion
+# must be the archive's now, or the copy is of some other archive, one that may be gone, or that
+# had a second name when it was expanded, and is reported like any other hit.
 store_archive_is_own() {
-  local middle archive
+  local middle archive bundle recorded
   middle=$(store_middle "$1") || return 1
   # A complete archive that an interrupted store-snapshot left under its temporary name expands
   # under that name, which ends in .tgz.partial.<suffix> already. Unambiguous, because inject
@@ -421,7 +388,14 @@ store_archive_is_own() {
     *.tgz.partial.*) archive=$STATE/backups/store-$middle ;;
     *) archive=$STATE/backups/store-$middle.tgz ;;
   esac
-  [ ! -L "$archive" ] && [ -f "$archive" ] && [ "$(stat --format=%h -- "$archive" 2>/dev/null)" = 1 ]
+  [ ! -L "$archive" ] && [ -f "$archive" ] && [ "$(stat --format=%h -- "$archive" 2>/dev/null)" = 1 ] || return 1
+  bundle=${1#"$STATE/evidence/"}
+  bundle=${bundle%%/*}
+  recorded=$STATE/evidence/$bundle/backups/store-$middle.sha256
+  [ ! -L "$recorded" ] && [ -f "$recorded" ] || return 1
+  recorded=$(cat -- "$recorded" 2>/dev/null) || return 1
+  [[ $recorded =~ ^[0-9a-f]{64}$ ]] || return 1
+  [ "$recorded" = "$(sha256sum -- "$archive" 2>/dev/null | cut -d' ' -f1)" ]
 }
 # is_live_control <file>: the control's own place, or, while the live directory is gone, the
 # place a store-restore killed between its two renames moved it to.
@@ -516,5 +490,11 @@ others=${others%$'\n'}
 say "leak scan: positive control found; $leaks other file(s) contain synthetic secret material"
 [ "$leaks" -eq 0 ] || say "$others"
 rm -- "$out/.incomplete" || die "the scan ran, but the bundle $out could not be marked complete; the next capture scans it again"
+# The siblings scanned with this bundle: marked scanned by it, the marker removed last, so that a
+# kill in between leaves the sibling to be scanned again rather than marked without the name.
+for sibling in "${siblings[@]}"; do
+  { printf '%s\n' "$out" >"$sibling/scanned-by.txt" && rm -- "$sibling/.incomplete"; } 2>/dev/null ||
+    die "the scan ran, but the earlier capture $(shown "$sibling") could not be marked scanned; the next capture scans it again"
+done
 [ ! -f "$out/unavailable.txt" ] || say "evidence: INCOMPLETE, see $out/unavailable.txt"
 printf '%s\n' "$out" # the only line on stdout: the bundle path

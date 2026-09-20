@@ -108,7 +108,27 @@ rm "$STATE/backups/pg-selftest-corrupt.dump"
   fail "a failed db-restore left its scratch database behind"
 "$here/inject" db-restore selftest
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "db-restore did not return to the snapshot a second time"
-ok "db-snapshot / db-restore; a truncated dump leaves the live database alone"
+# A snapshot name that is a symlink to a dump outside .state: the restore would install what
+# nothing here wrote. Refused before anything is read.
+sql "insert into bw_selftest values ('after-restore')" >/dev/null
+mkdir "$STATE/selftest-elsewhere"
+cp "$STATE/backups/pg-selftest.dump" "$STATE/selftest-elsewhere/dump"
+ln -s "$STATE/selftest-elsewhere/dump" "$STATE/backups/pg-selftest-link.dump"
+rc=0
+"$here/inject" db-restore selftest-link 2>/dev/null || rc=$?
+rm "$STATE/backups/pg-selftest-link.dump"
+[ "$rc" -ne 0 ] || fail "db-restore read a snapshot name that is a symlink"
+[ "$(sql 'select count(*) from bw_selftest')" = 2 ] || fail "db-restore from the symlinked name reached the live database"
+# And one with a second hard-linked name.
+ln "$STATE/backups/pg-selftest.dump" "$STATE/selftest-elsewhere/alias"
+rc=0
+"$here/inject" db-restore selftest 2>/dev/null || rc=$?
+rm -r "$STATE/selftest-elsewhere"
+[ "$rc" -ne 0 ] || fail "db-restore read a snapshot that has a second name"
+[ "$(sql 'select count(*) from bw_selftest')" = 2 ] || fail "db-restore from the hard-linked snapshot reached the live database"
+"$here/inject" db-restore selftest
+[ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "db-restore did not return to the snapshot a third time"
+ok "db-snapshot / db-restore; a truncated dump leaves the live database alone; a symlinked or hard-linked snapshot is refused unread"
 
 # OpenBao: snapshot, soft delete, destroy, key loss, restore.
 bao kv put -mount=secret selftest/item value="$BW_CANARY" >/dev/null
@@ -161,9 +181,25 @@ rc=0
 "$here/inject" store-snapshot selftest 2>/dev/null || rc=$?
 same=0
 [ "$STATE/backups/store-selftest.tgz" -ef "$STATE/selftest-snapshot-alias" ] && same=1
-rm "$STATE/selftest-snapshot-alias"
 [ "$rc" -ne 0 ] && [ "$same" -eq 1 ] || fail "store-snapshot replaced a snapshot that has a second name"
 [ -z "$(find "$STATE/backups" -name 'store-selftest.tgz.partial.*')" ] || fail "a refused store-snapshot left its partial file"
+# Nor is a snapshot with a second name restored from: the other name is not one the fixture wrote.
+rm "$STATE/data/selftest-store"
+rc=0
+"$here/inject" store-restore selftest 2>/dev/null || rc=$?
+rm "$STATE/selftest-snapshot-alias"
+[ "$rc" -ne 0 ] && [ ! -e "$STATE/data/selftest-store" ] || fail "store-restore read a snapshot that has a second name"
+# And a snapshot name that is a symlink to an archive outside .state.
+mkdir "$STATE/selftest-elsewhere"
+cp "$STATE/backups/store-selftest.tgz" "$STATE/selftest-elsewhere/archive"
+ln -s "$STATE/selftest-elsewhere/archive" "$STATE/backups/store-selftest-link.tgz"
+rc=0
+"$here/inject" store-restore selftest-link 2>/dev/null || rc=$?
+rm -r "$STATE/backups/store-selftest-link.tgz" "$STATE/selftest-elsewhere"
+[ "$rc" -ne 0 ] && [ ! -e "$STATE/data/selftest-store" ] || fail "store-restore read a snapshot name that is a symlink"
+[ -z "$(find "$STATE" -maxdepth 1 -name 'store-restore.*')" ] || fail "a refused store-restore left its staging directory"
+"$here/inject" store-restore selftest
+[ -f "$STATE/data/selftest-store" ] || fail "store-restore did not bring the file back a second time"
 # Defaults for tar in the caller's shell must not reach the snapshot: this one would leave the file
 # out without any error.
 TAR_OPTIONS=--exclude=data/selftest-store "$here/inject" store-snapshot selftest-env
@@ -277,7 +313,7 @@ docker rm --force --volumes "$WORKER" >/dev/null
 docker rename "$WORKER-selftest-aside" "$WORKER" >/dev/null # before anything can fail
 [ "$impostor" -eq 0 ] || fail "inject acted on a container that bears a Talos node's name and label but is not the node"
 [ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
-ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash, a newline or .partial. refused, no write through a symlinked or a hard-linked final name or log, a container that only bears a fixture name, or a Talos node's name and label, refused, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored and never replaced by an archive's own previous entry"
+ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash, a newline or .partial. refused, no write through a symlinked or a hard-linked final name or log, no restore from one, a container that only bears a fixture name, or a Talos node's name and label, refused, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored and never replaced by an archive's own previous entry"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -648,25 +684,29 @@ grep --quiet 'hidden from git by an excludes file' "$STATE/selftest-evidence.err
 ! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
   fail "evidence printed the secret-bearing name of a hidden file"
 # An untracked directory git cannot open, named with a secret: git and find warn on stderr with
-# the name as it is, and the listing is incomplete.
-mkdir "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
-chmod 000 "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
-went=0
-"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
-chmod 700 "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN" # before anything can fail
-rmdir "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
-[ "$went" -eq 0 ] || fail "evidence captured while git could not open an untracked directory under fixtures/"
-grep --quiet 'warned while listing fixtures/' "$STATE/selftest-evidence.err" ||
-  fail "evidence failed on the closed directory for another reason: $(grep --invert-match --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" | tail -n 1)"
-! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
-  fail "evidence printed the secret-bearing name of a directory git could not open"
-# The directory of bundles writable but not readable: the captures that ended before their scan
-# cannot be listed, and this one must not report a scan.
-chmod 300 "$STATE/evidence"
-went=0
-"$here/evidence" >/dev/null 2>&1 && went=1
-chmod 700 "$STATE/evidence" # before anything can fail
-[ "$went" -eq 0 ] || fail "evidence reported a scan while the earlier captures could not be listed"
+# the name as it is, and the listing is incomplete. Then the directory of bundles writable but not
+# readable: the captures that ended before their scan cannot be listed, and this one must not
+# report a scan. root opens both, so there neither case can be built.
+if [ "$(id -u)" -ne 0 ]; then
+  mkdir "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
+  chmod 000 "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
+  went=0
+  "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+  chmod 700 "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN" # before anything can fail
+  rmdir "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
+  [ "$went" -eq 0 ] || fail "evidence captured while git could not open an untracked directory under fixtures/"
+  grep --quiet 'warned while listing fixtures/' "$STATE/selftest-evidence.err" ||
+    fail "evidence failed on the closed directory for another reason: $(grep --invert-match --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" | tail -n 1)"
+  ! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
+    fail "evidence printed the secret-bearing name of a directory git could not open"
+  chmod 300 "$STATE/evidence"
+  went=0
+  "$here/evidence" >/dev/null 2>&1 && went=1
+  chmod 700 "$STATE/evidence" # before anything can fail
+  [ "$went" -eq 0 ] || fail "evidence reported a scan while the earlier captures could not be listed"
+else
+  say "skipped as root: the closed-directory and the unreadable-bundle-directory cases"
+fi
 rc=0
 # An untracked file in the checkout: the commit alone does not say what ran, and the bundle must
 # carry the file's content, not its name alone.
@@ -675,6 +715,17 @@ rc=0
 mkdir "$STATE/evidence/selftest-interrupted"
 : >"$STATE/evidence/selftest-interrupted/.incomplete"
 printf 'left=%s\n' "$BW_CANARY" >"$STATE/evidence/selftest-interrupted/leftover.txt"
+# Two control copies inside that bundle, each as an expanded store snapshot with the archive's
+# digest recorded next to it: one whose digest is the archive's now is the control's copy, and one
+# whose digest is not was expanded from some other archive and is a leak, exact content or not.
+mkdir -p "$STATE/evidence/selftest-interrupted/backups/store-selftest-kept/data" \
+  "$STATE/evidence/selftest-interrupted/backups/store-selftest-stale/data"
+cp "$STATE/data/canary-control.txt" "$STATE/evidence/selftest-interrupted/backups/store-selftest-kept/data/"
+cp "$STATE/data/canary-control.txt" "$STATE/evidence/selftest-interrupted/backups/store-selftest-stale/data/"
+cp "$STATE/backups/store-selftest.tgz" "$STATE/backups/store-selftest-kept.tgz"
+cp "$STATE/backups/store-selftest.tgz" "$STATE/backups/store-selftest-stale.tgz"
+sha256sum "$STATE/backups/store-selftest-kept.tgz" | cut -d' ' -f1 >"$STATE/evidence/selftest-interrupted/backups/store-selftest-kept.sha256"
+printf '%064d\n' 0 >"$STATE/evidence/selftest-interrupted/backups/store-selftest-stale.sha256"
 printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
 # And one that is not text: carried as a binary patch, not as "differ".
 printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
@@ -683,12 +734,24 @@ printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
 # patch, not the helper's silence.
 bundle=$(cd "$STATE/selftest-outside" &&
   GIT_EXTERNAL_DIFF=/bin/true "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" 2>"$STATE/selftest-evidence.err") || rc=$?
+# The sibling's marks, read before it is removed: scanned once, by this capture, and named as such.
+sibling_marked=0
+[ ! -e "$STATE/evidence/selftest-interrupted/.incomplete" ] || sibling_marked=1
+sibling_scanned_by=$(cat "$STATE/evidence/selftest-interrupted/scanned-by.txt" 2>/dev/null || printf none)
 rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN" "$FIXTURES/.selftest-untracked" "$FIXTURES/.selftest-untracked.bin" \
-  "$STATE/evidence/selftest-interrupted"
+  "$STATE/evidence/selftest-interrupted" "$STATE/backups/store-selftest-kept.tgz" "$STATE/backups/store-selftest-stale.tgz"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
 [ ! -e "$bundle/.incomplete" ] || fail "a completed capture left its bundle marked incomplete"
 grep --quiet --fixed-strings "$STATE/evidence/selftest-interrupted/leftover.txt" "$bundle/leak-scan.txt" ||
   fail "leak scan skipped what a capture that ended before its scan left behind"
+[ "$sibling_marked" -eq 0 ] && [ "$sibling_scanned_by" = "$bundle" ] ||
+  fail "the capture that scanned an earlier incomplete bundle did not mark it as scanned by this bundle (marked: $sibling_marked, scanned by: $sibling_scanned_by)"
+# The report on stderr, not leak-scan.txt: the file lists every hit, the control's copies included,
+# and the report is what leaves the control out.
+grep --quiet --fixed-strings '/evidence/selftest-interrupted/backups/store-selftest-stale/data/canary-control.txt' "$STATE/selftest-evidence.err" ||
+  fail "leak scan excused a control copy in an incomplete sibling whose recorded archive digest is not the archive's now"
+! grep --quiet --fixed-strings '/evidence/selftest-interrupted/backups/store-selftest-kept/data/canary-control.txt' "$STATE/selftest-evidence.err" ||
+  fail "leak scan reported a control copy in an incomplete sibling whose recorded archive digest is the archive's"
 [ -z "$(sort "$bundle/leak-scan.txt" | uniq --repeated)" ] || fail "leak scan reported a file twice: for a scan path under a root it has anyway, or for a secret in its name and another in its content"
 grep --quiet 'differs from it' "$bundle/versions.txt" || fail "versions.txt does not say fixtures/ differs from the commit while an untracked file is there"
 grep --quiet "^created at      $(git -C "$FIXTURES" rev-parse HEAD)" "$bundle/versions.txt" ||
@@ -739,7 +802,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper and names the creating commit, refuses a symlink in the tree, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper and names the creating commit, refuses a symlink in the tree, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, holds a sibling's control copy to its archive's digest, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the

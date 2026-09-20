@@ -199,6 +199,70 @@ fixtures_manifest_diff() {
     done
 }
 
+# tree_name <path>: a name as bin/up may print it. bin/evidence passes its own sanitizer instead,
+# which withholds a name that holds one of the run's secrets; before up generated them there is
+# nothing of the fixture's to withhold.
+tree_name() { printf '%s' "$1"; }
+
+# fixtures_tree_check <workdir> <diff-file> <name-fn>: the commit fixtures/ is at, in `manifest`,
+# and how it differs from it, in `differs` and, when it does, as fixtures_manifest_diff in
+# <diff-file>. bin/up runs it before recording what the fixture is made from and bin/evidence
+# before tying a bundle to what ran, the same checks in both, so that the creation record stands
+# by what the bundle stands by: a commit plus a diff say what ran only if the tree holds nothing
+# they leave out. Refused: an untracked file that only .git/info/exclude or a global excludes file
+# hides, since neither the status nor the diff sees it (the repository's own .gitignore files are
+# the one exclusion stood by: .state and .cache); a symlink anywhere else under fixtures/, tracked
+# or not, since a diff carries the target's name and not the bytes that run, and on another host
+# the name points at something else or at nothing; and any warning git or find print while
+# listing, since a directory they cannot open is left out of the listing with status 0, and named
+# in the warning as it is. Every name printed goes through <name-fn>: a name may hold a secret.
+# Listings and the collected stderr go into <workdir> and are removed; a listing that fails is not
+# an empty one.
+fixtures_tree_check() {
+  local workdir=$1 diff_file=$2 name_fn=$3 warn file hidden linked find_rc=0
+  warn=$workdir/.git-stderr
+  : >"$warn" || die "cannot collect git's warnings in $workdir"
+  # Assigned first: a git that fails inside a printf argument would leave the line empty.
+  manifest=$(git -C "$FIXTURES" rev-parse HEAD 2>>"$warn") ||
+    die "cannot read the manifest commit from git; the fixture could not be tied to a fixture version"
+  differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES" 2>>"$warn") ||
+    die "cannot ask git whether fixtures/ differs from commit $manifest"
+  git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" 2>>"$warn" | sort -z >"$workdir/.untracked-seen" ||
+    die "cannot list the untracked files under fixtures/; the commit could not be tied to what runs"
+  git -C "$FIXTURES" ls-files --others --exclude-per-directory=.gitignore -z -- "$FIXTURES" 2>>"$warn" | sort -z >"$workdir/.untracked-all" ||
+    die "cannot list the untracked files under fixtures/; the commit could not be tied to what runs"
+  hidden=$(comm --zero-terminated -13 "$workdir/.untracked-seen" "$workdir/.untracked-all" |
+    while IFS= read -r -d '' file; do
+      printf '%s ' "$("$name_fn" "$FIXTURES/$file")"
+    done) ||
+    die "cannot compare the untracked listings of fixtures/; the commit could not be tied to what runs"
+  rm -- "$workdir/.untracked-seen" "$workdir/.untracked-all" || die "cannot remove the untracked listings from $workdir"
+  # find's status is looked at after its warnings: a directory it cannot open fails it, and the
+  # warning names that directory.
+  linked=$(find "$FIXTURES" \( -path "$STATE" -o -path "$CACHE" \) -prune -o -type l -print -quit 2>>"$warn") || find_rc=$?
+  tree_warnings_refuse "$warn" "$name_fn"
+  [ "$find_rc" -eq 0 ] || die "cannot look for symlinks under fixtures/; the commit could not be tied to what runs"
+  [ -z "$hidden" ] ||
+    die "untracked files under fixtures/ are hidden from git by an excludes file outside the repository: ${hidden% }; the commit plus a diff could not say what runs. Track, remove or unhide them"
+  [ -z "$linked" ] ||
+    die "$("$name_fn" "$linked") is a symlink under fixtures/; a diff cannot carry what it points at, and the commit plus a diff would not say what runs. Replace it with the file"
+  if [ -n "$differs" ]; then
+    fixtures_manifest_diff "$differs" >"$diff_file" 2>>"$warn" ||
+      die "cannot record how fixtures/ differs from commit $manifest; the commit could not be tied to what runs"
+  fi
+  tree_warnings_refuse "$warn" "$name_fn"
+  rm -f -- "$warn"
+}
+# tree_warnings_refuse <file> <name-fn>: refuse on what git and find said on stderr, each line
+# through <name-fn>, the file removed first.
+tree_warnings_refuse() {
+  local line warned=
+  [ -s "$1" ] || return 0
+  warned=$(while IFS= read -r line; do printf '%s; ' "$("$2" "$line")"; done <"$1")
+  rm -f -- "$1"
+  die "git or find warned while listing fixtures/, so the listing is incomplete: ${warned%; }. The commit could not be tied to what runs"
+}
+
 # compose_volume_names: the daemon-side names of the named volumes compose.yaml declares,
 # <project>_<key>, as Compose derives them. Read from the file, not repeated here. The secrets
 # file may not exist yet, so the password is only interpolated.
