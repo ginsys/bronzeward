@@ -99,10 +99,27 @@ record() {
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log"
 }
 partial=
+published=
+published_inode=
 staging=
 moved_aside=0
+committing=0
 finish() {
   local rc=$?
+  # A signal that arrives while bash waits for a rename has it finish the child and run this
+  # handler before the line that would have cleared the flags. The rename is the commit of a
+  # snapshot and of a store restore, so one that did complete is recorded as done, whatever the
+  # signal made of the status: the artifact it left is what a later restore acts on.
+  if [ -n "$partial" ] && [ ! -e "$partial" ] && [ -n "$published_inode" ] &&
+    [ "$(stat --format=%i -- "$published" 2>/dev/null)" = "$published_inode" ]; then
+    partial=
+    [ "$rc" -eq 0 ] || say "fixtures: interrupted after the snapshot was published; recorded as done"
+    rc=0
+  fi
+  if [ "$committing" -eq 1 ] && [ -n "$staging" ] && [ ! -e "$staging/data" ] && [ -e "$STATE/data" ]; then
+    [ "$rc" -eq 0 ] || say "fixtures: interrupted after the restored store was in place; recorded as done"
+    rc=0
+  fi
   # A removal that fails must not end the handler before the outcome is recorded: each is guarded.
   if [ -n "$partial" ]; then
     rm -f -- "$partial" || say "fixtures: could not remove the partial file $partial"
@@ -144,6 +161,10 @@ snapshot() {
   # --no-target-directory: a final name that is a symlink to a directory, left by an earlier run or
   # a prototype, would otherwise receive the snapshot inside that directory, outside .state, with
   # the action logged as done. The rename replaces the link itself, and fails on a real directory.
+  # The inode first: it is how the exit handler tells a rename that completed under a signal from
+  # a final name that was there before.
+  published_inode=$(stat --format=%i -- "$partial") || die "could not stat $partial"
+  published=$file
   mv --no-target-directory -- "$partial" "$file"
   partial=
 }
@@ -269,6 +290,10 @@ case $action in
       moved_aside=1
       mv --no-target-directory -- "$STATE/data" "$staging/previous"
     fi
+    # The flag first, for the same reason as moved_aside above: the exit handler recognizes a rename
+    # that completed under a signal by the restored directory being in place and the staging one
+    # empty of it, which without the flag would also describe an archive refused above.
+    committing=1
     mv --no-target-directory -- "$staging/data" "$STATE/data"
     # The rename above is the commit: the restored store is in place. Cleaning up after it must not
     # turn a restore that succeeded into one the log says failed; the leftover is named instead,

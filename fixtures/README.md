@@ -21,7 +21,7 @@ and `age` are downloaded into `fixtures/.cache/` and refused on a checksum misma
 | Command | Does |
 |---|---|
 | `fixtures/bin/up` | Generates synthetic secrets, starts PostgreSQL and OpenBao, initializes and unseals OpenBao, creates the Talos cluster, then asks both services again with this run's credentials before it reports the fixture up. Takes about two minutes once images are cached. |
-| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`. `start` is done only once the service or Talos node answers again. A snapshot name is one path component, without a slash and without `.partial.` in it; no argument may hold a control character, since each is written into the log, which must itself be the regular file `inject` made, under that one name. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
+| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`. `start` is done only once the service or Talos node answers again. A snapshot name is one path component, without a slash and without `.partial.` in it; no argument may hold a control character, since each is written into the log, which must itself be the regular file `inject` made, under that one name. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. The rename that publishes a snapshot, or puts a restored store in place, is the commit: an action interrupted after it is logged `done`, since the artifact it left is what a later restore acts on. Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
 | `fixtures/bin/evidence [path ...]` | Writes versions, container logs, a database dump, a copy of the PostgreSQL data directory as written to disk (read from the container whether the server runs or not), OpenBao metadata and Talos config digests to `.state/evidence/<utc>/`, then scans them, and any extra paths given, for synthetic secret material. Prints the bundle path. A bundle is some tens of MiB, most of it that data directory. |
 | `fixtures/bin/down [--purge] [--adopt]` | Removes every container, network and volume, then checks that nothing is left and fails if something is, or if Docker could not be asked. The claim and then `.state/` are removed last and only after that check passed, so a `down` that could not finish can simply be run again. `--purge` also removes `.cache/`. It refuses a fixture it cannot show to be this checkout's own; `--adopt` overrides that. |
 | `fixtures/bin/selftest [--keep]` | `up`, each injection once with an assertion, `evidence`, `down`. `--keep` runs the checks against a fixture that is already up. |
@@ -73,7 +73,10 @@ expanded store snapshots count as the control; any other file of the same name i
 every other hit, and a control whose content changed, or that is a symlink or has a second hard
 link, is no control at all: the command then fails, since the planted canary is absent.
 The bundle's `versions.txt` names the manifest commit; a capture that cannot read it from git
-fails rather than write a bundle that cannot be tied to its pins. Names of files and directories,
+fails rather than write a bundle that cannot be tied to its pins, and when `fixtures/` differs
+from that commit the bundle's `fixtures-diff.txt` holds the status of every changed or untracked
+file and the diff of the tracked ones, so that the commit plus that file says what ran. Each
+path is scanned once, however many of the given paths contain it. Names of files and directories,
 and the target path a symlink stores, are matched as well as file contents; a name that holds a secret is withheld from the report, which
 gives the inode instead. Symlinks are followed, so a linked file or directory is scanned through its link and
 a link that cannot be followed fails the command; extra paths may be relative and may have any
@@ -99,29 +102,30 @@ from here.
 `.state/` belongs to whoever ran `bin/up`, and its lifetime is one run. Nothing in it is backed up
 or recoverable by design: losing `bao-init.json` loses that OpenBao instance, which is the
 intended way to study key loss. `bin/down` is the only cleanup and is safe to run at any time,
-including after a failed or interrupted `up`. `.state`, its `data`, `backups` and `evidence`
+including after a failed or interrupted `up`. `.state`, its `data`, `backups`, `evidence` and `talos`
 directories, and `.cache` must be real directories: every command refuses to run while one of them
-is a symlink, because secrets, or the CLIs, would be read or written outside the checkout. The files `bin/up` generates
+is a symlink, because secrets, or the CLIs, would be read or written outside the checkout, or
+`talosctl cluster destroy` pointed at someone else's state. The files `bin/up` generates
 (`secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
-`controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume and node-container
-records) must each be
+`controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container and
+node-network records) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
-same name, for a `store-restore` staging directory, and for the marker `down` leaves when the node
-volumes are not all known. `secrets.env` is written whole and renamed into place at each stage of
+same name, for every snapshot in `.state/backups` at teardown, for a `store-restore` staging
+directory, and for the marker `down` leaves when the node volumes are not all known. `secrets.env` is written whole and renamed into place at each stage of
 `up`, so an interruption leaves it complete or absent, never cut mid-line, and a second name made
 for it between two stages stops `up` there. The commands also check
 that every container answering to a fixture name carries the fixture's own labels (Compose
 project and directory, or Talos cluster name), since the names are fixed and, once the real
 container was removed by hand, anything can take the name while the claim stands. The node-volume record's content is held against Docker as well: `down` removes
 a recorded name only if it is an anonymous volume's, and the volume, if it still exists, carries
-no label. The Talos label is only a cluster name, which any container can be created with, so
-`up` records the IDs of the two containers it created once they exist: `inject` and `evidence`
-act on a container under a node's name only if its ID is recorded, and `down` refuses while a
-container carries the label without being one of them, or while labelled containers exist and
-there is no record, as an `up` interrupted right after creating the cluster leaves it. Only
-`down --adopt` removes by label alone. The checkout is
+no label. The Talos label is only a cluster name, which any container or network can be created
+with, so `up` records the IDs of the two containers and the network it created once they exist:
+`inject` and `evidence` act on a container under a node's name only if its ID is recorded, and
+`down` refuses while a container or network carries the label without being recorded, or while
+labelled ones exist and there is no record, as an `up` interrupted right after creating the
+cluster leaves it. Only `down --adopt` removes by label alone. The checkout is
 identified by its physical path, so the same checkout reached through a symlink is still its own.
 Evidence worth keeping must be copied out of `.state/` before `down`.
 

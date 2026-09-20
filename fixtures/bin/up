@@ -143,6 +143,12 @@ container_ids=$(docker ps --all --quiet --no-trunc --filter "label=talos.cluster
   die "expected two Talos containers to record; teardown could not tell them from another's"
 printf '%s\n' "$container_ids" >"$STATE/down-node-containers.partial"
 mv --no-target-directory -- "$STATE/down-node-containers.partial" "$STATE/down-node-containers"
+# The cluster network carries the same label, and bin/down removes networks by it just the same.
+network_ids=$(docker network ls --quiet --no-trunc --filter "label=talos.cluster.name=$FIXTURE_NAME") ||
+  die "could not list the Talos networks"
+[ -n "$network_ids" ] || die "no Talos network to record; teardown could not tell it from another's"
+printf '%s\n' "$network_ids" >"$STATE/down-node-networks.partial"
+mv --no-target-directory -- "$STATE/down-node-networks.partial" "$STATE/down-node-networks"
 
 # The cluster's own secrets bundle, for import experiments and as leak-scan patterns.
 talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" \

@@ -24,8 +24,9 @@ unset TAR_OPTIONS GZIP
 # The same holds one level down for the directories the commands write into: through a symlinked
 # evidence or backups directory, dumps and snapshots would land where teardown does not reach.
 # And for .cache: through a link, downloads would land elsewhere and `down --purge` would remove
-# the link alone while reporting the cache gone.
-for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence" "$CACHE"; do
+# the link alone while reporting the cache gone. And for the Talos state directory, which names
+# what `talosctl cluster destroy` acts on.
+for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence" "$STATE/talos" "$CACHE"; do
   if [ -L "$managed" ]; then
     printf 'fixtures: %s is a symlink; the fixture never creates one. Remove the link and run again\n' "$managed" >&2
     exit 1
@@ -119,11 +120,11 @@ need_state() {
 # checked above, before it is read; the rest here, by need_state and by down, before anything is
 # scanned or removed. The node-volume record has its own check in down. injections.log too: its
 # arguments name snapshots, and bin/evidence copies it into the bundle as the timeline. And the
-# record of the Talos container IDs, which containers_own and down trust with what a fixture name
-# or label may act on.
+# records of the Talos container and network IDs, which containers_own and down trust with what
+# a fixture name or label may act on.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers; do
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"

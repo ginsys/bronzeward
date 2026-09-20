@@ -385,6 +385,16 @@ if [ "$(id -u)" -ne 0 ]; then
     fail "evidence did not fail on the unreadable file: $(grep --invert-match --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" | tail -n 1)"
   ! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
     fail "evidence wrote a secret-bearing file name into its error message"
+  # A backup that cannot be opened for expansion, before the scan: bash names the file it cannot
+  # redirect from, and that name must not reach stderr either.
+  printf 'not a dump\n' >"$STATE/backups/pg-named-$BW_BAO_METADATA_TOKEN.dump"
+  chmod 000 "$STATE/backups/pg-named-$BW_BAO_METADATA_TOKEN.dump"
+  rc=0
+  "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
+  rm -f "$STATE/backups/pg-named-$BW_BAO_METADATA_TOKEN.dump"
+  [ "$rc" -ne 0 ] || fail "evidence accepted a backup it could not expand"
+  ! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
+    fail "evidence wrote a secret-bearing backup name into its error message"
   rm "$STATE/selftest-evidence.err"
 else
   say "skipped as root: the unreadable-file case"
@@ -583,10 +593,19 @@ ln -s "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN/file" "$STATE/data/selftest
 # A client private key from the generated talosconfig, which the secrets bundle does not hold.
 awk '$1 == "key:" {print "client-key=" $2}' "$TALOSCONFIG" >"$STATE/data/selftest-client-key-leak"
 rc=0
+# The live store given as an extra path as well: it is a root already, and a file under it must
+# still be counted once.
 bundle=$(cd "$STATE/selftest-outside" &&
-  "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" 2>"$STATE/selftest-evidence.err") || rc=$?
+  "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" 2>"$STATE/selftest-evidence.err") || rc=$?
 rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
+[ -z "$(sort "$bundle/leak-scan.txt" | uniq --repeated)" ] || fail "leak scan reported a file twice for a scan path under a root it has anyway"
+# The commit alone does not say what ran when the tree differs from it; the difference then is in the bundle.
+if grep --quiet 'differs from it' "$bundle/versions.txt"; then
+  [ -s "$bundle/fixtures-diff.txt" ] || fail "versions.txt says fixtures/ differs from the commit but the bundle holds no fixtures-diff.txt"
+else
+  [ ! -e "$bundle/fixtures-diff.txt" ] || fail "the bundle holds a fixtures-diff.txt while versions.txt says the tree is at the commit"
+fi
 # Relative scan paths are made absolute from the working directory; only the tail is compared, so
 # the assertion does not depend on how the checkout path is spelled.
 grep --quiet --fixed-strings "/.state/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
@@ -707,13 +726,41 @@ if [ "$keep" != --keep ]; then
     [ "$(docker ps --all --quiet --filter "label=talos.cluster.name=$FIXTURE_NAME" | wc -l)" -ne 2 ]; then
     fail "down removed by the Talos label alone, without the record of which containers up created"
   fi
+  # A network with the label, which down removes by label just as it does containers.
+  docker network create --label "talos.cluster.name=$FIXTURE_NAME" "$FIXTURE_NAME-selftest-net" >/dev/null || fail "cannot create a network for the test"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  impostor=$(docker network ls --quiet --filter "name=^${FIXTURE_NAME}-selftest-net$")
+  docker network rm "$FIXTURE_NAME-selftest-net" >/dev/null 2>&1 || true # gone already in the failing case
+  if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down removed, or did not refuse, a network that only carries the Talos label"
+  fi
+  # A snapshot with a second name outside .state would keep its content past the teardown.
+  ln "$STATE/backups/pg-selftest.dump" "$FIXTURES/.selftest-backup-alias"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  rm -f "$FIXTURES/.selftest-backup-alias"
+  if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down tore down while a snapshot had a second name outside .state"
+  fi
+  # The Talos state directory through a link: `talosctl cluster destroy` would act on the state
+  # at the far end.
+  mv "$STATE/talos" "$FIXTURES/.selftest-talos-aside"
+  ln -s "$FIXTURES/.selftest-talos-aside" "$STATE/talos"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  rm "$STATE/talos"
+  mv "$FIXTURES/.selftest-talos-aside" "$STATE/talos" # before anything can fail
+  if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down followed a symlinked Talos state directory"
+  fi
   "$here/down" || fail "down reported leftovers"
   # down looks for what it can name. A volume no label or record points at, such as the anonymous
   # one Docker makes for the claim container, only shows up as a difference on the whole daemon.
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container against the records and refuses by label alone, then leaves nothing behind, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container and network against the records and refuses by label alone, refuses a snapshot with a second name and a linked Talos state directory, then leaves nothing behind, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"
