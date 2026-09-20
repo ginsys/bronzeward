@@ -39,6 +39,13 @@ need docker curl jq tar mktemp timeout
 need_state
 action=$1
 shift
+# The log below holds one record per line, the arguments included: an argument with a newline in
+# it, or any other control character, would write records of its own. Refused before anything is
+# recorded.
+for arg in "$@"; do
+  [[ $arg != *[[:cntrl:]]* ]] || die "arguments must not hold control characters"
+done
+unset arg
 
 network_of() {
   case $1 in

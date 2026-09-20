@@ -12,6 +12,11 @@ set -euo pipefail
 
 need docker curl jq tar sha256sum git find awk timeout realpath readlink mktemp cmp stat
 need_state
+# The pattern list every match below relies on is rebuilt from the generated credentials and must
+# be what bin/up wrote: thinned after up, a scan against it would pass while a token or key goes
+# unmatched, and `shown` would print a name that holds one.
+cmp --silent -- <(scan_patterns) "$STATE/scan-patterns.txt" ||
+  die "$STATE/scan-patterns.txt is not the list this run's credentials give; results void"
 # shown <path>: the path as a message or the bundle may record it. A name that holds a secret is
 # never written out, for the same reason a matched line is not; the entry is identified by its inode
 # instead. That holds for error messages as much as for the report, so every path this command
@@ -103,25 +108,52 @@ for c in "$PG" "$BAO" "$CP" "$WORKER"; do
   docker logs "$c" >"$out/logs/$c.log" 2>&1 || unavailable "logs of $c"
 done
 
-if ! { running "$PG" && timeout 60 docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" \
-  pg_dump -U bronzeward bronzeward >"$out/postgres.sql" 2>/dev/null; }; then
-  rm -f "$out/postgres.sql"
+dump_db() { # dump_db <database> <file>
+  timeout 60 docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" pg_dump -U bronzeward "$1" >"$2" 2>/dev/null ||
+    { rm -f "$2"; return 1; }
+}
+if ! { running "$PG" && dump_db bronzeward "$out/postgres.sql"; }; then
   unavailable "live database dump (postgres stopped, paused or unreachable): current database content NOT scanned"
+fi
+# What an interrupted db-restore leaves under its two other names holds data too: the previous
+# live database among it, with rows the current one and the backup may both lack.
+if ! { running "$PG" && scratch=$(pg psql -U bronzeward -d postgres -Atc \
+  "select datname from pg_database where datname in ('bronzeward_previous', 'bronzeward_restore')" 2>/dev/null); }; then
+  unavailable "databases left by an interrupted db-restore, if any: NOT scanned"
+else
+  for db in $scratch; do
+    dump_db "$db" "$out/postgres-$db.sql" ||
+      unavailable "dump of $db, left by an interrupted db-restore: its content NOT scanned"
+  done
 fi
 
 # Backups are compressed; a scan of the raw files would be clean for the wrong reason. Expanding a
 # dump needs no server, so it runs in a throwaway container and works while postgres is down.
-for dump in "$STATE"/backups/pg-*.dump; do
+# A dump or archive that an interrupted action left under its temporary name holds the same
+# material as a finished one and is expanded too. One that cannot be, being truncated, marks the
+# bundle incomplete rather than void: that is what an interruption leaves, and whatever part of it
+# did expand is scanned all the same.
+for dump in "$STATE"/backups/pg-*.dump "$STATE"/backups/pg-*.dump.partial.*; do
   [ -f "$dump" ] || continue
   as_sql=$out/backups/$(basename "$dump").sql
-  docker run --rm --interactive --network none "$POSTGRES_IMAGE" pg_restore --file=- <"$dump" >"$as_sql" ||
-    die "could not expand $(shown "$dump"): the backup would go unscanned"
+  if ! docker run --rm --interactive --network none "$POSTGRES_IMAGE" pg_restore --file=- <"$dump" >"$as_sql"; then
+    case $dump in
+      *.partial.*) unavailable "interrupted dump $(shown "$dump") could not be expanded in full: scanned only as far as it did expand, and as written" ;;
+      *) die "could not expand $(shown "$dump"): the backup would go unscanned" ;;
+    esac
+  fi
 done
-for store in "$STATE"/backups/store-*.tgz; do
+for store in "$STATE"/backups/store-*.tgz "$STATE"/backups/store-*.tgz.partial.*; do
   [ -f "$store" ] || continue
-  mkdir -p "$out/backups/$(basename "$store" .tgz)"
-  tar -xzf "$store" -C "$out/backups/$(basename "$store" .tgz)" 2>/dev/null ||
-    die "could not expand $(shown "$store"): the backup would go unscanned"
+  expanded=$out/backups/$(basename "$store")
+  expanded=${expanded%.tgz}
+  mkdir -p "$expanded"
+  if ! tar -xzf "$store" -C "$expanded" 2>/dev/null; then
+    case $store in
+      *.partial.*) unavailable "interrupted archive $(shown "$store") could not be expanded in full: scanned only as far as it did expand, and as written" ;;
+      *) die "could not expand $(shown "$store"): the backup would go unscanned" ;;
+    esac
+  fi
 done
 
 # Provider state through the metadata-only identity: names and versions, never values. A provider
@@ -221,6 +253,11 @@ trap 'rm -f -- "$list"' EXIT
 # -L: a symlinked path or file is followed and its target scanned. Without it find skips the link
 # silently and the target reads as clean. A link that cannot be followed is therefore fatal too.
 roots=("$out" "$STATE/data" "$STATE/backups" "${extras[@]}")
+# What a store-restore killed outright leaves aside: the extracted store and, past its first
+# rename, the earlier live one. Plaintext copies of the store both, scanned like the live directory.
+for staging in "$STATE"/store-restore.*; do
+  [ ! -e "$staging" ] || roots+=("$staging")
+done
 dangling=$(find -L "${roots[@]}" -type l -print -quit 2>/dev/null) ||
   die "leak scan could not walk every path (a directory it may not read, most likely); results void"
 [ -z "$dangling" ] || die "leak scan cannot follow the symlink $(shown "$dangling"); results void"
