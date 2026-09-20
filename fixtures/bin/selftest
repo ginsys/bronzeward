@@ -127,8 +127,19 @@ printf 'not a tar archive\n' >"$STATE/backups/store-selftest-corrupt.tgz"
 ! "$here/inject" store-restore selftest-corrupt 2>/dev/null || fail "store-restore accepted a corrupt archive"
 [ -f "$STATE/data/selftest-store" ] && [ -f "$STATE/data/canary-control.txt" ] ||
   fail "a failed store-restore destroyed the live store directory"
-rm "$STATE/data/selftest-store" "$STATE/backups/store-selftest-corrupt.tgz"
-ok "store-snapshot / store-restore; a corrupt snapshot leaves the live directory alone"
+rm "$STATE/backups/store-selftest-corrupt.tgz"
+# The loss a store snapshot exists for: the live directory gone altogether.
+mv "$STATE/data" "$STATE/selftest-data-aside"
+rc=0
+"$here/inject" store-restore selftest || rc=$?
+if [ "$rc" -ne 0 ] || [ ! -f "$STATE/data/selftest-store" ]; then
+  rm -rf "$STATE/data"
+  mv "$STATE/selftest-data-aside" "$STATE/data"
+  fail "store-restore did not bring back a store directory that was gone"
+fi
+rm -r "$STATE/selftest-data-aside"
+rm "$STATE/data/selftest-store"
+ok "store-snapshot / store-restore; a corrupt snapshot leaves the live directory alone, a missing one is restored"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -152,7 +163,7 @@ ok "kill / start postgres keeps committed data"
 "$here/inject" kill openbao
 degraded=$("$here/evidence") || fail "evidence aborted while openbao was down"
 grep --quiet 'openbao metadata' "$degraded/unavailable.txt" || fail "evidence did not say the OpenBao metadata is missing"
-jq -e 'has("unknown")' "$degraded/openbao-metadata.jsonl" >/dev/null ||
+jq -es 'any(.[]; has("unknown"))' "$degraded/openbao-metadata.jsonl" >/dev/null ||
   fail "OpenBao metadata reads as empty instead of unknown while openbao was down"
 ok "evidence records OpenBao state as unknown, not empty, while openbao is down"
 "$here/inject" start openbao
@@ -259,18 +270,29 @@ cp "$STATE/data/canary-control.txt" "$STATE/selftest-outside/control-as-planted"
 printf 'planted on purpose: %s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/canary-control.txt"
 # A secret in a file name, over benign content.
 printf 'nothing to see\n' >"$STATE/selftest-outside/-delete.d/named-$BW_BAO_METADATA_TOKEN"
+# And in the name of a scan path that is itself a symlink, to an empty directory: resolving the
+# path before the scan would lose the only place the secret is in.
+mkdir "$STATE/selftest-outside/empty"
+ln -s empty "$STATE/selftest-outside/link-$BW_BAO_METADATA_TOKEN"
 # A client private key from the generated talosconfig, which the secrets bundle does not hold.
 awk '$1 == "key:" {print "client-key=" $2}' "$TALOSCONFIG" >"$STATE/data/selftest-client-key-leak"
 rc=0
-bundle=$(cd "$STATE/selftest-outside" && "$here/evidence" -delete -delete.d 2>"$STATE/selftest-evidence.err") || rc=$?
+bundle=$(cd "$STATE/selftest-outside" &&
+  "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" 2>"$STATE/selftest-evidence.err") || rc=$?
 cp "$STATE/selftest-outside/control-as-planted" "$STATE/data/canary-control.txt" # before anything can fail
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
-grep --quiet --fixed-strings "$STATE/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
+# Relative scan paths are made absolute from the physical working directory, so with the checkout
+# reached through a symlink they are spelled unlike $STATE. Only the tail is compared.
+grep --quiet --fixed-strings "/.state/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
   fail "leak scan took a file named like its positive control for the control"
 grep --quiet --line-regexp --fixed-strings "1 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
   fail "leak scan excused a positive control whose canary had been replaced by another secret"
-grep --quiet 'a path whose name holds secret material' "$bundle/leak-scan.txt" ||
-  fail "leak scan missed a secret in a file name"
+[ "$(grep --count 'a path whose name holds secret material' "$bundle/leak-scan.txt")" -eq 2 ] ||
+  fail "leak scan did not report exactly the two secret-bearing names: a file, and a scan path that is a symlink"
+# The control's copy inside the expanded store snapshot is the control too, whatever characters the
+# checkout path holds.
+! grep --quiet --fixed-strings '/backups/store-selftest/data/canary-control.txt' "$STATE/selftest-evidence.err" ||
+  fail "leak scan reported the positive control's copy in a store snapshot as a leak"
 ! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$bundle/leak-scan.txt" "$STATE/selftest-evidence.err" ||
   fail "the leak scan wrote a secret into its own report"
 rm "$STATE/selftest-evidence.err"
@@ -278,7 +300,7 @@ grep --quiet --fixed-strings "$STATE/data/selftest-client-key-leak" "$bundle/lea
   fail "leak scan missed a client private key from the talosconfig"
 rm "$STATE/data/selftest-client-key-leak"
 grep --quiet --fixed-strings "$STATE/data/selftest-link" "$bundle/leak-scan.txt" || fail "leak scan skipped a symlinked file"
-grep --quiet --fixed-strings "$STATE/selftest-outside/-delete" "$bundle/leak-scan.txt" ||
+grep --quiet --fixed-strings "/.state/selftest-outside/-delete" "$bundle/leak-scan.txt" ||
   fail "leak scan mishandled a scan path named like a find action"
 rm -r "$STATE/selftest-outside" "$STATE/data/selftest-link"
 grep --quiet --fixed-strings "$STATE/data/selftest-token-leak" "$bundle/leak-scan.txt" || fail "leak scan missed the OpenBao metadata token"

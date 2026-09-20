@@ -77,6 +77,8 @@ BW_POSTGRES_PASSWORD=${BW_POSTGRES_PASSWORD:-unused} docker compose --project-na
   --project-directory "$FIXTURES" --file "$FIXTURES/compose.yaml" --env-file "$FIXTURES/versions.env" \
   down --volumes --remove-orphans 2>&1 | sed 's/^/  /' >&2
 
+# talosctl here is the function from lib.sh, that is the cached binary the guard tests. Its status,
+# like that of every removal below, is not what decides: the probes further down are.
 if [ -x "$CACHE/talosctl" ] && [ -f "$STATE/talos/$FIXTURE_NAME/state.yaml" ]; then
   talosctl cluster destroy --name "$FIXTURE_NAME" --state "$STATE/talos" 2>&1 | sed 's/^/  /' >&2
 fi
