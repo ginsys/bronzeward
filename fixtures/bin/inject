@@ -140,9 +140,11 @@ case $action in
   db-restore)
     [ $# -eq 1 ] || usage
     [ -f "$STATE/backups/pg-$1.dump" ] || die "no such snapshot: pg-$1.dump"
-    # Restored aside first: a dump that cannot be read must not cost the live database. It is
-    # dropped only once the restore succeeded, and the restored one then takes its name. Between
-    # those two steps the data exists under the other name, never nowhere.
+    # Restored aside first: a dump that cannot be read must not cost the live database. The swap is
+    # then two renames in one transaction, so at every moment a database named bronzeward exists
+    # and it is either the old one or the new one. What an interrupted run leaves under the two
+    # other names is dropped here, at the start of the next.
+    pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_previous
     pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_restore
     pg createdb -U bronzeward --maintenance-db=postgres bronzeward_restore
     if ! timeout 600 docker exec -i -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" \
@@ -151,9 +153,15 @@ case $action in
         say "fixtures: the half-restored database bronzeward_restore could not be dropped"
       die "pg-$1.dump could not be restored; the live database was left alone"
     fi
-    pg dropdb --force -U bronzeward --maintenance-db=postgres bronzeward
-    pg psql -U bronzeward -d postgres -v ON_ERROR_STOP=1 --quiet \
-      -c 'alter database bronzeward_restore rename to bronzeward'
+    # A database cannot be renamed while anyone is connected to it, so its sessions are ended in
+    # the same transaction. A client that reconnects in between makes the rename fail, and the
+    # transaction then leaves the live database as it was.
+    pg psql -U bronzeward -d postgres -v ON_ERROR_STOP=1 --quiet --single-transaction --output=/dev/null \
+      -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = 'bronzeward'" \
+      -c 'alter database bronzeward rename to bronzeward_previous' \
+      -c 'alter database bronzeward_restore rename to bronzeward' ||
+      die "could not swap the restored database in; the live database was left alone"
+    pg dropdb --force -U bronzeward --maintenance-db=postgres bronzeward_previous
     ;;
   bao-snapshot)
     [ $# -eq 1 ] || usage
@@ -184,7 +192,8 @@ case $action in
     tar -xzf "$STATE/backups/store-$1.tgz" -C "$staging"
     [ -d "$staging/data" ] || die "store-$1.tgz holds no data directory; the live one was left alone"
     [ ! -e "$staging/previous" ] || die "store-$1.tgz holds an entry named previous next to data; the live one was left alone"
-    mv -- "$STATE/data" "$staging/previous"
+    # The live directory may be gone already: losing it is what a store snapshot is for.
+    [ ! -e "$STATE/data" ] || mv -- "$STATE/data" "$staging/previous"
     mv -- "$staging/data" "$STATE/data"
     rm -rf -- "$staging"
     staging=

@@ -29,14 +29,15 @@ shown() {
   fi
 }
 # Extra scan paths become absolute: find would read a relative name such as -delete as an
-# expression, not as a path.
+# expression, not as a path. Absolute, not resolved (--no-symlinks): a path that is a symlink keeps
+# its own name, which may hold a secret and is matched like any other; find -L follows it from there.
 extras=()
 for extra in "$@"; do
   [ -e "$extra" ] || die "extra scan path does not exist: $(shown "$extra")"
   # 2>/dev/null here and on tar, find and grep below: each names the path it fails on in its own
   # message, which would bypass `shown`. The exit status still decides, and the message that
   # follows says what failed.
-  resolved=$(realpath -- "$extra" 2>/dev/null) || die "cannot resolve extra scan path: $(shown "$extra")"
+  resolved=$(realpath --no-symlinks -- "$extra" 2>/dev/null) || die "cannot resolve extra scan path: $(shown "$extra")"
   extras+=("$resolved")
 done
 
@@ -229,9 +230,18 @@ dangling=$(find -L "${roots[@]}" -type l -print -quit 2>/dev/null) ||
 # name is a leak like any other, and so is a control whose content changed: one that gained a
 # second secret, or whose canary was replaced by another credential.
 control=$STATE/data/canary-control.txt
-store_copy="^$out/backups/store-[^/]+/data/canary-control\\.txt\$"
+# is_store_copy <file>: the control's place inside one expanded store snapshot. Compared as strings,
+# not as a regular expression: the bundle path holds the checkout path, and a `+` or a `.` in it
+# would be read as an operator.
+is_store_copy() {
+  local middle=${1#"$out/backups/store-"}
+  [ "$middle" != "$1" ] || return 1
+  [ "${middle%/data/canary-control.txt}" != "$middle" ] || return 1
+  middle=${middle%/data/canary-control.txt}
+  [ -n "$middle" ] && [[ $middle != */* ]]
+}
 is_control() { # is_control <file>
-  [ "$1" = "$control" ] || [[ $1 =~ $store_copy ]] || return 1
+  [ "$1" = "$control" ] || is_store_copy "$1" || return 1
   cmp --silent -- "$1" <(control_content)
 }
 secret_in_name() { # secret_in_name <path>
