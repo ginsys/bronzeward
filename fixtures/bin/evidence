@@ -242,6 +242,10 @@ is_store_copy() {
 }
 is_control() { # is_control <file>
   [ "$1" = "$control" ] || is_store_copy "$1" || return 1
+  # Not a symlink: find -L and cmp both follow one, and a control that points at a file outside
+  # .state would excuse a canary that lives there and survives teardown. The same goes for its
+  # data directory; everything above that is the fixture's own.
+  [ ! -L "$1" ] && [ ! -L "$(dirname -- "$1")" ] || return 1
   cmp --silent -- "$1" <(control_content)
 }
 secret_in_name() { # secret_in_name <path>
