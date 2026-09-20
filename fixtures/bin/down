@@ -78,6 +78,11 @@ fi
 # cluster: containers that were removed by hand, or by an earlier down that could not finish, leave
 # volumes that only this list still ties to the fixture.
 if [ -d "$STATE" ]; then
+  # The record is what the removal loop below trusts with `docker volume rm`. Only the regular
+  # file bin/up wrote: through a link, someone else's file would name the volumes to remove.
+  if [ -L "$STATE/down-node-volumes" ] || { [ -e "$STATE/down-node-volumes" ] && [ ! -f "$STATE/down-node-volumes" ]; }; then
+    die "$STATE/down-node-volumes is not the regular file bin/up writes; nothing was removed"
+  fi
   printf '%s\n' "$volume_names" >>"$STATE/down-node-volumes" ||
     die "could not record the Talos node volumes in $STATE; nothing was removed"
   volume_names=$(cat "$STATE/down-node-volumes") ||

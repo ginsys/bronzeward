@@ -21,7 +21,7 @@ and `age` are downloaded into `fixtures/.cache/` and refused on a checksum misma
 | Command | Does |
 |---|---|
 | `fixtures/bin/up` | Generates synthetic secrets, starts PostgreSQL and OpenBao, initializes and unseals OpenBao, creates the Talos cluster, then asks both services again with this run's credentials before it reports the fixture up. Takes about two minutes once images are cached. |
-| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`. `start` is done only once the service or Talos node answers again. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
+| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`. `start` is done only once the service or Talos node answers again. A snapshot name is one path component, without a slash. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
 | `fixtures/bin/evidence [path ...]` | Writes versions, container logs, a database dump, OpenBao metadata and Talos config digests to `.state/evidence/<utc>/`, then scans them, and any extra paths given, for synthetic secret material. Prints the bundle path. |
 | `fixtures/bin/down [--purge] [--adopt]` | Removes every container, network and volume, then checks that nothing is left and fails if something is, or if Docker could not be asked. The claim and then `.state/` are removed last and only after that check passed, so a `down` that could not finish can simply be run again. `--purge` also removes `.cache/`. It refuses a fixture it cannot show to be this checkout's own; `--adopt` overrides that. |
 | `fixtures/bin/selftest [--keep]` | `up`, each injection once with an assertion, `evidence`, `down`. `--keep` runs the checks against a fixture that is already up. |
@@ -53,7 +53,9 @@ old value no longer reproduces. The file is deliberately not a format Renovate r
 No secret is committed. `bin/up` generates all of them into the gitignored `.state/`:
 
 - `secrets.env`: a canary value, the PostgreSQL password, and the OpenBao root and metadata-only
-  tokens. Values the fixture chooses itself start with `BWSYNTH-`.
+  tokens. Values the fixture chooses itself start with `BWSYNTH-`. The commands read this file as
+  data, never as shell code: only those four assignments are accepted, the file must be the regular
+  file `bin/up` wrote, and anything else in it stops every command.
 - `bao-init.json`: the single OpenBao unseal key, in base64 and in hex, and the root token.
 - `talos-secrets.yaml`, `controlplane.yaml`, `talosconfig`, `kubeconfig`: the cluster's own
   generated secrets bundle and client configs.
