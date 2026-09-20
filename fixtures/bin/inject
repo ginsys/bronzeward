@@ -139,6 +139,7 @@ moved_aside=0
 committing=0
 db_swapping=0
 bao_dispatched=0
+docker_dispatched=0
 finish() {
   local rc=$? left status=failed
   # A signal that arrives while bash waits for a rename has it finish the child and run this
@@ -173,6 +174,12 @@ finish() {
   if [ "$bao_dispatched" -eq 1 ] && [ "$rc" -ne 0 ] && [ "$rc" -ne 7 ] && [ "$rc" -ne 22 ]; then
     status=unknown
     say "fixtures: the request was sent and not answered; whether OpenBao applied it is not known"
+  fi
+  # A Docker mutation the daemon may have carried out while a signal ended the client: the CLI
+  # then exits with the signal (above 128); with 1 the daemon answered, and refused.
+  if [ "$docker_dispatched" -eq 1 ] && [ "$rc" -gt 128 ]; then
+    status=unknown
+    say "fixtures: the Docker request was sent and not answered; whether the daemon applied it is not known"
   fi
   # A removal that fails must not end the handler before the outcome is recorded: each is guarded.
   if [ -n "$partial" ]; then
@@ -224,11 +231,16 @@ snapshot() {
 }
 
 case $action in
+  # Each Docker mutation is flagged while it is in flight: see docker_dispatched in finish.
   kill)
+    docker_dispatched=1
     docker kill --signal KILL "$target" >/dev/null
+    docker_dispatched=0
     ;;
   start)
+    docker_dispatched=1
     docker start "$target" >/dev/null
+    docker_dispatched=0
     case $1 in
       postgres) wait_for 60 "postgres" pg pg_isready -h 127.0.0.1 -U bronzeward -d bronzeward ;;
       openbao)
@@ -252,21 +264,27 @@ case $action in
     esac
     ;;
   pause | unpause)
+    docker_dispatched=1
     docker "$action" "$target" >/dev/null
+    docker_dispatched=0
     ;;
   netsplit)
     network=$(network_of "$1")
     network_own "$1" "$network"
+    docker_dispatched=1
     docker network disconnect "$network" "$target"
+    docker_dispatched=0
     ;;
   netjoin)
     network=$(network_of "$1")
     network_own "$1" "$network"
+    docker_dispatched=1
     case $1 in
       controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$network" "$target" ;;
       worker) docker network connect --ip "$TALOS_WORKER_IP" "$network" "$target" ;;
       *) docker network connect --alias "$1" "$network" "$target" ;;
     esac
+    docker_dispatched=0
     ;;
   db-snapshot)
     [ $# -eq 1 ] || usage

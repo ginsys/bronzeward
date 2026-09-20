@@ -59,6 +59,28 @@ mkdir "$STATE" 2>/dev/null || {
 # ERR trap, so neither would print the hint.
 trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; run fixtures/bin/down to remove what was created"' EXIT
 mkdir "$STATE/data" "$STATE/backups"
+# The named volumes compose.yaml declares are made here, first of all, with a label that names this
+# run. Compose reuses a volume of that name whatever made it, and the look above is only a look: a
+# volume made by anyone between it and `compose up` would be run on and, at teardown, removed. Nor
+# is `docker volume create` a claim: on a name that exists it returns the name, without a word.
+# What settles it is the label read back: the run whose create made the volume sees its own value,
+# any other run sees another's, or none, and refuses. bin/down removes a volume of these names
+# only as the run recorded here.
+run_id=$(synthetic) || die "could not generate the run identity"
+compose_volumes=$(compose_volume_names) || die "could not read the volume names from compose.yaml"
+for compose_volume in $compose_volumes; do
+  docker volume create --label "com.docker.compose.project=$FIXTURE_NAME" \
+    --label "com.docker.compose.volume=${compose_volume#"${FIXTURE_NAME}_"}" \
+    --label "$CLAIM_OWNER_LABEL=$FIXTURES" --label "$RUN_LABEL=$run_id" "$compose_volume" >/dev/null ||
+    die "could not create the volume $compose_volume"
+  made_by=$(docker volume inspect --format "{{index .Labels \"$RUN_LABEL\"}}" "$compose_volume") ||
+    die "could not read back the volume $compose_volume"
+  [ "$made_by" = "$run_id" ] ||
+    die "the volume $compose_volume existed before this run made it, or another run made it meanwhile; it is not this fixture's, and nothing more is created. Remove or rename it by hand"
+  printf '%s %s\n' "$compose_volume" "$run_id"
+done >"$STATE/down-compose-volumes.partial"
+mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes"
+unset compose_volumes compose_volume made_by run_id
 canary=$(synthetic) || die "could not generate the synthetic canary"
 password=$(synthetic) || die "could not generate the synthetic PostgreSQL password"
 # secrets_publish: the whole file from the values in hand, written under a temporary name and
@@ -100,20 +122,6 @@ fetch_tools
 say "starting postgres and openbao"
 compose up --detach --quiet-pull --wait postgres
 compose up --detach --quiet-pull openbao
-# The named volumes carry only the project label, which any Compose run of that project name from
-# anywhere puts there too, and a volume has no ID. Their creation times, recorded here, are what
-# bin/down holds each volume of that name to before `compose down --volumes` removes it.
-compose_volumes=$(compose_volume_names) || die "could not read the volume names from compose.yaml"
-compose_volume_record=$(
-  for compose_volume in $compose_volumes; do
-    docker volume inspect --format '{{.Name}} {{.CreatedAt}}' "$compose_volume" || exit 1
-  done
-) || die "could not read the creation time of the Compose volumes"
-[ "$(sed '/^$/d' <<<"$compose_volume_record" | wc -l)" -eq "$(wc -l <<<"$compose_volumes")" ] ||
-  die "expected every Compose volume to record; teardown could not tell them from another's"
-printf '%s\n' "$compose_volume_record" >"$STATE/down-compose-volumes.partial"
-mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes"
-unset compose_volumes compose_volume compose_volume_record
 
 bao_answers() {
   local rc=0
@@ -162,18 +170,21 @@ talosctl cluster create docker \
   --subnet "$TALOS_SUBNET" \
   --workers 1 \
   --talosconfig-destination "$TALOSCONFIG"
-# While the containers certainly exist: see talos_volume_names in lib.sh.
-volume_names=$(talos_volume_names) || die "could not list the Talos node volumes"
-[ -n "$volume_names" ] || die "the Talos nodes have no volumes to record; teardown could not verify them"
-# Under its final name only when complete: bin/down takes a record that exists for the whole list.
-printf '%s\n' "$volume_names" >"$STATE/down-node-volumes.partial"
-mv --no-target-directory -- "$STATE/down-node-volumes.partial" "$STATE/down-node-volumes"
 # The Talos containers carry only the cluster name, which any container can be labelled with. Their
 # IDs, recorded here, are what bin/down holds every container of that label to before removing it.
 container_ids=$(docker ps --all --quiet --no-trunc --filter "label=talos.cluster.name=$FIXTURE_NAME") ||
   die "could not list the Talos containers"
 [ "$(sed '/^$/d' <<<"$container_ids" | wc -l)" -eq 2 ] ||
   die "expected two Talos containers to record; teardown could not tell them from another's"
+# While the containers certainly exist, and from those two alone: a stranger's container under the
+# label, listed and gone between two looks, would otherwise have its volumes recorded as this
+# fixture's and removed with them. See talos_volume_names in lib.sh.
+# shellcheck disable=SC2086  # one ID per word
+volume_names=$(talos_volume_names $container_ids) || die "could not list the Talos node volumes"
+[ -n "$volume_names" ] || die "the Talos nodes have no volumes to record; teardown could not verify them"
+# Under its final name only when complete: bin/down takes a record that exists for the whole list.
+printf '%s\n' "$volume_names" >"$STATE/down-node-volumes.partial"
+mv --no-target-directory -- "$STATE/down-node-volumes.partial" "$STATE/down-node-volumes"
 printf '%s\n' "$container_ids" >"$STATE/down-node-containers.partial"
 mv --no-target-directory -- "$STATE/down-node-containers.partial" "$STATE/down-node-containers"
 # The cluster network carries the same label, and bin/down removes networks by it just the same.

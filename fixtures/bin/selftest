@@ -344,18 +344,22 @@ ok "wait_for ends at its deadline when the attempt itself hangs"
 bao_published() { curl --noproxy '*' --silent --max-time 5 --output /dev/null "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health"; }
 "$here/inject" netsplit openbao
 ! bao_published || fail "partitioned openbao still answers on its published port"
-split=$("$here/evidence") || fail "evidence aborted while openbao was partitioned"
+rc=0
+split=$("$here/evidence") || rc=$?
+"$here/inject" netjoin openbao # before anything can fail
+[ "$rc" -eq 0 ] || fail "evidence aborted while openbao was partitioned"
 grep --quiet '^unreachable' "$split/openbao-client-view.txt" || fail "evidence did not record that clients cannot reach openbao"
 jq -es 'any(.[]; .path == "selftest/item")' "$split/openbao-metadata.jsonl" >/dev/null ||
   fail "evidence lost the true provider state while openbao was partitioned"
-"$here/inject" netjoin openbao
 wait_for 60 "openbao on its published port after netjoin" bao_published
 ok "netsplit / netjoin openbao: bundle holds the client view (unreachable) and the true metadata"
 
 # A hung control plane must not make the healthy worker look dead in the evidence.
 "$here/inject" pause controlplane
-hung=$("$here/evidence") || fail "evidence aborted while the control plane was paused"
-"$here/inject" unpause controlplane
+rc=0
+hung=$("$here/evidence") || rc=$?
+"$here/inject" unpause controlplane # before anything can fail
+[ "$rc" -eq 0 ] || fail "evidence aborted while the control plane was paused"
 grep --quiet "^UNAVAILABLE $TALOS_CONTROLPLANE_IP\$" "$hung/talos-config-sha256.txt" || fail "evidence claims to have read the paused control plane"
 grep --quiet --extended-regexp "^[0-9a-f]{64} $TALOS_WORKER_IP\$" "$hung/talos-config-sha256.txt" ||
   fail "evidence could not read the worker while only the control plane was paused"
@@ -614,6 +618,28 @@ printf 'nothing to see\n' >"$STATE/selftest-target-$BW_BAO_METADATA_TOKEN/file"
 ln -s "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN/file" "$STATE/data/selftest-textlink"
 # A client private key from the generated talosconfig, which the secrets bundle does not hold.
 awk '$1 == "key:" {print "client-key=" $2}' "$TALOSCONFIG" >"$STATE/data/selftest-client-key-leak"
+# An untracked symlink: the bundle would carry the target's name, not the bytes that ran.
+ln -s /etc/hostname "$FIXTURES/.selftest-untracked-link"
+went=0
+"$here/evidence" >/dev/null 2>&1 && went=1
+rm "$FIXTURES/.selftest-untracked-link"
+[ "$went" -eq 0 ] || fail "evidence recorded an untracked symlink as the file that ran"
+# An untracked file hidden by an excludes file outside the repository: neither the status nor the
+# listing sees it, and the bundle would claim to say what ran without it.
+printf '.selftest-globally-ignored\n' >"$FIXTURES/.selftest-excludes"
+printf '[core]\n\texcludesFile = %s\n' "$FIXTURES/.selftest-excludes" >"$FIXTURES/.selftest-gitconfig"
+: >"$FIXTURES/.selftest-globally-ignored"
+went=0
+GIT_CONFIG_GLOBAL=$FIXTURES/.selftest-gitconfig "$here/evidence" >/dev/null 2>&1 && went=1
+rm "$FIXTURES/.selftest-excludes" "$FIXTURES/.selftest-gitconfig" "$FIXTURES/.selftest-globally-ignored"
+[ "$went" -eq 0 ] || fail "evidence captured while an untracked file under fixtures/ was hidden by an excludes file outside the repository"
+# The directory of bundles writable but not readable: the captures that ended before their scan
+# cannot be listed, and this one must not report a scan.
+chmod 300 "$STATE/evidence"
+went=0
+"$here/evidence" >/dev/null 2>&1 && went=1
+chmod 700 "$STATE/evidence" # before anything can fail
+[ "$went" -eq 0 ] || fail "evidence reported a scan while the earlier captures could not be listed"
 rc=0
 # An untracked file in the checkout: the commit alone does not say what ran, and the bundle must
 # carry the file's content, not its name alone.
@@ -766,13 +792,13 @@ if [ "$keep" != --keep ]; then
     [ "$(docker ps --all --quiet --filter "label=talos.cluster.name=$FIXTURE_NAME" | wc -l)" -ne 2 ]; then
     fail "down removed by the Talos label alone, without the record of which containers up created"
   fi
-  # The Compose volumes carry only the project label, which any Compose run of that name puts
-  # there; down holds each to the creation time up recorded. Without the record, and with a
-  # record naming another time, down refuses.
+  # The Compose volumes carry the project label, which any Compose run of that name puts there;
+  # down holds each to the run up labelled it with and recorded. Without the record, and with a
+  # record naming another run, down refuses.
   mv "$STATE/down-compose-volumes" "$STATE/selftest-compose-volumes-aside"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
-  awk '{print $1, "1970-01-01T00:00:00Z"}' "$STATE/selftest-compose-volumes-aside" >"$STATE/down-compose-volumes"
+  awk '{print $1, "BWSYNTH-selftest-not-this-run"}' "$STATE/selftest-compose-volumes-aside" >"$STATE/down-compose-volumes"
   stale=0
   "$here/down" >/dev/null 2>&1 && stale=1
   mv "$STATE/selftest-compose-volumes-aside" "$STATE/down-compose-volumes" # before anything can fail
@@ -842,7 +868,7 @@ if [ "$keep" != --keep ]; then
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container and network against the records and refuses by label alone, holds the Compose volumes to the creation times recorded, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container and network against the records and refuses by label alone, holds the Compose volumes to the run recorded, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

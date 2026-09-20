@@ -113,12 +113,13 @@ unset talos_state
 # A volume under one of the names compose.yaml gives its own, without the project label, is not
 # the fixture's and never was: Compose does not make one without the label. `compose down
 # --volumes` below would remove it all the same, so it stops the teardown, --adopt or not.
-# The label itself is only the project name, which any Compose run of that name from anywhere
-# puts on the volumes it makes, and a volume has no ID: with this run's volume removed by hand,
-# a name could be taken again under the same label. bin/up recorded each volume's creation time
-# once it existed (held to the one-name rule by state_files_own above), and a labelled volume
-# is removed only as the one recorded. Without the record, as an up interrupted right after
-# starting the services leaves it, the label is all there is, and that is for --adopt.
+# The project label itself is only the project name, which any Compose run of that name from
+# anywhere puts on the volumes it makes, and a volume has no ID: with this run's volume removed
+# by hand, a name could be taken again under the same label. bin/up made the volumes itself,
+# labelled with the run, and recorded name and run (held to the one-name rule by state_files_own
+# above); a labelled volume is removed only as the run recorded. Without the record, as an up
+# interrupted right after making the volumes leaves it, the label is all there is, and that is
+# for --adopt.
 compose_volumes=$(compose_volume_names) || die "could not read the volume names from compose.yaml; nothing was removed"
 if [ -f "$STATE/down-compose-volumes" ]; then
   compose_volume_record=$(cat "$STATE/down-compose-volumes") || die "could not read the recorded Compose volumes; nothing was removed"
@@ -126,14 +127,14 @@ else
   compose_volume_record=
 fi
 for compose_volume in $compose_volumes; do
-  if identity=$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}} {{.Name}} {{.CreatedAt}}' "$compose_volume" 2>&1); then
+  if identity=$(docker volume inspect --format "{{index .Labels \"com.docker.compose.project\"}} {{.Name}} {{index .Labels \"$RUN_LABEL\"}}" "$compose_volume" 2>&1); then
     [ "${identity%% *}" = "$FIXTURE_NAME" ] ||
       die "the volume $compose_volume carries no fixture label and is someone's data under a name compose.yaml uses; nothing was removed. Remove or rename it by hand"
     [ "$adopt" -eq 1 ] || {
       [ -n "$compose_volume_record" ] ||
-        die "the volume $compose_volume carries this fixture's label but bin/up left no record of the volumes it created, as an up interrupted right after starting the services leaves it; nothing was removed. Pass --adopt to remove it by the label"
+        die "the volume $compose_volume carries this fixture's label but bin/up left no record of the volumes it made, as an up interrupted right after making them leaves it; nothing was removed. Pass --adopt to remove it by the label"
       grep --quiet --line-regexp --fixed-strings -- "${identity#* }" <<<"$compose_volume_record" ||
-        die "the volume $compose_volume carries this fixture's label but is not the one bin/up created (its creation time is not the recorded one); nothing was removed. Remove it by hand, or pass --adopt"
+        die "the volume $compose_volume carries this fixture's label but is not the one bin/up made (it does not carry the run recorded); nothing was removed. Remove it by hand, or pass --adopt"
     }
   else
     case $identity in
@@ -147,6 +148,7 @@ unset compose_volumes compose_volume compose_volume_record identity
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
 # see "Known limits" in fixtures/README.md.
+# shellcheck disable=SC2119  # of every labelled container: no IDs on purpose
 volume_names=$(talos_volume_names) || die "could not list the Talos node volumes; nothing was removed"
 # Without the record bin/up writes once the cluster exists, which a checkout that adopts another's
 # fixture never has, only the nodes whose containers still exist name their volumes. With fewer
