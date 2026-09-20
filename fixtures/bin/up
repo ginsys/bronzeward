@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-need docker curl jq tar sha256sum install awk timeout
+need docker curl jq tar sha256sum install awk timeout mktemp
 docker compose version >/dev/null || die "missing prerequisite: docker compose v2"
 [ "$(uname -sm)" = "Linux x86_64" ] || die "pinned CLI assets are linux/amd64 only"
 [ ! -e "$STATE" ] || die "$STATE exists: run fixtures/bin/down first"
@@ -117,25 +117,9 @@ talosctl -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" \
 talosctl gen secrets --from-controlplane-config "$STATE/controlplane.yaml" \
   --output-file "$STATE/talos-secrets.yaml"
 
-# Leak-scan patterns: every synthetic secret this run produced. An empty or very short pattern
-# would match every line of every file, so anything under 8 characters is dropped, and the list
-# must still hold more than the prefix.
-# The client configs hold private keys of their own, generated for this cluster's admin clients and
-# absent from the secrets bundle. Collected first, so that a config whose key is not where it is
-# expected fails the run instead of thinning the list.
-talos_client_key=$(awk '$1 == "key:" {print $2}' "$TALOSCONFIG")
-kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG")
-[ -n "$talos_client_key" ] || die "no client key found in $TALOSCONFIG; it would go unscanned"
-[ -n "$kube_client_key" ] || die "no client key found in $KUBECONFIG; it would go unscanned"
-{
-  printf 'BWSYNTH-\n'
-  printf '%s\n' "$talos_client_key" "$kube_client_key"
-  # Both encodings of the unseal key: they share no substring, and either is the credential.
-  jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json"
-  awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env"
-  awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \
-    "$STATE/talos-secrets.yaml"
-} | awk 'length($0) >= 8' | sort -u >"$STATE/scan-patterns.txt"
+# Leak-scan patterns: every synthetic secret this run produced (scan_patterns in lib.sh, which
+# bin/evidence runs again to check the file). The list must hold more than the prefix.
+scan_patterns >"$STATE/scan-patterns.txt"
 [ "$(wc -l <"$STATE/scan-patterns.txt")" -ge 8 ] ||
   die "only $(wc -l <"$STATE/scan-patterns.txt") leak-scan patterns were collected; the Talos bundle was not read"
 

@@ -17,7 +17,7 @@ for arg in "$@"; do
   esac
 done
 
-need docker
+need docker stat
 # Every removal and every check below asks Docker. If it does not answer, nothing can be removed
 # or verified, and the state directory that names what to remove must survive.
 docker info >/dev/null 2>&1 || die "the Docker daemon does not answer; nothing was removed"
@@ -79,9 +79,11 @@ fi
 # volumes that only this list still ties to the fixture.
 if [ -d "$STATE" ]; then
   # The record is what the removal loop below trusts with `docker volume rm`. Only the regular
-  # file bin/up wrote: through a link, someone else's file would name the volumes to remove.
-  if [ -L "$STATE/down-node-volumes" ] || { [ -e "$STATE/down-node-volumes" ] && [ ! -f "$STATE/down-node-volumes" ]; }; then
-    die "$STATE/down-node-volumes is not the regular file bin/up writes; nothing was removed"
+  # file bin/up wrote, under that one name: through a link, symbolic or hard, someone else's file
+  # would name the volumes to remove.
+  if [ -L "$STATE/down-node-volumes" ] || { [ -e "$STATE/down-node-volumes" ] &&
+    { [ ! -f "$STATE/down-node-volumes" ] || [ "$(stat --format=%h -- "$STATE/down-node-volumes" 2>/dev/null)" != 1 ]; }; }; then
+    die "$STATE/down-node-volumes is not the regular file bin/up writes, with that one name; nothing was removed"
   fi
   printf '%s\n' "$volume_names" >>"$STATE/down-node-volumes" ||
     die "could not record the Talos node volumes in $STATE; nothing was removed"

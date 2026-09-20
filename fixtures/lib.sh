@@ -34,10 +34,12 @@ set +a
 # The generated secrets are read as data, not sourced: a secrets.env that was replaced, or a line
 # added to it, must not run as shell code here, before any ownership check. Only the four
 # assignments bin/up writes are accepted, each a bare value without whitespace, and the file must
-# be the regular file bin/up made.
+# be the regular file bin/up made, under that one name: with a second name outside .state the
+# secrets would outlive teardown there.
 if [ -e "$STATE/secrets.env" ] || [ -L "$STATE/secrets.env" ]; then
-  if [ -L "$STATE/secrets.env" ] || [ ! -f "$STATE/secrets.env" ]; then
-    printf 'fixtures: %s is not the regular file bin/up writes; the fixture never makes anything else there\n' "$STATE/secrets.env" >&2
+  if [ -L "$STATE/secrets.env" ] || [ ! -f "$STATE/secrets.env" ] ||
+    [ "$(stat --format=%h -- "$STATE/secrets.env" 2>/dev/null)" != 1 ]; then
+    printf 'fixtures: %s is not the regular file bin/up writes, with that one name; the fixture never makes anything else there\n' "$STATE/secrets.env" >&2
     exit 1
   fi
   while IFS= read -r secret_line || [ -n "$secret_line" ]; do
@@ -179,13 +181,24 @@ container() {
 
 # fetch <name> <url> <sha256>: download once into .cache, refuse a checksum mismatch.
 fetch() {
-  local name=$1 url=$2 sum=$3 file=$CACHE/download-$1
+  local name=$1 url=$2 sum=$3 file=$CACHE/download-$1 partial
   mkdir -p "$CACHE"
+  # Never through a link: curl writes through an existing symlink, so a linked cache entry would
+  # send the download into whatever file it names. The download lands in a new file of its own
+  # and takes the cache name only once its checksum passed.
+  [ ! -L "$file" ] || die "$file is a symlink; the fixture never makes one. Remove it and run again"
   if [ ! -f "$file" ] || ! printf '%s  %s\n' "$sum" "$file" | sha256sum --check --status; then
     say "downloading $name"
-    curl --fail --silent --show-error --location --output "$file" "$url"
-    printf '%s  %s\n' "$sum" "$file" | sha256sum --check --status ||
+    partial=$(mktemp "$file.partial.XXXXXX")
+    curl --fail --silent --show-error --location --output "$partial" "$url" || {
+      rm -f -- "$partial"
+      die "$name: download of $url failed"
+    }
+    printf '%s  %s\n' "$sum" "$partial" | sha256sum --check --status || {
+      rm -f -- "$partial"
       die "$name: sha256 mismatch for $url"
+    }
+    mv --no-target-directory -- "$partial" "$file"
   fi
   printf '%s\n' "$file"
 }
@@ -198,6 +211,30 @@ fetch_tools() {
   install -m 0755 "$file" "$CACHE/sops"
   file=$(fetch age "$AGE_URL" "$AGE_SHA256")
   tar -xzf "$file" -C "$CACHE" --strip-components=1 age/age age/age-keygen
+}
+
+# scan_patterns: every synthetic secret this run produced, one per line, from the files bin/up
+# generated. An empty or very short pattern would match every line of every file, so anything
+# under 8 characters is dropped. The client configs hold private keys of their own, generated for
+# this cluster's admin clients and absent from the secrets bundle; collected first, so that a
+# config whose key is not where it is expected fails instead of thinning the list. bin/up writes
+# the list to .state/scan-patterns.txt; bin/evidence rebuilds it from the same sources and refuses
+# a file that differs, since a list thinned after up would let a scan pass with a token unmatched.
+scan_patterns() {
+  local talos_client_key kube_client_key
+  talos_client_key=$(awk '$1 == "key:" {print $2}' "$TALOSCONFIG")
+  kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG")
+  [ -n "$talos_client_key" ] || die "no client key found in $TALOSCONFIG; it would go unscanned"
+  [ -n "$kube_client_key" ] || die "no client key found in $KUBECONFIG; it would go unscanned"
+  {
+    printf 'BWSYNTH-\n'
+    printf '%s\n' "$talos_client_key" "$kube_client_key"
+    # Both encodings of the unseal key: they share no substring, and either is the credential.
+    jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json"
+    awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env"
+    awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \
+      "$STATE/talos-secrets.yaml"
+  } | awk 'length($0) >= 8' | sort -u
 }
 
 bao_unseal() {
