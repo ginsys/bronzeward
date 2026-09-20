@@ -104,8 +104,9 @@ published_inode=
 staging=
 moved_aside=0
 committing=0
+db_swapping=0
 finish() {
-  local rc=$?
+  local rc=$? left
   # A signal that arrives while bash waits for a rename has it finish the child and run this
   # handler before the line that would have cleared the flags. The rename is the commit of a
   # snapshot and of a store restore, so one that did complete is recorded as done, whatever the
@@ -116,8 +117,19 @@ finish() {
     [ "$rc" -eq 0 ] || say "fixtures: interrupted after the snapshot was published; recorded as done"
     rc=0
   fi
-  if [ "$committing" -eq 1 ] && [ -n "$staging" ] && [ ! -e "$staging/data" ] && [ -e "$STATE/data" ]; then
+  # With the staging name already cleared, the interruption came during the cleanup after the swap.
+  if [ "$committing" -eq 1 ] && [ -e "$STATE/data" ] && { [ -z "$staging" ] || [ ! -e "$staging/data" ]; }; then
     [ "$rc" -eq 0 ] || say "fixtures: interrupted after the restored store was in place; recorded as done"
+    rc=0
+  fi
+  # The database swap is one transaction that the server may commit while the signal ends the
+  # client: afterwards the scratch database no longer exists under its name, and the restore is
+  # in place. Asked only when the status says failure, and only while the server answers; a
+  # query that fails leaves the status as it was.
+  if [ "$db_swapping" -eq 1 ] && [ "$rc" -ne 0 ] &&
+    left=$(pg psql -U bronzeward -d postgres -Atc "select count(*) from pg_database where datname = 'bronzeward_restore'" 2>/dev/null) &&
+    [ "$left" = 0 ]; then
+    say "fixtures: interrupted after the restored database was swapped in; recorded as done. bronzeward_previous is left; the next db-restore drops it"
     rc=0
   fi
   # A removal that fails must not end the handler before the outcome is recorded: each is guarded.
@@ -236,7 +248,9 @@ case $action in
     # the same transaction, and each is waited for: the signal alone returns before the backend
     # has gone, and the rename right after it would then fail on a session already told to leave.
     # A client that reconnects in between makes the rename fail, and the transaction then leaves
-    # the live database as it was.
+    # the live database as it was. The flag first: a signal during the transaction has the exit
+    # handler ask the server whether it committed all the same.
+    db_swapping=1
     pg psql -U bronzeward -d postgres -v ON_ERROR_STOP=1 --quiet --single-transaction --output=/dev/null \
       -c "select pg_terminate_backend(pid, 5000) from pg_stat_activity where datname = 'bronzeward'" \
       -c 'alter database bronzeward rename to bronzeward_previous' \
