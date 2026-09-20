@@ -118,10 +118,12 @@ need_state() {
 # client key past teardown, and the scan roots never reach the source itself. secrets.env is
 # checked above, before it is read; the rest here, by need_state and by down, before anything is
 # scanned or removed. The node-volume record has its own check in down. injections.log too: its
-# arguments name snapshots, and bin/evidence copies it into the bundle as the timeline.
+# arguments name snapshots, and bin/evidence copies it into the bundle as the timeline. And the
+# record of the Talos container IDs, which containers_own and down trust with what a fixture name
+# or label may act on.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log; do
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -132,10 +134,11 @@ state_files_own() {
 # containers_own: every container that answers to one of the fixture's names is the fixture's. The
 # names are fixed, so once the real one was removed by hand anything can take the name while the
 # claim still stands, and a kill or a restore would go to it. The Compose containers carry the
-# project and its directory; the Talos nodes carry the cluster name. One that is gone is what a
-# kill or a teardown that could not finish leaves, and is not refused here.
+# project and its directory. The Talos nodes carry only the cluster name, which anything can be
+# labelled with, so they are held to the IDs bin/up recorded once it had created them. One that is
+# gone is what a kill or a teardown that could not finish leaves, and is not refused here.
 containers_own() {
-  local name labels
+  local name labels id
   for name in "$PG" "$BAO"; do
     labels=$(docker inspect --format \
       '{{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
@@ -144,9 +147,11 @@ containers_own() {
       die "the container named $name is not this fixture's: its labels do not name this project and checkout. Remove it by hand; the fixture will not act on it"
   done
   for name in "$CP" "$WORKER"; do
-    labels=$(docker inspect --format '{{index .Config.Labels "talos.cluster.name"}}' "$name" 2>/dev/null) || continue
-    [ "$labels" = "$FIXTURE_NAME" ] ||
-      die "the container named $name is not this fixture's: its labels do not name this cluster. Remove it by hand; the fixture will not act on it"
+    id=$(docker inspect --format '{{.Id}}' "$name" 2>/dev/null) || continue
+    [ -f "$STATE/down-node-containers" ] ||
+      die "a container named $name exists but bin/up left no record of the Talos containers it created, as an up interrupted right after creating the cluster leaves it. Run fixtures/bin/down --adopt, then up"
+    grep --quiet --line-regexp --fixed-strings -- "$id" "$STATE/down-node-containers" ||
+      die "the container named $name is not this fixture's: it is not one bin/up created. Remove it by hand; the fixture will not act on it"
   done
 }
 

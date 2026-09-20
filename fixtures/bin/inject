@@ -261,9 +261,13 @@ case $action in
       die "store-$1.tgz holds an entry named previous next to data; the live one was left alone"
     # The live directory may be gone already: losing it is what a store snapshot is for.
     # --no-target-directory: a destination that exists must fail the rename, never receive the source.
+    # The flag goes first: a signal during the rename has bash finish the child and run the exit
+    # handler before the next line, and the handler must then know the live directory was moved.
+    # Set with nothing moved yet, it is harmless: the handler only moves back a previous that exists
+    # while data does not.
     if [ -e "$STATE/data" ]; then
-      mv --no-target-directory -- "$STATE/data" "$staging/previous"
       moved_aside=1
+      mv --no-target-directory -- "$STATE/data" "$staging/previous"
     fi
     mv --no-target-directory -- "$staging/data" "$STATE/data"
     # The rename above is the commit: the restored store is in place. Cleaning up after it must not

@@ -255,7 +255,17 @@ docker rm --force --volumes "$PG" >/dev/null
 docker rename "$PG-selftest-aside" "$PG" >/dev/null # before anything can fail
 [ "$impostor" -eq 0 ] || fail "inject acted on a container that only bears the fixture's name"
 [ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
-ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash, a newline or .partial. refused, no write through a symlinked or a hard-linked final name or log, a container that only bears a fixture name refused, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored and never replaced by an archive's own previous entry"
+# A Talos node's name and label both: the label is a cluster name anything can be created with, so
+# only the ID bin/up recorded says the container is the node.
+docker rename "$WORKER" "$WORKER-selftest-aside" >/dev/null
+docker create --quiet --name "$WORKER" --label "talos.cluster.name=$FIXTURE_NAME" --network none "$POSTGRES_IMAGE" true >/dev/null
+impostor=0
+"$here/inject" pause worker >/dev/null 2>&1 && impostor=1
+docker rm --force --volumes "$WORKER" >/dev/null
+docker rename "$WORKER-selftest-aside" "$WORKER" >/dev/null # before anything can fail
+[ "$impostor" -eq 0 ] || fail "inject acted on a container that bears a Talos node's name and label but is not the node"
+[ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
+ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash, a newline or .partial. refused, no write through a symlinked or a hard-linked final name or log, a container that only bears a fixture name, or a Talos node's name and label, refused, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored and never replaced by an archive's own previous entry"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -687,13 +697,23 @@ if [ "$keep" != --keep ]; then
   if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a container that only carries the Talos label"
   fi
+  # And without the record, as an up interrupted right after creating the cluster leaves it: the
+  # label is all there is, and removing by it is for --adopt.
+  mv "$STATE/down-node-containers" "$STATE/selftest-containers-aside"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  mv "$STATE/selftest-containers-aside" "$STATE/down-node-containers" # before anything can fail
+  if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ] ||
+    [ "$(docker ps --all --quiet --filter "label=talos.cluster.name=$FIXTURE_NAME" | wc -l)" -ne 2 ]; then
+    fail "down removed by the Talos label alone, without the record of which containers up created"
+  fi
   "$here/down" || fail "down reported leftovers"
   # down looks for what it can name. A volume no label or record points at, such as the anonymous
   # one Docker makes for the claim container, only shows up as a difference on the whole daemon.
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link and holds every recorded name against Docker, then leaves nothing behind, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name and every Talos-labelled container against the records and refuses by label alone, then leaves nothing behind, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"
