@@ -89,7 +89,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-2, 4, 9, 19, 21, 22 and 23 (section 5, items 8 to 17); the revision described here passed 24 of 24 from
+2, 4, 8, 9, 19, 21, 22 and 23 (section 5, items 8 to 18); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed.
 
@@ -102,8 +102,8 @@ against one fixture. Those runs were not timed.
 | 5 | `bao-soft-delete` | Metadata shows a deletion time, `destroyed` false | pass |
 | 6 | `bao-destroy` | Metadata shows `destroyed` true | pass |
 | 7 | `bao-delete-key` | Transit key no longer readable | pass |
-| 8 | `bao-restore` of the earlier snapshot | Destroyed version and deleted key are back | pass |
-| 9 | `store-snapshot` / `store-restore`, then `store-restore` of a corrupt archive, a `store-snapshot` with an excluding `TAR_OPTIONS` in the environment, then `store-restore` with the live directory gone | Deleted file is back; the corrupt restore fails and leaves the live directory, positive control included, untouched; the snapshot holds the file `TAR_OPTIONS` named; the missing directory is restored | pass |
+| 8 | A second `bao-snapshot` under a `CURL_HOME` whose curlrc sets `output`; `bao-restore` of the earlier snapshot | The curlrc is ignored: nothing is written where it points and the snapshot is not empty; destroyed version and deleted key are back | pass |
+| 9 | `store-snapshot` / `store-restore`, then `store-restore` of a corrupt archive, a `store-snapshot` with an excluding `TAR_OPTIONS` in the environment, a `store-snapshot` whose final name is a symlink to a directory, `store-restore` of an archive whose `data` is a symlink, then `store-restore` with the live directory gone | Deleted file is back; the corrupt restore fails and leaves the live directory, positive control included, untouched; the snapshot holds the file `TAR_OPTIONS` named; the symlinked name is replaced by the snapshot and nothing is written into the directory it pointed at; the archive with the symlinked `data` is refused and the live directory stays; the missing directory is restored | pass |
 | 10 | `bin/evidence` while PostgreSQL is dead | Does not abort; `unavailable.txt` names the missing live dump; the database backup is still expanded and scanned | pass |
 | 11 | `db-snapshot` while PostgreSQL is dead | Fails; no file of that snapshot name is left in `.state/backups`; `injections.log` records it as `failed` and the preceding `kill` as `done` | pass |
 | 12 | `kill` / `start` PostgreSQL | No answer while dead; committed row survives | pass |
@@ -116,7 +116,7 @@ against one fixture. Those runs were not timed.
 | 19 | `kill` / `start` worker, then `pause` / `unpause` worker | The first request after `start` returns is answered, without a wait; no Talos API answer while paused, answers after | pass |
 | 20 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
 | 21 | `bin/evidence` with a scan path that does not exist, then with a mode-000 file whose name holds a secret (skipped when run as root) | Refuses both, non-zero exit; the second message withholds the name, and stderr holds no secret | pass |
-| 22 | Evidence with the positive control replaced by a symlink to a file of the same content outside the scanned paths, then with a hard link to the control outside them, then with `.state/evidence` replaced by a symlink; then evidence and leak scan on the healthy fixture, run from another directory with the relative scan paths `-delete` and `-delete.d`, a symlinked file under `.state/data`, a leaking file named `canary-control.txt` outside `.state/data`, the control itself with its canary replaced by another secret, a benign file with a secret in its name, a scan path that is a symlink with a secret in its name, and a planted copy of the `talosconfig` client key | The symlinked and the hard-linked control are each reported as a leak; the symlinked evidence directory is refused and nothing is written through it; in the last run all are scanned and reported, nothing is deleted; the file that only shares the control's name and the control with the replaced canary are reported as leaks, the control's copy inside the expanded store snapshot is not; exactly the two secret-bearing names are reported, with the names withheld, and the report itself holds no secret; the client key is found; no `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
+| 22 | Evidence with the positive control replaced by a symlink to a file of the same content outside the scanned paths, then with a hard link to the control outside them, then with `.state/evidence` replaced by a symlink; then evidence and leak scan on the healthy fixture, run from another directory with the relative scan paths `-delete` and `-delete.d`, a symlinked file under `.state/data`, a leaking file named `canary-control.txt` outside `.state/data`, the control itself with its canary replaced by another secret, a benign file with a secret in its name, a scan path that is a symlink with a secret in its name, a symlink with a benign name and benign content behind it whose stored target path holds a secret, and a planted copy of the `talosconfig` client key | The symlinked and the hard-linked control are each reported as a leak; the symlinked evidence directory is refused and nothing is written through it; in the last run all are scanned and reported, nothing is deleted; the file that only shares the control's name and the control with the replaced canary are reported as leaks, the control's copy inside the expanded store snapshot is not; exactly the two secret-bearing names are reported, with the names withheld, and the report itself holds no secret; the client key is found; no `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
 | 23 | `bin/down`, then the daemon's whole volume list against the one taken before `up` | No container, network, volume or state directory left; no volume exists that did not before `up` | pass |
 | 24 | `up`, `evidence` and `down` with `.state` replaced by a dangling symlink | Each refuses; nothing is created at the link's target | pass |
 
@@ -367,6 +367,25 @@ Each of these is reproducible and each changed the fixture.
     read of the random source would have left the constant prefix as the PostgreSQL password,
     with `up` reporting success. The value is assigned and measured first. That failure was not
     provoked.
+18. **Links again, the caller's environment again, and two outcomes reported before they were
+    checked.** An eleventh round, six findings, all from one reviewer; the advisory review found
+    nothing. A snapshot's final name that was a symlink to a directory received the finished
+    snapshot inside that directory, outside `.state`, with the action logged as done; every
+    rename that publishes or swaps something now refuses to treat its destination as a directory
+    (check 9). `store-restore` tested the extracted `data` with a test that follows links, so an
+    archive holding `data` as a symlink was installed as the store, the real one was removed for
+    it, and every later command refused the result; it must be a real directory (check 9). The
+    leak scan read what a symlink points at and what it is called, but not the path it stores,
+    so a secret held only there went unreported; the stored target is matched too (check 22).
+    A curlrc in the caller's home could set `output` and make `bao-snapshot` publish an empty
+    file with exit status 0; every `curl` of the fixture now ignores it, through one wrapper in
+    the shared setup, and the prerequisite check was changed to look for executables only, since
+    a wrapper function would otherwise have satisfied it (check 8). `bin/up` wrote its record of
+    the node volumes in place, so an interruption could leave a partial record that `bin/down`
+    takes for complete; it is written aside and renamed. And `down --purge` reported success
+    without checking that the cache was gone. Observed outside `selftest`: with an entry in
+    `.cache` that cannot be removed, `down --purge` exits 1 and names the directory, and
+    finishes once the entry is removable. The interrupted record was not provoked.
 
 ## 6. What each experiment gets
 

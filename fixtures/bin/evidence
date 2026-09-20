@@ -10,7 +10,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-need docker curl jq tar sha256sum git find awk timeout realpath mktemp cmp stat
+need docker curl jq tar sha256sum git find awk timeout realpath readlink mktemp cmp stat
 need_state
 # shown <path>: the path as a message or the bundle may record it. A name that holds a secret is
 # never written out, for the same reason a matched line is not; the entry is identified by its inode
@@ -282,7 +282,16 @@ done <"$list"
 # directories included, is matched too.
 find -L "${roots[@]}" -print0 2>/dev/null >"$list" || die "leak scan could not walk every path; results void"
 while IFS= read -r -d '' entry; do
-  secret_in_name "$entry" || continue
+  hit=0
+  ! secret_in_name "$entry" || hit=1
+  # The text of a symlink is stored data too: the content pass reads what the link points at and
+  # the test above reads what the link is called, so a secret in the target path is in neither.
+  if [ "$hit" -eq 0 ] && [ -L "$entry" ]; then
+    target=$(readlink -- "$entry" 2>/dev/null) || die "leak scan could not read the link $(shown "$entry"); results void"
+    ! secret_in_name "$target" || hit=1
+    unset target
+  fi
+  [ "$hit" -eq 1 ] || continue
   printf '1 %s\n' "$(shown "$entry")" >>"$scan"
   others+="1 $(shown "$entry")"$'\n'
 done <"$list"

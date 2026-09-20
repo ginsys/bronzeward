@@ -61,7 +61,9 @@ die() {
 need() {
   local tool
   for tool in "$@"; do
-    command -v "$tool" >/dev/null || die "missing prerequisite: $tool"
+    # type -P: an executable on PATH. `command -v` is also satisfied by a shell function, and curl
+    # below is wrapped in one.
+    type -P "$tool" >/dev/null || die "missing prerequisite: $tool"
   done
 }
 
@@ -89,6 +91,11 @@ compose() {
 }
 
 talosctl() { "$CACHE/talosctl" "$@"; }
+
+# Every curl of the fixture ignores the caller's curlrc: an `output` or a `proxy` set there would
+# send a snapshot somewhere else, or a token through a proxy, with curl still exiting 0. --disable
+# only counts as the first argument.
+curl() { command curl --disable "$@"; }
 
 # Every request to a service is bounded. The fixture exists to be broken on purpose, and a provider
 # that accepts a request and never answers would otherwise hang the command for good; a request

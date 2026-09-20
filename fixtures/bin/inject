@@ -78,7 +78,7 @@ finish() {
     # store-restore ended between its two renames: the earlier store goes back before the staging
     # directory is removed. If it cannot, the staging directory stays, because it holds the only copy.
     if [ -d "$staging/previous" ] && [ ! -e "$STATE/data" ]; then
-      mv -- "$staging/previous" "$STATE/data" || staging=
+      mv --no-target-directory -- "$staging/previous" "$STATE/data" || staging=
     fi
     [ -z "$staging" ] || rm -rf -- "$staging"
   fi
@@ -95,7 +95,10 @@ snapshot() {
   shift
   partial=$(mktemp "$file.partial.XXXXXX")
   "$@" >"$partial"
-  mv -- "$partial" "$file"
+  # --no-target-directory: a final name that is a symlink to a directory, left by an earlier run or
+  # a prototype, would otherwise receive the snapshot inside that directory, outside .state, with
+  # the action logged as done. The rename replaces the link itself, and fails on a real directory.
+  mv --no-target-directory -- "$partial" "$file"
   partial=
 }
 
@@ -202,11 +205,16 @@ case $action in
     # if the action ends in between, `finish` puts it back.
     staging=$(mktemp -d "$STATE/store-restore.XXXXXX")
     tar -xzf "$STATE/backups/store-$1.tgz" -C "$staging"
-    [ -d "$staging/data" ] || die "store-$1.tgz holds no data directory; the live one was left alone"
-    [ ! -e "$staging/previous" ] || die "store-$1.tgz holds an entry named previous next to data; the live one was left alone"
+    # A real directory: `-d` alone follows a link, and a `data` that is a symlink would be installed
+    # as the store, which every command then refuses, after the real one had been removed for it.
+    [ -d "$staging/data" ] && [ ! -L "$staging/data" ] ||
+      die "store-$1.tgz holds no data directory; the live one was left alone"
+    [ ! -e "$staging/previous" ] && [ ! -L "$staging/previous" ] ||
+      die "store-$1.tgz holds an entry named previous next to data; the live one was left alone"
     # The live directory may be gone already: losing it is what a store snapshot is for.
-    [ ! -e "$STATE/data" ] || mv -- "$STATE/data" "$staging/previous"
-    mv -- "$staging/data" "$STATE/data"
+    # --no-target-directory: a destination that exists must fail the rename, never receive the source.
+    [ ! -e "$STATE/data" ] || mv --no-target-directory -- "$STATE/data" "$staging/previous"
+    mv --no-target-directory -- "$staging/data" "$STATE/data"
     rm -rf -- "$staging"
     staging=
     ;;
