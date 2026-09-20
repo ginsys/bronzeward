@@ -49,16 +49,31 @@ foreign=$(grep --invert-match --line-regexp --fixed-strings -- "$FIXTURES" <<<"$
 if [ "$adopt" -eq 0 ] && [ -n "$existing" ]; then
   [ -z "$foreign" ] ||
     die "the fixture on this Docker daemon was started from $foreign, not from here; nothing was removed. Run its own fixtures/bin/down, or pass --adopt if that checkout is gone"
-  # Either mark shows the resources to be this checkout's own: the claim `up` took here, or, for a
-  # fixture that lost its claim, the state directory.
-  [ "$claimed_by" = "$FIXTURES" ] || [ -e "$STATE" ] ||
-    die "fixture containers, networks or volumes exist, but neither a claim taken from this checkout nor $STATE shows them to belong to it; nothing was removed. Pass --adopt to remove them anyway"
+  # The claim `up` took here is the one mark that shows the resources to be this checkout's own, and
+  # it is dropped last, below, so a teardown that could not finish still holds it. A state directory
+  # is no such mark: it can be left over from a fixture whose resources were removed by hand, while
+  # what exists now is the rest of another checkout's fixture.
+  [ "$claimed_by" = "$FIXTURES" ] ||
+    die "fixture containers, networks or volumes exist, but no claim taken from this checkout shows them to belong to it; nothing was removed. Pass --adopt to remove them anyway"
 fi
 
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
 # see "Known limits" in fixtures/README.md.
 volume_names=$(talos_volume_names) || die "could not list the Talos node volumes; nothing was removed"
+# Without the record bin/up writes once the cluster exists, which a checkout that adopts another's
+# fixture never has, only the nodes whose containers still exist name their volumes. With fewer
+# than both of them, this run cannot say that no node volume is left, and must not. Remembered in
+# the state directory as well: the list written below would pass for the record on a second run.
+talos_containers=$(docker ps --all --quiet --filter "label=$talos_label") ||
+  die "could not list the Talos containers; nothing was removed"
+volumes_known=1
+if [ -e "$STATE/down-node-volumes-incomplete" ] ||
+  { [ -n "$existing" ] && [ ! -f "$STATE/down-node-volumes" ] && [ "$(sed '/^$/d' <<<"$talos_containers" | wc -l)" -lt 2 ]; }; then
+  volumes_known=0
+  [ ! -d "$STATE" ] || : >"$STATE/down-node-volumes-incomplete" ||
+    die "could not record in $STATE that the Talos node volumes are not all known; nothing was removed"
+fi
 # Remembered in the state directory, where bin/up already put the names it saw after creating the
 # cluster: containers that were removed by hand, or by an earlier down that could not finish, leave
 # volumes that only this list still ties to the fixture.
@@ -88,7 +103,6 @@ docker network ls --quiet --filter "label=$talos_label" | xargs --no-run-if-empt
 for volume in "${node_volumes[@]}"; do
   docker volume rm "$volume" >/dev/null 2>&1
 done
-claim_drop
 
 # A query that fails lists nothing, which reads exactly like "nothing left". Keep the two apart.
 left=
@@ -104,7 +118,19 @@ probe() { # probe <kind> <command...>: the command lists names, one per line
     unverified=1
   fi
 }
-probe container claim_names
+# verdict: leaves with status 1 unless everything probed so far is verifiably gone. The state
+# directory then stays: it names the node volumes for the next run.
+verdict() {
+  if [ -n "$left" ]; then
+    say "fixtures: leftovers after down:"
+    say "${left%$'\n'}"
+  fi
+  [ "$unverified" -eq 0 ] || say "fixtures: a Docker query failed, so what is left could not be verified"
+  if [ -n "$left" ] || [ "$unverified" -ne 0 ]; then
+    [ ! -e "$STATE" ] || say "fixtures: $STATE is kept, so that down can be run again"
+    exit 1
+  fi
+}
 probe container docker ps --all --filter "label=$talos_label" --format '{{.Names}}'
 probe container docker ps --all --filter "label=$compose_label" --format '{{.Names}}'
 probe network docker network ls --filter "label=$talos_label" --format '{{.Name}}'
@@ -113,17 +139,13 @@ probe volume docker volume ls --filter "label=$compose_label" --format '{{.Name}
 for volume in "${node_volumes[@]}"; do
   probe volume docker volume ls --quiet --filter "name=^${volume}$"
 done
-if [ -n "$left" ]; then
-  say "fixtures: leftovers after down:"
-  say "${left%$'\n'}"
-fi
-[ "$unverified" -eq 0 ] || say "fixtures: a Docker query failed, so what is left could not be verified"
-# The state directory goes last, and only after a verified clean teardown: it is what shows a
-# second run that the leftovers are this checkout's own, and it names the node volumes.
-if [ -n "$left" ] || [ "$unverified" -ne 0 ]; then
-  [ ! -e "$STATE" ] || say "fixtures: $STATE is kept, so that down can be run again"
-  exit 1
-fi
+verdict
+# The claim goes only now. It is what shows a second run that leftovers are this checkout's own, so
+# a teardown that could not finish keeps it, and the next plain down is not refused.
+claim_drop
+probe container claim_names
+verdict
+# The state directory goes last of all, after a verified clean teardown.
 
 case $STATE in
   */fixtures/.state) rm -rf -- "$STATE" ;;
@@ -136,4 +158,8 @@ if [ "$purge" -eq 1 ]; then
   esac
 fi
 [ ! -e "$STATE" ] || die "could not remove $STATE"
-say "fixture is down: no containers, networks, volumes or state left"
+if [ "$volumes_known" -eq 1 ]; then
+  say "fixture is down: no containers, networks, volumes or state left"
+else
+  say "fixture is down: no containers, networks, labelled volumes or state left. Not looked for, because nothing recorded their names: Talos node volumes whose containers were gone before down ran. \`docker volume ls --filter dangling=true\` lists every candidate on this daemon"
+fi

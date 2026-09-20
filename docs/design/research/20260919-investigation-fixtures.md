@@ -52,8 +52,8 @@ See [`fixtures/README.md`](../../../fixtures/README.md) for the commands. In sho
   for synthetic secret material, with a positive control. It runs while parts of the fixture are
   down: a source it cannot read is named in `unavailable.txt`, and a scan input it cannot read
   fails the command.
-- `bin/down` removes everything and fails if anything is left; `.state/` goes last, only after
-  that check, so a `down` that could not finish can be run again.
+- `bin/down` removes everything and fails if anything is left; the claim and then `.state/` go
+  last, only after that check, so a `down` that could not finish can be run again.
 - `bin/selftest` exercises all of the above with assertions.
 
 ### Pinned versions
@@ -89,14 +89,14 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-4, 9, 21, 22 and 23 (section 5, items 8 to 16); the revision described here passed 24 of 24 from
+2, 4, 9, 19, 21, 22 and 23 (section 5, items 8 to 17); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed.
 
 | # | Check | Expected | Observed |
 |---|---|---|---|
 | 1 | All four containers running | running | pass |
-| 2 | `inject` and `evidence` with the claim container removed, then with one labelled for another checkout | All four calls refuse; PostgreSQL is not paused | pass |
+| 2 | `inject`, `evidence` and `down` with the claim container removed, then `inject` and `evidence` with one labelled for another checkout | All five calls refuse, `down` by naming the missing claim; PostgreSQL is not paused and nothing is removed | pass |
 | 3 | Full-config `no-reboot` apply on the worker | The configuration read back is byte-identical to the one sent | pass: equal SHA-256 once the single extra trailing newline of `-o jsonpath` output is normalized |
 | 4 | `db-snapshot`, diverge, `db-restore`, then `db-restore` of a dump cut in half | Row written after the snapshot is gone; the truncated restore fails, leaves the live database with its rows and leaves no scratch database | pass |
 | 5 | `bao-soft-delete` | Metadata shows a deletion time, `destroyed` false | pass |
@@ -113,10 +113,10 @@ against one fixture. Those runs were not timed.
 | 16 | A 5-second wait on an authenticated OpenBao request while the server process inside the container is stopped (`SIGSTOP`), so that the CLI connects and is never answered | The wait fails within 10 seconds; OpenBao answers again after `SIGCONT` | pass |
 | 17 | `netsplit` / `netjoin` OpenBao, with `bin/evidence` during the split | Published port does not answer; bundle records the client view as `unreachable` and still holds the true metadata; port answers again after `netjoin` | pass |
 | 18 | `bin/evidence` while the control plane is paused | Control-plane config digest `UNAVAILABLE`; worker digest still read, because each node is asked on its own address | pass |
-| 19 | `pause` / `unpause` worker | No Talos API answer while paused, answers after | pass |
+| 19 | `kill` / `start` worker, then `pause` / `unpause` worker | The first request after `start` returns is answered, without a wait; no Talos API answer while paused, answers after | pass |
 | 20 | `netsplit` / `netjoin` worker | No answer while detached, answers again on the same address | pass |
 | 21 | `bin/evidence` with a scan path that does not exist, then with a mode-000 file whose name holds a secret (skipped when run as root) | Refuses both, non-zero exit; the second message withholds the name, and stderr holds no secret | pass |
-| 22 | Evidence with the positive control replaced by a symlink to a file of the same content outside the scanned paths; then evidence and leak scan on the healthy fixture, run from another directory with the relative scan paths `-delete` and `-delete.d`, a symlinked file under `.state/data`, a leaking file named `canary-control.txt` outside `.state/data`, the control itself with its canary replaced by another secret, a benign file with a secret in its name, a scan path that is a symlink with a secret in its name, and a planted copy of the `talosconfig` client key | The symlinked control is reported as a leak; in the second run all are scanned and reported, nothing is deleted; the file that only shares the control's name and the control with the replaced canary are reported as leaks, the control's copy inside the expanded store snapshot is not; exactly the two secret-bearing names are reported, with the names withheld, and the report itself holds no secret; the client key is found; no `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
+| 22 | Evidence with the positive control replaced by a symlink to a file of the same content outside the scanned paths, then with a hard link to the control outside them, then with `.state/evidence` replaced by a symlink; then evidence and leak scan on the healthy fixture, run from another directory with the relative scan paths `-delete` and `-delete.d`, a symlinked file under `.state/data`, a leaking file named `canary-control.txt` outside `.state/data`, the control itself with its canary replaced by another secret, a benign file with a secret in its name, a scan path that is a symlink with a secret in its name, and a planted copy of the `talosconfig` client key | The symlinked and the hard-linked control are each reported as a leak; the symlinked evidence directory is refused and nothing is written through it; in the last run all are scanned and reported, nothing is deleted; the file that only shares the control's name and the control with the replaced canary are reported as leaks, the control's copy inside the expanded store snapshot is not; exactly the two secret-bearing names are reported, with the names withheld, and the report itself holds no secret; the client key is found; no `unavailable.txt`; client view `reachable`; finds the canary in the live dump and in the expanded backup; finds a planted copy of the OpenBao metadata-only token and a plain file planted next to the OpenBao snapshots in `.state/backups`; lists the Transit key; finds nothing in container logs | pass |
 | 23 | `bin/down`, then the daemon's whole volume list against the one taken before `up` | No container, network, volume or state directory left; no volume exists that did not before `up` | pass |
 | 24 | `up`, `evidence` and `down` with `.state` replaced by a dangling symlink | Each refuses; nothing is created at the link's target | pass |
 
@@ -344,6 +344,30 @@ Each of these is reproducible and each changed the fixture.
     dropped the superseded database as a fatal last step, so a failure there made the log say
     `failed` about a restore that had succeeded; the swap decides now, and the next `db-restore`
     drops what was left. That last case was not exercised.
+17. **A mark of ownership that was none, a teardown that vouched for volumes it never looked for,
+    and four smaller ones.** A tenth round, six findings. `bin/down` took a `.state/` for proof
+    that the resources on the daemon were this checkout's, for the sake of a fixture that had lost
+    its claim; but a stale `.state/` next to the rest of another checkout's fixture passes the
+    same test, and `compose down --volumes` would then delete that checkout's volumes. The one
+    ordinary way to lose the claim was `down` itself, which dropped it before verifying; it drops
+    it last now, so the claim is the only mark, and without it `down` refuses unless `--adopt` is
+    given (check 2). `down --adopt` without the owning checkout's record, after Talos containers
+    were removed by hand, cannot find their anonymous volumes and still ended with "no volumes
+    left"; keeping the names on the daemon was considered and left out as more machinery than a
+    disposable fixture warrants, so the limit stays and the last line of `down` now says what it
+    did not look for. `inject start` on a Talos node returned when the container had started,
+    not when the node answered, so a capture right after `done` could record a recovering node
+    as unavailable; it waits for the node's own address now (check 19, which also is the first
+    time a Talos node was killed and started here). A hard link to the positive control passed
+    where the symlink of item 16 no longer did; the control must have one name (check 22). A
+    symlinked `.state/evidence` sent every bundle outside the checkout, where teardown does not
+    reach; `data`, `backups` and `evidence` are refused as symlinks along with `.state` itself
+    (check 22). And `bin/up` built its two chosen secrets in a command substitution used as a
+    `printf` argument, the very shape its own comment on the metadata token warns about: a failed
+    read of the random source would have left the constant prefix as the PostgreSQL password,
+    with `up` reporting success. The value is assigned and measured first. That failure was not
+    provoked.
+
 ## 6. What each experiment gets
 
 | Experiment | Uses | Must add itself |
@@ -382,10 +406,11 @@ Each of these is reproducible and each changed the fixture.
   read and records the node as unavailable. `bin/selftest` exercises the paused control plane
   (check 18); a partitioned node was not exercised.
 - One fixture per Docker daemon, enforced by a claim container that `bin/up` creates first and
-  never starts. The ownership check in `bin/down` rests on the checkout that claim names, on the
-  origin directory Compose records on its containers, and, for a fixture that lost its claim, on
-  the presence of `.state/`; Talos containers, networks and volumes carry no owner mark of
-  their own.
+  never starts. The ownership check in `bin/down` rests on the checkout that claim names and on
+  the origin directory Compose records on its containers; Talos containers, networks and volumes
+  carry no owner mark of their own. A fixture whose claim was removed by hand needs
+  `down --adopt`. Adoption without the owning checkout's `.state/` cannot find the volumes of
+  Talos containers that are already gone, and says so.
 - CI shellchecks the scripts and does not run them. "Reproducible" is claimed for a host meeting
   the README prerequisites, and was exercised on one machine.
 - Recovery ownership: `.state/` belongs to the person who ran `bin/up` and lives for one run.

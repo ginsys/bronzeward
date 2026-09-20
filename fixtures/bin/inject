@@ -13,7 +13,8 @@ usage: inject <action> [args]
   targets: postgres | openbao | controlplane | worker
 
   kill <target>                 SIGKILL the container (crash, no shutdown hooks)
-  start <target>                start it again; openbao comes back sealed and is unsealed
+  start <target>                start it again and wait until it answers; openbao comes back
+                                sealed and is unsealed
   pause <target>                freeze every process (hung peer, connections stay open)
   unpause <target>
   netsplit <target>             detach from its network (unreachable, process keeps running)
@@ -115,6 +116,14 @@ case $action in
         wait_for 60 "a sealed OpenBao" bao_sealed
         bao_unseal
         wait_for 60 "an active OpenBao node" bao token lookup
+        ;;
+      controlplane | worker)
+        # A started container is a node that is still booting. Asked on its own address, like
+        # bin/evidence does: a capture right after `done` must not find the node unavailable.
+        node=$TALOS_WORKER_IP
+        [ "$1" = worker ] || node=$TALOS_CONTROLPLANE_IP
+        talos_answers() { timeout "$REQUEST_LIMIT" "$CACHE/talosctl" -e "$node" -n "$node" version --short; }
+        wait_for 180 "the Talos API on $node" talos_answers
         ;;
     esac
     ;;

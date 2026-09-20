@@ -50,18 +50,22 @@ refused=0
 claim_drop
 "$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
+# Nor does it let down remove anything: the state may be stale, and what exists another checkout's.
+down_said=$("$here/down" 2>&1) || refused=$((refused + 1))
 docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=/another/checkout/fixtures" \
   --network none "$POSTGRES_IMAGE" true >/dev/null
 "$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
 claim_drop
 claim_take # this checkout's claim again, before anything can fail
-if [ "$refused" -ne 4 ]; then
+if [ "$refused" -ne 5 ]; then
   docker unpause "$PG" >/dev/null 2>&1 || true
-  fail "inject or evidence ran without this checkout's claim ($refused of 4 refused)"
+  fail "inject, evidence or down ran without this checkout's claim ($refused of 5 refused)"
 fi
 [ "$(docker inspect --format '{{.State.Paused}}' "$PG")" = false ] || fail "a refused inject paused postgres all the same"
-ok "inject and evidence refuse when the claim is missing or names another checkout"
+grep --quiet --fixed-strings 'no claim taken from this checkout' <<<"$down_said" ||
+  fail "down failed without the claim, but not by refusing: $(tail -n 1 <<<"$down_said")"
+ok "inject and evidence refuse when the claim is missing or names another checkout; down refuses when it is missing"
 
 # Talos: a full-config no-reboot apply on the worker lands byte for byte.
 before=$(worker_digest)
@@ -227,12 +231,18 @@ grep --quiet --extended-regexp "^[0-9a-f]{64} $TALOS_WORKER_IP\$" "$hung/talos-c
 wait_for 60 "the worker through the control plane after unpause" worker_talos version --short
 ok "evidence reads each Talos node on its own address: paused control plane, worker still read"
 
-# Hung and unreachable Talos peer.
+# Crashed, hung and unreachable Talos peer. `start` returns only once the node answers on its own
+# address, so the very next request must succeed without a wait of its own.
+"$here/inject" kill worker
+"$here/inject" start worker
+timeout 10 "$CACHE/talosctl" -e "$TALOS_WORKER_IP" -n "$TALOS_WORKER_IP" version --short >/dev/null 2>&1 ||
+  fail "inject start worker returned before the worker answered"
+wait_for 60 "the worker through the control plane after its restart" worker_talos version --short
 "$here/inject" pause worker
 ! worker_talos version --short >/dev/null 2>&1 || fail "paused worker still answers"
 "$here/inject" unpause worker
 wait_for 60 "the worker after unpause" worker_talos version --short
-ok "pause / unpause worker"
+ok "kill / start and pause / unpause worker"
 "$here/inject" netsplit worker
 ! worker_talos version --short >/dev/null 2>&1 || fail "partitioned worker still answers"
 "$here/inject" netjoin worker
@@ -272,7 +282,25 @@ mv "$STATE/selftest-control-target" "$STATE/data/canary-control.txt" # before an
 [ "$rc" -eq 0 ] || fail "evidence aborted on a symlinked positive control: $(tail -n 1 "$STATE/selftest-evidence.err")"
 grep --quiet --line-regexp --fixed-strings "1 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
   fail "leak scan excused a positive control that is a symlink to a file outside .state/data"
+# The same through a hard link: a second name for the control outside the scanned paths.
+ln "$STATE/data/canary-control.txt" "$STATE/selftest-control-alias"
+rc=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
+rm "$STATE/selftest-control-alias" # before anything can fail
+[ "$rc" -eq 0 ] || fail "evidence aborted on a hard-linked positive control: $(tail -n 1 "$STATE/selftest-evidence.err")"
+grep --quiet --line-regexp --fixed-strings "1 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
+  fail "leak scan excused a positive control that has a second name outside .state/data"
 rm "$STATE/selftest-evidence.err"
+# A managed directory that is a symlink: bundles would be written where teardown does not reach.
+mv "$STATE/evidence" "$STATE/selftest-evidence-aside"
+ln -s "$STATE/selftest-evidence-aside" "$STATE/evidence"
+rc=0
+"$here/evidence" >/dev/null 2>&1 || rc=$?
+bundles=$(find "$STATE/selftest-evidence-aside" -mindepth 1 -maxdepth 1 -newer "$STATE/evidence" | wc -l)
+rm "$STATE/evidence"
+mv "$STATE/selftest-evidence-aside" "$STATE/evidence" # before anything can fail
+[ "$rc" -ne 0 ] || fail "evidence accepted an evidence directory that is a symlink"
+[ "$bundles" -eq 0 ] || fail "evidence wrote a bundle through a symlinked evidence directory"
 printf 'token=%s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/selftest-token-leak"
 printf 'plain=%s\n' "$BW_CANARY" >"$STATE/backups/selftest-plain-backup"
 # Two inputs find would mishandle if passed along as they are: a file reached only through a
