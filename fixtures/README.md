@@ -117,9 +117,11 @@ project and directory, or Talos cluster name), since the names are fixed and, on
 container was removed by hand, anything can take the name while the claim stands. The node-volume record's content is held against Docker as well: `down` removes
 a recorded name only if it is an anonymous volume's, and the volume, if it still exists, carries
 no label. The Talos label is only a cluster name, which any container can be created with, so
-`up` records the IDs of the two containers it created and `down` refuses while a container
-carries the label without being one of them; `down --adopt`, which has no such record to go by,
-removes by label alone. The checkout is
+`up` records the IDs of the two containers it created once they exist: `inject` and `evidence`
+act on a container under a node's name only if its ID is recorded, and `down` refuses while a
+container carries the label without being one of them, or while labelled containers exist and
+there is no record, as an `up` interrupted right after creating the cluster leaves it. Only
+`down --adopt` removes by label alone. The checkout is
 identified by its physical path, so the same checkout reached through a symlink is still its own.
 Evidence worth keeping must be copied out of `.state/` before `down`.
 
