@@ -105,13 +105,25 @@ manifest=$(git -C "$FIXTURES" rev-parse HEAD) ||
 differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES") ||
   die "cannot ask git whether fixtures/ differs from commit $manifest"
 # A tree that differs from the commit: the commit alone then does not say what ran. The bundle
-# carries the difference, the status of every changed or untracked file and the diff of the
-# tracked ones, so that the commit plus this file reproduces what captured the bundle.
+# carries the difference, the status of every changed or untracked file, the diff of the tracked
+# ones and the whole content of the untracked ones (as a diff against nothing), so that the
+# commit plus this file reproduces what captured the bundle. Ignored files, .state and .cache,
+# are left out: they are this run's secrets and the pinned binaries.
+fixtures_diff() {
+  local file
+  printf '%s\n\n' "$differs"
+  git -C "$FIXTURES" diff HEAD -- "$FIXTURES" || return 1
+  # A pipe, not a substitution: a substitution drops the NULs that end each name. With pipefail
+  # a failing listing fails the pipeline, as does the loop when a diff cannot be written.
+  git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" |
+    while IFS= read -r -d '' file; do
+      # --no-index exits 1 when the two differ, which a file against /dev/null always does.
+      git -C "$FIXTURES" diff --no-index -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
+    done
+}
 if [ -n "$differs" ]; then
-  {
-    printf '%s\n\n' "$differs"
-    git -C "$FIXTURES" diff HEAD -- "$FIXTURES"
-  } >"$out/fixtures-diff.txt" || die "cannot record how fixtures/ differs from commit $manifest; the bundle could not be tied to what ran"
+  fixtures_diff >"$out/fixtures-diff.txt" ||
+    die "cannot record how fixtures/ differs from commit $manifest; the bundle could not be tied to what ran"
 fi
 {
   printf 'captured        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -382,6 +394,9 @@ find -L "${roots[@]}" -type f -print0 2>/dev/null | sort --zero-terminated --uni
 : >"$scan"
 control_seen=0
 others=
+# Files the content pass reported, so that the name pass below does not report one of them again:
+# a file with a secret in its name and one in its content is one file.
+declare -A reported=()
 while IFS= read -r -d '' file; do
   [ "$file" != "$scan" ] || continue
   # Occurrences, not matching lines: two secrets on one line are two hits.
@@ -393,6 +408,7 @@ while IFS= read -r -d '' file; do
   hits=$(sed '/^$/d' <<<"$found" | wc -l)
   unset found
   [ "$hits" -gt 0 ] || continue
+  reported[$file]=1
   printf '%s %s\n' "$hits" "$(shown "$file")" >>"$scan"
   # The control counts as found only once its content is the planted one: overwritten with another
   # secret it has hits, and is a leak, not the control.
@@ -408,6 +424,7 @@ done <"$list"
 find -L "${roots[@]}" -print0 2>/dev/null | sort --zero-terminated --unique >"$list" ||
   die "leak scan could not walk every path; results void"
 while IFS= read -r -d '' entry; do
+  [ -z "${reported[$entry]:-}" ] || continue
   hit=0
   ! secret_in_name "$entry" || hit=1
   # The text of a symlink is stored data too: the content pass reads what the link points at and

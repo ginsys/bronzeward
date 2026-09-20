@@ -89,13 +89,15 @@ fi
 # the removal of .state below takes the one name here and leaves the other. The one-name rule
 # for the files bin/up generated is checked in state_files_own; the snapshots inject published
 # are checked here, where the secret would otherwise be left behind.
-for backup in "$STATE"/backups/*; do
-  [ -e "$backup" ] || [ -L "$backup" ] || continue
-  if [ -L "$backup" ] || [ ! -f "$backup" ] || [ "$(stat --format=%h -- "$backup" 2>/dev/null)" != 1 ]; then
+# Asked of find, not a glob: a glob skips names that start with a dot, and a dot is no defence.
+# Without -L a symlink is not a regular file, so the one test covers links of both kinds.
+if [ -d "$STATE/backups" ]; then
+  backup=$(find "$STATE/backups" -mindepth 1 -maxdepth 1 \( ! -type f -o -links +1 \) -print -quit) ||
+    die "could not list $STATE/backups; nothing was removed"
+  [ -z "$backup" ] ||
     die "$backup is not a regular file with that one name; its content would outlive this teardown under the other name. Remove that name first; nothing was removed"
-  fi
-done
-unset backup
+  unset backup
+fi
 # The Talos state directory names what `talosctl cluster destroy` acts on. Through a link, that
 # would be someone else's state. .state/talos itself is refused as a link by lib.sh.
 for talos_state in "$STATE/talos/$FIXTURE_NAME" "$STATE/talos/$FIXTURE_NAME/state.yaml"; do
