@@ -100,6 +100,20 @@ fetch_tools
 say "starting postgres and openbao"
 compose up --detach --quiet-pull --wait postgres
 compose up --detach --quiet-pull openbao
+# The named volumes carry only the project label, which any Compose run of that project name from
+# anywhere puts there too, and a volume has no ID. Their creation times, recorded here, are what
+# bin/down holds each volume of that name to before `compose down --volumes` removes it.
+compose_volumes=$(compose_volume_names) || die "could not read the volume names from compose.yaml"
+compose_volume_record=$(
+  for compose_volume in $compose_volumes; do
+    docker volume inspect --format '{{.Name}} {{.CreatedAt}}' "$compose_volume" || exit 1
+  done
+) || die "could not read the creation time of the Compose volumes"
+[ "$(sed '/^$/d' <<<"$compose_volume_record" | wc -l)" -eq "$(wc -l <<<"$compose_volumes")" ] ||
+  die "expected every Compose volume to record; teardown could not tell them from another's"
+printf '%s\n' "$compose_volume_record" >"$STATE/down-compose-volumes.partial"
+mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes"
+unset compose_volumes compose_volume compose_volume_record
 
 bao_answers() {
   local rc=0

@@ -112,8 +112,8 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 `talosctl cluster destroy` pointed at someone else's state; the cluster state file `talosctl` writes
 under `.state/talos` must likewise be a regular file with that one name at teardown. The files `bin/up` generates
 (`secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
-`controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container and
-node-network records) must each be
+`controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
+node-network and Compose-volume records) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
@@ -138,7 +138,11 @@ cluster leaves it. Only `down --adopt` removes by label alone. The named volumes
 declares get fixed names too (`<fixture>_postgres-data`, `<fixture>_openbao-data`), and Compose
 reuses a volume of that name it did not create: `up` refuses while one exists, and `down`, with
 or without `--adopt`, refuses to run `compose down --volumes` while one exists without the
-project label, since it is someone's data. The checkout is
+project label, since it is someone's data. The label is only the project name, which any Compose
+run of that name puts on the volumes it makes, so `up` also records each volume's creation time
+once the services are started and `down` removes a labelled volume only as the one recorded;
+without the record, as an `up` interrupted right after starting the services leaves it, only
+`down --adopt` removes it by the label. The checkout is
 identified by its physical path, so the same checkout reached through a symlink is still its own.
 Evidence worth keeping must be copied out of `.state/` before `down`.
 
