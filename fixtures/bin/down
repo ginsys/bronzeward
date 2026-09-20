@@ -100,6 +100,20 @@ if [ -d "$STATE" ]; then
     die "could not read the recorded Talos node volumes; nothing was removed"
 fi
 mapfile -t node_volumes < <(sed '/^$/d' <<<"$volume_names" | sort -u)
+# The record names what `docker volume rm` below removes, and its content can be written by anyone
+# who can write under .state. Each name is held to what the daemon itself says of a Talos node
+# volume: an anonymous one, so a 64-digit hex name, with no label. A name that fails is refused
+# with nothing removed; one that names no volume any more is what an earlier removal leaves and
+# passes. Not the volume's age against the claim's: selftest re-takes the claim after the cluster
+# exists, and so would any recovery that did. What stays open is in fixtures/README.md.
+for volume in "${node_volumes[@]}"; do
+  [[ $volume =~ ^[0-9a-f]{64}$ ]] ||
+    die "the recorded node volume '$volume' is not an anonymous volume's name; the record was not written by the fixture. Nothing was removed"
+  labels=$(docker volume inspect --format '{{len .Labels}}' "$volume" 2>/dev/null) || continue
+  [ "$labels" = 0 ] ||
+    die "the recorded node volume $volume carries labels, which a Talos node volume never does; nothing was removed"
+done
+unset labels
 
 # Name the project, its directory and its file, so that neither a compose.yaml in the caller's
 # working directory nor a COMPOSE_PROJECT_NAME in the caller's shell can choose what is torn down.

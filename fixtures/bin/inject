@@ -74,9 +74,11 @@ case $action in
   db-snapshot | db-restore | bao-snapshot | bao-restore | store-snapshot | store-restore)
     [ $# -eq 1 ] || usage
     # One path component, so that the snapshot lands in .state/backups itself: a name with a
-    # slash would put it under some other directory, which may be a link to anywhere.
+    # slash would put it under some other directory, which may be a link to anywhere. And not
+    # spelled like a snapshot that was interrupted, which bin/evidence tells by that suffix.
     case $1 in
       '' | . | .. | */*) die "snapshot names are one path component without a slash, not '$1'" ;;
+      *.partial.*) die "snapshot names must not hold '.partial.', which marks an interrupted snapshot" ;;
     esac
     ;;
   bao-soft-delete | bao-destroy | bao-delete-key) ;;
@@ -85,13 +87,26 @@ esac
 # Two records per action. The first is written when the action starts, so the timeline shows when a
 # failure began, not when it returned. The second says how it ended: without it a kill that Docker
 # refused reads exactly like one that happened. EXIT, not ERR: `die` leaves through `exit`.
-record() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$STATE/injections.log"; }
+# The log is appended to only as the regular file with one name that inject itself made: through a
+# link, the arguments, which may hold a snapshot name that is a secret, would be written outside
+# .state. Absent, the append creates it, following nothing.
+record() {
+  local log=$STATE/injections.log
+  if [ -L "$log" ] || { [ -e "$log" ] && { [ ! -f "$log" ] || [ "$(stat --format=%h -- "$log" 2>/dev/null)" != 1 ]; }; }; then
+    say "fixtures: $log is not the regular file inject writes, with that one name; nothing was recorded"
+    return 1
+  fi
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log"
+}
 partial=
 staging=
 moved_aside=0
 finish() {
   local rc=$?
-  [ -z "$partial" ] || rm -f -- "$partial"
+  # A removal that fails must not end the handler before the outcome is recorded: each is guarded.
+  if [ -n "$partial" ]; then
+    rm -f -- "$partial" || say "fixtures: could not remove the partial file $partial"
+  fi
   if [ -n "$staging" ]; then
     # store-restore ended between its two renames: the earlier store goes back before the staging
     # directory is removed. If it cannot, the staging directory stays, because it holds the only copy.
@@ -100,12 +115,17 @@ finish() {
     if [ "$moved_aside" -eq 1 ] && [ -d "$staging/previous" ] && [ ! -e "$STATE/data" ]; then
       mv --no-target-directory -- "$staging/previous" "$STATE/data" || staging=
     fi
-    [ -z "$staging" ] || rm -rf -- "$staging"
+    if [ -n "$staging" ]; then
+      rm -rf -- "$staging" || say "fixtures: could not remove the staging directory $staging"
+    fi
   fi
-  if [ "$rc" -eq 0 ]; then record "done $action $logged"; else record "failed rc=$rc $action $logged"; fi
+  # An outcome that could not be recorded is a failure of its own; the action's status stands
+  # otherwise, and is restated here so that nothing above decides it.
+  if [ "$rc" -eq 0 ]; then record "done $action $logged" || rc=1; else record "failed rc=$rc $action $logged" || true; fi
+  exit "$rc"
 }
 logged=$*
-record "begin $action $logged"
+record "begin $action $logged" || exit 1
 trap finish EXIT
 
 # snapshot <file> <command...>: the command writes the snapshot to stdout. It reaches its final name
