@@ -98,10 +98,15 @@ node_tag() { # node_tag <ip>
   timeout 20 "$CACHE/talosctl" -e "$1" -n "$1" version --short | awk '/Tag:/ {print $2}'
 }
 
+# Assigned first: a git that fails inside a printf argument would leave the line empty, and a bundle
+# without the manifest commit cannot be tied to the pins it was captured under.
+manifest=$(git -C "$FIXTURES" rev-parse HEAD) ||
+  die "cannot read the manifest commit from git; the bundle could not be tied to a fixture version"
+differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES") ||
+  die "cannot ask git whether fixtures/ differs from commit $manifest"
 {
   printf 'captured        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf 'manifest commit %s%s\n' "$(git -C "$FIXTURES" rev-parse HEAD)" \
-    "$([ -z "$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES")" ] || printf ' (fixtures/ differs from it)')"
+  printf 'manifest commit %s%s\n' "$manifest" "$([ -z "$differs" ] || printf ' (fixtures/ differs from it)')"
   printf 'host            %s\n' "$(uname -srm)"
   printf 'docker          %s\n' "$(reported docker version --format 'client {{.Client.Version}} server {{.Server.Version}}')"
   printf 'compose         %s\n' "$(reported docker compose version --short)"
@@ -279,7 +284,10 @@ else
 fi
 # What a store-restore killed outright leaves aside: the extracted store and, past its first
 # rename, the earlier live one. Plaintext copies of the store both, scanned like the live directory.
+# Never through a link: a staging directory that points outside .state would have the walk follow
+# it there, and a copy of the control planted at the far end excused.
 for staging in "$STATE"/store-restore.*; do
+  [ ! -L "$staging" ] || die "$(shown "$staging") is a symlink; the fixture never makes one there. Results void"
   [ ! -e "$staging" ] || roots+=("$staging")
 done
 dangling=$(find -L "${roots[@]}" -type l -print -quit 2>/dev/null) ||
@@ -364,8 +372,13 @@ while IFS= read -r -d '' file; do
   unset found
   [ "$hits" -gt 0 ] || continue
   printf '%s %s\n' "$hits" "$(shown "$file")" >>"$scan"
-  ! is_live_control "$file" || control_seen=1
-  is_control "$file" || others+="$hits $(shown "$file")"$'\n'
+  # The control counts as found only once its content is the planted one: overwritten with another
+  # secret it has hits, and is a leak, not the control.
+  if is_control "$file"; then
+    ! is_live_control "$file" || control_seen=1
+  else
+    others+="$hits $(shown "$file")"$'\n'
+  fi
 done <"$list"
 
 # A secret can sit in a name as well as in a file: every directory entry under the same paths,

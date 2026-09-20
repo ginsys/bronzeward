@@ -244,7 +244,18 @@ mv "$STATE/selftest-data-aside" "$STATE/data" # before anything can fail
 [ "$installed" -eq 0 ] || fail "a refused archive's previous entry was installed as the store directory"
 [ -z "$(find "$STATE" -maxdepth 1 -name 'store-restore.*')" ] || fail "a refused store-restore left its staging directory"
 rm "$STATE/data/selftest-store"
-ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash, a newline or .partial. refused, no write through a symlinked or a hard-linked final name or log, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored and never replaced by an archive's own previous entry"
+# A container that only bears a fixture name: the names are fixed, so once the real one was removed
+# by hand anything can take the name while the claim still stands, and a kill would go to it.
+docker rename "$PG" "$PG-selftest-aside" >/dev/null
+docker create --quiet --name "$PG" --network none "$POSTGRES_IMAGE" true >/dev/null
+records=$(wc -l <"$STATE/injections.log")
+impostor=0
+"$here/inject" kill postgres >/dev/null 2>&1 && impostor=1
+docker rm --force --volumes "$PG" >/dev/null
+docker rename "$PG-selftest-aside" "$PG" >/dev/null # before anything can fail
+[ "$impostor" -eq 0 ] || fail "inject acted on a container that only bears the fixture's name"
+[ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
+ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash, a newline or .partial. refused, no write through a symlinked or a hard-linked final name or log, a container that only bears a fixture name refused, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored and never replaced by an archive's own previous entry"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -366,24 +377,25 @@ else
 fi
 ok "evidence refuses a scan path it cannot read, and withholds a secret-bearing name when it does"
 # The positive control as a symlink to a file outside the scanned paths that holds exactly the
-# planted content: the canary then lives where teardown does not reach, and that is a leak.
+# planted content: the canary then lives where teardown does not reach, so it is not the control,
+# and without a control the capture is void.
 mv "$STATE/data/canary-control.txt" "$STATE/selftest-control-target"
 ln -s "$STATE/selftest-control-target" "$STATE/data/canary-control.txt"
 rc=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
 rm "$STATE/data/canary-control.txt"
 mv "$STATE/selftest-control-target" "$STATE/data/canary-control.txt" # before anything can fail
-[ "$rc" -eq 0 ] || fail "evidence aborted on a symlinked positive control: $(tail -n 1 "$STATE/selftest-evidence.err")"
-grep --quiet --line-regexp --fixed-strings "1 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
-  fail "leak scan excused a positive control that is a symlink to a file outside .state/data"
+[ "$rc" -ne 0 ] || fail "evidence accepted a positive control that is a symlink to a file outside .state/data"
+grep --quiet 'did not find its positive control' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the symlinked control for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 # The same through a hard link: a second name for the control outside the scanned paths.
 ln "$STATE/data/canary-control.txt" "$STATE/selftest-control-alias"
 rc=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
 rm "$STATE/selftest-control-alias" # before anything can fail
-[ "$rc" -eq 0 ] || fail "evidence aborted on a hard-linked positive control: $(tail -n 1 "$STATE/selftest-evidence.err")"
-grep --quiet --line-regexp --fixed-strings "1 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
-  fail "leak scan excused a positive control that has a second name outside .state/data"
+[ "$rc" -ne 0 ] || fail "evidence accepted a positive control that has a second name outside .state/data"
+grep --quiet 'did not find its positive control' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the hard-linked control for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 rm "$STATE/selftest-evidence.err"
 # A managed directory that is a symlink: bundles would be written where teardown does not reach.
 mv "$STATE/evidence" "$STATE/selftest-evidence-aside"
@@ -423,6 +435,27 @@ aliased=0
 ! "$here/evidence" >/dev/null 2>&1 || aliased=1
 rm "$STATE/selftest-init-alias"
 [ "$aliased" -eq 0 ] || fail "a bao-init.json with a second name was accepted"
+# And the injection log, which names snapshots and becomes the bundle's timeline.
+ln "$STATE/injections.log" "$STATE/selftest-log-alias"
+aliased=0
+! "$here/evidence" >/dev/null 2>&1 || aliased=1
+rm "$STATE/selftest-log-alias"
+[ "$aliased" -eq 0 ] || fail "an injections.log with a second name was accepted"
+# Without the manifest commit the bundle cannot be tied to the pins it was captured under.
+nogit=0
+! GIT_DIR=$STATE/selftest-no-git "$here/evidence" >/dev/null 2>&1 || nogit=1
+[ "$nogit" -eq 0 ] || fail "evidence wrote a bundle without the manifest commit"
+# The control itself with its canary replaced by another secret: still one hit, no longer the
+# control, and without the control the capture is void.
+cp "$STATE/data/canary-control.txt" "$STATE/selftest-control-as-planted"
+printf 'planted on purpose: %s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/canary-control.txt"
+rc=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
+mv "$STATE/selftest-control-as-planted" "$STATE/data/canary-control.txt" # before anything can fail
+[ "$rc" -ne 0 ] || fail "evidence accepted a positive control whose canary had been replaced by another secret"
+grep --quiet 'did not find its positive control' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the replaced control for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+rm "$STATE/selftest-evidence.err"
 # The pattern list thinned after up: a scan against it would pass while a token goes unmatched.
 cp "$STATE/scan-patterns.txt" "$STATE/selftest-patterns-aside"
 printf 'BWSYNTH-\n' >"$STATE/scan-patterns.txt"
@@ -488,6 +521,16 @@ grep --quiet --fixed-strings "$STATE/data is absent" "$bundle/unavailable.txt" |
 ! grep --quiet --fixed-strings "$STATE/store-restore.selftest/previous/canary-control.txt" "$STATE/selftest-evidence.err" ||
   fail "leak scan reported the control moved aside by an interrupted store-restore as a leak"
 rm "$STATE/selftest-evidence.err"
+# A staging directory that is a symlink to elsewhere: the walk would follow it out of .state, and a
+# copy of the control planted at the far end would be excused.
+mkdir -p "$STATE/selftest-outside-staging/previous"
+cp "$STATE/data/canary-control.txt" "$STATE/selftest-outside-staging/previous/canary-control.txt"
+ln -s "$STATE/selftest-outside-staging" "$STATE/store-restore.selftest-link"
+linked=0
+! "$here/evidence" >/dev/null 2>&1 || linked=1
+rm "$STATE/store-restore.selftest-link"
+rm -r "$STATE/selftest-outside-staging"
+[ "$linked" -eq 0 ] || fail "evidence scanned through a symlinked store-restore staging directory"
 # A store archive with a second name outside .state keeps the canary where teardown does not reach:
 # the control's copy expanded from it is no longer excused.
 ln "$STATE/backups/store-selftest.tgz" "$STATE/selftest-archive-alias"
@@ -512,9 +555,6 @@ printf 'dashed=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/-delete"
 # And a leak in a file that only shares the positive control's name: it is not the control.
 mkdir -p "$STATE/selftest-outside/-delete.d"
 printf 'imposter=%s\n' "$BW_CANARY" >"$STATE/selftest-outside/-delete.d/canary-control.txt"
-# The control itself with its canary replaced by another secret: still one hit, no longer the control.
-cp "$STATE/data/canary-control.txt" "$STATE/selftest-outside/control-as-planted"
-printf 'planted on purpose: %s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/canary-control.txt"
 # A secret in a file name, over benign content.
 printf 'nothing to see\n' >"$STATE/selftest-outside/-delete.d/named-$BW_BAO_METADATA_TOKEN"
 # And in the name of a scan path that is itself a symlink, to an empty directory: resolving the
@@ -531,15 +571,12 @@ awk '$1 == "key:" {print "client-key=" $2}' "$TALOSCONFIG" >"$STATE/data/selftes
 rc=0
 bundle=$(cd "$STATE/selftest-outside" &&
   "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" 2>"$STATE/selftest-evidence.err") || rc=$?
-cp "$STATE/selftest-outside/control-as-planted" "$STATE/data/canary-control.txt" # before anything can fail
 rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
 # Relative scan paths are made absolute from the working directory; only the tail is compared, so
 # the assertion does not depend on how the checkout path is spelled.
 grep --quiet --fixed-strings "/.state/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
   fail "leak scan took a file named like its positive control for the control"
-grep --quiet --line-regexp --fixed-strings "1 $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
-  fail "leak scan excused a positive control whose canary had been replaced by another secret"
 [ "$(grep --count 'a path whose name holds secret material' "$bundle/leak-scan.txt")" -eq 2 ] ||
   fail "leak scan did not report exactly the two secret-bearing names: a file, and a scan path that is a symlink"
 # The control's copy inside the expanded store snapshot is the control too, whatever characters the
@@ -602,6 +639,15 @@ if [ "$keep" != --keep ]; then
   if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down read a node-volume record that has a second name"
   fi
+  # A marker that is a dangling symlink: `-e` reads it as absent, and the uncertainty an earlier
+  # run recorded would be dropped with it.
+  ln -s "$FIXTURES/.selftest-no-such-marker" "$STATE/down-node-volumes-incomplete"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  rm "$STATE/down-node-volumes-incomplete"
+  if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down took a dangling symlinked marker for no marker"
+  fi
   # And the record's content: each name is held against what Docker says of a Talos node volume.
   # A name that is no anonymous volume's, then a volume of such a name that carries a label.
   cp "$STATE/down-node-volumes" "$STATE/selftest-record-copy"
@@ -618,7 +664,7 @@ if [ "$keep" != --keep ]; then
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   labelled=$(docker volume ls --quiet --filter "name=^${selftest_volume}$")
-  docker volume rm "$selftest_volume" >/dev/null 2>&1
+  docker volume rm "$selftest_volume" >/dev/null 2>&1 || true # gone already in the failing case
   mv "$STATE/selftest-record-copy" "$STATE/down-node-volumes" # before anything can fail
   if [ "$went" -eq 1 ] || [ -z "$labelled" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a recorded volume that carries a label"
