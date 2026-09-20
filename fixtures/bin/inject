@@ -35,15 +35,15 @@ EOF
 }
 
 [ $# -ge 1 ] || usage
-need docker curl jq tar mktemp timeout
+need docker curl jq tar mktemp timeout stat
 need_state
 action=$1
 shift
-# The log below holds one record per line, the arguments included: an argument with a newline in
-# it, or any other control character, would write records of its own. Refused before anything is
-# recorded.
-for arg in "$@"; do
-  [[ $arg != *[[:cntrl:]]* ]] || die "arguments must not hold control characters"
+# The log below holds one record per line, the action and its arguments included: a word with a
+# newline in it, or any other control character, would write records of its own. Refused before
+# anything is recorded, as is an action that does not exist.
+for arg in "$action" "$@"; do
+  [[ $arg != *[[:cntrl:]]* ]] || die "the action and its arguments must not hold control characters"
 done
 unset arg
 
@@ -79,6 +79,8 @@ case $action in
       '' | . | .. | */*) die "snapshot names are one path component without a slash, not '$1'" ;;
     esac
     ;;
+  bao-soft-delete | bao-destroy | bao-delete-key) ;;
+  *) usage ;;
 esac
 # Two records per action. The first is written when the action starts, so the timeline shows when a
 # failure began, not when it returned. The second says how it ended: without it a kill that Docker
@@ -86,13 +88,16 @@ esac
 record() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$STATE/injections.log"; }
 partial=
 staging=
+moved_aside=0
 finish() {
   local rc=$?
   [ -z "$partial" ] || rm -f -- "$partial"
   if [ -n "$staging" ]; then
     # store-restore ended between its two renames: the earlier store goes back before the staging
     # directory is removed. If it cannot, the staging directory stays, because it holds the only copy.
-    if [ -d "$staging/previous" ] && [ ! -e "$STATE/data" ]; then
+    # Only a directory this run moved there: an archive may hold an entry named previous of its
+    # own, and with the live directory gone that entry is not the store.
+    if [ "$moved_aside" -eq 1 ] && [ -d "$staging/previous" ] && [ ! -e "$STATE/data" ]; then
       mv --no-target-directory -- "$staging/previous" "$STATE/data" || staging=
     fi
     [ -z "$staging" ] || rm -rf -- "$staging"
@@ -110,6 +115,12 @@ snapshot() {
   shift
   partial=$(mktemp "$file.partial.XXXXXX")
   "$@" >"$partial"
+  # A final name that exists with a second name: the rename would replace this entry alone, and
+  # the earlier snapshot would live on under the other name, past teardown, with nothing left here
+  # to show it.
+  if [ -e "$file" ] && [ ! -L "$file" ] && [ "$(stat --format=%h -- "$file" 2>/dev/null)" != 1 ]; then
+    die "$file has a second name; the snapshot was not published"
+  fi
   # --no-target-directory: a final name that is a symlink to a directory, left by an earlier run or
   # a prototype, would otherwise receive the snapshot inside that directory, outside .state, with
   # the action logged as done. The rename replaces the link itself, and fails on a real directory.
@@ -228,7 +239,10 @@ case $action in
       die "store-$1.tgz holds an entry named previous next to data; the live one was left alone"
     # The live directory may be gone already: losing it is what a store snapshot is for.
     # --no-target-directory: a destination that exists must fail the rename, never receive the source.
-    [ ! -e "$STATE/data" ] || mv --no-target-directory -- "$STATE/data" "$staging/previous"
+    if [ -e "$STATE/data" ]; then
+      mv --no-target-directory -- "$STATE/data" "$staging/previous"
+      moved_aside=1
+    fi
     mv --no-target-directory -- "$staging/data" "$STATE/data"
     rm -rf -- "$staging"
     staging=

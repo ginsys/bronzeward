@@ -17,7 +17,7 @@ for arg in "$@"; do
   esac
 done
 
-need docker stat
+need docker stat mktemp
 # Every removal and every check below asks Docker. If it does not answer, nothing can be removed
 # or verified, and the state directory that names what to remove must survive.
 docker info >/dev/null 2>&1 || die "the Docker daemon does not answer; nothing was removed"
@@ -56,6 +56,9 @@ if [ "$adopt" -eq 0 ] && [ -n "$existing" ]; then
   [ "$claimed_by" = "$FIXTURES" ] ||
     die "fixture containers, networks or volumes exist, but no claim taken from this checkout shows them to belong to it; nothing was removed. Pass --adopt to remove them anyway"
 fi
+# A credential file with a second name would keep its secret past this teardown. Refused before
+# anything is removed, so that the fixture stays there to be looked at.
+state_files_own
 
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
@@ -71,8 +74,14 @@ volumes_known=1
 if [ -e "$STATE/down-node-volumes-incomplete" ] ||
   { [ -n "$existing" ] && [ ! -f "$STATE/down-node-volumes" ] && [ "$(sed '/^$/d' <<<"$talos_containers" | wc -l)" -lt 2 ]; }; then
   volumes_known=0
-  [ ! -d "$STATE" ] || : >"$STATE/down-node-volumes-incomplete" ||
-    die "could not record in $STATE that the Talos node volumes are not all known; nothing was removed"
+  # Published by rename: a marker that is a link, symbolic or hard, must not have the write go
+  # through it into someone else's file.
+  if [ -d "$STATE" ]; then
+    if ! marker=$(mktemp "$STATE/down-node-volumes-incomplete.XXXXXX") ||
+      ! mv --no-target-directory -- "$marker" "$STATE/down-node-volumes-incomplete"; then
+      die "could not record in $STATE that the Talos node volumes are not all known; nothing was removed"
+    fi
+  fi
 fi
 # Remembered in the state directory, where bin/up already put the names it saw after creating the
 # cluster: containers that were removed by hand, or by an earlier down that could not finish, leave
