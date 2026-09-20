@@ -364,9 +364,15 @@ wait_for 60 "the worker after unpause" worker_talos version --short
 ok "kill / start and pause / unpause worker"
 "$here/inject" netsplit worker
 ! worker_talos version --short >/dev/null 2>&1 || fail "partitioned worker still answers"
+# Off its network, the node would be given its address on whatever network carries the name: the
+# network is held to the one up recorded, and without the record nothing is joined.
+mv "$STATE/down-node-networks" "$STATE/selftest-networks-aside"
+! "$here/inject" netjoin worker 2>/dev/null || fail "netjoin worker joined a network no record vouches for"
+mv "$STATE/selftest-networks-aside" "$STATE/down-node-networks"
+! worker_talos version --short >/dev/null 2>&1 || fail "the refused netjoin connected the worker all the same"
 "$here/inject" netjoin worker
 wait_for 120 "the worker after netjoin" worker_talos version --short
-ok "netsplit / netjoin worker returns on the same address"
+ok "netsplit / netjoin worker returns on the same address, and only on the recorded network"
 
 # Evidence: the scan must see the canary that was deliberately written to the database, and a
 # secret the fixture did not choose itself.
@@ -597,6 +603,11 @@ awk '$1 == "key:" {print "client-key=" $2}' "$TALOSCONFIG" >"$STATE/data/selftes
 rc=0
 # An untracked file in the checkout: the commit alone does not say what ran, and the bundle must
 # carry the file's content, not its name alone.
+# What a capture ended before its leak scan leaves: a bundle still marked incomplete, holding
+# material nothing scanned. The next capture scans it as one more root.
+mkdir "$STATE/evidence/selftest-interrupted"
+: >"$STATE/evidence/selftest-interrupted/.incomplete"
+printf 'left=%s\n' "$BW_CANARY" >"$STATE/evidence/selftest-interrupted/leftover.txt"
 printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
 # And one that is not text: carried as a binary patch, not as "differ".
 printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
@@ -604,8 +615,12 @@ printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
 # still be counted once.
 bundle=$(cd "$STATE/selftest-outside" &&
   "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" 2>"$STATE/selftest-evidence.err") || rc=$?
-rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN" "$FIXTURES/.selftest-untracked" "$FIXTURES/.selftest-untracked.bin"
+rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN" "$FIXTURES/.selftest-untracked" "$FIXTURES/.selftest-untracked.bin" \
+  "$STATE/evidence/selftest-interrupted"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
+[ ! -e "$bundle/.incomplete" ] || fail "a completed capture left its bundle marked incomplete"
+grep --quiet --fixed-strings "$STATE/evidence/selftest-interrupted/leftover.txt" "$bundle/leak-scan.txt" ||
+  fail "leak scan skipped what a capture that ended before its scan left behind"
 [ -z "$(sort "$bundle/leak-scan.txt" | uniq --repeated)" ] || fail "leak scan reported a file twice: for a scan path under a root it has anyway, or for a secret in its name and another in its content"
 grep --quiet 'differs from it' "$bundle/versions.txt" || fail "versions.txt does not say fixtures/ differs from the commit while an untracked file is there"
 grep --quiet --fixed-strings "+selftest-untracked-content $$" "$bundle/fixtures-diff.txt" ||

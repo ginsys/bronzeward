@@ -21,7 +21,7 @@ and `age` are downloaded into `fixtures/.cache/` and refused on a checksum misma
 | Command | Does |
 |---|---|
 | `fixtures/bin/up` | Generates synthetic secrets, starts PostgreSQL and OpenBao, initializes and unseals OpenBao, creates the Talos cluster, then asks both services again with this run's credentials before it reports the fixture up. Takes about two minutes once images are cached. |
-| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`, or `unknown rc=N` for a `bao-restore` whose request went out and got no answer (a timeout, a dropped connection or a signal), since OpenBao may have applied the snapshot all the same. `start` is done only once the service or Talos node answers again. A snapshot name is one path component, without a slash and without `.partial.` in it; no argument may hold a control character, since each is written into the log, which must itself be the regular file `inject` made, under that one name. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. The rename that publishes a snapshot, or puts a restored store in place, is the commit, as is the one transaction that swaps the restored database in: an action interrupted after it is logged `done`, since the artifact it left is what a later restore acts on (after an interrupted `db-restore` the server is asked whether the swap committed; `bronzeward_previous` is then left until the next `db-restore` drops it). Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
+| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`, or `unknown rc=N` for a `bao-restore`, `bao-soft-delete`, `bao-destroy` or `bao-delete-key` whose request went out and got no answer (a timeout, a dropped connection or a signal), since OpenBao may have applied it all the same. `start` is done only once the service or Talos node answers again. A snapshot name is one path component, without a slash and without `.partial.` in it; no argument may hold a control character, since each is written into the log, which must itself be the regular file `inject` made, under that one name. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. The rename that publishes a snapshot, or puts a restored store in place, is the commit, as is the one transaction that swaps the restored database in: an action interrupted after it is logged `done`, since the artifact it left is what a later restore acts on (after an interrupted `db-restore` the server is asked whether the swap committed; `bronzeward_previous` is then left until the next `db-restore` drops it). Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
 | `fixtures/bin/evidence [path ...]` | Writes versions, container logs, a database dump, a copy of the PostgreSQL data directory as written to disk (read from the container whether the server runs or not), OpenBao metadata and Talos config digests to `.state/evidence/<utc>/`, then scans them, and any extra paths given, for synthetic secret material. Prints the bundle path. A bundle is some tens of MiB, most of it that data directory. |
 | `fixtures/bin/down [--purge] [--adopt]` | Removes every container, network and volume, then checks that nothing is left and fails if something is, or if Docker could not be asked. The claim and then `.state/` are removed last and only after that check passed, so a `down` that could not finish can simply be run again. `--purge` also removes `.cache/`. It refuses a fixture it cannot show to be this checkout's own; `--adopt` overrides that. |
 | `fixtures/bin/selftest [--keep]` | `up`, each injection once with an assertion, `evidence`, `down`. `--keep` runs the checks against a fixture that is already up. |
@@ -88,7 +88,10 @@ backups are expanded before scanning, without needing the database server. What 
 action leaves is covered too: a dump or archive still under its temporary `.partial.` name is
 expanded as far as it goes (a truncated one is named in `unavailable.txt`), a `store-restore`
 staging directory under `.state` is scanned like the live store, and a database left under a
-`db-restore` scratch name is dumped next to the live one. With the live store directory gone, as
+`db-restore` scratch name is dumped next to the live one, and a bundle a capture left before its
+own leak scan ran (it stays marked incomplete, by a `.incomplete` file removed only after the
+scan) is scanned as one more root, since it holds a dump, logs and a data-directory copy nothing
+scanned. With the live store directory gone, as
 a `store-restore` killed between its two renames leaves it, the capture goes on without it, names
 it in `unavailable.txt`, and takes the control from the copy the staging directory holds. OpenBao snapshots are encrypted by
 OpenBao and are scanned as they are. The pattern list in `scan-patterns.txt` is rebuilt from the
@@ -123,7 +126,11 @@ container was removed by hand, anything can take the name while the claim stands
 a recorded name only if it is an anonymous volume's, and the volume, if it still exists, carries
 no label. The Talos label is only a cluster name, which any container or network can be created
 with, so `up` records the IDs of the two containers and the network it created once they exist:
-`inject` and `evidence` act on a container under a node's name only if its ID is recorded, and
+`inject` and `evidence` act on a container under a node's name only if its ID is recorded,
+`inject netsplit` and `netjoin` touch the network under the fixture's name only if its ID is
+recorded (a Talos node would otherwise be given its fixed address on whatever network took the
+name once every node was off it) or, for the Compose network, if it carries the project's own
+labels, and
 `down` refuses while a container or network carries the label without being recorded, or while
 labelled ones exist and there is no record, as an `up` interrupted right after creating the
 cluster leaves it. Only `down --adopt` removes by label alone. The checkout is
