@@ -60,25 +60,48 @@ fi
 # anything is removed, so that the fixture stays there to be looked at.
 state_files_own
 
-# The Talos label is a cluster name, and any container can be created with it; the removal below
-# selects by that label. bin/up recorded the IDs of the containers it created (held to the one-name
-# rule by state_files_own above), so every container carrying the label must be one of them. With
-# labelled containers and no record, as an up interrupted right after creating the cluster leaves
-# it, the label is all there is, and removing by it is what --adopt asks for, not a plain down.
-if [ "$adopt" -eq 0 ]; then
-  labelled=$(docker ps --all --quiet --no-trunc --filter "label=$talos_label") ||
-    die "could not list the Talos containers; nothing was removed"
-  if [ -f "$STATE/down-node-containers" ]; then
-    recorded=$(cat "$STATE/down-node-containers") || die "could not read the recorded Talos container IDs; nothing was removed"
+# The Talos label is a cluster name, and any container or network can be created with it; the
+# removal below selects by that label. bin/up recorded the IDs of the containers and the network it
+# created (held to the one-name rule by state_files_own above), so everything carrying the label
+# must be among them. With labelled resources and no record, as an up interrupted right after
+# creating the cluster leaves it, the label is all there is, and removing by it is what --adopt
+# asks for, not a plain down.
+# recorded_only <kind> <record> <listing...>: every ID the listing gives is in the record
+recorded_only() {
+  local kind=$1 record=$2 labelled recorded id
+  shift 2
+  labelled=$("$@") || die "could not list the Talos ${kind}s; nothing was removed"
+  if [ -f "$record" ]; then
+    recorded=$(cat "$record") || die "could not read the recorded Talos $kind IDs; nothing was removed"
     for id in $labelled; do
       grep --quiet --line-regexp --fixed-strings -- "$id" <<<"$recorded" ||
-        die "the container $id carries this fixture's Talos label but is not one bin/up created; nothing was removed. Remove it by hand, or pass --adopt"
+        die "the $kind $id carries this fixture's Talos label but is not one bin/up created; nothing was removed. Remove it by hand, or pass --adopt"
     done
   elif [ -n "$labelled" ]; then
-    die "containers carry this fixture's Talos label but bin/up left no record of which it created, as an up interrupted right after creating the cluster leaves it; nothing was removed. Pass --adopt to remove every container with the label"
+    die "${kind}s carry this fixture's Talos label but bin/up left no record of which it created, as an up interrupted right after creating the cluster leaves it; nothing was removed. Pass --adopt to remove every $kind with the label"
   fi
-  unset recorded labelled id
+}
+if [ "$adopt" -eq 0 ]; then
+  recorded_only container "$STATE/down-node-containers" docker ps --all --quiet --no-trunc --filter "label=$talos_label"
+  recorded_only network "$STATE/down-node-networks" docker network ls --quiet --no-trunc --filter "label=$talos_label"
 fi
+# A snapshot with a second name, or one that is a symlink, keeps its secret past this teardown:
+# the removal of .state below takes the one name here and leaves the other. The one-name rule
+# for the files bin/up generated is checked in state_files_own; the snapshots inject published
+# are checked here, where the secret would otherwise be left behind.
+for backup in "$STATE"/backups/*; do
+  [ -e "$backup" ] || [ -L "$backup" ] || continue
+  if [ -L "$backup" ] || [ ! -f "$backup" ] || [ "$(stat --format=%h -- "$backup" 2>/dev/null)" != 1 ]; then
+    die "$backup is not a regular file with that one name; its content would outlive this teardown under the other name. Remove that name first; nothing was removed"
+  fi
+done
+unset backup
+# The Talos state directory names what `talosctl cluster destroy` acts on. Through a link, that
+# would be someone else's state. .state/talos itself is refused as a link by lib.sh.
+for talos_state in "$STATE/talos/$FIXTURE_NAME" "$STATE/talos/$FIXTURE_NAME/state.yaml"; do
+  [ ! -L "$talos_state" ] || die "$talos_state is a symlink; the fixture never makes one there. Nothing was removed"
+done
+unset talos_state
 
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:

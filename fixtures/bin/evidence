@@ -104,9 +104,18 @@ manifest=$(git -C "$FIXTURES" rev-parse HEAD) ||
   die "cannot read the manifest commit from git; the bundle could not be tied to a fixture version"
 differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES") ||
   die "cannot ask git whether fixtures/ differs from commit $manifest"
+# A tree that differs from the commit: the commit alone then does not say what ran. The bundle
+# carries the difference, the status of every changed or untracked file and the diff of the
+# tracked ones, so that the commit plus this file reproduces what captured the bundle.
+if [ -n "$differs" ]; then
+  {
+    printf '%s\n\n' "$differs"
+    git -C "$FIXTURES" diff HEAD -- "$FIXTURES"
+  } >"$out/fixtures-diff.txt" || die "cannot record how fixtures/ differs from commit $manifest; the bundle could not be tied to what ran"
+fi
 {
   printf 'captured        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf 'manifest commit %s%s\n' "$manifest" "$([ -z "$differs" ] || printf ' (fixtures/ differs from it)')"
+  printf 'manifest commit %s%s\n' "$manifest" "$([ -z "$differs" ] || printf ' (fixtures/ differs from it: see fixtures-diff.txt)')"
   printf 'host            %s\n' "$(uname -srm)"
   printf 'docker          %s\n' "$(reported docker version --format 'client {{.Client.Version}} server {{.Server.Version}}')"
   printf 'compose         %s\n' "$(reported docker compose version --short)"
@@ -165,7 +174,9 @@ fi
 for dump in "$STATE"/backups/pg-*.dump "$STATE"/backups/pg-*.dump.partial.*; do
   [ -f "$dump" ] || continue
   as_sql=$out/backups/$(basename "$dump").sql
-  if ! docker run --rm --interactive --network none "$POSTGRES_IMAGE" pg_restore --file=- <"$dump" >"$as_sql"; then
+  # In a group with stderr closed: a dump that cannot be opened has bash name it, with the full
+  # path, before any message below could go through `shown`.
+  if ! { docker run --rm --interactive --network none "$POSTGRES_IMAGE" pg_restore --file=- <"$dump" >"$as_sql"; } 2>/dev/null; then
     case $dump in
       *.partial.*) unavailable "interrupted dump $(shown "$dump") could not be expanded in full: scanned only as far as it did expand, and as written" ;;
       *) die "could not expand $(shown "$dump"): the backup would go unscanned" ;;
@@ -364,7 +375,10 @@ secret_in_name() { # secret_in_name <path>
   [ "$rc" -eq 0 ]
 }
 
-find -L "${roots[@]}" -type f -print0 2>/dev/null >"$list" || die "leak scan could not walk every path; results void"
+# Each path once: an extra path that lies under a root the scan has anyway is walked twice, and
+# the same file would be counted twice.
+find -L "${roots[@]}" -type f -print0 2>/dev/null | sort --zero-terminated --unique >"$list" ||
+  die "leak scan could not walk every path; results void"
 : >"$scan"
 control_seen=0
 others=
@@ -391,7 +405,8 @@ done <"$list"
 
 # A secret can sit in a name as well as in a file: every directory entry under the same paths,
 # directories included, is matched too.
-find -L "${roots[@]}" -print0 2>/dev/null >"$list" || die "leak scan could not walk every path; results void"
+find -L "${roots[@]}" -print0 2>/dev/null | sort --zero-terminated --unique >"$list" ||
+  die "leak scan could not walk every path; results void"
 while IFS= read -r -d '' entry; do
   hit=0
   ! secret_in_name "$entry" || hit=1
