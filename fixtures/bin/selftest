@@ -647,6 +647,19 @@ grep --quiet 'hidden from git by an excludes file' "$STATE/selftest-evidence.err
   fail "evidence failed on the hidden file for another reason: $(grep --invert-match --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" | tail -n 1)"
 ! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
   fail "evidence printed the secret-bearing name of a hidden file"
+# An untracked directory git cannot open, named with a secret: git and find warn on stderr with
+# the name as it is, and the listing is incomplete.
+mkdir "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
+chmod 000 "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+chmod 700 "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN" # before anything can fail
+rmdir "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
+[ "$went" -eq 0 ] || fail "evidence captured while git could not open an untracked directory under fixtures/"
+grep --quiet 'warned while listing fixtures/' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the closed directory for another reason: $(grep --invert-match --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" | tail -n 1)"
+! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
+  fail "evidence printed the secret-bearing name of a directory git could not open"
 # The directory of bundles writable but not readable: the captures that ended before their scan
 # cannot be listed, and this one must not report a scan.
 chmod 300 "$STATE/evidence"
@@ -678,6 +691,8 @@ grep --quiet --fixed-strings "$STATE/evidence/selftest-interrupted/leftover.txt"
   fail "leak scan skipped what a capture that ended before its scan left behind"
 [ -z "$(sort "$bundle/leak-scan.txt" | uniq --repeated)" ] || fail "leak scan reported a file twice: for a scan path under a root it has anyway, or for a secret in its name and another in its content"
 grep --quiet 'differs from it' "$bundle/versions.txt" || fail "versions.txt does not say fixtures/ differs from the commit while an untracked file is there"
+grep --quiet "^created at      $(git -C "$FIXTURES" rev-parse HEAD)" "$bundle/versions.txt" ||
+  fail "versions.txt does not name the commit the fixture was created at"
 grep --quiet --fixed-strings "+selftest-untracked-content $$" "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt does not carry the content of an untracked file"
 grep --quiet '^GIT binary patch$' "$bundle/fixtures-diff.txt" ||
@@ -724,7 +739,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper, refuses a symlink in the tree and withholds a hidden file's name; leak scan finds the planted canary and token, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper and names the creating commit, refuses a symlink in the tree, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the
@@ -816,10 +831,13 @@ if [ "$keep" != --keep ]; then
   awk '{print $1, "BWSYNTH-selftest-not-this-run"}' "$STATE/selftest-compose-volumes-aside" >"$STATE/down-compose-volumes"
   stale=0
   "$here/down" >/dev/null 2>&1 && stale=1
+  # With a record, --adopt changes nothing: a volume the record does not name is someone's.
+  adopted=0
+  "$here/down" --adopt >/dev/null 2>&1 && adopted=1
   mv "$STATE/selftest-compose-volumes-aside" "$STATE/down-compose-volumes" # before anything can fail
-  if [ "$went" -eq 1 ] || [ "$stale" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ] ||
+  if [ "$went" -eq 1 ] || [ "$stale" -eq 1 ] || [ "$adopted" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ] ||
     [ -z "$(docker volume ls --quiet --filter "name=^${FIXTURE_NAME}_postgres-data$")" ]; then
-    fail "down removed the Compose volumes by the project label alone, without the record of the ones up created"
+    fail "down removed the Compose volumes by the project label alone, without the record of the ones up created or, with --adopt, against it"
   fi
   # A network with the label, which down removes by label just as it does containers.
   docker network create --label "talos.cluster.name=$FIXTURE_NAME" "$FIXTURE_NAME-selftest-net" >/dev/null || fail "cannot create a network for the test"
@@ -894,7 +912,7 @@ if [ "$keep" != --keep ]; then
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled container and network and the Compose-labelled network against the records and refuses by label alone, holds the Compose volumes to the run recorded, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled container and network and the Compose-labelled network against the records and refuses by label alone, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

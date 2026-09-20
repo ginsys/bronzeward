@@ -127,7 +127,7 @@ need_state() {
 # a fixture name or label may act on.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-volumes down-compose-networks; do
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -177,6 +177,26 @@ compose() {
   docker compose --project-name "$FIXTURE_NAME" --project-directory "$FIXTURES" \
     --file "$FIXTURES/compose.yaml" \
     --env-file "$FIXTURES/versions.env" --env-file "$STATE/secrets.env" "$@"
+}
+
+# fixtures_manifest_diff <status>: how fixtures/ differs from the commit, as bin/up records it at
+# creation and bin/evidence at capture: the status given, the diff of the tracked files and the
+# whole content of the untracked ones (as a diff against nothing), so that the commit plus this
+# says what ran. Git's own diff: --no-ext-diff and --no-textconv keep a helper or filter from the
+# caller's configuration, which may print nothing with the status git would give, from being
+# handed it; --binary carries a file that is not text whole, not as "differ". Ignored files,
+# .state and .cache, are left out: they are the run's secrets and the pinned binaries.
+fixtures_manifest_diff() {
+  local file
+  printf '%s\n\n' "$1"
+  git -C "$FIXTURES" diff --no-ext-diff --no-textconv --binary HEAD -- "$FIXTURES" || return 1
+  # A pipe, not a substitution: a substitution drops the NULs that end each name. With pipefail
+  # a failing listing fails the pipeline, as does the loop when a diff cannot be written.
+  git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" |
+    while IFS= read -r -d '' file; do
+      # --no-index exits 1 when the two differ, which a file against /dev/null always does.
+      git -C "$FIXTURES" diff --no-index --no-ext-diff --no-textconv --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
+    done
 }
 
 # compose_volume_names: the daemon-side names of the named volumes compose.yaml declares,
