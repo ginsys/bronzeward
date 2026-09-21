@@ -91,7 +91,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 56); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 57); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed. Each revision was run this way again, from clean,
 before it was committed, and the run of the revision described here is the one recorded with the
@@ -110,7 +110,7 @@ pull request that landed it; the numbers above are that run's, not an earlier re
 | 9 | `store-snapshot` / `store-restore`, then `store-restore` of a corrupt archive, a `store-snapshot` with an excluding `TAR_OPTIONS` in the environment, a `store-snapshot` whose final name is a symlink to a directory, `store-restore` of an archive whose `data` is a symlink, a `store-snapshot` over a snapshot that has a second hard-linked name and a `store-restore` from it, a `store-restore` from a snapshot name that is a symlink to an archive outside `.state`, a `store-snapshot` whose name holds a slash, one whose name holds a newline, one whose name holds `.partial.`, an action word with a newline and an action that does not exist, a `store-snapshot` with `injections.log` replaced by a symlink to a file outside `.state` and then with a second hard-linked name, then `store-restore` with the live directory gone, then with the store a completed restore replaced left in its staging directory next to the live one, then with the store an interrupted restore moved aside left in its staging directory while the live one is gone, then `kill postgres` with the PostgreSQL container renamed aside and an unlabelled container created under its name, then `pause worker` with the worker renamed aside and a container created under its name carrying the Talos cluster-name label, then `pause worker` with the two Talos containers' names swapped | Deleted file is back; the corrupt restore fails and leaves the live directory, positive control included, untouched; the snapshot holds the file `TAR_OPTIONS` named; the symlinked name is replaced by the snapshot and nothing is written into the directory it pointed at; the archive with the symlinked `data` is refused and the live directory stays; the name with a slash is refused and nothing is written under it; the snapshot with a second name is not replaced and no partial is left, and neither it nor the symlinked name is restored from, no staging directory being left; the name and the action with a newline, the name with `.partial.` and the unknown action are refused before anything is logged; with the log linked either way the action is refused, no snapshot is taken and the file behind the symlink keeps its content; the missing directory is restored, the completed restore's leftover is refused as one to remove with the live directory untouched, the interrupted restore's as the store to move back with nothing installed, and an archive holding an entry named `previous`, restored while the directory is gone, is refused without that entry being installed; the kill and the two pauses are each refused and not logged, the real containers are untouched and neither node is paused | pass |
 | 10 | `bin/evidence` while PostgreSQL is dead | Does not abort; `unavailable.txt` names the missing live dump; the database backup is still expanded and scanned; the data directory is read from the stopped container and the canary found in it | pass |
 | 11 | `db-snapshot` while PostgreSQL is dead, after a `pause postgres` and a second `kill postgres` while it is dead | The pause fails and is recorded `failed`, the second kill is recorded `done`, since the container is stopped as asked; the snapshot fails; no file of that snapshot name is left in `.state/backups`; `injections.log` records it as `failed` and the preceding `kill` as `done` | pass |
-| 12 | `kill` / `start` PostgreSQL, then `start` with the fixture's database renamed aside, then a statement past the request limit (`pg_sleep` under a limit of 3 s), then the network password probe `up` ends on, with another password and with this run's | No answer while dead; committed row survives; the start with the database gone fails at its wait and is recorded `failed`, since readiness is an authenticated query on that database, not `pg_isready`; the probe, run from inside the container's namespace against its address on the Compose network, refuses the other password and answers this run's; the statement is cancelled by the server (its own statement-timeout error, not the client's status 124), so nothing runs on inside the container after the client is given up on | pass |
+| 12 | `kill` / `start` PostgreSQL, then `start` with the fixture's database renamed aside, then `start` with the role's password changed under the server (set from the container's environment over stdin, on no command line; put back through the handler), then a statement past the request limit (`pg_sleep` under a limit of 3 s), then the network password probe `up` ends on, with another password and with this run's | No answer while dead; committed row survives; the start with the database gone, and the one with the password changed, fail at their wait and are recorded `failed`, since readiness is an authenticated query on that database, not `pg_isready`, sent to the container's address on the Compose network, since the image trusts loopback; the probe, run from inside the container's namespace against its address on the Compose network, refuses the other password and answers this run's; the statement is cancelled by the server (its own statement-timeout error, not the client's status 124), so nothing runs on inside the container after the client is given up on | pass |
 | 13 | `bin/evidence` while OpenBao is dead, then `bao-soft-delete` against it | `unavailable.txt` names the provider metadata; `openbao-metadata.jsonl` holds an `unknown` record, not an empty file; the mutation ends with status 125 (its client had no namespace to join and was not run) and is logged `failed`, not `unknown` | pass |
 | 14 | `kill` / `start` OpenBao | Comes back sealed, unseals with the stored key, state intact | pass |
 | 15 | `bao-snapshot` while OpenBao is paused, after a second `pause openbao` | The second pause is recorded `done`, since the container is paused as asked; the request ends on its own; the action fails, is logged as `failed` and leaves no snapshot file | pass |
@@ -1425,6 +1425,36 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     marker, the creator dies at its own `flock`, and nothing that capture wrote is marked
     scanned by another, so the window costs a run, never evidence. Not exercised: a signal
     between the claim's create and its return; a marker lost to a sibling.
+
+57. **`selftest`'s creates labelled and put back only under the label, every file it moves
+    aside registered first, `down`'s three records removed one by one and the declared volumes
+    probed by name, and `start postgres` asked for the password.** A fiftieth round: four
+    findings from one reviewer and one from the advisory review (degraded, five of nine chunks
+    lost, one unverdicted), all accepted. Item 56's put-back for a create removed whatever held
+    the name unless it was the fixture's own recorded container, so a stranger under a name the
+    test uses (which is what made the create fail) would have been removed as the test's: every
+    container and network a test creates carries this run's label, and the put-back removes
+    only under it, as the volumes' did. `selftest` moved a fixture file aside for a case (the
+    store directory, the injection log, the secrets, the positive control, the evidence
+    directory, the cache, five `down` records, the backups directory, `versions.env` four
+    times) and put it back at the end of the case with nothing registered, so a signal in
+    between left the fixture without its store, its records or its secrets, the only copy under
+    a name nothing reads: `restore_aside` is registered before each move (twenty-six sites)
+    and puts the original back over whatever the case put under its name, and the case
+    unregisters it after its own put-back. `down` removed its last three records with one
+    `rm -f`, which goes on past a record it cannot remove and takes the daemon record with it,
+    leaving what the next `down` refuses: one `rm` per record, in order. `down`'s last look for
+    Compose volumes was by the project label alone, so a volume made under a declared name
+    without the label after the removal would have passed, `down` reporting nothing left while
+    the next `up` refused the name: each declared name is probed exactly, as the node volumes
+    are, and a match keeps the state (not exercised: the window is inside `down`). `inject
+    start postgres` waited on a query over loopback, which the image trusts, so a start with
+    the role's password changed was recorded `done` while no client with this run's password
+    connected: the wait goes through `pg_client`, to the container's address on the Compose
+    network, as `up`'s last probe does. Check 12 changes the role's password under the server
+    (from the container's environment over stdin, on no command line, verified first on a
+    throwaway container of the pinned image: `-c` does not interpolate a psql variable, stdin
+    does) and asserts the start is `failed` and the password is back.
 
 ## 6. What each experiment gets
 

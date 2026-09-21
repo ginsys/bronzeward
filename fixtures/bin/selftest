@@ -61,20 +61,35 @@ test_volume_rm() {
   docker volume rm "$1" >/dev/null 2>&1 || true
   undefer
 }
-# drop_stranger <name> <id>: the container under the name removed unless it is the given one (or
-# any, when the ID is empty). Registered before a create for the test, whose ID a signal during
-# the create would leave unknown: what holds the name at put-back time is the test's own.
-# drop_stranger_network <name>: the same for a network.
+# drop_stranger <name>: the container under the name removed, only under this run's label.
+# Registered before a create for the test, whose ID a signal during the create would leave
+# unknown; every create for a test carries the label. What holds the name at put-back time is
+# removed only as the test's own: a stranger under the name, which the create then failed on, or
+# a fixture container the test had renamed to it, is left. drop_stranger_network <name>: the
+# same for a network.
+test_label="bronzeward.selftest.run=$selftest_run"
 drop_stranger() {
-  local id
+  local id made_by
   id=$(docker inspect --type container --format '{{.Id}}' "$1" 2>/dev/null) || return 0
-  [ "$id" != "$2" ] || return 0
+  made_by=$(docker inspect --type container --format '{{index .Labels "bronzeward.selftest.run"}}' "$id" 2>/dev/null) || return 0
+  [ "$made_by" = "$selftest_run" ] || return 0
   docker rm --force --volumes "$id" >/dev/null
 }
 drop_stranger_network() {
-  local id
+  local id made_by
   id=$(docker network inspect --format '{{.Id}}' "$1" 2>/dev/null) || return 0
+  made_by=$(docker network inspect --format '{{index .Labels "bronzeward.selftest.run"}}' "$id" 2>/dev/null) || return 0
+  [ "$made_by" = "$selftest_run" ] || return 0
   docker network rm "$id" >/dev/null
+}
+# restore_aside <aside> <original>: the original put back from where a test moved or copied it,
+# over whatever the test put under its name meanwhile (a link, a copy, a directory). Registered
+# before the move and unregistered after the test's own put-back, after which there is nothing
+# aside and nothing to do.
+restore_aside() {
+  [ -e "$1" ] || [ -L "$1" ] || return 0
+  rm -rf -- "$2"
+  mv --no-target-directory -- "$1" "$2"
 }
 worker_digest() {
   local config
@@ -119,9 +134,9 @@ claim_drop "$FIXTURES"
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
 # Nor does it let down remove anything: the state may be stale, and what exists another checkout's.
 down_said=$("$here/down" 2>&1) || refused=$((refused + 1))
-defer drop_stranger "$CLAIM" ''
+defer drop_stranger "$CLAIM"
 docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=/another/checkout/fixtures" \
-  --network none "$POSTGRES_IMAGE" true >/dev/null || fail "cannot create a container for the test"
+  --label "$test_label" --network none "$POSTGRES_IMAGE" true >/dev/null || fail "cannot create a container for the test"
 "$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
 # Dropped as held by that other checkout; as this one's it is refused and left (asserted).
@@ -299,6 +314,7 @@ records=$(wc -l <"$STATE/injections.log")
 [ -z "$(find "$STATE/backups" -name 'store-selftest.partial.x*')" ] || fail "store-snapshot wrote a snapshot for a name that holds .partial."
 # The log itself: through a link, the arguments, a snapshot name among them, would be written
 # outside .state; a second name keeps them past teardown.
+defer restore_aside "$STATE/selftest-log-aside" "$STATE/injections.log"
 mv "$STATE/injections.log" "$STATE/selftest-log-aside"
 printf 'keep\n' >"$FIXTURES/.selftest-log-target"
 ln -s "$FIXTURES/.selftest-log-target" "$STATE/injections.log"
@@ -307,6 +323,7 @@ linked=0
 kept=$(cat "$FIXTURES/.selftest-log-target")
 rm -f "$FIXTURES/.selftest-log-target" "$STATE/injections.log"
 mv "$STATE/selftest-log-aside" "$STATE/injections.log" # before anything can fail
+undefer
 [ "$linked" -eq 0 ] || fail "inject ran with a symlinked log"
 [ "$kept" = keep ] || fail "inject wrote its log through a link"
 ln "$STATE/injections.log" "$STATE/selftest-log-alias"
@@ -342,6 +359,7 @@ if [ -L "$STATE/data" ]; then
 fi
 [ "$rc" -ne 0 ] && [ -f "$STATE/data/selftest-store" ] || fail "store-restore accepted an archive whose data is a symlink"
 # The loss a store snapshot exists for: the live directory gone altogether.
+defer restore_aside "$STATE/selftest-data-aside" "$STATE/data"
 mv "$STATE/data" "$STATE/selftest-data-aside"
 rc=0
 "$here/inject" store-restore selftest || rc=$?
@@ -351,6 +369,7 @@ if [ "$rc" -ne 0 ] || [ ! -f "$STATE/data/selftest-store" ]; then
   fail "store-restore did not bring back a store directory that was gone"
 fi
 rm -r "$STATE/selftest-data-aside"
+undefer
 # The store a completed restore replaced, left in its staging directory by an interruption while
 # that directory was being removed: the live directory is the restored one, and the leftover is
 # named as such, not as one to move back over it.
@@ -365,6 +384,7 @@ grep --quiet 'the restore it came from is in place' "$STATE/selftest-inject.err"
 # And the leftover of one killed between its two renames, the live directory gone with it: named
 # as the only copy, to move back.
 mkdir -p "$STATE/store-restore.selftest-cut/previous"
+defer restore_aside "$STATE/selftest-data-aside" "$STATE/data"
 mv "$STATE/data" "$STATE/selftest-data-aside"
 rc=0
 "$here/inject" store-restore selftest 2>"$STATE/selftest-inject.err" || rc=$?
@@ -372,6 +392,7 @@ installed=0
 [ ! -e "$STATE/data" ] || installed=1
 rm -rf "$STATE/data" "$STATE/store-restore.selftest-cut"
 mv "$STATE/selftest-data-aside" "$STATE/data" # before anything can fail
+undefer
 [ "$rc" -ne 0 ] && [ "$installed" -eq 0 ] || fail "store-restore ran over the earlier store an interrupted restore left"
 grep --quiet 'move it back' "$STATE/selftest-inject.err" ||
   fail "store-restore did not name an interrupted restore's leftover as the store to move back: $(tail -n 1 "$STATE/selftest-inject.err")"
@@ -382,6 +403,7 @@ mkdir -p "$STATE/selftest-previous-archive/data" "$STATE/selftest-previous-archi
 printf 'from the archive\n' >"$STATE/selftest-previous-archive/previous/planted"
 tar -czf "$STATE/backups/store-selftest-previous.tgz" -C "$STATE/selftest-previous-archive" data previous
 rm -r "$STATE/selftest-previous-archive"
+defer restore_aside "$STATE/selftest-data-aside" "$STATE/data"
 mv "$STATE/data" "$STATE/selftest-data-aside"
 rc=0
 "$here/inject" store-restore selftest-previous 2>/dev/null || rc=$?
@@ -389,6 +411,7 @@ installed=0
 [ ! -e "$STATE/data" ] || installed=1
 rm -rf "$STATE/data" "$STATE/backups/store-selftest-previous.tgz"
 mv "$STATE/selftest-data-aside" "$STATE/data" # before anything can fail
+undefer
 [ "$rc" -ne 0 ] || fail "store-restore accepted an archive with an entry named previous while the live directory was gone"
 [ "$installed" -eq 0 ] || fail "a refused archive's previous entry was installed as the store directory"
 [ -z "$(find "$STATE" -maxdepth 1 -name 'store-restore.*')" ] || fail "a refused store-restore left its staging directory"
@@ -400,8 +423,8 @@ rm "$STATE/data/selftest-store"
 # the fixture under the aside name with the impostor under its own.
 defer docker rename "$PG-selftest-aside" "$PG"
 docker rename "$PG" "$PG-selftest-aside" >/dev/null
-defer drop_stranger "$PG" ''
-impostor_id=$(docker create --quiet --name "$PG" --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
+defer drop_stranger "$PG"
+impostor_id=$(docker create --quiet --name "$PG" --label "$test_label" --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
 records=$(wc -l <"$STATE/injections.log")
 impostor=0
 "$here/inject" kill postgres >/dev/null 2>&1 && impostor=1
@@ -415,8 +438,8 @@ undefer
 # only the ID bin/up recorded says the container is the node.
 defer docker rename "$WORKER-selftest-aside" "$WORKER"
 docker rename "$WORKER" "$WORKER-selftest-aside" >/dev/null
-defer drop_stranger "$WORKER" ''
-impostor_id=$(docker create --quiet --name "$WORKER" --label "talos.cluster.name=$FIXTURE_NAME" --network none "$POSTGRES_IMAGE" true) ||
+defer drop_stranger "$WORKER"
+impostor_id=$(docker create --quiet --name "$WORKER" --label "talos.cluster.name=$FIXTURE_NAME" --label "$test_label" --network none "$POSTGRES_IMAGE" true) ||
   fail "cannot create a container for the test"
 impostor=0
 "$here/inject" pause worker >/dev/null 2>&1 && impostor=1
@@ -493,6 +516,28 @@ pg psql -U bronzeward -d postgres -Atc 'alter database bronzeward_selftest_aside
 grep --quiet --extended-regexp ' failed rc=[0-9]+ start postgres$' <(tail -n 1 "$STATE/injections.log") ||
   fail "injections.log does not record the start without the database as failed"
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "the database is not back after the rename"
+# The role's password changed under the server: pg_isready, and a query over loopback, which the
+# image trusts, would say ready while no client with this run's password connects. The put-back
+# is registered first; the statements take the password from the container's environment (read
+# from stdin: -c does not interpolate), so that it is on no command line, client or container.
+password_set() {
+  local id
+  id=$(container_id "$PG") || return 1
+  PGPASSWORD=$BW_POSTGRES_PASSWORD timeout "$PG_LIMIT" docker exec -i -e PGPASSWORD "$id" psql -U bronzeward -d postgres -q -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+\set pw `echo "$PGPASSWORD"`
+alter role bronzeward password :'pw';
+SQL
+}
+defer password_set
+BW_POSTGRES_PASSWORD=selftest-not-this-run password_set || fail "cannot change the role's password for the test"
+started=0
+"$here/inject" start postgres >/dev/null 2>&1 && started=1
+password_set # before anything can fail
+undefer
+[ "$started" -eq 0 ] || fail "start postgres was done while the role's password was not this run's"
+grep --quiet --extended-regexp ' failed rc=[0-9]+ start postgres$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "injections.log does not record the start with the password changed as failed"
+[ "$(pg_client -Atc 'select 1' 2>/dev/null)" = 1 ] || fail "the password is not back after the change"
 # A statement that outlives the limit is cancelled by the server, not only given up on by the
 # client: with the docker client ended, the statement would run on inside the container, and a
 # rename waiting on a lock would still commit after the log said the action failed.
@@ -505,7 +550,7 @@ grep --quiet 'statement timeout' <<<"$said" || fail "a statement past the limit 
 # so another password must be refused there and this run's answered.
 ! BW_POSTGRES_PASSWORD=not-this-run pg_client -Atc 'select 1' >/dev/null 2>&1 || fail "pg_client was not asked for the password"
 [ "$(pg_client -Atc 'select 1' 2>/dev/null)" = 1 ] || fail "pg_client with this run's password did not answer"
-ok "kill / start postgres keeps committed data; a start with the database gone is failed; a statement past the limit is cancelled by the server; the password is asked for over the network"
+ok "kill / start postgres keeps committed data; a start with the database gone, or the password changed, is failed; a statement past the limit is cancelled by the server; the password is asked for over the network"
 "$here/inject" kill openbao
 degraded=$("$here/evidence") || fail "evidence aborted while openbao was down"
 grep --quiet 'openbao metadata' "$degraded/unavailable.txt" || fail "evidence did not say the OpenBao metadata is missing"
@@ -597,10 +642,12 @@ ok "kill / start and pause / unpause worker"
 ! worker_talos version --short >/dev/null 2>&1 || fail "partitioned worker still answers"
 # Off its network, the node would be given its address on whatever network carries the name: the
 # network is held to the one up recorded, and without the record nothing is joined.
+defer restore_aside "$STATE/selftest-networks-aside" "$STATE/down-node-networks"
 mv "$STATE/down-node-networks" "$STATE/selftest-networks-aside"
 joined=0
 "$here/inject" netjoin worker 2>/dev/null && joined=1
 mv "$STATE/selftest-networks-aside" "$STATE/down-node-networks" # before anything can fail
+undefer
 [ "$joined" -eq 0 ] || fail "netjoin worker joined a network no record vouches for"
 ! worker_talos version --short >/dev/null 2>&1 || fail "the refused netjoin connected the worker all the same"
 # Attached meanwhile at another address, by hand: the connect is refused, and membership alone is
@@ -654,12 +701,14 @@ ok "evidence refuses a scan path it cannot read, and withholds a secret-bearing 
 # The positive control as a symlink to a file outside the scanned paths that holds exactly the
 # planted content: the canary then lives where teardown does not reach, so it is not the control,
 # and without a control the capture is void.
+defer restore_aside "$STATE/selftest-control-target" "$STATE/data/canary-control.txt"
 mv "$STATE/data/canary-control.txt" "$STATE/selftest-control-target"
 ln -s "$STATE/selftest-control-target" "$STATE/data/canary-control.txt"
 rc=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
 rm "$STATE/data/canary-control.txt"
 mv "$STATE/selftest-control-target" "$STATE/data/canary-control.txt" # before anything can fail
+undefer
 [ "$rc" -ne 0 ] || fail "evidence accepted a positive control that is a symlink to a file outside .state/data"
 grep --quiet 'did not find its positive control' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the symlinked control for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
@@ -673,6 +722,7 @@ grep --quiet 'did not find its positive control' "$STATE/selftest-evidence.err" 
   fail "evidence failed on the hard-linked control for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 rm "$STATE/selftest-evidence.err"
 # A managed directory that is a symlink: bundles would be written where teardown does not reach.
+defer restore_aside "$STATE/selftest-evidence-aside" "$STATE/evidence"
 mv "$STATE/evidence" "$STATE/selftest-evidence-aside"
 ln -s "$STATE/selftest-evidence-aside" "$STATE/evidence"
 bundles_before=$(find "$STATE/selftest-evidence-aside" -mindepth 1 -maxdepth 1 | sort)
@@ -681,10 +731,12 @@ rc=0
 bundles_after=$(find "$STATE/selftest-evidence-aside" -mindepth 1 -maxdepth 1 | sort)
 rm "$STATE/evidence"
 mv "$STATE/selftest-evidence-aside" "$STATE/evidence" # before anything can fail
+undefer
 [ "$rc" -ne 0 ] || fail "evidence accepted an evidence directory that is a symlink"
 [ "$bundles_before" = "$bundles_after" ] || fail "evidence wrote a bundle through a symlinked evidence directory"
 # The generated secrets are data, never code: a secrets.env that is a link, or that holds a line
 # the fixture did not write, stops every command before it is read.
+defer restore_aside "$STATE/selftest-secrets-aside" "$STATE/secrets.env"
 mv "$STATE/secrets.env" "$STATE/selftest-secrets-aside"
 ln -s "$STATE/selftest-secrets-aside" "$STATE/secrets.env"
 linked=0
@@ -701,6 +753,7 @@ printf 'BW_CANARY=%s\n' "$BW_CANARY" >>"$STATE/secrets.env"
 twice=0
 ! "$here/evidence" >/dev/null 2>&1 || twice=1
 mv "$STATE/selftest-secrets-aside" "$STATE/secrets.env" # before anything can fail
+undefer
 [ "$linked" -eq 0 ] || fail "a symlinked secrets.env was read"
 [ "$extra" -eq 0 ] || fail "a secrets.env with a line the fixture never writes was accepted"
 [ "$twice" -eq 0 ] || fail "a secrets.env that sets a name twice was accepted"
@@ -730,37 +783,45 @@ nogit=0
 # The control itself with its canary replaced by another secret: still one hit, no longer the
 # control, and without the control the capture is void.
 cp "$STATE/data/canary-control.txt" "$STATE/selftest-control-as-planted"
+defer restore_aside "$STATE/selftest-control-as-planted" "$STATE/data/canary-control.txt"
 printf 'planted on purpose: %s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/canary-control.txt"
 rc=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
 mv "$STATE/selftest-control-as-planted" "$STATE/data/canary-control.txt" # before anything can fail
+undefer
 [ "$rc" -ne 0 ] || fail "evidence accepted a positive control whose canary had been replaced by another secret"
 grep --quiet 'did not find its positive control' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the replaced control for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 rm "$STATE/selftest-evidence.err"
 # The pattern list thinned after up: a scan against it would pass while a token goes unmatched.
 cp "$STATE/scan-patterns.txt" "$STATE/selftest-patterns-aside"
+defer restore_aside "$STATE/selftest-patterns-aside" "$STATE/scan-patterns.txt"
 printf 'BWSYNTH-\n' >"$STATE/scan-patterns.txt"
 thinned=0
 ! "$here/evidence" >/dev/null 2>&1 || thinned=1
 mv "$STATE/selftest-patterns-aside" "$STATE/scan-patterns.txt" # before anything can fail
+undefer
 [ "$thinned" -eq 0 ] || fail "evidence scanned with a pattern list that was changed after up"
 # A secrets.env short of one assignment, as an up interrupted while writing it leaves it, while
 # the caller's shell holds that variable: the value must not come from there.
 cp "$STATE/secrets.env" "$STATE/selftest-secrets-aside"
+defer restore_aside "$STATE/selftest-secrets-aside" "$STATE/secrets.env"
 grep --invert-match '^BW_CANARY=' "$STATE/selftest-secrets-aside" >"$STATE/secrets.env"
 inherited=0
 ! BW_CANARY=$BW_CANARY "$here/evidence" >/dev/null 2>&1 || inherited=1
 mv "$STATE/selftest-secrets-aside" "$STATE/secrets.env" # before anything can fail
+undefer
 [ "$inherited" -eq 0 ] || fail "an incomplete secrets.env was completed from the caller's environment"
 # .cache likewise a real directory: through a link the CLIs would be downloaded elsewhere, and
 # `down --purge` would remove the link alone.
+defer restore_aside "$FIXTURES/.selftest-cache-aside" "$CACHE"
 mv "$CACHE" "$FIXTURES/.selftest-cache-aside"
 ln -s "$FIXTURES/.selftest-cache-aside" "$CACHE"
 linked=0
 ! "$here/evidence" >/dev/null 2>&1 || linked=1
 rm "$CACHE"
 mv "$FIXTURES/.selftest-cache-aside" "$CACHE" # before anything can fail
+undefer
 [ "$linked" -eq 0 ] || fail "a symlinked cache directory was accepted"
 # What an interruption leaves, each holding the canary: a dump and two archives under their
 # temporary names, one complete and one truncated, a store-restore staging directory, and a
@@ -792,11 +853,15 @@ rm "$STATE/selftest-evidence.err"
 # The live store gone, as a store-restore killed between its two renames leaves it: aside under
 # the staging directory, where the control still counts as found, and the capture goes on.
 mkdir "$STATE/store-restore.selftest"
+defer rm -rf "$STATE/store-restore.selftest"
+defer restore_aside "$STATE/store-restore.selftest/previous" "$STATE/data"
 mv "$STATE/data" "$STATE/store-restore.selftest/previous"
 rc=0
 bundle=$("$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
 mv "$STATE/store-restore.selftest/previous" "$STATE/data" # before anything can fail
+undefer
 rm -r "$STATE/store-restore.selftest"
+undefer
 [ "$rc" -eq 0 ] || fail "evidence aborted with the live store directory moved aside: $(tail -n 1 "$STATE/selftest-evidence.err")"
 grep --quiet --fixed-strings "$STATE/data is absent" "$bundle/unavailable.txt" ||
   fail "evidence did not name the absent live store directory"
@@ -1346,6 +1411,7 @@ if [ "$keep" != --keep ]; then
   [ ! -e "$STATE/down-node-volumes-incomplete" ] || fail "up left its unrecorded-cluster marker in .state"
   # The record of node volumes is what down removes by name: a link there is refused, before
   # anything is removed.
+  defer restore_aside "$STATE/selftest-record-aside" "$STATE/down-node-volumes"
   mv "$STATE/down-node-volumes" "$STATE/selftest-record-aside"
   ln -s "$STATE/selftest-record-aside" "$STATE/down-node-volumes"
   # And the marker down writes when the node volumes are not all known, which it does before the
@@ -1362,6 +1428,7 @@ if [ "$keep" != --keep ]; then
   [ "$kept" = keep ] || fail "down wrote its incomplete-volumes marker through a link"
   rm "$STATE/down-node-volumes"
   mv "$STATE/selftest-record-aside" "$STATE/down-node-volumes"
+  undefer
   # A hard link is no symlink and is a regular file; it is a second name all the same.
   ln "$STATE/down-node-volumes" "$STATE/selftest-record-alias"
   went=0
@@ -1382,6 +1449,7 @@ if [ "$keep" != --keep ]; then
   # And the record's content: each name is held against what Docker says of a Talos node volume.
   # A name that is no anonymous volume's, then a volume of such a name that carries a label.
   cp "$STATE/down-node-volumes" "$STATE/selftest-record-copy"
+  defer restore_aside "$STATE/selftest-record-copy" "$STATE/down-node-volumes"
   printf 'selftest-not-a-volume\n' >>"$STATE/down-node-volumes"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
@@ -1397,14 +1465,15 @@ if [ "$keep" != --keep ]; then
   labelled=$(docker volume ls --quiet --filter "name=^${selftest_volume}$")
   test_volume_rm "$selftest_volume"
   mv "$STATE/selftest-record-copy" "$STATE/down-node-volumes" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ -z "$labelled" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a recorded volume that carries a label"
   fi
   # The Talos label alone: a container that only carries the cluster name is not one up created,
   # and down must not remove it with the fixture's own.
-  defer drop_stranger "$FIXTURE_NAME-selftest-impostor" ''
+  defer drop_stranger "$FIXTURE_NAME-selftest-impostor"
   impostor_id=$(docker create --quiet --name "$FIXTURE_NAME-selftest-impostor" --label "talos.cluster.name=$FIXTURE_NAME" \
-    --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
+    --label "$test_label" --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   impostor=$(docker ps --all --quiet --no-trunc --filter "id=$impostor_id")
@@ -1420,9 +1489,9 @@ if [ "$keep" != --keep ]; then
   # a signal in between leaves the fixture under its own name, not the impostor.
   defer docker rename "$PG-selftest-aside" "$PG"
   docker rename "$PG" "$PG-selftest-aside" >/dev/null
-  defer drop_stranger "$PG" ''
+  defer drop_stranger "$PG"
   impostor_id=$(docker create --quiet --name "$PG" --label "com.docker.compose.project=$FIXTURE_NAME" \
-    --label "com.docker.compose.project.working_dir=$FIXTURES" --network none "$POSTGRES_IMAGE" true) ||
+    --label "com.docker.compose.project.working_dir=$FIXTURES" --label "$test_label" --network none "$POSTGRES_IMAGE" true) ||
     fail "cannot create a container for the test"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
@@ -1439,9 +1508,9 @@ if [ "$keep" != --keep ]; then
   fi
   # A container carrying the claim label under another name: not the claim, not the fixture's,
   # and down does not know whose it is. It removes nothing and names it.
-  defer drop_stranger "$FIXTURE_NAME-selftest-claimant" ''
+  defer drop_stranger "$FIXTURE_NAME-selftest-claimant"
   claimant_id=$(docker create --quiet --name "$FIXTURE_NAME-selftest-claimant" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=$FIXTURES" \
-    --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
+    --label "$test_label" --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   claimant=$(docker ps --all --quiet --no-trunc --filter "id=$claimant_id")
@@ -1454,10 +1523,12 @@ if [ "$keep" != --keep ]; then
   # up leaves it: every name and label would be derived from the new value, and down would find
   # nothing to remove. Simulated through the record, which is what lib.sh holds versions.env to.
   cp "$STATE/up-fixture-name" "$STATE/selftest-fixture-name-copy"
+  defer restore_aside "$STATE/selftest-fixture-name-copy" "$STATE/up-fixture-name"
   printf '%s-other\n' "$FIXTURE_NAME" >"$STATE/up-fixture-name"
   went=0
   down_said=$("$here/down" 2>&1) && went=1
   mv --no-target-directory -- "$STATE/selftest-fixture-name-copy" "$STATE/up-fixture-name" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down ran, or removed the state, while the fixture was recorded as created under another name"
   fi
@@ -1466,12 +1537,14 @@ if [ "$keep" != --keep ]; then
   # commands would use is not the one the fixture was made with. Likewise simulated through the
   # record; inject refuses too.
   cp "$STATE/up-versions.env" "$STATE/selftest-versions-copy"
+  defer restore_aside "$STATE/selftest-versions-copy" "$STATE/up-versions.env"
   printf '# selftest\n' >>"$STATE/up-versions.env"
   went=0
   down_said=$("$here/down" 2>&1) && went=1
   injected=0
   "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
   mv --no-target-directory -- "$STATE/selftest-versions-copy" "$STATE/up-versions.env" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down or inject ran, or down removed the state, while versions.env differed from the one recorded at up"
   fi
@@ -1493,12 +1566,14 @@ if [ "$keep" != --keep ]; then
   # versions.env short of a value the caller's shell exports: the shell's value must not stand in
   # for it, since the record holds the file's bytes alone. Put back before anything can fail.
   cp "$FIXTURES/versions.env" "$STATE/selftest-versions-file-copy"
+  defer restore_aside "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env"
   grep --invert-match '^OPENBAO_PORT=' "$STATE/selftest-versions-file-copy" >"$FIXTURES/versions.env"
   went=0
   down_said=$(OPENBAO_PORT=$OPENBAO_PORT "$here/down" 2>&1) && went=1
   injected=0
   OPENBAO_PORT=$OPENBAO_PORT "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
   mv --no-target-directory -- "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     docker unpause "$PG" >/dev/null 2>&1 || true
     fail "down or inject ran, or down removed the state, while versions.env omitted a value the shell exported"
@@ -1508,6 +1583,7 @@ if [ "$keep" != --keep ]; then
   # value at another command, with the record of the bytes holding. The manifest is parsed, and
   # the line refused.
   cp "$FIXTURES/versions.env" "$STATE/selftest-versions-file-copy"
+  defer restore_aside "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env"
   # shellcheck disable=SC2016  # the expansion is written into the file, for the fixture to refuse
   { grep --invert-match '^OPENBAO_PORT=' "$STATE/selftest-versions-file-copy" && printf 'OPENBAO_PORT=${OPENBAO_PORT_SELFTEST:-%s}\n' "$OPENBAO_PORT"; } >"$FIXTURES/versions.env"
   went=0
@@ -1515,6 +1591,7 @@ if [ "$keep" != --keep ]; then
   injected=0
   "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
   mv --no-target-directory -- "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     docker unpause "$PG" >/dev/null 2>&1 || true
     fail "down or inject ran, or down removed the state, while versions.env held a value to be evaluated"
@@ -1524,24 +1601,28 @@ if [ "$keep" != --keep ]; then
   # manifest's keys, each once, or STATE, CACHE or PATH could be set from the file, and the value
   # that runs would be the last of two while the record shows both.
   cp "$FIXTURES/versions.env" "$STATE/selftest-versions-file-copy"
+  defer restore_aside "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env"
   { cat "$STATE/selftest-versions-file-copy" && printf 'STATE=%s\n' "$STATE/selftest-state-elsewhere"; } >"$FIXTURES/versions.env"
   went=0
   down_said=$("$here/down" 2>&1) && went=1
   injected=0
   "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
   mv --no-target-directory -- "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ -e "$STATE/selftest-state-elsewhere" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     docker unpause "$PG" >/dev/null 2>&1 || true
     fail "down or inject ran, or down removed the state or made another, while versions.env set a key the manifest does not define"
   fi
   grep --quiet 'sets STATE, which is not a value the manifest defines' <<<"$down_said" || fail "down failed on the foreign key for another reason: $(tail -n 1 <<<"$down_said")"
   cp "$FIXTURES/versions.env" "$STATE/selftest-versions-file-copy"
+  defer restore_aside "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env"
   { cat "$STATE/selftest-versions-file-copy" && printf 'OPENBAO_PORT=%s\n' "$OPENBAO_PORT"; } >"$FIXTURES/versions.env"
   went=0
   down_said=$("$here/down" 2>&1) && went=1
   injected=0
   "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
   mv --no-target-directory -- "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     docker unpause "$PG" >/dev/null 2>&1 || true
     fail "down or inject ran, or down removed the state, while versions.env set a key twice"
@@ -1549,12 +1630,14 @@ if [ "$keep" != --keep ]; then
   grep --quiet 'sets OPENBAO_PORT a second time' <<<"$down_said" || fail "down failed on the repeated key for another reason: $(tail -n 1 <<<"$down_said")"
   # The backups directory replaced by a symlink: every command refuses at load, before down's own
   # look at the entries in it, which through the link would find a directory elsewhere.
+  defer restore_aside "$STATE/selftest-backups-aside" "$STATE/backups"
   mv --no-target-directory -- "$STATE/backups" "$STATE/selftest-backups-aside"
   ln -s "$STATE/selftest-backups-aside" "$STATE/backups"
   went=0
   down_said=$("$here/down" 2>&1) && went=1
   rm -- "$STATE/backups"
   mv --no-target-directory -- "$STATE/selftest-backups-aside" "$STATE/backups" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down ran, or removed the state, while the backups directory was a symlink"
   fi
@@ -1563,12 +1646,14 @@ if [ "$keep" != --keep ]; then
   # daemon reached holds none of the fixture, and down would verify it clean. Likewise simulated
   # through the record. inject, and evidence through the same check, refuse too.
   cp "$STATE/up-daemon" "$STATE/selftest-daemon-copy"
+  defer restore_aside "$STATE/selftest-daemon-copy" "$STATE/up-daemon"
   printf 'selftest-not-this-daemon\n' >"$STATE/up-daemon"
   went=0
   down_said=$("$here/down" 2>&1) && went=1
   injected=0
   "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
   mv --no-target-directory -- "$STATE/selftest-daemon-copy" "$STATE/up-daemon" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     docker unpause "$PG" >/dev/null 2>&1 || true
     fail "down or inject ran, or down removed the state, while the fixture was recorded as created on another Docker daemon"
@@ -1577,12 +1662,14 @@ if [ "$keep" != --keep ]; then
   grep --quiet 'this shell reaches' <<<"$down_said" || fail "down failed on the daemon for another reason: $(tail -n 1 <<<"$down_said")"
   # And with no daemon record at all: up writes it before anything else under the directory, so
   # the directory is not one up left, and is not taken for a fixture on the daemon reached now.
+  defer restore_aside "$STATE/selftest-daemon-aside" "$STATE/up-daemon"
   mv "$STATE/up-daemon" "$STATE/selftest-daemon-aside"
   went=0
   down_said=$("$here/down" 2>&1) && went=1
   injected=0
   "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
   mv --no-target-directory -- "$STATE/selftest-daemon-aside" "$STATE/up-daemon" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     docker unpause "$PG" >/dev/null 2>&1 || true
     fail "down or inject ran, or down removed the state, with no record of the Docker daemon the fixture was created on"
@@ -1591,10 +1678,12 @@ if [ "$keep" != --keep ]; then
   grep --quiet 'no record in' <<<"$down_said" || fail "down failed on the missing daemon record for another reason: $(tail -n 1 <<<"$down_said")"
   # And without the record, as an up interrupted right after creating the cluster leaves it: the
   # label is all there is, and removing by it is for --adopt.
+  defer restore_aside "$STATE/selftest-containers-aside" "$STATE/down-node-containers"
   mv "$STATE/down-node-containers" "$STATE/selftest-containers-aside"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   mv "$STATE/selftest-containers-aside" "$STATE/down-node-containers" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ] ||
     [ "$(docker ps --all --quiet --filter "label=talos.cluster.name=$FIXTURE_NAME" | wc -l)" -ne 2 ]; then
     fail "down removed by the Talos label alone, without the record of which containers up created"
@@ -1602,6 +1691,7 @@ if [ "$keep" != --keep ]; then
   # The Compose volumes carry the project label, which any Compose run of that name puts there;
   # down holds each to the run up labelled it with and recorded. Without the record, and with a
   # record naming another run, down refuses.
+  defer restore_aside "$STATE/selftest-compose-volumes-aside" "$STATE/down-compose-volumes"
   mv "$STATE/down-compose-volumes" "$STATE/selftest-compose-volumes-aside"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
@@ -1612,13 +1702,14 @@ if [ "$keep" != --keep ]; then
   adopted=0
   "$here/down" --adopt >/dev/null 2>&1 && adopted=1
   mv "$STATE/selftest-compose-volumes-aside" "$STATE/down-compose-volumes" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ "$stale" -eq 1 ] || [ "$adopted" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ] ||
     [ -z "$(docker volume ls --quiet --filter "name=^${FIXTURE_NAME}_postgres-data$")" ]; then
     fail "down removed the Compose volumes by the project label alone, without the record of the ones up created or, with --adopt, against it"
   fi
   # A network with the label, which down removes by label just as it does containers.
   defer drop_stranger_network "$FIXTURE_NAME-selftest-net"
-  net_id=$(docker network create --label "talos.cluster.name=$FIXTURE_NAME" "$FIXTURE_NAME-selftest-net") || fail "cannot create a network for the test"
+  net_id=$(docker network create --label "talos.cluster.name=$FIXTURE_NAME" --label "$test_label" "$FIXTURE_NAME-selftest-net") || fail "cannot create a network for the test"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   impostor=$(docker network ls --quiet --no-trunc --filter "id=$net_id")
@@ -1631,7 +1722,7 @@ if [ "$keep" != --keep ]; then
   # network to the ID up recorded.
   defer drop_stranger_network "$FIXTURE_NAME-selftest-cnet"
   net_id=$(docker network create --label "com.docker.compose.project=$FIXTURE_NAME" --label "com.docker.compose.network=default" \
-    "$FIXTURE_NAME-selftest-cnet") || fail "cannot create a network for the test"
+    --label "$test_label" "$FIXTURE_NAME-selftest-cnet") || fail "cannot create a network for the test"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   impostor=$(docker network ls --quiet --no-trunc --filter "id=$net_id")
