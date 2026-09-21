@@ -136,12 +136,16 @@ if [ -e "$STATE/up-versions.env" ] || [ -L "$STATE/up-versions.env" ]; then
     exit 1
   fi
 fi
-# The generated secrets are read as data, not sourced: a secrets.env that was replaced, or a line
-# added to it, must not run as shell code here, before any ownership check. Only the four
+# The generated secrets are read as data, not sourced, and only ever this way: a secrets.env that
+# was replaced, or a line added to it, must not run as shell code here, before any ownership
+# check, nor in bin/up, which exports the values it generated without reading the file back, nor
+# in bin/selftest, which reads the file a child up wrote through this same function. Only the four
 # assignments bin/up writes are accepted, each a bare value without whitespace, and the file must
 # be the regular file bin/up made, under that one name: with a second name outside .state the
 # secrets would outlive teardown there.
-if [ -e "$STATE/secrets.env" ] || [ -L "$STATE/secrets.env" ]; then
+secrets_load() {
+  local secret_line
+  [ -e "$STATE/secrets.env" ] || [ -L "$STATE/secrets.env" ] || return 0
   if [ -L "$STATE/secrets.env" ] || [ ! -f "$STATE/secrets.env" ] ||
     [ "$(stat --format=%h -- "$STATE/secrets.env" 2>/dev/null)" != 1 ]; then
     printf 'fixtures: %s is not the regular file bin/up writes, with that one name; the fixture never makes anything else there\n' "$STATE/secrets.env" >&2
@@ -155,8 +159,8 @@ if [ -e "$STATE/secrets.env" ] || [ -L "$STATE/secrets.env" ]; then
       exit 1
     fi
   done <"$STATE/secrets.env"
-  unset secret_line
-fi
+}
+secrets_load
 
 # Keep every generated client config inside .state; never touch the caller's own.
 export TALOSCONFIG=$STATE/talosconfig
