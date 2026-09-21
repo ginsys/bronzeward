@@ -194,6 +194,22 @@ need() {
   done
 }
 
+# The Docker context, pinned for the life of this command. `docker context use` in another shell
+# changes the default the CLI reads afresh for each call, so a command that began on one daemon
+# would go on with another: up would record the daemon and take the claim on the first and create
+# the services on the second, where no down can both pass the daemon check and find them. Named in
+# the environment, the context is the same for every call this process makes. DOCKER_HOST, when
+# set, names the daemon itself and cannot change under a process; the context is then "default",
+# and the pin changes nothing. What the pin does not hold is the context's own endpoint, which
+# `docker context update` can re-point; the daemon record catches that before inject, evidence and
+# down act, and up in the window before its records is not covered.
+need docker
+if [ -z "${DOCKER_CONTEXT:-}" ]; then
+  DOCKER_CONTEXT=$(docker context show) || die "cannot read the current Docker context"
+  [ -n "$DOCKER_CONTEXT" ] || die "the current Docker context has no name"
+  export DOCKER_CONTEXT
+fi
+
 # need_state: this checkout has a fixture, and the fixture on the daemon is that one. The state
 # directory alone does not show it: container names are fixed, so after this checkout's resources
 # were removed by hand another checkout's fixture answers to the same names, and the stale
@@ -704,13 +720,16 @@ claim_label() {
 }
 # claim_owner: the checkout that took the claim (nothing when there is no claim).
 claim_owner() { claim_label "$CLAIM_OWNER_LABEL"; }
-# claim_drop: the container of the claim's name, once its label shows it to be the claim, and only
-# that one: the label alone selects any container given it, and the name, by the time of the
-# removal, whatever was given the name since the look, so the removal takes the ID the look held.
-# --volumes, because the image declares a data volume and Docker creates an anonymous one for the
-# claim although it never starts. Nothing else would ever find that volume again.
+# claim_drop <owner>: the container of the claim's name, once its labels show it to be the claim
+# held by <owner>, the checkout the caller saw holding it, and only that one: the label alone
+# selects any container given it, and the name, by the time of the removal, whatever was given the
+# name since the look, so the removal takes the ID the look held. A claim held by another checkout
+# by now is a fixture starting there, and is left, with a word and status 1; none at all is
+# nothing to do. --volumes, because the image declares a data volume and Docker creates an
+# anonymous one for the claim although it never starts. Nothing else would ever find that volume
+# again.
 claim_drop() {
-  local strangers out id
+  local strangers out id owner
   strangers=$(claim_strangers) || die "could not list the containers carrying the fixture claim label"
   [ -z "$strangers" ] ||
     die "$(tr '\n' ' ' <<<"$strangers")carries the fixture claim label without being the claim $CLAIM; not the fixture's, not removed"
@@ -724,7 +743,12 @@ claim_drop() {
   id=${out%% *}
   out=${out#* }
   [ "${out%% *}" = "${CLAIM_LABEL#*=}" ] || return 0
-  [ -n "${out#* }" ] || return 0
+  owner=${out#* }
+  [ -n "$owner" ] || return 0
+  if [ "$owner" != "$1" ]; then
+    say "fixtures: the claim $CLAIM is held by $owner now, not by $1 as it was; it is another fixture's and is left"
+    return 1
+  fi
   docker rm --force --volumes "$id" >/dev/null
 }
 

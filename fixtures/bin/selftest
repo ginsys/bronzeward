@@ -55,7 +55,7 @@ ok "all four containers are running"
 # The state directory alone is not ownership: with the claim gone, or held by another checkout, the
 # fixed container names may be someone else's fixture, and nothing here may touch them.
 refused=0
-claim_drop
+claim_drop "$FIXTURES"
 "$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
 # Nor does it let down remove anything: the state may be stale, and what exists another checkout's.
@@ -64,7 +64,9 @@ docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWN
   --network none "$POSTGRES_IMAGE" true >/dev/null
 "$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
-claim_drop
+# Dropped as held by that other checkout; as this one's it is refused and left (asserted).
+! claim_drop "$FIXTURES" 2>/dev/null || fail "claim_drop removed a claim held by another checkout"
+claim_drop /another/checkout/fixtures
 claim_take # this checkout's claim again, before anything can fail
 # The claim is a container of an image that declares a volume, and must have made none: removed
 # by hand without --volumes, an anonymous one would outlive every record.

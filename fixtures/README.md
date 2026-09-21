@@ -192,7 +192,12 @@ switched, or `DOCKER_HOST` or the Docker context changed since `up`, `down` woul
 nothing, find nothing, remove `.state` and report success while the fixture ran on. Every command
 refuses while `versions.env` names another fixture than the record; `inject`, `evidence` and
 `down` refuse while the shell reaches another daemon than the record, or while `.state` holds no
-daemon record at all. The rest of `versions.env` (ports, node addresses, image pins, requested
+daemon record at all. Within one command the daemon cannot change under it either: every command
+pins the Docker context it started under (`DOCKER_CONTEXT`, unless the caller set it) for its
+whole life, so a `docker context use` in another shell mid-way does not have `up` record the
+daemon on one and create the services on another; a context re-pointed by `docker context update`
+is caught by the daemon record before `inject`, `evidence` and `down` act, and not by `up` before
+its records. The rest of `versions.env` (ports, node addresses, image pins, requested
 versions) is bound the same way: every command reads the file once, as bytes, clears every value
 the manifest must set before taking its values from that reading, and refuses a file that leaves
 one unset, so a value exported by the caller's shell never stands in for one the file omits; the
@@ -255,7 +260,9 @@ label); the Compose containers and network the same way, not through `compose do
 the project up again by its labels when it removes. Every other command acts by the ID its check
 held too: `inject` and `evidence` read, exec into, log and copy from the container verified under
 the name, `inject` connects and disconnects the network under the ID recorded, and the claim is
-dropped by the ID its labels were read from. That is what the hint of an `up` that failed names
+dropped by the ID its labels were read from, and only while its owner label still names the
+checkout the command saw holding it at its start (one retaken by another checkout since is that
+fixture's, and is left, with `down` ending on it). That is what the hint of an `up` that failed names
 from the first Compose volume until the last record is published, since a plain `down` refuses
 what it finds without its record; an `up` that found a Compose volume name taken (the label read
 back is another run's), or whose `docker volume create` failed or whose read-back did (the volume

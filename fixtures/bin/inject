@@ -141,6 +141,9 @@ moved_aside=0
 committing=0
 db_swapping=0
 bao_dispatched=0
+# bao_answered: OpenBao answered the mutating request with success; set before the dispatch flag
+# is cleared, so that no moment has neither. A signal after it is a signal after the mutation.
+bao_answered=0
 docker_dispatched=0
 started=0
 # docker_expect: the state the Docker request in flight asks for, set before the request: "<field>
@@ -215,6 +218,13 @@ finish() {
     left=$(pg psql -U bronzeward -d postgres -Atc "select count(*) from pg_database where datname = 'bronzeward_restore'" 2>/dev/null) &&
     [ "$left" = 0 ]; then
     say "fixtures: interrupted after the restored database was swapped in; recorded as done. bronzeward_previous is left; the next db-restore drops it"
+    rc=0
+  fi
+  # A mutating request OpenBao answered with success, then a signal before the last line: the
+  # mutation is made, and the log must not deny it. Recorded as done; what came after the answer,
+  # bao-restore's wait for an active node, was not seen to finish, and is said so.
+  if [ "$bao_answered" -eq 1 ] && [ "$rc" -ne 0 ] && [ "$signalled" -eq 1 ]; then
+    say "fixtures: OpenBao answered the request before the signal; recorded as done (what followed the answer, if anything, was not seen to finish)"
     rc=0
   fi
   # A mutating request that OpenBao may have received and applied without answering: curl's own
@@ -364,8 +374,10 @@ case $action in
     docker_expect='Running true'
     docker_dispatched=1
     docker start "$target_id" >/dev/null
-    docker_dispatched=0
+    # started first: a signal between the two would otherwise find neither flag, and record
+    # failed for a container the daemon started.
     started=1
+    docker_dispatched=0
     case $1 in
       # An authenticated query on the fixture's database, not pg_isready, which answers as soon as
       # the server accepts connections, whatever the parameters: a database dropped or a password
@@ -433,7 +445,8 @@ case $action in
     pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_previous
     pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_restore
     pg createdb -U bronzeward --maintenance-db=postgres bronzeward_restore
-    if ! timeout 600 docker exec -i -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" \
+    pg_id=$(container_id "$PG") || die "the PostgreSQL container was not verified under its name; nothing was changed"
+    if ! timeout 600 docker exec -i -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$pg_id" \
       pg_restore -U bronzeward --dbname=bronzeward_restore --exit-on-error <"$STATE/backups/pg-$1.dump"; then
       pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_restore ||
         say "fixtures: the half-restored database bronzeward_restore could not be dropped"
@@ -470,6 +483,7 @@ case $action in
     # says nothing about whether the snapshot was applied, and the exit handler records that.
     bao_dispatched=1
     bao_http POST sys/storage/raft/snapshot-force --data-binary "@$STATE/backups/bao-$1.snap" --output /dev/null
+    bao_answered=1
     bao_dispatched=0
     wait_for 60 "an active OpenBao node" bao token lookup
     ;;
@@ -537,6 +551,7 @@ case $action in
     [ "$action" = bao-soft-delete ] || verb=destroy
     bao_dispatched=1
     bao_http POST "secret/$verb/$1" --data "{\"versions\":[$2]}" --output /dev/null
+    bao_answered=1
     bao_dispatched=0
     ;;
   bao-delete-key)
@@ -583,6 +598,7 @@ case $action in
       say "fixtures: the deletion of the Transit key $1 went out and got no answer (curl rc=$delete_rc); whether the key is gone is not known"
       exit 1
     fi
+    bao_answered=1
     bao_dispatched=0
     ;;
   *) usage ;;
