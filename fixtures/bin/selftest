@@ -15,7 +15,7 @@ ok() {
 }
 fail() { die "selftest FAILED: $*"; }
 
-worker_talos() { timeout 10 "$CACHE/talosctl" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" "$@"; }
+worker_talos() { talosctl_timed 10 -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" "$@"; }
 worker_digest() {
   local config
   config=$(worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}')
@@ -1526,7 +1526,7 @@ if [ "$keep" != --keep ]; then
   printf '%s' "$(cat "$STATE/down-node-volumes")" >"$STATE/down-node-volumes"
   "$here/down" || fail "down reported leftovers"
   # With the fixture gone, a volume under a Compose name without the label is someone's data that
-  # `compose down --volumes` would remove: down refuses, whatever else is there.
+  # the teardown would remove: down refuses, whatever else is there.
   docker volume create "${FIXTURE_NAME}_openbao-data" >/dev/null || fail "cannot create a volume for the test"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1

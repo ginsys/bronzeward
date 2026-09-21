@@ -32,7 +32,7 @@ compose_label=com.docker.compose.project=$FIXTURE_NAME
 # project was started from; the Talos containers carry no such mark, so for them the only sign of
 # ownership is a state directory here.
 # Networks and named volumes count too: they outlive containers that were removed by hand, and
-# `compose down --volumes` would delete them just the same.
+# the teardown removes them just the same.
 existing=$(
   claim_names &&
     docker ps --all --quiet --filter "label=$compose_label" &&
@@ -77,7 +77,7 @@ state_files_own
 # asks for, not a plain down. With a record, --adopt changes nothing: a labelled resource the
 # record does not name is someone's, and is not removed as the fixture's by any down. The Compose
 # network is the same case: its labels are only the project's, which any network can be given,
-# and `compose down` removes it as the project's.
+# and a removal by them would take it as the project's.
 # recorded_only <kind> <mark> <record> <listing...>: every ID the listing gives is in the record.
 # The IDs it held to the record are left in `held`: the removals below take those, not a fresh
 # listing by the label, which would take in a resource given the label since this check.
@@ -101,9 +101,11 @@ held=
 recorded_only container Talos "$STATE/down-node-containers" docker ps --all --quiet --no-trunc --filter "label=$talos_label"
 talos_containers=$held
 recorded_only container Compose "$STATE/down-compose-containers" docker ps --all --quiet --no-trunc --filter "label=$compose_label"
+compose_containers=$held
 recorded_only network Talos "$STATE/down-node-networks" docker network ls --quiet --no-trunc --filter "label=$talos_label"
 talos_networks=$held
 recorded_only network Compose "$STATE/down-compose-networks" docker network ls --quiet --no-trunc --filter "label=$compose_label"
+compose_networks=$held
 unset held
 # A snapshot with a second name, or one that is a symlink, keeps its secret past this teardown:
 # the removal of .state below takes the one name here and leaves the other. The one-name rule
@@ -131,8 +133,8 @@ if [ -e "$talos_state" ] && { [ ! -f "$talos_state" ] || [ "$(stat --format=%h -
 fi
 unset talos_state
 # A volume under one of the names compose.yaml gives its own, without the project label, is not
-# the fixture's and never was: Compose does not make one without the label. `compose down
-# --volumes` below would remove it all the same, so it stops the teardown, --adopt or not.
+# the fixture's and never was: Compose does not make one without the label. The removal below
+# would take it all the same, so it stops the teardown, --adopt or not.
 # The project label itself is only the project name, which any Compose run of that name from
 # anywhere puts on the volumes it makes, and a volume has no ID: with this run's volume removed
 # by hand, a name could be taken again under the same label. bin/up made the volumes itself,
@@ -164,13 +166,19 @@ for compose_volume in $compose_volumes; do
     esac
   fi
 done
-unset compose_volumes compose_volume compose_volume_record identity
+unset compose_volume compose_volume_record identity
 
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
-# see "Known limits" in fixtures/README.md.
-# shellcheck disable=SC2119  # of every labelled container: no IDs on purpose
-volume_names=$(talos_volume_names) || die "could not list the Talos node volumes; nothing was removed"
+# see "Known limits" in fixtures/README.md. Of the containers recorded_only held above, not of a
+# fresh listing by the label, which would take in a container given the label since, and its
+# volumes into the record and the removal with it.
+if [ -n "$talos_containers" ]; then
+  # shellcheck disable=SC2086  # one ID per word
+  volume_names=$(talos_volume_names $talos_containers) || die "could not list the Talos node volumes; nothing was removed"
+else
+  volume_names=
+fi
 # Held to what a Talos node's volume is, an anonymous one, before the names go into the record
 # below: a labelled container that mounts a named volume (under --adopt, with no record to hold
 # the containers to, the label is all there is) would otherwise put that name into the record,
@@ -183,14 +191,17 @@ done
 # fixture never has, only the nodes whose containers still exist name their volumes. With fewer
 # than both of them, this run cannot say that no node volume is left, and must not. Remembered in
 # the state directory as well: the list written below would pass for the record on a second run.
-# The containers counted are the ones recorded_only held above, not a fresh listing.
+# The containers counted are the ones recorded_only held above, not a fresh listing. Whether
+# anything labelled still exists does not enter into it: with every container gone by hand and
+# no record, the volumes are exactly what cannot be looked for, and a run that found nothing to
+# remove has not looked for them either.
 # A marker that is a link, dangling or not: `-e` reads a dangling one as absent, and the
 # uncertainty an earlier run recorded would be dropped. The fixture never makes one there.
 [ ! -L "$STATE/down-node-volumes-incomplete" ] ||
   die "$STATE/down-node-volumes-incomplete is a symlink; the fixture never makes one there. Nothing was removed"
 volumes_known=1
 if [ -e "$STATE/down-node-volumes-incomplete" ] ||
-  { [ -n "$existing" ] && [ ! -f "$STATE/down-node-volumes" ] && [ "$(sed '/^$/d' <<<"$talos_containers" | wc -l)" -lt 2 ]; }; then
+  { [ ! -f "$STATE/down-node-volumes" ] && [ "$(sed '/^$/d' <<<"$talos_containers" | wc -l)" -lt 2 ]; }; then
   volumes_known=0
   # Published by rename: a marker that is a hard link must not have the write go through it into
   # someone else's file.
@@ -257,15 +268,24 @@ for volume in "${node_volumes[@]}"; do
 done
 unset labels
 
-# Name the project, its directory and its file, so that neither a compose.yaml in the caller's
-# working directory nor a COMPOSE_PROJECT_NAME in the caller's shell can choose what is torn down.
-# The file and the environment are the copies bin/up recorded, the ones the services were created
-# from (compose_inputs in lib.sh). The password is only interpolated, never used, by `down`.
-compose_inputs
-BW_POSTGRES_PASSWORD=${BW_POSTGRES_PASSWORD:-unused} docker compose --project-name "$FIXTURE_NAME" \
-  --project-directory "$FIXTURES" --file "$compose_file" --env-file "$compose_env" \
-  down --volumes --remove-orphans 2>&1 | sed 's/^/  /' >&2
-unset compose_file compose_env
+# The Compose side is not torn down by `compose down`: that looks the project up by its labels
+# again at the time of the removal, and would take a container or network given them since the
+# checks above, and the named volumes by name. Exactly the IDs recorded_only held to the records
+# (or, without one, listed under --adopt), containers first, since a network with a container on
+# it and a volume in use cannot be removed; then the volumes under the names compose.yaml
+# declares, each held above to the project label and the recorded run. A volume has no ID, so the
+# name is all there is to remove it by, as it was to check it: the one-name rule (see "Known
+# limits" in fixtures/README.md). Each removal's status is not what decides: the probes below are.
+for id in $compose_containers; do
+  docker rm --force --volumes "$id" >/dev/null 2>&1
+done
+for id in $compose_networks; do
+  docker network rm "$id" >/dev/null 2>&1
+done
+for volume in $compose_volumes; do
+  docker volume rm "$volume" >/dev/null 2>&1
+done
+unset compose_containers compose_networks compose_volumes
 
 # talosctl here is the function from lib.sh, that is the cached binary the guard tests. Its status,
 # like that of every removal below, is not what decides: the probes further down are.
@@ -341,11 +361,11 @@ verdict
 # signal, a file that would not go) leaves a directory that up refuses as existing and, without
 # the daemon record, down would refuse as not one up left, so that what is left, evidence and
 # secrets among it, could only be removed by hand. With the record still there, the next plain
-# down removes the rest. The Compose records go together, the compose file first: Compose is run
-# from the recorded compose file whenever it is there, with the recorded environment beside it,
-# and a cut that left the one without the other would have the next down fail before it could
-# start; one that left the environment alone has the checkout's files taken, which the guard at
-# load holds to that record.
+# down removes the rest. The Compose records go together, the compose file first: the volume
+# names compose.yaml declares are read from the recorded compose file whenever it is there, with
+# the recorded environment beside it, and a cut that left the one without the other would have
+# the next down fail before it could start; one that left the environment alone has the
+# checkout's files taken, which the guard at load holds to that record.
 
 case $STATE in
   */fixtures/.state)
