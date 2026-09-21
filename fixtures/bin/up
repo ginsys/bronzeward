@@ -78,12 +78,26 @@ recovery=
 state_made=0
 up_failed() {
   if [ -n "$recovery" ]; then
+    # The record of the Compose volumes made so far, when the stage that makes them was cut short
+    # before publishing it: a plain down then holds those to it, and refuses the one in question,
+    # which the hint names.
+    if [ -e "$STATE/down-compose-volumes.partial" ] && [ ! -e "$STATE/down-compose-volumes" ]; then
+      mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes" 2>/dev/null ||
+        say "fixtures: could not publish the record of the volumes made so far"
+    fi
     say "fixtures: up failed; $recovery"
     return 0
   fi
-  if [ "$state_made" -eq 1 ]; then
-    rm -f -- "$STATE/up-daemon" "$STATE/up-daemon.partial" "$STATE/up-fixture-name" "$STATE/up-fixture-name.partial" 2>/dev/null
-    rmdir -- "$STATE" 2>/dev/null || say "fixtures: up failed; $STATE holds more than this up put there, and is left"
+  # The flag is set before the mkdir, so a signal between the two finds the directory not there,
+  # or there and this up's. A directory that holds another's daemon record (an up from this
+  # checkout on another daemon, whose mkdir won, in the moment before this one's failure is
+  # noted) is left as it is, its records untouched.
+  if [ "$state_made" -eq 1 ] && [ -d "$STATE" ]; then
+    rm -f -- "$STATE/up-daemon.partial" "$STATE/up-fixture-name.partial" 2>/dev/null
+    if [ "$(cat -- "$STATE/up-daemon" 2>/dev/null)" = "${daemon_id:-}" ]; then
+      rm -f -- "$STATE/up-daemon" "$STATE/up-fixture-name" 2>/dev/null
+    fi
+    rmdir -- "$STATE" 2>/dev/null || say "fixtures: up failed; $STATE is not this up's, or holds more than it put there, and is left"
   fi
   if claim_drop 2>/dev/null; then
     say "fixtures: up failed; nothing was created"
@@ -92,8 +106,8 @@ up_failed() {
   fi
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || up_failed' EXIT
-mkdir "$STATE" 2>/dev/null || die "$STATE appeared meanwhile; nothing was created"
 state_made=1
+mkdir "$STATE" 2>/dev/null || { state_made=0; die "$STATE appeared meanwhile; nothing was created"; }
 # The identity every later command derives its names, labels and daemon from, recorded before
 # anything is made under the directory: lib.sh refuses every command while versions.env names
 # another fixture, and need_state and down refuse while the shell reaches another Docker daemon,
@@ -108,8 +122,8 @@ record() { # record <name> <value>
 if ! record up-daemon "$daemon_id" || ! record up-fixture-name "$FIXTURE_NAME"; then
   die "could not record the fixture's identity in $STATE"
 fi
-unset daemon_id
 recovery='run fixtures/bin/down to remove what was created'
+unset daemon_id
 mkdir "$STATE/data" "$STATE/backups"
 # The commit the fixture is made from, and how fixtures/ differs from it now: bin/evidence records
 # the commit it captures under, and a checkout switched or committed in between would have the
@@ -122,7 +136,6 @@ mkdir "$STATE/data" "$STATE/backups"
 fixtures_tree_check "$STATE" "$STATE/up-fixtures-diff.txt" tree_name
 printf '%s\n' "$manifest" >"$STATE/up-manifest"
 unset manifest differs
-recovery='run fixtures/bin/down --adopt to remove what was created (a plain down refuses what it finds without its record, and the records were not all published)'
 # The named volumes compose.yaml declares are made here, first of all, with a label that names this
 # run. Compose reuses a volume of that name whatever made it, and the look above is only a look: a
 # volume made by anyone between it and `compose up` would be run on and, at teardown, removed. Nor
@@ -145,7 +158,11 @@ volume_stop() {
 # shellcheck disable=SC2094  # the record is renamed on the failure path, never read: the loop's open file keeps writing to it
 for compose_volume in $compose_volumes; do
   # A create that fails may have made the volume all the same, as a connection lost after the
-  # request went through does: the same way out as one that could not be read back.
+  # request went through does: the same way out as one that could not be read back. And a signal
+  # between the create and the label read back leaves the same question, so the hint names that
+  # volume from before the create until its label is this run's: the --adopt hint of the stages
+  # after would remove it by the label, whosever it is.
+  recovery="inspect the volume $compose_volume by hand, if it exists (this run's carries $RUN_LABEL=$run_id), remove it if it is this run's, then run fixtures/bin/down; not --adopt, which would remove that volume whosever it is"
   docker volume create --label "com.docker.compose.project=$FIXTURE_NAME" \
     --label "com.docker.compose.volume=${compose_volume#"${FIXTURE_NAME}_"}" \
     --label "$CLAIM_OWNER_LABEL=$FIXTURES" --label "$RUN_LABEL=$run_id" "$compose_volume" >/dev/null ||
@@ -160,6 +177,7 @@ for compose_volume in $compose_volumes; do
   printf '%s %s\n' "$compose_volume" "$run_id"
 done >"$STATE/down-compose-volumes.partial"
 mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes"
+recovery='run fixtures/bin/down --adopt to remove what was created (a plain down refuses what it finds without its record, and the records were not all published)'
 unset compose_volumes compose_volume made_by run_id
 canary=$(synthetic) || die "could not generate the synthetic canary"
 password=$(synthetic) || die "could not generate the synthetic PostgreSQL password"
