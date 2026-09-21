@@ -58,17 +58,20 @@ network_of() {
 # before a container is connected to it. Once every container is off it, the name is free for
 # anyone's network, and a Talos node would be given its fixed address on that one. Each network is
 # held to the ID bin/up recorded; the Compose network's labels are only the project's, which any
-# network can be given, so they are no mark.
+# network can be given, so they are no mark. The ID it held is left in network_id, and the
+# connect, the disconnect and the read-back take that, not the name: by name, they would reach
+# whatever network carries it by then.
+network_id=
 network_own() {
-  local id record
+  local record
   case $1 in
     controlplane | worker) record=$STATE/down-node-networks ;;
     *) record=$STATE/down-compose-networks ;;
   esac
-  id=$(docker network inspect --format '{{.Id}}' "$2") || die "cannot inspect the network $2"
+  network_id=$(docker network inspect --format '{{.Id}}' "$2") || die "cannot inspect the network $2"
   [ -f "$record" ] ||
     die "no record of the network $2 in $STATE; run fixtures/bin/down --adopt, then up"
-  grep --quiet --line-regexp --fixed-strings -- "$id" "$record" ||
+  grep --quiet --line-regexp --fixed-strings -- "$network_id" "$record" ||
     die "the network $2 is not the one bin/up recorded; refusing to touch it"
 }
 
@@ -141,9 +144,9 @@ bao_dispatched=0
 docker_dispatched=0
 started=0
 # docker_expect: the state the Docker request in flight asks for, set before the request: "<field>
-# <value>" for a container state field, "network out" for no membership of $network, "network
-# ip <address>" for membership at that address and "network alias <name>" for membership under
-# that alias. Membership alone is not the state a netjoin asks for: a container attached at
+# <value>" for a container state field, "network out" for no membership of the network held under
+# network_id, "network ip <address>" for membership at that address and "network alias <name>" for
+# membership under that alias. Membership alone is not the state a netjoin asks for: a container attached at
 # another address, or without its alias, is a member the connect refuses, and the node is not
 # where its address promises.
 docker_expect=
@@ -155,8 +158,11 @@ docker_applied() {
   for _ in 1 2 3 4 5; do
     case $kind in
       network)
-        # "out", or "in <address> <alias>..." from the endpoint on $network.
-        got=$(docker inspect --type container --format "{{with index .NetworkSettings.Networks \"$network\"}}in {{.IPAddress}}{{range .Aliases}} {{.}}{{end}}{{else}}out{{end}}" "$target_id" 2>/dev/null) || return 2
+        # "in <address> <alias>..." from the endpoint whose network is the ID held, or nothing,
+        # which is "out": the endpoints are keyed by network name, and the name is no mark.
+        # shellcheck disable=SC2016  # a Go template, not a shell expansion
+        got=$(docker inspect --type container --format "{{range \$n, \$e := .NetworkSettings.Networks}}{{if eq \$e.NetworkID \"$network_id\"}}in {{\$e.IPAddress}}{{range \$e.Aliases}} {{.}}{{end}}{{end}}{{end}}" "$target_id" 2>/dev/null) || return 2
+        [ -n "$got" ] || got=out
         case $want in
           out) [ "$got" != out ] || return 0 ;;
           ip\ *) [[ $got != "in ${want#ip }" && $got != "in ${want#ip } "* ]] || return 0 ;;
@@ -328,7 +334,9 @@ snapshot() {
   published_inode=$(stat --format=%i -- "$partial") || die "could not stat $partial"
   published=$file
   mv --no-target-directory -- "$partial" "$file"
-  partial=
+  # The partial name is not cleared here: a signal between the rename and this line would have the
+  # handler see it cleared and record failed for a snapshot that is published. The handler clears
+  # it itself where the final name holds the inode recorded above, and records done.
 }
 # restore_source <file> <name>: the snapshot a restore reads is the regular file snapshot published,
 # with no second name. A symlink there would have the restore read a file outside .state, and a
@@ -394,7 +402,7 @@ case $action in
     network_own "$1" "$network"
     docker_expect='network out'
     docker_dispatched=1
-    docker network disconnect "$network" "$target_id"
+    docker network disconnect "$network_id" "$target_id"
     ;;
   netjoin)
     network=$(network_of "$1")
@@ -406,9 +414,9 @@ case $action in
     esac
     docker_dispatched=1
     case $1 in
-      controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$network" "$target_id" ;;
-      worker) docker network connect --ip "$TALOS_WORKER_IP" "$network" "$target_id" ;;
-      *) docker network connect --alias "$1" "$network" "$target_id" ;;
+      controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$network_id" "$target_id" ;;
+      worker) docker network connect --ip "$TALOS_WORKER_IP" "$network_id" "$target_id" ;;
+      *) docker network connect --alias "$1" "$network_id" "$target_id" ;;
     esac
     ;;
   db-snapshot)

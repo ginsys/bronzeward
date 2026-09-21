@@ -262,16 +262,18 @@ compose up --detach --quiet-pull openbao
 # The Compose containers carry the project's labels, which any container can be given under the
 # fixed names once the real one is gone by hand. Recorded by ID under each name, as the Talos
 # nodes are below: containers_own (lib.sh) holds the name to the ID before inject or evidence act
-# on it, and bin/down holds every labelled container to the record before removing any.
+# on it, and bin/down holds every labelled container to the record before removing any. This run
+# acts on them by these IDs too (bao and pg in lib.sh take the ID the name was verified under).
 for name in "$PG" "$BAO"; do
   id=$(docker inspect --type container --format '{{.Id}}' "$name") || die "could not read the ID of the container $name"
+  verified_container_ids["$name"]=$id
   printf '%s %s\n' "$id" "$name"
 done >"$STATE/down-compose-containers.partial"
 mv --no-target-directory -- "$STATE/down-compose-containers.partial" "$STATE/down-compose-containers"
 unset name id
 # The Compose network carries only the project's labels, which any network can be given, and its
 # name is fixed: with the containers gone by hand, anyone's network can take the name and the
-# labels, and `compose down` would remove it as this project's. Recorded by ID, exactly the one
+# labels, and a removal by them would take it as this project's. Recorded by ID, exactly the one
 # the project has, and bin/down and inject hold the labelled network to it, as for the Talos one.
 compose_network_ids=$(docker network ls --quiet --no-trunc --filter "label=com.docker.compose.project=$FIXTURE_NAME") ||
   die "could not list the Compose networks"
@@ -302,7 +304,8 @@ bao write -force transit/keys/bw-artifact >/dev/null
 bao kv put secret/fixture/inline value="$BW_CANARY" >/dev/null
 
 # A metadata-only identity: the classification experiment must not be able to read values.
-timeout "$REQUEST_LIMIT" docker exec -i -e BAO_TOKEN="$BW_BAO_ROOT_TOKEN" "$BAO" bao policy write bw-metadata-only - >/dev/null <<'POLICY'
+bao_id=$(container_id "$BAO") || die "the OpenBao container was not recorded above"
+timeout "$REQUEST_LIMIT" docker exec -i -e BAO_TOKEN="$BW_BAO_ROOT_TOKEN" "$bao_id" bao policy write bw-metadata-only - >/dev/null <<'POLICY'
 path "secret/metadata/*" { capabilities = ["read", "list"] }
 path "transit/keys/*"    { capabilities = ["read", "list"] }
 POLICY

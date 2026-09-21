@@ -93,7 +93,14 @@ unavailable() {
   printf '%s\n' "$*" >>"$out/unavailable.txt"
   say "evidence: unavailable: $*"
 }
-running() { [ "$(docker inspect --format '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
+# Every container is read by the ID need_state verified its name under (container_id in lib.sh),
+# never by the name: by name, the logs, the dump and the data directory would be whatever carries
+# the name by now. A name no container answered to when checked is unavailable.
+running() {
+  local id
+  id=$(container_id "$1" 2>/dev/null) || return 1
+  [ "$(docker inspect --format '{{.State.Running}}' "$id" 2>/dev/null)" = true ]
+}
 # Evidence is captured while things are broken on purpose. bao and pg from lib.sh are bounded, so
 # a provider paused between two requests cannot hang the capture: the request times out and fails,
 # and a failed one is recorded as unknown or unavailable like any other.
@@ -150,18 +157,25 @@ cp -- "$STATE/up-fixtures-diff.txt" "$out/up-fixtures-diff.txt" ||
   printf 'sops            %s\n' "$(reported "$CACHE/sops" --version --disable-version-check)"
   printf 'age             %s\n' "$(reported "$CACHE/age" --version)"
   for c in "$PG" "$BAO" "$CP" "$WORKER"; do
-    # shellcheck disable=SC2016  # $name is a Go template variable, not a shell one
-    printf 'image          %s %s\n' "$c" "$(reported docker inspect --format '{{.Config.Image}} -> {{.Image}} running={{.State.Running}} paused={{.State.Paused}} networks=[{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}]' "$c")"
+    if id=$(container_id "$c" 2>/dev/null); then
+      # shellcheck disable=SC2016  # $name is a Go template variable, not a shell one
+      printf 'image          %s %s\n' "$c" "$(reported docker inspect --format '{{.Config.Image}} -> {{.Image}} running={{.State.Running}} paused={{.State.Paused}} networks=[{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}]' "$id")"
+    else
+      printf 'image          %s UNAVAILABLE (no container under the name when checked)\n' "$c"
+    fi
   done
 } >"$out/versions.txt"
 
 # Logs survive a kill, so they are read from stopped containers too.
 for c in "$PG" "$BAO" "$CP" "$WORKER"; do
-  docker logs "$c" >"$out/logs/$c.log" 2>&1 || unavailable "logs of $c"
+  { id=$(container_id "$c" 2>/dev/null) && docker logs "$id" >"$out/logs/$c.log" 2>&1; } || unavailable "logs of $c"
 done
+unset id
 
 dump_db() { # dump_db <database> <file>
-  timeout 60 docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" pg_dump -U bronzeward "$1" >"$2" 2>/dev/null ||
+  local id
+  id=$(container_id "$PG" 2>/dev/null) || return 1
+  timeout 60 docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$id" pg_dump -U bronzeward "$1" >"$2" 2>/dev/null ||
     { rm -f "$2"; return 1; }
 }
 if ! { running "$PG" && dump_db bronzeward "$out/postgres.sql"; }; then
@@ -182,7 +196,7 @@ fi
 # write-ahead log, a temporary file it did not remove, is what an extraction has to be judged on,
 # and it is read from the container's storage whether the server runs or not. Copied as files, so
 # that the scan below covers it with the rest of the bundle.
-if ! timeout 120 docker cp --quiet "$PG:/var/lib/postgresql/data" "$out/postgres-data" 2>/dev/null; then
+if ! { pg_id=$(container_id "$PG" 2>/dev/null) && timeout 120 docker cp --quiet "$pg_id:/var/lib/postgresql/data" "$out/postgres-data" 2>/dev/null; }; then
   rm -rf -- "$out/postgres-data"
   unavailable "PostgreSQL data directory (container gone or its storage unreadable): what the server wrote to disk NOT scanned"
 fi

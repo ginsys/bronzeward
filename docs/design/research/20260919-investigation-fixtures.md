@@ -90,9 +90,11 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 19, 20, 21, 22 and 23 (section 5, items 8 to 50); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 19, 20, 21, 22 and 23 (section 5, items 8 to 51); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
-against one fixture. Those runs were not timed.
+against one fixture. Those runs were not timed. Each revision was run this way again, from clean,
+before it was committed, and the run of the revision described here is the one recorded with the
+pull request that landed it; the numbers above are that run's, not an earlier revision's.
 
 | # | Check | Expected | Observed |
 |---|---|---|---|
@@ -1230,6 +1232,34 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     `unknown` when the put-back fails too, and any other status puts the setting back where it was
     applied and is `unknown` whatever came of that (check 7 exercises the read and the deletion
     itself; the refusal and the unanswered request are not exercised).
+51. **Every action by the ID the check held, the Compose side torn down the same way, a signal
+    after a snapshot's rename, the volumes of the held containers, the node volumes unknown
+    whether or not anything is left.** A forty-fourth round: ten findings from one reviewer, nine
+    accepted and one declined, and none from the advisory review (degraded, four of nine chunks
+    lost). Items 48 and 49 had `inject` act by the verified ID, but `evidence` still read the
+    logs, the images, the running state, the dump and the data directory by name, `bao` and `pg`
+    in `lib.sh` still ran `docker exec` by name, the claim was dropped by name after its label was
+    checked, the fixture network was connected and disconnected by name after its ID was checked
+    and read back under that name, and the selftest's bounded worker call named the cached
+    `talosctl` directly: each takes the ID its check held (`container_id` in `lib.sh`, filled by
+    `containers_own` and by `up` from its own records; `network_id` in `inject`, the read-back
+    matching endpoints on the held network ID; `claim_drop` on the ID inspected with the labels;
+    `talosctl_timed`), and `pg_client` joins the network by the recorded ID. `down` still ran
+    `compose down --volumes --remove-orphans`, which looks the project up by its labels at the
+    time of the removal: the Compose containers and network are removed by the IDs the check held,
+    then the declared volumes by name (a volume has no ID; the one-name rule stands). The Talos
+    node volumes were listed by a fresh listing on the label, not from the held containers: listed
+    from those, and `talos_volume_names` refuses a call without IDs. `snapshot` cleared its partial
+    name on the line after the rename, so a signal between the two recorded `failed` for a
+    snapshot that is published: the handler clears it where the final name holds the recorded
+    inode. And a `down` that found nothing labelled and no record said no volume was left, while
+    the node volumes of containers removed by hand are exactly what it could not look for: whether
+    anything labelled exists no longer enters into that. Declined: that the leak scan reads a tree
+    a writer may still be changing; the scan is of the moment, experiments quiesce their writers
+    before capturing, and the limit is recorded in the README. A finding that section 4 attributed
+    an earlier revision's run to this one was answered by stating there that each revision was run
+    again before it was committed. Check 23 passes through every teardown path changed; no case
+    is exercised as a race.
 
 ## 6. What each experiment gets
 

@@ -251,7 +251,11 @@ where no record exists: with a record, a labelled container, network or volume t
 name is someone's and no `down` removes it. The removals take exactly the IDs that check held,
 never a fresh listing on the label, which would take in one given the label since the check
 (`talosctl cluster destroy`, run before them on the cluster's own state file, selects by its own
-label). That is what the hint of an `up` that failed names
+label); the Compose containers and network the same way, not through `compose down`, which looks
+the project up again by its labels when it removes. Every other command acts by the ID its check
+held too: `inject` and `evidence` read, exec into, log and copy from the container verified under
+the name, `inject` connects and disconnects the network under the ID recorded, and the claim is
+dropped by the ID its labels were read from. That is what the hint of an `up` that failed names
 from the first Compose volume until the last record is published, since a plain `down` refuses
 what it finds without its record; an `up` that found a Compose volume name taken (the label read
 back is another run's), or whose `docker volume create` failed or whose read-back did (the volume
@@ -260,7 +264,7 @@ did make and names that volume to inspect, remove or rename by hand, then a plai
 `--adopt`. The named volumes `compose.yaml`
 declares get fixed names too (`<fixture>_postgres-data`, `<fixture>_openbao-data`), and Compose
 reuses a volume of that name it did not create: `up` refuses while one exists, and `down`, with
-or without `--adopt`, refuses to run `compose down --volumes` while one exists without the
+or without `--adopt`, refuses to remove the Compose side while one exists without the
 project label, since it is someone's data. The label is only the project name, which any Compose
 run of that name puts on the volumes it makes, and a look before `compose up` cannot rule out a
 volume made in between, so `up` makes the two volumes itself, first of all, labelled with the
@@ -286,13 +290,19 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   a valid SQLite backup while no process has the database open.
 - The Talos subnet must not overlap the Kubernetes pod or service ranges. With an overlapping
   subnet Talos leaves the node address out of its API certificate and the cluster never bootstraps.
+- The leak scan reads each file once, as it is at that moment. A writer still running while
+  `bin/evidence` captures (a restore, a dump, a prototype) can put a secret into a file after the
+  scan read it, or into a file the listing never saw. Quiesce the experiment's writers before
+  capturing; the bundle's `captured` line in `versions.txt` says when the scan ran.
 - Talos node volumes are anonymous. `bin/up` records their names in `.state/` once the cluster
   exists, and `bin/down` removes those and any still attached to fixture containers. If
   `talosctl cluster create` fails before a container exists, its empty volumes cannot be told apart
   from anyone else's and are left behind; `docker volume ls --filter dangling=true` shows them.
   The same holds for `down --adopt` run without the owning checkout's `.state/` after Talos
   containers were removed by hand. In both cases `down` says in its last line that it did not
-  look for such volumes, instead of reporting that no volume is left. `bin/up` marks `.state/`
+  look for such volumes, instead of reporting that no volume is left; so does a `down` that found
+  nothing labelled and no record, since a run with nothing to remove has not looked for them
+  either. `bin/up` marks `.state/`
   before it creates the cluster and clears the mark once the records are published, so a `down`
   after an `up` interrupted in between says the same even when every container is gone; `down`
   rewrites the record whole and publishes it by rename, so an interrupted `down` leaves it

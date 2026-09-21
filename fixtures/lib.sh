@@ -306,6 +306,17 @@ containers_own() {
     verified_container_ids["$name"]=$answer
   done
 }
+# container_id <name>: the ID <name> was verified under, for a command to act on. Fails when there
+# is none: the name answered to no container when containers_own checked, or nothing checked yet
+# (bin/up fills the table itself from the IDs it records). Every exec, log read and copy goes by
+# this ID: by name, it would reach whatever carries the name by then.
+container_id() {
+  [[ -v verified_container_ids[$1] ]] || {
+    printf 'fixtures: no container was verified under the name %s; not acted on\n' "$1" >&2
+    return 1
+  }
+  printf '%s\n' "${verified_container_ids[$1]}"
+}
 # recorded_under <name> <id> <record> <mark>: the record bin/up wrote, one `<id> <name>` per line,
 # names <id> under <name>.
 recorded_under() {
@@ -627,8 +638,11 @@ REQUEST_LIMIT=20
 PG_LIMIT=60
 
 # bao <args>: the OpenBao CLI inside the pinned container, as root token unless BAO_TOKEN is set.
+# Inside the container verified under the name (container_id), never by the name.
 bao() {
-  timeout "$REQUEST_LIMIT" docker exec -e BAO_TOKEN="${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}}" "$BAO" bao "$@"
+  local id
+  id=$(container_id "$BAO") || return 1
+  timeout "$REQUEST_LIMIT" docker exec -e BAO_TOKEN="${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}}" "$id" bao "$@"
 }
 
 # The server is given the same limit, a second less: timeout ends the docker client, and the
@@ -640,14 +654,21 @@ bao() {
 # the next db-restore drops.
 pg_options() { printf -- '-c statement_timeout=%ds -c lock_timeout=%ds' "$((PG_LIMIT > 1 ? PG_LIMIT - 1 : 1))" "$((PG_LIMIT > 1 ? PG_LIMIT - 1 : 1))"; }
 pg() {
-  timeout "$PG_LIMIT" docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" -e PGOPTIONS="$(pg_options)" "$PG" "$@"
+  local id
+  id=$(container_id "$PG") || return 1
+  timeout "$PG_LIMIT" docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" -e PGOPTIONS="$(pg_options)" "$id" "$@"
 }
 
 # pg_client <psql args>: psql from a throwaway container on the fixture network. The image trusts
 # every connection that starts inside the server's own container, so pg() proves nothing about the
-# password; only a connection from another host is asked for it.
+# password; only a connection from another host is asked for it. The network by the ID bin/up
+# recorded: under the fixed name, once the containers are off it, anyone's network could be there,
+# and the client would hand this run's password to whatever answers as postgres on it.
 pg_client() {
-  PGPASSWORD=$BW_POSTGRES_PASSWORD PGOPTIONS=$(pg_options) timeout "$PG_LIMIT" docker run --rm --network "${FIXTURE_NAME}_default" \
+  local network
+  network=$(cat "$STATE/down-compose-networks") || return 1
+  [ -n "$network" ] || return 1
+  PGPASSWORD=$BW_POSTGRES_PASSWORD PGOPTIONS=$(pg_options) timeout "$PG_LIMIT" docker run --rm --network "$network" \
     --env PGPASSWORD --env PGOPTIONS "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
 }
 
@@ -684,17 +705,27 @@ claim_label() {
 # claim_owner: the checkout that took the claim (nothing when there is no claim).
 claim_owner() { claim_label "$CLAIM_OWNER_LABEL"; }
 # claim_drop: the container of the claim's name, once its label shows it to be the claim, and only
-# that one: the label alone selects any container given it. --volumes, because the image declares
-# a data volume and Docker creates an anonymous one for the claim although it never starts.
-# Nothing else would ever find that volume again.
+# that one: the label alone selects any container given it, and the name, by the time of the
+# removal, whatever was given the name since the look, so the removal takes the ID the look held.
+# --volumes, because the image declares a data volume and Docker creates an anonymous one for the
+# claim although it never starts. Nothing else would ever find that volume again.
 claim_drop() {
-  local strangers held
+  local strangers out id
   strangers=$(claim_strangers) || die "could not list the containers carrying the fixture claim label"
   [ -z "$strangers" ] ||
     die "$(tr '\n' ' ' <<<"$strangers")carries the fixture claim label without being the claim $CLAIM; not the fixture's, not removed"
-  held=$(claim_label "$CLAIM_OWNER_LABEL") || die "could not ask Docker about the claim $CLAIM"
-  [ -n "$held" ] || return 0
-  docker rm --force --volumes "$CLAIM" >/dev/null
+  if ! out=$(docker inspect --type container --format \
+    "{{.Id}} {{index .Config.Labels \"${CLAIM_LABEL%%=*}\"}} {{index .Config.Labels \"$CLAIM_OWNER_LABEL\"}}" "$CLAIM" 2>&1); then
+    case $out in
+      *[Nn]o\ such\ container*) return 0 ;;
+      *) die "could not ask Docker about the claim $CLAIM: $out" ;;
+    esac
+  fi
+  id=${out%% *}
+  out=${out#* }
+  [ "${out%% *}" = "${CLAIM_LABEL#*=}" ] || return 0
+  [ -n "${out#* }" ] || return 0
+  docker rm --force --volumes "$id" >/dev/null
 }
 
 # The exact content of the leak scan's positive control. bin/up writes it and bin/evidence compares
@@ -703,17 +734,14 @@ control_content() { printf 'planted on purpose: %s\n' "$BW_CANARY"; }
 
 # Talos node volumes are anonymous and unlabelled: once their container is gone nothing ties them to
 # the fixture. bin/up records these names right after creating the cluster, bin/down adds what it
-# still sees, and the list in .state is what teardown removes and verifies.
-talos_volume_names() { # talos_volume_names [container-id ...]: of every labelled container when none is given
-  local ids
-  if [ $# -gt 0 ]; then
-    ids=$(printf '%s\n' "$@")
-  else
-    ids=$(docker ps --all --quiet --filter "label=talos.cluster.name=$FIXTURE_NAME") || return 1
-  fi
+# still sees, and the list in .state is what teardown removes and verifies. Of the containers given
+# by ID, the ones the caller held to its record, never of a fresh listing by the label: that would
+# take in a container given the label since the check, and its volumes with it.
+talos_volume_names() { # talos_volume_names <container-id>...
+  [ $# -gt 0 ] || return 1
   # shellcheck disable=SC2016  # a Go template, not a shell expansion
-  xargs --no-run-if-empty docker inspect \
-    --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' <<<"$ids"
+  printf '%s\n' "$@" | xargs --no-run-if-empty docker inspect \
+    --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'
 }
 
 # container <target>: map an injection target to a container name.
