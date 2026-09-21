@@ -1,2 +1,3 @@
-# go-kure/.github checkout made by `mise run upstream-sync` for the action-pin checker
-upstream/
+# go-kure/.github checkout made by `mise run upstream-sync` for the action-pin checker.
+# Anchored: unanchored, the pattern would hide a directory of that name anywhere in the tree.
+/upstream/
