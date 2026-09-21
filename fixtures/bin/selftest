@@ -842,6 +842,40 @@ if [ "$(id -u)" -ne 0 ]; then
 else
   say "skipped as root: the closed-directory and the unreadable-bundle-directory cases"
 fi
+# A tracked file changed to bytes of the same length, its mtime put back, under
+# core.trustctime=false and core.checkStat=minimal in the caller's configuration: git would trust
+# its stat cache, read the file as the commit's, and the diff would not carry the bytes that ran.
+# Put back before anything can fail.
+cp -p "$FIXTURES/README.md" "$STATE/selftest-readme-stat"
+sed '1s/^# /#-/' "$STATE/selftest-readme-stat" >"$FIXTURES/README.md"
+touch -r "$STATE/selftest-readme-stat" "$FIXTURES/README.md"
+rc=0
+bundle=$(GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.trustctime GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=core.checkStat GIT_CONFIG_VALUE_1=minimal \
+  "$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
+mv --no-target-directory -- "$STATE/selftest-readme-stat" "$FIXTURES/README.md"
+[ "$rc" -eq 0 ] || fail "evidence aborted with a tracked file changed in place: $(tail -n 1 "$STATE/selftest-evidence.err")"
+grep --quiet --fixed-strings '+#-Investigation fixtures' "$bundle/fixtures-diff.txt" ||
+  fail "fixtures-diff.txt does not carry a same-length change to a tracked file with its mtime put back, under core.trustctime=false"
+rm "$STATE/selftest-evidence.err"
+# A symlink to the state directory, a parent of three roots the scan has anyway, given as an extra
+# path: walked once, by the name it resolves to, so the control is met at the fixture's own
+# spelling and the capture is not void for want of it. The state directory holds the generated
+# credentials and every earlier bundle, so the scan reports them; that is not the point here.
+alias_dir=$(mktemp -d "${TMPDIR:-/tmp}/bw-selftest-alias.XXXXXX")
+ln -s "$STATE" "$alias_dir/state"
+rc=0
+bundle=$("$here/evidence" "$alias_dir/state" 2>"$STATE/selftest-evidence.err") || rc=$?
+rm -r "$alias_dir"
+[ "$rc" -eq 0 ] || fail "evidence aborted with a symlinked parent of its roots as an extra path: $(tail -n 1 "$STATE/selftest-evidence.err")"
+! grep --quiet --fixed-strings "$alias_dir/state/" "$bundle/leak-scan.txt" ||
+  fail "leak scan walked the fixture's roots under a symlinked parent's spelling"
+[ "$(grep --count --fixed-strings " $STATE/data/canary-control.txt" "$bundle/leak-scan.txt")" -eq 1 ] ||
+  fail "leak scan did not list the positive control once, at its own spelling, under a symlinked parent of the live store"
+! grep --quiet --fixed-strings " $STATE/data/canary-control.txt" "$STATE/selftest-evidence.err" ||
+  fail "leak scan reported the positive control as a leak under a symlinked parent of the live store"
+[ -z "$(sort "$bundle/leak-scan.txt" | uniq --repeated)" ] || fail "leak scan reported a file twice under a symlinked parent of its roots"
+rm "$STATE/selftest-evidence.err"
 rc=0
 # An untracked file in the checkout: the commit alone does not say what ran, and the bundle must
 # carry the file's content, not its name alone.
@@ -994,7 +1028,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper, folded case and hidden untracked files, and names the creating commit, refuses a symlink, an empty directory, a clean filter and a skipped file in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files and a trusted stat cache, and names the creating commit, refuses a symlink, an empty directory, a clean filter and a skipped file in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the

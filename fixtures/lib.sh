@@ -236,8 +236,15 @@ compose() {
 # that ran, a CRLF shebang among them, would be in neither; and git warns on an untracked LF file
 # it would convert. core.ignoreCase: with it on, an untracked file whose name differs from a
 # tracked one's only by case is taken for the tracked one, in no status and no listing, while
-# find sees an ordinary file (observed: README.MD beside README.md, every inventory empty).
-fixtures_git() { git -C "$FIXTURES" -c core.autocrlf=false -c core.ignoreCase=false "$@"; }
+# find sees an ordinary file (observed: README.MD beside README.md, every inventory empty). And
+# the stat cache at its strictest: core.trustctime=false or core.checkStat=minimal let a tracked
+# file changed to bytes of the same length, its mtime put back, pass for the commit's without its
+# content being read; an fsmonitor or an untracked cache would have git ask a daemon or a
+# directory's mtime what changed, in place of looking.
+fixtures_git() {
+  git -C "$FIXTURES" -c core.autocrlf=false -c core.ignoreCase=false -c core.trustctime=true \
+    -c core.checkStat=default -c core.fsmonitor=false -c core.untrackedCache=false "$@"
+}
 
 # fixtures_manifest_diff <status>: how fixtures/ differs from the commit, as bin/up records it at
 # creation and bin/evidence at capture: the status given, the diff of the tracked files and the
