@@ -482,7 +482,9 @@ case $action in
     # applied leaves the key deletable, which `failed` would deny: the setting is put back to what
     # the read found, and the action fails with the key as it was; a key already deletable is left
     # so, since nothing was changed. When the setting cannot be put back, what the key is left as
-    # is not known.
+    # is not known. Refused means curl's 7 or 22 (never reached, or answered with an error), as
+    # for every request above: a DELETE that went out and got no answer may have taken the key,
+    # and is unknown, whatever the setting was.
     deletable=$(bao_http GET "transit/keys/$1" | jq --raw-output '.data.deletion_allowed') ||
       die "cannot read the Transit key $1; nothing was changed"
     case $deletable in
@@ -495,8 +497,12 @@ case $action in
     bao_http DELETE "transit/keys/$1" --output /dev/null || delete_rc=$?
     if [ "$delete_rc" -ne 0 ]; then
       if [ "$deletable" = true ]; then
-        [ "$delete_rc" -eq 7 ] || bao_dispatched=0
-        die "the Transit key $1 could not be deleted (curl rc=$delete_rc); it was deletable before and is left so"
+        if [ "$delete_rc" -eq 7 ] || [ "$delete_rc" -eq 22 ]; then
+          bao_dispatched=0
+          die "the Transit key $1 could not be deleted (curl rc=$delete_rc); it was deletable before and is left so"
+        fi
+        say "fixtures: the deletion of the Transit key $1 went out and got no answer (curl rc=$delete_rc); whether the key is gone is not known"
+        exit 1
       fi
       if [ "$delete_rc" -ne 7 ] && bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":false}' --output /dev/null; then
         bao_dispatched=0

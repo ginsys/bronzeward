@@ -409,7 +409,14 @@ pg psql -U bronzeward -d postgres -Atc 'alter database bronzeward_selftest_aside
 grep --quiet --extended-regexp ' failed rc=[0-9]+ start postgres$' <(tail -n 1 "$STATE/injections.log") ||
   fail "injections.log does not record the start without the database as failed"
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "the database is not back after the rename"
-ok "kill / start postgres keeps committed data; a start with the database gone is failed"
+# A statement that outlives the limit is cancelled by the server, not only given up on by the
+# client: with the docker client ended, the statement would run on inside the container, and a
+# rename waiting on a lock would still commit after the log said the action failed.
+rc=0
+said=$(PG_LIMIT=3 pg psql -U bronzeward -d bronzeward -Atc 'select pg_sleep(30)' 2>&1) || rc=$?
+[ "$rc" -ne 124 ] || fail "a statement past the limit was only given up on by the client, not cancelled by the server"
+grep --quiet 'statement timeout' <<<"$said" || fail "a statement past the limit was not cancelled by the server (rc=$rc): $said"
+ok "kill / start postgres keeps committed data; a start with the database gone is failed; a statement past the limit is cancelled by the server"
 "$here/inject" kill openbao
 degraded=$("$here/evidence") || fail "evidence aborted while openbao was down"
 grep --quiet 'openbao metadata' "$degraded/unavailable.txt" || fail "evidence did not say the OpenBao metadata is missing"
@@ -988,6 +995,24 @@ rm -r "$alias_dir"
   fail "leak scan reported the positive control as a leak under a symlinked parent of the live store"
 [ -z "$(sort "$bundle/leak-scan.txt" | uniq --repeated)" ] || fail "leak scan reported a file twice under a symlinked parent of its roots"
 rm "$STATE/selftest-evidence.err"
+# An earlier capture's bundle, marked incomplete, with a scanned-by mark already there that is a
+# symlink to a file outside the bundle: the mark this capture writes once its scan ran would go
+# through the link into that file. Refused before anything is scanned; the file keeps its content
+# and the bundle stays marked incomplete.
+mkdir "$STATE/evidence/selftest-linked-mark" "$STATE/selftest-outside-mark"
+: >"$STATE/evidence/selftest-linked-mark/.incomplete"
+printf 'keep\n' >"$STATE/selftest-outside-mark/target"
+ln -s "$STATE/selftest-outside-mark/target" "$STATE/evidence/selftest-linked-mark/scanned-by.txt"
+rc=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
+[ "$rc" -ne 0 ] || fail "evidence accepted an earlier bundle whose scanned-by mark is a symlink"
+grep --quiet 'scanned-by' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the linked scanned-by mark for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+[ "$(cat "$STATE/selftest-outside-mark/target")" = keep ] || fail "evidence wrote through a linked scanned-by mark"
+[ -e "$STATE/evidence/selftest-linked-mark/.incomplete" ] || fail "evidence unmarked an earlier bundle it refused"
+[ -L "$STATE/evidence/selftest-linked-mark/scanned-by.txt" ] || fail "evidence replaced a linked scanned-by mark in a bundle it refused"
+rm -r "$STATE/evidence/selftest-linked-mark" "$STATE/selftest-outside-mark"
+rm "$STATE/selftest-evidence.err"
 rc=0
 # An untracked file in the checkout: the commit alone does not say what ran, and the bundle must
 # carry the file's content, not its name alone.
@@ -1274,6 +1299,32 @@ if [ "$keep" != --keep ]; then
     fail "down or inject ran, or down removed the state, while versions.env differed from the one recorded at up"
   fi
   grep --quiet 'is not the file the fixture' <<<"$down_said" || fail "down failed on the versions record for another reason: $(tail -n 1 <<<"$down_said")"
+  # The record of compose.yaml, the file the services were created from: the bytes of the
+  # checkout's file at up, and one more name held to the one-name rule.
+  cmp --silent -- "$FIXTURES/compose.yaml" "$STATE/up-compose.yaml" || fail "the record of compose.yaml is not the file's bytes"
+  ln "$STATE/up-compose.yaml" "$FIXTURES/.selftest-compose-alias"
+  went=0
+  down_said=$("$here/down" 2>&1) && went=1
+  injected=0
+  "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
+  rm -f "$FIXTURES/.selftest-compose-alias"
+  if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    docker unpause "$PG" >/dev/null 2>&1 || true
+    fail "down or inject ran, or down removed the state, while the record of compose.yaml had a second name"
+  fi
+  grep --quiet 'is not the regular file' <<<"$down_said" || fail "down failed on the compose record for another reason: $(tail -n 1 <<<"$down_said")"
+  # The backups directory replaced by a symlink: every command refuses at load, before down's own
+  # look at the entries in it, which through the link would find a directory elsewhere.
+  mv --no-target-directory -- "$STATE/backups" "$STATE/selftest-backups-aside"
+  ln -s "$STATE/selftest-backups-aside" "$STATE/backups"
+  went=0
+  down_said=$("$here/down" 2>&1) && went=1
+  rm -- "$STATE/backups"
+  mv --no-target-directory -- "$STATE/selftest-backups-aside" "$STATE/backups" # before anything can fail
+  if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down ran, or removed the state, while the backups directory was a symlink"
+  fi
+  grep --quiet 'is a symlink' <<<"$down_said" || fail "down failed on the symlinked backups directory for another reason: $(tail -n 1 <<<"$down_said")"
   # And on another Docker daemon, as DOCKER_HOST or the context changed since up leaves it: the
   # daemon reached holds none of the fixture, and down would verify it clean. Likewise simulated
   # through the record. inject, and evidence through the same check, refuse too.
@@ -1399,12 +1450,20 @@ if [ "$keep" != --keep ]; then
   stranger=$(docker volume ls --quiet --filter "name=^${FIXTURE_NAME}_openbao-data$")
   docker volume rm "${FIXTURE_NAME}_openbao-data" >/dev/null 2>&1 || true # gone already in the failing case
   [ "$went" -eq 0 ] && [ -n "$stranger" ] || fail "down removed, or did not refuse, a volume under a Compose name that is not the fixture's"
+  # What a removal of the state directory cut short leaves: the daemon record, which goes last,
+  # and whatever would not go. A plain down removes the rest; without the record it would refuse
+  # the directory as not one up left, and up refuses it as existing.
+  mkdir "$STATE" "$STATE/evidence"
+  docker info --format '{{.ID}}' >"$STATE/up-daemon" || fail "cannot read the daemon ID for the test"
+  : >"$STATE/evidence/selftest-leftover"
+  "$here/down" >/dev/null 2>&1 || fail "down refused the state directory a removal cut short leaves, holding the daemon record and a leftover"
+  [ ! -e "$STATE" ] || fail "down left the state directory a removal cut short leaves"
   # down looks for what it can name. A volume no label or record points at, such as the anonymous
   # one Docker makes for the claim container, only shows up as a difference on the whole daemon.
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled and Compose-labelled container and network against the records and refuses by label alone, refuses a stranger carrying the claim label, a fixture name, daemon or versions.env not the record's and a missing daemon record, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled and Compose-labelled container and network against the records and refuses by label alone, refuses a stranger carrying the claim label, a fixture name, daemon or versions.env not the record's, a missing daemon record, a compose record with a second name and a symlinked backups directory, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind, refuses a stranger's volume under a Compose name and removes what a removal cut short leaves, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

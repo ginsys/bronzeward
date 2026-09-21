@@ -171,7 +171,7 @@ need_state() {
 # a fixture name or label may act on.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env; do
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env up-compose.yaml; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -245,12 +245,32 @@ recorded_under() {
     die "the container named $1 is not this fixture's: it is not the one bin/up created under that name. Remove or rename it by hand; the fixture will not act on it"
 }
 
+# compose_inputs: the compose file and the environment file Compose is given, in compose_file and
+# compose_env. The copies bin/up recorded under .state once they exist, the checkout's files
+# before: the services are created well after the records are written (the tools are fetched in
+# between), and Compose reading the checkout's files then would create them from bytes the records
+# do not hold, an image or a port among them, with the checkout put back afterwards passing every
+# guard. Without the records nothing was composed yet, and the checkout's files are what an up
+# would compose.
+compose_inputs() {
+  if [ -f "$STATE/up-compose.yaml" ]; then
+    compose_file=$STATE/up-compose.yaml
+    compose_env=$STATE/up-versions.env
+  else
+    compose_file=$FIXTURES/compose.yaml
+    compose_env=$FIXTURES/versions.env
+  fi
+}
+
 # The project name is forced: a COMPOSE_PROJECT_NAME in the caller's shell wins over the `name` in
-# compose.yaml, and every ownership check and teardown probe selects by that name's label.
+# compose.yaml, and every ownership check and teardown probe selects by that name's label. The
+# project directory stays the checkout, so that a path in the file resolves as it always did.
 compose() {
+  local compose_file compose_env
+  compose_inputs
   docker compose --project-name "$FIXTURE_NAME" --project-directory "$FIXTURES" \
-    --file "$FIXTURES/compose.yaml" \
-    --env-file "$FIXTURES/versions.env" --env-file "$STATE/secrets.env" "$@"
+    --file "$compose_file" \
+    --env-file "$compose_env" --env-file "$STATE/secrets.env" "$@"
 }
 
 # fixtures_git <args...>: git on the fixtures checkout, for every inventory and diff below, with two
@@ -442,14 +462,16 @@ tree_warnings_refuse() {
 }
 
 # compose_volume_names: the daemon-side names of the named volumes compose.yaml declares,
-# <project>_<key>, as Compose derives them. Read from the file, not repeated here. The secrets
-# file may not exist yet, so the password is only interpolated.
+# <project>_<key>, as Compose derives them. Read from the file (the recorded copy, once there is
+# one), not repeated here. The secrets file may not exist yet, so the password is only
+# interpolated.
 compose_volume_names() {
-  local keys key
+  local keys key compose_file compose_env
+  compose_inputs
   # Into a variable first: a failed `config` inside a `for` word list would be an empty list and
   # a clean exit, and an empty list is not what compose.yaml declares.
   keys=$(BW_POSTGRES_PASSWORD=${BW_POSTGRES_PASSWORD:-unused} docker compose --project-name "$FIXTURE_NAME" \
-    --project-directory "$FIXTURES" --file "$FIXTURES/compose.yaml" --env-file "$FIXTURES/versions.env" \
+    --project-directory "$FIXTURES" --file "$compose_file" --env-file "$compose_env" \
     config --volumes) || return 1
   [ -n "$keys" ] || return 1
   for key in $keys; do
@@ -480,14 +502,24 @@ bao() {
   timeout "$REQUEST_LIMIT" docker exec -e BAO_TOKEN="${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}}" "$BAO" bao "$@"
 }
 
-pg() { timeout "$PG_LIMIT" docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$PG" "$@"; }
+# The server is given the same limit, a second less: timeout ends the docker client, and the
+# process inside the container runs on without it, so a rename waiting on a lock would still commit
+# once the client was given up on, after the log had said the action failed. With the statement and
+# lock timeouts set for the session, the server cancels the statement itself, before the client is
+# given up on. pg_dump and pg_restore set both to zero for their own session, and are not bounded
+# this way: a dump that runs on only reads, and a restore that runs on fills the scratch database
+# the next db-restore drops.
+pg_options() { printf -- '-c statement_timeout=%ds -c lock_timeout=%ds' "$((PG_LIMIT > 1 ? PG_LIMIT - 1 : 1))" "$((PG_LIMIT > 1 ? PG_LIMIT - 1 : 1))"; }
+pg() {
+  timeout "$PG_LIMIT" docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" -e PGOPTIONS="$(pg_options)" "$PG" "$@"
+}
 
 # pg_client <psql args>: psql from a throwaway container on the fixture network. The image trusts
 # every connection that starts inside the server's own container, so pg() proves nothing about the
 # password; only a connection from another host is asked for it.
 pg_client() {
-  PGPASSWORD=$BW_POSTGRES_PASSWORD timeout "$PG_LIMIT" docker run --rm --network "${FIXTURE_NAME}_default" \
-    --env PGPASSWORD "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
+  PGPASSWORD=$BW_POSTGRES_PASSWORD PGOPTIONS=$(pg_options) timeout "$PG_LIMIT" docker run --rm --network "${FIXTURE_NAME}_default" \
+    --env PGPASSWORD --env PGOPTIONS "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
 }
 
 # claim_take [attempt]: fails when any checkout on this daemon already holds the claim. The image

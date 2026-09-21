@@ -92,9 +92,9 @@ up_failed() {
   # checkout on another daemon, whose mkdir won, in the moment before this one's failure is
   # noted) is left as it is, its records untouched.
   if [ "$state_made" -eq 1 ] && [ -d "$STATE" ]; then
-    rm -f -- "$STATE/up-daemon.partial" "$STATE/up-fixture-name.partial" "$STATE/up-versions.env.partial" 2>/dev/null
+    rm -f -- "$STATE/up-daemon.partial" "$STATE/up-fixture-name.partial" "$STATE/up-versions.env.partial" "$STATE/up-compose.yaml.partial" 2>/dev/null
     if [ "$(cat -- "$STATE/up-daemon" 2>/dev/null)" = "${daemon_id:-}" ]; then
-      rm -f -- "$STATE/up-daemon" "$STATE/up-fixture-name" "$STATE/up-versions.env" 2>/dev/null
+      rm -f -- "$STATE/up-daemon" "$STATE/up-fixture-name" "$STATE/up-versions.env" "$STATE/up-compose.yaml" 2>/dev/null
     fi
     rmdir -- "$STATE" 2>/dev/null || say "fixtures: up failed; $STATE is not this up's, or holds more than it put there, and is left"
   fi
@@ -129,6 +129,16 @@ if ! printf '%s\n' "$versions_env" >"$STATE/up-versions.env.partial" ||
   rm -f -- "$STATE/up-versions.env.partial"
   die "could not record versions.env in $STATE"
 fi
+# And compose.yaml, read once here and recorded from that reading: the services are created from
+# the record (compose in lib.sh), well after this, and the checkout's file read then could differ
+# from the one the tree check below ties to the commit. The fetch of the tools lies in between.
+compose_yaml=$(cat -- "$FIXTURES/compose.yaml") || die "cannot read $FIXTURES/compose.yaml"
+if ! printf '%s\n' "$compose_yaml" >"$STATE/up-compose.yaml.partial" ||
+  ! mv --no-target-directory -- "$STATE/up-compose.yaml.partial" "$STATE/up-compose.yaml"; then
+  rm -f -- "$STATE/up-compose.yaml.partial"
+  die "could not record compose.yaml in $STATE"
+fi
+unset compose_yaml
 recovery='run fixtures/bin/down to remove what was created'
 unset daemon_id
 mkdir "$STATE/data" "$STATE/backups"

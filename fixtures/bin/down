@@ -253,10 +253,13 @@ unset labels
 
 # Name the project, its directory and its file, so that neither a compose.yaml in the caller's
 # working directory nor a COMPOSE_PROJECT_NAME in the caller's shell can choose what is torn down.
-# The password is only interpolated, never used, by `down`.
+# The file and the environment are the copies bin/up recorded, the ones the services were created
+# from (compose_inputs in lib.sh). The password is only interpolated, never used, by `down`.
+compose_inputs
 BW_POSTGRES_PASSWORD=${BW_POSTGRES_PASSWORD:-unused} docker compose --project-name "$FIXTURE_NAME" \
-  --project-directory "$FIXTURES" --file "$FIXTURES/compose.yaml" --env-file "$FIXTURES/versions.env" \
+  --project-directory "$FIXTURES" --file "$compose_file" --env-file "$compose_env" \
   down --volumes --remove-orphans 2>&1 | sed 's/^/  /' >&2
+unset compose_file compose_env
 
 # talosctl here is the function from lib.sh, that is the cached binary the guard tests. Its status,
 # like that of every removal below, is not what decides: the probes further down are.
@@ -319,10 +322,19 @@ verdict
 claim_drop
 probe container claim_names
 verdict
-# The state directory goes last of all, after a verified clean teardown.
+# The state directory goes last of all, after a verified clean teardown. The daemon record goes
+# last within it, and the compose record with it: a removal cut short in the middle (a signal, a
+# file that would not go) leaves a directory that up refuses as existing and, without the daemon
+# record, down would refuse as not one up left, so that what is left, evidence and secrets among
+# it, could only be removed by hand. With the record still there, the next plain down removes the
+# rest.
 
 case $STATE in
-  */fixtures/.state) rm -rf -- "$STATE" ;;
+  */fixtures/.state)
+    find "$STATE" -mindepth 1 -maxdepth 1 ! -name up-daemon ! -name up-compose.yaml -exec rm -rf -- {} + &&
+      rm -f -- "$STATE/up-compose.yaml" "$STATE/up-daemon" &&
+      rmdir -- "$STATE"
+    ;;
   *) die "refusing to delete unexpected state path $STATE" ;;
 esac
 if [ "$purge" -eq 1 ]; then
