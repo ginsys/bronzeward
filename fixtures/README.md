@@ -60,7 +60,9 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
   tokens. Values the fixture chooses itself start with `BWSYNTH-`. The commands read this file as
   data, never as shell code: only those four assignments are accepted, all four must be there, the
   file must be the regular file `bin/up` wrote under that one name, and anything else in it stops
-  every command. A value the caller's shell holds under one of those names is never used.
+  every command. `bin/up` itself exports the values it generated and never reads the file back,
+  and `bin/selftest` reads the file a child `up` wrote the same way as every other command. A
+  value the caller's shell holds under one of those names is never used.
 - `bao-init.json`: the single OpenBao unseal key, in base64 and in hex, and the root token.
 - `talos-secrets.yaml`, `controlplane.yaml`, `talosconfig`, `kubeconfig`: the cluster's own
   generated secrets bundle and client configs.
@@ -241,7 +243,9 @@ under a fixture name that Docker cannot be asked about stops the command too, si
 container" means absent. The node-volume record's content is held against Docker as well: `down` removes
 a recorded name only if it is an anonymous volume's, and the volume, if it still exists, carries
 no label. The Talos label is only a cluster name, which any container or network can be created
-with, so `up` records the IDs of the two containers and the network it created once they exist:
+with, so `up` records the IDs of the two containers and the network it created once they exist
+(the network as the one both recorded containers are attached to, which must carry the label,
+not from a listing by the label, which a network made under it meanwhile would answer):
 `inject netsplit` and `netjoin` touch the network under the fixture's name only if its ID is
 recorded (a Talos node would otherwise be given its fixed address on whatever network took the
 name once every node was off it), and
@@ -249,7 +253,8 @@ name once every node was off it), and
 labelled ones exist and there is no record, as an `up` interrupted right after creating the
 cluster leaves it. The Compose containers and network are held the same way: their labels are only
 the project's, which any container or network can be given, so `up` records their IDs after
-`compose up`, `down` holds every labelled container and the labelled network to the records, and
+`compose up` (the network, again, as the one the recorded containers are attached to), `down`
+holds every labelled container and the labelled network to the records, and
 `inject` the network. Only `down --adopt` removes by label alone, and only
 where no record exists: with a record, a labelled container, network or volume the record does not
 name is someone's and no `down` removes it. The removals take exactly the IDs that check held,
@@ -261,8 +266,9 @@ held too: `inject` and `evidence` read, exec into, log and copy from the contain
 the name, `inject` connects and disconnects the network under the ID recorded and sends its OpenBao
 requests from inside that container's network namespace rather than to the published port, `up`
 records each Compose container by the ID its labels were read from and asks its final readiness
-of the recorded IDs (the password probe runs from inside the PostgreSQL container's namespace,
-against its own address on the Compose network, not by the service's name on it), and the claim is
+of the recorded IDs (running and not paused, then an authenticated OpenBao request, the password
+probe from inside the PostgreSQL container's namespace against its own address on the Compose
+network, not by the service's name on it, and a bounded request to each Talos node), and the claim is
 dropped by the ID its labels were read from, and only while its owner label still names the
 checkout the command saw holding it at its start (one retaken by another checkout since is that
 fixture's, and is left, with `down` ending on it). That is what the hint of an `up` that failed names

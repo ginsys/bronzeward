@@ -18,9 +18,10 @@ fail() { die "selftest FAILED: $*"; }
 # What a case changes in the checkout, the cache or the state is put back on any end. A case puts
 # its own change back before anything of it can fail; a signal, or a failure the case did not
 # provide for, between the change and that line would otherwise leave the checkout altered (a
-# replacement ref, an index flag, a tracked file rewritten) with nothing to say so. Each such
-# change registers its put-back before it is made (defer) and unregisters it after its own
-# (undefer); the handler runs whatever is still registered, last first.
+# replacement ref, an index flag, a tracked file rewritten), or the fixture (its container renamed
+# aside, a volume made for a test), with nothing to say so. Each such change registers its
+# put-back before it is made (defer) and unregisters it after its own (undefer); the handler runs
+# whatever is still registered, last first.
 undo=()
 defer() { undo+=("$(printf '%q ' "$@")"); }
 undefer() { unset 'undo[-1]'; }
@@ -37,6 +38,23 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 
 worker_talos() { talosctl_timed 10 -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" "$@"; }
+# test_volume <name>: a volume for a test, made under a label only this run gives and read back
+# under it: docker volume create on a name that exists returns that volume as if it had made it,
+# and the removal after the test would take someone's data with it. One that existed is left, and
+# named. test_volume_rm <name> removes the test's own, gone already in the failing case.
+selftest_run=r$(date -u +%s%N)
+test_volume() {
+  local made_by
+  docker volume create --label "bronzeward.selftest.run=$selftest_run" "$1" >/dev/null || fail "cannot create a volume for the test"
+  made_by=$(docker volume inspect --format '{{index .Labels "bronzeward.selftest.run"}}' "$1") ||
+    fail "cannot read back the volume $1 made for the test"
+  [ "$made_by" = "$selftest_run" ] || fail "a volume named $1 existed before this test; it is someone's data, and is left"
+  defer docker volume rm "$1"
+}
+test_volume_rm() {
+  docker volume rm "$1" >/dev/null 2>&1 || true
+  undefer
+}
 worker_digest() {
   local config
   config=$(worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}')
@@ -52,18 +70,16 @@ if [ "$keep" != --keep ]; then
   volumes_before=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   # A volume under a name compose.yaml gives its own, without the label Compose puts on the ones
   # it makes: Compose would reuse it, and the fixture would run on someone's data.
-  docker volume create "${FIXTURE_NAME}_postgres-data" >/dev/null || fail "cannot create a volume for the test"
+  test_volume "${FIXTURE_NAME}_postgres-data"
   went=0
   "$here/up" >/dev/null 2>&1 && went=1
-  docker volume rm "${FIXTURE_NAME}_postgres-data" >/dev/null 2>&1 || true # gone already in the failing case
+  test_volume_rm "${FIXTURE_NAME}_postgres-data"
   [ "$went" -eq 0 ] || fail "up ran on a volume under a Compose name that is not the fixture's"
   [ ! -e "$STATE" ] || fail "the refused up left a state directory"
   "$here/up"
-  # lib.sh was sourced before the secrets existed
-  set -a
-  # shellcheck disable=SC1091
-  . "$STATE/secrets.env"
-  set +a
+  # lib.sh was loaded before the secrets existed: read now as every command reads them, never
+  # sourced.
+  secrets_load
 fi
 need_state
 
@@ -76,19 +92,23 @@ ok "all four containers are running"
 # The state directory alone is not ownership: with the claim gone, or held by another checkout, the
 # fixed container names may be someone else's fixture, and nothing here may touch them.
 refused=0
+defer claim_take
 claim_drop "$FIXTURES"
 "$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
 # Nor does it let down remove anything: the state may be stale, and what exists another checkout's.
 down_said=$("$here/down" 2>&1) || refused=$((refused + 1))
-docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=/another/checkout/fixtures" \
-  --network none "$POSTGRES_IMAGE" true >/dev/null
+other_claim=$(docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=/another/checkout/fixtures" \
+  --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
+defer docker rm --force --volumes "$other_claim"
 "$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
 # Dropped as held by that other checkout; as this one's it is refused and left (asserted).
 ! claim_drop "$FIXTURES" 2>/dev/null || fail "claim_drop removed a claim held by another checkout"
 claim_drop /another/checkout/fixtures
+undefer
 claim_take # this checkout's claim again, before anything can fail
+undefer
 # The claim is a container of an image that declares a volume, and must have made none: removed
 # by hand without --volumes, an anonymous one would outlive every record.
 [ "$(docker inspect --format '{{len .Mounts}}' "$CLAIM")" -eq 0 ] || fail "the claim container was created with a volume"
@@ -354,35 +374,55 @@ mv "$STATE/selftest-data-aside" "$STATE/data" # before anything can fail
 rm "$STATE/data/selftest-store"
 # A container that only bears a fixture name: the names are fixed, so once the real one was removed
 # by hand anything can take the name while the claim still stands, and a kill would go to it.
+# The rename back and the impostor's removal, by the ID its create returned, are registered
+# before each is made, here and at every rename below: a signal in between would otherwise leave
+# the fixture under the aside name with the impostor under its own.
+defer docker rename "$PG-selftest-aside" "$PG"
 docker rename "$PG" "$PG-selftest-aside" >/dev/null
-docker create --quiet --name "$PG" --network none "$POSTGRES_IMAGE" true >/dev/null
+impostor_id=$(docker create --quiet --name "$PG" --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
+defer docker rm --force --volumes "$impostor_id"
 records=$(wc -l <"$STATE/injections.log")
 impostor=0
 "$here/inject" kill postgres >/dev/null 2>&1 && impostor=1
-docker rm --force --volumes "$PG" >/dev/null
+docker rm --force --volumes "$impostor_id" >/dev/null
+undefer
 docker rename "$PG-selftest-aside" "$PG" >/dev/null # before anything can fail
+undefer
 [ "$impostor" -eq 0 ] || fail "inject acted on a container that only bears the fixture's name"
 [ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
 # A Talos node's name and label both: the label is a cluster name anything can be created with, so
 # only the ID bin/up recorded says the container is the node.
+defer docker rename "$WORKER-selftest-aside" "$WORKER"
 docker rename "$WORKER" "$WORKER-selftest-aside" >/dev/null
-docker create --quiet --name "$WORKER" --label "talos.cluster.name=$FIXTURE_NAME" --network none "$POSTGRES_IMAGE" true >/dev/null
+impostor_id=$(docker create --quiet --name "$WORKER" --label "talos.cluster.name=$FIXTURE_NAME" --network none "$POSTGRES_IMAGE" true) ||
+  fail "cannot create a container for the test"
+defer docker rm --force --volumes "$impostor_id"
 impostor=0
 "$here/inject" pause worker >/dev/null 2>&1 && impostor=1
-docker rm --force --volumes "$WORKER" >/dev/null
+docker rm --force --volumes "$impostor_id" >/dev/null
+undefer
 docker rename "$WORKER-selftest-aside" "$WORKER" >/dev/null # before anything can fail
+undefer
 [ "$impostor" -eq 0 ] || fail "inject acted on a container that bears a Talos node's name and label but is not the node"
 [ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
 # The two nodes' names swapped: each container is one up recorded, but not under that name, and a
-# pause of the worker would go to the control plane. Swapped back before anything can fail.
+# pause of the worker would go to the control plane. Swapped back before anything can fail; each
+# of the three renames registers its own reverse first, so a signal after any of them swaps back
+# from that point, last first.
+defer docker rename "$CP-selftest-swap" "$CP"
 docker rename "$CP" "$CP-selftest-swap" >/dev/null
+defer docker rename "$CP" "$WORKER"
 docker rename "$WORKER" "$CP" >/dev/null
+defer docker rename "$WORKER" "$CP-selftest-swap"
 docker rename "$CP-selftest-swap" "$WORKER" >/dev/null
 swapped=0
 "$here/inject" pause worker >/dev/null 2>&1 && swapped=1
 docker rename "$WORKER" "$CP-selftest-swap" >/dev/null
+undefer
 docker rename "$CP" "$WORKER" >/dev/null
+undefer
 docker rename "$CP-selftest-swap" "$CP" >/dev/null # before anything can fail
+undefer
 if [ "$swapped" -eq 1 ] || [ "$(docker inspect --format '{{.State.Paused}}' "$CP" "$WORKER" | sort -u)" != false ]; then
   docker unpause "$CP" "$WORKER" >/dev/null 2>&1 || true
   fail "inject acted on a Talos node under the other node's name"
@@ -1309,54 +1349,64 @@ if [ "$keep" != --keep ]; then
     fail "down accepted a recorded name that is no anonymous volume's"
   fi
   selftest_volume=$(printf '%064d' 7)
-  docker volume create --label bronzeward.selftest=1 "$selftest_volume" >/dev/null || fail "cannot create a volume for the test"
+  test_volume "$selftest_volume" # labelled: the run's own label is a label
   cat "$STATE/selftest-record-copy" >"$STATE/down-node-volumes"
   printf '%s\n' "$selftest_volume" >>"$STATE/down-node-volumes"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   labelled=$(docker volume ls --quiet --filter "name=^${selftest_volume}$")
-  docker volume rm "$selftest_volume" >/dev/null 2>&1 || true # gone already in the failing case
+  test_volume_rm "$selftest_volume"
   mv "$STATE/selftest-record-copy" "$STATE/down-node-volumes" # before anything can fail
   if [ "$went" -eq 1 ] || [ -z "$labelled" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a recorded volume that carries a label"
   fi
   # The Talos label alone: a container that only carries the cluster name is not one up created,
   # and down must not remove it with the fixture's own.
-  docker create --quiet --name "$FIXTURE_NAME-selftest-impostor" --label "talos.cluster.name=$FIXTURE_NAME" \
-    --network none "$POSTGRES_IMAGE" true >/dev/null || fail "cannot create a container for the test"
+  impostor_id=$(docker create --quiet --name "$FIXTURE_NAME-selftest-impostor" --label "talos.cluster.name=$FIXTURE_NAME" \
+    --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
+  defer docker rm --force --volumes "$impostor_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
-  impostor=$(docker ps --all --quiet --filter "name=^${FIXTURE_NAME}-selftest-impostor$")
-  docker rm --force --volumes "$FIXTURE_NAME-selftest-impostor" >/dev/null 2>&1 || true # gone already in the failing case
+  impostor=$(docker ps --all --quiet --no-trunc --filter "id=$impostor_id")
+  docker rm --force --volumes "$impostor_id" >/dev/null 2>&1 || true # gone already in the failing case
+  undefer
   if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a container that only carries the Talos label"
   fi
   # A container under a Compose name carrying the project's labels, which any container can be
   # given: not the one up recorded under that name. down and inject refuse. The real one is
-  # renamed aside meanwhile and back before anything can fail.
+  # renamed aside meanwhile and back before anything can fail; the rename back, and the removal
+  # of the impostor by the ID its create returned, are registered before each is made, so that
+  # a signal in between leaves the fixture under its own name, not the impostor.
+  defer docker rename "$PG-selftest-aside" "$PG"
   docker rename "$PG" "$PG-selftest-aside" >/dev/null
-  docker create --quiet --name "$PG" --label "com.docker.compose.project=$FIXTURE_NAME" \
-    --label "com.docker.compose.project.working_dir=$FIXTURES" --network none "$POSTGRES_IMAGE" true >/dev/null ||
+  impostor_id=$(docker create --quiet --name "$PG" --label "com.docker.compose.project=$FIXTURE_NAME" \
+    --label "com.docker.compose.project.working_dir=$FIXTURES" --network none "$POSTGRES_IMAGE" true) ||
     fail "cannot create a container for the test"
+  defer docker rm --force --volumes "$impostor_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   injected=0
   "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
-  impostor=$(docker ps --all --quiet --filter "name=^${PG}$")
-  docker rm --force --volumes "$PG" >/dev/null 2>&1 || true # gone already in the failing case
+  impostor=$(docker ps --all --quiet --no-trunc --filter "id=$impostor_id")
+  docker rm --force --volumes "$impostor_id" >/dev/null 2>&1 || true # gone already in the failing case
+  undefer
   docker rename "$PG-selftest-aside" "$PG" >/dev/null # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] ||
     [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down or inject acted on a container that carries the Compose labels under a fixture name but is not the one up recorded"
   fi
   # A container carrying the claim label under another name: not the claim, not the fixture's,
   # and down does not know whose it is. It removes nothing and names it.
-  docker create --quiet --name "$FIXTURE_NAME-selftest-claimant" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=$FIXTURES" \
-    --network none "$POSTGRES_IMAGE" true >/dev/null || fail "cannot create a container for the test"
+  claimant_id=$(docker create --quiet --name "$FIXTURE_NAME-selftest-claimant" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=$FIXTURES" \
+    --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
+  defer docker rm --force --volumes "$claimant_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
-  claimant=$(docker ps --all --quiet --filter "name=^${FIXTURE_NAME}-selftest-claimant$")
-  docker rm --force --volumes "$FIXTURE_NAME-selftest-claimant" >/dev/null 2>&1 || true # gone already in the failing case
+  claimant=$(docker ps --all --quiet --no-trunc --filter "id=$claimant_id")
+  docker rm --force --volumes "$claimant_id" >/dev/null 2>&1 || true # gone already in the failing case
+  undefer
   if [ "$went" -eq 1 ] || [ -z "$claimant" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a container that carries the claim label under another name"
   fi
@@ -1527,22 +1577,26 @@ if [ "$keep" != --keep ]; then
     fail "down removed the Compose volumes by the project label alone, without the record of the ones up created or, with --adopt, against it"
   fi
   # A network with the label, which down removes by label just as it does containers.
-  docker network create --label "talos.cluster.name=$FIXTURE_NAME" "$FIXTURE_NAME-selftest-net" >/dev/null || fail "cannot create a network for the test"
+  net_id=$(docker network create --label "talos.cluster.name=$FIXTURE_NAME" "$FIXTURE_NAME-selftest-net") || fail "cannot create a network for the test"
+  defer docker network rm "$net_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
-  impostor=$(docker network ls --quiet --filter "name=^${FIXTURE_NAME}-selftest-net$")
-  docker network rm "$FIXTURE_NAME-selftest-net" >/dev/null 2>&1 || true # gone already in the failing case
+  impostor=$(docker network ls --quiet --no-trunc --filter "id=$net_id")
+  docker network rm "$net_id" >/dev/null 2>&1 || true # gone already in the failing case
+  undefer
   if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a network that only carries the Talos label"
   fi
   # And one with the Compose project's labels, which are only a name: down holds the labelled
   # network to the ID up recorded.
-  docker network create --label "com.docker.compose.project=$FIXTURE_NAME" --label "com.docker.compose.network=default" \
-    "$FIXTURE_NAME-selftest-cnet" >/dev/null || fail "cannot create a network for the test"
+  net_id=$(docker network create --label "com.docker.compose.project=$FIXTURE_NAME" --label "com.docker.compose.network=default" \
+    "$FIXTURE_NAME-selftest-cnet") || fail "cannot create a network for the test"
+  defer docker network rm "$net_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
-  impostor=$(docker network ls --quiet --filter "name=^${FIXTURE_NAME}-selftest-cnet$")
-  docker network rm "$FIXTURE_NAME-selftest-cnet" >/dev/null 2>&1 || true # gone already in the failing case
+  impostor=$(docker network ls --quiet --no-trunc --filter "id=$net_id")
+  docker network rm "$net_id" >/dev/null 2>&1 || true # gone already in the failing case
+  undefer
   if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a network that only carries the Compose labels"
   fi
@@ -1581,11 +1635,11 @@ if [ "$keep" != --keep ]; then
   "$here/down" || fail "down reported leftovers"
   # With the fixture gone, a volume under a Compose name without the label is someone's data that
   # the teardown would remove: down refuses, whatever else is there.
-  docker volume create "${FIXTURE_NAME}_openbao-data" >/dev/null || fail "cannot create a volume for the test"
+  test_volume "${FIXTURE_NAME}_openbao-data"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   stranger=$(docker volume ls --quiet --filter "name=^${FIXTURE_NAME}_openbao-data$")
-  docker volume rm "${FIXTURE_NAME}_openbao-data" >/dev/null 2>&1 || true # gone already in the failing case
+  test_volume_rm "${FIXTURE_NAME}_openbao-data"
   [ "$went" -eq 0 ] && [ -n "$stranger" ] || fail "down removed, or did not refuse, a volume under a Compose name that is not the fixture's"
   # What a removal of the state directory cut short leaves: the daemon record, which goes last,
   # and whatever would not go. A plain down removes the rest; without the record it would refuse

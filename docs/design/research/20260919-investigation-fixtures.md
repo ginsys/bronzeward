@@ -91,7 +91,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 54); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 55); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed. Each revision was run this way again, from clean,
 before it was committed, and the run of the revision described here is the one recorded with the
@@ -1235,9 +1235,9 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     itself; the refusal and the unanswered request are not exercised).
 51. **Every action by the ID the check held, the Compose side torn down the same way, a signal
     after a snapshot's rename, the volumes of the held containers, the node volumes unknown
-    whether or not anything is left.** A forty-fourth round: ten findings from one reviewer, nine
-    accepted and one declined, and none from the advisory review (degraded, four of nine chunks
-    lost). Items 48 and 49 had `inject` act by the verified ID, but `evidence` still read the
+    whether or not anything is left.** A forty-fourth round: ten findings from one reviewer, eight
+    accepted, one answered and one declined, and none from the advisory review (degraded, four of
+    nine chunks lost). Items 48 and 49 had `inject` act by the verified ID, but `evidence` still read the
     logs, the images, the running state, the dump and the data directory by name, `bao` and `pg`
     in `lib.sh` still ran `docker exec` by name, the claim was dropped by name after its label was
     checked, the fixture network was connected and disconnected by name after its ID was checked
@@ -1363,6 +1363,37 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     the CLI fails to connect there, as with `DOCKER_HOST` alone; `DOCKER_CONTEXT` overrides
     `DOCKER_HOST` only when it names another context, and the CLI reports `default` whenever
     `DOCKER_HOST` is set, so the pin never names another in that case.
+
+55. **The networks from the verified containers' attachments, a readiness that asks each node
+    and refuses a paused container, the generated secrets never sourced, and `selftest`'s own
+    volumes and renames put back.** A forty-eighth round: six findings from one reviewer (two
+    the same) and one from the advisory review (degraded, five of nine chunks lost, one
+    unverdicted), all accepted. `up` recorded each network from a listing by its label, counted
+    to one: the label is one any network can be given, so a network made under it once the real
+    one was gone by hand would have been listed, counted, recorded and removed as the fixture's.
+    Each is now the one network both verified containers are attached to, read from those
+    containers, and must carry the label; a listing by the label is not consulted. `up`'s final
+    readiness asked only `Running`, which a paused container still is, and asked nothing of the
+    Talos nodes after the control plane's config was read minutes before: it refuses a paused
+    container by name and sends a bounded request to each node. `up` sourced the `secrets.env`
+    it had just published, and `selftest` sourced the one a child `up` wrote, while every other
+    command parses the file as four literal assignments: `up` exports the values it generated
+    and never reads the file back, and `selftest` reads it through the same parser (`secrets_load`
+    in `lib.sh`). `selftest` made a volume under a Compose name for two of its cases with
+    `docker volume create`, which returns an existing volume of that name as if it had made it,
+    then removed it: the volume is made under a label only that run gives and read back under
+    it, one that existed is left and named, and the removal is registered with the handler item
+    54 added. That handler had nothing registered for the Docker changes the cases make: the
+    PostgreSQL container or the worker renamed aside with an impostor created under its name
+    (checks 9 and 23), the two nodes' names swapped (check 9), the claim replaced by another
+    checkout's (check 2), and the containers, networks and volume made for check 23's refusals.
+    The reverse of each is registered before it is made (a rename back, a removal by the ID the
+    create returned, `claim_take`), each of the swap's three renames its own, so that a signal
+    after any of them puts the fixture back from that point, last first. Run by hand, the first
+    attempt hit this: a TERM during check 9's rename, the site the finding had not named, left
+    the fixture under the aside name with the impostor under its own. And item
+    51's header counted nine findings accepted and none answered where that round had eight and
+    one; corrected. No case is exercised as a race.
 
 ## 6. What each experiment gets
 

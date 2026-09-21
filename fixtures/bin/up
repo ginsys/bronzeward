@@ -249,10 +249,9 @@ secrets_publish() {
   }
 }
 secrets_publish
-set -a
-# shellcheck disable=SC1091  # just generated
-. "$STATE/secrets.env"
-set +a
+# The values in hand, not the file read back: the file is data that lib.sh parses for every other
+# command, and sourcing it here would run whatever replaced it between the rename and the read.
+export BW_CANARY=$canary BW_POSTGRES_PASSWORD=$password
 
 fetch_tools
 
@@ -283,17 +282,43 @@ for name in "$PG" "$BAO"; do
 done >"$STATE/down-compose-containers.partial"
 mv --no-target-directory -- "$STATE/down-compose-containers.partial" "$STATE/down-compose-containers"
 unset name id answer
+# attached_network <what> <label> <value> <container id>...: the ID of the one network every given
+# container is attached to, which must carry the label with that value. From the verified
+# containers, not from a listing by the label: the label is one any network can be given, and a
+# network made under it once the real one was gone by hand would be listed, and counted, as the
+# fixture's, then recorded and removed as its own. A container is attached to what it was started
+# on; a network it is not on is not the fixture's, whatever its labels say.
+attached_network() {
+  local what=$1 label=$2 value=$3 id networks network found
+  shift 3
+  network=
+  for id; do
+    networks=$(docker inspect --type container --format \
+      '{{range $n, $e := .NetworkSettings.Networks}}{{$e.NetworkID}}{{"\n"}}{{end}}' "$id") ||
+      die "could not read the networks of the container $id"
+    [ "$(sed '/^$/d' <<<"$networks" | wc -l)" -eq 1 ] ||
+      die "the container $id is attached to $(sed '/^$/d' <<<"$networks" | wc -l) networks, not the one $what network; teardown could not tell which is the fixture's"
+    networks=$(sed '/^$/d' <<<"$networks")
+    [ -z "$network" ] || [ "$network" = "$networks" ] ||
+      die "the containers are not all on one $what network; teardown could not tell which is the fixture's"
+    network=$networks
+  done
+  found=$(docker network inspect --format "{{.Id}} {{index .Labels \"$label\"}}" "$network") ||
+    die "could not inspect the $what network $network the containers are attached to"
+  [ "$found" = "$network $value" ] ||
+    die "the $what network the containers are attached to does not carry $label=$value; not recorded as the fixture's"
+  printf '%s\n' "$network"
+}
 # The Compose network carries only the project's labels, which any network can be given, and its
 # name is fixed: with the containers gone by hand, anyone's network can take the name and the
-# labels, and a removal by them would take it as this project's. Recorded by ID, exactly the one
-# the project has, and bin/down and inject hold the labelled network to it, as for the Talos one.
-compose_network_ids=$(docker network ls --quiet --no-trunc --filter "label=com.docker.compose.project=$FIXTURE_NAME") ||
-  die "could not list the Compose networks"
-[ "$(sed '/^$/d' <<<"$compose_network_ids" | wc -l)" -eq 1 ] ||
-  die "expected one Compose network to record; teardown could not tell it from another's"
-printf '%s\n' "$compose_network_ids" >"$STATE/down-compose-networks.partial"
+# labels, and a removal by them would take it as this project's. Recorded by ID, the one the
+# verified containers are attached to, and bin/down and inject hold the labelled network to it,
+# as for the Talos one.
+compose_network_id=$(attached_network Compose com.docker.compose.project "$FIXTURE_NAME" \
+  "${verified_container_ids[$PG]}" "${verified_container_ids[$BAO]}") || exit 1
+printf '%s\n' "$compose_network_id" >"$STATE/down-compose-networks.partial"
 mv --no-target-directory -- "$STATE/down-compose-networks.partial" "$STATE/down-compose-networks"
-unset compose_network_ids
+unset compose_network_id
 
 bao_answers() {
   local rc=0
@@ -324,6 +349,7 @@ POLICY
 # Assigned first: a command substitution that is only a printf argument cannot fail the script.
 metadata_token=$(bao token create -policy=bw-metadata-only -format=json | jq -er .auth.client_token) ||
   die "could not create the metadata-only OpenBao token"
+export BW_BAO_METADATA_TOKEN=$metadata_token
 secrets_publish
 
 say "creating the talos cluster (several minutes on a cold image cache)"
@@ -370,14 +396,14 @@ done >"$STATE/down-node-containers.partial"
 unset name id
 mv --no-target-directory -- "$STATE/down-node-containers.partial" "$STATE/down-node-containers"
 # The cluster network carries the same label, and bin/down removes networks by it just the same.
-network_ids=$(docker network ls --quiet --no-trunc --filter "label=talos.cluster.name=$FIXTURE_NAME") ||
-  die "could not list the Talos networks"
-# Exactly the one the cluster has: a second network of that label, made by someone else while the
-# cluster was being created, must not be recorded as this fixture's and removed with it.
-[ "$(sed '/^$/d' <<<"$network_ids" | wc -l)" -eq 1 ] ||
-  die "expected one Talos network to record; teardown could not tell it from another's"
-printf '%s\n' "$network_ids" >"$STATE/down-node-networks.partial"
+# The one the two verified nodes are attached to, as above: a second network of that label, made
+# by someone else while the cluster was being created, is not the one they are on, and must not
+# be recorded as this fixture's and removed with it.
+network_id=$(attached_network Talos talos.cluster.name "$FIXTURE_NAME" \
+  "${verified_container_ids[$CP]}" "${verified_container_ids[$WORKER]}") || exit 1
+printf '%s\n' "$network_id" >"$STATE/down-node-networks.partial"
 mv --no-target-directory -- "$STATE/down-node-networks.partial" "$STATE/down-node-networks"
+unset network_id
 rm -- "$STATE/down-node-volumes-incomplete" || die "could not clear the unrecorded-cluster marker in $STATE"
 # Every record is published: a plain down now holds what it finds to them.
 recovery='run fixtures/bin/down to remove what was created'
@@ -400,18 +426,28 @@ control_content >"$STATE/data/canary-control.txt"
 # Something outside the fixture may have stopped a container meanwhile, for example a host hook
 # that restarts the Docker daemon when a new bridge appears. Never report a half-dead fixture as up.
 # Each asked by the ID recorded under its name: by name, a replacement made meanwhile would
-# answer for one that stopped.
+# answer for one that stopped. Running and not paused: a paused container is still running, with
+# every process in it frozen.
 for c in "$PG" "$BAO" "$CP" "$WORKER"; do
   id=$(container_id "$c") || die "$c was not recorded under its name; the fixture is not known to be up"
-  [ "$(docker inspect --type container --format '{{.State.Running}}' "$id")" = true ] ||
-    die "$c stopped while the fixture was starting (see 'Known limits' in fixtures/README.md)"
+  case $(docker inspect --type container --format '{{.State.Running}} {{.State.Paused}}' "$id") in
+    'true false') ;;
+    'true true') die "$c was paused while the fixture was starting" ;;
+    *) die "$c stopped while the fixture was starting (see 'Known limits' in fixtures/README.md)" ;;
+  esac
 done
 unset c id
 # Running is not usable. Several minutes of Talos creation have passed since both services were
 # last asked, so ask again, with credentials: an OpenBao that sealed itself and a PostgreSQL that
-# does not accept this run's password both still count as running.
+# does not accept this run's password both still count as running. And each Talos node, bounded:
+# the control plane was last asked for its config before the checks above, the worker never.
 bao token lookup >/dev/null 2>&1 || die "OpenBao no longer answers an authenticated request"
 [ "$(pg_client -Atc 'select 1')" = 1 ] || die "PostgreSQL does not accept this run's password over the network"
+for node in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
+  talosctl_timed "$REQUEST_LIMIT" -e "$node" -n "$node" version --short >/dev/null 2>&1 ||
+    die "the Talos node $node no longer answers a request"
+done
+unset node
 # The scripts as they were loaded, once more: the inventory above compared them at its moment,
 # and an edit since would have the rest of this run made by code the inventory does not say.
 scripts_unchanged_since_load
