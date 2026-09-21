@@ -21,6 +21,9 @@ need docker stat mktemp
 # Every removal and every check below asks Docker. If it does not answer, nothing can be removed
 # or verified, and the state directory that names what to remove must survive.
 docker info >/dev/null 2>&1 || die "the Docker daemon does not answer; nothing was removed"
+# And it is the daemon up created the fixture on: another would be verified clean and the state
+# removed while the fixture runs on.
+daemon_own
 talos_label=talos.cluster.name=$FIXTURE_NAME
 compose_label=com.docker.compose.project=$FIXTURE_NAME
 

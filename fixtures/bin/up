@@ -64,6 +64,11 @@ mkdir "$STATE" 2>/dev/null || {
   claim_drop
   die "$STATE appeared meanwhile; nothing was created"
 }
+# The identity every later command derives its names, labels and daemon from, recorded before
+# anything is made under it: lib.sh refuses every command while versions.env names another
+# fixture, and need_state and down refuse while the shell reaches another Docker daemon.
+printf '%s\n' "$FIXTURE_NAME" >"$STATE/up-fixture-name" || die "could not record the fixture name in $STATE"
+docker info --format '{{.ID}}' >"$STATE/up-daemon" || die "could not record the Docker daemon's ID in $STATE"
 # From here on a failure leaves something behind. Not earlier: an `up` that was refused created
 # nothing, and the hint would send its caller to tear down a fixture that is not theirs.
 # EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
@@ -100,8 +105,14 @@ for compose_volume in $compose_volumes; do
     --label "com.docker.compose.volume=${compose_volume#"${FIXTURE_NAME}_"}" \
     --label "$CLAIM_OWNER_LABEL=$FIXTURES" --label "$RUN_LABEL=$run_id" "$compose_volume" >/dev/null ||
     die "could not create the volume $compose_volume"
-  made_by=$(docker volume inspect --format "{{index .Labels \"$RUN_LABEL\"}}" "$compose_volume") ||
-    die "could not read back the volume $compose_volume"
+  if ! made_by=$(docker volume inspect --format "{{index .Labels \"$RUN_LABEL\"}}" "$compose_volume"); then
+    # Not read back, not known to be this run's: the same way out as a volume that is another's,
+    # since the --adopt the hint would otherwise name removes it by the label, whosever it is.
+    mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes" ||
+      say "fixtures: could not publish the record of the volumes made so far"
+    recovery="inspect the volume $compose_volume by hand (this run's carries $RUN_LABEL=$run_id), remove it if it is this run's, then run fixtures/bin/down; not --adopt, which would remove that volume whosever it is"
+    die "the volume $compose_volume could not be read back after this run made it, or found it made; whether it is this fixture's is not known, and nothing more is created"
+  fi
   if [ "$made_by" != "$run_id" ]; then
     # The volumes made so far are published as the record, so that the plain down removes those
     # and holds this one, which is someone's, against it. Not --adopt: with no record it would
