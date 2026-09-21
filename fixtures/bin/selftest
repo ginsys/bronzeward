@@ -1369,6 +1369,33 @@ if [ "$keep" != --keep ]; then
     fail "down or inject ran, or down removed the state, while versions.env held a value to be evaluated"
   fi
   grep --quiet 'not a plain KEY=value' <<<"$down_said" || fail "down failed on the expansion for another reason: $(tail -n 1 <<<"$down_said")"
+  # A key the manifest does not define, and then a key set twice: the parser assigns only the
+  # manifest's keys, each once, or STATE, CACHE or PATH could be set from the file, and the value
+  # that runs would be the last of two while the record shows both.
+  cp "$FIXTURES/versions.env" "$STATE/selftest-versions-file-copy"
+  { cat "$STATE/selftest-versions-file-copy" && printf 'STATE=%s\n' "$STATE/selftest-state-elsewhere"; } >"$FIXTURES/versions.env"
+  went=0
+  down_said=$("$here/down" 2>&1) && went=1
+  injected=0
+  "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
+  mv --no-target-directory -- "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env" # before anything can fail
+  if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ -e "$STATE/selftest-state-elsewhere" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    docker unpause "$PG" >/dev/null 2>&1 || true
+    fail "down or inject ran, or down removed the state or made another, while versions.env set a key the manifest does not define"
+  fi
+  grep --quiet 'sets STATE, which is not a value the manifest defines' <<<"$down_said" || fail "down failed on the foreign key for another reason: $(tail -n 1 <<<"$down_said")"
+  cp "$FIXTURES/versions.env" "$STATE/selftest-versions-file-copy"
+  { cat "$STATE/selftest-versions-file-copy" && printf 'OPENBAO_PORT=%s\n' "$OPENBAO_PORT"; } >"$FIXTURES/versions.env"
+  went=0
+  down_said=$("$here/down" 2>&1) && went=1
+  injected=0
+  "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
+  mv --no-target-directory -- "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env" # before anything can fail
+  if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    docker unpause "$PG" >/dev/null 2>&1 || true
+    fail "down or inject ran, or down removed the state, while versions.env set a key twice"
+  fi
+  grep --quiet 'sets OPENBAO_PORT a second time' <<<"$down_said" || fail "down failed on the repeated key for another reason: $(tail -n 1 <<<"$down_said")"
   # The backups directory replaced by a symlink: every command refuses at load, before down's own
   # look at the entries in it, which through the link would find a directory elsewhere.
   mv --no-target-directory -- "$STATE/backups" "$STATE/selftest-backups-aside"
@@ -1531,7 +1558,7 @@ if [ "$keep" != --keep ]; then
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled and Compose-labelled container and network against the records and refuses by label alone, refuses a stranger carrying the claim label, a fixture name, daemon or versions.env not the record's, a missing daemon record, a compose record with a second name, a versions.env short of a value the shell exports or holding a value to be evaluated, and a symlinked backups directory, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind, refuses a stranger's volume under a Compose name and removes what a removal cut short leaves, full, empty or the last three records, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled and Compose-labelled container and network against the records and refuses by label alone, refuses a stranger carrying the claim label, a fixture name, daemon or versions.env not the record's, a missing daemon record, a compose record with a second name, a versions.env short of a value the shell exports, holding a value to be evaluated, setting a key it does not define or setting one twice, and a symlinked backups directory, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind, refuses a stranger's volume under a Compose name and removes what a removal cut short leaves, full, empty or the last three records, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

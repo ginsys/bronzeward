@@ -72,6 +72,21 @@ while IFS= read -r line; do
   versions_line=$((versions_line + 1))
   [[ ! $line =~ ^[[:space:]]*(#.*)?$ ]] || continue
   if [[ $line =~ ^([A-Z][A-Z0-9_]*)=([A-Za-z0-9._:/@+-]*)$ ]]; then
+    # Only the keys above, each once: any other name would be assigned too, STATE, CACHE, PATH or
+    # a key of the commands', and a key set twice would run under its last value while the record
+    # of the bytes shows both. Every key above was unset before the file is read, so one that is
+    # set now was set by an earlier line.
+    case " ${versions_keys[*]} " in
+      *" ${BASH_REMATCH[1]} "*) ;;
+      *)
+        printf 'fixtures: versions.env line %d sets %s, which is not a value the manifest defines; the file sets only those the commands need\n' "$versions_line" "${BASH_REMATCH[1]}" >&2
+        exit 1
+        ;;
+    esac
+    if [ -n "${!BASH_REMATCH[1]+set}" ]; then
+      printf 'fixtures: versions.env line %d sets %s a second time; a key is set once, so that the value that runs is the one the record shows\n' "$versions_line" "${BASH_REMATCH[1]}" >&2
+      exit 1
+    fi
     printf -v "${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
     export "${BASH_REMATCH[1]}"
   else
@@ -393,10 +408,48 @@ tree_name() { printf '%s' "$1"; }
 # Listings and the collected stderr go into <workdir> and are removed; a listing that fails is not
 # an empty one.
 fixtures_tree_check() {
-  local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top ignores untracked_all flagged gitlinks filtered linked find_rc=0 tab=$'\t'
+  local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top ignores untracked_all flagged gitlinks filtered linked find_rc=0 tab=$'\t' first_manifest first_differs
   warn=$workdir/.git-stderr
   scripts_unchanged_since_load
   : >"$warn" || die "cannot collect git's warnings in $workdir"
+  fixtures_tree_inventory
+  first_manifest=$manifest
+  first_differs=$differs
+  # Written when the tree is the commit's too, empty then: a record that is absent could not be
+  # told from one removed, and bin/evidence requires the one bin/up wrote.
+  fixtures_tree_diff "$diff_file"
+  # The inventory and the diff describe the tree as it was at their moments, one after the other;
+  # a file changed, added, linked or flagged, or HEAD moved, between two of them would have the
+  # diff describe a tree the inventory did not pass, or the inventory pass a tree the diff does
+  # not describe. Both are taken a second time and held to the first: the same commit, the same
+  # status, the same diff byte for byte, or the run is refused. What is not seen is a change made
+  # and undone between the two takes of the same listing.
+  fixtures_tree_inventory
+  [ "$manifest" = "$first_manifest" ] ||
+    die "HEAD moved from $first_manifest to $manifest while fixtures/ was being inventoried; run again"
+  [ "$differs" = "$first_differs" ] ||
+    die "fixtures/ changed while it was being inventoried (git's status differs between two listings); run again"
+  fixtures_tree_diff "$workdir/.diff-again"
+  cmp --silent -- "$diff_file" "$workdir/.diff-again" ||
+    die "fixtures/ changed while it was being inventoried (the diff from commit $manifest differs between two takes); run again"
+  rm -f -- "$workdir/.diff-again" "$warn"
+}
+# fixtures_tree_diff <file>: fixtures_manifest_diff of the inventory just taken into <file>, empty
+# when the tree is the commit's. Called from fixtures_tree_check, whose variables it uses.
+fixtures_tree_diff() {
+  if [ -n "$differs" ]; then
+    fixtures_manifest_diff "$differs" "$manifest" >"$1" 2>>"$warn" ||
+      die "cannot record how fixtures/ differs from commit $manifest; the commit could not be tied to what runs"
+  else
+    : >"$1" || die "cannot record that fixtures/ is commit $manifest; the commit could not be tied to what runs"
+  fi
+  tree_warnings_refuse "$warn" "$name_fn"
+}
+# fixtures_tree_inventory: one take of every listing fixtures_tree_check stands by, `manifest` and
+# `differs` set, refused on anything the commit plus a diff would leave out. Called from
+# fixtures_tree_check, whose variables it uses.
+fixtures_tree_inventory() {
+  find_rc=0
   # Assigned first: a git that fails inside a printf argument would leave the line empty.
   manifest=$(fixtures_git rev-parse HEAD 2>>"$warn") ||
     die "cannot read the manifest commit from git; the fixture could not be tied to a fixture version"
@@ -490,22 +543,6 @@ fixtures_tree_check() {
     die "a filter, text, eol, ident or working-tree-encoding attribute from git's attributes applies to ${filtered% }; git would compare the attribute's output, not the bytes that run. Remove the attribute"
   [ -z "$linked" ] ||
     die "$("$name_fn" "$linked") is a symlink, a special file, an empty directory or a nested repository under fixtures/; git records nothing of it, or a commit hash at most, and the commit plus a diff would not say what runs. Replace or remove it"
-  # Written when the tree is the commit's too, empty then: a record that is absent could not be
-  # told from one removed, and bin/evidence requires the one bin/up wrote.
-  if [ -n "$differs" ]; then
-    fixtures_manifest_diff "$differs" "$manifest" >"$diff_file" 2>>"$warn" ||
-      die "cannot record how fixtures/ differs from commit $manifest; the commit could not be tied to what runs"
-  else
-    : >"$diff_file" || die "cannot record that fixtures/ is commit $manifest; the commit could not be tied to what runs"
-  fi
-  tree_warnings_refuse "$warn" "$name_fn"
-  # The status above was taken against HEAD as it was then; a checkout or commit meanwhile would
-  # have it, and the listings, describe another commit than the one recorded.
-  moved=$(fixtures_git rev-parse HEAD 2>/dev/null) || die "cannot read the manifest commit from git a second time"
-  [ "$moved" = "$manifest" ] ||
-    die "HEAD moved from $manifest to $moved while fixtures/ was being inventoried; run again"
-  unset moved
-  rm -f -- "$warn"
 }
 # tree_warnings_refuse <file> <name-fn>: refuse on what git and find said on stderr, each line
 # through <name-fn>, the file removed first.

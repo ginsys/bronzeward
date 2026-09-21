@@ -139,6 +139,7 @@ committing=0
 db_swapping=0
 bao_dispatched=0
 docker_dispatched=0
+started=0
 # docker_expect: the state the Docker request in flight asks for, set before the request: "<field>
 # <value>" for a container state field, "network out" for no membership of $network, "network
 # ip <address>" for membership at that address and "network alias <name>" for membership under
@@ -172,16 +173,19 @@ docker_applied() {
   return 1
 }
 finish() {
-  local rc=$? left status=failed applied
+  local rc=$? left status=failed applied signalled=0
   # A signal that ends the shell between two commands, or during a builtin, leaves the status of
   # the command before it, which is 0 as a rule (observed: the handler sees 0 on a TERM during a
   # function's sleep, and the shell still exits 143). Without the flag the last line sets, that 0
   # would have an action the signal ended before it completed recorded as done. The commit checks
-  # below still turn it back into done where the artifact shows the commit went through.
+  # below still turn it back into done where the artifact shows the commit went through. A status
+  # past 128 is a child ended by the signal it shared: the same case.
   if [ "$rc" -eq 0 ] && [ "$completed" -ne 1 ]; then
     rc=1
+    signalled=1
     say "fixtures: ended by a signal before the action completed"
   fi
+  [ "$rc" -le 128 ] || signalled=1
   # A signal that arrives while bash waits for a rename has it finish the child and run this
   # handler before the line that would have cleared the flags. The rename is the commit of a
   # snapshot and of a store restore, so one that did complete is recorded as done, whatever the
@@ -216,10 +220,12 @@ finish() {
     say "fixtures: the request was sent and not answered; whether OpenBao applied it is not known"
   fi
   # A Docker mutation the daemon may have carried out whatever the CLI's status: a signal ends the
-  # client with the signal's status, and a connection that closed before the answer came with an
-  # ordinary failure, the same as a refusal. What decides is the state read back: the one asked
-  # for, and the action is done (a start is not: the service was not seen to answer); not the one
-  # asked for, and it failed; none to be had, and it is unknown.
+  # client with the signal's status, a connection that closed before the answer came with an
+  # ordinary failure, the same as a refusal, and one at a command boundary after the request
+  # returned with the flag still set, since it is cleared only by the action completing. What
+  # decides is the state read back: the one asked for, and the action is done (a start is not:
+  # the service was not seen to answer); not the one asked for, and it failed; none to be had,
+  # and it is unknown.
   if [ "$docker_dispatched" -eq 1 ] && [ "$rc" -ne 0 ]; then
     applied=0
     docker_applied || applied=$?
@@ -227,18 +233,25 @@ finish() {
       0)
         if [ "$action" = start ]; then
           status=unknown
-          say "fixtures: the Docker request failed (rc=$rc), the container runs, but was not seen to answer; recorded as unknown"
+          say "fixtures: the action ended (rc=$rc) after the start was sent; the container runs, but was not seen to answer; recorded as unknown"
         else
-          say "fixtures: the Docker request failed (rc=$rc), and the state read back is the one asked for; recorded as done"
+          say "fixtures: the action ended (rc=$rc) after the Docker request was sent, and the state read back is the one asked for; recorded as done"
           rc=0
         fi
         ;;
-      1) say "fixtures: the Docker request failed (rc=$rc), and the state read back is not the one asked for; recorded as failed" ;;
+      1) say "fixtures: the action ended (rc=$rc) after the Docker request was sent, and the state read back is not the one asked for; recorded as failed" ;;
       *)
         status=unknown
-        say "fixtures: the Docker request failed (rc=$rc), and the daemon cannot say what it made of it; recorded as unknown"
+        say "fixtures: the action ended (rc=$rc) after the Docker request was sent, and the daemon cannot say what it made of it; recorded as unknown"
         ;;
     esac
+  fi
+  # A start the daemon answered, then a signal during the wait for the service: the container was
+  # started, and whether the service answers is not known. A wait that ran to its limit is a
+  # failure of the start, and says so itself.
+  if [ "$started" -eq 1 ] && [ "$rc" -ne 0 ] && [ "$signalled" -eq 1 ]; then
+    status=unknown
+    say "fixtures: the container was started and the wait for the service was ended by a signal; whether it answers is not known; recorded as unknown"
   fi
   # A removal that fails must not end the handler before the outcome is recorded: each is guarded.
   if [ -n "$partial" ]; then
@@ -246,14 +259,23 @@ finish() {
   fi
   if [ -n "$staging" ]; then
     # store-restore ended between its two renames: the earlier store goes back before the staging
-    # directory is removed. If it cannot, the staging directory stays, because it holds the only copy.
-    # Only a directory this run moved there: an archive may hold an entry named previous of its
-    # own, and with the live directory gone that entry is not the store.
-    if [ "$moved_aside" -eq 1 ] && [ -d "$staging/previous" ] && [ ! -e "$STATE/data" ]; then
-      mv --no-target-directory -- "$staging/previous" "$STATE/data" || {
-        say "fixtures: the earlier store could not be moved back to $STATE/data; $staging/previous is its only copy, and the staging directory is left"
+    # directory is removed. If it cannot, the staging directory stays, because it holds the only
+    # copy; so does it when a data directory that this restore did not install is in the way,
+    # made there since the earlier one was moved aside, since the earlier store is not moved back
+    # over it and is not to be removed under it either. The store is removed with the staging
+    # directory only once the restore's own data directory is in place. Only a directory this run
+    # moved there: an archive may hold an entry named previous of its own, and with the live
+    # directory gone that entry is not the store.
+    if [ "$moved_aside" -eq 1 ] && [ -d "$staging/previous" ]; then
+      if [ ! -e "$STATE/data" ]; then
+        mv --no-target-directory -- "$staging/previous" "$STATE/data" || {
+          say "fixtures: the earlier store could not be moved back to $STATE/data; $staging/previous is its only copy, and the staging directory is left"
+          staging=
+        }
+      elif [ "$committing" -ne 1 ] || [ -e "$staging/data" ]; then
+        say "fixtures: $STATE/data exists and is not the one this restore installed; the earlier store is not moved back over it, $staging/previous is its only copy, and the staging directory is left"
         staging=
-      }
+      fi
     fi
     if [ -n "$staging" ]; then
       rm -rf -- "$staging" || say "fixtures: could not remove the staging directory $staging"
@@ -320,18 +342,22 @@ restore_source() {
 }
 
 case $action in
-  # Each Docker mutation is flagged while it is in flight: see docker_dispatched in finish.
+  # Each Docker mutation is flagged from its request until the action completes, the flag never
+  # cleared by a line of its own: a signal between the request returning and that line would run
+  # finish with the mutation made and the flag down, and record failed with nothing read back.
+  # See docker_dispatched in finish. A start is the exception: the daemon's answer settles the
+  # mutation, and what follows is the wait for the service, flagged as started.
   kill)
     docker_expect='Running false'
     docker_dispatched=1
     docker kill --signal KILL "$target_id" >/dev/null
-    docker_dispatched=0
     ;;
   start)
     docker_expect='Running true'
     docker_dispatched=1
     docker start "$target_id" >/dev/null
     docker_dispatched=0
+    started=1
     case $1 in
       # An authenticated query on the fixture's database, not pg_isready, which answers as soon as
       # the server accepts connections, whatever the parameters: a database dropped or a password
@@ -362,7 +388,6 @@ case $action in
     [ "$action" = pause ] || docker_expect='Paused false'
     docker_dispatched=1
     docker "$action" "$target_id" >/dev/null
-    docker_dispatched=0
     ;;
   netsplit)
     network=$(network_of "$1")
@@ -370,7 +395,6 @@ case $action in
     docker_expect='network out'
     docker_dispatched=1
     docker network disconnect "$network" "$target_id"
-    docker_dispatched=0
     ;;
   netjoin)
     network=$(network_of "$1")
@@ -386,7 +410,6 @@ case $action in
       worker) docker network connect --ip "$TALOS_WORKER_IP" "$network" "$target_id" ;;
       *) docker network connect --alias "$1" "$network" "$target_id" ;;
     esac
-    docker_dispatched=0
     ;;
   db-snapshot)
     [ $# -eq 1 ] || usage
