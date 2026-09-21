@@ -1,4 +1,5 @@
 # Disposable run state: synthetic secrets, unseal keys, cluster state, backups, evidence.
-.state/
+# Anchored: unanchored, the pattern would hide a directory of that name anywhere under fixtures/.
+/.state/
 # Downloaded, checksum-verified CLIs. Kept across runs; removed by `bin/down --purge`.
-.cache/
+/.cache/
