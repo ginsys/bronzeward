@@ -78,11 +78,14 @@ state_files_own
 # record does not name is someone's, and is not removed as the fixture's by any down. The Compose
 # network is the same case: its labels are only the project's, which any network can be given,
 # and `compose down` removes it as the project's.
-# recorded_only <kind> <mark> <record> <listing...>: every ID the listing gives is in the record
+# recorded_only <kind> <mark> <record> <listing...>: every ID the listing gives is in the record.
+# The IDs it held to the record are left in `held`: the removals below take those, not a fresh
+# listing by the label, which would take in a resource given the label since this check.
 recorded_only() {
   local kind=$1 mark=$2 record=$3 labelled recorded id
   shift 3
   labelled=$("$@") || die "could not list the $mark ${kind}s; nothing was removed"
+  held=$labelled
   if [ -f "$record" ]; then
     # The first field: a container record names each ID under its container name.
     recorded=$(cut -d' ' -f1 -- "$record") || die "could not read the recorded $mark $kind IDs; nothing was removed"
@@ -94,10 +97,14 @@ recorded_only() {
     die "${kind}s carry this fixture's $mark label but bin/up left no record of which it created, as an up interrupted right after creating them leaves it; nothing was removed. Pass --adopt to remove every $kind with the label"
   fi
 }
+held=
 recorded_only container Talos "$STATE/down-node-containers" docker ps --all --quiet --no-trunc --filter "label=$talos_label"
+talos_containers=$held
 recorded_only container Compose "$STATE/down-compose-containers" docker ps --all --quiet --no-trunc --filter "label=$compose_label"
 recorded_only network Talos "$STATE/down-node-networks" docker network ls --quiet --no-trunc --filter "label=$talos_label"
+talos_networks=$held
 recorded_only network Compose "$STATE/down-compose-networks" docker network ls --quiet --no-trunc --filter "label=$compose_label"
+unset held
 # A snapshot with a second name, or one that is a symlink, keeps its secret past this teardown:
 # the removal of .state below takes the one name here and leaves the other. The one-name rule
 # for the files bin/up generated is checked in state_files_own; the snapshots inject published
@@ -266,9 +273,17 @@ unset compose_file compose_env
 if [ -x "$CACHE/talosctl" ] && [ -f "$STATE/talos/$FIXTURE_NAME/state.yaml" ]; then
   talosctl cluster destroy --name "$FIXTURE_NAME" --state "$STATE/talos" 2>&1 | sed 's/^/  /' >&2
 fi
-# What talosctl cannot see: a create that failed before it wrote state.yaml.
-docker ps --all --quiet --filter "label=$talos_label" | xargs --no-run-if-empty docker rm --force --volumes >/dev/null
-docker network ls --quiet --filter "label=$talos_label" | xargs --no-run-if-empty docker network rm >/dev/null
+# What talosctl cannot see: a create that failed before it wrote state.yaml. Exactly the IDs held to
+# the record above (or, without one, listed under --adopt): a listing taken now would take in a
+# container or network given the label since, which no record vouches for. One removed already, by
+# talosctl, fails as no such container, which the probes below do not read as left.
+for id in $talos_containers; do
+  docker rm --force --volumes "$id" >/dev/null 2>&1
+done
+for id in $talos_networks; do
+  docker network rm "$id" >/dev/null 2>&1
+done
+unset talos_containers talos_networks
 for volume in "${node_volumes[@]}"; do
   docker volume rm "$volume" >/dev/null 2>&1
 done
