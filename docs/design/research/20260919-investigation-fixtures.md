@@ -67,6 +67,7 @@ From `fixtures/versions.env`, with what the running services reported:
 | `talosctl` | v1.13.6, SHA-256 `540c5e7c…41d4` from upstream `sha256sum.txt` | `Talos v1.13.6` |
 | Kubernetes | 1.36.2 (version, not digest) | not separately recorded |
 | OpenBao | `ghcr.io/openbao/openbao:2.6.1@sha256:5b2486ab…67e0` | `OpenBao v2.6.1 (ba7ad886…)` |
+| HTTP client `inject` runs inside the OpenBao container's network namespace | `docker.io/curlimages/curl:8.22.0@sha256:58adaa4e…6777` | `curl 8.22.0` (by hand; not recorded in a bundle) |
 | PostgreSQL | `postgres:17-alpine@sha256:f02121de…7995` | `17.11` |
 | `sops` | v3.13.3, SHA-256 `e5bec334…ef6b` from upstream checksums file | `sops 3.13.3` |
 | `age` | v1.3.2, SHA-256 `cbe24006…ac10` (the digest GitHub records for the release asset; upstream publishes no checksum file) | `v1.3.2` |
@@ -90,7 +91,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 19, 20, 21, 22 and 23 (section 5, items 8 to 52); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 53); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed. Each revision was run this way again, from clean,
 before it was committed, and the run of the revision described here is the one recorded with the
@@ -110,7 +111,7 @@ pull request that landed it; the numbers above are that run's, not an earlier re
 | 10 | `bin/evidence` while PostgreSQL is dead | Does not abort; `unavailable.txt` names the missing live dump; the database backup is still expanded and scanned; the data directory is read from the stopped container and the canary found in it | pass |
 | 11 | `db-snapshot` while PostgreSQL is dead, after a `pause postgres` and a second `kill postgres` while it is dead | The pause fails and is recorded `failed`, the second kill is recorded `done`, since the container is stopped as asked; the snapshot fails; no file of that snapshot name is left in `.state/backups`; `injections.log` records it as `failed` and the preceding `kill` as `done` | pass |
 | 12 | `kill` / `start` PostgreSQL, then `start` with the fixture's database renamed aside, then a statement past the request limit (`pg_sleep` under a limit of 3 s) | No answer while dead; committed row survives; the start with the database gone fails at its wait and is recorded `failed`, since readiness is an authenticated query on that database, not `pg_isready`; the statement is cancelled by the server (its own statement-timeout error, not the client's status 124), so nothing runs on inside the container after the client is given up on | pass |
-| 13 | `bin/evidence` while OpenBao is dead | `unavailable.txt` names the provider metadata; `openbao-metadata.jsonl` holds an `unknown` record, not an empty file | pass |
+| 13 | `bin/evidence` while OpenBao is dead, then `bao-soft-delete` against it | `unavailable.txt` names the provider metadata; `openbao-metadata.jsonl` holds an `unknown` record, not an empty file; the mutation ends with status 125 (its client had no namespace to join and was not run) and is logged `failed`, not `unknown` | pass |
 | 14 | `kill` / `start` OpenBao | Comes back sealed, unseals with the stored key, state intact | pass |
 | 15 | `bao-snapshot` while OpenBao is paused, after a second `pause openbao` | The second pause is recorded `done`, since the container is paused as asked; the request ends on its own; the action fails, is logged as `failed` and leaves no snapshot file | pass |
 | 16 | A 5-second wait on an authenticated OpenBao request while the server process inside the container is stopped (`SIGSTOP`), so that the CLI connects and is never answered | The wait fails within 10 seconds; OpenBao answers again after `SIGCONT` | pass |
@@ -1293,6 +1294,38 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     `find`'s "No such file or directory" on a teardown it then reported clean: the removal runs
     only while the directory exists (probed by hand: a `down` on a clean daemon with no `.state/`
     prints nothing but its last line; not a selftest case).
+53. **OpenBao requests from inside the verified container's namespace, `up`'s own records held
+    to labels and asked by ID, the swap told by the restored database's identity, an answered
+    mutation kept through any end, and the partial marker refused at a name's end.** A
+    forty-sixth round: four findings from one reviewer and three from the advisory review
+    (degraded, four of nine chunks lost, two unverdicted), six accepted and one rejected (the
+    state directory's `backups` as a symlink: `lib.sh` refuses it at load for every command, item
+    17; the seventh time). `inject` sent every OpenBao request to the published port on the host,
+    which is an address: whatever held it by then answered, a replacement bound to it once the
+    verified container was gone included, and was handed the root token. The requests now go
+    from inside the network namespace of the container verified under the name, to its own
+    listener, by a pinned client image (`CURL_IMAGE`; the OpenBao image carries only BusyBox
+    `wget`, which cannot send a `DELETE`), pulled by `up` and run by `inject` with `--pull never`.
+    The client's status is curl's own when it ran (7, 22, 28 as before) and Docker's 125 to 127
+    when it was not run, which is a request that never went out: a container stopped or gone has
+    no namespace to join. Check 13 sends `bao-soft-delete` to the killed OpenBao and asserts
+    status 125 and `failed`. The token goes in through the environment and curl expands it into
+    the header. The client view `evidence` records stays on the published port, since it is the
+    client's view. `up` recorded each Compose container by inspecting its name after `compose up`,
+    so a replacement made under the fixed name in that window would have been recorded and
+    installed as the verified ID: the loop reads the ID with the two Compose labels and refuses one
+    not naming this project and checkout, as `containers_own` does. Its final readiness loop asked
+    `docker inspect` by name for all four containers: it asks the ID recorded under each name
+    (the Talos loop now fills the same table). The `db-restore` handler took the scratch name's
+    absence after an interrupted swap as proof the swap committed, which a concurrent drop of the
+    scratch database would fake: the OID of the restored copy is read before the swap, and the
+    handler asks whether the database under the live name carries it, since a rename keeps the
+    OID (not exercised; the query was run by hand). The answered-mutation branch of item 52
+    required a signal, so a `bao-restore` whose wait for an active node gave up was recorded
+    `failed` for a mutation OpenBao had confirmed: the branch takes any failure after the answer
+    (not exercised: the wait has not been seen to give up). And the snapshot-name guard refused
+    `.partial.` inside a name, while a name ending in `.partial` gets the suffix that completes
+    the marker: both are refused (checked by hand; not a selftest case).
 
 ## 6. What each experiment gets
 

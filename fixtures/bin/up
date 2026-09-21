@@ -256,6 +256,11 @@ set +a
 
 fetch_tools
 
+# The client image inject runs inside the OpenBao container's network namespace, pulled here so
+# that inject never pulls: it runs with --pull never, and fails before sending when the image is
+# not there.
+docker image pull --quiet "$CURL_IMAGE" >/dev/null || die "could not pull the client image $CURL_IMAGE"
+
 say "starting postgres and openbao"
 compose up --detach --quiet-pull --wait postgres
 compose up --detach --quiet-pull openbao
@@ -265,12 +270,19 @@ compose up --detach --quiet-pull openbao
 # on it, and bin/down holds every labelled container to the record before removing any. This run
 # acts on them by these IDs too (bao and pg in lib.sh take the ID the name was verified under).
 for name in "$PG" "$BAO"; do
-  id=$(docker inspect --type container --format '{{.Id}}' "$name") || die "could not read the ID of the container $name"
+  # The one Compose made, told by its labels, as containers_own tells it: the name alone could
+  # be a replacement's, made once the real one was gone between compose up and this look.
+  answer=$(docker inspect --type container --format \
+    '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
+    "$name") || die "could not read the ID of the container $name"
+  [ "${answer#* }" = "$FIXTURE_NAME $FIXTURES" ] ||
+    die "the container named $name is not the one Compose made: its labels do not name this project and checkout. Remove it by hand"
+  id=${answer%% *}
   verified_container_ids["$name"]=$id
   printf '%s %s\n' "$id" "$name"
 done >"$STATE/down-compose-containers.partial"
 mv --no-target-directory -- "$STATE/down-compose-containers.partial" "$STATE/down-compose-containers"
-unset name id
+unset name id answer
 # The Compose network carries only the project's labels, which any network can be given, and its
 # name is fixed: with the containers gone by hand, anyone's network can take the name and the
 # labels, and a removal by them would take it as this project's. Recorded by ID, exactly the one
@@ -352,6 +364,7 @@ for name in "$CP" "$WORKER"; do
   id=$(docker inspect --type container --format '{{.Id}}' "$name") || die "could not read the ID of the Talos container $name"
   grep --quiet --line-regexp --fixed-strings -- "$id" <<<"$container_ids" ||
     die "the container named $name is not one of the two the cluster's label lists; teardown could not tell it from another's"
+  verified_container_ids["$name"]=$id
   printf '%s %s\n' "$id" "$name"
 done >"$STATE/down-node-containers.partial"
 unset name id
@@ -386,10 +399,14 @@ control_content >"$STATE/data/canary-control.txt"
 
 # Something outside the fixture may have stopped a container meanwhile, for example a host hook
 # that restarts the Docker daemon when a new bridge appears. Never report a half-dead fixture as up.
+# Each asked by the ID recorded under its name: by name, a replacement made meanwhile would
+# answer for one that stopped.
 for c in "$PG" "$BAO" "$CP" "$WORKER"; do
-  [ "$(docker inspect --format '{{.State.Running}}' "$c")" = true ] ||
+  id=$(container_id "$c") || die "$c was not recorded under its name; the fixture is not known to be up"
+  [ "$(docker inspect --type container --format '{{.State.Running}}' "$id")" = true ] ||
     die "$c stopped while the fixture was starting (see 'Known limits' in fixtures/README.md)"
 done
+unset c id
 # Running is not usable. Several minutes of Talos creation have passed since both services were
 # last asked, so ask again, with credentials: an OpenBao that sealed itself and a PostgreSQL that
 # does not accept this run's password both still count as running.

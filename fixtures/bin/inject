@@ -35,7 +35,7 @@ EOF
 }
 
 [ $# -ge 1 ] || usage
-need docker curl jq tar mktemp timeout stat
+need docker jq tar mktemp timeout stat
 need_state
 action=$1
 shift
@@ -76,14 +76,34 @@ network_own() {
 }
 
 bao_http() { # bao_http <method> <api-path> [curl args]
-  local method=$1 path=$2
+  local method=$1 path=$2 id
   shift 2
-  # --noproxy: a proxy from the caller's shell must never stand between this and localhost.
+  # Sent from inside the network namespace of the container verified under the name, by the
+  # pinned curl image: from the host, the published port is an address, and whatever holds it by
+  # then answers, a replacement bound to it once the verified container was gone included, and
+  # would be handed the root token. Inside the namespace, 127.0.0.1:8200 is that container's own
+  # listener whatever network it is on, and a container stopped or gone has no namespace to join:
+  # docker run then fails with 125 before anything is sent. The status is curl's own when the
+  # client ran (7 never connected, 22 an HTTP error, 28 timed out) and Docker's 125 to 127 when it
+  # did not. The token goes in through the environment and curl expands it into the header, so
+  # that it is not on a command line. Stdin is handed through, for a body from a file.
   # --max-time: a paused OpenBao accepts the connection and never answers; the action must end,
   # and be logged as failed, all the same.
   # --path-as-is: no '.' or '..' is let through above; this keeps curl from resolving one anyway.
-  curl --noproxy '*' --path-as-is --connect-timeout 5 --max-time 30 --fail --silent --show-error --request "$method" \
-    --header "X-Vault-Token: $BW_BAO_ROOT_TOKEN" "http://127.0.0.1:$OPENBAO_PORT/v1/$path" "$@"
+  id=$(container_id "$BAO") || return 1
+  docker run --rm --interactive --pull never --network "container:$id" --env BAO_TOKEN="$BW_BAO_ROOT_TOKEN" "$CURL_IMAGE" \
+    --disable --path-as-is --connect-timeout 5 --max-time 30 --fail --silent --show-error --request "$method" \
+    --variable '%BAO_TOKEN' --expand-header 'X-Vault-Token: {{BAO_TOKEN}}' "http://127.0.0.1:8200/v1/$path" "$@"
+}
+# bao_refused <rc>: the request did not reach OpenBao, or OpenBao answered it with an error, so
+# nothing was applied: curl's 7 (never connected) or 22 (an HTTP error), or Docker's 125 to 127
+# (the client was not run: no such container, not running, no image). Any other status is a
+# request that went out and got no answer.
+bao_refused() {
+  case $1 in
+    7 | 22 | 125 | 126 | 127) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # Resolve the target in an assignment: `die` inside a command substitution only ends the subshell,
@@ -105,7 +125,8 @@ case $action in
     # spelled like a snapshot that was interrupted, which bin/evidence tells by that suffix.
     case $1 in
       '' | . | .. | */*) die "snapshot names are one path component without a slash, not '$1'" ;;
-      *.partial.*) die "snapshot names must not hold '.partial.', which marks an interrupted snapshot" ;;
+      # With the suffix the file name gets, a name that ends in '.partial' would carry it too.
+      *.partial.* | *.partial) die "snapshot names must not hold '.partial.' or end in '.partial', which marks an interrupted snapshot" ;;
     esac
     ;;
   # A KV path or key name reaches OpenBao inside a URL path: slash-separated components of
@@ -140,6 +161,7 @@ staging=
 moved_aside=0
 committing=0
 db_swapping=0
+restore_oid=
 bao_dispatched=0
 # bao_answered: OpenBao answered the mutating request with success; set before the dispatch flag
 # is cleared, so that no moment has neither. A signal after it is a signal after the mutation.
@@ -211,27 +233,29 @@ finish() {
     rc=0
   fi
   # The database swap is one transaction that the server may commit while the signal ends the
-  # client: afterwards the scratch database no longer exists under its name, and the restore is
-  # in place. Asked only when the status says failure, and only while the server answers; a
-  # query that fails leaves the status as it was.
-  if [ "$db_swapping" -eq 1 ] && [ "$rc" -ne 0 ] &&
-    left=$(pg psql -U bronzeward -d postgres -Atc "select count(*) from pg_database where datname = 'bronzeward_restore'" 2>/dev/null) &&
-    [ "$left" = 0 ]; then
+  # client: afterwards the database under the live name is the restored one. Told by its OID,
+  # which a rename keeps, and which was read from the restored copy before the swap: that the
+  # scratch name is gone would say as much of a drop by someone else. Asked only when the status
+  # says failure, and only while the server answers; a query that fails leaves the status as it was.
+  if [ "$db_swapping" -eq 1 ] && [ "$rc" -ne 0 ] && [ -n "$restore_oid" ] &&
+    live=$(pg psql -U bronzeward -d postgres -Atc "select oid from pg_database where datname = 'bronzeward'" 2>/dev/null) &&
+    [ "$live" = "$restore_oid" ]; then
     say "fixtures: interrupted after the restored database was swapped in; recorded as done. bronzeward_previous is left; the next db-restore drops it"
     rc=0
   fi
-  # A mutating request OpenBao answered with success, then a signal before the last line: the
-  # mutation is made, and the log must not deny it. Recorded as done; what came after the answer,
-  # bao-restore's wait for an active node, was not seen to finish, and is said so.
-  if [ "$bao_answered" -eq 1 ] && [ "$rc" -ne 0 ] && [ "$signalled" -eq 1 ]; then
-    say "fixtures: OpenBao answered the request before the signal; recorded as done (what followed the answer, if anything, was not seen to finish)"
+  # A mutating request OpenBao answered with success, then a failure before the last line, a
+  # signal or bao-restore's wait for an active node giving up: the mutation is made, and the log
+  # must not deny it. Recorded as done; what came after the answer was not seen to finish, and is
+  # said so (the wait's own message above says what).
+  if [ "$bao_answered" -eq 1 ] && [ "$rc" -ne 0 ]; then
+    say "fixtures: OpenBao answered the request before the action ended (rc=$rc); recorded as done (what followed the answer, if anything, was not seen to finish)"
     rc=0
   fi
-  # A mutating request that OpenBao may have received and applied without answering: curl's own
-  # status tells a request that never reached the server (7, no connection) or that the server
-  # refused (22, an HTTP error) from a timeout, a dropped connection or a signal, after which
-  # the provider's state is whatever the request made of it. Recorded as unknown, not failed.
-  if [ "$bao_dispatched" -eq 1 ] && [ "$rc" -ne 0 ] && [ "$rc" -ne 7 ] && [ "$rc" -ne 22 ]; then
+  # A mutating request that OpenBao may have received and applied without answering: the status
+  # tells a request that never reached the server or that the server refused (bao_refused) from
+  # a timeout, a dropped connection or a signal, after which the provider's state is whatever the
+  # request made of it. Recorded as unknown, not failed.
+  if [ "$bao_dispatched" -eq 1 ] && [ "$rc" -ne 0 ] && ! bao_refused "$rc"; then
     status=unknown
     say "fixtures: the request was sent and not answered; whether OpenBao applied it is not known"
   fi
@@ -452,6 +476,12 @@ case $action in
         say "fixtures: the half-restored database bronzeward_restore could not be dropped"
       die "pg-$1.dump could not be restored; the live database was left alone"
     fi
+    # The restored copy's identity, for the exit handler: an OID survives the rename, so the
+    # database found under the live name afterwards is told to be this one, not merely not the
+    # scratch name any more.
+    restore_oid=$(pg psql -U bronzeward -d postgres -Atc "select oid from pg_database where datname = 'bronzeward_restore'") &&
+      [ -n "$restore_oid" ] ||
+      die "could not read the identity of the restored database; the live database was left alone, and the restored copy is bronzeward_restore until the next db-restore"
     # A database cannot be renamed while anyone is connected to it, so its sessions are ended in
     # the same transaction, and each is waited for: the signal alone returns before the backend
     # has gone, and the rename right after it would then fail on a session already told to leave.
@@ -482,7 +512,7 @@ case $action in
     # The flag first: once the request is on its way, a failure without an answer from OpenBao
     # says nothing about whether the snapshot was applied, and the exit handler records that.
     bao_dispatched=1
-    bao_http POST sys/storage/raft/snapshot-force --data-binary "@$STATE/backups/bao-$1.snap" --output /dev/null
+    bao_http POST sys/storage/raft/snapshot-force --data-binary @- --output /dev/null <"$STATE/backups/bao-$1.snap"
     bao_answered=1
     bao_dispatched=0
     wait_for 60 "an active OpenBao node" bao token lookup
@@ -559,9 +589,9 @@ case $action in
     # applied leaves the key deletable, which `failed` would deny: the setting is put back to what
     # the read found, and the action fails with the key as it was; a key already deletable is left
     # so, since nothing was changed. When the setting cannot be put back, what the key is left as
-    # is not known. Refused means curl's 7 or 22 (never reached, or answered with an error), as
-    # for every request above: a DELETE that went out and got no answer may have taken the key,
-    # and is unknown, whatever the setting was.
+    # is not known. Refused is bao_refused's reading of the status (never reached, or answered
+    # with an error), as for every request above: a DELETE that went out and got no answer may
+    # have taken the key, and is unknown, whatever the setting was.
     deletable=$(bao_http GET "transit/keys/$1" | jq --raw-output '.data.deletion_allowed') ||
       die "cannot read the Transit key $1; nothing was changed"
     case $deletable in
@@ -575,16 +605,16 @@ case $action in
     if [ "$delete_rc" -ne 0 ]; then
       # Refused: the key is there. A setting this action applied is put back, and the action
       # failed; one that cannot be put back leaves the key deletable or not, which is not known.
-      if [ "$delete_rc" -eq 7 ] || [ "$delete_rc" -eq 22 ]; then
+      if bao_refused "$delete_rc"; then
         if [ "$deletable" = true ]; then
           bao_dispatched=0
-          die "the Transit key $1 could not be deleted (curl rc=$delete_rc); it was deletable before and is left so"
+          die "the Transit key $1 could not be deleted (rc=$delete_rc); it was deletable before and is left so"
         fi
         if bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":false}' --output /dev/null; then
           bao_dispatched=0
-          die "the Transit key $1 could not be deleted (curl rc=$delete_rc); its deletion_allowed setting was put back to false"
+          die "the Transit key $1 could not be deleted (rc=$delete_rc); its deletion_allowed setting was put back to false"
         fi
-        say "fixtures: the Transit key $1 could not be deleted (curl rc=$delete_rc), and its deletion_allowed setting could not be put back; whether it is left deletable is not known"
+        say "fixtures: the Transit key $1 could not be deleted (rc=$delete_rc), and its deletion_allowed setting could not be put back; whether it is left deletable is not known"
         exit 1
       fi
       # Went out and got no answer: the key may be gone, whatever the setting, and the outcome is
@@ -595,7 +625,7 @@ case $action in
         bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":false}' --output /dev/null ||
           say "fixtures: the deletion_allowed setting of the Transit key $1 could not be put back (the key may be gone)"
       fi
-      say "fixtures: the deletion of the Transit key $1 went out and got no answer (curl rc=$delete_rc); whether the key is gone is not known"
+      say "fixtures: the deletion of the Transit key $1 went out and got no answer (rc=$delete_rc); whether the key is gone is not known"
       exit 1
     fi
     bao_answered=1

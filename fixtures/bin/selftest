@@ -424,7 +424,14 @@ degraded=$("$here/evidence") || fail "evidence aborted while openbao was down"
 grep --quiet 'openbao metadata' "$degraded/unavailable.txt" || fail "evidence did not say the OpenBao metadata is missing"
 jq -es 'any(.[]; has("unknown"))' "$degraded/openbao-metadata.jsonl" >/dev/null ||
   fail "OpenBao metadata reads as empty instead of unknown while openbao was down"
-ok "evidence records OpenBao state as unknown, not empty, while openbao is down"
+# A request to a stopped OpenBao: its client has no namespace to join, so it is not run (Docker's
+# 125), nothing is sent, and the mutation is recorded as failed, not unknown.
+rc=0
+"$here/inject" bao-soft-delete selftest/item 1 2>/dev/null || rc=$?
+[ "$rc" -eq 125 ] || fail "bao-soft-delete against a stopped openbao ended with rc=$rc, not 125 (client not run)"
+grep --quiet ' failed rc=125 bao-soft-delete selftest/item 1$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "a request to a stopped openbao is not recorded as failed: $(tail -n 1 "$STATE/injections.log")"
+ok "evidence records OpenBao state as unknown, not empty, while openbao is down; a mutation sent to it then is failed, its client never run"
 "$here/inject" start openbao
 [ "$(kv_version destroyed)" = false ] || fail "openbao state differs after crash and unseal"
 ok "kill / start openbao comes back sealed, unseals, keeps state"
