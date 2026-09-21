@@ -15,6 +15,27 @@ ok() {
 }
 fail() { die "selftest FAILED: $*"; }
 
+# What a case changes in the checkout, the cache or the state is put back on any end. A case puts
+# its own change back before anything of it can fail; a signal, or a failure the case did not
+# provide for, between the change and that line would otherwise leave the checkout altered (a
+# replacement ref, an index flag, a tracked file rewritten) with nothing to say so. Each such
+# change registers its put-back before it is made (defer) and unregisters it after its own
+# (undefer); the handler runs whatever is still registered, last first.
+undo=()
+defer() { undo+=("$(printf '%q ' "$@")"); }
+undefer() { unset 'undo[-1]'; }
+put_back() {
+  local i
+  for ((i = ${#undo[@]} - 1; i >= 0; i--)); do
+    eval "${undo[i]}" || say "selftest: could not put back: ${undo[i]}"
+  done
+  undo=()
+}
+trap 'rc=$?; put_back; exit $rc' EXIT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+trap 'exit 130' INT
+
 worker_talos() { talosctl_timed 10 -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" "$@"; }
 worker_digest() {
   local config
@@ -418,7 +439,12 @@ rc=0
 said=$(PG_LIMIT=3 pg psql -U bronzeward -d bronzeward -Atc 'select pg_sleep(30)' 2>&1) || rc=$?
 [ "$rc" -ne 124 ] || fail "a statement past the limit was only given up on by the client, not cancelled by the server"
 grep --quiet 'statement timeout' <<<"$said" || fail "a statement past the limit was not cancelled by the server (rc=$rc): $said"
-ok "kill / start postgres keeps committed data; a start with the database gone is failed; a statement past the limit is cancelled by the server"
+# The password is asked for over the network: up's last probe runs from a client inside the
+# container's namespace against its address on the Compose network (the image trusts loopback),
+# so another password must be refused there and this run's answered.
+! BW_POSTGRES_PASSWORD=not-this-run pg_client -Atc 'select 1' >/dev/null 2>&1 || fail "pg_client was not asked for the password"
+[ "$(pg_client -Atc 'select 1' 2>/dev/null)" = 1 ] || fail "pg_client with this run's password did not answer"
+ok "kill / start postgres keeps committed data; a start with the database gone is failed; a statement past the limit is cancelled by the server; the password is asked for over the network"
 "$here/inject" kill openbao
 degraded=$("$here/evidence") || fail "evidence aborted while openbao was down"
 grep --quiet 'openbao metadata' "$degraded/unavailable.txt" || fail "evidence did not say the OpenBao metadata is missing"
@@ -776,12 +802,14 @@ rm "$FIXTURES/.selftest-untracked-link"
 [ "$went" -eq 0 ] || fail "evidence recorded an untracked symlink as the file that ran"
 # A tracked file replaced by a symlink: the diff would carry the target's name, and what the
 # scripts read is at the far end.
+defer mv --no-target-directory -- "$FIXTURES/.selftest-readme-aside" "$FIXTURES/README.md"
 mv "$FIXTURES/README.md" "$FIXTURES/.selftest-readme-aside"
 ln -s "$FIXTURES/.selftest-readme-aside" "$FIXTURES/README.md"
 went=0
 "$here/evidence" >/dev/null 2>&1 && went=1
 rm "$FIXTURES/README.md"
 mv "$FIXTURES/.selftest-readme-aside" "$FIXTURES/README.md" # before anything can fail
+undefer
 [ "$went" -eq 0 ] || fail "evidence recorded a tracked file replaced by a symlink as the file that ran"
 # An untracked file hidden by an excludes file outside the repository: neither the status nor the
 # listing sees it, and the bundle would claim to say what ran without it. With a secret in its
@@ -839,19 +867,23 @@ grep --quiet 'attribute from git' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the untracked file's filter attribute for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 # A tracked file git is told to assume unchanged: a change there is in no status and no diff. The
 # flag is cleared before anything can fail.
+defer git -C "$FIXTURES" update-index --no-assume-unchanged README.md
 git -C "$FIXTURES" update-index --assume-unchanged README.md
 went=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
 git -C "$FIXTURES" update-index --no-assume-unchanged README.md # before anything can fail
+undefer
 [ "$went" -eq 0 ] || fail "evidence captured while git was told to assume a tracked file under fixtures/ unchanged"
 grep --quiet 'told to skip' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the assume-unchanged file for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 # The record of how fixtures/ differed at creation gone: its absence must not read as "the tree
 # was the commit's". Put back before anything can fail.
+defer mv --no-target-directory -- "$STATE/selftest-creation-diff-aside" "$STATE/up-fixtures-diff.txt"
 mv "$STATE/up-fixtures-diff.txt" "$STATE/selftest-creation-diff-aside"
 went=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
 mv "$STATE/selftest-creation-diff-aside" "$STATE/up-fixtures-diff.txt" # before anything can fail
+undefer
 [ "$went" -eq 0 ] || fail "evidence captured without the record of how fixtures/ differed at creation"
 grep --quiet 'differed at creation' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the missing creation record for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
@@ -859,11 +891,13 @@ grep --quiet 'differed at creation' "$STATE/selftest-evidence.err" ||
 # every listing, and the diff would carry the rule, not the helper. The file is put back before
 # anything can fail.
 cp "$FIXTURES/.gitignore" "$STATE/selftest-gitignore-copy"
+defer mv --no-target-directory -- "$STATE/selftest-gitignore-copy" "$FIXTURES/.gitignore"
 printf '.selftest-helper\n' >>"$FIXTURES/.gitignore"
 printf 'helper=%s\n' "$BW_CANARY" >"$FIXTURES/.selftest-helper"
 went=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
 mv --no-target-directory -- "$STATE/selftest-gitignore-copy" "$FIXTURES/.gitignore"
+undefer
 rm "$FIXTURES/.selftest-helper"
 [ "$went" -eq 0 ] || fail "evidence captured while fixtures/.gitignore differed from the commit"
 grep --quiet 'ignore rules are not the commit' "$STATE/selftest-evidence.err" ||
@@ -883,10 +917,12 @@ grep --quiet 'ignore rules are not the commit' "$STATE/selftest-evidence.err" ||
 # carries a commit hash for it, never the bytes under it. Taken out of the index before anything
 # can fail.
 # --cacheinfo takes a path from the repository root; --force-remove one from the directory.
+defer fixtures_git update-index --force-remove -- .selftest-gitlink
 fixtures_git update-index --add --cacheinfo "160000,$(fixtures_git rev-parse HEAD),$(fixtures_git rev-parse --show-prefix).selftest-gitlink"
 went=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
 fixtures_git update-index --force-remove -- .selftest-gitlink
+undefer
 [ "$went" -eq 0 ] || fail "evidence captured with a gitlink staged under fixtures/"
 grep --quiet 'is a gitlink' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the staged gitlink for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
@@ -895,12 +931,14 @@ grep --quiet 'is a gitlink' "$STATE/selftest-evidence.err" ||
 # find nothing to say, while a regular file runs. The setting is forced on for the inventory, so
 # the diff carries the file as the regular file it is. Taken out before anything can fail.
 link_blob=$(printf 'README.md' | fixtures_git hash-object -w --stdin)
+defer fixtures_git update-index --force-remove -- .selftest-link
 fixtures_git update-index --add --cacheinfo "120000,$link_blob,$(fixtures_git rev-parse --show-prefix).selftest-link"
 printf 'README.md' >"$FIXTURES/.selftest-link"
 rc=0
 bundle=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.symlinks GIT_CONFIG_VALUE_0=false \
   "$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
 fixtures_git update-index --force-remove -- .selftest-link
+undefer
 rm "$FIXTURES/.selftest-link"
 [ "$rc" -eq 0 ] || fail "evidence aborted with a regular file where the index has a symlink: $(tail -n 1 "$STATE/selftest-evidence.err")"
 grep --quiet --extended-regexp '^new file mode 100644$' "$bundle/fixtures-diff.txt" ||
@@ -925,20 +963,24 @@ grep --quiet 'nested repository' "$STATE/selftest-evidence.err" ||
 # report a scan. root opens both, so there neither case can be built.
 if [ "$(id -u)" -ne 0 ]; then
   mkdir "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
+  defer rmdir "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
   chmod 000 "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
   went=0
   "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
   chmod 700 "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN" # before anything can fail
   rmdir "$FIXTURES/.selftest-closed-$BW_BAO_METADATA_TOKEN"
+  undefer
   [ "$went" -eq 0 ] || fail "evidence captured while git could not open an untracked directory under fixtures/"
   grep --quiet 'warned while listing fixtures/' "$STATE/selftest-evidence.err" ||
     fail "evidence failed on the closed directory for another reason: $(grep --invert-match --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" | tail -n 1)"
   ! grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" "$STATE/selftest-evidence.err" ||
     fail "evidence printed the secret-bearing name of a directory git could not open"
+  defer chmod 700 "$STATE/evidence"
   chmod 300 "$STATE/evidence"
   went=0
   "$here/evidence" >/dev/null 2>&1 && went=1
   chmod 700 "$STATE/evidence" # before anything can fail
+  undefer
   [ "$went" -eq 0 ] || fail "evidence reported a scan while the earlier captures could not be listed"
 else
   say "skipped as root: the closed-directory and the unreadable-bundle-directory cases"
@@ -948,6 +990,7 @@ fi
 # its stat cache, read the file as the commit's, and the diff would not carry the bytes that ran.
 # Put back before anything can fail.
 cp -p "$FIXTURES/README.md" "$STATE/selftest-readme-stat"
+defer mv --no-target-directory -- "$STATE/selftest-readme-stat" "$FIXTURES/README.md"
 sed '1s/^# /#-/' "$STATE/selftest-readme-stat" >"$FIXTURES/README.md"
 touch -r "$STATE/selftest-readme-stat" "$FIXTURES/README.md"
 rc=0
@@ -955,6 +998,7 @@ bundle=$(GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.trustctime GIT_CONFIG_VALUE_0=
   GIT_CONFIG_KEY_1=core.checkStat GIT_CONFIG_VALUE_1=minimal \
   "$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
 mv --no-target-directory -- "$STATE/selftest-readme-stat" "$FIXTURES/README.md"
+undefer
 [ "$rc" -eq 0 ] || fail "evidence aborted with a tracked file changed in place: $(tail -n 1 "$STATE/selftest-evidence.err")"
 grep --quiet --fixed-strings '+#-Investigation fixtures' "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt does not carry a same-length change to a tracked file with its mtime put back, under core.trustctime=false"
@@ -966,10 +1010,12 @@ rm "$STATE/selftest-evidence.err"
 # anything can fail.
 plain=$("$here/evidence" 2>"$STATE/selftest-evidence.err") || fail "evidence aborted before the replacement ref: $(tail -n 1 "$STATE/selftest-evidence.err")"
 replaced=$(fixtures_git rev-parse HEAD)
+defer fixtures_git replace --delete "$replaced"
 fixtures_git replace "$replaced" "$(fixtures_git rev-parse HEAD~1)"
 rc=0
 bundle=$("$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
 fixtures_git replace --delete "$replaced"
+undefer
 [ "$rc" -eq 0 ] || fail "evidence aborted under a replacement ref for the commit: $(tail -n 1 "$STATE/selftest-evidence.err")"
 cmp --silent -- "$plain/fixtures-diff.txt" "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt differs under a replacement ref for the commit: the diff was taken against the replacement"
@@ -977,11 +1023,13 @@ grep --quiet --fixed-strings "$replaced" "$bundle/versions.txt" || fail "version
 unset replaced plain
 # The executable bit taken from a command under core.fileMode=false in the caller's configuration:
 # git would see no change, while running the command fails. Put back before anything can fail.
+defer chmod a+x "$FIXTURES/bin/inject"
 chmod a-x "$FIXTURES/bin/inject"
 rc=0
 bundle=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fileMode GIT_CONFIG_VALUE_0=false \
   "$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
 chmod a+x "$FIXTURES/bin/inject"
+undefer
 [ "$rc" -eq 0 ] || fail "evidence aborted with a command's executable bit taken: $(tail -n 1 "$STATE/selftest-evidence.err")"
 grep --quiet '^new mode 100644' "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt does not carry a command's executable bit taken under core.fileMode=false"
@@ -1007,12 +1055,14 @@ rm "$STATE/selftest-evidence.err"
 # The cached talosctl replaced by a stand-in that reports the pinned version: the cache is
 # writable, and the bundle cites the manifest. Refused against the manifest's digest before the
 # stand-in is run at all (it leaves a mark when run). Put back before anything can fail.
+defer mv --no-target-directory -- "$STATE/selftest-talosctl-aside" "$CACHE/talosctl"
 mv --no-target-directory -- "$CACHE/talosctl" "$STATE/selftest-talosctl-aside"
 printf '#!/bin/sh\n: >"%s"\necho "Client:\\n\\tTag: %s"\n' "$STATE/selftest-standin-ran" "$TALOS_VERSION" >"$CACHE/talosctl"
 chmod +x "$CACHE/talosctl"
 rc=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
 mv --no-target-directory -- "$STATE/selftest-talosctl-aside" "$CACHE/talosctl"
+undefer
 [ "$rc" -ne 0 ] || fail "evidence ran with a stand-in in place of the cached talosctl"
 grep --quiet 'is not the pinned talosctl' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the stand-in talosctl for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
@@ -1100,6 +1150,7 @@ ln -s "$STATE/data" "$STATE/selftest-data-alias"
 # normalise both sides, and the diff would not carry the bytes that ran. Put back before anything
 # can fail.
 cp "$FIXTURES/README.md" "$STATE/selftest-readme-copy"
+defer mv --no-target-directory -- "$STATE/selftest-readme-copy" "$FIXTURES/README.md"
 sed 's/$/\r/' "$STATE/selftest-readme-copy" >"$FIXTURES/README.md"
 # The live store given as an extra path as well: it is a root already, and a file under it must
 # still be counted once. Under a diff helper that prints nothing: the bundle must carry git's own
@@ -1111,6 +1162,7 @@ bundle=$(cd "$STATE/selftest-outside" &&
     GIT_CONFIG_KEY_2=core.ignoreCase GIT_CONFIG_VALUE_2=true \
     "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" "$STATE/selftest-data-alias" 2>"$STATE/selftest-evidence.err") || rc=$?
 mv --no-target-directory -- "$STATE/selftest-readme-copy" "$FIXTURES/README.md"
+undefer
 [ "$case_planted" -eq 0 ] || rm "$FIXTURES/README.MD"
 rm "$STATE/selftest-data-alias" # the link only
 rm -r "$FIXTURES/.selftest-nested"
@@ -1510,25 +1562,18 @@ if [ "$keep" != --keep ]; then
   if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down tore down while a dot-named link sat in .state/backups"
   fi
-  # The Talos state directory through a link: `talosctl cluster destroy` would act on the state
-  # at the far end.
+  # The Talos state directory through a link: refused at load, as every managed directory (the
+  # removal of .state would take the link and leave the cluster's credentials at the far end).
+  defer mv --no-target-directory -- "$FIXTURES/.selftest-talos-aside" "$STATE/talos"
   mv "$STATE/talos" "$FIXTURES/.selftest-talos-aside"
   ln -s "$FIXTURES/.selftest-talos-aside" "$STATE/talos"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   rm "$STATE/talos"
   mv "$FIXTURES/.selftest-talos-aside" "$STATE/talos" # before anything can fail
+  undefer
   if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down followed a symlinked Talos state directory"
-  fi
-  # The cluster state file with a second name: destroy would act on what it describes while the
-  # other name survives.
-  ln "$STATE/talos/$FIXTURE_NAME/state.yaml" "$FIXTURES/.selftest-state-alias"
-  went=0
-  "$here/down" >/dev/null 2>&1 && went=1
-  rm -f "$FIXTURES/.selftest-state-alias"
-  if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
-    fail "down tore down while the Talos cluster state file had a second name"
   fi
   # A record whose last name lacks its newline, as an append cut short leaves it: read whole,
   # not appended onto.

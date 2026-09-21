@@ -120,18 +120,6 @@ if [ -d "$STATE/backups" ]; then
     die "$backup is not a regular file with that one name; its content would outlive this teardown under the other name. Remove that name first; nothing was removed"
   unset backup
 fi
-# The Talos state directory names what `talosctl cluster destroy` acts on. Through a link, that
-# would be someone else's state. .state/talos itself is refused as a link by lib.sh.
-for talos_state in "$STATE/talos/$FIXTURE_NAME" "$STATE/talos/$FIXTURE_NAME/state.yaml"; do
-  [ ! -L "$talos_state" ] || die "$talos_state is a symlink; the fixture never makes one there. Nothing was removed"
-done
-# And the file itself with one name: `talosctl cluster destroy` acts on what it describes, and a
-# hard link to someone else's state would have it act on theirs while the other name survives.
-talos_state=$STATE/talos/$FIXTURE_NAME/state.yaml
-if [ -e "$talos_state" ] && { [ ! -f "$talos_state" ] || [ "$(stat --format=%h -- "$talos_state" 2>/dev/null)" != 1 ]; }; then
-  die "$talos_state is not a regular file with that one name; the fixture never makes one there. Nothing was removed"
-fi
-unset talos_state
 # A volume under one of the names compose.yaml gives its own, without the project label, is not
 # the fixture's and never was: Compose does not make one without the label. The removal below
 # would take it all the same, so it stops the teardown, --adopt or not.
@@ -287,15 +275,11 @@ for volume in $compose_volumes; do
 done
 unset compose_containers compose_networks compose_volumes
 
-# talosctl here is the function from lib.sh, that is the cached binary the guard tests. Its status,
-# like that of every removal below, is not what decides: the probes further down are.
-if [ -x "$CACHE/talosctl" ] && [ -f "$STATE/talos/$FIXTURE_NAME/state.yaml" ]; then
-  talosctl cluster destroy --name "$FIXTURE_NAME" --state "$STATE/talos" 2>&1 | sed 's/^/  /' >&2
-fi
-# What talosctl cannot see: a create that failed before it wrote state.yaml. Exactly the IDs held to
-# the record above (or, without one, listed under --adopt): a listing taken now would take in a
-# container or network given the label since, which no record vouches for. One removed already, by
-# talosctl, fails as no such container, which the probes below do not read as left.
+# The Talos side: exactly the IDs held to the record above (or, without one, listed under
+# --adopt). A listing taken now would take in a container or network given the label since, which
+# no record vouches for, and so would `talosctl cluster destroy`, which selects by the label and
+# is not run: what it would remove besides, the cluster's state directory, goes with .state below.
+# The status of a removal, here as above, is not what decides: the probes further down are.
 for id in $talos_containers; do
   docker rm --force --volumes "$id" >/dev/null 2>&1
 done
