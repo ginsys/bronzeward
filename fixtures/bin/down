@@ -183,8 +183,7 @@ done
 # fixture never has, only the nodes whose containers still exist name their volumes. With fewer
 # than both of them, this run cannot say that no node volume is left, and must not. Remembered in
 # the state directory as well: the list written below would pass for the record on a second run.
-talos_containers=$(docker ps --all --quiet --filter "label=$talos_label") ||
-  die "could not list the Talos containers; nothing was removed"
+# The containers counted are the ones recorded_only held above, not a fresh listing.
 # A marker that is a link, dangling or not: `-e` reads a dangling one as absent, and the
 # uncertainty an earlier run recorded would be dropped. The fixture never makes one there.
 [ ! -L "$STATE/down-node-volumes-incomplete" ] ||

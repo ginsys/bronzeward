@@ -550,19 +550,29 @@ case $action in
     delete_rc=0
     bao_http DELETE "transit/keys/$1" --output /dev/null || delete_rc=$?
     if [ "$delete_rc" -ne 0 ]; then
-      if [ "$deletable" = true ]; then
-        if [ "$delete_rc" -eq 7 ] || [ "$delete_rc" -eq 22 ]; then
+      # Refused: the key is there. A setting this action applied is put back, and the action
+      # failed; one that cannot be put back leaves the key deletable or not, which is not known.
+      if [ "$delete_rc" -eq 7 ] || [ "$delete_rc" -eq 22 ]; then
+        if [ "$deletable" = true ]; then
           bao_dispatched=0
           die "the Transit key $1 could not be deleted (curl rc=$delete_rc); it was deletable before and is left so"
         fi
-        say "fixtures: the deletion of the Transit key $1 went out and got no answer (curl rc=$delete_rc); whether the key is gone is not known"
+        if bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":false}' --output /dev/null; then
+          bao_dispatched=0
+          die "the Transit key $1 could not be deleted (curl rc=$delete_rc); its deletion_allowed setting was put back to false"
+        fi
+        say "fixtures: the Transit key $1 could not be deleted (curl rc=$delete_rc), and its deletion_allowed setting could not be put back; whether it is left deletable is not known"
         exit 1
       fi
-      if [ "$delete_rc" -ne 7 ] && bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":false}' --output /dev/null; then
-        bao_dispatched=0
-        die "the Transit key $1 could not be deleted (curl rc=$delete_rc); its deletion_allowed setting was put back to false"
+      # Went out and got no answer: the key may be gone, whatever the setting, and the outcome is
+      # unknown either way. A setting this action applied is put back all the same, so that a key
+      # that survived is left as it was found; on a key that is gone the request fails, and says
+      # nothing more than the deletion did.
+      if [ "$deletable" != true ]; then
+        bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":false}' --output /dev/null ||
+          say "fixtures: the deletion_allowed setting of the Transit key $1 could not be put back (the key may be gone)"
       fi
-      say "fixtures: the Transit key $1 could not be deleted (curl rc=$delete_rc), and its deletion_allowed setting was not put back; what the key is left as is not known"
+      say "fixtures: the deletion of the Transit key $1 went out and got no answer (curl rc=$delete_rc); whether the key is gone is not known"
       exit 1
     fi
     bao_dispatched=0

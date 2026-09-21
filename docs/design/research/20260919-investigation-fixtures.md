@@ -90,7 +90,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 19, 20, 21, 22 and 23 (section 5, items 8 to 49); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 19, 20, 21, 22 and 23 (section 5, items 8 to 50); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed.
 
@@ -1213,6 +1213,23 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     the checks review widened omitted 6, 7 and 12, and section 5's opening line claimed every
     item reproducible and fixture-changing, which the items rejected or not exercised
     contradict; both corrected.
+50. **The held IDs kept to the removal, an unanswered key deletion unknown whatever the setting.**
+    A forty-third round: the reviewer found nothing on the previous revision, and the advisory
+    review (degraded, three of nine chunks lost, four unverdicted) reported five, three accepted
+    and two rejected (`.state/evidence` as a symlink is refused at load by `lib.sh`'s check of the
+    managed directories, check 22; `talosctl` in the selftest is the `lib.sh` function running the
+    checked binary, twenty-eighth time). Item 49 kept the Talos container IDs `down`'s check held
+    for the removal, but a later line of `down` listed the containers by label again into the same
+    variable, for the count that decides whether the node volumes are known, so the removal took
+    the fresh listing after all: the count takes the held list, and nothing lists by the label
+    again (check 23 passes through the held IDs; not exercised as a race). `bao-delete-key` on a
+    key made deletable here treated a `DELETE` that went out and got no answer like a refusal,
+    putting the setting back and recording `failed`, while the key may be gone, and a `DELETE`
+    that never reached the server (curl 7) skipped the put-back and recorded `unknown`, while the
+    key is there and deletable: a refusal (curl 7 or 22) puts the setting back and fails, or is
+    `unknown` when the put-back fails too, and any other status puts the setting back where it was
+    applied and is `unknown` whatever came of that (check 7 exercises the read and the deletion
+    itself; the refusal and the unanswered request are not exercised).
 
 ## 6. What each experiment gets
 
