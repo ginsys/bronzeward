@@ -273,7 +273,7 @@ done
 for volume in $compose_volumes; do
   docker volume rm "$volume" >/dev/null 2>&1
 done
-unset compose_containers compose_networks compose_volumes
+unset compose_containers compose_networks
 
 # The Talos side: exactly the IDs held to the record above (or, without one, listed under
 # --adopt). A listing taken now would take in a container or network given the label since, which
@@ -334,6 +334,13 @@ volume_exact() {
 for volume in "${node_volumes[@]}"; do
   probe volume volume_exact "$volume"
 done
+# The declared Compose volumes by their exact names too, not by the label alone: one made under
+# a name since the removal, without the label, would pass the listing above, and the next up
+# would refuse the name while this run had reported nothing left.
+for volume in $compose_volumes; do
+  probe volume volume_exact "$volume"
+done
+unset compose_volumes
 verdict
 # The claim goes only now. It is what shows a second run that leftovers are this checkout's own, so
 # a teardown that could not finish keeps it, and the next plain down is not refused. Only as held
@@ -358,8 +365,12 @@ verdict
 if [ -d "$STATE" ]; then
   case $STATE in
     */fixtures/.state)
+      # One rm per record, in order: one rm given all three goes on past a record it cannot
+      # remove and takes the daemon record with it, leaving what the next down refuses.
       find "$STATE" -mindepth 1 -maxdepth 1 ! -name up-daemon ! -name up-compose.yaml ! -name up-versions.env -exec rm -rf -- {} + &&
-        rm -f -- "$STATE/up-compose.yaml" "$STATE/up-versions.env" "$STATE/up-daemon" &&
+        rm -f -- "$STATE/up-compose.yaml" &&
+        rm -f -- "$STATE/up-versions.env" &&
+        rm -f -- "$STATE/up-daemon" &&
         rmdir -- "$STATE"
       ;;
     *) die "refusing to delete unexpected state path $STATE" ;;

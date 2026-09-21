@@ -412,8 +412,10 @@ case $action in
     case $1 in
       # An authenticated query on the fixture's database, not pg_isready, which answers as soon as
       # the server accepts connections, whatever the parameters: a database dropped or a password
-      # changed would then have the start recorded done on a database no client can use.
-      postgres) wait_for 60 "postgres" pg psql -h 127.0.0.1 -U bronzeward -d bronzeward -Atc 'select 1' ;;
+      # changed would then have the start recorded done on a database no client can use. Through
+      # pg_client, to the container's address on the Compose network, since the image trusts
+      # loopback and a query there would prove nothing about the password.
+      postgres) wait_for 60 "postgres" pg_client -Atc 'select 1' ;;
       openbao)
         bao_sealed() {
           local rc=0
