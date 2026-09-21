@@ -352,8 +352,10 @@ for volume in "${node_volumes[@]}"; do
 done
 verdict
 # The claim goes only now. It is what shows a second run that leftovers are this checkout's own, so
-# a teardown that could not finish keeps it, and the next plain down is not refused.
-claim_drop
+# a teardown that could not finish keeps it, and the next plain down is not refused. Only as held
+# by the checkout the look at the start saw (this one, or under --adopt whichever it was): one
+# taken since by another checkout is that fixture's, and this run ends with it left.
+claim_drop "$claimed_by"
 probe container claim_names
 verdict
 # The state directory goes last of all, after a verified clean teardown. The daemon record goes
@@ -367,14 +369,18 @@ verdict
 # the next down fail before it could start; one that left the environment alone has the
 # checkout's files taken, which the guard at load holds to that record.
 
-case $STATE in
-  */fixtures/.state)
-    find "$STATE" -mindepth 1 -maxdepth 1 ! -name up-daemon ! -name up-compose.yaml ! -name up-versions.env -exec rm -rf -- {} + &&
-      rm -f -- "$STATE/up-compose.yaml" "$STATE/up-versions.env" "$STATE/up-daemon" &&
-      rmdir -- "$STATE"
-    ;;
-  *) die "refusing to delete unexpected state path $STATE" ;;
-esac
+# Only while there is one: an --adopt after the directory was moved away, or a down on a clean
+# daemon, has nothing here to remove, and find would report it as an error on a clean teardown.
+if [ -d "$STATE" ]; then
+  case $STATE in
+    */fixtures/.state)
+      find "$STATE" -mindepth 1 -maxdepth 1 ! -name up-daemon ! -name up-compose.yaml ! -name up-versions.env -exec rm -rf -- {} + &&
+        rm -f -- "$STATE/up-compose.yaml" "$STATE/up-versions.env" "$STATE/up-daemon" &&
+        rmdir -- "$STATE"
+      ;;
+    *) die "refusing to delete unexpected state path $STATE" ;;
+  esac
+fi
 if [ "$purge" -eq 1 ]; then
   case $CACHE in
     */fixtures/.cache) rm -rf -- "$CACHE" ;;

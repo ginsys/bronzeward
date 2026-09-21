@@ -90,7 +90,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 19, 20, 21, 22 and 23 (section 5, items 8 to 51); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 19, 20, 21, 22 and 23 (section 5, items 8 to 52); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed. Each revision was run this way again, from clean,
 before it was committed, and the run of the revision described here is the one recorded with the
@@ -1260,6 +1260,39 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     an earlier revision's run to this one was answered by stating there that each revision was run
     again before it was committed. Check 23 passes through every teardown path changed; no case
     is exercised as a race.
+52. **The restore through the verified ID, no moment with neither flag, an answered mutation
+    kept through the end, the claim dropped only as seen held, listings held to arrays, the
+    Docker context pinned, and no error line from a state directory already gone.** A forty-fifth
+    round: six findings from one reviewer and one from the advisory review (degraded, six of nine
+    chunks lost, one unverdicted), all accepted. Item 51 left one
+    `docker exec` by name, `db-restore`'s `pg_restore`: it takes the verified ID. `start` cleared
+    its Docker flag before it set the started flag, so a signal between the two lines found
+    neither and recorded `failed` for a container the daemon started: the started flag goes
+    first. `bao-soft-delete`, `bao-destroy`, `bao-delete-key` and `bao-restore` cleared the
+    dispatch flag once OpenBao had answered, so a signal between that line and the last recorded
+    `failed` for a mutation OpenBao made: a flag set on the answer, before the other is cleared,
+    has the handler record `done`, saying that what followed the answer (`bao-restore`'s wait for
+    an active node) was not seen to finish. `claim_drop` removed the claim by the ID it inspected
+    once its owner label was non-empty, so a claim retaken by another checkout between `down`'s
+    look at the start and the drop at the end would have been removed from under that fixture:
+    it takes the owner the caller saw and refuses, with status 1, one held by anyone else (check
+    2 plants a claim of another checkout and asserts the refusal; the retake itself is not
+    exercised as a race). `evidence` iterated an OpenBao listing with `.[]`, which walks an
+    object's values as well as an array's, so an empty object read as an empty listing instead
+    of an unparsable one: both listings are held to the array type (the guard was run on an
+    object and on an array by hand; a malformed listing is not exercised through the fixture).
+    And the Docker CLI reads its default context afresh for every call, so a `docker context use`
+    in another shell while `up` ran would have it record the daemon and take the claim on one
+    daemon and create the services on another, where no `down` could both pass the daemon check
+    and find them: `lib.sh` pins the context at load in `DOCKER_CONTEXT` (unless the caller set
+    it) for the life of the command (`DOCKER_HOST` beside a pinned `default` was run by hand and
+    reaches the daemon; a context re-pointed with `docker context update` is not held, and is
+    caught by the daemon record before `inject`, `evidence` and `down` act, not by `up` before its
+    records). Last, `down`'s removal of the state directory ran `find` on it whether it existed
+    or not, so a `down --adopt` after `.state/` was moved away, a documented path, printed
+    `find`'s "No such file or directory" on a teardown it then reported clean: the removal runs
+    only while the directory exists (probed by hand: a `down` on a clean daemon with no `.state/`
+    prints nothing but its last line; not a selftest case).
 
 ## 6. What each experiment gets
 
