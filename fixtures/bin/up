@@ -82,8 +82,7 @@ up_failed() {
     # before publishing it: a plain down then holds those to it, and refuses the one in question,
     # which the hint names.
     if [ -e "$STATE/down-compose-volumes.partial" ] && [ ! -e "$STATE/down-compose-volumes" ]; then
-      mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes" 2>/dev/null ||
-        say "fixtures: could not publish the record of the volumes made so far"
+      volumes_publish || recovery="$recovery; and $(volumes_unpublished)"
     fi
     say "fixtures: up failed; $recovery"
     return 0
@@ -122,9 +121,10 @@ record() { # record <name> <value>
 if ! record up-daemon "$daemon_id" || ! record up-fixture-name "$FIXTURE_NAME"; then
   die "could not record the fixture's identity in $STATE"
 fi
-# And the whole of versions.env as it is now: lib.sh holds the file to this copy, byte for byte,
-# for every later command, since the ports, addresses and pins the commands use come from it.
-if ! cp -- "$FIXTURES/versions.env" "$STATE/up-versions.env.partial" ||
+# And the whole of versions.env, the bytes lib.sh read and this run's values come from, not a
+# second reading of the file: lib.sh holds what it read to this copy, byte for byte, for every
+# later command, since the ports, addresses and pins the commands use come from it.
+if ! printf '%s\n' "$versions_env" >"$STATE/up-versions.env.partial" ||
   ! mv --no-target-directory -- "$STATE/up-versions.env.partial" "$STATE/up-versions.env"; then
   rm -f -- "$STATE/up-versions.env.partial"
   die "could not record versions.env in $STATE"
@@ -157,10 +157,21 @@ compose_volumes=$(compose_volume_names) || die "could not read the volume names 
 # and holds the one in question against it. Never --adopt: with no record it would remove a
 # volume of the name by the label, whosever it is.
 volume_stop() {
-  mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes" ||
-    say "fixtures: could not publish the record of the volumes made so far"
   recovery=$1
+  volumes_publish || recovery="$recovery; and $(volumes_unpublished)"
   die "$2"
+}
+# volumes_publish: the record of the volumes made so far, renamed into place. When that fails, a
+# plain down would refuse those volumes as well, so the hint names each of them for inspection by
+# hand: the one in question is no longer the only volume without a record.
+volumes_publish() {
+  mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes" 2>/dev/null ||
+    { say "fixtures: could not publish the record of the volumes made so far"; return 1; }
+}
+volumes_unpublished() {
+  local made
+  made=$(cut -d ' ' -f 1 -- "$STATE/down-compose-volumes.partial" 2>/dev/null | tr '\n' ' ')
+  printf 'inspect the volumes %sby hand as well (this run'"'"'s carry %s=%s), remove those that are this run'"'"'s, then run fixtures/bin/down; not --adopt' "$made" "$RUN_LABEL" "$run_id"
 }
 # shellcheck disable=SC2094  # the record is renamed on the failure path, never read: the loop's open file keeps writing to it
 for compose_volume in $compose_volumes; do

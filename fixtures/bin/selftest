@@ -396,7 +396,18 @@ grep --quiet ' done kill postgres$' "$STATE/injections.log" || fail "injections.
 ok "a failed snapshot leaves no file behind, and injections.log records done and failed apart; a pause of a stopped container is failed, a second kill is done"
 "$here/inject" start postgres
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "postgres lost committed data over a crash"
-ok "kill / start postgres keeps committed data"
+# The server up but the fixture's database gone (renamed aside): the start must not be done, since
+# no client can use what it waited for; pg_isready would have said ready. Put back before anything
+# can fail.
+pg psql -U bronzeward -d postgres -Atc 'alter database bronzeward rename to bronzeward_selftest_aside' >/dev/null
+started=0
+"$here/inject" start postgres >/dev/null 2>&1 && started=1
+pg psql -U bronzeward -d postgres -Atc 'alter database bronzeward_selftest_aside rename to bronzeward' >/dev/null
+[ "$started" -eq 0 ] || fail "start postgres was done while the fixture's database was gone"
+grep --quiet --extended-regexp ' failed rc=[0-9]+ start postgres$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "injections.log does not record the start without the database as failed"
+[ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "the database is not back after the rename"
+ok "kill / start postgres keeps committed data; a start with the database gone is failed"
 "$here/inject" kill openbao
 degraded=$("$here/evidence") || fail "evidence aborted while openbao was down"
 grep --quiet 'openbao metadata' "$degraded/unavailable.txt" || fail "evidence did not say the OpenBao metadata is missing"
@@ -487,9 +498,21 @@ joined=0
 mv "$STATE/selftest-networks-aside" "$STATE/down-node-networks" # before anything can fail
 [ "$joined" -eq 0 ] || fail "netjoin worker joined a network no record vouches for"
 ! worker_talos version --short >/dev/null 2>&1 || fail "the refused netjoin connected the worker all the same"
+# Attached meanwhile at another address, by hand: the connect is refused, and membership alone is
+# not the state asked for, so the netjoin is recorded as failed, not done, and the worker stays
+# where it is. Detached again, the netjoin puts it at its address.
+docker network connect --ip 10.55.0.9 "$FIXTURE_NAME" "$WORKER"
+! "$here/inject" netjoin worker >/dev/null 2>&1 || fail "netjoin worker succeeded while the worker was attached at another address"
+grep --quiet --extended-regexp ' failed rc=[0-9]+ netjoin worker$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "injections.log does not record the netjoin of a worker attached at another address as failed"
+docker network disconnect "$FIXTURE_NAME" "$WORKER"
 "$here/inject" netjoin worker
 wait_for 120 "the worker after netjoin" worker_talos version --short
-ok "netsplit / netjoin worker returns on the same address, and only on the recorded network"
+# Joined again: the connect is refused, the worker is at its address, which is what was asked: done.
+"$here/inject" netjoin worker >/dev/null 2>&1 || fail "a second netjoin of the joined worker was not recorded as done"
+grep --quiet ' done netjoin worker$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "injections.log does not record the second netjoin of the joined worker as done"
+ok "netsplit / netjoin worker returns on the same address, and only on the recorded network; attached elsewhere it is failed, joined again it is done"
 
 # Evidence: the scan must see the canary that was deliberately written to the database, and a
 # secret the fixture did not choose itself.
@@ -1045,6 +1068,10 @@ grep --quiet --fixed-strings '/evidence/selftest-interrupted/backups/store-selft
 grep --quiet 'differs from it' "$bundle/versions.txt" || fail "versions.txt does not say fixtures/ differs from the commit while an untracked file is there"
 grep --quiet "^created at      $(git -C "$FIXTURES" rev-parse HEAD)" "$bundle/versions.txt" ||
   fail "versions.txt does not name the commit the fixture was created at"
+# Each node's tag is read through `version --short`, which shortens the client block only; the
+# server block keeps its Tag line.
+grep --quiet --extended-regexp "^talos nodes +$TALOS_CONTROLPLANE_IP v[0-9]+\.[0-9]+\.[0-9]+, $TALOS_WORKER_IP v[0-9]+\.[0-9]+\.[0-9]+$" "$bundle/versions.txt" ||
+  fail "versions.txt does not carry both Talos nodes' tags: $(grep '^talos nodes' "$bundle/versions.txt")"
 grep --quiet --fixed-strings "+selftest-untracked-content $$" "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt does not carry the content of an untracked file"
 grep --quiet --fixed-strings "+selftest-nested-content $$" "$bundle/fixtures-diff.txt" ||
@@ -1099,7 +1126,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files, a trusted stat cache, a replacement ref for the commit and an executable bit taken under core.fileMode=false, and names the creating commit, refuses a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files, a trusted stat cache, a replacement ref for the commit and an executable bit taken under core.fileMode=false, and names the creating commit and both nodes' tags, refuses a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the
