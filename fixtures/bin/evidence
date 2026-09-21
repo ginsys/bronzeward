@@ -383,6 +383,14 @@ while IFS= read -r -d '' sibling; do
     # own message, which names the path.
     [ -f "$sibling/.incomplete" ] && [ ! -L "$sibling/.incomplete" ] && [ -r "$sibling/.incomplete" ] ||
       die "the marker of the earlier capture $(shown "$sibling") is not a file this capture can open; results void"
+    # The mark this capture would leave there once its scan ran, if one is there already (a kill
+    # between the mark and the marker's removal leaves one): the fixture writes a regular file
+    # with that one name, and a link there would be written through, into whatever it names.
+    # Refused now, before anything is scanned, rather than at the end with the scan done.
+    if [ -L "$sibling/scanned-by.txt" ] || { [ -e "$sibling/scanned-by.txt" ] &&
+      { [ ! -f "$sibling/scanned-by.txt" ] || [ "$(stat --format=%h -- "$sibling/scanned-by.txt" 2>/dev/null)" != 1 ]; }; }; then
+      die "$(shown "$sibling/scanned-by.txt") is not the regular file evidence writes, with that one name; the fixture never makes anything else there. Results void"
+    fi
     # Read-only, which flock locks all the same: opened for writing, a marker its capture removed
     # between the test above and here, its scan complete, would be made again, and that bundle
     # scanned once more at every capture after. One gone by now is a capture that completed.
@@ -586,10 +594,16 @@ say "leak scan: positive control found; $leaks other file(s) contain synthetic s
 [ "$leaks" -eq 0 ] || say "$others"
 rm -- "$out/.incomplete" || die "the scan ran, but the bundle $out could not be marked complete; the next capture scans it again"
 # The siblings scanned with this bundle: marked scanned by it, the marker removed last, so that a
-# kill in between leaves the sibling to be scanned again rather than marked without the name.
+# kill in between leaves the sibling to be scanned again rather than marked without the name. The
+# mark is written aside and renamed into place: a rename replaces whatever entry is under the name,
+# a link put there since the check above included, and never writes through it.
 for sibling in "${siblings[@]}"; do
-  { printf '%s\n' "$out" >"$sibling/scanned-by.txt" && rm -- "$sibling/.incomplete"; } 2>/dev/null ||
+  mark=
+  { mark=$(mktemp "$sibling/scanned-by.XXXXXX") && printf '%s\n' "$out" >"$mark" &&
+    mv --no-target-directory -- "$mark" "$sibling/scanned-by.txt" && rm -- "$sibling/.incomplete"; } 2>/dev/null || {
+    rm -f -- "${mark:-$sibling/scanned-by.none}"
     die "the scan ran, but the earlier capture $(shown "$sibling") could not be marked scanned; the next capture scans it again"
+  }
 done
 [ ! -f "$out/unavailable.txt" ] || say "evidence: INCOMPLETE, see $out/unavailable.txt"
 printf '%s\n' "$out" # the only line on stdout: the bundle path
