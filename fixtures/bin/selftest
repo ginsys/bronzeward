@@ -995,6 +995,20 @@ rm -r "$alias_dir"
   fail "leak scan reported the positive control as a leak under a symlinked parent of the live store"
 [ -z "$(sort "$bundle/leak-scan.txt" | uniq --repeated)" ] || fail "leak scan reported a file twice under a symlinked parent of its roots"
 rm "$STATE/selftest-evidence.err"
+# The cached talosctl replaced by a stand-in that reports the pinned version: the cache is
+# writable, and the bundle cites the manifest. Refused against the manifest's digest before the
+# stand-in is run at all (it leaves a mark when run). Put back before anything can fail.
+mv --no-target-directory -- "$CACHE/talosctl" "$STATE/selftest-talosctl-aside"
+printf '#!/bin/sh\n: >"%s"\necho "Client:\\n\\tTag: %s"\n' "$STATE/selftest-standin-ran" "$TALOS_VERSION" >"$CACHE/talosctl"
+chmod +x "$CACHE/talosctl"
+rc=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
+mv --no-target-directory -- "$STATE/selftest-talosctl-aside" "$CACHE/talosctl"
+[ "$rc" -ne 0 ] || fail "evidence ran with a stand-in in place of the cached talosctl"
+grep --quiet 'is not the pinned talosctl' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the stand-in talosctl for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+[ ! -e "$STATE/selftest-standin-ran" ] || fail "evidence ran the stand-in talosctl before checking it against the manifest"
+rm "$STATE/selftest-evidence.err"
 # An earlier capture's bundle, marked incomplete, with a scanned-by mark already there that is a
 # symlink to a file outside the bundle: the mark this capture writes once its scan ran would go
 # through the link into that file. Refused before anything is scanned; the file keeps its content
@@ -1171,7 +1185,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files, a trusted stat cache, a replacement ref for the commit, an executable bit taken under core.fileMode=false and a regular file where the index has a symlink under core.symlinks=false, and names the creating commit and both nodes' tags, refuses a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files, a trusted stat cache, a replacement ref for the commit, an executable bit taken under core.fileMode=false and a regular file where the index has a symlink under core.symlinks=false, and names the creating commit and both nodes' tags, refuses a stand-in for the cached talosctl before running it, a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the
@@ -1313,6 +1327,20 @@ if [ "$keep" != --keep ]; then
     fail "down or inject ran, or down removed the state, while the record of compose.yaml had a second name"
   fi
   grep --quiet 'is not the regular file' <<<"$down_said" || fail "down failed on the compose record for another reason: $(tail -n 1 <<<"$down_said")"
+  # versions.env short of a value the caller's shell exports: the shell's value must not stand in
+  # for it, since the record holds the file's bytes alone. Put back before anything can fail.
+  cp "$FIXTURES/versions.env" "$STATE/selftest-versions-file-copy"
+  grep --invert-match '^OPENBAO_PORT=' "$STATE/selftest-versions-file-copy" >"$FIXTURES/versions.env"
+  went=0
+  down_said=$(OPENBAO_PORT=$OPENBAO_PORT "$here/down" 2>&1) && went=1
+  injected=0
+  OPENBAO_PORT=$OPENBAO_PORT "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
+  mv --no-target-directory -- "$STATE/selftest-versions-file-copy" "$FIXTURES/versions.env" # before anything can fail
+  if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    docker unpause "$PG" >/dev/null 2>&1 || true
+    fail "down or inject ran, or down removed the state, while versions.env omitted a value the shell exported"
+  fi
+  grep --quiet 'does not set OPENBAO_PORT' <<<"$down_said" || fail "down failed on the omitted value for another reason: $(tail -n 1 <<<"$down_said")"
   # The backups directory replaced by a symlink: every command refuses at load, before down's own
   # look at the entries in it, which through the link would find a directory elsewhere.
   mv --no-target-directory -- "$STATE/backups" "$STATE/selftest-backups-aside"
@@ -1458,12 +1486,16 @@ if [ "$keep" != --keep ]; then
   : >"$STATE/evidence/selftest-leftover"
   "$here/down" >/dev/null 2>&1 || fail "down refused the state directory a removal cut short leaves, holding the daemon record and a leftover"
   [ ! -e "$STATE" ] || fail "down left the state directory a removal cut short leaves"
+  # And one cut short between the daemon record and the directory: empty, with nothing to hold to.
+  mkdir "$STATE"
+  "$here/down" >/dev/null 2>&1 || fail "down refused an empty state directory, as a removal cut short after the daemon record leaves it"
+  [ ! -e "$STATE" ] || fail "down left an empty state directory"
   # down looks for what it can name. A volume no label or record points at, such as the anonymous
   # one Docker makes for the claim container, only shows up as a difference on the whole daemon.
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled and Compose-labelled container and network against the records and refuses by label alone, refuses a stranger carrying the claim label, a fixture name, daemon or versions.env not the record's, a missing daemon record, a compose record with a second name and a symlinked backups directory, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind, refuses a stranger's volume under a Compose name and removes what a removal cut short leaves, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled and Compose-labelled container and network against the records and refuses by label alone, refuses a stranger carrying the claim label, a fixture name, daemon or versions.env not the record's, a missing daemon record, a compose record with a second name, a versions.env short of a value the shell exports and a symlinked backups directory, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind, refuses a stranger's volume under a Compose name and removes what a removal cut short leaves, full or empty, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

@@ -41,10 +41,24 @@ versions_env=$(cat -- "$FIXTURES/versions.env") || {
   printf 'fixtures: cannot read %s\n' "$FIXTURES/versions.env" >&2
   exit 1
 }
+# Every value the manifest must set, cleared before the file is read and required after: a
+# value exported by the caller's shell would otherwise stand in for one the file omits, used by
+# every command and recorded nowhere, since the record is the file's bytes.
+versions_keys=(TALOS_VERSION TALOSCTL_URL TALOSCTL_SHA256 TALOS_IMAGE KUBERNETES_VERSION OPENBAO_IMAGE
+  POSTGRES_IMAGE SOPS_VERSION SOPS_URL SOPS_SHA256 AGE_VERSION AGE_URL AGE_SHA256 AGE_BINARY_SHA256
+  AGE_KEYGEN_SHA256 FIXTURE_NAME TALOS_SUBNET TALOS_CONTROLPLANE_IP TALOS_WORKER_IP POSTGRES_PORT OPENBAO_PORT)
+unset -v "${versions_keys[@]}"
 set -a
 # shellcheck disable=SC1090  # the bytes of versions.env read above
 . <(printf '%s\n' "$versions_env")
 set +a
+for versions_key in "${versions_keys[@]}"; do
+  [ -n "${!versions_key:-}" ] || {
+    printf 'fixtures: versions.env does not set %s; every command needs it, and a value from the shell would not be recorded\n' "$versions_key" >&2
+    exit 1
+  }
+done
+unset versions_key versions_keys
 # The name the fixture was created under: bin/up records it first of all. With versions.env edited
 # or the checkout switched since, every name and label above would be derived from another value,
 # and down would look for nothing, find nothing, remove .state and report success while the
@@ -190,6 +204,9 @@ daemon_own() {
   local recorded reached
   [ -d "$STATE" ] || return 0
   if [ ! -e "$STATE/up-daemon" ] && [ ! -L "$STATE/up-daemon" ]; then
+    # An empty directory is what a removal cut short between the record, which down removes last,
+    # and the directory itself leaves: nothing to hold to, and down removes it.
+    [ -n "$(find "$STATE" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ] || return 0
     die "no record in $STATE of the Docker daemon the fixture was created on; bin/up writes it before it makes anything else there, so the directory is not one it left. Find the fixture's daemon by hand, run down there once the record is restored, or remove $STATE yourself"
   fi
   if [ -L "$STATE/up-daemon" ] || [ ! -f "$STATE/up-daemon" ] || [ "$(stat --format=%h -- "$STATE/up-daemon" 2>/dev/null)" != 1 ]; then
@@ -479,7 +496,33 @@ compose_volume_names() {
   done
 }
 
-talosctl() { "$CACHE/talosctl" "$@"; }
+# tool_verify <name> <sha256>: the cached tool is a regular file whose digest is the one the
+# manifest pins. The cache is writable, and fetch checked the download once: a binary replaced or
+# damaged since would be run as the pinned one, and could report the pinned version, while every
+# bundle cites the manifest. Checked by every command before its first use of the tool (a tenth
+# of a second for talosctl), by evidence for all four, and by up once they are installed.
+tool_verify() {
+  local digest
+  [ -f "$CACHE/$1" ] && [ ! -L "$CACHE/$1" ] || die "$CACHE/$1 is not a regular file; run fixtures/bin/down --purge, then up"
+  digest=$(sha256sum <"$CACHE/$1") || die "cannot read $CACHE/$1 to check it against the manifest"
+  [ "${digest%% *}" = "$2" ] ||
+    die "$CACHE/$1 is not the pinned $1 (sha256 ${digest%% *}, the manifest pins $2); run fixtures/bin/down --purge, then up"
+}
+talosctl_verified=0
+tools_verify() {
+  tool_verify talosctl "$TALOSCTL_SHA256"
+  talosctl_verified=1
+  tool_verify sops "$SOPS_SHA256"
+  tool_verify age "$AGE_BINARY_SHA256"
+  tool_verify age-keygen "$AGE_KEYGEN_SHA256"
+}
+talosctl() {
+  if [ "$talosctl_verified" -eq 0 ]; then
+    tool_verify talosctl "$TALOSCTL_SHA256"
+    talosctl_verified=1
+  fi
+  "$CACHE/talosctl" "$@"
+}
 
 # Every curl of the fixture ignores the caller's curlrc: an `output` or a `proxy` set there would
 # send a snapshot somewhere else, or a token through a proxy, with curl still exiting 0. --disable
@@ -630,6 +673,7 @@ fetch_tools() {
   install -m 0755 "$file" "$CACHE/sops"
   file=$(fetch age "$AGE_URL" "$AGE_SHA256")
   tar -xzf "$file" -C "$CACHE" --strip-components=1 age/age age/age-keygen
+  tools_verify
 }
 
 # scan_patterns: every synthetic secret this run produced, one per line, from the files bin/up

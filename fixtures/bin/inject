@@ -246,13 +246,18 @@ finish() {
     fi
   fi
   # An outcome that could not be recorded is a failure of its own; the action's status stands
-  # otherwise, and is restated here so that nothing above decides it.
+  # otherwise, and is restated here so that nothing above decides it. No outcome without a begin:
+  # the handler is armed before the begin line is written, so that a signal between the two does
+  # not leave a begin with no outcome; one before the line is written leaves nothing.
+  [ "$begun" -eq 1 ] || exit "$rc"
   if [ "$rc" -eq 0 ]; then record "done $action $logged" || rc=1; else record "$status rc=$rc $action $logged" || true; fi
   exit "$rc"
 }
 logged=$*
-record "begin $action $logged" || exit 1
+begun=0
 trap finish EXIT
+record "begin $action $logged" || exit 1
+begun=1
 
 # snapshot <file> <command...>: the command writes the snapshot to stdout. It reaches its final name
 # only when the command succeeded, so a restore can never pick up a truncated one.
