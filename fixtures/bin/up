@@ -47,6 +47,10 @@ umask 077
 # The checks above are only a look, and of two `up` started together both can pass them, from one
 # checkout or from two. The claim container is what only one of them can create; the plain mkdir
 # then cannot race any more, and stays plain so that it never adopts a directory it did not make.
+# The daemon's ID before the claim is made on it: asked after, a docker that did not answer would
+# leave the claim with no record of where it is.
+daemon_id=$(docker info --format '{{.ID}}') && [ -n "$daemon_id" ] ||
+  die "could not read the Docker daemon's ID; nothing was created"
 attempt=$(synthetic) || die "could not generate the attempt identity"
 claim_error=$(claim_take "$attempt" 2>&1) || {
   # Docker can create the container and still answer with an error, as a connection lost after
@@ -64,6 +68,27 @@ mkdir "$STATE" 2>/dev/null || {
   claim_drop
   die "$STATE appeared meanwhile; nothing was created"
 }
+# The identity every later command derives its names, labels and daemon from, recorded before
+# anything is made under the directory: lib.sh refuses every command while versions.env names
+# another fixture, and need_state and down refuse while the shell reaches another Docker daemon,
+# or while the daemon record is missing. Each written whole under a temporary name and renamed
+# into place: a record cut short would have every command refuse, down among them. One that
+# cannot be written takes the directory and the claim with it, since nothing else exists yet, so
+# that no directory without the record is left for down to take for a fixture on whichever daemon
+# the shell reaches then.
+record() { # record <name> <value>
+  if ! printf '%s\n' "$2" >"$STATE/$1.partial" || ! mv --no-target-directory -- "$STATE/$1.partial" "$STATE/$1"; then
+    rm -f -- "$STATE/$1.partial"
+    return 1
+  fi
+}
+if ! record up-daemon "$daemon_id" || ! record up-fixture-name "$FIXTURE_NAME"; then
+  rm -rf -- "$STATE" 2>/dev/null || true
+  claim_drop 2>/dev/null ||
+    die "could not record the fixture's identity in $STATE, and the claim $CLAIM could not be removed; run fixtures/bin/down to remove it"
+  die "could not record the fixture's identity in $STATE; nothing was created"
+fi
+unset daemon_id
 # From here on a failure leaves something behind: the claim and the state directory. Not earlier:
 # an `up` that was refused created nothing, and the hint would send its caller to tear down a
 # fixture that is not theirs.
@@ -73,23 +98,6 @@ mkdir "$STATE" 2>/dev/null || {
 # a labelled volume, container or network it finds without one, and what it asks for is --adopt.
 recovery='run fixtures/bin/down to remove what was created'
 trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; $recovery"' EXIT
-# The identity every later command derives its names, labels and daemon from, recorded before
-# anything is made under it: lib.sh refuses every command while versions.env names another
-# fixture, and need_state and down refuse while the shell reaches another Docker daemon. Each
-# written whole under a temporary name and renamed into place, and the daemon asked first: a
-# record cut short, empty after a docker that did not answer say, would have every command refuse,
-# down among them, and nothing to point back at.
-record() { # record <name> <value>
-  if ! printf '%s\n' "$2" >"$STATE/$1.partial" || ! mv --no-target-directory -- "$STATE/$1.partial" "$STATE/$1"; then
-    rm -f -- "$STATE/$1.partial"
-    return 1
-  fi
-}
-record up-fixture-name "$FIXTURE_NAME" || die "could not record the fixture name in $STATE"
-daemon_id=$(docker info --format '{{.ID}}') && [ -n "$daemon_id" ] ||
-  die "could not read the Docker daemon's ID; nothing more is created"
-record up-daemon "$daemon_id" || die "could not record the Docker daemon's ID in $STATE"
-unset daemon_id
 mkdir "$STATE/data" "$STATE/backups"
 # The commit the fixture is made from, and how fixtures/ differs from it now: bin/evidence records
 # the commit it captures under, and a checkout switched or committed in between would have the
