@@ -84,7 +84,8 @@ recorded_only() {
   shift 3
   labelled=$("$@") || die "could not list the $mark ${kind}s; nothing was removed"
   if [ -f "$record" ]; then
-    recorded=$(cat "$record") || die "could not read the recorded $mark $kind IDs; nothing was removed"
+    # The first field: a container record names each ID under its container name.
+    recorded=$(cut -d' ' -f1 -- "$record") || die "could not read the recorded $mark $kind IDs; nothing was removed"
     for id in $labelled; do
       grep --quiet --line-regexp --fixed-strings -- "$id" <<<"$recorded" ||
         die "the $kind $id carries this fixture's $mark label but is not one bin/up created; nothing was removed. Remove it by hand"
@@ -94,6 +95,7 @@ recorded_only() {
   fi
 }
 recorded_only container Talos "$STATE/down-node-containers" docker ps --all --quiet --no-trunc --filter "label=$talos_label"
+recorded_only container Compose "$STATE/down-compose-containers" docker ps --all --quiet --no-trunc --filter "label=$compose_label"
 recorded_only network Talos "$STATE/down-node-networks" docker network ls --quiet --no-trunc --filter "label=$talos_label"
 recorded_only network Compose "$STATE/down-compose-networks" docker network ls --quiet --no-trunc --filter "label=$compose_label"
 # A snapshot with a second name, or one that is a symlink, keeps its secret past this teardown:

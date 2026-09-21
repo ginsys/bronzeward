@@ -148,7 +148,7 @@ need_state() {
 # a fixture name or label may act on.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon; do
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -176,37 +176,45 @@ daemon_own() {
 # containers_own: every container that answers to one of the fixture's names is the fixture's. The
 # names are fixed, so once the real one was removed by hand anything can take the name while the
 # claim still stands, and a kill or a restore would go to it. The Compose containers carry the
-# project and its directory. The Talos nodes carry only the cluster name, which anything can be
-# labelled with, so they are held to the IDs bin/up recorded once it had created them. One that is
-# gone is what a kill or a teardown that could not finish leaves, and is not refused here; any
-# other failure to ask is not that, and must not read as it, or the container would be acted on
+# project and its directory, which any container can be labelled with too, and the Talos nodes
+# only the cluster name; each is held to the ID bin/up recorded under that name once it had
+# created it. Under the name, not among the recorded: with the two nodes' names swapped each is
+# still one recorded, and a pause of the worker would go to the control plane. One that is gone
+# is what a kill or a teardown that could not finish leaves, and is not refused here; any other
+# failure to ask is not that, and must not read as it, or the container would be acted on
 # unverified.
 containers_own() {
-  local name labels id
+  local name answer
   for name in "$PG" "$BAO"; do
-    if ! labels=$(docker inspect --type container --format \
-      '{{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
+    if ! answer=$(docker inspect --type container --format \
+      '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
       "$name" 2>&1); then
-      case $labels in
+      case $answer in
         *[Nn]o\ such\ container*) continue ;;
-        *) die "could not inspect the container $name: $labels; the fixture will not act on what it cannot verify" ;;
+        *) die "could not inspect the container $name: $answer; the fixture will not act on what it cannot verify" ;;
       esac
     fi
-    [ "$labels" = "$FIXTURE_NAME $FIXTURES" ] ||
+    [ "${answer#* }" = "$FIXTURE_NAME $FIXTURES" ] ||
       die "the container named $name is not this fixture's: its labels do not name this project and checkout. Remove it by hand; the fixture will not act on it"
+    recorded_under "$name" "${answer%% *}" "$STATE/down-compose-containers" Compose
   done
   for name in "$CP" "$WORKER"; do
-    if ! id=$(docker inspect --type container --format '{{.Id}}' "$name" 2>&1); then
-      case $id in
+    if ! answer=$(docker inspect --type container --format '{{.Id}}' "$name" 2>&1); then
+      case $answer in
         *[Nn]o\ such\ container*) continue ;;
-        *) die "could not inspect the container $name: $id; the fixture will not act on what it cannot verify" ;;
+        *) die "could not inspect the container $name: $answer; the fixture will not act on what it cannot verify" ;;
       esac
     fi
-    [ -f "$STATE/down-node-containers" ] ||
-      die "a container named $name exists but bin/up left no record of the Talos containers it created, as an up interrupted right after creating the cluster leaves it. Run fixtures/bin/down --adopt, then up"
-    grep --quiet --line-regexp --fixed-strings -- "$id" "$STATE/down-node-containers" ||
-      die "the container named $name is not this fixture's: it is not one bin/up created. Remove it by hand; the fixture will not act on it"
+    recorded_under "$name" "$answer" "$STATE/down-node-containers" Talos
   done
+}
+# recorded_under <name> <id> <record> <mark>: the record bin/up wrote, one `<id> <name>` per line,
+# names <id> under <name>.
+recorded_under() {
+  [ -f "$3" ] ||
+    die "a container named $1 exists but bin/up left no record of the $4 containers it created, as an up interrupted right after creating them leaves it. Run fixtures/bin/down --adopt, then up"
+  grep --quiet --line-regexp --fixed-strings -- "$2 $1" "$3" ||
+    die "the container named $1 is not this fixture's: it is not the one bin/up created under that name. Remove or rename it by hand; the fixture will not act on it"
 }
 
 # The project name is forced: a COMPOSE_PROJECT_NAME in the caller's shell wins over the `name` in
@@ -258,7 +266,7 @@ tree_name() { printf '%s' "$1"; }
 # Listings and the collected stderr go into <workdir> and are removed; a listing that fails is not
 # an empty one.
 fixtures_tree_check() {
-  local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top ignores untracked_all filtered linked find_rc=0
+  local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top ignores untracked_all flagged filtered linked find_rc=0
   warn=$workdir/.git-stderr
   : >"$warn" || die "cannot collect git's warnings in $workdir"
   # Assigned first: a git that fails inside a printf argument would leave the line empty.
@@ -266,17 +274,29 @@ fixtures_tree_check() {
     die "cannot read the manifest commit from git; the fixture could not be tied to a fixture version"
   # core.autocrlf off for the status and the diff: with it on, a tracked script turned to CRLF
   # reads as unmodified (both sides normalised), or as modified with an empty diff, and the bytes
-  # that ran, a CRLF shebang among them, would be in neither. The text, eol and ident attributes
-  # do the same whatever the setting, and are refused below with the clean filter.
-  differs=$(git -C "$FIXTURES" -c core.autocrlf=false status --porcelain -- "$FIXTURES" 2>>"$warn") ||
+  # that ran, a CRLF shebang among them, would be in neither. The text, eol, ident and
+  # working-tree-encoding attributes do the same whatever the setting, and are refused below with
+  # the clean filter. --untracked-files=all: a status.showUntrackedFiles=no in the caller's
+  # configuration would leave a tree whose only change is an untracked file reading as the commit's.
+  differs=$(git -C "$FIXTURES" -c core.autocrlf=false status --porcelain --untracked-files=all -- "$FIXTURES" 2>>"$warn") ||
     die "cannot ask git whether fixtures/ differs from commit $manifest"
+  # A tracked file git is told to skip, assume-unchanged or skip-worktree (git update-index): a
+  # modification there is in no status and no diff. ls-files -v tags each file, a lowercase tag
+  # for assume-unchanged and S for skip-worktree.
+  flagged=$(git -C "$FIXTURES" ls-files -v -z -- "$FIXTURES" 2>>"$warn" |
+    while IFS= read -r -d '' file; do
+      case $file in
+        [a-z]\ * | S\ *) printf '%s ' "$("$name_fn" "$FIXTURES/${file#??}")" ;;
+      esac
+    done) ||
+    die "cannot ask git which files under fixtures/ it is told to skip; the commit could not be tied to what runs"
   # The ignore rules the listings below apply are the working tree's: a .gitignore modified, or
   # an untracked one (which may hide itself and its directory), hides an untracked file from
   # every listing, and the diff would carry the rule and not the file. The root .gitignore applies
   # under fixtures/ too. Refused while any of them is not the commit's.
   top=$(git -C "$FIXTURES" rev-parse --show-toplevel 2>>"$warn") ||
     die "cannot find the repository root; the commit could not be tied to what runs"
-  ignores=$(git -C "$FIXTURES" -c core.autocrlf=false status --porcelain -- "$top/.gitignore" "$FIXTURES" 2>>"$warn") ||
+  ignores=$(git -C "$FIXTURES" -c core.autocrlf=false status --porcelain --untracked-files=all -- "$top/.gitignore" "$FIXTURES" 2>>"$warn") ||
     die "cannot ask git about the ignore files; the commit could not be tied to what runs"
   untracked_all=$(git -C "$FIXTURES" ls-files --others -- "$FIXTURES" 2>>"$warn") ||
     die "cannot list the files under fixtures/; the commit could not be tied to what runs"
@@ -299,10 +319,13 @@ fixtures_tree_check() {
   rm -- "$workdir/.untracked-seen" "$workdir/.untracked-all" || die "cannot remove the untracked listings from $workdir"
   # A clean filter from the attributes has git compare the filter's output, not the bytes that
   # run: one that maps a modified script back to its committed content leaves the status empty
-  # and the diff with it, and --no-textconv does not turn it off. A tracked file under fixtures/
-  # that any attributes file gives a filter is refused. The output is path, attribute, value.
-  filtered=$(git -C "$FIXTURES" ls-files -z -- "$FIXTURES" 2>>"$warn" |
-    git -C "$FIXTURES" check-attr --stdin -z filter text eol ident 2>>"$warn" |
+  # and the diff with it, and --no-textconv does not turn it off. A file under fixtures/ that any
+  # attributes file gives a filter is refused, untracked ones included: the diff against nothing
+  # that carries an untracked file applies the attributes too. The output is path, attribute,
+  # value.
+  filtered=$({ git -C "$FIXTURES" ls-files -z -- "$FIXTURES" &&
+    git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES"; } 2>>"$warn" |
+    git -C "$FIXTURES" check-attr --stdin -z filter text eol ident working-tree-encoding 2>>"$warn" |
     while IFS= read -r -d '' file && IFS= read -r -d '' attribute && IFS= read -r -d '' value; do
       case $value in
         unspecified | unset) ;;
@@ -322,13 +345,19 @@ fixtures_tree_check() {
     die "untracked files under fixtures/ are hidden from git by an excludes file outside the repository: ${hidden% }; the commit plus a diff could not say what runs. Track, remove or unhide them"
   [ -z "$ignores" ] ||
     die "the ignore rules are not the commit's: ${ignores% }; an untracked file they hide would be in no listing, and the commit plus a diff would not say what runs. Commit, revert or remove the .gitignore change"
+  [ -z "$flagged" ] ||
+    die "git is told to skip ${flagged% }(assume-unchanged or skip-worktree); a change there is in no status and no diff, and the commit plus a diff would not say what runs. Clear the flag (git update-index --no-assume-unchanged, --no-skip-worktree)"
   [ -z "$filtered" ] ||
-    die "a filter, text, eol or ident attribute from git's attributes applies to ${filtered% }; git would compare the attribute's output, not the bytes that run. Remove the attribute"
+    die "a filter, text, eol, ident or working-tree-encoding attribute from git's attributes applies to ${filtered% }; git would compare the attribute's output, not the bytes that run. Remove the attribute"
   [ -z "$linked" ] ||
     die "$("$name_fn" "$linked") is a symlink, a special file or an empty directory under fixtures/; git records nothing of it, and the commit plus a diff would not say what runs. Replace or remove it"
+  # Written when the tree is the commit's too, empty then: a record that is absent could not be
+  # told from one removed, and bin/evidence requires the one bin/up wrote.
   if [ -n "$differs" ]; then
     fixtures_manifest_diff "$differs" >"$diff_file" 2>>"$warn" ||
       die "cannot record how fixtures/ differs from commit $manifest; the commit could not be tied to what runs"
+  else
+    : >"$diff_file" || die "cannot record that fixtures/ is commit $manifest; the commit could not be tied to what runs"
   fi
   tree_warnings_refuse "$warn" "$name_fn"
   rm -f -- "$warn"

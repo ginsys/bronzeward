@@ -73,31 +73,40 @@ expanded store snapshots count as the control; any other file of the same name i
 every other hit, and a control whose content changed, or that is a symlink or has a second hard
 link, is no control at all: the command then fails, since the planted canary is absent.
 The bundle's `versions.txt` names the manifest commit; a capture that cannot read it from git
-fails rather than write a bundle that cannot be tied to its pins, and when `fixtures/` differs
-from that commit the bundle's `fixtures-diff.txt` holds the status of every changed or untracked
-file, the diff of the tracked ones and the whole content of the untracked ones (text or not), so that the commit
-plus that file says what ran. Both diffs are git's own (`--no-ext-diff`, so a diff helper from the
-caller's configuration is not handed them) and carry binary content whole. A symlink anywhere
+fails rather than write a bundle that cannot be tied to its pins, and the bundle's
+`fixtures-diff.txt` holds the status of every changed or untracked file, the diff of the tracked
+ones and the whole content of the untracked ones (text or not), so that the commit plus that file
+says what ran; it is empty when `fixtures/` is the commit's, and the like record `bin/up` wrote at
+creation is required, since one removed could otherwise not be told from one never needed. Both diffs are git's own (`--no-ext-diff`, so a diff helper from the
+caller's configuration is not handed them) and carry binary content whole; the status lists
+untracked files whatever `status.showUntrackedFiles` says. A symlink anywhere
 under `fixtures/` outside `.state` and `.cache`, tracked or not, is refused, since the file would
 carry the target's name and not the bytes that ran; so is an untracked file that only
 `.git/info/exclude` or a global excludes file hides, since neither the status nor the content
 would show it (the repository's own `.gitignore` files are the one exclusion the bundle stands
 by); the refusal withholds a name that holds secret material, like every path the command prints. So is
 what git records nothing of, an empty directory or a special file (a named pipe, a socket, a
-device), since the commit plus a diff would not say it is there; a `filter`, `text`, `eol` or
-`ident` attribute that git's attributes give a tracked file, since git would then compare the
-attribute's output and not the bytes that run (`core.autocrlf` is turned off for the status and
-the diff for the same reason, so a script turned to CRLF is recorded as the bytes it has); and
+device), since the commit plus a diff would not say it is there; a `filter`, `text`, `eol`,
+`ident` or `working-tree-encoding` attribute that git's attributes give a file, tracked or
+untracked, since git would then compare the attribute's output and not the bytes that run
+(`core.autocrlf` is turned off for the status and the diffs for the same reason, so a script
+turned to CRLF is recorded as the bytes it has); a tracked file git is told to skip
+(assume-unchanged or skip-worktree), since a change there is in no status and no diff; and
 an ignore file that is not the commit's, a modified `.gitignore` or an untracked one, since the
 listings apply the working tree's rules and a file a new rule hides would be in none of them,
-with the diff carrying the rule and not the file. `bin/up` makes the same
+with the diff carrying the rule and not the file (the committed rules are anchored, so a
+directory named `.state` or `.cache` anywhere else is untracked like any other). `bin/up` makes the same
 checks before it records the commit the fixture is made from, so that record stands by what the
 bundle stands by. Each archive expanded into the bundle has its SHA-256 recorded next to the
 expansion, read from the archive's content so that its name, whatever it holds, is not in the
 record (and `tar` runs with `--no-unquote`, so a backslash in a name is a backslash, not an
 escape), and the control's copy inside one is the control only while the archive under that
-name still has those bytes. Each path is scanned once, however many of the given paths contain
-it, and reported once, whether the secret is in its content, in its name or in both. Names of files and directories,
+name still has those bytes; a dump or archive that is a symlink or has a second name is refused,
+not expanded, since the fixture never makes one and what the other name holds would be copied
+into the bundle. Each path is scanned once, however many of the given paths contain
+it and under whichever spelling (an extra path that is a symlink to a scanned directory, or lies
+under one, is not walked again; its own name is still matched), and reported once, whether the
+secret is in its content, in its name or in both. Names of files and directories,
 and the target path a symlink stores, are matched as well as file contents; a name that holds a secret is withheld from the report, which
 gives the inode instead. Symlinks are followed, so a linked file or directory is scanned through its link and
 a link that cannot be followed fails the command; extra paths may be relative and may have any
@@ -139,7 +148,7 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 under `.state/talos` must likewise be a regular file with that one name at teardown. The files `bin/up` generates
 (`secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
-node-network, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name` and `up-daemon`) must each be
+node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name` and `up-daemon`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
@@ -154,30 +163,39 @@ is made against the daemon the shell reaches, so with `versions.env` edited, the
 switched, or `DOCKER_HOST` or the Docker context changed since `up`, `down` would look for
 nothing, find nothing, remove `.state` and report success while the fixture ran on. Every command
 refuses while `versions.env` names another fixture than the record; `inject`, `evidence` and
-`down` refuse while the shell reaches another daemon than the record. The commands also check
+`down` refuse while the shell reaches another daemon than the record. Both records are written
+whole and renamed into place, the daemon asked first, so that an `up` that failed there leaves
+no record rather than an empty one every command would refuse. The commands also check
 that every container answering to a fixture name carries the fixture's own labels (Compose
 project and directory, or Talos cluster name), since the names are fixed and, once the real
-container was removed by hand, anything can take the name while the claim stands; a container
+container was removed by hand, anything can take the name while the claim stands, and that it is
+the container `up` recorded under that name: the labels can be given to any container, so `up`
+records the ID of each of the four under its name once it exists, and `inject` and `evidence`
+act on a container under a fixture name only if its ID is the one recorded under that name (the
+two Talos nodes' names swapped, each is still one recorded, and a pause of the worker would go
+to the control plane); a container
 under a fixture name that Docker cannot be asked about stops the command too, since only "no such
 container" means absent. The node-volume record's content is held against Docker as well: `down` removes
 a recorded name only if it is an anonymous volume's, and the volume, if it still exists, carries
 no label. The Talos label is only a cluster name, which any container or network can be created
 with, so `up` records the IDs of the two containers and the network it created once they exist:
-`inject` and `evidence` act on a container under a node's name only if its ID is recorded,
 `inject netsplit` and `netjoin` touch the network under the fixture's name only if its ID is
 recorded (a Talos node would otherwise be given its fixed address on whatever network took the
 name once every node was off it), and
 `down` refuses while a container or network carries the label without being recorded, or while
 labelled ones exist and there is no record, as an `up` interrupted right after creating the
-cluster leaves it. The Compose network is held the same way: its labels are only the project's
-name, which any network can be given, so `up` records its ID after `compose up` and `down` and
-`inject` hold the labelled network to it. Only `down --adopt` removes by label alone, and only
+cluster leaves it. The Compose containers and network are held the same way: their labels are only
+the project's, which any container or network can be given, so `up` records their IDs after
+`compose up`, `down` holds every labelled container and the labelled network to the records, and
+`inject` the network. Only `down --adopt` removes by label alone, and only
 where no record exists: with a record, a labelled container, network or volume the record does not
 name is someone's and no `down` removes it. That is what the hint of an `up` that failed names
 from the first Compose volume until the last record is published, since a plain `down` refuses
 what it finds without its record; an `up` that found a Compose volume name taken (the label read
-back is another run's) publishes the record of the volumes it did make and names that volume to
-remove or rename by hand, then a plain `down`, not `--adopt`. The named volumes `compose.yaml`
+back is another run's), or whose `docker volume create` failed or whose read-back did (the volume
+may exist all the same, and whose it is is not known), publishes the record of the volumes it
+did make and names that volume to inspect, remove or rename by hand, then a plain `down`, not
+`--adopt`. The named volumes `compose.yaml`
 declares get fixed names too (`<fixture>_postgres-data`, `<fixture>_openbao-data`), and Compose
 reuses a volume of that name it did not create: `up` refuses while one exists, and `down`, with
 or without `--adopt`, refuses to run `compose down --volumes` while one exists without the
