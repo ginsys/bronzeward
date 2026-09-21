@@ -185,7 +185,10 @@ finish() {
     # Only a directory this run moved there: an archive may hold an entry named previous of its
     # own, and with the live directory gone that entry is not the store.
     if [ "$moved_aside" -eq 1 ] && [ -d "$staging/previous" ] && [ ! -e "$STATE/data" ]; then
-      mv --no-target-directory -- "$staging/previous" "$STATE/data" || staging=
+      mv --no-target-directory -- "$staging/previous" "$STATE/data" || {
+        say "fixtures: the earlier store could not be moved back to $STATE/data; $staging/previous is its only copy, and the staging directory is left"
+        staging=
+      }
     fi
     if [ -n "$staging" ]; then
       rm -rf -- "$staging" || say "fixtures: could not remove the staging directory $staging"
@@ -314,17 +317,20 @@ case $action in
     # the same transaction, and each is waited for: the signal alone returns before the backend
     # has gone, and the rename right after it would then fail on a session already told to leave.
     # A client that reconnects in between makes the rename fail, and the transaction then leaves
-    # the live database as it was. The flag first: a signal during the transaction has the exit
-    # handler ask the server whether it committed all the same.
+    # the live database as it was. A live database that is gone, the loss a snapshot is for, is
+    # nothing to rename: the first rename runs only while one of the name exists, decided inside
+    # the same transaction. The flag first: a signal during the transaction has the exit handler
+    # ask the server whether it committed all the same.
     db_swapping=1
     pg psql -U bronzeward -d postgres -v ON_ERROR_STOP=1 --quiet --single-transaction --output=/dev/null \
       -c "select pg_terminate_backend(pid, 5000) from pg_stat_activity where datname = 'bronzeward'" \
-      -c 'alter database bronzeward rename to bronzeward_previous' \
+      -c "do \$\$ begin if exists (select 1 from pg_database where datname = 'bronzeward') then execute 'alter database bronzeward rename to bronzeward_previous'; end if; end \$\$" \
       -c 'alter database bronzeward_restore rename to bronzeward' ||
-      die "could not swap the restored database in; the live database was left alone"
+      die "could not swap the restored database in; the live database, if there is one, was left alone, and the restored copy is bronzeward_restore until the next db-restore"
     # The swap above is what decides. A superseded database that cannot be dropped must not make
-    # the log say the restore failed; the next db-restore drops it.
-    pg dropdb --force -U bronzeward --maintenance-db=postgres bronzeward_previous ||
+    # the log say the restore failed; the next db-restore drops it. With no live database before
+    # the swap there is none to drop.
+    pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_previous ||
       say "fixtures: the superseded database bronzeward_previous could not be dropped; the restore itself succeeded"
     ;;
   bao-snapshot)

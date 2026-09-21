@@ -111,6 +111,13 @@ rm "$STATE/backups/pg-selftest-corrupt.dump"
   fail "a failed db-restore left its scratch database behind"
 "$here/inject" db-restore selftest
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "db-restore did not return to the snapshot a second time"
+# The live database gone, the loss a snapshot is for: the restore installs the snapshot under the
+# name, with nothing to supersede and nothing left under the scratch names.
+pg dropdb --force -U bronzeward --maintenance-db=postgres bronzeward
+"$here/inject" db-restore selftest
+[ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "db-restore did not install the snapshot over a dropped live database"
+[ -z "$(sql "select 1 from pg_database where datname in ('bronzeward_restore', 'bronzeward_previous')")" ] ||
+  fail "db-restore over a dropped live database left a scratch database behind"
 # A snapshot name that is a symlink to a dump outside .state: the restore would install what
 # nothing here wrote. Refused before anything is read.
 sql "insert into bw_selftest values ('after-restore')" >/dev/null
@@ -131,7 +138,7 @@ rm -r "$STATE/selftest-elsewhere"
 [ "$(sql 'select count(*) from bw_selftest')" = 2 ] || fail "db-restore from the hard-linked snapshot reached the live database"
 "$here/inject" db-restore selftest
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "db-restore did not return to the snapshot a third time"
-ok "db-snapshot / db-restore; a truncated dump leaves the live database alone; a symlinked or hard-linked snapshot is refused unread"
+ok "db-snapshot / db-restore; a truncated dump leaves the live database alone; a dropped live database is restored over; a symlinked or hard-linked snapshot is refused unread"
 
 # OpenBao: snapshot, soft delete, destroy, key loss, restore.
 bao kv put -mount=secret selftest/item value="$BW_CANARY" >/dev/null
@@ -818,6 +825,28 @@ rm -r "$FIXTURES/.selftest-hidden-dir"
 [ "$went" -eq 0 ] || fail "evidence captured while an untracked .gitignore hid its directory under fixtures/"
 grep --quiet 'ignore rules are not the commit' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the untracked ignore file for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# A gitlink staged under fixtures/ (a submodule, or an embedded repository added as one): the diff
+# carries a commit hash for it, never the bytes under it. Taken out of the index before anything
+# can fail.
+# --cacheinfo takes a path from the repository root; --force-remove one from the directory.
+fixtures_git update-index --add --cacheinfo "160000,$(fixtures_git rev-parse HEAD),$(fixtures_git rev-parse --show-prefix).selftest-gitlink"
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+fixtures_git update-index --force-remove -- .selftest-gitlink
+[ "$went" -eq 0 ] || fail "evidence captured with a gitlink staged under fixtures/"
+grep --quiet 'is a gitlink' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the staged gitlink for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# A nested repository not staged, a .git directory under fixtures/: what is under it is a
+# repository's, whether git lists it or stops at the directory.
+mkdir -p "$FIXTURES/.selftest-nested/.git"
+printf 'ref: refs/heads/main\n' >"$FIXTURES/.selftest-nested/.git/HEAD"
+printf 'helper=%s\n' "$BW_CANARY" >"$FIXTURES/.selftest-nested/helper"
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+rm -r "$FIXTURES/.selftest-nested"
+[ "$went" -eq 0 ] || fail "evidence captured with a nested repository under fixtures/"
+grep --quiet 'nested repository' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the nested repository for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 # An untracked directory git cannot open, named with a secret: git and find warn on stderr with
 # the name as it is, and the listing is incomplete. Then the directory of bundles writable but not
 # readable: the captures that ended before their scan cannot be listed, and this one must not
@@ -1028,7 +1057,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files and a trusted stat cache, and names the creating commit, refuses a symlink, an empty directory, a clean filter and a skipped file in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files and a trusted stat cache, and names the creating commit, refuses a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the

@@ -286,7 +286,7 @@ tree_name() { printf '%s' "$1"; }
 # Listings and the collected stderr go into <workdir> and are removed; a listing that fails is not
 # an empty one.
 fixtures_tree_check() {
-  local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top ignores untracked_all flagged filtered linked find_rc=0
+  local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top ignores untracked_all flagged gitlinks filtered linked find_rc=0 tab=$'\t'
   warn=$workdir/.git-stderr
   : >"$warn" || die "cannot collect git's warnings in $workdir"
   # Assigned first: a git that fails inside a printf argument would leave the line empty.
@@ -308,6 +308,16 @@ fixtures_tree_check() {
       esac
     done) ||
     die "cannot ask git which files under fixtures/ it is told to skip; the commit could not be tied to what runs"
+  # A gitlink, a submodule or an embedded repository staged as one (mode 160000): the diff carries
+  # "Subproject commit <hash>", with -dirty at most, never the bytes under it, and the untracked
+  # listing stops at its directory. ls-files --stage gives mode, object, stage, a tab, the path.
+  gitlinks=$(fixtures_git ls-files --stage -z -- "$FIXTURES" 2>>"$warn" |
+    while IFS= read -r -d '' file; do
+      case $file in
+        160000\ *) printf '%s ' "$("$name_fn" "$FIXTURES/${file#*"$tab"}")" ;;
+      esac
+    done) ||
+    die "cannot ask git for the index entries under fixtures/; the commit could not be tied to what runs"
   # The ignore rules the listings below apply are the working tree's: a .gitignore modified, or
   # an untracked one (which may hide itself and its directory), hides an untracked file from
   # every listing, and the diff would carry the rule and not the file. The root .gitignore applies
@@ -354,9 +364,10 @@ fixtures_tree_check() {
   # find's status is looked at after its warnings: a directory it cannot open fails it, and the
   # warning names that directory. Besides symlinks, what git records nothing of: a named pipe, a
   # socket, a device, an empty directory. Code that runs may read from any of them, and the commit
-  # plus a diff would not show it.
+  # plus a diff would not show it. And a nested repository, staged as a gitlink or not: git lists
+  # nothing under one it recognises, and what is under one it does not is a repository all the same.
   linked=$(find "$FIXTURES" \( -path "$STATE" -o -path "$CACHE" \) -prune -o \
-    \( -type l -o -type p -o -type s -o -type b -o -type c -o \( -type d -empty \) \) -print -quit 2>>"$warn") || find_rc=$?
+    \( -type l -o -type p -o -type s -o -type b -o -type c -o \( -type d -empty \) -o -name .git \) -print -quit 2>>"$warn") || find_rc=$?
   tree_warnings_refuse "$warn" "$name_fn"
   [ "$find_rc" -eq 0 ] || die "cannot look for symlinks and special files under fixtures/; the commit could not be tied to what runs"
   [ -z "$hidden" ] ||
@@ -365,10 +376,12 @@ fixtures_tree_check() {
     die "the ignore rules are not the commit's: ${ignores% }; an untracked file they hide would be in no listing, and the commit plus a diff would not say what runs. Commit, revert or remove the .gitignore change"
   [ -z "$flagged" ] ||
     die "git is told to skip ${flagged% }(assume-unchanged or skip-worktree); a change there is in no status and no diff, and the commit plus a diff would not say what runs. Clear the flag (git update-index --no-assume-unchanged, --no-skip-worktree)"
+  [ -z "$gitlinks" ] ||
+    die "${gitlinks% } is a gitlink (a submodule, or a repository staged as one); the diff would carry a commit hash for it and not the bytes under it, and the commit plus a diff would not say what runs. Remove it from the index"
   [ -z "$filtered" ] ||
     die "a filter, text, eol, ident or working-tree-encoding attribute from git's attributes applies to ${filtered% }; git would compare the attribute's output, not the bytes that run. Remove the attribute"
   [ -z "$linked" ] ||
-    die "$("$name_fn" "$linked") is a symlink, a special file or an empty directory under fixtures/; git records nothing of it, and the commit plus a diff would not say what runs. Replace or remove it"
+    die "$("$name_fn" "$linked") is a symlink, a special file, an empty directory or a nested repository under fixtures/; git records nothing of it, or a commit hash at most, and the commit plus a diff would not say what runs. Replace or remove it"
   # Written when the tree is the commit's too, empty then: a record that is absent could not be
   # told from one removed, and bin/evidence requires the one bin/up wrote.
   if [ -n "$differs" ]; then

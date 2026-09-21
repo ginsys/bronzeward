@@ -300,8 +300,16 @@ probe container docker ps --all --filter "label=$compose_label" --format '{{.Nam
 probe network docker network ls --filter "label=$talos_label" --format '{{.Name}}'
 probe network docker network ls --filter "label=$compose_label" --format '{{.Name}}'
 probe volume docker volume ls --filter "label=$compose_label" --format '{{.Name}}'
+# volume_exact <name>: the name, if a volume of exactly that name exists. Docker documents its name
+# filter as matching part of a name too (observed to take an anchored regular expression, which
+# the documentation does not promise), so the listing is held to the whole name here.
+volume_exact() {
+  local names
+  names=$(docker volume ls --quiet --filter "name=$1") || return 1
+  grep --line-regexp --fixed-strings -- "$1" <<<"$names" || [ $? -eq 1 ]
+}
 for volume in "${node_volumes[@]}"; do
-  probe volume docker volume ls --quiet --filter "name=^${volume}$"
+  probe volume volume_exact "$volume"
 done
 verdict
 # The claim goes only now. It is what shows a second run that leftovers are this checkout's own, so

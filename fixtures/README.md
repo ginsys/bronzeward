@@ -86,7 +86,9 @@ carry the target's name and not the bytes that ran; so is an untracked file that
 would show it (the repository's own `.gitignore` files are the one exclusion the bundle stands
 by); the refusal withholds a name that holds secret material, like every path the command prints. So is
 what git records nothing of, an empty directory or a special file (a named pipe, a socket, a
-device), since the commit plus a diff would not say it is there; a `filter`, `text`, `eol`,
+device), since the commit plus a diff would not say it is there; a gitlink (a submodule, or a
+repository staged as one) or a nested `.git` under `fixtures/`, since the diff would carry a
+commit hash at most and not the bytes under it; a `filter`, `text`, `eol`,
 `ident` or `working-tree-encoding` attribute that git's attributes give a file, tracked or
 untracked, since git would then compare the attribute's output and not the bytes that run
 (`core.autocrlf` is turned off for every listing and diff for the same reason, so a script
@@ -176,10 +178,12 @@ refuses while `versions.env` names another fixture than the record; `inject`, `e
 `down` refuse while the shell reaches another daemon than the record, or while `.state` holds no
 daemon record at all. The daemon is asked before the claim is made on it; both records are
 written whole and renamed into place, the first thing under `.state`, and a failure or a signal
-before both are in place, the exit handler armed before the directory is made, takes the records,
-the directory and the claim with it, since nothing else exists yet: so no `.state` without the
-record is one `up` left, and none is taken for a fixture on whichever daemon the shell reaches
-now. The commands also check
+before both are in place, the exit handler armed before the directory is made, takes the records
+(when the daemon record is this run's), the directory and the claim with it, since nothing else
+exists yet: so no `.state` without the record is one `up` left, and none is taken for a fixture
+on whichever daemon the shell reaches now. While a Compose volume is being made and its label not
+yet read back, the hint a failure prints names that volume to inspect by hand, not `--adopt`,
+which would remove it by the label whoever made it. The commands also check
 that every container answering to a fixture name carries the fixture's own labels (Compose
 project and directory, or Talos cluster name), since the names are fixed and, once the real
 container was removed by hand, anything can take the name while the claim stands, and that it is
