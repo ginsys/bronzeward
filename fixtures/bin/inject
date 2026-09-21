@@ -134,8 +134,12 @@ committing=0
 db_swapping=0
 bao_dispatched=0
 docker_dispatched=0
-# docker_expect: the state the Docker request in flight asks for, "<field> <value>" for a container
-# state field or "network in|out" for membership of $network, set before the request.
+# docker_expect: the state the Docker request in flight asks for, set before the request: "<field>
+# <value>" for a container state field, "network out" for no membership of $network, "network
+# ip <address>" for membership at that address and "network alias <name>" for membership under
+# that alias. Membership alone is not the state a netjoin asks for: a container attached at
+# another address, or without its alias, is a member the connect refuses, and the node is not
+# where its address promises.
 docker_expect=
 # docker_applied: whether that state holds, read back from the daemon; asked a few times over, since
 # a kill is answered before the container has stopped. 0 when it holds, 1 when it does not, 2 when
@@ -145,13 +149,19 @@ docker_applied() {
   for _ in 1 2 3 4 5; do
     case $kind in
       network)
-        got=$(docker inspect --type container --format "{{if index .NetworkSettings.Networks \"$network\"}}in{{else}}out{{end}}" "$target" 2>/dev/null) || return 2
+        # "out", or "in <address> <alias>..." from the endpoint on $network.
+        got=$(docker inspect --type container --format "{{with index .NetworkSettings.Networks \"$network\"}}in {{.IPAddress}}{{range .Aliases}} {{.}}{{end}}{{else}}out{{end}}" "$target" 2>/dev/null) || return 2
+        case $want in
+          out) [ "$got" != out ] || return 0 ;;
+          ip\ *) [[ $got != "in ${want#ip }" && $got != "in ${want#ip } "* ]] || return 0 ;;
+          alias\ *) [[ $got != in\ * || " ${got#in * } " != *" ${want#alias } "* ]] || return 0 ;;
+        esac
         ;;
       *)
         got=$(docker inspect --type container --format "{{.State.$kind}}" "$target" 2>/dev/null) || return 2
+        [ "$got" != "$want" ] || return 0
         ;;
     esac
-    [ "$got" != "$want" ] || return 0
     sleep 1
   done
   return 1
@@ -292,7 +302,10 @@ case $action in
     docker start "$target" >/dev/null
     docker_dispatched=0
     case $1 in
-      postgres) wait_for 60 "postgres" pg pg_isready -h 127.0.0.1 -U bronzeward -d bronzeward ;;
+      # An authenticated query on the fixture's database, not pg_isready, which answers as soon as
+      # the server accepts connections, whatever the parameters: a database dropped or a password
+      # changed would then have the start recorded done on a database no client can use.
+      postgres) wait_for 60 "postgres" pg psql -h 127.0.0.1 -U bronzeward -d bronzeward -Atc 'select 1' ;;
       openbao)
         bao_sealed() {
           local rc=0
@@ -331,7 +344,11 @@ case $action in
   netjoin)
     network=$(network_of "$1")
     network_own "$1" "$network"
-    docker_expect='network in'
+    case $1 in
+      controlplane) docker_expect="network ip $TALOS_CONTROLPLANE_IP" ;;
+      worker) docker_expect="network ip $TALOS_WORKER_IP" ;;
+      *) docker_expect="network alias $1" ;;
+    esac
     docker_dispatched=1
     case $1 in
       controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$network" "$target" ;;
@@ -461,9 +478,21 @@ case $action in
     bao_dispatched=0
     ;;
   bao-delete-key)
+    # Two requests. A DELETE refused after the POST was applied leaves the key deletable, which
+    # `failed` would deny: the setting is put back, and the action fails with the key as it was.
+    # When that cannot be done either, what the key is left as is not known.
     bao_dispatched=1
     bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":true}' --output /dev/null
-    bao_http DELETE "transit/keys/$1" --output /dev/null
+    delete_rc=0
+    bao_http DELETE "transit/keys/$1" --output /dev/null || delete_rc=$?
+    if [ "$delete_rc" -ne 0 ]; then
+      if [ "$delete_rc" -ne 7 ] && bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":false}' --output /dev/null; then
+        bao_dispatched=0
+        die "the Transit key $1 could not be deleted (curl rc=$delete_rc); its deletion_allowed setting was put back"
+      fi
+      say "fixtures: the Transit key $1 could not be deleted (curl rc=$delete_rc), and its deletion_allowed setting was not put back; what the key is left as is not known"
+      exit 1
+    fi
     bao_dispatched=0
     ;;
   *) usage ;;

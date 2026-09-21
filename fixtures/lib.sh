@@ -34,9 +34,16 @@ for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence" "$STATE
 done
 unset managed
 
+# Read once, as bytes, and sourced from that reading: bin/up records the same bytes, and the guard
+# below holds them, not a second reading of the file, to the record; an edit between two readings
+# would have the values in use and the record disagree without a word.
+versions_env=$(cat -- "$FIXTURES/versions.env") || {
+  printf 'fixtures: cannot read %s\n' "$FIXTURES/versions.env" >&2
+  exit 1
+}
 set -a
-# shellcheck source-path=SCRIPTDIR source=versions.env
-. "$FIXTURES/versions.env"
+# shellcheck disable=SC1090  # the bytes of versions.env read above
+. <(printf '%s\n' "$versions_env")
 set +a
 # The name the fixture was created under: bin/up records it first of all. With versions.env edited
 # or the checkout switched since, every name and label above would be derived from another value,
@@ -66,7 +73,7 @@ if [ -e "$STATE/up-versions.env" ] || [ -L "$STATE/up-versions.env" ]; then
     printf 'fixtures: %s is not the regular file bin/up writes, with that one name; the fixture never makes anything else there\n' "$STATE/up-versions.env" >&2
     exit 1
   fi
-  if ! cmp --silent -- "$STATE/up-versions.env" "$FIXTURES/versions.env"; then
+  if ! printf '%s\n' "$versions_env" | cmp --silent -- - "$STATE/up-versions.env"; then
     printf 'fixtures: versions.env is not the file the fixture in %s was created with (recorded as %s); restore it, or the checkout it came from, then run fixtures/bin/down\n' "$STATE" "$STATE/up-versions.env" >&2
     exit 1
   fi
@@ -266,8 +273,9 @@ fixtures_git() {
     -c core.checkStat=default -c core.fsmonitor=false -c core.untrackedCache=false -c core.fileMode=true "$@"
 }
 
-# fixtures_manifest_diff <status>: how fixtures/ differs from the commit, as bin/up records it at
-# creation and bin/evidence at capture: the status given, the diff of the tracked files and the
+# fixtures_manifest_diff <status> <commit>: how fixtures/ differs from the commit, as bin/up
+# records it at creation and bin/evidence at capture: the status given, the diff of the tracked
+# files against the commit named, not HEAD, which a checkout meanwhile would have moved, and the
 # whole content of the untracked ones (as a diff against nothing), so that the commit plus this
 # says what ran. Git's own diff: --no-ext-diff and --no-textconv keep a helper or filter from the
 # caller's configuration, which may print nothing with the status git would give, from being
@@ -276,7 +284,7 @@ fixtures_git() {
 fixtures_manifest_diff() {
   local file
   printf '%s\n\n' "$1"
-  fixtures_git diff --no-ext-diff --no-textconv --binary HEAD -- "$FIXTURES" || return 1
+  fixtures_git diff --no-ext-diff --no-textconv --binary "$2" -- "$FIXTURES" || return 1
   # A pipe, not a substitution: a substitution drops the NULs that end each name. With pipefail
   # a failing listing fails the pipeline, as does the loop when a diff cannot be written.
   fixtures_git ls-files --others --exclude-standard -z -- "$FIXTURES" |
@@ -405,12 +413,18 @@ fixtures_tree_check() {
   # Written when the tree is the commit's too, empty then: a record that is absent could not be
   # told from one removed, and bin/evidence requires the one bin/up wrote.
   if [ -n "$differs" ]; then
-    fixtures_manifest_diff "$differs" >"$diff_file" 2>>"$warn" ||
+    fixtures_manifest_diff "$differs" "$manifest" >"$diff_file" 2>>"$warn" ||
       die "cannot record how fixtures/ differs from commit $manifest; the commit could not be tied to what runs"
   else
     : >"$diff_file" || die "cannot record that fixtures/ is commit $manifest; the commit could not be tied to what runs"
   fi
   tree_warnings_refuse "$warn" "$name_fn"
+  # The status above was taken against HEAD as it was then; a checkout or commit meanwhile would
+  # have it, and the listings, describe another commit than the one recorded.
+  moved=$(fixtures_git rev-parse HEAD 2>/dev/null) || die "cannot read the manifest commit from git a second time"
+  [ "$moved" = "$manifest" ] ||
+    die "HEAD moved from $manifest to $moved while fixtures/ was being inventoried; run again"
+  unset moved
   rm -f -- "$warn"
 }
 # tree_warnings_refuse <file> <name-fn>: refuse on what git and find said on stderr, each line
