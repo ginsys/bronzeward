@@ -134,8 +134,30 @@ committing=0
 db_swapping=0
 bao_dispatched=0
 docker_dispatched=0
+# docker_expect: the state the Docker request in flight asks for, "<field> <value>" for a container
+# state field or "network in|out" for membership of $network, set before the request.
+docker_expect=
+# docker_applied: whether that state holds, read back from the daemon; asked a few times over, since
+# a kill is answered before the container has stopped. 0 when it holds, 1 when it does not, 2 when
+# the daemon cannot say.
+docker_applied() {
+  local kind=${docker_expect%% *} want=${docker_expect#* } got _
+  for _ in 1 2 3 4 5; do
+    case $kind in
+      network)
+        got=$(docker inspect --type container --format "{{if index .NetworkSettings.Networks \"$network\"}}in{{else}}out{{end}}" "$target" 2>/dev/null) || return 2
+        ;;
+      *)
+        got=$(docker inspect --type container --format "{{.State.$kind}}" "$target" 2>/dev/null) || return 2
+        ;;
+    esac
+    [ "$got" != "$want" ] || return 0
+    sleep 1
+  done
+  return 1
+}
 finish() {
-  local rc=$? left status=failed
+  local rc=$? left status=failed applied
   # A signal that arrives while bash waits for a rename has it finish the child and run this
   # handler before the line that would have cleared the flags. The rename is the commit of a
   # snapshot and of a store restore, so one that did complete is recorded as done, whatever the
@@ -169,11 +191,30 @@ finish() {
     status=unknown
     say "fixtures: the request was sent and not answered; whether OpenBao applied it is not known"
   fi
-  # A Docker mutation the daemon may have carried out while a signal ended the client: the CLI
-  # then exits with the signal (above 128); with 1 the daemon answered, and refused.
-  if [ "$docker_dispatched" -eq 1 ] && [ "$rc" -gt 128 ]; then
-    status=unknown
-    say "fixtures: the Docker request was sent and not answered; whether the daemon applied it is not known"
+  # A Docker mutation the daemon may have carried out whatever the CLI's status: a signal ends the
+  # client with the signal's status, and a connection that closed before the answer came with an
+  # ordinary failure, the same as a refusal. What decides is the state read back: the one asked
+  # for, and the action is done (a start is not: the service was not seen to answer); not the one
+  # asked for, and it failed; none to be had, and it is unknown.
+  if [ "$docker_dispatched" -eq 1 ] && [ "$rc" -ne 0 ]; then
+    applied=0
+    docker_applied || applied=$?
+    case $applied in
+      0)
+        if [ "$action" = start ]; then
+          status=unknown
+          say "fixtures: the Docker request failed (rc=$rc), the container runs, but was not seen to answer; recorded as unknown"
+        else
+          say "fixtures: the Docker request failed (rc=$rc), and the state read back is the one asked for; recorded as done"
+          rc=0
+        fi
+        ;;
+      1) say "fixtures: the Docker request failed (rc=$rc), and the state read back is not the one asked for; recorded as failed" ;;
+      *)
+        status=unknown
+        say "fixtures: the Docker request failed (rc=$rc), and the daemon cannot say what it made of it; recorded as unknown"
+        ;;
+    esac
   fi
   # A removal that fails must not end the handler before the outcome is recorded: each is guarded.
   if [ -n "$partial" ]; then
@@ -240,11 +281,13 @@ restore_source() {
 case $action in
   # Each Docker mutation is flagged while it is in flight: see docker_dispatched in finish.
   kill)
+    docker_expect='Running false'
     docker_dispatched=1
     docker kill --signal KILL "$target" >/dev/null
     docker_dispatched=0
     ;;
   start)
+    docker_expect='Running true'
     docker_dispatched=1
     docker start "$target" >/dev/null
     docker_dispatched=0
@@ -271,6 +314,8 @@ case $action in
     esac
     ;;
   pause | unpause)
+    docker_expect='Paused true'
+    [ "$action" = pause ] || docker_expect='Paused false'
     docker_dispatched=1
     docker "$action" "$target" >/dev/null
     docker_dispatched=0
@@ -278,6 +323,7 @@ case $action in
   netsplit)
     network=$(network_of "$1")
     network_own "$1" "$network"
+    docker_expect='network out'
     docker_dispatched=1
     docker network disconnect "$network" "$target"
     docker_dispatched=0
@@ -285,6 +331,7 @@ case $action in
   netjoin)
     network=$(network_of "$1")
     network_own "$1" "$network"
+    docker_expect='network in'
     docker_dispatched=1
     case $1 in
       controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$network" "$target" ;;

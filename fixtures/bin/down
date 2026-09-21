@@ -189,8 +189,10 @@ if [ -e "$STATE/down-node-volumes-incomplete" ] ||
   # Published by rename: a marker that is a hard link must not have the write go through it into
   # someone else's file.
   if [ -d "$STATE" ]; then
+    marker=
     if ! marker=$(mktemp "$STATE/down-node-volumes-incomplete.XXXXXX") ||
       ! mv --no-target-directory -- "$marker" "$STATE/down-node-volumes-incomplete"; then
+      rm -f -- "${marker:-$STATE/down-node-volumes-incomplete.none}"
       die "could not record in $STATE that the Talos node volumes are not all known; nothing was removed"
     fi
   fi

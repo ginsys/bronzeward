@@ -93,9 +93,9 @@ up_failed() {
   # checkout on another daemon, whose mkdir won, in the moment before this one's failure is
   # noted) is left as it is, its records untouched.
   if [ "$state_made" -eq 1 ] && [ -d "$STATE" ]; then
-    rm -f -- "$STATE/up-daemon.partial" "$STATE/up-fixture-name.partial" 2>/dev/null
+    rm -f -- "$STATE/up-daemon.partial" "$STATE/up-fixture-name.partial" "$STATE/up-versions.env.partial" 2>/dev/null
     if [ "$(cat -- "$STATE/up-daemon" 2>/dev/null)" = "${daemon_id:-}" ]; then
-      rm -f -- "$STATE/up-daemon" "$STATE/up-fixture-name" 2>/dev/null
+      rm -f -- "$STATE/up-daemon" "$STATE/up-fixture-name" "$STATE/up-versions.env" 2>/dev/null
     fi
     rmdir -- "$STATE" 2>/dev/null || say "fixtures: up failed; $STATE is not this up's, or holds more than it put there, and is left"
   fi
@@ -121,6 +121,13 @@ record() { # record <name> <value>
 }
 if ! record up-daemon "$daemon_id" || ! record up-fixture-name "$FIXTURE_NAME"; then
   die "could not record the fixture's identity in $STATE"
+fi
+# And the whole of versions.env as it is now: lib.sh holds the file to this copy, byte for byte,
+# for every later command, since the ports, addresses and pins the commands use come from it.
+if ! cp -- "$FIXTURES/versions.env" "$STATE/up-versions.env.partial" ||
+  ! mv --no-target-directory -- "$STATE/up-versions.env.partial" "$STATE/up-versions.env"; then
+  rm -f -- "$STATE/up-versions.env.partial"
+  die "could not record versions.env in $STATE"
 fi
 recovery='run fixtures/bin/down to remove what was created'
 unset daemon_id

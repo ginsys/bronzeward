@@ -55,6 +55,22 @@ if [ -e "$STATE/up-fixture-name" ] || [ -L "$STATE/up-fixture-name" ]; then
   fi
   unset created_as
 fi
+# The rest of versions.env, likewise: the ports, the node addresses, the image pins and the
+# requested versions every command uses come from the file as it is now, and bin/up records the
+# whole file as it was. An edit since, the name kept, would have inject send a token to another
+# port, netjoin put a node back at another address, or evidence report a version that was never
+# requested. Refused, byte for byte, until the file is back.
+if [ -e "$STATE/up-versions.env" ] || [ -L "$STATE/up-versions.env" ]; then
+  if [ -L "$STATE/up-versions.env" ] || [ ! -f "$STATE/up-versions.env" ] ||
+    [ "$(stat --format=%h -- "$STATE/up-versions.env" 2>/dev/null)" != 1 ]; then
+    printf 'fixtures: %s is not the regular file bin/up writes, with that one name; the fixture never makes anything else there\n' "$STATE/up-versions.env" >&2
+    exit 1
+  fi
+  if ! cmp --silent -- "$STATE/up-versions.env" "$FIXTURES/versions.env"; then
+    printf 'fixtures: versions.env is not the file the fixture in %s was created with (recorded as %s); restore it, or the checkout it came from, then run fixtures/bin/down\n' "$STATE" "$STATE/up-versions.env" >&2
+    exit 1
+  fi
+fi
 # The generated secrets are read as data, not sourced: a secrets.env that was replaced, or a line
 # added to it, must not run as shell code here, before any ownership check. Only the four
 # assignments bin/up writes are accepted, each a bare value without whitespace, and the file must
@@ -148,7 +164,7 @@ need_state() {
 # a fixture name or label may act on.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon; do
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -240,10 +256,14 @@ compose() {
 # the stat cache at its strictest: core.trustctime=false or core.checkStat=minimal let a tracked
 # file changed to bytes of the same length, its mtime put back, pass for the commit's without its
 # content being read; an fsmonitor or an untracked cache would have git ask a daemon or a
-# directory's mtime what changed, in place of looking.
+# directory's mtime what changed, in place of looking. core.fileMode=false has git ignore the
+# executable bit, so a command made non-executable is in no status and no diff, while running it
+# fails. And replacement refs (git replace) have status and diff compare against the replacement
+# commit's tree while rev-parse names the original, so the manifest would name a commit whose
+# bytes did not run: --no-replace-objects reads every object as it is.
 fixtures_git() {
-  git -C "$FIXTURES" -c core.autocrlf=false -c core.ignoreCase=false -c core.trustctime=true \
-    -c core.checkStat=default -c core.fsmonitor=false -c core.untrackedCache=false "$@"
+  git --no-replace-objects -C "$FIXTURES" -c core.autocrlf=false -c core.ignoreCase=false -c core.trustctime=true \
+    -c core.checkStat=default -c core.fsmonitor=false -c core.untrackedCache=false -c core.fileMode=true "$@"
 }
 
 # fixtures_manifest_diff <status>: how fixtures/ differs from the commit, as bin/up records it at
