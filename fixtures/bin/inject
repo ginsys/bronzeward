@@ -478,17 +478,29 @@ case $action in
     bao_dispatched=0
     ;;
   bao-delete-key)
-    # Two requests. A DELETE refused after the POST was applied leaves the key deletable, which
-    # `failed` would deny: the setting is put back, and the action fails with the key as it was.
-    # When that cannot be done either, what the key is left as is not known.
+    # Two requests, after a read. A DELETE refused after the setting that allows deletion was
+    # applied leaves the key deletable, which `failed` would deny: the setting is put back to what
+    # the read found, and the action fails with the key as it was; a key already deletable is left
+    # so, since nothing was changed. When the setting cannot be put back, what the key is left as
+    # is not known.
+    deletable=$(bao_http GET "transit/keys/$1" | jq --raw-output '.data.deletion_allowed') ||
+      die "cannot read the Transit key $1; nothing was changed"
+    case $deletable in
+      true | false) ;;
+      *) die "the Transit key $1 has no deletion_allowed setting to read back; nothing was changed" ;;
+    esac
     bao_dispatched=1
-    bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":true}' --output /dev/null
+    [ "$deletable" = true ] || bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":true}' --output /dev/null
     delete_rc=0
     bao_http DELETE "transit/keys/$1" --output /dev/null || delete_rc=$?
     if [ "$delete_rc" -ne 0 ]; then
+      if [ "$deletable" = true ]; then
+        [ "$delete_rc" -eq 7 ] || bao_dispatched=0
+        die "the Transit key $1 could not be deleted (curl rc=$delete_rc); it was deletable before and is left so"
+      fi
       if [ "$delete_rc" -ne 7 ] && bao_http POST "transit/keys/$1/config" --data '{"deletion_allowed":false}' --output /dev/null; then
         bao_dispatched=0
-        die "the Transit key $1 could not be deleted (curl rc=$delete_rc); its deletion_allowed setting was put back"
+        die "the Transit key $1 could not be deleted (curl rc=$delete_rc); its deletion_allowed setting was put back to false"
       fi
       say "fixtures: the Transit key $1 could not be deleted (curl rc=$delete_rc), and its deletion_allowed setting was not put back; what the key is left as is not known"
       exit 1

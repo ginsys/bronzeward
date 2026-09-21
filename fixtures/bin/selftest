@@ -164,9 +164,11 @@ ok "bao-soft-delete is visible as a reversible state; a path with '..' is refuse
 "$here/inject" bao-destroy selftest/item 1
 [ "$(kv_version destroyed)" = true ] || fail "destroy not visible in metadata"
 ok "bao-destroy is visible as a permanent state"
+# The key made deletable beforehand: the setting is read first and left as found.
+bao write transit/keys/selftest/config deletion_allowed=true >/dev/null
 "$here/inject" bao-delete-key selftest
 ! bao read transit/keys/selftest >/dev/null 2>&1 || fail "transit key still present after bao-delete-key"
-ok "bao-delete-key removes the transit key"
+ok "bao-delete-key removes the transit key, one already deletable too"
 "$here/inject" bao-restore selftest
 [ "$(kv_version destroyed)" = false ] || fail "bao-restore did not bring back the destroyed secret version"
 bao read transit/keys/selftest >/dev/null || fail "bao-restore did not bring back the deleted transit key"
@@ -872,6 +874,24 @@ fixtures_git update-index --force-remove -- .selftest-gitlink
 [ "$went" -eq 0 ] || fail "evidence captured with a gitlink staged under fixtures/"
 grep --quiet 'is a gitlink' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the staged gitlink for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# A symlink in the index with a regular file holding the target's name on disk, as core.symlinks=false
+# checks a committed symlink out: under that setting git would read the file back as the link and
+# find nothing to say, while a regular file runs. The setting is forced on for the inventory, so
+# the diff carries the file as the regular file it is. Taken out before anything can fail.
+link_blob=$(printf 'README.md' | fixtures_git hash-object -w --stdin)
+fixtures_git update-index --add --cacheinfo "120000,$link_blob,$(fixtures_git rev-parse --show-prefix).selftest-link"
+printf 'README.md' >"$FIXTURES/.selftest-link"
+rc=0
+bundle=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.symlinks GIT_CONFIG_VALUE_0=false \
+  "$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
+fixtures_git update-index --force-remove -- .selftest-link
+rm "$FIXTURES/.selftest-link"
+[ "$rc" -eq 0 ] || fail "evidence aborted with a regular file where the index has a symlink: $(tail -n 1 "$STATE/selftest-evidence.err")"
+grep --quiet --extended-regexp '^new file mode 100644$' "$bundle/fixtures-diff.txt" ||
+  fail "fixtures-diff.txt does not carry the regular file standing where the index has a symlink as a regular file"
+! grep --quiet '^new file mode 120000$' "$bundle/fixtures-diff.txt" ||
+  fail "fixtures-diff.txt carries the regular file standing where the index has a symlink as a symlink"
+unset link_blob
 # A nested repository not staged, a .git directory under fixtures/: what is under it is a
 # repository's, whether git lists it or stops at the directory.
 mkdir -p "$FIXTURES/.selftest-nested/.git"
@@ -1126,7 +1146,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files, a trusted stat cache, a replacement ref for the commit and an executable bit taken under core.fileMode=false, and names the creating commit and both nodes' tags, refuses a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files, a trusted stat cache, a replacement ref for the commit, an executable bit taken under core.fileMode=false and a regular file where the index has a symlink under core.symlinks=false, and names the creating commit and both nodes' tags, refuses a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the
