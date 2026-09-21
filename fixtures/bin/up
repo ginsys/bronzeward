@@ -64,18 +64,41 @@ claim_error=$(claim_take "$attempt" 2>&1) || {
   die "could not take the fixture claim $CLAIM on this Docker daemon, which another fixtures/bin/up may hold; nothing was created. Docker said: $claim_error"
 }
 unset attempt
-mkdir "$STATE" 2>/dev/null || {
-  claim_drop
-  die "$STATE appeared meanwhile; nothing was created"
+# From here on a failure leaves something behind. Not earlier: an `up` that was refused created
+# nothing, and a hint would send its caller to tear down a fixture that is not theirs. Until the
+# identity records below are published, what exists is the claim and what this stage put under
+# the state directory, and the handler removes exactly that, so that a failure or a signal there
+# created nothing: a directory left without its daemon record is one every command refuses, down
+# among them. From the records on, the hint names the down that works: until every record is
+# published, a plain down refuses a labelled volume, container or network it finds without one,
+# and what it asks for is --adopt.
+# EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
+# ERR trap, so neither would run the handler.
+recovery=
+state_made=0
+up_failed() {
+  if [ -n "$recovery" ]; then
+    say "fixtures: up failed; $recovery"
+    return 0
+  fi
+  if [ "$state_made" -eq 1 ]; then
+    rm -f -- "$STATE/up-daemon" "$STATE/up-daemon.partial" "$STATE/up-fixture-name" "$STATE/up-fixture-name.partial" 2>/dev/null
+    rmdir -- "$STATE" 2>/dev/null || say "fixtures: up failed; $STATE holds more than this up put there, and is left"
+  fi
+  if claim_drop 2>/dev/null; then
+    say "fixtures: up failed; nothing was created"
+  else
+    say "fixtures: up failed; the claim $CLAIM could not be removed, run fixtures/bin/down to remove it"
+  fi
 }
+trap 'rc=$?; [ "$rc" -eq 0 ] || up_failed' EXIT
+mkdir "$STATE" 2>/dev/null || die "$STATE appeared meanwhile; nothing was created"
+state_made=1
 # The identity every later command derives its names, labels and daemon from, recorded before
 # anything is made under the directory: lib.sh refuses every command while versions.env names
 # another fixture, and need_state and down refuse while the shell reaches another Docker daemon,
 # or while the daemon record is missing. Each written whole under a temporary name and renamed
-# into place: a record cut short would have every command refuse, down among them. One that
-# cannot be written takes the directory and the claim with it, since nothing else exists yet, so
-# that no directory without the record is left for down to take for a fixture on whichever daemon
-# the shell reaches then.
+# into place: a record cut short would have every command refuse, down among them.
 record() { # record <name> <value>
   if ! printf '%s\n' "$2" >"$STATE/$1.partial" || ! mv --no-target-directory -- "$STATE/$1.partial" "$STATE/$1"; then
     rm -f -- "$STATE/$1.partial"
@@ -83,21 +106,10 @@ record() { # record <name> <value>
   fi
 }
 if ! record up-daemon "$daemon_id" || ! record up-fixture-name "$FIXTURE_NAME"; then
-  rm -rf -- "$STATE" 2>/dev/null || true
-  claim_drop 2>/dev/null ||
-    die "could not record the fixture's identity in $STATE, and the claim $CLAIM could not be removed; run fixtures/bin/down to remove it"
-  die "could not record the fixture's identity in $STATE; nothing was created"
+  die "could not record the fixture's identity in $STATE"
 fi
 unset daemon_id
-# From here on a failure leaves something behind: the claim and the state directory. Not earlier:
-# an `up` that was refused created nothing, and the hint would send its caller to tear down a
-# fixture that is not theirs.
-# EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
-# ERR trap, so neither would print the hint.
-# The hint names the down that works: until every record below is published, a plain down refuses
-# a labelled volume, container or network it finds without one, and what it asks for is --adopt.
 recovery='run fixtures/bin/down to remove what was created'
-trap 'rc=$?; [ "$rc" -eq 0 ] || say "fixtures: up failed; $recovery"' EXIT
 mkdir "$STATE/data" "$STATE/backups"
 # The commit the fixture is made from, and how fixtures/ differs from it now: bin/evidence records
 # the commit it captures under, and a checkout switched or committed in between would have the

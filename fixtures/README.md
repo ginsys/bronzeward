@@ -92,7 +92,9 @@ untracked, since git would then compare the attribute's output and not the bytes
 (`core.autocrlf` is turned off for every listing and diff for the same reason, so a script
 turned to CRLF is recorded as the bytes it has, and `core.ignoreCase` with it, so an untracked
 file whose name differs from a tracked one's only by case is listed and not taken for the
-tracked one); a tracked file git is told to skip
+tracked one, and git's stat cache is not trusted either — `core.trustctime`, `core.checkStat`,
+`core.fsmonitor` and `core.untrackedCache` are set so that a file changed to bytes of the same
+length with its mtime put back is compared by content, not taken for the commit's); a tracked file git is told to skip
 (assume-unchanged or skip-worktree), since a change there is in no status and no diff; and
 an ignore file that is not the commit's, a modified `.gitignore` or an untracked one, since the
 listings apply the working tree's rules and a file a new rule hides would be in none of them,
@@ -107,7 +109,9 @@ name still has those bytes; a dump or archive that is a symlink or has a second 
 not expanded, since the fixture never makes one and what the other name holds would be copied
 into the bundle. Each path is scanned once, however many of the given paths contain
 it and under whichever spelling (an extra path that is a symlink to a scanned directory, or lies
-under one, is not walked again; its own name is still matched), and reported once, whether the
+under one, is not walked again; its own name is still matched; an extra path that resolves to a
+parent of a scanned directory, such as a symlink to the checkout or to `.state`, is walked by the
+name it resolves to, so the control is met at its own name and not taken for a leak), and reported once, whether the
 secret is in its content, in its name or in both. Names of files and directories,
 and the target path a symlink stores, are matched as well as file contents; a name that holds a secret is withheld from the report, which
 gives the inode instead. Symlinks are followed, so a linked file or directory is scanned through its link and
@@ -171,10 +175,11 @@ nothing, find nothing, remove `.state` and report success while the fixture ran 
 refuses while `versions.env` names another fixture than the record; `inject`, `evidence` and
 `down` refuse while the shell reaches another daemon than the record, or while `.state` holds no
 daemon record at all. The daemon is asked before the claim is made on it; both records are
-written whole and renamed into place, the first thing under `.state`, and one that cannot be
-written takes the directory and the claim with it, since nothing else exists yet: so no `.state`
-without the record is one `up` left, and none is taken for a fixture on whichever daemon the
-shell reaches now. The commands also check
+written whole and renamed into place, the first thing under `.state`, and a failure or a signal
+before both are in place, the exit handler armed before the directory is made, takes the records,
+the directory and the claim with it, since nothing else exists yet: so no `.state` without the
+record is one `up` left, and none is taken for a fixture on whichever daemon the shell reaches
+now. The commands also check
 that every container answering to a fixture name carries the fixture's own labels (Compose
 project and directory, or Talos cluster name), since the names are fixed and, once the real
 container was removed by hand, anything can take the name while the claim stands, and that it is

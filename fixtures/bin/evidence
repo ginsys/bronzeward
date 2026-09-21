@@ -409,13 +409,16 @@ dangling=$(find -L "${roots[@]}" -type l -print -quit 2>/dev/null) ||
 # the scan has anyway, or lies under one, would have every file under it walked twice, counted
 # twice, and the control's copy under the other spelling reported as a leak, since it is the
 # control at one name only. Of two spellings the first is walked, the fixture's own names before
-# the extra paths, and a root that holds one kept earlier takes its place. A root dropped keeps
-# its own name for the name pass below, which may hold a secret. A symlink inside a walked
-# directory is still followed, as before.
+# the extra paths, and a root that holds one kept earlier takes its place, walked by the name it
+# resolves to: the fixture's own roots are spelled as they resolve, and the control under a
+# symlinked parent of the checkout would otherwise be met at the parent's spelling and not known.
+# A root dropped, and the given spelling of one walked as it resolves, keep their own names for
+# the name pass below, which may hold a secret. A symlink inside a walked directory is still
+# followed, as before.
 kept=() kept_at=() dropped=()
 for root in "${roots[@]}"; do
   resolved=$(realpath -- "$root" 2>/dev/null) || die "leak scan cannot resolve $(shown "$root"); results void"
-  keep=1
+  keep=1 holds=0
   for i in "${!kept_at[@]}"; do
     if [ "$resolved" = "${kept_at[$i]}" ] || [ "${resolved#"${kept_at[$i]}"/}" != "$resolved" ]; then
       keep=0
@@ -424,9 +427,14 @@ for root in "${roots[@]}"; do
     if [ "${kept_at[$i]#"$resolved"/}" != "${kept_at[$i]}" ]; then
       dropped+=("${kept[$i]}")
       unset "kept[$i]" "kept_at[$i]"
+      holds=1
     fi
   done
   if [ "$keep" -eq 1 ]; then
+    if [ "$holds" -eq 1 ] && [ "$root" != "$resolved" ]; then
+      dropped+=("$root")
+      root=$resolved
+    fi
     kept+=("$root")
     kept_at+=("$resolved")
   else
@@ -434,7 +442,7 @@ for root in "${roots[@]}"; do
   fi
 done
 roots=("${kept[@]}")
-unset kept kept_at root resolved keep i
+unset kept kept_at root resolved keep holds i
 
 # The positive control is one file, plus its copy at the same place inside an expanded store
 # snapshot, and only while it holds exactly what bin/up planted. A file that merely shares the
