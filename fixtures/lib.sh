@@ -60,7 +60,7 @@ versions_env=$(cat -- "$FIXTURES/versions.env") || {
 # value exported by the caller's shell would otherwise stand in for one the file omits, used by
 # every command and recorded nowhere, since the record is the file's bytes.
 versions_keys=(TALOS_VERSION TALOSCTL_URL TALOSCTL_SHA256 TALOS_IMAGE KUBERNETES_VERSION OPENBAO_IMAGE
-  POSTGRES_IMAGE SOPS_VERSION SOPS_URL SOPS_SHA256 AGE_VERSION AGE_URL AGE_SHA256 AGE_BINARY_SHA256
+  CURL_IMAGE POSTGRES_IMAGE SOPS_VERSION SOPS_URL SOPS_SHA256 AGE_VERSION AGE_URL AGE_SHA256 AGE_BINARY_SHA256
   AGE_KEYGEN_SHA256 FIXTURE_NAME TALOS_SUBNET TALOS_CONTROLPLANE_IP TALOS_WORKER_IP POSTGRES_PORT OPENBAO_PORT)
 unset -v "${versions_keys[@]}"
 # Parsed, never sourced: sourced, a value that is an expansion (`$RANDOM`, `${X:-58200}`) would
