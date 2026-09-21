@@ -39,8 +39,9 @@ unset TAR_OPTIONS GZIP
 # The same holds one level down for the directories the commands write into: through a symlinked
 # evidence or backups directory, dumps and snapshots would land where teardown does not reach.
 # And for .cache: through a link, downloads would land elsewhere and `down --purge` would remove
-# the link alone while reporting the cache gone. And for the Talos state directory, which names
-# what `talosctl cluster destroy` acts on.
+# the link alone while reporting the cache gone. And for the Talos state directory, which holds
+# the cluster's client credentials and goes with .state at teardown: through a link, the removal
+# would take the link and leave them.
 for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence" "$STATE/talos" "$CACHE"; do
   if [ -L "$managed" ]; then
     printf 'fixtures: %s is a symlink; the fixture never creates one. Remove the link and run again\n' "$managed" >&2
@@ -675,17 +676,23 @@ pg() {
   timeout "$PG_LIMIT" docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" -e PGOPTIONS="$(pg_options)" "$id" "$@"
 }
 
-# pg_client <psql args>: psql from a throwaway container on the fixture network. The image trusts
-# every connection that starts inside the server's own container, so pg() proves nothing about the
-# password; only a connection from another host is asked for it. The network by the ID bin/up
-# recorded: under the fixed name, once the containers are off it, anyone's network could be there,
-# and the client would hand this run's password to whatever answers as postgres on it.
+# pg_client <psql args>: psql over TCP with the password, from a throwaway container inside the
+# network namespace of the container verified under the name, to that container's own address on
+# the Compose network (the one bin/up recorded). The image trusts every connection over its unix
+# socket and its loopback address, so pg() proves nothing about the password, and neither would a
+# client on 127.0.0.1 here; the address on the network is asked for it. Inside the namespace, that
+# address is the verified container's whatever else answers to the service's name on the network:
+# a client on the network by the name would hand this run's password to whatever holds the name.
 pg_client() {
-  local network
+  local id network address
+  id=$(container_id "$PG") || return 1
   network=$(cat "$STATE/down-compose-networks") || return 1
   [ -n "$network" ] || return 1
-  PGPASSWORD=$BW_POSTGRES_PASSWORD PGOPTIONS=$(pg_options) timeout "$PG_LIMIT" docker run --rm --network "$network" \
-    --env PGPASSWORD --env PGOPTIONS "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
+  address=$(docker inspect --type container --format \
+    "{{range \$n, \$e := .NetworkSettings.Networks}}{{if eq \$e.NetworkID \"$network\"}}{{\$e.IPAddress}}{{end}}{{end}}" "$id") || return 1
+  [ -n "$address" ] || return 1
+  PGPASSWORD=$BW_POSTGRES_PASSWORD PGOPTIONS=$(pg_options) timeout "$PG_LIMIT" docker run --rm --network "container:$id" \
+    --env PGPASSWORD --env PGOPTIONS "$POSTGRES_IMAGE" psql --host="$address" --username=bronzeward --dbname=bronzeward "$@"
 }
 
 # claim_take [attempt]: fails when any checkout on this daemon already holds the claim. The image
