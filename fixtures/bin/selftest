@@ -41,19 +41,40 @@ worker_talos() { talosctl_timed 10 -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER
 # test_volume <name>: a volume for a test, made under a label only this run gives and read back
 # under it: docker volume create on a name that exists returns that volume as if it had made it,
 # and the removal after the test would take someone's data with it. One that existed is left, and
-# named. test_volume_rm <name> removes the test's own, gone already in the failing case.
+# named. The put-back is registered before the create, since the create's return is what a signal
+# would cut off: it removes the volume only under this run's label. test_volume_rm <name> removes
+# the test's own, gone already in the failing case.
 selftest_run=r$(date -u +%s%N)
+test_volume_drop() {
+  [ "$(docker volume inspect --format '{{index .Labels "bronzeward.selftest.run"}}' "$1" 2>/dev/null)" = "$selftest_run" ] || return 0
+  docker volume rm "$1" >/dev/null
+}
 test_volume() {
   local made_by
+  defer test_volume_drop "$1"
   docker volume create --label "bronzeward.selftest.run=$selftest_run" "$1" >/dev/null || fail "cannot create a volume for the test"
   made_by=$(docker volume inspect --format '{{index .Labels "bronzeward.selftest.run"}}' "$1") ||
     fail "cannot read back the volume $1 made for the test"
   [ "$made_by" = "$selftest_run" ] || fail "a volume named $1 existed before this test; it is someone's data, and is left"
-  defer docker volume rm "$1"
 }
 test_volume_rm() {
   docker volume rm "$1" >/dev/null 2>&1 || true
   undefer
+}
+# drop_stranger <name> <id>: the container under the name removed unless it is the given one (or
+# any, when the ID is empty). Registered before a create for the test, whose ID a signal during
+# the create would leave unknown: what holds the name at put-back time is the test's own.
+# drop_stranger_network <name>: the same for a network.
+drop_stranger() {
+  local id
+  id=$(docker inspect --type container --format '{{.Id}}' "$1" 2>/dev/null) || return 0
+  [ "$id" != "$2" ] || return 0
+  docker rm --force --volumes "$id" >/dev/null
+}
+drop_stranger_network() {
+  local id
+  id=$(docker network inspect --format '{{.Id}}' "$1" 2>/dev/null) || return 0
+  docker network rm "$id" >/dev/null
 }
 worker_digest() {
   local config
@@ -98,9 +119,9 @@ claim_drop "$FIXTURES"
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
 # Nor does it let down remove anything: the state may be stale, and what exists another checkout's.
 down_said=$("$here/down" 2>&1) || refused=$((refused + 1))
-other_claim=$(docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=/another/checkout/fixtures" \
-  --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
-defer docker rm --force --volumes "$other_claim"
+defer drop_stranger "$CLAIM" ''
+docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=/another/checkout/fixtures" \
+  --network none "$POSTGRES_IMAGE" true >/dev/null || fail "cannot create a container for the test"
 "$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
 # Dropped as held by that other checkout; as this one's it is refused and left (asserted).
@@ -379,8 +400,8 @@ rm "$STATE/data/selftest-store"
 # the fixture under the aside name with the impostor under its own.
 defer docker rename "$PG-selftest-aside" "$PG"
 docker rename "$PG" "$PG-selftest-aside" >/dev/null
+defer drop_stranger "$PG" ''
 impostor_id=$(docker create --quiet --name "$PG" --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
-defer docker rm --force --volumes "$impostor_id"
 records=$(wc -l <"$STATE/injections.log")
 impostor=0
 "$here/inject" kill postgres >/dev/null 2>&1 && impostor=1
@@ -394,9 +415,9 @@ undefer
 # only the ID bin/up recorded says the container is the node.
 defer docker rename "$WORKER-selftest-aside" "$WORKER"
 docker rename "$WORKER" "$WORKER-selftest-aside" >/dev/null
+defer drop_stranger "$WORKER" ''
 impostor_id=$(docker create --quiet --name "$WORKER" --label "talos.cluster.name=$FIXTURE_NAME" --network none "$POSTGRES_IMAGE" true) ||
   fail "cannot create a container for the test"
-defer docker rm --force --volumes "$impostor_id"
 impostor=0
 "$here/inject" pause worker >/dev/null 2>&1 && impostor=1
 docker rm --force --volumes "$impostor_id" >/dev/null
@@ -673,9 +694,16 @@ cp "$STATE/selftest-secrets-aside" "$STATE/secrets.env"
 printf 'EXTRA=%s(true)\n' '$' >>"$STATE/secrets.env" # a command substitution, were the file sourced
 extra=0
 ! "$here/evidence" >/dev/null 2>&1 || extra=1
+# A name set twice, a well-formed line even with this run's own value: the later value would stand
+# for the one the fixture wrote.
+cp "$STATE/selftest-secrets-aside" "$STATE/secrets.env"
+printf 'BW_CANARY=%s\n' "$BW_CANARY" >>"$STATE/secrets.env"
+twice=0
+! "$here/evidence" >/dev/null 2>&1 || twice=1
 mv "$STATE/selftest-secrets-aside" "$STATE/secrets.env" # before anything can fail
 [ "$linked" -eq 0 ] || fail "a symlinked secrets.env was read"
 [ "$extra" -eq 0 ] || fail "a secrets.env with a line the fixture never writes was accepted"
+[ "$twice" -eq 0 ] || fail "a secrets.env that sets a name twice was accepted"
 # And with a second name, which would keep the secrets past teardown wherever it is.
 ln "$STATE/secrets.env" "$STATE/selftest-secrets-alias"
 aliased=0
@@ -927,6 +955,18 @@ undefer
 [ "$went" -eq 0 ] || fail "evidence captured without the record of how fixtures/ differed at creation"
 grep --quiet 'differed at creation' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the missing creation record for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# The record of the commit the fixture was created at emptied: a bundle whose versions.txt names
+# nothing as what ran is tied to nothing. Put back before anything can fail.
+defer mv --no-target-directory -- "$STATE/selftest-creation-commit-aside" "$STATE/up-manifest"
+mv "$STATE/up-manifest" "$STATE/selftest-creation-commit-aside"
+: >"$STATE/up-manifest"
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+mv "$STATE/selftest-creation-commit-aside" "$STATE/up-manifest" # before anything can fail
+undefer
+[ "$went" -eq 0 ] || fail "evidence captured with an empty record of the commit the fixture was created at"
+grep --quiet 'is not a commit ID' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the empty creation commit for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 # The ignore rules modified: a rule added to fixtures/.gitignore hides an untracked helper from
 # every listing, and the diff would carry the rule, not the helper. The file is put back before
 # anything can fail.
@@ -1362,9 +1402,9 @@ if [ "$keep" != --keep ]; then
   fi
   # The Talos label alone: a container that only carries the cluster name is not one up created,
   # and down must not remove it with the fixture's own.
+  defer drop_stranger "$FIXTURE_NAME-selftest-impostor" ''
   impostor_id=$(docker create --quiet --name "$FIXTURE_NAME-selftest-impostor" --label "talos.cluster.name=$FIXTURE_NAME" \
     --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
-  defer docker rm --force --volumes "$impostor_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   impostor=$(docker ps --all --quiet --no-trunc --filter "id=$impostor_id")
@@ -1380,10 +1420,10 @@ if [ "$keep" != --keep ]; then
   # a signal in between leaves the fixture under its own name, not the impostor.
   defer docker rename "$PG-selftest-aside" "$PG"
   docker rename "$PG" "$PG-selftest-aside" >/dev/null
+  defer drop_stranger "$PG" ''
   impostor_id=$(docker create --quiet --name "$PG" --label "com.docker.compose.project=$FIXTURE_NAME" \
     --label "com.docker.compose.project.working_dir=$FIXTURES" --network none "$POSTGRES_IMAGE" true) ||
     fail "cannot create a container for the test"
-  defer docker rm --force --volumes "$impostor_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   injected=0
@@ -1399,9 +1439,9 @@ if [ "$keep" != --keep ]; then
   fi
   # A container carrying the claim label under another name: not the claim, not the fixture's,
   # and down does not know whose it is. It removes nothing and names it.
+  defer drop_stranger "$FIXTURE_NAME-selftest-claimant" ''
   claimant_id=$(docker create --quiet --name "$FIXTURE_NAME-selftest-claimant" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=$FIXTURES" \
     --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
-  defer docker rm --force --volumes "$claimant_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   claimant=$(docker ps --all --quiet --no-trunc --filter "id=$claimant_id")
@@ -1577,8 +1617,8 @@ if [ "$keep" != --keep ]; then
     fail "down removed the Compose volumes by the project label alone, without the record of the ones up created or, with --adopt, against it"
   fi
   # A network with the label, which down removes by label just as it does containers.
+  defer drop_stranger_network "$FIXTURE_NAME-selftest-net"
   net_id=$(docker network create --label "talos.cluster.name=$FIXTURE_NAME" "$FIXTURE_NAME-selftest-net") || fail "cannot create a network for the test"
-  defer docker network rm "$net_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   impostor=$(docker network ls --quiet --no-trunc --filter "id=$net_id")
@@ -1589,9 +1629,9 @@ if [ "$keep" != --keep ]; then
   fi
   # And one with the Compose project's labels, which are only a name: down holds the labelled
   # network to the ID up recorded.
+  defer drop_stranger_network "$FIXTURE_NAME-selftest-cnet"
   net_id=$(docker network create --label "com.docker.compose.project=$FIXTURE_NAME" --label "com.docker.compose.network=default" \
     "$FIXTURE_NAME-selftest-cnet") || fail "cannot create a network for the test"
-  defer docker network rm "$net_id"
   went=0
   "$here/down" >/dev/null 2>&1 && went=1
   impostor=$(docker network ls --quiet --no-trunc --filter "id=$net_id")
