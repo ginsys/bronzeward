@@ -12,6 +12,9 @@ set -euo pipefail
 
 need docker curl jq tar sha256sum git find comm awk timeout realpath readlink mktemp cmp stat flock
 need_state
+# The cached tools against the manifest, before any is run: the bundle cites the manifest, and a
+# replaced talosctl could report the pinned version.
+tools_verify
 # The pattern list every match below relies on is rebuilt from the generated credentials and must
 # be what bin/up wrote: thinned after up, a scan against it would pass while a token or key goes
 # unmatched, and `shown` would print a name that holds one.
@@ -137,6 +140,7 @@ cp -- "$STATE/up-fixtures-diff.txt" "$out/up-fixtures-diff.txt" ||
   printf 'host            %s\n' "$(uname -srm)"
   printf 'docker          %s\n' "$(reported docker version --format 'client {{.Client.Version}} server {{.Server.Version}}')"
   printf 'compose         %s\n' "$(reported docker compose version --short)"
+  printf 'tools           talosctl, sops, age, age-keygen in .cache checked against the manifest digests\n'
   printf 'talosctl        %s\n' "$(reported talosctl version --client --short)"
   printf 'talos nodes     %s %s, %s %s\n' "$TALOS_CONTROLPLANE_IP" "$(reported node_tag "$TALOS_CONTROLPLANE_IP")" \
     "$TALOS_WORKER_IP" "$(reported node_tag "$TALOS_WORKER_IP")"

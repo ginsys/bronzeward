@@ -151,6 +151,13 @@ mkdir "$STATE/data" "$STATE/backups"
 # symlink, or a directory git cannot open is refused here too, since the commit plus the diff
 # recorded would not say what the fixture was made from.
 fixtures_tree_check "$STATE" "$STATE/up-fixtures-diff.txt" tree_name
+# The two file records against the files now: both were taken before the inventory above, and a
+# file edited in between would have the inventory carry bytes the services are not created from.
+# Unchanged from before the inventory to after it is unchanged during it.
+cmp --silent -- "$STATE/up-compose.yaml" "$FIXTURES/compose.yaml" ||
+  die "compose.yaml changed while fixtures/ was being inventoried; run again"
+printf '%s\n' "$versions_env" | cmp --silent -- - "$FIXTURES/versions.env" ||
+  die "versions.env changed while fixtures/ was being inventoried; run again"
 printf '%s\n' "$manifest" >"$STATE/up-manifest"
 unset manifest differs
 # The named volumes compose.yaml declares are made here, first of all, with a label that names this
