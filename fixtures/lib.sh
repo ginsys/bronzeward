@@ -267,10 +267,14 @@ compose() {
 # executable bit, so a command made non-executable is in no status and no diff, while running it
 # fails. And replacement refs (git replace) have status and diff compare against the replacement
 # commit's tree while rev-parse names the original, so the manifest would name a commit whose
-# bytes did not run: --no-replace-objects reads every object as it is.
+# bytes did not run: --no-replace-objects reads every object as it is. And core.symlinks=false has
+# git check a committed symlink out as a regular file holding the target's name, and read that file
+# back as the symlink, so the tree is clean while a regular file runs where the commit has a link:
+# core.symlinks=true has git see the regular file for what it is, a type change, in the diff.
 fixtures_git() {
   git --no-replace-objects -C "$FIXTURES" -c core.autocrlf=false -c core.ignoreCase=false -c core.trustctime=true \
-    -c core.checkStat=default -c core.fsmonitor=false -c core.untrackedCache=false -c core.fileMode=true "$@"
+    -c core.checkStat=default -c core.fsmonitor=false -c core.untrackedCache=false -c core.fileMode=true \
+    -c core.symlinks=true "$@"
 }
 
 # fixtures_manifest_diff <status> <commit>: how fixtures/ differs from the commit, as bin/up
