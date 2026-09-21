@@ -8,6 +8,21 @@
 FIXTURES=$(CDPATH='' cd -P -- "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 STATE=$FIXTURES/.state
 CACHE=$FIXTURES/.cache
+# The digests of this file and of the command running, as they are on disk at load: the tree
+# check later ties the fixture to a commit by the files as they are then, and a script edited
+# before launch and put back before that inventory would have run as edited while the inventory
+# says the commit's. Taken again at the inventory and at the end of up (scripts_unchanged_since_load),
+# and a difference refuses the run; what remains is the moment between the shell opening a script
+# and this line. The command's path is made absolute here, so that a later cd does not change it.
+loaded_scripts=("$FIXTURES/lib.sh" "$(CDPATH='' cd -P -- "$(dirname "$0")" && pwd -P)/$(basename "$0")")
+loaded_digests=$(sha256sum -- "${loaded_scripts[@]}") || {
+  printf 'fixtures: cannot read the scripts loaded, %s and %s\n' "${loaded_scripts[0]}" "${loaded_scripts[1]}" >&2
+  exit 1
+}
+scripts_unchanged_since_load() {
+  [ "$(sha256sum -- "${loaded_scripts[@]}" 2>/dev/null)" = "$loaded_digests" ] ||
+    die "${loaded_scripts[0]} or ${loaded_scripts[1]} changed since it was loaded; what ran is not what the files say. Run again"
+}
 
 # A BAO_TOKEN from the caller's own OpenBao or Vault work would win over the fixture's root token in
 # bao() below. bin/evidence sets it on purpose, after this point. The fixture's own variables are
@@ -48,10 +63,23 @@ versions_keys=(TALOS_VERSION TALOSCTL_URL TALOSCTL_SHA256 TALOS_IMAGE KUBERNETES
   POSTGRES_IMAGE SOPS_VERSION SOPS_URL SOPS_SHA256 AGE_VERSION AGE_URL AGE_SHA256 AGE_BINARY_SHA256
   AGE_KEYGEN_SHA256 FIXTURE_NAME TALOS_SUBNET TALOS_CONTROLPLANE_IP TALOS_WORKER_IP POSTGRES_PORT OPENBAO_PORT)
 unset -v "${versions_keys[@]}"
-set -a
-# shellcheck disable=SC1090  # the bytes of versions.env read above
-. <(printf '%s\n' "$versions_env")
-set +a
+# Parsed, never sourced: sourced, a value that is an expansion (`$RANDOM`, `${X:-58200}`) would
+# be evaluated, and the same bytes could give another value at another command, with the record
+# of the bytes holding. Each line is blank, a comment, or one plain KEY=value whose value is made
+# of the characters a version, an address, a URL or a digest needs; anything else is refused.
+versions_line=0
+while IFS= read -r line; do
+  versions_line=$((versions_line + 1))
+  [[ ! $line =~ ^[[:space:]]*(#.*)?$ ]] || continue
+  if [[ $line =~ ^([A-Z][A-Z0-9_]*)=([A-Za-z0-9._:/@+-]*)$ ]]; then
+    printf -v "${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
+    export "${BASH_REMATCH[1]}"
+  else
+    printf 'fixtures: versions.env line %d is not a plain KEY=value assignment (a value of letters, digits and ._:/@+-); the manifest is read literally, never evaluated\n' "$versions_line" >&2
+    exit 1
+  fi
+done <<<"$versions_env"
+unset versions_line line
 for versions_key in "${versions_keys[@]}"; do
   [ -n "${!versions_key:-}" ] || {
     printf 'fixtures: versions.env does not set %s; every command needs it, and a value from the shell would not be recorded\n' "$versions_key" >&2
@@ -228,8 +256,14 @@ daemon_own() {
 # is what a kill or a teardown that could not finish leaves, and is not refused here; any other
 # failure to ask is not that, and must not read as it, or the container would be acted on
 # unverified.
+# The ID each name was verified under, for a command to act on: a mutation by name would act on
+# whatever carries the name by then, a replacement made after the check included.
+# shellcheck disable=SC2034  # read by bin/inject
+declare -A verified_container_ids=()
 containers_own() {
   local name answer
+  # shellcheck disable=SC2034  # read by bin/inject
+  verified_container_ids=()
   for name in "$PG" "$BAO"; do
     if ! answer=$(docker inspect --type container --format \
       '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
@@ -242,6 +276,8 @@ containers_own() {
     [ "${answer#* }" = "$FIXTURE_NAME $FIXTURES" ] ||
       die "the container named $name is not this fixture's: its labels do not name this project and checkout. Remove it by hand; the fixture will not act on it"
     recorded_under "$name" "${answer%% *}" "$STATE/down-compose-containers" Compose
+    # shellcheck disable=SC2034  # read by bin/inject
+    verified_container_ids["$name"]=${answer%% *}
   done
   for name in "$CP" "$WORKER"; do
     if ! answer=$(docker inspect --type container --format '{{.Id}}' "$name" 2>&1); then
@@ -251,6 +287,8 @@ containers_own() {
       esac
     fi
     recorded_under "$name" "$answer" "$STATE/down-node-containers" Talos
+    # shellcheck disable=SC2034  # read by bin/inject
+    verified_container_ids["$name"]=$answer
   done
 }
 # recorded_under <name> <id> <record> <mark>: the record bin/up wrote, one `<id> <name>` per line,
@@ -357,6 +395,7 @@ tree_name() { printf '%s' "$1"; }
 fixtures_tree_check() {
   local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top ignores untracked_all flagged gitlinks filtered linked find_rc=0 tab=$'\t'
   warn=$workdir/.git-stderr
+  scripts_unchanged_since_load
   : >"$warn" || die "cannot collect git's warnings in $workdir"
   # Assigned first: a git that fails inside a printf argument would leave the line empty.
   manifest=$(fixtures_git rev-parse HEAD 2>>"$warn") ||

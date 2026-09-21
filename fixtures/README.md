@@ -191,7 +191,9 @@ refuses while `versions.env` names another fixture than the record; `inject`, `e
 daemon record at all. The rest of `versions.env` (ports, node addresses, image pins, requested
 versions) is bound the same way: every command reads the file once, as bytes, clears every value
 the manifest must set before taking its values from that reading, and refuses a file that leaves
-one unset, so a value exported by the caller's shell never stands in for one the file omits;
+one unset, so a value exported by the caller's shell never stands in for one the file omits; the
+file is parsed as plain `KEY=value` lines and never sourced, so a value written as a shell
+expansion is refused rather than evaluated to something the recorded bytes do not say;
 `up` records those bytes as `up-versions.env`, and every command refuses while
 the bytes it read differ from the record, since an edit since `up` would send an `inject` to
 another port or report a version never requested; restore the file, or the checkout it came from,
@@ -199,14 +201,19 @@ then run `down`. `compose.yaml` is recorded the same way, as `up-compose.yaml`, 
 from the two records, at `up` and at `down`, never from the checkout's files: the services are
 created well after the records are written (the CLIs are fetched in between), and an edit in that
 window would create them from bytes no record holds; both file records are compared to the files
-again once `fixtures/` has been inventoried, so the inventory carries the bytes recorded. At
+again once `fixtures/` has been inventoried, so the inventory carries the bytes recorded; and
+`lib.sh` and the command running are digested as they are on disk at load, compared again at the
+inventory and at the end of `up`, so a script edited before launch and put back before the
+inventory does not pass for the commit's. At
 teardown the daemon record is the last entry removed from `.state`, the two records Compose is run
 from go just before it and together, and an empty `.state`, which a removal cut short after the
 daemon record leaves, is taken for none: a removal cut short at any point leaves a directory the
 next plain `down` removes. The daemon is asked before the claim is made on it;
 the four records are
 written whole and renamed into place, the first thing under `.state`, and a failure or a signal
-before they are in place, the exit handler armed before the directory is made, takes the records
+before they are in place, the exit handler armed before the directory is made and run on every
+exit but the one past the flag set once the fixture is up (a signal between two commands leaves
+the shell's status at 0), takes the records
 (when the daemon record is this run's), the directory and the claim with it, since nothing else
 exists yet: so no `.state` without the record is one `up` left, and none is taken for a fixture
 on whichever daemon the shell reaches now. While a Compose volume is being made and its label not
