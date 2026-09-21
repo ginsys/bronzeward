@@ -84,9 +84,13 @@ carry the target's name and not the bytes that ran; so is an untracked file that
 would show it (the repository's own `.gitignore` files are the one exclusion the bundle stands
 by); the refusal withholds a name that holds secret material, like every path the command prints. So is
 what git records nothing of, an empty directory or a special file (a named pipe, a socket, a
-device), since the commit plus a diff would not say it is there, and a clean filter that git's
-attributes give a tracked file, since git would then compare the filter's output and not the bytes
-that run. `bin/up` makes the same
+device), since the commit plus a diff would not say it is there; a `filter`, `text`, `eol` or
+`ident` attribute that git's attributes give a tracked file, since git would then compare the
+attribute's output and not the bytes that run (`core.autocrlf` is turned off for the status and
+the diff for the same reason, so a script turned to CRLF is recorded as the bytes it has); and
+an ignore file that is not the commit's, a modified `.gitignore` or an untracked one, since the
+listings apply the working tree's rules and a file a new rule hides would be in none of them,
+with the diff carrying the rule and not the file. `bin/up` makes the same
 checks before it records the commit the fixture is made from, so that record stands by what the
 bundle stands by. Each archive expanded into the bundle has its SHA-256 recorded next to the
 expansion, read from the archive's content so that its name, whatever it holds, is not in the
@@ -135,7 +139,7 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 under `.state/talos` must likewise be a regular file with that one name at teardown. The files `bin/up` generates
 (`secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
-node-network, Compose-volume and Compose-network records, `up-manifest` and `up-fixtures-diff.txt`) must each be
+node-network, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name` and `up-daemon`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
@@ -143,7 +147,14 @@ same name, for a snapshot about to be restored from (a symlink or a second name 
 what nothing here wrote), for every entry in `.state/backups` at teardown (dot-named ones included), for a `store-restore` staging
 directory, and for the marker `down` leaves when the node volumes are not all known. `secrets.env` is written whole and renamed into place at each stage of
 `up`, so an interruption leaves it complete or absent, never cut mid-line, and a second name made
-for it between two stages stops `up` there. The commands also check
+for it between two stages stops `up` there. The first two records `up` writes, before anything
+else is made, are the fixture's name and the ID of the Docker daemon it is made on: every name,
+label and port the commands use is derived from `FIXTURE_NAME` in `versions.env`, and every check
+is made against the daemon the shell reaches, so with `versions.env` edited, the checkout
+switched, or `DOCKER_HOST` or the Docker context changed since `up`, `down` would look for
+nothing, find nothing, remove `.state` and report success while the fixture ran on. Every command
+refuses while `versions.env` names another fixture than the record; `inject`, `evidence` and
+`down` refuse while the shell reaches another daemon than the record. The commands also check
 that every container answering to a fixture name carries the fixture's own labels (Compose
 project and directory, or Talos cluster name), since the names are fixed and, once the real
 container was removed by hand, anything can take the name while the claim stands; a container
@@ -217,7 +228,9 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   which means two checkouts on one daemon would share them. `bin/up` refuses to start while
   fixture containers, networks or volumes exist: a leftover PostgreSQL volume keeps the password
   of the run that created it. It then takes the claim: a container named `bw-fixture-claim` that
-  is created, labelled with this checkout's path and never started. Docker refuses a second one
+  is created, labelled with this checkout's path and never started (with a tmpfs in place of the
+  data volume its image declares, so that no anonymous volume is made for it, which removed
+  without `--volumes` would outlive every record). Docker refuses a second one
   of that name atomically, so of two `up` started together, from one checkout or two, only one
   proceeds. Docker can create the claim and still answer with an error (a connection lost after
   the request went through); an `up` refused that way looks at the claim, and one that carries

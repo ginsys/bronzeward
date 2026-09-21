@@ -66,6 +66,9 @@ docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWN
 "$here/evidence" >/dev/null 2>&1 || refused=$((refused + 1))
 claim_drop
 claim_take # this checkout's claim again, before anything can fail
+# The claim is a container of an image that declares a volume, and must have made none: removed
+# by hand without --volumes, an anonymous one would outlive every record.
+[ "$(docker inspect --format '{{len .Mounts}}' "$CLAIM")" -eq 0 ] || fail "the claim container was created with a volume"
 if [ "$refused" -ne 5 ]; then
   docker unpause "$PG" >/dev/null 2>&1 || true
   fail "inject, evidence or down ran without this checkout's claim ($refused of 5 refused)"
@@ -700,8 +703,42 @@ went=0
 GIT_CONFIG_GLOBAL=$STATE/selftest-attr.gitconfig "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
 rm "$STATE/selftest-attributes" "$STATE/selftest-attr.gitconfig"
 [ "$went" -eq 0 ] || fail "evidence captured while a clean filter applied to a tracked file under fixtures/"
-grep --quiet 'clean filter' "$STATE/selftest-evidence.err" ||
+grep --quiet 'attribute from git' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the filter attribute for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# The text attribute likewise: git would compare a normalised file, and a tracked script turned
+# to CRLF would read as the committed one.
+printf 'README.md text\n' >"$STATE/selftest-attributes"
+printf '[core]\n\tattributesFile = %s\n' "$STATE/selftest-attributes" >"$STATE/selftest-attr.gitconfig"
+went=0
+GIT_CONFIG_GLOBAL=$STATE/selftest-attr.gitconfig "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+rm "$STATE/selftest-attributes" "$STATE/selftest-attr.gitconfig"
+[ "$went" -eq 0 ] || fail "evidence captured while a text attribute applied to a tracked file under fixtures/"
+grep --quiet 'attribute from git' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the text attribute for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# The ignore rules modified: a rule added to fixtures/.gitignore hides an untracked helper from
+# every listing, and the diff would carry the rule, not the helper. The file is put back before
+# anything can fail.
+cp "$FIXTURES/.gitignore" "$STATE/selftest-gitignore-copy"
+printf '.selftest-helper\n' >>"$FIXTURES/.gitignore"
+printf 'helper=%s\n' "$BW_CANARY" >"$FIXTURES/.selftest-helper"
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+mv --no-target-directory -- "$STATE/selftest-gitignore-copy" "$FIXTURES/.gitignore"
+rm "$FIXTURES/.selftest-helper"
+[ "$went" -eq 0 ] || fail "evidence captured while fixtures/.gitignore differed from the commit"
+grep --quiet 'ignore rules are not the commit' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the modified ignore file for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# An untracked .gitignore that ignores everything in its directory, itself included: the
+# directory is in no status and no listing.
+mkdir "$FIXTURES/.selftest-hidden-dir"
+printf '*\n' >"$FIXTURES/.selftest-hidden-dir/.gitignore"
+printf 'helper=%s\n' "$BW_CANARY" >"$FIXTURES/.selftest-hidden-dir/helper"
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+rm -r "$FIXTURES/.selftest-hidden-dir"
+[ "$went" -eq 0 ] || fail "evidence captured while an untracked .gitignore hid its directory under fixtures/"
+grep --quiet 'ignore rules are not the commit' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the untracked ignore file for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 # An untracked directory git cannot open, named with a secret: git and find warn on stderr with
 # the name as it is, and the listing is incomplete. Then the directory of bundles writable but not
 # readable: the captures that ended before their scan cannot be listed, and this one must not
@@ -757,11 +794,18 @@ active_holder=$!
 printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
 # And one that is not text: carried as a binary patch, not as "differ".
 printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
+# A tracked file turned to CRLF under core.autocrlf=true in the caller's configuration: git would
+# normalise both sides, and the diff would not carry the bytes that ran. Put back before anything
+# can fail.
+cp "$FIXTURES/README.md" "$STATE/selftest-readme-copy"
+sed 's/$/\r/' "$STATE/selftest-readme-copy" >"$FIXTURES/README.md"
 # The live store given as an extra path as well: it is a root already, and a file under it must
 # still be counted once. Under a diff helper that prints nothing: the bundle must carry git's own
 # patch, not the helper's silence.
 bundle=$(cd "$STATE/selftest-outside" &&
-  GIT_EXTERNAL_DIFF=/bin/true "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" 2>"$STATE/selftest-evidence.err") || rc=$?
+  GIT_EXTERNAL_DIFF=/bin/true GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true \
+    "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" 2>"$STATE/selftest-evidence.err") || rc=$?
+mv --no-target-directory -- "$STATE/selftest-readme-copy" "$FIXTURES/README.md"
 # The sibling's marks, read before it is removed: scanned once, by this capture, and named as such.
 sibling_marked=0
 [ ! -e "$STATE/evidence/selftest-interrupted/.incomplete" ] || sibling_marked=1
@@ -802,6 +846,8 @@ grep --quiet '^GIT binary patch$' "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt does not carry the content of an untracked file that is not text"
 ! grep --quiet '^Binary files .* differ$' "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt only says that an untracked file that is not text differs"
+grep --quiet $'^+.*\r$' "$bundle/fixtures-diff.txt" ||
+  fail "fixtures-diff.txt does not carry the CRLF bytes of a tracked file turned under core.autocrlf=true"
 # Relative scan paths are made absolute from the working directory; only the tail is compared, so
 # the assertion does not depend on how the checkout path is spelled.
 grep --quiet --fixed-strings "/.state/selftest-outside/-delete.d/canary-control.txt" "$STATE/selftest-evidence.err" ||
@@ -926,6 +972,34 @@ if [ "$keep" != --keep ]; then
   if [ "$went" -eq 1 ] || [ -z "$claimant" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a container that carries the claim label under another name"
   fi
+  # The fixture created under another name, as versions.env edited or the checkout switched since
+  # up leaves it: every name and label would be derived from the new value, and down would find
+  # nothing to remove. Simulated through the record, which is what lib.sh holds versions.env to.
+  cp "$STATE/up-fixture-name" "$STATE/selftest-fixture-name-copy"
+  printf '%s-other\n' "$FIXTURE_NAME" >"$STATE/up-fixture-name"
+  went=0
+  down_said=$("$here/down" 2>&1) && went=1
+  mv --no-target-directory -- "$STATE/selftest-fixture-name-copy" "$STATE/up-fixture-name" # before anything can fail
+  if [ "$went" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down ran, or removed the state, while the fixture was recorded as created under another name"
+  fi
+  grep --quiet 'was created as' <<<"$down_said" || fail "down failed on the fixture name for another reason: $(tail -n 1 <<<"$down_said")"
+  # And on another Docker daemon, as DOCKER_HOST or the context changed since up leaves it: the
+  # daemon reached holds none of the fixture, and down would verify it clean. Likewise simulated
+  # through the record. inject, and evidence through the same check, refuse too.
+  cp "$STATE/up-daemon" "$STATE/selftest-daemon-copy"
+  printf 'selftest-not-this-daemon\n' >"$STATE/up-daemon"
+  went=0
+  down_said=$("$here/down" 2>&1) && went=1
+  injected=0
+  "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
+  mv --no-target-directory -- "$STATE/selftest-daemon-copy" "$STATE/up-daemon" # before anything can fail
+  if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    docker unpause "$PG" >/dev/null 2>&1 || true
+    fail "down or inject ran, or down removed the state, while the fixture was recorded as created on another Docker daemon"
+  fi
+  [ "$(docker inspect --format '{{.State.Paused}}' "$PG")" = false ] || fail "a refused inject paused postgres all the same"
+  grep --quiet 'this shell reaches' <<<"$down_said" || fail "down failed on the daemon for another reason: $(tail -n 1 <<<"$down_said")"
   # And without the record, as an up interrupted right after creating the cluster leaves it: the
   # label is all there is, and removing by it is for --adopt.
   mv "$STATE/down-node-containers" "$STATE/selftest-containers-aside"

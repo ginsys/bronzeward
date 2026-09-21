@@ -369,9 +369,15 @@ while IFS= read -r -d '' sibling; do
     # either way, and a sibling left out by guess would go unscanned.
     # Looked at before exec opens it: on a redirection that fails, exec ends the shell with bash's
     # own message, which names the path.
-    [ -f "$sibling/.incomplete" ] && [ ! -L "$sibling/.incomplete" ] && [ -r "$sibling/.incomplete" ] && [ -w "$sibling/.incomplete" ] ||
+    [ -f "$sibling/.incomplete" ] && [ ! -L "$sibling/.incomplete" ] && [ -r "$sibling/.incomplete" ] ||
       die "the marker of the earlier capture $(shown "$sibling") is not a file this capture can open; results void"
-    exec {sibling_lock}<>"$sibling/.incomplete"
+    # Read-only, which flock locks all the same: opened for writing, a marker its capture removed
+    # between the test above and here, its scan complete, would be made again, and that bundle
+    # scanned once more at every capture after. One gone by now is a capture that completed.
+    if ! { exec {sibling_lock}<"$sibling/.incomplete"; } 2>/dev/null; then
+      say "evidence: the earlier capture $(shown "$sibling") completed meanwhile; it scanned itself"
+      continue
+    fi
     if flock --nonblock "$sibling_lock"; then
       say "evidence: an earlier capture ended before its leak scan; $(shown "$sibling") is scanned with this one"
       roots+=("$sibling")

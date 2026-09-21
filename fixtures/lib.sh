@@ -38,6 +38,23 @@ set -a
 # shellcheck source-path=SCRIPTDIR source=versions.env
 . "$FIXTURES/versions.env"
 set +a
+# The name the fixture was created under: bin/up records it first of all. With versions.env edited
+# or the checkout switched since, every name and label above would be derived from another value,
+# and down would look for nothing, find nothing, remove .state and report success while the
+# fixture runs on under the old name. Refused here, for every command, until the value is back.
+if [ -e "$STATE/up-fixture-name" ] || [ -L "$STATE/up-fixture-name" ]; then
+  if [ -L "$STATE/up-fixture-name" ] || [ ! -f "$STATE/up-fixture-name" ] ||
+    [ "$(stat --format=%h -- "$STATE/up-fixture-name" 2>/dev/null)" != 1 ]; then
+    printf 'fixtures: %s is not the regular file bin/up writes, with that one name; the fixture never makes anything else there\n' "$STATE/up-fixture-name" >&2
+    exit 1
+  fi
+  IFS= read -r created_as <"$STATE/up-fixture-name" || created_as=
+  if [ "$created_as" != "$FIXTURE_NAME" ]; then
+    printf 'fixtures: the fixture in %s was created as %s, and versions.env now names %s; restore FIXTURE_NAME, or the checkout it came from, then run fixtures/bin/down\n' "$STATE" "${created_as:-nothing}" "$FIXTURE_NAME" >&2
+    exit 1
+  fi
+  unset created_as
+fi
 # The generated secrets are read as data, not sourced: a secrets.env that was replaced, or a line
 # added to it, must not run as shell code here, before any ownership check. Only the four
 # assignments bin/up writes are accepted, each a bare value without whitespace, and the file must
@@ -111,6 +128,7 @@ need_state() {
     die "$STATE/secrets.env is incomplete, as an interrupted up leaves it. Run fixtures/bin/down, then up"
   fi
   need docker
+  daemon_own
   owner=$(claim_owner) || die "could not ask Docker who holds the fixture claim"
   [ -n "$owner" ] ||
     die "$STATE exists but no fixture claim does: the state is stale. Run fixtures/bin/down, then up"
@@ -130,12 +148,29 @@ need_state() {
 # a fixture name or label may act on.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt; do
+  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
     fi
   done
+}
+
+# daemon_own: the Docker daemon this shell reaches is the one bin/up created the fixture on. With
+# DOCKER_HOST or the context changed since, every check above would be made against a daemon that
+# holds none of it, down would verify that one clean and remove .state while the fixture, and its
+# credentials, run on. The daemon's ID is what bin/up recorded; no record (an up interrupted
+# before it) is not a mismatch.
+daemon_own() {
+  local recorded reached
+  [ -e "$STATE/up-daemon" ] || [ -L "$STATE/up-daemon" ] || return 0
+  if [ -L "$STATE/up-daemon" ] || [ ! -f "$STATE/up-daemon" ] || [ "$(stat --format=%h -- "$STATE/up-daemon" 2>/dev/null)" != 1 ]; then
+    die "$STATE/up-daemon is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
+  fi
+  IFS= read -r recorded <"$STATE/up-daemon" || recorded=
+  reached=$(docker info --format '{{.ID}}' 2>/dev/null) || die "the Docker daemon does not answer; nothing can be verified"
+  [ -n "$recorded" ] && [ "$recorded" = "$reached" ] ||
+    die "the fixture in $STATE was created on the Docker daemon ${recorded:-recorded as nothing}, and this shell reaches $reached (DOCKER_HOST or the Docker context changed); point it back at that daemon and run again"
 }
 
 # containers_own: every container that answers to one of the fixture's names is the fixture's. The
@@ -192,13 +227,14 @@ compose() {
 fixtures_manifest_diff() {
   local file
   printf '%s\n\n' "$1"
-  git -C "$FIXTURES" diff --no-ext-diff --no-textconv --binary HEAD -- "$FIXTURES" || return 1
+  git -C "$FIXTURES" -c core.autocrlf=false diff --no-ext-diff --no-textconv --binary HEAD -- "$FIXTURES" || return 1
   # A pipe, not a substitution: a substitution drops the NULs that end each name. With pipefail
   # a failing listing fails the pipeline, as does the loop when a diff cannot be written.
   git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" |
     while IFS= read -r -d '' file; do
       # --no-index exits 1 when the two differ, which a file against /dev/null always does.
-      git -C "$FIXTURES" diff --no-index --no-ext-diff --no-textconv --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
+      # core.autocrlf off here too: with it on, git warns on an untracked LF file it would convert.
+      git -C "$FIXTURES" -c core.autocrlf=false diff --no-index --no-ext-diff --no-textconv --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
     done
 }
 
@@ -222,14 +258,35 @@ tree_name() { printf '%s' "$1"; }
 # Listings and the collected stderr go into <workdir> and are removed; a listing that fails is not
 # an empty one.
 fixtures_tree_check() {
-  local workdir=$1 diff_file=$2 name_fn=$3 warn file value hidden filtered linked find_rc=0
+  local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top ignores untracked_all filtered linked find_rc=0
   warn=$workdir/.git-stderr
   : >"$warn" || die "cannot collect git's warnings in $workdir"
   # Assigned first: a git that fails inside a printf argument would leave the line empty.
   manifest=$(git -C "$FIXTURES" rev-parse HEAD 2>>"$warn") ||
     die "cannot read the manifest commit from git; the fixture could not be tied to a fixture version"
-  differs=$(git -C "$FIXTURES" status --porcelain -- "$FIXTURES" 2>>"$warn") ||
+  # core.autocrlf off for the status and the diff: with it on, a tracked script turned to CRLF
+  # reads as unmodified (both sides normalised), or as modified with an empty diff, and the bytes
+  # that ran, a CRLF shebang among them, would be in neither. The text, eol and ident attributes
+  # do the same whatever the setting, and are refused below with the clean filter.
+  differs=$(git -C "$FIXTURES" -c core.autocrlf=false status --porcelain -- "$FIXTURES" 2>>"$warn") ||
     die "cannot ask git whether fixtures/ differs from commit $manifest"
+  # The ignore rules the listings below apply are the working tree's: a .gitignore modified, or
+  # an untracked one (which may hide itself and its directory), hides an untracked file from
+  # every listing, and the diff would carry the rule and not the file. The root .gitignore applies
+  # under fixtures/ too. Refused while any of them is not the commit's.
+  top=$(git -C "$FIXTURES" rev-parse --show-toplevel 2>>"$warn") ||
+    die "cannot find the repository root; the commit could not be tied to what runs"
+  ignores=$(git -C "$FIXTURES" -c core.autocrlf=false status --porcelain -- "$top/.gitignore" "$FIXTURES" 2>>"$warn") ||
+    die "cannot ask git about the ignore files; the commit could not be tied to what runs"
+  untracked_all=$(git -C "$FIXTURES" ls-files --others -- "$FIXTURES" 2>>"$warn") ||
+    die "cannot list the files under fixtures/; the commit could not be tied to what runs"
+  ignores=$(grep -E '(^|[ /])\.gitignore"?$' <<<"$ignores"$'\n'"$untracked_all" || [ $? -eq 1 ]) ||
+    die "cannot look for ignore files under fixtures/; the commit could not be tied to what runs"
+  ignores=$(while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    printf '%s ' "$("$name_fn" "$file")"
+  done <<<"$ignores")
+  unset top untracked_all
   git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" 2>>"$warn" | sort -z >"$workdir/.untracked-seen" ||
     die "cannot list the untracked files under fixtures/; the commit could not be tied to what runs"
   git -C "$FIXTURES" ls-files --others --exclude-per-directory=.gitignore -z -- "$FIXTURES" 2>>"$warn" | sort -z >"$workdir/.untracked-all" ||
@@ -245,11 +302,11 @@ fixtures_tree_check() {
   # and the diff with it, and --no-textconv does not turn it off. A tracked file under fixtures/
   # that any attributes file gives a filter is refused. The output is path, attribute, value.
   filtered=$(git -C "$FIXTURES" ls-files -z -- "$FIXTURES" 2>>"$warn" |
-    git -C "$FIXTURES" check-attr --stdin -z filter 2>>"$warn" |
-    while IFS= read -r -d '' file && IFS= read -r -d '' _ && IFS= read -r -d '' value; do
+    git -C "$FIXTURES" check-attr --stdin -z filter text eol ident 2>>"$warn" |
+    while IFS= read -r -d '' file && IFS= read -r -d '' attribute && IFS= read -r -d '' value; do
       case $value in
         unspecified | unset) ;;
-        *) printf '%s ' "$("$name_fn" "$FIXTURES/$file")" ;;
+        *) printf '%s (%s) ' "$("$name_fn" "$FIXTURES/$file")" "$attribute" ;;
       esac
     done) ||
     die "cannot ask git which attributes apply under fixtures/; the commit could not be tied to what runs"
@@ -263,8 +320,10 @@ fixtures_tree_check() {
   [ "$find_rc" -eq 0 ] || die "cannot look for symlinks and special files under fixtures/; the commit could not be tied to what runs"
   [ -z "$hidden" ] ||
     die "untracked files under fixtures/ are hidden from git by an excludes file outside the repository: ${hidden% }; the commit plus a diff could not say what runs. Track, remove or unhide them"
+  [ -z "$ignores" ] ||
+    die "the ignore rules are not the commit's: ${ignores% }; an untracked file they hide would be in no listing, and the commit plus a diff would not say what runs. Commit, revert or remove the .gitignore change"
   [ -z "$filtered" ] ||
-    die "a clean filter from git's attributes applies to ${filtered% }; git would compare the filter's output, not the bytes that run. Remove the filter attribute"
+    die "a filter, text, eol or ident attribute from git's attributes applies to ${filtered% }; git would compare the attribute's output, not the bytes that run. Remove the attribute"
   [ -z "$linked" ] ||
     die "$("$name_fn" "$linked") is a symlink, a special file or an empty directory under fixtures/; git records nothing of it, and the commit plus a diff would not say what runs. Replace or remove it"
   if [ -n "$differs" ]; then
@@ -333,10 +392,13 @@ pg_client() {
     --env PGPASSWORD "$POSTGRES_IMAGE" psql --host=postgres --username=bronzeward --dbname=bronzeward "$@"
 }
 
-# claim_take [attempt]: fails when any checkout on this daemon already holds the claim.
+# claim_take [attempt]: fails when any checkout on this daemon already holds the claim. The image
+# declares a data volume, and Docker would make an anonymous, unlabelled one for the claim although
+# it never starts; removed outside claim_drop without --volumes, it would outlive every record. A
+# tmpfs at that path takes the volume's place, and nothing is made.
 claim_take() {
   docker create --quiet --name "$CLAIM" --label "$CLAIM_LABEL" --label "$CLAIM_OWNER_LABEL=$FIXTURES" \
-    --label "$CLAIM_ATTEMPT_LABEL=${1:-}" --network none "$POSTGRES_IMAGE" true >/dev/null
+    --label "$CLAIM_ATTEMPT_LABEL=${1:-}" --tmpfs /var/lib/postgresql/data --network none "$POSTGRES_IMAGE" true >/dev/null
 }
 # claim_names: every container carrying the claim label (names, or nothing).
 claim_names() { docker ps --all --filter "label=$CLAIM_LABEL" --format '{{.Names}}'; }
