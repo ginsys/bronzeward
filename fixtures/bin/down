@@ -164,6 +164,14 @@ unset compose_volumes compose_volume compose_volume_record identity
 # see "Known limits" in fixtures/README.md.
 # shellcheck disable=SC2119  # of every labelled container: no IDs on purpose
 volume_names=$(talos_volume_names) || die "could not list the Talos node volumes; nothing was removed"
+# Held to what a Talos node's volume is, an anonymous one, before the names go into the record
+# below: a labelled container that mounts a named volume (under --adopt, with no record to hold
+# the containers to, the label is all there is) would otherwise put that name into the record,
+# and every down after would refuse the record as not the fixture's.
+for volume in $volume_names; do
+  [[ $volume =~ ^[0-9a-f]{64}$ ]] ||
+    die "a container carrying this fixture's Talos label mounts the volume '$volume', which is no anonymous volume of a Talos node; nothing was removed. Remove that container by hand"
+done
 # Without the record bin/up writes once the cluster exists, which a checkout that adopts another's
 # fixture never has, only the nodes whose containers still exist name their volumes. With fewer
 # than both of them, this run cannot say that no node volume is left, and must not. Remembered in

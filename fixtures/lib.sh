@@ -159,11 +159,16 @@ state_files_own() {
 # daemon_own: the Docker daemon this shell reaches is the one bin/up created the fixture on. With
 # DOCKER_HOST or the context changed since, every check above would be made against a daemon that
 # holds none of it, down would verify that one clean and remove .state while the fixture, and its
-# credentials, run on. The daemon's ID is what bin/up recorded; no record (an up interrupted
-# before it) is not a mismatch.
+# credentials, run on. The daemon's ID is what bin/up recorded, before it made anything else under
+# the directory, and a directory it could not record it in it removed again; so a state directory
+# without the record is not one bin/up left, and is not taken for a fixture on whichever daemon
+# the shell reaches now. No state directory at all is nothing to hold to.
 daemon_own() {
   local recorded reached
-  [ -e "$STATE/up-daemon" ] || [ -L "$STATE/up-daemon" ] || return 0
+  [ -d "$STATE" ] || return 0
+  if [ ! -e "$STATE/up-daemon" ] && [ ! -L "$STATE/up-daemon" ]; then
+    die "no record in $STATE of the Docker daemon the fixture was created on; bin/up writes it before it makes anything else there, so the directory is not one it left. Find the fixture's daemon by hand, run down there once the record is restored, or remove $STATE yourself"
+  fi
   if [ -L "$STATE/up-daemon" ] || [ ! -f "$STATE/up-daemon" ] || [ "$(stat --format=%h -- "$STATE/up-daemon" 2>/dev/null)" != 1 ]; then
     die "$STATE/up-daemon is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
   fi
@@ -225,6 +230,15 @@ compose() {
     --env-file "$FIXTURES/versions.env" --env-file "$STATE/secrets.env" "$@"
 }
 
+# fixtures_git <args...>: git on the fixtures checkout, for every inventory and diff below, with two
+# of the caller's settings turned off. core.autocrlf: with it on, a tracked script turned to CRLF
+# reads as unmodified (both sides normalised), or as modified with an empty diff, and the bytes
+# that ran, a CRLF shebang among them, would be in neither; and git warns on an untracked LF file
+# it would convert. core.ignoreCase: with it on, an untracked file whose name differs from a
+# tracked one's only by case is taken for the tracked one, in no status and no listing, while
+# find sees an ordinary file (observed: README.MD beside README.md, every inventory empty).
+fixtures_git() { git -C "$FIXTURES" -c core.autocrlf=false -c core.ignoreCase=false "$@"; }
+
 # fixtures_manifest_diff <status>: how fixtures/ differs from the commit, as bin/up records it at
 # creation and bin/evidence at capture: the status given, the diff of the tracked files and the
 # whole content of the untracked ones (as a diff against nothing), so that the commit plus this
@@ -235,14 +249,13 @@ compose() {
 fixtures_manifest_diff() {
   local file
   printf '%s\n\n' "$1"
-  git -C "$FIXTURES" -c core.autocrlf=false diff --no-ext-diff --no-textconv --binary HEAD -- "$FIXTURES" || return 1
+  fixtures_git diff --no-ext-diff --no-textconv --binary HEAD -- "$FIXTURES" || return 1
   # A pipe, not a substitution: a substitution drops the NULs that end each name. With pipefail
   # a failing listing fails the pipeline, as does the loop when a diff cannot be written.
-  git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" |
+  fixtures_git ls-files --others --exclude-standard -z -- "$FIXTURES" |
     while IFS= read -r -d '' file; do
       # --no-index exits 1 when the two differ, which a file against /dev/null always does.
-      # core.autocrlf off here too: with it on, git warns on an untracked LF file it would convert.
-      git -C "$FIXTURES" -c core.autocrlf=false diff --no-index --no-ext-diff --no-textconv --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
+      fixtures_git diff --no-index --no-ext-diff --no-textconv --binary -- /dev/null "$file" || [ $? -eq 1 ] || exit 1
     done
 }
 
@@ -270,20 +283,18 @@ fixtures_tree_check() {
   warn=$workdir/.git-stderr
   : >"$warn" || die "cannot collect git's warnings in $workdir"
   # Assigned first: a git that fails inside a printf argument would leave the line empty.
-  manifest=$(git -C "$FIXTURES" rev-parse HEAD 2>>"$warn") ||
+  manifest=$(fixtures_git rev-parse HEAD 2>>"$warn") ||
     die "cannot read the manifest commit from git; the fixture could not be tied to a fixture version"
-  # core.autocrlf off for the status and the diff: with it on, a tracked script turned to CRLF
-  # reads as unmodified (both sides normalised), or as modified with an empty diff, and the bytes
-  # that ran, a CRLF shebang among them, would be in neither. The text, eol, ident and
-  # working-tree-encoding attributes do the same whatever the setting, and are refused below with
-  # the clean filter. --untracked-files=all: a status.showUntrackedFiles=no in the caller's
-  # configuration would leave a tree whose only change is an untracked file reading as the commit's.
-  differs=$(git -C "$FIXTURES" -c core.autocrlf=false status --porcelain --untracked-files=all -- "$FIXTURES" 2>>"$warn") ||
+  # The text, eol, ident and working-tree-encoding attributes normalise like core.autocrlf does
+  # (turned off in fixtures_git) whatever the setting, and are refused below with the clean
+  # filter. --untracked-files=all: a status.showUntrackedFiles=no in the caller's configuration
+  # would leave a tree whose only change is an untracked file reading as the commit's.
+  differs=$(fixtures_git status --porcelain --untracked-files=all -- "$FIXTURES" 2>>"$warn") ||
     die "cannot ask git whether fixtures/ differs from commit $manifest"
   # A tracked file git is told to skip, assume-unchanged or skip-worktree (git update-index): a
   # modification there is in no status and no diff. ls-files -v tags each file, a lowercase tag
   # for assume-unchanged and S for skip-worktree.
-  flagged=$(git -C "$FIXTURES" ls-files -v -z -- "$FIXTURES" 2>>"$warn" |
+  flagged=$(fixtures_git ls-files -v -z -- "$FIXTURES" 2>>"$warn" |
     while IFS= read -r -d '' file; do
       case $file in
         [a-z]\ * | S\ *) printf '%s ' "$("$name_fn" "$FIXTURES/${file#??}")" ;;
@@ -294,11 +305,11 @@ fixtures_tree_check() {
   # an untracked one (which may hide itself and its directory), hides an untracked file from
   # every listing, and the diff would carry the rule and not the file. The root .gitignore applies
   # under fixtures/ too. Refused while any of them is not the commit's.
-  top=$(git -C "$FIXTURES" rev-parse --show-toplevel 2>>"$warn") ||
+  top=$(fixtures_git rev-parse --show-toplevel 2>>"$warn") ||
     die "cannot find the repository root; the commit could not be tied to what runs"
-  ignores=$(git -C "$FIXTURES" -c core.autocrlf=false status --porcelain --untracked-files=all -- "$top/.gitignore" "$FIXTURES" 2>>"$warn") ||
+  ignores=$(fixtures_git status --porcelain --untracked-files=all -- "$top/.gitignore" "$FIXTURES" 2>>"$warn") ||
     die "cannot ask git about the ignore files; the commit could not be tied to what runs"
-  untracked_all=$(git -C "$FIXTURES" ls-files --others -- "$FIXTURES" 2>>"$warn") ||
+  untracked_all=$(fixtures_git ls-files --others -- "$FIXTURES" 2>>"$warn") ||
     die "cannot list the files under fixtures/; the commit could not be tied to what runs"
   ignores=$(grep -E '(^|[ /])\.gitignore"?$' <<<"$ignores"$'\n'"$untracked_all" || [ $? -eq 1 ]) ||
     die "cannot look for ignore files under fixtures/; the commit could not be tied to what runs"
@@ -307,9 +318,9 @@ fixtures_tree_check() {
     printf '%s ' "$("$name_fn" "$file")"
   done <<<"$ignores")
   unset top untracked_all
-  git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES" 2>>"$warn" | sort -z >"$workdir/.untracked-seen" ||
+  fixtures_git ls-files --others --exclude-standard -z -- "$FIXTURES" 2>>"$warn" | sort -z >"$workdir/.untracked-seen" ||
     die "cannot list the untracked files under fixtures/; the commit could not be tied to what runs"
-  git -C "$FIXTURES" ls-files --others --exclude-per-directory=.gitignore -z -- "$FIXTURES" 2>>"$warn" | sort -z >"$workdir/.untracked-all" ||
+  fixtures_git ls-files --others --exclude-per-directory=.gitignore -z -- "$FIXTURES" 2>>"$warn" | sort -z >"$workdir/.untracked-all" ||
     die "cannot list the untracked files under fixtures/; the commit could not be tied to what runs"
   hidden=$(comm --zero-terminated -13 "$workdir/.untracked-seen" "$workdir/.untracked-all" |
     while IFS= read -r -d '' file; do
@@ -323,9 +334,9 @@ fixtures_tree_check() {
   # attributes file gives a filter is refused, untracked ones included: the diff against nothing
   # that carries an untracked file applies the attributes too. The output is path, attribute,
   # value.
-  filtered=$({ git -C "$FIXTURES" ls-files -z -- "$FIXTURES" &&
-    git -C "$FIXTURES" ls-files --others --exclude-standard -z -- "$FIXTURES"; } 2>>"$warn" |
-    git -C "$FIXTURES" check-attr --stdin -z filter text eol ident working-tree-encoding 2>>"$warn" |
+  filtered=$({ fixtures_git ls-files -z -- "$FIXTURES" &&
+    fixtures_git ls-files --others --exclude-standard -z -- "$FIXTURES"; } 2>>"$warn" |
+    fixtures_git check-attr --stdin -z filter text eol ident working-tree-encoding 2>>"$warn" |
     while IFS= read -r -d '' file && IFS= read -r -d '' attribute && IFS= read -r -d '' value; do
       case $value in
         unspecified | unset) ;;

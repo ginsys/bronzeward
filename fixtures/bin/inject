@@ -349,9 +349,15 @@ case $action in
     [ $# -eq 1 ] || usage
     restore_source "$STATE/backups/store-$1.tgz" "store-$1.tgz"
     # An earlier run that was killed outright between its two renames left the only copy of the
-    # store there. It is not guessed at.
+    # store there. It is not guessed at. One killed after its commit, while removing the staging
+    # directory, left the earlier store next to a live directory that is the restored one: that
+    # earlier store is not to be moved back over it.
     for left in "$STATE"/store-restore.*/previous; do
-      [ ! -e "$left" ] || die "an interrupted store-restore left the earlier store at $left; move it back to $STATE/data or remove it"
+      [ -e "$left" ] || continue
+      if [ -e "$STATE/data" ] && [ ! -e "${left%/previous}/data" ]; then
+        die "a completed store-restore left the store it replaced at $left; the restore it came from is in place. Remove it"
+      fi
+      die "an interrupted store-restore left the earlier store at $left; move it back to $STATE/data or remove it"
     done
     # Extracted aside first: an archive that cannot be read must not cost the live directory. The
     # live directory is then renamed aside, not removed, and goes only once the new one is in place;
@@ -381,11 +387,14 @@ case $action in
     mv --no-target-directory -- "$staging/data" "$STATE/data"
     # The rename above is the commit: the restored store is in place. Cleaning up after it must not
     # turn a restore that succeeded into one the log says failed; the leftover is named instead,
-    # and bin/evidence scans it like the live directory.
-    staging_left=$staging
-    staging=
-    rm -rf -- "$staging_left" ||
-      say "fixtures: the restore is in place; its staging directory $staging_left could not be removed and holds the earlier store under previous"
+    # and bin/evidence scans it like the live directory. The staging name stays set until the
+    # directory is gone: a signal during the removal has the exit handler finish it, and the
+    # handler moves nothing back while the live directory is there.
+    if rm -rf -- "$staging"; then
+      staging=
+    else
+      say "fixtures: the restore is in place; its staging directory $staging could not be removed and holds the earlier store under previous"
+    fi
     ;;
   # The three mutations below go over HTTP like bao-restore, for the same reason: a request that
   # went out and got no answer may have been applied, and curl's status tells that case from a

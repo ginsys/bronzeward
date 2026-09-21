@@ -89,8 +89,10 @@ what git records nothing of, an empty directory or a special file (a named pipe,
 device), since the commit plus a diff would not say it is there; a `filter`, `text`, `eol`,
 `ident` or `working-tree-encoding` attribute that git's attributes give a file, tracked or
 untracked, since git would then compare the attribute's output and not the bytes that run
-(`core.autocrlf` is turned off for the status and the diffs for the same reason, so a script
-turned to CRLF is recorded as the bytes it has); a tracked file git is told to skip
+(`core.autocrlf` is turned off for every listing and diff for the same reason, so a script
+turned to CRLF is recorded as the bytes it has, and `core.ignoreCase` with it, so an untracked
+file whose name differs from a tracked one's only by case is listed and not taken for the
+tracked one); a tracked file git is told to skip
 (assume-unchanged or skip-worktree), since a change there is in no status and no diff; and
 an ignore file that is not the commit's, a modified `.gitignore` or an untracked one, since the
 listings apply the working tree's rules and a file a new rule hides would be in none of them,
@@ -128,7 +130,11 @@ capture is still writing is left to its own scan and said so, not scanned half-w
 marked scanned. The OpenBao metadata is recorded from listings parsed as JSON; a listing that is
 not is recorded as unknown, and the bundle stays marked incomplete. With the live store directory gone, as
 a `store-restore` killed between its two renames leaves it, the capture goes on without it, names
-it in `unavailable.txt`, and takes the control from the copy the staging directory holds. OpenBao snapshots are encrypted by
+it in `unavailable.txt`, and takes the control from the copy the staging directory holds. The
+next `store-restore` refuses while such a leftover exists and names it as the only copy, to move
+back by hand; one left by a restore that completed, killed while removing its staging directory
+(the live directory present, the staging one holding only `previous`), it names as the replaced
+store, to remove. OpenBao snapshots are encrypted by
 OpenBao and are scanned as they are. The pattern list in `scan-patterns.txt` is rebuilt from the
 generated credentials at every capture and must equal the file, or the scan is void. Talos key material is matched in the base64 form
 the secrets bundle carries, so a decoded PEM copy would not match.
@@ -163,9 +169,12 @@ is made against the daemon the shell reaches, so with `versions.env` edited, the
 switched, or `DOCKER_HOST` or the Docker context changed since `up`, `down` would look for
 nothing, find nothing, remove `.state` and report success while the fixture ran on. Every command
 refuses while `versions.env` names another fixture than the record; `inject`, `evidence` and
-`down` refuse while the shell reaches another daemon than the record. Both records are written
-whole and renamed into place, the daemon asked first, so that an `up` that failed there leaves
-no record rather than an empty one every command would refuse. The commands also check
+`down` refuse while the shell reaches another daemon than the record, or while `.state` holds no
+daemon record at all. The daemon is asked before the claim is made on it; both records are
+written whole and renamed into place, the first thing under `.state`, and one that cannot be
+written takes the directory and the claim with it, since nothing else exists yet: so no `.state`
+without the record is one `up` left, and none is taken for a fixture on whichever daemon the
+shell reaches now. The commands also check
 that every container answering to a fixture name carries the fixture's own labels (Compose
 project and directory, or Talos cluster name), since the names are fixed and, once the real
 container was removed by hand, anything can take the name while the claim stands, and that it is
