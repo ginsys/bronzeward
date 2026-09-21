@@ -368,6 +368,15 @@ ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name wit
 # Crash and restart.
 "$here/inject" kill postgres
 ! sql 'select 1' >/dev/null 2>&1 || fail "postgres answers after kill"
+# A pause of the stopped container: Docker refuses, the state read back is not the one asked for,
+# and the action is recorded as failed. A second kill: Docker refuses too, but the container is
+# stopped, which is what was asked for, so it is done.
+! "$here/inject" pause postgres >/dev/null 2>&1 || fail "pause of a stopped container succeeded"
+grep --quiet --extended-regexp ' failed rc=[0-9]+ pause postgres$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "injections.log does not record the pause of a stopped container as failed"
+"$here/inject" kill postgres >/dev/null 2>&1 || fail "a second kill of a stopped container was not recorded as done"
+grep --quiet ' done kill postgres$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "injections.log does not record the second kill of a stopped container as done"
 degraded=$("$here/evidence") || fail "evidence aborted while postgres was down"
 grep --quiet 'live database dump' "$degraded/unavailable.txt" || fail "evidence did not say the database dump is missing"
 grep --quiet --fixed-strings "$degraded/backups/pg-selftest.dump.sql" "$degraded/leak-scan.txt" ||
@@ -384,7 +393,7 @@ ok "evidence still captures and scans while postgres is down, reads the server's
 grep --quiet --extended-regexp ' failed rc=[0-9]+ db-snapshot selftest-broken$' "$STATE/injections.log" ||
   fail "injections.log does not record the failed db-snapshot as failed"
 grep --quiet ' done kill postgres$' "$STATE/injections.log" || fail "injections.log does not record the kill as done"
-ok "a failed snapshot leaves no file behind, and injections.log records done and failed apart"
+ok "a failed snapshot leaves no file behind, and injections.log records done and failed apart; a pause of a stopped container is failed, a second kill is done"
 "$here/inject" start postgres
 [ "$(sql 'select count(*) from bw_selftest')" = 1 ] || fail "postgres lost committed data over a crash"
 ok "kill / start postgres keeps committed data"
@@ -401,6 +410,10 @@ ok "kill / start openbao comes back sealed, unseals, keeps state"
 # Hung provider: a paused OpenBao still accepts the connection and never answers. The action must
 # end on its own and say that it failed.
 "$here/inject" pause openbao
+# Paused again: Docker refuses, the container is paused, which is what was asked for: done.
+"$here/inject" pause openbao >/dev/null 2>&1 || fail "a second pause of a paused container was not recorded as done"
+grep --quiet ' done pause openbao$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "injections.log does not record the second pause of a paused container as done"
 rc=0
 "$here/inject" bao-snapshot selftest-hung 2>/dev/null || rc=$?
 "$here/inject" unpause openbao
@@ -409,7 +422,7 @@ rc=0
 grep --quiet --extended-regexp ' failed rc=[0-9]+ bao-snapshot selftest-hung$' "$STATE/injections.log" ||
   fail "injections.log does not record the hung bao-snapshot as failed"
 wait_for 60 "openbao after unpause" bao token lookup
-ok "bao-snapshot against a paused openbao ends, is recorded as failed and leaves no file"
+ok "bao-snapshot against a paused openbao ends, is recorded as failed and leaves no file; a second pause is recorded as done"
 
 # The same from inside the container, where a pause does not reach: with the server process
 # stopped, `docker exec` still runs the CLI, which connects and is never answered. A wait must end
@@ -887,6 +900,33 @@ mv --no-target-directory -- "$STATE/selftest-readme-stat" "$FIXTURES/README.md"
 grep --quiet --fixed-strings '+#-Investigation fixtures' "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt does not carry a same-length change to a tracked file with its mtime put back, under core.trustctime=false"
 rm "$STATE/selftest-evidence.err"
+# A replacement ref for the commit (git replace): status and diff would compare against the
+# replacement's tree while the manifest names the original. Under one that replaces HEAD with its
+# parent, the diff must be the one taken without it, byte for byte (the tree may differ from the
+# commit while this runs, so it is not asserted empty). The ref is repository-wide; removed before
+# anything can fail.
+plain=$("$here/evidence" 2>"$STATE/selftest-evidence.err") || fail "evidence aborted before the replacement ref: $(tail -n 1 "$STATE/selftest-evidence.err")"
+replaced=$(fixtures_git rev-parse HEAD)
+fixtures_git replace "$replaced" "$(fixtures_git rev-parse HEAD~1)"
+rc=0
+bundle=$("$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
+fixtures_git replace --delete "$replaced"
+[ "$rc" -eq 0 ] || fail "evidence aborted under a replacement ref for the commit: $(tail -n 1 "$STATE/selftest-evidence.err")"
+cmp --silent -- "$plain/fixtures-diff.txt" "$bundle/fixtures-diff.txt" ||
+  fail "fixtures-diff.txt differs under a replacement ref for the commit: the diff was taken against the replacement"
+grep --quiet --fixed-strings "$replaced" "$bundle/versions.txt" || fail "versions.txt does not name the commit under a replacement ref for it"
+unset replaced plain
+# The executable bit taken from a command under core.fileMode=false in the caller's configuration:
+# git would see no change, while running the command fails. Put back before anything can fail.
+chmod a-x "$FIXTURES/bin/inject"
+rc=0
+bundle=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fileMode GIT_CONFIG_VALUE_0=false \
+  "$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
+chmod a+x "$FIXTURES/bin/inject"
+[ "$rc" -eq 0 ] || fail "evidence aborted with a command's executable bit taken: $(tail -n 1 "$STATE/selftest-evidence.err")"
+grep --quiet '^new mode 100644' "$bundle/fixtures-diff.txt" ||
+  fail "fixtures-diff.txt does not carry a command's executable bit taken under core.fileMode=false"
+rm "$STATE/selftest-evidence.err"
 # A symlink to the state directory, a parent of three roots the scan has anyway, given as an extra
 # path: walked once, by the name it resolves to, so the control is met at the fixture's own
 # spelling and the capture is not void for want of it. The state directory holds the generated
@@ -931,7 +971,9 @@ cp "$STATE/backups/store-selftest.tgz" "$STATE/backups/store-selftest\\back.tgz"
 mkdir "$STATE/evidence/selftest-active"
 : >"$STATE/evidence/selftest-active/.incomplete"
 printf 'active=%s\n' "$BW_CANARY" >"$STATE/evidence/selftest-active/writing.txt"
-flock --nonblock "$STATE/evidence/selftest-active/.incomplete" sleep 300 &
+# The holder is the sleep itself, the lock on a descriptor it inherits: flock given a command
+# forks it, and killing flock would leave the command holding the lock.
+( flock --nonblock 3 || exit 9; exec sleep 300; ) 3>"$STATE/evidence/selftest-active/.incomplete" &
 active_holder=$!
 printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
 # And one that is not text: carried as a binary patch, not as "differ".
@@ -1057,7 +1099,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files and a trusted stat cache, and names the creating commit, refuses a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files, a trusted stat cache, a replacement ref for the commit and an executable bit taken under core.fileMode=false, and names the creating commit, refuses a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the
@@ -1171,6 +1213,20 @@ if [ "$keep" != --keep ]; then
     fail "down ran, or removed the state, while the fixture was recorded as created under another name"
   fi
   grep --quiet 'was created as' <<<"$down_said" || fail "down failed on the fixture name for another reason: $(tail -n 1 <<<"$down_said")"
+  # The rest of versions.env edited since up, the name kept: a port, an address or a pin the
+  # commands would use is not the one the fixture was made with. Likewise simulated through the
+  # record; inject refuses too.
+  cp "$STATE/up-versions.env" "$STATE/selftest-versions-copy"
+  printf '# selftest\n' >>"$STATE/up-versions.env"
+  went=0
+  down_said=$("$here/down" 2>&1) && went=1
+  injected=0
+  "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
+  mv --no-target-directory -- "$STATE/selftest-versions-copy" "$STATE/up-versions.env" # before anything can fail
+  if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down or inject ran, or down removed the state, while versions.env differed from the one recorded at up"
+  fi
+  grep --quiet 'is not the file the fixture' <<<"$down_said" || fail "down failed on the versions record for another reason: $(tail -n 1 <<<"$down_said")"
   # And on another Docker daemon, as DOCKER_HOST or the context changed since up leaves it: the
   # daemon reached holds none of the fixture, and down would verify it clean. Likewise simulated
   # through the record. inject, and evidence through the same check, refuse too.
@@ -1301,7 +1357,7 @@ if [ "$keep" != --keep ]; then
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled and Compose-labelled container and network against the records and refuses by label alone, refuses a stranger carrying the claim label, a fixture name or daemon not the record's and a missing daemon record, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled and Compose-labelled container and network against the records and refuses by label alone, refuses a stranger carrying the claim label, a fixture name, daemon or versions.env not the record's and a missing daemon record, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"

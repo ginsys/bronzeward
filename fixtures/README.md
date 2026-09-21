@@ -21,7 +21,7 @@ and `age` are downloaded into `fixtures/.cache/` and refused on a checksum misma
 | Command | Does |
 |---|---|
 | `fixtures/bin/up` | Generates synthetic secrets, starts PostgreSQL and OpenBao, initializes and unseals OpenBao, creates the Talos cluster, then asks both services again with this run's credentials before it reports the fixture up. Takes about two minutes once images are cached. |
-| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`, or `unknown rc=N` for a `bao-restore`, `bao-soft-delete`, `bao-destroy` or `bao-delete-key` whose request went out and got no answer (a timeout, a dropped connection or a signal), since OpenBao may have applied it all the same, and likewise for a `kill`, `start`, `pause`, `unpause`, `netsplit` or `netjoin` whose Docker request was in flight when a signal ended the command. `start` is done only once the service or Talos node answers again. A snapshot name is one path component, without a slash and without `.partial.` in it; a KV path or Transit key name is slash-separated components of letters, digits, `_`, `-` and `.`, none being `.` or `..` (which would reach another API path than the one the log names), and is refused before anything is logged; no argument may hold a control character, since each is written into the log, which must itself be the regular file `inject` made, under that one name. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. The rename that publishes a snapshot, or puts a restored store in place, is the commit, as is the one transaction that swaps the restored database in: an action interrupted after it is logged `done`, since the artifact it left is what a later restore acts on (after an interrupted `db-restore` the server is asked whether the swap committed; `bronzeward_previous` is then left until the next `db-restore` drops it). Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
+| `fixtures/bin/inject <action>` | Failure injection and backup/restore. Run it without arguments for the list. `.state/injections.log` gets two timestamped lines per action: `begin` when it starts, then `done` or `failed rc=N`, or `unknown rc=N` for a `bao-restore`, `bao-soft-delete`, `bao-destroy` or `bao-delete-key` whose request went out and got no answer (a timeout, a dropped connection or a signal), since OpenBao may have applied it all the same, and for a `kill`, `start`, `pause`, `unpause`, `netsplit` or `netjoin` whose Docker request failed and whose outcome the daemon cannot be asked for: when the CLI fails, whether by a refusal, a dropped connection or a signal, the container's state is read back (a few times over, since a kill is answered before the container has stopped), and the state asked for is `done`, another state `failed` (a `start` whose CLI failed stays `unknown` even with the container running, since the service was not seen to answer). `start` is done only once the service or Talos node answers again. A snapshot name is one path component, without a slash and without `.partial.` in it; a KV path or Transit key name is slash-separated components of letters, digits, `_`, `-` and `.`, none being `.` or `..` (which would reach another API path than the one the log names), and is refused before anything is logged; no argument may hold a control character, since each is written into the log, which must itself be the regular file `inject` made, under that one name. A snapshot gets its final name only once it is complete; `db-restore` and `store-restore` replace the live data only after the snapshot was read in full. The rename that publishes a snapshot, or puts a restored store in place, is the commit, as is the one transaction that swaps the restored database in: an action interrupted after it is logged `done`, since the artifact it left is what a later restore acts on (after an interrupted `db-restore` the server is asked whether the swap committed; `bronzeward_previous` is then left until the next `db-restore` drops it). Every request to a service is time-bounded, so an action against a hung service fails instead of hanging. |
 | `fixtures/bin/evidence [path ...]` | Writes versions, container logs, a database dump, a copy of the PostgreSQL data directory as written to disk (read from the container whether the server runs or not), OpenBao metadata and Talos config digests to `.state/evidence/<utc>/`, then scans them, and any extra paths given, for synthetic secret material. Prints the bundle path. A bundle is some tens of MiB, most of it that data directory. |
 | `fixtures/bin/down [--purge] [--adopt]` | Removes every container, network and volume, then checks that nothing is left and fails if something is, or if Docker could not be asked. The claim and then `.state/` are removed last and only after that check passed, so a `down` that could not finish can simply be run again. `--purge` also removes `.cache/`. It refuses a fixture it cannot show to be this checkout's own; `--adopt` overrides that. |
 | `fixtures/bin/selftest [--keep]` | `up`, each injection once with an assertion, `evidence`, `down`. `--keep` runs the checks against a fixture that is already up. |
@@ -96,7 +96,10 @@ turned to CRLF is recorded as the bytes it has, and `core.ignoreCase` with it, s
 file whose name differs from a tracked one's only by case is listed and not taken for the
 tracked one, and git's stat cache is not trusted either — `core.trustctime`, `core.checkStat`,
 `core.fsmonitor` and `core.untrackedCache` are set so that a file changed to bytes of the same
-length with its mtime put back is compared by content, not taken for the commit's); a tracked file git is told to skip
+length with its mtime put back is compared by content, not taken for the commit's; `core.fileMode`
+is forced on, so a command made non-executable is in the diff; and replacement refs are turned
+off with `--no-replace-objects`, so the diff is taken against the commit the manifest names, not
+against a replacement of it); a tracked file git is told to skip
 (assume-unchanged or skip-worktree), since a change there is in no status and no diff; and
 an ignore file that is not the commit's, a modified `.gitignore` or an untracked one, since the
 listings apply the working tree's rules and a file a new rule hides would be in none of them,
@@ -160,7 +163,7 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 under `.state/talos` must likewise be a regular file with that one name at teardown. The files `bin/up` generates
 (`secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
-node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name` and `up-daemon`) must each be
+node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon` and `up-versions.env`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
@@ -176,9 +179,14 @@ switched, or `DOCKER_HOST` or the Docker context changed since `up`, `down` woul
 nothing, find nothing, remove `.state` and report success while the fixture ran on. Every command
 refuses while `versions.env` names another fixture than the record; `inject`, `evidence` and
 `down` refuse while the shell reaches another daemon than the record, or while `.state` holds no
-daemon record at all. The daemon is asked before the claim is made on it; both records are
+daemon record at all. The rest of `versions.env` (ports, node addresses, image pins, requested
+versions) is bound the same way: `up` records a copy of the whole file as `up-versions.env`, and
+every command refuses while the file differs from it byte for byte, since an edit since `up`
+would send an `inject` to another port or report a version never requested; restore the file, or
+the checkout it came from, then run `down`. The daemon is asked before the claim is made on it;
+the three records are
 written whole and renamed into place, the first thing under `.state`, and a failure or a signal
-before both are in place, the exit handler armed before the directory is made, takes the records
+before they are in place, the exit handler armed before the directory is made, takes the records
 (when the daemon record is this run's), the directory and the claim with it, since nothing else
 exists yet: so no `.state` without the record is one `up` left, and none is taken for a fixture
 on whichever daemon the shell reaches now. While a Compose volume is being made and its label not
