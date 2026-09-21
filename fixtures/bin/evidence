@@ -122,15 +122,17 @@ fixtures_tree_check "$out" "$out/fixtures-diff.txt" shown
 # bundle, and versions.txt says when they are not the same.
 created=$(cat "$STATE/up-manifest" 2>/dev/null) ||
   die "no record in $STATE of the commit the fixture was created at, as an up interrupted early leaves it; the bundle could not be tied to what ran"
-if [ -e "$STATE/up-fixtures-diff.txt" ]; then
-  cp -- "$STATE/up-fixtures-diff.txt" "$out/up-fixtures-diff.txt" ||
-    die "cannot copy the record of how fixtures/ differed at creation into the bundle"
-fi
+# Required, not taken as "the tree was the commit's" when absent: bin/up writes it empty then,
+# and one removed since would leave a fixture made from a dirty tree passing for the commit's.
+[ -e "$STATE/up-fixtures-diff.txt" ] ||
+  die "no record in $STATE of how fixtures/ differed at creation, which bin/up writes with the commit; the bundle could not be tied to what ran"
+cp -- "$STATE/up-fixtures-diff.txt" "$out/up-fixtures-diff.txt" ||
+  die "cannot copy the record of how fixtures/ differed at creation into the bundle"
 {
   printf 'captured        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'manifest commit %s%s\n' "$manifest" "$([ -z "$differs" ] || printf ' (fixtures/ differs from it: see fixtures-diff.txt)')"
   printf 'created at      %s%s%s\n' "$created" \
-    "$([ ! -e "$STATE/up-fixtures-diff.txt" ] || printf ' (fixtures/ differed from it then: see up-fixtures-diff.txt)')" \
+    "$([ ! -s "$STATE/up-fixtures-diff.txt" ] || printf ' (fixtures/ differed from it then: see up-fixtures-diff.txt)')" \
     "$([ "$created" = "$manifest" ] || printf ' (not the commit captured under: what runs was made from this one)')"
   printf 'host            %s\n' "$(uname -srm)"
   printf 'docker          %s\n' "$(reported docker version --format 'client {{.Client.Version}} server {{.Server.Version}}')"
@@ -187,8 +189,16 @@ fi
 # material as a finished one and is expanded too. One that cannot be, being truncated, marks the
 # bundle incomplete rather than void: that is what an interruption leaves, and whatever part of it
 # did expand is scanned all the same.
+# A dump or archive that is a symlink or has a second name is not one the fixture wrote: what is
+# under the other name, whatever it holds, would be expanded into the bundle. Refused, as bin/down
+# refuses it at teardown.
+one_name() { # one_name <file>
+  [ ! -L "$1" ] && [ -f "$1" ] && [ "$(stat --format=%h -- "$1" 2>/dev/null)" = 1 ] ||
+    die "$(shown "$1") is not a regular file with that one name; the fixture never makes one there, and what the other name holds would be copied into the bundle. Results void"
+}
 for dump in "$STATE"/backups/pg-*.dump "$STATE"/backups/pg-*.dump.partial.*; do
-  [ -f "$dump" ] || continue
+  [ -e "$dump" ] || [ -L "$dump" ] || continue
+  one_name "$dump"
   as_sql=$out/backups/$(basename "$dump").sql
   # In a group with stderr closed: a dump that cannot be opened has bash name it, with the full
   # path, before any message below could go through `shown`.
@@ -200,7 +210,8 @@ for dump in "$STATE"/backups/pg-*.dump "$STATE"/backups/pg-*.dump.partial.*; do
   fi
 done
 for store in "$STATE"/backups/store-*.tgz "$STATE"/backups/store-*.tgz.partial.*; do
-  [ -f "$store" ] || continue
+  [ -e "$store" ] || [ -L "$store" ] || continue
+  one_name "$store"
   expanded=$out/backups/$(basename "$store")
   expanded=${expanded%.tgz}
   # The archive's digest, recorded before it is expanded, next to the expansion: a control copy
@@ -331,7 +342,8 @@ trap 'rm -f -- "$list"' EXIT
 # OpenBao encrypts, are covered.
 # -L: a symlinked path or file is followed and its target scanned. Without it find skips the link
 # silently and the target reads as clean. A link that cannot be followed is therefore fatal too.
-roots=("$out" "$STATE/backups" "${extras[@]}")
+# The extra paths come last (below): of two spellings of one place the first is walked.
+roots=("$out" "$STATE/backups")
 # The live store may be gone: a store-restore killed between its two renames leaves it aside as
 # store-restore.*/previous, and losing it is what a store snapshot is for. A root that does not
 # exist fails the walk, which would void the scan of everything else.
@@ -389,9 +401,40 @@ while IFS= read -r -d '' sibling; do
   }
 done <"$out/.siblings"
 rm -- "$out/.siblings" || die "cannot remove the sibling listing from $out; results void"
+roots+=("${extras[@]}")
 dangling=$(find -L "${roots[@]}" -type l -print -quit 2>/dev/null) ||
   die "leak scan could not walk every path (a directory it may not read, most likely); results void"
 [ -z "$dangling" ] || die "leak scan cannot follow the symlink $(shown "$dangling"); results void"
+# Each root once by what it names, not by its spelling: an extra path that is a symlink to a root
+# the scan has anyway, or lies under one, would have every file under it walked twice, counted
+# twice, and the control's copy under the other spelling reported as a leak, since it is the
+# control at one name only. Of two spellings the first is walked, the fixture's own names before
+# the extra paths, and a root that holds one kept earlier takes its place. A root dropped keeps
+# its own name for the name pass below, which may hold a secret. A symlink inside a walked
+# directory is still followed, as before.
+kept=() kept_at=() dropped=()
+for root in "${roots[@]}"; do
+  resolved=$(realpath -- "$root" 2>/dev/null) || die "leak scan cannot resolve $(shown "$root"); results void"
+  keep=1
+  for i in "${!kept_at[@]}"; do
+    if [ "$resolved" = "${kept_at[$i]}" ] || [ "${resolved#"${kept_at[$i]}"/}" != "$resolved" ]; then
+      keep=0
+      break
+    fi
+    if [ "${kept_at[$i]#"$resolved"/}" != "${kept_at[$i]}" ]; then
+      dropped+=("${kept[$i]}")
+      unset "kept[$i]" "kept_at[$i]"
+    fi
+  done
+  if [ "$keep" -eq 1 ]; then
+    kept+=("$root")
+    kept_at+=("$resolved")
+  else
+    dropped+=("$root")
+  fi
+done
+roots=("${kept[@]}")
+unset kept kept_at root resolved keep i
 
 # The positive control is one file, plus its copy at the same place inside an expanded store
 # snapshot, and only while it holds exactly what bin/up planted. A file that merely shares the
@@ -472,8 +515,7 @@ secret_in_name() { # secret_in_name <path>
   [ "$rc" -eq 0 ]
 }
 
-# Each path once: an extra path that lies under a root the scan has anyway is walked twice, and
-# the same file would be counted twice.
+# Each path once: a path given twice under one spelling is listed once.
 find -L "${roots[@]}" -type f -print0 2>/dev/null | sort --zero-terminated --unique >"$list" ||
   die "leak scan could not walk every path; results void"
 : >"$scan"
@@ -505,8 +547,10 @@ while IFS= read -r -d '' file; do
 done <"$list"
 
 # A secret can sit in a name as well as in a file: every directory entry under the same paths,
-# directories included, is matched too.
-find -L "${roots[@]}" -print0 2>/dev/null | sort --zero-terminated --unique >"$list" ||
+# directories included, is matched too, and the own name of a root not walked for being another
+# spelling of one that was.
+{ find -L "${roots[@]}" -print0 2>/dev/null &&
+  { [ "${#dropped[@]}" -eq 0 ] || printf '%s\0' "${dropped[@]}"; }; } | sort --zero-terminated --unique >"$list" ||
   die "leak scan could not walk every path; results void"
 while IFS= read -r -d '' entry; do
   [ -z "${reported[$entry]:-}" ] || continue

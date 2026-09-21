@@ -316,7 +316,22 @@ docker rm --force --volumes "$WORKER" >/dev/null
 docker rename "$WORKER-selftest-aside" "$WORKER" >/dev/null # before anything can fail
 [ "$impostor" -eq 0 ] || fail "inject acted on a container that bears a Talos node's name and label but is not the node"
 [ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
-ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash, a newline or .partial. refused, no write through a symlinked or a hard-linked final name or log, no restore from one, a container that only bears a fixture name, or a Talos node's name and label, refused, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored and never replaced by an archive's own previous entry"
+# The two nodes' names swapped: each container is one up recorded, but not under that name, and a
+# pause of the worker would go to the control plane. Swapped back before anything can fail.
+docker rename "$CP" "$CP-selftest-swap" >/dev/null
+docker rename "$WORKER" "$CP" >/dev/null
+docker rename "$CP-selftest-swap" "$WORKER" >/dev/null
+swapped=0
+"$here/inject" pause worker >/dev/null 2>&1 && swapped=1
+docker rename "$WORKER" "$CP-selftest-swap" >/dev/null
+docker rename "$CP" "$WORKER" >/dev/null
+docker rename "$CP-selftest-swap" "$CP" >/dev/null # before anything can fail
+if [ "$swapped" -eq 1 ] || [ "$(docker inspect --format '{{.State.Paused}}' "$CP" "$WORKER" | sort -u)" != false ]; then
+  docker unpause "$CP" "$WORKER" >/dev/null 2>&1 || true
+  fail "inject acted on a Talos node under the other node's name"
+fi
+[ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
+ok "store-snapshot / store-restore; the caller's TAR_OPTIONS ignored, a name with a slash, a newline or .partial. refused, no write through a symlinked or a hard-linked final name or log, no restore from one, a container that only bears a fixture name, or a Talos node's name and label, or a node under the other node's name, refused, a corrupt or symlinked snapshot leaves the live directory alone, a missing one is restored and never replaced by an archive's own previous entry"
 
 # Crash and restart.
 "$here/inject" kill postgres
@@ -618,15 +633,25 @@ linked=0
 rm "$STATE/store-restore.selftest-link"
 rm -r "$STATE/selftest-outside-staging"
 [ "$linked" -eq 0 ] || fail "evidence scanned through a symlinked store-restore staging directory"
-# A store archive with a second name outside .state keeps the canary where teardown does not reach:
-# the control's copy expanded from it is no longer excused.
+# A store archive with a second name outside .state, and a dump that is a symlink to a file
+# elsewhere: neither is one the fixture wrote, and what the other name holds would be expanded
+# into the bundle. Refused, nothing expanded.
 ln "$STATE/backups/store-selftest.tgz" "$STATE/selftest-archive-alias"
-rc=0
-"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" || rc=$?
+went=0
+bundle=$("$here/evidence" 2>"$STATE/selftest-evidence.err") && went=1
 rm "$STATE/selftest-archive-alias" # before anything can fail
-[ "$rc" -eq 0 ] || fail "evidence aborted on a hard-linked store archive: $(tail -n 1 "$STATE/selftest-evidence.err")"
-grep --quiet --fixed-strings '/backups/store-selftest/data/canary-control.txt' "$STATE/selftest-evidence.err" ||
-  fail "leak scan excused the control's copy from a store archive that has a second name outside .state"
+[ "$went" -eq 0 ] || fail "evidence expanded a store archive that has a second name outside .state"
+grep --quiet 'that one name' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the hard-linked store archive for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+ln -s "$FIXTURES/versions.env" "$STATE/backups/pg-selftest-elsewhere.dump"
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+rm "$STATE/backups/pg-selftest-elsewhere.dump" # before anything can fail
+[ "$went" -eq 0 ] || fail "evidence expanded a dump that is a symlink to a file outside .state"
+grep --quiet 'that one name' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the symlinked dump for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+[ -z "$(find "$STATE/evidence" -mindepth 2 -maxdepth 3 -name 'pg-selftest-elsewhere.dump.sql')" ] ||
+  fail "evidence expanded the symlinked dump before refusing it"
 rm "$STATE/selftest-evidence.err"
 printf 'token=%s\n' "$BW_BAO_METADATA_TOKEN" >"$STATE/data/selftest-token-leak"
 printf 'plain=%s\n' "$BW_CANARY" >"$STATE/backups/selftest-plain-backup"
@@ -715,6 +740,35 @@ rm "$STATE/selftest-attributes" "$STATE/selftest-attr.gitconfig"
 [ "$went" -eq 0 ] || fail "evidence captured while a text attribute applied to a tracked file under fixtures/"
 grep --quiet 'attribute from git' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the text attribute for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# A clean filter given to an untracked file: the diff against nothing that carries it applies the
+# attributes too, and the helper would be recorded as the filter's output.
+printf '.selftest-filtered filter=selftest\n' >"$STATE/selftest-attributes"
+printf '[core]\n\tattributesFile = %s\n' "$STATE/selftest-attributes" >"$STATE/selftest-attr.gitconfig"
+printf 'filtered=%s\n' "$BW_CANARY" >"$FIXTURES/.selftest-filtered"
+went=0
+GIT_CONFIG_GLOBAL=$STATE/selftest-attr.gitconfig "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+rm "$STATE/selftest-attributes" "$STATE/selftest-attr.gitconfig" "$FIXTURES/.selftest-filtered"
+[ "$went" -eq 0 ] || fail "evidence captured while a clean filter applied to an untracked file under fixtures/"
+grep --quiet 'attribute from git' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the untracked file's filter attribute for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# A tracked file git is told to assume unchanged: a change there is in no status and no diff. The
+# flag is cleared before anything can fail.
+git -C "$FIXTURES" update-index --assume-unchanged README.md
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+git -C "$FIXTURES" update-index --no-assume-unchanged README.md # before anything can fail
+[ "$went" -eq 0 ] || fail "evidence captured while git was told to assume a tracked file under fixtures/ unchanged"
+grep --quiet 'told to skip' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the assume-unchanged file for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# The record of how fixtures/ differed at creation gone: its absence must not read as "the tree
+# was the commit's". Put back before anything can fail.
+mv "$STATE/up-fixtures-diff.txt" "$STATE/selftest-creation-diff-aside"
+went=0
+"$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
+mv "$STATE/selftest-creation-diff-aside" "$STATE/up-fixtures-diff.txt" # before anything can fail
+[ "$went" -eq 0 ] || fail "evidence captured without the record of how fixtures/ differed at creation"
+grep --quiet 'differed at creation' "$STATE/selftest-evidence.err" ||
+  fail "evidence failed on the missing creation record for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 # The ignore rules modified: a rule added to fixtures/.gitignore hides an untracked helper from
 # every listing, and the diff would carry the rule, not the helper. The file is put back before
 # anything can fail.
@@ -794,6 +848,13 @@ active_holder=$!
 printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
 # And one that is not text: carried as a binary patch, not as "differ".
 printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
+# And one under a directory named like the ignored state directory, elsewhere than at the root of
+# fixtures/: the ignore rule is anchored, so it is untracked like any other.
+mkdir -p "$FIXTURES/.selftest-nested/.state"
+printf 'selftest-nested-content %s\n' "$$" >"$FIXTURES/.selftest-nested/.state/helper"
+# The live store under a second spelling, a symlink to it given as an extra path: walked once,
+# under the fixture's own name, so the control at the other spelling is not a leak.
+ln -s "$STATE/data" "$STATE/selftest-data-alias"
 # A tracked file turned to CRLF under core.autocrlf=true in the caller's configuration: git would
 # normalise both sides, and the diff would not carry the bytes that ran. Put back before anything
 # can fail.
@@ -801,11 +862,15 @@ cp "$FIXTURES/README.md" "$STATE/selftest-readme-copy"
 sed 's/$/\r/' "$STATE/selftest-readme-copy" >"$FIXTURES/README.md"
 # The live store given as an extra path as well: it is a root already, and a file under it must
 # still be counted once. Under a diff helper that prints nothing: the bundle must carry git's own
-# patch, not the helper's silence.
+# patch, not the helper's silence. And with untracked files turned off in the caller's status
+# configuration: the diff must carry them all the same.
 bundle=$(cd "$STATE/selftest-outside" &&
-  GIT_EXTERNAL_DIFF=/bin/true GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true \
-    "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" 2>"$STATE/selftest-evidence.err") || rc=$?
+  GIT_EXTERNAL_DIFF=/bin/true GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true \
+    GIT_CONFIG_KEY_1=status.showUntrackedFiles GIT_CONFIG_VALUE_1=no \
+    "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" "$STATE/selftest-data-alias" 2>"$STATE/selftest-evidence.err") || rc=$?
 mv --no-target-directory -- "$STATE/selftest-readme-copy" "$FIXTURES/README.md"
+rm "$STATE/selftest-data-alias" # the link only
+rm -r "$FIXTURES/.selftest-nested"
 # The sibling's marks, read before it is removed: scanned once, by this capture, and named as such.
 sibling_marked=0
 [ ! -e "$STATE/evidence/selftest-interrupted/.incomplete" ] || sibling_marked=1
@@ -842,6 +907,10 @@ grep --quiet "^created at      $(git -C "$FIXTURES" rev-parse HEAD)" "$bundle/ve
   fail "versions.txt does not name the commit the fixture was created at"
 grep --quiet --fixed-strings "+selftest-untracked-content $$" "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt does not carry the content of an untracked file"
+grep --quiet --fixed-strings "+selftest-nested-content $$" "$bundle/fixtures-diff.txt" ||
+  fail "fixtures-diff.txt does not carry an untracked file under a nested directory named .state"
+! grep --quiet --fixed-strings "$STATE/selftest-data-alias/" "$bundle/leak-scan.txt" ||
+  fail "leak scan walked the live store a second time under a symlink given as an extra path"
 grep --quiet '^GIT binary patch$' "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt does not carry the content of an untracked file that is not text"
 ! grep --quiet '^Binary files .* differ$' "$bundle/fixtures-diff.txt" ||
@@ -888,7 +957,7 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
-ok "evidence bundle complete under a silent diff helper and names the creating commit, refuses a symlink, an empty directory and a clean filter in the tree, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
+ok "evidence bundle complete under a silent diff helper and names the creating commit, refuses a symlink, an empty directory, a clean filter and a skipped file in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
 
 if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the
@@ -960,6 +1029,24 @@ if [ "$keep" != --keep ]; then
   docker rm --force --volumes "$FIXTURE_NAME-selftest-impostor" >/dev/null 2>&1 || true # gone already in the failing case
   if [ "$went" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] || [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
     fail "down removed, or did not refuse, a container that only carries the Talos label"
+  fi
+  # A container under a Compose name carrying the project's labels, which any container can be
+  # given: not the one up recorded under that name. down and inject refuse. The real one is
+  # renamed aside meanwhile and back before anything can fail.
+  docker rename "$PG" "$PG-selftest-aside" >/dev/null
+  docker create --quiet --name "$PG" --label "com.docker.compose.project=$FIXTURE_NAME" \
+    --label "com.docker.compose.project.working_dir=$FIXTURES" --network none "$POSTGRES_IMAGE" true >/dev/null ||
+    fail "cannot create a container for the test"
+  went=0
+  "$here/down" >/dev/null 2>&1 && went=1
+  injected=0
+  "$here/inject" pause postgres >/dev/null 2>&1 && injected=1
+  impostor=$(docker ps --all --quiet --filter "name=^${PG}$")
+  docker rm --force --volumes "$PG" >/dev/null 2>&1 || true # gone already in the failing case
+  docker rename "$PG-selftest-aside" "$PG" >/dev/null # before anything can fail
+  if [ "$went" -eq 1 ] || [ "$injected" -eq 1 ] || [ -z "$impostor" ] || [ ! -d "$STATE" ] ||
+    [ "$(docker inspect --format '{{.State.Running}}' "$PG" 2>/dev/null)" != true ]; then
+    fail "down or inject acted on a container that carries the Compose labels under a fixture name but is not the one up recorded"
   fi
   # A container carrying the claim label under another name: not the claim, not the fixture's,
   # and down does not know whose it is. It removes nothing and names it.
@@ -1100,7 +1187,7 @@ if [ "$keep" != --keep ]; then
   volumes_after=$(docker volume ls --quiet | sort) || fail "cannot list the Docker volumes"
   new_volumes=$(comm -13 <(printf '%s\n' "$volumes_before") <(printf '%s\n' "$volumes_after"))
   [ -z "$new_volumes" ] || fail "volumes exist that did not before up (this run's, unless something else used the daemon meanwhile): $(tr '\n' ' ' <<<"$new_volumes")"
-  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled container and network and the Compose-labelled network against the records and refuses by label alone, refuses a stranger carrying the claim label, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
+  ok "down refuses a linked node-volume record, writes no marker through a link, holds every recorded name, every Talos-labelled and Compose-labelled container and network against the records and refuses by label alone, refuses a stranger carrying the claim label, holds the Compose volumes to the run recorded with and without --adopt, refuses a snapshot with a second name, a dot-named link among the snapshots, a linked Talos state directory and a cluster state file with a second name, reads a record cut short of its last newline, then leaves nothing behind and refuses a stranger's volume under a Compose name, and no volume exists that did not before up"
   # A .state that is a symlink, here a dangling one that `[ -e ]` reads as absent, must stop every
   # command before it reads or writes through the link.
   ln -s "$FIXTURES/.selftest-no-such-dir" "$STATE"
