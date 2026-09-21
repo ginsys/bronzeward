@@ -89,6 +89,11 @@ case $action in
   kill | start | pause | unpause | netsplit | netjoin)
     [ $# -eq 1 ] || usage
     target=$(container "$1")
+    # Acted on by the ID need_state verified under that name (containers_own in lib.sh), not by
+    # the name: a container removed and the name taken by another between the check and the
+    # action would otherwise be the one killed, paused or moved. An ID names one container ever.
+    target_id=${verified_container_ids[$target]:-}
+    [ -n "$target_id" ] || die "no container named $target exists; nothing to act on"
     ;;
   db-snapshot | db-restore | bao-snapshot | bao-restore | store-snapshot | store-restore)
     [ $# -eq 1 ] || usage
@@ -150,7 +155,7 @@ docker_applied() {
     case $kind in
       network)
         # "out", or "in <address> <alias>..." from the endpoint on $network.
-        got=$(docker inspect --type container --format "{{with index .NetworkSettings.Networks \"$network\"}}in {{.IPAddress}}{{range .Aliases}} {{.}}{{end}}{{else}}out{{end}}" "$target" 2>/dev/null) || return 2
+        got=$(docker inspect --type container --format "{{with index .NetworkSettings.Networks \"$network\"}}in {{.IPAddress}}{{range .Aliases}} {{.}}{{end}}{{else}}out{{end}}" "$target_id" 2>/dev/null) || return 2
         case $want in
           out) [ "$got" != out ] || return 0 ;;
           ip\ *) [[ $got != "in ${want#ip }" && $got != "in ${want#ip } "* ]] || return 0 ;;
@@ -158,7 +163,7 @@ docker_applied() {
         esac
         ;;
       *)
-        got=$(docker inspect --type container --format "{{.State.$kind}}" "$target" 2>/dev/null) || return 2
+        got=$(docker inspect --type container --format "{{.State.$kind}}" "$target_id" 2>/dev/null) || return 2
         [ "$got" != "$want" ] || return 0
         ;;
     esac
@@ -319,13 +324,13 @@ case $action in
   kill)
     docker_expect='Running false'
     docker_dispatched=1
-    docker kill --signal KILL "$target" >/dev/null
+    docker kill --signal KILL "$target_id" >/dev/null
     docker_dispatched=0
     ;;
   start)
     docker_expect='Running true'
     docker_dispatched=1
-    docker start "$target" >/dev/null
+    docker start "$target_id" >/dev/null
     docker_dispatched=0
     case $1 in
       # An authenticated query on the fixture's database, not pg_isready, which answers as soon as
@@ -356,7 +361,7 @@ case $action in
     docker_expect='Paused true'
     [ "$action" = pause ] || docker_expect='Paused false'
     docker_dispatched=1
-    docker "$action" "$target" >/dev/null
+    docker "$action" "$target_id" >/dev/null
     docker_dispatched=0
     ;;
   netsplit)
@@ -364,7 +369,7 @@ case $action in
     network_own "$1" "$network"
     docker_expect='network out'
     docker_dispatched=1
-    docker network disconnect "$network" "$target"
+    docker network disconnect "$network" "$target_id"
     docker_dispatched=0
     ;;
   netjoin)
@@ -377,9 +382,9 @@ case $action in
     esac
     docker_dispatched=1
     case $1 in
-      controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$network" "$target" ;;
-      worker) docker network connect --ip "$TALOS_WORKER_IP" "$network" "$target" ;;
-      *) docker network connect --alias "$1" "$network" "$target" ;;
+      controlplane) docker network connect --ip "$TALOS_CONTROLPLANE_IP" "$network" "$target_id" ;;
+      worker) docker network connect --ip "$TALOS_WORKER_IP" "$network" "$target_id" ;;
+      *) docker network connect --alias "$1" "$network" "$target_id" ;;
     esac
     docker_dispatched=0
     ;;

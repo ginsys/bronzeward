@@ -104,7 +104,11 @@ up_failed() {
     say "fixtures: up failed; the claim $CLAIM could not be removed, run fixtures/bin/down to remove it"
   fi
 }
-trap 'rc=$?; [ "$rc" -eq 0 ] || up_failed' EXIT
+# A signal that ends the shell between two commands leaves the status of the command before it,
+# 0 as a rule, so the status alone would have the handler take an up cut short for one that
+# completed; the flag set once the fixture is up tells the two apart.
+up_completed=0
+trap 'rc=$?; if [ "$rc" -ne 0 ] || [ "$up_completed" -ne 1 ]; then up_failed; fi' EXIT
 state_made=1
 mkdir "$STATE" 2>/dev/null || { state_made=0; die "$STATE appeared meanwhile; nothing was created"; }
 # The identity every later command derives its names, labels and daemon from, recorded before
@@ -388,6 +392,10 @@ done
 # does not accept this run's password both still count as running.
 bao token lookup >/dev/null 2>&1 || die "OpenBao no longer answers an authenticated request"
 [ "$(pg_client -Atc 'select 1')" = 1 ] || die "PostgreSQL does not accept this run's password over the network"
+# The scripts as they were loaded, once more: the inventory above compared them at its moment,
+# and an edit since would have the rest of this run made by code the inventory does not say.
+scripts_unchanged_since_load
+up_completed=1
 
 cat >&2 <<EOF
 fixture is up
