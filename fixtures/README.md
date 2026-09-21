@@ -58,9 +58,9 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
 
 - `secrets.env`: a canary value, the PostgreSQL password, and the OpenBao root and metadata-only
   tokens. Values the fixture chooses itself start with `BWSYNTH-`. The commands read this file as
-  data, never as shell code: only those four assignments are accepted, all four must be there, the
-  file must be the regular file `bin/up` wrote under that one name, and anything else in it stops
-  every command. `bin/up` itself exports the values it generated and never reads the file back,
+  data, never as shell code: only those four assignments are accepted, each once, all four must be
+  there, the file must be the regular file `bin/up` wrote under that one name, and anything else
+  in it stops every command. `bin/up` itself exports the values it generated and never reads the file back,
   and `bin/selftest` reads the file a child `up` wrote the same way as every other command. A
   value the caller's shell holds under one of those names is never used.
 - `bao-init.json`: the single OpenBao unseal key, in base64 and in hex, and the root token.
@@ -223,10 +223,12 @@ daemon record leaves, is taken for none: a removal cut short at any point leaves
 next plain `down` removes. The daemon is asked before the claim is made on it;
 the four records are
 written whole and renamed into place, the first thing under `.state`, and a failure or a signal
-before they are in place, the exit handler armed before the directory is made and run on every
+before they are in place, the exit handler armed before the claim is taken and run on every
 exit but the one past the flag set once the fixture is up (a signal between two commands leaves
 the shell's status at 0), takes the records
-(when the daemon record is this run's), the directory and the claim with it, since nothing else
+(when the daemon record is this run's), the directory and the claim with it (only while the claim
+carries the nonce this `up` labelled its attempt with: one another `up` holds, or none, is not
+this one's to remove), since nothing else
 exists yet: so no `.state` without the record is one `up` left, and none is taken for a fixture
 on whichever daemon the shell reaches now. While a Compose volume is being made and its label not
 yet read back, the hint a failure prints names that volume to inspect by hand, not `--adopt`,
@@ -340,9 +342,10 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   of that name atomically, so of two `up` started together, from one checkout or two, only one
   proceeds. Docker can create the claim and still answer with an error (a connection lost after
   the request went through); an `up` refused that way looks at the claim, and one that carries
-  the nonce this very `up` labelled its attempt with is reported as its own, with a plain `down`
-  to remove it; a claim from this checkout under another nonce is a second `up` running here, and
-  is reported as such. The claim's label is what the commands read the claim by, and a container
+  the nonce this very `up` labelled its attempt with is reported as its own and removed by its
+  exit handler, which is armed before the claim is asked for, so that a signal while the create
+  returns leaves no claim either; a claim from this checkout under another nonce is a second `up`
+  running here, and is reported as such and left. The claim's label is what the commands read the claim by, and a container
   that carries it under another name is nobody's they know: `down` names it, removes nothing,
   and leaves it to be removed or relabelled by hand; on its way out `down` removes the claim
   container only, never every carrier of the label. `bin/down` refuses when the claim or Compose names another directory as the origin,

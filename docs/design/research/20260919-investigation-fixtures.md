@@ -91,7 +91,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 55); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 56); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed. Each revision was run this way again, from clean,
 before it was committed, and the run of the revision described here is the one recorded with the
@@ -1394,6 +1394,37 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     the fixture under the aside name with the impostor under its own. And item
     51's header counted nine findings accepted and none answered where that round had eight and
     one; corrected. No case is exercised as a race.
+
+56. **A repeated secret assignment refused, `selftest`'s reverses registered before each
+    create, `up`'s handler armed before the claim, the creation commit held to its shape, and no
+    credential on a command line.** A forty-ninth round: three findings from one reviewer and
+    three from the advisory review (degraded, four of nine chunks lost, two unverdicted), five
+    accepted and one answered. `secrets_load` accepted a `secrets.env` that set one of the four
+    names twice, the last value winning, where the fixture writes each once: a repeated name is
+    refused by line number (check 3). `selftest` registered the removal of the volume it makes
+    after `docker volume create` returned, and the removal of each impostor, claimant and network
+    after its create, so a signal inside the create left the object with nothing registered: each
+    reverse is registered before the create, and removes only what carries this run's label
+    (volumes) or what exists under the name and is not the fixture's own recorded container
+    (containers, networks), so an object the create never made is not removed. `up` armed its
+    exit handler after `claim_take` returned, so a signal while the create returned left the
+    claim with no handler to remove it: the handler is armed first, and removes the claim only
+    while it carries the nonce this `up` labelled its attempt with, so that another `up`'s claim,
+    or none, is left. `evidence` took `up-manifest` as whatever `cat` returned, so an empty
+    record, as an `up` interrupted while writing it leaves, had `versions.txt` name nothing as
+    what ran: the record must be one full commit ID (check 22). The OpenBao token and the
+    PostgreSQL password were passed to Docker as `--env NAME=value` and `-e NAME=value`, on the
+    client's command line where any local user reads it, at six sites (`bao_http` in `inject`,
+    whose comment claimed otherwise; `db-restore`'s `pg_restore`; `bao` and `pg` in `lib.sh`;
+    `up`'s policy write; `evidence`'s dumps): each is now a prefix assignment plus `--env NAME`,
+    which the client copies from its own environment, verified by hand on the pinned PostgreSQL
+    image (a name given without a value is copied, and stays unset in the container when unset
+    in the client). Answered, not changed: the advisory review read a window between `evidence`
+    creating its `.incomplete` marker and locking it, in which a sibling could take the lock
+    and scan the bundle; a sibling that wins the lock then scans a bundle that holds only the
+    marker, the creator dies at its own `flock`, and nothing that capture wrote is marked
+    scanned by another, so the window costs a run, never evidence. Not exercised: a signal
+    between the claim's create and its return; a marker lost to a sibling.
 
 ## 6. What each experiment gets
 

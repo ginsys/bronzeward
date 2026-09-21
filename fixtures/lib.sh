@@ -144,7 +144,7 @@ fi
 # be the regular file bin/up made, under that one name: with a second name outside .state the
 # secrets would outlive teardown there.
 secrets_load() {
-  local secret_line
+  local secret_line seen=' ' line_number=0
   [ -e "$STATE/secrets.env" ] || [ -L "$STATE/secrets.env" ] || return 0
   if [ -L "$STATE/secrets.env" ] || [ ! -f "$STATE/secrets.env" ] ||
     [ "$(stat --format=%h -- "$STATE/secrets.env" 2>/dev/null)" != 1 ]; then
@@ -152,7 +152,17 @@ secrets_load() {
     exit 1
   fi
   while IFS= read -r secret_line || [ -n "$secret_line" ]; do
+    line_number=$((line_number + 1))
     if [[ $secret_line =~ ^(BW_CANARY|BW_POSTGRES_PASSWORD|BW_BAO_ROOT_TOKEN|BW_BAO_METADATA_TOKEN)=([^[:space:]]+)$ ]]; then
+      # Each once: bin/up writes each name once, and a second line would have the later value
+      # stand for the one every earlier reading took.
+      case $seen in
+        *" ${BASH_REMATCH[1]} "*)
+          printf 'fixtures: %s line %d sets %s a second time, which the fixture never writes; remove the file and the fixture with it\n' "$STATE/secrets.env" "$line_number" "${BASH_REMATCH[1]}" >&2
+          exit 1
+          ;;
+      esac
+      seen="$seen${BASH_REMATCH[1]} "
       export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
     else
       printf 'fixtures: %s holds a line the fixture never writes; remove the file and the fixture with it\n' "$STATE/secrets.env" >&2
@@ -663,7 +673,7 @@ PG_LIMIT=60
 bao() {
   local id
   id=$(container_id "$BAO") || return 1
-  timeout "$REQUEST_LIMIT" docker exec -e BAO_TOKEN="${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}}" "$id" bao "$@"
+  BAO_TOKEN=${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}} timeout "$REQUEST_LIMIT" docker exec -e BAO_TOKEN "$id" bao "$@"
 }
 
 # The server is given the same limit, a second less: timeout ends the docker client, and the
@@ -677,7 +687,7 @@ pg_options() { printf -- '-c statement_timeout=%ds -c lock_timeout=%ds' "$((PG_L
 pg() {
   local id
   id=$(container_id "$PG") || return 1
-  timeout "$PG_LIMIT" docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" -e PGOPTIONS="$(pg_options)" "$id" "$@"
+  PGPASSWORD=$BW_POSTGRES_PASSWORD PGOPTIONS=$(pg_options) timeout "$PG_LIMIT" docker exec -e PGPASSWORD -e PGOPTIONS "$id" "$@"
 }
 
 # pg_client <psql args>: psql over TCP with the password, from a throwaway container inside the

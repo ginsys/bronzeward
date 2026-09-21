@@ -86,12 +86,13 @@ bao_http() { # bao_http <method> <api-path> [curl args]
   # docker run then fails with 125 before anything is sent (the ID itself was resolved above,
   # before the action began). The status is curl's own when the
   # client ran (7 never connected, 22 an HTTP error, 28 timed out) and Docker's 125 to 127 when it
-  # did not. The token goes in through the environment and curl expands it into the header, so
-  # that it is not on a command line. Stdin is handed through, for a body from a file.
+  # did not. The token goes in through the environment (the client copies a name given without a
+  # value from its own) and curl expands it into the header, so that it is on no command line,
+  # neither the client's nor curl's. Stdin is handed through, for a body from a file.
   # --max-time: a paused OpenBao accepts the connection and never answers; the action must end,
   # and be logged as failed, all the same.
   # --path-as-is: no '.' or '..' is let through above; this keeps curl from resolving one anyway.
-  docker run --rm --interactive --pull never --network "container:$bao_id" --env BAO_TOKEN="$BW_BAO_ROOT_TOKEN" "$CURL_IMAGE" \
+  BAO_TOKEN=$BW_BAO_ROOT_TOKEN docker run --rm --interactive --pull never --network "container:$bao_id" --env BAO_TOKEN "$CURL_IMAGE" \
     --disable --path-as-is --connect-timeout 5 --max-time 30 --fail --silent --show-error --request "$method" \
     --variable '%BAO_TOKEN' --expand-header 'X-Vault-Token: {{BAO_TOKEN}}' "http://127.0.0.1:8200/v1/$path" "$@"
 }
@@ -476,7 +477,7 @@ case $action in
     pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_restore
     pg createdb -U bronzeward --maintenance-db=postgres bronzeward_restore
     pg_id=$(container_id "$PG") || die "the PostgreSQL container was not verified under its name; nothing was changed"
-    if ! timeout 600 docker exec -i -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$pg_id" \
+    if ! PGPASSWORD=$BW_POSTGRES_PASSWORD timeout 600 docker exec -i -e PGPASSWORD "$pg_id" \
       pg_restore -U bronzeward --dbname=bronzeward_restore --exit-on-error <"$STATE/backups/pg-$1.dump"; then
       pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_restore ||
         say "fixtures: the half-restored database bronzeward_restore could not be dropped"

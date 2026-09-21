@@ -132,6 +132,10 @@ fixtures_tree_check "$out" "$out/fixtures-diff.txt" shown
 # bundle, and versions.txt says when they are not the same.
 created=$(cat "$STATE/up-manifest" 2>/dev/null) ||
   die "no record in $STATE of the commit the fixture was created at, as an up interrupted early leaves it; the bundle could not be tied to what ran"
+# Held to the one shape bin/up writes, a full commit ID: an empty or edited record would have
+# versions.txt name nothing, or a string that is no commit, as what the fixture was made from.
+[[ $created =~ ^[0-9a-f]{40}$ ]] ||
+  die "the record in $STATE of the commit the fixture was created at is not a commit ID; the bundle could not be tied to what ran"
 # Required, not taken as "the tree was the commit's" when absent: bin/up writes it empty then,
 # and one removed since would leave a fixture made from a dirty tree passing for the commit's.
 [ -e "$STATE/up-fixtures-diff.txt" ] ||
@@ -175,7 +179,7 @@ unset id
 dump_db() { # dump_db <database> <file>
   local id
   id=$(container_id "$PG" 2>/dev/null) || return 1
-  timeout 60 docker exec -e PGPASSWORD="$BW_POSTGRES_PASSWORD" "$id" pg_dump -U bronzeward "$1" >"$2" 2>/dev/null ||
+  PGPASSWORD=$BW_POSTGRES_PASSWORD timeout 60 docker exec -e PGPASSWORD "$id" pg_dump -U bronzeward "$1" >"$2" 2>/dev/null ||
     { rm -f "$2"; return 1; }
 }
 if ! { running "$PG" && dump_db bronzeward "$out/postgres.sql"; }; then
