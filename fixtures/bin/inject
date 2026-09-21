@@ -168,6 +168,15 @@ docker_applied() {
 }
 finish() {
   local rc=$? left status=failed applied
+  # A signal that ends the shell between two commands, or during a builtin, leaves the status of
+  # the command before it, which is 0 as a rule (observed: the handler sees 0 on a TERM during a
+  # function's sleep, and the shell still exits 143). Without the flag the last line sets, that 0
+  # would have an action the signal ended before it completed recorded as done. The commit checks
+  # below still turn it back into done where the artifact shows the commit went through.
+  if [ "$rc" -eq 0 ] && [ "$completed" -ne 1 ]; then
+    rc=1
+    say "fixtures: ended by a signal before the action completed"
+  fi
   # A signal that arrives while bash waits for a rename has it finish the child and run this
   # handler before the line that would have cleared the flags. The rename is the commit of a
   # snapshot and of a store restore, so one that did complete is recorded as done, whatever the
@@ -247,17 +256,29 @@ finish() {
   fi
   # An outcome that could not be recorded is a failure of its own; the action's status stands
   # otherwise, and is restated here so that nothing above decides it. No outcome without a begin:
-  # the handler is armed before the begin line is written, so that a signal between the two does
-  # not leave a begin with no outcome; one before the line is written leaves nothing.
+  # the handler is armed before the begin line is written, and a signal is held from before the
+  # line until the flag below is set, so that none leaves a begin with no outcome; one before the
+  # line is written leaves nothing.
   [ "$begun" -eq 1 ] || exit "$rc"
   if [ "$rc" -eq 0 ]; then record "done $action $logged" || rc=1; else record "$status rc=$rc $action $logged" || true; fi
   exit "$rc"
 }
 logged=$*
 begun=0
+completed=0
 trap finish EXIT
+# The begin line and the flag that arms the outcome are two commands, and a signal between them
+# would run finish with the line written and the flag not set, leaving a begin with no outcome.
+# The three signals a shell can be ended by are held until the flag is set, then delivered as they
+# came, and finish sees the flag.
+deferred=
+trap 'deferred=TERM' TERM
+trap 'deferred=HUP' HUP
+trap 'deferred=INT' INT
 record "begin $action $logged" || exit 1
 begun=1
+trap - TERM HUP INT
+[ -z "$deferred" ] || kill -s "$deferred" $$
 
 # snapshot <file> <command...>: the command writes the snapshot to stdout. It reaches its final name
 # only when the command succeeded, so a restore can never pick up a truncated one.
@@ -326,7 +347,7 @@ case $action in
         # bin/evidence does: a capture right after `done` must not find the node unavailable.
         node=$TALOS_WORKER_IP
         [ "$1" = worker ] || node=$TALOS_CONTROLPLANE_IP
-        talos_answers() { timeout "$REQUEST_LIMIT" "$CACHE/talosctl" -e "$node" -n "$node" version --short; }
+        talos_answers() { talosctl_timed "$REQUEST_LIMIT" -e "$node" -n "$node" version --short; }
         wait_for 180 "the Talos API on $node" talos_answers
         ;;
     esac
@@ -520,3 +541,4 @@ case $action in
     ;;
   *) usage ;;
 esac
+completed=1

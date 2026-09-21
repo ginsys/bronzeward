@@ -110,7 +110,7 @@ reported() {
 # plane does not make a healthy worker look dead. Bounded, so a paused or partitioned node cannot
 # hang the capture.
 node_tag() { # node_tag <ip>
-  timeout 20 "$CACHE/talosctl" -e "$1" -n "$1" version --short | awk '/Tag:/ {print $2}'
+  talosctl_timed 20 -e "$1" -n "$1" version --short | awk '/Tag:/ {print $2}'
 }
 
 # The commit captured under and how fixtures/ differs from it, the difference into the bundle
@@ -325,7 +325,7 @@ fi >"$out/openbao-client-view.txt"
 # Digest of each node's machine config, normalized to exactly one trailing newline (the jsonpath
 # output adds one). The config itself holds cluster secrets and is not copied into the bundle.
 for node in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
-  if config=$(timeout 20 "$CACHE/talosctl" -e "$node" -n "$node" \
+  if config=$(talosctl_timed 20 -e "$node" -n "$node" \
     get machineconfig v1alpha1 -o jsonpath='{.spec}' 2>/dev/null) && [ -n "$config" ]; then
     printf '%s %s\n' "$(printf '%s\n' "$config" | sha256sum | cut -d' ' -f1)" "$node"
   else
@@ -378,6 +378,11 @@ find "$STATE/evidence" -mindepth 1 -maxdepth 1 -print0 >"$out/.siblings" 2>/dev/
 siblings=()
 while IFS= read -r -d '' sibling; do
   [ ! -L "$sibling" ] || die "$(shown "$sibling") is a symlink; the fixture never makes one there. Results void"
+  # A marker that is a link: one that resolves is refused below as not a file to open, and one
+  # that does not would read as no marker at all, the bundle taken for a completed capture and
+  # left out of the scan. Neither is anything the fixture makes.
+  [ "$sibling" = "$out" ] || [ ! -L "$sibling/.incomplete" ] ||
+    die "the marker of the earlier capture $(shown "$sibling") is a symlink; the fixture never makes one there. Results void"
   [ "$sibling" = "$out" ] || [ ! -e "$sibling/.incomplete" ] || {
     # The marker locked, or the capture that made it is still running: its bundle is not all
     # there yet, and it scans itself. Held until the marker is removed below, so that no other

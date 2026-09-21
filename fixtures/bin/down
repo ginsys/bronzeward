@@ -323,16 +323,20 @@ claim_drop
 probe container claim_names
 verdict
 # The state directory goes last of all, after a verified clean teardown. The daemon record goes
-# last within it, and the compose record with it: a removal cut short in the middle (a signal, a
-# file that would not go) leaves a directory that up refuses as existing and, without the daemon
-# record, down would refuse as not one up left, so that what is left, evidence and secrets among
-# it, could only be removed by hand. With the record still there, the next plain down removes the
-# rest.
+# last within it, and the two Compose records with it: a removal cut short in the middle (a
+# signal, a file that would not go) leaves a directory that up refuses as existing and, without
+# the daemon record, down would refuse as not one up left, so that what is left, evidence and
+# secrets among it, could only be removed by hand. With the record still there, the next plain
+# down removes the rest. The Compose records go together, the compose file first: Compose is run
+# from the recorded compose file whenever it is there, with the recorded environment beside it,
+# and a cut that left the one without the other would have the next down fail before it could
+# start; one that left the environment alone has the checkout's files taken, which the guard at
+# load holds to that record.
 
 case $STATE in
   */fixtures/.state)
-    find "$STATE" -mindepth 1 -maxdepth 1 ! -name up-daemon ! -name up-compose.yaml -exec rm -rf -- {} + &&
-      rm -f -- "$STATE/up-compose.yaml" "$STATE/up-daemon" &&
+    find "$STATE" -mindepth 1 -maxdepth 1 ! -name up-daemon ! -name up-compose.yaml ! -name up-versions.env -exec rm -rf -- {} + &&
+      rm -f -- "$STATE/up-compose.yaml" "$STATE/up-versions.env" "$STATE/up-daemon" &&
       rmdir -- "$STATE"
     ;;
   *) die "refusing to delete unexpected state path $STATE" ;;

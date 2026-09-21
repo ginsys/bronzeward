@@ -523,6 +523,16 @@ talosctl() {
   fi
   "$CACHE/talosctl" "$@"
 }
+# talosctl_timed <seconds> <args...>: the same, bounded. timeout runs a program, not a function, so
+# a bounded call names the binary itself; the check goes before it here, so that no call site runs
+# the cached file unchecked.
+talosctl_timed() {
+  if [ "$talosctl_verified" -eq 0 ]; then
+    tool_verify talosctl "$TALOSCTL_SHA256"
+    talosctl_verified=1
+  fi
+  timeout "$1" "$CACHE/talosctl" "${@:2}"
+}
 
 # Every curl of the fixture ignores the caller's curlrc: an `output` or a `proxy` set there would
 # send a snapshot somewhere else, or a token through a proxy, with curl still exiting 0. --disable
