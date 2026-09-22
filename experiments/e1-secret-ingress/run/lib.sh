@@ -45,6 +45,11 @@ e1_need_fixture() {
   [ -n "${BW_CANARY:-}" ] || die "the fixture published no canary; results would be unattributable"
   [ -n "${BW_POSTGRES_PASSWORD:-}" ] || die "the fixture published no database password"
   [ -n "${BW_BAO_ROOT_TOKEN:-}" ] || die "the fixture published no OpenBao token"
+  # Without this the fixture's container table is empty, so pg() refuses by name and every command
+  # that goes through it fails. That is how the screen's dump column came to be vacuous: e1_dump
+  # failed for every row, the failure was redirected away, and a dump that was never taken was
+  # counted as a dump holding nothing.
+  containers_own
 }
 
 # e1_build: compile the prototype once per matrix. Its build cache and temporary files go under

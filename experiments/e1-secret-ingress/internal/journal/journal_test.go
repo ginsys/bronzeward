@@ -181,6 +181,70 @@ func TestVerifyCatchesPersistFirst(t *testing.T) {
 	}
 }
 
+// TestVerifyCatchesAWriteThatNamesNoSecret is the case the two tests above could not express, and
+// the reason all three --persist-first controls passed on the real fixture while these passed here.
+//
+// Both write records above carry a Digests list, because the test author wrote down what the
+// forbidden design ought to record. The prototype's own control does not: it writes the whole
+// observed document before anything has been extracted, so there is no secret to name yet and the
+// list is empty. A rule quantified over that list is then vacuously satisfied, and the verifier
+// reported "ok" for exactly the design the experiment exists to detect.
+//
+// The fix asserts the phase order itself. This test holds it: a write that names nothing, before
+// any extraction, is a violation.
+func TestVerifyCatchesAWriteThatNamesNoSecret(t *testing.T) {
+	a := digestOf("talos-ca-key")
+	records := []Record{
+		{Seq: 1, Event: EventCheckpoint, Checkpoint: "after-parse", MonoNanos: 10},
+		{Seq: 2, Event: EventWrite, Surface: "machine_draft (plaintext, before extraction)", MonoNanos: 20},
+		{Seq: 3, Event: EventExtracted, Digests: []string{a}, MonoNanos: 30},
+	}
+
+	violations := Verify(records)
+	if len(violations) != 1 {
+		t.Fatalf("Verify reported %d violations, want exactly 1: %v", len(violations), violations)
+	}
+	if violations[0].Seq != 2 {
+		t.Errorf("the violation points at sequence %d, want 2", violations[0].Seq)
+	}
+	if r := violations[0].Reason; !strings.Contains(r, "before the first extraction") {
+		t.Errorf("the violation does not say the write came before extraction: %q", r)
+	}
+}
+
+// TestVerifyAllowsADeclaredRecovery covers the one write with no extraction in its own journal that
+// is not a violation: a second principal resuming an interrupted run out of encrypted staging. The
+// extraction happened under the crashed run's identity and is recorded there, which the write says.
+// Without the carve-out the recovery comparison the two staging alternatives exist for would report
+// a §7.1 violation for behaving correctly.
+func TestVerifyAllowsADeclaredRecovery(t *testing.T) {
+	records := []Record{
+		{Seq: 1, Event: EventNote, Detail: "resumed run crashed-in-review-encrypted from encrypted staging", MonoNanos: 10},
+		{Seq: 2, Event: EventWrite, Surface: "machine_draft.document", Detail: "recover:crashed-in-review-encrypted", MonoNanos: 20},
+	}
+
+	if v := Verify(records); v != nil {
+		t.Errorf("a declared recovery reported violations: %v", v)
+	}
+}
+
+// TestVerifyRejectsAnUndeclaredWriteWithoutExtraction is that carve-out's own control. The marker
+// on the write record is what distinguishes a recovery from a run that simply persisted and
+// extracted nothing, so a journal without it must still fail.
+func TestVerifyRejectsAnUndeclaredWriteWithoutExtraction(t *testing.T) {
+	records := []Record{
+		{Seq: 1, Event: EventWrite, Surface: "machine_draft.document", MonoNanos: 10},
+	}
+
+	violations := Verify(records)
+	if len(violations) != 1 {
+		t.Fatalf("Verify reported %d violations, want exactly 1: %v", len(violations), violations)
+	}
+	if r := violations[0].Reason; !strings.Contains(r, "extracted no secret at all") {
+		t.Errorf("the violation does not say why it fired: %q", r)
+	}
+}
+
 // TestVerifyCatchesRedactAfter covers the variant §7.1 singles out: the plaintext is written, then
 // replaced by references. The later extraction does not repair the earlier write, and Verify must
 // not be fooled by the run ending in a tidy state.

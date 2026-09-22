@@ -217,7 +217,7 @@ func verifyOrder(args []string, stdout io.Writer) error {
 		return fmt.Errorf("%d ordering violation(s) in %s across %d records", len(violations), path, len(records))
 	}
 
-	fmt.Fprintf(stdout, "ok: %d records in %s, every write preceded by the extraction of every secret it lists\n",
+	fmt.Fprintf(stdout, "ok: %d records in %s, no write before the first extraction and every secret a write lists extracted before it\n",
 		len(records), path)
 	return nil
 }

@@ -7,7 +7,18 @@
 # heap, the write-ahead log or the backups, which is where the redact-after control's whole result
 # lives. Depth comes from run/capture, and the report must label this table as a screen.
 #
-# Usage: E1_OUT=<dir> run/screen [--marks <file>|--mark-suffix <list>]
+# Usage: E1_OUT=<dir> run/screen [--reset-tables] [--marks <file>|--mark-suffix <list>]
+#
+# --reset-tables empties the prototype's tables before the screen starts. It is needed after the
+# matrix has run, because the deliberate --persist-first controls committed plaintext and it is
+# still in the live rows: every row of the screen would then report a dump hit that no screen run
+# wrote. Never pass it while a matrix or a capture is in flight — it would delete another run's
+# staging claim underneath it.
+#
+# It empties the tables; it does not erase anything. The plaintext those controls committed stays
+# in the heap, the write-ahead log and the snapshots, which is the finding, not a side effect. The
+# screen only ever reads a logical dump, so emptying the tables makes the dump column report what
+# the screen's own runs wrote rather than what an earlier control left.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname -- "$0")/lib.sh"
@@ -15,17 +26,35 @@ set -euo pipefail
 need docker grep sed awk wc date go
 
 mark_args=()
-case ${1:-} in
-  --marks | --mark-suffix)
-    [ -n "${2:-}" ] || die "$1 needs a value"
-    mark_args=("$1=$2")
-    ;;
-  "") ;;
-  *) die "usage: run/screen [--marks <file>|--mark-suffix <list>]" ;;
-esac
+reset=no
+while [ $# -gt 0 ]; do
+  case $1 in
+    --reset-tables)
+      reset=yes
+      shift
+      ;;
+    --marks | --mark-suffix)
+      [ -n "${2:-}" ] || die "$1 needs a value"
+      mark_args=("$1=$2")
+      shift 2
+      ;;
+    *) die "usage: run/screen [--reset-tables] [--marks <file>|--mark-suffix <list>]" ;;
+  esac
+done
 
 e1_need_fixture
 e1_build
+
+if [ "$reset" = yes ]; then
+  # TRUNCATE rather than DROP: the schema is the prototype's, created once at first ingest, and
+  # re-creating it is not what is being screened.
+  pg psql --username=bronzeward --dbname=bronzeward --no-password --quiet \
+    -c 'TRUNCATE machine_draft, parsed_index, secret_reference, ingest_journal, staging_claim, encrypted_baseline' ||
+    die "the tables could not be emptied; the dump column below would report an earlier control's
+plaintext for every row and none of it would be about this screen"
+  say "screen: the prototype's tables were emptied first. The rows are gone; what the deliberate"
+  say "screen: controls wrote is still in the heap, the write-ahead log and the snapshots."
+fi
 
 # Every run gets an identifier no earlier run used. The tables key on run_id — staging_claim by
 # primary key, parsed_index and secret_reference by (run_id, path), encrypted_baseline uniquely —
@@ -34,7 +63,15 @@ e1_build
 # identifiers inside one fixture are not.
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 
-report=$(e1_report screen.tsv)
+# The mark source is part of the table's identity. The second pass exists to show the ordering
+# results do not depend on which marking syntax is used, and a run that overwrote the first pass's
+# table would leave nothing to compare it against.
+if [ "${#mark_args[@]}" -eq 0 ]; then
+  report=$(e1_report screen.tsv)
+else
+  report=$(e1_report "screen-${mark_args[0]#--}.tsv")
+  report=${report//[^A-Za-z0-9._\/-]/_}
+fi
 printf 'flow\tstaging\toutcome\tcrash_at\trun_id\tstatus\trun_root_hits\tdump_hits\torder\n' >"$report"
 
 # The crossing order, which is also the order the boundary map lists. "none" is the uninterrupted
@@ -80,12 +117,18 @@ for flow in "${flows[@]}"; do
           rejected:*:exit-*) expected=yes status=refused-as-expected ;;
         esac
 
+        # A dump that could not be taken is not a dump that held nothing. The earlier version of
+        # this line sent the failure to /dev/null and left an empty file behind, so e1_hits counted
+        # zero and every row passed its dump check without a dump ever being read — the same
+        # false-clean the two-line bundle invariant exists to prevent, one tier up.
         dump=$E1_RUNS/$run_id.sql
-        e1_dump "$dump" 2>/dev/null || printf -- '-- dump unavailable\n' >"$dump"
+        dumped=yes
+        e1_dump "$dump" 2>"$dump.err" || dumped=no
 
         root_hits=0
         [ ! -d "$run_root" ] || root_hits=$(e1_hits "$run_root")
-        dump_hits=$(e1_hits "$dump")
+        dump_hits=-
+        [ "$dumped" = no ] || dump_hits=$(e1_hits "$dump")
 
         # The run root always holds the reachability control, which is one deliberate hit. Anything
         # beyond it is a candidate leak; nothing at all means the control was never planted and the
@@ -109,11 +152,17 @@ for flow in "${flows[@]}"; do
             failures=$((failures + 1))
             ;;
         esac
-        [ "$dump_hits" -eq 0 ] || { verdict="$verdict/dump-leak"; failures=$((failures + 1)); }
+        if [ "$dumped" = no ]; then
+          verdict="$verdict/dump-unavailable"
+          failures=$((failures + 1))
+        elif [ "$dump_hits" -ne 0 ]; then
+          verdict="$verdict/dump-leak"
+          failures=$((failures + 1))
+        fi
 
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
           "$flow" "$staging" "$outcome" "$crash" "$run_id" "$verdict" "$root_hits" "$dump_hits" "$order" >>"$report"
-        rm -f -- "$dump"
+        rm -f -- "$dump" "$dump.err"
       done
     done
   done
