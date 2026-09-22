@@ -298,11 +298,12 @@ rather than at the fragments its tests were written from. The section is ordered
 deliberately, because one shape recurs and it is the failure mode this whole experiment is exposed
 to: **a check that could not have failed**.
 
-Five of the thirteen below are that shape — 5.2, 5.5, 5.11, 5.12 and the statement-log control in
-4.3. A silently truncated document, a screen counting runs that never ran, a verifier quantified
-over an empty list, a dump that was never taken, a control writing to a surface that was switched
-off. Every one of them reported success. None of them is visible in the evidence they produced,
-because the evidence they produced was "nothing found", which is also what a correct run produces.
+Six of the fourteen below are that shape — 5.2, 5.5, 5.11, 5.12, 5.14 and the statement-log control
+in 4.3. A silently truncated document, a screen counting runs that never ran, a verifier quantified
+over an empty list, a dump that was never taken, a lint reading a file from outside the tree it was
+checking, a control writing to a surface that was switched off. Every one of them reported success.
+None is visible in the evidence it produced, because the evidence it produced was "nothing found",
+which is also what a correct run produces.
 
 An experiment whose instrument can report clean without looking proves nothing at all, and the
 count above is the honest reason for every positive control described in section 4.
@@ -435,7 +436,7 @@ extraction of its own, and its record names the run it resumed, so that case is 
 explicitly rather than falling through. Three tests were added, one of them the write that names
 nothing.
 
-This is one of the five checks in this experiment that could not fail, listed at the top of this
+This is one of the six checks in this experiment that could not fail, listed at the top of this
 section. Each was found the same way: by asking what would have to be true for the check to report a
 failure, and then noticing that nothing could make it.
 
@@ -461,6 +462,21 @@ instead of asserting it.
 The refusal is the interesting half. That check exists because a mark naming a path the document
 does not have is indistinguishable, in every other piece of evidence, from a mark that found nothing
 to extract.
+
+### 5.14 The lint passed locally by reading a file outside the tree under test
+
+`run/lib.sh` sources the fixtures library through a `# shellcheck source=../../../fixtures/lib.sh`
+directive, with no `source-path`, so shellcheck resolved it against its own working directory rather
+than against the script. The work was done in a linked worktree, where three levels above the
+checkout root is the main checkout — which has its own `fixtures/lib.sh`. The path resolved, the
+lint passed, and it was reading a file from outside the tree it was checking.
+
+CI has no such parent directory. The same command, the same pinned shellcheck version, the same
+working directory relative to the checkout: fail.
+
+The directive now says `source-path=SCRIPTDIR`, which resolves against the script and gives the same
+answer everywhere. The defect class is the one this section keeps returning to: the check ran, it
+reported success, and what it actually examined was not what anyone intended.
 
 ## 6. What this decides
 
@@ -580,11 +596,11 @@ first is feasible, for this prototype, these flows, these secrets and these boun
    And every document in a multi-document stream must be addressable, which this prototype had to be
    corrected to do (5.2).
 
-6. **Treat the five vacuous checks in section 5 as a standing hazard for the evidence work, not as
+6. **Treat the six vacuous checks in section 5 as a standing hazard for the evidence work, not as
    incidents.** A control that comes back clean because its surface was switched off, a screen that
    counts runs that never ran, a dump that was never taken, a verifier quantified over an empty
-   list, a document read only as far as its first `---`: each looked exactly like a passing result.
-   The habit that found all five is asking what
-   would have to be true for the check to fail, and confirming something could make it. Any
+   list, a document read only as far as its first `---`, a lint reading a file from outside the tree
+   under test: each looked exactly like a passing result. The habit that found all six is asking
+   what would have to be true for the check to fail, and confirming something could make it. Any
    subsequent experiment producing absence evidence should carry a positive control per surface and
    assert it, which is what the reachability control and the two-line invariant do here.

@@ -13,7 +13,11 @@ E1_DIR=$(dirname -- "$E1_RUN_DIR")
 REPO_DIR=$(cd -- "$E1_DIR/../.." && pwd)
 FIXTURES_DIR=$REPO_DIR/fixtures
 
-# shellcheck source=../../../fixtures/lib.sh
+# source-path=SCRIPTDIR is required, not decoration. Without it shellcheck resolves the source path
+# against its own working directory, so `shellcheck -x experiments/e1-secret-ingress/run/*` from the
+# repository root looked for fixtures/lib.sh three levels above the checkout and reported SC1091.
+# That is how the lint task passed locally, run from this directory, and failed in CI.
+# shellcheck source-path=SCRIPTDIR source=../../../fixtures/lib.sh
 . "$FIXTURES_DIR/lib.sh"
 
 # The output directory is the operator's to choose and is deliberately not defaulted. Every bundle
