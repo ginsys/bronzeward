@@ -61,9 +61,6 @@ func respond(t *testing.T, w http.ResponseWriter, status int, payload any) {
 	}
 }
 
-// TestPutAddressesTheVersionItWrote covers the KV v2 write and the URI it produces. The version
-// matters: without it the URI names a path whose value a later write could change, and a read back
-// would return something this run never stored.
 // TestKVPathRefusesKeysAURLWouldRewrite covers the keys that would reach a different secret than
 // the one named. The control case is the shape every real key has — a run identifier and a
 // document path, brackets included — and it must pass through byte-for-byte, because the committed
@@ -102,6 +99,9 @@ func TestTransitPathRefusesKeyNamesAURLWouldRewrite(t *testing.T) {
 	}
 }
 
+// TestPutAddressesTheVersionItWrote covers the KV v2 write and the URI it produces. The version
+// matters: without it the URI names a path whose value a later write could change, and a read back
+// would return something this run never stored.
 func TestPutAddressesTheVersionItWrote(t *testing.T) {
 	c, rec := server(t, func(w http.ResponseWriter, _ *http.Request) {
 		respond(t, w, http.StatusOK, map[string]any{"data": map[string]any{"version": 3}})
@@ -126,6 +126,49 @@ func TestPutAddressesTheVersionItWrote(t *testing.T) {
 	}
 	if !strings.Contains(rec.body, "private-key-value") {
 		t.Errorf("the value did not reach the server: %q", rec.body)
+	}
+}
+
+// TestPutRefusesInvalidUTF8 checks a value JSON would rewrite is refused before it is sent, rather
+// than stored as U+FFFD under a URI that claims to address it.
+func TestPutRefusesInvalidUTF8(t *testing.T) {
+	c, rec := server(t, func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, http.StatusOK, map[string]any{"data": map[string]any{"version": 1}})
+	})
+
+	if uri, err := c.Put(t.Context(), "run-1/x", []byte("ab\xff\xfecd")); err == nil {
+		t.Fatalf("Put accepted a value that is not valid UTF-8 and returned %q", uri)
+	}
+	if rec.method != "" {
+		t.Errorf("the value was sent before it was refused: %s %s", rec.method, rec.path)
+	}
+}
+
+// TestRedirectsAreNotFollowed checks neither the token nor a secret body is replayed to wherever a
+// 3xx points. The second server stands for that other host: it must never see a request.
+func TestRedirectsAreNotFollowed(t *testing.T) {
+	const plaintext = "E1-PROVIDER-PLAINTEXT-MUST-NOT-TRAVEL"
+
+	var elsewhere int
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		elsewhere++
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(other.Close)
+
+	c, rec := server(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	})
+
+	if _, err := c.Put(t.Context(), "run-1/machine.token", []byte(plaintext)); err == nil {
+		t.Fatal("Put succeeded against a redirect")
+	}
+	// The control: the first server really was asked, with the secret in the body.
+	if !strings.Contains(rec.body, plaintext) {
+		t.Fatalf("the request did not carry the plaintext, so this test proves nothing: %q", rec.body)
+	}
+	if elsewhere != 0 {
+		t.Errorf("the redirect was followed %d time(s), replaying the token and the body", elsewhere)
 	}
 }
 

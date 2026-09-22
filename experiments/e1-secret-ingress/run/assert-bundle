@@ -45,8 +45,11 @@ lines=$(sed '/^$/d' "$scan" | wc -l)
 
 # Evidence captured against unmodified fixtures at the recorded manifest commit. A bundle taken
 # against a locally edited fixture is not comparable with any other, and the report cites the
-# manifest commit as if it were.
-if [ -s "$bundle/fixtures-diff.txt" ]; then
+# manifest commit as if it were. The fixture writes the file on every capture, empty when the tree
+# matched, so an absent one is a capture that never ran the check, not a clean one.
+if [ ! -e "$bundle/fixtures-diff.txt" ]; then
+  bad "fixtures-diff.txt is missing; the fixture-integrity check would be vacuous"
+elif [ -s "$bundle/fixtures-diff.txt" ]; then
   bad "fixtures/ differed from the manifest commit when this bundle was taken (fixtures-diff.txt is not empty)"
 fi
 

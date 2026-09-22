@@ -39,20 +39,47 @@ func assertRedacted(t *testing.T, what, got string) {
 // assertNoPlaintext fails if the plaintext appears in any spelling fmt produces for a byte slice:
 // as text, as the decimal list %v gives a []byte, or as hex. The first version looked only for the
 // text, so a []byte field printed as [69 49 45 ...] passed it, and that leak was caught only
-// because the same output also lacked the redaction.
+// because the same output also lacked the redaction. The Go-syntax list, 0x45, 0x31, ..., which is
+// what a []byte field prints under %#v, was missing until a review pointed it out.
 func assertNoPlaintext(t *testing.T, what, got string) {
 	t.Helper()
+	for spelling, needle := range plaintextSpellings() {
+		if strings.Contains(got, needle) {
+			t.Errorf("%s leaked the plaintext as %s: %s", what, spelling, got)
+		}
+	}
+}
+
+// plaintextSpellings is every form fmt gives the plaintext's bytes, keyed by a name for the error.
+// TestEverySpellingIsRecognised holds it to the verbs the tests use.
+func plaintextSpellings() map[string]string {
 	b := []byte(plaintext)
-	inner := strings.Trim(fmt.Sprint(b), "[]")
-	for spelling, needle := range map[string]string{
+	goSyntax := fmt.Sprintf("%#v", b)
+	return map[string]string{
 		"text":         plaintext,
-		"decimal":      inner,
+		"decimal":      strings.Trim(fmt.Sprint(b), "[]"),
 		"hex":          hex.EncodeToString(b),
 		"upper hex":    strings.ToUpper(hex.EncodeToString(b)),
 		"spaced bytes": fmt.Sprintf("% x", b),
-	} {
-		if strings.Contains(got, needle) {
-			t.Errorf("%s leaked the plaintext as %s: %s", what, spelling, got)
+		"Go syntax":    goSyntax[strings.Index(goSyntax, "{")+1 : len(goSyntax)-1],
+	}
+}
+
+// TestEverySpellingIsRecognised calibrates assertNoPlaintext against the leak it exists to catch:
+// for every verb the redaction tests use, the unprotected control's rendering must match at least
+// one spelling. A verb whose leak no needle matches would pass those tests however it leaked.
+func TestEverySpellingIsRecognised(t *testing.T) {
+	leaky := unprotected{plaintext: []byte(plaintext)}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%x", "%X", "%d", "%q"} {
+		got := fmt.Sprintf(verb, leaky)
+		matched := false
+		for _, needle := range plaintextSpellings() {
+			if strings.Contains(got, needle) {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Errorf("no spelling recognises the leak %s prints: %s", verb, got)
 		}
 	}
 }

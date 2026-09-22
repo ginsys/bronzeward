@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -106,8 +107,13 @@ func Run(ctx context.Context, req Request) (Result, error) {
 	// the one caller happened to sort first; a caller assembling paths from a map would have made
 	// two runs over the same document disagree, which is exactly the comparison the journal exists
 	// for.
+	//
+	// A path named twice — once by schema detection and once by an operator mark — is one location,
+	// and is extracted once. Without the dedup its second visit found the reference the first had
+	// just written and refused the run as a re-ingestion.
 	paths := append([]string(nil), req.Paths...)
 	sort.Strings(paths)
+	paths = slices.Compact(paths)
 	for _, path := range paths {
 		value, ok := req.Document.Get(path)
 		if !ok {
