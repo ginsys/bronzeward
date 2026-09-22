@@ -135,7 +135,21 @@ type claims struct {
 }
 
 // leaseInterval is the lease as a PostgreSQL interval literal, for expiry computed on the server.
-func (c *claims) leaseInterval() string { return fmt.Sprintf("%d seconds", int(c.lease.Seconds())) }
+// Fractional seconds are kept: truncating to whole seconds made any sub-second lease "0 seconds",
+// a claim that expired as it was created. A whole-second lease renders as before, "600 seconds".
+func (c *claims) leaseInterval() string {
+	return strconv.FormatFloat(c.lease.Seconds(), 'f', -1, 64) + " seconds"
+}
+
+// normaliseLease applies DefaultLease to a lease below PostgreSQL's interval resolution, one
+// microsecond, which includes a zero or negative one: such a lease could only produce a claim
+// already expired.
+func normaliseLease(lease time.Duration) time.Duration {
+	if lease < time.Microsecond {
+		return DefaultLease
+	}
+	return lease
+}
 
 // insert writes the claim row and sets cl.ExpiresAt to the expiry the server recorded.
 //
@@ -234,7 +248,7 @@ func (c *claims) heartbeat(ctx context.Context, runID string) error {
 		`UPDATE staging_claim
 		    SET heartbeat_at = clock_timestamp(), expires_at = clock_timestamp() + $2::interval
 		  WHERE run_id = $1 AND state = 'held' AND expires_at > clock_timestamp()`,
-		runID, fmt.Sprintf("%d seconds", int(c.lease.Seconds())))
+		runID, c.leaseInterval())
 	if err != nil {
 		return fmt.Errorf("staging: extending the lease on %s: %w", runID, err)
 	}
@@ -260,11 +274,8 @@ type Transient struct {
 
 // NewTransient builds transient staging.
 func NewTransient(db *sql.DB, lease time.Duration) *Transient {
-	if lease <= 0 {
-		lease = DefaultLease
-	}
 	return &Transient{
-		claims: claims{db: db, lease: lease},
+		claims: claims{db: db, lease: normaliseLease(lease)},
 		held:   map[string]secret.Sanitized{},
 	}
 }
@@ -375,11 +386,8 @@ func NewEncrypted(db *sql.DB, c Cipher, keyName string, lease time.Duration) (*E
 	if keyName == "" {
 		return nil, errors.New("staging: encrypted staging needs a key name")
 	}
-	if lease <= 0 {
-		lease = DefaultLease
-	}
 	return &Encrypted{
-		claims:  claims{db: db, lease: lease},
+		claims:  claims{db: db, lease: normaliseLease(lease)},
 		cipher:  c,
 		keyName: keyName,
 	}, nil
