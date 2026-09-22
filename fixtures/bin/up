@@ -343,7 +343,8 @@ wait_for 60 "an active OpenBao node" bao token lookup
 bao secrets enable -path=secret -version=2 kv >/dev/null
 bao secrets enable transit >/dev/null
 bao write -force transit/keys/bw-artifact >/dev/null
-bao kv put secret/fixture/inline value="$BW_CANARY" >/dev/null
+# The canary over stdin, not on the CLI's command line: it is what the leak scan looks for.
+printf '%s' "$BW_CANARY" | bao_stdin kv put secret/fixture/inline value=- >/dev/null
 
 # A metadata-only identity: the classification experiment must not be able to read values.
 bao_id=$(container_id "$BAO") || die "the OpenBao container was not recorded above"

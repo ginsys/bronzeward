@@ -91,7 +91,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 57); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 58); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed. Each revision was run this way again, from clean,
 before it was committed, and the run of the revision described here is the one recorded with the
@@ -1455,6 +1455,29 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     (from the container's environment over stdin, on no command line, verified first on a
     throwaway container of the pinned image: `-c` does not interpolate a psql variable, stdin
     does) and asserts the start is `failed` and the password is back.
+
+58. **The unseal key and the canary over stdin, and `down`'s last look under every fixed
+    name.** A fifty-first round: three findings from one reviewer, two accepted and one
+    answered; the advisory review reported none (degraded, four of nine chunks lost). Item 56
+    claimed no credential on a command line while `bao_unseal` still passed the unseal key to
+    `bao operator unseal` as an argument, on the CLI's command line inside the container, where
+    any user there reads it: that command takes the key as an argument or asks for it on a
+    terminal, and refuses a pipe (verified on the pinned image), so the key goes over stdin to
+    the unseal endpoint instead (`bao write sys/unseal key=-` through `docker exec -i`, as
+    `bao_stdin` in `lib.sh`), and the answer is held to unsealed, since the endpoint answers
+    the seal status whatever the key did. The canary went the same way at three sites no
+    reviewer raised (`up`'s and `selftest`'s `kv put`, and every `selftest` statement through
+    its `sql` helper): `value=-` and psql over stdin, verified first on a throwaway container
+    of the pinned OpenBao image (`value=-` keeps the bytes on stdin exactly, a trailing newline
+    included, so none is sent). `down`'s last look was by label for containers and networks
+    (and, since item 57, by name for volumes): a container or network made under one of the
+    fixture's fixed names since the removal, without the label, passed it, and the next `up`
+    refused the name while this run had reported nothing left. Each of the four container
+    names, both network names and, once the claim is dropped, the claim's name is probed
+    exactly, as the volumes are (not exercised: the window is inside `down`). Answered, not
+    changed: the reviewer read section 4 as recording an earlier revision's run; each revision
+    is run from clean before it is committed, and the run recorded is the described
+    revision's, as the section says.
 
 ## 6. What each experiment gets
 

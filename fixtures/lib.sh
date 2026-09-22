@@ -689,6 +689,14 @@ pg() {
   id=$(container_id "$PG") || return 1
   PGPASSWORD=$BW_POSTGRES_PASSWORD PGOPTIONS=$(pg_options) timeout "$PG_LIMIT" docker exec -e PGPASSWORD -e PGOPTIONS "$id" "$@"
 }
+# pg_stdin <command>: as pg, with the caller's stdin handed to the command, for a statement that
+# names the canary or a password: on psql's `-c` it would be on a command line inside the
+# container, readable by any local user there.
+pg_stdin() {
+  local id
+  id=$(container_id "$PG") || return 1
+  PGPASSWORD=$BW_POSTGRES_PASSWORD PGOPTIONS=$(pg_options) timeout "$PG_LIMIT" docker exec -i -e PGPASSWORD -e PGOPTIONS "$id" "$@"
+}
 
 # pg_client <psql args>: psql over TCP with the password, from a throwaway container inside the
 # network namespace of the container verified under the name, to that container's own address on
@@ -859,10 +867,23 @@ scan_patterns() {
     awk 'length($0) >= 8' | sort -u
 }
 
+# bao_stdin <args>: as bao, with the caller's stdin handed to the CLI, for a value it reads from
+# there (`key=-`, `value=-`, `-` as a file): the CLI's command line inside the container is
+# readable by any local user, as the client's is, so no key or canary is put on either.
+bao_stdin() {
+  local id
+  id=$(container_id "$BAO") || return 1
+  BAO_TOKEN=${BAO_TOKEN:-${BW_BAO_ROOT_TOKEN:-}} timeout "$REQUEST_LIMIT" docker exec -i -e BAO_TOKEN "$id" bao "$@"
+}
+
+# The unseal key goes over stdin to the unseal endpoint: `bao operator unseal` takes the key on
+# its command line or asks for it on a terminal, and refuses a pipe (verified on the pinned
+# image). The endpoint answers the seal status whatever the key did, so the answer is held to
+# unsealed.
 bao_unseal() {
-  local key
-  key=$(jq -r '.unseal_keys_b64[0]' "$STATE/bao-init.json")
-  bao operator unseal "$key" >/dev/null
+  local status
+  status=$(jq -j '.unseal_keys_b64[0]' "$STATE/bao-init.json" | bao_stdin write -format=json sys/unseal key=-) || return 1
+  jq -e '.data.sealed == false' <<<"$status" >/dev/null
 }
 
 # wait_for <seconds> <description> <command...>

@@ -323,22 +323,37 @@ probe container docker ps --all --filter "label=$compose_label" --format '{{.Nam
 probe network docker network ls --filter "label=$talos_label" --format '{{.Name}}'
 probe network docker network ls --filter "label=$compose_label" --format '{{.Name}}'
 probe volume docker volume ls --filter "label=$compose_label" --format '{{.Name}}'
-# volume_exact <name>: the name, if a volume of exactly that name exists. Docker documents its name
-# filter as matching part of a name too (observed to take an anchored regular expression, which
-# the documentation does not promise), so the listing is held to the whole name here.
-volume_exact() {
+# exact <kind> <name>: the name, if a container, network or volume of exactly that name exists.
+# Docker documents its name filter as matching part of a name too (observed to take an anchored
+# regular expression, which the documentation does not promise), so the listing is held to the
+# whole name here.
+exact() {
   local names
-  names=$(docker volume ls --quiet --filter "name=$1") || return 1
-  grep --line-regexp --fixed-strings -- "$1" <<<"$names" || [ $? -eq 1 ]
+  case $1 in
+    container) names=$(docker ps --all --filter "name=$2" --format '{{.Names}}') || return 1 ;;
+    network) names=$(docker network ls --filter "name=$2" --format '{{.Name}}') || return 1 ;;
+    volume) names=$(docker volume ls --quiet --filter "name=$2") || return 1 ;;
+  esac
+  grep --line-regexp --fixed-strings -- "$2" <<<"$names" || [ $? -eq 1 ]
 }
-for volume in "${node_volumes[@]}"; do
-  probe volume volume_exact "$volume"
+# Every fixed name by its exact name too, not by the labels alone: a container, network or volume
+# made under one of them since the removal, without the label, would pass the listings above, and
+# the next up would refuse the name while this run had reported nothing left. The four containers
+# and the two networks (Compose names its default network after the project; the Talos
+# provisioner names its network after the cluster), then the node volumes and the declared
+# Compose volumes.
+for name in "$PG" "$BAO" "$CP" "$WORKER"; do
+  probe container exact container "$name"
 done
-# The declared Compose volumes by their exact names too, not by the label alone: one made under
-# a name since the removal, without the label, would pass the listing above, and the next up
-# would refuse the name while this run had reported nothing left.
+for name in "${FIXTURE_NAME}_default" "$FIXTURE_NAME"; do
+  probe network exact network "$name"
+done
+unset name
+for volume in "${node_volumes[@]}"; do
+  probe volume exact volume "$volume"
+done
 for volume in $compose_volumes; do
-  probe volume volume_exact "$volume"
+  probe volume exact volume "$volume"
 done
 unset compose_volumes
 verdict
@@ -348,6 +363,7 @@ verdict
 # taken since by another checkout is that fixture's, and this run ends with it left.
 claim_drop "$claimed_by"
 probe container claim_names
+probe container exact container "$CLAIM"
 verdict
 # The state directory goes last of all, after a verified clean teardown. The daemon record goes
 # last within it, and the two Compose records with it: a removal cut short in the middle (a
