@@ -1,3 +1,3 @@
 1 <repo>/fixtures/.state/data/canary-control.txt
-1 <repo>/fixtures/.state/evidence/20260922T165935Z/logs/bw-fixture-postgres.log
+1 <repo>/fixtures/.state/evidence/20260922T194843Z/logs/bw-fixture-postgres.log
 1 <E1_OUT>/runs/control-leak-db-log/meta/reach-control.txt
