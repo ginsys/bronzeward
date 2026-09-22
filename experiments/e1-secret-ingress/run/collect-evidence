@@ -75,6 +75,28 @@ done
 # file beside the runs rather than a copy inside each.
 sanitize "$STATE/injections.log" "$dest/injections.log"
 
+# The tier A screen tables and the schema-detection reports. These are the two results the report
+# quotes that no bundle holds: the screen captures no bundle by design, and schema detection is a
+# measurement over a configuration rather than over a run.
+#
+# Both screen tables are collected, and the second one is the point. It differs from the first only
+# in which marking syntax selected the marks, so a reader can check for themselves that the
+# ordering column is the same in both — which is the whole claim that these results do not depend
+# on a syntax §6.9 has not settled.
+#
+# The values files and the planted configuration are deliberately not here: they hold synthetic
+# secrets. The path lists and the reports name paths only, and the scan below is what proves it.
+tables=0
+for table in "$E1_REPORTS"/screen*.tsv "$E1_REPORTS"/schema-report*.txt \
+  "$E1_REPORTS"/ground-truth-paths.txt "$E1_REPORTS"/planted-ground-truth-paths.txt \
+  "$E1_REPORTS"/planted-marks.txt; do
+  [ -f "$table" ] || continue
+  sanitize "$table" "$dest/$(basename -- "$table")"
+  tables=$((tables + 1))
+done
+[ "$tables" -gt 0 ] || die "no screen or schema tables in $E1_REPORTS; run run/screen and run/schema
+before collecting, or the report will cite numbers no committed file carries"
+
 # §6.9 asks whether Talos ships machine-readable sensitivity metadata a detector could rely on
 # instead of encoding its own field rules. It does, at the COSI resource level: each resource
 # definition carries a sensitivity, and the whole machine configuration is one resource marked
@@ -93,4 +115,4 @@ hits=$(e1_hits "$dest")
 secrets and must not be committed. The files are left in $dest for inspection; attribute each hit
 by opening the file that holds it."
 
-say "collect-evidence: $runs run(s) collected into $dest, scanned clean"
+say "collect-evidence: $runs run(s) and $tables table(s) collected into $dest, scanned clean"

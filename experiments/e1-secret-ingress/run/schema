@@ -41,6 +41,98 @@ would be empty and every number below would be reporting that rather than the de
 e1_env "$E1_BIN" --config="$(e1_config import)" paths-holding "$values" >"$truth"
 
 e1_env "$E1_BIN" --config="$(e1_config import)" schema-report "$truth" >"$report"
+
+# The planted miss. A schema detector recognises what it was told to recognise, and the honest way
+# to show its boundary is to put a secret somewhere real configurations put one and see it go
+# unfound — not to add a sentence saying it might.
+#
+# machine.files[].content is that place: Talos writes the value to a file on the node, the value is
+# whatever the operator put there, and no rule in the table covers it. The planted document is
+# appended to the stream rather than merged into the existing one, which also exercises the
+# multi-document indexing this prototype had to be corrected for.
+#
+# The planted file holds the canary and stays in E1_OUT. It is a run artifact, not a fixture, and
+# nothing here is committed.
+planted=$E1_REPORTS/planted-config.yaml
+planted_truth=$E1_REPORTS/planted-ground-truth-paths.txt
+planted_report=$(e1_report schema-report-planted.txt)
+
+cp -- "$(e1_config import)" "$planted"
+{
+  printf -- '---\n'
+  printf 'machine:\n'
+  printf '  files:\n'
+  printf '    - path: /var/etc/synthetic.conf\n'
+  printf '      op: create\n'
+  printf '      permissions: 0o600\n'
+  printf '      content: %s\n' "$BW_CANARY"
+} >>"$planted"
+
+# The planted path joins the ground truth: it is a secret by construction, so a detector that does
+# not find it has missed one, and the denominator has to say so.
+#
+# Where it landed is asked rather than assumed. The fixture's controlplane.yaml is already a
+# multi-document stream — its second document is a HostnameConfig — so the appended document is
+# doc[2], and writing doc[1] here produced a ground truth naming a path the configuration does not
+# have. The prototype refused it, correctly: a mark that matches nothing extracts nothing.
+canary_value=$E1_REPORTS/canary-value.txt
+printf '%s\n' "$BW_CANARY" >"$canary_value"
+planted_path=$(e1_env "$E1_BIN" --config="$planted" paths-holding "$canary_value")
+[ -n "$planted_path" ] || die "the planted value is not addressable in $planted; the miss this
+measures would be an artifact of the plant rather than of the detector"
+
+e1_env "$E1_BIN" --config="$planted" paths-holding "$values" >"$planted_truth"
+printf '%s\n' "$planted_path" >>"$planted_truth"
+sort -u -o "$planted_truth" "$planted_truth"
+
+# No `|| true` here. A miss is reported in the body and exits 0; a non-zero status means the
+# measurement did not happen, and swallowing that is the exact failure this experiment is about.
+e1_env "$E1_BIN" --config="$planted" schema-report "$planted_truth" >"$planted_report"
+
+# The other half of the miss. Showing the detector does not find it is only half an answer; §6.9
+# puts the rest on the operator, so the planted path is handed back as a mark and the same
+# configuration is ingested twice. The two runs differ by exactly the planted secret, which is what
+# "the marking mechanism covers what schema detection cannot" has to mean to be worth stating.
+marks=$E1_REPORTS/planted-marks.txt
+printf '%s\n' "$planted_path" >"$marks"
+
+# The run identity is the primary key of the staging claim, so it carries the invocation's instant:
+# re-running this script with a fixed identity collides with its own previous run's claim row and
+# fails before it ingests anything.
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+
+extracted() { # extracted <run-id> <extra e1 args…>
+  local run_id=$1-$stamp root
+  shift
+  root=$E1_RUNS/$run_id
+  rm -rf -- "$root"
+  mkdir -p -- "$root"
+  e1_env "$E1_BIN" --run-root="$root" --run-id="$run_id" --staging=transient \
+    --config="$planted" "$@" import >"$root/stdout.txt" 2>"$root/stderr.txt" ||
+    die "the planted-mark comparison run $run_id failed; see $root/stderr.txt"
+  # The `|| die` is load-bearing: under pipefail a command substitution whose pipeline fails aborts
+  # the whole script with no message, which is how the first version of this comparison exited
+  # silently and reported nothing at all.
+  local line
+  line=$(grep --only-matching --extended-regexp '[0-9]+ secret\(s\) extracted' \
+    "$root/stdout.txt" | head -n 1) ||
+    die "$run_id reported no extraction count; $root/stdout.txt does not have the expected shape
+and the comparison below would be measuring the parse rather than the run"
+  printf '%s' "${line%% *}"
+}
+
+unmarked=$(extracted schema-planted-unmarked)
+marked=$(extracted schema-planted-marked --marks="$marks")
+
 say "schema: $(wc -l <"$truth") ground-truth path(s); report written to $report"
-say "schema: the values file is $values and must not be committed"
+say "schema: the planted secret is at $planted_path, which no rule covers;"
+say "schema: ingesting without a mark extracts $unmarked secret(s), with the mark $marked"
+[ "$marked" -eq $((unmarked + 1)) ] ||
+  die "the mark did not add exactly the planted secret ($unmarked then $marked); the claim that
+marking covers what schema detection misses is unsupported and must not be made"
+say "schema: planted-miss report written to $planted_report"
+say "schema: $values, $canary_value and $planted hold synthetic secret values"
+say "schema: and must not be committed; the path lists and the reports hold none"
 cat -- "$report"
+printf '\n--- with a secret planted where no rule looks ---\n'
+cat -- "$planted_report"

@@ -31,6 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,9 +43,14 @@ const (
 	// Digests holds exactly that secret's digest; Detail holds the reference it became.
 	EventExtracted = "secret.extracted"
 	// EventWrite records bytes about to be persisted. PayloadSHA256 is the digest of those exact
-	// bytes, and Digests lists every secret present in the source document, whether or not this
-	// payload was expected to contain it. Listing them all is what makes Verify an assertion
-	// rather than a restatement: the prototype does not get to decide which secrets were at risk.
+	// bytes, and Digests lists the secrets the writer believes were at risk in that payload.
+	//
+	// Verify does not take that list on trust, and an earlier version of this comment claimed more
+	// than the code could support. A writer that lists nothing would satisfy a rule quantified over
+	// the list alone, which is precisely what the forbidden design does: the --persist-first
+	// controls write the whole plaintext document with no secret named, and passed until Verify
+	// began asserting the phase order directly. The list narrows a violation to a value; it is not
+	// what establishes that one occurred.
 	EventWrite = "payload.write"
 	// EventCheckpoint records crossing a boundary.
 	EventCheckpoint = "checkpoint.reached"
@@ -225,9 +231,10 @@ func (v Violation) String() string { return fmt.Sprintf("seq %d: %s", v.Seq, v.R
 // backwards clock cannot support a claim about ordering, so those are violations in their own
 // right rather than warnings: an incomplete instrument must not return "no violations".
 //
-// A nil result means every write in these records was preceded by the extraction of every secret
-// it lists. It does not mean no secret leaked — only that this record of the run is consistent
-// with §7.1. The leak scan and the calibrated controls answer the other half.
+// A nil result means two things held: no write preceded the run's first extraction, and every
+// secret a write did list was extracted before it. It does not mean no secret leaked — only that
+// this record of the run is consistent with §7.1. The leak scan and the calibrated controls answer
+// the other half.
 func Verify(records []Record) []Violation {
 	var violations []Violation
 
@@ -256,7 +263,57 @@ func Verify(records []Record) []Violation {
 		}
 	}
 
-	// The ordering requirement itself.
+	// The ordering requirement, as a property of the phases rather than of a list.
+	//
+	// The per-digest rule below asks whether every secret a write *lists* was extracted first. That
+	// is necessary and, on its own, vacuous: a write that lists nothing satisfies it without
+	// examination, and the forbidden design is exactly the one that writes the document before any
+	// secret has been named. All three --persist-first controls passed this verifier until the
+	// check below was added — they write at sequence 7 and extract from sequence 10, and the
+	// verifier had nothing to say about it.
+	//
+	// So the phase order is asserted directly: in a journal that records an extraction, no write
+	// may precede the first one. §7.1 is a statement about "any ordinary plaintext persistence",
+	// not about persistence of a particular listed value.
+	//
+	// A recovery is the one legitimate write without an extraction in the same journal: it resumes
+	// a run that extracted under its own identity, and its write record says which. That is
+	// reported rather than skipped — the ordering claim for those bytes lives in the named run's
+	// journal, and a reader has to be told where to look.
+	firstExtraction := 0
+	for _, r := range ordered {
+		if r.Event == EventExtracted {
+			firstExtraction = r.Seq
+			break
+		}
+	}
+	// A record the phase rule has already condemned is not reported twice by the per-digest rule
+	// below. The two rules overlap on exactly the write that lists a secret and happens too early,
+	// and a reader counting violations should be counting writes, not rules.
+	outOfPhase := map[int]bool{}
+	for _, r := range ordered {
+		if r.Event != EventWrite || strings.HasPrefix(r.Detail, "recover:") {
+			continue
+		}
+		switch {
+		case firstExtraction == 0:
+			outOfPhase[r.Seq] = true
+			violations = append(violations, Violation{
+				Seq: r.Seq,
+				Reason: fmt.Sprintf("wrote %s although this run extracted no secret at all and did not declare itself a recovery; §7.1 requires extraction before any ordinary plaintext persistence",
+					surfaceOf(r)),
+			})
+		case r.Seq < firstExtraction:
+			outOfPhase[r.Seq] = true
+			violations = append(violations, Violation{
+				Seq: r.Seq,
+				Reason: fmt.Sprintf("wrote %s at sequence %d, before the first extraction at sequence %d; §7.1 forbids persisting the observed configuration and extracting afterwards%s",
+					surfaceOf(r), r.Seq, firstExtraction, listed(r)),
+			})
+		}
+	}
+
+	// The per-digest rule: whatever a write does name must already have been extracted.
 	extracted := map[string]int{}
 	for _, r := range ordered {
 		switch r.Event {
@@ -267,6 +324,9 @@ func Verify(records []Record) []Violation {
 				}
 			}
 		case EventWrite:
+			if outOfPhase[r.Seq] {
+				continue
+			}
 			for _, d := range r.Digests {
 				at, seen := extracted[d]
 				switch {
@@ -300,6 +360,21 @@ func surfaceOf(r Record) string {
 		return "a payload with digest " + short(r.PayloadSHA256)
 	}
 	return "an unnamed surface"
+}
+
+// listed names the secrets a write record claims were at risk, for a message that already says the
+// write was out of phase. It returns the empty string when the record names none — which is the
+// normal case for the forbidden design, and exactly why the violation cannot be made to depend on
+// this list.
+func listed(r Record) string {
+	if len(r.Digests) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(r.Digests))
+	for _, d := range r.Digests {
+		parts = append(parts, short(d))
+	}
+	return "; this write names secret(s) " + strings.Join(parts, ", ")
 }
 
 // short abbreviates a digest for a message. The full value stays in the record.
