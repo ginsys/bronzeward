@@ -12,7 +12,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname -- "$0")/lib.sh"
 
-need docker grep sed awk wc go
+need docker grep sed awk wc date go
 
 mark_args=()
 case ${1:-} in
@@ -26,6 +26,13 @@ esac
 
 e1_need_fixture
 e1_build
+
+# Every run gets an identifier no earlier run used. The tables key on run_id — staging_claim by
+# primary key, parsed_index and secret_reference by (run_id, path), encrypted_baseline uniquely —
+# so a re-run under the same identifier collides with what the first one left, and the failure
+# looks like a defect in the flow rather than in the harness. The fixture is disposable; the run
+# identifiers inside one fixture are not.
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
 
 report=$(e1_report screen.tsv)
 printf 'flow\tstaging\toutcome\tcrash_at\trun_id\tstatus\trun_root_hits\tdump_hits\torder\n' >"$report"
@@ -45,7 +52,7 @@ for flow in "${flows[@]}"; do
     for outcome in "${outcomes[@]}"; do
       for crash in "${crash_points[@]}"; do
         rows=$((rows + 1))
-        run_id="screen-$flow-$staging-$outcome-$crash"
+        run_id="screen-$stamp-$flow-$staging-$outcome-$crash"
         run_root=$E1_RUNS/$run_id
         rm -rf -- "$run_root"
 
@@ -58,7 +65,20 @@ for flow in "${flows[@]}"; do
 
         status=ok
         e1_env "$E1_BIN" "${args[@]}" "$flow" >"$run_root.log" 2>&1 || status=exit-$?
-        [ "$outcome" != rejected ] || { [ "$status" != ok ] && status=refused-as-expected; }
+
+        # What counts as the expected outcome depends on the row. A clean run must succeed, unless
+        # it was killed at a boundary, in which case 137 is the point. A rejected run must fail.
+        #
+        # This is checked because the first screen run did not: 32 rows exited 1 before reaching the
+        # database, left nothing but the reachability control in the run root, and were recorded as
+        # passing. A run that never ran scans clean, which is the same trap the two-line invariant
+        # exists for one level down.
+        expected=no
+        case $outcome:$crash:$status in
+          clean:none:ok) expected=yes ;;
+          clean:*:exit-137) expected=yes ;;
+          rejected:*:exit-*) expected=yes status=refused-as-expected ;;
+        esac
 
         dump=$E1_RUNS/$run_id.sql
         e1_dump "$dump" 2>/dev/null || printf -- '-- dump unavailable\n' >"$dump"
@@ -77,6 +97,10 @@ for flow in "${flows[@]}"; do
         fi
 
         verdict=$status
+        [ "$expected" = yes ] || {
+          verdict="$status/unexpected-outcome"
+          failures=$((failures + 1))
+        }
         case $root_hits in
           0) [ ! -d "$run_root" ] || { verdict="$status/no-control"; failures=$((failures + 1)); } ;;
           1) ;;

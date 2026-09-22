@@ -254,13 +254,20 @@ func insertParsedIndex(ctx context.Context, tx *sql.Tx, runID string, body []byt
 // does not supply and cannot backdate, which is the only reason to duplicate the journal at all.
 func appendJournal(ctx context.Context, tx *sql.Tx, records []journal.Record) error {
 	for _, r := range records {
+		// A nil slice reaches PostgreSQL as NULL, and a supplied NULL overrides the column's
+		// DEFAULT '{}' rather than falling back to it — so the NOT NULL constraint rejects every
+		// record that lists no digest, which is most of them. The empty array is passed explicitly.
+		digests := r.Digests
+		if digests == nil {
+			digests = []string{}
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO ingest_journal
 			   (run_id, seq, event, checkpoint, surface, payload_sha256, secret_digests, detail, wall, mono_ns)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			 ON CONFLICT (run_id, seq) DO NOTHING`,
 			r.RunID, r.Seq, r.Event, nullable(r.Checkpoint), nullable(r.Surface),
-			nullable(r.PayloadSHA256), pq.Array(r.Digests), nullable(r.Detail),
+			nullable(r.PayloadSHA256), pq.Array(digests), nullable(r.Detail),
 			r.Wall, r.MonoNanos); err != nil {
 			return fmt.Errorf("store: mirroring journal record %d: %w", r.Seq, err)
 		}

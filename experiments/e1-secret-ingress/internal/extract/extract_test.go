@@ -66,17 +66,17 @@ func request(d *document.Document, s Store, j *journal.Journal, paths ...string)
 func TestRunExtractsSubstitutesAndRecords(t *testing.T) {
 	d, store, j := setup(t)
 
-	res, err := Run(t.Context(), request(d, store, j, "machine.ca.key", "machine.token"))
+	res, err := Run(t.Context(), request(d, store, j, "doc[0].machine.ca.key", "doc[0].machine.token"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
 	// The values reached the provider, under run-namespaced keys.
-	if got := store.put["run-test/machine.ca.key"]; got != "machine-ca-private-key" {
-		t.Errorf("the provider holds %q for machine.ca.key", got)
+	if got := store.put["run-test/doc[0].machine.ca.key"]; got != "machine-ca-private-key" {
+		t.Errorf("the provider holds %q for doc[0].machine.ca.key", got)
 	}
-	if got := store.put["run-test/machine.token"]; got != "machine-join-token" {
-		t.Errorf("the provider holds %q for machine.token", got)
+	if got := store.put["run-test/doc[0].machine.token"]; got != "machine-join-token" {
+		t.Errorf("the provider holds %q for doc[0].machine.token", got)
 	}
 
 	// The sanitized document holds references and neither secret.
@@ -90,8 +90,8 @@ func TestRunExtractsSubstitutesAndRecords(t *testing.T) {
 		}
 	}
 	for _, present := range []string{
-		"bw:ref:kv://fake/run-test/machine.ca.key",
-		"bw:ref:kv://fake/run-test/machine.token",
+		"bw:ref:kv://fake/run-test/doc[0].machine.ca.key",
+		"bw:ref:kv://fake/run-test/doc[0].machine.token",
 	} {
 		if !strings.Contains(body, present) {
 			t.Errorf("the sanitized document does not hold %q:\n%s", present, body)
@@ -118,7 +118,7 @@ func TestRunExtractsSubstitutesAndRecords(t *testing.T) {
 func TestJournalRecordsExtractionBeforeAnyWrite(t *testing.T) {
 	d, store, j := setup(t)
 
-	res, err := Run(t.Context(), request(d, store, j, "machine.ca.key", "machine.token"))
+	res, err := Run(t.Context(), request(d, store, j, "doc[0].machine.ca.key", "doc[0].machine.token"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -156,11 +156,11 @@ func TestRunFailsClosedOnAProviderError(t *testing.T) {
 	d, store, j := setup(t)
 	store.failAfter = 1
 
-	res, err := Run(t.Context(), request(d, store, j, "machine.ca.key", "machine.token"))
+	res, err := Run(t.Context(), request(d, store, j, "doc[0].machine.ca.key", "doc[0].machine.token"))
 	if err == nil {
 		t.Fatal("Run succeeded despite a provider failure")
 	}
-	if !strings.Contains(err.Error(), "machine.token") {
+	if !strings.Contains(err.Error(), "doc[0].machine.token") {
 		t.Errorf("the error does not name the path that failed: %v", err)
 	}
 	if res.Sanitized.Valid() {
@@ -179,10 +179,10 @@ func TestRunFailsClosedOnAProviderError(t *testing.T) {
 func TestRunRefusesADocumentAlreadyExtracted(t *testing.T) {
 	d, store, j := setup(t)
 
-	if _, err := Run(t.Context(), request(d, store, j, "machine.ca.key")); err != nil {
+	if _, err := Run(t.Context(), request(d, store, j, "doc[0].machine.ca.key")); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	_, err := Run(t.Context(), request(d, store, j, "machine.ca.key"))
+	_, err := Run(t.Context(), request(d, store, j, "doc[0].machine.ca.key"))
 	if err == nil {
 		t.Fatal("Run extracted the same path twice")
 	}
@@ -209,11 +209,11 @@ func TestRunFailsWhenTheSameValueSitsAtAnUnmarkedPath(t *testing.T) {
 	}
 	t.Cleanup(func() { j.Close() })
 
-	res, err := Run(t.Context(), request(d, newFakeStore(), j, "machine.token"))
+	res, err := Run(t.Context(), request(d, newFakeStore(), j, "doc[0].machine.token"))
 	if err == nil {
 		t.Fatal("Run returned a document still holding the extracted value")
 	}
-	if !strings.Contains(err.Error(), "machine.token") {
+	if !strings.Contains(err.Error(), "doc[0].machine.token") {
 		t.Errorf("the error does not name the path: %v", err)
 	}
 	if res.Sanitized.Valid() {
@@ -225,7 +225,7 @@ func TestRunFailsWhenTheSameValueSitsAtAnUnmarkedPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("document.Load: %v", err)
 	}
-	res2, err := Run(t.Context(), request(d2, newFakeStore(), j, "machine.backup.token", "machine.token"))
+	res2, err := Run(t.Context(), request(d2, newFakeStore(), j, "doc[0].machine.backup.token", "doc[0].machine.token"))
 	if err != nil {
 		t.Fatalf("Run with both copies marked: %v", err)
 	}
@@ -240,10 +240,10 @@ func TestRunRejectsIncompleteRequests(t *testing.T) {
 	d, store, j := setup(t)
 
 	cases := map[string]Request{
-		"no document": {Paths: []string{"machine.token"}, Store: store, Journal: j, RunID: "r"},
-		"no store":    {Document: d, Paths: []string{"machine.token"}, Journal: j, RunID: "r"},
-		"no journal":  {Document: d, Paths: []string{"machine.token"}, Store: store, RunID: "r"},
-		"no run id":   {Document: d, Paths: []string{"machine.token"}, Store: store, Journal: j},
+		"no document": {Paths: []string{"doc[0].machine.token"}, Store: store, Journal: j, RunID: "r"},
+		"no store":    {Document: d, Paths: []string{"doc[0].machine.token"}, Journal: j, RunID: "r"},
+		"no journal":  {Document: d, Paths: []string{"doc[0].machine.token"}, Store: store, RunID: "r"},
+		"no run id":   {Document: d, Paths: []string{"doc[0].machine.token"}, Store: store, Journal: j},
 		"no paths":    {Document: d, Store: store, Journal: j, RunID: "r"},
 	}
 
@@ -260,7 +260,7 @@ func TestRunRejectsIncompleteRequests(t *testing.T) {
 // mark package, since detection results reach Run by a different route.
 func TestRunRejectsAnUnknownPath(t *testing.T) {
 	d, store, j := setup(t)
-	if _, err := Run(t.Context(), request(d, store, j, "machine.absent")); err == nil {
+	if _, err := Run(t.Context(), request(d, store, j, "doc[0].machine.absent")); err == nil {
 		t.Fatal("Run accepted a path that does not exist")
 	}
 }
@@ -278,7 +278,7 @@ func TestRunHandlesAnEmptyValue(t *testing.T) {
 	}
 	t.Cleanup(func() { j.Close() })
 
-	res, err := Run(t.Context(), request(d, newFakeStore(), j, "machine.token"))
+	res, err := Run(t.Context(), request(d, newFakeStore(), j, "doc[0].machine.token"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestRunHandlesAnEmptyValue(t *testing.T) {
 func TestJournalHoldsNoExtractedValue(t *testing.T) {
 	d, store, j := setup(t)
 
-	if _, err := Run(t.Context(), request(d, store, j, "machine.ca.key")); err != nil {
+	if _, err := Run(t.Context(), request(d, store, j, "doc[0].machine.ca.key")); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -324,7 +324,7 @@ func TestRunStopsWhenTheExtractionCannotBeRecorded(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	res, err := Run(t.Context(), request(d, store, j, "machine.ca.key"))
+	res, err := Run(t.Context(), request(d, store, j, "doc[0].machine.ca.key"))
 	if err == nil {
 		t.Fatal("Run succeeded despite being unable to record the extraction")
 	}

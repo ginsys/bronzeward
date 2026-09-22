@@ -42,17 +42,17 @@ type Rule struct {
 // with good recall on paper and no precision in practice.
 func TalosRules() []Rule {
 	return []Rule{
-		{"machine.token", "the machine's join token"},
-		{"machine.ca.key", "the machine certificate authority's private key"},
-		{"cluster.id", "the cluster identifier, which is a generated secret in v1alpha1"},
-		{"cluster.secret", "the cluster's bootstrap secret"},
-		{"cluster.token", "the cluster's join token"},
-		{"cluster.secretboxEncryptionSecret", "the secretbox encryption key for etcd at rest"},
-		{"cluster.aescbcEncryptionSecret", "the AES-CBC encryption key for etcd at rest"},
-		{"cluster.ca.key", "the cluster certificate authority's private key"},
-		{"cluster.aggregatorCA.key", "the aggregator certificate authority's private key"},
-		{"cluster.serviceAccount.key", "the service account signing key"},
-		{"cluster.etcd.ca.key", "etcd's certificate authority private key"},
+		{"doc[*].machine.token", "the machine's join token"},
+		{"doc[*].machine.ca.key", "the machine certificate authority's private key"},
+		{"doc[*].cluster.id", "the cluster identifier, which is a generated secret in v1alpha1"},
+		{"doc[*].cluster.secret", "the cluster's bootstrap secret"},
+		{"doc[*].cluster.token", "the cluster's join token"},
+		{"doc[*].cluster.secretboxEncryptionSecret", "the secretbox encryption key for etcd at rest"},
+		{"doc[*].cluster.aescbcEncryptionSecret", "the AES-CBC encryption key for etcd at rest"},
+		{"doc[*].cluster.ca.key", "the cluster certificate authority's private key"},
+		{"doc[*].cluster.aggregatorCA.key", "the aggregator certificate authority's private key"},
+		{"doc[*].cluster.serviceAccount.key", "the service account signing key"},
+		{"doc[*].cluster.etcd.ca.key", "etcd's certificate authority private key"},
 	}
 }
 

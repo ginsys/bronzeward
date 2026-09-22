@@ -43,11 +43,11 @@ func load(t *testing.T) *document.Document {
 func TestSchemaFindsTheKnownLocations(t *testing.T) {
 	got := Paths(Schema(load(t), TalosRules()))
 	want := []string{
-		"cluster.ca.key",
-		"cluster.id",
-		"cluster.secret",
-		"machine.ca.key",
-		"machine.token",
+		"doc[0].cluster.ca.key",
+		"doc[0].cluster.id",
+		"doc[0].cluster.secret",
+		"doc[0].machine.ca.key",
+		"doc[0].machine.token",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("Schema() = %v\nwant %v", got, want)
@@ -79,8 +79,8 @@ func TestSchemaMissesWhatItWasNeverToldAbout(t *testing.T) {
 	}
 
 	for _, missed := range []string{
-		"machine.files[0].content",
-		"cluster.apiServer.extraArgs.oidc-client-secret",
+		"doc[0].machine.files[0].content",
+		"doc[0].cluster.apiServer.extraArgs.oidc-client-secret",
 	} {
 		if _, ok := load(t).Get(missed); !ok {
 			t.Fatalf("the fixture does not contain %s, so this test asserts nothing", missed)
@@ -99,8 +99,8 @@ func TestSchemaReportsAnEmptyKnownField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("document.Load: %v", err)
 	}
-	if got := Paths(Schema(d, TalosRules())); strings.Join(got, ",") != "machine.token" {
-		t.Errorf("Schema() = %v, want machine.token reported despite being empty", got)
+	if got := Paths(Schema(d, TalosRules())); strings.Join(got, ",") != "doc[0].machine.token" {
+		t.Errorf("Schema() = %v, want doc[0].machine.token reported despite being empty", got)
 	}
 }
 

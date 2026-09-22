@@ -96,11 +96,11 @@ func TestSchemaReportMeasuresAgainstAGroundTruthItDidNotProduce(t *testing.T) {
 	// and excludes machine.ca.crt, which is a certificate sitting beside its key. Both are there to
 	// make the two numbers move independently.
 	truth := writeFile(t, "truth.txt", strings.Join([]string{
-		"machine.token",
-		"machine.ca.key",
-		"cluster.id",
-		"cluster.secret",
-		"cluster.apiServer.extraArgs.oidc-client-secret",
+		"doc[0].machine.token",
+		"doc[0].machine.ca.key",
+		"doc[0].cluster.id",
+		"doc[0].cluster.secret",
+		"doc[0].cluster.apiServer.extraArgs.oidc-client-secret",
 	}, "\n")+"\n")
 
 	stdout, _, err := runCLI(t, "--config="+config, "schema-report", truth)
@@ -110,7 +110,7 @@ func TestSchemaReportMeasuresAgainstAGroundTruthItDidNotProduce(t *testing.T) {
 
 	// The miss must be reported as a miss. If the detector ever grows a rule for it, this fails and
 	// the report's limits section has to change with the code rather than drift away from it.
-	if !strings.Contains(stdout, "cluster.apiServer.extraArgs.oidc-client-secret") {
+	if !strings.Contains(stdout, "doc[0].cluster.apiServer.extraArgs.oidc-client-secret") {
 		t.Errorf("the report does not name the path the detector misses:\n%s", stdout)
 	}
 	// Both denominators, never a single score: one number hides which of the two moved.
@@ -138,11 +138,11 @@ func TestSchemaReportMeasuresAgainstAGroundTruthItDidNotProduce(t *testing.T) {
 // improve recall by deleting the cases the detector failed.
 func TestSchemaReportRefusesAGroundTruthThatDoesNotFit(t *testing.T) {
 	config := writeFile(t, "controlplane.yaml", miniConfig)
-	truth := writeFile(t, "truth.txt", "machine.token\nmachine.nonexistent.key\n")
+	truth := writeFile(t, "truth.txt", "doc[0].machine.token\ndoc[0].machine.nonexistent.key\n")
 
 	if _, _, err := runCLI(t, "--config="+config, "schema-report", truth); err == nil {
 		t.Fatal("schema-report accepted a ground truth naming a path the configuration lacks")
-	} else if !strings.Contains(err.Error(), "machine.nonexistent.key") {
+	} else if !strings.Contains(err.Error(), "doc[0].machine.nonexistent.key") {
 		t.Errorf("the error does not name the offending path: %v", err)
 	}
 }
@@ -152,19 +152,19 @@ func TestSchemaReportRefusesAGroundTruthThatDoesNotFit(t *testing.T) {
 // changing its caption.
 func TestPlainIndexTakesTheValuesAsRead(t *testing.T) {
 	doc := loadMini(t)
-	paths := []string{"machine.token", "cluster.secret"}
+	paths := []string{"doc[0].machine.token", "doc[0].cluster.secret"}
 
 	index := plainIndex(doc, paths)
 	if len(index) != len(paths) {
 		t.Fatalf("plainIndex gave %d entries for %d paths", len(index), len(paths))
 	}
-	if index["machine.token"] != "e1-test-machine-token" {
-		t.Errorf("plainIndex did not take the value as read: %q", index["machine.token"])
+	if index["doc[0].machine.token"] != "e1-test-machine-token" {
+		t.Errorf("plainIndex did not take the value as read: %q", index["doc[0].machine.token"])
 	}
 
 	// A path that is not in the document is dropped rather than stored empty: an empty value would
 	// scan clean and be read as the control having covered that path.
-	if got := plainIndex(doc, []string{"machine.absent"}); len(got) != 0 {
+	if got := plainIndex(doc, []string{"doc[0].machine.absent"}); len(got) != 0 {
 		t.Errorf("plainIndex invented an entry for an absent path: %v", got)
 	}
 }
