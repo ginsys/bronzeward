@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,17 +47,27 @@ func TestFlagValidation(t *testing.T) {
 	}
 }
 
-// TestUnbuiltSubcommandsSaySo checks the skeleton is honest about what it does not do yet, rather
-// than exiting zero and leaving a caller to assume a run happened.
-func TestUnbuiltSubcommandsSaySo(t *testing.T) {
-	for _, cmd := range []string{"import", "adopt", "schema-report"} {
+// TestEverySubcommandTheUsageAdvertisesIsDispatched checks the help and the dispatch agree. A
+// subcommand listed in the usage and missing from the switch would be reported as unknown, and one
+// in the switch and missing from the usage would never be run by anyone reading the help.
+func TestEverySubcommandTheUsageAdvertisesIsDispatched(t *testing.T) {
+	var help bytes.Buffer
+	usage(&help, flag.NewFlagSet("e1", flag.ContinueOnError))
+
+	advertised := []string{"import", "adopt", "recover", "verify-order", "baseline-verify", "schema-report"}
+	for _, cmd := range advertised {
+		if !strings.Contains(help.String(), cmd) {
+			t.Errorf("the usage does not list %q", cmd)
+		}
+		// Each is invoked with no arguments, which every one of them refuses. What matters is that
+		// the refusal is the subcommand's own and not the dispatch's.
 		_, _, err := runCLI(t, cmd)
 		if err == nil {
-			t.Errorf("%q returned no error despite not being built", cmd)
+			t.Errorf("%q ran with no arguments at all", cmd)
 			continue
 		}
-		if !strings.Contains(err.Error(), "not built yet") {
-			t.Errorf("%q failed with %q, which does not say it is unbuilt", cmd, err)
+		if strings.Contains(err.Error(), "unknown subcommand") || strings.Contains(err.Error(), "not built yet") {
+			t.Errorf("%q is advertised but not dispatched: %v", cmd, err)
 		}
 	}
 }
