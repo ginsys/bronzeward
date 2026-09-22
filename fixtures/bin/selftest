@@ -96,7 +96,8 @@ worker_digest() {
   config=$(worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}')
   printf '%s\n' "$config" | sha256sum | cut -d' ' -f1
 }
-sql() { pg psql -U bronzeward -d bronzeward -v ON_ERROR_STOP=1 -Atc "$1"; }
+# The statement over stdin: some name the canary, which a `-c` would put on a command line.
+sql() { printf '%s\n' "$1" | pg_stdin psql -U bronzeward -d bronzeward -v ON_ERROR_STOP=1 -Atq; }
 kv_version() { # kv_version <field>: a field of version 1 of the test secret's metadata
   bao kv metadata get -mount=secret -format=json selftest/item | jq -r ".data.versions[\"1\"].$1"
 }
@@ -220,7 +221,7 @@ rm -r "$STATE/selftest-elsewhere"
 ok "db-snapshot / db-restore; a truncated dump leaves the live database alone; a dropped live database is restored over; a symlinked or hard-linked snapshot is refused unread"
 
 # OpenBao: snapshot, soft delete, destroy, key loss, restore.
-bao kv put -mount=secret selftest/item value="$BW_CANARY" >/dev/null
+printf '%s' "$BW_CANARY" | bao_stdin kv put -mount=secret selftest/item value=- >/dev/null
 bao write -force transit/keys/selftest >/dev/null
 "$here/inject" bao-snapshot selftest
 # A curlrc of the caller must not reach the request: with `output` set there, curl would exit 0 and
@@ -521,9 +522,7 @@ grep --quiet --extended-regexp ' failed rc=[0-9]+ start postgres$' <(tail -n 1 "
 # is registered first; the statements take the password from the container's environment (read
 # from stdin: -c does not interpolate), so that it is on no command line, client or container.
 password_set() {
-  local id
-  id=$(container_id "$PG") || return 1
-  PGPASSWORD=$BW_POSTGRES_PASSWORD timeout "$PG_LIMIT" docker exec -i -e PGPASSWORD "$id" psql -U bronzeward -d postgres -q -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+  pg_stdin psql -U bronzeward -d postgres -q -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 \set pw `echo "$PGPASSWORD"`
 alter role bronzeward password :'pw';
 SQL
