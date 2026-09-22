@@ -1,0 +1,16 @@
+configuration: <E1_OUT>/reports/planted-config.yaml (61 scalar paths)
+ground truth:  <E1_OUT>/reports/planted-ground-truth-paths.txt (10 paths)
+detector:      11 schema rules
+
+recall 9/10, precision 9/10
+  correct  (9): doc[0].cluster.aggregatorCA.key, doc[0].cluster.ca.key, doc[0].cluster.etcd.ca.key, doc[0].cluster.secret, doc[0].cluster.secretboxEncryptionSecret, doc[0].cluster.serviceAccount.key, doc[0].cluster.token, doc[0].machine.ca.key, doc[0].machine.token
+  spurious (1): doc[0].cluster.id
+  missed   (1): doc[2].machine.files[0].content
+
+
+This recall is over the fields this environment produces. A Docker-provisioned
+Talos node emits no systemDiskEncryption, installer or disk configuration — precisely the
+secret-bearing areas that are absent here — so the denominator understates what a real node
+would present. Design §6.9 forbids a completeness claim for unmarked values outright: what
+is recorded is reliability on identified fields, with the rest explicitly the operator's
+responsibility through marking.

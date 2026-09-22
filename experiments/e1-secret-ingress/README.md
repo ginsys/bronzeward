@@ -32,6 +32,8 @@ outside this checkout, with room for the bundles:
 ```sh
 E1_OUT=<somewhere with a few hundred MiB> experiments/e1-secret-ingress/run/screen
 E1_OUT=<the same directory>               experiments/e1-secret-ingress/run/matrix
+E1_OUT=<the same directory>               experiments/e1-secret-ingress/run/schema
+E1_OUT=<the same directory>               experiments/e1-secret-ingress/run/collect-evidence
 ```
 
 `E1_OUT` has no default on purpose. Every bundle carries a PostgreSQL data directory, so a full
@@ -43,8 +45,19 @@ evidence about. Deleting it afterwards is part of finishing the run — nothing 
   bundle captured. Its only authority is finding candidates. A passing row says the run root and the
   live tables were clean at that moment and says nothing about the heap, the write-ahead log or the
   backups.
+  Pass `--marks <file>` or `--mark-suffix <list>` to re-run it against a different mark source; the
+  table is named for the source so the two can be compared. Pass `--reset-tables` to empty the
+  prototype's tables first, which is required after a matrix has left the deliberate controls'
+  plaintext in the live rows, and must never be passed while a matrix or a capture is in flight.
 - `run/matrix` is Tier B: the runs that get a `fixtures/bin/evidence` bundle, each asserted by
   `run/assert-bundle`. `run/capture` takes one of them on its own.
+- `run/schema` measures detection against a ground truth built from the fixture's own rule over the
+  secrets bundle, and plants a secret where no rule looks to show what detection misses and the
+  operator mark catches. It writes the values it works from into `E1_OUT`; those files hold real
+  synthetic secrets and are never committed.
+- `run/collect-evidence` copies the committable text into `evidence/`, rewriting absolute paths and
+  refusing to leave anything the fixture's own patterns match. Run it last, with the fixture still
+  up: it re-reads the control plane and the injection log.
 
 Every honest bundle's `leak-scan.txt` must hold **exactly two lines**: the fixture's own positive
 control and the reachability control each run plants in its run root. The scan records hits only, so
