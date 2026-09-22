@@ -90,12 +90,15 @@ up_failed() {
     rmdir -- "$STATE" 2>/dev/null || say "fixtures: up failed; $STATE is not this up's, or holds more than it put there, and is left"
   fi
   # The claim only as this attempt's: one another up holds, or none, is not this up's to remove.
+  # The nonce is read once more inside claim_drop, in the same look as the owner it removes by:
+  # between the look here and the removal, this checkout may have taken the claim again for
+  # another up, same owner, another nonce, and that one is left.
   if [ "$(claim_label "$CLAIM_ATTEMPT_LABEL" 2>/dev/null)" != "$attempt" ]; then
     say "fixtures: up failed; nothing of this up's was created"
-  elif claim_drop "$FIXTURES" 2>/dev/null; then
+  elif claim_drop "$FIXTURES" "$attempt" 2>/dev/null; then
     say "fixtures: up failed; nothing was created"
   else
-    say "fixtures: up failed; the claim $CLAIM could not be removed, run fixtures/bin/down to remove it"
+    say "fixtures: up failed; the claim $CLAIM was not removed: another up's by now, or Docker could not remove it (then run fixtures/bin/down)"
   fi
 }
 # A signal that ends the shell between two commands leaves the status of the command before it,

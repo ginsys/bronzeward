@@ -43,7 +43,8 @@ worker_talos() { talosctl_timed 10 -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER
 # and the removal after the test would take someone's data with it. One that existed is left, and
 # named. The put-back is registered before the create, since the create's return is what a signal
 # would cut off: it removes the volume only under this run's label. test_volume_rm <name> removes
-# the test's own, gone already in the failing case.
+# the test's own, and unregisters the put-back only once it is gone: a removal that failed leaves
+# the put-back registered, for the handler to try again, and the test fails.
 selftest_run=r$(date -u +%s%N)
 test_volume_drop() {
   [ "$(docker volume inspect --format '{{index .Labels "bronzeward.selftest.run"}}' "$1" 2>/dev/null)" = "$selftest_run" ] || return 0
@@ -58,7 +59,7 @@ test_volume() {
   [ "$made_by" = "$selftest_run" ] || fail "a volume named $1 existed before this test; it is someone's data, and is left"
 }
 test_volume_rm() {
-  docker volume rm "$1" >/dev/null 2>&1 || true
+  test_volume_drop "$1" 2>/dev/null || fail "cannot remove the volume $1 made for the test; it is left under this run's label"
   undefer
 }
 # drop_stranger <name>: the container under the name removed, only under this run's label.
@@ -129,6 +130,9 @@ ok "all four containers are running"
 # The state directory alone is not ownership: with the claim gone, or held by another checkout, the
 # fixed container names may be someone else's fixture, and nothing here may touch them.
 refused=0
+# Under another attempt's nonce the claim is another up's from this checkout, and is left.
+! claim_drop "$FIXTURES" selftest-not-this-attempt 2>/dev/null || fail "claim_drop removed a claim taken under another attempt"
+[ "$(claim_owner)" = "$FIXTURES" ] || fail "the claim is not this checkout's after a refused drop"
 defer claim_take
 claim_drop "$FIXTURES"
 "$here/inject" pause postgres 2>/dev/null || refused=$((refused + 1))
@@ -775,9 +779,15 @@ aliased=0
 ! "$here/evidence" >/dev/null 2>&1 || aliased=1
 rm "$STATE/selftest-log-alias"
 [ "$aliased" -eq 0 ] || fail "an injections.log with a second name was accepted"
-# Without the manifest commit the bundle cannot be tied to the pins it was captured under.
+# Without the manifest commit the bundle cannot be tied to the pins it was captured under: a git
+# that fails, a stand-in first on PATH (a GIT_DIR naming nowhere is dropped from the environment,
+# with the rest of git's repository selection, and would prove nothing; see the last case).
+mkdir "$STATE/selftest-no-git"
+printf '#!/bin/sh\nexit 1\n' >"$STATE/selftest-no-git/git"
+chmod +x "$STATE/selftest-no-git/git"
 nogit=0
-! GIT_DIR=$STATE/selftest-no-git "$here/evidence" >/dev/null 2>&1 || nogit=1
+! PATH=$STATE/selftest-no-git:$PATH "$here/evidence" >/dev/null 2>&1 || nogit=1
+rm -r "$STATE/selftest-no-git"
 [ "$nogit" -eq 0 ] || fail "evidence wrote a bundle without the manifest commit"
 # The control itself with its canary replaced by another secret: still one hit, no longer the
 # control, and without the control the capture is void.
@@ -1296,15 +1306,24 @@ ln -s "$STATE/data" "$STATE/selftest-data-alias"
 cp "$FIXTURES/README.md" "$STATE/selftest-readme-copy"
 defer mv --no-target-directory -- "$STATE/selftest-readme-copy" "$FIXTURES/README.md"
 sed 's/$/\r/' "$STATE/selftest-readme-copy" >"$FIXTURES/README.md"
+# Another repository, with a commit of its own, named by the caller's GIT_DIR and GIT_WORK_TREE:
+# the bundle must name this checkout's commit all the same (asserted below).
+git -c init.defaultBranch=main init --quiet "$STATE/selftest-other-repo"
+git -C "$STATE/selftest-other-repo" -c user.name=selftest -c user.email=selftest@example.invalid \
+  commit --quiet --allow-empty --message other
 # The live store given as an extra path as well: it is a root already, and a file under it must
-# still be counted once. Under a diff helper that prints nothing: the bundle must carry git's own
-# patch, not the helper's silence. And with untracked files turned off in the caller's status
-# configuration, and case folded in git's: the diff must carry them all the same.
+# still be counted once. And the bundle the other capture is still writing, given as an extra
+# path: left to its own scan all the same (asserted below, with the rest). Under a diff helper
+# that prints nothing: the bundle must carry git's own patch, not the helper's silence. And with
+# untracked files turned off in the caller's status configuration, and case folded in git's: the
+# diff must carry them all the same.
 bundle=$(cd "$STATE/selftest-outside" &&
   GIT_EXTERNAL_DIFF=/bin/true GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true \
     GIT_CONFIG_KEY_1=status.showUntrackedFiles GIT_CONFIG_VALUE_1=no \
     GIT_CONFIG_KEY_2=core.ignoreCase GIT_CONFIG_VALUE_2=true \
-    "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" "$STATE/selftest-data-alias" 2>"$STATE/selftest-evidence.err") || rc=$?
+    GIT_DIR=$STATE/selftest-other-repo/.git GIT_WORK_TREE=$STATE/selftest-other-repo \
+    "$here/evidence" -delete -delete.d "link-$BW_BAO_METADATA_TOKEN" "$STATE/data" "$STATE/selftest-data-alias" \
+    "$STATE/evidence/selftest-active" 2>"$STATE/selftest-evidence.err") || rc=$?
 mv --no-target-directory -- "$STATE/selftest-readme-copy" "$FIXTURES/README.md"
 undefer
 [ "$case_planted" -eq 0 ] || rm "$FIXTURES/README.MD"
@@ -1319,7 +1338,7 @@ active_marked=0
 active_scanned_by=$(cat "$STATE/evidence/selftest-active/scanned-by.txt" 2>/dev/null || printf none)
 kill "$active_holder" 2>/dev/null || true
 rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN" "$FIXTURES/.selftest-untracked" "$FIXTURES/.selftest-untracked.bin" \
-  "$STATE/evidence/selftest-interrupted" "$STATE/evidence/selftest-active" \
+  "$STATE/evidence/selftest-interrupted" "$STATE/evidence/selftest-active" "$STATE/selftest-other-repo" \
   "$STATE/backups/store-selftest-kept.tgz" "$STATE/backups/store-selftest-stale.tgz" "$STATE/backups/store-selftest\\back.tgz"
 [ "$rc" -eq 0 ] || fail "evidence aborted on a healthy fixture: $(cat "$STATE/selftest-evidence.err")"
 [ ! -e "$bundle/.incomplete" ] || fail "a completed capture left its bundle marked incomplete"
