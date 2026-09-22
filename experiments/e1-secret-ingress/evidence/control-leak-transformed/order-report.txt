@@ -1,0 +1,1 @@
+ok: 27 records in <E1_OUT>/runs/control-leak-transformed/journal.jsonl, no write before the first extraction and every secret a write lists extracted before it

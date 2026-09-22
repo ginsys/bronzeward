@@ -1,0 +1,1 @@
+ok: 26 records in <E1_OUT>/runs/honest-import-final/journal.jsonl, no write before the first extraction and every secret a write lists extracted before it

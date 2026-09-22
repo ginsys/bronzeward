@@ -1,0 +1,5 @@
+{"seq":1,"run_id":"recover-encrypted","event":"note","detail":"resumed run crashed-in-review-encrypted from encrypted staging as recovery-13b42d8ff04971b4, at checkpoint in-review; the extraction of its secrets is recorded in that run's journal, not this one","wall":"2026-09-22T18:56:07.329135089+02:00","mono_ns":9169219}
+{"seq":2,"run_id":"recover-encrypted","event":"payload.write","checkpoint":"in-db-txn","surface":"machine_draft.document","payload_sha256":"918296301e9f5e0138cffdce74dd2d9b1fa3cde688edb1c55e714181f25f8599","detail":"recover:crashed-in-review-encrypted","wall":"2026-09-22T18:56:07.335371714+02:00","mono_ns":15405864}
+{"seq":3,"run_id":"recover-encrypted","event":"checkpoint.reached","checkpoint":"in-db-txn","wall":"2026-09-22T18:56:07.352721311+02:00","mono_ns":32755424}
+{"seq":4,"run_id":"recover-encrypted","event":"note","checkpoint":"after-commit","surface":"machine_draft","detail":"committed","wall":"2026-09-22T18:56:07.360665919+02:00","mono_ns":40700015}
+{"seq":5,"run_id":"recover-encrypted","event":"checkpoint.reached","checkpoint":"after-commit","wall":"2026-09-22T18:56:07.366865403+02:00","mono_ns":46899548}

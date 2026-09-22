@@ -1,0 +1,38 @@
+# talosctl get rd -o yaml, sensitivity by resource definition
+# read from the fixture control plane at capture time
+
+sensitive	apicertificates.secrets.talos.dev
+sensitive	apiserverconfigs.kubernetes.talos.dev
+sensitive	auditpolicyconfigs.kubernetes.talos.dev
+sensitive	authorizationconfigs.kubernetes.talos.dev
+sensitive	certsans.secrets.talos.dev
+sensitive	deviceconfigspecs.net.talos.dev
+sensitive	discoveryconfigs.cluster.talos.dev
+sensitive	encryptionsalts.secrets.talos.dev
+sensitive	etcdrootsecrets.secrets.talos.dev
+sensitive	etcdsecrets.secrets.talos.dev
+sensitive	etcfilespecs.files.talos.dev
+sensitive	extensionserviceconfigs.runtime.talos.dev
+sensitive	kubeletconfigs.kubernetes.talos.dev
+sensitive	kubeletsecrets.secrets.talos.dev
+sensitive	kubeletspecs.kubernetes.talos.dev
+sensitive	kubernetesdynamiccerts.secrets.talos.dev
+sensitive	kubernetesrootsecrets.secrets.talos.dev
+sensitive	kubernetessecrets.secrets.talos.dev
+sensitive	kubespanconfigs.kubespan.talos.dev
+sensitive	kubespanidentities.kubespan.talos.dev
+sensitive	linkspecs.net.talos.dev
+sensitive	machineconfigs.config.talos.dev
+sensitive	maintenancerootsecrets.secrets.talos.dev
+sensitive	nodeannotationspecs.k8s.talos.dev
+sensitive	nodecordonedspecs.k8s.talos.dev
+sensitive	nodelabelspecs.k8s.talos.dev
+sensitive	nodetaintspecs.k8s.talos.dev
+sensitive	oomactions.talos.dev
+sensitive	operatorspecs.net.talos.dev
+sensitive	osrootsecrets.secrets.talos.dev
+sensitive	registryconfigs.cri.talos.dev
+sensitive	siderolinkconfigs.siderolink.talos.dev
+sensitive	siderolinktunnels.siderolink.talos.dev
+sensitive	trustdcertificates.secrets.talos.dev
+sensitive	volumeconfigs.block.talos.dev

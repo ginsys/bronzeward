@@ -1,0 +1,1 @@
+ok: 22 records in <E1_OUT>/runs/crashed-in-db-txn/journal.jsonl, no write before the first extraction and every secret a write lists extracted before it

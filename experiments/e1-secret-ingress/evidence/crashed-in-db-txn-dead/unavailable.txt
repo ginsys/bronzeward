@@ -1,0 +1,2 @@
+live database dump (postgres stopped, paused or unreachable): current database content NOT scanned
+databases left by an interrupted db-restore, if any: NOT scanned

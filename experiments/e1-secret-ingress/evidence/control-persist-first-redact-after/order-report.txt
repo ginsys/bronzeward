@@ -1,0 +1,2 @@
+seq 7: wrote machine_draft (plaintext, before extraction) at sequence 7, before the first extraction at sequence 10; §7.1 forbids persisting the observed configuration and extracting afterwards
+e1: 1 ordering violation(s) in <E1_OUT>/runs/control-persist-first-redact-after/journal.jsonl across 26 records
