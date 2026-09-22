@@ -27,7 +27,12 @@ need grep sed find sort cp
 e1_need_fixture
 e1_build
 
-dest=$E1_DIR/evidence
+# The committed evidence is replaced only once its replacement is complete and has scanned clean.
+# The first version removed it before checking anything, so a run with an empty or mismatched
+# E1_OUT deleted the tracked evidence and then stopped at the "no bundles" check, leaving nothing
+# at all. It is now built beside the bundles and moved into place at the end.
+final=$E1_DIR/evidence
+dest=$E1_OUT/evidence.building
 rm -rf -- "$dest"
 mkdir -p -- "$dest"
 
@@ -115,4 +120,6 @@ hits=$(e1_hits "$dest")
 secrets and must not be committed. The files are left in $dest for inspection; attribute each hit
 by opening the file that holds it."
 
-say "collect-evidence: $runs run(s) and $tables table(s) collected into $dest, scanned clean"
+rm -rf -- "$final"
+mv -- "$dest" "$final" || die "the evidence scanned clean but could not be moved into $final; it is in $dest"
+say "collect-evidence: $runs run(s) and $tables table(s) collected into $final, scanned clean"

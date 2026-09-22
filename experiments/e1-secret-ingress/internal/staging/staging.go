@@ -39,6 +39,7 @@ import (
 
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/checkpoint"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/secret"
+	"github.com/lib/pq"
 )
 
 // Mode names a staging alternative.
@@ -76,13 +77,18 @@ type Claim struct {
 	CreatedAt        time.Time
 	HeartbeatAt      time.Time
 	ExpiresAt        time.Time
+
+	// expiredAtRead is whether the server's clock had passed ExpiresAt when this claim was read.
+	// Resume decides on this rather than on Expired(time.Now()), so the decision uses the clock
+	// that set the expiry; the transition out of held checks it again inside its own UPDATE.
+	expiredAtRead bool
 }
 
-// Expired reports whether the claim's lease has run out as of now.
+// Expired reports whether the claim's lease has run out as of now, on the caller's clock.
 //
-// Expiry is evaluated here, at read, rather than only by a sweeper. A sweeper that has not run
-// yet leaves an expired claim looking valid, and the window between expiry and the sweep is
-// exactly when a second party would pick up a claim it should not have.
+// It is for reporting and for tests. Resume does not use it: the lease is set and extended from
+// the server's clock, so judging it by the caller's would let a caller whose clock lags keep using
+// a claim the server already considers expired.
 func (c Claim) Expired(now time.Time) bool { return now.After(c.ExpiresAt) }
 
 // Staging is a place a pending change waits for review.
@@ -125,16 +131,25 @@ type claims struct {
 	lease time.Duration
 }
 
-// insert writes the claim row.
-func (c *claims) insert(ctx context.Context, cl Claim, payload *string) error {
-	_, err := c.db.ExecContext(ctx,
+// leaseInterval is the lease as a PostgreSQL interval literal, for expiry computed on the server.
+func (c *claims) leaseInterval() string { return fmt.Sprintf("%d seconds", int(c.lease.Seconds())) }
+
+// insert writes the claim row and sets cl.ExpiresAt to the expiry the server recorded.
+//
+// Every expiry in this table is the server's. heartbeat already extended the lease from
+// clock_timestamp() so that a caller with a lagging clock could not extend its own claim; the
+// initial expiry and the check at resume used the caller's clock, which reopened that hole at both
+// ends. A claim's lifetime is now decided in one place, by one clock.
+func (c *claims) insert(ctx context.Context, cl *Claim, payload *string) error {
+	err := c.db.QueryRowContext(ctx,
 		`INSERT INTO staging_claim
 		   (run_id, mode, owner_principal, owner_pid, owner_start_token,
 		    payload, payload_sha256, resume_checkpoint, state, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, clock_timestamp() + $10::interval)
+		 RETURNING expires_at`,
 		cl.RunID, string(cl.Mode), cl.OwnerPrincipal, nullableInt(cl.OwnerPID),
 		nullableString(cl.OwnerStartToken), payload, cl.PayloadSHA256,
-		cl.ResumeCheckpoint, cl.State, cl.ExpiresAt)
+		cl.ResumeCheckpoint, cl.State, c.leaseInterval()).Scan(&cl.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("staging: claiming %s: %w", cl.RunID, err)
 	}
@@ -153,11 +168,11 @@ func (c *claims) read(ctx context.Context, runID string) (Claim, *string, error)
 	err := c.db.QueryRowContext(ctx,
 		`SELECT run_id, mode, owner_principal, owner_pid, owner_start_token,
 		        payload, payload_sha256, resume_checkpoint, state,
-		        created_at, heartbeat_at, expires_at
+		        created_at, heartbeat_at, expires_at, expires_at <= clock_timestamp()
 		   FROM staging_claim WHERE run_id = $1`, runID).
 		Scan(&cl.RunID, &mode, &cl.OwnerPrincipal, &pid, &startToken,
 			&payload, &cl.PayloadSHA256, &cl.ResumeCheckpoint, &cl.State,
-			&cl.CreatedAt, &cl.HeartbeatAt, &cl.ExpiresAt)
+			&cl.CreatedAt, &cl.HeartbeatAt, &cl.ExpiresAt, &cl.expiredAtRead)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Claim{}, nil, fmt.Errorf("staging: no claim for run %s", runID)
 	}
@@ -175,12 +190,33 @@ func (c *claims) read(ctx context.Context, runID string) (Claim, *string, error)
 	return cl, nil, nil
 }
 
-// setState moves a claim to a terminal state and drops its payload.
-func (c *claims) setState(ctx context.Context, runID, state string) error {
-	_, err := c.db.ExecContext(ctx,
-		`UPDATE staging_claim SET state = $2, payload = NULL WHERE run_id = $1`, runID, state)
+// transition moves a claim from one of the given states to another and drops its payload, and
+// fails if the claim was not in one of them at that moment.
+//
+// The guard is in the UPDATE itself. Resume used to read the claim, check it was held, and then
+// update it unconditionally, so two principals resuming the same encrypted claim at once both
+// passed the check and both obtained the pending change — the ownership property the encrypted
+// alternative is compared on. The row the database actually changes is now the only arbiter, the
+// way heartbeat already worked.
+//
+// unexpired adds the server's own expiry to that guard, for the transition out of held: a claim
+// that expired between the read and this statement must not be taken.
+func (c *claims) transition(ctx context.Context, runID, to string, unexpired bool, from ...string) error {
+	query := `UPDATE staging_claim SET state = $2, payload = NULL WHERE run_id = $1 AND state = ANY($3)`
+	if unexpired {
+		query += ` AND expires_at > clock_timestamp()`
+	}
+	result, err := c.db.ExecContext(ctx, query, runID, to, pq.Array(from))
 	if err != nil {
-		return fmt.Errorf("staging: setting %s to %s: %w", runID, state, err)
+		return fmt.Errorf("staging: setting %s to %s: %w", runID, to, err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("staging: setting %s to %s: %w", runID, to, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("staging: run %s was not %s%s when it was to become %s; another principal took it or it expired first",
+			runID, strings.Join(from, " or "), map[bool]string{true: " and unexpired", false: ""}[unexpired], to)
 	}
 	return nil
 }
@@ -251,10 +287,9 @@ func (t *Transient) Hold(ctx context.Context, runID, principal string, s secret.
 		PayloadSHA256:    hex.EncodeToString(sum[:]),
 		ResumeCheckpoint: resumeAt.String(),
 		State:            StateHeld,
-		ExpiresAt:        time.Now().Add(t.claims.lease),
 	}
 	// payload stays NULL: the change is in memory and must not reach the log.
-	if err := t.claims.insert(ctx, cl, nil); err != nil {
+	if err := t.claims.insert(ctx, &cl, nil); err != nil {
 		return Claim{}, err
 	}
 	t.held[runID] = s
@@ -279,7 +314,7 @@ func (t *Transient) Resume(ctx context.Context, runID, principal string) (secret
 	if cl.State != StateHeld {
 		return secret.Sanitized{}, cl, fmt.Errorf("staging: run %s is %s, not held", runID, cl.State)
 	}
-	if cl.Expired(time.Now()) {
+	if cl.expiredAtRead {
 		return secret.Sanitized{}, cl, fmt.Errorf("staging: run %s: %w", runID, ErrExpired)
 	}
 
@@ -305,7 +340,7 @@ func (t *Transient) Resume(ctx context.Context, runID, principal string) (secret
 			runID, cl.OwnerPrincipal, ErrNotOwner)
 	}
 
-	if err := t.claims.setState(ctx, runID, StateResumed); err != nil {
+	if err := t.claims.transition(ctx, runID, StateResumed, true, StateHeld); err != nil {
 		return secret.Sanitized{}, cl, err
 	}
 	delete(t.held, runID)
@@ -315,7 +350,7 @@ func (t *Transient) Resume(ctx context.Context, runID, principal string) (secret
 // Release implements Staging.
 func (t *Transient) Release(ctx context.Context, runID string) error {
 	delete(t.held, runID)
-	return t.claims.setState(ctx, runID, StateReleased)
+	return t.claims.transition(ctx, runID, StateReleased, false, StateHeld, StateResumed)
 }
 
 // Encrypted is explicitly encrypted staging. The pending change is a row holding ciphertext, which
@@ -370,9 +405,8 @@ func (e *Encrypted) Hold(ctx context.Context, runID, principal string, s secret.
 		PayloadSHA256:    hex.EncodeToString(sum[:]),
 		ResumeCheckpoint: resumeAt.String(),
 		State:            StateHeld,
-		ExpiresAt:        time.Now().Add(e.claims.lease),
 	}
-	if err := e.claims.insert(ctx, cl, &ciphertext); err != nil {
+	if err := e.claims.insert(ctx, &cl, &ciphertext); err != nil {
 		return Claim{}, err
 	}
 	return cl, nil
@@ -397,9 +431,11 @@ func (e *Encrypted) Resume(ctx context.Context, runID, principal string) (secret
 	if cl.State != StateHeld {
 		return secret.Sanitized{}, cl, fmt.Errorf("staging: run %s is %s, not held", runID, cl.State)
 	}
-	// Expiry is checked here, at read. A sweeper that has not run yet leaves an expired claim
-	// looking valid, and that window is exactly when a second party would take one it should not.
-	if cl.Expired(time.Now()) {
+	// Expiry is checked here, at read, and on the server's clock. A sweeper that has not run yet
+	// leaves an expired claim looking valid, and that window is exactly when a second party would
+	// take one it should not. The transition below checks it again, in the same statement that
+	// takes the claim.
+	if cl.expiredAtRead {
 		return secret.Sanitized{}, cl, fmt.Errorf("staging: run %s: %w", runID, ErrExpired)
 	}
 	if payload == nil {
@@ -417,8 +453,14 @@ func (e *Encrypted) Resume(ctx context.Context, runID, principal string) (secret
 
 	sum := sha256.Sum256(body)
 	if got := hex.EncodeToString(sum[:]); got != cl.PayloadSHA256 {
+		// The recorded digest comes from the table and is abbreviated only when it is long enough:
+		// a malformed row must be reported as a mismatch, not panic on the slice.
+		claimed := cl.PayloadSHA256
+		if len(claimed) > 12 {
+			claimed = claimed[:12]
+		}
 		return secret.Sanitized{}, cl, fmt.Errorf("staging: run %s decrypts to digest %s, claimed as %s",
-			runID, got[:12], cl.PayloadSHA256[:12])
+			runID, got[:12], claimed)
 	}
 
 	// The resumed change re-enters the program as a Sanitized. That is sound here and nowhere
@@ -426,7 +468,10 @@ func (e *Encrypted) Resume(ctx context.Context, runID, principal string) (secret
 	// claim, and the ciphertext came from this program's own Hold.
 	resumed := secret.NewSanitized(body, nil)
 
-	if err := e.claims.setState(ctx, runID, StateResumed); err != nil {
+	// Taking the claim is the last step and the only one that decides who gets it. Two principals
+	// can both reach this line with the plaintext decrypted; exactly one UPDATE changes the row, and
+	// the other returns an error and discards what it decrypted.
+	if err := e.claims.transition(ctx, runID, StateResumed, true, StateHeld); err != nil {
 		return secret.Sanitized{}, cl, err
 	}
 	return resumed, cl, nil
@@ -437,7 +482,7 @@ func (e *Encrypted) Resume(ctx context.Context, runID, principal string) (secret
 // that is harmless. The same delete under the forbidden persist-then-redact design leaves
 // plaintext there instead.
 func (e *Encrypted) Release(ctx context.Context, runID string) error {
-	return e.claims.setState(ctx, runID, StateReleased)
+	return e.claims.transition(ctx, runID, StateReleased, false, StateHeld, StateResumed)
 }
 
 // ProcessStartToken identifies this process beyond its PID.

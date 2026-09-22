@@ -61,6 +61,34 @@ expect_status() {
   }
 }
 
+# fault <verb> <args…>: one fixture injection, whose failure is a matrix failure.
+#
+# The first version sent each injection's output to /dev/null and, on failure, printed one line and
+# carried on, so the capture that depended on it was still taken and filed under the injection's
+# name. A crashed-in-db-txn-dead bundle taken with PostgreSQL still running satisfies every other
+# assertion here — the run is verify-order, which succeeds, and the scan is clean — and would have
+# been reported as a read of the disk with the database dead. The caller now skips the dependent
+# capture when this fails, and the reason is shown rather than discarded.
+fault() {
+  local out
+  if out=$("$inject" "$@" 2>&1); then
+    return 0
+  fi
+  say "matrix: FAIL injection '$*' did not take effect:"
+  printf '%s\n' "$out" | sed 's/^/matrix:   /' >&2
+  failed+=("inject:$1-$2")
+  return 1
+}
+
+# fault_or_stop: as fault, for an injection that restores what every later run needs — the
+# provider after a netsplit, the database after a kill. Carrying on without it would turn every
+# remaining bundle into a measurement of the fixture's broken state.
+fault_or_stop() {
+  fault "$@" && return 0
+  die "matrix: stopping — '$*' failed, so no later capture would be about the flow under test.
+Failures so far: ${failed[*]}"
+}
+
 # The honest path, both staging alternatives, both flows. These are the bundles the claim rests on,
 # and every one of them must hold exactly the two controls.
 take honest-import-transient clean - -- --staging=transient --config="$import_config" import
@@ -72,9 +100,10 @@ expect_status honest-adopt-transient ok
 
 # A forced checkpoint, so a clean data directory on the honest path cannot be dismissed as "not
 # flushed yet". The same run without it is above.
-"$inject" db-snapshot honest-flush >/dev/null 2>&1 || say "matrix: db-snapshot unavailable"
-take honest-import-flushed clean - -- --staging=encrypted --config="$import_config" import
-expect_status honest-import-flushed ok
+if fault db-snapshot honest-flush; then
+  take honest-import-flushed clean - -- --staging=encrypted --config="$import_config" import
+  expect_status honest-import-flushed ok
+fi
 
 # Held at in-review, which is where the two staging alternatives differ: the transient bundle must
 # show the pending change nowhere on disk, the encrypted one must show ciphertext in the row.
@@ -100,10 +129,11 @@ expect_status recover-transient refused
 
 # Encrypted staging depends on the provider at recovery, which is the cost of having a recovery
 # owner at all. Measured rather than argued.
-"$inject" netsplit openbao >/dev/null 2>&1 || say "matrix: netsplit unavailable"
-take recover-encrypted-netsplit clean - -- --staging=encrypted recover crashed-in-review-encrypted
-expect_status recover-encrypted-netsplit refused
-"$inject" netjoin openbao >/dev/null 2>&1 || say "matrix: netjoin unavailable"
+if fault netsplit openbao; then
+  take recover-encrypted-netsplit clean - -- --staging=encrypted recover crashed-in-review-encrypted
+  expect_status recover-encrypted-netsplit refused
+  fault_or_stop netjoin openbao
+fi
 
 take recover-encrypted clean - -- --staging=encrypted recover crashed-in-review-encrypted
 expect_status recover-encrypted ok
@@ -111,10 +141,17 @@ expect_status recover-encrypted ok
 # Killed inside the database transaction, captured twice: dead, then restarted.
 take crashed-in-db-txn clean - -- --staging=encrypted --crash-at=in-db-txn --config="$import_config" import
 expect_status crashed-in-db-txn killed
-"$inject" kill postgres >/dev/null 2>&1 || say "matrix: kill postgres unavailable"
-take crashed-in-db-txn-dead clean - -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
-expect_status crashed-in-db-txn-dead ok
-"$inject" start postgres >/dev/null 2>&1 || say "matrix: start postgres unavailable"
+if fault kill postgres; then
+  take crashed-in-db-txn-dead clean - -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
+  expect_status crashed-in-db-txn-dead ok
+  # The bundle's own record that the database went unread is the evidence it was dead. Without
+  # it the bundle cannot be told apart from one taken with PostgreSQL running.
+  [ -s "$E1_BUNDLES/crashed-in-db-txn-dead/unavailable.txt" ] || {
+    say "matrix: FAIL crashed-in-db-txn-dead has no unavailable.txt, so PostgreSQL was not dead when it was taken"
+    failed+=(crashed-in-db-txn-dead/not-dead)
+  }
+  fault_or_stop start postgres
+fi
 take crashed-in-db-txn-restarted clean - -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
 expect_status crashed-in-db-txn-restarted ok
 

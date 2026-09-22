@@ -75,9 +75,12 @@ e1_env() {
     "$@"
 }
 
-# e1_config: the document a flow ingests. import takes the configuration the generator produced;
-# adopt takes the effective configuration read back off the node, which is what design §12.4's
-# drift adoption actually sees.
+# e1_config: the document a flow ingests. Both flows take the same one: the effective machine
+# configuration fixtures/bin/up reads back off the control plane, which is what design §12.4's
+# drift adoption sees. The fixture keeps no copy of the generator's pre-apply output, so an import
+# of a freshly generated configuration is not exercised here, and the two flows share one function
+# in the prototype as well — the adopt bundle adds a flow label, not a second input or code path.
+# An earlier version of this comment said import took the generator's output; it never did.
 e1_config() {
   case $1 in
     import) printf '%s' "$STATE/controlplane.yaml" ;;

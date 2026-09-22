@@ -281,6 +281,76 @@ func TestSanitizedCopiesItsInputs(t *testing.T) {
 	if got := s.References()[0].URI; got != "kv://x" {
 		t.Errorf("mutating the caller's slice changed a reference: %q", got)
 	}
+
+	// The other direction: what the accessors hand out must not alias the value either, or the
+	// constructor's copying protects only half of it.
+	copy(s.Document(), []byte("LEAKED------"))
+	s.References()[0].URI = "mutated"
+	if got := string(s.Document()); got != "machine: {}\n" {
+		t.Errorf("writing through Document() changed the document: %q", got)
+	}
+	if got := s.References()[0].URI; got != "kv://x" {
+		t.Errorf("writing through References() changed a reference: %q", got)
+	}
+}
+
+// sanitizedConstructors are the non-test packages permitted to call NewSanitized.
+//
+// Extraction is the constructor the design rests on. Staging is the second, and it is a trust
+// assertion rather than an extraction: a resumed change is rebuilt from bytes decrypted out of
+// staging, sound only because what was encrypted had already been sanitized and its digest is
+// checked against the claim first. Test files may build one freely; they cannot reach persistence
+// in a real run.
+var sanitizedConstructors = map[string]bool{
+	"internal/secret":  true,
+	"internal/extract": true,
+	"internal/staging": true,
+}
+
+// TestNewSanitizedHasNoUnexpectedCallers is the enforcement the constructor's doc comment used to
+// claim and did not have. Go cannot restrict an exported function to one sibling package, so the
+// claim that only extraction produces a Sanitized is a property of this test, not of the compiler,
+// and the report says so. Lexical like the Unsafe scan beside it, and over-reporting for the same
+// reason.
+func TestNewSanitizedHasNoUnexpectedCallers(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("resolving the module root: %v", err)
+	}
+	var scanned int
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		scanned++
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Contains(body, []byte("NewSanitized(")) {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if pkg := filepath.ToSlash(filepath.Dir(rel)); !sanitizedConstructors[pkg] {
+			t.Errorf("%s calls NewSanitized; only %v may", rel, keys(sanitizedConstructors))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
+	if scanned == 0 {
+		t.Fatalf("walked %s and found no .go files at all; the scan proves nothing", root)
+	}
 }
 
 // unsafeCallers are the packages permitted to call Unresolved.Unsafe. Extraction must read the

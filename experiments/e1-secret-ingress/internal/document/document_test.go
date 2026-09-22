@@ -208,6 +208,59 @@ func TestRoundTripIsStable(t *testing.T) {
 	}
 }
 
+// TestRoundTripKeepsEmptyDocuments holds the document numbering across a re-encode. Bytes used to
+// skip empty documents, so every later doc[n] shifted down on reading the output back and a
+// reference recorded against one document then named another. Each case places an empty document
+// somewhere a separator is easy to get wrong: first, between two, and last.
+func TestRoundTripKeepsEmptyDocuments(t *testing.T) {
+	for name, in := range map[string]string{
+		"first":  "---\n---\na: x\n---\nb: y\n",
+		"middle": "a: x\n---\n---\nb: y\n",
+		"last":   "a: x\n---\nb: y\n---\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := load(t, in)
+			out, err := d.Bytes()
+			if err != nil {
+				t.Fatalf("Bytes: %v", err)
+			}
+			again, err := Load(out)
+			if err != nil {
+				t.Fatalf("re-loading %q: %v", out, err)
+			}
+			if got, want := strings.Join(again.Paths(), ","), strings.Join(d.Paths(), ","); got != want {
+				t.Errorf("paths changed across a round trip:\n in: %s\nout: %s\nfrom bytes %q", want, got, out)
+			}
+		})
+	}
+}
+
+// TestRoundTripOfAPlainStreamIsUnchanged is that fix's control: a stream with no empty document must
+// come out exactly as the single encoder used to write it, or every sanitized digest recorded in the
+// committed evidence would stop being reproducible for no reason.
+func TestRoundTripOfAPlainStreamIsUnchanged(t *testing.T) {
+	out, err := load(t, "a: x\n---\nb: y\n").Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+	if want := "a: x\n---\nb: y\n"; string(out) != want {
+		t.Errorf("Bytes = %q, want %q", out, want)
+	}
+}
+
+// TestLoadNamesAnEmptyInputAsEmpty checks the empty-index error blames the right cause. An input
+// with no value at all used to be reported as "0 key(s) carry a dot or a bracket", which sends the
+// reader looking for an ambiguous key that does not exist.
+func TestLoadNamesAnEmptyInputAsEmpty(t *testing.T) {
+	_, err := Load([]byte("machine: {}\n"))
+	if err == nil {
+		t.Fatal("Load accepted an input with no scalar value")
+	}
+	if !strings.Contains(err.Error(), "holds no scalar value") {
+		t.Errorf("the error does not say the input is empty: %v", err)
+	}
+}
+
 // TestAmbiguousKeysAreUnaddressableAndReported is the guard that keeps a mark from addressing the
 // wrong value. A key holding a dot would make `a.b` mean either of two locations, and extracting
 // the wrong one is invisible in every piece of evidence this experiment collects.

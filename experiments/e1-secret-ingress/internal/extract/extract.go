@@ -4,11 +4,16 @@
 // It is the step design §7.1 requires to come first: every known or marked secret is moved to a
 // provider and replaced by a reference, and only then does anything sanitized exist to persist.
 //
-// The ordering is enforced by the type system rather than by the order of statements. Run is the
-// only constructor of a secret.Sanitized in this program, and every persistence function takes
-// one, so there is no arrangement of calls in which a draft is written before this function
-// returns. A reviewer does not have to read the ingestion flow in order to believe it; they have
-// to check that Sanitized has no other constructor, which is one grep.
+// The ordering is carried by a type rather than by the order of statements. Every persistence
+// function takes a secret.Sanitized, and Run is how an ingested document becomes one; the only
+// other constructor call is staging's resume path, which rebuilds one from bytes that were
+// already sanitized when they were staged. So there is no arrangement of calls in which a draft is
+// written before this function returns.
+//
+// The restriction is not the compiler's. NewSanitized is exported, since Go cannot scope it to one
+// sibling package, and secret's TestNewSanitizedHasNoUnexpectedCallers is what fails if anything
+// else calls it. A reviewer does not have to read the ingestion flow to believe the ordering; they
+// have to believe that test, which is a lexical scan of the module.
 //
 // Run fails closed. If a provider write fails halfway, it returns an error and no Sanitized, so
 // the caller has nothing it could persist. If the substituted document still contains a secret it

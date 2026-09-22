@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,7 +31,34 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
+
+// kvPath is the request path for a KV key under the given prefix, or an error for a key this client
+// cannot address exactly.
+//
+// The key is written into the URL path as it stands, so any character a URL gives meaning to would
+// move the request somewhere other than the key: a '#' ends the path and makes the rest a fragment,
+// a '?' starts a query, a '%' begins an escape the server decodes, and a "." or ".." segment is
+// collapsed. Two different keys could then land on one secret and the second write would replace
+// the first. Such a key is refused rather than escaped, because escaping would change the request
+// path of every key the matrix already stored, and the committed evidence records those paths.
+func kvPath(prefix, key string) (string, error) {
+	if key == "" {
+		return "", errors.New("provider: an empty key addresses no secret")
+	}
+	if i := strings.IndexFunc(key, func(r rune) bool {
+		return r == '#' || r == '?' || r == '%' || r == '\\' || unicode.IsSpace(r) || unicode.IsControl(r)
+	}); i >= 0 {
+		return "", fmt.Errorf("provider: key %q holds %q at byte %d, which a URL path would not carry literally; the request would reach a different secret", key, key[i], i)
+	}
+	for _, segment := range strings.Split(key, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("provider: key %q holds an empty, \".\" or \"..\" segment, which the server would collapse into another path", key)
+		}
+	}
+	return prefix + key, nil
+}
 
 // Environment variables the fixtures publish. The token is read from the environment and never
 // from a flag: argv is world-readable through /proc and is captured by the evidence bundles this
@@ -116,7 +144,11 @@ func (c *Client) Put(ctx context.Context, key string, value []byte) (string, err
 			Version int `json:"version"`
 		} `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/secret/data/"+key, body, &out); err != nil {
+	path, err := kvPath("/v1/secret/data/", key)
+	if err != nil {
+		return "", err
+	}
+	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
 		return "", err
 	}
 	if out.Data.Version == 0 {
@@ -135,7 +167,11 @@ func (c *Client) Get(ctx context.Context, key string) ([]byte, error) {
 			Data map[string]string `json:"data"`
 		} `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/secret/data/"+key, nil, &out); err != nil {
+	path, err := kvPath("/v1/secret/data/", key)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	value, ok := out.Data.Data["value"]
@@ -165,7 +201,11 @@ func (c *Client) Versions(ctx context.Context, key string) ([]Version, error) {
 			} `json:"versions"`
 		} `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/secret/metadata/"+key, nil, &out); err != nil {
+	path, err := kvPath("/v1/secret/metadata/", key)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 
