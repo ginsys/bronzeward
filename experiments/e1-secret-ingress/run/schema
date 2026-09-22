@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Criterion 4: how much of the configuration's secret material schema detection finds, measured
+# against a denominator the detector had no part in choosing.
+#
+# Usage: E1_OUT=<dir> run/schema
+#
+# The ground truth is built in two steps, deliberately split so neither half can flatter the other.
+#
+# The fixture's own rule decides what counts as a secret, applied to the secrets bundle Talos
+# generated — the expression below is copied from fixtures/lib.sh's scan_patterns, which is the
+# same rule the leak scan uses, so the report's detection numbers and its absence claims are about
+# the same set of values. The prototype then does the mechanical half: where in the configuration
+# each of those values ended up.
+#
+# Intersecting with the configuration matters. A secrets bundle holds material the machine
+# configuration never carries, and counting those as misses would understate a detector that could
+# not have found them because they are not there.
+#
+# The values file holds real synthetic secrets and stays in E1_OUT. The path list it produces holds
+# none and is what the report cites.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "$0")/lib.sh"
+
+need awk sort go
+
+e1_need_fixture
+e1_build
+
+values=$E1_REPORTS/ground-truth-values.txt
+truth=$E1_REPORTS/ground-truth-paths.txt
+report=$(e1_report schema-report.txt)
+
+# Copied from fixtures/lib.sh scan_patterns. Keep the two identical: a rule that drifted here would
+# measure detection against a different set of secrets than the one the leak scan looks for.
+awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \
+  "$STATE/talos-secrets.yaml" | sort -u >"$values"
+[ -s "$values" ] || die "no secret values came out of $STATE/talos-secrets.yaml; the denominator
+would be empty and every number below would be reporting that rather than the detector"
+
+e1_env "$E1_BIN" --config="$(e1_config import)" paths-holding "$values" >"$truth"
+
+e1_env "$E1_BIN" --config="$(e1_config import)" schema-report "$truth" >"$report"
+say "schema: $(wc -l <"$truth") ground-truth path(s); report written to $report"
+say "schema: the values file is $values and must not be committed"
+cat -- "$report"

@@ -12,8 +12,18 @@
 # leaked, and which it was is settled by looking at the file named, never by the count.
 set -euo pipefail
 
-bundle=${1:?usage: assert-bundle <bundle-dir> [clean|leak|miss]}
+bundle=${1:?usage: assert-bundle <bundle-dir> [clean|leak|miss|residue] [surfaces]}
 expectation=${2:-clean}
+# Where a control's hits must and must not be: a comma-separated list of path fragments, each
+# optionally prefixed with ! for "no line may name this". A dash requires nothing.
+#
+# A count is not enough. One database serves the whole matrix, so once a control has committed
+# plaintext every later bundle shows hits in the dump and the write-ahead log, and a control
+# asserted on the count alone would pass on that residue without ever writing to the surface it is
+# named after. The negative form is what carries the redact-after and rollback results: their
+# plaintext must be gone from the live rows the dump holds and still present in the write-ahead
+# log, and only stating both makes that a measurement rather than a description.
+surfaces=${3:--}
 [ -d "$bundle" ] || {
   printf 'assert-bundle: %s is not a directory\n' "$bundle" >&2
   exit 1
@@ -69,11 +79,50 @@ not evidence: the report must say so rather than treating the honest run's clean
       note "OK the deliberate control is visible ($lines lines)"
     fi
     ;;
+  residue)
+    # An honest run taken after the deliberate controls, in the same database. The run itself
+    # writes no plaintext; the database still holds what the controls put there, in the heap, the
+    # write-ahead log and the dump. A clean scan here would mean the controls' plaintext had gone
+    # away on its own, which would undermine §7.1's reason for forbidding a plaintext draft.
+    if [ "$lines" -le 2 ]; then
+      bad "leak-scan.txt holds $lines line(s), want more than 2. The plaintext an earlier control \
+committed is expected to still be readable; if it is not, the residue claim is unsupported and the \
+report must not make it."
+    else
+      note "OK the earlier controls' plaintext is still on disk ($lines lines)"
+    fi
+    ;;
   *)
     note "FAIL unknown expectation $expectation"
     exit 1
     ;;
 esac
+
+# Where the hits are, which is the part a count cannot express.
+if [ "$surfaces" != - ]; then
+  IFS=, read -r -a wanted <<<"$surfaces" || true
+  for want in "${wanted[@]}"; do
+    case $want in
+      '!'*)
+        if grep --quiet --fixed-strings -- "${want#!}" "$scan"; then
+          bad "a line names ${want#!}, where this control's value must no longer be. That is the \
+claim the control exists to test, and it did not hold."
+        else
+          note "OK nothing at ${want#!}"
+        fi
+        ;;
+      *)
+        if grep --quiet --fixed-strings -- "$want" "$scan"; then
+          note "OK a hit at $want"
+        else
+          bad "no line names $want, which is where this control writes. Any other hits are an \
+earlier control's residue in the shared database, so this surface is unproven and the report must \
+not cite it."
+        fi
+        ;;
+    esac
+  done
+fi
 
 # The reachability control must be the run root's own, not the fixture's. Both carry the canary, so
 # the count alone cannot tell them apart; the path can.

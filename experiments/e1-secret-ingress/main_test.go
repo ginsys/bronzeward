@@ -78,15 +78,18 @@ func TestEverySubcommandTheUsageAdvertisesIsDispatched(t *testing.T) {
 func TestRecoverRefusesBeforeTouchingAnything(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "run")
 
+	// The run root is prepared for every subcommand that is given one, before dispatch, so the
+	// canary has to be present for the argument check below to be the failure under test.
+	t.Setenv(canaryEnv, "BWSYNTH-e1-test-canary")
 	if _, _, err := runCLI(t, "--run-root="+root, "recover"); err == nil {
 		t.Error("recover accepted no run id")
 	} else if !strings.Contains(err.Error(), "one argument") {
 		t.Errorf("the error does not say what recover wants: %v", err)
 	}
 
-	// The run root is prepared before the database is opened, so a missing canary stops the run
-	// here. Without it the bundle's leak scan of the run root would be unreadable, and a recovery
-	// that produced no usable evidence is not worth running at all.
+	// A missing canary stops the run at the run root, before the database is opened. Without it the
+	// bundle's leak scan of the run root would be unreadable, and a recovery that produced no usable
+	// evidence is not worth running at all.
 	t.Setenv(canaryEnv, "")
 	if _, _, err := runCLI(t, "--run-root="+root, "recover", "run-earlier"); err == nil {
 		t.Error("recover ran with no canary set")

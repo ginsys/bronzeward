@@ -56,6 +56,14 @@ fixture's synthetic values share a prefix.
 A control that comes back clean means that surface is not evidence. Say which one and change the
 design before drawing a conclusion from it, not after.
 
+One database serves the whole matrix, and the plaintext a `--persist-first` control commits stays
+readable in the heap, the write-ahead log, the dump and the snapshots for every run after it. So
+`run/matrix` takes every bundle that must scan clean before the first control, and the run that
+closes the §9.1 machine-state bracket at the end is asserted as `residue` instead: the run is
+honest, the database is not, and a clean scan there would mean the controls' plaintext had gone
+away on its own. Re-running the matrix therefore needs a fresh fixture (`fixtures/bin/down` then
+`fixtures/bin/up`), not just a fresh `E1_OUT`.
+
 ## What it deliberately does not do
 
 No upstream Talos composition, merge or typed validation. No reference resolution. No release,

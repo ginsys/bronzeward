@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Copy the committable part of a matrix run into experiments/e1-secret-ingress/evidence/.
+#
+# Usage: E1_OUT=<dir> run/collect-evidence
+#
+# The bundles themselves are never committed: each carries a PostgreSQL data directory and the
+# run's synthetic credentials. What is committed is the small text a reader needs to check the
+# report's claims without re-running anything — the leak scan, the pinned versions, what went
+# unread, the ordering journal and its verification.
+#
+# Two things are done to that text before it lands.
+#
+# Paths are rewritten. A leak scan names absolute paths on the machine that ran it, and a committed
+# file that says /home/<someone>/... is useless to every other reader and leaks a local layout into
+# a public repository. The checkout becomes <repo> and the output directory <E1_OUT>.
+#
+# And the result is scanned. The fixture's own pattern file is the authority on what a synthetic
+# secret looks like here, and anything it matches must not reach a commit — a journal record that
+# somehow held a value rather than a digest would otherwise be published. A hit is fatal and leaves
+# the directory in place for inspection.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "$0")/lib.sh"
+
+need grep sed find sort cp
+
+e1_need_fixture
+e1_build
+
+dest=$E1_DIR/evidence
+rm -rf -- "$dest"
+mkdir -p -- "$dest"
+
+# sanitize <source> <target>: copy, rewriting this machine's absolute paths out of the text.
+sanitize() {
+  [ -f "$1" ] || return 0
+  sed -e "s#$REPO_DIR#<repo>#g" -e "s#$E1_OUT#<E1_OUT>#g" -- "$1" >"$2"
+}
+
+runs=0
+for bundle in "$E1_BUNDLES"/*/; do
+  [ -d "$bundle" ] || continue
+  run_id=$(basename -- "$bundle")
+  out=$dest/$run_id
+  mkdir -p -- "$out"
+  runs=$((runs + 1))
+
+  for name in leak-scan.txt versions.txt unavailable.txt e1-run-status.txt e1-expectation.txt; do
+    sanitize "$bundle/$name" "$out/$name"
+  done
+
+  # The journal is the ordering evidence, and its verification is re-run here rather than quoted
+  # from the matrix: a report that cites a verdict nobody can reproduce from the committed files is
+  # not evidence. A run killed before it wrote anything has no journal, which is itself a result,
+  # so a missing one is recorded rather than skipped silently.
+  journal=$E1_RUNS/$run_id/journal.jsonl
+  if [ -f "$journal" ]; then
+    sanitize "$journal" "$out/journal.jsonl"
+    if "$E1_BIN" verify-order "$journal" >"$out/order-report.txt" 2>&1; then
+      printf 'pass\n' >"$out/order-verdict.txt"
+    else
+      printf 'fail\n' >"$out/order-verdict.txt"
+    fi
+    sanitize "$out/order-report.txt" "$out/order-report.txt.tmp"
+    mv -- "$out/order-report.txt.tmp" "$out/order-report.txt"
+  else
+    printf 'this run wrote no journal\n' >"$out/order-report.txt"
+    printf 'none\n' >"$out/order-verdict.txt"
+  fi
+done
+
+[ "$runs" -gt 0 ] || die "no bundles in $E1_BUNDLES; run run/matrix first"
+
+# The injection timeline is written by a third process and covers the whole matrix, so it is one
+# file beside the runs rather than a copy inside each.
+sanitize "$STATE/injections.log" "$dest/injections.log"
+
+# §6.9 asks whether Talos ships machine-readable sensitivity metadata a detector could rely on
+# instead of encoding its own field rules. It does, at the COSI resource level: each resource
+# definition carries a sensitivity, and the whole machine configuration is one resource marked
+# sensitive. That is the answer, and it is recorded from the running node rather than asserted,
+# because a negative result here is what makes §6.9's refusal to promise completeness load-bearing.
+{
+  printf '# talosctl get rd -o yaml, sensitivity by resource definition\n'
+  printf '# read from the fixture control plane at capture time\n\n'
+  TALOSCONFIG=$STATE/talosconfig "$FIXTURES_DIR/.cache/talosctl" -n "$TALOS_CONTROLPLANE_IP" get rd -o yaml |
+    awk '/^    id: /{id=$2} /sensitivity:/{printf "%s\t%s\n", $2, id}' | sort
+} >"$dest/talos-resource-sensitivity.txt" 2>&1 ||
+  printf 'the control plane could not be read at capture time\n' >"$dest/talos-resource-sensitivity.txt"
+
+hits=$(e1_hits "$dest")
+[ "$hits" -eq 0 ] || die "the collected evidence holds $hits occurrence(s) of this run's synthetic
+secrets and must not be committed. The files are left in $dest for inspection; attribute each hit
+by opening the file that holds it."
+
+say "collect-evidence: $runs run(s) collected into $dest, scanned clean"

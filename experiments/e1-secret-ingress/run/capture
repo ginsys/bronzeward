@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Tier B: one run, one evidence bundle, asserted.
 #
-# Usage: E1_OUT=<dir> run/capture <run-id> <expectation> -- <e1 flags and subcommand>
+# Usage: E1_OUT=<dir> run/capture <run-id> <expectation> <surfaces|-> -- <e1 flags and subcommand>
 #
 #   <expectation> is what the bundle's leak scan must show:
 #     clean   exactly the two controls and nothing else
 #     leak    more than the two controls: a deliberate control that must be visible
 #     miss    exactly the two controls, although a value really was written: the transformed
 #             control, which demonstrates what the instrument cannot see
+#     residue more than the two controls, none of them written by this run: an honest run taken
+#             after the deliberate controls, whose database still holds their plaintext
 #
 # The run root is handed to fixtures/bin/evidence as an extra scan path, and the bundle is copied
 # out of .state immediately: fixtures/bin/down destroys .state, and a bundle captured before a
@@ -18,16 +20,20 @@ set -euo pipefail
 
 need docker grep sed awk wc cp find sort tail go
 
-[ $# -ge 4 ] || die "usage: run/capture <run-id> clean|leak|miss -- <e1 arguments>"
+[ $# -ge 5 ] || die "usage: run/capture <run-id> clean|leak|miss|residue <surfaces|-> -- <e1 arguments>"
 run_id=$1
 expectation=$2
-shift 2
+# Comma-separated path fragments the hits must and, with a ! prefix, must not appear at; - requires
+# nothing. See run/assert-bundle: a count alone cannot tell a control's own write from an earlier
+# control's residue in the shared database.
+surfaces=$3
+shift 3
 [ "$1" = -- ] || die "expected -- before the e1 arguments"
 shift
 
 case $expectation in
-  clean | leak | miss) ;;
-  *) die "unknown expectation $expectation; want clean, leak or miss" ;;
+  clean | leak | miss | residue) ;;
+  *) die "unknown expectation $expectation; want clean, leak, miss or residue" ;;
 esac
 
 e1_need_fixture
@@ -44,7 +50,16 @@ say "capture: $run_id finished $status"
 
 # bundles are directories named for the UTC instant of their capture, so sorting them by name is
 # sorting them by time.
-bundle_names() { find "$STATE/evidence" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort; }
+#
+# The directory is created here rather than assumed. fixtures/bin/evidence makes it on its first
+# run, so before that find fails, and under `set -e` with pipefail a failing pipeline inside a
+# command substitution aborts this script with no message at all: every capture of a first matrix
+# exited silently between the run and the bundle, the harness recorded 23 unexplained failures, and
+# nothing in the log said why. `|| true` keeps a later unreadable directory from doing it again.
+mkdir -p -- "$STATE/evidence"
+bundle_names() {
+  find "$STATE/evidence" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort || true
+}
 
 # The bundle is taken whatever the run did. A crashed run is the interesting case, and one that
 # failed for an unexpected reason still has to be looked at rather than discarded.
@@ -60,4 +75,4 @@ cp -a -- "$STATE/evidence/$latest" "$dest" || die "could not copy the bundle out
 printf '%s\n' "$status" >"$dest/e1-run-status.txt"
 printf '%s\n' "$expectation" >"$dest/e1-expectation.txt"
 
-"$E1_RUN_DIR/assert-bundle" "$dest" "$expectation"
+"$E1_RUN_DIR/assert-bundle" "$dest" "$expectation" "$surfaces"

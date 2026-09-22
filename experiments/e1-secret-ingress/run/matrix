@@ -3,12 +3,23 @@
 #
 # Usage: E1_OUT=<dir> run/matrix
 #
-# Ordering matters in two places. The first and last bundles bracket the whole matrix, so their
-# Talos configuration digests answer §9.1's "import must leave machine state unchanged" over
-# everything in between. And each killed run is captured twice — once with PostgreSQL dead, which
-# is the only way to read the data directory as the crash left it, and once after restarting it,
-# which adds the dump and the write-ahead-replayed state. Presenting the first as a clean scan of
-# the database would be false, and unavailable.txt in that bundle says so.
+# Ordering matters in three places.
+#
+# The first and last bundles bracket the whole matrix, so their Talos configuration digests answer
+# §9.1's "import must leave machine state unchanged" over everything in between.
+#
+# Each killed run is captured twice — once with PostgreSQL dead, which is the only way to read the
+# data directory as the crash left it, and once after restarting it, which adds the dump and the
+# write-ahead-replayed state. Presenting the first as a clean scan of the database would be false,
+# and unavailable.txt in that bundle says so.
+#
+# And every capture that must scan clean comes before the first deliberate control. One database
+# serves the whole matrix, so the plaintext a --persist-first control commits stays readable in the
+# heap, the write-ahead log, the dump and the snapshots for every run after it. That is not a
+# harness limitation to work around: it is §7.1's own reason for forbidding a plaintext draft,
+# measured. The closing bracket is therefore captured with the residue expectation — the run is
+# honest, the database is not, and a clean scan there would mean the controls' plaintext had gone
+# away by itself.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname -- "$0")/lib.sh"
@@ -29,54 +40,131 @@ take() { # take <run-id> <expectation> -- <e1 args>
   "$capture" "$@" || failed+=("$1")
 }
 
+# expect_status <run-id> ok|killed|refused: what the run itself must have done, read back from the
+# bundle rather than from this script's memory of it.
+#
+# A leak scan cannot tell a run that behaved from a run that never got far enough to misbehave, and
+# the screen already produced 32 rows that passed for exactly that reason. A refusal that is a
+# design finding — transient staging having no recovery owner — is indistinguishable in the bundle
+# from a crash on the way to the database unless the expected shape is written down here.
+expect_status() {
+  local run_id=$1 want=$2 got ok=no
+  got=$(cat "$E1_BUNDLES/$run_id/e1-run-status.txt" 2>/dev/null || printf 'missing')
+  case $want:$got in
+    ok:ok) ok=yes ;;
+    killed:exit-137) ok=yes ;;
+    refused:exit-1) ok=yes ;;
+  esac
+  [ "$ok" = yes ] || {
+    say "matrix: FAIL $run_id exited $got, expected $want"
+    failed+=("$run_id/status")
+  }
+}
+
 # The honest path, both staging alternatives, both flows. These are the bundles the claim rests on,
 # and every one of them must hold exactly the two controls.
-take honest-import-transient clean -- --staging=transient --config="$import_config" import
-take honest-import-encrypted clean -- --staging=encrypted --config="$import_config" import
-take honest-adopt-transient clean -- --staging=transient --config="$(e1_config adopt)" adopt
+take honest-import-transient clean - -- --staging=transient --config="$import_config" import
+expect_status honest-import-transient ok
+take honest-import-encrypted clean - -- --staging=encrypted --config="$import_config" import
+expect_status honest-import-encrypted ok
+take honest-adopt-transient clean - -- --staging=transient --config="$(e1_config adopt)" adopt
+expect_status honest-adopt-transient ok
 
 # A forced checkpoint, so a clean data directory on the honest path cannot be dismissed as "not
 # flushed yet". The same run without it is above.
 "$inject" db-snapshot honest-flush >/dev/null 2>&1 || say "matrix: db-snapshot unavailable"
-take honest-import-flushed clean -- --staging=encrypted --config="$import_config" import
+take honest-import-flushed clean - -- --staging=encrypted --config="$import_config" import
+expect_status honest-import-flushed ok
 
 # Held at in-review, which is where the two staging alternatives differ: the transient bundle must
 # show the pending change nowhere on disk, the encrypted one must show ciphertext in the row.
-take held-in-review-transient clean -- --staging=transient --hold-at=in-review --config="$import_config" import
-take held-in-review-encrypted clean -- --staging=encrypted --hold-at=in-review --config="$import_config" import
+take held-in-review-transient clean - -- --staging=transient --hold-at=in-review --config="$import_config" import
+expect_status held-in-review-transient ok
+take held-in-review-encrypted clean - -- --staging=encrypted --hold-at=in-review --config="$import_config" import
+expect_status held-in-review-encrypted ok
 
-# Interrupted at in-review and then resumed by a different principal. The transient run refuses,
-# which is its result; the encrypted one succeeds, and does so only while OpenBao is reachable.
-take crashed-in-review-encrypted clean -- --staging=encrypted --crash-at=in-review --config="$import_config" import
-take recover-encrypted clean -- --staging=encrypted recover crashed-in-review-encrypted
-take recover-transient clean -- --staging=transient recover crashed-in-review-encrypted
+# Interrupted at in-review, with the claim still outstanding, and then approached by a second
+# principal. Three attempts against the same crashed run, in this order because only the last one
+# consumes it: transient refuses by design, the netsplit attempt fails at the provider, and the
+# successful recovery releases the claim and would make either of the others fail for the wrong
+# reason if it ran first.
+take crashed-in-review-transient clean - -- --staging=transient --crash-at=in-review --config="$import_config" import
+expect_status crashed-in-review-transient killed
+take crashed-in-review-encrypted clean - -- --staging=encrypted --crash-at=in-review --config="$import_config" import
+expect_status crashed-in-review-encrypted killed
 
+# The transient alternative's answer to "who may take this over" is nobody: the owner's duty is to
+# declare the run dead and re-ingest. The refusal is the finding, not a failure of the run.
+take recover-transient clean - -- --staging=transient recover crashed-in-review-transient
+expect_status recover-transient refused
+
+# Encrypted staging depends on the provider at recovery, which is the cost of having a recovery
+# owner at all. Measured rather than argued.
 "$inject" netsplit openbao >/dev/null 2>&1 || say "matrix: netsplit unavailable"
-take recover-encrypted-netsplit clean -- --staging=encrypted recover crashed-in-review-encrypted
+take recover-encrypted-netsplit clean - -- --staging=encrypted recover crashed-in-review-encrypted
+expect_status recover-encrypted-netsplit refused
 "$inject" netjoin openbao >/dev/null 2>&1 || say "matrix: netjoin unavailable"
 
+take recover-encrypted clean - -- --staging=encrypted recover crashed-in-review-encrypted
+expect_status recover-encrypted ok
+
 # Killed inside the database transaction, captured twice: dead, then restarted.
-take crashed-in-db-txn clean -- --staging=encrypted --crash-at=in-db-txn --config="$import_config" import
+take crashed-in-db-txn clean - -- --staging=encrypted --crash-at=in-db-txn --config="$import_config" import
+expect_status crashed-in-db-txn killed
 "$inject" kill postgres >/dev/null 2>&1 || say "matrix: kill postgres unavailable"
-take crashed-in-db-txn-dead clean -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
+take crashed-in-db-txn-dead clean - -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
+expect_status crashed-in-db-txn-dead ok
 "$inject" start postgres >/dev/null 2>&1 || say "matrix: start postgres unavailable"
-take crashed-in-db-txn-restarted clean -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
+take crashed-in-db-txn-restarted clean - -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
+expect_status crashed-in-db-txn-restarted ok
 
-# The semantic controls. Each must produce hits, and a clean result means that surface is not
-# evidence — at which point the report says so instead of drawing a conclusion from it.
-take control-persist-first leak -- --persist-first --config="$import_config" import
-take control-persist-first-redact-after leak -- --persist-first --redact-after --config="$import_config" import
-take control-persist-first-rollback leak -- --persist-first --rollback --config="$import_config" import
+# The blindness control, first of the controls because it is the only one that must scan clean: it
+# writes the canary base64-encoded and the instrument must not find it. Run after the controls that
+# commit plaintext, its two extra lines would be their residue rather than anything about it, and
+# the one assertion it exists to make could not be made at all.
+take control-leak-transformed miss - -- --leak-at=transformed --config="$import_config" import
+expect_status control-leak-transformed ok
 
-for surface in temp-file staging app-log error-report db-log; do
-  take "control-leak-$surface" leak -- --leak-at="$surface" --config="$import_config" import
-done
+# The per-surface controls, before anything writes plaintext to the database, so that each one's
+# hit can only be its own. Each names the file it must appear at: asserting on the count alone
+# would let a control pass on another control's residue without ever reaching its own surface.
+#
+# The statement-log control turns log_statement on for its own connection first. The fixture leaves
+# it at 'none', and a control that comes back clean because the surface was switched off reads in a
+# bundle exactly like a surface that cannot be observed.
+take control-leak-temp-file leak '/tmp/effective-config.yaml' -- --leak-at=temp-file --config="$import_config" import
+expect_status control-leak-temp-file ok
+take control-leak-staging leak '/staging/pending.yaml' -- --leak-at=staging --config="$import_config" import
+expect_status control-leak-staging ok
+take control-leak-app-log leak '/e1.log' -- --leak-at=app-log --config="$import_config" import
+expect_status control-leak-app-log ok
+take control-leak-error-report leak '/error-report.txt' -- --leak-at=error-report --config="$import_config" import
+expect_status control-leak-error-report ok
+take control-leak-db-log leak 'logs/bw-fixture-postgres.log' -- --leak-at=db-log --config="$import_config" import
+expect_status control-leak-db-log ok
 
-# The blindness control: the value is written, encoded, and the scan must find nothing.
-take control-leak-transformed miss -- --leak-at=transformed --config="$import_config" import
+# The semantic controls, in the order that keeps each one's result attributable to itself.
+#
+# Redact-after runs first, while the live tables still hold no plaintext from any other control, so
+# its two assertions are about it alone and they are the strongest result this experiment
+# produces: the plaintext it committed a moment earlier is gone from the dump, which is what
+# "redacting it later" is supposed to achieve, and it is still in the write-ahead log, which is
+# what §7.1 says makes that shortcut worthless. Rollback shows the same pair for an aborted
+# transaction.
+#
+# Persist-first is last because it is the only one that leaves plaintext in the live rows, so a hit
+# in the dump is unambiguously its own.
+take control-persist-first-redact-after leak 'postgres-data/pg_wal,!postgres.sql' -- --persist-first --redact-after --config="$import_config" import
+expect_status control-persist-first-redact-after ok
+take control-persist-first-rollback leak 'postgres-data/pg_wal,!postgres.sql' -- --persist-first --rollback --config="$import_config" import
+expect_status control-persist-first-rollback ok
+take control-persist-first leak 'postgres-data/pg_wal,postgres.sql' -- --persist-first --config="$import_config" import
+expect_status control-persist-first ok
 
-# The last bundle closes the §9.1 bracket opened by the first.
-take honest-import-final clean -- --staging=transient --config="$import_config" import
+# The last bundle closes the §9.1 bracket opened by the first. Its run is honest and its scan is
+# not: see the residue note at the top.
+take honest-import-final residue 'postgres-data/pg_wal,postgres.sql' -- --staging=transient --config="$import_config" import
+expect_status honest-import-final ok
 
 say ""
 first=$E1_BUNDLES/honest-import-transient/talos-config-sha256.txt
