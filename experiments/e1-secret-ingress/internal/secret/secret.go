@@ -35,9 +35,11 @@ const digestLen = 12
 // Unresolved holds plaintext that has not yet been extracted to a secret provider. Its field is
 // unexported, and no method returns it except Unsafe.
 //
-// The zero value renders as a redaction like any other, deliberately: a struct literal that
-// forgot to set the field must not be distinguishable in output from one that did, or the absence
-// of a secret becomes a signal about the presence of one.
+// The zero value renders as a redaction too, with "unset" where the digest would be, and never as
+// nothing or as a panic: a struct literal that forgot to set the field still prints in the shape
+// every log reader and scan expects. It is distinguishable from a set value on purpose. It holds
+// no secret, so saying so reveals none, and rendering the digest of the empty string instead would
+// make it look like a wrapped empty secret.
 //
 // The plaintext is captured by a closure, and that is load-bearing rather than incidental. fmt
 // calls an operand's Format, String or GoString only when reflection may take its value as an

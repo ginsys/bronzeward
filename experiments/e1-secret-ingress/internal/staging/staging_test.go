@@ -108,9 +108,10 @@ func TestNewEncryptedRequiresACipherAndAKey(t *testing.T) {
 }
 
 // TestDefaultLeaseIsAppliedToAZeroOrNegativeValue checks a caller that forgets the lease gets the
-// default rather than a claim that is already expired.
+// default rather than a claim that is already expired, as does one below PostgreSQL's microsecond
+// interval resolution.
 func TestDefaultLeaseIsAppliedToAZeroOrNegativeValue(t *testing.T) {
-	for _, lease := range []time.Duration{0, -time.Minute} {
+	for _, lease := range []time.Duration{0, -time.Minute, time.Nanosecond} {
 		if got := NewTransient(nil, lease).claims.lease; got != DefaultLease {
 			t.Errorf("transient lease %s became %s, want %s", lease, got, DefaultLease)
 		}
@@ -120,6 +121,21 @@ func TestDefaultLeaseIsAppliedToAZeroOrNegativeValue(t *testing.T) {
 		}
 		if got := e.claims.lease; got != DefaultLease {
 			t.Errorf("encrypted lease %s became %s, want %s", lease, got, DefaultLease)
+		}
+	}
+}
+
+// TestLeaseIntervalKeepsSubSecondPrecision is the regression for a sub-second lease becoming
+// "0 seconds". The whole-second case is the one every recorded run used, and must not change.
+func TestLeaseIntervalKeepsSubSecondPrecision(t *testing.T) {
+	for lease, want := range map[time.Duration]string{
+		10 * time.Minute:        "600 seconds",
+		1500 * time.Millisecond: "1.5 seconds",
+		250 * time.Millisecond:  "0.25 seconds",
+		time.Microsecond:        "0.000001 seconds",
+	} {
+		if got := (&claims{lease: lease}).leaseInterval(); got != want {
+			t.Errorf("lease %s became %q, want %q", lease, got, want)
 		}
 	}
 }

@@ -680,6 +680,13 @@ redirects, which would replay the token and, for a 307, the secret body to the t
 runs one OpenBao node with no standby to redirect to. And the capture script now refuses an empty or
 multi-segment run id, which would have made its cleanup delete every earlier run.
 
+A sixth review raised 2, both real, neither changing an output. The staging lease was sent to
+PostgreSQL truncated to whole seconds, so a sub-second lease became `0 seconds`; fractional seconds
+are now kept. Every run used the five-minute default, which still renders as `300 seconds`. And
+`Unresolved`'s doc comment claimed its zero value renders identically to a set one, when the code
+deliberately renders `unset` in place of the digest, as a test requires; the comment now describes
+the code.
+
 ## 6. What this decides
 
 **§7.1's ordering requirement is implementable, and the evidence for that is structural.** Every
