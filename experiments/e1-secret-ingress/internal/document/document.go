@@ -77,9 +77,14 @@ func Load(data []byte) (*Document, error) {
 		if err != nil {
 			return nil, fmt.Errorf("document: parsing document %d: %w", n, err)
 		}
-		if root.Kind == 0 || len(root.Content) == 0 {
+		if root.Kind == 0 || len(root.Content) == 0 || root.Content[0].ShortTag() == "!!null" {
 			// An empty document between separators. It carries nothing and indexes nothing, but the
 			// numbering must still advance so a path keeps naming the document it came from.
+			//
+			// yaml.v3 decodes one as a document holding a null scalar, not as a document with no
+			// content, so the null case is the one that actually occurs. Without it, a legal stream
+			// with a trailing separator was refused below as "a bare scalar", and this branch — and
+			// the round trip in Bytes that depends on it — was never reached at all.
 			d.roots = append(d.roots, nil)
 			continue
 		}
@@ -99,8 +104,12 @@ func Load(data []byte) (*Document, error) {
 	sort.Strings(d.paths)
 	sort.Strings(d.unaddressable)
 	if len(d.paths) == 0 {
-		// Every scalar sat under an ambiguous key. Extraction would find nothing and the run would
-		// look clean for a reason that has nothing to do with the design under test.
+		// Extraction would find nothing and the run would look clean for a reason that has nothing
+		// to do with the design under test. The two causes are reported apart: blaming ambiguous
+		// keys for an input that simply holds no value would send the reader to the wrong fix.
+		if len(d.unaddressable) == 0 {
+			return nil, errors.New("document: the input holds no scalar value; there is nothing to extract or persist")
+		}
 		return nil, fmt.Errorf("document: no scalar in this document can be addressed; %d key(s) "+
 			"carry a dot or a bracket and everything is below one of them", len(d.unaddressable))
 	}
@@ -196,20 +205,36 @@ func (d *Document) Replace(path, value string) error {
 // so a diff against the input shows the substitutions and nothing else.
 // Every document is re-encoded, in order, separated as they arrived. Dropping the ones that carry
 // no addressable scalar would silently rewrite the operator's file.
+//
+// That includes the empty ones. An earlier version skipped them, which shifted the doc[n] prefix of
+// every later path on a round trip — a reference recorded against doc[2] would then name a
+// different document once the sanitized bytes were read back. Each document is encoded on its own
+// and the separators are written here, so an empty one can be emitted as nothing between two of
+// them; a stream with no empty document comes out byte-for-byte as the single encoder wrote it.
 func (d *Document) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
 	for n, root := range d.roots {
+		switch {
+		case n > 0:
+			buf.WriteString("---\n")
+		case root == nil:
+			// An empty first document needs its own explicit start, or the separator before the
+			// second would be read as the start of the first.
+			buf.WriteString("---\n")
+		}
 		if root == nil {
 			continue
 		}
+		var one bytes.Buffer
+		enc := yaml.NewEncoder(&one)
+		enc.SetIndent(2)
 		if err := enc.Encode(root); err != nil {
 			return nil, fmt.Errorf("document: encoding document %d: %w", n, err)
 		}
-	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("document: closing the encoder: %w", err)
+		if err := enc.Close(); err != nil {
+			return nil, fmt.Errorf("document: closing the encoder for document %d: %w", n, err)
+		}
+		buf.Write(one.Bytes())
 	}
 	return buf.Bytes(), nil
 }

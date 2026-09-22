@@ -95,10 +95,20 @@ type Journal struct {
 	seq     int
 	opened  time.Time
 	records []Record
+	// broken is the failure of the last write that reached the file, or nil. Once set, Append
+	// refuses.
+	broken error
 }
 
-// Open creates or appends to the journal at path and fsyncs the directory entry, so that the file
-// itself survives a SIGKILL delivered immediately afterwards.
+// Open creates the journal at path and fsyncs the directory entry, so that the file itself survives
+// a SIGKILL delivered immediately afterwards.
+//
+// A journal that already holds records is refused rather than appended to. This comment used to
+// promise appending, but Open started the sequence at 1 and the monotonic clock at zero whatever
+// the file held, so a second run's records would have repeated the first run's numbers and Verify
+// would have reported the whole file as unordered. Nothing in the prototype reopens a journal —
+// every run gets a fresh run root and a recovery gets its own — so continuing one is not needed,
+// and a file that is somehow there already is a reason to stop.
 func Open(path, runID string) (*Journal, error) {
 	if runID == "" {
 		return nil, errors.New("journal: a run id is required; an unidentified journal cannot be matched to a bundle")
@@ -109,6 +119,13 @@ func Open(path, runID string) (*Journal, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("journal: opening %s: %w", path, err)
+	}
+	if info, err := f.Stat(); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("journal: inspecting %s: %w", path, err)
+	} else if info.Size() > 0 {
+		f.Close()
+		return nil, fmt.Errorf("journal: %s already holds %d bytes; a journal is never continued, because its sequence and clock would restart and the file would no longer establish an order", path, info.Size())
 	}
 	if err := syncDir(filepath.Dir(path)); err != nil {
 		f.Close()
@@ -140,23 +157,35 @@ func (j *Journal) Append(r Record) (Record, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
-	j.seq++
-	r.Seq = j.seq
+	// A journal whose last write failed is not appended to again. The failed record's bytes may or
+	// may not be in the file — a Write can land and its Sync fail — so neither reusing its sequence
+	// number nor skipping it is safe: one risks a duplicate, the other a gap Verify would read as a
+	// lost record. Refusing makes the run fail, which is the honest outcome for an instrument that
+	// can no longer say what it recorded.
+	if j.broken != nil {
+		return Record{}, fmt.Errorf("journal: an earlier write failed, so this journal no longer establishes an order: %w", j.broken)
+	}
+
+	r.Seq = j.seq + 1
 	r.RunID = j.runID
 	r.Wall = time.Now()
 	r.MonoNanos = int64(time.Since(j.opened))
 
+	// Encoding touches nothing on disk, so a failure here costs no sequence number.
 	line, err := json.Marshal(r)
 	if err != nil {
 		return Record{}, fmt.Errorf("journal: encoding record %d: %w", r.Seq, err)
 	}
 	if _, err := j.file.Write(append(line, '\n')); err != nil {
-		return Record{}, fmt.Errorf("journal: writing record %d: %w", r.Seq, err)
+		j.broken = fmt.Errorf("writing record %d: %w", r.Seq, err)
+		return Record{}, fmt.Errorf("journal: %w", j.broken)
 	}
 	if err := j.file.Sync(); err != nil {
-		return Record{}, fmt.Errorf("journal: syncing record %d: %w", r.Seq, err)
+		j.broken = fmt.Errorf("syncing record %d: %w", r.Seq, err)
+		return Record{}, fmt.Errorf("journal: %w", j.broken)
 	}
 
+	j.seq = r.Seq
 	j.records = append(j.records, r)
 	return r, nil
 }
@@ -236,6 +265,14 @@ func (v Violation) String() string { return fmt.Sprintf("seq %d: %s", v.Seq, v.R
 // this record of the run is consistent with §7.1. The leak scan and the calibrated controls answer
 // the other half.
 func Verify(records []Record) []Violation {
+	// No records establish no order. The verify-order subcommand refuses an empty journal before it
+	// gets here, but the rule belongs to the verifier: a caller that forgot that check would get a
+	// nil result — "consistent with §7.1" — for a journal that was created and never written, which
+	// is exactly what a run killed before its first record leaves behind.
+	if len(records) == 0 {
+		return []Violation{{Reason: "the journal holds no records, so it establishes no order at all; this is not a pass"}}
+	}
+
 	var violations []Violation
 
 	ordered := make([]Record, len(records))

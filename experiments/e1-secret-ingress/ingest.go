@@ -115,8 +115,10 @@ func ingest(ctx context.Context, opts options, source string, stdout io.Writer) 
 	}
 
 	// The forbidden order, run before extraction on purpose. store.PersistDraft cannot express this
-	// — it takes a secret.Sanitized, which only extract.Run constructs — so the control had to be
-	// written in its own package against the database handle directly. That compile-time refusal is
+	// without a secret.Sanitized, which only extraction and staging's resume path may construct, so
+	// the control is written in its own package against the database handle directly. The
+	// restriction is a call-site test in the secret package rather than the compiler — the
+	// constructor is exported — and that test would fail if the control built one itself. That is
 	// the structural half of the claim; what follows measures it.
 	if opts.control.PersistFirst {
 		if err := control.PersistFirst(ctx, db.SQL(), opts.runID, source, raw,

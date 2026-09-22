@@ -212,6 +212,69 @@ func TestVerifyCatchesAWriteThatNamesNoSecret(t *testing.T) {
 	}
 }
 
+// TestVerifyRejectsAnEmptyJournal holds the verifier itself to the rule the verify-order subcommand
+// applies before calling it. An empty record set is what a run killed before its first record
+// leaves, and a nil result for it would read as "consistent with §7.1".
+func TestVerifyRejectsAnEmptyJournal(t *testing.T) {
+	if v := Verify(nil); len(v) == 0 {
+		t.Fatal("Verify accepted a journal with no records")
+	}
+}
+
+// TestOpenRefusesAJournalThatAlreadyHoldsRecords checks a journal is never continued. Open used to
+// append while restarting the sequence at 1, so a second run's records repeated the first run's
+// numbers and the file as a whole could no longer establish an order.
+func TestOpenRefusesAJournalThatAlreadyHoldsRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.jsonl")
+	j, err := Open(path, "run-1")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := j.Append(Record{Event: EventNote, Detail: "first"}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if _, err := Open(path, "run-1"); err == nil {
+		t.Fatal("Open continued a journal that already held a record")
+	}
+}
+
+// TestAppendRefusesAfterAFailedWrite checks that a write failure ends the journal rather than
+// leaving a gap or a duplicate behind it. The file is closed underneath the journal, so the next
+// write fails the way a full disk would; every Append after that must refuse, and the record that
+// did land must be the only one.
+func TestAppendRefusesAfterAFailedWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.jsonl")
+	j, err := Open(path, "run-1")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := j.Append(Record{Event: EventNote, Detail: "lands"}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := j.file.Close(); err != nil {
+		t.Fatalf("closing the file underneath the journal: %v", err)
+	}
+
+	if _, err := j.Append(Record{Event: EventNote, Detail: "fails"}); err == nil {
+		t.Fatal("Append reported success writing to a closed file")
+	}
+	if _, err := j.Append(Record{Event: EventNote, Detail: "after"}); err == nil {
+		t.Fatal("Append wrote again after a failed write")
+	}
+
+	records, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(records) != 1 || records[0].Seq != 1 {
+		t.Errorf("the file holds %d record(s), want exactly the one that landed: %+v", len(records), records)
+	}
+}
+
 // TestVerifyAllowsADeclaredRecovery covers the one write with no extraction in its own journal that
 // is not a violation: a second principal resuming an interrupted run out of encrypted staging. The
 // extraction happened under the crashed run's identity and is recorded there, which the write says.

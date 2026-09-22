@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,10 +29,10 @@ func openJournal(t *testing.T) *journal.Journal {
 	return j
 }
 
-// TestPersistDraftRefusesAnUnextractedDocument is the guard on the one route by which an
-// unextracted document could reach persistence. extract.Run is the only constructor of a
-// secret.Sanitized, so a caller cannot build one around a raw configuration — but Go lets any
-// package write the zero value, and that is what this rejects.
+// TestPersistDraftRefusesAnUnextractedDocument is the guard on the zero value. Building a
+// secret.Sanitized around a raw configuration is kept out by the secret package's call-site test,
+// not by the compiler; the zero value is the gap that test cannot see, since any package can write
+// it without calling anything, and that is what this rejects.
 //
 // It runs before any statement is sent, so a nil database is enough to prove the order.
 func TestPersistDraftRefusesAnUnextractedDocument(t *testing.T) {
@@ -140,6 +141,39 @@ func TestRedactDSNRemovesThePassword(t *testing.T) {
 	plain := errors.New("connection refused")
 	if redactDSN(plain, dsn) != plain {
 		t.Error("an error without the password was rewritten anyway")
+	}
+}
+
+// TestRedactDSNCoversEveryFormLibPQAccepts extends the redaction to the shapes the first version
+// missed. DSNEnv replaces the whole connection string, so an operator may supply either form, and a
+// URL-form password used to reach the returned error untouched.
+func TestRedactDSNCoversEveryFormLibPQAccepts(t *testing.T) {
+	const password = "E1-DSN p@ss/word-MUST-NOT-APPEAR"
+	for name, dsn := range map[string]string{
+		"url userinfo":  "postgres://bronzeward:" + url.PathEscape(password) + "@127.0.0.1:55432/bronzeward?sslmode=disable",
+		"url query":     "postgresql://127.0.0.1:55432/bronzeward?user=bronzeward&password=" + url.QueryEscape(password),
+		"quoted keyval": "host=127.0.0.1 user=bronzeward password='" + password + "' dbname=bronzeward",
+	} {
+		t.Run(name, func(t *testing.T) {
+			// The error quotes both the raw password and the DSN as given, so each spelling a
+			// driver could plausibly echo is present.
+			leaky := errors.New("dial failed for " + dsn + " using " + password)
+			got := redactDSN(leaky, dsn).Error()
+			for _, spelling := range []string{password, url.PathEscape(password), url.QueryEscape(password)} {
+				if strings.Contains(got, spelling) {
+					t.Errorf("the password survived redaction as %q: %s", spelling, got)
+				}
+			}
+			if !strings.Contains(got, "127.0.0.1") {
+				t.Errorf("redaction removed more than the password: %s", got)
+			}
+		})
+	}
+
+	// sslpassword= is a different key. Treating its value as the password would not leak anything,
+	// but it would show the scan matching a key by suffix, which is how it would miss one too.
+	if got := dsnPasswords("host=h sslpassword=keyphrase dbname=d"); len(got) != 0 {
+		t.Errorf("dsnPasswords took sslpassword= for password=: %q", got)
 	}
 }
 

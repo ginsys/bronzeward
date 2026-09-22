@@ -8,10 +8,11 @@
 // under test. §7.1's sentence about redacting later is a claim about backups and history, and only
 // something that gets into them can test it.
 //
-// The ordering requirement is enforced by the signature, not by the order of statements here.
-// PersistDraft takes a secret.Sanitized, and extract.Run is that type's only constructor, so there
-// is no way to call this function with a document that has not been through extraction. The one
-// thing Go leaves open is the zero value, which any package can write; it is rejected below.
+// The ordering requirement is carried by the signature, not by the order of statements here.
+// PersistDraft takes a secret.Sanitized, which only extraction and staging's resume path construct.
+// That restriction is a test, not the compiler: the constructor is exported because Go cannot
+// scope a function to one sibling package, and secret's TestNewSanitizedHasNoUnexpectedCallers is
+// what fails if anything else calls it. The zero value is the other gap; it is rejected below.
 //
 // Nothing here selects a database or a driver for v1. lib/pq is used because it has no transitive
 // dependencies, which keeps go.sum auditable in full; that is a property of this experiment's
@@ -26,6 +27,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -125,8 +127,8 @@ type Draft struct {
 	// Source names where the configuration came from, for the report: an import or a drift
 	// adoption, and which file.
 	Source string
-	// Sanitized is the document. Its type is the guarantee: there is no way to build one without
-	// going through extraction.
+	// Sanitized is the document. Its type carries the guarantee, and a call-site test in the secret
+	// package is what keeps anything but extraction and staging from building one.
 	Sanitized secret.Sanitized
 	// Digests are every secret extracted from the source, which each write record names so that
 	// verification can assert the write came after all of them.
@@ -146,8 +148,8 @@ func (db *DB) PersistDraft(ctx context.Context, d Draft, j *journal.Journal, ctr
 	case j == nil:
 		return errors.New("store: no journal; an unrecorded write cannot be shown to have come after extraction")
 	case !d.Sanitized.Valid():
-		// The zero Sanitized is the one thing the type system cannot stop a caller writing. It is
-		// the only route by which an unextracted document could reach this function.
+		// The zero Sanitized can be written by any package without calling the constructor, so the
+		// call-site test on NewSanitized cannot see it. This is where it is stopped.
 		return errors.New("store: the document did not come from extraction; refusing to persist it")
 	}
 
@@ -337,17 +339,75 @@ func nullable(s string) any {
 // redactDSN removes the password from an error that quoted the connection string. lib/pq does not
 // normally include it, and relying on that would make this function's absence a silent dependency
 // on another project's error formatting.
+//
+// Both forms lib/pq accepts are covered, since DSNEnv overrides the whole connection string: the
+// key/value form, where the password is a password= field and may be single-quoted, and the URL
+// form, where it is the userinfo password or a password query parameter. The first version only
+// knew unquoted key/value fields, so a URL-form DSN's password survived into the error unredacted.
+// Each value is also replaced in its URL-escaped spelling, which is how an error quoting the URL
+// would carry it.
 func redactDSN(err error, dsn string) error {
 	text := err.Error()
-	for _, field := range strings.Fields(dsn) {
-		value, found := strings.CutPrefix(field, "password=")
-		if !found || value == "" {
-			continue
-		}
+	for _, value := range dsnPasswords(dsn) {
 		text = strings.ReplaceAll(text, value, "[redacted]")
+		if escaped := url.QueryEscape(value); escaped != value {
+			text = strings.ReplaceAll(text, escaped, "[redacted]")
+		}
+		if escaped := url.PathEscape(value); escaped != value {
+			text = strings.ReplaceAll(text, escaped, "[redacted]")
+		}
 	}
 	if text == err.Error() {
 		return err
 	}
 	return errors.New(text)
+}
+
+// dsnPasswords returns every password a connection string carries, in either lib/pq form.
+func dsnPasswords(dsn string) []string {
+	var out []string
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		u, err := url.Parse(dsn)
+		if err != nil {
+			return nil
+		}
+		if pw, ok := u.User.Password(); ok && pw != "" {
+			out = append(out, pw)
+		}
+		if pw := u.Query().Get("password"); pw != "" {
+			out = append(out, pw)
+		}
+		return out
+	}
+	// Key/value form. A quoted value may contain spaces, so the string is scanned for the key
+	// rather than split on whitespace.
+	rest := dsn
+	for {
+		i := strings.Index(rest, "password=")
+		if i < 0 {
+			return out
+		}
+		if i > 0 && rest[i-1] != ' ' && rest[i-1] != '\t' {
+			// Part of another key, such as sslpassword=.
+			rest = rest[i+len("password="):]
+			continue
+		}
+		rest = rest[i+len("password="):]
+		var value string
+		if strings.HasPrefix(rest, "'") {
+			end := strings.Index(rest[1:], "'")
+			if end < 0 {
+				value, rest = rest[1:], ""
+			} else {
+				value, rest = rest[1:1+end], rest[2+end:]
+			}
+		} else if end := strings.IndexAny(rest, " \t"); end >= 0 {
+			value, rest = rest[:end], rest[end:]
+		} else {
+			value, rest = rest, ""
+		}
+		if value != "" {
+			out = append(out, value)
+		}
+	}
 }

@@ -138,9 +138,15 @@ type Reference struct {
 // Sanitized is a document that has been through extraction: every marked secret has been replaced
 // by a Reference, and no plaintext remains. Persistence functions take this type and no other.
 //
-// Its fields are unexported and NewSanitized is the only constructor, so a caller cannot assemble
-// one around a document that was never extracted. The one gap Go leaves is the zero value, which
-// any package can write as Sanitized{}; Valid reports it and every persistence function rejects it.
+// Its fields are unexported and NewSanitized is the only constructor. That does not by itself stop
+// a caller assembling one around a document that was never extracted: NewSanitized is exported,
+// because Go cannot make a function visible to one sibling package and no other, so any package
+// in this module could call it. What restricts it is TestNewSanitizedHasNoUnexpectedCallers, which
+// fails if a non-test file outside extraction and staging does. The zero value is the other gap;
+// Valid reports it and every persistence function rejects it.
+//
+// A v1 implementation that wants the compiler to enforce this would put the type in the package
+// that constructs it, so that no other package can name its constructor at all.
 type Sanitized struct {
 	document []byte
 	refs     []Reference
@@ -151,14 +157,28 @@ type Sanitized struct {
 func (s Sanitized) Valid() bool { return s.valid }
 
 // Document is the sanitized bytes, safe to persist.
-func (s Sanitized) Document() []byte { return s.document }
+//
+// It returns a copy. Returning the field itself would let any caller write through it — plaintext
+// copied back into a document that already passed extraction, and read later by persistence — and
+// the constructor's own copying would then protect only one direction of the aliasing it exists
+// to rule out.
+func (s Sanitized) Document() []byte {
+	out := make([]byte, len(s.document))
+	copy(out, s.document)
+	return out
+}
 
-// References are the replacements made, in document order.
-func (s Sanitized) References() []Reference { return s.refs }
+// References are the replacements made, in document order. It returns a copy, for the reason
+// Document does.
+func (s Sanitized) References() []Reference {
+	out := make([]Reference, len(s.refs))
+	copy(out, s.refs)
+	return out
+}
 
-// NewSanitized builds a Sanitized document. It is exported for the extraction package, which is
-// the only legitimate caller; nothing here can enforce that, so the name says what it is for and
-// the package test asserts the call sites.
+// NewSanitized builds a Sanitized document. It is exported for the extraction package and for
+// staging's resume path, the only two legitimate callers. Nothing in the language enforces that;
+// TestNewSanitizedHasNoUnexpectedCallers does.
 //
 // It does not itself extract. It is the point at which a caller asserts extraction has happened,
 // and the type is what carries that assertion to the persistence layer.

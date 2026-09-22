@@ -261,10 +261,18 @@ func leak(ctx context.Context, s Surface, runRoot string, db *sql.DB, value secr
 			// Best effort: the run is about to end, and a failure to reset would only mean more
 			// logging than intended, never less.
 			_, _ = conn.ExecContext(ctx, "RESET log_statement")
+			_, _ = conn.ExecContext(ctx, "RESET standard_conforming_strings")
 			_ = conn.Close()
 		}()
 		if _, err := conn.ExecContext(ctx, "SET log_statement = 'all'"); err != nil {
 			return "", fmt.Errorf("control: enabling statement logging: %w", err)
+		}
+		// Doubling single quotes is the complete escaping rule for a standard-conforming literal, and
+		// only for one: with standard_conforming_strings off, a backslash in the value would escape
+		// the closing quote and change the statement. It is set here, on this connection, rather than
+		// assumed from the server default.
+		if _, err := conn.ExecContext(ctx, "SET standard_conforming_strings = on"); err != nil {
+			return "", fmt.Errorf("control: making string literals standard-conforming: %w", err)
 		}
 		// The value goes in the statement text, not in a parameter: the text is what log_statement
 		// records, and a parameter would be recorded separately or not at all.
@@ -449,11 +457,23 @@ func RedactAfter(ctx context.Context, db *sql.DB, runID string, s secret.Sanitiz
 		return fmt.Errorf("control: no draft for run %s to redact; the control did not run", runID)
 	}
 
+	// Each index row is checked the way the draft is. A reference whose path matched no row would
+	// leave that value's plaintext in the live index while this control reported success, and the
+	// result it exists for — nothing in the dump, everything in the write-ahead log — would then
+	// rest on a redaction that never happened.
 	for _, ref := range s.References() {
-		if _, err := tx.ExecContext(ctx,
+		result, err := tx.ExecContext(ctx,
 			`UPDATE parsed_index SET value = $3 WHERE run_id = $1 AND path = $2`,
-			runID, ref.Path, "bw:ref:"+ref.URI); err != nil {
+			runID, ref.Path, "bw:ref:"+ref.URI)
+		if err != nil {
 			return fmt.Errorf("control: redacting the parsed index at %s: %w", ref.Path, err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("control: redacting the parsed index at %s: %w", ref.Path, err)
+		}
+		if n == 0 {
+			return fmt.Errorf("control: no parsed-index row for run %s at %s to redact; the control did not run", runID, ref.Path)
 		}
 	}
 

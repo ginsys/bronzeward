@@ -107,6 +107,12 @@ func (b Baseline) Verify(ctx context.Context, c Cipher) error {
 	if b.Ciphertext == "" || b.InputSHA256 == "" {
 		return fmt.Errorf("baseline: incomplete; it holds %s", b.missing())
 	}
+	// A recorded digest that is not a SHA-256 cannot be compared against, and the mismatch message
+	// below abbreviates it; a truncated or hand-edited record would otherwise panic there instead of
+	// being reported as the malformed record it is.
+	if raw, err := hex.DecodeString(b.InputSHA256); err != nil || len(raw) != sha256.Size {
+		return fmt.Errorf("baseline: run %s records an input digest that is not a SHA-256", b.RunID)
+	}
 
 	plaintext, err := c.Decrypt(ctx, b.KeyName, b.Ciphertext)
 	if err != nil {
