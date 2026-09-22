@@ -70,6 +70,19 @@ jobs:
           install: false   # the fixtures need only bash and git
       - run: mise run test
 
+  go:
+    # The Phase-0 experiment modules under experiments/. Each is its own module; `mise run go`
+    # names them one by one rather than relying on a root module, which deliberately does not
+    # exist yet.
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          install_args: go
+      - run: mise run go
+
   commit-lint:
     # PR commits only: a push to main or a merge-group ref has no PR range to lint.
     if: github.event_name == 'pull_request'
@@ -101,7 +114,7 @@ jobs:
     # Aggregator: fails on any failed or cancelled job. `commit-lint` is skipped by design outside
     # pull requests, so `skipped` counts as success only for that job.
     if: always()
-    needs: [docs, actionlint, test, commit-lint, action-pins]
+    needs: [docs, actionlint, test, go, commit-lint, action-pins]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:

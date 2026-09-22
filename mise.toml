@@ -1,7 +1,10 @@
 [tools]
-# ci.yml installs from this list (jdx/mise-action); a bump here is the only edit needed.
+# ci.yml installs from this list (jdx/mise-action); a bump here is the only edit needed. A new
+# tool also needs naming in the `install_args` of every job that runs a task using it, since each
+# job installs only what it names.
 actionlint = "1.7.12"
 shellcheck = "0.11.0"
+go = "1.27.1"
 
 [tasks.lint]
 description = "actionlint on the workflows, shellcheck on the scripts"
@@ -35,6 +38,20 @@ base=$(git merge-base origin/main HEAD) || { echo "commit-lint: no merge-base wi
 scripts/ci/commit-lint.sh "$base" HEAD
 """
 
+[tasks.go]
+description = "Build, vet, format-check and test the Phase-0 experiment modules"
+# `go -C <dir>`: each experiment is its own module, deliberately, so that a future root module's
+# `./...` cannot sweep disposable evidence code into the implementation. One line per module.
+# `mod tidy -diff` fails instead of rewriting, so CI reports a stale go.mod rather than hiding it.
+run = """
+gofmt -l experiments/e1-secret-ingress | { ! grep . ; }
+go -C experiments/e1-secret-ingress mod verify
+go -C experiments/e1-secret-ingress mod tidy -diff
+go -C experiments/e1-secret-ingress build ./...
+go -C experiments/e1-secret-ingress vet ./...
+go -C experiments/e1-secret-ingress test ./...
+"""
+
 [tasks.upstream-sync]
 description = "Check out go-kure/.github into upstream/ (gitignored) at the commit ci.yml pins the action-pin checker to"
 # Single source of truth for the revision: the `check-action-pins@<sha>` pin in ci.yml, so the
@@ -53,5 +70,5 @@ depends = ["upstream-sync"]
 run = "FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@main$' bash upstream/scripts/check-action-pins.sh ."
 
 [tasks.verify]
-description = "Everything ci.yml runs: lint, tests, docs, whitespace, commit subjects, action pins"
-depends = ["lint", "test", "docs", "whitespace", "commit-lint", "action-pins"]
+description = "Everything ci.yml runs: lint, tests, docs, whitespace, commit subjects, go, action pins"
+depends = ["lint", "test", "docs", "whitespace", "commit-lint", "go", "action-pins"]
