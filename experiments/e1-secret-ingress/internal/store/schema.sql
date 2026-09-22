@@ -69,6 +69,34 @@ CREATE TABLE IF NOT EXISTS ingest_journal (
     PRIMARY KEY (run_id, seq)
 );
 
+-- The staging claim. One table for both staging alternatives, deliberately: the comparison is
+-- only like-for-like if ownership, expiry and resumption are expressed in the same columns, and
+-- the difference is then visible as which columns each mode uses and what it puts in payload.
+--
+-- payload is NULL for the transient mode, which keeps the pending change in process memory and so
+-- puts nothing in the write-ahead log, and ciphertext for the encrypted mode, which puts a row
+-- there on purpose. That asymmetry is the finding the experiment is built to produce, not an
+-- oversight: what reaches the log is exactly what the two modes differ on.
+CREATE TABLE IF NOT EXISTS staging_claim (
+    run_id            TEXT PRIMARY KEY,
+    mode              TEXT        NOT NULL CHECK (mode IN ('transient', 'encrypted')),
+    -- Who holds it. The transient mode identifies a process; the encrypted mode identifies a
+    -- principal, which is what lets a different one resume.
+    owner_principal   TEXT        NOT NULL,
+    owner_pid         INTEGER,
+    -- The owning process's start time, read from the kernel. A PID alone is not an identity:
+    -- PIDs are reused, and a new process inheriting a dead one's claim is the failure this
+    -- column exists to make impossible.
+    owner_start_token TEXT,
+    payload           TEXT,
+    payload_sha256    TEXT        NOT NULL,
+    resume_checkpoint TEXT        NOT NULL,
+    state             TEXT        NOT NULL CHECK (state IN ('held', 'resumed', 'released', 'abandoned')),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    heartbeat_at      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    expires_at        TIMESTAMPTZ NOT NULL
+);
+
 -- The encrypted baseline: the observed configuration retained as ciphertext, which §7.1 permits,
 -- rather than as the plaintext draft it forbids.
 CREATE TABLE IF NOT EXISTS encrypted_baseline (

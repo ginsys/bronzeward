@@ -28,6 +28,8 @@ import (
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/checkpoint"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/journal"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/provider"
+	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/staging"
+	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/store"
 )
 
 // canaryEnv names the environment variable carrying the fixture canary. The reachability control
@@ -105,7 +107,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return verifyOrder(fs.Args()[1:], stdout)
 	case "baseline-verify":
 		return baselineVerify(fs.Args()[1:], stdout)
-	case "import", "adopt", "recover", "schema-report":
+	case "recover":
+		return recoverRun(context.Background(), opts, fs.Args()[1:], stdout)
+	case "import", "adopt", "schema-report":
 		return fmt.Errorf("subcommand %q is not built yet", cmd)
 	default:
 		usage(stderr, fs)
@@ -193,6 +197,121 @@ func baselineVerify(args []string, stdout io.Writer) error {
 		"Transit uses a fresh nonce per call, so identical input encrypts differently every time; "+
 		"two runs are compared by their recorded input digests, not by their ciphertext.\n")
 	return nil
+}
+
+// recoverRun resumes an interrupted run's pending change from staging, as a principal that is
+// deliberately not the one that held it, and persists the sanitized draft.
+//
+// It is run for both staging modes, and the transient mode's refusal is the point: the two
+// alternatives differ in exactly what this subcommand can do, so running it against each is how
+// that difference becomes a measurement instead of a description. Against transient staging it
+// exits non-zero carrying staging.ErrNotRecoverable; against encrypted staging it succeeds, and
+// under `inject netsplit openbao` it fails at the decryption, which is that mode's own cost.
+//
+// The recovery gets its own run root and its own journal. Nothing of the original extraction is
+// re-journalled here — this process did not extract anything — so the write it records lists no
+// digests, and the note it appends points at the journal that does hold them.
+func recoverRun(ctx context.Context, opts options, args []string, stdout io.Writer) error {
+	if len(args) != 1 {
+		return errors.New("recover takes one argument: the run id whose pending change is staged")
+	}
+	claimed := args[0]
+
+	opts, err := prepareRunRoot(opts)
+	if err != nil {
+		return err
+	}
+	j, err := journal.Open(opts.journalP, opts.runID)
+	if err != nil {
+		return err
+	}
+	defer j.Close()
+
+	db, err := store.OpenFromEnv(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := db.EnsureSchema(ctx); err != nil {
+		return err
+	}
+
+	place, err := openStaging(ctx, opts, db)
+	if err != nil {
+		return err
+	}
+	principal, err := staging.NewPrincipal("recovery")
+	if err != nil {
+		return err
+	}
+
+	resumed, claim, err := place.Resume(ctx, claimed, principal)
+	if err != nil {
+		// The refusal is a result, so it is recorded rather than only returned. A run that failed
+		// and journalled nothing would be indistinguishable from a run that was never started.
+		if _, appendErr := j.Append(journal.Record{
+			Event:  journal.EventNote,
+			Detail: fmt.Sprintf("recover %s as %s under %s staging refused: %v", claimed, principal, place.Mode(), err),
+		}); appendErr != nil {
+			return fmt.Errorf("%w (and the journal could not record it: %v)", err, appendErr)
+		}
+		return err
+	}
+
+	if _, err := j.Append(journal.Record{
+		Event: journal.EventNote,
+		Detail: fmt.Sprintf("resumed run %s from %s staging as %s, at checkpoint %s; "+
+			"the extraction of its secrets is recorded in that run's journal, not this one",
+			claimed, place.Mode(), principal, claim.ResumeCheckpoint),
+	}); err != nil {
+		return err
+	}
+
+	ctrl := newControl(opts, j)
+	if err := db.PersistDraft(ctx, store.Draft{
+		RunID:     opts.runID,
+		Source:    "recover:" + claimed,
+		Sanitized: resumed,
+	}, j, ctrl); err != nil {
+		return err
+	}
+	if err := place.Release(ctx, claimed); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(stdout, "ok: run %s resumed from %s staging as %s and persisted as run %s\n",
+		claimed, place.Mode(), principal, opts.runID)
+	return nil
+}
+
+// openStaging builds the staging alternative named by --staging.
+func openStaging(ctx context.Context, opts options, db *store.DB) (staging.Staging, error) {
+	if opts.staging == "transient" {
+		return staging.NewTransient(db.SQL(), 0), nil
+	}
+	client, err := provider.FromEnv(provider.TokenEnv)
+	if err != nil {
+		return nil, err
+	}
+	return staging.NewEncrypted(db.SQL(), client, provider.TransitKey, 0)
+}
+
+// newControl wires the crash and hold flags to the journal, so that a capture taken mid-flight
+// carries a record of which boundary it was taken at rather than relying on the harness's caption.
+func newControl(opts options, j *journal.Journal) *checkpoint.Control {
+	return &checkpoint.Control{
+		CrashAt: opts.crashAt,
+		HoldAt:  opts.holdAt,
+		HoldFor: opts.holdFor,
+		Observe: func(p checkpoint.Point) {
+			// A failure to record a checkpoint is not worth aborting a run over, but it must not be
+			// silent either: verify-order would read the gap as a boundary that was never crossed.
+			if _, err := j.Append(journal.Record{Event: journal.EventCheckpoint, Checkpoint: p.String()}); err != nil {
+				fmt.Fprintf(os.Stderr, "e1: could not journal checkpoint %s: %v\n", p, err)
+			}
+		},
+		Announce: func(msg string) { fmt.Fprintf(os.Stderr, "e1: %s\n", msg) },
+	}
 }
 
 // prepareRunRoot creates the run root and plants the reachability control in it. It is called by
