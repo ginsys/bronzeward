@@ -1,11 +1,18 @@
 # Database and provider candidates for the feasibility experiments. Started by bin/up, which
 # passes versions.env and the generated .state/secrets.env. Both services publish on localhost only.
+# BW_RUN_ID (exported by bin/up, never in a file) labels both services so that the post-hoc lookup
+# in bin/up, done by name and by the labels Compose gives every container of this project, can tell
+# the one Compose just made from a replacement created under the same name and project labels in
+# the moment between: only the one carrying this run's value is trusted, the same binding
+# down-compose-volumes already gives the two named volumes below.
 name: ${FIXTURE_NAME}
 
 services:
   postgres:
     image: ${POSTGRES_IMAGE}
     container_name: ${FIXTURE_NAME}-postgres
+    labels:
+      bronzeward.fixture.run: ${BW_RUN_ID}
     environment:
       POSTGRES_USER: bronzeward
       POSTGRES_DB: bronzeward
@@ -27,6 +34,8 @@ services:
   openbao:
     image: ${OPENBAO_IMAGE}
     container_name: ${FIXTURE_NAME}-openbao
+    labels:
+      bronzeward.fixture.run: ${BW_RUN_ID}
     command: ["server"]
     environment:
       BAO_ADDR: http://127.0.0.1:8200

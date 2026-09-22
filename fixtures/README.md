@@ -263,9 +263,12 @@ recorded (a Talos node would otherwise be given its fixed address on whatever ne
 name once every node was off it), and
 `down` refuses while a container or network carries the label without being recorded, or while
 labelled ones exist and there is no record, as an `up` interrupted right after creating the
-cluster leaves it. The Compose containers and network are held the same way: their labels are only
-the project's, which any container or network can be given, so `up` records their IDs after
-`compose up` (the network, again, as the one the recorded containers are attached to), `down`
+cluster leaves it. The Compose containers and network are held the same way: the project labels
+Compose gives them are not enough on their own, since any container or network can be given them,
+so compose.yaml also labels the two services with this run's own value (`BW_RUN_ID`, exported by
+`bin/up`, never in a file) and `up` checks it along with the project labels before recording their
+IDs after `compose up` (the network, again, as the one the recorded containers are attached to,
+which needs no label of its own), `down`
 holds every labelled container and the labelled network to the records, and
 `inject` the network. Only `down --adopt` removes by label alone, and only
 where no record exists: with a record, a labelled container, network or volume the record does not
@@ -337,7 +340,11 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   readable. The converse limit: the
   record in `.state/` can be rewritten by anyone who can write there, and `down` can only hold
   each name to what Docker says of a Talos node volume. Any anonymous, unlabelled volume on the
-  daemon, written into the record, is removed with the rest.
+  daemon, written into the record, is removed with the rest. The Talos containers, unlike the
+  Compose ones (below), carry no label of `bin/up`'s own: `talosctl`'s Docker provisioner accepts
+  none, so a replacement created under one of the two fixed names in the moment between
+  `cluster create` returning and `bin/up`'s look after it, which the Compose containers are told
+  apart from by a run label, is not caught there.
 - A host that restarts the Docker daemon when a new bridge interface appears, for example through
   a NetworkManager dispatcher script, stops the containers that were already running each time a
   fixture network is created. `bin/up` detects this and fails. Fix the host hook so that it ignores

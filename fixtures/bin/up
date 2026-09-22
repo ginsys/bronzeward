@@ -237,6 +237,12 @@ for compose_volume in $compose_volumes; do
 done >"$STATE/down-compose-volumes.partial"
 mv --no-target-directory -- "$STATE/down-compose-volumes.partial" "$STATE/down-compose-volumes"
 recovery='run fixtures/bin/down --adopt to remove what was created (a plain down refuses what it finds without its record, and the records were not all published)'
+# Kept past the unset below, for compose.yaml: the project and working-directory labels Compose
+# gives the containers it makes are its own, and any container can be given them, so a
+# replacement made under the fixed name in the moment between compose up returning and the look
+# after it would pass by them alone. This run's containers, told apart below by the same value
+# the two named volumes above were labelled with, are not.
+export BW_RUN_ID=$run_id
 unset compose_volumes compose_volume made_by run_id
 canary=$(synthetic) || die "could not generate the synthetic canary"
 password=$(synthetic) || die "could not generate the synthetic PostgreSQL password"
@@ -289,13 +295,18 @@ compose up --detach --quiet-pull openbao
 # on it, and bin/down holds every labelled container to the record before removing any. This run
 # acts on them by these IDs too (bao and pg in lib.sh take the ID the name was verified under).
 for name in "$PG" "$BAO"; do
-  # The one Compose made, told by its labels, as containers_own tells it: the name alone could
-  # be a replacement's, made once the real one was gone between compose up and this look.
+  # The one Compose made, told by its labels, as containers_own tells it: the name and the project
+  # labels alone could be a replacement's, made under the fixed name once the real one was gone
+  # between compose up and this look, since any container can carry them; this run's own value,
+  # which compose.yaml gives its services and no one made outside it could guess, cannot. The
+  # analogous look at the Talos containers below has no such label to ask for: talosctl's docker
+  # provisioner takes none, and the two are told apart by ID as soon as possible after cluster
+  # create instead (see the comment there); this remains a stated residual (README, Known limits).
   answer=$(docker inspect --type container --format \
-    '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
+    "{{.Id}} {{index .Config.Labels \"com.docker.compose.project\"}} {{index .Config.Labels \"com.docker.compose.project.working_dir\"}} {{index .Config.Labels \"$RUN_LABEL\"}}" \
     "$name") || die "could not read the ID of the container $name"
-  [ "${answer#* }" = "$FIXTURE_NAME $FIXTURES" ] ||
-    die "the container named $name is not the one Compose made: its labels do not name this project and checkout. Remove it by hand"
+  [ "${answer#* }" = "$FIXTURE_NAME $FIXTURES $BW_RUN_ID" ] ||
+    die "the container named $name is not the one Compose made: its labels do not name this project and checkout, or this run. Remove it by hand"
   id=${answer%% *}
   verified_container_ids["$name"]=$id
   printf '%s %s\n' "$id" "$name"

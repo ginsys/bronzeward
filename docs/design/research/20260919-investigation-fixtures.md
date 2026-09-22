@@ -91,7 +91,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 60); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 61); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed. Each revision was run this way again, from clean,
 before it was committed, and the run of the revision described here is the one recorded with the
@@ -1543,6 +1543,27 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     this capture's results: the list is built before it and applied to it too. Not exercised: a
     `down` during a running `up` (the lock is exercised through a holder that stands in for the
     running command).
+61. **A run label on the Compose containers, and the active-capture holder's cleanup deferred.**
+    A fifty-fourth round: two findings, both accepted, from the one reviewer that answered
+    (the advisory review reported none, degraded again). The project and working-directory
+    labels `up` checked the Compose containers by, once Compose made them, are Compose's own:
+    any container can be given them, so a replacement created under one of the two fixed names in
+    the moment between `compose up` returning and that look would have passed for the real one,
+    exposing generated credentials to it and having a later teardown remove it by the recorded ID
+    as if it were the fixture's. `compose.yaml` now labels both services with `BW_RUN_ID`, the
+    same value the two named volumes were already labelled with (`RUN_LABEL` in `lib.sh`,
+    exported by `bin/up`, never written to a file), and `up`'s look asks for it alongside the
+    project labels; a container without it is refused. The analogous gap in the Talos container
+    recording right after it is not closed the same way: `talosctl`'s Docker provisioner takes no
+    custom label, so the two nodes are still told apart by ID as soon as possible after
+    `cluster create` and nothing more (README, Known limits). `selftest`'s holder of the fixture
+    lock for the still-writing-capture case (check 22) was started and only killed at the end of
+    the case, with nothing to kill it on a signal in between: it would have outlived the run for
+    up to five minutes, holding both the sibling marker lock and the fixture lock and refusing
+    `inject` and `down` over planted state nothing would clean up. Registered with `defer`
+    immediately after its PID is captured, unregistered once the explicit kill at the end of the
+    case runs. Not exercised: the race on the Compose containers itself, for the same reason as
+    the claim's own nonce race (item 59) and the Talos gap above.
 
 ## 6. What each experiment gets
 
