@@ -107,8 +107,8 @@ manifest, so a bundle states what actually produced it.
 
 | | |
 |---|---|
-| Captured | 2026-09-22, 20:34Z to 21:11Z |
-| Fixture manifest commit | `d2fbb10ca5137dc2876b991e48c99c9e6af24842`, which is also the commit every bundle records as the one the running code was built from |
+| Captured | 2026-09-22, 21:48Z to 22:25Z |
+| Fixture manifest commit | `4e3a83af5cbe35c4889ecfac92f90bbd9d2b6e77`, which is also the commit every bundle records as the one the running code was built from |
 | Host | Linux 7.1.3+deb13-amd64 x86\_64 |
 | Docker / Compose | 26.1.5+dfsg1 / 2.27.1 |
 | Talos | v1.13.6, both nodes; `talosctl` client v1.13.6 |
@@ -235,19 +235,19 @@ write-ahead log for rows that no query will ever return.
 So the prohibition is not a precaution. "Redact it later" produces a database that looks clean by
 every means an application has and still holds the plaintext where backups and replicas read.
 
-**The exact counts are not the result; the split is.** This matrix was captured three times on
+**The exact counts are not the result; the split is.** This matrix was captured four times on
 fresh fixtures while the review fixes landed, and the write-ahead-log counts moved by one between
-captures — persist-first 24, 23, 24; rollback 16, 15, 16 — because what else the log holds, and so
-where a record straddles a page, depends on everything before it. The dump counts and the
-redact-after pair never moved: nothing in the dump, eight in the log, all three times.
+captures — persist-first 24, 23, 24, 24; rollback 16, 15, 16, 16 — because what else the log holds,
+and so where a record straddles a page, depends on everything before it. The dump counts and the
+redact-after pair never moved: nothing in the dump, eight in the log, all four times.
 
 The single line each of these bundles shows at `logs/bw-fixture-postgres.log` is **not** theirs: it
-is the statement `control-leak-db-log` logged at 21:04:24Z, in a log file that is appended to for
+is the statement `control-leak-db-log` logged at 22:18:06Z, in a log file that is appended to for
 the whole matrix. Attributed by opening it, which is the rule this report follows throughout.
 
 `honest-import-final` is an honest run that scans with six lines. Nothing in it wrote plaintext;
 the database it ran against still holds what the controls put there — 18 occurrences in the dump,
-27 in the write-ahead log, and 20 in the heap file of `parsed_index` (relation file
+30 in the write-ahead log, and 18 in the heap file of `parsed_index` (relation file
 `base/16384/16400`, named from `pg_class` while the fixture was still up). The heap line is the
 residue reaching the table's own data file once a checkpoint flushed it, the one place in this
 matrix where the controls' plaintext is seen outside the log and the dump. That bundle is asserted
@@ -333,8 +333,10 @@ which is also what a correct run produces.
 
 5.15 adds a seventh, one level up: this report's own claim that the ordering was enforced by the
 compiler, citing a test that did not exist. 5.16 adds an eighth: a recovery that dropped every
-reference and passed because nothing read the rows. Both were found by an external review rather
-than by the habit that found the first six, which is the argument for having both.
+reference and passed because nothing read the rows. 5.17 adds a ninth: a redaction test that used
+the one kind of field where redaction works, with a leak detector that could only see one spelling
+of a leak. All three were found by an external review rather than by the habit that found the first
+six, which is the argument for having both.
 
 An experiment whose instrument can report clean without looking proves nothing at all, and the
 count above is the honest reason for every positive control described in section 4.
@@ -347,6 +349,10 @@ which uses `GoStringer` and falls back to the struct's fields. `%+v` and `%v` go
 `MarshalJSON`, `MarshalText` and `LogValue`, and a test asserts every one of them, together with
 `%w` wrapping and `log/slog`, because a single unguarded verb in an error path is enough to put a
 secret in a log line that §7.1 counts as persistence.
+
+That was not the whole of it, and 5.17 records the rest: none of those methods runs for a value
+held in an unexported field, and the plaintext then has to be unreachable by reflection rather
+than merely overridden.
 
 ### 5.2 Silently reading only the first YAML document
 
@@ -598,6 +604,34 @@ transient staging the owner is the process; under encrypted staging the claim ca
 principal, so "only the holder" needs a definition of holder across a recovery. That belongs with
 the staging decision in the milestone-02 specification.
 
+### 5.17 The redaction that held only for exported fields
+
+A third advisory review raised 7 findings, all real. One undoes part of 5.1.
+
+fmt calls a value's `Format`, `String` or `GoString` only when reflection is allowed to take it as
+an interface, and it is not allowed to for an unexported field. A secret held in one — the natural
+way to carry it inside a private struct — was printed by fmt walking its fields instead, and the
+plaintext came out as a list of decimal bytes. The test that was meant to cover containers used
+an exported field, which is the one case where the overrides do run.
+
+Two further layers of the same mistake turned up while fixing it. Moving the bytes behind a pointer
+was not enough, because fmt's bad-verb path — `%s`, `%q` or `%d` applied to a pointer —
+dereferences it. The plaintext is now captured by a closure, which fmt prints only as an address
+under every verb and which reflection cannot look inside. And the test helper itself searched for
+the plaintext only as text, so the decimal-byte leak had been caught only because the same output
+also lacked the redaction; it now looks for the decimal, hex and spaced-hex spellings too.
+
+No run leaked this way — the prototype never holds a secret in an unexported field that is then
+formatted — which is why no scan could have found it. It is recorded because it is exactly the
+class of defect the redaction type exists to rule out, and because the leak scan would not have
+matched the decimal spelling if it had happened.
+
+The other six were: a test comparing against a path no document can produce, so one of its cases
+asserted nothing; a 10ms timing bound a loaded runner could exceed; the leak control accepting a
+value shorter than the scan can match; the staging envelope's silent rewrite of invalid UTF-8; a
+malformed URL-form DSN escaping redaction; and an evidence swap that a cross-device move could leave
+half-done.
+
 ## 6. What this decides
 
 **§7.1's ordering requirement is implementable, and the evidence for that is structural.** Every
@@ -740,6 +774,7 @@ first is feasible, for this prototype, these flows, these secrets and these boun
    under test: each looked exactly like a passing result. The habit that found all six is asking
    what would have to be true for the check to fail, and confirming something could make it. Any
    subsequent experiment producing absence evidence should carry a positive control per surface and
-   assert it, which is what the reachability control and the two-line invariant do here. The two
-   the habit missed — an overclaimed guarantee and a recovery that dropped its references (5.15,
-   5.16) — were found by an independent review, so the evidence work needs one of those too.
+   assert it, which is what the reachability control and the two-line invariant do here. The three
+   the habit missed — an overclaimed guarantee, a recovery that dropped its references and a
+   redaction that held only for exported fields (5.15–5.17) — were found by an independent review,
+   so the evidence work needs one of those too.
