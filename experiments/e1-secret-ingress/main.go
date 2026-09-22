@@ -98,6 +98,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs.Usage = func() { usage(stderr, fs) }
 
 	if err := fs.Parse(args); err != nil {
+		// Asking for help is not a failure. The flag package has already printed the usage; turning
+		// ErrHelp into an error made `e1 -h` exit 1 and tell the user to run the flag they just ran.
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return errors.New("see -h for the accepted flags")
 	}
 	if fs.NArg() == 0 {

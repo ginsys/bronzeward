@@ -75,6 +75,17 @@ func TestEverySubcommandTheUsageAdvertisesIsDispatched(t *testing.T) {
 // TestRecoverRefusesBeforeTouchingAnything covers the guards that run before recover opens a
 // database or a provider. Both failures below would otherwise surface as a connection error, which
 // reads as an environment problem rather than as a wrong invocation.
+// TestHelpIsNotAFailure checks `e1 -h` prints the usage and succeeds.
+func TestHelpIsNotAFailure(t *testing.T) {
+	var stdout, stderr strings.Builder
+	if err := run([]string{"-h"}, &stdout, &stderr); err != nil {
+		t.Errorf("run(-h) = %v, want nil", err)
+	}
+	if !strings.Contains(stderr.String(), "-config") {
+		t.Errorf("run(-h) did not print the flags: %q", stderr.String())
+	}
+}
+
 func TestRecoverRefusesBeforeTouchingAnything(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "run")
 

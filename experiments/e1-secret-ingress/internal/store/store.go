@@ -31,6 +31,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/lib/pq"
 
@@ -72,7 +73,10 @@ func Open(ctx context.Context, dsn string) (*DB, error) {
 	}
 	handle, err := sql.Open("postgres", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("store: opening the database: %w", err)
+		// lib/pq v1.10.9 does not parse the DSN here — it implements no OpenConnector, so parsing
+		// waits for the first connection, which is redacted below. Redacted here as well so that
+		// a driver version that does parse at Open cannot put the password in this error.
+		return nil, fmt.Errorf("store: opening the database: %w", redactDSN(err, dsn))
 	}
 	if err := handle.PingContext(ctx); err != nil {
 		handle.Close()
@@ -379,35 +383,64 @@ func dsnPasswords(dsn string) []string {
 		}
 		return out
 	}
-	// Key/value form. A quoted value may contain spaces, so the string is scanned for the key
-	// rather than split on whitespace.
-	rest := dsn
+	// Key/value form, scanned the way lib/pq's parseOpts scans it (conn.go in v1.10.9): whitespace
+	// may surround '=', a value may be single-quoted, and a backslash escapes the next character in
+	// either form. The first version split on whitespace and knew no escapes, so for
+	// password='foo\'bar' it found foo\ and let the real password through.
+	//
+	// Both spellings of each password are returned: the value lib/pq uses, and the raw text it was
+	// written as, since an error that quotes the connection string carries the raw one.
+	rs := []rune(dsn)
+	i := 0
+	skip := func() {
+		for i < len(rs) && unicode.IsSpace(rs[i]) {
+			i++
+		}
+	}
 	for {
-		i := strings.Index(rest, "password=")
-		if i < 0 {
+		skip()
+		if i >= len(rs) {
 			return out
 		}
-		if i > 0 && rest[i-1] != ' ' && rest[i-1] != '\t' {
-			// Part of another key, such as sslpassword=.
-			rest = rest[i+len("password="):]
-			continue
+		start := i
+		for i < len(rs) && rs[i] != '=' && !unicode.IsSpace(rs[i]) {
+			i++
 		}
-		rest = rest[i+len("password="):]
-		var value string
-		if strings.HasPrefix(rest, "'") {
-			end := strings.Index(rest[1:], "'")
-			if end < 0 {
-				value, rest = rest[1:], ""
-			} else {
-				value, rest = rest[1:1+end], rest[2+end:]
+		key := string(rs[start:i])
+		skip()
+		if i >= len(rs) || rs[i] != '=' {
+			return out // malformed; lib/pq refuses it before any password is used
+		}
+		i++
+		skip()
+		rawStart := i
+		var value []rune
+		if i < len(rs) && rs[i] == '\'' {
+			i++
+			for i < len(rs) && rs[i] != '\'' {
+				if rs[i] == '\\' && i+1 < len(rs) {
+					i++
+				}
+				value = append(value, rs[i])
+				i++
 			}
-		} else if end := strings.IndexAny(rest, " \t"); end >= 0 {
-			value, rest = rest[:end], rest[end:]
+			if i < len(rs) {
+				i++ // the closing quote
+			}
 		} else {
-			value, rest = rest, ""
+			for i < len(rs) && !unicode.IsSpace(rs[i]) {
+				if rs[i] == '\\' && i+1 < len(rs) {
+					i++
+				}
+				value = append(value, rs[i])
+				i++
+			}
 		}
-		if value != "" {
-			out = append(out, value)
+		if key == "password" && len(value) > 0 {
+			out = append(out, string(value))
+			if raw := string(rs[rawStart:i]); raw != string(value) {
+				out = append(out, raw)
+			}
 		}
 	}
 }

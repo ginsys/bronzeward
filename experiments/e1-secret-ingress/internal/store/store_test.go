@@ -170,6 +170,23 @@ func TestRedactDSNCoversEveryFormLibPQAccepts(t *testing.T) {
 		})
 	}
 
+	// lib/pq's escaping and spacing rules. Each DSN spells the password foo'bar or "foo bar" in a
+	// way the first scanner misread; both the value and its raw spelling must be found.
+	for dsn, want := range map[string][]string{
+		`host=h password='foo\'bar' dbname=d`:  {`foo'bar`, `'foo\'bar'`},
+		`host=h password = 'foo bar' dbname=d`: {`foo bar`, `'foo bar'`},
+		`host=h password=foo\ bar dbname=d`:    {`foo bar`, `foo\ bar`},
+	} {
+		got := dsnPasswords(dsn)
+		if strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Errorf("dsnPasswords(%q) = %q, want %q", dsn, got, want)
+		}
+		leaky := errors.New("bad connection string " + dsn)
+		if text := redactDSN(leaky, dsn).Error(); strings.Contains(text, "foo") {
+			t.Errorf("the password survived redaction of %q: %s", dsn, text)
+		}
+	}
+
 	// sslpassword= is a different key. Treating its value as the password would not leak anything,
 	// but it would show the scan matching a key by suffix, which is how it would miss one too.
 	if got := dsnPasswords("host=h sslpassword=keyphrase dbname=d"); len(got) != 0 {

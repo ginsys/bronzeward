@@ -249,15 +249,22 @@ func (c *Client) Encrypt(ctx context.Context, keyName string, plaintext []byte) 
 func (c *Client) Decrypt(ctx context.Context, keyName, ciphertext string) ([]byte, error) {
 	body := map[string]string{"ciphertext": ciphertext}
 
+	// A pointer, so a response with no plaintext field is told apart from one whose plaintext is
+	// empty. Decoding "" succeeds, so without this a malformed response returned an empty document
+	// and no error — the one call that could fail silently, where Put, Get and Encrypt all reject
+	// a response missing their field.
 	var out struct {
 		Data struct {
-			Plaintext string `json:"plaintext"`
+			Plaintext *string `json:"plaintext"`
 		} `json:"data"`
 	}
 	if err := c.do(ctx, http.MethodPost, "/v1/transit/decrypt/"+keyName, body, &out); err != nil {
 		return nil, err
 	}
-	plaintext, err := base64.StdEncoding.DecodeString(out.Data.Plaintext)
+	if out.Data.Plaintext == nil {
+		return nil, fmt.Errorf("provider: transit/decrypt/%s returned no plaintext field", keyName)
+	}
+	plaintext, err := base64.StdEncoding.DecodeString(*out.Data.Plaintext)
 	if err != nil {
 		return nil, fmt.Errorf("provider: transit/decrypt/%s returned undecodable plaintext: %w", keyName, err)
 	}

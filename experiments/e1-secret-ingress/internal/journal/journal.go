@@ -361,7 +361,12 @@ func Verify(records []Record) []Violation {
 				}
 			}
 		case EventWrite:
-			if outOfPhase[r.Seq] {
+			// A declared recovery is exempt here for the reason it is exempt from the phase rule:
+			// its secrets were extracted under the crashed run's identity and are recorded in that
+			// run's journal, so none of them is in this map. Applying the carve-out to one rule
+			// and not the other meant a recovery write listing any digest would be reported as
+			// writing unextracted secrets for behaving correctly.
+			if outOfPhase[r.Seq] || strings.HasPrefix(r.Detail, "recover:") {
 				continue
 			}
 			for _, d := range r.Digests {
