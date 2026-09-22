@@ -223,3 +223,44 @@ func TestNullableHelpers(t *testing.T) {
 		t.Error("a real token was nulled")
 	}
 }
+
+// TestEnvelopeKeepsTheReferences is the regression for encrypted staging resuming a change without
+// its references. Hold used to encrypt the document alone and Resume rebuilt it with none, so a
+// draft recovered by a second principal was persisted with no secret_reference rows at all.
+func TestEnvelopeKeepsTheReferences(t *testing.T) {
+	refs := []secret.Reference{
+		{Path: "doc[0].machine.token", URI: "openbao:secret/run/doc[0].machine.token#1", Digest: strings.Repeat("a", 64)},
+		{Path: "doc[0].cluster.secret", URI: "openbao:secret/run/doc[0].cluster.secret#1", Digest: strings.Repeat("b", 64)},
+	}
+	held := secret.NewSanitized([]byte("machine:\n  token: bw:ref:x\n"), refs)
+
+	plain, err := sealEnvelope(held)
+	if err != nil {
+		t.Fatalf("sealEnvelope: %v", err)
+	}
+	resumed, err := openEnvelope(plain)
+	if err != nil {
+		t.Fatalf("openEnvelope: %v", err)
+	}
+
+	if got, want := string(resumed.Document()), string(held.Document()); got != want {
+		t.Errorf("document changed across staging: %q, want %q", got, want)
+	}
+	got := resumed.References()
+	if len(got) != len(refs) {
+		t.Fatalf("resumed with %d reference(s), want %d", len(got), len(refs))
+	}
+	for i := range refs {
+		if got[i] != refs[i] {
+			t.Errorf("reference %d changed across staging: %+v, want %+v", i, got[i], refs[i])
+		}
+	}
+}
+
+// TestOpenEnvelopeRefusesABareDocument checks the payload shape the first version wrote — the
+// document alone — is refused rather than resumed as a change with no references.
+func TestOpenEnvelopeRefusesABareDocument(t *testing.T) {
+	if _, err := openEnvelope([]byte("machine:\n  token: bw:ref:x\n")); err == nil {
+		t.Fatal("openEnvelope accepted a bare document as a staged change")
+	}
+}

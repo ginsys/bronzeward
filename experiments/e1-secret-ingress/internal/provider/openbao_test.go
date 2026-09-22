@@ -128,6 +128,18 @@ func TestPutRefusesAResponseWithoutAVersion(t *testing.T) {
 	}
 }
 
+// TestDecryptRefusesAResponseWithoutPlaintext covers the one call that used to fail silently: an
+// absent plaintext field decoded as "" and came back as an empty document with no error.
+func TestDecryptRefusesAResponseWithoutPlaintext(t *testing.T) {
+	c, _ := server(t, func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, http.StatusOK, map[string]any{"data": map[string]any{}})
+	})
+
+	if got, err := c.Decrypt(t.Context(), "bw-artifact", "vault:v1:xyz"); err == nil {
+		t.Fatalf("Decrypt accepted a response with no plaintext and returned %q", got)
+	}
+}
+
 // TestAFailedWriteDoesNotLeakWhatItWasSending is the one that matters. A provider error ends up in
 // a log and an error report, both of which §7.1 names as persistence surfaces, and the request
 // body is the secret itself.

@@ -289,6 +289,14 @@ func TestVerifyAllowsADeclaredRecovery(t *testing.T) {
 	if v := Verify(records); v != nil {
 		t.Errorf("a declared recovery reported violations: %v", v)
 	}
+
+	// The same write naming the secrets it carries. They were extracted under the crashed run's
+	// identity, so none of them is in this journal, and the per-digest rule must not count that
+	// against it.
+	records[1].Digests = []string{digestOf("talos-ca-key")}
+	if v := Verify(records); v != nil {
+		t.Errorf("a declared recovery listing its secrets reported violations: %v", v)
+	}
 }
 
 // TestVerifyRejectsAnUndeclaredWriteWithoutExtraction is that carve-out's own control. The marker

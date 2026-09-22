@@ -138,6 +138,20 @@ fi
 take recover-encrypted clean - -- --staging=encrypted recover crashed-in-review-encrypted
 expect_status recover-encrypted ok
 
+# A recovery must resume the change that was held, not only its text. Encrypted staging first
+# staged the document alone, so this run exited ok, scanned clean, and persisted a draft with no
+# secret_reference rows — nothing here looked at the rows, so a recovery that had dropped every
+# reference passed. The count must equal the secrets the crashed run extracted before it was held.
+want_refs=$(grep -c '"event":"secret.extracted"' "$E1_RUNS/crashed-in-review-encrypted/journal.jsonl" || true)
+got_refs=$(pg psql --username=bronzeward --dbname=bronzeward --no-password -Atc \
+  "SELECT count(*) FROM secret_reference WHERE run_id = 'recover-encrypted'" 2>&1) || got_refs="unreadable: $got_refs"
+if [ "$want_refs" -gt 0 ] && [ "$got_refs" = "$want_refs" ]; then
+  say "matrix: OK recover-encrypted persisted $got_refs reference(s), one per secret the crashed run extracted"
+else
+  say "matrix: FAIL recover-encrypted persisted $got_refs reference(s), want $want_refs"
+  failed+=(recover-encrypted/references)
+fi
+
 # Killed inside the database transaction, captured twice: dead, then restarted.
 take crashed-in-db-txn clean - -- --staging=encrypted --crash-at=in-db-txn --config="$import_config" import
 expect_status crashed-in-db-txn killed

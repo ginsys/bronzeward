@@ -25,11 +25,13 @@
 package staging
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -225,9 +227,12 @@ func (c *claims) transition(ctx context.Context, runID, to string, unexpired boo
 // behind would otherwise extend its own claim indefinitely.
 func (c *claims) heartbeat(ctx context.Context, runID string) error {
 	result, err := c.db.ExecContext(ctx,
+		// Only a claim that is still live can be extended. Without the expiry condition a heartbeat
+		// revived a lease that had already lapsed, undoing the expiry that transition and Resume
+		// enforce. Who may send a heartbeat is not checked here; see the report's limits.
 		`UPDATE staging_claim
 		    SET heartbeat_at = clock_timestamp(), expires_at = clock_timestamp() + $2::interval
-		  WHERE run_id = $1 AND state = 'held'`,
+		  WHERE run_id = $1 AND state = 'held' AND expires_at > clock_timestamp()`,
 		runID, fmt.Sprintf("%d seconds", int(c.lease.Seconds())))
 	if err != nil {
 		return fmt.Errorf("staging: extending the lease on %s: %w", runID, err)
@@ -237,7 +242,7 @@ func (c *claims) heartbeat(ctx context.Context, runID string) error {
 		return fmt.Errorf("staging: extending the lease on %s: %w", runID, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("staging: no held claim for run %s to extend", runID)
+		return fmt.Errorf("staging: no held, unexpired claim for run %s to extend", runID)
 	}
 	return nil
 }
@@ -392,12 +397,20 @@ func (e *Encrypted) Hold(ctx context.Context, runID, principal string, s secret.
 		return Claim{}, errors.New("staging: encrypted staging needs a principal; an unowned claim can be taken by anyone")
 	}
 
-	ciphertext, err := e.cipher.Encrypt(ctx, e.keyName, s.Document())
+	// The whole change is staged, not only its document. The first version encrypted the document
+	// alone, so a change resumed by a second principal came back with no references, and the draft
+	// it became was persisted without a single secret_reference row — a recovery that looked
+	// complete and had silently dropped the mapping from each reference to the secret it replaced.
+	plain, err := sealEnvelope(s)
+	if err != nil {
+		return Claim{}, err
+	}
+	ciphertext, err := e.cipher.Encrypt(ctx, e.keyName, plain)
 	if err != nil {
 		return Claim{}, fmt.Errorf("staging: encrypting the pending change: %w", err)
 	}
 
-	sum := sha256.Sum256(s.Document())
+	sum := sha256.Sum256(plain)
 	cl := Claim{
 		RunID:            runID,
 		Mode:             ModeEncrypted,
@@ -466,7 +479,10 @@ func (e *Encrypted) Resume(ctx context.Context, runID, principal string) (secret
 	// The resumed change re-enters the program as a Sanitized. That is sound here and nowhere
 	// else: what was encrypted was already sanitized, its digest has just been checked against the
 	// claim, and the ciphertext came from this program's own Hold.
-	resumed := secret.NewSanitized(body, nil)
+	resumed, err := openEnvelope(body)
+	if err != nil {
+		return secret.Sanitized{}, cl, fmt.Errorf("staging: run %s: %w", runID, err)
+	}
 
 	// Taking the claim is the last step and the only one that decides who gets it. Two principals
 	// can both reach this line with the plaintext decrypted; exactly one UPDATE changes the row, and
@@ -475,6 +491,35 @@ func (e *Encrypted) Resume(ctx context.Context, runID, principal string) (secret
 		return secret.Sanitized{}, cl, err
 	}
 	return resumed, cl, nil
+}
+
+// envelope is what encrypted staging encrypts: the sanitized document and the references that
+// replaced its secrets, so that a resumed change is the change that was held and not only its text.
+// It holds no plaintext secret — the references carry provider locations and digests — and it is
+// encrypted before it reaches the table in any case.
+type envelope struct {
+	Document   string             `json:"document"`
+	References []secret.Reference `json:"references"`
+}
+
+func sealEnvelope(s secret.Sanitized) ([]byte, error) {
+	out, err := json.Marshal(envelope{Document: string(s.Document()), References: s.References()})
+	if err != nil {
+		return nil, fmt.Errorf("staging: encoding the pending change: %w", err)
+	}
+	return out, nil
+}
+
+// openEnvelope rebuilds a staged change. A payload that does not decode is refused rather than
+// resumed as a document with no references, which is the silent loss the envelope exists to end.
+func openEnvelope(plain []byte) (secret.Sanitized, error) {
+	var env envelope
+	dec := json.NewDecoder(bytes.NewReader(plain))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&env); err != nil {
+		return secret.Sanitized{}, fmt.Errorf("the staged change does not decode as a staging envelope: %w", err)
+	}
+	return secret.NewSanitized([]byte(env.Document), env.References), nil
 }
 
 // Release implements Staging. It sets the payload to NULL, which is the delete the report's paired

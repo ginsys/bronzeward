@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/checkpoint"
@@ -100,7 +101,14 @@ func Run(ctx context.Context, req Request) (Result, error) {
 	refs := make([]secret.Reference, 0, len(req.Paths))
 	digests := make([]string, 0, len(req.Paths))
 
-	for _, path := range req.Paths {
+	// Extracted in path order, whatever order the caller supplied. The documented order of
+	// Result.Digests — and so of every journal record and provider write — was only true because
+	// the one caller happened to sort first; a caller assembling paths from a map would have made
+	// two runs over the same document disagree, which is exactly the comparison the journal exists
+	// for.
+	paths := append([]string(nil), req.Paths...)
+	sort.Strings(paths)
+	for _, path := range paths {
 		value, ok := req.Document.Get(path)
 		if !ok {
 			return Result{}, fmt.Errorf("extract: no scalar at %q", path)

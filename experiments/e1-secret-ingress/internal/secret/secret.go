@@ -121,7 +121,15 @@ func (u Unresolved) LogValue() slog.Value { return slog.StringValue(u.Redacted()
 //
 // Only extraction and the deliberate-failure controls may call it. That restriction is a test in
 // this package, not a language guarantee: Go cannot express "only package X may call this".
-func (u Unresolved) Unsafe() []byte { return u.plaintext }
+//
+// It returns a copy. Returning the field let a caller rewrite the bytes behind a digest that had
+// already been computed, so the value a provider stored and the digest the journal recorded could
+// silently disagree — the aliasing NewUnresolved's own copy exists to rule out.
+func (u Unresolved) Unsafe() []byte {
+	out := make([]byte, len(u.plaintext))
+	copy(out, u.plaintext)
+	return out
+}
 
 // Reference replaces a secret in a sanitized document. It names where the value came from and
 // where it now lives, and carries the digest so that a persisted document can be checked against

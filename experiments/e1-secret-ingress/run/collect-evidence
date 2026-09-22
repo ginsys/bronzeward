@@ -112,14 +112,31 @@ before collecting, or the report will cite numbers no committed file carries"
   printf '# read from the fixture control plane at capture time\n\n'
   TALOSCONFIG=$STATE/talosconfig "$FIXTURES_DIR/.cache/talosctl" -n "$TALOS_CONTROLPLANE_IP" get rd -o yaml |
     awk '/^    id: /{id=$2} /sensitivity:/{printf "%s\t%s\n", $2, id}' | sort
-} >"$dest/talos-resource-sensitivity.txt" 2>&1 ||
-  printf 'the control plane could not be read at capture time\n' >"$dest/talos-resource-sensitivity.txt"
+} >"$E1_OUT/talos-resource-sensitivity.raw" 2>&1 ||
+  printf 'the control plane could not be read at capture time\n' >"$E1_OUT/talos-resource-sensitivity.raw"
+# Through sanitize like every other file. talosctl's stderr goes into the same stream and names the
+# TALOSCONFIG path under this checkout's state directory when it complains, and this was the one
+# file written straight into the evidence without the path rewrite.
+sanitize "$E1_OUT/talos-resource-sensitivity.raw" "$dest/talos-resource-sensitivity.txt"
+rm -f -- "$E1_OUT/talos-resource-sensitivity.raw"
 
 hits=$(e1_hits "$dest")
 [ "$hits" -eq 0 ] || die "the collected evidence holds $hits occurrence(s) of this run's synthetic
 secrets and must not be committed. The files are left in $dest for inspection; attribute each hit
 by opening the file that holds it."
 
-rm -rf -- "$final"
-mv -- "$dest" "$final" || die "the evidence scanned clean but could not be moved into $final; it is in $dest"
+# The old evidence is set aside, not deleted, until the new one is in place. Removing it first
+# meant a move that failed partway — a full disk on a cross-filesystem copy — lost both. A rename
+# within one directory is atomic, so at every moment one complete evidence tree exists.
+previous=$final.previous
+rm -rf -- "$previous"
+if [ -e "$final" ]; then
+  mv -- "$final" "$previous" || die "could not set the existing evidence aside at $previous; nothing was replaced"
+fi
+if ! mv -- "$dest" "$final"; then
+  [ ! -e "$previous" ] || mv -- "$previous" "$final" ||
+    die "the new evidence could not be moved in and the old could not be put back; the old is at $previous, the new at $dest"
+  die "the evidence scanned clean but could not be moved into $final; it is in $dest, and the previous evidence is back in place"
+fi
+rm -rf -- "$previous"
 say "collect-evidence: $runs run(s) and $tables table(s) collected into $final, scanned clean"

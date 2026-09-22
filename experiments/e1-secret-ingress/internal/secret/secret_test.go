@@ -218,6 +218,16 @@ func TestDigestAndCopy(t *testing.T) {
 		t.Errorf("NewUnresolved did not copy its input: Unsafe() = %q after the caller zeroed it", got)
 	}
 
+	// And the accessor must copy too: writing through what Unsafe returned must not change the
+	// value either.
+	out := u.Unsafe()
+	for i := range out {
+		out[i] = 0
+	}
+	if got := string(u.Unsafe()); got != plaintext {
+		t.Errorf("writing through Unsafe() changed the value: %q", got)
+	}
+
 	// Equal plaintext must give an equal digest, or cross-run comparison in the report is
 	// meaningless; different plaintext must not.
 	if NewUnresolved([]byte("a")).Digest() == NewUnresolved([]byte("b")).Digest() {
