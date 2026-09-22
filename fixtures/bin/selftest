@@ -1324,6 +1324,10 @@ printf 'active=%s\n' "$BW_CANARY" >"$STATE/evidence/selftest-active/writing.txt"
 # shared too, as a running capture does: the capture below must run alongside it.
 ( flock --nonblock 3 && flock --shared --nonblock 4 || exit 9; exec sleep 300; ) 3>"$STATE/evidence/selftest-active/.incomplete" 4<"$STATE/lock" &
 active_holder=$!
+# Registered before anything else below can fail: a signal here would otherwise leave it running
+# for up to 300 seconds, holding both locks and refusing inject and down over planted state that
+# is never cleaned up either.
+defer kill "$active_holder"
 printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
 # And one that is not text: carried as a binary patch, not as "differ".
 printf 'selftest-binary\0%s\n' "$$" >"$FIXTURES/.selftest-untracked.bin"
@@ -1379,6 +1383,7 @@ active_marked=0
 [ ! -e "$STATE/evidence/selftest-active/.incomplete" ] || active_marked=1
 active_scanned_by=$(cat "$STATE/evidence/selftest-active/scanned-by.txt" 2>/dev/null || printf none)
 kill "$active_holder" 2>/dev/null || true
+undefer
 rm -r "$STATE/data/selftest-textlink" "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN" "$FIXTURES/.selftest-untracked" "$FIXTURES/.selftest-untracked.bin" \
   "$STATE/evidence/selftest-interrupted" "$STATE/evidence/selftest-active" "$STATE/selftest-other-repo" \
   "$STATE/backups/store-selftest-kept.tgz" "$STATE/backups/store-selftest-stale.tgz" "$STATE/backups/store-selftest\\back.tgz"
