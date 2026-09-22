@@ -30,11 +30,30 @@ func wantRedaction(t *testing.T) string {
 // that a secret was there, which would make the ordering journal unreadable.
 func assertRedacted(t *testing.T, what, got string) {
 	t.Helper()
-	if strings.Contains(got, plaintext) {
-		t.Errorf("%s leaked the plaintext: %s", what, got)
-	}
+	assertNoPlaintext(t, what, got)
 	if !strings.Contains(got, wantRedaction(t)) {
 		t.Errorf("%s did not render the redaction: got %q, want it to contain %q", what, got, wantRedaction(t))
+	}
+}
+
+// assertNoPlaintext fails if the plaintext appears in any spelling fmt produces for a byte slice:
+// as text, as the decimal list %v gives a []byte, or as hex. The first version looked only for the
+// text, so a []byte field printed as [69 49 45 ...] passed it, and that leak was caught only
+// because the same output also lacked the redaction.
+func assertNoPlaintext(t *testing.T, what, got string) {
+	t.Helper()
+	b := []byte(plaintext)
+	inner := strings.Trim(fmt.Sprint(b), "[]")
+	for spelling, needle := range map[string]string{
+		"text":         plaintext,
+		"decimal":      inner,
+		"hex":          hex.EncodeToString(b),
+		"upper hex":    strings.ToUpper(hex.EncodeToString(b)),
+		"spaced bytes": fmt.Sprintf("% x", b),
+	} {
+		if strings.Contains(got, needle) {
+			t.Errorf("%s leaked the plaintext as %s: %s", what, spelling, got)
+		}
 	}
 }
 
@@ -106,6 +125,22 @@ func TestUnresolvedInsideContainers(t *testing.T) {
 	assertRedacted(t, "slice", fmt.Sprintf("%v", []Unresolved{u}))
 	assertRedacted(t, "map value", fmt.Sprintf("%v", map[string]Unresolved{"token": u}))
 	assertRedacted(t, "interface element", fmt.Sprintf("%v", []any{"x", u, 3}))
+
+	// An unexported field. fmt calls a field's Format, String or GoString only when reflection is
+	// allowed to take its value as an interface, which it is not for an unexported field; it then
+	// walks the field's own fields instead. The exported Token above is the case where the
+	// overrides run, and the only case this test used to check.
+	type private struct {
+		name  string
+		token Unresolved
+	}
+	// No redaction can appear here — fmt never calls a method on an unexported field — so the
+	// assertion is only that the value is absent in every spelling.
+	p := private{name: "bootstrap", token: u}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%x", "%X", "%d", "%q"} {
+		assertNoPlaintext(t, "unexported field under "+verb, fmt.Sprintf(verb, p))
+		assertNoPlaintext(t, "pointer to a struct with an unexported field under "+verb, fmt.Sprintf(verb, &p))
+	}
 }
 
 // TestUnresolvedJSON covers encoding/json directly and as a struct field, since a sanitized draft

@@ -38,6 +38,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/checkpoint"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/secret"
@@ -502,8 +503,18 @@ type envelope struct {
 	References []secret.Reference `json:"references"`
 }
 
+// sealEnvelope refuses a document that is not valid UTF-8 rather than staging a corrupted one.
+// encoding/json replaces each invalid byte sequence with U+FFFD without an error, and the claim's
+// digest is taken over the envelope after that replacement, so a resume would pass its digest check
+// and hand back a different document than the one held. Every document this prototype stages is
+// yaml.v3 output, which is always UTF-8; the refusal keeps that an assumption checked here rather
+// than one the envelope silently depends on.
 func sealEnvelope(s secret.Sanitized) ([]byte, error) {
-	out, err := json.Marshal(envelope{Document: string(s.Document()), References: s.References()})
+	doc := s.Document()
+	if !utf8.Valid(doc) {
+		return nil, errors.New("staging: the pending change is not valid UTF-8 and would not survive encoding intact; refusing to stage it")
+	}
+	out, err := json.Marshal(envelope{Document: string(doc), References: s.References()})
 	if err != nil {
 		return nil, fmt.Errorf("staging: encoding the pending change: %w", err)
 	}

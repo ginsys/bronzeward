@@ -38,9 +38,19 @@ const digestLen = 12
 // The zero value renders as a redaction like any other, deliberately: a struct literal that
 // forgot to set the field must not be distinguishable in output from one that did, or the absence
 // of a secret becomes a signal about the presence of one.
+//
+// The plaintext is captured by a closure, and that is load-bearing rather than incidental. fmt
+// calls an operand's Format, String or GoString only when reflection may take its value as an
+// interface, which it may not for an unexported field; an Unresolved held in one was printed by
+// walking its fields, and a []byte field came out as the plaintext's bytes in decimal. The earlier
+// claim that every fmt path was overridden held only for exported fields.
+//
+// A pointer is not enough: fmt's bad-verb path (%s, %q or %d on a pointer) dereferences it and
+// prints what it points at. A func value is printed only as its address, under every verb, and
+// what it captures is not reachable by reflection at all.
 type Unresolved struct {
-	plaintext []byte
-	digest    string
+	held   func() []byte
+	digest string
 }
 
 // Compile-time proof that every rendering path is overridden. If a future edit drops one of these
@@ -58,7 +68,7 @@ func NewUnresolved(plaintext []byte) Unresolved {
 	buf := make([]byte, len(plaintext))
 	copy(buf, plaintext)
 	sum := sha256.Sum256(buf)
-	return Unresolved{plaintext: buf, digest: hex.EncodeToString(sum[:])}
+	return Unresolved{held: func() []byte { return buf }, digest: hex.EncodeToString(sum[:])}
 }
 
 // Digest is the full SHA-256 of the plaintext, hex encoded. It is safe to persist and is what the
@@ -126,8 +136,12 @@ func (u Unresolved) LogValue() slog.Value { return slog.StringValue(u.Redacted()
 // already been computed, so the value a provider stored and the digest the journal recorded could
 // silently disagree — the aliasing NewUnresolved's own copy exists to rule out.
 func (u Unresolved) Unsafe() []byte {
-	out := make([]byte, len(u.plaintext))
-	copy(out, u.plaintext)
+	if u.held == nil {
+		return nil // the zero value holds nothing
+	}
+	b := u.held()
+	out := make([]byte, len(b))
+	copy(out, b)
 	return out
 }
 

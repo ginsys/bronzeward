@@ -24,6 +24,11 @@ import (
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/store"
 )
 
+// minLeakValue is the shortest value the fixture's leak scan turns into a pattern
+// (fixtures/lib.sh scan_patterns: `awk 'length($0) >= 8'`). A leak control writing anything
+// shorter would be invisible to the instrument it exists to calibrate.
+const minLeakValue = 8
+
 // ingest is the flow under test, and the same function serves both import (§9.1) and drift
 // adoption (§12.4). They differ in which document the operator points at, not in what happens to
 // it, and giving them separate implementations would make their results incomparable.
@@ -97,6 +102,15 @@ func ingest(ctx context.Context, opts options, source string, stdout io.Writer) 
 		value, ok := doc.Get(paths[0])
 		if !ok {
 			return fmt.Errorf("the leak control has no value to write: %q holds no scalar", paths[0])
+		}
+		// A value the scan cannot match would make the control write something and then come back
+		// clean, which reads exactly like a surface that cannot be observed. The fixture only turns
+		// values of eight characters or more into scan patterns, so that is the floor here too; an
+		// empty value is the extreme case, where the control wrote nothing and still reported that
+		// it had leaked.
+		if len(value) < minLeakValue {
+			return fmt.Errorf("the leak control's value at %q is %d byte(s), shorter than the %d the leak scan can match; the control would prove nothing",
+				paths[0], len(value), minLeakValue)
 		}
 		leakValue = secret.NewUnresolved([]byte(value))
 	}

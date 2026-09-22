@@ -125,18 +125,29 @@ hits=$(e1_hits "$dest")
 secrets and must not be committed. The files are left in $dest for inspection; attribute each hit
 by opening the file that holds it."
 
-# The old evidence is set aside, not deleted, until the new one is in place. Removing it first
-# meant a move that failed partway — a full disk on a cross-filesystem copy — lost both. A rename
-# within one directory is atomic, so at every moment one complete evidence tree exists.
+# The old evidence is replaced only by renames within its own directory, which are atomic, so at
+# every moment one complete evidence tree sits at $final.
+#
+# Two earlier versions got this wrong. The first deleted the old tree before moving the new one in.
+# The second set the old tree aside first, but moved the new one in from E1_OUT, which may be on
+# another filesystem: mv then copies, a copy that fails partway leaves a partial $final, and the
+# attempt to put the old tree back moved it *inside* that partial directory and reported success.
+# The new tree is now copied beside $final first — the only step that can fail partway, and one
+# that touches nothing tracked — and the scan has already passed on the copy's source.
+incoming=$final.incoming
 previous=$final.previous
-rm -rf -- "$previous"
+rm -rf -- "$incoming" "$previous"
+if ! cp -a -- "$dest" "$incoming"; then
+  rm -rf -- "$incoming"
+  die "could not copy the new evidence beside $final; nothing was replaced, and the new evidence is in $dest"
+fi
 if [ -e "$final" ]; then
-  mv -- "$final" "$previous" || die "could not set the existing evidence aside at $previous; nothing was replaced"
+  mv -T -- "$final" "$previous" || die "could not set the existing evidence aside; nothing was replaced"
 fi
-if ! mv -- "$dest" "$final"; then
-  [ ! -e "$previous" ] || mv -- "$previous" "$final" ||
-    die "the new evidence could not be moved in and the old could not be put back; the old is at $previous, the new at $dest"
-  die "the evidence scanned clean but could not be moved into $final; it is in $dest, and the previous evidence is back in place"
+if ! mv -T -- "$incoming" "$final"; then
+  [ ! -e "$previous" ] || mv -T -- "$previous" "$final" ||
+    die "the new evidence could not be renamed into place and the old could not be put back; the old is at $previous, the new at $incoming"
+  die "the new evidence could not be renamed into place; the previous evidence is back at $final"
 fi
-rm -rf -- "$previous"
+rm -rf -- "$previous" "$dest"
 say "collect-evidence: $runs run(s) and $tables table(s) collected into $final, scanned clean"

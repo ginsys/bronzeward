@@ -146,11 +146,17 @@ func TestHoldPausesAtItsBoundaryOnly(t *testing.T) {
 		Announce: func(s string) { announcements = append(announcements, s) },
 	}
 
+	// A boundary that is not the hold point must not pause. The check used to be "under 10ms",
+	// which a GC pause on a loaded runner can exceed with the code behaving correctly. It now runs
+	// against a separate Control whose hold is ten seconds and allows one: a real pause is ten
+	// times the allowance, and no scheduler delay comes close to it.
+	long := &Control{HoldAt: InReview, HoldFor: 10 * time.Second, Announce: func(string) {}}
 	beforeHold := time.Now()
-	c.Reach(AfterExtract)
-	if elapsed := time.Since(beforeHold); elapsed > 10*time.Millisecond {
+	long.Reach(AfterExtract)
+	if elapsed := time.Since(beforeHold); elapsed > time.Second {
 		t.Errorf("a boundary that is not the hold point paused for %s", elapsed)
 	}
+	c.Reach(AfterExtract)
 	if len(announcements) != 0 {
 		t.Errorf("a boundary that is not the hold point announced %v", announcements)
 	}

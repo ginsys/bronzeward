@@ -187,6 +187,18 @@ func TestRedactDSNCoversEveryFormLibPQAccepts(t *testing.T) {
 		}
 	}
 
+	// A URL-form DSN net/url refuses: the raw password holds a space and a '#', so url.Parse fails
+	// and the first version returned no password at all for exactly the DSN most likely to be
+	// quoted back whole.
+	const raw = "p#ss word"
+	broken := "postgres://bronzeward:" + raw + "@127.0.0.1:55432/bronzeward"
+	if _, err := url.Parse(broken); err == nil {
+		t.Fatalf("the test's DSN parses, so it does not exercise the fallback: %q", broken)
+	}
+	if text := redactDSN(errors.New("cannot parse "+broken), broken).Error(); strings.Contains(text, raw) {
+		t.Errorf("an unparseable URL DSN's password survived redaction: %s", text)
+	}
+
 	// sslpassword= is a different key. Treating its value as the password would not leak anything,
 	// but it would show the scan matching a key by suffix, which is how it would miss one too.
 	if got := dsnPasswords("host=h sslpassword=keyphrase dbname=d"); len(got) != 0 {

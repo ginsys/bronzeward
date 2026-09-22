@@ -257,6 +257,14 @@ func TestEnvelopeKeepsTheReferences(t *testing.T) {
 	}
 }
 
+// TestSealEnvelopeRefusesInvalidUTF8 checks a document JSON would silently rewrite is refused at
+// Hold rather than staged and resumed as something else.
+func TestSealEnvelopeRefusesInvalidUTF8(t *testing.T) {
+	if _, err := sealEnvelope(secret.NewSanitized([]byte("machine:\n  x: \xff\xfe\n"), nil)); err == nil {
+		t.Fatal("sealEnvelope accepted a document that is not valid UTF-8")
+	}
+}
+
 // TestOpenEnvelopeRefusesABareDocument checks the payload shape the first version wrote — the
 // document alone — is refused rather than resumed as a change with no references.
 func TestOpenEnvelopeRefusesABareDocument(t *testing.T) {
