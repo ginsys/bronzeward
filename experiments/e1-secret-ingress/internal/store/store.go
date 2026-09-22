@@ -95,6 +95,12 @@ func OpenFromEnv(ctx context.Context) (*DB, error) {
 	return Open(ctx, dsn)
 }
 
+// SQL exposes the handle for the staging package, which owns its own table and its own statements
+// but must share this connection: a claim and the draft it becomes have to be visible to each
+// other, and two pools would make the experiment's ordering depend on which one a statement
+// happened to use.
+func (db *DB) SQL() *sql.DB { return db.sql }
+
 // Close releases the connection.
 func (db *DB) Close() error {
 	if db == nil || db.sql == nil {

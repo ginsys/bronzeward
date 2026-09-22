@@ -49,7 +49,7 @@ func TestFlagValidation(t *testing.T) {
 // TestUnbuiltSubcommandsSaySo checks the skeleton is honest about what it does not do yet, rather
 // than exiting zero and leaving a caller to assume a run happened.
 func TestUnbuiltSubcommandsSaySo(t *testing.T) {
-	for _, cmd := range []string{"import", "adopt", "recover", "schema-report"} {
+	for _, cmd := range []string{"import", "adopt", "schema-report"} {
 		_, _, err := runCLI(t, cmd)
 		if err == nil {
 			t.Errorf("%q returned no error despite not being built", cmd)
@@ -58,6 +58,29 @@ func TestUnbuiltSubcommandsSaySo(t *testing.T) {
 		if !strings.Contains(err.Error(), "not built yet") {
 			t.Errorf("%q failed with %q, which does not say it is unbuilt", cmd, err)
 		}
+	}
+}
+
+// TestRecoverRefusesBeforeTouchingAnything covers the guards that run before recover opens a
+// database or a provider. Both failures below would otherwise surface as a connection error, which
+// reads as an environment problem rather than as a wrong invocation.
+func TestRecoverRefusesBeforeTouchingAnything(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "run")
+
+	if _, _, err := runCLI(t, "--run-root="+root, "recover"); err == nil {
+		t.Error("recover accepted no run id")
+	} else if !strings.Contains(err.Error(), "one argument") {
+		t.Errorf("the error does not say what recover wants: %v", err)
+	}
+
+	// The run root is prepared before the database is opened, so a missing canary stops the run
+	// here. Without it the bundle's leak scan of the run root would be unreadable, and a recovery
+	// that produced no usable evidence is not worth running at all.
+	t.Setenv(canaryEnv, "")
+	if _, _, err := runCLI(t, "--run-root="+root, "recover", "run-earlier"); err == nil {
+		t.Error("recover ran with no canary set")
+	} else if !strings.Contains(err.Error(), canaryEnv) {
+		t.Errorf("the error does not name the missing variable: %v", err)
 	}
 }
 
