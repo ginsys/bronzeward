@@ -107,8 +107,8 @@ manifest, so a bundle states what actually produced it.
 
 | | |
 |---|---|
-| Captured | 2026-09-22, 19:19Z to 19:55Z |
-| Fixture manifest commit | `cfb86b70cb11525f045e185affa7588744864101`, which is also the commit every bundle records as the one the running code was built from |
+| Captured | 2026-09-22, 20:34Z to 21:11Z |
+| Fixture manifest commit | `d2fbb10ca5137dc2876b991e48c99c9e6af24842`, which is also the commit every bundle records as the one the running code was built from |
 | Host | Linux 7.1.3+deb13-amd64 x86\_64 |
 | Docker / Compose | 26.1.5+dfsg1 / 2.27.1 |
 | Talos | v1.13.6, both nodes; `talosctl` client v1.13.6 |
@@ -168,7 +168,7 @@ and which it was is settled by opening the file.
 | `crashed-in-db-txn-restarted` | the same run after PostgreSQL restarted | 2 | — |
 | `recover-transient` | second principal, transient staging | 2 | pass |
 | `recover-encrypted-netsplit` | second principal, provider unreachable | 2 | pass |
-| `recover-encrypted` | second principal, recovery completes | 2 | pass |
+| `recover-encrypted` | second principal, recovery completes with every reference row (5.16) | 2 | pass |
 
 Ten secrets were extracted per run, before any persistence. The flush bundle exists so that a clean
 data directory cannot be dismissed as "not written out yet": the checkpoint was forced first and the
@@ -222,26 +222,32 @@ before extracting anything; they differ only in what they do next.
 
 | Control | Occurrences in `pg_wal/` | Occurrences in the dump | Ordering |
 |---|---|---|---|
-| `control-persist-first` | 23 | 18 | **fail** |
+| `control-persist-first` | 24 | 18 | **fail** |
 | `control-persist-first-redact-after` | 8 | **0** | **fail** |
-| `control-persist-first-rollback` | 15 | **0** | **fail** |
+| `control-persist-first-rollback` | 16 | **0** | **fail** |
 
 The middle row is the whole answer to question 2. Redact-after does exactly what its advocate would
 claim: the plaintext it committed a moment earlier is gone from the live rows, so a `pg_dump` taken
 afterwards is clean. It is still in the write-ahead log, eight times, in the same bundle. Rollback
-gives the same shape for a transaction that was never committed at all — fifteen occurrences in the
+gives the same shape for a transaction that was never committed at all — sixteen occurrences in the
 write-ahead log for rows that no query will ever return.
 
 So the prohibition is not a precaution. "Redact it later" produces a database that looks clean by
 every means an application has and still holds the plaintext where backups and replicas read.
 
+**The exact counts are not the result; the split is.** This matrix was captured three times on
+fresh fixtures while the review fixes landed, and the write-ahead-log counts moved by one between
+captures — persist-first 24, 23, 24; rollback 16, 15, 16 — because what else the log holds, and so
+where a record straddles a page, depends on everything before it. The dump counts and the
+redact-after pair never moved: nothing in the dump, eight in the log, all three times.
+
 The single line each of these bundles shows at `logs/bw-fixture-postgres.log` is **not** theirs: it
-is the statement `control-leak-db-log` logged at 19:48:43Z, in a log file that is appended to for
+is the statement `control-leak-db-log` logged at 21:04:24Z, in a log file that is appended to for
 the whole matrix. Attributed by opening it, which is the rule this report follows throughout.
 
 `honest-import-final` is an honest run that scans with six lines. Nothing in it wrote plaintext;
 the database it ran against still holds what the controls put there — 18 occurrences in the dump,
-31 in the write-ahead log, and 16 in the heap file of `parsed_index` (relation file
+27 in the write-ahead log, and 20 in the heap file of `parsed_index` (relation file
 `base/16384/16400`, named from `pg_class` while the fixture was still up). The heap line is the
 residue reaching the table's own data file once a checkpoint flushed it, the one place in this
 matrix where the controls' plaintext is seen outside the log and the dump. That bundle is asserted
@@ -326,8 +332,9 @@ None is visible in the evidence it produced, because the evidence it produced wa
 which is also what a correct run produces.
 
 5.15 adds a seventh, one level up: this report's own claim that the ordering was enforced by the
-compiler, citing a test that did not exist. It was found by an external review rather than by the
-habit that found the other six, which is the argument for having both.
+compiler, citing a test that did not exist. 5.16 adds an eighth: a recovery that dropped every
+reference and passed because nothing read the rows. Both were found by an external review rather
+than by the habit that found the first six, which is the argument for having both.
 
 An experiment whose instrument can report clean without looking proves nothing at all, and the
 count above is the honest reason for every positive control described in section 4.
@@ -556,6 +563,41 @@ prototype refused any stream with an empty document in it as "a bare scalar" and
 empty-document handling had never run. No fixture configuration contains one, so no result here
 depended on it.
 
+### 5.16 The recovery that passed without its references
+
+A second advisory review, of the corrected code, raised 13 findings: 10 real as stated, 1 real
+with a mechanism that does not hold for the pinned driver, and 2 already fixed by the first round.
+Coverage was degraded again — one chunk unreviewed, eight unassessed.
+
+One of them changes a result. Encrypted staging encrypted the sanitized document and nothing else,
+and a resume rebuilt the change with no references. Persistence writes the `secret_reference`
+table from those references, so every draft a second principal recovered was persisted without a
+single reference row — the mapping from each `bw:ref:` token back to the secret it replaced was
+gone. `recover-encrypted` still exited ok and scanned clean, because nothing in the matrix read
+those rows. The first capture of section 4 therefore reported "recovery completes" for a recovery
+that had silently dropped part of what it recovered.
+
+Staging now encrypts the whole change — document and references — as one envelope, a resume
+refuses a payload that is not one, and the matrix asserts that the recovered draft carries one
+reference row per secret the crashed run extracted. The evidence in section 4 is from after that
+change.
+
+It is the same shape as everything else in this section: a run that succeeded, a scan that found
+nothing, and no check that would have failed.
+
+The rest were guards on paths the matrix does not reach: the recovery carve-out missing from one of
+the verifier's two rules; `Unsafe` returning the plaintext's backing array; a decrypt response with
+no plaintext accepted as an empty document; a heartbeat able to revive a lapsed lease; the DSN
+scanner not following lib/pq's escaping; extraction order depending on the caller having sorted;
+`-h` exiting 1; and the evidence collector writing one file without its path rewrite and deleting
+the old evidence before the new was in place.
+
+One question it raised is left open rather than decided here: **who may send a heartbeat**. The
+lease can no longer be revived once lapsed, but any caller may still extend a live one. Under
+transient staging the owner is the process; under encrypted staging the claim can pass to a second
+principal, so "only the holder" needs a definition of holder across a recovery. That belongs with
+the staging decision in the milestone-02 specification.
+
 ## 6. What this decides
 
 **§7.1's ordering requirement is implementable, and the evidence for that is structural.** Every
@@ -571,7 +613,7 @@ is a known, cheap step for v1 (section 8, item 2).
 **§7.1's prohibition on redacting later is a real constraint, not a precaution.** 4.4 measures it.
 A plaintext draft that is redacted immediately afterwards leaves a database that is clean to every
 query an application can make, and eight occurrences of the plaintext in the write-ahead log of the
-same bundle. A rolled-back transaction leaves fifteen, for rows that never existed. The sentence in
+same bundle. A rolled-back transaction leaves sixteen, for rows that never existed. The sentence in
 §7.1 about backups and historical records is describing exactly this and should not be softened.
 
 **The two staging alternatives differ on one axis that matters, and it is not secrecy.** Both keep
@@ -639,7 +681,8 @@ unmeasured here.
 **Ownership and expiry were checked without contention.** Every run is one process against one
 claim. The guarded transitions and server-side expiry added after review (5.15) close the race and
 clock-skew holes by construction, and each is reached on the matrix's ordinary path, but no run
-drives two principals at one claim concurrently or skews a caller's clock.
+drives two principals at one claim concurrently or skews a caller's clock. Who may extend a live
+lease is not checked at all, and is left to the specification (5.16).
 
 **The environment bounds the schema-detection denominator.** A Docker-provisioned Talos node
 produces no disk-encryption, installer or disk configuration — precisely the secret-bearing areas
@@ -697,4 +740,6 @@ first is feasible, for this prototype, these flows, these secrets and these boun
    under test: each looked exactly like a passing result. The habit that found all six is asking
    what would have to be true for the check to fail, and confirming something could make it. Any
    subsequent experiment producing absence evidence should carry a positive control per surface and
-   assert it, which is what the reachability control and the two-line invariant do here.
+   assert it, which is what the reachability control and the two-line invariant do here. The two
+   the habit missed — an overclaimed guarantee and a recovery that dropped its references (5.15,
+   5.16) — were found by an independent review, so the evidence work needs one of those too.
