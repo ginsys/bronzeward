@@ -24,6 +24,38 @@ appears at the repository root, its `./...` will not reach this code, so disposa
 cannot be swept into the implementation by accident. `mise run go` names each experiment module
 explicitly for the same reason.
 
+## Running the matrix
+
+The fixtures must be up first (`fixtures/bin/up`), and `E1_OUT` must name an absolute path on disk,
+outside this checkout, with room for the bundles:
+
+```sh
+E1_OUT=<somewhere with a few hundred MiB> experiments/e1-secret-ingress/run/screen
+E1_OUT=<the same directory>               experiments/e1-secret-ingress/run/matrix
+```
+
+`E1_OUT` has no default on purpose. Every bundle carries a PostgreSQL data directory, so a full
+matrix runs to hundreds of megabytes; a default under `/tmp` would put that in RAM on most systems,
+and one inside the checkout would be destroyed by `fixtures/bin/down` along with the state it is
+evidence about. Deleting it afterwards is part of finishing the run — nothing sweeps it.
+
+- `run/screen` is Tier A: every combination of flow, staging mode, outcome and crash point, with no
+  bundle captured. Its only authority is finding candidates. A passing row says the run root and the
+  live tables were clean at that moment and says nothing about the heap, the write-ahead log or the
+  backups.
+- `run/matrix` is Tier B: the runs that get a `fixtures/bin/evidence` bundle, each asserted by
+  `run/assert-bundle`. `run/capture` takes one of them on its own.
+
+Every honest bundle's `leak-scan.txt` must hold **exactly two lines**: the fixture's own positive
+control and the reachability control each run plants in its run root. The scan records hits only, so
+a directory that scanned clean is identical in the report to one it never walked — fewer than two
+lines means the run root went unscanned and the bundle proves nothing about it. More than two is a
+leak, and which secret it was is settled by opening the file named, never by the count: the
+fixture's synthetic values share a prefix.
+
+A control that comes back clean means that surface is not evidence. Say which one and change the
+design before drawing a conclusion from it, not after.
+
 ## What it deliberately does not do
 
 No upstream Talos composition, merge or typed validation. No reference resolution. No release,

@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# The invariants every E1 bundle must satisfy, checked outside the program that produced it.
+#
+# Usage: run/assert-bundle <bundle-dir> [clean|leak|miss]
+#
+# The one that carries the most weight is the line count. fixtures/bin/evidence records hits only,
+# so a path with none produces no line at all, and a directory that scanned clean is byte-for-byte
+# identical in the report to one the scan never walked. The fixture plants its own positive control
+# in .state, which proves only that .state was read; every E1 run plants a second one in its run
+# root. An honest bundle must therefore hold exactly two lines. Fewer means the run root went
+# unscanned and the bundle proves nothing about the surfaces that matter most; more means something
+# leaked, and which it was is settled by looking at the file named, never by the count.
+set -euo pipefail
+
+bundle=${1:?usage: assert-bundle <bundle-dir> [clean|leak|miss]}
+expectation=${2:-clean}
+[ -d "$bundle" ] || {
+  printf 'assert-bundle: %s is not a directory\n' "$bundle" >&2
+  exit 1
+}
+
+fail=0
+note() { printf 'assert-bundle: %s\n' "$*" >&2; }
+bad() {
+  note "FAIL $*"
+  fail=1
+}
+
+scan=$bundle/leak-scan.txt
+[ -f "$scan" ] || {
+  note "FAIL $bundle holds no leak-scan.txt; the capture did not complete"
+  exit 1
+}
+lines=$(sed '/^$/d' "$scan" | wc -l)
+
+# Evidence captured against unmodified fixtures at the recorded manifest commit. A bundle taken
+# against a locally edited fixture is not comparable with any other, and the report cites the
+# manifest commit as if it were.
+if [ -s "$bundle/fixtures-diff.txt" ]; then
+  bad "fixtures/ differed from the manifest commit when this bundle was taken (fixtures-diff.txt is not empty)"
+fi
+
+# unavailable.txt is not a failure: a run captured with PostgreSQL killed cannot be dumped, and
+# that is the point of taking it. It must be surfaced, though, because presenting a bundle whose
+# database went unread as a clean scan of the database would be false.
+if [ -s "$bundle/unavailable.txt" ]; then
+  note "INCOMPLETE this bundle did not read everything:"
+  sed 's/^/assert-bundle:   /' "$bundle/unavailable.txt" >&2
+fi
+
+case $expectation in
+  clean | miss)
+    if [ "$lines" -lt 2 ]; then
+      bad "leak-scan.txt holds $lines line(s), want exactly 2. Fewer than two means a control is \
+missing: either the fixture's own, or the run root's, and in the second case the run root was \
+never walked and this bundle proves nothing about it."
+    elif [ "$lines" -gt 2 ]; then
+      bad "leak-scan.txt holds $lines line(s), want exactly 2. Attribute each by opening the file \
+it names; a count is never the finding, because the fixture's synthetic values share a prefix."
+    else
+      note "OK two controls and nothing else"
+    fi
+    ;;
+  leak)
+    if [ "$lines" -le 2 ]; then
+      bad "leak-scan.txt holds $lines line(s) for a control that must be visible. This surface is \
+not evidence: the report must say so rather than treating the honest run's clean scan as proof."
+    else
+      note "OK the deliberate control is visible ($lines lines)"
+    fi
+    ;;
+  *)
+    note "FAIL unknown expectation $expectation"
+    exit 1
+    ;;
+esac
+
+# The reachability control must be the run root's own, not the fixture's. Both carry the canary, so
+# the count alone cannot tell them apart; the path can.
+if ! grep --quiet 'reach-control.txt' "$scan"; then
+  bad "no line names the run root's reachability control, so the scan did not reach the run root"
+fi
+
+# §9.1: an import must leave machine state unchanged. The digest is compared against the first
+# bundle of the matrix by run/matrix; here it only has to exist, since a missing file would make
+# that comparison silently vacuous.
+[ -s "$bundle/talos-config-sha256.txt" ] ||
+  bad "talos-config-sha256.txt is missing or empty; the machine-state comparison would be vacuous"
+
+[ "$fail" -eq 0 ] || exit 2
+note "PASS $bundle"

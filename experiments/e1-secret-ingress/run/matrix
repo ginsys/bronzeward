@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# The tier B capture list: the runs that get an evidence bundle.
+#
+# Usage: E1_OUT=<dir> run/matrix
+#
+# Ordering matters in two places. The first and last bundles bracket the whole matrix, so their
+# Talos configuration digests answer §9.1's "import must leave machine state unchanged" over
+# everything in between. And each killed run is captured twice — once with PostgreSQL dead, which
+# is the only way to read the data directory as the crash left it, and once after restarting it,
+# which adds the dump and the write-ahead-replayed state. Presenting the first as a clean scan of
+# the database would be false, and unavailable.txt in that bundle says so.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "$0")/lib.sh"
+
+need docker grep sed awk wc cp go
+
+e1_need_fixture
+e1_build
+
+capture=$E1_RUN_DIR/capture
+inject=$FIXTURES_DIR/bin/inject
+import_config=$(e1_config import)
+
+failed=()
+take() { # take <run-id> <expectation> -- <e1 args>
+  say ""
+  say "=== $1 ($2) ==="
+  "$capture" "$@" || failed+=("$1")
+}
+
+# The honest path, both staging alternatives, both flows. These are the bundles the claim rests on,
+# and every one of them must hold exactly the two controls.
+take honest-import-transient clean -- --staging=transient --config="$import_config" import
+take honest-import-encrypted clean -- --staging=encrypted --config="$import_config" import
+take honest-adopt-transient clean -- --staging=transient --config="$(e1_config adopt)" adopt
+
+# A forced checkpoint, so a clean data directory on the honest path cannot be dismissed as "not
+# flushed yet". The same run without it is above.
+"$inject" db-snapshot honest-flush >/dev/null 2>&1 || say "matrix: db-snapshot unavailable"
+take honest-import-flushed clean -- --staging=encrypted --config="$import_config" import
+
+# Held at in-review, which is where the two staging alternatives differ: the transient bundle must
+# show the pending change nowhere on disk, the encrypted one must show ciphertext in the row.
+take held-in-review-transient clean -- --staging=transient --hold-at=in-review --config="$import_config" import
+take held-in-review-encrypted clean -- --staging=encrypted --hold-at=in-review --config="$import_config" import
+
+# Interrupted at in-review and then resumed by a different principal. The transient run refuses,
+# which is its result; the encrypted one succeeds, and does so only while OpenBao is reachable.
+take crashed-in-review-encrypted clean -- --staging=encrypted --crash-at=in-review --config="$import_config" import
+take recover-encrypted clean -- --staging=encrypted recover crashed-in-review-encrypted
+take recover-transient clean -- --staging=transient recover crashed-in-review-encrypted
+
+"$inject" netsplit openbao >/dev/null 2>&1 || say "matrix: netsplit unavailable"
+take recover-encrypted-netsplit clean -- --staging=encrypted recover crashed-in-review-encrypted
+"$inject" netjoin openbao >/dev/null 2>&1 || say "matrix: netjoin unavailable"
+
+# Killed inside the database transaction, captured twice: dead, then restarted.
+take crashed-in-db-txn clean -- --staging=encrypted --crash-at=in-db-txn --config="$import_config" import
+"$inject" kill postgres >/dev/null 2>&1 || say "matrix: kill postgres unavailable"
+take crashed-in-db-txn-dead clean -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
+"$inject" start postgres >/dev/null 2>&1 || say "matrix: start postgres unavailable"
+take crashed-in-db-txn-restarted clean -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
+
+# The semantic controls. Each must produce hits, and a clean result means that surface is not
+# evidence — at which point the report says so instead of drawing a conclusion from it.
+take control-persist-first leak -- --persist-first --config="$import_config" import
+take control-persist-first-redact-after leak -- --persist-first --redact-after --config="$import_config" import
+take control-persist-first-rollback leak -- --persist-first --rollback --config="$import_config" import
+
+for surface in temp-file staging app-log error-report db-log; do
+  take "control-leak-$surface" leak -- --leak-at="$surface" --config="$import_config" import
+done
+
+# The blindness control: the value is written, encoded, and the scan must find nothing.
+take control-leak-transformed miss -- --leak-at=transformed --config="$import_config" import
+
+# The last bundle closes the §9.1 bracket opened by the first.
+take honest-import-final clean -- --staging=transient --config="$import_config" import
+
+say ""
+first=$E1_BUNDLES/honest-import-transient/talos-config-sha256.txt
+last=$E1_BUNDLES/honest-import-final/talos-config-sha256.txt
+if [ -s "$first" ] && [ -s "$last" ]; then
+  if cmp --silent -- "$first" "$last"; then
+    say "matrix: OK the Talos configuration digest is unchanged across the whole matrix (§9.1)"
+  else
+    say "matrix: FAIL the Talos configuration changed during the matrix; §9.1's requirement is not met"
+    failed+=(talos-config-unchanged)
+  fi
+else
+  say "matrix: FAIL one of the bracketing bundles has no Talos digest; the comparison is vacuous"
+  failed+=(talos-config-unchanged)
+fi
+
+say ""
+if [ "${#failed[@]}" -eq 0 ]; then
+  say "matrix: every bundle satisfied its expectation. Bundles in $E1_BUNDLES"
+  exit 0
+fi
+say "matrix: ${#failed[@]} bundle(s) did not: ${failed[*]}"
+say "matrix: a control that came back clean means that surface is not evidence. Say which one and"
+say "matrix: change the design before drawing a conclusion from it, not after."
+exit 2

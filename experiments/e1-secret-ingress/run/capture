@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Tier B: one run, one evidence bundle, asserted.
+#
+# Usage: E1_OUT=<dir> run/capture <run-id> <expectation> -- <e1 flags and subcommand>
+#
+#   <expectation> is what the bundle's leak scan must show:
+#     clean   exactly the two controls and nothing else
+#     leak    more than the two controls: a deliberate control that must be visible
+#     miss    exactly the two controls, although a value really was written: the transformed
+#             control, which demonstrates what the instrument cannot see
+#
+# The run root is handed to fixtures/bin/evidence as an extra scan path, and the bundle is copied
+# out of .state immediately: fixtures/bin/down destroys .state, and a bundle captured before a
+# teardown has to outlive it.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "$0")/lib.sh"
+
+need docker grep sed awk wc cp find sort tail go
+
+[ $# -ge 4 ] || die "usage: run/capture <run-id> clean|leak|miss -- <e1 arguments>"
+run_id=$1
+expectation=$2
+shift 2
+[ "$1" = -- ] || die "expected -- before the e1 arguments"
+shift
+
+case $expectation in
+  clean | leak | miss) ;;
+  *) die "unknown expectation $expectation; want clean, leak or miss" ;;
+esac
+
+e1_need_fixture
+e1_build
+
+run_root=$E1_RUNS/$run_id
+rm -rf -- "$run_root"
+mkdir -p -- "$run_root"
+
+status=ok
+e1_env "$E1_BIN" --run-root="$run_root" --run-id="$run_id" "$@" >"$run_root/stdout.txt" 2>"$run_root/stderr.txt" ||
+  status=exit-$?
+say "capture: $run_id finished $status"
+
+# bundles are directories named for the UTC instant of their capture, so sorting them by name is
+# sorting them by time.
+bundle_names() { find "$STATE/evidence" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort; }
+
+# The bundle is taken whatever the run did. A crashed run is the interesting case, and one that
+# failed for an unexpected reason still has to be looked at rather than discarded.
+before=$(bundle_names | wc -l)
+"$FIXTURES_DIR/bin/evidence" "$run_root" || die "the capture itself failed; results void"
+after=$(bundle_names | wc -l)
+[ "$after" -gt "$before" ] || die "fixtures/bin/evidence wrote no new bundle"
+
+latest=$(bundle_names | tail -n 1)
+dest=$E1_BUNDLES/$run_id
+rm -rf -- "$dest"
+cp -a -- "$STATE/evidence/$latest" "$dest" || die "could not copy the bundle out of .state"
+printf '%s\n' "$status" >"$dest/e1-run-status.txt"
+printf '%s\n' "$expectation" >"$dest/e1-expectation.txt"
+
+"$E1_RUN_DIR/assert-bundle" "$dest" "$expectation"
