@@ -24,6 +24,14 @@ docker info >/dev/null 2>&1 || die "the Docker daemon does not answer; nothing w
 # And it is the daemon up created the fixture on: another would be verified clean and the state
 # removed while the fixture runs on.
 daemon_own
+# Held before anything is looked at: a down under an up, inject or evidence still running would
+# remove what that command is creating or changing, and report clean over it. Only while the
+# lock is there: a down on a clean daemon, or after the directory was moved away, has nothing
+# running here to hold off, and neither has what a removal cut short left, the records without
+# the lock, which goes with them at the end.
+if [ -e "$STATE/lock" ] || [ -L "$STATE/lock" ]; then
+  fixture_lock exclusive
+fi
 talos_label=talos.cluster.name=$FIXTURE_NAME
 compose_label=com.docker.compose.project=$FIXTURE_NAME
 
@@ -68,6 +76,17 @@ fi
 # A credential file with a second name would keep its secret past this teardown. Refused before
 # anything is removed, so that the fixture stays there to be looked at.
 state_files_own
+# And a filesystem mounted below the state directory, or the cache under --purge: the removal at
+# the end would go into it and empty its far end. Looked at now, for the same reason; one mounted
+# there while this runs is not caught.
+for tree in "$STATE" "$CACHE"; do
+  [ "$tree" != "$CACHE" ] || [ "$purge" -eq 1 ] || continue
+  [ -d "$tree" ] || continue
+  mounted=$(mounted_under "$tree") || die "cannot read the mount table, so a filesystem mounted below $tree cannot be ruled out; nothing was removed"
+  [ -z "$mounted" ] ||
+    die "a filesystem is mounted at $(tr '\n' ' ' <<<"$mounted")below $tree; removing the directory would go into it. Unmount it first; nothing was removed"
+done
+unset tree mounted
 
 # The Talos label is a cluster name, and any container or network can be created with it; the
 # removal below selects by that label. bin/up recorded the IDs of the containers and the network it
@@ -383,10 +402,12 @@ if [ -d "$STATE" ]; then
     */fixtures/.state)
       # One rm per record, in order: one rm given all three goes on past a record it cannot
       # remove and takes the daemon record with it, leaving what the next down refuses.
-      find "$STATE" -mindepth 1 -maxdepth 1 ! -name up-daemon ! -name up-compose.yaml ! -name up-versions.env -exec rm -rf -- {} + &&
+      # The lock last but for the directory: a down started in between finds it and refuses.
+      find "$STATE" -mindepth 1 -maxdepth 1 ! -name up-daemon ! -name up-compose.yaml ! -name up-versions.env ! -name lock -exec rm -rf -- {} + &&
         rm -f -- "$STATE/up-compose.yaml" &&
         rm -f -- "$STATE/up-versions.env" &&
         rm -f -- "$STATE/up-daemon" &&
+        rm -f -- "$STATE/lock" &&
         rmdir -- "$STATE"
       ;;
     *) die "refusing to delete unexpected state path $STATE" ;;

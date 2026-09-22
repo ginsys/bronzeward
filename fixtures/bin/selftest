@@ -127,6 +127,28 @@ for c in "$PG" "$BAO" "$CP" "$WORKER"; do
 done
 ok "all four containers are running"
 
+# The lock up made: held by another process, as an up, down or inject still running holds it,
+# inject, evidence and down refuse, and the fixture is left whole. The holder is the sleep itself,
+# the lock on a descriptor it inherits (see the evidence check below).
+( flock --nonblock 3 || exit 9; exec sleep 300; ) 3<"$STATE/lock" &
+lock_holder=$!
+defer kill "$lock_holder"
+held=0
+"$here/inject" pause postgres 2>/dev/null || held=$((held + 1))
+"$here/evidence" >/dev/null 2>&1 || held=$((held + 1))
+down_said=$("$here/down" 2>&1) || held=$((held + 1))
+kill "$lock_holder" 2>/dev/null || true
+undefer
+wait "$lock_holder" 2>/dev/null || true
+if [ "$held" -ne 3 ]; then
+  docker unpause "$PG" >/dev/null 2>&1 || true
+  fail "inject, evidence or down ran while another process held the fixture lock ($held of 3 refused)"
+fi
+[ "$(docker inspect --format '{{.State.Paused}}' "$PG" 2>/dev/null)" = false ] || fail "a refused inject paused postgres all the same, or down removed postgres, under a held lock"
+[ "$(claim_owner)" = "$FIXTURES" ] || fail "down removed the claim under a held lock"
+grep --quiet --fixed-strings 'holds the fixture' <<<"$down_said" ||
+  fail "down failed under a held lock, but not by refusing: $(tail -n 1 <<<"$down_said")"
+
 # The state directory alone is not ownership: with the claim gone, or held by another checkout, the
 # fixed container names may be someone else's fixture, and nothing here may touch them.
 refused=0
@@ -160,7 +182,7 @@ fi
 [ "$(docker inspect --format '{{.State.Paused}}' "$PG")" = false ] || fail "a refused inject paused postgres all the same"
 grep --quiet --fixed-strings 'no claim taken from this checkout' <<<"$down_said" ||
   fail "down failed without the claim, but not by refusing: $(tail -n 1 <<<"$down_said")"
-ok "inject and evidence refuse when the claim is missing or names another checkout; down refuses when it is missing"
+ok "inject, evidence and down refuse while another process holds the fixture lock, and leave the fixture whole; inject and evidence refuse when the claim is missing or names another checkout; down refuses when it is missing"
 
 # Talos: a full-config no-reboot apply on the worker lands byte for byte.
 before=$(worker_digest)
@@ -1164,17 +1186,36 @@ rm "$STATE/selftest-evidence.err"
 # anything can fail.
 plain=$("$here/evidence" 2>"$STATE/selftest-evidence.err") || fail "evidence aborted before the replacement ref: $(tail -n 1 "$STATE/selftest-evidence.err")"
 replaced=$(fixtures_git rev-parse HEAD)
-defer fixtures_git replace --delete "$replaced"
-fixtures_git replace "$replaced" "$(fixtures_git rev-parse HEAD~1)"
+# A replacement ref already there for the commit is someone's: put back as it was once the test
+# is done, not deleted with the test's own. One is planted for the test when the history reaches
+# far enough (the grandparent), so that the put-back can be told from the test's own target.
+before=$(fixtures_git rev-parse --verify --quiet "refs/replace/$replaced") || before=
+planted=0
+if [ -z "$before" ] && before=$(fixtures_git rev-parse --verify --quiet 'HEAD~2^{commit}'); then
+  fixtures_git update-ref "refs/replace/$replaced" "$before" || fail "cannot plant a replacement ref for the test"
+  planted=1
+fi
+replace_ref_back() {
+  if [ -n "$before" ]; then
+    fixtures_git update-ref "refs/replace/$replaced" "$before"
+  else
+    fixtures_git replace --delete "$replaced"
+  fi
+}
+defer replace_ref_back
+fixtures_git replace --force "$replaced" "$(fixtures_git rev-parse HEAD~1)"
 rc=0
 bundle=$("$here/evidence" 2>"$STATE/selftest-evidence.err") || rc=$?
-fixtures_git replace --delete "$replaced"
+replace_ref_back
 undefer
+[ "$(fixtures_git rev-parse --verify --quiet "refs/replace/$replaced" || true)" = "$before" ] ||
+  fail "the replacement ref that was there before the test is not put back as it was"
+[ "$planted" -eq 0 ] || fixtures_git replace --delete "$replaced"
 [ "$rc" -eq 0 ] || fail "evidence aborted under a replacement ref for the commit: $(tail -n 1 "$STATE/selftest-evidence.err")"
 cmp --silent -- "$plain/fixtures-diff.txt" "$bundle/fixtures-diff.txt" ||
   fail "fixtures-diff.txt differs under a replacement ref for the commit: the diff was taken against the replacement"
 grep --quiet --fixed-strings "$replaced" "$bundle/versions.txt" || fail "versions.txt does not name the commit under a replacement ref for it"
-unset replaced plain
+unset replaced plain before planted
 # The executable bit taken from a command under core.fileMode=false in the caller's configuration:
 # git would see no change, while running the command fails. Put back before anything can fail.
 defer chmod a+x "$FIXTURES/bin/inject"
@@ -1279,8 +1320,9 @@ mkdir "$STATE/evidence/selftest-active"
 : >"$STATE/evidence/selftest-active/.incomplete"
 printf 'active=%s\n' "$BW_CANARY" >"$STATE/evidence/selftest-active/writing.txt"
 # The holder is the sleep itself, the lock on a descriptor it inherits: flock given a command
-# forks it, and killing flock would leave the command holding the lock.
-( flock --nonblock 3 || exit 9; exec sleep 300; ) 3>"$STATE/evidence/selftest-active/.incomplete" &
+# forks it, and killing flock would leave the command holding the lock. It holds the fixture lock
+# shared too, as a running capture does: the capture below must run alongside it.
+( flock --nonblock 3 && flock --shared --nonblock 4 || exit 9; exec sleep 300; ) 3>"$STATE/evidence/selftest-active/.incomplete" 4<"$STATE/lock" &
 active_holder=$!
 printf 'selftest-untracked-content %s\n' "$$" >"$FIXTURES/.selftest-untracked"
 # And one that is not text: carried as a binary patch, not as "differ".
@@ -1427,6 +1469,15 @@ if [ "$keep" != --keep ]; then
   # up marks the state directory before it creates the cluster and clears the mark once the
   # records are published; a mark still there would have down keep .state as uncertain.
   [ ! -e "$STATE/down-node-volumes-incomplete" ] || fail "up left its unrecorded-cluster marker in .state"
+  # The look down takes for a filesystem mounted below what it removes (mounted_under in lib.sh):
+  # names a mount point at the directory itself, as /proc is on every Linux host, and nothing
+  # below .state. A mount there needs privileges the test does not have, so down's refusal of one
+  # is not exercised.
+  mounts=$(mounted_under /proc) || fail "mounted_under cannot read the mount table"
+  grep --quiet --line-regexp --fixed-strings /proc <<<"$mounts" || fail "mounted_under does not name /proc as mounted at /proc"
+  mounts=$(mounted_under "$STATE") || fail "mounted_under cannot read the mount table"
+  [ -z "$mounts" ] || fail "mounted_under names a mount below .state: $(tr '\n' ' ' <<<"$mounts")"
+  unset mounts
   # The record of node volumes is what down removes by name: a link there is refused, before
   # anything is removed.
   defer restore_aside "$STATE/selftest-record-aside" "$STATE/down-node-volumes"

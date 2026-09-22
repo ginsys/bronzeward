@@ -37,6 +37,9 @@ EOF
 [ $# -ge 1 ] || usage
 need docker jq tar mktemp timeout stat
 need_state
+# Alone: two injections at once would share the scratch names a restore swaps through, and a
+# teardown under one would remove what it is changing.
+fixture_lock exclusive
 action=$1
 shift
 # The log below holds one record per line, the action and its arguments included: a word with a
@@ -213,7 +216,7 @@ docker_applied() {
   return 1
 }
 finish() {
-  local rc=$? left status=failed applied signalled=0
+  local rc=$? left status=failed applied signalled=0 mounted
   # A signal that ends the shell between two commands, or during a builtin, leaves the status of
   # the command before it, which is 0 as a rule (observed: the handler sees 0 on a TERM during a
   # function's sleep, and the shell still exits 143). Without the flag the last line sets, that 0
@@ -334,7 +337,12 @@ finish() {
       fi
     fi
     if [ -n "$staging" ]; then
-      rm -rf -- "$staging" || say "fixtures: could not remove the staging directory $staging"
+      # Not into a filesystem mounted below it meanwhile (mounted_under in lib.sh).
+      if ! mounted=$(mounted_under "$staging") || [ -n "$mounted" ]; then
+        say "fixtures: the staging directory $staging is left: a filesystem is mounted below it, or the mount table cannot be read"
+      elif ! rm -rf -- "$staging"; then
+        say "fixtures: could not remove the staging directory $staging"
+      fi
     fi
   fi
   # An outcome that could not be recorded is a failure of its own; the action's status stands
@@ -494,6 +502,13 @@ case $action in
     pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_previous
     pg dropdb --if-exists --force -U bronzeward --maintenance-db=postgres bronzeward_restore
     pg createdb -U bronzeward --maintenance-db=postgres bronzeward_restore
+    # The scratch database's identity, read as soon as it exists and before anything is put in
+    # it, for the exit handler: an OID survives the rename, so the database found under the live
+    # name afterwards is told to be this very one, not merely not the scratch name any more, and
+    # not whatever else came to carry the scratch name meanwhile.
+    restore_oid=$(pg psql -U bronzeward -d postgres -Atc "select oid from pg_database where datname = 'bronzeward_restore'") &&
+      [ -n "$restore_oid" ] ||
+      die "could not read the identity of the scratch database bronzeward_restore; the live database was left alone, and the scratch one is dropped by the next db-restore"
     pg_id=$(container_id "$PG") || die "the PostgreSQL container was not verified under its name; nothing was changed"
     if ! PGPASSWORD=$BW_POSTGRES_PASSWORD timeout 600 docker exec -i -e PGPASSWORD "$pg_id" \
       pg_restore -U bronzeward --dbname=bronzeward_restore --exit-on-error <"$STATE/backups/pg-$1.dump"; then
@@ -501,12 +516,6 @@ case $action in
         say "fixtures: the half-restored database bronzeward_restore could not be dropped"
       die "pg-$1.dump could not be restored; the live database was left alone"
     fi
-    # The restored copy's identity, for the exit handler: an OID survives the rename, so the
-    # database found under the live name afterwards is told to be this one, not merely not the
-    # scratch name any more.
-    restore_oid=$(pg psql -U bronzeward -d postgres -Atc "select oid from pg_database where datname = 'bronzeward_restore'") &&
-      [ -n "$restore_oid" ] ||
-      die "could not read the identity of the restored database; the live database was left alone, and the restored copy is bronzeward_restore until the next db-restore"
     # A database cannot be renamed while anyone is connected to it, so its sessions are ended in
     # the same transaction, and each is waited for: the signal alone returns before the backend
     # has gone, and the rename right after it would then fail on a session already told to leave.
@@ -591,7 +600,10 @@ case $action in
     # and bin/evidence scans it like the live directory. The staging name stays set until the
     # directory is gone: a signal during the removal has the exit handler finish it, and the
     # handler moves nothing back while the live directory is there.
-    if rm -rf -- "$staging"; then
+    # Not into a filesystem mounted below it since it was made (mounted_under in lib.sh).
+    if ! mounted=$(mounted_under "$staging") || [ -n "$mounted" ]; then
+      say "fixtures: the restore is in place; its staging directory $staging is left, a filesystem being mounted below it or the mount table unreadable, and holds the earlier store under previous"
+    elif rm -rf -- "$staging"; then
       staging=
     else
       say "fixtures: the restore is in place; its staging directory $staging could not be removed and holds the earlier store under previous"

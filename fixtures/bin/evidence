@@ -12,6 +12,9 @@ set -euo pipefail
 
 need docker curl jq tar sha256sum git find comm awk timeout realpath readlink mktemp cmp stat flock
 need_state
+# Alongside other captures, which hold their own marker locks below, and refused under an up,
+# down or inject: a capture under a teardown would scan what is being removed.
+fixture_lock shared
 # The cached tools against the manifest, before any is run: the bundle cites the manifest, and a
 # replaced talosctl could report the pinned version.
 tools_verify
@@ -201,6 +204,9 @@ fi
 # and it is read from the container's storage whether the server runs or not. Copied as files, so
 # that the scan below covers it with the rest of the bundle.
 if ! { pg_id=$(container_id "$PG" 2>/dev/null) && timeout 120 docker cp --quiet "$pg_id:/var/lib/postgresql/data" "$out/postgres-data" 2>/dev/null; }; then
+  # What a copy cut short left, and not a filesystem mounted below it since (mounted_under in lib.sh).
+  mounted=$(mounted_under "$out/postgres-data") && [ -z "$mounted" ] ||
+    die "a filesystem is mounted below $out/postgres-data, or the mount table cannot be read; the partial copy is left. Results void"
   rm -rf -- "$out/postgres-data"
   unavailable "PostgreSQL data directory (container gone or its storage unreadable): what the server wrote to disk NOT scanned"
 fi
@@ -441,7 +447,19 @@ while IFS= read -r -d '' sibling; do
 done <"$out/.siblings"
 rm -- "$out/.siblings" || die "cannot remove the sibling listing from $out; results void"
 roots+=("${extras[@]}")
-dangling=$(find -L "${roots[@]}" -type l -print -quit 2>/dev/null) ||
+# A capture still writing is left to its own scan whatever root holds it: an extra path that is
+# the evidence directory, or above it, or the bundle itself, would have the walk go through what
+# that capture writes after this walk, and this capture report itself complete over it. Each such
+# bundle is pruned from every walk below, by inode, so that the spelling of the root walked (a
+# symlink to it, a parent) does not matter. Nothing under it, and not its own name, is listed.
+# Built before the first walk: a link that capture is still making, or a file it removes
+# meanwhile, would otherwise void this capture's results.
+prune=()
+for sibling in "${locked[@]}"; do
+  prune+=(-samefile "$sibling" -o)
+done
+unset sibling
+dangling=$(find -L "${roots[@]}" \( "${prune[@]}" -false \) -prune -o -type l -print -quit 2>/dev/null) ||
   die "leak scan could not walk every path (a directory it may not read, most likely); results void"
 [ -z "$dangling" ] || die "leak scan cannot follow the symlink $(shown "$dangling"); results void"
 # Each root once by what it names, not by its spelling: an extra path that is a symlink to a root
@@ -482,16 +500,6 @@ for root in "${roots[@]}"; do
 done
 roots=("${kept[@]}")
 unset kept kept_at root resolved keep holds i
-# A capture still writing is left to its own scan whatever root holds it: an extra path that is
-# the evidence directory, or above it, or the bundle itself, would have the walk go through what
-# that capture writes after this walk, and this capture report itself complete over it. Each such
-# bundle is pruned from both walks below, by inode, so that the spelling of the root walked (a
-# symlink to it, a parent) does not matter. Nothing under it, and not its own name, is listed.
-prune=()
-for sibling in "${locked[@]}"; do
-  prune+=(-samefile "$sibling" -o)
-done
-unset sibling
 
 # The positive control is one file, plus its copy at the same place inside an expanded store
 # snapshot, and only while it holds exactly what bin/up planted. A file that merely shares the

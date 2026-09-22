@@ -45,8 +45,9 @@ synthetic() {
 
 umask 077
 # The checks above are only a look, and of two `up` started together both can pass them, from one
-# checkout or from two. The claim container is what only one of them can create; the plain mkdir
-# then cannot race any more, and stays plain so that it never adopts a directory it did not make.
+# checkout or from two. The plain mkdir is what only one of them can make from one checkout, and
+# stays plain so that it never adopts a directory it did not make; the claim container is what
+# only one can create on the daemon, from whichever checkout.
 # The daemon's ID before the claim is made on it: asked after, a docker that did not answer would
 # leave the claim with no record of where it is.
 daemon_id=$(docker info --format '{{.ID}}') && [ -n "$daemon_id" ] ||
@@ -58,9 +59,9 @@ attempt=$(synthetic) || die "could not generate the attempt identity"
 # this up's by the attempt label, which no other up carries: an `up` that was refused the claim,
 # or ended before asking for it, created nothing, and a hint would send its caller to tear down
 # a fixture that is not theirs. Until the identity records below are published, what exists is
-# the claim and what this stage put under the state directory, and the handler removes exactly
-# that, so that a failure or a signal there created nothing: a directory left without its daemon
-# record is one every command refuses, down among them. From the records on, the hint names the
+# the state directory with its lock, the claim and what this stage put under the directory, and
+# the handler removes exactly that, so that a failure or a signal there created nothing: a
+# directory left without its daemon record is one every command refuses, down among them. From the records on, the hint names the
 # down that works: until every record is published, a plain down refuses a labelled volume,
 # container or network it finds without one, and what it asks for is --adopt.
 # EXIT, not ERR: `die` leaves through `exit 1` and a failure inside a function does not inherit an
@@ -68,6 +69,7 @@ attempt=$(synthetic) || die "could not generate the attempt identity"
 recovery=
 state_made=0
 up_failed() {
+  local recorded
   if [ -n "$recovery" ]; then
     # The record of the Compose volumes made so far, when the stage that makes them was cut short
     # before publishing it: a plain down then holds those to it, and refuses the one in question,
@@ -84,8 +86,11 @@ up_failed() {
   # noted) is left as it is, its records untouched.
   if [ "$state_made" -eq 1 ] && [ -d "$STATE" ]; then
     rm -f -- "$STATE/up-daemon.partial" "$STATE/up-fixture-name.partial" "$STATE/up-versions.env.partial" "$STATE/up-compose.yaml.partial" 2>/dev/null
-    if [ "$(cat -- "$STATE/up-daemon" 2>/dev/null)" = "${daemon_id:-}" ]; then
-      rm -f -- "$STATE/up-daemon" "$STATE/up-fixture-name" "$STATE/up-versions.env" "$STATE/up-compose.yaml" 2>/dev/null
+    # The lock is made before the daemon record, so a directory without the record yet is this
+    # up's as much as one with its own.
+    recorded=$(cat -- "$STATE/up-daemon" 2>/dev/null) || recorded=
+    if [ -z "$recorded" ] || [ "$recorded" = "${daemon_id:-}" ]; then
+      rm -f -- "$STATE/up-daemon" "$STATE/up-fixture-name" "$STATE/up-versions.env" "$STATE/up-compose.yaml" "$STATE/lock" 2>/dev/null
     fi
     rmdir -- "$STATE" 2>/dev/null || say "fixtures: up failed; $STATE is not this up's, or holds more than it put there, and is left"
   fi
@@ -106,6 +111,15 @@ up_failed() {
 # completed; the flag set once the fixture is up tells the two apart.
 up_completed=0
 trap 'rc=$?; if [ "$rc" -ne 0 ] || [ "$up_completed" -ne 1 ]; then up_failed; fi' EXIT
+state_made=1
+mkdir "$STATE" 2>/dev/null || { state_made=0; die "$STATE exists: a fixture is up from this checkout, or its state was left; run fixtures/bin/down first"; }
+# The lock, first thing in the directory and before the claim is taken: bin/down holds it before
+# it looks at anything, so from here on a down from this checkout refuses while this up runs,
+# instead of removing what it is creating and reporting clean (README, Ownership and recovery).
+# Made and taken in two steps after the mkdir; a down in that instant finds the directory empty
+# and nothing to hold off, and this up then fails at the file with nothing made.
+: >"$STATE/lock" || die "could not make the lock file in $STATE"
+fixture_lock exclusive
 claim_error=$(claim_take "$attempt" 2>&1) || {
   # Docker can create the container and still answer with an error, as a connection lost after
   # the request went through does. A claim that then carries this attempt's label is this up's own
@@ -117,8 +131,6 @@ claim_error=$(claim_take "$attempt" 2>&1) || {
   fi
   die "could not take the fixture claim $CLAIM on this Docker daemon, which another fixtures/bin/up may hold. Docker said: $claim_error"
 }
-state_made=1
-mkdir "$STATE" 2>/dev/null || { state_made=0; die "$STATE appeared meanwhile; nothing was created"; }
 # The identity every later command derives its names, labels and daemon from, recorded before
 # anything is made under the directory: lib.sh refuses every command while versions.env names
 # another fixture, and need_state and down refuse while the shell reaches another Docker daemon,
