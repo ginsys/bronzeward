@@ -367,13 +367,44 @@ func redactDSN(err error, dsn string) error {
 	return errors.New(text)
 }
 
+// roughURLPasswords extracts passwords from a URL-form DSN that net/url cannot parse — typically
+// because the password itself holds a '/', '?', '#' or space. It over-collects rather than
+// under-collects: a redaction that also blanks a fragment of the host is harmless, a missed
+// password is a leak.
+func roughURLPasswords(dsn string) []string {
+	var out []string
+	rest := dsn[strings.Index(dsn, "://")+len("://"):]
+	if at := strings.LastIndex(rest, "@"); at >= 0 {
+		if _, pw, found := strings.Cut(rest[:at], ":"); found && pw != "" {
+			out = append(out, pw)
+			if decoded, err := url.PathUnescape(pw); err == nil && decoded != pw {
+				out = append(out, decoded)
+			}
+		}
+	}
+	if _, q, found := strings.Cut(rest, "?"); found {
+		for _, kv := range strings.Split(q, "&") {
+			if pw, ok := strings.CutPrefix(kv, "password="); ok && pw != "" {
+				out = append(out, pw)
+				if decoded, err := url.QueryUnescape(pw); err == nil && decoded != pw {
+					out = append(out, decoded)
+				}
+			}
+		}
+	}
+	return out
+}
+
 // dsnPasswords returns every password a connection string carries, in either lib/pq form.
 func dsnPasswords(dsn string) []string {
 	var out []string
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		u, err := url.Parse(dsn)
 		if err != nil {
-			return nil
+			// A DSN net/url refuses is the case most likely to be quoted back whole in an error,
+			// so giving up here left exactly that one unredacted. The userinfo is recovered by
+			// hand instead: everything after the scheme up to the last '@', and after its first ':'.
+			return roughURLPasswords(dsn)
 		}
 		if pw, ok := u.User.Password(); ok && pw != "" {
 			out = append(out, pw)

@@ -286,10 +286,15 @@ func TestAmbiguousKeysAreUnaddressableAndReported(t *testing.T) {
 			}
 			// The ambiguous path must not be reachable by any route: a mark or a rule naming it has
 			// to fail rather than resolve to one of the two locations it could mean.
+			// Every indexed path carries its doc[n] prefix, so the root case is doc[0].a.b; the
+			// bare "a.b" this compared against could never match, and that case asserted nothing.
 			for _, p := range d.Paths() {
-				if strings.Contains(p, ".crt") || strings.Contains(p, "files[0]") || p == "a.b" {
+				if strings.Contains(p, ".crt") || strings.Contains(p, "files[0]") || p == "doc[0].a.b" {
 					t.Errorf("Paths includes the ambiguous path %q", p)
 				}
+			}
+			if _, ok := d.Get("doc[0].a.b"); ok {
+				t.Error("the ambiguous root key resolves through Get")
 			}
 			if _, ok := d.Get("doc[0].machine.ca.crt"); ok {
 				t.Error("Get resolved an ambiguous path")
