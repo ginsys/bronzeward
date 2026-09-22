@@ -173,11 +173,19 @@ from here.
 `.state/` belongs to whoever ran `bin/up`, and its lifetime is one run. Nothing in it is backed up
 or recoverable by design: losing `bao-init.json` loses that OpenBao instance, which is the
 intended way to study key loss. `bin/down` is the only cleanup and is safe to run at any time,
-including after a failed or interrupted `up`. `.state`, its `data`, `backups`, `evidence` and `talos`
+including after a failed or interrupted `up`; under an `up`, `inject` or `evidence` from this
+checkout that is still running it refuses instead of removing what that command is creating or
+changing. The lock is `.state/lock`, which `up` makes first thing in the directory and holds for
+its run; `down` and `inject` hold it alone for theirs, `evidence` shared with other captures, and
+every command that finds it held says so and stops rather than wait. It is released when the
+holder ends, however it ends. Before it removes `.state`, or `.cache` under `--purge`, `down`
+also reads the mount table and refuses while a filesystem is mounted at or below either, since
+the removal would go into it; `inject` and `evidence` look the same way before removing a
+staging directory or a partial copy of their own. `.state`, its `data`, `backups`, `evidence` and `talos`
 directories, and `.cache` must be real directories: every command refuses to run while one of them
 is a symlink, because secrets, or the CLIs, would be read or written outside the checkout, or the
 removal of `.state` would take a link and leave the cluster's credentials at the far end. The files `bin/up` generates
-(`secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
+(`lock`, `secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
 node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env` and `up-compose.yaml`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
@@ -357,6 +365,14 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   earlier fixture, and `down` drops the claim only after everything else is verified gone. `bin/inject` and `bin/evidence` refuse unless the claim names this checkout: a `.state/`
   left over here does not make another checkout's fixture, which answers to the same names, fair
   game.
+- The lock in `.state/lock` holds the commands of one checkout apart. `down --adopt` from another
+  checkout reads no lock of this one and removes a fixture an `up` here may still be creating: it
+  is for a checkout that is gone. Two instants are not covered: `up` makes the directory and the
+  lock in two steps, so a `down` in between finds an empty directory and removes it, and that
+  `up` then fails at the lock file with nothing made; and `down` removes the lock just before the
+  directory, so a `down` started in between proceeds and one of the two reports the directory as
+  not removed. The mount table is read once, before anything is removed; a filesystem mounted
+  below `.state` while `down` runs is not caught.
 - `bin/evidence` observes OpenBao and PostgreSQL out of band, from inside their containers. After
   `inject netsplit openbao` every client finds the provider unreachable while
   `openbao-metadata.jsonl` still shows its true metadata. The bundle records both sides:

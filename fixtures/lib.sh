@@ -218,7 +218,7 @@ need() {
 # and the pin changes nothing. What the pin does not hold is the context's own endpoint, which
 # `docker context update` can re-point; the daemon record catches that before inject, evidence and
 # down act, and up in the window before its records is not covered.
-need docker
+need docker flock stat
 if [ -z "${DOCKER_CONTEXT:-}" ]; then
   DOCKER_CONTEXT=$(docker context show) || die "cannot read the current Docker context"
   [ -n "$DOCKER_CONTEXT" ] || die "the current Docker context has no name"
@@ -253,13 +253,13 @@ need_state() {
 # one name. Hard-linked outside .state, a bao-init.json or talosconfig keeps the root token or the
 # client key past teardown, and the scan roots never reach the source itself. secrets.env is
 # checked above, before it is read; the rest here, by need_state and by down, before anything is
-# scanned or removed. The node-volume record has its own check in down. injections.log too: its
+# scanned or removed. The lock too, which every command opens. The node-volume record has its own check in down. injections.log too: its
 # arguments name snapshots, and bin/evidence copies it into the bundle as the timeline. And the
 # records of the Talos container and network IDs, which containers_own and down trust with what
 # a fixture name or label may act on.
 state_files_own() {
   local file
-  for file in bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env up-compose.yaml; do
+  for file in lock bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env up-compose.yaml; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -798,6 +798,44 @@ claim_drop() {
     return 1
   fi
   docker rm --force --volumes "$id" >/dev/null
+}
+
+# fixture_lock <exclusive|shared>: the lock bin/up makes at .state/lock, first thing in the
+# directory, held for the rest of this process. A teardown is safe at any time only while no other
+# command is still creating or changing what it removes: up holds the lock alone from the moment
+# the directory exists, before the claim is taken; down and inject alone for their run; evidence
+# with other captures, which scan alongside one another under their own marker locks. A command
+# that finds it held refuses with a word rather than wait: after the wait the fixture would not be
+# the one it was asked about. Released when the process ends, whatever ends it; the children it
+# runs inherit the descriptor and end with it. Two checkouts on one daemon have two directories
+# and two locks; the claim is what holds those apart.
+fixture_lock() {
+  local mode=()
+  [ "$1" != shared ] || mode=(--shared)
+  if [ -L "$STATE/lock" ] || [ ! -f "$STATE/lock" ] || [ "$(stat --format=%h -- "$STATE/lock" 2>/dev/null)" != 1 ]; then
+    die "$STATE/lock is not the regular file bin/up makes before anything else there; run fixtures/bin/down, then up"
+  fi
+  if ! { exec {fixture_lock_fd}<"$STATE/lock"; } 2>/dev/null; then
+    die "cannot open $STATE/lock"
+  fi
+  flock --nonblock "${mode[@]}" "$fixture_lock_fd" ||
+    die "another fixtures command holds the fixture, an up, down or inject still running, or a capture ($STATE/lock is locked); wait for it or interrupt it, then run again"
+}
+
+# mounted_under <dir>: every mount point at or below <dir> in this process's mount table, one per
+# line; nothing when there is none. A recursive removal goes into a filesystem mounted below the
+# tree it removes, so a bind mount put under .state would have its far end emptied by a teardown;
+# every removal of a tree the fixture made looks here first and refuses. Field five of mountinfo
+# is the mount point, with space, tab, newline and backslash as octal escapes, which %b undoes;
+# the table is the one this mount namespace sees, the same one the removal would run in. Fails
+# when the table cannot be read: a removal that cannot tell is not made.
+mounted_under() {
+  local raw target
+  while read -r _ _ _ _ raw _; do
+    printf -v target '%b' "$raw"
+    [ "$target" = "$1" ] || [ "${target#"$1"/}" != "$target" ] || continue
+    printf '%s\n' "$target"
+  done </proc/self/mountinfo
 }
 
 # The exact content of the leak scan's positive control. bin/up writes it and bin/evidence compares
