@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // transitPath is the request path for a Transit operation on one named key. A Transit key name is a
@@ -116,7 +117,14 @@ func New(addr, token string) (*Client, error) {
 	return &Client{
 		addr:  strings.TrimSuffix(addr, "/"),
 		token: token,
-		http:  &http.Client{Timeout: requestTimeout},
+		http: &http.Client{
+			Timeout: requestTimeout,
+			// Never follow a redirect. Go keeps a custom header such as X-Vault-Token on a redirect
+			// to another host, and a 307 or 308 replays the body, which for Put and Encrypt is the
+			// secret itself. OpenBao has no reason to redirect these calls, so a 3xx is reported as
+			// the failure it is rather than followed.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 	}, nil
 }
 
@@ -145,8 +153,13 @@ func (c *Client) Name() string { return "openbao:" + c.addr }
 // The value is stored as a JSON string, which requires it to be valid UTF-8. Every secret in a
 // Talos configuration is PEM or base64 text, so this holds here; a binary secret would need
 // encoding, and encoding it would also put it beyond what the leak scan can recognise, which is a
-// reason to state the constraint rather than to paper over it.
+// reason to state the constraint rather than to paper over it. The constraint is checked, not only
+// stated: encoding/json replaces invalid UTF-8 with U+FFFD instead of failing, so an unchecked
+// binary value would be stored altered under a URI that claims to address it.
 func (c *Client) Put(ctx context.Context, key string, value []byte) (string, error) {
+	if !utf8.Valid(value) {
+		return "", fmt.Errorf("provider: the value for secret/%s is not valid UTF-8 and would be stored altered", key)
+	}
 	body := map[string]any{"data": map[string]string{"value": string(value)}}
 
 	var out struct {

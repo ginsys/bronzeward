@@ -113,9 +113,12 @@ func TestSchemaReportMeasuresAgainstAGroundTruthItDidNotProduce(t *testing.T) {
 	if !strings.Contains(stdout, "doc[0].cluster.apiServer.extraArgs.oidc-client-secret") {
 		t.Errorf("the report does not name the path the detector misses:\n%s", stdout)
 	}
-	// Both denominators, never a single score: one number hides which of the two moved.
-	if !strings.Contains(stdout, "recall") || !strings.Contains(stdout, "precision") {
-		t.Errorf("the report does not give recall and precision separately:\n%s", stdout)
+	// Both denominators, never a single score: one number hides which of the two moved. The figures
+	// are asserted, not the words: the footer says "recall" on every run, so the bare word could not
+	// fail. Truth is 5 paths and the rules find 4 of them, missing the OIDC secret; they flag nothing
+	// else, the certificate included, so all 4 of their hits are true.
+	if want := "recall 4/5, precision 4/4"; !strings.Contains(stdout, want) {
+		t.Errorf("the report does not give %q:\n%s", want, stdout)
 	}
 	if strings.Contains(strings.ToLower(stdout), "f1") || strings.Contains(strings.ToLower(stdout), "f-score") {
 		t.Errorf("the report gives a combined score, which §6.9 forbids the claim behind:\n%s", stdout)

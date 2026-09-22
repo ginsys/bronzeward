@@ -191,6 +191,27 @@ func TestRunRefusesADocumentAlreadyExtracted(t *testing.T) {
 	}
 }
 
+// TestRunExtractsAPathNamedTwiceOnce covers the union Request.Paths documents: schema detection and
+// an operator mark naming the same location. That is one secret, stored once, with one reference —
+// not a re-ingestion.
+func TestRunExtractsAPathNamedTwiceOnce(t *testing.T) {
+	d, store, j := setup(t)
+
+	res, err := Run(t.Context(), request(d, store, j, "doc[0].machine.token", "doc[0].machine.ca.key", "doc[0].machine.token"))
+	if err != nil {
+		t.Fatalf("Run refused a path named twice: %v", err)
+	}
+	if store.calls != 2 {
+		t.Errorf("the provider was written %d time(s), want 2", store.calls)
+	}
+	if got := len(res.Sanitized.References()); got != 2 {
+		t.Errorf("got %d reference(s), want 2", got)
+	}
+	if got := len(res.Digests); got != 2 {
+		t.Errorf("got %d digest(s), want 2", got)
+	}
+}
+
 // TestRunFailsWhenTheSameValueSitsAtAnUnmarkedPath is a real finding, asserted rather than
 // described. Extraction removes a value from the path it was marked at; an identical copy
 // elsewhere is untouched, and persisting the result would leak it. Run refuses instead.

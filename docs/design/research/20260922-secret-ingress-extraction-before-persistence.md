@@ -108,7 +108,7 @@ manifest, so a bundle states what actually produced it.
 | | |
 |---|---|
 | Captured | 2026-09-22, 21:48Z to 22:25Z |
-| Fixture manifest commit | `4e3a83af5cbe35c4889ecfac92f90bbd9d2b6e77`, which is also the commit every bundle records as the one the running code was built from. The fixes committed after it (5.18) change no output on any path the matrix runs, and why for each is recorded there; the evidence was not re-captured for them |
+| Fixture manifest commit | `4e3a83af5cbe35c4889ecfac92f90bbd9d2b6e77`, which is also the commit every bundle records as the one the running code was built from. The fixes committed after it (5.18, 5.19) change no output on any path the matrix runs, and why for each is recorded there; the evidence was not re-captured for them |
 | Host | Linux 7.1.3+deb13-amd64 x86\_64 |
 | Docker / Compose | 26.1.5+dfsg1 / 2.27.1 |
 | Talos | v1.13.6, both nodes; `talosctl` client v1.13.6 |
@@ -319,12 +319,12 @@ load-bearing rather than cautious.
 
 ## 5. Failures hit while building it
 
-Four of these were found only by pointing the prototype at the fixture's own Talos configuration
-rather than at the fragments its tests were written from. The section is ordered that way
+Four of the first fourteen were found only by pointing the prototype at the fixture's own Talos
+configuration rather than at the fragments its tests were written from. The section is ordered that way
 deliberately, because one shape recurs and it is the failure mode this whole experiment is exposed
 to: **a check that could not have failed**.
 
-Six of the fourteen below are that shape — 5.2, 5.5, 5.11, 5.12, 5.14 and the statement-log control
+Six of the first fourteen below are that shape — 5.2, 5.5, 5.11, 5.12, 5.14 and the statement-log control
 in 4.3. A silently truncated document, a screen counting runs that never ran, a verifier quantified
 over an empty list, a dump that was never taken, a lint reading a file from outside the tree it was
 checking, a control writing to a surface that was switched off. Every one of them reported success.
@@ -336,7 +336,8 @@ compiler, citing a test that did not exist. 5.16 adds an eighth: a recovery that
 reference and passed because nothing read the rows. 5.17 adds a ninth: a redaction test that used
 the one kind of field where redaction works, with a leak detector that could only see one spelling
 of a leak. All three were found by an external review rather than by the habit that found the first
-six, which is the argument for having both.
+six, which is the argument for having both. 5.19 records three more from the fifth review, smaller
+in consequence and identical in shape.
 
 An experiment whose instrument can report clean without looking proves nothing at all, and the
 count above is the honest reason for every positive control described in section 4.
@@ -653,6 +654,31 @@ each is stated rather than assumed:
   which the test asserts.
 - **The staging envelope checked UTF-8 only in the document**, not in the references it carries.
   Every reference a run produces is valid UTF-8, so no staged payload changes.
+
+### 5.19 The fifth review
+
+A fifth advisory review raised 8 findings, all real. Three are the section's recurring shape — a
+check that could not fail:
+
+- **The schema-report test asserted the words, not the figures.** It looked for "recall" and
+  "precision", and the report's footer prints "recall" on every run. It now asserts
+  `recall 4/5, precision 4/4` for its fixture.
+- **The redaction tests could not see `%#v`'s spelling of a byte slice**, `0x45, 0x31, …`, which is
+  the one those cases would print. The spelling is added, and a new calibration requires every verb
+  the tests use to have its leak recognised on the unprotected control; with the spelling removed,
+  it fails on `%#v`. The closure from 5.17 is why no redaction test was actually passing a leak.
+- **A bundle missing `fixtures-diff.txt` passed as "fixtures unmodified"**, because the check read
+  an absent file as an empty one. The fixture writes the file on every capture, empty when the tree
+  matched, so absence is now a failure.
+
+The other five were fixed without re-capturing, again because no recorded output depends on them.
+The report's own count of these subsections was stale. A path named twice, once by schema detection
+and once by a mark, aborted the run as a re-ingestion, and every honest run in section 4 completed,
+so none named one twice. The provider now refuses a value that is not valid UTF-8, which every
+recorded value was, since each was read back byte-for-byte. The provider client no longer follows
+redirects, which would replay the token and, for a 307, the secret body to the target; the fixture
+runs one OpenBao node with no standby to redirect to. And the capture script now refuses an empty or
+multi-segment run id, which would have made its cleanup delete every earlier run.
 
 ## 6. What this decides
 

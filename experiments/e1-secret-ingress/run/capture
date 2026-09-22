@@ -35,6 +35,13 @@ case $expectation in
   clean | leak | miss | residue) ;;
   *) die "unknown expectation $expectation; want clean, leak, miss or residue" ;;
 esac
+# The run id names the directories removed below. An empty one would make them $E1_RUNS/ and
+# $E1_BUNDLES/ themselves, deleting every earlier run and bundle; a / or a dot segment would reach
+# outside them.
+case $run_id in
+  '' | . | .. | */*) die "run id '$run_id' must be one non-empty path segment" ;;
+esac
+[ -n "$surfaces" ] || die "surfaces is empty; pass - to require none"
 
 e1_need_fixture
 e1_build
