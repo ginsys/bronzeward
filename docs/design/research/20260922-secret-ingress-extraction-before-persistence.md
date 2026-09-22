@@ -60,11 +60,20 @@ The claim rests on four independent layers, and they are a conjunction, not a me
 the one that actually proves ordering; the rest are there to catch the case where it is wrong.
 
 **A structural argument.** Exactly one type may hold plaintext, in an unexported field, and every
-persistence function takes a sanitized type that only the extraction package can construct.
-Persisting plaintext is a compile error rather than a review finding. The deliberate controls could
-not be written against those functions at all: they had to be written in a separate package,
-against the raw database handle, which is itself the result — the forbidden design is not
-expressible through the ordinary path.
+persistence function takes a sanitized type. Two places construct it: extraction, and staging's
+resume path, which rebuilds one from bytes that were already sanitized when they were staged and
+checks their digest first. **That restriction is enforced by a test, not by the compiler.** The
+constructor is exported, because Go cannot make a function visible to one sibling package and no
+other; a lexical call-site test fails if any other non-test file calls it, and it was proven to
+fail on a planted caller. The zero value, which no call-site test can see, is rejected by every
+persistence function.
+
+An earlier draft of this report said persisting plaintext was a compile error. It was not, and
+5.15 records how that claim got in. The deliberate controls are written in a separate package
+against the raw database handle, because building a sanitized value around plaintext would fail
+that test — so the forbidden design cannot pass through the ordinary path without breaking the
+build's test suite, which is a weaker and accurate statement. A v1 that wants the compiler to hold
+it would define the type in the package that constructs it (section 8).
 
 **Calibrated negative controls, one per surface family.** The fixture's own positive control proves
 only that its state directory was walked. Each surface this experiment claims to observe — the run
@@ -98,8 +107,8 @@ manifest, so a bundle states what actually produced it.
 
 | | |
 |---|---|
-| Captured | 2026-09-22, 16:52Z to 17:01Z |
-| Fixture manifest commit | `72713dc90fe118e496173cd0bbdb9a44a9e4fdf3` |
+| Captured | 2026-09-22, 19:19Z to 19:55Z |
+| Fixture manifest commit | `cfb86b70cb11525f045e185affa7588744864101`, which is also the commit every bundle records as the one the running code was built from |
 | Host | Linux 7.1.3+deb13-amd64 x86\_64 |
 | Docker / Compose | 26.1.5+dfsg1 / 2.27.1 |
 | Talos | v1.13.6, both nodes; `talosctl` client v1.13.6 |
@@ -149,7 +158,7 @@ and which it was is settled by opening the file.
 | `honest-import-transient` | import, transient staging | 2 | pass |
 | `honest-import-encrypted` | import, encrypted staging | 2 | pass |
 | `honest-import-flushed` | import after a forced checkpoint | 2 | pass |
-| `honest-adopt-transient` | drift adoption (§12.4) | 2 | pass |
+| `honest-adopt-transient` | drift adoption (§12.4), same input — see below | 2 | pass |
 | `held-in-review-transient` | held at in-review, claim outstanding | 2 | pass |
 | `held-in-review-encrypted` | held at in-review, claim outstanding | 2 | pass |
 | `crashed-in-review-transient` | `SIGKILL` at in-review | 2 | pass |
@@ -164,6 +173,13 @@ and which it was is settled by opening the file.
 Ten secrets were extracted per run, before any persistence. The flush bundle exists so that a clean
 data directory cannot be dismissed as "not written out yet": the checkpoint was forced first and the
 result is the same.
+
+**Import and drift adoption ran on the same input and the same code.** Every run here ingests the
+effective machine configuration the fixture reads back off the control plane, which is what §12.4's
+drift adoption sees; the fixture keeps no copy of the generator's pre-apply output. The prototype
+also serves both flows from one function, which differ only in the label recorded. So the adopt row
+is a second honest run under the drift-adoption label, not independent coverage of a second flow,
+and an import of a freshly generated configuration is not exercised at all (section 7).
 
 `crashed-in-db-txn-dead` carries a non-empty `unavailable.txt`: with PostgreSQL killed there is no
 logical dump, and the bundle says so rather than presenting a partial read as a clean scan of the
@@ -206,27 +222,31 @@ before extracting anything; they differ only in what they do next.
 
 | Control | Occurrences in `pg_wal/` | Occurrences in the dump | Ordering |
 |---|---|---|---|
-| `control-persist-first` | 24 | 18 | **fail** |
+| `control-persist-first` | 23 | 18 | **fail** |
 | `control-persist-first-redact-after` | 8 | **0** | **fail** |
-| `control-persist-first-rollback` | 16 | **0** | **fail** |
+| `control-persist-first-rollback` | 15 | **0** | **fail** |
 
 The middle row is the whole answer to question 2. Redact-after does exactly what its advocate would
 claim: the plaintext it committed a moment earlier is gone from the live rows, so a `pg_dump` taken
 afterwards is clean. It is still in the write-ahead log, eight times, in the same bundle. Rollback
-gives the same shape for a transaction that was never committed at all — sixteen occurrences in the
+gives the same shape for a transaction that was never committed at all — fifteen occurrences in the
 write-ahead log for rows that no query will ever return.
 
 So the prohibition is not a precaution. "Redact it later" produces a database that looks clean by
 every means an application has and still holds the plaintext where backups and replicas read.
 
 The single line each of these bundles shows at `logs/bw-fixture-postgres.log` is **not** theirs: it
-is the statement `control-leak-db-log` logged at 16:59:35Z, in a log file that is appended to for
+is the statement `control-leak-db-log` logged at 19:48:43Z, in a log file that is appended to for
 the whole matrix. Attributed by opening it, which is the rule this report follows throughout.
 
-`honest-import-final` is an honest run that scans with five lines. Nothing in it wrote plaintext;
-the database it ran against still holds what the controls put there. That bundle is asserted as
-residue rather than as clean, because a clean scan there would mean the controls' plaintext had gone
-away by itself — see 5.8.
+`honest-import-final` is an honest run that scans with six lines. Nothing in it wrote plaintext;
+the database it ran against still holds what the controls put there — 18 occurrences in the dump,
+31 in the write-ahead log, and 16 in the heap file of `parsed_index` (relation file
+`base/16384/16400`, named from `pg_class` while the fixture was still up). The heap line is the
+residue reaching the table's own data file once a checkpoint flushed it, the one place in this
+matrix where the controls' plaintext is seen outside the log and the dump. That bundle is asserted
+as residue rather than as clean, because a clean scan there would mean the controls' plaintext had
+gone away by itself — see 5.8.
 
 ### 4.5 Ordering, checked by a process that did not write the journal
 
@@ -304,6 +324,10 @@ over an empty list, a dump that was never taken, a lint reading a file from outs
 checking, a control writing to a surface that was switched off. Every one of them reported success.
 None is visible in the evidence it produced, because the evidence it produced was "nothing found",
 which is also what a correct run produces.
+
+5.15 adds a seventh, one level up: this report's own claim that the ordering was enforced by the
+compiler, citing a test that did not exist. It was found by an external review rather than by the
+habit that found the other six, which is the argument for having both.
 
 An experiment whose instrument can report clean without looking proves nothing at all, and the
 count above is the honest reason for every positive control described in section 4.
@@ -478,20 +502,76 @@ The directive now says `source-path=SCRIPTDIR`, which resolves against the scrip
 answer everywhere. The defect class is the one this section keeps returning to: the check ran, it
 reported success, and what it actually examined was not what anyone intended.
 
+### 5.15 What the advisory review found, and the claim it retracted
+
+An advisory review of the pull request raised 17 findings. Each was checked against the source
+before anything was changed; 15 were real as stated, one was real with its premise reversed, and
+one changed what this report may say. The review ran with degraded coverage — one chunk of the
+diff went unreviewed and nine chunks' findings were never assessed — so its silence elsewhere is
+not evidence of anything.
+
+**The retraction.** This report said the sanitized type could be constructed only by extraction,
+"so persisting plaintext is a compile error". The constructor is exported — Go cannot scope a
+function to one sibling package — and staging's resume path calls it outside extraction. Its own
+doc comment had said a package test asserted the call sites; there was a test for the plaintext
+accessor and none for the constructor. So the report's central structural claim rested on a test
+that did not exist.
+
+It exists now, and was proven to fail on a planted caller. The claim in sections 3 and 6 is
+restated at the strength the code supports. The refactor that would make it a compile-time property
+was not done, because making it after the evidence was captured would have left the evidence
+describing code that no longer existed; section 8 recommends it for v1. The matrix and every table
+in section 4 were then re-captured against the corrected code.
+
+This is the same failure as the six above, one level up: a check that could not fail, except that
+the check here was a sentence in this report citing a guarantee the code never had.
+
+**The reversed finding.** The review said drift adoption was never exercised against the effective
+configuration because both flows were handed the same file. The file is the configuration read
+back off the node, so adoption was exercised against exactly that. What was wrong was the harness
+comment claiming import took the generator's output. The honest statement — both flows, one input,
+one function — is now in 4.2 and section 7.
+
+**The rest**, fixed and tested. Most are guards on paths the matrix does not reach, recorded
+because each would have failed silently if it were ever reached:
+
+- the ordering journal could be reopened and restart its sequence, lose a sequence number to a
+  failed write, and return clean for an empty record set;
+- staging judged expiry on the caller's clock while extending it on the server's — and set the
+  initial expiry on the caller's too, which the review did not name — and let two concurrent
+  resumes both take one encrypted claim;
+- the redact-after control did not check that each parsed-index update matched a row, so it could
+  report success without redacting; the measured result in 4.4 shows it did redact, but the
+  control could not have said so if it had not;
+- the statement-log control's quoting was correct only under a server setting it did not set;
+- a KV key containing `#` or `?` would have reached a different secret;
+- DSN redaction missed the URL form;
+- the committed evidence was deleted before its replacement was known to exist;
+- a failed fault injection was logged and its dependent capture taken anyway, so a bundle filed as
+  "PostgreSQL dead" could have been taken with it running.
+
+One finding led somewhere the review did not. Fixing the round trip of empty YAML documents showed
+that yaml.v3 decodes an empty document as a null scalar rather than as empty content, so the
+prototype refused any stream with an empty document in it as "a bare scalar" and its
+empty-document handling had never run. No fixture configuration contains one, so no result here
+depended on it.
+
 ## 6. What this decides
 
-**§7.1's ordering requirement is implementable, and the evidence for that is structural.** Exactly
-one type may hold plaintext and only the extraction package can construct the sanitized type every
-persistence function takes, so persisting plaintext is a compile error. The strongest evidence is
-negative and was not planned: the deliberate controls could not be written through the ordinary path
-at all. They had to live in a separate package addressing the raw database handle. The forbidden
-design is not expressible in the design under test, which is a stronger statement than any scan
-result in section 4.
+**§7.1's ordering requirement is implementable, and the evidence for that is structural.** Every
+persistence function takes a sanitized type that only extraction and staging's resume path may
+construct. In this prototype that is enforced by a call-site test rather than by the compiler (3,
+5.15), so the accurate statement is that the forbidden design cannot pass through the ordinary path
+without failing the test suite, and the deliberate controls had to be written in a separate
+package against the raw database handle to exist at all. That is still a stronger statement than
+any scan result in section 4: a scan says one run left nothing behind, while the type and its test
+say no run through that path can write an unextracted document. Making it a compile-time property
+is a known, cheap step for v1 (section 8, item 2).
 
 **§7.1's prohibition on redacting later is a real constraint, not a precaution.** 4.4 measures it.
 A plaintext draft that is redacted immediately afterwards leaves a database that is clean to every
 query an application can make, and eight occurrences of the plaintext in the write-ahead log of the
-same bundle. A rolled-back transaction leaves sixteen, for rows that never existed. The sentence in
+same bundle. A rolled-back transaction leaves fifteen, for rows that never existed. The sentence in
 §7.1 about backups and historical records is describing exactly this and should not be softened.
 
 **The two staging alternatives differ on one axis that matters, and it is not secrecy.** Both keep
@@ -551,6 +631,16 @@ annotation key cannot be marked, detected or substituted here. This is a limit o
 addressing, not of the design; it is reported by every run rather than left implicit, and a v1
 implementation needs an escaping scheme.
 
+**One input for both flows.** Import and drift adoption both ingest the configuration read back
+off the node, through one function (4.2). What a generated configuration looks like before Talos
+applies and normalises it is not exercised, so any difference in where its secrets sit is
+unmeasured here.
+
+**Ownership and expiry were checked without contention.** Every run is one process against one
+claim. The guarded transitions and server-side expiry added after review (5.15) close the race and
+clock-skew holes by construction, and each is reached on the matrix's ordinary path, but no run
+drives two principals at one claim concurrently or skews a caller's clock.
+
 **The environment bounds the schema-detection denominator.** A Docker-provisioned Talos node
 produces no disk-encryption, installer or disk configuration — precisely the secret-bearing areas
 absent here. Recall is over the fields this environment produces, and §6.9 forbids the completeness
@@ -571,11 +661,15 @@ first is feasible, for this prototype, these flows, these secrets and these boun
    write-ahead log after the redaction and after a rollback. No weakening of that sentence is
    supported by anything here.
 
-2. **Carry the structural construction into the v1 contract, not just the behaviour.** The property
-   that made this experiment come out the way it did is that persistence functions accept only a
-   type the extraction package can construct. A v1 specification that states the ordering
-   requirement without requiring that shape is asking every future change to re-derive it. The
-   milestone-02 compilation contract is where this belongs.
+2. **Carry the structural construction into the v1 contract, not just the behaviour — and make
+   the compiler hold it.** The property that made this experiment come out the way it did is that
+   persistence functions accept only a type extraction constructs. This prototype enforces the
+   "only" with a call-site test, which is weaker than it first claimed (5.15). v1 should define the
+   sanitized type in the package that constructs it, with an unexported constructor, so that no
+   other package can build one at all; the resume path then has to go through that package too,
+   which is the correct place to re-check a resumed document anyway. A v1 specification that states
+   the ordering requirement without requiring that shape is asking every future change to re-derive
+   it. The milestone-02 compilation contract is where this belongs.
 
 3. **Adopt explicitly encrypted staging when a change must survive the process, and keep protected
    transient as the default for changes that need not.** The difference is a recovery owner, not

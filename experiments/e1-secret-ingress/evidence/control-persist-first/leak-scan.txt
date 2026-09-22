@@ -1,5 +1,5 @@
 1 <repo>/fixtures/.state/data/canary-control.txt
-1 <repo>/fixtures/.state/evidence/20260922T170107Z/logs/bw-fixture-postgres.log
-24 <repo>/fixtures/.state/evidence/20260922T170107Z/postgres-data/pg_wal/000000010000000000000001
-18 <repo>/fixtures/.state/evidence/20260922T170107Z/postgres.sql
+1 <repo>/fixtures/.state/evidence/20260922T195352Z/logs/bw-fixture-postgres.log
+23 <repo>/fixtures/.state/evidence/20260922T195352Z/postgres-data/pg_wal/000000010000000000000001
+18 <repo>/fixtures/.state/evidence/20260922T195352Z/postgres.sql
 1 <E1_OUT>/runs/control-persist-first/meta/reach-control.txt
