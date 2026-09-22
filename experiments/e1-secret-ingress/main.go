@@ -26,6 +26,7 @@ import (
 
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/baseline"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/checkpoint"
+	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/control"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/journal"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/provider"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/staging"
@@ -52,6 +53,16 @@ type options struct {
 	holdAt   checkpoint.Point
 	holdFor  time.Duration
 	journalP string
+
+	// config is the document to ingest, marks and markSuffix select the mark source, and baseline
+	// says whether to retain the observed configuration as ciphertext.
+	config     string
+	marks      string
+	markSuffix string
+	baseline   bool
+
+	// control carries the deliberate-failure flags.
+	control control.Options
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
@@ -73,6 +84,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 		crashAt = fs.String("crash-at", "none", "boundary at which to SIGKILL this process: "+strings.Join(checkpoint.Names(), ", "))
 		holdAt  = fs.String("hold-at", "none", "boundary at which to pause so the disk can be captured mid-flight")
 		holdFor = fs.Duration("hold-for", 0, "how long --hold-at pauses; zero means the default")
+
+		config     = fs.String("config", "", "the machine configuration to ingest (required by import and adopt)")
+		marks      = fs.String("marks", "", "file of operator-marked dotted paths, one per line")
+		markSuffix = fs.String("mark-suffix", "", "comma-separated key suffixes to mark instead, as the alternative mark source")
+		wantBase   = fs.Bool("baseline", true, "retain the observed configuration as an encrypted baseline")
+
+		persistFirst = fs.Bool("persist-first", false, "CONTROL: persist the plaintext draft before extracting, the design §7.1 forbids")
+		redactAfter  = fs.Bool("redact-after", false, "CONTROL: follow --persist-first with the redaction §7.1 says is not a remedy")
+		rollback     = fs.Bool("rollback", false, "CONTROL: roll back the plaintext transaction instead of committing it")
+		leakAt       = fs.String("leak-at", "none", "CONTROL: write the value to one surface on purpose: "+strings.Join(control.Surfaces(), ", "))
 	)
 	fs.Usage = func() { usage(stderr, fs) }
 
@@ -84,9 +105,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return errors.New("a subcommand is required")
 	}
 
-	opts := options{runRoot: *runRoot, runID: *runID, staging: *staging, holdFor: *holdFor}
+	opts := options{
+		runRoot: *runRoot, runID: *runID, staging: *staging, holdFor: *holdFor,
+		config: *config, marks: *marks, markSuffix: *markSuffix, baseline: *wantBase,
+		control: control.Options{PersistFirst: *persistFirst, RedactAfter: *redactAfter, Rollback: *rollback},
+	}
 
 	var err error
+	if opts.control.LeakAt, err = control.ParseSurface(*leakAt); err != nil {
+		return err
+	}
+	if err := opts.control.Validate(); err != nil {
+		return err
+	}
 	if opts.crashAt, err = checkpoint.Parse(*crashAt); err != nil {
 		return err
 	}
@@ -109,8 +140,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return baselineVerify(fs.Args()[1:], stdout)
 	case "recover":
 		return recoverRun(context.Background(), opts, fs.Args()[1:], stdout)
-	case "import", "adopt", "schema-report":
-		return fmt.Errorf("subcommand %q is not built yet", cmd)
+	case "import":
+		// §9.1: ingesting a machine configuration and its secrets bundle.
+		return ingest(context.Background(), opts, "import", stdout)
+	case "adopt":
+		// §12.4: the same ingestion applied to the effective configuration read back off a node.
+		// It is the same code path on purpose — the difference is which document the operator points
+		// at, and a separate implementation would make the two flows' results incomparable.
+		return ingest(context.Background(), opts, "adopt", stdout)
+	case "schema-report":
+		return schemaReport(opts, fs.Args()[1:], stdout)
 	default:
 		usage(stderr, fs)
 		return fmt.Errorf("unknown subcommand %q", cmd)
@@ -236,7 +275,7 @@ func recoverRun(ctx context.Context, opts options, args []string, stdout io.Writ
 		return err
 	}
 
-	place, err := openStaging(ctx, opts, db)
+	place, err := openStaging(opts, db)
 	if err != nil {
 		return err
 	}
@@ -284,14 +323,25 @@ func recoverRun(ctx context.Context, opts options, args []string, stdout io.Writ
 	return nil
 }
 
-// openStaging builds the staging alternative named by --staging.
-func openStaging(ctx context.Context, opts options, db *store.DB) (staging.Staging, error) {
+// openStaging builds the staging alternative named by --staging, contacting the provider only if
+// the encrypted mode needs it. The transient mode must not require a provider at all: that it does
+// not is half of what distinguishes the two.
+func openStaging(opts options, db *store.DB) (staging.Staging, error) {
 	if opts.staging == "transient" {
 		return staging.NewTransient(db.SQL(), 0), nil
 	}
 	client, err := provider.FromEnv(provider.TokenEnv)
 	if err != nil {
 		return nil, err
+	}
+	return openStagingWith(opts, db, client)
+}
+
+// openStagingWith is openStaging for a caller that already holds a provider client, so an ingestion
+// does not open a second one.
+func openStagingWith(opts options, db *store.DB, client *provider.Client) (staging.Staging, error) {
+	if opts.staging == "transient" {
+		return staging.NewTransient(db.SQL(), 0), nil
 	}
 	return staging.NewEncrypted(db.SQL(), client, provider.TransitKey, 0)
 }
