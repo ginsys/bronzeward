@@ -108,7 +108,7 @@ manifest, so a bundle states what actually produced it.
 | | |
 |---|---|
 | Captured | 2026-09-22, 21:48Z to 22:25Z |
-| Fixture manifest commit | `4e3a83af5cbe35c4889ecfac92f90bbd9d2b6e77`, which is also the commit every bundle records as the one the running code was built from |
+| Fixture manifest commit | `4e3a83af5cbe35c4889ecfac92f90bbd9d2b6e77`, which is also the commit every bundle records as the one the running code was built from. The fixes committed after it (5.18) change no output on any path the matrix runs, and why for each is recorded there; the evidence was not re-captured for them |
 | Host | Linux 7.1.3+deb13-amd64 x86\_64 |
 | Docker / Compose | 26.1.5+dfsg1 / 2.27.1 |
 | Talos | v1.13.6, both nodes; `talosctl` client v1.13.6 |
@@ -631,6 +631,28 @@ asserted nothing; a 10ms timing bound a loaded runner could exceed; the leak con
 value shorter than the scan can match; the staging envelope's silent rewrite of invalid UTF-8; a
 malformed URL-form DSN escaping redaction; and an evidence swap that a cross-device move could leave
 half-done.
+
+### 5.18 The fourth review, and the fixes made after the evidence
+
+A fourth advisory review raised 4 findings, all real, and the rounds had been shrinking — 17, 13,
+7, 4. These were fixed after the last capture of section 4, and the evidence was not captured a
+fifth time, because none of them changes the output of any path the matrix runs. The reason for
+each is stated rather than assumed:
+
+- **The extraction guard missed values the encoder rewrites.** It searched the sanitized text for
+  each extracted value, so a multi-line secret — re-encoded as an indented block — or one written
+  back with escapes would have passed with the plaintext still in the document. The document is now
+  parsed back and every scalar compared as a value, with a test proven to fail without it. No
+  recorded run can have depended on the gap: had it let a value through, that run's sanitized draft
+  would hold the plaintext, and every dump scan in section 4 shows the drafts do not.
+- **A zero-valued leak surface counted as a control.** `Surface` is a string whose zero value is
+  `""`, not `"none"`, so an options literal that omitted it was scored as a leak control. The
+  prototype's flags always set it, with `none` as the default, so no run was affected.
+- **Transit key names reached the request path unchecked**, as KV keys had before 5.15. They are
+  now held to the same rules, plus no `/`; the fixture's key name produces a byte-identical path,
+  which the test asserts.
+- **The staging envelope checked UTF-8 only in the document**, not in the references it carries.
+  Every reference a run produces is valid UTF-8, so no staged payload changes.
 
 ## 6. What this decides
 

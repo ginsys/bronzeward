@@ -98,7 +98,7 @@ func ingest(ctx context.Context, opts options, source string, stdout io.Writer) 
 	// whether the scan finds the canary, and a control that leaks a configuration secret tests
 	// whether it finds the thing the design is about. Attribution is by the file it lands in.
 	var leakValue secret.Unresolved
-	if opts.control.LeakAt != control.SurfaceNone {
+	if opts.control.LeakAt.Leaks() {
 		value, ok := doc.Get(paths[0])
 		if !ok {
 			return fmt.Errorf("the leak control has no value to write: %q holds no scalar", paths[0])
@@ -153,7 +153,7 @@ func ingest(ctx context.Context, opts options, source string, stdout io.Writer) 
 		return err
 	}
 
-	if opts.control.LeakAt != control.SurfaceNone {
+	if opts.control.LeakAt.Leaks() {
 		where, err := control.Leak(ctx, opts.control.LeakAt, opts.runRoot, db.SQL(), leakValue, j)
 		if err != nil {
 			return err

@@ -89,6 +89,19 @@ func TestKVPathRefusesKeysAURLWouldRewrite(t *testing.T) {
 	}
 }
 
+// TestTransitPathRefusesKeyNamesAURLWouldRewrite holds Encrypt and Decrypt to the KV rules, plus
+// no '/' at all, since a Transit key name is one segment. The fixture's own key name must pass.
+func TestTransitPathRefusesKeyNamesAURLWouldRewrite(t *testing.T) {
+	if got, err := transitPath("encrypt", "bw-artifact"); err != nil || got != "/v1/transit/encrypt/bw-artifact" {
+		t.Fatalf("transitPath(bw-artifact) = %q, %v", got, err)
+	}
+	for _, name := range []string{"", "k#x", "k?x", "k%2F", "k x", "a/b", "../sys", "."} {
+		if got, err := transitPath("encrypt", name); err == nil {
+			t.Errorf("transitPath accepted %q as %q", name, got)
+		}
+	}
+}
+
 func TestPutAddressesTheVersionItWrote(t *testing.T) {
 	c, rec := server(t, func(w http.ResponseWriter, _ *http.Request) {
 		respond(t, w, http.StatusOK, map[string]any{"data": map[string]any{"version": 3}})

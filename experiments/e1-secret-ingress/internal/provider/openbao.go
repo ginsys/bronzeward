@@ -34,6 +34,16 @@ import (
 	"unicode"
 )
 
+// transitPath is the request path for a Transit operation on one named key. A Transit key name is a
+// single path segment, so it is held to kvPath's rules and may not contain a '/' either: a name
+// that did would address a different endpoint — "k/../../sys/…" — rather than a different key.
+func transitPath(op, keyName string) (string, error) {
+	if strings.Contains(keyName, "/") {
+		return "", fmt.Errorf("provider: transit key name %q holds a '/', which would address another endpoint", keyName)
+	}
+	return kvPath("/v1/transit/"+op+"/", keyName)
+}
+
 // kvPath is the request path for a KV key under the given prefix, or an error for a key this client
 // cannot address exactly.
 //
@@ -236,7 +246,11 @@ func (c *Client) Encrypt(ctx context.Context, keyName string, plaintext []byte) 
 			Ciphertext string `json:"ciphertext"`
 		} `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/transit/encrypt/"+keyName, body, &out); err != nil {
+	path, err := transitPath("encrypt", keyName)
+	if err != nil {
+		return "", err
+	}
+	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
 		return "", err
 	}
 	if out.Data.Ciphertext == "" {
@@ -258,7 +272,11 @@ func (c *Client) Decrypt(ctx context.Context, keyName, ciphertext string) ([]byt
 			Plaintext *string `json:"plaintext"`
 		} `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/transit/decrypt/"+keyName, body, &out); err != nil {
+	path, err := transitPath("decrypt", keyName)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
 		return nil, err
 	}
 	if out.Data.Plaintext == nil {

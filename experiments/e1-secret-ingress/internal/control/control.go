@@ -115,12 +115,18 @@ const (
 	ExpectMiss
 )
 
+// Leaks reports whether this surface writes anything. The zero value counts as none: Surface is a
+// string, so an Options literal that never set LeakAt holds "", and comparing against SurfaceNone
+// alone made such a run Active, captioned "leak-at=" and expected to show a hit — an honest run
+// scored as a control, the mislabelling this package exists to prevent.
+func (s Surface) Leaks() bool { return s != SurfaceNone && s != "" }
+
 // Expect reports what the surface's leak scan must show.
 func (s Surface) Expect() Expectation {
-	switch s {
-	case SurfaceNone:
+	switch {
+	case !s.Leaks():
 		return ExpectNone
-	case SurfaceTransformed:
+	case s == SurfaceTransformed:
 		return ExpectMiss
 	default:
 		return ExpectHit
@@ -141,7 +147,7 @@ type Options struct {
 
 // Active reports whether this run is a control rather than an honest run.
 func (o Options) Active() bool {
-	return o.PersistFirst || o.RedactAfter || o.Rollback || o.LeakAt != SurfaceNone
+	return o.PersistFirst || o.RedactAfter || o.Rollback || o.LeakAt.Leaks()
 }
 
 // Validate refuses combinations that would produce a bundle which is not the control it is filed
@@ -178,7 +184,7 @@ func (o Options) Describe() string {
 	if o.Rollback {
 		parts = append(parts, "rollback (plaintext never committed)")
 	}
-	if o.LeakAt != SurfaceNone {
+	if o.LeakAt.Leaks() {
 		parts = append(parts, "leak-at="+string(o.LeakAt))
 	}
 	return strings.Join(parts, ", ")
@@ -190,7 +196,7 @@ func (o Options) Describe() string {
 // plaintext it obtained some other way: the only plaintext in the program lives in that type, and
 // unwrapping it here is deliberate and greppable.
 func Leak(ctx context.Context, s Surface, runRoot string, db *sql.DB, value secret.Unresolved, j *journal.Journal) (string, error) {
-	if s == SurfaceNone {
+	if !s.Leaks() {
 		return "", nil
 	}
 	if runRoot == "" {
