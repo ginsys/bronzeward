@@ -49,7 +49,7 @@ func TestFlagValidation(t *testing.T) {
 // TestUnbuiltSubcommandsSaySo checks the skeleton is honest about what it does not do yet, rather
 // than exiting zero and leaving a caller to assume a run happened.
 func TestUnbuiltSubcommandsSaySo(t *testing.T) {
-	for _, cmd := range []string{"import", "adopt", "recover", "baseline-verify", "schema-report"} {
+	for _, cmd := range []string{"import", "adopt", "recover", "schema-report"} {
 		_, _, err := runCLI(t, cmd)
 		if err == nil {
 			t.Errorf("%q returned no error despite not being built", cmd)
@@ -131,6 +131,28 @@ func TestVerifyOrderArgumentCount(t *testing.T) {
 		if _, _, err := runCLI(t, args...); err == nil {
 			t.Errorf("run(%v) returned no error", args)
 		}
+	}
+}
+
+// TestBaselineVerifyArgumentsAndLoading covers what can be checked without a live provider: the
+// argument count, and that a missing or malformed file is reported before anything contacts
+// OpenBao. The decryption itself is exercised by the matrix run against the fixtures.
+func TestBaselineVerifyArgumentsAndLoading(t *testing.T) {
+	for _, args := range [][]string{{"baseline-verify"}, {"baseline-verify", "a", "b"}} {
+		if _, _, err := runCLI(t, args...); err == nil {
+			t.Errorf("run(%v) returned no error", args)
+		}
+	}
+
+	missing := filepath.Join(t.TempDir(), "absent.json")
+	_, _, err := runCLI(t, "baseline-verify", missing)
+	if err == nil {
+		t.Fatal("baseline-verify accepted a path that does not exist")
+	}
+	// It must fail on the file, not on an unset provider token: reporting the wrong one first
+	// sends a reader to fix the wrong thing.
+	if !strings.Contains(err.Error(), "absent.json") {
+		t.Errorf("the error does not name the missing file: %v", err)
 	}
 }
 

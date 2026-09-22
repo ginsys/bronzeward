@@ -13,6 +13,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,8 +24,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/baseline"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/checkpoint"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/journal"
+	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/provider"
 )
 
 // canaryEnv names the environment variable carrying the fixture canary. The reachability control
@@ -100,7 +103,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	switch cmd := fs.Arg(0); cmd {
 	case "verify-order":
 		return verifyOrder(fs.Args()[1:], stdout)
-	case "import", "adopt", "recover", "baseline-verify", "schema-report":
+	case "baseline-verify":
+		return baselineVerify(fs.Args()[1:], stdout)
+	case "import", "adopt", "recover", "schema-report":
 		return fmt.Errorf("subcommand %q is not built yet", cmd)
 	default:
 		usage(stderr, fs)
@@ -157,6 +162,36 @@ func verifyOrder(args []string, stdout io.Writer) error {
 
 	fmt.Fprintf(stdout, "ok: %d records in %s, every write preceded by the extraction of every secret it lists\n",
 		len(records), path)
+	return nil
+}
+
+// baselineVerify checks a saved encrypted baseline against the provider.
+//
+// It is a separate entry point from the run that produced the baseline, on purpose: a round trip
+// checked only by the process that did the encryption proves that the process is self-consistent,
+// not that the configuration can be recovered later by anyone else.
+func baselineVerify(args []string, stdout io.Writer) error {
+	if len(args) != 1 {
+		return errors.New("baseline-verify takes one argument: the path to a baseline.json")
+	}
+
+	b, err := baseline.Load(args[0])
+	if err != nil {
+		return err
+	}
+	client, err := provider.FromEnv(provider.TokenEnv)
+	if err != nil {
+		return err
+	}
+	if err := b.Verify(context.Background(), client); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(stdout, "ok: run %s, %d bytes decrypt to the recorded digest %s under transit key %s\n",
+		b.RunID, b.InputBytes, b.InputSHA256[:12], b.KeyName)
+	fmt.Fprintf(stdout, "note: this baseline's ciphertext is not comparable to another run's. "+
+		"Transit uses a fresh nonce per call, so identical input encrypts differently every time; "+
+		"two runs are compared by their recorded input digests, not by their ciphertext.\n")
 	return nil
 }
 
