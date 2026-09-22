@@ -133,6 +133,17 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("unknown --staging %q; want transient or encrypted", opts.staging)
 	}
 
+	// Any subcommand given a run root plants the reachability control in it, not only the ones that
+	// ingest. A bundle captured around verify-order — which is how the disk is read with PostgreSQL
+	// dead and again after it restarts — would otherwise scan an empty directory, and a scan that
+	// finds nothing there is indistinguishable from one that never walked it. The ingesting
+	// subcommands prepare their run root again, which is idempotent; each keeps requiring one.
+	if opts.runRoot != "" {
+		if opts, err = prepareRunRoot(opts); err != nil {
+			return err
+		}
+	}
+
 	switch cmd := fs.Arg(0); cmd {
 	case "verify-order":
 		return verifyOrder(fs.Args()[1:], stdout)
@@ -150,6 +161,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return ingest(context.Background(), opts, "adopt", stdout)
 	case "schema-report":
 		return schemaReport(opts, fs.Args()[1:], stdout)
+	case "paths-holding":
+		return pathsHolding(opts, fs.Args()[1:], stdout)
 	default:
 		usage(stderr, fs)
 		return fmt.Errorf("unknown subcommand %q", cmd)
@@ -168,6 +181,7 @@ Subcommands:
   verify-order     check a journal against the extraction-before-persistence requirement
   baseline-verify  check the encrypted baseline decrypts to the input it was made from
   schema-report    report which secret-bearing fields schema detection finds, and which it misses
+  paths-holding    list the configuration paths whose value appears in a file of known secrets
 
 Credentials come from the environment, never from a flag: argv is world-readable and is captured
 by the evidence bundles this program's runs produce.

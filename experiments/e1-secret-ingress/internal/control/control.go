@@ -245,11 +245,31 @@ func leak(ctx context.Context, s Surface, runRoot string, db *sql.DB, value secr
 		if db == nil {
 			return "", errors.New("control: the db-log surface needs a database connection")
 		}
-		// The value goes in the statement text, not in a parameter. log_statement='all' records the
-		// text; a parameter would be recorded separately or not at all, and the control would come
-		// back clean for a reason that has nothing to do with the surface being unobservable.
+		// Statement logging is off in this fixture (log_statement is 'none'), so the setting is
+		// turned on for this one connection first. Without that the control comes back clean because
+		// the surface was switched off, which reads in a bundle exactly like the surface being
+		// unobservable — and a control that cannot fail is not a control.
+		//
+		// One connection, not the pool: SET applies to the session it ran in, and the pool is free
+		// to hand the statement below to a different connection. It is reset before the connection
+		// goes back, so nothing else in the run is logged in full.
+		conn, err := db.Conn(ctx)
+		if err != nil {
+			return "", fmt.Errorf("control: taking a connection for the statement log: %w", err)
+		}
+		defer func() {
+			// Best effort: the run is about to end, and a failure to reset would only mean more
+			// logging than intended, never less.
+			_, _ = conn.ExecContext(ctx, "RESET log_statement")
+			_ = conn.Close()
+		}()
+		if _, err := conn.ExecContext(ctx, "SET log_statement = 'all'"); err != nil {
+			return "", fmt.Errorf("control: enabling statement logging: %w", err)
+		}
+		// The value goes in the statement text, not in a parameter: the text is what log_statement
+		// records, and a parameter would be recorded separately or not at all.
 		stmt := "SELECT '" + strings.ReplaceAll(string(plaintext), "'", "''") + "'::text AS deliberate_control"
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
 			return "", fmt.Errorf("control: leaking to the statement log: %w", err)
 		}
 		return "the postgres statement log", nil

@@ -146,11 +146,14 @@ func ingest(ctx context.Context, opts options, source string, stdout io.Writer) 
 	}
 	ctrl.Reach(checkpoint.AfterFirstLog)
 
-	sanitized, err := stageAndResume(ctx, opts, db, client, result.Sanitized, j)
+	// InReview is reached inside stageAndResume, while the claim is still outstanding. Reaching it
+	// here instead would stop the run after the claim had already been resumed and released, so a
+	// crash would leave nothing held and the recovery comparison the two staging alternatives exist
+	// for would have nothing to take over.
+	sanitized, err := stageAndResume(ctx, opts, db, client, result.Sanitized, j, ctrl)
 	if err != nil {
 		return err
 	}
-	ctrl.Reach(checkpoint.InReview)
 
 	switch {
 	case opts.control.RedactAfter:
@@ -236,6 +239,68 @@ func schemaReport(opts options, args []string, stdout io.Writer) error {
 		"would present. Design §6.9 forbids a completeness claim for unmarked values outright: what\n"+
 		"is recorded is reliability on identified fields, with the rest explicitly the operator's\n"+
 		"responsibility through marking.\n")
+	return nil
+}
+
+// pathsHolding prints every configuration path whose scalar is one of the values in a file. It is
+// how the harness builds schema-report's ground truth, and the split of work is the point.
+//
+// The authority on what counts as a secret is the fixture's own rule over the secrets bundle Talos
+// generated, applied by the harness with the fixture's own expression. This subcommand only does
+// the mechanical half: it says where in the configuration each of those values ended up. A ground
+// truth this program derived on its own would be the detector grading its own work.
+//
+// The values file holds real synthetic secrets and belongs in the run output directory, never in
+// the repository. Nothing here prints a value: the output is paths, and a value that appears at
+// several paths is reported at each of them.
+func pathsHolding(opts options, args []string, stdout io.Writer) error {
+	if opts.config == "" {
+		return errors.New("--config is required: the path to the configuration to look in")
+	}
+	if len(args) != 1 {
+		return errors.New("paths-holding takes one argument: a file of known secret values, one per line")
+	}
+
+	raw, err := os.ReadFile(opts.config)
+	if err != nil {
+		return fmt.Errorf("reading the configuration: %w", err)
+	}
+	doc, err := document.Load(raw)
+	if err != nil {
+		return err
+	}
+
+	body, err := os.ReadFile(args[0])
+	if err != nil {
+		return fmt.Errorf("reading the known secret values: %w", err)
+	}
+	wanted := map[string]bool{}
+	for _, line := range strings.Split(string(body), "\n") {
+		v := strings.TrimSpace(line)
+		// A short value would match a version string or a boolean and inflate the denominator with
+		// fields that hold no secret. The fixture's own pattern list drops the same length.
+		if len(v) >= 8 {
+			wanted[v] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return fmt.Errorf("%s holds no value of at least 8 characters; an empty ground truth would "+
+			"make every recall figure meaningless rather than zero", args[0])
+	}
+
+	found := 0
+	for _, path := range doc.Paths() {
+		value, ok := doc.Get(path)
+		if !ok || !wanted[value] {
+			continue
+		}
+		fmt.Fprintln(stdout, path)
+		found++
+	}
+	if found == 0 {
+		return fmt.Errorf("none of the %d known value(s) appears in %s; the ground truth would be "+
+			"empty and every later number would be reporting that, not the detector", len(wanted), opts.config)
+	}
 	return nil
 }
 
@@ -328,7 +393,7 @@ func plainIndex(doc *document.Document, paths []string) map[string]string {
 // The same principal resumes here. A resume by a different one is what the recover subcommand does,
 // and keeping it a separate process is the point: an in-process resume would prove the program is
 // self-consistent, not that a second party can take over.
-func stageAndResume(ctx context.Context, opts options, db *store.DB, client *provider.Client, s secret.Sanitized, j *journal.Journal) (secret.Sanitized, error) {
+func stageAndResume(ctx context.Context, opts options, db *store.DB, client *provider.Client, s secret.Sanitized, j *journal.Journal, ctrl *checkpoint.Control) (secret.Sanitized, error) {
 	place, err := openStagingWith(opts, db, client)
 	if err != nil {
 		return secret.Sanitized{}, err
@@ -349,6 +414,11 @@ func stageAndResume(ctx context.Context, opts options, db *store.DB, client *pro
 	}); err != nil {
 		return secret.Sanitized{}, err
 	}
+
+	// The change is staged and the claim is outstanding: this is the review window the two staging
+	// alternatives are compared over, and the only moment at which a crash leaves something for a
+	// second principal to recover.
+	ctrl.Reach(checkpoint.InReview)
 
 	resumed, _, err := place.Resume(ctx, opts.runID, principal)
 	if err != nil {
