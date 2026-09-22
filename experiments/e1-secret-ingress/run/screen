@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Tier A: the cheap screen. Every combination of flow, staging mode, outcome and crash point, run
+# without capturing a bundle, scanned over the run root and a fresh logical dump.
+#
+# Its only authority is finding candidates. A screen row that passes says the run root and the live
+# tables hold none of this fixture's synthetic secrets at that moment; it says nothing about the
+# heap, the write-ahead log or the backups, which is where the redact-after control's whole result
+# lives. Depth comes from run/capture, and the report must label this table as a screen.
+#
+# Usage: E1_OUT=<dir> run/screen [--marks <file>|--mark-suffix <list>]
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "$0")/lib.sh"
+
+need docker grep sed awk wc go
+
+mark_args=()
+case ${1:-} in
+  --marks | --mark-suffix)
+    [ -n "${2:-}" ] || die "$1 needs a value"
+    mark_args=("$1=$2")
+    ;;
+  "") ;;
+  *) die "usage: run/screen [--marks <file>|--mark-suffix <list>]" ;;
+esac
+
+e1_need_fixture
+e1_build
+
+report=$(e1_report screen.tsv)
+printf 'flow\tstaging\toutcome\tcrash_at\trun_id\tstatus\trun_root_hits\tdump_hits\torder\n' >"$report"
+
+# The crossing order, which is also the order the boundary map lists. "none" is the uninterrupted
+# run; the rest kill the process at the named boundary, so each row asks what is on disk when the
+# program stops there.
+crash_points=(none after-read after-parse after-detect after-extract after-first-log in-review in-db-txn after-commit)
+flows=(import adopt)
+stagings=(transient encrypted)
+outcomes=(clean rejected)
+
+rows=0
+failures=0
+for flow in "${flows[@]}"; do
+  for staging in "${stagings[@]}"; do
+    for outcome in "${outcomes[@]}"; do
+      for crash in "${crash_points[@]}"; do
+        rows=$((rows + 1))
+        run_id="screen-$flow-$staging-$outcome-$crash"
+        run_root=$E1_RUNS/$run_id
+        rm -rf -- "$run_root"
+
+        args=(--run-root="$run_root" --run-id="$run_id" --staging="$staging"
+          --config="$(e1_config "$flow")" --crash-at="$crash" "${mark_args[@]}")
+        # The rejected outcome points the run at a document it must refuse. A run that failed for
+        # the wrong reason would still be recorded as a refusal, so the status column below
+        # distinguishes the exit code the flow gives from the one the harness expected.
+        [ "$outcome" != rejected ] || args+=(--config=/dev/null)
+
+        status=ok
+        e1_env "$E1_BIN" "${args[@]}" "$flow" >"$run_root.log" 2>&1 || status=exit-$?
+        [ "$outcome" != rejected ] || { [ "$status" != ok ] && status=refused-as-expected; }
+
+        dump=$E1_RUNS/$run_id.sql
+        e1_dump "$dump" 2>/dev/null || printf -- '-- dump unavailable\n' >"$dump"
+
+        root_hits=0
+        [ ! -d "$run_root" ] || root_hits=$(e1_hits "$run_root")
+        dump_hits=$(e1_hits "$dump")
+
+        # The run root always holds the reachability control, which is one deliberate hit. Anything
+        # beyond it is a candidate leak; nothing at all means the control was never planted and the
+        # count proves the scan walked nothing.
+        order=n/a
+        if [ -f "$run_root/journal.jsonl" ]; then
+          order=pass
+          e1_env "$E1_BIN" verify-order "$run_root/journal.jsonl" >/dev/null 2>&1 || order=fail
+        fi
+
+        verdict=$status
+        case $root_hits in
+          0) [ ! -d "$run_root" ] || { verdict="$status/no-control"; failures=$((failures + 1)); } ;;
+          1) ;;
+          *)
+            verdict="$status/candidate-leak"
+            failures=$((failures + 1))
+            ;;
+        esac
+        [ "$dump_hits" -eq 0 ] || { verdict="$verdict/dump-leak"; failures=$((failures + 1)); }
+
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "$flow" "$staging" "$outcome" "$crash" "$run_id" "$verdict" "$root_hits" "$dump_hits" "$order" >>"$report"
+        rm -f -- "$dump"
+      done
+    done
+  done
+done
+
+say "screen: $rows rows, $failures needing a bundle, written to $report"
+say "screen: this is a candidate finder. A passing row says nothing about the heap, the"
+say "screen: write-ahead log or the backups; run/capture is what looks there."
+[ "$failures" -eq 0 ] || exit 2

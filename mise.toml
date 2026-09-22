@@ -13,7 +13,7 @@ description = "actionlint on the workflows, shellcheck on the scripts"
 run = """
 env -u SHELLCHECK_OPTS actionlint
 env -u SHELLCHECK_OPTS shellcheck scripts/ci/*.sh scripts/test/*.sh
-env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/bin/*
+env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/bin/* experiments/e1-secret-ingress/run/*
 """
 
 [tasks.test]
