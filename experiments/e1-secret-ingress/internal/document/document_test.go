@@ -43,18 +43,57 @@ func TestPathsAddressEveryScalar(t *testing.T) {
 	d := load(t, sample)
 
 	want := []string{
-		"cluster.apiServer.extraArgs.audit-log-path",
-		"machine.ca.crt",
-		"machine.ca.key",
-		"machine.files[0].content",
-		"machine.files[0].path",
-		"machine.files[0].permissions",
-		"machine.token",
-		"machine.type",
-		"version",
+		"doc[0].cluster.apiServer.extraArgs.audit-log-path",
+		"doc[0].machine.ca.crt",
+		"doc[0].machine.ca.key",
+		"doc[0].machine.files[0].content",
+		"doc[0].machine.files[0].path",
+		"doc[0].machine.files[0].permissions",
+		"doc[0].machine.token",
+		"doc[0].machine.type",
+		"doc[0].version",
 	}
 	if got := strings.Join(d.Paths(), "\n"); got != strings.Join(want, "\n") {
 		t.Errorf("Paths() =\n%s\n\nwant\n%s", got, strings.Join(want, "\n"))
+	}
+}
+
+// TestEveryDocumentInTheStreamIsIndexed is a regression test for the worst kind of defect this
+// experiment can have: one that makes a run scan clean because it never looked.
+//
+// The fixtures' own controlplane.yaml is a multi-document file — Talos 1.13 emits the machine
+// configuration and several sibling documents in one stream — and yaml.Unmarshal into a node
+// decodes the first and discards the rest, returning no error. A secret in a later document was
+// therefore outside every path a mark or a rule could name, while the leak scan reported nothing.
+func TestEveryDocumentInTheStreamIsIndexed(t *testing.T) {
+	d := load(t, "machine:\n  token: first\n---\napiVersion: v1alpha1\nkind: HostnameConfig\nsecret: second\n")
+
+	want := "doc[0].machine.token,doc[1].apiVersion,doc[1].kind,doc[1].secret"
+	if got := strings.Join(d.Paths(), ","); got != want {
+		t.Errorf("Paths() = %q, want %q", got, want)
+	}
+
+	// The value in the second document must be reachable, and a substitution there must survive
+	// re-encoding: a document that could be read and not written would be half-covered.
+	if v, ok := d.Get("doc[1].secret"); !ok || v != "second" {
+		t.Errorf("the second document's scalar is not addressable (%q, %v)", v, ok)
+	}
+	if err := d.Replace("doc[1].secret", "bw:ref:kv://x"); err != nil {
+		t.Fatalf("Replace in the second document: %v", err)
+	}
+	out, err := d.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+	body := string(out)
+	if strings.Contains(body, "second") {
+		t.Errorf("the second document still holds its value:\n%s", body)
+	}
+	if !strings.Contains(body, "first") || !strings.Contains(body, "HostnameConfig") {
+		t.Errorf("re-encoding lost a document:\n%s", body)
+	}
+	if !strings.Contains(body, "---") {
+		t.Errorf("re-encoding merged the documents into one:\n%s", body)
 	}
 }
 
@@ -75,15 +114,15 @@ func TestPathsAreSorted(t *testing.T) {
 func TestGet(t *testing.T) {
 	d := load(t, sample)
 
-	crt, ok := d.Get("machine.ca.crt")
+	crt, ok := d.Get("doc[0].machine.ca.crt")
 	if !ok {
-		t.Fatal("machine.ca.crt is not addressable")
+		t.Fatal("doc[0].machine.ca.crt is not addressable")
 	}
 	if !strings.Contains(crt, "BEGIN CERTIFICATE") || !strings.Contains(crt, "MIIB") {
 		t.Errorf("the literal block did not come back whole: %q", crt)
 	}
 
-	if v, ok := d.Get("machine.ca.absent"); ok {
+	if v, ok := d.Get("doc[0].machine.ca.absent"); ok {
 		t.Errorf("a missing path returned %q as if it existed", v)
 	}
 }
@@ -94,10 +133,10 @@ func TestGet(t *testing.T) {
 func TestReplaceSubstitutesAndDropsTheOldStyle(t *testing.T) {
 	d := load(t, sample)
 
-	if err := d.Replace("machine.ca.key", "bw:ref:kv://secret/run-1/machine.ca.key"); err != nil {
+	if err := d.Replace("doc[0].machine.ca.key", "bw:ref:kv://secret/run-1/doc[0].machine.ca.key"); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
-	if err := d.Replace("machine.ca.crt", "bw:ref:kv://secret/run-1/machine.ca.crt"); err != nil {
+	if err := d.Replace("doc[0].machine.ca.crt", "bw:ref:kv://secret/run-1/doc[0].machine.ca.crt"); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
 
@@ -113,8 +152,8 @@ func TestReplaceSubstitutesAndDropsTheOldStyle(t *testing.T) {
 		}
 	}
 	for _, present := range []string{
-		"bw:ref:kv://secret/run-1/machine.ca.key",
-		"bw:ref:kv://secret/run-1/machine.ca.crt",
+		"bw:ref:kv://secret/run-1/doc[0].machine.ca.key",
+		"bw:ref:kv://secret/run-1/doc[0].machine.ca.crt",
 	} {
 		if !strings.Contains(body, present) {
 			t.Errorf("the re-encoded document does not hold %q:\n%s", present, body)
@@ -138,7 +177,7 @@ func TestReplaceSubstitutesAndDropsTheOldStyle(t *testing.T) {
 // would leave the secret in place while the journal recorded a substitution.
 func TestReplaceRejectsAnUnknownPath(t *testing.T) {
 	d := load(t, sample)
-	if err := d.Replace("machine.ca.keys", "x"); err == nil {
+	if err := d.Replace("doc[0].machine.ca.keys", "x"); err == nil {
 		t.Fatal("Replace accepted a path that does not exist")
 	}
 }
@@ -169,22 +208,54 @@ func TestRoundTripIsStable(t *testing.T) {
 	}
 }
 
-// TestLoadRefusesAmbiguousPaths is the guard that keeps a mark from addressing the wrong value. A
-// key holding a dot would make `a.b` mean either of two locations, and extracting the wrong one is
-// invisible in every piece of evidence this experiment collects.
-func TestLoadRefusesAmbiguousPaths(t *testing.T) {
-	cases := map[string]string{
-		"a dotted key":    "machine:\n  ca.crt: x\n",
-		"a bracketed key": "machine:\n  files[0]: x\n",
+// TestAmbiguousKeysAreUnaddressableAndReported is the guard that keeps a mark from addressing the
+// wrong value. A key holding a dot would make `a.b` mean either of two locations, and extracting
+// the wrong one is invisible in every piece of evidence this experiment collects.
+//
+// The subtree is excluded rather than the document refused. Refusing rejected every real Talos
+// configuration — machine.nodeLabels carries Kubernetes label keys, where dots are ordinary — and
+// the hazard only exists where someone tries to address the path. What remains is a coverage gap,
+// so it has to be visible: a caller reporting a clean run reports this beside it.
+func TestAmbiguousKeysAreUnaddressableAndReported(t *testing.T) {
+	cases := map[string]struct{ body, key string }{
+		"a dotted key":    {"machine:\n  ca.crt: x\n  token: t\n", "doc[0].machine: ca.crt"},
+		"a bracketed key": {"machine:\n  files[0]: x\n  token: t\n", "doc[0].machine: files[0]"},
+		"at the root":     {"a.b: x\ntoken: t\n", "doc[0]: a.b"},
 	}
-	for name, body := range cases {
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Load([]byte(body)); err == nil {
-				t.Fatal("Load accepted a document whose paths are ambiguous")
-			} else if !strings.Contains(err.Error(), "ambiguous") {
-				t.Errorf("the error does not explain the ambiguity: %v", err)
+			d, err := Load([]byte(c.body))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := strings.Join(d.Unaddressable(), ","); got != c.key {
+				t.Errorf("Unaddressable gave %q, want %q", got, c.key)
+			}
+			// The ambiguous path must not be reachable by any route: a mark or a rule naming it has
+			// to fail rather than resolve to one of the two locations it could mean.
+			for _, p := range d.Paths() {
+				if strings.Contains(p, ".crt") || strings.Contains(p, "files[0]") || p == "a.b" {
+					t.Errorf("Paths includes the ambiguous path %q", p)
+				}
+			}
+			if _, ok := d.Get("doc[0].machine.ca.crt"); ok {
+				t.Error("Get resolved an ambiguous path")
+			}
+			if err := d.Replace("doc[0].machine.ca.crt", "x"); err == nil {
+				t.Error("Replace resolved an ambiguous path")
 			}
 		})
+	}
+}
+
+// TestLoadRefusesADocumentThatIsEntirelyUnaddressable checks the degenerate case is an error rather
+// than an empty index. Extraction would find nothing and the run would scan clean for a reason that
+// has nothing to do with the design under test.
+func TestLoadRefusesADocumentThatIsEntirelyUnaddressable(t *testing.T) {
+	if _, err := Load([]byte("a.b:\n  c: x\n")); err == nil {
+		t.Fatal("Load accepted a document in which nothing can be addressed")
+	} else if !strings.Contains(err.Error(), "can be addressed") {
+		t.Errorf("the error does not explain why: %v", err)
 	}
 }
 

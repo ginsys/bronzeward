@@ -44,10 +44,10 @@ func writeMarks(t *testing.T, lines ...string) string {
 func TestPathListReadsAndSorts(t *testing.T) {
 	path := writeMarks(t,
 		"# the operator's marks for this run",
-		"machine.ca.key",
+		"doc[0].machine.ca.key",
 		"",
-		"  machine.token  ",
-		"machine.ca.crt",
+		"  doc[0].machine.token  ",
+		"doc[0].machine.ca.crt",
 	)
 
 	p, err := LoadPathList(path)
@@ -59,7 +59,7 @@ func TestPathListReadsAndSorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marks: %v", err)
 	}
-	want := "machine.ca.crt,machine.ca.key,machine.token"
+	want := "doc[0].machine.ca.crt,doc[0].machine.ca.key,doc[0].machine.token"
 	if strings.Join(got, ",") != want {
 		t.Errorf("Marks() = %v, want %s", got, want)
 	}
@@ -72,13 +72,13 @@ func TestPathListReadsAndSorts(t *testing.T) {
 // the journal would record as an honest run: an unmatched mark extracts nothing, the secret stays
 // in the document, and every check downstream passes.
 func TestPathListRejectsAMarkThatMatchesNothing(t *testing.T) {
-	p := NewPathList("test", "machine.ca.key", "machine.ca.keyy")
+	p := NewPathList("test", "doc[0].machine.ca.key", "doc[0].machine.ca.keyy")
 
 	_, err := p.Marks(load(t))
 	if err == nil {
 		t.Fatal("Marks accepted a mark that matches nothing in the document")
 	}
-	if !strings.Contains(err.Error(), "machine.ca.keyy") {
+	if !strings.Contains(err.Error(), "doc[0].machine.ca.keyy") {
 		t.Errorf("the error does not name the unmatched mark: %v", err)
 	}
 	// It must also say why this is fatal rather than cosmetic.
@@ -90,7 +90,7 @@ func TestPathListRejectsAMarkThatMatchesNothing(t *testing.T) {
 // TestPathListRejectsDuplicates checks a path listed twice is refused. Extracting one secret twice
 // would put two EventExtracted records in the journal for one value and make the count wrong.
 func TestPathListRejectsDuplicates(t *testing.T) {
-	path := writeMarks(t, "machine.ca.key", "machine.token", "machine.ca.key")
+	path := writeMarks(t, "doc[0].machine.ca.key", "doc[0].machine.token", "doc[0].machine.ca.key")
 
 	_, err := LoadPathList(path)
 	if err == nil {
@@ -136,7 +136,7 @@ func TestKeySuffixMarksByMechanismNotByList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marks: %v", err)
 	}
-	want := "machine.ca.key,machine.token"
+	want := "doc[0].machine.ca.key,doc[0].machine.token"
 	if strings.Join(got, ",") != want {
 		t.Errorf("Marks() = %v, want %s", got, want)
 	}
@@ -146,7 +146,7 @@ func TestKeySuffixMarksByMechanismNotByList(t *testing.T) {
 }
 
 // TestKeySuffixStripsSequenceIndices checks a path inside a sequence is matched on its key rather
-// than on the bracketed index, so machine.files[0].content is matched by "content".
+// than on the bracketed index, so doc[0].machine.files[0].content is matched by "content".
 func TestKeySuffixStripsSequenceIndices(t *testing.T) {
 	k, err := NewKeySuffix("content")
 	if err != nil {
@@ -157,8 +157,8 @@ func TestKeySuffixStripsSequenceIndices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marks: %v", err)
 	}
-	if strings.Join(got, ",") != "machine.files[0].content" {
-		t.Errorf("Marks() = %v, want machine.files[0].content", got)
+	if strings.Join(got, ",") != "doc[0].machine.files[0].content" {
+		t.Errorf("Marks() = %v, want doc[0].machine.files[0].content", got)
 	}
 }
 
@@ -192,7 +192,7 @@ func TestBothSourcesSatisfyTheInterface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewKeySuffix: %v", err)
 	}
-	sources := []Source{NewPathList("test", "machine.ca.key"), k}
+	sources := []Source{NewPathList("test", "doc[0].machine.ca.key"), k}
 
 	for _, s := range sources {
 		marks, err := s.Marks(load(t))
@@ -200,8 +200,8 @@ func TestBothSourcesSatisfyTheInterface(t *testing.T) {
 			t.Errorf("%s: %v", s.Name(), err)
 			continue
 		}
-		if strings.Join(marks, ",") != "machine.ca.key" {
-			t.Errorf("%s marked %v, want machine.ca.key", s.Name(), marks)
+		if strings.Join(marks, ",") != "doc[0].machine.ca.key" {
+			t.Errorf("%s marked %v, want doc[0].machine.ca.key", s.Name(), marks)
 		}
 	}
 }

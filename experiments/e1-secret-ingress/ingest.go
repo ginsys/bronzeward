@@ -65,6 +65,20 @@ func ingest(ctx context.Context, opts options, source string, stdout io.Writer) 
 	if err != nil {
 		return err
 	}
+	// The coverage gap travels with the run. A secret under a key whose name would make its path
+	// ambiguous cannot be marked, detected or extracted by this prototype, and a clean leak scan
+	// that did not say so would overstate what was covered.
+	if gaps := doc.Unaddressable(); len(gaps) > 0 {
+		if _, err := j.Append(journal.Record{
+			Event: journal.EventNote,
+			Detail: fmt.Sprintf("%d key(s) cannot be addressed and nothing below them was considered: %s",
+				len(gaps), strings.Join(gaps, "; ")),
+		}); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "coverage: %d unaddressable key(s); nothing below them was considered: %s\n",
+			len(gaps), strings.Join(gaps, "; "))
+	}
 	ctrl.Reach(checkpoint.AfterParse)
 
 	paths, err := targetPaths(opts, doc, j)

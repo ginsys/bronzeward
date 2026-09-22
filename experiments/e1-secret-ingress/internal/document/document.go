@@ -7,49 +7,103 @@
 // and on which fields that version knows about, and the question under test — whether extraction
 // can be made to happen before persistence — does not turn on either.
 //
-// Paths are dotted, with bracketed indices for sequence elements:
+// Paths are dotted, with bracketed indices for sequence elements, and every path names the YAML
+// document it is in:
 //
-//	machine.ca.crt
-//	machine.files[0].content
-//	cluster.apiServer.extraArgs.audit-log-path
+//	doc[0].machine.ca.crt
+//	doc[0].machine.files[0].content
+//	doc[1].cluster.apiServer.extraArgs.audit-log-path
 //
-// A key containing a dot or a bracket would make two different locations share one path. Rather
-// than silently resolving such a collision, Load refuses the document: a mark or a detection rule
-// pointing at an ambiguous path could extract the wrong value, and a wrong extraction is not
-// visible in any of this experiment's evidence.
+// The document index is always present, including for a single-document file. It was added after
+// the prototype was found to be reading only the first document of the fixtures' own
+// controlplane.yaml: Talos 1.13 emits the machine configuration and several sibling documents in
+// one file, and yaml.Unmarshal into a node decodes the first and discards the rest without an
+// error. A secret in a later document would have been unreachable by every mark and every rule,
+// and the run would have scanned clean. Indexing all of them, under a prefix that cannot be
+// omitted, is what stops that from coming back.
+//
+// A key containing a dot or a bracket would make two different locations share one path, and a
+// mark or a detection rule pointing at such a path could extract the wrong value — a mistake that
+// is invisible in every piece of evidence this experiment collects. Rather than resolve the
+// collision silently, Load leaves the subtree under such a key unaddressable: it is excluded from
+// Paths, Get and Replace, and listed by Unaddressable.
+//
+// Load originally refused the whole document instead. That turned out to reject every real Talos
+// configuration: machine.nodeLabels carries Kubernetes label keys such as
+// "node.kubernetes.io/exclude-from-external-load-balancers", and dots in label and annotation keys
+// are ordinary. Refusing was the wrong response to a hazard that only exists where someone tries
+// to address the path, and it would have left the experiment able to run on nothing but fixtures
+// it wrote itself. The coverage gap that remains is real and is reported rather than hidden: a
+// secret under an unaddressable key cannot be marked, and the report records that as a limit of
+// this prototype's addressing, not of the design.
 package document
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Document is a parsed YAML document with every scalar indexed by path.
+// Document is a parsed YAML stream with every addressable scalar indexed by path. It is one file,
+// which may hold several YAML documents; the path's doc[n] prefix says which.
 type Document struct {
-	root  *yaml.Node
+	roots []*yaml.Node
 	index map[string]*yaml.Node
 	paths []string
+	// unaddressable holds one entry per key whose name would make its path ambiguous, as
+	// "<parent path>: <key>". Everything below such a key is excluded from the index.
+	unaddressable []string
 }
 
-// Load parses YAML and indexes its scalars.
+// Load parses every YAML document in the input and indexes their scalars.
+//
+// A decoder loop, not yaml.Unmarshal: Unmarshal into a node decodes the first document and
+// discards the rest with no error at all, which would leave a secret in a later document outside
+// every path this program can address, while the run scanned clean.
 func Load(data []byte) (*Document, error) {
-	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("document: parsing: %w", err)
+	d := &Document{index: map[string]*yaml.Node{}}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	for n := 0; ; n++ {
+		var root yaml.Node
+		err := dec.Decode(&root)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("document: parsing document %d: %w", n, err)
+		}
+		if root.Kind == 0 || len(root.Content) == 0 {
+			// An empty document between separators. It carries nothing and indexes nothing, but the
+			// numbering must still advance so a path keeps naming the document it came from.
+			d.roots = append(d.roots, nil)
+			continue
+		}
+		if root.Content[0].Kind == yaml.ScalarNode {
+			// A bare scalar document. There is nothing to address inside it, and a machine
+			// configuration is never one.
+			return nil, fmt.Errorf("document: document %d is a bare scalar, not a mapping", n)
+		}
+		d.roots = append(d.roots, &root)
+		if err := d.walk(fmt.Sprintf("doc[%d]", n), root.Content[0]); err != nil {
+			return nil, err
+		}
 	}
-	if root.Kind == 0 || len(root.Content) == 0 {
+	if len(d.roots) == 0 {
 		return nil, fmt.Errorf("document: the input holds no YAML document")
 	}
-
-	d := &Document{root: &root, index: map[string]*yaml.Node{}}
-	if err := d.walk("", root.Content[0]); err != nil {
-		return nil, err
-	}
 	sort.Strings(d.paths)
+	sort.Strings(d.unaddressable)
+	if len(d.paths) == 0 {
+		// Every scalar sat under an ambiguous key. Extraction would find nothing and the run would
+		// look clean for a reason that has nothing to do with the design under test.
+		return nil, fmt.Errorf("document: no scalar in this document can be addressed; %d key(s) "+
+			"carry a dot or a bracket and everything is below one of them", len(d.unaddressable))
+	}
 	return d, nil
 }
 
@@ -61,9 +115,11 @@ func (d *Document) walk(prefix string, node *yaml.Node) error {
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key, value := node.Content[i], node.Content[i+1]
 			if strings.ContainsAny(key.Value, ".[]") {
-				return fmt.Errorf("document: key %q at line %d contains a dot or a bracket, so its path "+
-					"would be ambiguous; this experiment refuses such a document rather than risk "+
-					"extracting the wrong value", key.Value, key.Line)
+				// Ambiguous: "a.b: x" and "a: {b: x}" would both be "a.b". Nothing below this key
+				// is indexed, so no mark and no rule can reach it, and the gap is reported rather
+				// than resolved by guessing which location a path meant.
+				d.unaddressable = append(d.unaddressable, prefix+": "+key.Value)
+				continue
 			}
 			child := key.Value
 			if prefix != "" {
@@ -80,11 +136,6 @@ func (d *Document) walk(prefix string, node *yaml.Node) error {
 			}
 		}
 	case yaml.ScalarNode:
-		if prefix == "" {
-			// A bare scalar document. There is nothing to address it by, and a machine
-			// configuration is never one.
-			return fmt.Errorf("document: the input is a bare scalar, not a mapping")
-		}
 		if _, clash := d.index[prefix]; clash {
 			return fmt.Errorf("document: two locations share the path %q", prefix)
 		}
@@ -104,6 +155,16 @@ func (d *Document) walk(prefix string, node *yaml.Node) error {
 func (d *Document) Paths() []string {
 	out := make([]string, len(d.paths))
 	copy(out, d.paths)
+	return out
+}
+
+// Unaddressable lists the keys whose names would make a path ambiguous, as "<parent>: <key>".
+// Everything below each of them is outside the index, so it cannot be marked, detected, extracted
+// or substituted. A caller that reports a clean run has to report this alongside it: the two
+// together are the coverage claim, and the clean result on its own overstates it.
+func (d *Document) Unaddressable() []string {
+	out := make([]string, len(d.unaddressable))
+	copy(out, d.unaddressable)
 	return out
 }
 
@@ -133,12 +194,19 @@ func (d *Document) Replace(path, value string) error {
 
 // Bytes re-encodes the document. Two-space indentation matches the fixtures' own configurations,
 // so a diff against the input shows the substitutions and nothing else.
+// Every document is re-encoded, in order, separated as they arrived. Dropping the ones that carry
+// no addressable scalar would silently rewrite the operator's file.
 func (d *Document) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if err := enc.Encode(d.root); err != nil {
-		return nil, fmt.Errorf("document: encoding: %w", err)
+	for n, root := range d.roots {
+		if root == nil {
+			continue
+		}
+		if err := enc.Encode(root); err != nil {
+			return nil, fmt.Errorf("document: encoding document %d: %w", n, err)
+		}
 	}
 	if err := enc.Close(); err != nil {
 		return nil, fmt.Errorf("document: closing the encoder: %w", err)
