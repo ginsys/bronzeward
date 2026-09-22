@@ -175,6 +175,8 @@ bao_dispatched=0
 bao_answered=0
 docker_dispatched=0
 started=0
+# ready_probe: the bounded request a start waits on, kept for finish to ask once more.
+ready_probe=
 # docker_expect: the state the Docker request in flight asks for, set before the request: "<field>
 # <value>" for a container state field, "network out" for no membership of the network held under
 # network_id, "network ip <address>" for membership at that address and "network alias <name>" for
@@ -293,12 +295,19 @@ finish() {
         ;;
     esac
   fi
-  # A start the daemon answered, then a signal during the wait for the service: the container was
-  # started, and whether the service answers is not known. A wait that ran to its limit is a
-  # failure of the start, and says so itself.
+  # A start the daemon answered, then a signal during the wait for the service, or right after
+  # the wait was answered and before the last line: the container was started, and whether the
+  # service answers is decided by asking it once more, bounded: it answers, and the start is done;
+  # it does not, and whether it did is not known. A wait that ran to its limit is a failure of
+  # the start, and says so itself.
   if [ "$started" -eq 1 ] && [ "$rc" -ne 0 ] && [ "$signalled" -eq 1 ]; then
-    status=unknown
-    say "fixtures: the container was started and the wait for the service was ended by a signal; whether it answers is not known; recorded as unknown"
+    if [ -n "$ready_probe" ] && REQUEST_LIMIT=5 PG_LIMIT=5 "$ready_probe" >/dev/null 2>&1; then
+      say "fixtures: the container was started and the wait for the service was ended by a signal, and the service answers; recorded as done"
+      rc=0
+    else
+      status=unknown
+      say "fixtures: the container was started and the wait for the service was ended by a signal; whether it answers is not known; recorded as unknown"
+    fi
   fi
   # A removal that fails must not end the handler before the outcome is recorded: each is guarded.
   if [ -n "$partial" ]; then
@@ -415,16 +424,22 @@ case $action in
       # changed would then have the start recorded done on a database no client can use. Through
       # pg_client, to the container's address on the Compose network, since the image trusts
       # loopback and a query there would prove nothing about the password.
-      postgres) wait_for 60 "postgres" pg_client -Atc 'select 1' ;;
+      postgres)
+        pg_answers() { pg_client -Atc 'select 1'; }
+        ready_probe=pg_answers
+        wait_for 60 "postgres" pg_answers
+        ;;
       openbao)
         bao_sealed() {
           local rc=0
           bao status >/dev/null 2>&1 || rc=$?
           [ "$rc" -eq 2 ]
         }
+        bao_active() { bao token lookup; }
+        ready_probe=bao_active
         wait_for 60 "a sealed OpenBao" bao_sealed
         bao_unseal
-        wait_for 60 "an active OpenBao node" bao token lookup
+        wait_for 60 "an active OpenBao node" bao_active
         ;;
       controlplane | worker)
         # A started container is a node that is still booting. Asked on its own address, like
@@ -432,6 +447,7 @@ case $action in
         node=$TALOS_WORKER_IP
         [ "$1" = worker ] || node=$TALOS_CONTROLPLANE_IP
         talos_answers() { talosctl_timed "$REQUEST_LIMIT" -e "$node" -n "$node" version --short; }
+        ready_probe=talos_answers
         wait_for 180 "the Talos API on $node" talos_answers
         ;;
     esac

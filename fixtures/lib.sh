@@ -403,8 +403,14 @@ compose() {
 # git check a committed symlink out as a regular file holding the target's name, and read that file
 # back as the symlink, so the tree is clean while a regular file runs where the commit has a link:
 # core.symlinks=true has git see the regular file for what it is, a type change, in the diff.
+# And the caller's repository selection is dropped: GIT_DIR, GIT_WORK_TREE and the rest name a
+# repository, an index or an object store git takes over -C, so every inventory would describe
+# some other repository's HEAD and index as this checkout's. Discovery from the fixtures
+# directory is what names this checkout, and fixtures_tree_inventory holds the answer to it.
 fixtures_git() {
-  git --no-replace-objects -C "$FIXTURES" -c core.autocrlf=false -c core.ignoreCase=false -c core.trustctime=true \
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+    -u GIT_COMMON_DIR -u GIT_NAMESPACE -u GIT_CEILING_DIRECTORIES \
+    git --no-replace-objects -C "$FIXTURES" -c core.autocrlf=false -c core.ignoreCase=false -c core.trustctime=true \
     -c core.checkStat=default -c core.fsmonitor=false -c core.untrackedCache=false -c core.fileMode=true \
     -c core.symlinks=true "$@"
 }
@@ -450,7 +456,7 @@ tree_name() { printf '%s' "$1"; }
 # Listings and the collected stderr go into <workdir> and are removed; a listing that fails is not
 # an empty one.
 fixtures_tree_check() {
-  local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top ignores untracked_all flagged gitlinks filtered linked find_rc=0 tab=$'\t' first_manifest first_differs
+  local workdir=$1 diff_file=$2 name_fn=$3 warn file attribute value hidden top toplevel ignores untracked_all flagged gitlinks filtered linked find_rc=0 tab=$'\t' first_manifest first_differs
   warn=$workdir/.git-stderr
   scripts_unchanged_since_load
   : >"$warn" || die "cannot collect git's warnings in $workdir"
@@ -492,6 +498,11 @@ fixtures_tree_diff() {
 # fixtures_tree_check, whose variables it uses.
 fixtures_tree_inventory() {
   find_rc=0
+  # The repository answering is the one holding fixtures/: its top level is the directory above.
+  toplevel=$(fixtures_git rev-parse --show-toplevel 2>>"$warn") ||
+    die "cannot find the repository holding $FIXTURES; the fixture could not be tied to a fixture version"
+  [ "$toplevel" = "$(dirname -- "$FIXTURES")" ] ||
+    die "git answers for $toplevel, not for the checkout holding $FIXTURES; the fixture could not be tied to a fixture version"
   # Assigned first: a git that fails inside a printf argument would leave the line empty.
   manifest=$(fixtures_git rev-parse HEAD 2>>"$warn") ||
     die "cannot read the manifest commit from git; the fixture could not be tied to a fixture version"
@@ -749,33 +760,41 @@ claim_label() {
 }
 # claim_owner: the checkout that took the claim (nothing when there is no claim).
 claim_owner() { claim_label "$CLAIM_OWNER_LABEL"; }
-# claim_drop <owner>: the container of the claim's name, once its labels show it to be the claim
-# held by <owner>, the checkout the caller saw holding it, and only that one: the label alone
-# selects any container given it, and the name, by the time of the removal, whatever was given the
-# name since the look, so the removal takes the ID the look held. A claim held by another checkout
-# by now is a fixture starting there, and is left, with a word and status 1; none at all is
-# nothing to do. --volumes, because the image declares a data volume and Docker creates an
-# anonymous one for the claim although it never starts. Nothing else would ever find that volume
-# again.
+# claim_drop <owner> [attempt]: the container of the claim's name, once its labels show it to be
+# the claim held by <owner>, the checkout the caller saw holding it, and only that one: the label
+# alone selects any container given it, and the name, by the time of the removal, whatever was
+# given the name since the look, so the removal takes the ID the look held. A claim held by
+# another checkout by now is a fixture starting there, and is left, with a word and status 1;
+# none at all is nothing to do. With an attempt given, the claim must carry that nonce too, read
+# in the same look as the owner: a claim this checkout took again since, for another up, has the
+# same owner and is that up's, not this one's. --volumes, because the image declares a data volume
+# and Docker creates an anonymous one for the claim although it never starts. Nothing else would
+# ever find that volume again.
 claim_drop() {
-  local strangers out id owner
+  local strangers out id mark attempt owner tab=$'\t'
   strangers=$(claim_strangers) || die "could not list the containers carrying the fixture claim label"
   [ -z "$strangers" ] ||
     die "$(tr '\n' ' ' <<<"$strangers")carries the fixture claim label without being the claim $CLAIM; not the fixture's, not removed"
   if ! out=$(docker inspect --type container --format \
-    "{{.Id}} {{index .Config.Labels \"${CLAIM_LABEL%%=*}\"}} {{index .Config.Labels \"$CLAIM_OWNER_LABEL\"}}" "$CLAIM" 2>&1); then
+    "{{.Id}}{{\"\\t\"}}{{index .Config.Labels \"${CLAIM_LABEL%%=*}\"}}{{\"\\t\"}}{{index .Config.Labels \"$CLAIM_ATTEMPT_LABEL\"}}{{\"\\t\"}}{{index .Config.Labels \"$CLAIM_OWNER_LABEL\"}}" "$CLAIM" 2>&1); then
     case $out in
       *[Nn]o\ such\ container*) return 0 ;;
       *) die "could not ask Docker about the claim $CLAIM: $out" ;;
     esac
   fi
-  id=${out%% *}
-  out=${out#* }
-  [ "${out%% *}" = "${CLAIM_LABEL#*=}" ] || return 0
-  owner=${out#* }
+  # Split on the tabs by hand: read would take the tab for whitespace and fold an empty nonce
+  # field away, leaving the owner in the nonce's place and nothing in the owner's.
+  id=${out%%"$tab"*} out=${out#*"$tab"}
+  mark=${out%%"$tab"*} out=${out#*"$tab"}
+  attempt=${out%%"$tab"*} owner=${out#*"$tab"}
+  [ "$mark" = "${CLAIM_LABEL#*=}" ] || return 0
   [ -n "$owner" ] || return 0
   if [ "$owner" != "$1" ]; then
     say "fixtures: the claim $CLAIM is held by $owner now, not by $1 as it was; it is another fixture's and is left"
+    return 1
+  fi
+  if [ $# -ge 2 ] && [ "$attempt" != "$2" ]; then
+    say "fixtures: the claim $CLAIM was taken again by $owner since, for another up; it is that up's and is left"
     return 1
   fi
   docker rm --force --volumes "$id" >/dev/null

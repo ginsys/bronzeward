@@ -396,6 +396,7 @@ done
 find "$STATE/evidence" -mindepth 1 -maxdepth 1 -print0 >"$out/.siblings" 2>/dev/null ||
   die "cannot list $STATE/evidence for captures that ended before their scan; results void"
 siblings=()
+locked=()
 while IFS= read -r -d '' sibling; do
   [ ! -L "$sibling" ] || die "$(shown "$sibling") is a symlink; the fixture never makes one there. Results void"
   # A marker that is a link: one that resolves is refused below as not a file to open, and one
@@ -434,6 +435,7 @@ while IFS= read -r -d '' sibling; do
     else
       exec {sibling_lock}>&-
       say "evidence: another capture is still writing $(shown "$sibling"); it is left to its own scan"
+      locked+=("$sibling")
     fi
   }
 done <"$out/.siblings"
@@ -480,6 +482,16 @@ for root in "${roots[@]}"; do
 done
 roots=("${kept[@]}")
 unset kept kept_at root resolved keep holds i
+# A capture still writing is left to its own scan whatever root holds it: an extra path that is
+# the evidence directory, or above it, or the bundle itself, would have the walk go through what
+# that capture writes after this walk, and this capture report itself complete over it. Each such
+# bundle is pruned from both walks below, by inode, so that the spelling of the root walked (a
+# symlink to it, a parent) does not matter. Nothing under it, and not its own name, is listed.
+prune=()
+for sibling in "${locked[@]}"; do
+  prune+=(-samefile "$sibling" -o)
+done
+unset sibling
 
 # The positive control is one file, plus its copy at the same place inside an expanded store
 # snapshot, and only while it holds exactly what bin/up planted. A file that merely shares the
@@ -561,7 +573,7 @@ secret_in_name() { # secret_in_name <path>
 }
 
 # Each path once: a path given twice under one spelling is listed once.
-find -L "${roots[@]}" -type f -print0 2>/dev/null | sort --zero-terminated --unique >"$list" ||
+find -L "${roots[@]}" \( "${prune[@]}" -false \) -prune -o -type f -print0 2>/dev/null | sort --zero-terminated --unique >"$list" ||
   die "leak scan could not walk every path; results void"
 : >"$scan"
 control_seen=0
@@ -594,7 +606,7 @@ done <"$list"
 # A secret can sit in a name as well as in a file: every directory entry under the same paths,
 # directories included, is matched too, and the own name of a root not walked for being another
 # spelling of one that was.
-{ find -L "${roots[@]}" -print0 2>/dev/null &&
+{ find -L "${roots[@]}" \( "${prune[@]}" -false \) -prune -o -print0 2>/dev/null &&
   { [ "${#dropped[@]}" -eq 0 ] || printf '%s\0' "${dropped[@]}"; }; } | sort --zero-terminated --unique >"$list" ||
   die "leak scan could not walk every path; results void"
 while IFS= read -r -d '' entry; do

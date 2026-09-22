@@ -105,9 +105,11 @@ tracked one, and git's stat cache is not trusted either — `core.trustctime`, `
 length with its mtime put back is compared by content, not taken for the commit's; `core.fileMode`
 is forced on, so a command made non-executable is in the diff; `core.symlinks` is forced on, so a
 regular file checked out where the commit has a symlink (as `core.symlinks=false` does) is in the
-diff as the regular file it is; and replacement refs are turned
+diff as the regular file it is; replacement refs are turned
 off with `--no-replace-objects`, so the diff is taken against the commit the manifest names, not
-against a replacement of it); a tracked file git is told to skip
+against a replacement of it; and the caller's `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the
+other repository-selection variables are dropped, so every listing is this checkout's, which is
+also checked, by the repository's top level); a tracked file git is told to skip
 (assume-unchanged or skip-worktree), since a change there is in no status and no diff; and
 an ignore file that is not the commit's, a modified `.gitignore` or an untracked one, since the
 listings apply the working tree's rules and a file a new rule hides would be in none of them,
