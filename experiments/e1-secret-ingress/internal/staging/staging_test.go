@@ -263,6 +263,15 @@ func TestSealEnvelopeRefusesInvalidUTF8(t *testing.T) {
 	if _, err := sealEnvelope(secret.NewSanitized([]byte("machine:\n  x: \xff\xfe\n"), nil)); err == nil {
 		t.Fatal("sealEnvelope accepted a document that is not valid UTF-8")
 	}
+	for _, ref := range []secret.Reference{
+		{Path: "doc[0].\xffa", URI: "u", Digest: "d"},
+		{Path: "p", URI: "openbao:\xfe", Digest: "d"},
+		{Path: "p", URI: "u", Digest: "\xff"},
+	} {
+		if _, err := sealEnvelope(secret.NewSanitized([]byte("machine: {}\n"), []secret.Reference{ref})); err == nil {
+			t.Errorf("sealEnvelope accepted a reference that is not valid UTF-8: %q", ref)
+		}
+	}
 }
 
 // TestOpenEnvelopeRefusesABareDocument checks the payload shape the first version wrote — the

@@ -30,6 +30,22 @@ func openJournal(t *testing.T) *journal.Journal {
 // that quietly writes nothing produces a clean bundle indistinguishable from an honest run, and
 // the honest run's clean bundle would then be reported as proof of something the instrument never
 // tested. Each surface must contain the value verbatim.
+// TestTheZeroValueIsAnHonestRun checks an Options literal that never set LeakAt is the honest path.
+// Surface's zero value is "", not SurfaceNone, and comparing against SurfaceNone alone scored such
+// a run as a control: Active, captioned "leak-at=" and expected to show a hit.
+func TestTheZeroValueIsAnHonestRun(t *testing.T) {
+	var o Options
+	if o.Active() {
+		t.Error("the zero Options is Active")
+	}
+	if got := o.Describe(); got != "honest path" {
+		t.Errorf("the zero Options is captioned %q, want \"honest path\"", got)
+	}
+	if got := o.LeakAt.Expect(); got != ExpectNone {
+		t.Errorf("the zero surface expects %v, want ExpectNone", got)
+	}
+}
+
 func TestEveryFileSurfaceActuallyLeaks(t *testing.T) {
 	for _, surface := range []Surface{SurfaceTempFile, SurfaceStaging, SurfaceAppLog, SurfaceErrorReport} {
 		t.Run(string(surface), func(t *testing.T) {

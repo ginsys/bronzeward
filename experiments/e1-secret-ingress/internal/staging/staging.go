@@ -514,7 +514,19 @@ func sealEnvelope(s secret.Sanitized) ([]byte, error) {
 	if !utf8.Valid(doc) {
 		return nil, errors.New("staging: the pending change is not valid UTF-8 and would not survive encoding intact; refusing to stage it")
 	}
-	out, err := json.Marshal(envelope{Document: string(doc), References: s.References()})
+	// The references go through the same encoder and are rewritten the same way. The first version
+	// checked only the document, so an invalid byte in a reference's path or URI would have come
+	// back from a resume as U+FFFD, with the digest check passing because it is taken after the
+	// rewrite — the silent change to a reference mapping the envelope was introduced to end.
+	refs := s.References()
+	for i, r := range refs {
+		for field, v := range map[string]string{"path": r.Path, "uri": r.URI, "digest": r.Digest} {
+			if !utf8.ValidString(v) {
+				return nil, fmt.Errorf("staging: reference %d's %s is not valid UTF-8 and would not survive encoding intact; refusing to stage it", i, field)
+			}
+		}
+	}
+	out, err := json.Marshal(envelope{Document: string(doc), References: refs})
 	if err != nil {
 		return nil, fmt.Errorf("staging: encoding the pending change: %w", err)
 	}

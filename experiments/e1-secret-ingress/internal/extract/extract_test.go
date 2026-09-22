@@ -234,6 +234,36 @@ func TestRunFailsWhenTheSameValueSitsAtAnUnmarkedPath(t *testing.T) {
 	}
 }
 
+// TestRunFailsWhenAMultiLineValueRemains covers the value the text search cannot see. A multi-line
+// secret is re-encoded as an indented block, so the value as extracted — lines joined by bare
+// newlines — never appears in the output text, and the first version of the guard passed with the
+// secret still in the document. The body here is built so that the second copy stays behind.
+func TestRunFailsWhenAMultiLineValueRemains(t *testing.T) {
+	const value = "-----BEGIN KEY-----\nline-one-of-the-key\nline-two-of-the-key\n"
+	body := "machine:\n  key: |\n    -----BEGIN KEY-----\n    line-one-of-the-key\n    line-two-of-the-key\n" +
+		"  backup:\n    key: |\n      -----BEGIN KEY-----\n      line-one-of-the-key\n      line-two-of-the-key\n"
+	d, err := document.Load([]byte(body))
+	if err != nil {
+		t.Fatalf("document.Load: %v", err)
+	}
+	if got, _ := d.Get("doc[0].machine.backup.key"); got != value {
+		t.Fatalf("the fixture does not hold the value it means to: %q", got)
+	}
+	j, err := journal.Open(filepath.Join(t.TempDir(), "journal.jsonl"), "run-test")
+	if err != nil {
+		t.Fatalf("journal.Open: %v", err)
+	}
+	t.Cleanup(func() { j.Close() })
+
+	res, err := Run(t.Context(), request(d, newFakeStore(), j, "doc[0].machine.key"))
+	if err == nil {
+		t.Fatalf("Run returned a document still holding a multi-line secret:\n%s", res.Sanitized.Document())
+	}
+	if !strings.Contains(err.Error(), "doc[0].machine.backup.key") {
+		t.Errorf("the error does not name where the value remains: %v", err)
+	}
+}
+
 // TestRunRejectsIncompleteRequests covers the inputs that would each produce a run which looks
 // clean while demonstrating nothing.
 func TestRunRejectsIncompleteRequests(t *testing.T) {

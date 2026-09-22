@@ -188,6 +188,25 @@ func assertNoPlaintextRemains(body []byte, refs []secret.Reference, plaintexts [
 			left = append(left, refs[i].Path)
 		}
 	}
+	// The text search above sees only values the encoder writes out verbatim. A multi-line secret
+	// becomes an indented block, and one with characters YAML must escape becomes a quoted string
+	// with those escapes, so neither appears in the text as it was extracted and the search passes
+	// with the value still there. The re-encoded document is therefore parsed back and every scalar
+	// compared as a value, which is the form the secret was read in.
+	if len(left) == 0 {
+		reparsed, err := document.Load(body)
+		if err != nil {
+			return fmt.Errorf("extract: the sanitized document does not parse back: %w", err)
+		}
+		for _, path := range reparsed.Paths() {
+			value, _ := reparsed.Get(path)
+			for i, u := range plaintexts {
+				if len(u.Unsafe()) > 0 && value == string(u.Unsafe()) {
+					left = append(left, refs[i].Path+" (as the value at "+path+")")
+				}
+			}
+		}
+	}
 	if len(left) > 0 {
 		return fmt.Errorf("extract: the document still holds the value extracted from %s; "+
 			"refusing to return anything persistable", strings.Join(left, ", "))
