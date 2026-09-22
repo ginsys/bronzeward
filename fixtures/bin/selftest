@@ -1080,12 +1080,14 @@ grep --quiet 'ignore rules are not the commit' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the modified ignore file for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
 # An untracked .gitignore that ignores everything in its directory, itself included: the
 # directory is in no status and no listing.
+defer rm -r "$FIXTURES/.selftest-hidden-dir"
 mkdir "$FIXTURES/.selftest-hidden-dir"
 printf '*\n' >"$FIXTURES/.selftest-hidden-dir/.gitignore"
 printf 'helper=%s\n' "$BW_CANARY" >"$FIXTURES/.selftest-hidden-dir/helper"
 went=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
 rm -r "$FIXTURES/.selftest-hidden-dir"
+undefer
 [ "$went" -eq 0 ] || fail "evidence captured while an untracked .gitignore hid its directory under fixtures/"
 grep --quiet 'ignore rules are not the commit' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the untracked ignore file for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
@@ -1124,12 +1126,14 @@ grep --quiet --extended-regexp '^new file mode 100644$' "$bundle/fixtures-diff.t
 unset link_blob
 # A nested repository not staged, a .git directory under fixtures/: what is under it is a
 # repository's, whether git lists it or stops at the directory.
+defer rm -r "$FIXTURES/.selftest-nested"
 mkdir -p "$FIXTURES/.selftest-nested/.git"
 printf 'ref: refs/heads/main\n' >"$FIXTURES/.selftest-nested/.git/HEAD"
 printf 'helper=%s\n' "$BW_CANARY" >"$FIXTURES/.selftest-nested/helper"
 went=0
 "$here/evidence" >/dev/null 2>"$STATE/selftest-evidence.err" && went=1
 rm -r "$FIXTURES/.selftest-nested"
+undefer
 [ "$went" -eq 0 ] || fail "evidence captured with a nested repository under fixtures/"
 grep --quiet 'nested repository' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the nested repository for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"

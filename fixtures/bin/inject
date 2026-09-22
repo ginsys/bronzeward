@@ -247,13 +247,26 @@ finish() {
   # The database swap is one transaction that the server may commit while the signal ends the
   # client: afterwards the database under the live name is the restored one. Told by its OID,
   # which a rename keeps, and which was read from the restored copy before the swap: that the
-  # scratch name is gone would say as much of a drop by someone else. Asked only when the status
-  # says failure, and only while the server answers; a query that fails leaves the status as it was.
-  if [ "$db_swapping" -eq 1 ] && [ "$rc" -ne 0 ] && [ -n "$restore_oid" ] &&
-    live=$(pg psql -U bronzeward -d postgres -Atc "select oid from pg_database where datname = 'bronzeward'" 2>/dev/null) &&
-    [ "$live" = "$restore_oid" ]; then
-    say "fixtures: interrupted after the restored database was swapped in; recorded as done. bronzeward_previous is left; the next db-restore drops it"
-    rc=0
+  # scratch name is gone would say as much of a drop by someone else. A transaction still
+  # in flight at the first look can still commit a moment later, so the look is repeated for a
+  # few seconds rather than taken once; one that never shows the restored OID in that span, or a
+  # query that keeps failing, leaves the outcome unknown, not failed, since the transaction's
+  # own fate past that span is not this handler's to guess.
+  if [ "$db_swapping" -eq 1 ] && [ "$rc" -ne 0 ] && [ -n "$restore_oid" ]; then
+    live=
+    swapped=0
+    for _ in 1 2 3 4 5; do
+      live=$(PG_LIMIT=5 pg psql -U bronzeward -d postgres -Atc "select oid from pg_database where datname = 'bronzeward'" 2>/dev/null) || live=
+      [ "$live" != "$restore_oid" ] || { swapped=1; break; }
+      sleep 1
+    done
+    if [ "$swapped" -eq 1 ]; then
+      say "fixtures: interrupted after the restored database was swapped in; recorded as done. bronzeward_previous is left; the next db-restore drops it"
+      rc=0
+    else
+      status=unknown
+      say "fixtures: the swap transaction's outcome was not confirmed within 5s of the signal; whether the restored database is live is not known"
+    fi
   fi
   # A mutating request OpenBao answered with success, then a failure before the last line, a
   # signal or bao-restore's wait for an active node giving up: the mutation is made, and the log

@@ -91,7 +91,7 @@ list of files containing secret material, or none.
 `fixtures/bin/selftest`, run from a host with no fixture state, 19 September 2026, images already
 pulled. The first revision had 14 checks and passed 14 of 14 twice in a row, in 2 min 35 s each,
 `up` and `down` included. Review added checks 2, 10, 11, 13, 15, 16, 17, 18, 21 and 24 and widened
-1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 61); the revision described here passed 24 of 24 from
+1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 19, 20, 21, 22 and 23 (section 5, items 8 to 62); the revision described here passed 24 of 24 from
 clean. `selftest --keep`, which skips `up` and checks 23 and 24, passed 22 of 22 twice in a row
 against one fixture. Those runs were not timed. Each revision was run this way again, from clean,
 before it was committed, and the run of the revision described here is the one recorded with the
@@ -1564,6 +1564,28 @@ on its own, or not at all is stated per item, and a finding rejected is recorded
     immediately after its PID is captured, unregistered once the explicit kill at the end of the
     case runs. Not exercised: the race on the Compose containers itself, for the same reason as
     the claim's own nonce race (item 59) and the Talos gap above.
+62. **A `db-restore` swap's uncertain outcome held for a few seconds instead of read once, and two
+    more untracked test plants deferred.** A fifty-fifth round: two findings, both accepted, from
+    the one reviewer that answered (the advisory review degraded again, a transport timeout).
+    The swap that commits a restored database is one transaction the server may still complete
+    after the client that started it is signalled away; the exit handler's single, immediate read
+    of the live database's OID could land inside that gap and, seeing the database still under
+    its old identity, log the restore `failed` moments before the transaction went on to commit
+    it after all. The read is now repeated once a second for five seconds; one that never shows
+    the restored OID in that span is logged `unknown`, not `failed`, since the transaction's fate
+    past that span is not this handler's to guess (README, the `inject` row). Found while fixing
+    it, the identical gap Codex named for `selftest`'s nested-repository test plant
+    (`.selftest-nested`, a directory holding a `.git` and a canary-bearing file, left for a
+    `TERM`/`HUP`/`INT` during the `evidence` call right after it, since nothing would remove it
+    and a later `up` would refuse the dirty tree) was present a second time, immediately before
+    it, in the untracked-`.gitignore`-hides-its-directory test plant (`.selftest-hidden-dir`):
+    both now `defer` their removal before creating the directory and `undefer` once the ordinary
+    removal after `evidence` runs, matching the pattern already used elsewhere in the same check.
+    Not extended to the rest of check 22's untracked plants (a second `.selftest-nested`, the
+    empty directory, the two `.selftest-untracked` files, the other-repository directory, the
+    case-folded `README.MD`, the two kept/stale backup archives): the same argument applies to
+    each of them, but bringing every one under `defer` is a materially larger, unreviewed change
+    to an already-converged 745-line check, left for a decision on scope rather than taken here.
 
 ## 6. What each experiment gets
 
