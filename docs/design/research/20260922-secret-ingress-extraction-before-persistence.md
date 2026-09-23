@@ -698,6 +698,20 @@ not report them, and they now go through a mutex and an atomic rather than relyi
 read for ordering. An eighth review raised 1: the direct mark-list constructor, used only by tests,
 did not remove duplicate paths as the file loader refuses them; it now keeps each path once.
 
+A ninth review raised 2, and the first was a real hole in the guard from 5.18. Its value comparison
+walked the addressable paths only, and the subtree under a key with a dot, such as
+`machine.nodeLabels`, is not addressable, so a copy of a secret there, re-encoded as a block, passed
+both the text search and the comparison. Every scalar in the tree, keys included, is now compared,
+and a test built on exactly that shape fails without it. No recorded run can have depended on the
+hole. Every committed journal records exactly one unaddressable key, the node label
+`node.kubernetes.io/exclude-from-external-load-balancers`. Its value is a Kubernetes label value,
+limited to 63 characters of letters, digits, `-`, `_` and `.`, which YAML writes verbatim. The text
+search covers that subtree too, and passed on every run; a copy there could only have escaped it
+if re-encoded, and such a value never is. The
+second: a mark list built with no paths returned an empty result instead of the refusal an empty
+mark file gets. Extraction refused an empty path set regardless, so no run could have proceeded on
+one.
+
 ## 6. What this decides
 
 **§7.1's ordering requirement is implementable, and the evidence for that is structural.** Every

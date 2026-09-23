@@ -212,6 +212,18 @@ func assertNoPlaintextRemains(body []byte, refs []secret.Reference, plaintexts [
 				}
 			}
 		}
+		// Paths omits every subtree under a key with a dot or a bracket, which a real configuration
+		// has (machine.nodeLabels), so a re-encoded copy there passed both checks above. Every
+		// scalar in the tree is compared as well, keys included; it has no path to report.
+		if len(left) == 0 {
+			for _, value := range reparsed.Scalars() {
+				for i, u := range plaintexts {
+					if len(u.Unsafe()) > 0 && value == string(u.Unsafe()) {
+						left = append(left, refs[i].Path+" (as a scalar outside the addressable paths)")
+					}
+				}
+			}
+		}
 	}
 	if len(left) > 0 {
 		return fmt.Errorf("extract: the document still holds the value extracted from %s; "+

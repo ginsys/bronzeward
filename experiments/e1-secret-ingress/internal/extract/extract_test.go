@@ -285,6 +285,34 @@ func TestRunFailsWhenAMultiLineValueRemains(t *testing.T) {
 	}
 }
 
+// TestRunFailsWhenAValueRemainsUnderAnUnaddressableKey covers the copy neither earlier check could
+// see: re-encoded as a block, so the text search misses it, and under a key with a dot, so the path
+// index omits it. Real Talos configurations have such keys in machine.nodeLabels.
+func TestRunFailsWhenAValueRemainsUnderAnUnaddressableKey(t *testing.T) {
+	body := "machine:\n  key: |\n    -----BEGIN KEY-----\n    line-one-of-the-key\n" +
+		"  nodeLabels:\n    example.com/copy: |\n      -----BEGIN KEY-----\n      line-one-of-the-key\n"
+	d, err := document.Load([]byte(body))
+	if err != nil {
+		t.Fatalf("document.Load: %v", err)
+	}
+	if len(d.Unaddressable()) != 1 {
+		t.Fatalf("the fixture's copy is not under an unaddressable key: %q", d.Unaddressable())
+	}
+	j, err := journal.Open(filepath.Join(t.TempDir(), "journal.jsonl"), "run-test")
+	if err != nil {
+		t.Fatalf("journal.Open: %v", err)
+	}
+	t.Cleanup(func() { j.Close() })
+
+	res, err := Run(t.Context(), request(d, newFakeStore(), j, "doc[0].machine.key"))
+	if err == nil {
+		t.Fatalf("Run returned a document still holding the secret under an unaddressable key:\n%s", res.Sanitized.Document())
+	}
+	if !strings.Contains(err.Error(), "outside the addressable paths") {
+		t.Errorf("the error does not say where the value remains: %v", err)
+	}
+}
+
 // TestRunRejectsIncompleteRequests covers the inputs that would each produce a run which looks
 // clean while demonstrating nothing.
 func TestRunRejectsIncompleteRequests(t *testing.T) {

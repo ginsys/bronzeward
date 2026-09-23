@@ -177,6 +177,29 @@ func (d *Document) Unaddressable() []string {
 	return out
 }
 
+// Scalars returns the value of every scalar node in every document, keys included and subtrees
+// under unaddressable keys included. It is for checking what a document holds, not for addressing
+// it: Paths omits exactly the subtrees a leftover secret could hide in.
+func (d *Document) Scalars() []string {
+	var out []string
+	var visit func(*yaml.Node)
+	visit = func(n *yaml.Node) {
+		if n == nil {
+			return
+		}
+		if n.Kind == yaml.ScalarNode {
+			out = append(out, n.Value)
+		}
+		for _, c := range n.Content {
+			visit(c)
+		}
+	}
+	for _, root := range d.roots {
+		visit(root)
+	}
+	return out
+}
+
 // Get returns the scalar at path.
 func (d *Document) Get(path string) (string, bool) {
 	node, ok := d.index[path]

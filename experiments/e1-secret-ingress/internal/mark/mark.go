@@ -96,6 +96,12 @@ func (p *PathList) Name() string { return "path-list:" + p.source }
 
 // Marks implements Source. Every listed path must exist in the document.
 func (p *PathList) Marks(d *document.Document) ([]string, error) {
+	if len(p.paths) == 0 {
+		// LoadPathList refuses an empty file; a list built directly with no paths must fail the same
+		// way rather than return an empty mark set as if that were a result.
+		return nil, fmt.Errorf("mark: %s marks nothing; a run with no marks cannot demonstrate "+
+			"extraction and would be recorded as clean", p.source)
+	}
 	var missing []string
 	for _, path := range p.paths {
 		if _, ok := d.Get(path); !ok {

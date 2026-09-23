@@ -101,6 +101,14 @@ func TestNewPathListKeepsAPathOnce(t *testing.T) {
 	}
 }
 
+// TestEmptyPathListMarksNothingIsAnError holds the direct constructor to LoadPathList's refusal of
+// an empty file.
+func TestEmptyPathListMarksNothingIsAnError(t *testing.T) {
+	if got, err := NewPathList("test").Marks(load(t)); err == nil {
+		t.Fatalf("an empty list returned %q and no error", got)
+	}
+}
+
 // TestPathListRejectsDuplicates checks a path listed twice is refused. Extracting one secret twice
 // would put two EventExtracted records in the journal for one value and make the count wrong.
 func TestPathListRejectsDuplicates(t *testing.T) {
