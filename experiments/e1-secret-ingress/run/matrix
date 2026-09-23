@@ -34,10 +34,20 @@ inject=$FIXTURES_DIR/bin/inject
 import_config=$(e1_config import)
 
 failed=()
+taken=()
+# The set of bundles is written only by a matrix that succeeded, and run/collect-evidence refuses
+# anything else, so a stale list from an earlier run must not survive into this one.
+rm -f -- "$E1_OUT/matrix-bundles.txt"
 take() { # take <run-id> <expectation> -- <e1 args>
   say ""
   say "=== $1 ($2) ==="
+  taken+=("$1")
   "$capture" "$@" || failed+=("$1")
+}
+
+# wal_hits <run-id>: the write-ahead-log occurrences in a bundle's leak scan.
+wal_hits() {
+  awk '/postgres-data\/pg_wal\// {n += $1} END {print n + 0}' "$E1_BUNDLES/$1/leak-scan.txt"
 }
 
 # expect_status <run-id> ok|killed|refused: what the run itself must have done, read back from the
@@ -234,6 +244,16 @@ take control-persist-first-redact-after leak 'postgres-data/pg_wal,!postgres.sql
 expect_status control-persist-first-redact-after ok
 take control-persist-first-rollback leak 'postgres-data/pg_wal,!postgres.sql' -- --persist-first --rollback --config="$import_config" import
 expect_status control-persist-first-rollback ok
+# Rollback writes the same secrets redact-after already put in the log, so a hit in pg_wal alone
+# could be that residue. Its own writes show as an increase over the bundle before it.
+before_wal=$(wal_hits control-persist-first-redact-after)
+after_wal=$(wal_hits control-persist-first-rollback)
+if [ "$after_wal" -gt "$before_wal" ]; then
+  say "matrix: OK rollback added to the write-ahead log: $before_wal occurrence(s) before it, $after_wal after"
+else
+  say "matrix: FAIL rollback's write-ahead-log count ($after_wal) does not exceed redact-after's ($before_wal)"
+  failed+=(control-persist-first-rollback/own-wal)
+fi
 take control-persist-first leak 'postgres-data/pg_wal,postgres.sql' -- --persist-first --config="$import_config" import
 expect_status control-persist-first ok
 
@@ -241,6 +261,33 @@ expect_status control-persist-first ok
 # not: see the residue note at the top.
 take honest-import-final residue 'postgres-data/pg_wal,postgres.sql' -- --staging=transient --config="$import_config" import
 expect_status honest-import-final ok
+
+# Criterion 2's exact encrypted baseline, checked by a process that did not write it: each honest
+# run's persisted baseline.json must decrypt to the digest it records, and every one must record the
+# same input digest, since they all ingested the same configuration. Ciphertext is not compared
+# across runs — Transit's nonce makes a correct implementation fail that.
+report=$E1_REPORTS/baseline-verify.txt
+: >"$report"
+digests=()
+for run in honest-import-transient honest-import-encrypted honest-adopt-transient honest-import-flushed honest-import-final; do
+  file=$E1_RUNS/$run/baseline.json
+  if out=$(e1_env "$E1_BIN" baseline-verify "$file" 2>&1); then
+    printf '%s\t%s\n' "$run" "${out%%$'\n'*}" >>"$report"
+  else
+    printf '%s\tFAIL %s\n' "$run" "$out" >>"$report"
+    failed+=("$run/baseline")
+  fi
+  digests+=("$(sed -n 's/.*"input_sha256": *"\([0-9a-f]*\)".*/\1/p' "$file")")
+done
+distinct=$(printf '%s\n' "${digests[@]}" | sort -u | sed '/^$/d' | wc -l)
+if [ "$distinct" -eq 1 ]; then
+  printf 'input digest identical across all %d runs: %s\n' "${#digests[@]}" "${digests[0]}" >>"$report"
+  say "matrix: OK every persisted baseline verified, one input digest across ${#digests[@]} runs"
+else
+  printf 'input digests differ across runs (%d distinct)\n' "$distinct" >>"$report"
+  say "matrix: FAIL the baselines record $distinct different input digests"
+  failed+=(baseline/input-digest)
+fi
 
 say ""
 first=$E1_BUNDLES/honest-import-transient/talos-config-sha256.txt
@@ -259,6 +306,7 @@ fi
 
 say ""
 if [ "${#failed[@]}" -eq 0 ]; then
+  printf '%s\n' "${taken[@]}" >"$E1_OUT/matrix-bundles.txt"
   say "matrix: every bundle satisfied its expectation. Bundles in $E1_BUNDLES"
   exit 0
 fi

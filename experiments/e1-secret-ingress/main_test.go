@@ -12,9 +12,18 @@ import (
 // runCLI drives run() with the flag set a real invocation would get.
 func runCLI(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	keepTempDir(t)
 	var out, errBuf bytes.Buffer
 	err = run(args, &out, &errBuf)
 	return out.String(), errBuf.String(), err
+}
+
+// keepTempDir restores TMPDIR after the test. prepareRunRoot points it into the run root, as a
+// real run needs, and a test's run root is deleted when the test ends: left set, every later
+// t.TempDir in the package would be created under a directory that no longer exists.
+func keepTempDir(t *testing.T) {
+	t.Helper()
+	t.Setenv("TMPDIR", os.Getenv("TMPDIR"))
 }
 
 // TestFlagValidation covers the invocations that must fail before anything is written. Each of
@@ -210,11 +219,17 @@ func TestBaselineVerifyArgumentsAndLoading(t *testing.T) {
 func TestPrepareRunRootPlantsTheReachabilityControl(t *testing.T) {
 	const canary = "BWSYNTH-TESTCANARY-0123456789"
 	t.Setenv(canaryEnv, canary)
+	keepTempDir(t)
 
 	root := filepath.Join(t.TempDir(), "run-0001")
 	opts, err := prepareRunRoot(options{runRoot: root})
 	if err != nil {
 		t.Fatalf("prepareRunRoot: %v", err)
+	}
+	// The process's temporary directory is inside the run root, which is what makes a temporary
+	// file visible to the capture's scan.
+	if got, want := os.TempDir(), filepath.Join(opts.runRoot, "tmp"); got != want {
+		t.Errorf("os.TempDir() = %q, want it inside the run root at %q", got, want)
 	}
 
 	if opts.runID != "run-0001" {
@@ -250,6 +265,7 @@ func TestPrepareRunRootPlantsTheReachabilityControl(t *testing.T) {
 // uninterpretable, which is the failure this whole mechanism exists to prevent.
 func TestPrepareRunRootRefusesWithoutACanary(t *testing.T) {
 	t.Setenv(canaryEnv, "")
+	keepTempDir(t)
 
 	root := filepath.Join(t.TempDir(), "run-0002")
 	if _, err := prepareRunRoot(options{runRoot: root}); err == nil {

@@ -115,6 +115,11 @@ if [ "$held" = yes ]; then
   # the capture would reproduce the original defect silently.
   grep -q 'hold over' "$run_root/stderr.txt" &&
     die "capture: $run_id's hold ended before its bundle was complete; lengthen --hold-for"
+  # The journal as it stood when the bundle was taken. The run finishes after this, and the
+  # committed journal used to be the finished one, which records the draft and the release — not
+  # the outstanding claim the bundle was taken to show.
+  cp -- "$run_root/journal.jsonl" "$run_root/journal-at-capture.jsonl" ||
+    die "capture: could not keep $run_id's journal as it was at the capture"
   if wait "$pid"; then status=ok; else status=exit-$?; fi
   say "capture: $run_id finished $status after its hold"
 fi

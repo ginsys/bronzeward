@@ -361,8 +361,8 @@ compiler, citing a test that did not exist. 5.16 adds an eighth: a recovery that
 reference and passed because nothing read the rows. 5.17 adds a ninth: a redaction test that used
 the one kind of field where redaction works, with a leak detector that could only see one spelling
 of a leak. All three were found by an external review rather than by the habit that found the first
-six, which is the argument for having both. 5.19 records three more from the fifth review, smaller
-in consequence and identical in shape.
+six, which is the argument for having both. 5.20 records the same shape at the level of the
+capture itself, found by the Codex review.
 
 An experiment whose instrument can report clean without looking proves nothing at all, and the
 count above is the honest reason for every positive control described in section 4.
@@ -680,110 +680,34 @@ now reports was taken after all of them (5.20). The reason for each is stated ra
 - **The staging envelope checked UTF-8 only in the document**, not in the references it carries.
   Every reference a run produces is valid UTF-8, so no staged payload changes.
 
-### 5.19 The fifth review
+### 5.19 Advisory rounds five to eighteen: the prototype hardened, the evidence unchanged
 
-A fifth advisory review raised 8 findings, all real. Three are the section's recurring shape — a
-check that could not fail:
+Fourteen further advisory rounds raised 35 findings between them, the last round none. All were
+checked against the source; one was declined, one recorded as an open decision, and the rest were
+fixed, each with a test. Almost
+none touched a recorded result; they hardened throwaway code — connection-string redaction for
+passwords holding a space, quote, backslash, `#` or a bad percent escape, not following provider
+redirects, UTF-8 and version-number validation, sub-second leases, a mutex for concurrency the
+prototype never has, and several tests made able to fail. That is recorded here as one line rather
+than round by round because it is not a finding about the design: a Phase-0 prototype reviewed
+without a rule separating "affects the evidence" from "robustness of code that will be thrown away"
+grows in the second direction indefinitely. From the Codex round on (5.20), a finding of the second
+kind is answered as out of scope for Phase-0 rather than fixed.
 
-- **The schema-report test asserted the words, not the figures.** It looked for "recall" and
-  "precision", and the report's footer prints "recall" on every run. It now asserts
-  `recall 4/5, precision 4/4` for its fixture.
-- **The redaction tests could not see `%#v`'s spelling of a byte slice**, `0x45, 0x31, …`, which is
-  the one those cases would print. The spelling is added, and a new calibration requires every verb
-  the tests use to have its leak recognised on the unprotected control; with the spelling removed,
-  it fails on `%#v`. The closure from 5.17 is why no redaction test was actually passing a leak.
-- **A bundle missing `fixtures-diff.txt` passed as "fixtures unmodified"**, because the check read
-  an absent file as an empty one. The fixture writes the file on every capture, empty when the tree
-  matched, so absence is now a failure.
+Three results from those rounds do matter:
 
-The other five were fixed without re-capturing, again because no recorded output depends on them.
-The report's own count of these subsections was stale. A path named twice, once by schema detection
-and once by a mark, aborted the run as a re-ingestion, and every honest run in section 4 completed,
-so none named one twice. The provider now refuses a value that is not valid UTF-8, which every
-recorded value was, since each was read back byte-for-byte. The provider client no longer follows
-redirects, which would replay the token and, for a 307, the secret body to the target; the fixture
-runs one OpenBao node with no standby to redirect to. And the capture script now refuses an empty or
-multi-segment run id, which would have made its cleanup delete every earlier run.
-
-A sixth review raised 2, both real, neither changing an output. The staging lease was sent to
-PostgreSQL truncated to whole seconds, so a sub-second lease became `0 seconds`; fractional seconds
-are now kept. Every run used the five-minute default, which still renders as `300 seconds`. And
-`Unresolved`'s doc comment claimed its zero value renders identically to a set one, when the code
-deliberately renders `unset` in place of the digest, as a test requires; the comment now describes
-the code.
-
-A seventh review raised 3. The connection string built from the fixture password interpolated it
-bare, so a password with a space, a quote or a backslash was mis-parsed, and lib/pq's parse error
-quoted a fragment of it that redaction could not recognise; it is now single-quoted and escaped,
-and a test reads the password back through lib/pq's own parser. The fixture's synthetic password
-has none of those characters, so every recorded run connected with the same value. The other two
-were test-side: the provider tests' request recorder and redirect counter were shared between the
-stand-in server's goroutine and the test's without explicit synchronisation. The race detector did
-not report them, and they now go through a mutex and an atomic rather than relying on the response
-read for ordering. An eighth review raised 1: the direct mark-list constructor, used only by tests,
-did not remove duplicate paths as the file loader refuses them; it now keeps each path once.
-
-A ninth review raised 2, and the first was a real hole in the guard from 5.18. Its value comparison
-walked the addressable paths only, and the subtree under a key with a dot, such as
-`machine.nodeLabels`, is not addressable, so a copy of a secret there, re-encoded as a block, passed
-both the text search and the comparison. Every scalar in the tree, keys included, is now compared,
-and a test built on exactly that shape fails without it. No recorded run can have depended on the
-hole. Every committed journal records exactly one unaddressable key, the node label
-`node.kubernetes.io/exclude-from-external-load-balancers`. Its value is a Kubernetes label value,
-limited to 63 characters of letters, digits, `-`, `_` and `.`, which YAML writes verbatim. The text
-search covers that subtree too, and passed on every run; a copy there could only have escaped it
-if re-encoded, and such a value never is. The
-second: a mark list built with no paths returned an empty result instead of the refusal an empty
-mark file gets. Extraction refused an empty path set regardless, so no run could have proceeded on
-one.
-
-A tenth review raised 4. The ordering verifier exempted any write whose free-text detail began
-`recover:`; the exemption now also requires a journal with no extraction at all, which every
-ingestion has, and a named run. All 22 committed journals verify with the same verdict under the
-stricter rule. The provider's version-number parse accepted `1x` as 1; it is now strict. The two
-call-site scans matched the text `.Unsafe()` and `NewSanitized(`, so a method value or a call split
-across lines passed them; they now match identifier tokens, with a calibration covering each form.
-The fourth — digests persisted unsalted — is a contract decision rather than a defect in the
-prototype, and is recorded in section 7 and recommendation 7 instead of being changed here. An
-eleventh review raised 1: transient staging's in-memory map was unguarded. The prototype drives one
-ingestion at a time, so no run could have raced on it, but a concurrent map write aborts a Go
-process outright; the map is now behind a mutex, and a concurrency test aborts without it. A
-twelfth review raised 1: the claim a hold returns carried zero creation and heartbeat times,
-because the insert returned only the expiry; it now returns all three. Nothing read those two
-fields from a held claim, so no output changed, and the statement was not run against a live
-database this round. A thirteenth review raised 2. The connection-string password scan stopped at
-the first malformed token, leaving any password after it unredacted; it now carries on past it,
-and the fixture's own DSN has no malformed token. The other asked for the extraction guard's
-substring search to be dropped, since a short value occurring inside another would refuse an
-honest run. It was kept: the whole-scalar comparisons cannot see a secret embedded in a larger
-value — a token inside a URL or a command line — which is the case the substring search is for,
-and refusing an honest run is the failure direction that leaks nothing. No recorded run was
-refused this way. A fourteenth review raised 3, all in tests or contracts: the round-trip test's
-trailing-empty-document case compared paths, which a dropped trailing document leaves unchanged,
-and now compares the bytes; the suffix mark source relied on its input's order for the sorted
-result its contract promises, and now sorts; and the DSN test's reflection into lib/pq would have
-panicked rather than failed had the dependency renamed its field. A fifteenth review raised 1:
-a failure to journal the commit, after the draft had committed, returned an error that read like
-every pre-commit failure, after which nothing exists. It now wraps a distinct
-`ErrCommittedUnrecorded` that says the rows are committed. No recorded run hit it. A sixteenth
-review raised 3. The extraction guard's substring search matched a short value inside the very
-reference that replaced it, whose URI carries the run id and the path; the substituted references
-are now removed from the text before it is searched, and an embedded copy elsewhere is still
-refused, by test. A URL-form DSN whose query password held an invalid percent escape lost that
-password to `url.Values`, which drops such a pair silently; the query is now read as text. And
-the NewSanitized call-site scan counted test files toward its "scanned something" guard, though
-it inspects none of them. Every honest recorded run passed the wider search, and the narrower one
-refuses a subset of what it refused, so no recorded outcome changes. A seventeenth review raised
-4. The statement-log control's reset ran on the caller's context, which a hold or crash path may
-already have cancelled, and a failed reset returned the connection to the pool still logging in
-full; it now resets on its own context and discards the connection if the reset fails. Every
-matrix run is its own process, so a leaked setting could not have outlived the run that set it.
-Transient release dropped the held change before the claim's transition, so a failed transition
-left a held row with no change behind it; the order is now the one Resume uses. A URL DSN with
-`#` in its password parsed without error as a shorter password; the rough reading is now always
-added, and redaction replaces the longest spelling first so the misreading cannot split the real
-one. And a control test's zero-document assertion passed a nil database, so the nil-database
-guard answered first; it now passes a real, unconnected handle.
+- **A real hole in the extraction guard (round nine).** The value comparison added in 5.18 walked
+  only addressable paths, so a re-encoded copy of a secret under a key with a dot, such as
+  `machine.nodeLabels`, passed it; every scalar in the tree is now compared. No recorded run
+  depended on the hole: every committed journal names one unaddressable key, a Kubernetes node
+  label whose value YAML writes verbatim, and the text search, which covers that subtree, passed.
+- **The substring search was kept, and narrowed (rounds thirteen and sixteen).** Whole-scalar
+  comparison cannot see a secret embedded in a larger value — a token inside a URL or a join
+  command — so the substring search stays, since a false refusal leaks nothing and a false pass
+  persists plaintext; it now skips the references the run substituted, which carry the run id and
+  path and matched short values.
+- **Digests are persisted unsalted (round ten)** — a contract decision, recorded in section 7 and
+  recommendation 7 rather than changed here.
 
 ### 5.20 The Codex review, and what it found about the evidence itself
 
@@ -990,7 +914,10 @@ first is feasible, for this prototype, these flows, these secrets and these boun
    assert it, which is what the reachability control and the two-line invariant do here. The three
    the habit missed — an overclaimed guarantee, a recovery that dropped its references and a
    redaction that held only for exported fields (5.15–5.17) — were found by an independent review,
-   so the evidence work needs one of those too.
+   so the evidence work needs one of those too. It also needs a rule for what that review is for:
+   findings that bear on whether the evidence shows what is claimed are fixed and re-captured, and
+   robustness findings against Phase-0 code are out of scope. Without that rule, fourteen rounds
+   hardened this prototype while the capture defects in 5.20 went unnoticed (5.19).
 
 7. **Decide how a secret's digest is keyed before v1 persists one.** Section 7 records the
    prototype persisting unsalted SHA-256 digests, which is a guessing oracle for any low-entropy

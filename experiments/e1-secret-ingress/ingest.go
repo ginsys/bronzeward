@@ -166,7 +166,7 @@ func ingest(ctx context.Context, opts options, source string, stdout io.Writer) 
 	// here instead would stop the run after the claim had already been resumed and released, so a
 	// crash would leave nothing held and the recovery comparison the two staging alternatives exist
 	// for would have nothing to take over.
-	sanitized, err := stageAndResume(ctx, opts, db, client, result.Sanitized, j, ctrl)
+	sanitized, release, err := stageAndResume(ctx, opts, db, client, result.Sanitized, j, ctrl)
 	if err != nil {
 		return err
 	}
@@ -190,6 +190,12 @@ func ingest(ctx context.Context, opts options, source string, stdout io.Writer) 
 		}, j, ctrl); err != nil {
 			return err
 		}
+	}
+	// The claim is released only once the draft it became has committed, as recover does. Released
+	// earlier, a crash inside the draft transaction — or any persistence error — rolled the draft
+	// back after the only staged copy had already been cleared, leaving nothing for anyone to recover.
+	if err := release(ctx); err != nil {
+		return err
 	}
 
 	if opts.baseline {
@@ -409,26 +415,29 @@ func plainIndex(doc *document.Document, paths []string) map[string]string {
 // The same principal resumes here. A resume by a different one is what the recover subcommand does,
 // and keeping it a separate process is the point: an in-process resume would prove the program is
 // self-consistent, not that a second party can take over.
-func stageAndResume(ctx context.Context, opts options, db *store.DB, client *provider.Client, s secret.Sanitized, j *journal.Journal, ctrl *checkpoint.Control) (secret.Sanitized, error) {
+//
+// The claim is not released here. The caller releases it, through the returned function, once the
+// draft the change becomes has committed.
+func stageAndResume(ctx context.Context, opts options, db *store.DB, client *provider.Client, s secret.Sanitized, j *journal.Journal, ctrl *checkpoint.Control) (secret.Sanitized, func(context.Context) error, error) {
 	place, err := openStagingWith(opts, db, client)
 	if err != nil {
-		return secret.Sanitized{}, err
+		return secret.Sanitized{}, nil, err
 	}
 	principal, err := staging.NewPrincipal("operator")
 	if err != nil {
-		return secret.Sanitized{}, err
+		return secret.Sanitized{}, nil, err
 	}
 
 	claim, err := place.Hold(ctx, opts.runID, principal, s, checkpoint.InReview)
 	if err != nil {
-		return secret.Sanitized{}, err
+		return secret.Sanitized{}, nil, err
 	}
 	if _, err := j.Append(journal.Record{
 		Event: journal.EventNote,
 		Detail: fmt.Sprintf("staged in %s staging as %s until %s",
 			place.Mode(), principal, claim.ExpiresAt.UTC().Format("15:04:05Z")),
 	}); err != nil {
-		return secret.Sanitized{}, err
+		return secret.Sanitized{}, nil, err
 	}
 
 	// The change is staged and the claim is outstanding: this is the review window the two staging
@@ -438,12 +447,10 @@ func stageAndResume(ctx context.Context, opts options, db *store.DB, client *pro
 
 	resumed, _, err := place.Resume(ctx, opts.runID, principal)
 	if err != nil {
-		return secret.Sanitized{}, err
+		return secret.Sanitized{}, nil, err
 	}
-	if err := place.Release(ctx, opts.runID, principal); err != nil {
-		return secret.Sanitized{}, err
-	}
-	return resumed, nil
+	release := func(ctx context.Context) error { return place.Release(ctx, opts.runID, principal) }
+	return resumed, release, nil
 }
 
 // retainBaseline keeps the observed configuration as ciphertext, which §7.1 permits, rather than as
