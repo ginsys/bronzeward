@@ -399,10 +399,12 @@ func TestNewSanitizedHasNoUnexpectedCallers(t *testing.T) {
 		if d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
-		scanned++
 		if strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
+		// Counted after the skip: the guard below is about the files this check inspects, and test
+		// files alone must not satisfy it.
+		scanned++
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return err

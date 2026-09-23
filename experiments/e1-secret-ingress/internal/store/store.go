@@ -399,12 +399,22 @@ func roughURLPasswords(dsn string) []string {
 		}
 	}
 	if _, q, found := strings.Cut(rest, "?"); found {
-		for _, kv := range strings.Split(q, "&") {
-			if pw, ok := strings.CutPrefix(kv, "password="); ok && pw != "" {
-				out = append(out, pw)
-				if decoded, err := url.QueryUnescape(pw); err == nil && decoded != pw {
-					out = append(out, decoded)
-				}
+		out = append(out, queryPasswords(q)...)
+	}
+	return out
+}
+
+// queryPasswords reads every password= value from a raw query string as text, both as written
+// and unescaped. url.Values is not used: its parser silently drops a pair whose value holds an
+// invalid percent escape, and url.Parse does not validate the query, so such a password reached
+// neither this function's caller nor the rough fallback and was left unredacted.
+func queryPasswords(rawQuery string) []string {
+	var out []string
+	for _, kv := range strings.Split(rawQuery, "&") {
+		if pw, ok := strings.CutPrefix(kv, "password="); ok && pw != "" {
+			out = append(out, pw)
+			if decoded, err := url.QueryUnescape(pw); err == nil && decoded != pw {
+				out = append(out, decoded)
 			}
 		}
 	}
@@ -425,10 +435,7 @@ func dsnPasswords(dsn string) []string {
 		if pw, ok := u.User.Password(); ok && pw != "" {
 			out = append(out, pw)
 		}
-		if pw := u.Query().Get("password"); pw != "" {
-			out = append(out, pw)
-		}
-		return out
+		return append(out, queryPasswords(u.RawQuery)...)
 	}
 	// Key/value form, scanned the way lib/pq's parseOpts scans it (conn.go in v1.10.9): whitespace
 	// may surround '=', a value may be single-quoted, and a backslash escapes the next character in
