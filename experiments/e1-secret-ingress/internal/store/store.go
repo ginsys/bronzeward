@@ -228,13 +228,21 @@ func (db *DB) PersistDraft(ctx context.Context, d Draft, j *journal.Journal, ctr
 		Surface:    "machine_draft",
 		Detail:     "committed",
 	}); err != nil {
-		return fmt.Errorf("store: recording the commit: %w", err)
+		// Past the commit the rows exist whatever happens next, so this failure must not read like
+		// the ones above, after which nothing was persisted.
+		return fmt.Errorf("%w: %w", ErrCommittedUnrecorded, err)
 	}
 	if ctrl != nil {
 		ctrl.Reach(checkpoint.AfterCommit)
 	}
 	return nil
 }
+
+// ErrCommittedUnrecorded is PersistDraft's one failure after which the draft, its parsed index and
+// its references are committed: the journal note recording the commit could not be written. Every
+// other error from PersistDraft means nothing was persisted. The note cannot share the
+// transaction, because the journal is a file.
+var ErrCommittedUnrecorded = errors.New("store: the draft is committed, but the commit could not be recorded in the journal")
 
 // insertParsedIndex writes one row per scalar in the sanitized document.
 //

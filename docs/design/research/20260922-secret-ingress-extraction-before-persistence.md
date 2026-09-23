@@ -737,7 +737,10 @@ refused this way. A fourteenth review raised 3, all in tests or contracts: the r
 trailing-empty-document case compared paths, which a dropped trailing document leaves unchanged,
 and now compares the bytes; the suffix mark source relied on its input's order for the sorted
 result its contract promises, and now sorts; and the DSN test's reflection into lib/pq would have
-panicked rather than failed had the dependency renamed its field.
+panicked rather than failed had the dependency renamed its field. A fifteenth review raised 1:
+a failure to journal the commit, after the draft had committed, returned an error that read like
+every pre-commit failure, after which nothing exists. It now wraps a distinct
+`ErrCommittedUnrecorded` that says the rows are committed. No recorded run hit it.
 
 ## 6. What this decides
 
