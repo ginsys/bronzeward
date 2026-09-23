@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -368,14 +369,22 @@ func nullable(s string) any {
 // would carry it.
 func redactDSN(err error, dsn string) error {
 	text := err.Error()
+	// Every spelling of every candidate, longest first. Candidates overlap — a misparsed prefix of
+	// a password beside the password itself — and replacing the short one first would split the
+	// long one so that it no longer matched, leaving its remainder in the text.
+	seen := map[string]bool{}
+	var spellings []string
 	for _, value := range dsnPasswords(dsn) {
-		text = strings.ReplaceAll(text, value, "[redacted]")
-		if escaped := url.QueryEscape(value); escaped != value {
-			text = strings.ReplaceAll(text, escaped, "[redacted]")
+		for _, s := range []string{value, url.QueryEscape(value), url.PathEscape(value)} {
+			if s != "" && !seen[s] {
+				seen[s] = true
+				spellings = append(spellings, s)
+			}
 		}
-		if escaped := url.PathEscape(value); escaped != value {
-			text = strings.ReplaceAll(text, escaped, "[redacted]")
-		}
+	}
+	sort.SliceStable(spellings, func(i, j int) bool { return len(spellings[i]) > len(spellings[j]) })
+	for _, s := range spellings {
+		text = strings.ReplaceAll(text, s, "[redacted]")
 	}
 	if text == err.Error() {
 		return err
@@ -435,7 +444,12 @@ func dsnPasswords(dsn string) []string {
 		if pw, ok := u.User.Password(); ok && pw != "" {
 			out = append(out, pw)
 		}
-		return append(out, queryPasswords(u.RawQuery)...)
+		out = append(out, queryPasswords(u.RawQuery)...)
+		// The rough reading is added even when url.Parse succeeds. A '#' in the password parses as
+		// the start of a fragment, so postgres://u:p@ss#word@h/d yields the password "p" with no
+		// error, and the real one reached no path at all. redactDSN replaces longest first, so the
+		// short misreading cannot cut the full password apart before it is matched.
+		return append(out, roughURLPasswords(dsn)...)
 	}
 	// Key/value form, scanned the way lib/pq's parseOpts scans it (conn.go in v1.10.9): whitespace
 	// may surround '=', a value may be single-quoted, and a backslash escapes the next character in

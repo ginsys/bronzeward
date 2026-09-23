@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/journal"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/secret"
+	_ "github.com/lib/pq"
 )
 
 // plaintext stands in for the fixture canary. It is not a real credential and never was: the
@@ -255,9 +257,18 @@ func TestPersistFirstAndRedactAfterRefuseBeforeAnyStatement(t *testing.T) {
 	if err := RedactAfter(ctx, nil, "run-1", secret.NewSanitized(body, nil), openJournal(t)); err == nil {
 		t.Error("RedactAfter ran with no database")
 	}
-	// The zero Sanitized never went through extraction, so there is nothing to redact to.
-	if err := RedactAfter(ctx, nil, "run-1", secret.Sanitized{}, openJournal(t)); err == nil {
+	// The zero Sanitized never went through extraction, so there is nothing to redact to. A real
+	// handle is passed, or the nil-database guard above would answer first and this could not fail;
+	// sql.Open does not connect, and the guard must refuse before any statement tries to.
+	db, err := sql.Open("postgres", "host=127.0.0.1 port=1 user=nobody dbname=none sslmode=disable connect_timeout=1")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := RedactAfter(ctx, db, "run-1", secret.Sanitized{}, openJournal(t)); err == nil {
 		t.Error("RedactAfter accepted a document that did not come from extraction")
+	} else if !strings.Contains(err.Error(), "sanitized form") {
+		t.Errorf("RedactAfter refused for another reason than the zero Sanitized: %v", err)
 	}
 }
 

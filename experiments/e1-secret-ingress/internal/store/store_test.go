@@ -247,6 +247,22 @@ func TestRedactDSNCoversEveryFormLibPQAccepts(t *testing.T) {
 		t.Errorf("the password survived redaction: %s", text)
 	}
 
+	// A '#' in the password: url.Parse succeeds, reading the rest as a fragment, and returns the
+	// password "p". The real one must still be found, and redacted whole rather than cut apart by
+	// the short misreading.
+	hash := "postgres://bronzeward:p@ss#word@127.0.0.1:55432/bronzeward"
+	if u, err := url.Parse(hash); err != nil {
+		t.Fatalf("the test's DSN does not parse, so it exercises the fallback instead: %v", err)
+	} else if pw, _ := u.User.Password(); pw != "p" {
+		t.Fatalf("url.Parse read the password as %q; the test assumes the fragment misreading", pw)
+	}
+	text := redactDSN(errors.New("failed: "+hash), hash).Error()
+	for _, piece := range []string{"p@ss#word", "ss#word"} {
+		if strings.Contains(text, piece) {
+			t.Errorf("the password survived redaction as %q: %s", piece, text)
+		}
+	}
+
 	// A URL-form DSN net/url refuses: the raw password holds a space and a '#', so url.Parse fails
 	// and the first version returned no password at all for exactly the DSN most likely to be
 	// quoted back whole.
