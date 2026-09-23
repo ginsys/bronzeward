@@ -206,8 +206,10 @@ committed, so these observations are recorded here and not reproducible from `ev
 
 A claim is released only after the draft and its references have committed. `crashed-in-db-txn`,
 killed inside that transaction, therefore leaves its claim `resumed` with its ciphertext and no
-draft row, recoverable rather than lost; before 5.20 the release ran first and the same crash
-discarded the only copy of the pending change.
+draft row; before 5.20 the release ran first and the same crash discarded the only copy of the
+pending change. The ciphertext survives but is stranded: `Encrypted.Resume` accepts only a `held`
+claim, so no later process can take over a `resumed` one until a takeover policy exists (section
+7).
 
 **Criterion 2 — the encrypted baseline.** `e1 baseline-verify` ran on the five runs that persisted a
 baseline (the three honest imports, the adopt run and `honest-import-final`). Each baseline decrypts
