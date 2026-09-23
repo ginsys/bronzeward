@@ -100,10 +100,14 @@ written together with the reference tokens that replaced each secret. A separate
 a process that is not the one that wrote the journal, asserts that every secret's extraction
 precedes the first write of any payload that could contain it.
 
-**Three observers that are not the prototype.** PostgreSQL's server-side `clock_timestamp()` and
-write-ahead-log position; OpenBao's per-version `created_time`, read out of band through a
-metadata-only identity; and the fixture's injection log, written by a third process. Both
-containers share the host clock, which is stated here rather than assumed away.
+**Three observers that are not the prototype — recorded, not checked.** PostgreSQL's server-side
+`clock_timestamp()` and write-ahead-log position; OpenBao's per-version `created_time`, read out of
+band through a metadata-only identity; and the fixture's injection log, written by a third process.
+Both containers share the host clock. The design called for these to corroborate the journal's
+ordering. As built, the injection log is committed and used to attribute the matrix's deliberate
+kills, but nothing compares the database or provider timestamps with the journal, and they are in
+the uncommitted bundles only. They contribute no check that could contradict the prototype's own
+account, and this report does not rest on them (5.21).
 
 ### Boundaries and how each is stopped at
 
@@ -141,9 +145,10 @@ beginning with `BWSYNTH-`; the rest — OpenBao's root token and unseal key, Tal
 bundle — are collected after creation. All of them become fixed-string scan patterns, which is what
 makes an absence claim here checkable at all.
 
-No secret is ever a command-line argument. `argv` is world-readable through `/proc` and is captured
-by the evidence bundles these runs produce, so every credential reaches the prototype through the
-environment.
+No secret is ever a command-line argument. `argv` is world-readable through `/proc`, so every
+credential reaches the prototype through the environment. That is a property of how the harness
+invokes the prototype, not a measured result: no bundle captures a process's command line, so a
+secret-bearing argument would not be seen by any scan here.
 
 ## 4. Expected and observed
 
@@ -195,7 +200,9 @@ ciphertext, which scans clean. That is the difference between the two alternativ
 moment it exists. The first captures of these two bundles were taken after the hold had expired and
 the run had finished, and so showed neither (5.20). Each held bundle's committed `journal.jsonl` is
 the journal as it stood at the capture, ending at in-review; the journal the run wrote once the hold
-ended sits beside it as `journal-complete.jsonl`, and `verify-order` is run on that one.
+ended sits beside it as `journal-complete.jsonl`, and `verify-order` is run on that one. The claim
+states and payload presence above were read from each bundle's database dump. The dump is not
+committed, so these observations are recorded here and not reproducible from `evidence/` alone.
 
 A claim is released only after the draft and its references have committed. `crashed-in-db-txn`,
 killed inside that transaction, therefore leaves its claim `resumed` with its ciphertext and no
@@ -317,6 +324,12 @@ parsed and searched and then refused before any provider write. In both tables 3
 were refused for that reason and 8 were killed first, at after-read or after-parse, where no
 refusal can yet exist; the harness accepts only those two outcomes. The 40 clean rows are 4
 completed runs and 36 killed at their crash point.
+
+Two limits on what a screen row covers (5.21). The screen does not scan the stdout and stderr it
+captures for each run, which it keeps beside the run root rather than in it. And on an honest run
+the `after-first-log` point is reached after extraction with no application-log entry written yet,
+so its rows are interruptions between extraction and staging, not interruptions of the log
+surface; that surface is covered by `control-leak-app-log` alone.
 
 The screen was then re-run with a different mark source — path binding replaced by a suffix rule
 over `key`, `token` and `secret` — and the two tables are identical apart from run identifiers. The
@@ -793,6 +806,27 @@ validation of the provider address beyond `url.Parse` (the advisory review's one
 changes a recorded result. The evidence was re-captured once more with the eight fixes; every
 result in section 4 held, and the counts that move between captures are recorded as such (4.4).
 
+### 5.21 The third Codex review: where the report claimed more than was checked
+
+The third Codex review, on that re-capture, raised nine findings. Four were right that the report
+claimed more than the evidence checks, and the report is corrected rather than the harness
+extended: the external observers are recorded and never compared with the journal (section 3); no
+bundle captures a process's command line, so "no secret in `argv`" is how the harness invokes the
+prototype, not a measurement (section 3); a released claim row stays, with its payload cleared, and
+is not deleted (section 6); and the held-claim states come from uncommitted dumps (4.2). Two more
+are recorded as limits on the screen (4.6): its captured output is not scanned, and the
+`after-first-log` point comes before any log entry.
+
+The other three would harden the harness against a future re-run and change nothing in this
+capture, which was checked against the committed files: every committed ordering verdict is the
+expected one (the three persist-first controls fail, the dead- and restarted-database captures
+record that they wrote no journal, and every other run passes); no screen row with crash point
+`none` ended in `SIGKILL`; and both screens, the matrix and the schema reports ran in one
+invocation on one fresh fixture at one commit — the screens' run identifiers carry that capture's
+start times, 12:20:45Z and 12:21:07Z, and the regenerated schema reports are byte-identical to the
+previous capture's. Under the scope rule of 5.20 they are declined, and
+the evidence was not re-captured for this round.
+
 ## 6. What this decides
 
 **§7.1's ordering requirement is implementable, and the evidence for that is structural.** Every
@@ -830,10 +864,10 @@ plaintext out of ordinary persistence. They differ on who may take over after an
   recovery time, measured here by making the provider unreachable — the recovery fails, and the
   claim stays held.
 
-The paired result to carry forward: after a successful recovery the staging row is deleted, and the
-deleted *ciphertext* remains in the write-ahead log and in every earlier snapshot, which is
-harmless. The identical delete under redact-after leaves *plaintext*. Same code path, same
-instrument, opposite consequence.
+The paired result to carry forward: after a successful recovery the claim row stays, in state
+`released`, and its ciphertext payload is set to `NULL`. The overwritten *ciphertext* remains in
+the write-ahead log and in every earlier snapshot, which is harmless. The same kind of overwrite
+under redact-after leaves *plaintext*. Same database, same instrument, opposite consequence.
 
 **Schema detection can be relied on for identified fields and for nothing beyond them.** Recall is
 9/9 on this configuration and 9/10 once a secret is placed where no rule looks; the operator mark
@@ -849,8 +883,8 @@ the staging decision is reserved to milestone 02 and is not written here.
 
 ## 7. Limits
 
-**The prototype is both subject and instrument.** The three external observers reduce that, and do
-not remove it. The structural argument is what carries the claim; the scans are what catch the case
+**The prototype is both subject and instrument.** The external observers were meant to reduce that
+and, as built, are recorded without being checked (section 3), so they do not. The structural argument is what carries the claim; the scans are what catch the case
 where the structure is wrong.
 
 **Ordering is a property of the program, not of bytes at an instant.** A clean scan at one moment
