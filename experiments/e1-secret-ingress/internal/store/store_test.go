@@ -206,6 +206,9 @@ func TestRedactDSNCoversEveryFormLibPQAccepts(t *testing.T) {
 		`host=h password='foo\'bar' dbname=d`:  {`foo'bar`, `'foo\'bar'`},
 		`host=h password = 'foo bar' dbname=d`: {`foo bar`, `'foo bar'`},
 		`host=h password=foo\ bar dbname=d`:    {`foo bar`, `foo\ bar`},
+		// A malformed token before the password: the scan used to stop there and find nothing.
+		`host=h badtoken password=foo-bar dbname=d`: {`foo-bar`},
+		`badtoken`: nil,
 	} {
 		got := dsnPasswords(dsn)
 		if strings.Join(got, "|") != strings.Join(want, "|") {

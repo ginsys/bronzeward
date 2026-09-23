@@ -448,7 +448,10 @@ func dsnPasswords(dsn string) []string {
 		key := string(rs[start:i])
 		skip()
 		if i >= len(rs) || rs[i] != '=' {
-			return out // malformed; lib/pq refuses it before any password is used
+			// Malformed. lib/pq refuses the string, and its error may quote the whole of it, so the
+			// scan carries on from the next token rather than stopping: returning here left every
+			// password written after the bad token unredacted.
+			continue
 		}
 		i++
 		skip()
