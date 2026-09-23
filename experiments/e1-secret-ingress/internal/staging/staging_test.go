@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -138,6 +139,31 @@ func TestLeaseIntervalKeepsSubSecondPrecision(t *testing.T) {
 			t.Errorf("lease %s became %q, want %q", lease, got, want)
 		}
 	}
+}
+
+// TestTransientHeldIsSafeUnderConcurrency drives the in-memory store from several goroutines. Run
+// under -race it fails on an unguarded map, and without -race an unguarded concurrent write can
+// still abort the process.
+func TestTransientHeldIsSafeUnderConcurrency(t *testing.T) {
+	tr := NewTransient(nil, 0)
+	s := secret.NewSanitized([]byte("machine: {}\n"), nil)
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			run := "run-" + strconv.Itoa(i)
+			for range 200 {
+				tr.put(run, s)
+				if _, ok := tr.get(run); !ok {
+					t.Errorf("%s vanished between put and get", run)
+					return
+				}
+				tr.drop(run)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // TestExpiredIsEvaluatedAtRead covers the expiry rule. A sweeper that has not run yet leaves an
