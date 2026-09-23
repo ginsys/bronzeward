@@ -120,8 +120,8 @@ manifest, so a bundle states what actually produced it.
 
 | | |
 |---|---|
-| Captured | 2026-09-22, 21:48Z to 22:25Z |
-| Fixture manifest commit | `4e3a83af5cbe35c4889ecfac92f90bbd9d2b6e77`, which is also the commit every bundle records as the one the running code was built from. The fixes committed after it (5.18, 5.19) change no output on any path the matrix runs, and why for each is recorded there; the evidence was not re-captured for them |
+| Captured | 2026-09-23, 09:41Z to 10:25Z, on a fresh fixture |
+| Fixture manifest commit | `9fc2c206c3ca849dd2e54af2a4ee3957b9e28a3f`, which is also the commit every bundle records as the one the running code was built from. It includes every fix in 5.18 to 5.20 |
 | Host | Linux 7.1.3+deb13-amd64 x86\_64 |
 | Docker / Compose | 26.1.5+dfsg1 / 2.27.1 |
 | Talos | v1.13.6, both nodes; `talosctl` client v1.13.6 |
@@ -170,10 +170,10 @@ and which it was is settled by opening the file.
 |---|---|---|---|
 | `honest-import-transient` | import, transient staging | 2 | pass |
 | `honest-import-encrypted` | import, encrypted staging | 2 | pass |
-| `honest-import-flushed` | import after a forced checkpoint | 2 | pass |
+| `honest-import-flushed` | import, `CHECKPOINT` forced after it and before the bundle | 2 | pass |
 | `honest-adopt-transient` | drift adoption (§12.4), same input — see below | 2 | pass |
-| `held-in-review-transient` | held at in-review, claim outstanding | 2 | pass |
-| `held-in-review-encrypted` | held at in-review, claim outstanding | 2 | pass |
+| `held-in-review-transient` | captured while held at in-review, claim outstanding | 2 | pass |
+| `held-in-review-encrypted` | captured while held at in-review, claim outstanding | 2 | pass |
 | `crashed-in-review-transient` | `SIGKILL` at in-review | 2 | pass |
 | `crashed-in-review-encrypted` | `SIGKILL` at in-review | 2 | pass |
 | `crashed-in-db-txn` | `SIGKILL` inside the database transaction | 2 | pass |
@@ -184,8 +184,16 @@ and which it was is settled by opening the file.
 | `recover-encrypted` | second principal, recovery completes with every reference row (5.16) | 2 | pass |
 
 Ten secrets were extracted per run, before any persistence. The flush bundle exists so that a clean
-data directory cannot be dismissed as "not written out yet": the checkpoint was forced first and the
-result is the same.
+data directory cannot be dismissed as "not written out yet": a `CHECKPOINT` was issued after the run
+and before the capture, and the result is the same.
+
+The two held bundles are taken while the process is paused at in-review, and the harness checks the
+hold was still in force when the capture finished. Each shows its own claim in state `held` and no
+draft row for its run yet. The transient claim carries no payload — the pending change is in the
+paused process's memory and nowhere on disk — and the encrypted claim carries the Transit
+ciphertext, which scans clean. That is the difference between the two alternatives, observed at the
+moment it exists. The first captures of these two bundles were taken after the hold had expired and
+the run had finished, and so showed neither (5.20).
 
 **Import and drift adoption ran on the same input and the same code.** Every run here ingests the
 effective machine configuration the fixture reads back off the control plane, which is what §12.4's
@@ -235,7 +243,7 @@ before extracting anything; they differ only in what they do next.
 
 | Control | Occurrences in `pg_wal/` | Occurrences in the dump | Ordering |
 |---|---|---|---|
-| `control-persist-first` | 24 | 18 | **fail** |
+| `control-persist-first` | 33 | 18 | **fail** |
 | `control-persist-first-redact-after` | 8 | **0** | **fail** |
 | `control-persist-first-rollback` | 16 | **0** | **fail** |
 
@@ -248,24 +256,26 @@ write-ahead log for rows that no query will ever return.
 So the prohibition is not a precaution. "Redact it later" produces a database that looks clean by
 every means an application has and still holds the plaintext where backups and replicas read.
 
-**The exact counts are not the result; the split is.** This matrix was captured four times on
-fresh fixtures while the review fixes landed, and the write-ahead-log counts moved by one between
-captures — persist-first 24, 23, 24, 24; rollback 16, 15, 16, 16 — because what else the log holds,
-and so where a record straddles a page, depends on everything before it. The dump counts and the
-redact-after pair never moved: nothing in the dump, eight in the log, all four times.
+**The exact counts are not the result; the split is.** This matrix was captured five times on
+fresh fixtures while the review fixes landed, and the persist-first write-ahead-log count moved
+between captures — 24, 23, 24, 24, 33; rollback 16, 15, 16, 16, 16 — because what else the log
+holds, and so where a record straddles a page and which segment it lands in, depends on everything
+before it; the last capture added a forced checkpoint and two paused runs ahead of these controls.
+The dump counts and the redact-after pair never moved: nothing in the dump, eight in the log, all
+five times.
 
 The single line each of these bundles shows at `logs/bw-fixture-postgres.log` is **not** theirs: it
-is the statement `control-leak-db-log` logged at 22:18:06Z, in a log file that is appended to for
+is the statement `control-leak-db-log` logged at 10:16:12Z, in a log file that is appended to for
 the whole matrix. Attributed by opening it, which is the rule this report follows throughout.
 
-`honest-import-final` is an honest run that scans with six lines. Nothing in it wrote plaintext;
-the database it ran against still holds what the controls put there — 18 occurrences in the dump,
-30 in the write-ahead log, and 18 in the heap file of `parsed_index` (relation file
-`base/16384/16400`, named from `pg_class` while the fixture was still up). The heap line is the
-residue reaching the table's own data file once a checkpoint flushed it, the one place in this
-matrix where the controls' plaintext is seen outside the log and the dump. That bundle is asserted
-as residue rather than as clean, because a clean scan there would mean the controls' plaintext had
-gone away by itself — see 5.8.
+`control-persist-first` and `honest-import-final` also each show 16 occurrences in the heap file of
+`parsed_index` (relation file `base/16384/16400`): the controls' plaintext reaching the table's own
+data file once a checkpoint had flushed it, and the one place in this matrix it is seen outside the
+log and the dump. `honest-import-final` is an honest run that scans with six lines. Nothing in it
+wrote plaintext; the database it ran against still holds what the controls put there — 18
+occurrences in the dump, 33 in the write-ahead log, 16 in that heap file. That bundle is asserted as
+residue rather than as clean, because a clean scan there would mean the controls' plaintext had gone
+away by itself — see 5.8.
 
 ### 4.5 Ordering, checked by a process that did not write the journal
 
@@ -282,8 +292,10 @@ records why, because the shape of that defect matters more than the fix.
 
 ### 4.6 Tier A — the screen
 
-72 rows: two flows × two staging modes × two outcomes × nine crash points, each run without
-capturing a bundle and screened over its run root and a fresh logical dump. No row needed a bundle.
+80 rows: two flows × two staging modes × two outcomes × ten crash points, from `none` through
+`after-baseline`, each run without capturing a bundle and screened over its run root and a fresh
+logical dump. No row needed a bundle, and every row's journal passed `verify-order`; an ordering
+failure now fails the row rather than only being recorded in its column (5.20).
 
 The screen was then re-run with a different mark source — path binding replaced by a suffix rule
 over `key`, `token` and `secret` — and the two tables are identical apart from run identifiers. The
@@ -649,9 +661,9 @@ half-done.
 ### 5.18 The fourth review, and the fixes made after the evidence
 
 A fourth advisory review raised 4 findings, all real, and the rounds had been shrinking — 17, 13,
-7, 4. These were fixed after the last capture of section 4, and the evidence was not captured a
-fifth time, because none of them changes the output of any path the matrix runs. The reason for
-each is stated rather than assumed:
+7, 4. These were fixed after the capture section 4 then held, and were not re-captured on their
+own, because none of them changes the output of any path the matrix runs; the capture section 4
+now reports was taken after all of them (5.20). The reason for each is stated rather than assumed:
 
 - **The extraction guard missed values the encoder rewrites.** It searched the sanitized text for
   each extracted value, so a multi-line secret — re-encoded as an indented block — or one written
@@ -773,6 +785,41 @@ added, and redaction replaces the longest spelling first so the misreading canno
 one. And a control test's zero-document assertion passed a nil database, so the nil-database
 guard answered first; it now passes a real, unconnected handle.
 
+### 5.20 The Codex review, and what it found about the evidence itself
+
+The first Codex review, run once the PR left draft, raised 11 findings. Unlike most of the advisory
+rounds, which hardened the prototype without changing any recorded result, most of these were about
+whether the evidence showed what the report said it did — the recurring shape of this section, a
+check that could not fail, at the level of the capture rather than the code:
+
+- **The held bundles were not held.** `run/capture` ran every run in the foreground, so the two
+  `held-in-review` bundles were taken after the hold had expired and the run had resumed, released
+  its claim and persisted its draft. The report described them as showing a claim outstanding.
+- **The flushed bundle was not flushed.** The matrix took a `db-snapshot` before the run, which is
+  a `pg_dump`; nothing issued a `CHECKPOINT`, and `store.Checkpoint` existed with no caller.
+- **The recovery refusals were counted for any reason.** Exit status 1 was accepted, so an expired
+  claim or a lost connection would have passed as "transient staging has no recovery owner". The
+  first re-capture after the fix showed exactly that: `recover-encrypted` was refused for an expired
+  lease, because three captures between the crash and the recovery outlasted the five-minute
+  default, which earlier captures had fitted inside by timing alone. The crashed-in-review runs now
+  take a 30-minute lease, and each refusal is checked for the error it is named after.
+- **An unreadable surface did not fail a bundle.** `unavailable.txt` was printed and ignored, so a
+  bundle whose database went unread could pass on its two control lines. Only the deliberately dead
+  capture may now carry one.
+- **The screen did not fail on an ordering violation**, did not cross `after-baseline`, and the
+  evidence collector accepted any one report file as all of them.
+
+The rest: the structural argument in section 3 claimed only one type held plaintext, which the raw
+input and the parsed document contradict, and is narrowed to the program's own persistence
+functions (3, 6); OpenBao error strings relayed through a failed write could echo the value it was
+sent, and are now scrubbed of it; and encrypted staging cleared the payload at resume — so a
+recovery killed before its commit destroyed the only copy — and let any caller with the run id
+release a claim. The payload now stays until release, a resume makes its taker the owner, and only
+the owner may release.
+
+The evidence in section 4 was re-captured on a fresh fixture with all of these in place. The held
+bundles now show what they are named for (4.2); every other result held.
+
 ## 6. What this decides
 
 **§7.1's ordering requirement is implementable, and the evidence for that is structural.** Every
@@ -865,7 +912,11 @@ unmeasured here.
 claim. The guarded transitions and server-side expiry added after review (5.15) close the race and
 clock-skew holes by construction, and each is reached on the matrix's ordinary path, but no run
 drives two principals at one claim concurrently or skews a caller's clock. Who may extend a live
-lease is not checked at all, and is left to the specification (5.16).
+lease is not checked at all, and is left to the specification (5.16). Nor is it decided who may
+take over a resumed claim whose taker died before releasing it: the ciphertext now survives until
+release (5.20), so a second attempt is possible in principle, but the prototype refuses any resume
+of a claim that is not `held`, and when a stalled recovery may be taken from its owner is a policy
+for the same specification.
 
 **Secret digests are persisted unsalted.** The journal, every `secret_reference` row and the
 encrypted baseline carry the full SHA-256 of each extracted value, which is what lets extraction

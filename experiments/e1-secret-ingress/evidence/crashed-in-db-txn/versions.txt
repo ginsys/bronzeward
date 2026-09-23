@@ -1,6 +1,6 @@
-captured        2026-09-22T22:05:14Z
-manifest commit 4e3a83af5cbe35c4889ecfac92f90bbd9d2b6e77
-created at      4e3a83af5cbe35c4889ecfac92f90bbd9d2b6e77
+captured        2026-09-23T10:02:15Z
+manifest commit 9fc2c206c3ca849dd2e54af2a4ee3957b9e28a3f
+created at      9fc2c206c3ca849dd2e54af2a4ee3957b9e28a3f
 host            Linux 7.1.3+deb13-amd64 x86_64
 docker          client 26.1.5+dfsg1 server 26.1.5+dfsg1
 compose         2.27.1
