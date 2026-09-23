@@ -37,6 +37,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -268,8 +269,30 @@ type Transient struct {
 	claims claims
 	// held is the change itself. It is a map rather than a single value so the type behaves the
 	// same way under a matrix that runs several ingestions in one process, and it is keyed by run
-	// id so a mismatched resume cannot reach another run's change.
+	// id so a mismatched resume cannot reach another run's change. mu guards it: the prototype
+	// drives one ingestion at a time, but a concurrent map write is a fatal runtime error rather
+	// than a recoverable one, and the type should not depend on its caller for that.
+	mu   sync.Mutex
 	held map[string]secret.Sanitized
+}
+
+func (t *Transient) put(runID string, s secret.Sanitized) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.held[runID] = s
+}
+
+func (t *Transient) get(runID string) (secret.Sanitized, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.held[runID]
+	return s, ok
+}
+
+func (t *Transient) drop(runID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.held, runID)
 }
 
 // NewTransient builds transient staging.
@@ -309,7 +332,7 @@ func (t *Transient) Hold(ctx context.Context, runID, principal string, s secret.
 	if err := t.claims.insert(ctx, &cl, nil); err != nil {
 		return Claim{}, err
 	}
-	t.held[runID] = s
+	t.put(runID, s)
 	return cl, nil
 }
 
@@ -335,7 +358,7 @@ func (t *Transient) Resume(ctx context.Context, runID, principal string) (secret
 		return secret.Sanitized{}, cl, fmt.Errorf("staging: run %s: %w", runID, ErrExpired)
 	}
 
-	held, inMemory := t.held[runID]
+	held, inMemory := t.get(runID)
 	if !inMemory {
 		// Either a different process, or this one after a restart. Both are the same situation,
 		// and the table cannot tell them apart from the change's point of view: it is gone.
@@ -360,13 +383,13 @@ func (t *Transient) Resume(ctx context.Context, runID, principal string) (secret
 	if err := t.claims.transition(ctx, runID, StateResumed, true, StateHeld); err != nil {
 		return secret.Sanitized{}, cl, err
 	}
-	delete(t.held, runID)
+	t.drop(runID)
 	return held, cl, nil
 }
 
 // Release implements Staging.
 func (t *Transient) Release(ctx context.Context, runID string) error {
-	delete(t.held, runID)
+	t.drop(runID)
 	return t.claims.transition(ctx, runID, StateReleased, false, StateHeld, StateResumed)
 }
 

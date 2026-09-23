@@ -719,7 +719,10 @@ stricter rule. The provider's version-number parse accepted `1x` as 1; it is now
 call-site scans matched the text `.Unsafe()` and `NewSanitized(`, so a method value or a call split
 across lines passed them; they now match identifier tokens, with a calibration covering each form.
 The fourth — digests persisted unsalted — is a contract decision rather than a defect in the
-prototype, and is recorded in section 7 and recommendation 7 instead of being changed here.
+prototype, and is recorded in section 7 and recommendation 7 instead of being changed here. An
+eleventh review raised 1: transient staging's in-memory map was unguarded. The prototype drives one
+ingestion at a time, so no run could have raced on it, but a concurrent map write aborts a Go
+process outright; the map is now behind a mutex, and a concurrency test aborts without it.
 
 ## 6. What this decides
 
