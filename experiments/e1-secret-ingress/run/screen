@@ -83,6 +83,10 @@ flows=(import adopt)
 stagings=(transient encrypted)
 outcomes=(clean rejected)
 
+# The rejection rows' mark file: one path no configuration has.
+reject_marks=$E1_RUNS/screen-$stamp-reject-marks.txt
+printf 'doc[0].bw-e1.no-such-path\n' >"$reject_marks"
+
 rows=0
 failures=0
 for flow in "${flows[@]}"; do
@@ -95,11 +99,21 @@ for flow in "${flows[@]}"; do
         rm -rf -- "$run_root"
 
         args=(--run-root="$run_root" --run-id="$run_id" --staging="$staging"
-          --config="$(e1_config "$flow")" --crash-at="$crash" "${mark_args[@]}")
-        # The rejected outcome points the run at a document it must refuse. A run that failed for
-        # the wrong reason would still be recorded as a refusal, so the status column below
-        # distinguishes the exit code the flow gives from the one the harness expected.
-        [ "$outcome" != rejected ] || args+=(--config=/dev/null)
+          --config="$(e1_config "$flow")" --crash-at="$crash")
+        # The rejected outcome ingests the real, secret-bearing configuration with an operator
+        # mark that matches nothing, which the run must refuse. It is refused after the document
+        # has been read and parsed — its secrets are in memory — and schema detection has run, and
+        # before any provider write. The first version pointed the run at /dev/null instead, which
+        # failed before a single secret was parsed, so those rows said nothing about rejection.
+        if [ "$outcome" = rejected ]; then
+          if [ "${#mark_args[@]}" -gt 0 ] && [[ ${mark_args[0]} == --mark-suffix=* ]]; then
+            args+=(--mark-suffix=bw-e1-matches-nothing)
+          else
+            args+=(--marks="$reject_marks")
+          fi
+        else
+          args+=("${mark_args[@]}")
+        fi
 
         status=ok
         e1_env "$E1_BIN" "${args[@]}" "$flow" >"$run_root.log" 2>&1 || status=exit-$?
@@ -115,7 +129,15 @@ for flow in "${flows[@]}"; do
         case $outcome:$crash:$status in
           clean:none:ok) expected=yes ;;
           clean:*:exit-137) expected=yes ;;
-          rejected:*:exit-*) expected=yes status=refused-as-expected ;;
+          # Killed at a boundary before the refusal point is still the kill the row asked for.
+          rejected:after-read:exit-137 | rejected:after-parse:exit-137) expected=yes ;;
+          # Anywhere else a rejected row must be refused, and for the reason it is named after: any
+          # other failure would pass as a rejection without having exercised one.
+          rejected:*:exit-1)
+            if grep -qE 'this document does not have|no key in this document ends in' "$run_root.log"; then
+              expected=yes status=refused-as-expected
+            fi
+            ;;
         esac
 
         # A dump that could not be taken is not a dump that held nothing. The earlier version of

@@ -232,8 +232,22 @@ func leak(ctx context.Context, s Surface, runRoot string, db *sql.DB, value secr
 
 	switch s {
 	case SurfaceTempFile:
-		return writeUnder(runRoot, filepath.Join("tmp", "effective-config.yaml"),
-			"# deliberate control: the observed configuration written to a working file\n"+string(plaintext)+"\n")
+		// Through the process's own temporary directory, the way an accidental spill would go, so the
+		// control calibrates the surface a real temporary file reaches rather than a path chosen to
+		// be scanned. main points TMPDIR inside the run root, and that is why it is scanned at all.
+		f, err := os.CreateTemp("", "effective-config-*.yaml")
+		if err != nil {
+			return "", fmt.Errorf("control: creating a temporary file: %w", err)
+		}
+		_, werr := f.WriteString("# deliberate control: the observed configuration written to a working file\n" + string(plaintext) + "\n")
+		cerr := f.Close()
+		if werr != nil {
+			return "", fmt.Errorf("control: writing %s: %w", f.Name(), werr)
+		}
+		if cerr != nil {
+			return "", fmt.Errorf("control: closing %s: %w", f.Name(), cerr)
+		}
+		return f.Name(), nil
 
 	case SurfaceStaging:
 		return writeUnder(runRoot, filepath.Join("staging", "pending.yaml"),

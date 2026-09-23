@@ -406,6 +406,17 @@ func prepareRunRoot(opts options) (options, error) {
 	if err := os.MkdirAll(filepath.Join(abs, "meta"), 0o700); err != nil {
 		return opts, fmt.Errorf("creating the run root: %w", err)
 	}
+	// The process's temporary directory is moved inside the run root, which the capture scans. It
+	// was the host's before, which no capture looks at: a temporary file this program or a library
+	// made would have been invisible, and the temp-file control, writing under the run root, passed
+	// without ever touching the surface it is named after.
+	tmp := filepath.Join(abs, "tmp")
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
+		return opts, fmt.Errorf("creating the run's temporary directory: %w", err)
+	}
+	if err := os.Setenv("TMPDIR", tmp); err != nil {
+		return opts, fmt.Errorf("pointing TMPDIR into the run root: %w", err)
+	}
 	if err := plantReachabilityControl(abs); err != nil {
 		return opts, err
 	}

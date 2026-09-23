@@ -59,8 +59,15 @@ for bundle in "$E1_BUNDLES"/*/; do
   # not evidence. A run killed before it wrote anything has no journal, which is itself a result,
   # so a missing one is recorded rather than skipped silently.
   journal=$E1_RUNS/$run_id/journal.jsonl
+  # A held run's bundle was taken mid-flight, so the journal committed beside it is the one from
+  # that instant; the finished journal, which is what verify-order checks, goes next to it.
+  at_capture=$E1_RUNS/$run_id/journal-at-capture.jsonl
+  if [ -f "$at_capture" ]; then
+    sanitize "$at_capture" "$out/journal.jsonl"
+    sanitize "$journal" "$out/journal-complete.jsonl"
+  fi
   if [ -f "$journal" ]; then
-    sanitize "$journal" "$out/journal.jsonl"
+    [ -f "$at_capture" ] || sanitize "$journal" "$out/journal.jsonl"
     if "$E1_BIN" verify-order "$journal" >"$out/order-report.txt" 2>&1; then
       printf 'pass\n' >"$out/order-verdict.txt"
     else
@@ -75,6 +82,21 @@ for bundle in "$E1_BUNDLES"/*/; do
 done
 
 [ "$runs" -gt 0 ] || die "no bundles in $E1_BUNDLES; run run/matrix first"
+
+# Exactly the bundles one successful matrix took, all from one commit. Any non-empty directory
+# used to do, so an aborted matrix, or a partial re-run beside stale bundles, could replace the
+# committed evidence with a set missing captures or mixing runs of different code.
+manifest=$E1_OUT/matrix-bundles.txt
+[ -s "$manifest" ] || die "$manifest is missing; only a matrix that completed successfully writes it"
+want=$(sort -- "$manifest")
+have=$(find "$E1_BUNDLES" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+[ "$want" = "$have" ] || die "the bundles in $E1_BUNDLES are not the set the last successful matrix took:
+$(diff <(printf '%s\n' "$want") <(printf '%s\n' "$have") || true)"
+commits=$(sed -n 's/^manifest commit *//p' "$E1_BUNDLES"/*/versions.txt | awk '{print $1}' | sort -u)
+[ "$(printf '%s\n' "$commits" | sed '/^$/d' | wc -l)" -eq 1 ] ||
+  die "the bundles were captured at more than one commit: $(printf '%s ' "$commits")"
+sanitize "$E1_REPORTS/baseline-verify.txt" "$dest/baseline-verify.txt"
+[ -s "$dest/baseline-verify.txt" ] || die "baseline-verify.txt is missing; run/matrix writes it"
 
 # The injection timeline is written by a third process and covers the whole matrix, so it is one
 # file beside the runs rather than a copy inside each.
@@ -125,7 +147,11 @@ done
   TALOSCONFIG=$STATE/talosconfig "$FIXTURES_DIR/.cache/talosctl" -n "$TALOS_CONTROLPLANE_IP" get rd -o yaml |
     awk '/^    id: /{id=$2} /sensitivity:/{printf "%s\t%s\n", $2, id}' | sort
 } >"$E1_OUT/talos-resource-sensitivity.raw" 2>&1 ||
-  printf 'the control plane could not be read at capture time\n' >"$E1_OUT/talos-resource-sensitivity.raw"
+  die "the control plane's resource definitions could not be read; the report's sensitivity counts
+would have nothing behind them. The first version wrote a placeholder and carried on."
+# A read that succeeded but produced no rows is the same failure in another form.
+grep -qE '^[a-z-]+'$'\t''[a-z0-9]' "$E1_OUT/talos-resource-sensitivity.raw" ||
+  die "the resource-definition read produced no sensitivity rows"
 # Through sanitize like every other file. talosctl's stderr goes into the same stream and names the
 # TALOSCONFIG path under this checkout's state directory when it complains, and this was the one
 # file written straight into the evidence without the path rewrite.
