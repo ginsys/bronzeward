@@ -231,6 +231,11 @@ func TestRoundTripKeepsEmptyDocuments(t *testing.T) {
 			if got, want := strings.Join(again.Paths(), ","), strings.Join(d.Paths(), ","); got != want {
 				t.Errorf("paths changed across a round trip:\n in: %s\nout: %s\nfrom bytes %q", want, got, out)
 			}
+			// The bytes too. A trailing empty document contributes no path, so dropping it leaves the
+			// paths above identical and only the stream itself shows the loss.
+			if string(out) != in {
+				t.Errorf("Bytes = %q, want the input back unchanged, %q", out, in)
+			}
 		})
 	}
 }

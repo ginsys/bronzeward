@@ -155,6 +155,9 @@ func (k *KeySuffix) Marks(d *document.Document) ([]string, error) {
 			"marks cannot demonstrate extraction and would be recorded as clean",
 			strings.Join(k.suffixes, ", "))
 	}
+	// d.Paths is sorted, so this is already in order; sorted here anyway, so the contract does not
+	// rest on a property of another package.
+	sort.Strings(out)
 	return out, nil
 }
 
