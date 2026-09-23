@@ -695,7 +695,8 @@ has none of those characters, so every recorded run connected with the same valu
 were test-side: the provider tests' request recorder and redirect counter were shared between the
 stand-in server's goroutine and the test's without explicit synchronisation. The race detector did
 not report them, and they now go through a mutex and an atomic rather than relying on the response
-read for ordering.
+read for ordering. An eighth review raised 1: the direct mark-list constructor, used only by tests,
+did not remove duplicate paths as the file loader refuses them; it now keeps each path once.
 
 ## 6. What this decides
 
