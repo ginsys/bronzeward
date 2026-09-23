@@ -172,7 +172,7 @@ func (c *Client) Put(ctx context.Context, key string, value []byte) (string, err
 	if err != nil {
 		return "", err
 	}
-	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path, body, &out, value); err != nil {
 		return "", err
 	}
 	if out.Data.Version == 0 {
@@ -266,7 +266,7 @@ func (c *Client) Encrypt(ctx context.Context, keyName string, plaintext []byte) 
 	if err != nil {
 		return "", err
 	}
-	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path, body, &out, plaintext); err != nil {
 		return "", err
 	}
 	if out.Data.Ciphertext == "" {
@@ -308,7 +308,12 @@ func (c *Client) Decrypt(ctx context.Context, keyName, ciphertext string) ([]byt
 // do performs one request. It never puts a request or response body in an error: a failing write
 // carries the secret it was trying to store, and an error string ends up in logs, which §7.1 names
 // as a persistence surface in its own right.
-func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
+//
+// sensitive is the secret a write carries, if any. OpenBao's own error strings are relayed because
+// they are what tells an operator the token or mount is wrong, but a server can put what it was sent
+// inside one — {"errors":["rejected value <plaintext>"]} parses cleanly — so every spelling of the
+// secret the request held is removed from them first.
+func (c *Client) do(ctx context.Context, method, path string, in, out any, sensitive ...[]byte) error {
 	var body io.Reader
 	if in != nil {
 		encoded, err := json.Marshal(in)
@@ -340,7 +345,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("provider: %s %s: %s: %s", method, path, resp.Status, serverErrors(payload))
+		return fmt.Errorf("provider: %s %s: %s: %s", method, path, resp.Status, serverErrors(payload, sensitive))
 	}
 	if out == nil {
 		return nil
@@ -354,7 +359,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 // serverErrors pulls OpenBao's own error strings out of a failure response and returns nothing
 // else. The rest of the body is discarded rather than quoted, because a failed write's response
 // is the one place a server might echo what it was sent.
-func serverErrors(payload []byte) string {
+func serverErrors(payload []byte, sensitive [][]byte) string {
 	var parsed struct {
 		Errors []string `json:"errors"`
 	}
@@ -362,5 +367,18 @@ func serverErrors(payload []byte) string {
 		return "the server gave no error message (the response body is not quoted here, since a " +
 			"failed write's response is where a server would echo what it was sent)"
 	}
-	return strings.Join(parsed.Errors, "; ")
+	text := strings.Join(parsed.Errors, "; ")
+	// Each secret as sent (the KV value) and as encoded (Transit's base64 plaintext), plus the JSON
+	// spelling of each, since a server may quote the request body's own escaping back.
+	for _, s := range sensitive {
+		if len(s) == 0 {
+			continue
+		}
+		b64 := base64.StdEncoding.EncodeToString(s)
+		quoted, _ := json.Marshal(string(s))
+		for _, spelling := range []string{string(s), b64, strings.Trim(string(quoted), `"`)} {
+			text = strings.ReplaceAll(text, spelling, "[redacted]")
+		}
+	}
+	return text
 }

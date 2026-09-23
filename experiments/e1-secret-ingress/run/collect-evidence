@@ -91,6 +91,20 @@ sanitize "$STATE/injections.log" "$dest/injections.log"
 #
 # The values files and the planted configuration are deliberately not here: they hold synthetic
 # secrets. The path lists and the reports name paths only, and the scan below is what proves it.
+# Every one is required by name. The first version accepted any one of them, so collecting after
+# run/schema alone replaced the whole committed evidence tree and silently dropped both screens.
+for required in screen.tsv schema-report.txt schema-report-planted.txt ground-truth-paths.txt \
+  planted-ground-truth-paths.txt planted-marks.txt; do
+  [ -f "$E1_REPORTS/$required" ] || die "$E1_REPORTS/$required is missing; run run/screen (twice, the
+second with a different mark source) and run/schema before collecting, or the report will cite
+numbers no committed file carries"
+done
+second_screens=0
+for table in "$E1_REPORTS"/screen-*.tsv; do
+  [ -f "$table" ] && second_screens=$((second_screens + 1))
+done
+[ "$second_screens" -ge 1 ] || die "no second screen (screen-*.tsv) in $E1_REPORTS; the claim that
+the ordering results do not depend on the marking syntax rests on it"
 tables=0
 for table in "$E1_REPORTS"/screen*.tsv "$E1_REPORTS"/schema-report*.txt \
   "$E1_REPORTS"/ground-truth-paths.txt "$E1_REPORTS"/planted-ground-truth-paths.txt \
@@ -99,8 +113,6 @@ for table in "$E1_REPORTS"/screen*.tsv "$E1_REPORTS"/schema-report*.txt \
   sanitize "$table" "$dest/$(basename -- "$table")"
   tables=$((tables + 1))
 done
-[ "$tables" -gt 0 ] || die "no screen or schema tables in $E1_REPORTS; run run/screen and run/schema
-before collecting, or the report will cite numbers no committed file carries"
 
 # §6.9 asks whether Talos ships machine-readable sensitivity metadata a detector could rely on
 # instead of encoding its own field rules. It does, at the COSI resource level: each resource

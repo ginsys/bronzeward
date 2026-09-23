@@ -258,6 +258,36 @@ func TestAFailedWriteDoesNotLeakWhatItWasSending(t *testing.T) {
 	}
 }
 
+// TestAStructuredErrorDoesNotEchoTheSecret covers the form the raw-echo test above cannot: a server
+// that puts the value inside a well-formed OpenBao error. It parses, so it used to be relayed
+// verbatim. Both writes are covered, each in the spelling its request carried.
+func TestAStructuredErrorDoesNotEchoTheSecret(t *testing.T) {
+	const plaintext = "E1-PROVIDER-PLAINTEXT-MUST-NOT-APPEAR"
+	b64 := base64.StdEncoding.EncodeToString([]byte(plaintext))
+
+	c, _ := server(t, func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, http.StatusBadRequest, map[string]any{"errors": []string{
+			"rejected value " + plaintext, "rejected plaintext " + b64, "permission denied",
+		}})
+	})
+	_, putErr := c.Put(t.Context(), "run-1/machine.token", []byte(plaintext))
+	_, encErr := c.Encrypt(t.Context(), "bw-artifact", []byte(plaintext))
+	for name, err := range map[string]error{"Put": putErr, "Encrypt": encErr} {
+		if err == nil {
+			t.Fatalf("%s succeeded against a 400", name)
+		}
+		for _, spelling := range []string{plaintext, b64} {
+			if strings.Contains(err.Error(), spelling) {
+				t.Errorf("%s's error echoes the secret as %q: %v", name, spelling, err)
+			}
+		}
+		// The server's own message still has to reach the operator.
+		if !strings.Contains(err.Error(), "permission denied") {
+			t.Errorf("%s's error dropped the server's message: %v", name, err)
+		}
+	}
+}
+
 // TestAServerErrorMessageIsReported checks OpenBao's own error strings do come through, since
 // those are what tell an operator whether the token is wrong or the mount is missing.
 func TestAServerErrorMessageIsReported(t *testing.T) {

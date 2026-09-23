@@ -59,14 +59,27 @@ and says so on its first line and in every package's doc comment.
 The claim rests on four independent layers, and they are a conjunction, not a menu. The first is
 the one that actually proves ordering; the rest are there to catch the case where it is wrong.
 
-**A structural argument.** Exactly one type may hold plaintext, in an unexported field, and every
-persistence function takes a sanitized type. Two places construct it: extraction, and staging's
-resume path, which rebuilds one from bytes that were already sanitized when they were staged and
-checks their digest first. **That restriction is enforced by a test, not by the compiler.** The
-constructor is exported, because Go cannot make a function visible to one sibling package and no
-other; a lexical call-site test fails if any other non-test file calls it, and it was proven to
-fail on a planted caller. The zero value, which no call-site test can see, is rejected by every
-persistence function.
+**A structural argument, over this program's own persistence functions.** An extracted secret is
+held in one type, `secret.Unresolved`, whose every rendering is redacted, and every persistence
+function this prototype defines — the draft, the parsed index, the reference rows and both staging
+modes — takes a sanitized type rather than bytes. Two places construct it: extraction, and
+staging's resume path, which rebuilds one from bytes that were already sanitized when they were
+staged and checks their digest first. **That restriction is enforced by a test, not by the
+compiler.** The constructor is exported, because Go cannot make a function visible to one sibling
+package and no other; a lexical call-site test fails if any other non-test file calls it, and it was
+proven to fail on a planted caller. The zero value, which no call-site test can see, is rejected by
+every persistence function.
+
+**What the structure does not cover.** It is not true that only one type holds plaintext, and an
+earlier version of this section said so. Before extraction the input is ordinary data: the raw bytes
+that are read, retained until the encrypted baseline is made, and the parsed document, whose every
+scalar is a Go string. Nothing structural stops either from reaching a generic sink — a file write,
+a logger, the raw SQL handle the store exposes — without calling the sanitized constructor, and the
+call-site test would still pass. The structure therefore proves ordering for the persistence paths
+the program routes through its own API, and no further. The other surfaces are covered by the
+remaining three layers below, which observe the bytes rather than the types: the per-surface
+controls show each one can be seen, and the honest runs show nothing reached them. That is evidence
+about these runs, not a guarantee about the code.
 
 An earlier draft of this report said persisting plaintext was a compile error. It was not, and
 5.15 records how that claim got in. The deliberate controls are written in a separate package
@@ -772,6 +785,14 @@ any scan result in section 4: a scan says one run left nothing behind, while the
 say no run through that path can write an unextracted document. Making it a compile-time property
 is a known, cheap step for v1 (section 8, item 2).
 
+The scope of that statement is the program's own persistence API. The raw input and the parsed
+document hold plaintext in ordinary types before extraction, and a generic sink — a file, a log, the
+raw database handle — is reachable from them without the sanitized type (3). For those surfaces the
+evidence is the per-surface controls and the honest runs' scans, which show that these runs wrote
+nothing there, not that no change to the code could. A v1 that wants the structural guarantee to
+cover them has to extend the typed boundary to the input itself, so that what is read is held as
+unresolved until extraction (section 8, item 2).
+
 **§7.1's prohibition on redacting later is a real constraint, not a precaution.** 4.4 measures it.
 A plaintext draft that is redacted immediately afterwards leaves a database that is clean to every
 query an application can make, and eight occurrences of the plaintext in the write-ahead log of the
@@ -882,9 +903,12 @@ first is feasible, for this prototype, these flows, these secrets and these boun
    "only" with a call-site test, which is weaker than it first claimed (5.15). v1 should define the
    sanitized type in the package that constructs it, with an unexported constructor, so that no
    other package can build one at all; the resume path then has to go through that package too,
-   which is the correct place to re-check a resumed document anyway. A v1 specification that states
-   the ordering requirement without requiring that shape is asking every future change to re-derive
-   it. The milestone-02 compilation contract is where this belongs.
+   which is the correct place to re-check a resumed document anyway. The boundary also has to start
+   earlier than it does here: this prototype holds the raw input and the parsed document in ordinary
+   types, so the guarantee covers only its own persistence functions (3, 6). v1's reader should
+   return input that is unresolved until extraction, so that no generic sink can take it either. A
+   v1 specification that states the ordering requirement without requiring that shape is asking
+   every future change to re-derive it. The milestone-02 compilation contract is where this belongs.
 
 3. **Adopt explicitly encrypted staging when a change must survive the process, and keep protected
    transient as the default for changes that need not.** The difference is a recovery owner, not

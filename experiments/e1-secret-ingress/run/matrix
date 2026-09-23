@@ -61,6 +61,20 @@ expect_status() {
   }
 }
 
+# expect_reason <run-id> <fixed string>: a refusal counts only for the reason it is named after.
+# Exit status 1 alone was accepted before, so an expired claim, a lost database connection or a
+# missing token would each have passed as "transient staging has no recovery owner" or as "encrypted
+# staging depends on the provider".
+expect_reason() {
+  local run_id=$1 want=$2
+  if grep -qF -- "$want" "$E1_RUNS/$run_id/stderr.txt" 2>/dev/null; then
+    say "matrix: OK $run_id was refused for the reason it is named after"
+  else
+    say "matrix: FAIL $run_id was not refused with: $want"
+    failed+=("$run_id/reason")
+  fi
+}
+
 # fault <verb> <args…>: one fixture injection, whose failure is a matrix failure.
 #
 # The first version sent each injection's output to /dev/null and, on failure, printed one line and
@@ -98,18 +112,21 @@ expect_status honest-import-encrypted ok
 take honest-adopt-transient clean - -- --staging=transient --config="$(e1_config adopt)" adopt
 expect_status honest-adopt-transient ok
 
-# A forced checkpoint, so a clean data directory on the honest path cannot be dismissed as "not
-# flushed yet". The same run without it is above.
-if fault db-snapshot honest-flush; then
-  take honest-import-flushed clean - -- --staging=encrypted --config="$import_config" import
-  expect_status honest-import-flushed ok
-fi
+# A forced CHECKPOINT after the run and before its bundle, so a clean data directory on the honest
+# path cannot be dismissed as "not flushed yet". The same run without it is above. The first version
+# took a db-snapshot before the run, which is a pg_dump and flushes nothing.
+export E1_FLUSH=1
+take honest-import-flushed clean - -- --staging=encrypted --config="$import_config" import
+unset E1_FLUSH
+expect_status honest-import-flushed ok
 
 # Held at in-review, which is where the two staging alternatives differ: the transient bundle must
-# show the pending change nowhere on disk, the encrypted one must show ciphertext in the row.
-take held-in-review-transient clean - -- --staging=transient --hold-at=in-review --config="$import_config" import
+# show the pending change nowhere on disk, the encrypted one must show ciphertext in the row. Each is
+# captured while the process is paused there, with the claim outstanding. The hold must outlast a
+# capture and stay inside the five-minute lease, or the resume after it would find the claim expired.
+take held-in-review-transient clean - -- --staging=transient --hold-at=in-review --hold-for=3m --config="$import_config" import
 expect_status held-in-review-transient ok
-take held-in-review-encrypted clean - -- --staging=encrypted --hold-at=in-review --config="$import_config" import
+take held-in-review-encrypted clean - -- --staging=encrypted --hold-at=in-review --hold-for=3m --config="$import_config" import
 expect_status held-in-review-encrypted ok
 
 # Interrupted at in-review, with the claim still outstanding, and then approached by a second
@@ -126,12 +143,14 @@ expect_status crashed-in-review-encrypted killed
 # declare the run dead and re-ingest. The refusal is the finding, not a failure of the run.
 take recover-transient clean - -- --staging=transient recover crashed-in-review-transient
 expect_status recover-transient refused
+expect_reason recover-transient "no principal can resume it"
 
 # Encrypted staging depends on the provider at recovery, which is the cost of having a recovery
 # owner at all. Measured rather than argued.
 if fault netsplit openbao; then
   take recover-encrypted-netsplit clean - -- --staging=encrypted recover crashed-in-review-encrypted
   expect_status recover-encrypted-netsplit refused
+  expect_reason recover-encrypted-netsplit "this mode cannot recover without the provider"
   fault_or_stop netjoin openbao
 fi
 
@@ -156,7 +175,9 @@ fi
 take crashed-in-db-txn clean - -- --staging=encrypted --crash-at=in-db-txn --config="$import_config" import
 expect_status crashed-in-db-txn killed
 if fault kill postgres; then
+  export E1_ALLOW_UNAVAILABLE=1
   take crashed-in-db-txn-dead clean - -- --staging=encrypted verify-order "$E1_RUNS/crashed-in-db-txn/journal.jsonl"
+  unset E1_ALLOW_UNAVAILABLE
   expect_status crashed-in-db-txn-dead ok
   # The bundle's own record that the database went unread is the evidence it was dead. Without
   # it the bundle cannot be told apart from one taken with PostgreSQL running.

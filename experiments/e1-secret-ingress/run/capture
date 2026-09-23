@@ -18,7 +18,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname -- "$0")/lib.sh"
 
-need docker grep sed awk wc cp find sort tail go
+need docker grep sed awk wc cp find sort tail go sleep
 
 [ $# -ge 5 ] || die "usage: run/capture <run-id> clean|leak|miss|residue <surfaces|-> -- <e1 arguments>"
 run_id=$1
@@ -50,10 +50,45 @@ run_root=$E1_RUNS/$run_id
 rm -rf -- "$run_root"
 mkdir -p -- "$run_root"
 
+held=no
+for arg in "$@"; do
+  case $arg in
+    --hold-at=none) ;;
+    --hold-at=*) held=yes ;;
+  esac
+done
+
 status=ok
-e1_env "$E1_BIN" --run-root="$run_root" --run-id="$run_id" "$@" >"$run_root/stdout.txt" 2>"$run_root/stderr.txt" ||
-  status=exit-$?
-say "capture: $run_id finished $status"
+if [ "$held" = yes ]; then
+  # A held run is captured while it is paused, which is the only reason to hold it. The first
+  # version ran it in the foreground like every other run, so the bundle was taken after the hold
+  # had expired, the change had been resumed and released and the draft persisted: the two
+  # held-in-review bundles, reported as showing a claim outstanding, showed a finished run.
+  e1_env "$E1_BIN" --run-root="$run_root" --run-id="$run_id" "$@" >"$run_root/stdout.txt" 2>"$run_root/stderr.txt" &
+  pid=$!
+  waited=0
+  until grep -q 'reached: holding' "$run_root/stderr.txt" 2>/dev/null; do
+    kill -0 "$pid" 2>/dev/null || die "capture: $run_id exited before announcing its hold; see $run_root/stderr.txt"
+    [ "$waited" -lt 120 ] || die "capture: $run_id did not announce its hold within 60s"
+    sleep 0.5
+    waited=$((waited + 1))
+  done
+  say "capture: $run_id is holding; taking the bundle now"
+fi
+if [ "$held" = no ]; then
+  e1_env "$E1_BIN" --run-root="$run_root" --run-id="$run_id" "$@" >"$run_root/stdout.txt" 2>"$run_root/stderr.txt" ||
+    status=exit-$?
+  say "capture: $run_id finished $status"
+fi
+
+# A flushed capture forces a PostgreSQL CHECKPOINT after the run and before the bundle, so a clean
+# data directory cannot be dismissed as "not flushed yet". The first version took a db-snapshot
+# before the run instead, which is a pg_dump: it flushed nothing, and certainly not this run's rows.
+if [ "${E1_FLUSH:-}" = 1 ]; then
+  pg psql --username=bronzeward --dbname=bronzeward --no-password -Atc CHECKPOINT >/dev/null ||
+    die "capture: the CHECKPOINT before $run_id's bundle failed; a flushed capture without the flush is not one"
+  say "capture: CHECKPOINT issued after $run_id, before its bundle"
+fi
 
 # bundles are directories named for the UTC instant of their capture, so sorting them by name is
 # sorting them by time.
@@ -74,6 +109,15 @@ before=$(bundle_names | wc -l)
 "$FIXTURES_DIR/bin/evidence" "$run_root" || die "the capture itself failed; results void"
 after=$(bundle_names | wc -l)
 [ "$after" -gt "$before" ] || die "fixtures/bin/evidence wrote no new bundle"
+
+if [ "$held" = yes ]; then
+  # Still holding when the bundle finished, or it is not a mid-flight capture: a hold shorter than
+  # the capture would reproduce the original defect silently.
+  grep -q 'hold over' "$run_root/stderr.txt" &&
+    die "capture: $run_id's hold ended before its bundle was complete; lengthen --hold-for"
+  if wait "$pid"; then status=ok; else status=exit-$?; fi
+  say "capture: $run_id finished $status after its hold"
+fi
 
 latest=$(bundle_names | tail -n 1)
 dest=$E1_BUNDLES/$run_id

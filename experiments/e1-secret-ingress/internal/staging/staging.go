@@ -106,8 +106,8 @@ type Staging interface {
 	// Resume takes the change back out, as principal. Whether a principal other than the one that
 	// held it may do so is the difference between the two modes.
 	Resume(ctx context.Context, runID, principal string) (secret.Sanitized, Claim, error)
-	// Release ends the claim and removes the payload.
-	Release(ctx context.Context, runID string) error
+	// Release ends the claim and removes the payload. Only the claim's owner may release it.
+	Release(ctx context.Context, runID, principal string) error
 }
 
 // Cipher is the provider capability encrypted staging needs.
@@ -209,23 +209,51 @@ func (c *claims) read(ctx context.Context, runID string) (Claim, *string, error)
 	return cl, nil, nil
 }
 
-// transition moves a claim from one of the given states to another and drops its payload, and
-// fails if the claim was not in one of them at that moment.
+// move describes one claim transition beyond its source and target states.
+type move struct {
+	// unexpired adds the server's own expiry to the guard, for the transition out of held: a claim
+	// that expired between the read and the statement must not be taken.
+	unexpired bool
+	// owner, if set, requires the claim to be owned by that principal. A release that any caller
+	// knowing the run id could make let an unrelated or stale worker destroy the only recoverable
+	// copy of a change another principal owned.
+	owner string
+	// takeOver, if set, makes that principal the claim's owner: a resume hands the claim to the one
+	// who took it, so that it is that principal, and no other, who may then release it.
+	takeOver string
+	// dropPayload clears the staged change. Only a release does: a resume used to clear it too, so a
+	// recovery killed after Resume and before its draft committed had already destroyed the only
+	// encrypted copy of the change.
+	dropPayload bool
+}
+
+// transition moves a claim from one of the given states to another, and fails if the claim was not
+// in one of them — or did not meet the move's other conditions — at that moment.
 //
 // The guard is in the UPDATE itself. Resume used to read the claim, check it was held, and then
 // update it unconditionally, so two principals resuming the same encrypted claim at once both
 // passed the check and both obtained the pending change — the ownership property the encrypted
 // alternative is compared on. The row the database actually changes is now the only arbiter, the
 // way heartbeat already worked.
-//
-// unexpired adds the server's own expiry to that guard, for the transition out of held: a claim
-// that expired between the read and this statement must not be taken.
-func (c *claims) transition(ctx context.Context, runID, to string, unexpired bool, from ...string) error {
-	query := `UPDATE staging_claim SET state = $2, payload = NULL WHERE run_id = $1 AND state = ANY($3)`
-	if unexpired {
+func (c *claims) transition(ctx context.Context, runID, to string, m move, from ...string) error {
+	set := "state = $2"
+	if m.dropPayload {
+		set += ", payload = NULL"
+	}
+	args := []any{runID, to, pq.Array(from)}
+	if m.takeOver != "" {
+		args = append(args, m.takeOver)
+		set += fmt.Sprintf(", owner_principal = $%d", len(args))
+	}
+	query := `UPDATE staging_claim SET ` + set + ` WHERE run_id = $1 AND state = ANY($3)`
+	if m.unexpired {
 		query += ` AND expires_at > clock_timestamp()`
 	}
-	result, err := c.db.ExecContext(ctx, query, runID, to, pq.Array(from))
+	if m.owner != "" {
+		args = append(args, m.owner)
+		query += fmt.Sprintf(" AND owner_principal = $%d", len(args))
+	}
+	result, err := c.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("staging: setting %s to %s: %w", runID, to, err)
 	}
@@ -234,8 +262,15 @@ func (c *claims) transition(ctx context.Context, runID, to string, unexpired boo
 		return fmt.Errorf("staging: setting %s to %s: %w", runID, to, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("staging: run %s was not %s%s when it was to become %s; another principal took it or it expired first",
-			runID, strings.Join(from, " or "), map[bool]string{true: " and unexpired", false: ""}[unexpired], to)
+		cond := strings.Join(from, " or ")
+		if m.unexpired {
+			cond += " and unexpired"
+		}
+		if m.owner != "" {
+			cond += " and owned by " + m.owner
+		}
+		return fmt.Errorf("staging: run %s was not %s when it was to become %s; another principal took it, "+
+			"it expired, or it is not this principal's", runID, cond, to)
 	}
 	return nil
 }
@@ -381,19 +416,22 @@ func (t *Transient) Resume(ctx context.Context, runID, principal string) (secret
 			runID, cl.OwnerPrincipal, ErrNotOwner)
 	}
 
-	if err := t.claims.transition(ctx, runID, StateResumed, true, StateHeld); err != nil {
+	if err := t.claims.transition(ctx, runID, StateResumed, move{unexpired: true, owner: principal}, StateHeld); err != nil {
 		return secret.Sanitized{}, cl, err
 	}
 	t.drop(runID)
 	return held, cl, nil
 }
 
-// Release implements Staging.
-func (t *Transient) Release(ctx context.Context, runID string) error {
+// Release implements Staging. Only the claim's owner may release it.
+func (t *Transient) Release(ctx context.Context, runID, principal string) error {
 	// The claim first, as in Resume. Dropping the change first and then failing the UPDATE left a
 	// row still 'held' by a live process whose change was gone, and a later Resume from that same
 	// process reported ErrNotRecoverable — "no principal can resume" — for a process that never died.
-	if err := t.claims.transition(ctx, runID, StateReleased, false, StateHeld, StateResumed); err != nil {
+	if principal == "" {
+		return errors.New("staging: a release needs the principal that owns the claim")
+	}
+	if err := t.claims.transition(ctx, runID, StateReleased, move{owner: principal, dropPayload: true}, StateHeld, StateResumed); err != nil {
 		return err
 	}
 	t.drop(runID)
@@ -526,7 +564,12 @@ func (e *Encrypted) Resume(ctx context.Context, runID, principal string) (secret
 	// Taking the claim is the last step and the only one that decides who gets it. Two principals
 	// can both reach this line with the plaintext decrypted; exactly one UPDATE changes the row, and
 	// the other returns an error and discards what it decrypted.
-	if err := e.claims.transition(ctx, runID, StateResumed, true, StateHeld); err != nil {
+	//
+	// The taker becomes the owner, so it alone may release the claim, and the ciphertext stays in
+	// the row until that release: the draft this resume feeds is not yet persisted, and clearing the
+	// payload here meant a recovery killed before its commit destroyed the only copy. Who may take
+	// over a resumed claim whose taker died is not decided here; see the report's limits.
+	if err := e.claims.transition(ctx, runID, StateResumed, move{unexpired: true, takeOver: principal}, StateHeld); err != nil {
 		return secret.Sanitized{}, cl, err
 	}
 	return resumed, cl, nil
@@ -587,8 +630,13 @@ func openEnvelope(plain []byte) (secret.Sanitized, error) {
 // result is about: the ciphertext remains in the write-ahead log and in any earlier snapshot, and
 // that is harmless. The same delete under the forbidden persist-then-redact design leaves
 // plaintext there instead.
-func (e *Encrypted) Release(ctx context.Context, runID string) error {
-	return e.claims.transition(ctx, runID, StateReleased, false, StateHeld, StateResumed)
+//
+// Only the claim's owner may release it: the principal that held it, or the one that resumed it.
+func (e *Encrypted) Release(ctx context.Context, runID, principal string) error {
+	if principal == "" {
+		return errors.New("staging: a release needs the principal that owns the claim")
+	}
+	return e.claims.transition(ctx, runID, StateReleased, move{owner: principal, dropPayload: true}, StateHeld, StateResumed)
 }
 
 // ProcessStartToken identifies this process beyond its PID.

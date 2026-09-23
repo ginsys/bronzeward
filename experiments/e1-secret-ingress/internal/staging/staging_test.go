@@ -98,6 +98,21 @@ func TestEncryptedHoldRequiresAPrincipal(t *testing.T) {
 	}
 }
 
+// TestReleaseRequiresAPrincipal checks neither mode accepts an anonymous release. Before, any caller
+// knowing the run id could clear the payload of a claim another principal owned. The owner check
+// itself is in the UPDATE and needs a database; this is the guard that runs before it.
+func TestReleaseRequiresAPrincipal(t *testing.T) {
+	encrypted, err := NewEncrypted(nil, &failCipher{}, "bw-artifact", 0)
+	if err != nil {
+		t.Fatalf("NewEncrypted: %v", err)
+	}
+	for name, s := range map[string]Staging{"transient": NewTransient(nil, 0), "encrypted": encrypted} {
+		if err := s.Release(context.Background(), "run-1", ""); err == nil {
+			t.Errorf("%s released a claim for no principal", name)
+		}
+	}
+}
+
 // TestNewEncryptedRequiresACipherAndAKey checks the constructor fails rather than the first hold.
 func TestNewEncryptedRequiresACipherAndAKey(t *testing.T) {
 	if _, err := NewEncrypted(nil, nil, "bw-artifact", 0); err == nil {

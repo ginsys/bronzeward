@@ -333,7 +333,7 @@ func recoverRun(ctx context.Context, opts options, args []string, stdout io.Writ
 	}, j, ctrl); err != nil {
 		return err
 	}
-	if err := place.Release(ctx, claimed); err != nil {
+	if err := place.Release(ctx, claimed, principal); err != nil {
 		return err
 	}
 
