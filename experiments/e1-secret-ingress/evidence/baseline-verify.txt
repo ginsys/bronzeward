@@ -1,0 +1,6 @@
+honest-import-transient	ok: run honest-import-transient, 25922 bytes decrypt to the recorded digest f026eeaeda5f under transit key bw-artifact
+honest-import-encrypted	ok: run honest-import-encrypted, 25922 bytes decrypt to the recorded digest f026eeaeda5f under transit key bw-artifact
+honest-adopt-transient	ok: run honest-adopt-transient, 25922 bytes decrypt to the recorded digest f026eeaeda5f under transit key bw-artifact
+honest-import-flushed	ok: run honest-import-flushed, 25922 bytes decrypt to the recorded digest f026eeaeda5f under transit key bw-artifact
+honest-import-final	ok: run honest-import-final, 25922 bytes decrypt to the recorded digest f026eeaeda5f under transit key bw-artifact
+input digest identical across all 5 runs: f026eeaeda5f831deca32ece2d1e9e01d21a68e90796ab3ffe6afc3dec2be604

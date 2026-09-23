@@ -120,8 +120,8 @@ manifest, so a bundle states what actually produced it.
 
 | | |
 |---|---|
-| Captured | 2026-09-23, 09:41Z to 10:25Z, on a fresh fixture |
-| Fixture manifest commit | `9fc2c206c3ca849dd2e54af2a4ee3957b9e28a3f`, which is also the commit every bundle records as the one the running code was built from. It includes every fix in 5.18 to 5.20 |
+| Captured | 2026-09-23, 12:20Z to 13:06Z, on a fresh fixture |
+| Fixture manifest commit | `e637bf0e284699c1689747c56e6c83c8cc12e8e8`, which is also the commit every bundle records as the one the running code was built from. It includes every fix in 5.18 to 5.20 |
 | Host | Linux 7.1.3+deb13-amd64 x86\_64 |
 | Docker / Compose | 26.1.5+dfsg1 / 2.27.1 |
 | Talos | v1.13.6, both nodes; `talosctl` client v1.13.6 |
@@ -193,7 +193,21 @@ draft row for its run yet. The transient claim carries no payload — the pendin
 paused process's memory and nowhere on disk — and the encrypted claim carries the Transit
 ciphertext, which scans clean. That is the difference between the two alternatives, observed at the
 moment it exists. The first captures of these two bundles were taken after the hold had expired and
-the run had finished, and so showed neither (5.20).
+the run had finished, and so showed neither (5.20). Each held bundle's committed `journal.jsonl` is
+the journal as it stood at the capture, ending at in-review; the journal the run wrote once the hold
+ended sits beside it as `journal-complete.jsonl`, and `verify-order` is run on that one.
+
+A claim is released only after the draft and its references have committed. `crashed-in-db-txn`,
+killed inside that transaction, therefore leaves its claim `resumed` with its ciphertext and no
+draft row, recoverable rather than lost; before 5.20 the release ran first and the same crash
+discarded the only copy of the pending change.
+
+**Criterion 2 — the encrypted baseline.** `e1 baseline-verify` ran on the five runs that persisted a
+baseline (the three honest imports, the adopt run and `honest-import-final`). Each baseline decrypts
+under Transit to 25,922 bytes whose SHA-256 matches the digest recorded for that run, and the input
+digest is the same in all five. Ciphertexts differ between runs, as they must with a fresh nonce per
+call; the result is in
+[`baseline-verify.txt`](../../../experiments/e1-secret-ingress/evidence/baseline-verify.txt).
 
 **Import and drift adoption ran on the same input and the same code.** Every run here ingests the
 effective machine configuration the fixture reads back off the control plane, which is what §12.4's
@@ -218,7 +232,7 @@ let a control pass on another control's residue without ever reaching the surfac
 
 | Control | Lines | Hit required at | Result |
 |---|---|---|---|
-| `control-leak-temp-file` | 3 | `/tmp/effective-config.yaml` under the run root | present |
+| `control-leak-temp-file` | 3 | `/tmp/effective-config-<random>.yaml` under the run root, where the process's `TMPDIR` points | present |
 | `control-leak-staging` | 3 | `/staging/pending.yaml` under the run root | present |
 | `control-leak-app-log` | 3 | `/e1.log` under the run root | present |
 | `control-leak-error-report` | 3 | `/error-report.txt` under the run root | present |
@@ -243,7 +257,7 @@ before extracting anything; they differ only in what they do next.
 
 | Control | Occurrences in `pg_wal/` | Occurrences in the dump | Ordering |
 |---|---|---|---|
-| `control-persist-first` | 33 | 18 | **fail** |
+| `control-persist-first` | 31 | 18 | **fail** |
 | `control-persist-first-redact-after` | 8 | **0** | **fail** |
 | `control-persist-first-rollback` | 16 | **0** | **fail** |
 
@@ -251,29 +265,30 @@ The middle row is the whole answer to question 2. Redact-after does exactly what
 claim: the plaintext it committed a moment earlier is gone from the live rows, so a `pg_dump` taken
 afterwards is clean. It is still in the write-ahead log, eight times, in the same bundle. Rollback
 gives the same shape for a transaction that was never committed at all — sixteen occurrences in the
-write-ahead log for rows that no query will ever return.
+write-ahead log for rows that no query will ever return. The matrix asserts that this is the
+rollback's own contribution: the log held 8 occurrences before that run and 16 after it.
 
 So the prohibition is not a precaution. "Redact it later" produces a database that looks clean by
 every means an application has and still holds the plaintext where backups and replicas read.
 
-**The exact counts are not the result; the split is.** This matrix was captured five times on
+**The exact counts are not the result; the split is.** This matrix was captured six times on
 fresh fixtures while the review fixes landed, and the persist-first write-ahead-log count moved
-between captures — 24, 23, 24, 24, 33; rollback 16, 15, 16, 16, 16 — because what else the log
-holds, and so where a record straddles a page and which segment it lands in, depends on everything
-before it; the last capture added a forced checkpoint and two paused runs ahead of these controls.
-The dump counts and the redact-after pair never moved: nothing in the dump, eight in the log, all
-five times.
+between captures — 24, 23, 24, 24, 33, 31 (the last across two segments); rollback 16, 15, 16, 16,
+16, 16 — because what else the log holds, and so where a record straddles a page and which segment
+it lands in, depends on everything before it; the later captures added a forced checkpoint and two
+paused runs ahead of these controls. The dump counts and the redact-after pair never moved: nothing
+in the dump, eight in the log, all six times.
 
 The single line each of these bundles shows at `logs/bw-fixture-postgres.log` is **not** theirs: it
-is the statement `control-leak-db-log` logged at 10:16:12Z, in a log file that is appended to for
+is the statement `control-leak-db-log` logged at 12:56:19Z, in a log file that is appended to for
 the whole matrix. Attributed by opening it, which is the rule this report follows throughout.
 
-`control-persist-first` and `honest-import-final` also each show 16 occurrences in the heap file of
+`control-persist-first` and `honest-import-final` also each show 15 occurrences in the heap file of
 `parsed_index` (relation file `base/16384/16400`): the controls' plaintext reaching the table's own
 data file once a checkpoint had flushed it, and the one place in this matrix it is seen outside the
 log and the dump. `honest-import-final` is an honest run that scans with six lines. Nothing in it
 wrote plaintext; the database it ran against still holds what the controls put there — 18
-occurrences in the dump, 33 in the write-ahead log, 16 in that heap file. That bundle is asserted as
+occurrences in the dump, 31 in the write-ahead log, 15 in that heap file. That bundle is asserted as
 residue rather than as clean, because a clean scan there would mean the controls' plaintext had gone
 away by itself — see 5.8.
 
@@ -296,6 +311,12 @@ records why, because the shape of that defect matters more than the fix.
 `after-baseline`, each run without capturing a bundle and screened over its run root and a fresh
 logical dump. No row needed a bundle, and every row's journal passed `verify-order`; an ordering
 failure now fails the row rather than only being recorded in its column (5.20).
+
+A rejected row runs the real input with a mark that matches nothing, so the document is read,
+parsed and searched and then refused before any provider write. In both tables 32 rejected rows
+were refused for that reason and 8 were killed first, at after-read or after-parse, where no
+refusal can yet exist; the harness accepts only those two outcomes. The 40 clean rows are 4
+completed runs and 36 killed at their crash point.
 
 The screen was then re-run with a different mark source — path binding replaced by a suffix rule
 over `key`, `token` and `secret` — and the two tables are identical apart from run identifiers. The
@@ -743,6 +764,34 @@ the owner may release.
 
 The evidence in section 4 was re-captured on a fresh fixture with all of these in place. The held
 bundles now show what they are named for (4.2); every other result held.
+
+The second Codex review, on that re-capture, raised nine findings. From this round on each finding
+was sorted first: one that changes what the evidence shows is fixed and re-captured, and one that
+only makes this throwaway prototype sturdier is declined as out of scope for Phase 0. Eight were of
+the first kind (the last bullet but one covers two):
+
+- **Criterion 2 had no result.** `baseline-verify` existed and nothing ran it; the matrix now runs
+  it on every run that persisted a baseline and requires one input digest across them (4.2).
+- **A rejected screen row never reached the detector.** It read `/dev/null` and failed before any
+  secret was parsed, so it showed refusal, not refusal after extraction. It now runs the real
+  input with a mark that matches nothing (4.6).
+- **Release ran before the commit.** A crash inside the draft transaction released the claim and
+  discarded the pending change; release now follows the commit (4.2).
+- **The held bundles' journals were written after the capture.** The committed journal is now the
+  snapshot taken at capture, with the complete one beside it.
+- **The rollback control could pass on the redact-after run's residue.** The matrix now requires the
+  write-ahead-log count to rise across the rollback run itself (4.4).
+- **The collector accepted a bundle set it had not produced**, from more than one manifest commit,
+  and a failed Talos read as an empty list. It now requires exactly the set the matrix recorded, one
+  commit, and a non-empty read.
+- **The temp-file surface was outside the run root.** The prototype now points `TMPDIR` at a
+  directory under its run root, so a temporary file is where the scan looks, and the control's
+  expected path moved with it (4.3).
+
+Declined as Phase-0 robustness: a read-back of each secret from the provider after the write, and
+validation of the provider address beyond `url.Parse` (the advisory review's one finding). Neither
+changes a recorded result. The evidence was re-captured once more with the eight fixes; every
+result in section 4 held, and the counts that move between captures are recorded as such (4.4).
 
 ## 6. What this decides
 
