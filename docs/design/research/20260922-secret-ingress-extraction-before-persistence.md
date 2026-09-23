@@ -726,7 +726,14 @@ process outright; the map is now behind a mutex, and a concurrency test aborts w
 twelfth review raised 1: the claim a hold returns carried zero creation and heartbeat times,
 because the insert returned only the expiry; it now returns all three. Nothing read those two
 fields from a held claim, so no output changed, and the statement was not run against a live
-database this round.
+database this round. A thirteenth review raised 2. The connection-string password scan stopped at
+the first malformed token, leaving any password after it unredacted; it now carries on past it,
+and the fixture's own DSN has no malformed token. The other asked for the extraction guard's
+substring search to be dropped, since a short value occurring inside another would refuse an
+honest run. It was kept: the whole-scalar comparisons cannot see a secret embedded in a larger
+value — a token inside a URL or a command line — which is the case the substring search is for,
+and refusing an honest run is the failure direction that leaks nothing. No recorded run was
+refused this way.
 
 ## 6. What this decides
 
