@@ -52,6 +52,7 @@ type options struct {
 	crashAt  checkpoint.Point
 	holdAt   checkpoint.Point
 	holdFor  time.Duration
+	lease    time.Duration
 	journalP string
 
 	// config is the document to ingest, marks and markSuffix select the mark source, and baseline
@@ -84,6 +85,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		crashAt = fs.String("crash-at", "none", "boundary at which to SIGKILL this process: "+strings.Join(checkpoint.Names(), ", "))
 		holdAt  = fs.String("hold-at", "none", "boundary at which to pause so the disk can be captured mid-flight")
 		holdFor = fs.Duration("hold-for", 0, "how long --hold-at pauses; zero means the default")
+		lease   = fs.Duration("lease", 0, "how long a staging claim is good for without a heartbeat; zero means the default")
 
 		config     = fs.String("config", "", "the machine configuration to ingest (required by import and adopt)")
 		marks      = fs.String("marks", "", "file of operator-marked dotted paths, one per line")
@@ -111,7 +113,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	opts := options{
-		runRoot: *runRoot, runID: *runID, staging: *staging, holdFor: *holdFor,
+		runRoot: *runRoot, runID: *runID, staging: *staging, holdFor: *holdFor, lease: *lease,
 		config: *config, marks: *marks, markSuffix: *markSuffix, baseline: *wantBase,
 		control: control.Options{PersistFirst: *persistFirst, RedactAfter: *redactAfter, Rollback: *rollback},
 	}
@@ -347,7 +349,7 @@ func recoverRun(ctx context.Context, opts options, args []string, stdout io.Writ
 // not is half of what distinguishes the two.
 func openStaging(opts options, db *store.DB) (staging.Staging, error) {
 	if opts.staging == "transient" {
-		return staging.NewTransient(db.SQL(), 0), nil
+		return staging.NewTransient(db.SQL(), opts.lease), nil
 	}
 	client, err := provider.FromEnv(provider.TokenEnv)
 	if err != nil {
@@ -360,9 +362,9 @@ func openStaging(opts options, db *store.DB) (staging.Staging, error) {
 // does not open a second one.
 func openStagingWith(opts options, db *store.DB, client *provider.Client) (staging.Staging, error) {
 	if opts.staging == "transient" {
-		return staging.NewTransient(db.SQL(), 0), nil
+		return staging.NewTransient(db.SQL(), opts.lease), nil
 	}
-	return staging.NewEncrypted(db.SQL(), client, provider.TransitKey, 0)
+	return staging.NewEncrypted(db.SQL(), client, provider.TransitKey, opts.lease)
 }
 
 // newControl wires the crash and hold flags to the journal, so that a capture taken mid-flight

@@ -134,9 +134,13 @@ expect_status held-in-review-encrypted ok
 # consumes it: transient refuses by design, the netsplit attempt fails at the provider, and the
 # successful recovery releases the claim and would make either of the others fail for the wrong
 # reason if it ran first.
-take crashed-in-review-transient clean - -- --staging=transient --crash-at=in-review --config="$import_config" import
+#
+# Both claims get a 30-minute lease. Three captures run between the encrypted crash and its recovery,
+# at a minute and a half or more each, and the default five-minute lease expired in between: the
+# recovery was then refused for expiry, which is not the result it exists to show.
+take crashed-in-review-transient clean - -- --staging=transient --crash-at=in-review --lease=30m --config="$import_config" import
 expect_status crashed-in-review-transient killed
-take crashed-in-review-encrypted clean - -- --staging=encrypted --crash-at=in-review --config="$import_config" import
+take crashed-in-review-encrypted clean - -- --staging=encrypted --crash-at=in-review --lease=30m --config="$import_config" import
 expect_status crashed-in-review-encrypted killed
 
 # The transient alternative's answer to "who may take this over" is nobody: the owner's duty is to
