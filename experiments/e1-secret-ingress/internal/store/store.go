@@ -96,9 +96,17 @@ func OpenFromEnv(ctx context.Context) (*DB, error) {
 	if password == "" {
 		return nil, fmt.Errorf("store: %s is not set; the fixtures publish it in their state directory", PasswordEnv)
 	}
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		defaultHost, defaultPort, defaultUser, password, defaultDatabase)
-	return Open(ctx, dsn)
+	return Open(ctx, fixtureDSN(password))
+}
+
+// fixtureDSN is the key/value connection string for the fixtures' database. The password is
+// single-quoted with ' and \ backslash-escaped, the form lib/pq's parser reads back exactly.
+// Interpolated bare, a password with a space, quote or backslash was mis-parsed, and the parse
+// error quoted a remainder of it that redactDSN could not recognise as the password.
+func fixtureDSN(password string) string {
+	quoted := strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(password)
+	return fmt.Sprintf("host=%s port=%s user=%s password='%s' dbname=%s sslmode=disable",
+		defaultHost, defaultPort, defaultUser, quoted, defaultDatabase)
 }
 
 // SQL exposes the handle for the staging package, which owns its own table and its own statements
