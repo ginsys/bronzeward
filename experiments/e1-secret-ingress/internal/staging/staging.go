@@ -152,7 +152,8 @@ func normaliseLease(lease time.Duration) time.Duration {
 	return lease
 }
 
-// insert writes the claim row and sets cl.ExpiresAt to the expiry the server recorded.
+// insert writes the claim row and sets cl's CreatedAt, HeartbeatAt and ExpiresAt to what the
+// server recorded, so a claim returned by Hold agrees with the same claim read back.
 //
 // Every expiry in this table is the server's. heartbeat already extended the lease from
 // clock_timestamp() so that a caller with a lagging clock could not extend its own claim; the
@@ -164,10 +165,10 @@ func (c *claims) insert(ctx context.Context, cl *Claim, payload *string) error {
 		   (run_id, mode, owner_principal, owner_pid, owner_start_token,
 		    payload, payload_sha256, resume_checkpoint, state, expires_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, clock_timestamp() + $10::interval)
-		 RETURNING expires_at`,
+		 RETURNING created_at, heartbeat_at, expires_at`,
 		cl.RunID, string(cl.Mode), cl.OwnerPrincipal, nullableInt(cl.OwnerPID),
 		nullableString(cl.OwnerStartToken), payload, cl.PayloadSHA256,
-		cl.ResumeCheckpoint, cl.State, c.leaseInterval()).Scan(&cl.ExpiresAt)
+		cl.ResumeCheckpoint, cl.State, c.leaseInterval()).Scan(&cl.CreatedAt, &cl.HeartbeatAt, &cl.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("staging: claiming %s: %w", cl.RunID, err)
 	}

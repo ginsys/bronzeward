@@ -722,7 +722,11 @@ The fourth — digests persisted unsalted — is a contract decision rather than
 prototype, and is recorded in section 7 and recommendation 7 instead of being changed here. An
 eleventh review raised 1: transient staging's in-memory map was unguarded. The prototype drives one
 ingestion at a time, so no run could have raced on it, but a concurrent map write aborts a Go
-process outright; the map is now behind a mutex, and a concurrency test aborts without it.
+process outright; the map is now behind a mutex, and a concurrency test aborts without it. A
+twelfth review raised 1: the claim a hold returns carried zero creation and heartbeat times,
+because the insert returned only the expiry; it now returns all three. Nothing read those two
+fields from a held claim, so no output changed, and the statement was not run against a live
+database this round.
 
 ## 6. What this decides
 
