@@ -440,7 +440,7 @@ func stageAndResume(ctx context.Context, opts options, db *store.DB, client *pro
 	if err != nil {
 		return secret.Sanitized{}, err
 	}
-	if err := place.Release(ctx, opts.runID); err != nil {
+	if err := place.Release(ctx, opts.runID, principal); err != nil {
 		return secret.Sanitized{}, err
 	}
 	return resumed, nil

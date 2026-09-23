@@ -53,12 +53,19 @@ elif [ -s "$bundle/fixtures-diff.txt" ]; then
   bad "fixtures/ differed from the manifest commit when this bundle was taken (fixtures-diff.txt is not empty)"
 fi
 
-# unavailable.txt is not a failure: a run captured with PostgreSQL killed cannot be dumped, and
-# that is the point of taking it. It must be surfaced, though, because presenting a bundle whose
-# database went unread as a clean scan of the database would be false.
+# unavailable.txt names a source the capture could not read. It is expected in exactly one bundle —
+# the one taken with PostgreSQL killed, which is the point of taking it — and the matrix says so with
+# E1_ALLOW_UNAVAILABLE=1. Anywhere else it is a failure: the first version only printed it, so a
+# bundle whose database or logs went unread could still pass on the two control lines, and be
+# reported as a clean scan of a surface that was never scanned.
 if [ -s "$bundle/unavailable.txt" ]; then
-  note "INCOMPLETE this bundle did not read everything:"
-  sed 's/^/assert-bundle:   /' "$bundle/unavailable.txt" >&2
+  if [ "${E1_ALLOW_UNAVAILABLE:-}" = 1 ]; then
+    note "INCOMPLETE, as this capture intends; it did not read:"
+    sed 's/^/assert-bundle:   /' "$bundle/unavailable.txt" >&2
+  else
+    bad "this bundle did not read everything, and it is not the capture allowed to:"
+    sed 's/^/assert-bundle:   /' "$bundle/unavailable.txt" >&2
+  fi
 fi
 
 case $expectation in

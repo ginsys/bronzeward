@@ -76,8 +76,9 @@ printf 'flow\tstaging\toutcome\tcrash_at\trun_id\tstatus\trun_root_hits\tdump_hi
 
 # The crossing order, which is also the order the boundary map lists. "none" is the uninterrupted
 # run; the rest kill the process at the named boundary, so each row asks what is on disk when the
-# program stops there.
-crash_points=(none after-read after-parse after-detect after-extract after-first-log in-review in-db-txn after-commit)
+# program stops there. after-baseline is the last persistence boundary the program reaches; the
+# first version stopped at after-commit and so never interrupted a run there.
+crash_points=(none after-read after-parse after-detect after-extract after-first-log in-review in-db-txn after-commit after-baseline)
 flows=(import adopt)
 stagings=(transient encrypted)
 outcomes=(clean rejected)
@@ -144,6 +145,13 @@ for flow in "${flows[@]}"; do
           verdict="$status/unexpected-outcome"
           failures=$((failures + 1))
         }
+        # An ordering violation is the finding this whole experiment exists to catch. The first
+        # version recorded order=fail in its column and counted nothing, so the screen could exit
+        # clean over a row its own verifier had condemned.
+        if [ "$order" = fail ]; then
+          verdict="$verdict/order-violation"
+          failures=$((failures + 1))
+        fi
         case $root_hits in
           0) [ ! -d "$run_root" ] || { verdict="$status/no-control"; failures=$((failures + 1)); } ;;
           1) ;;
