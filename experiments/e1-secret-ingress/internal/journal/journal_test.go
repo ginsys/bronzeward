@@ -299,6 +299,26 @@ func TestVerifyAllowsADeclaredRecovery(t *testing.T) {
 	}
 }
 
+// TestTheRecoveryMarkerCannotExemptAnIngestion checks free text in Detail cannot switch the rules
+// off: a persist-first ingestion whose early write happens to carry the marker still fails, and so
+// does a marker naming no run.
+func TestTheRecoveryMarkerCannotExemptAnIngestion(t *testing.T) {
+	persistFirst := []Record{
+		{Seq: 1, Event: EventWrite, Surface: "machine_draft.document", Detail: "recover:anything", Digests: []string{digestOf("talos-ca-key")}, MonoNanos: 10},
+		{Seq: 2, Event: EventExtracted, Digests: []string{digestOf("talos-ca-key")}, MonoNanos: 20},
+	}
+	if v := Verify(persistFirst); len(v) == 0 {
+		t.Error("a write before extraction was exempted by the text of its Detail")
+	}
+
+	unnamed := []Record{
+		{Seq: 1, Event: EventWrite, Surface: "machine_draft.document", Detail: "recover:", MonoNanos: 10},
+	}
+	if v := Verify(unnamed); len(v) == 0 {
+		t.Error("a recovery marker naming no run was accepted")
+	}
+}
+
 // TestVerifyRejectsAnUndeclaredWriteWithoutExtraction is that carve-out's own control. The marker
 // on the write record is what distinguishes a recovery from a run that simply persisted and
 // extracted nothing, so a journal without it must still fail.
