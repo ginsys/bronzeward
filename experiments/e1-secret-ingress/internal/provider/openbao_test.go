@@ -308,6 +308,21 @@ func TestGetRefusesAResponseWithoutTheField(t *testing.T) {
 	}
 }
 
+// TestVersionsRefusesAVersionNameThatIsNotAnInteger covers names a lenient parse accepted: "1x"
+// read as version 1, which could duplicate the real one in the evidence.
+func TestVersionsRefusesAVersionNameThatIsNotAnInteger(t *testing.T) {
+	for _, name := range []string{"1x", "x", "", "0", "-1", "1.0"} {
+		c, _ := server(t, func(w http.ResponseWriter, _ *http.Request) {
+			respond(t, w, http.StatusOK, map[string]any{"data": map[string]any{"versions": map[string]any{
+				name: map[string]string{"created_time": "2026-09-22T10:00:00Z"},
+			}}})
+		})
+		if got, err := c.Versions(t.Context(), "run-1/x"); err == nil {
+			t.Errorf("Versions accepted the version name %q as %+v", name, got)
+		}
+	}
+}
+
 // TestVersionsReadsMetadataAndSorts covers the out-of-band observer. Sorting matters because the
 // response is a JSON object and Go's map iteration is deliberately unordered, so an unsorted
 // result would make two reads of the same key produce different evidence.

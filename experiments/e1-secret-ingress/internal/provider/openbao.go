@@ -29,6 +29,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -234,9 +235,11 @@ func (c *Client) Versions(ctx context.Context, key string) ([]Version, error) {
 
 	versions := make([]Version, 0, len(out.Data.Versions))
 	for n, v := range out.Data.Versions {
-		var number int
-		if _, err := fmt.Sscanf(n, "%d", &number); err != nil {
-			return nil, fmt.Errorf("provider: secret/%s has a version named %q: %w", key, n, err)
+		// strconv.Atoi, not Sscanf: Sscanf's %d stops at the first non-digit and reports success, so
+		// "1x" became version 1 and could duplicate a real one in the evidence.
+		number, err := strconv.Atoi(n)
+		if err != nil || number < 1 {
+			return nil, fmt.Errorf("provider: secret/%s has a version named %q, which is not a positive integer", key, n)
 		}
 		versions = append(versions, Version{Number: number, Created: v.CreatedTime})
 	}

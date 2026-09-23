@@ -327,9 +327,19 @@ func Verify(records []Record) []Violation {
 	// A record the phase rule has already condemned is not reported twice by the per-digest rule
 	// below. The two rules overlap on exactly the write that lists a secret and happens too early,
 	// and a reader counting violations should be counting writes, not rules.
+	//
+	// Detail is free text, so its "recover:" prefix alone must not be able to exempt a write. A
+	// recovery extracts nothing — its secrets were extracted under the crashed run's identity — so
+	// the carve-out holds only in a journal with no extraction at all, and only for a write naming
+	// the run it resumes. An ingestion always extracts, so no Detail an ingestion writes can
+	// switch either rule off for it.
+	recovery := func(r Record) bool {
+		name, ok := strings.CutPrefix(r.Detail, "recover:")
+		return ok && name != "" && firstExtraction == 0
+	}
 	outOfPhase := map[int]bool{}
 	for _, r := range ordered {
-		if r.Event != EventWrite || strings.HasPrefix(r.Detail, "recover:") {
+		if r.Event != EventWrite || recovery(r) {
 			continue
 		}
 		switch {
@@ -366,7 +376,7 @@ func Verify(records []Record) []Violation {
 			// run's journal, so none of them is in this map. Applying the carve-out to one rule
 			// and not the other meant a recovery write listing any digest would be reported as
 			// writing unextracted secrets for behaving correctly.
-			if outOfPhase[r.Seq] || strings.HasPrefix(r.Detail, "recover:") {
+			if outOfPhase[r.Seq] || recovery(r) {
 				continue
 			}
 			for _, d := range r.Digests {

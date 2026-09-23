@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/scanner"
+	"go/token"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -405,7 +407,7 @@ func TestNewSanitizedHasNoUnexpectedCallers(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if !bytes.Contains(body, []byte("NewSanitized(")) {
+		if !mentionsIdent(t, path, body, "NewSanitized") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -438,9 +440,10 @@ var unsafeCallers = map[string]bool{
 // "what may touch a secret?" must be answerable by one grep over this module. It walks the module
 // source rather than trusting that a reviewer would notice a new call site.
 //
-// It is a lexical scan, not a type-checked one, so it over-reports (any method named Unsafe on any
-// type counts). That direction is the safe one: a false positive is read by a human, a false
-// negative is a leak.
+// It is a lexical scan, not a type-checked one, so it over-reports (any identifier named Unsafe
+// counts). That direction is the safe one: a false positive is read by a human, a false negative is
+// a leak. The first version matched the text ".Unsafe()" and so did have false negatives — a method
+// value and a call split across lines — until it moved to identifier tokens.
 func TestUnsafeHasNoUnexpectedCallers(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -462,7 +465,7 @@ func TestUnsafeHasNoUnexpectedCallers(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if !bytes.Contains(body, []byte(".Unsafe()")) {
+		if !mentionsIdent(t, path, body, "Unsafe") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -479,6 +482,52 @@ func TestUnsafeHasNoUnexpectedCallers(t *testing.T) {
 	}
 	if scanned == 0 {
 		t.Fatalf("walked %s and found no .go files at all; the scan proves nothing", root)
+	}
+}
+
+// mentionsIdent reports whether Go source uses name as an identifier token anywhere: a call, a
+// method value (f := u.Unsafe), or a call split across lines. The first scans matched the literal
+// text ".Unsafe()" and "NewSanitized(", which all of those forms get past. Comments and string
+// literals are separate tokens and do not count. Still lexical, so it over-reports: any identifier
+// with that name counts, whatever it names.
+func mentionsIdent(t *testing.T, path string, body []byte, name string) bool {
+	t.Helper()
+	fset := token.NewFileSet()
+	file := fset.AddFile(path, fset.Base(), len(body))
+	var s scanner.Scanner
+	var bad bool
+	s.Init(file, body, func(pos token.Position, msg string) { bad = true }, 0)
+	for {
+		_, tok, lit := s.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if tok == token.IDENT && lit == name {
+			return true
+		}
+	}
+	if bad {
+		// A file the scanner cannot read is reported rather than passed: an unreadable file is not
+		// one that was shown to be clean.
+		t.Errorf("%s did not scan as Go source", path)
+	}
+	return false
+}
+
+// TestMentionsIdentSeesEveryForm is the calibration for both scans: every form a caller can reach
+// the method by must be seen, and a mention in a comment or a string must not.
+func TestMentionsIdentSeesEveryForm(t *testing.T) {
+	for src, want := range map[string]bool{
+		"package p\nfunc f(u T) { u.Unsafe() }\n":         true,
+		"package p\nfunc f(u T) { g := u.Unsafe; g() }\n": true,
+		"package p\nfunc f(u T) { u.\n\tUnsafe() }\n":     true,
+		"package p\n// u.Unsafe() in a comment\n":         false,
+		"package p\nconst s = \"u.Unsafe()\"\n":           false,
+		"package p\nfunc f(u T) { u.UnsafeOther() }\n":    false,
+	} {
+		if got := mentionsIdent(t, "probe.go", []byte(src), "Unsafe"); got != want {
+			t.Errorf("mentionsIdent(%q) = %v, want %v", src, got, want)
+		}
 	}
 }
 

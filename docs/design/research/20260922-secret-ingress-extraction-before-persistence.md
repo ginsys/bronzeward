@@ -712,6 +712,15 @@ second: a mark list built with no paths returned an empty result instead of the 
 mark file gets. Extraction refused an empty path set regardless, so no run could have proceeded on
 one.
 
+A tenth review raised 4. The ordering verifier exempted any write whose free-text detail began
+`recover:`; the exemption now also requires a journal with no extraction at all, which every
+ingestion has, and a named run. All 22 committed journals verify with the same verdict under the
+stricter rule. The provider's version-number parse accepted `1x` as 1; it is now strict. The two
+call-site scans matched the text `.Unsafe()` and `NewSanitized(`, so a method value or a call split
+across lines passed them; they now match identifier tokens, with a calibration covering each form.
+The fourth — digests persisted unsalted — is a contract decision rather than a defect in the
+prototype, and is recorded in section 7 and recommendation 7 instead of being changed here.
+
 ## 6. What this decides
 
 **§7.1's ordering requirement is implementable, and the evidence for that is structural.** Every
@@ -798,6 +807,16 @@ clock-skew holes by construction, and each is reached on the matrix's ordinary p
 drives two principals at one claim concurrently or skews a caller's clock. Who may extend a live
 lease is not checked at all, and is left to the specification (5.16).
 
+**Secret digests are persisted unsalted.** The journal, every `secret_reference` row and the
+encrypted baseline carry the full SHA-256 of each extracted value, which is what lets extraction
+and every later write be correlated without the value. For Talos key material and tokens, which are
+random and long, that is not a practical guessing target. For an operator-marked low-entropy value
+such as a password, the persisted digest is an offline guessing oracle held in exactly the database
+and backups that §7.1 keeps the plaintext out of. A keyed digest (an HMAC under a key the database
+does not hold) keeps cross-run correlation and removes the oracle; a per-run salt removes it too but
+breaks the cross-run input comparison the baseline check relies on. The prototype was not changed:
+the choice is a contract decision, and changing it here would alter every recorded digest.
+
 **The environment bounds the schema-detection denominator.** A Docker-provisioned Talos node
 produces no disk-encryption, installer or disk configuration — precisely the secret-bearing areas
 absent here. Recall is over the fields this environment produces, and §6.9 forbids the completeness
@@ -858,3 +877,8 @@ first is feasible, for this prototype, these flows, these secrets and these boun
    the habit missed — an overclaimed guarantee, a recovery that dropped its references and a
    redaction that held only for exported fields (5.15–5.17) — were found by an independent review,
    so the evidence work needs one of those too.
+
+7. **Decide how a secret's digest is keyed before v1 persists one.** Section 7 records the
+   prototype persisting unsalted SHA-256 digests, which is a guessing oracle for any low-entropy
+   marked value. The compilation contract should state whether persisted correlators are keyed,
+   and by what. That is an open decision for the milestone-02 specification, not one made here.
