@@ -74,6 +74,15 @@ func TestPersistDraftRequiresARunIDAndAJournal(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "after extraction") {
 		t.Errorf("the error does not say why a journal is required: %v", err)
 	}
+
+	// A pre-commit refusal must not be mistakable for the post-commit failure: a caller testing for
+	// ErrCommittedUnrecorded would otherwise treat an unpersisted draft as committed.
+	if err := db.PersistDraft(context.Background(), Draft{Sanitized: valid}, openJournal(t), nil); errors.Is(err, ErrCommittedUnrecorded) {
+		t.Errorf("a refusal before any statement reported the draft committed: %v", err)
+	}
+	if !strings.Contains(ErrCommittedUnrecorded.Error(), "is committed") {
+		t.Errorf("ErrCommittedUnrecorded does not say the draft exists: %v", ErrCommittedUnrecorded)
+	}
 }
 
 // TestSaveBaselineRefusesAnIncompleteRecord checks the database is not told a configuration was
