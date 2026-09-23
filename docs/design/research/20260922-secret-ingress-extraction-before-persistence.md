@@ -733,7 +733,11 @@ substring search to be dropped, since a short value occurring inside another wou
 honest run. It was kept: the whole-scalar comparisons cannot see a secret embedded in a larger
 value — a token inside a URL or a command line — which is the case the substring search is for,
 and refusing an honest run is the failure direction that leaks nothing. No recorded run was
-refused this way.
+refused this way. A fourteenth review raised 3, all in tests or contracts: the round-trip test's
+trailing-empty-document case compared paths, which a dropped trailing document leaves unchanged,
+and now compares the bytes; the suffix mark source relied on its input's order for the sorted
+result its contract promises, and now sorts; and the DSN test's reflection into lib/pq would have
+panicked rather than failed had the dependency renamed its field.
 
 ## 6. What this decides
 

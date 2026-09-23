@@ -164,7 +164,12 @@ func TestFixtureDSNQuotesThePassword(t *testing.T) {
 			t.Errorf("lib/pq refused the DSN for %q: %v", password, err)
 			continue
 		}
-		got := reflect.ValueOf(c).Elem().FieldByName("opts").MapIndex(reflect.ValueOf("password"))
+		opts := reflect.ValueOf(c).Elem().FieldByName("opts")
+		if !opts.IsValid() || opts.Kind() != reflect.Map {
+			t.Fatalf("lib/pq's Connector has no opts map any more (%v); this test reads the parsed "+
+				"password through it and must be updated with the dependency", opts.Kind())
+		}
+		got := opts.MapIndex(reflect.ValueOf("password"))
 		if !got.IsValid() || got.String() != password {
 			t.Errorf("lib/pq read the password %q back as %v", password, got)
 		}
