@@ -31,6 +31,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -39,6 +40,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/checkpoint"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/journal"
@@ -264,10 +266,17 @@ func leak(ctx context.Context, s Surface, runRoot string, db *sql.DB, value secr
 			return "", fmt.Errorf("control: taking a connection for the statement log: %w", err)
 		}
 		defer func() {
-			// Best effort: the run is about to end, and a failure to reset would only mean more
-			// logging than intended, never less.
-			_, _ = conn.ExecContext(ctx, "RESET log_statement")
-			_, _ = conn.ExecContext(ctx, "RESET standard_conforming_strings")
+			// The reset runs on its own context: the caller's may already be cancelled on a hold or
+			// crash path, which would skip it and return the connection to the pool still logging
+			// every statement verbatim. If it fails anyway, the connection is discarded rather than
+			// pooled — returning driver.ErrBadConn from Raw is database/sql's way to say so.
+			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_, errLog := conn.ExecContext(rctx, "RESET log_statement")
+			_, errStr := conn.ExecContext(rctx, "RESET standard_conforming_strings")
+			if errLog != nil || errStr != nil {
+				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+			}
 			_ = conn.Close()
 		}()
 		if _, err := conn.ExecContext(ctx, "SET log_statement = 'all'"); err != nil {

@@ -748,7 +748,17 @@ refused, by test. A URL-form DSN whose query password held an invalid percent es
 password to `url.Values`, which drops such a pair silently; the query is now read as text. And
 the NewSanitized call-site scan counted test files toward its "scanned something" guard, though
 it inspects none of them. Every honest recorded run passed the wider search, and the narrower one
-refuses a subset of what it refused, so no recorded outcome changes.
+refuses a subset of what it refused, so no recorded outcome changes. A seventeenth review raised
+4. The statement-log control's reset ran on the caller's context, which a hold or crash path may
+already have cancelled, and a failed reset returned the connection to the pool still logging in
+full; it now resets on its own context and discards the connection if the reset fails. Every
+matrix run is its own process, so a leaked setting could not have outlived the run that set it.
+Transient release dropped the held change before the claim's transition, so a failed transition
+left a held row with no change behind it; the order is now the one Resume uses. A URL DSN with
+`#` in its password parsed without error as a shorter password; the rough reading is now always
+added, and redaction replaces the longest spelling first so the misreading cannot split the real
+one. And a control test's zero-document assertion passed a nil database, so the nil-database
+guard answered first; it now passes a real, unconnected handle.
 
 ## 6. What this decides
 

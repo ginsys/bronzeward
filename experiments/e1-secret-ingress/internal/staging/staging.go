@@ -390,8 +390,14 @@ func (t *Transient) Resume(ctx context.Context, runID, principal string) (secret
 
 // Release implements Staging.
 func (t *Transient) Release(ctx context.Context, runID string) error {
+	// The claim first, as in Resume. Dropping the change first and then failing the UPDATE left a
+	// row still 'held' by a live process whose change was gone, and a later Resume from that same
+	// process reported ErrNotRecoverable — "no principal can resume" — for a process that never died.
+	if err := t.claims.transition(ctx, runID, StateReleased, false, StateHeld, StateResumed); err != nil {
+		return err
+	}
 	t.drop(runID)
-	return t.claims.transition(ctx, runID, StateReleased, false, StateHeld, StateResumed)
+	return nil
 }
 
 // Encrypted is explicitly encrypted staging. The pending change is a row holding ciphertext, which
