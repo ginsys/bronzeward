@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -20,11 +22,32 @@ import (
 // against the fixtures, which is where a wrong assumption about OpenBao's API would surface.
 
 // recorder captures what the client sent, so a test can assert the request rather than infer it.
+// The handler fills it on the server's goroutine and the test reads it on its own, so both sides go
+// through the mutex: the ordering must not rest on the client having read a response first.
 type recorder struct {
+	mu  sync.Mutex
+	got request
+}
+
+// request is one recorded request.
+type request struct {
 	method string
 	path   string
 	token  string
 	body   string
+}
+
+func (r *recorder) set(req request) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.got = req
+}
+
+// last is the most recent request, copied under the lock.
+func (r *recorder) last() request {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.got
 }
 
 // server returns a client pointed at a handler, plus the recorder it fills.
@@ -36,7 +59,7 @@ func server(t *testing.T, handler func(w http.ResponseWriter, r *http.Request)) 
 		if err != nil {
 			t.Errorf("reading the request body: %v", err)
 		}
-		rec.method, rec.path, rec.token, rec.body = r.Method, r.URL.Path, r.Header.Get("X-Vault-Token"), string(body)
+		rec.set(request{method: r.Method, path: r.URL.Path, token: r.Header.Get("X-Vault-Token"), body: string(body)})
 		// Put the body back. Without this the handler reads nothing, and a test that asserts an
 		// error does not quote the request would pass against an empty request — which is the
 		// shape of a check that cannot fail.
@@ -115,17 +138,17 @@ func TestPutAddressesTheVersionItWrote(t *testing.T) {
 		t.Errorf("Put returned %q, want %q", uri, want)
 	}
 
-	if rec.method != http.MethodPost {
-		t.Errorf("method = %s, want POST", rec.method)
+	if rec.last().method != http.MethodPost {
+		t.Errorf("method = %s, want POST", rec.last().method)
 	}
-	if want := "/v1/secret/data/run-1/machine.ca.key"; rec.path != want {
-		t.Errorf("path = %q, want %q", rec.path, want)
+	if want := "/v1/secret/data/run-1/machine.ca.key"; rec.last().path != want {
+		t.Errorf("path = %q, want %q", rec.last().path, want)
 	}
-	if rec.token != "test-token" {
-		t.Errorf("token header = %q", rec.token)
+	if rec.last().token != "test-token" {
+		t.Errorf("token header = %q", rec.last().token)
 	}
-	if !strings.Contains(rec.body, "private-key-value") {
-		t.Errorf("the value did not reach the server: %q", rec.body)
+	if !strings.Contains(rec.last().body, "private-key-value") {
+		t.Errorf("the value did not reach the server: %q", rec.last().body)
 	}
 }
 
@@ -139,8 +162,8 @@ func TestPutRefusesInvalidUTF8(t *testing.T) {
 	if uri, err := c.Put(t.Context(), "run-1/x", []byte("ab\xff\xfecd")); err == nil {
 		t.Fatalf("Put accepted a value that is not valid UTF-8 and returned %q", uri)
 	}
-	if rec.method != "" {
-		t.Errorf("the value was sent before it was refused: %s %s", rec.method, rec.path)
+	if rec.last().method != "" {
+		t.Errorf("the value was sent before it was refused: %s %s", rec.last().method, rec.last().path)
 	}
 }
 
@@ -149,9 +172,9 @@ func TestPutRefusesInvalidUTF8(t *testing.T) {
 func TestRedirectsAreNotFollowed(t *testing.T) {
 	const plaintext = "E1-PROVIDER-PLAINTEXT-MUST-NOT-TRAVEL"
 
-	var elsewhere int
+	var elsewhere atomic.Int64
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		elsewhere++
+		elsewhere.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(other.Close)
@@ -164,11 +187,11 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 		t.Fatal("Put succeeded against a redirect")
 	}
 	// The control: the first server really was asked, with the secret in the body.
-	if !strings.Contains(rec.body, plaintext) {
-		t.Fatalf("the request did not carry the plaintext, so this test proves nothing: %q", rec.body)
+	if !strings.Contains(rec.last().body, plaintext) {
+		t.Fatalf("the request did not carry the plaintext, so this test proves nothing: %q", rec.last().body)
 	}
-	if elsewhere != 0 {
-		t.Errorf("the redirect was followed %d time(s), replaying the token and the body", elsewhere)
+	if n := elsewhere.Load(); n != 0 {
+		t.Errorf("the redirect was followed %d time(s), replaying the token and the body", n)
 	}
 }
 
@@ -221,8 +244,8 @@ func TestAFailedWriteDoesNotLeakWhatItWasSending(t *testing.T) {
 	}
 	// The control: the secret really was in flight, and really was echoed back. Without this the
 	// assertion below could pass against an empty request, which is a check that cannot fail.
-	if !strings.Contains(rec.body, plaintext) {
-		t.Fatalf("the request did not carry the plaintext, so this test proves nothing: %q", rec.body)
+	if !strings.Contains(rec.last().body, plaintext) {
+		t.Fatalf("the request did not carry the plaintext, so this test proves nothing: %q", rec.last().body)
 	}
 	if strings.Contains(err.Error(), plaintext) {
 		t.Errorf("the error holds what was being written: %v", err)
@@ -267,8 +290,8 @@ func TestGetReadsTheValueBack(t *testing.T) {
 	if string(got) != "private-key-value" {
 		t.Errorf("Get returned %q", got)
 	}
-	if rec.method != http.MethodGet {
-		t.Errorf("method = %s, want GET", rec.method)
+	if rec.last().method != http.MethodGet {
+		t.Errorf("method = %s, want GET", rec.last().method)
 	}
 }
 
@@ -305,8 +328,8 @@ func TestVersionsReadsMetadataAndSorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Versions: %v", err)
 	}
-	if !strings.HasPrefix(rec.path, "/v1/secret/metadata/") {
-		t.Errorf("Versions read %q, not the metadata path", rec.path)
+	if !strings.HasPrefix(rec.last().path, "/v1/secret/metadata/") {
+		t.Errorf("Versions read %q, not the metadata path", rec.last().path)
 	}
 	if len(versions) != 3 {
 		t.Fatalf("got %d versions, want 3", len(versions))

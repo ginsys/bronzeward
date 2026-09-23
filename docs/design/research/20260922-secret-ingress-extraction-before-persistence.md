@@ -687,6 +687,16 @@ are now kept. Every run used the five-minute default, which still renders as `30
 deliberately renders `unset` in place of the digest, as a test requires; the comment now describes
 the code.
 
+A seventh review raised 3. The connection string built from the fixture password interpolated it
+bare, so a password with a space, a quote or a backslash was mis-parsed, and lib/pq's parse error
+quoted a fragment of it that redaction could not recognise; it is now single-quoted and escaped,
+and a test reads the password back through lib/pq's own parser. The fixture's synthetic password
+has none of those characters, so every recorded run connected with the same value. The other two
+were test-side: the provider tests' request recorder and redirect counter were shared between the
+stand-in server's goroutine and the test's without explicit synchronisation. The race detector did
+not report them, and they now go through a mutex and an atomic rather than relying on the response
+read for ordering.
+
 ## 6. What this decides
 
 **§7.1's ordering requirement is implementable, and the evidence for that is structural.** Every

@@ -5,12 +5,14 @@ import (
 	"errors"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/baseline"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/journal"
 	"github.com/ginsys/bronzeward/experiments/e1-secret-ingress/internal/secret"
+	"github.com/lib/pq"
 )
 
 // These tests cover what can be established without a live PostgreSQL: the guards that run before
@@ -141,6 +143,34 @@ func TestRedactDSNRemovesThePassword(t *testing.T) {
 	plain := errors.New("connection refused")
 	if redactDSN(plain, dsn) != plain {
 		t.Error("an error without the password was rewritten anyway")
+	}
+}
+
+// TestFixtureDSNQuotesThePassword checks the password lib/pq's own parser reads out of the built
+// connection string is the one that went in, for the characters bare interpolation broke on. The
+// parsed value is read from the connector by reflection, because lib/pq exposes no accessor; that
+// is the parser the connection uses, rather than this package's copy of its rules.
+func TestFixtureDSNQuotesThePassword(t *testing.T) {
+	for _, password := range []string{
+		"BWSYNTH-plain",
+		"has a space",
+		"it's quoted",
+		`back\slash`,
+		`\' both`,
+	} {
+		dsn := fixtureDSN(password)
+		c, err := pq.NewConnector(dsn)
+		if err != nil {
+			t.Errorf("lib/pq refused the DSN for %q: %v", password, err)
+			continue
+		}
+		got := reflect.ValueOf(c).Elem().FieldByName("opts").MapIndex(reflect.ValueOf("password"))
+		if !got.IsValid() || got.String() != password {
+			t.Errorf("lib/pq read the password %q back as %v", password, got)
+		}
+		if pws := dsnPasswords(dsn); len(pws) == 0 || pws[0] != password {
+			t.Errorf("dsnPasswords found %q for %q, so redaction would miss it", pws, password)
+		}
 	}
 }
 
