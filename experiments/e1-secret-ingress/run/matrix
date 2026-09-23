@@ -218,7 +218,7 @@ expect_status control-leak-transformed ok
 # The statement-log control turns log_statement on for its own connection first. The fixture leaves
 # it at 'none', and a control that comes back clean because the surface was switched off reads in a
 # bundle exactly like a surface that cannot be observed.
-take control-leak-temp-file leak '/tmp/effective-config.yaml' -- --leak-at=temp-file --config="$import_config" import
+take control-leak-temp-file leak '/tmp/effective-config-' -- --leak-at=temp-file --config="$import_config" import
 expect_status control-leak-temp-file ok
 take control-leak-staging leak '/staging/pending.yaml' -- --leak-at=staging --config="$import_config" import
 expect_status control-leak-staging ok
