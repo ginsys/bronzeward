@@ -87,6 +87,20 @@ func TestPathListRejectsAMarkThatMatchesNothing(t *testing.T) {
 	}
 }
 
+// TestNewPathListKeepsAPathOnce holds the direct constructor to the contract LoadPathList enforces:
+// Marks returns no duplicates, whichever way the list was built.
+func TestNewPathListKeepsAPathOnce(t *testing.T) {
+	p := NewPathList("test", "doc[0].machine.token", "doc[0].machine.ca.key", "doc[0].machine.token")
+
+	got, err := p.Marks(load(t))
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if want := []string{"doc[0].machine.ca.key", "doc[0].machine.token"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("Marks = %q, want %q", got, want)
+	}
+}
+
 // TestPathListRejectsDuplicates checks a path listed twice is refused. Extracting one secret twice
 // would put two EventExtracted records in the journal for one value and make the count wrong.
 func TestPathListRejectsDuplicates(t *testing.T) {

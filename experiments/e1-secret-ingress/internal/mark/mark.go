@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -81,11 +82,13 @@ func LoadPathList(path string) (*PathList, error) {
 	return &PathList{source: path, paths: paths}, nil
 }
 
-// NewPathList builds a mark list directly, for tests and for the deliberate-failure controls.
+// NewPathList builds a mark list directly, for tests and for the deliberate-failure controls. A
+// path given twice is kept once, so the list meets Source.Marks' no-duplicates contract; it has no
+// line numbers to report, unlike LoadPathList, which refuses the duplicate instead.
 func NewPathList(source string, paths ...string) *PathList {
 	out := append([]string(nil), paths...)
 	sort.Strings(out)
-	return &PathList{source: source, paths: out}
+	return &PathList{source: source, paths: slices.Compact(out)}
 }
 
 // Name implements Source.
