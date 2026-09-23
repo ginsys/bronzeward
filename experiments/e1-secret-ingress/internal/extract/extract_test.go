@@ -313,6 +313,38 @@ func TestRunFailsWhenAValueRemainsUnderAnUnaddressableKey(t *testing.T) {
 	}
 }
 
+// TestRunIsNotRefusedByItsOwnReference covers a value that occurs inside the reference replacing
+// it: the URI embeds the run id and the path, so "run" is in every reference this run writes. The
+// run must succeed. An embedded copy elsewhere must still be refused, so the search was narrowed,
+// not removed.
+func TestRunIsNotRefusedByItsOwnReference(t *testing.T) {
+	d, err := document.Load([]byte("machine:\n  token: run\n"))
+	if err != nil {
+		t.Fatalf("document.Load: %v", err)
+	}
+	j, err := journal.Open(filepath.Join(t.TempDir(), "journal.jsonl"), "run-test")
+	if err != nil {
+		t.Fatalf("journal.Open: %v", err)
+	}
+	t.Cleanup(func() { j.Close() })
+	if _, err := Run(t.Context(), request(d, newFakeStore(), j, "doc[0].machine.token")); err != nil {
+		t.Fatalf("Run refused a document whose only copy of the value is inside its own reference: %v", err)
+	}
+
+	embedded, err := document.Load([]byte("machine:\n  token: s3cr3t-token-value\n  url: https://h/?t=s3cr3t-token-value\n"))
+	if err != nil {
+		t.Fatalf("document.Load: %v", err)
+	}
+	j2, err := journal.Open(filepath.Join(t.TempDir(), "journal.jsonl"), "run-test")
+	if err != nil {
+		t.Fatalf("journal.Open: %v", err)
+	}
+	t.Cleanup(func() { j2.Close() })
+	if _, err := Run(t.Context(), request(embedded, newFakeStore(), j2, "doc[0].machine.token")); err == nil {
+		t.Fatal("Run accepted a document with the secret still embedded in another value")
+	}
+}
+
 // TestRunRejectsIncompleteRequests covers the inputs that would each produce a run which looks
 // clean while demonstrating nothing.
 func TestRunRejectsIncompleteRequests(t *testing.T) {

@@ -234,6 +234,19 @@ func TestRedactDSNCoversEveryFormLibPQAccepts(t *testing.T) {
 		}
 	}
 
+	// A query password with an invalid percent escape. url.Parse accepts the DSN, and url.Values
+	// silently drops the pair, so the first version found no password at all.
+	badEscape := "postgres://127.0.0.1:55432/bronzeward?password=ab%zzcd&sslmode=disable"
+	if _, err := url.Parse(badEscape); err != nil {
+		t.Fatalf("the test's DSN does not parse, so it exercises the fallback instead: %v", err)
+	}
+	if got := dsnPasswords(badEscape); len(got) == 0 || got[0] != "ab%zzcd" {
+		t.Errorf("dsnPasswords(%q) = %q, want the raw ab%%zzcd", badEscape, got)
+	}
+	if text := redactDSN(errors.New("failed: "+badEscape), badEscape).Error(); strings.Contains(text, "ab%zzcd") {
+		t.Errorf("the password survived redaction: %s", text)
+	}
+
 	// A URL-form DSN net/url refuses: the raw password holds a space and a '#', so url.Parse fails
 	// and the first version returned no password at all for exactly the DSN most likely to be
 	// quoted back whole.

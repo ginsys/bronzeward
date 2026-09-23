@@ -740,7 +740,15 @@ result its contract promises, and now sorts; and the DSN test's reflection into 
 panicked rather than failed had the dependency renamed its field. A fifteenth review raised 1:
 a failure to journal the commit, after the draft had committed, returned an error that read like
 every pre-commit failure, after which nothing exists. It now wraps a distinct
-`ErrCommittedUnrecorded` that says the rows are committed. No recorded run hit it.
+`ErrCommittedUnrecorded` that says the rows are committed. No recorded run hit it. A sixteenth
+review raised 3. The extraction guard's substring search matched a short value inside the very
+reference that replaced it, whose URI carries the run id and the path; the substituted references
+are now removed from the text before it is searched, and an embedded copy elsewhere is still
+refused, by test. A URL-form DSN whose query password held an invalid percent escape lost that
+password to `url.Values`, which drops such a pair silently; the query is now read as text. And
+the NewSanitized call-site scan counted test files toward its "scanned something" guard, though
+it inspects none of them. Every honest recorded run passed the wider search, and the narrower one
+refuses a subset of what it refused, so no recorded outcome changes.
 
 ## 6. What this decides
 

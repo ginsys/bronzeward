@@ -183,6 +183,14 @@ func Run(ctx context.Context, req Request) (Result, error) {
 // extraction and the provider would hold the value.
 func assertNoPlaintextRemains(body []byte, refs []secret.Reference, plaintexts []secret.Unresolved) error {
 	text := string(body)
+	// The references this run substituted are removed before searching. Each carries the run id
+	// and the path in its URI, so a short value such as "doc" or a word in the run id matched inside
+	// the very reference that replaced it and refused a correctly sanitized document. Whatever else
+	// the text holds is still searched, which is what finds a secret embedded inside a larger value.
+	searched := text
+	for _, ref := range refs {
+		searched = strings.ReplaceAll(searched, refPrefix+ref.URI, "\x00")
+	}
 	var left []string
 	for i, u := range plaintexts {
 		// An empty original cannot be searched for: every document contains the empty string.
@@ -190,7 +198,7 @@ func assertNoPlaintextRemains(body []byte, refs []secret.Reference, plaintexts [
 		if len(u.Unsafe()) == 0 {
 			continue
 		}
-		if strings.Contains(text, string(u.Unsafe())) {
+		if strings.Contains(searched, string(u.Unsafe())) {
 			left = append(left, refs[i].Path)
 		}
 	}
