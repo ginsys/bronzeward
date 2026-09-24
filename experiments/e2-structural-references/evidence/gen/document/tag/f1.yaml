@@ -1,0 +1,4 @@
+apiVersion: v1alpha1
+kind: TrustedRootsConfig
+name: e2-roots
+certificates: !bwref roots

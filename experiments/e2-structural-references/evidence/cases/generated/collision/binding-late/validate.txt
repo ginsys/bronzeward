@@ -1,0 +1,1 @@
+cases/generated/collision/binding-late/out.yaml is valid for metal mode

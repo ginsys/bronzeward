@@ -1,0 +1,5 @@
+--- base
++++ binding-late
+@@ -9,0 +10,2 @@
++    acceptedCAs:
++        - crt: ZTItZXh0cmEtY2EtY2VydGlmaWNhdGU=

@@ -1,0 +1,1 @@
+cases/generated/int/marked-early/out.yaml is valid for metal mode

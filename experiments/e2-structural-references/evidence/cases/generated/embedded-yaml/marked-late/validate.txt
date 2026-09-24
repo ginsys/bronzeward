@@ -1,0 +1,1 @@
+cases/generated/embedded-yaml/marked-late/out.yaml is valid for metal mode

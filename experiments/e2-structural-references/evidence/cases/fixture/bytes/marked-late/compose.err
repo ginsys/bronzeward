@@ -1,0 +1,2 @@
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 3: illegal base64 data at input byte 5

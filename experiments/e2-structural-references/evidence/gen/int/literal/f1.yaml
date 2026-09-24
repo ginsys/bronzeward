@@ -1,0 +1,4 @@
+machine:
+    features:
+        kubePrism:
+            port: 7446

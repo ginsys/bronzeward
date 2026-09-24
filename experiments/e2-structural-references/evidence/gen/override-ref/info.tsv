@@ -1,0 +1,9 @@
+fragment	f1.yaml
+fragment	f2.yaml
+native	pass
+expect	tag	late	differs
+expect	tag	early	parity
+expect	marked	late	parity
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity

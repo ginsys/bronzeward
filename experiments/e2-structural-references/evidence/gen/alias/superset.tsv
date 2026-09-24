@@ -1,0 +1,2 @@
+f1.yaml	reg-secret	v1alpha1	machine/registries/config/registry.example.test/auth/password
+f1.yaml	reg-secret	v1alpha1	machine/registries/config/mirror.example.test/auth/password

@@ -1,0 +1,9 @@
+--- base
++++ marked-early
+@@ -19,0 +20,6 @@
++    registries:
++        config:
++            registry.example.test:
++                auth:
++                    username: e2-user
++                    password: e2-override-literal

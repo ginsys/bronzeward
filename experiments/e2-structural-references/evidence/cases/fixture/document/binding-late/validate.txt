@@ -1,0 +1,1 @@
+cases/fixture/document/binding-late/out.yaml is valid for container mode

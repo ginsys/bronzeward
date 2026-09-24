@@ -1,0 +1,1 @@
+cases/fixture/override-ref/native/out.yaml is valid for container mode

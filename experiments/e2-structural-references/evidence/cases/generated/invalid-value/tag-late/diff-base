@@ -1,0 +1,5 @@
+--- base
++++ tag-late
+@@ -37 +37 @@
+-        dnsDomain: cluster.local
++        dnsDomain: dns-domain

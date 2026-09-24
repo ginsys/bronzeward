@@ -1,0 +1,1 @@
+cases/generated/embedded-json/marked-early/out.yaml is valid for metal mode

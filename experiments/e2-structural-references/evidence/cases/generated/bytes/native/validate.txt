@@ -1,0 +1,1 @@
+cases/generated/bytes/native/out.yaml is valid for metal mode

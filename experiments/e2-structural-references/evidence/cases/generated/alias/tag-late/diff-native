@@ -1,0 +1,8 @@
+--- native
++++ tag-late
+@@ -25 +25 @@
+-                    password: e2-shared-secret
++                    password: reg-secret
+@@ -29 +29 @@
+-                    password: e2-shared-secret
++                    password: reg-secret

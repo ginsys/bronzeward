@@ -1,0 +1,1 @@
+cases/generated/map/binding-early/out.yaml is valid for metal mode

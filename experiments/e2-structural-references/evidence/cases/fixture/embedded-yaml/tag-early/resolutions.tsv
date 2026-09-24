@@ -1,0 +1,1 @@
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password

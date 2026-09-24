@@ -1,0 +1,11 @@
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: &secret e2-shared-secret
+            mirror.example.test:
+                auth:
+                    username: e2-user
+                    password: *secret
