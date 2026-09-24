@@ -60,11 +60,15 @@ The identities are the roles the design names, with one policy or key each:
 | `executor` | `update` on `transit/decrypt/bw-artifact` only | the key artifacts are encrypted to |
 | `metadata` | the fixture's `bw-metadata-only`: KV metadata and Transit key reads, no data | no key |
 | `admin` / `operator` | the root token, standing for the operator's administrator | whoever holds the store directory |
+| `compiler-2` | not used | the compiler's replacement key after rotation; a cell run with it is labelled `compiler-2` |
+| `lost` | not used | age store only: a key deleted after a generation was encrypted to it |
 | `recovery` | not used | SOPS only: a second recipient of source secrets |
 
 The OpenBao policies are in [`run/lib.sh`](../../../experiments/e5-provider-capabilities/run/lib.sh).
 In the local stores every identity runs as one uid. The separation is by which key file a command is
 given, not by the operating system, and each local candidate records that as an unsupported cell.
+Migration cells span two candidates and carry role names: `compiler` there means the OpenBao
+compiler token together with the compiler's current age key.
 
 ## 3. What was built
 
