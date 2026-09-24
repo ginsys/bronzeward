@@ -1,0 +1,119 @@
+==> 043-s4-sqlite-takeover-race-processes <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2065859
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> intent (rc 0) <==
+$ e4db intent -machine m1 -key k1 -owner o0
+backend=sqlite pid=2065998
+outcome=done elapsed_ms=18 op=1 created=true
+==> t1 (rc 3) <==
+$ e4db takeover -op 1 -owner o1 -expect 1 -start-at 1790287679477
+backend=sqlite pid=2066067
+outcome=refused reason=fenced elapsed_ms=33 err="fenced: ownership or claim not current"
+==> t2 (rc 3) <==
+$ e4db takeover -op 1 -owner o2 -expect 1 -start-at 1790287679477
+backend=sqlite pid=2066071
+outcome=refused reason=fenced elapsed_ms=33 err="fenced: ownership or claim not current"
+==> t3 (rc 0) <==
+$ e4db takeover -op 1 -owner o3 -expect 1 -start-at 1790287679477
+backend=sqlite pid=2066081
+outcome=done elapsed_ms=18 op=1 owner=o3 gen=2
+==> t4 (rc 3) <==
+$ e4db takeover -op 1 -owner o4 -expect 1 -start-at 1790287679477
+backend=sqlite pid=2066090
+outcome=refused reason=fenced elapsed_ms=18 err="fenced: ownership or claim not current"
+==> t5 (rc 3) <==
+$ e4db takeover -op 1 -owner o5 -expect 1 -start-at 1790287679477
+backend=sqlite pid=2066099
+outcome=refused reason=fenced elapsed_ms=53 err="fenced: ownership or claim not current"
+==> t6 (rc 3) <==
+$ e4db takeover -op 1 -owner o6 -expect 1 -start-at 1790287679477
+backend=sqlite pid=2066111
+outcome=refused reason=fenced elapsed_ms=53 err="fenced: ownership or claim not current"
+==> t7 (rc 3) <==
+$ e4db takeover -op 1 -owner o7 -expect 1 -start-at 1790287679477
+backend=sqlite pid=2066119
+outcome=refused reason=fenced elapsed_ms=33 err="fenced: ownership or claim not current"
+==> t8 (rc 3) <==
+$ e4db takeover -op 1 -owner o8 -expect 1 -start-at 1790287679477
+backend=sqlite pid=2066126
+outcome=refused reason=fenced elapsed_ms=33 err="fenced: ownership or claim not current"
+==> read-s4 (rc 0) <==
+takeovers|1
+attempts|0
+stale_attempts|0
+op:1|o3 2 0
+==> 044-s4-sqlite-stale-owner-fenced <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2068470
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> intent (rc 0) <==
+$ e4db intent -machine m1 -key k1 -owner a
+backend=sqlite pid=2068605
+outcome=done elapsed_ms=19 op=1 created=true
+==> takeover (rc 0) <==
+$ e4db takeover -op 1 -owner b -expect 1
+backend=sqlite pid=2068655
+outcome=done elapsed_ms=18 op=1 owner=b gen=2
+==> stale (rc 3) <==
+$ e4db attempt -op 1 -owner a -gen 1
+backend=sqlite pid=2068705
+outcome=refused reason=fenced elapsed_ms=0 err="fenced: ownership or claim not current"
+==> current (rc 0) <==
+$ e4db attempt -op 1 -owner b -gen 2
+backend=sqlite pid=2068720
+outcome=done elapsed_ms=18 op=1 owner=b gen=2
+==> read-s4 (rc 0) <==
+takeovers|1
+attempts|1
+stale_attempts|0
+op:1|b 2 1
+==> 045-s4-sqlite-attempt-race-fenced <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2068828
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> intent (rc 0) <==
+$ e4db intent -machine m1 -key k1 -owner a
+backend=sqlite pid=2068949
+outcome=done elapsed_ms=19 op=1 created=true
+==> attempt (rc 0) <==
+$ e4db attempt -op 1 -owner a -gen 1 -hold 3s
+backend=sqlite pid=2069009
+hold="after the ownership check" for=3s
+outcome=done elapsed_ms=3028 op=1 owner=a gen=1
+==> takeover (rc 0) <==
+$ e4db takeover -op 1 -owner b -expect 1
+backend=sqlite pid=2069098
+outcome=done elapsed_ms=3036 op=1 owner=b gen=2
+==> read-s4 (rc 0) <==
+takeovers|1
+attempts|1
+stale_attempts|0
+op:1|b 2 1
+==> 046-s4-sqlite-attempt-race-check-then-insert-control <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2073626
+outcome=done elapsed_ms=47 applied=[1 2 3 4]
+==> intent (rc 0) <==
+$ e4db intent -machine m1 -key k1 -owner a
+backend=sqlite pid=2073764
+outcome=done elapsed_ms=18 op=1 created=true
+==> attempt (rc 0) <==
+$ e4db attempt -op 1 -owner a -gen 1 -hold 3s -check-then-insert
+backend=sqlite pid=2073811
+hold="after the ownership check" for=3s
+outcome=done elapsed_ms=3028 op=1 owner=a gen=1
+==> takeover (rc 0) <==
+$ e4db takeover -op 1 -owner b -expect 1
+backend=sqlite pid=2073897
+outcome=done elapsed_ms=3036 op=1 owner=b gen=2
+==> read-s4 (rc 0) <==
+takeovers|1
+attempts|1
+stale_attempts|0
+op:1|b 2 0
+==> end <==

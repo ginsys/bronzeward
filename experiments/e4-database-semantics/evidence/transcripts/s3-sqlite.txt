@@ -1,0 +1,93 @@
+==> 040-s3-sqlite-race-processes <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2062334
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> c1 (rc 3) <==
+$ e4db intent -machine m1 -key k1 -owner c1 -start-at 1790287677353
+backend=sqlite pid=2062494
+outcome=refused reason=scope-busy elapsed_ms=103 err="machine scope busy"
+==> c2 (rc 3) <==
+$ e4db intent -machine m1 -key k2 -owner c2 -start-at 1790287677353
+backend=sqlite pid=2062499
+outcome=refused reason=scope-busy elapsed_ms=33 err="machine scope busy"
+==> c3 (rc 3) <==
+$ e4db intent -machine m1 -key k3 -owner c3 -start-at 1790287677353
+backend=sqlite pid=2062508
+outcome=refused reason=scope-busy elapsed_ms=128 err="machine scope busy"
+==> c4 (rc 3) <==
+$ e4db intent -machine m1 -key k4 -owner c4 -start-at 1790287677353
+backend=sqlite pid=2062519
+outcome=refused reason=scope-busy elapsed_ms=78 err="machine scope busy"
+==> c5 (rc 3) <==
+$ e4db intent -machine m1 -key k5 -owner c5 -start-at 1790287677353
+backend=sqlite pid=2062531
+outcome=refused reason=scope-busy elapsed_ms=53 err="machine scope busy"
+==> c6 (rc 3) <==
+$ e4db intent -machine m1 -key k6 -owner c6 -start-at 1790287677353
+backend=sqlite pid=2062539
+outcome=refused reason=scope-busy elapsed_ms=33 err="machine scope busy"
+==> c7 (rc 3) <==
+$ e4db intent -machine m1 -key k7 -owner c7 -start-at 1790287677353
+backend=sqlite pid=2062547
+outcome=refused reason=scope-busy elapsed_ms=33 err="machine scope busy"
+==> c8 (rc 0) <==
+$ e4db intent -machine m1 -key k8 -owner c8 -start-at 1790287677353
+backend=sqlite pid=2062556
+outcome=done elapsed_ms=28 op=1 created=true
+==> read-s3 (rc 0) <==
+operations|1
+scopes_with_two_active|0
+intents_recorded|1
+op:k8|1 m1 committed c8
+==> 041-s3-sqlite-retry-same-key <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2065196
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> first (rc 0) <==
+$ e4db intent -machine m1 -key k1 -owner c1
+backend=sqlite pid=2065334
+outcome=done elapsed_ms=19 op=1 created=true
+==> retry (rc 0) <==
+$ e4db intent -machine m1 -key k1 -owner c1
+backend=sqlite pid=2065386
+outcome=done elapsed_ms=0 op=1 created=false
+==> read-s3 (rc 0) <==
+operations|1
+scopes_with_two_active|0
+intents_recorded|1
+op:k1|1 m1 committed c1
+==> 042-s3-sqlite-after-completion <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2065438
+outcome=done elapsed_ms=44 applied=[1 2 3 4]
+==> first (rc 0) <==
+$ e4db intent -machine m1 -key k1 -owner c1
+backend=sqlite pid=2065574
+outcome=done elapsed_ms=17 op=1 created=true
+==> blocked (rc 3) <==
+$ e4db intent -machine m1 -key k2 -owner c2
+backend=sqlite pid=2065620
+outcome=refused reason=scope-busy elapsed_ms=0 err="machine scope busy"
+==> finish (rc 0) <==
+$ e4db finish -op 1 -state completed
+backend=sqlite pid=2065636
+outcome=done elapsed_ms=18 op=1 state=completed
+==> second (rc 0) <==
+$ e4db intent -machine m1 -key k2 -owner c2
+backend=sqlite pid=2065686
+outcome=done elapsed_ms=18 op=2 created=true
+==> other (rc 0) <==
+$ e4db intent -machine m2 -key k3 -owner c3
+backend=sqlite pid=2065752
+outcome=done elapsed_ms=19 op=3 created=true
+==> read-s3 (rc 0) <==
+operations|3
+scopes_with_two_active|0
+intents_recorded|3
+op:k1|1 m1 completed c1
+op:k2|2 m1 committed c2
+op:k3|3 m2 committed c3
+==> end <==

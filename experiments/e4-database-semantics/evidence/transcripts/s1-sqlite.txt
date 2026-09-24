@@ -1,0 +1,67 @@
+==> 029-s1-sqlite-cas <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2043784
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2043925
+outcome=done elapsed_ms=19 fragment=f1
+==> race (rc 0) <==
+$ e4db race -writers 8 -rounds 20 -actor w
+backend=sqlite pid=2044006
+outcome=done elapsed_ms=1002 wins=20 conflicts=140 busy=0
+==> read-s1 (rc 0) <==
+revisions_recorded|20
+duplicate_revisions|0
+final_revision|20
+lost_updates|0
+==> 030-s1-sqlite-cas-processes <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2045512
+outcome=done elapsed_ms=47 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2045654
+outcome=done elapsed_ms=18 fragment=f1
+==> p1 (rc 0) <==
+$ e4db race -writers 4 -rounds 10 -actor p1 -start-at 1790287664559
+backend=sqlite pid=2045720
+outcome=done elapsed_ms=489 wins=10 conflicts=30 busy=0
+==> p2 (rc 0) <==
+$ e4db race -writers 4 -rounds 10 -actor p2 -start-at 1790287664559
+backend=sqlite pid=2045724
+outcome=done elapsed_ms=603 wins=9 conflicts=31 busy=0
+==> p3 (rc 0) <==
+$ e4db race -writers 4 -rounds 10 -actor p3 -start-at 1790287664559
+backend=sqlite pid=2045732
+outcome=done elapsed_ms=324 wins=8 conflicts=32 busy=0
+==> p4 (rc 0) <==
+$ e4db race -writers 4 -rounds 10 -actor p4 -start-at 1790287664559
+backend=sqlite pid=2045741
+outcome=done elapsed_ms=193 wins=9 conflicts=31 busy=0
+==> read-s1 (rc 0) <==
+revisions_recorded|36
+duplicate_revisions|0
+final_revision|36
+lost_updates|0
+==> 031-s1-sqlite-blind-control <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2048803
+outcome=done elapsed_ms=45 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2048923
+outcome=done elapsed_ms=18 fragment=f1
+==> race (rc 0) <==
+$ e4db race -writers 8 -rounds 20 -actor w -blind
+backend=sqlite pid=2048980
+outcome=done elapsed_ms=2770 wins=160 conflicts=0 busy=0
+==> read-s1 (rc 0) <==
+revisions_recorded|160
+duplicate_revisions|20
+final_revision|20
+lost_updates|140
+==> end <==

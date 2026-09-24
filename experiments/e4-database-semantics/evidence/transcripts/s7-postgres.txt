@@ -1,0 +1,103 @@
+==> 027-s7-postgres-restore <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=2033593
+outcome=done elapsed_ms=34 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=2033603
+outcome=done elapsed_ms=2 fragment=f1
+==> r1 (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 2
+backend=postgres pid=2033613
+outcome=done elapsed_ms=5 release=r1 id=1 existing=false digest=c8ce64ba97e5592628676f2e4b2cc366085a78d799de6515c0a14787eceb3371
+==> op1 (rc 0) <==
+$ e4db intent -machine m1 -key k1 -owner x
+backend=postgres pid=2033623
+outcome=done elapsed_ms=4 op=1 created=true
+==> inject-db-snapshot (rc 0) <==
+$ fixtures/bin/inject db-snapshot e4-s7-postgres-2001504
+==> r2 (rc 0) <==
+$ e4db publish -release r2 -actor p -pin f1=0 -artifacts 2
+backend=postgres pid=2033860
+outcome=done elapsed_ms=5 release=r2 id=2 existing=false digest=f03621fb30dbd170184bca4673449e7e45492bf14dfab930ab0d929c978caf75
+==> to-y (rc 0) <==
+$ e4db takeover -op 1 -owner y -expect 1
+backend=postgres pid=2033870
+outcome=done elapsed_ms=3 op=1 owner=y gen=2
+==> to-x (rc 0) <==
+$ e4db takeover -op 1 -owner x -expect 2
+backend=postgres pid=2033880
+outcome=done elapsed_ms=3 op=1 owner=x gen=3
+==> attempt-x3 (rc 0) <==
+$ e4db attempt -op 1 -owner x -gen 3
+backend=postgres pid=2033890
+outcome=done elapsed_ms=4 op=1 owner=x gen=3
+==> op2 (rc 0) <==
+$ e4db intent -machine m2 -key k2 -owner z
+backend=postgres pid=2033900
+outcome=done elapsed_ms=3 op=2 created=true
+==> read-s2-before-restore (rc 0) <==
+releases|2
+artifacts|4
+sources|2
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 2 c8ce64ba97e5592628676f2e4b2cc366085a78d799de6515c0a14787eceb3371
+release:r2|2 2 f03621fb30dbd170184bca4673449e7e45492bf14dfab930ab0d929c978caf75
+==> read-s4-before-restore (rc 0) <==
+takeovers|2
+attempts|1
+stale_attempts|0
+op:1|x 3 1
+op:2|z 1 0
+==> inject-db-restore (rc 0) <==
+$ fixtures/bin/inject db-restore e4-s7-postgres-2001504
+NOTICE:  database "bronzeward_previous" does not exist, skipping
+NOTICE:  database "bronzeward_restore" does not exist, skipping
+==> read-s2-restored (rc 0) <==
+releases|1
+artifacts|2
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 2 c8ce64ba97e5592628676f2e4b2cc366085a78d799de6515c0a14787eceb3371
+==> read-s4-restored (rc 0) <==
+takeovers|0
+attempts|0
+stale_attempts|0
+op:1|x 1 0
+==> read-s3-restored (rc 0) <==
+operations|1
+scopes_with_two_active|0
+intents_recorded|1
+op:k1|1 m1 committed x
+==> r3 (rc 0) <==
+$ e4db publish -release r3 -actor p -pin f1=0 -artifacts 2
+backend=postgres pid=2034886
+outcome=done elapsed_ms=5 release=r3 id=2 existing=false digest=9f77444920c472d993b0ff758294a328ba8d5565870fd84ba0c19bb2ed1a9a29
+==> again-y (rc 0) <==
+$ e4db takeover -op 1 -owner y -expect 1
+backend=postgres pid=2034896
+outcome=done elapsed_ms=3 op=1 owner=y gen=2
+==> again-x (rc 0) <==
+$ e4db takeover -op 1 -owner x -expect 2
+backend=postgres pid=2034906
+outcome=done elapsed_ms=3 op=1 owner=x gen=3
+==> old-token (rc 0) <==
+$ e4db attempt -op 1 -owner x -gen 3
+backend=postgres pid=2034916
+outcome=done elapsed_ms=3 op=1 owner=x gen=3
+==> end <==

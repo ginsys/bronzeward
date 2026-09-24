@@ -1,0 +1,92 @@
+==> 001-s1-postgres-cas <==
+==> reset (rc ) <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=2002785
+outcome=done elapsed_ms=45 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=2002882
+outcome=done elapsed_ms=2 fragment=f1
+==> race (rc 0) <==
+$ e4db race -writers 8 -rounds 20 -actor w
+backend=postgres pid=2002910
+outcome=done elapsed_ms=374 wins=20 conflicts=140 busy=0
+==> read-s1 (rc 0) <==
+revisions_recorded|20
+duplicate_revisions|0
+final_revision|20
+lost_updates|0
+==> 002-s1-postgres-cas-processes <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=2003987
+outcome=done elapsed_ms=35 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=2004051
+outcome=done elapsed_ms=2 fragment=f1
+==> p1 (rc 0) <==
+$ e4db race -writers 4 -rounds 10 -actor p1 -start-at 1790287618032
+backend=postgres pid=2004080
+outcome=done elapsed_ms=175 wins=7 conflicts=33 busy=0
+==> p2 (rc 0) <==
+$ e4db race -writers 4 -rounds 10 -actor p2 -start-at 1790287618032
+backend=postgres pid=2004086
+outcome=done elapsed_ms=190 wins=2 conflicts=38 busy=0
+==> p3 (rc 0) <==
+$ e4db race -writers 4 -rounds 10 -actor p3 -start-at 1790287618032
+backend=postgres pid=2004094
+outcome=done elapsed_ms=180 wins=5 conflicts=35 busy=0
+==> p4 (rc 0) <==
+$ e4db race -writers 4 -rounds 10 -actor p4 -start-at 1790287618032
+backend=postgres pid=2004100
+outcome=done elapsed_ms=176 wins=3 conflicts=37 busy=0
+==> read-s1 (rc 0) <==
+revisions_recorded|17
+duplicate_revisions|0
+final_revision|17
+lost_updates|0
+==> 003-s1-postgres-blind-control <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=2006739
+outcome=done elapsed_ms=35 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=2006803
+outcome=done elapsed_ms=2 fragment=f1
+==> race (rc 0) <==
+$ e4db race -writers 8 -rounds 20 -actor w -blind
+backend=postgres pid=2006825
+outcome=done elapsed_ms=607 wins=160 conflicts=0 busy=0
+==> read-s1 (rc 0) <==
+revisions_recorded|160
+duplicate_revisions|20
+final_revision|20
+lost_updates|140
+==> end <==

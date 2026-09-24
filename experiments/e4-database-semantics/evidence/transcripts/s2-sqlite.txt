@@ -1,0 +1,192 @@
+==> 032-s2-sqlite-normal <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2051108
+outcome=done elapsed_ms=47 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2051117
+outcome=done elapsed_ms=19 fragment=f1
+==> publish (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=sqlite pid=2051142
+outcome=done elapsed_ms=18 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 033-s2-sqlite-stale-input <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2051171
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2051180
+outcome=done elapsed_ms=18 fragment=f1
+==> write (rc 0) <==
+$ e4db update -actor w -read 0
+backend=sqlite pid=2051189
+outcome=done elapsed_ms=18 fragment=f1 revision=1
+==> publish (rc 3) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=sqlite pid=2051198
+outcome=refused reason=stale elapsed_ms=0 err="stale source revision: f1 is at 1, publication pinned 0"
+==> read-s2 (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> 034-s2-sqlite-fail-at-5 <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2051231
+outcome=done elapsed_ms=74 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2051255
+outcome=done elapsed_ms=32 fragment=f1
+==> publish (rc 1) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -fail-at 5
+backend=sqlite pid=2051267
+outcome=error class=other elapsed_ms=0 err="injected failure before artifact 5 of 8"
+==> read-s2 (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> 035-s2-sqlite-client-sigkill <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2051303
+outcome=done elapsed_ms=83 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2051313
+outcome=done elapsed_ms=20 fragment=f1
+==> publish (rc 137) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 30s
+backend=sqlite pid=2051325
+hold="after artifact 4 of 8" for=30s
+# SIGKILL sent to 2051325
+==> read-s2 (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> 036-s2-sqlite-kill-before-commit <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2051461
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2051602
+outcome=done elapsed_ms=22 fragment=f1
+==> publish (rc 137) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -commit-gate <E4_OUT>/parts/036-s2-sqlite-kill-before-commit/commit-gate
+backend=sqlite pid=2051673
+commit-ready
+# SIGKILL sent to 2051673
+==> read-s2-after-kill (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> retry (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=sqlite pid=2051825
+outcome=done elapsed_ms=19 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 037-s2-sqlite-retry <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2051939
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2052089
+outcome=done elapsed_ms=18 fragment=f1
+==> first (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=sqlite pid=2052147
+outcome=done elapsed_ms=19 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> same (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=sqlite pid=2052192
+outcome=done elapsed_ms=0 release=r1 id=1 existing=true digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> different (rc 3) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 9
+backend=sqlite pid=2052206
+outcome=refused reason=conflict elapsed_ms=0 err="existing record differs"
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 038-s2-sqlite-race-locked <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2052274
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2052420
+outcome=done elapsed_ms=18 fragment=f1
+==> publish (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 3s
+backend=sqlite pid=2052469
+hold="after artifact 4 of 8" for=3s
+outcome=done elapsed_ms=3028 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> write (rc 0) <==
+$ e4db update -actor w -read 0
+backend=sqlite pid=2052553
+outcome=done elapsed_ms=3036 fragment=f1 revision=1
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 039-s2-sqlite-race-unlocked-control <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2057327
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2057487
+outcome=done elapsed_ms=18 fragment=f1
+==> publish (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 3s -no-source-lock
+backend=sqlite pid=2057546
+hold="after artifact 4 of 8" for=3s
+outcome=done elapsed_ms=3028 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> write (rc 0) <==
+$ e4db update -actor w -read 0
+backend=sqlite pid=2057650
+outcome=done elapsed_ms=3036 fragment=f1 revision=1
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> end <==
