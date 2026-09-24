@@ -481,6 +481,16 @@ evidence.
   Neither could change this capture: the prototype sets no context deadline, and both drivers'
   `RowsAffected` return a nil error (`database/sql/driver.RowsAffected`, which `lib/pq` returns,
   and `modernc.org/sqlite`'s `result`). The measured code was left as captured.
+- **Three harness weaknesses that did not reach the evidence.**
+  - `e4_kill` (`run/lib.sh`) falls back to killing the `timeout` wrapper when `pgrep` finds no
+    `e4db` child, and `pgrep` is not in the preflight. In all seven kill rows, the PID that got
+    the SIGKILL is the one `e4db` reported for itself.
+  - `RaceRevisions` (`scenarios.go`) counts a busy outcome instead of retrying it. Both S1
+    compare-and-set rows assert `busy=0`, and `TestS1CompareAndSetKeepsEveryWrite` fails on any
+    busy outcome, so one could not pass silently.
+  - The tests' `read` helper (`scenarios_test.go`) does not check `rows.Err()`. The harness's
+    readers are `psql` and `sqlite3`, not this helper. In the tests, a truncated read can only drop
+    keys, and every key a test checks is compared with a non-empty value, so a dropped key fails.
 
 ## 8. Recommendation
 
