@@ -19,7 +19,7 @@ import (
 
 // Dialect is the backend under test. Every place the SQL or the transaction handling differs by
 // dialect is a branch on this value, so the dialect-specific cost can be counted from the source
-// (`grep -n 'case Postgres\|case SQLite\|== Postgres\|== SQLite'`).
+// (`grep -n 'case Postgres\|case SQLite\|[!=]= Postgres\|[!=]= SQLite'`).
 type Dialect int
 
 const (

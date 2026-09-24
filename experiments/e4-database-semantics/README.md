@@ -25,9 +25,11 @@ links), with one schema and every dialect difference an explicit, countable bran
 | S7 | restored state: what a snapshot/restore takes back and what gets issued again |
 | S8 | the single-writer cost: an unrelated write during a long publication |
 
-Every negative claim has a positive control that removes the mechanism and must make the reader
-find the failure: blind writes (S1), an unlocked source check (S2), check-then-insert ownership
-(S4), a naive claim (S5), unlocked or deferred migration runners (S6).
+Five negative claims have a positive control that removes the mechanism and must make the reader
+find the failure: blind writes (S1), an unlocked source check (S2's race), check-then-insert
+ownership (S4's attempt), a naive claim (S5), unlocked or deferred migration runners (S6). S2's
+interruption rows, S3's scope uniqueness and S4's takeover have none; those claims rest on the
+reader's result alone.
 
 ## How a row is judged
 
@@ -58,8 +60,9 @@ fixtures/bin/down
 `go test` against both backends. `run/collect-evidence` copies the text evidence into
 [`evidence/`](evidence/), packs the transcripts one file per scenario and backend, rewrites local
 paths to placeholders, and refuses anything matching this run's fixture credentials or a path in
-the operator's home. An optional `bundle-summary.txt` in `E4_OUT` (the bundle's versions and leak
-scan) is carried along.
+the operator's home. It refuses to run without the bundle copied to `E4_OUT/bundle`, which stays
+there, and commits a summary of it (`bundle-summary.txt`: versions and leak scan) and a manifest
+of every copied file with its SHA-256 (`bundle-manifest.txt`).
 
 The unit tests need no fixture: `go test ./...` runs them on a temporary SQLite file, and
 `E4_TEST_PG_DSN=<dsn> go test ./...` on PostgreSQL.

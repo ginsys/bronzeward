@@ -61,7 +61,7 @@ e4_need_fixture() {
   [ -n "${BW_POSTGRES_PASSWORD:-}" ] || die "the fixture published no PostgreSQL password"
   [ -s "$STATE/scan-patterns.txt" ] || die "$STATE/scan-patterns.txt is missing; the fixture is not up"
   containers_own
-  need sqlite3 go timeout
+  need sqlite3 go timeout fuser
   mkdir -p -- "$E4_SQLITE_DIR"
 }
 
@@ -208,12 +208,26 @@ row_note() { R[$1]=$2; }
 #   key>value     the reading is an integer greater than value
 #   rc:label=N    client label exited N
 #   out:label~re  client label's transcript matches the extended regex
-# A row matches only if every expectation holds. The observed column records the actual value of
-# each, so a mismatch shows what was seen instead.
+#   seen:key      the reading R[key] exists; its value is recorded, not judged (a control's size)
+# A row matches only if every expectation holds, and only if no client reports reaching its start
+# barrier late (e4db prints late=true): a late client ran after the others, not with them. The
+# observed column records the actual value of each, so a mismatch shows what was seen instead.
 row_end() {
   local e key val got ok=1 observed=() t label
+  for label in "${ROW_LABELS[@]}"; do
+    if grep -q '^late=true' -- "$(e4_part "$label")" 2>/dev/null; then
+      ok=0
+      observed+=("late:$label")
+    fi
+  done
   for e in "$@"; do
     case $e in
+      seen:*)
+        key=${e#seen:}
+        got=${R[$key]-unset}
+        [ "$got" != unset ] || ok=0
+        observed+=("$key=$got")
+        ;;
       rc:*=*)
         key=${e%%=*} val=${e#*=} label=${key#rc:}
         got=${RC[$label]-unset}
@@ -265,5 +279,9 @@ e4_quiesced() {
   for label in "${!PID[@]}"; do
     kill -0 "${PID[$label]}" 2>/dev/null && return 1
   done
-  ! fuser -s -- "$ROW_DB" "$ROW_DB-wal" 2>/dev/null
+  # fuser exits 1 when no process has either file open. Anything else, a missing fuser or an
+  # error included, is not evidence of quiescence.
+  local rc=0
+  fuser -s -- "$ROW_DB" "$ROW_DB-wal" 2>/dev/null || rc=$?
+  [ "$rc" = 1 ]
 }

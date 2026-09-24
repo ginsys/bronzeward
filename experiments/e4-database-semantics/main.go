@@ -133,7 +133,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	defer db.Close()
 	out("backend=%s pid=%d", db.D, os.Getpid())
 	if *startAt > 0 {
-		time.Sleep(time.Until(time.UnixMilli(*startAt)))
+		// A process that reaches the barrier after it passed did not start together with the
+		// others; run/all refuses the row on this line rather than let it pass serially.
+		if wait := time.Until(time.UnixMilli(*startAt)); wait > 0 {
+			time.Sleep(wait)
+		} else {
+			out("late=true by_ms=%d", -wait.Milliseconds())
+		}
 	}
 	onHold := func(stage string) { out("hold=%q for=%s", stage, *hold) }
 	began := time.Now()

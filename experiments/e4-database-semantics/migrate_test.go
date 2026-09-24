@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -176,8 +177,13 @@ func TestSQLiteRebuildNeedsForeignKeysOff(t *testing.T) {
 		t.Fatal("migration 4 is not marked as needing foreign keys off")
 	}
 	rebuild.ForeignKeysOff = false
-	if _, err := Migrate(ctx, db, []Migration{ms[0], ms[1], ms[2], rebuild}, MigrateOptions{Runner: "t"}); err == nil {
+	_, err = Migrate(ctx, db, []Migration{ms[0], ms[1], ms[2], rebuild}, MigrateOptions{Runner: "t"})
+	if err == nil {
 		t.Fatal("the rebuild with foreign keys on succeeded; the counted cost would be imaginary")
+	}
+	// Only a foreign-key failure shows the cost; any other error would be a broken test.
+	if !strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+		t.Fatalf("the rebuild with foreign keys on failed, but not on a foreign key: %v", err)
 	}
 	if _, err := Migrate(ctx, db, ms, MigrateOptions{Runner: "t"}); err != nil {
 		t.Fatalf("the rebuild as marked: %v", err)

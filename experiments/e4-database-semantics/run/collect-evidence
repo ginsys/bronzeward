@@ -27,7 +27,29 @@ rewrite() { # rewrite <in> <out>: the checkout, E4_OUT and the fixture state bec
 for f in run.txt cells.tsv injections.log; do
   rewrite "$E4_OUT/$f" "$incoming/$f"
 done
-[ ! -f "$E4_OUT/bundle-summary.txt" ] || rewrite "$E4_OUT/bundle-summary.txt" "$incoming/bundle-summary.txt"
+
+# The fixture's evidence bundle, copied to E4_OUT/bundle before teardown (README), stays there: it
+# holds dumps and data. What is committed is its summary and a manifest of what was copied.
+bundle=$E4_OUT/bundle
+[ -s "$bundle/versions.txt" ] || die "$bundle/versions.txt is missing: copy the fixture's bundle there first"
+{
+  printf '# fixtures/bin/evidence bundle, captured after run/all with E4_OUT as an extra scan path\n'
+  printf '## versions.txt\n'
+  cat -- "$bundle/versions.txt"
+  printf '## leak-scan.txt (files matched; canary-control files are the planted positive controls, scan-patterns.txt is the pattern list itself)\n'
+  cat -- "$bundle/leak-scan.txt"
+  printf '## fixtures-diff.txt lines: %s; up-fixtures-diff.txt lines: %s\n' \
+    "$(wc -l <"$bundle/fixtures-diff.txt")" "$(wc -l <"$bundle/up-fixtures-diff.txt")"
+  if [ -e "$bundle/unavailable.txt" ]; then
+    printf '## unavailable.txt\n'
+    cat -- "$bundle/unavailable.txt"
+  else
+    printf '## unavailable.txt: absent\n'
+  fi
+} >"$E4_OUT/bundle-summary.txt"
+rewrite "$E4_OUT/bundle-summary.txt" "$incoming/bundle-summary.txt"
+(cd -- "$bundle" && find . -type f -print0 | sort -z | xargs -0 sha256sum) >"$E4_OUT/bundle-manifest.txt"
+rewrite "$E4_OUT/bundle-manifest.txt" "$incoming/bundle-manifest.txt"
 
 # One file per scenario and backend rather than one per row: GitHub serves no pull-request diff of
 # more than 300 files, and a review that cannot read the diff reviews nothing. Each row's
