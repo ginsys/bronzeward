@@ -1,1 +1,1 @@
-writer a rc=0, writer b rc=1
+writer a rc=1, writer b rc=0

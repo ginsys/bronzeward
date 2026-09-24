@@ -2,7 +2,7 @@ n	candidate	column	identity	kind	expected	observed	rc	verdict	command	transcript
 001	openbao	create-read-version	publisher	versioned	ok	ok	0	match	as publisher kv_put app-token-g1 -cas=0 secret/gen/app-token/g1 	transcripts/001-openbao-create-read-version.txt
 002	openbao	create-read-version	publisher	versioned	denied	denied	2	match	as publisher kv_put app-token-g2 secret/gen/app-token/g1 	transcripts/002-openbao-create-read-version.txt
 003	openbao	create-read-version	admin	versioned	fail	fail	2	match	as admin kv_put app-token-g2 -cas=0 secret/gen/app-token/g1 	transcripts/003-openbao-create-read-version.txt
-004	openbao	create-read-version	compiler	versioned	ok	ok	0	match	as compiler check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 kv_get secret/gen/app-token/g1 	transcripts/004-openbao-create-read-version.txt
+004	openbao	create-read-version	compiler	versioned	ok	ok	0	match	as compiler check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f kv_get secret/gen/app-token/g1 	transcripts/004-openbao-create-read-version.txt
 005	openbao	create-read-version	executor	versioned	denied	denied	2	match	as executor kv_get secret/gen/app-token/g1 	transcripts/005-openbao-create-read-version.txt
 006	openbao	create-read-version	metadata	versioned	denied	denied	2	match	as metadata kv_get secret/gen/app-token/g1 	transcripts/006-openbao-create-read-version.txt
 007	openbao	create-read-version	admin	metadata	ok	ok	0	match	as admin bao read -format=json secret/config 	transcripts/007-openbao-create-read-version.txt
@@ -18,8 +18,8 @@ n	candidate	column	identity	kind	expected	observed	rc	verdict	command	transcript
 017	openbao	create-read-version	admin	versioned	ok	ok	0	match	as admin kv_put registry-v10 secret/mutable/registry 	transcripts/017-openbao-create-read-version.txt
 018	openbao	create-read-version	admin	versioned	ok	ok	0	match	as admin kv_put registry-v11 secret/mutable/registry 	transcripts/018-openbao-create-read-version.txt
 019	openbao	create-read-version	admin	metadata	ok	ok	0	match	as admin versions secret/mutable/registry 	transcripts/019-openbao-create-read-version.txt
-020	openbao	create-read-version	admin	versioned	fail	fail	1	match	as admin check_digest 8a0eed33814b1641f1190ce54521c8587c5dca63900fb859903a933adc51aea4 kv_get -version=1 secret/mutable/registry 	transcripts/020-openbao-create-read-version.txt
-021	openbao	create-read-version	admin	versioned	ok	ok	0	match	as admin check_digest b10b491d3c46a0b5b4d2b5dfc1cdb99797973650d55f3d1a32333faf3217b97b kv_get -version=2 secret/mutable/registry 	transcripts/021-openbao-create-read-version.txt
+020	openbao	create-read-version	admin	versioned	fail	fail	1	match	as admin check_digest a8110aea8de240398ded0e48b54ba5f96fdf61a7e96e5f84b3cf167a2a981f6e kv_get -version=1 secret/mutable/registry 	transcripts/020-openbao-create-read-version.txt
+021	openbao	create-read-version	admin	versioned	ok	ok	0	match	as admin check_digest 0caaa11122acee74911fb6a50ce4a1d0a50549dff1821ad45971416c90f483d3 kv_get -version=2 secret/mutable/registry 	transcripts/021-openbao-create-read-version.txt
 022	openbao	create-read-version	admin	metadata	ok	ok	0	match	as admin bao kv metadata put -max-versions=0 secret/mutable/zero 	transcripts/022-openbao-create-read-version.txt
 023	openbao	create-read-version	admin	versioned	ok	ok	0	match	as admin kv_put registry-v1 secret/mutable/zero 	transcripts/023-openbao-create-read-version.txt
 024	openbao	create-read-version	admin	versioned	ok	ok	0	match	as admin kv_put registry-v2 secret/mutable/zero 	transcripts/024-openbao-create-read-version.txt
@@ -61,7 +61,7 @@ n	candidate	column	identity	kind	expected	observed	rc	verdict	command	transcript
 060	openbao	rotation	admin	versioned	ok	ok	0	match	as admin bao write transit/keys/bw-artifact/config min_decryption_version=1 	transcripts/060-openbao-rotation.txt
 061	openbao	rotation	executor	versioned	ok	ok	0	match	as executor decrypt <E5_OUT>/work/openbao/artifact-v1.ct 	transcripts/061-openbao-rotation.txt
 062	openbao	rotation	publisher	versioned	ok	ok	0	match	as publisher kv_put app-token-g2 -cas=0 secret/gen/app-token/g2 	transcripts/062-openbao-rotation.txt
-063	openbao	rotation	compiler	versioned	ok	ok	0	match	as compiler check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 kv_get secret/gen/app-token/g1 	transcripts/063-openbao-rotation.txt
+063	openbao	rotation	compiler	versioned	ok	ok	0	match	as compiler check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f kv_get secret/gen/app-token/g1 	transcripts/063-openbao-rotation.txt
 064	openbao	metadata-only	metadata	metadata	ok	ok	0	match	as metadata bao kv metadata get -format=json secret/gen/app-token/g1 	transcripts/064-openbao-metadata-only.txt
 065	openbao	metadata-only	metadata	metadata	ok	ok	0	match	as metadata bao kv list secret/gen/app-token 	transcripts/065-openbao-metadata-only.txt
 066	openbao	metadata-only	metadata	metadata	ok	ok	0	match	as metadata versions secret/mutable/registry 	transcripts/066-openbao-metadata-only.txt
@@ -73,36 +73,36 @@ n	candidate	column	identity	kind	expected	observed	rc	verdict	command	transcript
 072	openbao	startup-unlock	admin	metadata	ok	ok	0	match	as admin sealed 	transcripts/072-openbao-startup-unlock.txt
 073	openbao	startup-unlock	compiler	versioned	fail	fail	2	match	as compiler kv_get secret/gen/app-token/g1 	transcripts/073-openbao-startup-unlock.txt
 074	openbao	startup-unlock	operator	-	ok	ok	0	match	bao_unseal 	transcripts/074-openbao-startup-unlock.txt
-075	openbao	startup-unlock	compiler	versioned	ok	ok	0	match	as compiler check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 kv_get secret/gen/app-token/g1 	transcripts/075-openbao-startup-unlock.txt
+075	openbao	startup-unlock	compiler	versioned	ok	ok	0	match	as compiler check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f kv_get secret/gen/app-token/g1 	transcripts/075-openbao-startup-unlock.txt
 076	openbao	startup-unlock	operator	-	ok	ok	0	match	<repo>/fixtures/bin/inject kill openbao 	transcripts/076-openbao-startup-unlock.txt
 077	openbao	startup-unlock	operator	-	ok	ok	0	match	<repo>/fixtures/bin/inject start openbao 	transcripts/077-openbao-startup-unlock.txt
 078	openbao	startup-unlock	executor	versioned	ok	ok	0	match	as executor decrypt <E5_OUT>/work/openbao/artifact-v1.ct 	transcripts/078-openbao-startup-unlock.txt
 079	openbao	backup-restore	operator	-	ok	ok	0	match	<repo>/fixtures/bin/inject bao-snapshot e5-openbao 	transcripts/079-openbao-backup-restore.txt
 080	openbao	backup-restore	publisher	versioned	ok	ok	0	match	as publisher kv_put app-token-g3 -cas=0 secret/gen/app-token/g3 	transcripts/080-openbao-backup-restore.txt
 081	openbao	backup-restore	operator	-	ok	ok	0	match	<repo>/fixtures/bin/inject bao-restore e5-openbao 	transcripts/081-openbao-backup-restore.txt
-082	openbao	backup-restore	compiler	versioned	ok	ok	0	match	as compiler check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 kv_get secret/gen/app-token/g1 	transcripts/082-openbao-backup-restore.txt
+082	openbao	backup-restore	compiler	versioned	ok	ok	0	match	as compiler check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f kv_get secret/gen/app-token/g1 	transcripts/082-openbao-backup-restore.txt
 083	openbao	backup-restore	compiler	versioned	fail	fail	2	match	as compiler kv_get secret/gen/app-token/g3 	transcripts/083-openbao-backup-restore.txt
 084	openbao	backup-restore	executor	versioned	ok	ok	0	match	as executor decrypt <E5_OUT>/work/openbao/artifact-v1.ct 	transcripts/084-openbao-backup-restore.txt
 085	openbao	backup-restore	executor	versioned	ok	ok	0	match	as executor decrypt <E5_OUT>/work/openbao/artifact-v1-rewrapped.ct 	transcripts/085-openbao-backup-restore.txt
 086	openbao	create-read-version	publisher	versioned	ok	ok	0	match	as publisher kv_put app-token-g1 -cas=0 secret/gen/probe/g1 	transcripts/086-openbao-create-read-version.txt
 087	openbao	create-read-version	admin	versioned	ok	ok	0	match	as admin kv_put app-token-g2 secret/gen/probe/g1 	transcripts/087-openbao-create-read-version.txt
 088	openbao	create-read-version	metadata	metadata	ok	ok	0	match	as metadata versions secret/gen/probe/g1 	transcripts/088-openbao-create-read-version.txt
-089	openbao	create-read-version	compiler	versioned	ok	ok	0	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 as compiler kv_get secret/gen/probe/g1 	transcripts/089-openbao-create-read-version.txt
-090	openbao	create-read-version	compiler	versioned	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 as compiler kv_get -version=1 secret/gen/probe/g1 	transcripts/090-openbao-create-read-version.txt
+089	openbao	create-read-version	compiler	versioned	ok	ok	0	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b as compiler kv_get secret/gen/probe/g1 	transcripts/089-openbao-create-read-version.txt
+090	openbao	create-read-version	compiler	versioned	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f as compiler kv_get -version=1 secret/gen/probe/g1 	transcripts/090-openbao-create-read-version.txt
 091	age-store	key-custody	operator	primitive	ok	ok	0	match	newkey compiler 	transcripts/091-age-store-key-custody.txt
 092	age-store	key-custody	operator	primitive	ok	ok	0	match	newkey executor 	transcripts/092-age-store-key-custody.txt
 093	age-store	key-custody	operator	metadata	ok	ok	0	match	modes 	transcripts/093-age-store-key-custody.txt
 094	age-store	key-custody	-	unsupported	-	n/a	-	-	no permission boundary between identities in one uid: possession of a key file is the only control, enforced by filesystem modes and process separation outside the store	-
 095	age-store	create-read-version	publisher	primitive	ok	ok	0	match	put compiler app-token g1 app-token-g1 	transcripts/095-age-store-create-read-version.txt
 096	age-store	create-read-version	publisher	primitive	fail	fail	1	match	put compiler app-token g1 app-token-g2 	transcripts/096-age-store-create-read-version.txt
-097	age-store	create-read-version	compiler	primitive	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 get compiler app-token g1 	transcripts/097-age-store-create-read-version.txt
+097	age-store	create-read-version	compiler	primitive	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f get compiler app-token g1 	transcripts/097-age-store-create-read-version.txt
 098	age-store	create-read-version	executor	primitive	fail	fail	1	match	get executor app-token g1 	transcripts/098-age-store-create-read-version.txt
 099	age-store	create-read-version	publisher	primitive	ok	ok	0	match	put compiler app-token g2 app-token-g2 	transcripts/099-age-store-create-read-version.txt
 100	age-store	create-read-version	metadata	metadata	ok	ok	0	match	list_gens app-token 	transcripts/100-age-store-create-read-version.txt
 101	age-store	create-read-version	publisher	primitive	ok	ok	0	match	race app-token g-race 	transcripts/101-age-store-create-read-version.txt
 102	age-store	create-read-version	publisher	-	ok	ok	0	match	rm -- <repo>/fixtures/.state/data/age-store/objects/app-token/g2.age <repo>/fixtures/.state/data/age-store/meta/app-token/g2.json 	transcripts/102-age-store-create-read-version.txt
 103	age-store	create-read-version	publisher	primitive	ok	ok	0	match	put compiler app-token g2 app-token-g3 	transcripts/103-age-store-create-read-version.txt
-104	age-store	create-read-version	compiler	primitive	ok	ok	0	match	check_digest c99b4b743727f47e9e23fec3a03e182a37a6fd6ec5b29059b396ce2feb9fa14b get compiler app-token g2 	transcripts/104-age-store-create-read-version.txt
+104	age-store	create-read-version	compiler	primitive	ok	ok	0	match	check_digest 321f9fa594cad742c4d359b9fba3549dfd974a83398da06c14a3571fad025ca5 get compiler app-token g2 	transcripts/104-age-store-create-read-version.txt
 105	age-store	create-read-version	-	unsupported	-	n/a	-	-	no retention limit and no pruning: generations stay until a file is removed, which the store can neither prevent nor record	-
 106	age-store	artifact-encryption	compiler	primitive	ok	ok	0	match	seal_artifact rel-1 	transcripts/106-age-store-artifact-encryption.txt
 107	age-store	artifact-encryption	executor	primitive	ok	ok	0	match	open_artifact executor rel-1 	transcripts/107-age-store-artifact-encryption.txt
@@ -110,7 +110,7 @@ n	candidate	column	identity	kind	expected	observed	rc	verdict	command	transcript
 109	age-store	signing	-	unsupported	-	n/a	-	-	age encrypts and has no signatures; a signing need would require a separate tool and key	-
 110	age-store	rotation	operator	primitive	ok	ok	0	match	newkey compiler-2 	transcripts/110-age-store-rotation.txt
 111	age-store	rotation	operator	primitive	ok	ok	0	match	rotate app-token g1 compiler compiler-2 	transcripts/111-age-store-rotation.txt
-112	age-store	rotation	compiler	primitive	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 get compiler-2 app-token g1 	transcripts/112-age-store-rotation.txt
+112	age-store	rotation	compiler	primitive	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f get compiler-2 app-token g1 	transcripts/112-age-store-rotation.txt
 113	age-store	rotation	compiler	primitive	fail	fail	1	match	get compiler app-token g1 	transcripts/113-age-store-rotation.txt
 114	age-store	rotation	metadata	metadata	ok	ok	0	match	meta_check app-token g1 	transcripts/114-age-store-rotation.txt
 115	age-store	rotation	-	unsupported	-	n/a	-	-	no rewrap without plaintext: re-encryption decrypts in the rotating process	-
@@ -124,14 +124,14 @@ n	candidate	column	identity	kind	expected	observed	rc	verdict	command	transcript
 123	age-store	metadata-only	compiler	primitive	fail	fail	1	match	get lost app-token g-lost 	transcripts/123-age-store-metadata-only.txt
 124	age-store	metadata-only	operator	-	ok	ok	0	match	damage <repo>/fixtures/.state/data/age-store/objects/app-token/g-race.age 	transcripts/124-age-store-metadata-only.txt
 125	age-store	metadata-only	metadata	metadata	fail	fail	1	match	meta_check app-token g-race 	transcripts/125-age-store-metadata-only.txt
-126	age-store	startup-unlock	compiler	primitive	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 get compiler-2 app-token g1 	transcripts/126-age-store-startup-unlock.txt
+126	age-store	startup-unlock	compiler	primitive	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f get compiler-2 app-token g1 	transcripts/126-age-store-startup-unlock.txt
 127	age-store	startup-unlock	operator	-	ok	ok	0	match	with_pty 2 <repo>/fixtures/.cache/age\ -p\ -o\ <repo>/fixtures/.state/data/age-store/keys/compiler-protected.key.age\ <repo>/fixtures/.state/data/age-store/keys/compiler-2.key 	transcripts/127-age-store-startup-unlock.txt
 128	age-store	startup-unlock	compiler	primitive	fail	fail	1	match	no_tty_decrypt 	transcripts/128-age-store-startup-unlock.txt
-129	age-store	startup-unlock	compiler	primitive	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 pty_decrypt 	transcripts/129-age-store-startup-unlock.txt
+129	age-store	startup-unlock	compiler	primitive	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f pty_decrypt 	transcripts/129-age-store-startup-unlock.txt
 130	age-store	backup-restore	operator	-	ok	ok	0	match	<repo>/fixtures/bin/inject store-snapshot e5-age-store 	transcripts/130-age-store-backup-restore.txt
 131	age-store	backup-restore	publisher	primitive	ok	ok	0	match	put compiler-2 app-token g3 app-token-g3 	transcripts/131-age-store-backup-restore.txt
 132	age-store	backup-restore	operator	-	ok	ok	0	match	<repo>/fixtures/bin/inject store-restore e5-age-store 	transcripts/132-age-store-backup-restore.txt
-133	age-store	backup-restore	compiler	primitive	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 get compiler-2 app-token g1 	transcripts/133-age-store-backup-restore.txt
+133	age-store	backup-restore	compiler	primitive	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f get compiler-2 app-token g1 	transcripts/133-age-store-backup-restore.txt
 134	age-store	backup-restore	metadata	metadata	fail	fail	1	match	meta_check app-token g3 	transcripts/134-age-store-backup-restore.txt
 135	age-store	backup-restore	executor	primitive	ok	ok	0	match	open_artifact executor rel-1 	transcripts/135-age-store-backup-restore.txt
 136	sops	key-custody	operator	primitive	ok	ok	0	match	newkey compiler 	transcripts/136-sops-key-custody.txt
@@ -141,11 +141,11 @@ n	candidate	column	identity	kind	expected	observed	rc	verdict	command	transcript
 140	sops	key-custody	-	unsupported	-	n/a	-	-	no permission boundary between identities in one uid: possession of a key file is the only control	-
 141	sops	create-read-version	publisher	primitive	ok	ok	0	match	put app-token app-token-g1 	transcripts/141-sops-create-read-version.txt
 142	sops	create-read-version	publisher	primitive	fail	fail	1	match	put app-token app-token-g2 	transcripts/142-sops-create-read-version.txt
-143	sops	create-read-version	compiler	primitive	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 get compiler app-token 	transcripts/143-sops-create-read-version.txt
-144	sops	create-read-version	recovery	primitive	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 get recovery app-token 	transcripts/144-sops-create-read-version.txt
+143	sops	create-read-version	compiler	primitive	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f get compiler app-token 	transcripts/143-sops-create-read-version.txt
+144	sops	create-read-version	recovery	primitive	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f get recovery app-token 	transcripts/144-sops-create-read-version.txt
 145	sops	create-read-version	executor	primitive	fail	fail	128	match	get executor app-token 	transcripts/145-sops-create-read-version.txt
 146	sops	create-read-version	compiler	primitive	ok	ok	0	match	set_value compiler app-token app-token-g2 	transcripts/146-sops-create-read-version.txt
-147	sops	create-read-version	compiler	primitive	ok	ok	0	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 get compiler app-token 	transcripts/147-sops-create-read-version.txt
+147	sops	create-read-version	compiler	primitive	ok	ok	0	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b get compiler app-token 	transcripts/147-sops-create-read-version.txt
 148	sops	create-read-version	-	unsupported	-	n/a	-	-	no version history: an update replaces the only copy; generations exist only as separate files or in an outside history such as git	-
 149	sops	create-read-version	compiler	primitive	ok	ok	0	match	race race 	transcripts/149-sops-create-read-version.txt
 150	sops	create-read-version	-	unsupported	-	n/a	-	-	no compare-and-set and no locking: two writers of one file both succeed, and the later write discards the other	-
@@ -157,39 +157,39 @@ n	candidate	column	identity	kind	expected	observed	rc	verdict	command	transcript
 156	sops	metadata-only	metadata	metadata	ok	ok	0	match	meta <repo>/fixtures/.state/data/sops/artifacts/rel-1.enc.json 	transcripts/156-sops-metadata-only.txt
 157	sops	metadata-only	metadata	metadata	fail	fail	128	match	sops_nokey decrypt --extract \[\"value\"\] <repo>/fixtures/.state/data/sops/secrets/app-token.enc.json 	transcripts/157-sops-metadata-only.txt
 158	sops	rotation	compiler	primitive	ok	ok	0	match	sops_as compiler rotate -i <repo>/fixtures/.state/data/sops/secrets/app-token.enc.json 	transcripts/158-sops-rotation.txt
-159	sops	rotation	metadata	metadata	ok	ok	0	match	data_key app-token 29c3450a31a0e2fef16723e7c4665cbec2e45a5ef8e9947d4f5b9d5de57b57ea new 	transcripts/159-sops-rotation.txt
-160	sops	rotation	compiler	primitive	fail	fail	1	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 graft app-token <E5_OUT>/work/sops/pre-rotate.enc.json compiler 	transcripts/160-sops-rotation.txt
-161	sops	rotation	compiler	primitive	ok	ok	0	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 get compiler app-token 	transcripts/161-sops-rotation.txt
+159	sops	rotation	metadata	metadata	ok	ok	0	match	data_key app-token 4a37957cef5b88654ae8ca126be572deb9a20e7c7a0daad743d6271cc0a6771a new 	transcripts/159-sops-rotation.txt
+160	sops	rotation	compiler	primitive	fail	fail	1	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b graft app-token <E5_OUT>/work/sops/pre-rotate.enc.json compiler 	transcripts/160-sops-rotation.txt
+161	sops	rotation	compiler	primitive	ok	ok	0	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b get compiler app-token 	transcripts/161-sops-rotation.txt
 162	sops	rotation	operator	primitive	ok	ok	0	match	newkey compiler-2 	transcripts/162-sops-rotation.txt
 163	sops	rotation	operator	-	ok	ok	0	match	rules compiler-2\,recovery executor 	transcripts/163-sops-rotation.txt
 164	sops	rotation	compiler	primitive	ok	ok	0	match	updatekeys compiler app-token 	transcripts/164-sops-rotation.txt
-165	sops	rotation	metadata	metadata	ok	ok	0	match	data_key app-token 95493dd85b3eb1cc7a7b870dcb4803c71c24535376bb243c5756f719c8432171 same 	transcripts/165-sops-rotation.txt
-166	sops	rotation	compiler	primitive	ok	ok	0	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 graft app-token <E5_OUT>/work/sops/pre-updatekeys.enc.json compiler 	transcripts/166-sops-rotation.txt
-167	sops	rotation	compiler	primitive	ok	ok	0	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 get compiler-2 app-token 	transcripts/167-sops-rotation.txt
+165	sops	rotation	metadata	metadata	ok	ok	0	match	data_key app-token efa480faadfca56d2b31a4c3d4b38f3a49a8e75ac10c3f139aad60cde99f1e81 same 	transcripts/165-sops-rotation.txt
+166	sops	rotation	compiler	primitive	ok	ok	0	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b graft app-token <E5_OUT>/work/sops/pre-updatekeys.enc.json compiler 	transcripts/166-sops-rotation.txt
+167	sops	rotation	compiler	primitive	ok	ok	0	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b get compiler-2 app-token 	transcripts/167-sops-rotation.txt
 168	sops	rotation	compiler	primitive	fail	fail	128	match	get compiler app-token 	transcripts/168-sops-rotation.txt
 169	sops	rotation	metadata	metadata	ok	ok	0	match	meta <repo>/fixtures/.state/data/sops/secrets/app-token.enc.json 	transcripts/169-sops-rotation.txt
 170	sops	rotation	-	unsupported	-	n/a	-	-	no reversible decryption floor: removing a recipient re-encrypts the data key, and restoring access means re-adding it with a key that can still decrypt	-
 171	sops	startup-unlock	compiler	primitive	fail	fail	128	match	sops_nokey decrypt <repo>/fixtures/.state/data/sops/secrets/app-token.enc.json 	transcripts/171-sops-startup-unlock.txt
-172	sops	startup-unlock	compiler	primitive	ok	ok	0	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 get compiler-2 app-token 	transcripts/172-sops-startup-unlock.txt
+172	sops	startup-unlock	compiler	primitive	ok	ok	0	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b get compiler-2 app-token 	transcripts/172-sops-startup-unlock.txt
 173	sops	backup-restore	operator	-	ok	ok	0	match	<repo>/fixtures/bin/inject store-snapshot e5-sops 	transcripts/173-sops-backup-restore.txt
 174	sops	backup-restore	compiler	primitive	ok	ok	0	match	set_value compiler-2 app-token app-token-g1 	transcripts/174-sops-backup-restore.txt
-175	sops	backup-restore	compiler	primitive	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 get compiler-2 app-token 	transcripts/175-sops-backup-restore.txt
+175	sops	backup-restore	compiler	primitive	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f get compiler-2 app-token 	transcripts/175-sops-backup-restore.txt
 176	sops	backup-restore	operator	-	ok	ok	0	match	<repo>/fixtures/bin/inject store-restore e5-sops 	transcripts/176-sops-backup-restore.txt
-177	sops	backup-restore	compiler	primitive	ok	ok	0	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 get compiler-2 app-token 	transcripts/177-sops-backup-restore.txt
+177	sops	backup-restore	compiler	primitive	ok	ok	0	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b get compiler-2 app-token 	transcripts/177-sops-backup-restore.txt
 178	sops	backup-restore	executor	primitive	ok	ok	0	match	open_artifact executor rel-1 	transcripts/178-sops-backup-restore.txt
 179	migration	age-to-openbao	compiler+publisher+admin	versioned	ok	ok	0	match	age_to_bao app-token g1 secret/gen/migrated/app-token/g1 	transcripts/179-migration-age-to-openbao.txt
-180	migration	age-to-openbao	compiler	versioned	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 as compiler kv_get secret/gen/migrated/app-token/g1 	transcripts/180-migration-age-to-openbao.txt
+180	migration	age-to-openbao	compiler	versioned	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f as compiler kv_get secret/gen/migrated/app-token/g1 	transcripts/180-migration-age-to-openbao.txt
 181	migration	age-to-openbao	metadata	metadata	ok	ok	0	match	created_times app-token g1 secret/gen/migrated/app-token/g1 	transcripts/181-migration-age-to-openbao.txt
 182	migration	age-to-openbao	compiler+publisher+admin	versioned	denied	denied	1	match	age_to_bao app-token g1 secret/gen/migrated/app-token/g1 	transcripts/182-migration-age-to-openbao.txt
 183	migration	age-artifact-to-transit	executor+compiler	primitive	ok	ok	0	match	artifact_age_to_transit rel-1 	transcripts/183-migration-age-artifact-to-transit.txt
-184	migration	age-artifact-to-transit	executor	primitive	ok	ok	0	match	open_transit <E5_OUT>/work/migrated-rel-1.ct 8c7e04c7ad32e157d14b1850268544fa1f7a7ba145a1e058b48038d71f897b80 	transcripts/184-migration-age-artifact-to-transit.txt
+184	migration	age-artifact-to-transit	executor	primitive	ok	ok	0	match	open_transit <E5_OUT>/work/migrated-rel-1.ct 13f3de66edd4c47ef38dfb739bf26e25328cb3754dababb898950ea765ad6fc4 	transcripts/184-migration-age-artifact-to-transit.txt
 185	migration	openbao-to-age	compiler	versioned	ok	ok	0	match	bao_to_age secret/gen/app-token/g2 1 app-token-from-bao g2 	transcripts/185-migration-openbao-to-age.txt
-186	migration	openbao-to-age	compiler	versioned	ok	ok	0	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 age -d -i <repo>/fixtures/.state/data/age-store/keys/compiler-2.key <repo>/fixtures/.state/data/age-store/objects/app-token-from-bao/g2.age 	transcripts/186-migration-openbao-to-age.txt
+186	migration	openbao-to-age	compiler	versioned	ok	ok	0	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b age -d -i <repo>/fixtures/.state/data/age-store/keys/compiler-2.key <repo>/fixtures/.state/data/age-store/objects/app-token-from-bao/g2.age 	transcripts/186-migration-openbao-to-age.txt
 187	migration	openbao-to-age	compiler	versioned	ok	ok	0	match	all_versions_to_age secret/mutable/registry registry-from-bao 	transcripts/187-migration-openbao-to-age.txt
-188	migration	openbao-to-age	compiler	versioned	ok	ok	0	match	check_digest 1d8fbb4adc2b8c81a1009b3a73f73f488168554507089ce1628a2539bb5b856a age -d -i <repo>/fixtures/.state/data/age-store/keys/compiler-2.key <repo>/fixtures/.state/data/age-store/objects/registry-from-bao/v11.age 	transcripts/188-migration-openbao-to-age.txt
+188	migration	openbao-to-age	compiler	versioned	ok	ok	0	match	check_digest 04bbf3258270c5bab31bae0ec0dc7cecd18a8d293b86dcfca9574e255c63c61c age -d -i <repo>/fixtures/.state/data/age-store/keys/compiler-2.key <repo>/fixtures/.state/data/age-store/objects/registry-from-bao/v11.age 	transcripts/188-migration-openbao-to-age.txt
 189	migration	openbao-to-age	-	unsupported	-	n/a	-	-	Transit ciphertext cannot move: the key is not exportable, so every artifact must be decrypted by an executor and re-encrypted by the target	-
 190	migration	sops-import	compiler+publisher	versioned	ok	ok	0	match	sops_to_bao app-token secret/gen/imported/app-token/g1 	transcripts/190-migration-sops-import.txt
-191	migration	sops-import	compiler	versioned	ok	ok	0	match	check_digest e92d0be01f9d753d291ca49f8f53c1c9842ca34846413db0a18f16a22be7e426 as compiler kv_get secret/gen/imported/app-token/g1 	transcripts/191-migration-sops-import.txt
+191	migration	sops-import	compiler	versioned	ok	ok	0	match	check_digest 787c9f2a348a6ddc94fecb4ceb7e1fc8681f0cf91d37400421d3fc52d996539b as compiler kv_get secret/gen/imported/app-token/g1 	transcripts/191-migration-sops-import.txt
 192	migration	sops-export	compiler	primitive	ok	ok	0	match	bao_to_sops secret/gen/app-token/g1 exported-app-token 	transcripts/192-migration-sops-export.txt
-193	migration	sops-export	recovery	primitive	ok	ok	0	match	check_digest d11a59c46c04e0ae10164fa2900c7a23fbbe46a0dd464fecb53b982606567b61 sops_as recovery decrypt --extract \[\"value\"\] <repo>/fixtures/.state/data/sops/secrets/exported-app-token.enc.json 	transcripts/193-migration-sops-export.txt
+193	migration	sops-export	recovery	primitive	ok	ok	0	match	check_digest 5a456a1898d0901a27111b3851518876fade2bf23aafae58ca5267ef53a1a69f sops_as recovery decrypt --extract \[\"value\"\] <repo>/fixtures/.state/data/sops/secrets/exported-app-token.enc.json 	transcripts/193-migration-sops-export.txt
 194	migration	sops-export	metadata	metadata	ok	ok	0	match	jq -r .sops\ \|\ \"lastmodified=\\\(.lastmodified\)\ recipients=\\\(\[.age\[\].recipient\]\ \|\ length\)\" <repo>/fixtures/.state/data/sops/secrets/exported-app-token.enc.json 	transcripts/194-migration-sops-export.txt
