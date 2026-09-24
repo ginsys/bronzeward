@@ -33,7 +33,7 @@ e2_talosctl_ready
   # fixture library. evidence/ is what a previous collection wrote and is not an input.
   printf 'uncommitted-inputs\t%s\n' "$(git -C "$REPO_DIR" status --porcelain -- experiments/e2-structural-references \
     ':!experiments/e2-structural-references/evidence' fixtures | wc -l)"
-  printf 'talosctl\t%s\n' "$(talosctl version --client --short | tr '\n' ' ')"
+  printf 'talosctl\t%s\n' "$(talosctl version --client --short | tr '\n' ' ' | sed 's/ *$//')"
   printf 'talosctl-sha256\t%s\n' "$TALOSCTL_SHA256"
   printf 'go\t%s\n' "$(go version)"
 } >run.txt
@@ -149,8 +149,10 @@ refs() { # refs <tsv> [<column>]: the distinct references in that column (defaul
     awk '{ printf "%s%s", sep, $0; sep = "," }')
   printf '%s' "${r:--}"
 }
-row() {
-  printf '%s\n' "$(printf '%s\t' "$@" | sed 's/\t$//')" >>"$E2_MATRIX"
+row() { # an empty cell is written as `-`, so no row ends in a tab
+  local a cells=()
+  for a in "$@"; do cells+=("${a:--}"); done
+  (IFS=$'\t' && printf '%s\n' "${cells[*]}") >>"$E2_MATRIX"
 }
 
 printf 'base\tcase\tcandidate\torder\texpected\tobserved\tstage\tvalidate\tresolved\tsuperset\teffective\tmessage\n' >"$E2_MATRIX"
