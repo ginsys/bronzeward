@@ -1,0 +1,16 @@
+description: The embedded-yaml case with the document not identified. No candidate may parse it (design 6.9); only the reference-free form carries the author's value there.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+embedded:
+  - doc: v1alpha1
+    path: cluster/inlineManifests[name=e2-secret]/contents
+    format: yaml
+    identified: false
+values:
+  app-pass: e2-app-password
+expect:
+  tag: {late: differs, early: differs}
+  marked: {late: differs, early: differs}
+  binding: {late: refused, early: refused}

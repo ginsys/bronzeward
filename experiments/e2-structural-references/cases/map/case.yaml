@@ -1,0 +1,13 @@
+description: One reference whose value is a mapping (registry auth), in a struct field.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  reg-auth:
+    username: e2-user
+    password: e2-registry-password
+expect:
+  tag: {late: rejected, early: parity}
+  marked: {late: rejected, early: parity}
+  binding: {late: parity, early: parity}

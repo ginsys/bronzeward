@@ -1,0 +1,14 @@
+description: Literals that look like references. The first fragment (not opted in) holds the marker string and the tag text as plain quoted strings; the second holds a real reference.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: false
+  - file: f2.yaml
+    marked: true
+values:
+  reg-pass: e2-registry-password
+  reg-user: e2-user
+expect:
+  tag: {late: differs, early: parity}
+  marked: {late: differs, early: parity}
+  binding: {late: parity, early: parity}

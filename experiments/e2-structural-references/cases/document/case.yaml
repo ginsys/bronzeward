@@ -1,0 +1,11 @@
+description: A reference in a separate configuration document (TrustedRootsConfig) that only the fragment adds.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  roots: e2-not-a-real-certificate
+expect:
+  tag: {late: differs, early: parity}
+  marked: {late: parity, early: parity}
+  binding: {late: parity, early: parity}

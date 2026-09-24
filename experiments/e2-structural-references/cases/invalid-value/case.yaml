@@ -1,0 +1,11 @@
+description: A reference whose value composes but fails validation (a cluster DNS domain with spaces). The materialized output must fail validation as the native output does.
+native: invalid
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  dns-domain: e2 not a domain
+expect:
+  tag: {late: differs, early: parity}
+  marked: {late: parity, early: parity}
+  binding: {late: parity, early: parity}

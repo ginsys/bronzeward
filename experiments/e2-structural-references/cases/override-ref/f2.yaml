@@ -1,0 +1,6 @@
+machine:
+  registries:
+    config:
+      registry.example.test:
+        auth:
+          password: !ref reg-pass

@@ -1,0 +1,11 @@
+description: A referenced scalar under a YAML anchor, reused through an alias in the same fragment.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  reg-secret: e2-shared-secret
+expect:
+  tag: {late: differs, early: parity}
+  marked: {late: parity, early: parity}
+  binding: {late: parity, early: parity}

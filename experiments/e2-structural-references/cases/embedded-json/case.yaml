@@ -1,0 +1,16 @@
+description: A reference inside an identified embedded JSON document (a machine file's content).
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+embedded:
+  - doc: v1alpha1
+    path: machine/files[path=/var/etc/e2/config.json]/content
+    format: json
+    identified: true
+values:
+  app-token: e2-app-token
+expect:
+  tag: {late: parity, early: parity}
+  marked: {late: parity, early: parity}
+  binding: {late: parity, early: parity}

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Copy the committable text of one run into evidence/: the matrix, the summary, the controls, the
+# run record, the digests of every materialized output, and per case the generated fragment forms,
+# every message, every resolution and sentinel list, and the diffs (native against the base, each
+# candidate's output against native). The materialized configurations themselves stay in E2_OUT:
+# they carry the base's synthetic secrets bundle. Absolute paths are rewritten, and the result is
+# refused if it holds any leak-refusal pattern (every long scalar of the secrets bundle and of the
+# base); a planted control file proves the scan matches before the real scan runs.
+#
+# Phase-0 evidence for the structural-reference experiment (ginsys/bronzeward issue 3). Not v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+need grep sed find cp head
+[ -s "$E2_MARK" ] || die "$E2_OUT is not an E2 run directory ($E2_MARK is missing)"
+[ -s "$E2_OUT/complete" ] || die "$E2_OUT/complete is missing: run/all did not finish"
+[ -s "$E2_PATTERNS" ] || die "$E2_PATTERNS is missing or empty"
+
+dest=$E2_DIR/evidence
+incoming=$(mktemp -d "$E2_DIR/.evidence-incoming.XXXXXX")
+trap 'rm -rf -- "$incoming"' EXIT
+
+rewrite() { # rewrite <in> <out>: the checkout and E2_OUT become placeholders
+  mkdir -p -- "$(dirname -- "$2")"
+  sed -e "s#$REPO_DIR#<repo>#g" -e "s#$E2_OUT#<E2_OUT>#g" -- "$1" >"$2"
+}
+for f in run.txt controls.tsv summary.txt matrix.tsv outputs.sha256; do
+  rewrite "$E2_OUT/$f" "$incoming/$f"
+done
+# An empty file is not collected: an empty message is no message, and an empty resolution list is
+# the matrix's `resolved` count of 0.
+cases=0
+while IFS= read -r -d '' f; do
+  rel=${f#"$E2_OUT"/}
+  rewrite "$f" "$incoming/$rel"
+  cases=1
+done < <(find "$E2_OUT/gen" "$E2_OUT/cases" -type f ! -empty \( -path "$E2_OUT/gen/*" -o -name '*.err' \
+  -o -name '*.tsv' -o -name 'diff-*' -o -name 'validate.txt' -o -name '*.skipped' \) -print0 | sort -z)
+[ "$cases" -eq 1 ] || die "no case evidence under $E2_OUT/cases"
+
+# Each base with every line that holds a leak-refusal pattern redacted, and its validation message:
+# with a cell's diff-base, the materialized output that cell produced, less the secrets.
+mkdir -p -- "$incoming/base"
+for b in fixture generated; do
+  awk 'NR == FNR { if (length($0)) p[++n] = $0; next }
+    {
+      hit = 0
+      for (i = 1; i <= n; i++) if (index($0, p[i])) { hit = 1; break }
+      if (hit) { if (index($0, ":")) sub(/:.*/, ": <redacted>"); else $0 = "<redacted>" }
+      print
+    }' "$E2_PATTERNS" "$E2_OUT/base/$b.yaml" >"$incoming/base/$b.redacted.yaml"
+  rewrite "$E2_OUT/base/$b.validate.txt" "$incoming/base/$b.validate.txt"
+done
+
+# The control: a file holding one pattern must be found, or the scan below proves nothing.
+head -n 1 -- "$E2_PATTERNS" >"$incoming/leak-control"
+hits=$(grep -rlF -f "$E2_PATTERNS" -- "$incoming" || true)
+[ "$hits" = "$incoming/leak-control" ] && control=fired || control="did not fire as expected"
+rm -- "$incoming/leak-control"
+[ "$control" = fired ] || die "leak-scan control $control; the scan cannot be trusted"
+
+# Refusals. A match is reported by file only, never by content.
+hits=$(grep -rlF -f "$E2_PATTERNS" -- "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence matches a leak-refusal pattern in: $hits"
+hits=$(grep -rlF -- "$HOME/" "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence names a path in the operator's home in: $hits"
+printf 'leak-scan\t%s patterns\tcontrol %s\t0 hits in %s files\n' "$(wc -l <"$E2_PATTERNS")" "$control" \
+  "$(find "$incoming" -type f | wc -l)" >"$incoming/leak-scan.tsv"
+
+rm -rf -- "$dest"
+mv -T -- "$incoming" "$dest"
+trap - EXIT
+say "evidence collected in $dest: $(find "$dest" -type f | wc -l) files"
