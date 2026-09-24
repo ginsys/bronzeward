@@ -4,7 +4,7 @@ secret/data/mutable/zero
 ======= Metadata =======
 Key                Value
 ---                -----
-created_time       2026-09-24T12:11:25.264680534Z
+created_time       2026-09-24T12:40:47.575672905Z
 custom_metadata    <nil>
 deletion_time      n/a
 destroyed          false
