@@ -1,0 +1,12 @@
+description: One reference in a string field (a registry password), in one fragment.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  reg-pass: e2-registry-password
+# Expected before the run; the matrix records what happened next to each.
+expect:
+  tag: {late: differs, early: parity}
+  marked: {late: parity, early: parity}
+  binding: {late: parity, early: parity}

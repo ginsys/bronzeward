@@ -1,0 +1,12 @@
+description: One reference in a base64 bytes field (an accepted CA), inside a list element with no identifying field.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  # base64 of the ASCII text "e2-extra-ca-certificate": synthetic, not a certificate.
+  extra-ca: ZTItZXh0cmEtY2EtY2VydGlmaWNhdGU=
+expect:
+  tag: {late: rejected, early: parity}
+  marked: {late: rejected, early: parity}
+  binding: {late: parity, early: parity}

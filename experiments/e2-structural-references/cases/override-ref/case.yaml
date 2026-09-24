@@ -1,0 +1,13 @@
+description: A literal in the first fragment, overridden by a reference in the second.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+  - file: f2.yaml
+    marked: true
+values:
+  reg-pass: e2-registry-password
+expect:
+  tag: {late: differs, early: parity}
+  marked: {late: parity, early: parity}
+  binding: {late: parity, early: parity}

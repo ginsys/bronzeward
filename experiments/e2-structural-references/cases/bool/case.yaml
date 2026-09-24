@@ -1,0 +1,11 @@
+description: One reference in a boolean field (install wipe). No sentinel can tell a boolean from a literal.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  wipe: true
+expect:
+  tag: {late: rejected, early: parity}
+  marked: {late: rejected, early: parity}
+  binding: {late: parity, early: parity}

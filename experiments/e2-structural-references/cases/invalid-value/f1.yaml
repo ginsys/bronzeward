@@ -1,0 +1,3 @@
+cluster:
+  network:
+    dnsDomain: !ref dns-domain

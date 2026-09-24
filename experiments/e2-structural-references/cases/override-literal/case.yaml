@@ -1,0 +1,13 @@
+description: A reference in the first fragment, overridden by a literal in the second. The reference is in the provenance superset but not in the effective configuration.
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+  - file: f2.yaml
+    marked: true
+values:
+  reg-pass: e2-registry-password
+expect:
+  tag: {late: parity, early: parity}
+  marked: {late: parity, early: parity}
+  binding: {late: differs, early: parity}

@@ -1,0 +1,11 @@
+description: A reference whose value is a string, in an integer field. Native composition of the same literal rejects it; every candidate must reject it too, and early with the same message.
+native: rejected
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  prism-port: e2-not-a-port
+expect:
+  tag: {late: rejected, early: rejected}
+  marked: {late: rejected, early: rejected}
+  binding: {late: rejected, early: rejected}

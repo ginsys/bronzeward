@@ -1,0 +1,11 @@
+description: One reference in an integer field (the KubePrism port).
+native: pass
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  prism-port: 7446
+expect:
+  tag: {late: rejected, early: parity}
+  marked: {late: rejected, early: parity}
+  binding: {late: parity, early: parity}
