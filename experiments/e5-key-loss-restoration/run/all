@@ -18,6 +18,8 @@ kl_need_fixture
 [ -z "$(kl_sql "select to_regclass('kl_release')")" ] ||
   die "the release table exists already: a capture needs a fresh fixture (fixtures/bin/down, then up)"
 kl_init
+# Which fixture this capture ran on: run/collect-evidence refuses to collect it against another.
+sha256sum <"$STATE/scan-patterns.txt" >"$KL_OUT/fixture-patterns.sha256"
 
 "$KL_RUN_DIR/scenario"
 kl_bundle final

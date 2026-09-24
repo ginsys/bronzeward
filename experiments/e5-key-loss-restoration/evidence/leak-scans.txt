@@ -11,3 +11,4 @@ leak scan J-creds-lost: 3 control hit(s), 0 other
 leak scan J-store-g1: 3 control hit(s), 0 other
 leak scan K-sealed: 3 control hit(s), 0 other
 leak scan K-unsealed: 3 control hit(s), 0 other
+leak scan L-store-g1: 3 control hit(s), 0 other

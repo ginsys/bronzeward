@@ -14,5 +14,6 @@
   
   * Vault is sealed
   regen: source kl/app version 1 could not be read
-stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)
+stopped: nothing dispatched, no release stored (release table digest unchanged)
 class=blocked reason=neither the stored artifact nor its source is usable in this combination
+provider key state unreadable before or after the check; not compared

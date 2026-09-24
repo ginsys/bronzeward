@@ -6,18 +6,29 @@
 # dumps, snapshots and expanded store archives stay behind: the store archives hold the management
 # credentials. Absolute paths are rewritten, and the result is refused if it holds anything the
 # fixture's own leak-scan patterns match, a synthetic value, an OpenBao token, or a path in the
-# operator's home. Run it with the fixture still up: the patterns are rebuilt from this run's
-# credentials.
+# operator's home. Run it with the fixture of the capture still up: the patterns are rebuilt from
+# the fixture's credentials and compared with its pattern file, and that file with the digest
+# run/all recorded, so that a fixture recreated since the capture is refused rather than scanned
+# for the wrong run's secrets.
 #
 # Phase-0 evidence for the key-loss and restoration experiment (ginsys/bronzeward issue 10). Not v1
 # tooling.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
-need grep sed find cp
+need grep sed find cp cmp sha256sum
 [ -s "$KL_OUT/complete" ] || die "$KL_OUT/complete is missing: run/all did not finish, or a leak scan failed"
 [ -s "$KL_OUT/summary.txt" ] || die "$KL_OUT/summary.txt is missing"
 [ -s "$STATE/scan-patterns.txt" ] || die "no scan patterns: run this with the fixture still up"
+[ -s "$KL_OUT/fixture-patterns.sha256" ] || die "$KL_OUT/fixture-patterns.sha256 is missing: run/all did not record its fixture"
+[ "$(sha256sum <"$STATE/scan-patterns.txt")" = "$(cat -- "$KL_OUT/fixture-patterns.sha256")" ] ||
+  die "the fixture's scan patterns are not the ones of the capture in $KL_OUT: the fixture was recreated since"
+rebuilt=$(mktemp "$STATE/scan-patterns.rebuilt.XXXXXX")
+if ! scan_patterns >"$rebuilt" || ! cmp --silent -- "$rebuilt" "$STATE/scan-patterns.txt"; then
+  rm -f -- "$rebuilt"
+  die "$STATE/scan-patterns.txt is not the list the fixture's credentials give"
+fi
+rm -f -- "$rebuilt"
 
 dest=$KL_DIR/evidence
 incoming=$(mktemp -d "$KL_DIR/.evidence-incoming.XXXXXX")

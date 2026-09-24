@@ -15,7 +15,9 @@
 # Then each case puts the live state into one loss or one restored combination, and every release
 # is judged twice, as two separate dependencies: `apply` (the retained artifact, its key version and
 # the executor's credential) and `regen` (the source version, a usable key and the compiler's
-# credential); `check` is the read-only recovery classification that stops before either.
+# credential); `check` is the recovery classification, which stores no release and dispatches
+# nothing, and around which the provider's Transit key state is compared (its regeneration step
+# sends a real encrypt, which Transit would turn into a key creation for an identity with `create`).
 #
 # Phase-0 evidence for the key-loss and restoration experiment (ginsys/bronzeward issue 10). Not v1
 # tooling.
@@ -88,6 +90,38 @@ rewrap() { # rewrap <id>: the release's stored artifact rewrapped to the key's l
 key_truth() { bao read -format=json "transit/keys/$1" | jq -c '.data | {latest_version, min_decryption_version, keys: (.keys | keys)}'; }
 kv_truth() { bao kv metadata get -mount=secret -format=json "$1" | jq -c '.data | {current_version, versions: (.versions | map_values({destroyed, deletion_time}))}'; }
 releases() { kl_sql "select id, gen, source_path, source_version, key_name, split_part(ciphertext, ':', 2), artifact_sha256 from kl_release order by id"; }
+# key_state: every Transit key with its versions and floor, as the administrator reads them; empty
+# when the mount holds no key (the CLI then exits 2 and, in JSON format, prints nothing); the single
+# word `unreadable` when the provider cannot say (sealed, for one: an error message).
+key_state() {
+  local list keys k out='' t
+  if ! list=$(admin bao list -format=json transit/keys 2>&1); then
+    [ -z "$list" ] || { echo unreadable; return 0; }
+    return 0
+  fi
+  keys=$(jq -r '.[]' <<<"$list") || { echo unreadable; return 0; }
+  for k in $keys; do
+    t=$(admin key_truth "$k" 2>/dev/null) || { echo unreadable; return 0; }
+    out+="$k $t"$'\n'
+  done
+  printf '%s' "$out"
+}
+# checked <id>: the recovery check, with the provider's key state compared across it. A change is
+# reported as the last class line, so that judge records it instead of the check's own class.
+checked() {
+  local before after rc=0
+  before=$(key_state)
+  release check "$1" || rc=$?
+  after=$(key_state)
+  if [ "$before" = unreadable ] || [ "$after" = unreadable ]; then
+    echo "provider key state unreadable before or after the check; not compared"
+  elif [ "$before" = "$after" ]; then
+    echo "provider key state unchanged across the check ($(grep -c . <<<"$before") key(s))"
+  else
+    echo "class=provider-changed reason=the provider's Transit key state changed during the check"
+  fi
+  return "$rc"
+}
 snapshot_all() { # snapshot_all <gen>
   inject db-snapshot "$1" && inject bao-snapshot "$1" && inject store-snapshot "$1"
 }
@@ -96,7 +130,7 @@ snapshot_all() { # snapshot_all <gen>
 judge_release() {
   judge "$1" "$2" apply executor "$3" -- release apply "$2"
   judge "$1" "$2" regen compiler "$4" -- release regen "$2"
-  judge "$1" "$2" check operator "$5" -- release check "$2"
+  judge "$1" "$2" check operator "$5" -- checked "$2"
 }
 
 for v in app-v1 app-v2 late-v1; do kl_secret "$v"; done
@@ -166,7 +200,7 @@ judge D kl-art upsert admin ok -- admin bao write -field=ciphertext transit/encr
 judge D kl-art truth admin ok -- admin key_truth kl-art
 judge D R2 apply executor fail -- release apply R2
 judge D R2 regen compiler ok -- release regen R2
-judge D R2 check operator regenerable -- release check R2
+judge D R2 check operator regenerable -- checked R2
 
 # --- E: every family restored to g2 -----------------------------------------------------------------
 judge E g2 restore operator ok -- inject db-restore g2
@@ -180,7 +214,7 @@ judge E kl/late truth admin fail -- admin kv_truth kl/late
 judge E g2 releases admin ok -- releases
 judge_release E R1 ok ok applicable
 judge_release E R2 ok ok applicable
-judge E R3 check operator absent -- release check R3
+judge E R3 check operator absent -- checked R3
 
 # --- G: database older than the provider (db g1; bao, store g2) -------------------------------------
 # R1's stored artifact is the one from before the rewrap, under key version 1, below the floor the
@@ -188,7 +222,7 @@ judge E R3 check operator absent -- release check R3
 judge G g1 restore operator ok -- inject db-restore g1
 kl_bundle G-db-g1
 judge_release G R1 fail ok regenerable
-judge G R2 check operator absent -- release check R2
+judge G R2 check operator absent -- checked R2
 judge G kl-art floor admin ok -- admin bao write transit/keys/kl-art/config min_decryption_version=1
 judge G R1 apply executor ok -- release apply R1
 judge G kl-art floor admin ok -- admin bao write transit/keys/kl-art/config min_decryption_version=2
@@ -213,7 +247,7 @@ judge I g2 restore operator ok -- inject store-restore g2
 kl_bundle I-store-g2
 judge I R1 apply executor denied -- release apply R1
 judge I R1 regen compiler ok -- release regen R1
-judge I R1 check operator regenerable -- release check R1
+judge I R1 check operator regenerable -- checked R1
 judge I executor reissue admin ok -- admin issue executor kl-executor
 judge_release I R1 ok ok applicable
 
@@ -232,9 +266,31 @@ judge_release J R1 ok ok applicable
 # provider is unsealed with its key share, which the operator holds apart from every backup family.
 judge K openbao seal admin ok -- admin bao operator seal
 kl_bundle K-sealed
-judge K R1 check operator blocked -- release check R1
+judge K R1 check operator blocked -- checked R1
 judge K openbao unseal operator ok -- bao_unseal
 kl_bundle K-unsealed
-judge K R1 check operator applicable -- release check R1
+judge K R1 check operator applicable -- checked R1
+
+# --- L: credential store older than the provider (db, bao g2; store g1) -----------------------------
+# The store holds executor1, which the g2 provider revoked (setup row 005): the executor is refused
+# although key, artifact and source are all there, and only the compiler, issued in g1 and never
+# revoked, still works. Reissuing the executor is an administrator's action.
+revoked() { # revoked: the provider answers that the stored executor's accessor names no token
+  local out
+  if out=$(admin bao token lookup -accessor "$(cat -- "$KL_CREDS/executor.accessor")" 2>&1); then
+    echo "the stored executor's accessor still names a live token"
+    return 1
+  fi
+  printf 'the provider has no token for the stored executor accessor:\n%s\n' "$out"
+}
+judge L g2 restore operator ok -- inject db-restore g2
+judge L g2 restore operator ok -- inject bao-restore g2
+judge L g1 restore operator ok -- inject store-restore g1
+kl_bundle L-store-g1
+judge L executor1 revoked admin ok -- revoked
+judge_release L R1 denied ok regenerable
+judge_release L R2 denied ok regenerable
+judge L executor reissue admin ok -- admin issue executor kl-executor
+judge_release L R2 ok ok applicable
 
 say "scenario: $(kl_mismatches) mismatch(es) in $KL_ROWS"

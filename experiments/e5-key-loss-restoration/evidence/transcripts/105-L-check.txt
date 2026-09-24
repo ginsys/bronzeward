@@ -1,0 +1,14 @@
+  release R1: source kl/app version 1, stored artifact under kl-art key version 2
+  Error writing data to transit/decrypt/kl-art: Error making API request.
+  
+  URL: PUT http://127.0.0.1:8200/v1/transit/decrypt/kl-art
+  Code: 403. Errors:
+  
+  * permission denied
+  apply: the executor could not decrypt the stored artifact
+  release R1: source kl/app version 1, stored artifact under kl-art key version 2
+  regen: source kl/app version 1 renders to the digest the release recorded
+  regen: it encrypts under kl-art key version 2; nothing was stored (a new release would need its own approval)
+stopped: nothing dispatched, no release stored (release table digest unchanged)
+class=regenerable reason=the stored artifact does not apply; its source regenerates it, as a new release needing its own approval
+provider key state unchanged across the check (2 key(s))

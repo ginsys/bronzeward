@@ -3,5 +3,6 @@
   release R1: source kl/app version 1, stored artifact under kl-art key version 2
   regen: source kl/app version 1 renders to the digest the release recorded
   regen: it encrypts under kl-art key version 2; nothing was stored (a new release would need its own approval)
-stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)
+stopped: nothing dispatched, no release stored (release table digest unchanged)
 class=applicable reason=the stored artifact decrypts to its recorded digest
+provider key state unchanged across the check (2 key(s))

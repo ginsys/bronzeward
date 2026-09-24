@@ -9,5 +9,6 @@
   release R2: source kl/app version 2, stored artifact under kl-art key version 2
   No value found at secret/data/kl/app
   regen: source kl/app version 2 could not be read
-stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)
+stopped: nothing dispatched, no release stored (release table digest unchanged)
 class=blocked reason=neither the stored artifact nor its source is usable in this combination
+provider key state unchanged across the check (2 key(s))

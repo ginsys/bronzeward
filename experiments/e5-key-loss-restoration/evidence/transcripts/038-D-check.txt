@@ -18,5 +18,6 @@
   
   
   regen: the rendered artifact could not be encrypted under kl-art
-stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)
+stopped: nothing dispatched, no release stored (release table digest unchanged)
 class=blocked reason=neither the stored artifact nor its source is usable in this combination
+provider key state unchanged across the check (1 key(s))
