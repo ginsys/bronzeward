@@ -1,0 +1,3 @@
+release R3: source kl/late version 1, stored artifact under kl-late key version 1
+regen: source kl/late version 1 renders to the digest the release recorded
+regen: it encrypts under kl-late key version 1; nothing was stored (a new release would need its own approval)

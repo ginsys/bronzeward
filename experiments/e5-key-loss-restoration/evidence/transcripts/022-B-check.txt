@@ -1,0 +1,7 @@
+  release R1: source kl/app version 1, stored artifact under kl-art key version 2
+  apply: the stored artifact decrypts to the digest the release recorded
+  release R1: source kl/app version 1, stored artifact under kl-art key version 2
+  No data found at secret/data/kl/app
+  regen: source kl/app version 1 could not be read
+stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)
+class=applicable reason=the stored artifact decrypts to its recorded digest

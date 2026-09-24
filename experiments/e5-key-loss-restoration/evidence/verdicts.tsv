@@ -1,0 +1,99 @@
+n	case	release	action	identity	state	expected	observed	reason	verdict	command	transcript
+001	setup	g1	snapshot	operator	-	ok	ok	-	match	snapshot_all g1 	transcripts/001-setup-snapshot.txt
+002	setup	R1	rewrap	admin	-	ok	ok	-	match	admin rewrap R1 	transcripts/002-setup-rewrap.txt
+003	setup	kl-art	floor	admin	-	ok	ok	-	match	admin bao write transit/keys/kl-art/config min_decryption_version=2 	transcripts/003-setup-floor.txt
+004	setup	executor2	issue	admin	-	ok	ok	-	match	admin issue executor kl-executor 	transcripts/004-setup-issue.txt
+005	setup	executor1	revoke	admin	-	ok	ok	-	match	admin bao token revoke -accessor 8Xdt3c7C6eG3jcyxLMsSmEh3 	transcripts/005-setup-revoke.txt
+006	setup	g2	snapshot	operator	-	ok	ok	-	match	snapshot_all g2 	transcripts/006-setup-snapshot.txt
+007	setup	g3	releases	admin	-	ok	ok	-	match	releases 	transcripts/007-setup-releases.txt
+008	A	kl-art	truth	admin	A-live	ok	ok	-	match	admin key_truth kl-art 	transcripts/008-A-truth.txt
+009	A	R1	apply	executor	A-live	ok	ok	-	match	release apply R1 	transcripts/009-A-apply.txt
+010	A	R1	regen	compiler	A-live	ok	ok	-	match	release regen R1 	transcripts/010-A-regen.txt
+011	A	R1	check	operator	A-live	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R1 	transcripts/011-A-check.txt
+012	A	R2	apply	executor	A-live	ok	ok	-	match	release apply R2 	transcripts/012-A-apply.txt
+013	A	R2	regen	compiler	A-live	ok	ok	-	match	release regen R2 	transcripts/013-A-regen.txt
+014	A	R2	check	operator	A-live	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R2 	transcripts/014-A-check.txt
+015	A	R3	apply	executor	A-live	ok	ok	-	match	release apply R3 	transcripts/015-A-apply.txt
+016	A	R3	regen	compiler	A-live	ok	ok	-	match	release regen R3 	transcripts/016-A-regen.txt
+017	A	R3	check	operator	A-live	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R3 	transcripts/017-A-check.txt
+018	B	kl/app@1	inject	operator	A-live	ok	ok	-	match	inject bao-destroy kl/app 1 	transcripts/018-B-inject.txt
+019	B	kl/app	truth	admin	B-source-destroyed	ok	ok	-	match	admin kv_truth kl/app 	transcripts/019-B-truth.txt
+020	B	R1	apply	executor	B-source-destroyed	ok	ok	-	match	release apply R1 	transcripts/020-B-apply.txt
+021	B	R1	regen	compiler	B-source-destroyed	fail	fail	-	match	release regen R1 	transcripts/021-B-regen.txt
+022	B	R1	check	operator	B-source-destroyed	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R1 	transcripts/022-B-check.txt
+023	B	R2	apply	executor	B-source-destroyed	ok	ok	-	match	release apply R2 	transcripts/023-B-apply.txt
+024	B	R2	regen	compiler	B-source-destroyed	ok	ok	-	match	release regen R2 	transcripts/024-B-regen.txt
+025	B	R2	check	operator	B-source-destroyed	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R2 	transcripts/025-B-check.txt
+026	C	kl-late	inject	operator	B-source-destroyed	ok	ok	-	match	inject bao-delete-key kl-late 	transcripts/026-C-inject.txt
+027	C	kl/late@1	inject	operator	B-source-destroyed	ok	ok	-	match	inject bao-destroy kl/late 1 	transcripts/027-C-inject.txt
+028	C	R3	apply	executor	C-late-lost	fail	fail	-	match	release apply R3 	transcripts/028-C-apply.txt
+029	C	R3	regen	compiler	C-late-lost	fail	fail	-	match	release regen R3 	transcripts/029-C-regen.txt
+030	C	R3	check	operator	C-late-lost	blocked	blocked	neither the stored artifact nor its source is usable in this combination	match	release check R3 	transcripts/030-C-check.txt
+031	D	kl-art	inject	operator	C-late-lost	ok	ok	-	match	inject bao-delete-key kl-art 	transcripts/031-D-inject.txt
+032	D	kl-art	truth	admin	D-key-deleted	fail	fail	-	match	admin key_truth kl-art 	transcripts/032-D-truth.txt
+033	D	R1	apply	executor	D-key-deleted	fail	fail	-	match	release apply R1 	transcripts/033-D-apply.txt
+034	D	R1	regen	compiler	D-key-deleted	fail	fail	-	match	release regen R1 	transcripts/034-D-regen.txt
+035	D	R1	check	operator	D-key-deleted	blocked	blocked	neither the stored artifact nor its source is usable in this combination	match	release check R1 	transcripts/035-D-check.txt
+036	D	R2	apply	executor	D-key-deleted	fail	fail	-	match	release apply R2 	transcripts/036-D-apply.txt
+037	D	R2	regen	compiler	D-key-deleted	denied	denied	-	match	release regen R2 	transcripts/037-D-regen.txt
+038	D	R2	check	operator	D-key-deleted	blocked	blocked	neither the stored artifact nor its source is usable in this combination	match	release check R2 	transcripts/038-D-check.txt
+039	D	kl-art	upsert	admin	D-key-deleted	ok	ok	-	match	admin bao write -field=ciphertext transit/encrypt/kl-art plaintext=a2wtcHJvYmU= 	transcripts/039-D-upsert.txt
+040	D	kl-art	truth	admin	D-key-deleted	ok	ok	-	match	admin key_truth kl-art 	transcripts/040-D-truth.txt
+041	D	R2	apply	executor	D-key-deleted	fail	fail	-	match	release apply R2 	transcripts/041-D-apply.txt
+042	D	R2	regen	compiler	D-key-deleted	ok	ok	-	match	release regen R2 	transcripts/042-D-regen.txt
+043	D	R2	check	operator	D-key-deleted	regenerable	regenerable	the stored artifact does not apply; its source regenerates it, as a new release needing its own approval	match	release check R2 	transcripts/043-D-check.txt
+044	E	g2	restore	operator	D-key-deleted	ok	ok	-	match	inject db-restore g2 	transcripts/044-E-restore.txt
+045	E	g2	restore	operator	D-key-deleted	ok	ok	-	match	inject bao-restore g2 	transcripts/045-E-restore.txt
+046	E	g2	restore	operator	D-key-deleted	ok	ok	-	match	inject store-restore g2 	transcripts/046-E-restore.txt
+047	E	kl-art	truth	admin	E-all-g2	ok	ok	-	match	admin key_truth kl-art 	transcripts/047-E-truth.txt
+048	E	kl/app	truth	admin	E-all-g2	ok	ok	-	match	admin kv_truth kl/app 	transcripts/048-E-truth.txt
+049	E	kl-late	truth	admin	E-all-g2	fail	fail	-	match	admin key_truth kl-late 	transcripts/049-E-truth.txt
+050	E	kl/late	truth	admin	E-all-g2	fail	fail	-	match	admin kv_truth kl/late 	transcripts/050-E-truth.txt
+051	E	g2	releases	admin	E-all-g2	ok	ok	-	match	releases 	transcripts/051-E-releases.txt
+052	E	R1	apply	executor	E-all-g2	ok	ok	-	match	release apply R1 	transcripts/052-E-apply.txt
+053	E	R1	regen	compiler	E-all-g2	ok	ok	-	match	release regen R1 	transcripts/053-E-regen.txt
+054	E	R1	check	operator	E-all-g2	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R1 	transcripts/054-E-check.txt
+055	E	R2	apply	executor	E-all-g2	ok	ok	-	match	release apply R2 	transcripts/055-E-apply.txt
+056	E	R2	regen	compiler	E-all-g2	ok	ok	-	match	release regen R2 	transcripts/056-E-regen.txt
+057	E	R2	check	operator	E-all-g2	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R2 	transcripts/057-E-check.txt
+058	E	R3	check	operator	E-all-g2	absent	absent	the restored database has no record of release R3	match	release check R3 	transcripts/058-E-check.txt
+059	G	g1	restore	operator	E-all-g2	ok	ok	-	match	inject db-restore g1 	transcripts/059-G-restore.txt
+060	G	R1	apply	executor	G-db-g1	fail	fail	-	match	release apply R1 	transcripts/060-G-apply.txt
+061	G	R1	regen	compiler	G-db-g1	ok	ok	-	match	release regen R1 	transcripts/061-G-regen.txt
+062	G	R1	check	operator	G-db-g1	regenerable	regenerable	the stored artifact does not apply; its source regenerates it, as a new release needing its own approval	match	release check R1 	transcripts/062-G-check.txt
+063	G	R2	check	operator	G-db-g1	absent	absent	the restored database has no record of release R2	match	release check R2 	transcripts/063-G-check.txt
+064	G	kl-art	floor	admin	G-db-g1	ok	ok	-	match	admin bao write transit/keys/kl-art/config min_decryption_version=1 	transcripts/064-G-floor.txt
+065	G	R1	apply	executor	G-db-g1	ok	ok	-	match	release apply R1 	transcripts/065-G-apply.txt
+066	G	kl-art	floor	admin	G-db-g1	ok	ok	-	match	admin bao write transit/keys/kl-art/config min_decryption_version=2 	transcripts/066-G-floor.txt
+067	G	R1	apply	executor	G-db-g1	fail	fail	-	match	release apply R1 	transcripts/067-G-apply.txt
+068	H	g2	restore	operator	G-db-g1	ok	ok	-	match	inject db-restore g2 	transcripts/068-H-restore.txt
+069	H	g1	restore	operator	G-db-g1	ok	ok	-	match	inject bao-restore g1 	transcripts/069-H-restore.txt
+070	H	g1	restore	operator	G-db-g1	ok	ok	-	match	inject store-restore g1 	transcripts/070-H-restore.txt
+071	H	kl-art	truth	admin	H-bao-g1	ok	ok	-	match	admin key_truth kl-art 	transcripts/071-H-truth.txt
+072	H	R1	apply	executor	H-bao-g1	fail	fail	-	match	release apply R1 	transcripts/072-H-apply.txt
+073	H	R1	regen	compiler	H-bao-g1	ok	ok	-	match	release regen R1 	transcripts/073-H-regen.txt
+074	H	R1	check	operator	H-bao-g1	regenerable	regenerable	the stored artifact does not apply; its source regenerates it, as a new release needing its own approval	match	release check R1 	transcripts/074-H-check.txt
+075	H	R2	apply	executor	H-bao-g1	fail	fail	-	match	release apply R2 	transcripts/075-H-apply.txt
+076	H	R2	regen	compiler	H-bao-g1	fail	fail	-	match	release regen R2 	transcripts/076-H-regen.txt
+077	H	R2	check	operator	H-bao-g1	blocked	blocked	neither the stored artifact nor its source is usable in this combination	match	release check R2 	transcripts/077-H-check.txt
+078	I	g1	restore	operator	H-bao-g1	ok	ok	-	match	inject db-restore g1 	transcripts/078-I-restore.txt
+079	I	g2	restore	operator	H-bao-g1	ok	ok	-	match	inject store-restore g2 	transcripts/079-I-restore.txt
+080	I	R1	apply	executor	I-store-g2	denied	denied	-	match	release apply R1 	transcripts/080-I-apply.txt
+081	I	R1	regen	compiler	I-store-g2	ok	ok	-	match	release regen R1 	transcripts/081-I-regen.txt
+082	I	R1	check	operator	I-store-g2	regenerable	regenerable	the stored artifact does not apply; its source regenerates it, as a new release needing its own approval	match	release check R1 	transcripts/082-I-check.txt
+083	I	executor	reissue	admin	I-store-g2	ok	ok	-	match	admin issue executor kl-executor 	transcripts/083-I-reissue.txt
+084	I	R1	apply	executor	I-store-g2	ok	ok	-	match	release apply R1 	transcripts/084-I-apply.txt
+085	I	R1	regen	compiler	I-store-g2	ok	ok	-	match	release regen R1 	transcripts/085-I-regen.txt
+086	I	R1	check	operator	I-store-g2	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R1 	transcripts/086-I-check.txt
+087	J	kl-creds	remove	operator	I-store-g2	ok	ok	-	match	rm -rf -- <repo>/fixtures/.state/data/kl-creds 	transcripts/087-J-remove.txt
+088	J	R1	apply	executor	J-creds-lost	fail	fail	-	match	release apply R1 	transcripts/088-J-apply.txt
+089	J	R1	regen	compiler	J-creds-lost	fail	fail	-	match	release regen R1 	transcripts/089-J-regen.txt
+090	J	R1	check	operator	J-creds-lost	blocked	blocked	neither the stored artifact nor its source is usable in this combination	match	release check R1 	transcripts/090-J-check.txt
+091	J	g1	restore	operator	J-creds-lost	ok	ok	-	match	inject store-restore g1 	transcripts/091-J-restore.txt
+092	J	R1	apply	executor	J-store-g1	ok	ok	-	match	release apply R1 	transcripts/092-J-apply.txt
+093	J	R1	regen	compiler	J-store-g1	ok	ok	-	match	release regen R1 	transcripts/093-J-regen.txt
+094	J	R1	check	operator	J-store-g1	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R1 	transcripts/094-J-check.txt
+095	K	openbao	seal	admin	J-store-g1	ok	ok	-	match	admin bao operator seal 	transcripts/095-K-seal.txt
+096	K	R1	check	operator	K-sealed	blocked	blocked	neither the stored artifact nor its source is usable in this combination	match	release check R1 	transcripts/096-K-check.txt
+097	K	openbao	unseal	operator	K-sealed	ok	ok	-	match	bao_unseal 	transcripts/097-K-unseal.txt
+098	K	R1	check	operator	K-unsealed	applicable	applicable	the stored artifact decrypts to its recorded digest	match	release check R1 	transcripts/098-K-check.txt

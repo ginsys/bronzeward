@@ -1,0 +1,2 @@
+release R2: source kl/app version 2, stored artifact under kl-art key version 2
+apply: the stored artifact decrypts to the digest the release recorded

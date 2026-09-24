@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# What a restored management state can still do with one release, from the restored database, the
+# restored provider and the restored credential store, and nothing else.
+#
+#   release apply <id>    decrypt the stored artifact with the executor credential and compare it to
+#                         the digest the release recorded (applying a retained artifact)
+#   release regen <id>    read the release's source version with the compiler credential, render
+#                         the artifact again, compare its digest, and encrypt it under the release's
+#                         key without storing anything (regenerating the configuration)
+#   release check <id>    both, then a last line `class=<applicable|regenerable|blocked|absent>
+#                         reason=<text>`; stops there and shows that nothing was stored
+#
+# Design §14.4 and the execution-recovery specification §7 keep the two apart: applying a retained
+# artifact needs the artifact, its key version and the executor's credential; regenerating needs the
+# source version, a usable key and the compiler's credential, and makes a new release that needs its
+# own approval. Neither is attempted by the check for real: it prints what it found and stops.
+#
+# Values never reach the output: every plaintext is reduced to a digest verdict.
+#
+# Phase-0 evidence for the key-loss and restoration experiment (ginsys/bronzeward issue 10). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+# release_row <id>: source_path, source_version, key_name, ciphertext, artifact_sha256; empty when
+# the restored database has no such release. The id is held to ^R[0-9]+$ below.
+release_row() {
+  kl_sql "select source_path, source_version, key_name, ciphertext, artifact_sha256 from kl_release where id = '$1'"
+}
+releases_digest() { kl_sql "select coalesce(md5(string_agg(t::text, '|' order by id)), 'empty') from kl_release t"; }
+
+credential() { # credential <role>: the stored token for the role, or a failure naming what is missing
+  [ -s "$KL_CREDS/$1.token" ] || { echo "no $1 credential in the restored store"; return 1; }
+  cat -- "$KL_CREDS/$1.token"
+}
+
+load() { # load <id>: sets path version key ct want from the restored database
+  local row
+  row=$(release_row "$1") || { echo "the restored database could not be read"; return 1; }
+  [ -n "$row" ] || { echo "release $1 is not in the restored database"; return 1; }
+  IFS=$'\t' read -r path version key ct want <<<"$row"
+  printf 'release %s: source %s version %s, stored artifact under %s key version %s\n' \
+    "$1" "$path" "$version" "$key" "$(cut -d: -f2 <<<"$ct" | tr -d v)"
+}
+
+apply() {
+  local path version key ct want token got
+  load "$1" || return 1
+  token=$(credential executor) || { printf '%s\n' "$token"; return 1; }
+  got=$(BAO_TOKEN=$token bao write -field=plaintext "transit/decrypt/$key" ciphertext="$ct" | base64 -d | sha256sum | cut -d' ' -f1) ||
+    { echo "apply: the executor could not decrypt the stored artifact"; return 1; }
+  if [ "$got" = "$want" ]; then
+    echo "apply: the stored artifact decrypts to the digest the release recorded"
+  else
+    echo "apply: the stored artifact decrypts to another digest"
+    return 1
+  fi
+}
+
+regen() {
+  local path version key ct want token tmp rc=0
+  load "$1" || return 1
+  token=$(credential compiler) || { printf '%s\n' "$token"; return 1; }
+  # The rendered artifact is plaintext: it lives only for this call, under KL_WORK.
+  tmp=$(mktemp "$KL_WORK/regen.XXXXXX")
+  regen_into "$tmp" || rc=$?
+  rm -f -- "$tmp"
+  return "$rc"
+}
+
+regen_into() { # regen_into <file>: the body of regen, with its variables
+  local tmp=$1 got v
+  if ! BAO_TOKEN=$token bao kv get -mount=secret -version="$version" -field=value "$path" | render >"$tmp"; then
+    echo "regen: source $path version $version could not be read"
+    return 1
+  fi
+  got=$(sha256sum <"$tmp" | cut -d' ' -f1)
+  if [ "$got" != "$want" ]; then
+    echo "regen: the source renders to another digest"
+    return 1
+  fi
+  echo "regen: source $path version $version renders to the digest the release recorded"
+  v=$(base64 -w0 <"$tmp" | BAO_TOKEN=$token bao_stdin write -field=ciphertext "transit/encrypt/$key" plaintext=-) ||
+    { echo "regen: the rendered artifact could not be encrypted under $key"; return 1; }
+  echo "regen: it encrypts under $key key version $(cut -d: -f2 <<<"$v" | tr -d v); nothing was stored (a new release would need its own approval)"
+}
+
+check() {
+  local before after row a=0 r=0
+  before=$(releases_digest) || die "the restored database could not be read"
+  # Read apart from the test: an unreadable database must fail the check, not read as no record.
+  row=$(release_row "$1") || die "the restored database could not be read"
+  if [ -z "$row" ]; then
+    echo "stopped: nothing applied, nothing regenerated, nothing stored"
+    echo "class=absent reason=the restored database has no record of release $1"
+    return 0
+  fi
+  apply "$1" 2>&1 | sed 's/^/  /' || a=1
+  regen "$1" 2>&1 | sed 's/^/  /' || r=1
+  after=$(releases_digest) || die "the restored database could not be read"
+  [ "$before" = "$after" ] || die "the release table changed during the check"
+  echo "stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)"
+  if [ "$a" -eq 0 ]; then
+    echo "class=applicable reason=the stored artifact decrypts to its recorded digest"
+  elif [ "$r" -eq 0 ]; then
+    echo "class=regenerable reason=the stored artifact does not apply; its source regenerates it, as a new release needing its own approval"
+  else
+    echo "class=blocked reason=neither the stored artifact nor its source is usable in this combination"
+  fi
+}
+
+[ $# -eq 2 ] || die "usage: release apply|regen|check <id>"
+[[ $2 =~ ^R[0-9]+$ ]] || die "not a release id: '$2'"
+kl_need_fixture
+mkdir -p -- "$KL_WORK"
+case $1 in
+  apply | regen | check) "$1" "$2" ;;
+  *) die "no such action: $1" ;;
+esac

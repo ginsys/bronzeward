@@ -1,0 +1,2 @@
+stopped: nothing applied, nothing regenerated, nothing stored
+class=absent reason=the restored database has no record of release R3

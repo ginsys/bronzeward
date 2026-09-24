@@ -1,0 +1,22 @@
+  release R2: source kl/app version 2, stored artifact under kl-art key version 2
+  Error writing data to transit/decrypt/kl-art: Error making API request.
+  
+  URL: PUT http://127.0.0.1:8200/v1/transit/decrypt/kl-art
+  Code: 400. Errors:
+  
+  * encryption key not found
+  apply: the executor could not decrypt the stored artifact
+  release R2: source kl/app version 2, stored artifact under kl-art key version 2
+  regen: source kl/app version 2 renders to the digest the release recorded
+  Error writing data to transit/encrypt/kl-art: Error making API request.
+  
+  URL: PUT http://127.0.0.1:8200/v1/transit/encrypt/kl-art
+  Code: 403. Errors:
+  
+  * 1 error occurred:
+  	* permission denied
+  
+  
+  regen: the rendered artifact could not be encrypted under kl-art
+stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)
+class=blocked reason=neither the stored artifact nor its source is usable in this combination
