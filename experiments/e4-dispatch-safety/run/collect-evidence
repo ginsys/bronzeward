@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# Copy the committable text of one run into evidence/: the cell table, the run record, the
+# fixture's injection timeline, and every row's transcript (each executor's log, each injection,
+# each reader's output, the harness's worker readings), packed one file per group. The machine
+# configurations the rows applied, which hold the fixture's Talos secrets, and the fixture's
+# evidence bundle stay in E4D_OUT. Absolute paths are rewritten, and the result is refused if it
+# holds any of the fixture's leak-scan patterns; a planted control file proves the scan matches
+# before the real scan runs.
+#
+# Phase-0 evidence for the dispatch-safety experiment (ginsys/bronzeward issue 7). Not v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+need grep sed find sort sha256sum cut
+[ -s "$E4D_MARK" ] || die "$E4D_OUT is not an E4 dispatch-safety run directory ($E4D_MARK is missing)"
+[ -s "$E4D_OUT/complete" ] || die "$E4D_OUT/complete is missing: run/all did not finish"
+[ -s "$E4D_PATTERNS" ] || die "$E4D_PATTERNS is missing or empty"
+! grep -q '^only' -- "$E4D_OUT/run.txt" || die "$E4D_OUT is a partial run (E4D_ONLY was set); run the whole matrix"
+
+dest=$E4D_DIR/evidence
+incoming=$(mktemp -d "$E4D_DIR/.evidence-incoming.XXXXXX")
+trap 'rm -rf -- "$incoming"' EXIT
+
+placeholders() { sed -e "s#$REPO_DIR#<repo>#g" -e "s#$E4D_OUT#<E4D_OUT>#g" -e "s#$STATE#<fixture-state>#g" -- "$@"; }
+rewrite() { # rewrite <in> <out>; trailing whitespace (talosctl's version lines end in a space) is dropped
+  mkdir -p -- "$(dirname -- "$2")"
+  placeholders "$1" | sed 's/[[:space:]]*$//' >"$2"
+}
+for f in run.txt cells.tsv injections.log; do
+  rewrite "$E4D_OUT/$f" "$incoming/$f"
+done
+
+# The fixture's evidence bundle, copied to E4D_OUT/bundle before teardown (README), stays there.
+# What is committed is its summary and a manifest of what was copied.
+bundle=$E4D_OUT/bundle
+[ -s "$bundle/versions.txt" ] || die "$bundle/versions.txt is missing: copy the fixture's bundle there first"
+{
+  printf '# fixtures/bin/evidence bundle, captured after run/all with E4D_OUT as an extra scan path\n'
+  printf '## versions.txt\n'
+  cat -- "$bundle/versions.txt"
+  printf '## leak-scan.txt (files matched; canary-control files are the planted positive controls, scan-patterns.txt is the pattern list itself)\n'
+  cat -- "$bundle/leak-scan.txt"
+  printf '## fixtures-diff.txt lines: %s; up-fixtures-diff.txt lines: %s\n' \
+    "$(wc -l <"$bundle/fixtures-diff.txt")" "$(wc -l <"$bundle/up-fixtures-diff.txt")"
+  if [ -e "$bundle/unavailable.txt" ]; then
+    printf '## unavailable.txt\n'
+    cat -- "$bundle/unavailable.txt"
+  else
+    printf '## unavailable.txt: absent\n'
+  fi
+} >"$E4D_OUT/bundle-summary.txt"
+rewrite "$E4D_OUT/bundle-summary.txt" "$incoming/bundle-summary.txt"
+# The full manifest stays in E4D_OUT. The committed one lists every file outside postgres-data/
+# and gives that data directory one line, the digest of its part of the full manifest: its
+# 2000-odd per-file lines make a diff hunk too large for the pull-request review to read.
+(cd -- "$bundle" && find . -type f -print0 | sort -z | xargs -0 sha256sum) >"$E4D_OUT/bundle-manifest.txt"
+{
+  grep -v '  \./postgres-data/' -- "$E4D_OUT/bundle-manifest.txt" || true
+  pgdata=$(grep '  \./postgres-data/' -- "$E4D_OUT/bundle-manifest.txt" || true)
+  if [ -n "$pgdata" ]; then
+    printf '%s  ./postgres-data/ (%s files: the sha256 of their lines in the full manifest, kept in E4D_OUT)\n' \
+      "$(printf '%s\n' "$pgdata" | sha256sum | cut -d' ' -f1)" "$(printf '%s\n' "$pgdata" | wc -l)"
+  fi
+} >"$E4D_OUT/bundle-manifest-committed.txt"
+rewrite "$E4D_OUT/bundle-manifest-committed.txt" "$incoming/bundle-manifest.txt"
+
+# One file per group rather than one per row, so the pull request stays under GitHub's 300-file
+# diff limit. Each row's transcript follows a `==> <row> <==` line, in row order; the pack ends
+# with `==> end <==`.
+packs=0
+while IFS= read -r group; do
+  out=$incoming/transcripts/$group.txt
+  mkdir -p -- "$(dirname -- "$out")"
+  {
+    while IFS= read -r -d '' f; do
+      printf '==> %s <==\n' "$(basename -- "$f" .txt)"
+      placeholders "$f"
+      [ -z "$(tail -c 1 -- "$f")" ] || printf '\n'
+    done < <(find "$E4D_T" -type f -name "[0-9][0-9][0-9]-$group-*.txt" -print0 | sort -z)
+    printf '==> end <==\n'
+  } >"$out"
+  packs=$((packs + 1))
+done < <(awk -F'\t' 'NR > 1 { print $2 }' "$E4D_CELLS" | sort -u)
+[ "$packs" -gt 0 ] || die "no rows in $E4D_CELLS"
+
+# scan <fixed-strings-file> [dir]: the files under dir (incoming by default) that hold any of the
+# strings. grep exits 1 for no match; any other failure (an unreadable file) ends the run rather
+# than reading as clean.
+scan() {
+  local rc=0
+  grep -rlF -f "$1" -- "${2:-$incoming}" || rc=$?
+  [ "$rc" -le 1 ] || die "the leak scan failed (grep exit $rc)"
+}
+
+# The control: a file holding one pattern, in a directory of its own so that a real leak cannot
+# be mistaken for a failed control, must be found, or the scan below proves nothing.
+ctl=$(mktemp -d "$E4D_DIR/.evidence-control.XXXXXX")
+trap 'rm -rf -- "$incoming" "$ctl"' EXIT
+head -n 1 -- "$E4D_PATTERNS" >"$ctl/leak-control"
+hits=$(scan "$E4D_PATTERNS" "$ctl")
+[ "$hits" = "$ctl/leak-control" ] && control=fired || control="did not fire as expected"
+rm -rf -- "$ctl"
+[ "$control" = fired ] || die "leak-scan control $control; the scan cannot be trusted"
+
+hits=$(scan "$E4D_PATTERNS")
+[ -z "$hits" ] || die "collected evidence matches a leak-scan pattern in: $hits"
+hits=$(scan <(printf '%s/\n' "$HOME"))
+[ -z "$hits" ] || die "collected evidence names a path in the operator's home in: $hits"
+printf 'leak-scan\t%s patterns\tcontrol %s\t0 hits in %s files\n' "$(wc -l <"$E4D_PATTERNS")" "$control" \
+  "$(find "$incoming" -type f | wc -l)" >"$incoming/leak-scan.tsv"
+
+rm -rf -- "$dest"
+mv -T -- "$incoming" "$dest"
+trap - EXIT
+say "evidence collected in $dest: $(find "$dest" -type f | wc -l) files"
