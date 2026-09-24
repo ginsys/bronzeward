@@ -1,1 +1,14 @@
-versions 1..11: moved 10, not available 1
+current_version 11, oldest_version 2
+No value found at secret/data/mutable/registry
+version 1: not migrated
+migrated secret/mutable/registry version 2 to registry-from-bao/v2
+migrated secret/mutable/registry version 3 to registry-from-bao/v3
+migrated secret/mutable/registry version 4 to registry-from-bao/v4
+migrated secret/mutable/registry version 5 to registry-from-bao/v5
+migrated secret/mutable/registry version 6 to registry-from-bao/v6
+migrated secret/mutable/registry version 7 to registry-from-bao/v7
+migrated secret/mutable/registry version 8 to registry-from-bao/v8
+migrated secret/mutable/registry version 9 to registry-from-bao/v9
+migrated secret/mutable/registry version 10 to registry-from-bao/v10
+migrated secret/mutable/registry version 11 to registry-from-bao/v11
+versions 1..11: moved 10, not available 1, outside the pruned range 0
