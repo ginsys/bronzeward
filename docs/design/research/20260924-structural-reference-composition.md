@@ -62,7 +62,8 @@ Each candidate is resolved in two orders:
 
 Outcomes: `parity` (byte-identical to native), `differs`, `rejected` (a `talosctl` decode failure,
 at stage `compose` or `normalize`), `refused` (the resolver refused). The validation verdict is a
-separate column. Every expectation was written into `case.yaml` before the first run.
+separate column. Every expectation was written into `case.yaml` before the first run; that is
+asserted, not shown by the history, because the cases and the prototype landed in one commit.
 
 ### 3.1 Cases
 
@@ -109,8 +110,10 @@ The two bases must agree cell by cell on everything but the message, whose line 
 | Go | 1.27.1 |
 | `gopkg.in/yaml.v3` | v3.0.1 |
 
-`evidence/run.txt` records the prototype commit (`dc26305`), zero uncommitted inputs, and the
-`talosctl` version and digest.
+`evidence/run.txt` records the prototype commit of the capture (`dc26305`), zero uncommitted
+inputs, and the `talosctl` version and digest. Later commits change only comments in `run/` and
+make `collect-evidence` stop on a failed scan instead of reading it as clean; the evidence was
+collected again from the same capture with that collector and is byte-identical.
 
 ### 3.4 Synthetic values and the leak scan
 
@@ -143,7 +146,8 @@ Three captures gave the same matrix: the last before the prototype was committed
 `a7f4bb5`, and the collected one at `dc26305`, which differs from `a7f4bb5` only in writing `-` for
 an empty cell (§7.6). Between the last two, the fixture base's 88 output digests were identical;
 the generated base's 88 differed in every output, as they must, because each run generates a fresh
-secrets bundle.
+secrets bundle. Only the collected capture is retained; the comparisons with the earlier two are
+recorded here, not in `evidence/`.
 
 ## 4. The matrix
 
@@ -172,12 +176,15 @@ Totals per base: **early** reaches parity on all 13 positive cases for every can
 native rejection on type-mismatch, and fails as designed on unidentified-embedded. **Late** reaches
 parity on 3 cases with the tag, 8 with the marked string and 12 with the binding.
 
-Two late parities are coincidental and do not count in a candidate's favour:
+Three late parities are coincidental and do not count in a candidate's favour:
 
 - **tag late, override-literal**: the tag is stripped (§5 below), but fragment 2's literal overwrites
   the stripped value anyway.
 - **binding late, override-ref**: the binding happens to sit in the last fragment, so applying it
   after composition gives the value composition would have kept.
+- **binding late, bytes**: the binding's path is `machine/acceptedCAs[0]/crt`, an index into the
+  fragment's list applied to the composed list. Neither base has `acceptedCAs`, so index 0 is the
+  fragment's element. On a base that already held a CA, the binding would overwrite the base's.
 
 ## 5. What each late failure is
 
@@ -210,6 +217,13 @@ These are observed behaviours of `talosctl` v1.13.6 strategic merge, recorded wi
 
   (each prefixed `error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config:
   yaml: construct errors: line <n>:`). A marker on a string field survives composition as a string.
+
+  The rejection is shown for the integer, boolean and struct targets. The bytes rejection is weaker
+  evidence: `talosctl` base64-decodes the placeholder text, and fails at byte 5 because the
+  reference name `extra-ca` holds a `-`. `yaml.v3` decodes a tagged scalar into a string field
+  whatever its tag, so a reference name that happens to be valid base64 would likely compose into
+  wrong bytes silently, as on a string field. That was not run; likewise a boolean field would
+  accept a marker or tag whose text YAML reads as a boolean.
 - **A marker cannot honour a per-fragment opt-in after composition.** In the collision case,
   fragment 1 is not opted in and holds the literal `bwref:reg-pass`; resolved late, it is taken for
   a reference:
@@ -263,6 +277,10 @@ Observed:
   **unidentifiable** by this method (reported as `+unidentifiable: wipe`). Only the binding's late
   resolution names it. How to derive an effective boolean dependency early is open.
 
+In the matrix's `effective` column, `-` means "measured, none survived" in a cell that composed
+(override-literal early) and "not measured" in a rejected or refused cell; the `observed` column
+tells them apart.
+
 The distinction the design asks for follows directly:
 
 - **Artifact dependencies** are the effective set: what the published artifact contains, and what
@@ -287,9 +305,9 @@ The distinction the design asks for follows directly:
   ```
 
 - **Rejections**: type-mismatch is rejected natively with ``cannot construct !!str `e2-not-...`
-  into int``. Every early cell and the binding late are rejected with that same message, the
-  binding late at the re-read rather than at composition, because the key it fills is absent from
-  its fragments. The tag and marked late are rejected on their own placeholder instead (§5). The
+  into int``. Every early cell and the binding late are rejected with the same message; the
+  binding late at the re-read rather than at composition, and so at a different line of the
+  document, because the key it fills is absent from its fragments. The tag and marked late are rejected on their own placeholder instead (§5). The
   resolver refusal, binding only:
 
   ```text
@@ -307,9 +325,9 @@ constraint:
 
 | Candidate | Late failure | Why it is not fixable in the renderer without a merge engine |
 |---|---|---|
-| tag | dropped silently on strings; rejected on typed fields | composition discards it before the renderer runs |
-| marked | rejected on typed fields; misreads literals | typed decode runs first; opt-in is a fragment property composition erases |
-| binding | wrong value when a later fragment overrides | needs per-path last-writer knowledge |
+| tag | dropped silently on strings; rejected on integer, boolean and struct fields | composition discards it before the renderer runs |
+| marked | rejected on integer, boolean and struct fields; misreads literals | typed decode runs first; opt-in is a fragment property composition erases |
+| binding | wrong value when a later fragment overrides; a list index names the fragment's list, not the composed one | needs per-path last-writer knowledge |
 
 **Early resolution reaches native parity for all three candidates.** It hands `talosctl` only
 reference-free fragments, so upstream composition and validation are untouched. What each candidate
@@ -323,9 +341,15 @@ then demands of a renderer:
   is left in the output and validation passes.
 - **binding**: bindings keyed by fragment, document and path, kept in step as fragments are edited
   (list selectors such as `[name=e2-secret]` included). It is the only candidate that **refuses** a
-  reference into unidentified embedded content instead of leaving reference text behind. A
-  fragment that holds only bound values is empty after binding, and `talosctl` refuses an empty
-  patch, so such a fragment must be left out of composition (§7.1).
+  reference into unidentified embedded content instead of leaving reference text behind. (Resolved
+  late, a fragment that holds only bound values is empty, and `talosctl` refuses an empty patch, so
+  such a fragment must be left out of composition: §7.1. Early, each fragment is refilled first.)
+
+For identified embedded documents, every candidate re-serializes the whole document it resolves
+into: the prototype writes JSON with sorted keys and no whitespace. The native literal form was
+derived through the same encoder, so embedded-json's parity does not show that an author's
+hand-formatted literal would survive; it would differ in formatting. The tag form of the embedded
+JSON (`"token": !bwref app-token`) is not JSON either; the prototype parses it as YAML.
 
 For every candidate, early resolution means the compiler identity must read the whole superset
 (§6.2), and the release must record the effective set separately if dependency tracking is to be
@@ -380,7 +404,9 @@ own formats and were fixed; the validation messages are kept verbatim and exempt
   ([fixtures report §5](20260919-investigation-fixtures.md#5-failures-hit-while-building-it)); no JSON patch was tried.
 - **Fifteen cases, one machine type.** Both bases are control-plane configurations. Not covered:
   worker configurations, duration and IP/CIDR fields, a list as a reference target, list-element
-  overrides, `$patch: delete`, and more than two fragments.
+  overrides (the bytes case's list merged into a base with no such list, §4), `$patch: delete`,
+  more than two fragments, and a tag whose reference name is valid base64 or reads as a boolean
+  (§5).
 - **The fixture base validates in container mode.** Its read-back configuration is a Docker node's;
   `metal` validation applies only to the generated base.
 - **Boolean effective dependencies are unmeasured early** (§6.2).
