@@ -22,6 +22,10 @@ for run in openbao age-store sops migrate; do
 done
 
 bundle=$("$FIXTURES_DIR/bin/evidence") || die "fixtures/bin/evidence failed"
+case $bundle in
+  "$FIXTURES_DIR"/.state/evidence/?*) [ -d "$bundle" ] || die "fixtures/bin/evidence printed $bundle, which is not a directory" ;;
+  *) die "fixtures/bin/evidence printed '$bundle', not a bundle under .state/evidence" ;;
+esac
 mkdir -p -- "$E5_OUT/bundle"
 cp -a -- "$bundle/." "$E5_OUT/bundle/" || die "could not copy the bundle out of .state"
 printf '%s\n' "$bundle" >"$E5_OUT/bundle-source.txt"
