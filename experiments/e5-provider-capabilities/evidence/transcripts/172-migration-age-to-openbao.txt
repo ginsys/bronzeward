@@ -1,2 +1,12 @@
-age-store created=2026-09-24T10:24:10.571756246Z
-openbao created=2026-09-24T10:24:16.878734132Z custom_metadata={"source":"age-store:app-token/g1","source_created":"2026-09-24T10:24:10.571756246Z"}
+============ Secret Path ============
+secret/data/gen/migrated/app-token/g1
+
+======= Metadata =======
+Key                Value
+---                -----
+created_time       2026-09-24T10:31:16.455675578Z
+custom_metadata    <nil>
+deletion_time      n/a
+destroyed          false
+version            1
+Success! Data written to: secret/metadata/gen/migrated/app-token/g1

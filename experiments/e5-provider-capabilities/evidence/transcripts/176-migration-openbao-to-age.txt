@@ -1,1 +1,0 @@
-migrated secret/gen/app-token/g2 version 1 to app-token-from-bao/g2
