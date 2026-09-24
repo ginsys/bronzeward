@@ -16,7 +16,7 @@
 // Usage:
 //
 //	e4db version
-//	e4db migrate [-runner R] [-fail-at N] [-hold-at N -hold D] [-no-lock]
+//	e4db migrate [-runner R] [-upto N] [-fail-at N] [-hold-at N -hold D] [-no-lock]
 //	e4db seed-fragment -fragment F
 //	e4db race -fragment F -writers W -rounds R -actor A [-blind]
 //	e4db update -fragment F -actor A [-read N]
@@ -92,6 +92,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		holdAt    = fs.Int("hold-at", 0, "migrate: hold migration N open")
 		hold      = fs.Duration("hold", 0, "hold the transaction open this long")
 		noLock    = fs.Bool("no-lock", false, "migrate: control, no advisory lock")
+		upto      = fs.Int("upto", 0, "migrate: apply migrations up to N only")
 		fragment  = fs.String("fragment", "f1", "fragment name")
 		writers   = fs.Int("writers", 4, "race: concurrent writers")
 		rounds    = fs.Int("rounds", 10, "race: rounds")
@@ -163,6 +164,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		ms, err := Migrations(db.D)
 		if err != nil {
 			return res(err, "")
+		}
+		if *upto > 0 && *upto < len(ms) {
+			ms = ms[:*upto]
 		}
 		applied, err := Migrate(ctx, db, ms, MigrateOptions{Runner: *runner, FailAt: *failAt, HoldAt: *holdAt, Hold: *hold,
 			NoLock: *noLock, OnHold: func(v int) { onHold(fmt.Sprintf("migration %d", v)) }})
