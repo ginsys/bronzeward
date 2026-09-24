@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# Candidate A: OpenBao KV v2 and Transit, as the fixtures run it (single node, integrated Raft, one
+# synthetic unseal key). Every cell is one operation under one identity; see lib.sh for the
+# identities and README.md for the columns and kinds.
+#
+# Phase-0 evidence for the provider-capability experiment (ginsys/bronzeward issue 8). Not v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+e5_init
+e5_need_fixture
+e5_bao_identities
+
+C=openbao
+W=$E5_WORK/openbao
+mkdir -p -- "$W"
+
+# --- helpers: each prints a verdict or non-secret metadata, never a value ---------------------------
+
+kv_put() { # kv_put <name> <kv-args...>: write value <name> over stdin
+  local name=$1
+  shift
+  bao_stdin kv put "$@" value=- <"$(e5_value_file "$name")"
+}
+kv_get() { bao kv get -field=value "$@"; }
+
+versions() { # versions <path>: what the metadata says about retained versions
+  bao kv metadata get -format=json "$1" |
+    jq -r '.data | "current=\(.current_version) oldest=\(.oldest_version) max_versions=\(.max_versions) kept=\(.versions | keys | length)"'
+}
+
+encrypt() { # encrypt <out-file>: encrypt the artifact, keep the ciphertext for later cells
+  local ct
+  ct=$(base64 -w0 <"$W/artifact.yaml" | bao_stdin write -field=ciphertext transit/encrypt/bw-artifact plaintext=-) || return 1
+  printf '%s\n' "$ct" | tee "$1"
+}
+decrypt() { # decrypt <ciphertext-file>: the plaintext digest's verdict only
+  local want
+  want=$(sha256sum <"$W/artifact.yaml" | cut -d' ' -f1)
+  check_digest "$want" decrypt_raw "$1"
+}
+decrypt_raw() { bao write -field=plaintext transit/decrypt/bw-artifact ciphertext="$(cat "$1")" | base64 -d; }
+rewrap() { # rewrap <in> <out>: re-encrypt under the latest key version without returning plaintext
+  local ct
+  ct=$(bao write -field=ciphertext transit/rewrap/bw-artifact ciphertext="$(cat "$1")") || return 1
+  printf '%s\n' "$ct" | tee "$2"
+}
+key_state() { # key_state <transit-key>: the key's version metadata, no key material
+  bao read -format=json "transit/keys/$1" |
+    jq -r '.data | "type=\(.type) latest=\(.latest_version) min_decryption=\(.min_decryption_version) min_available=\(.min_available_version) min_encryption=\(.min_encryption_version) exportable=\(.exportable) deletion_allowed=\(.deletion_allowed) versions=\(.keys | keys | join(","))"'
+}
+sign_verify() { # sign, then verify, the artifact digest with an ed25519 Transit key
+  local input sig
+  input=$(sha256sum <"$W/artifact.yaml" | cut -d' ' -f1 | base64 -w0)
+  sig=$(bao write -field=signature transit/sign/bw-e5-sign input="$input") || return 1
+  bao write -format=json transit/verify/bw-e5-sign input="$input" signature="$sig" | jq -e '.data.valid == true'
+}
+# bao status exits 2 for "reachable but sealed" (as fixtures/bin/up reads it); that is an answer,
+# not a failure, so only another status fails the cell.
+sealed() {
+  local out rc=0
+  out=$(bao status -format=json) || rc=$?
+  [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || return "$rc"
+  jq -r '"sealed=\(.sealed) type=\(.type) shares=\(.n) threshold=\(.t)"' <<<"$out"
+}
+
+# --- inputs ------------------------------------------------------------------------------------------
+
+for v in app-token-g1 app-token-g2 app-token-g3; do e5_secret "$v"; done
+for i in $(seq 1 11); do e5_secret "registry-v$i"; done
+e5_secret artifact-token
+{
+  printf 'machine:\n  token: '
+  cat "$(e5_value_file artifact-token)"
+  printf '\n'
+} >"$W/artifact.yaml"
+
+# --- create, read, versioning -------------------------------------------------------------------------
+
+col='create-read-version'
+cell $C $col publisher ok versioned -- as publisher kv_put app-token-g1 -cas=0 secret/gen/app-token/g1
+cell $C $col publisher denied versioned -- as publisher kv_put app-token-g2 secret/gen/app-token/g1
+cell $C $col admin fail versioned -- as admin kv_put app-token-g2 -cas=0 secret/gen/app-token/g1
+cell $C $col compiler ok versioned -- as compiler check_digest "$(e5_digest app-token-g1)" kv_get secret/gen/app-token/g1
+cell $C $col executor denied versioned -- as executor kv_get secret/gen/app-token/g1
+cell $C $col metadata denied versioned -- as metadata kv_get secret/gen/app-token/g1
+# A mutable path with the default retention: eleven writes, then look for version 1.
+cell $C $col admin ok metadata -- as admin bao read -format=json secret/config
+for i in $(seq 1 11); do
+  cell $C $col admin ok versioned -- as admin kv_put "registry-v$i" secret/mutable/registry
+done
+cell $C $col admin ok metadata -- as admin versions secret/mutable/registry
+cell $C $col admin fail versioned -- as admin check_digest "$(e5_digest registry-v1)" kv_get -version=1 secret/mutable/registry
+cell $C $col admin ok versioned -- as admin check_digest "$(e5_digest registry-v2)" kv_get -version=2 secret/mutable/registry
+# An explicit zero is not unlimited (design §7.5).
+cell $C $col admin ok metadata -- as admin bao kv metadata put -max-versions=0 secret/mutable/zero
+for i in $(seq 1 11); do
+  cell $C $col admin ok versioned -- as admin kv_put "registry-v$i" secret/mutable/zero
+done
+cell $C $col admin ok metadata -- as admin versions secret/mutable/zero
+# Check-and-set can be made mandatory per path.
+cell $C $col admin ok metadata -- as admin bao kv metadata put -cas-required=true secret/mutable/cas
+cell $C $col admin fail versioned -- as admin kv_put app-token-g1 secret/mutable/cas
+cell $C $col admin ok versioned -- as admin kv_put app-token-g1 -cas=0 secret/mutable/cas
+
+# --- artifact encryption ------------------------------------------------------------------------------
+
+col='artifact-encryption'
+cell $C $col compiler ok primitive -- as compiler encrypt "$W/artifact-v1.ct"
+cell $C $col executor ok primitive -- as executor decrypt "$W/artifact-v1.ct"
+cell $C $col compiler denied primitive -- as compiler decrypt "$W/artifact-v1.ct"
+cell $C $col publisher denied primitive -- as publisher decrypt "$W/artifact-v1.ct"
+cell $C $col metadata denied primitive -- as metadata encrypt "$W/artifact-denied.ct"
+cell $C $col executor denied primitive -- as executor encrypt "$W/artifact-denied.ct"
+
+# --- signing ------------------------------------------------------------------------------------------
+
+col='signing'
+cell $C $col admin ok primitive -- as admin bao write -f transit/keys/bw-e5-sign type=ed25519
+cell $C $col admin ok primitive -- as admin sign_verify
+cell $C $col compiler denied primitive -- as compiler sign_verify
+
+# --- key custody --------------------------------------------------------------------------------------
+
+col='key-custody'
+cell $C $col metadata ok metadata -- as metadata key_state bw-artifact
+cell $C $col admin fail primitive -- as admin bao read transit/export/encryption-key/bw-artifact
+cell $C $col admin ok metadata -- as admin sealed
+
+# --- rotation -----------------------------------------------------------------------------------------
+
+col='rotation'
+cell $C $col admin ok versioned -- as admin bao write -f transit/keys/bw-artifact/rotate
+cell $C $col metadata ok metadata -- as metadata key_state bw-artifact
+cell $C $col executor ok versioned -- as executor decrypt "$W/artifact-v1.ct"
+cell $C $col compiler ok versioned -- as compiler encrypt "$W/artifact-v2.ct"
+cell $C $col compiler denied versioned -- as compiler rewrap "$W/artifact-v1.ct" "$W/artifact-v1-rewrapped.ct"
+cell $C $col admin ok versioned -- as admin rewrap "$W/artifact-v1.ct" "$W/artifact-v1-rewrapped.ct"
+cell $C $col executor ok versioned -- as executor decrypt "$W/artifact-v1-rewrapped.ct"
+# The reversible floor (design §7.6 "blocked"): old ciphertext refused, then accepted again.
+cell $C $col admin ok versioned -- as admin bao write transit/keys/bw-artifact/config min_decryption_version=2
+cell $C $col executor fail versioned -- as executor decrypt "$W/artifact-v1.ct"
+cell $C $col metadata ok metadata -- as metadata key_state bw-artifact
+cell $C $col admin ok versioned -- as admin bao write transit/keys/bw-artifact/config min_decryption_version=1
+cell $C $col executor ok versioned -- as executor decrypt "$W/artifact-v1.ct"
+# A secret is rotated by a new generation, never by overwriting the one a release pinned.
+cell $C $col publisher ok versioned -- as publisher kv_put app-token-g2 -cas=0 secret/gen/app-token/g2
+cell $C $col compiler ok versioned -- as compiler check_digest "$(e5_digest app-token-g1)" kv_get secret/gen/app-token/g1
+
+# --- metadata-only checks -----------------------------------------------------------------------------
+
+col='metadata-only'
+cell $C $col metadata ok metadata -- as metadata bao kv metadata get -format=json secret/gen/app-token/g1
+cell $C $col metadata ok metadata -- as metadata bao kv list secret/gen/app-token
+cell $C $col metadata ok metadata -- as metadata versions secret/mutable/registry
+cell $C $col metadata ok metadata -- as metadata key_state bw-artifact
+cell $C $col metadata denied metadata -- as metadata decrypt "$W/artifact-v1.ct"
+cell $C $col compiler denied metadata -- as compiler bao kv metadata get secret/gen/app-token/g1
+cell $C $col executor denied metadata -- as executor key_state bw-artifact
+
+# --- startup unlock -----------------------------------------------------------------------------------
+
+col='startup-unlock'
+cell $C $col admin ok - -- as admin bao operator seal
+cell $C $col admin ok metadata -- as admin sealed
+cell $C $col compiler fail versioned -- as compiler kv_get secret/gen/app-token/g1
+cell $C $col operator ok - -- bao_unseal
+cell $C $col compiler ok versioned -- as compiler check_digest "$(e5_digest app-token-g1)" kv_get secret/gen/app-token/g1
+# A crash comes back sealed; the fixture's start unseals with the key it holds, and logs both.
+cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" kill openbao
+cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" start openbao
+cell $C $col executor ok versioned -- as executor decrypt "$W/artifact-v1.ct"
+
+# --- backup and restore -------------------------------------------------------------------------------
+
+col='backup-restore'
+cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" bao-snapshot e5-openbao
+cell $C $col publisher ok versioned -- as publisher kv_put app-token-g3 -cas=0 secret/gen/app-token/g3
+cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" bao-restore e5-openbao
+cell $C $col compiler ok versioned -- as compiler check_digest "$(e5_digest app-token-g1)" kv_get secret/gen/app-token/g1
+cell $C $col compiler fail versioned -- as compiler kv_get secret/gen/app-token/g3
+cell $C $col executor ok versioned -- as executor decrypt "$W/artifact-v1.ct"
+cell $C $col executor ok versioned -- as executor decrypt "$W/artifact-v1-rewrapped.ct"
+
+say "openbao: $(e5_mismatches) mismatch(es) so far in $E5_CELLS"

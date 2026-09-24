@@ -29,6 +29,7 @@ Each row also carries a `kind`, the distinction acceptance criterion 2 asks for:
 | `versioned` | complete versioned secret or provider behaviour |
 | `metadata` | an observation made from metadata alone, without the value |
 | `unsupported` | the candidate has no such capability; named, never left blank |
+| `-` | a procedural step (a seal, a crash, a snapshot) that the cells after it depend on; not a capability claim |
 
 ## Why shell, not Go
 
