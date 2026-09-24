@@ -1,0 +1,28 @@
+==> 056-s8-sqlite-unrelated-writer <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=2116444
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=sqlite pid=2116599
+outcome=done elapsed_ms=19 fragment=f1
+==> seed2 (rc 0) <==
+$ e4db seed-fragment -fragment f2
+backend=sqlite pid=2116658
+outcome=done elapsed_ms=19 fragment=f2
+==> publish (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 2 -hold 7s
+backend=sqlite pid=2116718
+hold="after artifact 1 of 2" for=7s
+outcome=done elapsed_ms=7019 release=r1 id=1 existing=false digest=c8ce64ba97e5592628676f2e4b2cc366085a78d799de6515c0a14787eceb3371
+==> write (rc 1) <==
+$ e4db update -fragment f2 -actor w -read 0
+backend=sqlite pid=2116817
+outcome=error class=busy elapsed_ms=5002 err="database is locked (5) (SQLITE_BUSY)"
+==> read-s1 (rc 0) <==
+revisions_recorded|0
+duplicate_revisions|0
+final_revision|0
+lost_updates|0
+==> end <==

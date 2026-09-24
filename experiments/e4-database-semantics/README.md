@@ -54,7 +54,7 @@ E4_OUT=<the same directory> experiments/e4-database-semantics/run/collect-eviden
 fixtures/bin/down
 ```
 
-`run/all` builds `e4db`, runs the matrix (about four minutes), then runs the prototype's own
+`run/all` builds `e4db`, runs the matrix and then the prototype's own
 `go test` against both backends. `run/collect-evidence` copies the text evidence into
 [`evidence/`](evidence/), packs the transcripts one file per scenario and backend, rewrites local
 paths to placeholders, and refuses anything matching this run's fixture credentials or a path in

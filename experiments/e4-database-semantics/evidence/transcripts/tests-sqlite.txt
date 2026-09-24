@@ -1,0 +1,56 @@
+==> 062-tests-sqlite-go-test <==
+==> go-test (rc 0) <==
+$ go test -count=1 -v ./...
+=== RUN   TestRebind
+--- PASS: TestRebind (0.00s)
+=== RUN   TestClassifyUniqueViolation
+--- PASS: TestClassifyUniqueViolation (0.06s)
+=== RUN   TestClassifyNil
+--- PASS: TestClassifyNil (0.00s)
+=== RUN   TestSQLiteBusyIsClassified
+--- PASS: TestSQLiteBusyIsClassified (0.03s)
+=== RUN   TestEngineVersion
+--- PASS: TestEngineVersion (0.03s)
+=== RUN   TestMigrationsLoadInOrder
+--- PASS: TestMigrationsLoadInOrder (0.00s)
+=== RUN   TestMigrateFreshAppliesAllOnce
+--- PASS: TestMigrateFreshAppliesAllOnce (0.08s)
+=== RUN   TestMigrateFailureRollsBackThatMigration
+--- PASS: TestMigrateFailureRollsBackThatMigration (0.08s)
+=== RUN   TestMigrateConcurrentRunnersApplyOnce
+--- PASS: TestMigrateConcurrentRunnersApplyOnce (0.12s)
+=== RUN   TestSQLiteRebuildNeedsForeignKeysOff
+--- PASS: TestSQLiteRebuildNeedsForeignKeysOff (0.10s)
+=== RUN   TestReaderStatementsSkipsComments
+--- PASS: TestReaderStatementsSkipsComments (0.00s)
+=== RUN   TestS1CompareAndSetKeepsEveryWrite
+--- PASS: TestS1CompareAndSetKeepsEveryWrite (0.36s)
+=== RUN   TestS1BlindWriteLosesUpdates
+--- PASS: TestS1BlindWriteLosesUpdates (0.98s)
+=== RUN   TestS2PublishIsAllOrNothing
+--- PASS: TestS2PublishIsAllOrNothing (0.11s)
+=== RUN   TestS2PublishRacingWriterIsNeverStaleAtCommit
+--- PASS: TestS2PublishRacingWriterIsNeverStaleAtCommit (0.43s)
+=== RUN   TestS2UnlockedSourceCheckControl
+--- PASS: TestS2UnlockedSourceCheckControl (0.43s)
+=== RUN   TestS2PublishRetryIsIdempotent
+--- PASS: TestS2PublishRetryIsIdempotent (0.09s)
+=== RUN   TestS3OneActiveIntentPerScope
+--- PASS: TestS3OneActiveIntentPerScope (0.16s)
+=== RUN   TestS3RetryReturnsTheSameIntent
+--- PASS: TestS3RetryReturnsTheSameIntent (0.10s)
+=== RUN   TestS4ConcurrentTakeoverHasOneWinner
+--- PASS: TestS4ConcurrentTakeoverHasOneWinner (0.12s)
+=== RUN   TestS4StaleOwnerIsFenced
+--- PASS: TestS4StaleOwnerIsFenced (0.10s)
+=== RUN   TestS4CheckThenInsertAttempt
+--- PASS: TestS4CheckThenInsertAttempt (0.42s)
+=== RUN   TestS5WorkersClaimEachJobOnce
+=== RUN   TestS5WorkersClaimEachJobOnce/guarded
+--- PASS: TestS5WorkersClaimEachJobOnce (1.12s)
+    --- PASS: TestS5WorkersClaimEachJobOnce/guarded (1.12s)
+=== RUN   TestS5ExpiredLeaseIsReclaimedAndLateCompletionFenced
+--- PASS: TestS5ExpiredLeaseIsReclaimedAndLateCompletionFenced (0.41s)
+PASS
+ok  	github.com/ginsys/bronzeward/experiments/e4-database-semantics	5.311s
+==> end <==

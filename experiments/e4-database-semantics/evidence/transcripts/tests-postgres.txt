@@ -1,0 +1,72 @@
+==> 063-tests-postgres-go-test <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> go-test (rc 0) <==
+$ E4_TEST_PG_DSN=<fixture> go test -count=1 -v ./...
+=== RUN   TestRebind
+--- PASS: TestRebind (0.00s)
+=== RUN   TestClassifyUniqueViolation
+--- PASS: TestClassifyUniqueViolation (0.01s)
+=== RUN   TestClassifyNil
+--- PASS: TestClassifyNil (0.00s)
+=== RUN   TestSQLiteBusyIsClassified
+    db_test.go:74: SQLite-only: a writer lock held by another connection
+--- SKIP: TestSQLiteBusyIsClassified (0.00s)
+=== RUN   TestEngineVersion
+--- PASS: TestEngineVersion (0.01s)
+=== RUN   TestMigrationsLoadInOrder
+--- PASS: TestMigrationsLoadInOrder (0.00s)
+=== RUN   TestMigrateFreshAppliesAllOnce
+--- PASS: TestMigrateFreshAppliesAllOnce (0.04s)
+=== RUN   TestMigrateFailureRollsBackThatMigration
+--- PASS: TestMigrateFailureRollsBackThatMigration (0.07s)
+=== RUN   TestMigrateConcurrentRunnersApplyOnce
+--- PASS: TestMigrateConcurrentRunnersApplyOnce (0.06s)
+=== RUN   TestSQLiteRebuildNeedsForeignKeysOff
+    migrate_test.go:153: SQLite-only
+--- SKIP: TestSQLiteRebuildNeedsForeignKeysOff (0.00s)
+=== RUN   TestReaderStatementsSkipsComments
+--- PASS: TestReaderStatementsSkipsComments (0.00s)
+=== RUN   TestS1CompareAndSetKeepsEveryWrite
+--- PASS: TestS1CompareAndSetKeepsEveryWrite (0.22s)
+=== RUN   TestS1BlindWriteLosesUpdates
+--- PASS: TestS1BlindWriteLosesUpdates (0.31s)
+=== RUN   TestS2PublishIsAllOrNothing
+--- PASS: TestS2PublishIsAllOrNothing (0.07s)
+=== RUN   TestS2PublishRacingWriterIsNeverStaleAtCommit
+--- PASS: TestS2PublishRacingWriterIsNeverStaleAtCommit (0.37s)
+=== RUN   TestS2UnlockedSourceCheckControl
+--- PASS: TestS2UnlockedSourceCheckControl (0.37s)
+=== RUN   TestS2PublishRetryIsIdempotent
+--- PASS: TestS2PublishRetryIsIdempotent (0.06s)
+=== RUN   TestS3OneActiveIntentPerScope
+--- PASS: TestS3OneActiveIntentPerScope (0.07s)
+=== RUN   TestS3RetryReturnsTheSameIntent
+--- PASS: TestS3RetryReturnsTheSameIntent (0.07s)
+=== RUN   TestS4ConcurrentTakeoverHasOneWinner
+--- PASS: TestS4ConcurrentTakeoverHasOneWinner (0.07s)
+=== RUN   TestS4StaleOwnerIsFenced
+--- PASS: TestS4StaleOwnerIsFenced (0.07s)
+=== RUN   TestS4CheckThenInsertAttempt
+--- PASS: TestS4CheckThenInsertAttempt (0.37s)
+=== RUN   TestS5WorkersClaimEachJobOnce
+=== RUN   TestS5WorkersClaimEachJobOnce/guarded
+=== RUN   TestS5WorkersClaimEachJobOnce/skip-locked
+--- PASS: TestS5WorkersClaimEachJobOnce (0.54s)
+    --- PASS: TestS5WorkersClaimEachJobOnce/guarded (0.36s)
+    --- PASS: TestS5WorkersClaimEachJobOnce/skip-locked (0.18s)
+=== RUN   TestS5ExpiredLeaseIsReclaimedAndLateCompletionFenced
+--- PASS: TestS5ExpiredLeaseIsReclaimedAndLateCompletionFenced (0.38s)
+PASS
+ok  	github.com/ginsys/bronzeward/experiments/e4-database-semantics	3.176s
+==> end <==
