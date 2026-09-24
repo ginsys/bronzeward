@@ -116,7 +116,7 @@ something else.
 | `age`, `age-keygen` | v1.3.2 |
 | `sops` | 3.13.3 |
 | Pins | `fixtures/versions.env` as of c74f953; binaries checked against the manifest digests |
-| Captured from | 87a4077 (`manifest commit` in [`versions.txt`](../../../experiments/e5-provider-capabilities/evidence/versions.txt)) |
+| Captured from | aecdef4 (`manifest commit` in [`versions.txt`](../../../experiments/e5-provider-capabilities/evidence/versions.txt)) |
 
 ### 3.4 Synthetic values and the leak scan
 
@@ -169,7 +169,7 @@ named absence.
 
 | §7.3 element | OpenBao KV v2 + Transit | local age-backed store | SOPS with age |
 |---|---|---|---|
-| **Create / read / versioning** | **Native, versioned.** `cas=0` creates a generation once; a second create is refused ([003](../../../experiments/e5-provider-capabilities/evidence/transcripts/003-openbao-create-read-version.txt), 400 "check-and-set parameter did not match"). A mutable path keeps 10 versions: after 11 writes `oldest=2` and version 1 reads "No value found" ([019](../../../experiments/e5-provider-capabilities/evidence/transcripts/019-openbao-create-read-version.txt), [020](../../../experiments/e5-provider-capabilities/evidence/transcripts/020-openbao-create-read-version.txt)). An explicit `max_versions=0` does the same ([034](../../../experiments/e5-provider-capabilities/evidence/transcripts/034-openbao-create-read-version.txt)). `cas_required` refuses a write without CAS ([036](../../../experiments/e5-provider-capabilities/evidence/transcripts/036-openbao-create-read-version.txt)). The `gen/` paths are not `cas_required`, so create-only is the publisher's policy, not the path's: the administrator adds version 2 to a generation path without CAS ([087](../../../experiments/e5-provider-capabilities/evidence/transcripts/087-openbao-create-read-version.txt)), the metadata shows `current=2` (088), and both versions stay readable (089-090). | **Primitive; generations by convention.** `O_EXCL` refuses a second create ([096](../../../experiments/e5-provider-capabilities/evidence/transcripts/096-age-store-create-read-version.txt)), and of two concurrent creators exactly one wins ([101](../../../experiments/e5-provider-capabilities/evidence/transcripts/101-age-store-create-read-version.txt)). A writer that deletes the file first replaces a generation, and nothing records it (102-104). No retention limit and no pruning (105, unsupported). | **Primitive.** Create-only exists only in the writer's own `noclobber` ([142](../../../experiments/e5-provider-capabilities/evidence/transcripts/142-sops-create-read-version.txt)). An update replaces the only copy (146-147). No version history (148) and no compare-and-set or locking (150), both unsupported: two concurrent `sops set` adding different keys to one file both exit 0, and in 7 of 10 attempts the file still decrypted with only one of the two keys ([149](../../../experiments/e5-provider-capabilities/evidence/transcripts/149-sops-create-read-version.txt)). |
+| **Create / read / versioning** | **Native, versioned.** `cas=0` creates a generation once; a second create is refused ([003](../../../experiments/e5-provider-capabilities/evidence/transcripts/003-openbao-create-read-version.txt), 400 "check-and-set parameter did not match"). A mutable path keeps 10 versions: after 11 writes `oldest=2` and version 1 reads "No value found" ([019](../../../experiments/e5-provider-capabilities/evidence/transcripts/019-openbao-create-read-version.txt), [020](../../../experiments/e5-provider-capabilities/evidence/transcripts/020-openbao-create-read-version.txt)). An explicit `max_versions=0` does the same ([034](../../../experiments/e5-provider-capabilities/evidence/transcripts/034-openbao-create-read-version.txt)). `cas_required` refuses a write without CAS ([036](../../../experiments/e5-provider-capabilities/evidence/transcripts/036-openbao-create-read-version.txt)). The `gen/` paths are not `cas_required`, so create-only is the publisher's policy, not the path's: the administrator adds version 2 to a generation path without CAS ([087](../../../experiments/e5-provider-capabilities/evidence/transcripts/087-openbao-create-read-version.txt)), the metadata shows `current=2` (088), and both versions stay readable (089-090). | **Primitive; generations by convention.** `O_EXCL` refuses a second create ([096](../../../experiments/e5-provider-capabilities/evidence/transcripts/096-age-store-create-read-version.txt)), and of two concurrent creators exactly one wins ([101](../../../experiments/e5-provider-capabilities/evidence/transcripts/101-age-store-create-read-version.txt)). A writer that deletes the file first replaces a generation, and nothing records it (102-104). No retention limit and no pruning (105, unsupported). | **Primitive.** Create-only exists only in the writer's own `noclobber` ([142](../../../experiments/e5-provider-capabilities/evidence/transcripts/142-sops-create-read-version.txt)). An update replaces the only copy (146-147). No version history (148) and no compare-and-set or locking (150), both unsupported: two concurrent `sops set` adding different keys to one file both exit 0, and in 9 of 10 attempts the file still decrypted with only one of the two keys ([149](../../../experiments/e5-provider-capabilities/evidence/transcripts/149-sops-create-read-version.txt)). |
 | **Artifact encryption** | **Native, primitive.** Transit: the compiler encrypts ([038](../../../experiments/e5-provider-capabilities/evidence/transcripts/038-openbao-artifact-encryption.txt)), only the executor decrypts ([039](../../../experiments/e5-provider-capabilities/evidence/transcripts/039-openbao-artifact-encryption.txt), 040-041 denied), and neither the executor nor the metadata identity can encrypt (042-043 denied). | **Primitive.** Encrypted to the executor's recipient ([106](../../../experiments/e5-provider-capabilities/evidence/transcripts/106-age-store-artifact-encryption.txt)); the executor opens it, the compiler cannot ([107](../../../experiments/e5-provider-capabilities/evidence/transcripts/107-age-store-artifact-encryption.txt), [108](../../../experiments/e5-provider-capabilities/evidence/transcripts/108-age-store-artifact-encryption.txt)). Anyone holding the public recipient can encrypt. | **Primitive.** The whole artifact is encrypted as binary input to the executor (151-152); the compiler cannot open it ([153](../../../experiments/e5-provider-capabilities/evidence/transcripts/153-sops-artifact-encryption.txt)). |
 | **Signing** | **Native, primitive.** An `ed25519` Transit key signs and verifies under the administrator ([045](../../../experiments/e5-provider-capabilities/evidence/transcripts/045-openbao-signing.txt)); the compiler is denied ([046](../../../experiments/e5-provider-capabilities/evidence/transcripts/046-openbao-signing.txt)). | **Unsupported** (109): age has no signatures. | **Unsupported** (154): the MAC authenticates the file to key holders only. |
 | **Key custody** | **Native.** The Transit key reports `exportable=false deletion_allowed=false` to the metadata identity ([047](../../../experiments/e5-provider-capabilities/evidence/transcripts/047-openbao-key-custody.txt)), and export is refused even to the administrator ([048](../../../experiments/e5-provider-capabilities/evidence/transcripts/048-openbao-key-custody.txt), "private key material is not exportable"). The barrier uses one Shamir share, threshold 1 ([049](../../../experiments/e5-provider-capabilities/evidence/transcripts/049-openbao-key-custody.txt)). | **Files.** Key files are `0600` in a `0700` directory; the object and metadata directories took the caller's umask, `0775` here ([093](../../../experiments/e5-provider-capabilities/evidence/transcripts/093-age-store-key-custody.txt)). No boundary between identities in one uid (094, unsupported). | **Files.** One key file per role, recipients chosen by `.sops.yaml` path rules (136-139). No boundary in one uid (140, unsupported). By default sops also tries the caller's own SSH keys as identities (§5.5). |
@@ -212,7 +212,7 @@ privilege that allows them.
 
 | Operation | needs | age store | SOPS |
 |---|---|---|---|
-| create a secret | the public recipient and write access to the directory | ✓ publisher 095 | ✓ no key 141 |
+| create a secret | the public recipient and write access to the directory | ✓ publisher 095, from the published recipient file | ✓ no key 141 |
 | replace a secret | write access to the directory | ✓ delete and recreate 102-103 | ✓ compiler 146 |
 | read a secret | the recipient's key | compiler ✓ 097, executor ✗ 098 | compiler ✓ 143, recovery ✓ 144, executor ✗ 145 |
 | open an artifact | the executor's key | executor ✓ 107, compiler ✗ 108 | executor ✓ 152, compiler ✗ 153 |
@@ -254,7 +254,7 @@ answer passed, so the cell showed nothing, and a procedural cell had to write a 
 the cells after it. The race now runs on its own file: two writers each add a different key, ten
 times over, and the cell passes only if some attempt ends with both writers told they succeeded and
 the file readable with exactly one of the two keys. A file holding neither key could be one sops
-cannot read at all, so it is counted apart rather than as a lost update. Updates were lost in 7 of
+cannot read at all, so it is counted apart rather than as a lost update. Updates were lost in 9 of
 10 attempts, and no attempt left a file holding neither key (149).
 
 ### 5.5 sops looked for the operator's own SSH keys
@@ -316,7 +316,7 @@ exempts `evidence/transcripts/*.txt` alone.
 
 Section 4 is the matrix: 3 candidates by the 9 §7.3 elements plus permissions, with every entry
 tied to observed cells and every absence named. 194 cells, 0 mismatches, one capture from
-87a4077. The permission tables mark the operation/identity pairs that were not run as blank; not
+aecdef4. The permission tables mark the operation/identity pairs that were not run as blank; not
 every operation was tried under every identity.
 
 ### 6.2 Criterion 2: primitive or versioned provider behaviour
@@ -450,7 +450,7 @@ capability exists and is a separate grant.
   synthetic value, because the digest is an argument of the check. The values are random per run
   and never committed, so the digests reveal nothing. The column is not free of value-derived
   data.
-- **One capture.** The SOPS race lost an update in 7 of 10 attempts here. That shows the race
+- **One capture.** The SOPS race lost an update in 9 of 10 attempts here. That shows the race
   exists, not how often it is lost.
 - **No administrator least privilege.** Rewrap, rotation, the decryption floor, signing and
   snapshots ran under the root token (§4.1).
