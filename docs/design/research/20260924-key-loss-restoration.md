@@ -1,0 +1,348 @@
+# Key loss and restoration: applying a retained artifact versus regenerating it
+
+| | |
+|---|---|
+| **Date** | 24 September 2026 |
+| **Work item** | [Experiment E5 - test key loss and restoration](https://github.com/ginsys/bronzeward/issues/10) |
+| **Design reference** | [§7.5 Rotation and retention contract](../Talos_Configuration_and_Machine_Management_Design.md#75-rotation-and-retention-contract), [§14.4 Recovery dependencies](../Talos_Configuration_and_Machine_Management_Design.md#144-recovery-dependencies), [§14.6 Explicit recovery mode after restoration](../Talos_Configuration_and_Machine_Management_Design.md#146-explicit-recovery-mode-after-restoration), [§18.1 Phase 0](../Talos_Configuration_and_Machine_Management_Design.md#181-phase-0---evidence-before-implementation-contracts); [execution and recovery contract §7](../../spec/execution-recovery.md#7-recovery-after-management-state-restoration) |
+| **Artifacts** | [`experiments/e5-key-loss-restoration/`](../../../experiments/e5-key-loss-restoration/README.md), evidence under [`experiments/e5-key-loss-restoration/evidence/`](../../../experiments/e5-key-loss-restoration/evidence/) |
+| **Decision enabled** | What each backup family must hold, and in what order and age relative to the others, for a release to stay applicable or regenerable after a restore; what the recovery check must verify and how it stops. Input to [retention and recovery policy](https://github.com/ginsys/bronzeward/issues/15), [execution and recovery contracts](https://github.com/ginsys/bronzeward/issues/19) and [deployment profile selection](https://github.com/ginsys/bronzeward/issues/13). No policy, window or provider is selected here. |
+
+## 1. Question
+
+The design keeps two recovery paths apart. Applying a retained release uses its exact encrypted
+artifact; regenerating compiles a new release from source versions
+([design:287](../Talos_Configuration_and_Machine_Management_Design.md#65-renderer-and-contract-pinning),
+[design:404](../Talos_Configuration_and_Machine_Management_Design.md#75-rotation-and-retention-contract)).
+"Losing a source secret version can block regeneration while a retained encrypted artifact remains
+applicable. Losing the only usable artifact decryption key blocks application of that artifact.
+Preserving ciphertext alone does not preserve executability" (design:404). The recovery set
+includes releases, secret versions, artifact keys, credentials and provider unlock material, and
+"backups need not have identical timestamps, but every dependency required by the selected
+recovery action must be available" (design:866). After a restore the operator enters recovery
+mode, verifies decryption and credentials under the actual recovery identities, and marks each
+scope ready, blocked or unresolved (design:876-880; spec §7 steps 3 and 6, spec:448 and spec:454).
+
+The issue asks for three things:
+
+1. restoration cases for older and newer application and provider backups, missing keys and
+   missing secret versions;
+2. applying a stored encrypted artifact kept apart from regenerating the configuration, with
+   ciphertext presence alone not counted as executability;
+3. the recoverable, blocked and irrecoverable outcomes, the custody and unlock prerequisites, and
+   the safe stopping behaviour.
+
+## 2. What was built
+
+### 2.1 Three backup families, three generations
+
+The [investigation fixtures](20260919-investigation-fixtures.md#6-what-each-experiment-gets)
+snapshot three families independently and restore them in any combination. This experiment gives
+each a role:
+
+| Family | Snapshot, restore | Holds here |
+|---|---|---|
+| management database (PostgreSQL) | `db-snapshot`, `db-restore` | table `kl_release`: id, generation, source path and version, key name, stored ciphertext, artifact SHA-256 |
+| provider (OpenBao, integrated Raft) | `bao-snapshot`, `bao-restore` | KV v2 source versions under `secret/kl/`, Transit keys `kl-*`, policies, and every token it has issued |
+| local credential store (`.state/data`) | `store-snapshot`, `store-restore` | the compiler's and the executor's tokens (0600), with their accessors |
+
+`run/scenario` builds three generations:
+
+| Generation | Built | Snapshotted |
+|---|---|---|
+| g1 | KV `kl/app` v1; key `kl-art` v1; release R1 = `kl/app@1` under `kl-art` v1; compiler and executor1 issued | all three families (row 001) |
+| g2 | KV `kl/app` v2; `kl-art` rotated to v2; R2 = `kl/app@2` under v2; R1 rewrapped to v2 in the database (002); decryption floor raised to 2 (003); executor2 issued (004), executor1 revoked (005) | all three families (006) |
+| g3 | KV `kl/late` v1; key `kl-late`; R3 = `kl/late@1` under `kl-late` v1 | never |
+
+Row 007 is the release table at the end of g3: R1 and R2 under `kl-art` v2, R3 under `kl-late` v1.
+The injection log (`evidence/injections.log`) fixes which snapshot each restore used.
+
+### 2.2 Identities and the three actions
+
+| Identity | Policy |
+|---|---|
+| compiler | read `secret/data/kl/*`; `update` on `transit/encrypt/kl-*` |
+| executor | `update` on `transit/decrypt/kl-*` |
+| admin | the root token, standing for the operator's administrator |
+| operator | runs the fixture's injections and the read-only check |
+
+`run/release` takes a release id and reads everything else from the restored state: the record
+from the database, the credential from the store, the key and source from the provider.
+
+- **apply** (executor): decrypt the stored ciphertext and compare the plaintext's digest with the
+  recorded one. This is application *eligibility*; nothing is sent to a machine.
+- **regen** (compiler): read the recorded source version, render the artifact, compare its digest,
+  and encrypt it under the release's key. Nothing is stored: a regenerated release is a new release
+  that needs its own approval.
+- **check** (operator): run both, then stop. It prints `stopped: nothing applied, nothing
+  regenerated, nothing stored`, confirms that the release table's digest is unchanged, and ends
+  with one class: `applicable` (the stored artifact decrypts to its digest), `regenerable` (it
+  does not, and the source does regenerate it), `blocked` (neither), or `absent` (the restored
+  database has no such release).
+
+The artifact is a one-field YAML document, `machine:\n  token: <value>\n`, rendered
+deterministically so that a regeneration from the same source version reproduces its digest.
+
+### 2.3 Rows
+
+Every observation is one row of `evidence/verdicts.tsv`: the case, release, action and identity,
+the state bundle that is its ground truth, the expected outcome written into the script before the
+run, and the outcome observed from the command's exit status and output alone. For `apply` and
+`regen` the observation is `ok`, `denied` (HTTP 403 or "permission denied") or `fail`; for `check`
+it is the class printed. A mismatch is recorded and the run continues.
+
+### 2.4 Pinned versions
+
+From `fixtures/versions.env`: OpenBao `ghcr.io/openbao/openbao:2.6.1@sha256:5b2486ab…`, PostgreSQL
+`docker.io/library/postgres:17-alpine@sha256:f02121de…`, one-share unseal, single-node Raft. Talos
+v1.13.6 runs as part of the fixture and is not used here.
+
+### 2.5 Synthetic values and the leak scan
+
+The three source values are `BWSYNTH-kl-<name>-<24 hex>`, generated per run under `KL_OUT`, outside
+the checkout and outside every backup family, and handed to the CLIs over stdin. A rendered
+artifact exists only in a temporary file for the one call that needs it. Every decryption is
+reduced to a digest verdict. Tokens pass through the environment; only accessors are printed.
+
+The fixture's leak scan (`fixtures/lib.sh:923`, patterns including `BWSYNTH-`) ran on each of the
+13 bundles, over the bundle, `.state/backups` and `.state/data`. Each scan found its positive
+control three times (the live store and the two store archives the bundle expands) and nothing
+else: 39 control hits, 0 other hits (`evidence/leak-scans.txt`, `evidence/summary.txt`).
+
+### 2.6 Reproduction
+
+```sh
+fixtures/bin/up
+KL_OUT=<empty directory on disk> experiments/e5-key-loss-restoration/run/all
+KL_OUT=<the same directory> experiments/e5-key-loss-restoration/run/collect-evidence
+fixtures/bin/down
+```
+
+The committed capture: 98 rows, 0 mismatches, 13 state bundles.
+
+## 3. Results
+
+### 3.1 Case table
+
+"Live" is the state of each family at that point; `gN` names the snapshot a family was restored
+from.
+
+| Case | Database | Provider | Store | Release | apply | regen | check | Outcome | Rows |
+|---|---|---|---|---|---|---|---|---|---|
+| A nothing lost | live | live | live | R1, R2, R3 | ok | ok | applicable | recoverable | 009-017 |
+| B source version destroyed (`kl/app@1`) | live | live | live | R1 | ok | fail | applicable | recoverable by apply; regeneration blocked | 020-022 |
+| | | | | R2 | ok | ok | applicable | recoverable | 023-025 |
+| C key and source lost after the last snapshot (`kl-late`, `kl/late@1`) | live | live | live | R3 | fail | fail | blocked | irrecoverable: no snapshot holds either (E) | 028-030 |
+| D artifact key deleted (`kl-art`) | live | live | live | R1 | fail | fail | blocked | blocked; recovered by E | 033-035 |
+| | | | | R2 | fail | denied | blocked | blocked; recovered by E | 036-038 |
+| E all restored | g2 | g2 | g2 | R1, R2 | ok | ok | applicable | recoverable | 052-057 |
+| | | | | R3 | — | — | absent | irrecoverable | 058 |
+| G database older than provider | g1 | g2 | g2 | R1 | fail (below floor) | ok | regenerable | recoverable: regeneration, or an administrator lowers the floor | 060-067 |
+| | | | | R2 | — | — | absent | no record to apply | 063 |
+| H provider older than database | g2 | g1 | g1 | R1 | fail (key version too new) | ok | regenerable | recoverable by regeneration | 072-074 |
+| | | | | R2 | fail | fail | blocked | blocked in this combination | 075-077 |
+| I store newer than provider | g1 | g1 | g2 | R1 | denied | ok | regenerable | recoverable: an administrator reissues the executor | 080-086 |
+| J credentials lost | g1 | g1 | none, then g1 | R1 | fail, then ok | fail, then ok | blocked, then applicable | recoverable from the store backup that matches the provider | 088-094 |
+| K provider sealed | g1 | g1 (sealed) | g1 | R1 | — | — | blocked, then applicable | recoverable with the unseal key share | 096-098 |
+
+### 3.2 What each case showed
+
+**B — a destroyed source version.** The admin read shows `kl/app` version 1 `destroyed: true`
+(019). R1's stored artifact still decrypts to its digest (020), while its regeneration fails: "No
+data found at secret/data/kl/app" (021). The check classes R1 applicable (022). This is
+design:404 observed: the artifact stays applicable while regeneration is blocked. A later provider
+restore brought the version back (048), and R1 regenerated again (053).
+
+**C and E — irrecoverable, and why.** After `kl-late` was deleted and `kl/late@1` destroyed, R3
+neither applies ("encryption key not found", 028) nor regenerates (029). Restoring all three
+families to g2 brings back everything D had deleted: `kl-art` with its versions (047) and
+`kl/app@1` undestroyed (048). But `kl-late` and `kl/late` are absent from that snapshot (049,
+050), and so is R3's record (051, 058). R3 is irrecoverable because no snapshot holds its key, its
+source or its record, not because they were deleted: the same restore undid a destruction and a key
+deletion.
+
+**D — a deleted artifact key, and a key recreated under its name.** With `kl-art` deleted (032),
+no stored artifact applies (033, 036). R2's source is still readable and renders to its digest, but
+encryption is refused with HTTP 403 (037). Transit's encrypt endpoint creates a missing key, which
+needs the `create` capability, and the compiler holds `update` only. Rows 039-043 show what that
+refusal prevents. The administrator, who holds `create`, encrypted a probe under the missing name
+(039). That minted a new `kl-art` whose only version is 1 (040). Against that key, R2's stored
+artifact still fails ("invalid ciphertext: version is too new", 041). R2's regeneration now goes
+through and encrypts under "kl-art key version 1" (042), a label the lost key's own version 1 also
+carried. The check classes R2 regenerable (043). Nothing in the ciphertext's `vault:v1:` prefix tells
+the two keys apart.
+
+**G — the database older than the provider.** The g1 database holds R1 as it was before the
+rewrap, under key version 1, and the g2 provider enforces a decryption floor of 2. Apply fails:
+"ciphertext or signature version is disallowed by policy (too old)" (060). Regeneration from
+`kl/app@1` succeeds (061), so the check says regenerable (062). R2 was recorded after the g1
+database snapshot, so the restored database has no record of it (063), although the provider still
+holds its source and key. The administrator lowered the floor to 1 (064). The same artifact then
+applied (065), and failed again once the floor was put back (066, 067).
+
+**H — the provider older than the database.** The g2 database holds R1 rewrapped and R2 encrypted
+under `kl-art` version 2. The g1 provider has only version 1 (071). Both applications fail with
+"invalid ciphertext: version is too new" (072, 075). R1 regenerates from `kl/app@1` (073), but R2
+cannot: `kl/app@2` does not exist in the g1 provider (076). The rewrap in g2 is what cost R1 its
+applicability here. Before it, R1's artifact was under version 1, which this provider holds.
+
+**I — credentials newer than the provider.** The g2 store holds executor2, which the g1 provider
+never issued: apply is denied with HTTP 403 (080). The compiler token dates from g1 and still
+works, so R1 regenerates (081, 082). The administrator issued a new executor token on the restored
+provider (083), after which R1 applies (084, 086). The artifact and its key were intact; only the
+credential was missing.
+
+**J — credentials lost.** With the credential store removed, neither path opens: "no executor
+credential in the restored store" (088), "no compiler credential" (089). Restoring the g1 store,
+the one matching the g1 provider, restores both (092-094).
+
+**K — a sealed provider.** With every dependency retained and every credential valid, the check is
+blocked: both paths got HTTP 503 "Vault is sealed" (096). After unsealing with the fixture's key
+share (097), R1 is applicable again (098).
+
+## 4. Failures hit while building it
+
+### 4.1 The expected outcome of regenerating against a deleted key
+
+The first full capture expected row 037 to `fail` and observed `denied`: it was the one mismatch in
+93 rows. The script was right and the expectation was wrong. Transit's encrypt treats a missing key
+as an upsert, and the compiler's policy lacks `create`, so the provider refused the request with a
+403 rather than reporting a missing key. That capture was discarded. The second, committed capture
+expects `denied` and adds the administrator's upsert and its consequences (039-043) as the control
+for what the refusal prevents.
+
+### 4.2 Verbatim transcripts fail `git diff --check`
+
+The indented error text inside the check transcripts carries trailing whitespace. `.gitattributes`
+exempts this experiment's `evidence/transcripts/*.txt`, as it already does for the
+provider-capability run's.
+
+## 5. What this decides
+
+### 5.1 Criterion 1: restoration cases
+
+Each combination the issue names was restored and both paths were tried after it:
+
+| Asked for | Case |
+|---|---|
+| application backup older than provider | G (database g1, provider g2) |
+| application backup newer than provider | H (database g2, provider g1) |
+| provider backup older | H |
+| provider backup newer | G |
+| missing key | C (never snapshotted), D (deleted, restorable) |
+| missing secret version | B (destroyed, restorable), C (destroyed, never snapshotted) |
+| missing management credentials | I (credential newer than the provider), J (credentials gone) |
+| explicit restoration | E (all three families to g2), J (store alone) |
+
+### 5.2 Criterion 2: applying is not regenerating, and ciphertext is not executability
+
+The two paths failed independently in both directions:
+
+- **Artifact applies, regeneration blocked:** B, where the source version was destroyed (020, 021).
+- **Artifact does not apply, regeneration works:** G (060, 061), H for R1 (072, 073), I (080, 081),
+  and D after the key was recreated (041, 042).
+- **Both blocked:** C, D, H for R2, J and K.
+
+In every "does not apply" row the stored ciphertext was present and intact. The same ciphertext
+applied again once the missing piece came back: the key version (E, 052), the floor (065) or the
+credential (084). What made it executable was the key version, the provider's floor, the executor's
+credential and an unsealed provider. The ciphertext alone never did.
+
+### 5.3 Criterion 3: outcomes, prerequisites and stopping
+
+**Outcomes.** In this run, recoverable meant that a restore, an administrator action or a
+regeneration made the release usable again. Blocked meant a missing piece that another backup or
+action could supply. Irrecoverable meant that no snapshot held the piece:
+
+- *recoverable by apply*: A, B (R1), E (R1, R2), I after reissue, J after the store restore, K after
+  unsealing;
+- *recoverable by regeneration only*: G (R1), H (R1), I before reissue; each makes a new release that
+  needs its own approval;
+- *blocked, then recovered by a restore*: D (by E);
+- *blocked in this combination*: H (R2), which needs a provider backup at least as new as g2;
+- *irrecoverable*: R3 (C, E). Its key, its source version and its record were all made after the
+  last snapshot.
+
+**Custody and unlock prerequisites observed:**
+
+| Path | Needs |
+|---|---|
+| apply | the release record (database); the key version it names, present and at or above the decryption floor (provider); an executor credential the *restored* provider recognises (store matching provider); an unsealed provider (the unseal share) |
+| regen | the source version (provider KV); a key to encrypt under (provider); a compiler credential the restored provider recognises; an unsealed provider; then a new approval |
+| repair actions seen | lowering a decryption floor (064), reissuing a credential (083), creating a key (039): all administrator operations on the restored provider |
+
+**Safe stopping.** Every `check` row reads and never writes. Each ends with `stopped: nothing
+applied, nothing regenerated, nothing stored`, and for every release present the release table's
+digest was confirmed unchanged across the check (for example 030 and 043). For the irrecoverable R3
+the check reports `absent` (058) or `blocked` (030) and stops. It creates no replacement key, no
+new release and no substitute record. The one way this run found to "recover" past a lost key
+without a backup was the recreated key in D (042). There a regeneration succeeds under a different
+key that carries the same name and version number. That is exactly what the recovery check must not
+do on its own. The compiler's lack of `create` is what stopped it (037).
+
+## 6. Limits
+
+- **One provider and one topology.** OpenBao 2.6.1, single node, one unseal share. Every provider
+  restore went back onto the same cluster, which keeps its unseal key. Restoring onto a new cluster,
+  where unseal or recovery keys come from another custody path, was not exercised.
+- **The administrator ran as root** (003, 005, 064, 066, 083, 039). A least-privilege administrator
+  policy for floor changes, credential reissue and key creation is still unwritten.
+- **Apply is eligibility, not application.** Nothing was sent to a Talos machine. The artifact is a
+  one-field synthetic document, not a rendered machine configuration.
+- **The release table is a stand-in.** It has no approvals, operation journal or recovery epoch.
+  The check models spec §7 steps 2, 3 and 6 for one release. It does not model recovery-mode entry,
+  executor quiescence or approval invalidation.
+- **Token expiry was not exercised.** Tokens used the provider's default TTL, well beyond the run.
+  A restored provider whose tokens have expired, or a lease revoked after a snapshot, was not
+  tested.
+- **One pass per case, in sequence, on one fixture.** Each case's ground truth is its bundle, and the
+  injection log fixes the order. Case G's floor change was reverted within the case (066).
+- **The store is a file copy.** It held token files only; no process held a database open in it.
+- **What stays out of the repository.** The bundles under `KL_OUT` include the expanded store
+  archives, which hold the run's tokens. `run/collect-evidence` copies none of them and refuses
+  collected evidence that looks like an OpenBao token. The command column of `verdicts.tsv` holds
+  the probe ciphertext's base64 plaintext (`kl-probe`, 039) and no synthetic value.
+
+## 7. Recommendation
+
+The recommendations below are inferences from the cases above. They are not observations.
+
+1. **Record a release's key by identity, not by name and version alone.** D shows that a key
+   recreated under a lost key's name produces ciphertexts labelled `vault:v1:` like the lost key's
+   (042). Contracts for [issue 19](https://github.com/ginsys/bronzeward/issues/19) and the provider
+   profile for [issue 13](https://github.com/ginsys/bronzeward/issues/13) should pin something the
+   provider cannot reissue, such as the key's creation time for that version. The compiler should
+   also be kept without `create` on the key path (037).
+2. **Pair backups by age.** A provider backup older than the database backup it is restored with
+   loses what the database references (H). A database backup older than the provider loses release
+   records and can fall below a raised floor (G). For
+   [issue 15](https://github.com/ginsys/bronzeward/issues/15): take the provider backup no earlier
+   than the database backup it pairs with. Keep the credential store's backup matched to the
+   provider's (I, J).
+3. **Tie floor raises and rewraps to the database retention window.** Rewrapping made every
+   rewrapped artifact depend on the newest key version (H), and raising the floor made every older
+   database's artifacts undecryptable (G). While a database backup that references a key version
+   may still be restored, keep that version decryptable, or accept regeneration and re-approval
+   as the recovery path for those releases.
+4. **Make the recovery check verify, stop, and name the missing piece.** The check in this run
+   tells applicable from regenerable from blocked by testing decryption and the source under the
+   actual recovery identities, which spec §7 step 3 asks for. Its output names what failed. That
+   is enough to mark a scope blocked with the missing dependency (spec:454). Administrator repairs
+   (floor, reissue) stay explicit and outside the check.
+5. **Irrecoverability rests on the backup inventory.** A restore undid destruction and deletion
+   here (047, 048). Anything created after the newest snapshot of any family is what can be lost for
+   good (R3). The backup interval bounds that exposure.
+
+## 8. Hand-off
+
+- **[Issue 15](https://github.com/ginsys/bronzeward/issues/15), retention and recovery policy:**
+  the pairing rule and the floor and rewrap window (§7 items 2 and 3); the exposure bounded by the
+  newest snapshot (item 5); the case table (§3.1) as the restoration matrix to keep.
+- **[Issue 19](https://github.com/ginsys/bronzeward/issues/19), execution and recovery contracts:**
+  the prerequisites table (§5.3), the check's stop-and-name behaviour, key identity in the release
+  record (item 1), and that a regeneration is a new release needing approval (G, H, I).
+- **[Issue 13](https://github.com/ginsys/bronzeward/issues/13), deployment profile:** Transit's
+  upsert-on-encrypt and the `create` capability (D); the unseal share as a custody item separate
+  from every backup family (K).
+- **Not covered, for whoever takes it up:** restore onto a new provider cluster, token expiry
+  across a restore, and a least-privilege administrator policy (§6).

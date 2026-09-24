@@ -1,0 +1,13 @@
+leak scan A-live: 3 control hit(s), 0 other
+leak scan B-source-destroyed: 3 control hit(s), 0 other
+leak scan C-late-lost: 3 control hit(s), 0 other
+leak scan D-key-deleted: 3 control hit(s), 0 other
+leak scan E-all-g2: 3 control hit(s), 0 other
+leak scan final: 3 control hit(s), 0 other
+leak scan G-db-g1: 3 control hit(s), 0 other
+leak scan H-bao-g1: 3 control hit(s), 0 other
+leak scan I-store-g2: 3 control hit(s), 0 other
+leak scan J-creds-lost: 3 control hit(s), 0 other
+leak scan J-store-g1: 3 control hit(s), 0 other
+leak scan K-sealed: 3 control hit(s), 0 other
+leak scan K-unsealed: 3 control hit(s), 0 other

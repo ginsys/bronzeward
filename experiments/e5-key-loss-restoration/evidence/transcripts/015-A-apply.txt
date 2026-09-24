@@ -1,0 +1,2 @@
+release R3: source kl/late version 1, stored artifact under kl-late key version 1
+apply: the stored artifact decrypts to the digest the release recorded

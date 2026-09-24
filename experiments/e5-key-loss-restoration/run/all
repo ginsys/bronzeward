@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# The whole capture, on a fresh fixture: run/scenario, then one final evidence bundle, then the leak
+# scan of every bundle held to its positive control.
+#
+# fixtures/bin/evidence walks the bundle, .state/backups and .state/data, and plants its own
+# positive control at .state/data/canary-control.txt; the store snapshots carry a copy of it. A scan
+# that does not report the control walked nothing, and any other hit is a plaintext copy of a
+# synthetic value.
+#
+# Phase-0 evidence for the key-loss and restoration experiment (ginsys/bronzeward issue 10). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+kl_need_fixture
+[ ! -e "$KL_ROWS" ] || die "$KL_ROWS exists: a capture starts from an empty KL_OUT"
+[ ! -e "$KL_CREDS" ] || die "the credential store exists already: a capture needs a fresh fixture (fixtures/bin/down, then up)"
+[ -z "$(kl_sql "select to_regclass('kl_release')")" ] ||
+  die "the release table exists already: a capture needs a fresh fixture (fixtures/bin/down, then up)"
+kl_init
+
+"$KL_RUN_DIR/scenario"
+kl_bundle final
+
+controls=0
+others=0
+for scan in "$KL_OUT"/states/*/leak-scan.txt; do
+  label=${scan%/leak-scan.txt}
+  label=${label##*/}
+  c=$(grep -c '/data/canary-control\.txt$' "$scan" || true)
+  o=$(grep -vc '/data/canary-control\.txt$' "$scan" || true)
+  printf 'leak scan %s: %s control hit(s), %s other\n' "$label" "$c" "$o" >>"$KL_OUT/leak-scans.txt"
+  [ "$c" -ge 1 ] || die "the $label bundle's scan did not find the positive control: it proves nothing"
+  controls=$((controls + c))
+  others=$((others + o))
+done
+bundles=$(find "$KL_OUT/states" -mindepth 1 -maxdepth 1 -type d | wc -l)
+scans=$(wc -l <"$KL_OUT/leak-scans.txt")
+{
+  printf 'rows: %s, mismatches: %s\n' "$(($(wc -l <"$KL_ROWS") - 1))" "$(kl_mismatches)"
+  printf 'states: %s\n' "$(find "$KL_OUT/states" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | paste -sd' ' -)"
+  printf 'bundles: %s, leak scans read: %s\n' "$bundles" "$scans"
+  printf 'positive control hits: %s\n' "$controls"
+  printf 'other hits: %s\n' "$others"
+} | tee "$KL_OUT/summary.txt"
+[ "$scans" -eq "$bundles" ] || die "$bundles bundles but $scans leak scans: a bundle has no scan"
+[ "$others" -eq 0 ] || die "plaintext found outside the control: see $KL_OUT/leak-scans.txt"
+# Written last, only after every leak-scan check passed; run/collect-evidence refuses a capture
+# without it.
+echo "run/all completed and every leak scan passed" >"$KL_OUT/complete"

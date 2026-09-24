@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# Key loss and restoration across the three backup families the design names (§7.5, §14.4): the
+# management database (PostgreSQL, db-snapshot), the provider (OpenBao Raft, bao-snapshot) and the
+# local credential store (store-snapshot of .state/data, which holds the management credentials).
+#
+# Three generations are built, the first two snapshotted in all three families, the third never:
+#
+#   g1  KV kl/app v1, Transit key kl-art v1, release R1 (kl/app@1 under kl-art v1); compiler and
+#       executor1 credentials
+#   g2  KV kl/app v2, kl-art rotated to v2, release R2 (kl/app@2 under kl-art v2); R1 rewrapped to
+#       v2 in the database and the decryption floor raised to 2; executor2 issued and executor1
+#       revoked
+#   g3  KV kl/late v1, Transit key kl-late, release R3; no snapshot holds any of it
+#
+# Then each case puts the live state into one loss or one restored combination, and every release
+# is judged twice, as two separate dependencies: `apply` (the retained artifact, its key version and
+# the executor's credential) and `regen` (the source version, a usable key and the compiler's
+# credential); `check` is the read-only recovery classification that stops before either.
+#
+# Phase-0 evidence for the key-loss and restoration experiment (ginsys/bronzeward issue 10). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+kl_init
+kl_need_fixture
+
+inject() { "$FIXTURES_DIR/bin/inject" "$@"; }
+release() { "$KL_RUN_DIR/release" "$@"; }
+admin() { BAO_TOKEN=$BW_BAO_ROOT_TOKEN "$@"; }
+
+# --- identities --------------------------------------------------------------------------------------
+# compiler   reads source versions under secret/kl/, encrypts under the kl-* keys (design §7.4)
+# executor   decrypts under the kl-* keys only (docs/spec/execution-recovery.md §3.1)
+# admin      the root token, standing for the operator's administrator
+# Tokens are written to the credential store (KL_CREDS, 0600) and never printed.
+policies() {
+  bao_stdin policy write kl-compiler - >/dev/null <<'POLICY'
+path "secret/data/kl/*" { capabilities = ["read"] }
+path "transit/encrypt/kl-*" { capabilities = ["update"] }
+POLICY
+  bao_stdin policy write kl-executor - >/dev/null <<'POLICY'
+path "transit/decrypt/kl-*" { capabilities = ["update"] }
+POLICY
+}
+# Every function below that judge runs chains its steps: under judge's `|| rc=$?` errexit is off,
+# and a failed step would otherwise be followed by the next and hidden by its status.
+issue() { # issue <role> <policy>: a new token for <role> in the store; prints its accessor only
+  local out token accessor
+  out=$(bao token create -policy="$2" -format=json) &&
+    token=$(jq -er .auth.client_token <<<"$out") &&
+    accessor=$(jq -er .auth.accessor <<<"$out") &&
+    mkdir -p -- "$KL_CREDS" &&
+    chmod 700 -- "$KL_CREDS" &&
+    (umask 077 && printf '%s' "$token" >"$KL_CREDS/$1.token") &&
+    printf '%s' "$accessor" >"$KL_CREDS/$1.accessor" &&
+    printf 'issued %s token, accessor %s\n' "$1" "$accessor"
+}
+
+# --- releases ----------------------------------------------------------------------------------------
+# make_release <id> <gen> <path> <version> <key>: the compiler reads the source version, renders
+# the artifact, encrypts it and the release is recorded with the artifact's digest. The plaintext
+# exists only in a temporary file under KL_WORK for this call.
+make_release() {
+  local id=$1 gen=$2 path=$3 version=$4 key=$5 tmp sha ct rc=0
+  tmp=$(mktemp "$KL_WORK/make.XXXXXX")
+  {
+    BAO_TOKEN=$(cat -- "$KL_CREDS/compiler.token") bao kv get -mount=secret -version="$version" -field=value "$path" |
+      render >"$tmp" &&
+      sha=$(sha256sum <"$tmp" | cut -d' ' -f1) &&
+      ct=$(base64 -w0 <"$tmp" | BAO_TOKEN=$(cat -- "$KL_CREDS/compiler.token") bao_stdin write -field=ciphertext "transit/encrypt/$key" plaintext=-)
+  } || rc=$?
+  rm -f -- "$tmp"
+  [ "$rc" -eq 0 ] || die "could not make release $id"
+  kl_sql "insert into kl_release values ('$id', '$gen', '$path', $version, '$key', '$ct', '$sha')" >/dev/null
+  printf 'release %s: %s@%s under %s key version %s, artifact sha256 %s\n' \
+    "$id" "$path" "$version" "$key" "$(cut -d: -f2 <<<"$ct" | tr -d v)" "$sha"
+}
+rewrap() { # rewrap <id>: the release's stored artifact rewrapped to the key's latest version
+  local row key ct new
+  row=$(kl_sql "select key_name, ciphertext from kl_release where id = '$1'") && [ -n "$row" ] || return 1
+  IFS=$'\t' read -r key ct <<<"$row"
+  new=$(bao write -field=ciphertext "transit/rewrap/$key" ciphertext="$ct") &&
+    kl_sql "update kl_release set ciphertext = '$new' where id = '$1'" >/dev/null &&
+    printf 'release %s rewrapped from key version %s to %s\n' "$1" \
+      "$(cut -d: -f2 <<<"$ct" | tr -d v)" "$(cut -d: -f2 <<<"$new" | tr -d v)"
+}
+key_truth() { bao read -format=json "transit/keys/$1" | jq -c '.data | {latest_version, min_decryption_version, keys: (.keys | keys)}'; }
+kv_truth() { bao kv metadata get -mount=secret -format=json "$1" | jq -c '.data | {current_version, versions: (.versions | map_values({destroyed, deletion_time}))}'; }
+releases() { kl_sql "select id, gen, source_path, source_version, key_name, split_part(ciphertext, ':', 2), artifact_sha256 from kl_release order by id"; }
+snapshot_all() { # snapshot_all <gen>
+  inject db-snapshot "$1" && inject bao-snapshot "$1" && inject store-snapshot "$1"
+}
+
+# judge_release <case> <release> <apply> <regen> <check>: the three rows for one release
+judge_release() {
+  judge "$1" "$2" apply executor "$3" -- release apply "$2"
+  judge "$1" "$2" regen compiler "$4" -- release regen "$2"
+  judge "$1" "$2" check operator "$5" -- release check "$2"
+}
+
+for v in app-v1 app-v2 late-v1; do kl_secret "$v"; done
+kv_put() { bao_stdin kv put -mount=secret "$1" value=- <"$(kl_value_file "$2")" >/dev/null; } # kv_put <path> <value>
+
+# --- g1 ----------------------------------------------------------------------------------------------
+kl_sql 'create table kl_release (id text primary key, gen text not null, source_path text not null,
+  source_version int not null, key_name text not null, ciphertext text not null, artifact_sha256 text not null)' >/dev/null
+policies
+issue compiler kl-compiler >/dev/null
+issue executor kl-executor >/dev/null
+kv_put kl/app app-v1
+bao write -f transit/keys/kl-art >/dev/null
+make_release R1 g1 kl/app 1 kl-art >/dev/null
+judge setup g1 snapshot operator ok -- snapshot_all g1
+
+# --- g2 ----------------------------------------------------------------------------------------------
+kv_put kl/app app-v2
+bao write -f transit/keys/kl-art/rotate >/dev/null
+make_release R2 g2 kl/app 2 kl-art >/dev/null
+judge setup R1 rewrap admin ok -- admin rewrap R1
+judge setup kl-art floor admin ok -- admin bao write transit/keys/kl-art/config min_decryption_version=2
+cp -- "$KL_CREDS/executor.accessor" "$KL_WORK/executor1.accessor"
+judge setup executor2 issue admin ok -- admin issue executor kl-executor
+judge setup executor1 revoke admin ok -- admin bao token revoke -accessor "$(cat -- "$KL_WORK/executor1.accessor")"
+judge setup g2 snapshot operator ok -- snapshot_all g2
+
+# --- g3 (never snapshotted) --------------------------------------------------------------------------
+kv_put kl/late late-v1
+bao write -f transit/keys/kl-late >/dev/null
+make_release R3 g3 kl/late 1 kl-late >/dev/null
+judge setup g3 releases admin ok -- releases
+
+# --- A: the live state, nothing lost ----------------------------------------------------------------
+kl_bundle A-live
+judge A kl-art truth admin ok -- admin key_truth kl-art
+judge_release A R1 ok ok applicable
+judge_release A R2 ok ok applicable
+judge_release A R3 ok ok applicable
+
+# --- B: a source version destroyed ------------------------------------------------------------------
+# The retained artifact still applies; regeneration from that source version is blocked (§7.5).
+judge B kl/app@1 inject operator ok -- inject bao-destroy kl/app 1
+kl_bundle B-source-destroyed
+judge B kl/app truth admin ok -- admin kv_truth kl/app
+judge_release B R1 ok fail applicable
+judge_release B R2 ok ok applicable
+
+# --- C: key and source lost after the last snapshot -------------------------------------------------
+judge C kl-late inject operator ok -- inject bao-delete-key kl-late
+judge C kl/late@1 inject operator ok -- inject bao-destroy kl/late 1
+kl_bundle C-late-lost
+judge_release C R3 fail fail blocked
+
+# --- D: the key every retained artifact depends on deleted ------------------------------------------
+judge D kl-art inject operator ok -- inject bao-delete-key kl-art
+kl_bundle D-key-deleted
+judge D kl-art truth admin fail -- admin key_truth kl-art
+judge_release D R1 fail fail blocked
+# Transit's encrypt creates a missing key (an upsert), which needs `create`; the compiler holds
+# `update` only, so R2's source, still readable, renders and is refused at encryption (403). The
+# first capture expected `fail` here and observed `denied`; the control below shows what the
+# refusal prevents: an identity holding `create` mints a new key under the lost key's name, the
+# regeneration then goes through under it, and the stored artifacts stay undecryptable.
+judge_release D R2 fail denied blocked
+judge D kl-art upsert admin ok -- admin bao write -field=ciphertext transit/encrypt/kl-art plaintext=a2wtcHJvYmU=
+judge D kl-art truth admin ok -- admin key_truth kl-art
+judge D R2 apply executor fail -- release apply R2
+judge D R2 regen compiler ok -- release regen R2
+judge D R2 check operator regenerable -- release check R2
+
+# --- E: every family restored to g2 -----------------------------------------------------------------
+judge E g2 restore operator ok -- inject db-restore g2
+judge E g2 restore operator ok -- inject bao-restore g2
+judge E g2 restore operator ok -- inject store-restore g2
+kl_bundle E-all-g2
+judge E kl-art truth admin ok -- admin key_truth kl-art
+judge E kl/app truth admin ok -- admin kv_truth kl/app
+judge E kl-late truth admin fail -- admin key_truth kl-late
+judge E kl/late truth admin fail -- admin kv_truth kl/late
+judge E g2 releases admin ok -- releases
+judge_release E R1 ok ok applicable
+judge_release E R2 ok ok applicable
+judge E R3 check operator absent -- release check R3
+
+# --- G: database older than the provider (db g1; bao, store g2) -------------------------------------
+# R1's stored artifact is the one from before the rewrap, under key version 1, below the floor the
+# g2 provider enforces. Lowering the floor is an administrator's decision, recorded and reverted.
+judge G g1 restore operator ok -- inject db-restore g1
+kl_bundle G-db-g1
+judge_release G R1 fail ok regenerable
+judge G R2 check operator absent -- release check R2
+judge G kl-art floor admin ok -- admin bao write transit/keys/kl-art/config min_decryption_version=1
+judge G R1 apply executor ok -- release apply R1
+judge G kl-art floor admin ok -- admin bao write transit/keys/kl-art/config min_decryption_version=2
+judge G R1 apply executor fail -- release apply R1
+
+# --- H: provider older than the database (db g2; bao, store g1) -------------------------------------
+# Every stored artifact names key version 2, which the g1 provider never had; kl/app@2 does not
+# exist there either. Only R1 can be regenerated, from kl/app@1 under key version 1.
+judge H g2 restore operator ok -- inject db-restore g2
+judge H g1 restore operator ok -- inject bao-restore g1
+judge H g1 restore operator ok -- inject store-restore g1
+kl_bundle H-bao-g1
+judge H kl-art truth admin ok -- admin key_truth kl-art
+judge_release H R1 fail ok regenerable
+judge_release H R2 fail fail blocked
+
+# --- I: credential store newer than the provider (db, bao g1; store g2) -----------------------------
+# The store holds executor2, which the g1 provider never issued: the credential, not the key or the
+# artifact, is what is missing. Reissuing it is an administrator's action on the restored provider.
+judge I g1 restore operator ok -- inject db-restore g1
+judge I g2 restore operator ok -- inject store-restore g2
+kl_bundle I-store-g2
+judge I R1 apply executor denied -- release apply R1
+judge I R1 regen compiler ok -- release regen R1
+judge I R1 check operator regenerable -- release check R1
+judge I executor reissue admin ok -- admin issue executor kl-executor
+judge_release I R1 ok ok applicable
+
+# --- J: the management credentials lost outright (db, bao g1; store gone, then g1) ------------------
+# Without any credential neither path is open, whatever the database and the provider hold. The
+# store backup of the provider's own age brings back credentials the provider still honours.
+judge J kl-creds remove operator ok -- rm -rf -- "$KL_CREDS"
+kl_bundle J-creds-lost
+judge_release J R1 fail fail blocked
+judge J g1 restore operator ok -- inject store-restore g1
+kl_bundle J-store-g1
+judge_release J R1 ok ok applicable
+
+# --- K: the provider sealed (unlock prerequisite) ---------------------------------------------------
+# Every dependency is retained and every credential valid, and still nothing is usable until the
+# provider is unsealed with its key share, which the operator holds apart from every backup family.
+judge K openbao seal admin ok -- admin bao operator seal
+kl_bundle K-sealed
+judge K R1 check operator blocked -- release check R1
+judge K openbao unseal operator ok -- bao_unseal
+kl_bundle K-unsealed
+judge K R1 check operator applicable -- release check R1
+
+say "scenario: $(kl_mismatches) mismatch(es) in $KL_ROWS"

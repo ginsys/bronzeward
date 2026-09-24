@@ -1,0 +1,8 @@
+release R1: source kl/app version 1, stored artifact under kl-art key version 1
+Error writing data to transit/decrypt/kl-art: Error making API request.
+
+URL: PUT http://127.0.0.1:8200/v1/transit/decrypt/kl-art
+Code: 400. Errors:
+
+* ciphertext or signature version is disallowed by policy (too old)
+apply: the executor could not decrypt the stored artifact

@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Copy the committable text of one capture into evidence/: the verdict table, every transcript, the
+# summary and per-bundle leak-scan counts, and from each state's bundle the provider's own view
+# (OpenBao metadata, the client view of the published port, the container versions and networks,
+# what was unavailable), plus the final bundle's leak scan and injection log. The bundles' database
+# dumps, snapshots and expanded store archives stay behind: the store archives hold the management
+# credentials. Absolute paths are rewritten, and the result is refused if it holds anything the
+# fixture's own leak-scan patterns match, a synthetic value, an OpenBao token, or a path in the
+# operator's home. Run it with the fixture still up: the patterns are rebuilt from this run's
+# credentials.
+#
+# Phase-0 evidence for the key-loss and restoration experiment (ginsys/bronzeward issue 10). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+need grep sed find cp
+[ -s "$KL_OUT/complete" ] || die "$KL_OUT/complete is missing: run/all did not finish, or a leak scan failed"
+[ -s "$KL_OUT/summary.txt" ] || die "$KL_OUT/summary.txt is missing"
+[ -s "$STATE/scan-patterns.txt" ] || die "no scan patterns: run this with the fixture still up"
+
+dest=$KL_DIR/evidence
+incoming=$(mktemp -d "$KL_DIR/.evidence-incoming.XXXXXX")
+trap 'rm -rf -- "$incoming"' EXIT
+
+rewrite() { # rewrite <in> <out>: the checkout and KL_OUT become placeholders
+  sed -e "s#$REPO_DIR#<repo>#g" -e "s#$KL_OUT#<KL_OUT>#g" -- "$1" >"$2"
+}
+mkdir -p -- "$incoming/transcripts" "$incoming/states"
+rewrite "$KL_ROWS" "$incoming/verdicts.tsv"
+rewrite "$KL_OUT/summary.txt" "$incoming/summary.txt"
+rewrite "$KL_OUT/leak-scans.txt" "$incoming/leak-scans.txt"
+for f in "$KL_TRANSCRIPTS"/*.txt; do
+  rewrite "$f" "$incoming/transcripts/${f##*/}"
+done
+for s in "$KL_OUT"/states/*/; do
+  s=${s%/}
+  label=${s##*/}
+  mkdir -p -- "$incoming/states/$label"
+  for f in source.txt openbao-metadata.jsonl openbao-client-view.txt versions.txt; do
+    [ -f "$s/$f" ] || die "the $label bundle has no $f"
+    rewrite "$s/$f" "$incoming/states/$label/$f"
+  done
+  [ ! -f "$s/unavailable.txt" ] || rewrite "$s/unavailable.txt" "$incoming/states/$label/unavailable.txt"
+done
+for f in leak-scan.txt injections.log; do
+  [ -f "$KL_OUT/states/final/$f" ] || die "the final bundle has no $f"
+  rewrite "$KL_OUT/states/final/$f" "$incoming/$f"
+done
+
+# Refusals. A match is reported by file only, never by content. grep exits 1 for no match and 2
+# for an error (an unreadable file or pattern file); an error must not read as clean.
+refuse() { # refuse <what the evidence would hold> <grep arguments...>
+  local what=$1 hits rc=0
+  shift
+  hits=$(grep -rl "$@") || rc=$?
+  case $rc in
+    0) die "collected evidence $what in: $hits" ;;
+    1) ;;
+    *) die "the scan for evidence that $what could not run (grep exit $rc); nothing was collected" ;;
+  esac
+}
+refuse "matches the fixture's leak-scan patterns" -F -f "$STATE/scan-patterns.txt" -- "$incoming"
+refuse "holds a synthetic value" -F -- 'BWSYNTH-kl-' "$incoming"
+refuse "holds what looks like an OpenBao token" -E -- '\b(s|hvs)\.[A-Za-z0-9]{20,}' "$incoming"
+refuse "names a path in the operator's home" -F -- "$HOME/" "$incoming"
+
+rm -rf -- "$dest"
+mv -T -- "$incoming" "$dest"
+trap - EXIT
+say "evidence collected in $dest: $(find "$dest" -type f | wc -l) files"
