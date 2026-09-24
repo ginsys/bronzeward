@@ -1,0 +1,11 @@
+============ Secret Path ============
+secret/data/gen/imported/app-token/g1
+
+======= Metadata =======
+Key                Value
+---                -----
+created_time       2026-09-24T11:01:10.502654692Z
+custom_metadata    <nil>
+deletion_time      n/a
+destroyed          false
+version            1

@@ -1,4 +1,4 @@
 leak-scan lines: 3
 positive control hits: 3
 other hits: 0
-cells: 187, mismatches: 0
+cells: 194, mismatches: 0

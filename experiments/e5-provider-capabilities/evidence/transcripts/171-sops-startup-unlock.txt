@@ -1,0 +1,24 @@
+Failed to get the data key required to decrypt the SOPS file.
+
+Group 0: FAILED
+  age1l5k8mq4xy0nfrdgwxk7pjc05776glmj7ld8hkm8whnfs7eg3dvkq4lt5hj: FAILED
+    - | failed to load age identities. Did not find keys in
+      | locations 'SOPS_AGE_SSH_PRIVATE_KEY_FILE',
+      | 'SOPS_AGE_SSH_PRIVATE_KEY_CMD',
+      | '<E5_OUT>/work/no-home/.ssh/id_ed25519',
+      | '<E5_OUT>/work/no-home/.ssh/id_rsa',
+      | 'SOPS_AGE_KEY', 'SOPS_AGE_KEY_FILE', 'SOPS_AGE_KEY_CMD', and
+      | '<E5_OUT>/work/no-home/.config/sops/age/keys.txt'.
+  
+  age1x79zfdzsm2l8zf256jwdh95563nv3njl8erfjg2dn8469j86zcusj6hyed: FAILED
+    - | failed to load age identities. Did not find keys in
+      | locations 'SOPS_AGE_SSH_PRIVATE_KEY_FILE',
+      | 'SOPS_AGE_SSH_PRIVATE_KEY_CMD',
+      | '<E5_OUT>/work/no-home/.ssh/id_ed25519',
+      | '<E5_OUT>/work/no-home/.ssh/id_rsa',
+      | 'SOPS_AGE_KEY', 'SOPS_AGE_KEY_FILE', 'SOPS_AGE_KEY_CMD', and
+      | '<E5_OUT>/work/no-home/.config/sops/age/keys.txt'.
+
+Recovery failed because no master key was able to decrypt the file. In
+order for SOPS to recover the file, at least one key has to be successful,
+but none were.

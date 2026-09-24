@@ -1,7 +1,1 @@
-2026/09/24 12:36:54 Syncing keys for file <repo>/fixtures/.state/data/sops/secrets/app-token.enc.json
-The following changes will be made to the file's groups:
-Group 1
-    age1g0fg8yla56ljd7zdwsgv244psfpkh8w5cyvdqs5dvkyhrgvjyq3sslxz7d
-+++ age1cndjwfsk2f4v02zms3pvkv6rkaptwakeuswm8h9xqk40ptt8yg0qajrmyl
---- age1h6vh03qnngz3fc8aefgpmf627edxnfxardqf758fz3anqc57valqqf72sr
-2026/09/24 12:36:54 File <repo>/fixtures/.state/data/sops/secrets/app-token.enc.json synced with new keys
+value ciphertext changed: new data key

@@ -1,0 +1,26 @@
+Failed to get the data key required to decrypt the SOPS file.
+
+Group 0: FAILED
+  age16ftytu28mea6q03s3a4p5kegfd8hrw85ehk8mhfv34n8hv4zzqgqgwsa08: FAILED
+    - | failed to create reader for decrypting sops data key with
+      | age: identity did not match any of the recipients: incorrect
+      | identity for recipient block. Did not find keys in locations
+      | 'SOPS_AGE_SSH_PRIVATE_KEY_FILE',
+      | 'SOPS_AGE_SSH_PRIVATE_KEY_CMD',
+      | '<E5_OUT>/work/no-home/.ssh/id_ed25519',
+      | '<E5_OUT>/work/no-home/.ssh/id_rsa',
+      | 'SOPS_AGE_KEY', and 'SOPS_AGE_KEY_CMD'.
+  
+  age1x79zfdzsm2l8zf256jwdh95563nv3njl8erfjg2dn8469j86zcusj6hyed: FAILED
+    - | failed to create reader for decrypting sops data key with
+      | age: identity did not match any of the recipients: incorrect
+      | identity for recipient block. Did not find keys in locations
+      | 'SOPS_AGE_SSH_PRIVATE_KEY_FILE',
+      | 'SOPS_AGE_SSH_PRIVATE_KEY_CMD',
+      | '<E5_OUT>/work/no-home/.ssh/id_ed25519',
+      | '<E5_OUT>/work/no-home/.ssh/id_rsa',
+      | 'SOPS_AGE_KEY', and 'SOPS_AGE_KEY_CMD'.
+
+Recovery failed because no master key was able to decrypt the file. In
+order for SOPS to recover the file, at least one key has to be successful,
+but none were.
