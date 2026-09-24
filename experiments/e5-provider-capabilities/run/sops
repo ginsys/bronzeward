@@ -109,10 +109,12 @@ updatekeys() { sops_as "$1" updatekeys -y "$D/secrets/$2.enc.json"; }
 # The value's ciphertext, as a digest, read without any key: it changes only when sops encrypts the
 # value again, which it does under a new data key. Whether an operation replaced the data key is
 # therefore visible from the file alone.
-ct_digest() { jq -r .value "$D/secrets/$1.enc.json" | sha256sum | cut -d' ' -f1; }
+ct_digest() { jq -er .value "$D/secrets/$1.enc.json" | sha256sum | cut -d' ' -f1; }
 data_key() { # data_key <name> <digest-before> <same|new>: fails when the observation is the other one
-  local seen=new
-  [ "$(ct_digest "$1")" != "$2" ] || seen=same
+  # A file jq cannot read must fail the cell, not pass as a changed ciphertext.
+  local seen=new now
+  now=$(ct_digest "$1") || { echo "value ciphertext unreadable"; return 1; }
+  [ "$now" != "$2" ] || seen=same
   if [ "$seen" = same ]; then
     echo "value ciphertext unchanged: same data key"
   else
