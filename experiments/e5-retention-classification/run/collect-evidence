@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Copy the committable text of one capture into evidence/: the verdict table, every transcript, the
+# rule checks, the summary, and from each state's bundle the provider's own view (OpenBao metadata,
+# the client view of the published port, the container versions and networks, what was
+# unavailable), plus the final bundle's leak scan and injection log. The bundles' database dumps and snapshots stay behind. Absolute paths
+# are rewritten, and the result is refused if it holds anything the fixture's own leak-scan patterns
+# match, an age secret key, or an OpenBao token. Run it with the fixture still up: the patterns are
+# rebuilt from this run's credentials.
+#
+# Phase-0 evidence for the retention-classification experiment (ginsys/bronzeward issue 9). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+need grep sed find cp
+[ -s "$RC_OUT/complete" ] || die "$RC_OUT/complete is missing: run/all did not finish, or its leak scan failed"
+[ -s "$RC_OUT/summary.txt" ] || die "$RC_OUT/summary.txt is missing"
+[ -s "$STATE/scan-patterns.txt" ] || die "no scan patterns: run this with the fixture still up"
+
+dest=$RC_DIR/evidence
+incoming=$(mktemp -d "$RC_DIR/.evidence-incoming.XXXXXX")
+trap 'rm -rf -- "$incoming"' EXIT
+
+rewrite() { # rewrite <in> <out>: the checkout and RC_OUT become placeholders
+  sed -e "s#$REPO_DIR#<repo>#g" -e "s#$RC_OUT#<RC_OUT>#g" -- "$1" >"$2"
+}
+mkdir -p -- "$incoming/transcripts" "$incoming/states"
+rewrite "$RC_ROWS" "$incoming/verdicts.tsv"
+rewrite "$RC_OUT/summary.txt" "$incoming/summary.txt"
+rewrite "$RC_OUT/test-decide.txt" "$incoming/test-decide.txt"
+for f in "$RC_TRANSCRIPTS"/*.txt; do
+  rewrite "$f" "$incoming/transcripts/${f##*/}"
+done
+for s in "$RC_OUT"/states/*/; do
+  s=${s%/}
+  label=${s##*/}
+  mkdir -p -- "$incoming/states/$label"
+  # versions.txt too: it shows a partition as networks=[] on the OpenBao container's line.
+  for f in source.txt openbao-metadata.jsonl openbao-client-view.txt versions.txt; do
+    [ -f "$s/$f" ] || die "the $label bundle has no $f"
+    rewrite "$s/$f" "$incoming/states/$label/$f"
+  done
+  # Present only when fixtures/bin/evidence could not collect something: for a paused or sealed
+  # provider that is the state itself.
+  [ ! -f "$s/unavailable.txt" ] || rewrite "$s/unavailable.txt" "$incoming/states/$label/unavailable.txt"
+done
+for f in leak-scan.txt injections.log; do
+  [ -f "$RC_OUT/states/final/$f" ] || die "the final bundle has no $f"
+  rewrite "$RC_OUT/states/final/$f" "$incoming/$f"
+done
+
+# Refusals. A match is reported by file only, never by content.
+hits=$(grep -rlF -f "$STATE/scan-patterns.txt" -- "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence matches the fixture's leak-scan patterns in: $hits"
+hits=$(grep -rl 'AGE-SECRET-KEY-' -- "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence holds an age secret key in: $hits"
+hits=$(grep -rlE '\b(s|hvs)\.[A-Za-z0-9]{20,}' -- "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence holds what looks like an OpenBao token in: $hits"
+hits=$(grep -rlF -- "$HOME/" "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence names a path in the operator's home in: $hits"
+
+rm -rf -- "$dest"
+mv -T -- "$incoming" "$dest"
+trap - EXIT
+say "evidence collected in $dest: $(find "$dest" -type f | wc -l) files"

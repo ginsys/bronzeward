@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Checks for the classification rules in decide.sh, on synthetic provider answers. Needs no
+# fixture: every input is written out below, so each rule is exercised in isolation before a
+# capture relies on it.
+#
+# Phase-0 evidence for the retention-classification experiment (ginsys/bronzeward issue 9). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=decide.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/decide.sh"
+
+pass=0 fail=0
+check() { # check <description> <want> <got>
+  if [ "$2" = "$3" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s\n  want: %s\n  got:  %s\n' "$1" "$2" "$3"
+  fi
+}
+cls() { sed -n 's/^class=\([a-z]*\) .*/\1/p'; } # the class alone
+why() { sed -n 's/^class=[a-z]* reason=//p'; }    # the reason alone
+
+NOW=2026-09-24T12:00:00Z
+kv() { # kv <versions-json> <current> <oldest>: a KV v2 metadata answer's data object
+  jq -cn --argjson v "$1" --argjson c "$2" --argjson o "$3" \
+    '{versions: $v, current_version: $c, oldest_version: $o, max_versions: 0}'
+}
+live='{"created_time":"2026-09-24T10:00:00.1Z","deletion_time":"","destroyed":false}'
+destroyed='{"created_time":"2026-09-24T10:00:00.1Z","deletion_time":"","destroyed":true}'
+deleted='{"created_time":"2026-09-24T10:00:00.1Z","deletion_time":"2026-09-24T11:00:00.123456Z","destroyed":false}'
+scheduled='{"created_time":"2026-09-24T10:00:00.1Z","deletion_time":"2026-09-24T13:00:00.5Z","destroyed":false}'
+
+# --- KV v2 versions ------------------------------------------------------------------------------
+out=$(kv "{\"1\":$live}" 1 0 | decide_kv 1 "$NOW")
+check 'a live version is retained' retained "$(cls <<<"$out")"
+out=$(kv "{\"1\":$destroyed}" 1 0 | decide_kv 1 "$NOW")
+check 'a destroyed version is lost' lost "$(cls <<<"$out")"
+check 'the reason names the destruction' destroyed "$(why <<<"$out")"
+out=$(kv "{\"1\":$deleted}" 1 0 | decide_kv 1 "$NOW")
+check 'a soft-deleted version is blocked' blocked "$(cls <<<"$out")"
+out=$(kv "{\"1\":$scheduled}" 1 0 | decide_kv 1 "$NOW")
+check 'a deletion scheduled in the future is still retained' retained "$(cls <<<"$out")"
+check 'and the reason says it is scheduled' 'deletion scheduled for 2026-09-24T13:00:00Z' "$(why <<<"$out")"
+out=$(kv "{\"2\":$live,\"3\":$live}" 3 2 | decide_kv 1 "$NOW")
+check 'a version below oldest_version is lost (pruned)' lost "$(cls <<<"$out")"
+out=$(kv "{\"1\":$live}" 1 0 | decide_kv 4 "$NOW")
+check 'a version above current_version is unknown' unknown "$(cls <<<"$out")"
+out=$(kv "{\"1\":$live,\"3\":$live}" 3 1 | decide_kv 2 "$NOW")
+check 'a version missing without an explanation is unknown, never lost' unknown "$(cls <<<"$out")"
+out=$(printf 'not json' | decide_kv 1 "$NOW")
+check 'an answer that cannot be read is unknown' unknown "$(cls <<<"$out")"
+out=$(printf '{}' | decide_kv 1 "$NOW")
+check 'an answer without versions is unknown' unknown "$(cls <<<"$out")"
+
+# --- Transit key versions ------------------------------------------------------------------------
+tk() { jq -cn --argjson l "$1" --argjson d "$2" --argjson a "$3" '{latest_version: $l, min_decryption_version: $d, min_available_version: $a}'; }
+out=$(tk 2 1 0 | decide_transit 1)
+check 'a key version at or above both floors is retained' retained "$(cls <<<"$out")"
+out=$(tk 2 2 0 | decide_transit 1)
+check 'a key version below the decryption floor is blocked' blocked "$(cls <<<"$out")"
+out=$(tk 3 2 2 | decide_transit 1)
+check 'a key version below min_available_version is lost (trimmed)' lost "$(cls <<<"$out")"
+out=$(tk 2 1 0 | decide_transit 3)
+check 'a key version above latest is unknown' unknown "$(cls <<<"$out")"
+out=$(printf '{"latest_version":2}' | decide_transit 1)
+check 'an answer without the floors is unknown' unknown "$(cls <<<"$out")"
+
+# --- answers that are not metadata ---------------------------------------------------------------
+check 'HTTP 403 is unknown (denied)' 'unknown denied: HTTP 403' "$(answer_class 0 403 | sed 's/^class=\([a-z]*\) reason=/\1 /')"
+check 'HTTP 404 is unknown (absent), never lost' 'unknown absent: HTTP 404' "$(answer_class 0 404 | sed 's/^class=\([a-z]*\) reason=/\1 /')"
+check 'HTTP 503 is unknown (sealed or standby)' 'unknown sealed or unavailable: HTTP 503' "$(answer_class 0 503 | sed 's/^class=\([a-z]*\) reason=/\1 /')"
+check 'no connection is unknown (unreachable)' 'unknown unreachable: curl exit 7' "$(answer_class 7 000 | sed 's/^class=\([a-z]*\) reason=/\1 /')"
+check 'no answer in time is unknown' 'unknown no answer: curl exit 28' "$(answer_class 28 000 | sed 's/^class=\([a-z]*\) reason=/\1 /')"
+check 'HTTP 200 is not decided here' '' "$(answer_class 0 200)"
+
+# --- the monitor never turns unknown into anything else ------------------------------------------
+st=$(mktemp -d)
+trap 'rm -rf -- "$st"' EXIT
+out=$(monitor "$st/dep" 100 retained)
+check 'a first retained observation raises nothing' 'class=retained alert=no' "$out"
+out=$(monitor "$st/dep" 110 unknown)
+check 'retained then unknown alerts at once, as a regression' 'class=unknown alert=regression unknown_since=110' "$out"
+out=$(monitor "$st/dep" 5000 unknown)
+check 'a long unknown stays unknown and alerts as persistent' 'class=unknown alert=persistent unknown_since=110' "$out"
+out=$(monitor "$st/new" 100 unknown)
+check 'an unknown never seen retained is not yet alerted' 'class=unknown alert=no unknown_since=100' "$out"
+out=$(monitor "$st/new" 100000 unknown)
+check 'and no amount of time makes it lost' 'class=unknown alert=persistent unknown_since=100' "$out"
+out=$(monitor "$st/dep" 5001 lost)
+check 'lost alerts' 'class=lost alert=lost' "$out"
+
+printf '%s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

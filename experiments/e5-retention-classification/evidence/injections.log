@@ -1,0 +1,16 @@
+2026-09-24T18:25:47Z begin bao-soft-delete gen/soft/g1 1
+2026-09-24T18:25:47Z done bao-soft-delete gen/soft/g1 1
+2026-09-24T18:25:47Z begin bao-destroy gen/destroy/g1 1
+2026-09-24T18:25:48Z done bao-destroy gen/destroy/g1 1
+2026-09-24T18:25:48Z begin bao-delete-key rc-del
+2026-09-24T18:25:49Z done bao-delete-key rc-del
+2026-09-24T18:26:10Z begin netsplit openbao
+2026-09-24T18:26:11Z done netsplit openbao
+2026-09-24T18:26:29Z begin netjoin openbao
+2026-09-24T18:26:29Z done netjoin openbao
+2026-09-24T18:26:29Z begin pause openbao
+2026-09-24T18:26:29Z done pause openbao
+2026-09-24T18:26:46Z begin bao-destroy gen/uncertain/g1 1
+2026-09-24T18:27:16Z unknown rc=28 bao-destroy gen/uncertain/g1 1
+2026-09-24T18:27:16Z begin unpause openbao
+2026-09-24T18:27:16Z done unpause openbao

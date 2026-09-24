@@ -1,0 +1,12 @@
+{"path":"fixture/inline","versions":{"1":{"created_time":"2026-09-24T18:18:23.211306089Z","deletion_time":"","destroyed":false}}}
+{"path":"gen/app/g1","versions":{"1":{"created_time":"2026-09-24T18:25:33.157162807Z","deletion_time":"","destroyed":false}}}
+{"path":"gen/destroy/g1","versions":{"1":{"created_time":"2026-09-24T18:25:33.472642151Z","deletion_time":"","destroyed":false}}}
+{"path":"gen/metadel/g1","versions":{"1":{"created_time":"2026-09-24T18:25:33.775583765Z","deletion_time":"","destroyed":false}}}
+{"path":"gen/scheduled/g1","versions":{"1":{"created_time":"2026-09-24T18:25:34.071410878Z","deletion_time":"2026-09-24T19:25:34.071410878Z","destroyed":false}}}
+{"path":"gen/soft/g1","versions":{"1":{"created_time":"2026-09-24T18:25:33.307483509Z","deletion_time":"","destroyed":false}}}
+{"path":"gen/uncertain/g1","versions":{"1":{"created_time":"2026-09-24T18:25:33.628153064Z","deletion_time":"","destroyed":false}}}
+{"path":"mutable/registry","versions":{"10":{"created_time":"2026-09-24T18:25:35.643777943Z","deletion_time":"","destroyed":false},"11":{"created_time":"2026-09-24T18:25:35.804159886Z","deletion_time":"","destroyed":false},"2":{"created_time":"2026-09-24T18:25:34.378868766Z","deletion_time":"","destroyed":false},"3":{"created_time":"2026-09-24T18:25:34.530575506Z","deletion_time":"","destroyed":false},"4":{"created_time":"2026-09-24T18:25:34.692492252Z","deletion_time":"","destroyed":false},"5":{"created_time":"2026-09-24T18:25:34.853399835Z","deletion_time":"","destroyed":false},"6":{"created_time":"2026-09-24T18:25:35.029469157Z","deletion_time":"","destroyed":false},"7":{"created_time":"2026-09-24T18:25:35.184371248Z","deletion_time":"","destroyed":false},"8":{"created_time":"2026-09-24T18:25:35.338227984Z","deletion_time":"","destroyed":false},"9":{"created_time":"2026-09-24T18:25:35.486845493Z","deletion_time":"","destroyed":false}}}
+{"transit_key":"bw-artifact","latest":1,"min_decryption":1,"deletion_allowed":false}
+{"transit_key":"rc-art","latest":1,"min_decryption":1,"deletion_allowed":false}
+{"transit_key":"rc-del","latest":1,"min_decryption":1,"deletion_allowed":false}
+{"transit_key":"rc-trim","latest":1,"min_decryption":1,"deletion_allowed":false}

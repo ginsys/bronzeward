@@ -1,0 +1,9 @@
+Error reading secret/data/gen/app/g1: Error making API request.
+
+URL: GET http://127.0.0.1:8200/v1/secret/data/gen/app/g1
+Code: 403. Errors:
+
+* 1 error occurred:
+	* permission denied
+
+

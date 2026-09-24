@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# The two local candidates: the age store laid out by the provider-capability run, and SOPS files.
+# Neither has a metadata service, so the classifier reads what each keeps beside the ciphertext: the
+# age store's per-generation metadata file with the ciphertext digest it recorded, and the sops
+# block with its MAC. Each state is made by hand on the files, as an operator or a failing disk
+# would make it; the store itself records none of them.
+#
+# Blocked and unreachable have no equivalent for a file on the local disk: nothing can hide a
+# generation reversibly and still keep it, and there is no remote end to lose. Both are recorded as
+# absent states rather than left blank.
+#
+# Phase-0 evidence for the retention-classification experiment (ginsys/bronzeward issue 9). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+rc_init
+rc_need_fixture
+
+W=$RC_WORK/local
+mkdir -p -- "$W"
+classify() { "$RC_RUN_DIR/classify" "$@"; }
+age() { "$CACHE/age" "$@"; }
+age_keygen() { "$CACHE/age-keygen" "$@"; }
+
+for v in age-g1 age-g2 age-other sops-v1 sops-v2; do rc_secret "$v"; done
+
+# --- age store ---------------------------------------------------------------------------------------
+C=age-store
+A=$STATE/data/rc-age-store
+mkdir -p -- "$A/keys" "$A/recipients" "$A/objects" "$A/meta"
+chmod 700 "$A/keys"
+
+newkey() { # newkey <identity>
+  (umask 077 && age_keygen -o "$A/keys/$1.key" 2>/dev/null) || return 1
+  age_keygen -y "$A/keys/$1.key" >"$A/recipients/$1.pub"
+}
+put() { # put <identity> <name> <gen> <value-name>: create-only, as in the provider-capability run
+  local obj=$A/objects/$2/$3.age
+  mkdir -p -- "$A/objects/$2" "$A/meta/$2"
+  (set -C && age -r "$(cat -- "$A/recipients/$1.pub")" <"$(rc_value_file "$4")" >"$obj") || return 1
+  jq -n --arg created "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" --arg recipient "$(cat -- "$A/recipients/$1.pub")" \
+    --arg sha256 "$(sha256sum <"$obj" | cut -d' ' -f1)" \
+    '{created: $created, recipient: $recipient, ciphertext_sha256: $sha256}' >"$A/meta/$2/$3.json"
+  printf 'created %s/%s\n' "$2" "$3"
+}
+get() { age -d -i "$A/keys/$1.key" "$A/objects/$2/$3.age"; }
+replace() { # replace <identity> <name> <gen> <value-name>: another ciphertext under the same name
+  age -r "$(cat -- "$A/recipients/$1.pub")" <"$(rc_value_file "$4")" >"$A/objects/$2/$3.age"
+  echo "replaced the ciphertext of $2/$3; its metadata still records the old digest"
+}
+
+newkey compiler
+newkey gone
+put compiler app g1 age-g1 >/dev/null
+put compiler app g2 age-g2 >/dev/null
+put compiler removed g1 age-g1 >/dev/null
+put compiler replaced g1 age-g1 >/dev/null
+put compiler denied g1 age-g1 >/dev/null
+put gone keyless g1 age-g1 >/dev/null
+
+judge $C retained app@g1 metadata retained -- classify age-store "$A" app g1
+judge $C retained app@g2 metadata retained -- classify age-store "$A" app g2
+judge $C read app@g1 compiler ok -- check_digest "$(rc_digest age-g1)" get compiler app g1
+judge $C absent app@g9 metadata unknown -- classify age-store "$A" app g9
+judge $C inject removed@g1 operator ok -- rm -- "$A/objects/removed/g1.age"
+judge $C removed removed@g1 metadata unknown -- classify age-store "$A" removed g1
+judge $C inject replaced@g1 operator ok -- replace compiler replaced g1 age-other
+judge $C replaced replaced@g1 metadata lost -- classify age-store "$A" replaced g1
+judge $C inject denied@g1 operator ok -- chmod 000 "$A/meta/denied/g1.json"
+judge $C denied denied@g1 metadata unknown -- classify age-store "$A" denied g1
+judge $C inject denied@g1 operator ok -- chmod 644 "$A/meta/denied/g1.json"
+judge $C inject denied@g1 operator ok -- chmod 000 "$A/objects/denied/g1.age"
+judge $C denied denied@g1 metadata unknown -- classify age-store "$A" denied g1
+judge $C inject denied@g1 operator ok -- chmod 644 "$A/objects/denied/g1.age"
+judge $C restored denied@g1 metadata retained -- classify age-store "$A" denied g1
+# Retention is not usability: the key a generation was encrypted to is gone, and every file the
+# classifier reads is untouched. Key loss is the key-loss experiment's subject; this row shows only
+# that the retention class cannot see it.
+judge $C inject keyless@g1 operator ok -- rm -- "$A/keys/gone.key"
+judge $C key-deleted keyless@g1 metadata retained -- classify age-store "$A" keyless g1
+judge $C key-deleted keyless@g1 gone fail -- get gone keyless g1
+absent $C blocked 'no reversible removal: a file is there or it is not, and the store records no hold or delete marker'
+absent $C unreachable 'a local file has no remote end; an unreadable file is recorded as denied or absent above'
+
+# --- SOPS --------------------------------------------------------------------------------------------
+C=sops
+D=$STATE/data/rc-sops
+mkdir -p -- "$D/keys" "$D/secrets"
+chmod 700 "$D/keys"
+(umask 077 && age_keygen -o "$D/keys/compiler.key" 2>/dev/null)
+(umask 077 && age_keygen -o "$D/keys/gone.key" 2>/dev/null)
+rules() { # rules <identity>: every file is encrypted to that one recipient
+  printf 'creation_rules:\n  - path_regex: .*\n    age: %s\n' "$(age_keygen -y "$D/keys/$1.key")" >"$D/.sops.yaml"
+}
+# shellcheck disable=SC2094 # --filename-override only names the file for rule matching; sops reads stdin
+sput() { # sput <name> <value-name>: create-only, the value over stdin
+  local f=$D/secrets/$1.enc.json
+  { printf '{"value": '; jq -Rs . <"$(rc_value_file "$2")"; printf '}\n'; } |
+    (set -C && rc_sops - --config "$D/.sops.yaml" encrypt --filename-override "$f" --input-type json --output-type json /dev/stdin >"$f")
+  echo "created $1"
+}
+sset() { # sset <name> <value-name>: overwrite in place, as an edit would
+  jq -Rs . <"$(rc_value_file "$2")" | rc_sops "$D/keys/compiler.key" --config "$D/.sops.yaml" set --value-stdin "$D/secrets/$1.enc.json" '["value"]'
+  echo "value of $1 replaced"
+}
+sget() { rc_sops "$D/keys/$1.key" --config "$D/.sops.yaml" decrypt --extract '["value"]' "$D/secrets/$2.enc.json"; }
+mac() { jq -er .sops.mac -- "$D/secrets/$1.enc.json"; } # the MAC a reference pins; not a secret
+
+rules compiler
+for n in app edited removed denied; do sput "$n" sops-v1 >/dev/null; done
+rules gone
+sput keyless sops-v1 >/dev/null
+declare -A MAC=()
+for n in app edited removed denied keyless; do MAC[$n]=$(mac "$n"); done
+
+judge $C retained app metadata retained -- classify sops "$D/secrets/app.enc.json" "${MAC[app]}"
+judge $C read app compiler ok -- check_digest "$(rc_digest sops-v1)" sget compiler app
+judge $C inject edited operator ok -- sset edited sops-v2
+judge $C replaced edited metadata lost -- classify sops "$D/secrets/edited.enc.json" "${MAC[edited]}"
+judge $C inject removed operator ok -- rm -- "$D/secrets/removed.enc.json"
+judge $C removed removed metadata unknown -- classify sops "$D/secrets/removed.enc.json" "${MAC[removed]}"
+judge $C inject denied operator ok -- chmod 000 "$D/secrets/denied.enc.json"
+judge $C denied denied metadata unknown -- classify sops "$D/secrets/denied.enc.json" "${MAC[denied]}"
+judge $C inject denied operator ok -- chmod 644 "$D/secrets/denied.enc.json"
+judge $C restored denied metadata retained -- classify sops "$D/secrets/denied.enc.json" "${MAC[denied]}"
+judge $C inject keyless operator ok -- rm -- "$D/keys/gone.key"
+judge $C key-deleted keyless metadata retained -- classify sops "$D/secrets/keyless.enc.json" "${MAC[keyless]}"
+judge $C key-deleted keyless gone fail -- sget gone keyless
+absent $C blocked 'no reversible removal: sops keeps one revision per file; any history is the version control that holds the file'
+absent $C unreachable 'a local file has no remote end; an unreadable file is recorded as denied or absent above'
+
+say "local: $(rc_mismatches) mismatch(es) so far in $RC_ROWS"

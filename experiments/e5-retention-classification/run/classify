@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# The retention classifier. One dependency per call; the last line printed is
+# `class=<retained|blocked|lost|unknown> reason=<text>`.
+#
+#   classify openbao-kv <mount> <path> <version>          a KV v2 secret version
+#   classify openbao-transit <mount> <key> <key-version>  the Transit key version a ciphertext needs
+#   classify age-store <store> <name> <gen>       a generation in the local age store
+#   classify sops <file> <mac>                    a SOPS file, pinned by the MAC it had when referenced
+#
+# OpenBao is asked as a client would ask it: over HTTP on the published port, from the host, with
+# the metadata-only token and nothing else. The fixtures' bao wrapper runs the CLI inside the
+# container, where 127.0.0.1 answers whatever network the container is on, so it would never see
+# a partition (fixtures report §7). The token goes in through the environment and curl expands it
+# into the header, so that it is on no command line.
+#
+# The local stores have no metadata service: their classifier reads only the metadata files and
+# the ciphertext's digest, never a key file and never a value.
+#
+# Phase-0 evidence for the retention-classification experiment (ginsys/bronzeward issue 9). Not v1
+# tooling.
+set -euo pipefail
+here=$(dirname -- "${BASH_SOURCE[0]}")
+# shellcheck source-path=SCRIPTDIR source=decide.sh
+. "$here/decide.sh"
+
+die() { printf 'classify: %s\n' "$*" >&2; exit 2; }
+now_rfc3339() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# ask <api-path>: GET one path with the metadata-only token; prints the body, then a last line
+# `<curl-exit> <http-code>`. A bounded wait: a paused provider accepts the connection and never
+# answers, and the classifier must still answer unknown.
+ask() {
+  local body code rc=0
+  [ -n "${BW_BAO_METADATA_TOKEN:-}" ] || die "BW_BAO_METADATA_TOKEN is not set"
+  [ -n "${OPENBAO_PORT:-}" ] || die "OPENBAO_PORT is not set"
+  body=$(mktemp)
+  code=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN curl --noproxy '*' --silent --connect-timeout 5 --max-time "${RC_ASK_LIMIT:-10}" \
+    --variable '%BAO_TOKEN' --expand-header 'X-Vault-Token: {{BAO_TOKEN}}' \
+    --output "$body" --write-out '%{http_code}' "http://127.0.0.1:$OPENBAO_PORT/v1/$1") || rc=$?
+  cat -- "$body"
+  rm -f -- "$body"
+  printf '\n%s %s\n' "$rc" "${code:-000}"
+}
+
+# openbao <decider> <decider-args...> -- <api-path>
+openbao() {
+  local decider=() out status body
+  while [ "$1" != -- ]; do decider+=("$1"); shift; done
+  shift
+  out=$(ask "$1")
+  status=$(tail -n 1 <<<"$out")
+  body=$(sed '$d' <<<"$out")
+  printf 'asked GET /v1/%s with the metadata-only token: curl exit %s, HTTP %s\n' "$1" "${status% *}" "${status#* }"
+  # The body is metadata only (versions, times, floors); errors are OpenBao's own text.
+  printf '%s\n' "$body" | jq -c '.data // .errors // .' 2>/dev/null || printf '%s\n' "$body" | head -c 400
+  local verdict data
+  verdict=$(answer_class "${status% *}" "${status#* }")
+  if [ -n "$verdict" ]; then
+    printf '%s\n' "$verdict"
+  else
+    # An HTTP 200 whose body is not JSON goes to the decider as such, which calls it unknown.
+    data=$(jq -c '.data' <<<"$body" 2>/dev/null) || data='not json'
+    printf '%s\n' "$data" | "${decider[@]}"
+  fi
+}
+
+# age_store <store> <name> <gen>: metadata present and the ciphertext's digest is what it
+# recorded: retained. Neither says anything about the keys (the store keeps none in metadata).
+# A ciphertext that is there but differs from the recorded digest is positive evidence that the
+# referenced generation was replaced, and the store keeps no history: lost. An absent file, a
+# denied directory, or metadata that cannot be read is unknown.
+age_store() {
+  local store=$1 name=$2 gen=$3 m obj err want got
+  m=$store/meta/$name/$gen.json obj=$store/objects/$name/$gen.age
+  printf 'reading %s and the digest of %s\n' "${m#"$store"/}" "${obj#"$store"/}"
+  if ! err=$(jq -er .ciphertext_sha256 -- "$m" 2>&1); then
+    printf '%s\n' "$err"
+    case $err in
+      *'Permission denied'*) say_class unknown "denied: metadata not readable" ;;
+      *'No such file'*) say_class unknown "absent: no metadata file" ;;
+      *) say_class unknown "metadata could not be read" ;;
+    esac
+    return 0
+  fi
+  want=$err
+  # By name, not by redirection: a redirection that fails reports on the shell's own stderr, before
+  # 2>&1 applies, and denied would read as absent.
+  if ! got=$(sha256sum -- "$obj" 2>&1); then
+    printf '%s\n' "$got"
+    case $got in
+      *'Permission denied'*) say_class unknown "denied: ciphertext not readable" ;;
+      *) say_class unknown "absent: metadata present, ciphertext absent" ;;
+    esac
+    return 0
+  fi
+  got=${got%% *}
+  if [ "$got" = "$want" ]; then
+    say_class retained "metadata present, ciphertext digest matches (no key is checked)"
+  else
+    say_class lost "ciphertext replaced: digest differs from the recorded one, and the store keeps no history"
+  fi
+}
+
+# sops <file> <mac>: the sops block is readable without a key. The same MAC as when referenced:
+# retained. A different MAC is positive evidence that the file was re-encrypted with other
+# content, and sops keeps no versions: lost. An absent, denied or unparsable file is unknown.
+sops_file() {
+  local file=$1 mac=$2 err got
+  printf 'reading the sops metadata block of %s\n' "${file##*/}"
+  if ! err=$(jq -er '.sops.mac' -- "$file" 2>&1); then
+    printf '%s\n' "$err"
+    case $err in
+      *'Permission denied'*) say_class unknown "denied: file not readable" ;;
+      *'No such file'*) say_class unknown "absent: no such file" ;;
+      *) say_class unknown "no readable sops metadata" ;;
+    esac
+    return 0
+  fi
+  got=$err
+  jq -r '.sops | "lastmodified=\(.lastmodified) recipients=\([.age[].recipient] | length)"' -- "$file"
+  if [ "$got" = "$mac" ]; then
+    say_class retained "same MAC as when referenced (no key is checked)"
+  else
+    say_class lost "replaced: the MAC differs from the referenced one, and sops keeps no versions"
+  fi
+}
+
+[ $# -ge 1 ] || die "usage: classify openbao-kv|openbao-transit|age-store|sops ..."
+kind=$1
+shift
+case $kind in
+  openbao-kv) [ $# -eq 3 ] || die "usage: classify openbao-kv <mount> <path> <version>"
+    openbao decide_kv "$3" "$(now_rfc3339)" -- "$1/metadata/$2" ;;
+  openbao-transit) [ $# -eq 3 ] || die "usage: classify openbao-transit <mount> <key> <key-version>"
+    openbao decide_transit "$3" -- "$1/keys/$2" ;;
+  age-store) [ $# -eq 3 ] || die "usage: classify age-store <store> <name> <gen>"
+    age_store "$@" ;;
+  sops) [ $# -eq 2 ] || die "usage: classify sops <file> <mac>"
+    sops_file "$@" ;;
+  *) die "no such dependency kind: $kind" ;;
+esac

@@ -1,0 +1,7 @@
+observation 1: class=unknown reason=unreachable: curl exit 7
+monitor: class=unknown alert=regression unknown_since=1790274380
+observation 2: class=unknown reason=unreachable: curl exit 7
+monitor: class=unknown alert=regression unknown_since=1790274380
+observation 3: class=unknown reason=unreachable: curl exit 7
+monitor: class=unknown alert=persistent unknown_since=1790274380
+class=unknown reason=monitor after 3 observations: alert=persistent unknown_since=1790274380

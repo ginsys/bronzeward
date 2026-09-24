@@ -1,0 +1,2 @@
+reading meta/denied/g1.json and the digest of objects/denied/g1.age
+class=retained reason=metadata present, ciphertext digest matches (no key is checked)

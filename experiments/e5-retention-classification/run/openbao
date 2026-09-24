@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# OpenBao KV v2 and Transit, as the fixtures run them. Each dependency is put into a retention
+# state by the fixture's own injections (or, where the fixture has none, by the administrator's
+# API), one evidence bundle records the provider's true metadata for that state, and the
+# classifier is judged against it. The classifier only ever holds the metadata-only token.
+#
+# Phase-0 evidence for the retention-classification experiment (ginsys/bronzeward issue 9). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+rc_init
+rc_need_fixture
+
+C=openbao
+W=$RC_WORK/openbao
+mkdir -p -- "$W" "$RC_WORK/monitor"
+classify() { "$RC_RUN_DIR/classify" "$@"; }
+inject() { "$FIXTURES_DIR/bin/inject" "$@"; }
+
+# --- identities --------------------------------------------------------------------------------------
+# metadata  the fixture's metadata-only token: the only identity the classifier uses
+# compiler  encrypts artifacts (design §7.4)
+# executor  decrypts artifacts only (docs/spec/execution-recovery.md §3.1)
+# other     reads source secrets under secret/other/ only: a compiler for a different scope
+# admin     the root token, standing for the operator's administrator
+declare -A TOKEN=() ACCESSOR=()
+identities() {
+  local role out
+  bao_stdin policy write rc-compiler - >/dev/null <<'POLICY'
+path "transit/encrypt/*" { capabilities = ["update"] }
+POLICY
+  bao_stdin policy write rc-executor - >/dev/null <<'POLICY'
+path "transit/decrypt/*" { capabilities = ["update"] }
+POLICY
+  bao_stdin policy write rc-other - >/dev/null <<'POLICY'
+path "secret/data/other/*" { capabilities = ["read"] }
+POLICY
+  for role in compiler executor other; do
+    out=$(bao token create -policy="rc-$role" -format=json) || die "could not create the $role token"
+    TOKEN[$role]=$(jq -er .auth.client_token <<<"$out")
+    ACCESSOR[$role]=$(jq -er .auth.accessor <<<"$out")
+  done
+  TOKEN[metadata]=$BW_BAO_METADATA_TOKEN
+  TOKEN[admin]=$BW_BAO_ROOT_TOKEN
+}
+as() { # as <identity> <cmd...>: the token through the environment, never argv
+  local role=$1
+  shift
+  [ -n "${TOKEN[$role]:-}" ] || die "no token for identity $role"
+  BAO_TOKEN=${TOKEN[$role]} "$@"
+}
+
+# --- helpers: each prints a verdict or non-secret metadata, never a value ------------------------
+kv_put() { bao_stdin kv put -mount="$1" "$2" value=- <"$(rc_value_file "$3")"; } # kv_put <mount> <path> <value>
+encrypt() { # encrypt <mount> <key> <out>: the artifact under that key; prints the key version used
+  local ct
+  ct=$(base64 -w0 <"$W/artifact.yaml" | bao_stdin write -field=ciphertext "$1/encrypt/$2" plaintext=-) || return 1
+  printf '%s\n' "$ct" >"$3"
+  printf 'ciphertext uses key version %s\n' "$(cut -d: -f2 <"$3")"
+}
+key_version() { cut -d: -f2 <"$1" | tr -d v; } # the key version a ciphertext names
+decrypt() { # decrypt <key> <ciphertext-file>: the plaintext digest's verdict only
+  check_digest "$(sha256sum <"$W/artifact.yaml" | cut -d' ' -f1)" decrypt_raw "$1" "$2"
+}
+decrypt_raw() { bao write -field=plaintext "transit/decrypt/$1" ciphertext="$(cat "$2")" | base64 -d; }
+truth() { bao kv metadata get -mount="$1" -format=json "$2" | jq -c '.data | {current_version, oldest_version, versions}'; }
+key_truth() { bao read -format=json "$1/keys/$2" | jq -c '.data | {latest_version, min_decryption_version, min_available_version}'; }
+
+# watch <dependency> <observations> <interval> <classify-args...>: the monitor over repeated
+# classifications of one dependency; the last line carries the class the monitor printed, and the
+# alert, which time may change and the class may not.
+watch() {
+  local dep=$1 count=$2 interval=$3 i line class
+  shift 3
+  for i in $(seq 1 "$count"); do
+    [ "$i" -eq 1 ] || sleep "$interval"
+    line=$("$RC_RUN_DIR/classify" "$@" | tail -n 1)
+    printf 'observation %s: %s\n' "$i" "$line"
+    class=${line#class=}
+    class=${class%% *}
+    line=$(RC_ALERT_AFTER=$RC_WATCH_ALERT_AFTER monitor "$RC_WORK/monitor/$dep" "$(date +%s)" "$class")
+    printf 'monitor: %s\n' "$line"
+  done
+  printf 'class=%s reason=monitor after %s observations: %s\n' "$class" "$count" "${line#class=* }"
+}
+# shellcheck source-path=SCRIPTDIR source=decide.sh
+. "$RC_RUN_DIR/decide.sh"
+RC_WATCH_ALERT_AFTER=5 # seconds: short enough to observe a persistent unknown within one run
+
+# --- inputs ------------------------------------------------------------------------------------------
+identities
+for v in app retained-g1 soft destroy uncertain scheduled metadel other-mount artifact-token; do rc_secret "$v"; done
+for i in $(seq 1 11); do rc_secret "registry-v$i"; done
+{
+  printf 'machine:\n  token: '
+  cat "$(rc_value_file artifact-token)"
+  printf '\n'
+} >"$W/artifact.yaml"
+
+bao secrets enable -path=other-kv kv-v2 >/dev/null
+bao secrets enable -path=other-transit transit >/dev/null
+kv_put secret gen/app/g1 app >/dev/null
+kv_put secret gen/soft/g1 soft >/dev/null
+kv_put secret gen/destroy/g1 destroy >/dev/null
+kv_put secret gen/uncertain/g1 uncertain >/dev/null
+kv_put secret gen/metadel/g1 metadel >/dev/null
+bao kv metadata put -mount=secret -delete-version-after=1h gen/scheduled/g1 >/dev/null
+kv_put secret gen/scheduled/g1 scheduled >/dev/null
+for i in $(seq 1 11); do kv_put secret mutable/registry "registry-v$i" >/dev/null; done
+kv_put other-kv gen/app/g1 other-mount >/dev/null
+for key in rc-art rc-trim rc-del; do bao write -f "transit/keys/$key" >/dev/null; done
+bao write -f other-transit/keys/rc-other >/dev/null
+as compiler encrypt transit rc-art "$W/art.ct" >/dev/null
+as compiler encrypt transit rc-trim "$W/trim.ct" >/dev/null
+as compiler encrypt transit rc-del "$W/del.ct" >/dev/null
+[ "$(key_version "$W/art.ct")" = 1 ] || die "the first ciphertext does not use key version 1"
+
+# --- state: baseline ---------------------------------------------------------------------------------
+rc_bundle baseline
+judge $C retained gen/app/g1@1 metadata retained -- classify openbao-kv secret gen/app/g1 1
+judge $C retained gen/scheduled/g1@1 metadata retained -- classify openbao-kv secret gen/scheduled/g1 1
+judge $C retained mutable/registry@2 metadata retained -- classify openbao-kv secret mutable/registry 2
+judge $C pruned mutable/registry@1 metadata lost -- classify openbao-kv secret mutable/registry 1
+judge $C truth mutable/registry admin ok -- as admin truth secret mutable/registry
+judge $C not-yet mutable/registry@12 metadata unknown -- classify openbao-kv secret mutable/registry 12
+judge $C retained rc-art@1 metadata retained -- classify openbao-transit transit rc-art 1
+judge $C denied other-kv:gen/app/g1@1 metadata unknown -- classify openbao-kv other-kv gen/app/g1 1
+judge $C denied other-transit:rc-other@1 metadata unknown -- classify openbao-transit other-transit rc-other 1
+judge $C absent secret:gen/never/g1@1 metadata unknown -- classify openbao-kv secret gen/never/g1 1
+judge $C watch gen/app/g1@1 metadata retained -- watch gen-app-g1 1 0 openbao-kv secret gen/app/g1 1
+
+# --- state: removed ----------------------------------------------------------------------------------
+# The fixture's injections for soft delete, destruction and key deletion; the administrator's API
+# for the removals the fixture has no injection for (a whole path's metadata, a decryption floor, a
+# trim).
+judge $C inject gen/soft/g1@1 operator ok -- inject bao-soft-delete gen/soft/g1 1
+judge $C inject gen/destroy/g1@1 operator ok -- inject bao-destroy gen/destroy/g1 1
+judge $C inject rc-del operator ok -- inject bao-delete-key rc-del
+judge $C inject gen/metadel/g1 admin ok -- as admin bao kv metadata delete -mount=secret gen/metadel/g1
+judge $C inject rc-art admin ok -- as admin bao write -f transit/keys/rc-art/rotate
+judge $C inject rc-art admin ok -- as admin bao write transit/keys/rc-art/config min_decryption_version=2
+judge $C inject rc-trim admin ok -- as admin bao write -f transit/keys/rc-trim/rotate
+# A trim needs both floors raised first: OpenBao refuses min_available_version while
+# min_encryption_version is unset (HTTP 400, observed on the pinned image).
+judge $C inject rc-trim admin ok -- as admin bao write transit/keys/rc-trim/config min_decryption_version=2 min_encryption_version=2
+judge $C inject rc-trim admin ok -- as admin bao write transit/keys/rc-trim/trim min_available_version=2
+rc_bundle removed
+judge $C soft-deleted gen/soft/g1@1 metadata blocked -- classify openbao-kv secret gen/soft/g1 1
+judge $C destroyed gen/destroy/g1@1 metadata lost -- classify openbao-kv secret gen/destroy/g1 1
+judge $C key-deleted rc-del@1 metadata unknown -- classify openbao-transit transit rc-del 1
+judge $C metadata-deleted gen/metadel/g1@1 metadata unknown -- classify openbao-kv secret gen/metadel/g1 1
+judge $C floor rc-art@1 metadata blocked -- classify openbao-transit transit rc-art 1
+judge $C floor rc-art@2 metadata retained -- classify openbao-transit transit rc-art 2
+judge $C trimmed rc-trim@1 metadata lost -- classify openbao-transit transit rc-trim 1
+judge $C truth rc-trim admin ok -- as admin key_truth transit rc-trim
+judge $C floor rc-art@1 executor fail -- as executor decrypt rc-art "$W/art.ct"
+judge $C key-deleted rc-del@1 executor fail -- as executor decrypt rc-del "$W/del.ct"
+
+# --- state: reversed ---------------------------------------------------------------------------------
+# Blocked is reversible and lost is not: undelete and lower the floor, then classify all four again.
+judge $C reverse gen/soft/g1@1 admin ok -- as admin bao kv undelete -mount=secret -versions=1 gen/soft/g1
+judge $C reverse rc-art admin ok -- as admin bao write transit/keys/rc-art/config min_decryption_version=1
+judge $C reverse rc-trim admin fail -- as admin bao write transit/keys/rc-trim/config min_decryption_version=1
+rc_bundle reversed
+judge $C undeleted gen/soft/g1@1 metadata retained -- classify openbao-kv secret gen/soft/g1 1
+judge $C floor-lowered rc-art@1 metadata retained -- classify openbao-transit transit rc-art 1
+judge $C destroyed gen/destroy/g1@1 metadata lost -- classify openbao-kv secret gen/destroy/g1 1
+judge $C trimmed rc-trim@1 metadata lost -- classify openbao-transit transit rc-trim 1
+judge $C floor-lowered rc-art@1 executor ok -- as executor decrypt rc-art "$W/art.ct"
+
+# --- state: partitioned ------------------------------------------------------------------------------
+judge $C inject openbao operator ok -- inject netsplit openbao
+rc_bundle partitioned
+judge $C unreachable gen/app/g1@1 metadata unknown -- classify openbao-kv secret gen/app/g1 1
+judge $C unreachable gen/destroy/g1@1 metadata unknown -- classify openbao-kv secret gen/destroy/g1 1
+judge $C unreachable rc-art@1 metadata unknown -- classify openbao-transit transit rc-art 1
+judge $C watch gen/app/g1@1 metadata unknown -- watch gen-app-g1 3 4 openbao-kv secret gen/app/g1 1
+judge $C inject openbao operator ok -- inject netjoin openbao
+judge $C rejoined gen/app/g1@1 metadata retained -- classify openbao-kv secret gen/app/g1 1
+
+# --- state: paused -----------------------------------------------------------------------------------
+# A paused provider accepts the connection and never answers. The injection sent while it is paused
+# goes out and gets no answer: the fixture logs it as unknown, because OpenBao may apply it later.
+judge $C inject openbao operator ok -- inject pause openbao
+rc_bundle paused
+judge $C no-answer gen/app/g1@1 metadata unknown -- env RC_ASK_LIMIT=5 "$RC_RUN_DIR/classify" openbao-kv secret gen/app/g1 1
+judge $C inject gen/uncertain/g1@1 operator fail -- inject bao-destroy gen/uncertain/g1 1
+judge $C inject openbao operator ok -- inject unpause openbao
+rc_bundle after-uncertain
+judge $C uncertain gen/uncertain/g1@1 metadata any -- classify openbao-kv secret gen/uncertain/g1 1
+judge $C truth gen/uncertain/g1 admin ok -- as admin truth secret gen/uncertain/g1
+
+# --- state: sealed -----------------------------------------------------------------------------------
+judge $C inject openbao admin ok -- as admin bao operator seal
+rc_bundle sealed
+judge $C sealed gen/app/g1@1 metadata unknown -- classify openbao-kv secret gen/app/g1 1
+judge $C unseal openbao operator ok -- bao_unseal
+judge $C unsealed gen/app/g1@1 metadata retained -- classify openbao-kv secret gen/app/g1 1
+
+# --- retention is not authority (acceptance criterion 3) ---------------------------------------------
+# Each dependency below is classified retained, and then used under an identity that the retention
+# check says nothing about. A retained verdict is a statement about the provider, not a grant.
+rc_bundle authority
+judge $C retained gen/app/g1@1 metadata retained -- classify openbao-kv secret gen/app/g1 1
+judge $C read gen/app/g1@1 metadata denied -- as metadata bao kv get -mount=secret gen/app/g1
+judge $C read gen/app/g1@1 other denied -- as other bao kv get -mount=secret gen/app/g1
+judge $C retained rc-art@1 metadata retained -- classify openbao-transit transit rc-art 1
+judge $C decrypt rc-art@1 compiler denied -- as compiler decrypt rc-art "$W/art.ct"
+sed 's/^\(vault:v[0-9]*:\)./\1A/' "$W/art.ct" >"$W/art-damaged.ct"
+cmp -s "$W/art.ct" "$W/art-damaged.ct" && sed -i 's/^\(vault:v[0-9]*:\)./\1B/' "$W/art-damaged.ct"
+judge $C decrypt rc-art@1 executor fail -- as executor decrypt rc-art "$W/art-damaged.ct"
+judge $C revoke executor admin ok -- as admin bao token revoke -accessor "${ACCESSOR[executor]}"
+judge $C retained rc-art@1 metadata retained -- classify openbao-transit transit rc-art 1
+judge $C decrypt rc-art@1 executor denied -- as executor decrypt rc-art "$W/art.ct"
+
+say "openbao: $(rc_mismatches) mismatch(es) so far in $RC_ROWS"

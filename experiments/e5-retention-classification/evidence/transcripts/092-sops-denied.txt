@@ -1,0 +1,3 @@
+reading the sops metadata block of denied.enc.json
+jq: error: Could not open file <repo>/fixtures/.state/data/rc-sops/secrets/denied.enc.json: Permission denied
+class=unknown reason=denied: file not readable

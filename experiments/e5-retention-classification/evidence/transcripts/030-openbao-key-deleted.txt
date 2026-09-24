@@ -1,0 +1,6 @@
+Error writing data to transit/decrypt/rc-del: Error making API request.
+
+URL: PUT http://127.0.0.1:8200/v1/transit/decrypt/rc-del
+Code: 400. Errors:
+
+* encryption key not found

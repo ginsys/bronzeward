@@ -1,0 +1,3 @@
+asked GET /v1/other-kv/metadata/gen/app/g1 with the metadata-only token: curl exit 0, HTTP 403
+["1 error occurred:\n\t* permission denied\n\n"]
+class=unknown reason=denied: HTTP 403

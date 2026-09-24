@@ -1,0 +1,6 @@
+Error writing data to transit/keys/rc-trim/config: Error making API request.
+
+URL: PUT http://127.0.0.1:8200/v1/transit/keys/rc-trim/config
+Code: 400. Errors:
+
+* min decryption version should not be less then min available version

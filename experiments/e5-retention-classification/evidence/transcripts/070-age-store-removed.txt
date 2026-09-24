@@ -1,0 +1,3 @@
+reading meta/removed/g1.json and the digest of objects/removed/g1.age
+sha256sum: <repo>/fixtures/.state/data/rc-age-store/objects/removed/g1.age: No such file or directory
+class=unknown reason=absent: metadata present, ciphertext absent
