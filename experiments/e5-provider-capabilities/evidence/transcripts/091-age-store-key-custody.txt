@@ -1,1 +1,1 @@
-identity compiler recipient age1h4j42jgrh3w9hfz943cl9jufs5zucz3myx935zqzyldh8wv285ss2yessu
+identity compiler recipient age1ydnw9xaxffehg9n5mljhg50dzxdwjqx6q72k0a2vrzrrn522qfhsvh67vv (published as recipients/compiler.pub)

@@ -1,1 +1,1 @@
-identity compiler-2 recipient age1lqemml8rwx7e84msjjmxt97acu2gnzw7n2hl28tgj3dwwv0rf9wqyc0f0a
+identity compiler-2 recipient age1hhgtwx9fcq9ruguhzy675cxsjgr07u6t8r2r2ls9py8hx8xu83dqpymvcn (published as recipients/compiler-2.pub)

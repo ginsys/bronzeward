@@ -1,1 +1,1 @@
-<repo>/experiments/e5-provider-capabilities/run/age-store: line 47: <repo>/fixtures/.state/data/age-store/objects/app-token/g1.age: cannot overwrite existing file
+<repo>/experiments/e5-provider-capabilities/run/age-store: line 49: <repo>/fixtures/.state/data/age-store/objects/app-token/g1.age: cannot overwrite existing file
