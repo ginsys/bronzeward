@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Candidate C: SOPS with age, as operator-maintained encrypted files (design §7.3: "an alternative or
+# import/export mechanism"). The import/export role itself is exercised by run/migrate.
+#
+#   .state/data/sops/
+#     .sops.yaml                     creation rules: secrets/ to compiler + recovery, artifacts/ to executor
+#     keys/<identity>.key            age identities, one per role (0600)
+#     secrets/<name>.enc.json        one file per logical secret; sops keeps no version history
+#     artifacts/<id>.enc.json        a rendered artifact, encrypted whole (binary input type)
+#
+# Phase-0 evidence for the provider-capability experiment (ginsys/bronzeward issue 8). Not v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+e5_init
+e5_need_fixture
+
+C=sops
+D=$STATE/data/sops
+W=$E5_WORK/sops
+mkdir -p -- "$D/keys" "$D/secrets" "$D/artifacts" "$W"
+chmod 700 "$D/keys"
+
+age_keygen() { "$CACHE/age-keygen" "$@"; }
+recipient() { age_keygen -y "$D/keys/$1.key"; }
+# sops_as <identity> <sops-args...>: the identity is the key file sops is given; no other key is
+# reachable (SOPS_AGE_KEY and the default key location are cleared).
+sops_as() {
+  local role=$1
+  shift
+  env -u SOPS_AGE_KEY -u SOPS_AGE_KEY_CMD SOPS_AGE_KEY_FILE="$D/keys/$role.key" XDG_CONFIG_HOME="$W/no-config" \
+    "$CACHE/sops" --config "$D/.sops.yaml" "$@"
+}
+sops_nokey() {
+  env -u SOPS_AGE_KEY -u SOPS_AGE_KEY_CMD -u SOPS_AGE_KEY_FILE XDG_CONFIG_HOME="$W/no-config" \
+    "$CACHE/sops" --config "$D/.sops.yaml" "$@"
+}
+
+# --- helpers: each prints a verdict or non-secret metadata, never a value ---------------------------
+
+newkey() {
+  (umask 077 && age_keygen -o "$D/keys/$1.key" 2>/dev/null) || return 1
+  printf 'identity %s recipient %s\n' "$1" "$(recipient "$1")"
+}
+rules() { # rules <secret-recipients> <artifact-recipients>: comma-separated identities
+  local s a
+  s=$(for r in ${1//,/ }; do recipient "$r"; done | paste -sd, -)
+  a=$(for r in ${2//,/ }; do recipient "$r"; done | paste -sd, -)
+  printf 'creation_rules:\n  - path_regex: secrets/.*\n    age: %s\n  - path_regex: artifacts/.*\n    age: %s\n' "$s" "$a" \
+    >"$D/.sops.yaml"
+  echo "secrets to $1; artifacts to $2"
+}
+# shellcheck disable=SC2094 # --filename-override only names the file for rule matching; sops reads stdin
+put() { # put <name> <value-name>: create-only, the value over stdin
+  local f=$D/secrets/$1.enc.json
+  { printf '{"value": '; jq -Rs . <"$(e5_value_file "$2")"; printf '}\n'; } |
+    (set -C && sops_nokey encrypt --filename-override "$f" --input-type json --output-type json /dev/stdin >"$f") ||
+    return 1
+  echo "created $1"
+}
+set_value() { # set_value <identity> <name> <value-name>: overwrite in place, the value over stdin
+  jq -Rs . <"$(e5_value_file "$3")" | sops_as "$1" set --value-stdin "$D/secrets/$2.enc.json" '["value"]'
+}
+get() { sops_as "$1" decrypt --extract '["value"]' "$D/secrets/$2.enc.json"; }
+meta() { # meta <file>: what the file says about itself without any key
+  jq -r '.sops | "lastmodified=\(.lastmodified) recipients=\([.age[].recipient] | length) mac_present=\(.mac != null) version=\(.version)"' "$1"
+}
+race() { # race <name>: two writers of one file at once; both are told they succeeded
+  local a=0 b=0 got
+  set_value compiler "$1" race-a >/dev/null 2>&1 &
+  local pa=$!
+  set_value compiler "$1" race-b >/dev/null 2>&1 &
+  local pb=$!
+  wait "$pa" || a=1
+  wait "$pb" || b=1
+  got=$(get compiler "$1" | sha256sum | cut -d' ' -f1)
+  case $got in
+    "$(e5_digest race-a)") got=a ;;
+    "$(e5_digest race-b)") got=b ;;
+    *) got=neither ;;
+  esac
+  printf 'writer a rc=%s, writer b rc=%s, file holds writer %s\n' "$a" "$b" "$got"
+}
+# shellcheck disable=SC2094 # as for put
+seal_artifact() {
+  local f=$D/artifacts/$1.enc.json
+  (set -C && sops_nokey encrypt --filename-override "$f" --input-type binary --output-type json /dev/stdin \
+    <"$W/artifact.yaml" >"$f") || return 1
+  echo "artifact $1 encrypted"
+}
+open_artifact() {
+  check_digest "$(sha256sum <"$W/artifact.yaml" | cut -d' ' -f1)" \
+    sops_as "$1" decrypt --input-type json --output-type binary "$D/artifacts/$2.enc.json"
+}
+updatekeys() { sops_as "$1" updatekeys -y "$D/secrets/$2.enc.json"; }
+
+# --- inputs ------------------------------------------------------------------------------------------
+
+for v in app-token-g1 app-token-g2 race-a race-b artifact-token; do e5_secret "$v"; done
+{
+  printf 'machine:\n  token: '
+  cat "$(e5_value_file artifact-token)"
+  printf '\n'
+} >"$W/artifact.yaml"
+
+# --- key custody --------------------------------------------------------------------------------------
+
+col='key-custody'
+cell $C $col operator ok primitive -- newkey compiler
+cell $C $col operator ok primitive -- newkey executor
+cell $C $col operator ok primitive -- newkey recovery
+cell $C $col operator ok - -- rules compiler,recovery executor
+unsupported $C $col 'no permission boundary between identities in one uid: possession of a key file is the only control'
+
+# --- create, read, versioning -------------------------------------------------------------------------
+
+col='create-read-version'
+cell $C $col publisher ok primitive -- put app-token app-token-g1
+cell $C $col publisher fail primitive -- put app-token app-token-g2
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g1)" get compiler app-token
+cell $C $col recovery ok primitive -- check_digest "$(e5_digest app-token-g1)" get recovery app-token
+cell $C $col executor fail primitive -- get executor app-token
+cell $C $col compiler ok primitive -- set_value compiler app-token app-token-g2
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler app-token
+unsupported $C $col 'no version history: an update replaces the only copy; generations exist only as separate files or in an outside history such as git'
+cell $C $col compiler ok primitive -- race app-token
+# The race leaves whichever writer landed last; put the known value back for the cells below.
+cell $C $col compiler ok - -- set_value compiler app-token app-token-g2
+unsupported $C $col 'no compare-and-set: concurrent writers both succeed and the last write wins'
+
+# --- artifact encryption ------------------------------------------------------------------------------
+
+col='artifact-encryption'
+cell $C $col compiler ok primitive -- seal_artifact rel-1
+cell $C $col executor ok primitive -- open_artifact executor rel-1
+cell $C $col compiler fail primitive -- open_artifact compiler rel-1
+
+# --- signing ------------------------------------------------------------------------------------------
+
+unsupported $C signing 'sops has no signatures of its own; the MAC authenticates the file to key holders only'
+
+# --- metadata-only checks -----------------------------------------------------------------------------
+
+col='metadata-only'
+cell $C $col metadata ok metadata -- meta "$D/secrets/app-token.enc.json"
+cell $C $col metadata ok metadata -- meta "$D/artifacts/rel-1.enc.json"
+cell $C $col metadata fail metadata -- sops_nokey decrypt --extract '["value"]' "$D/secrets/app-token.enc.json"
+
+# --- rotation -----------------------------------------------------------------------------------------
+
+col='rotation'
+cell $C $col compiler ok versioned -- sops_as compiler rotate -i "$D/secrets/app-token.enc.json"
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler app-token
+cell $C $col operator ok primitive -- newkey compiler-2
+cell $C $col operator ok - -- rules compiler-2,recovery executor
+cell $C $col compiler ok versioned -- updatekeys compiler app-token
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
+cell $C $col compiler fail primitive -- get compiler app-token
+cell $C $col metadata ok metadata -- meta "$D/secrets/app-token.enc.json"
+unsupported $C $col 'no reversible decryption floor: removing a recipient re-encrypts the data key, and restoring access means re-adding it with a key that can still decrypt'
+
+# --- startup unlock -----------------------------------------------------------------------------------
+
+col='startup-unlock'
+cell $C $col compiler fail primitive -- sops_nokey decrypt "$D/secrets/app-token.enc.json"
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
+
+# --- backup and restore -------------------------------------------------------------------------------
+
+col='backup-restore'
+cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-snapshot e5-sops
+cell $C $col compiler ok primitive -- set_value compiler-2 app-token app-token-g1
+cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-restore e5-sops
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
+cell $C $col executor ok primitive -- open_artifact executor rel-1
+
+say "sops: $(e5_mismatches) mismatch(es) so far in $E5_CELLS"

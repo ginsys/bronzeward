@@ -34,7 +34,7 @@ recipient() { age_keygen -y "$S/keys/$1.key"; }
 # --- helpers: each prints a verdict or non-secret metadata, never a value ---------------------------
 
 newkey() { # newkey <identity>
-  (umask 077 && age_keygen -o "$S/keys/$1.key" 2>/dev/null)
+  (umask 077 && age_keygen -o "$S/keys/$1.key" 2>/dev/null) || return 1
   printf 'identity %s recipient %s\n' "$1" "$(recipient "$1")"
 }
 put() { # put <recipient-identity> <name> <gen> <value-name>: create-only, as a publisher would
@@ -73,7 +73,7 @@ race() { # race <name> <gen>: two creators of one generation at once; exactly on
   [ $((a + b)) -eq 1 ]
 }
 seal_artifact() { # seal_artifact <id>: encrypt the rendered artifact to the executor
-  (set -C && age -r "$(recipient executor)" <"$W/artifact.yaml" >"$S/artifacts/$1.age")
+  (set -C && age -r "$(recipient executor)" <"$W/artifact.yaml" >"$S/artifacts/$1.age") || return 1
   echo "artifact $1 encrypted to the executor"
 }
 open_artifact() { # open_artifact <identity> <id>: the plaintext digest's verdict only
@@ -83,10 +83,10 @@ rotate() { # rotate <name> <gen> <old-identity> <new-identity>: re-encrypt; plai
   local obj=$S/objects/$1/$2.age tmp
   tmp=$(mktemp "$S/objects/$1/.$2.XXXXXX")
   age -d -i "$S/keys/$3.key" "$obj" | age -r "$(recipient "$4")" >"$tmp" || { rm -f -- "$tmp"; return 1; }
-  mv -- "$tmp" "$obj"
+  mv -- "$tmp" "$obj" || return 1
   jq --arg r "$(recipient "$4")" --arg sha256 "$(sha256sum <"$obj" | cut -d' ' -f1)" \
-    '.recipient = $r | .ciphertext_sha256 = $sha256' "$S/meta/$1/$2.json" >"$S/meta/$1/$2.json.new"
-  mv -- "$S/meta/$1/$2.json.new" "$S/meta/$1/$2.json"
+    '.recipient = $r | .ciphertext_sha256 = $sha256' "$S/meta/$1/$2.json" >"$S/meta/$1/$2.json.new" || return 1
+  mv -- "$S/meta/$1/$2.json.new" "$S/meta/$1/$2.json" || return 1
   echo "re-encrypted $1/$2 from $3 to $4"
 }
 modes() { stat -c '%A %n' "$S/keys" "$S"/keys/*.key "$S/objects" "$S/meta" | sed "s|$S/||"; }
