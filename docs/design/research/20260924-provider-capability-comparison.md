@@ -4,7 +4,7 @@
 |---|---|
 | **Date** | 24 September 2026 |
 | **Work item** | [Experiment E5 - compare provider capabilities](https://github.com/ginsys/bronzeward/issues/8) |
-| **Design reference** | [§7.3 Secret and encryption provider candidates](../Talos_Configuration_and_Machine_Management_Design.md#73-secret-and-encryption-provider-candidates), [§7.5 Rotation and retention contract](../Talos_Configuration_and_Machine_Management_Design.md#75-rotation-and-retention-contract), [§7.6 Metadata-only dependency checks](../Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks), [§18.1 Phase 0](../Talos_Configuration_and_Machine_Management_Design.md#181-phase-0---evidence-before-implementation-contracts) |
+| **Design reference** | [§7.3 Secret and encryption provider candidates](../Talos_Configuration_and_Machine_Management_Design.md#73-secret-and-encryption-provider-candidates), [§7.5 Rotation and retention contract](../Talos_Configuration_and_Machine_Management_Design.md#75-rotation-and-retention-contract), [§7.6 Metadata-only dependency checks](../Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks), [§18.1 Phase 0](../Talos_Configuration_and_Machine_Management_Design.md#188-phase-0---evidence-before-implementation-contracts) |
 | **Artifacts** | [`experiments/e5-provider-capabilities/`](../../../experiments/e5-provider-capabilities/README.md), evidence under [`experiments/e5-provider-capabilities/evidence/`](../../../experiments/e5-provider-capabilities/evidence/) |
 | **Decision enabled** | Which provider properties each candidate supplies itself, which a Bronzeward provider would have to supply by convention, and which none of them supplies. This is the input to [deployment profile selection](https://github.com/ginsys/bronzeward/issues/13). No provider, physical layout or deployment profile is selected here. |
 
@@ -88,10 +88,10 @@ acceptance criterion 2 asks for:
 
 | Script | Cells | What it does |
 |---|---|---|
-| [`run/openbao`](../../../experiments/e5-provider-capabilities/run/openbao) | 001-085 | KV v2 and Transit, column by column |
-| [`run/age-store`](../../../experiments/e5-provider-capabilities/run/age-store) | 086-130 | builds the local store and exercises it |
-| [`run/sops`](../../../experiments/e5-provider-capabilities/run/sops) | 131-171 | SOPS as a store |
-| [`run/migrate`](../../../experiments/e5-provider-capabilities/run/migrate) | 172-187 | moves generations and artifacts between candidates, and SOPS import/export |
+| [`run/openbao`](../../../experiments/e5-provider-capabilities/run/openbao) | 001-090 | KV v2 and Transit, column by column |
+| [`run/age-store`](../../../experiments/e5-provider-capabilities/run/age-store) | 091-135 | builds the local store and exercises it |
+| [`run/sops`](../../../experiments/e5-provider-capabilities/run/sops) | 136-178 | SOPS as a store |
+| [`run/migrate`](../../../experiments/e5-provider-capabilities/run/migrate) | 179-194 | moves generations and artifacts between candidates, and SOPS import/export |
 | [`run/all`](../../../experiments/e5-provider-capabilities/run/all) | | the four above on a fresh fixture, then the fixture's evidence bundle and leak scan |
 
 A cell number in this report is the `n` column of `cells.tsv`; its transcript is
@@ -112,7 +112,7 @@ something else.
 | `age`, `age-keygen` | v1.3.2 |
 | `sops` | 3.13.3 |
 | Pins | `fixtures/versions.env` as of c74f953; binaries checked against the manifest digests |
-| Captured from | a7c3ce7 (`manifest commit` in [`versions.txt`](../../../experiments/e5-provider-capabilities/evidence/versions.txt)) |
+| Captured from | 923ab37 (`manifest commit` in [`versions.txt`](../../../experiments/e5-provider-capabilities/evidence/versions.txt)) |
 
 ### 3.4 Synthetic values and the leak scan
 
@@ -132,12 +132,13 @@ Observed ([`summary.txt`](../../../experiments/e5-provider-capabilities/evidence
 leak-scan lines: 3
 positive control hits: 3
 other hits: 0
-cells: 187, mismatches: 0
+cells: 194, mismatches: 0
 ```
 
 The three hits are the control in the live tree and its copies in the two store snapshots. No
-synthetic value appears in plaintext in either local store, either store snapshot or the OpenBao
-snapshot.
+synthetic value appears in plaintext in either local store or either store snapshot. The OpenBao
+snapshot was scanned too, but it is encrypted by OpenBao's barrier and holds no control, so its
+clean result shows nothing.
 
 ### 3.5 Reproduction
 
@@ -164,15 +165,15 @@ named absence.
 
 | §7.3 element | OpenBao KV v2 + Transit | local age-backed store | SOPS with age |
 |---|---|---|---|
-| **Create / read / versioning** | **Native, versioned.** `cas=0` creates a generation once; a second create is refused ([003](../../../experiments/e5-provider-capabilities/evidence/transcripts/003-openbao-create-read-version.txt), 400 "check-and-set parameter did not match"). A mutable path keeps 10 versions: after 11 writes `oldest=2` and version 1 reads "No value found" ([019](../../../experiments/e5-provider-capabilities/evidence/transcripts/019-openbao-create-read-version.txt), [020](../../../experiments/e5-provider-capabilities/evidence/transcripts/020-openbao-create-read-version.txt)). An explicit `max_versions=0` does the same ([034](../../../experiments/e5-provider-capabilities/evidence/transcripts/034-openbao-create-read-version.txt)). `cas_required` refuses a write without CAS ([036](../../../experiments/e5-provider-capabilities/evidence/transcripts/036-openbao-create-read-version.txt)). | **Convention, versioned by layout.** `O_EXCL` refuses a second create ([091](../../../experiments/e5-provider-capabilities/evidence/transcripts/091-age-store-create-read-version.txt)), and of two concurrent creators exactly one wins ([096](../../../experiments/e5-provider-capabilities/evidence/transcripts/096-age-store-create-read-version.txt)). A writer that deletes the file first replaces a generation, and nothing records it (097-099). No retention limit and no pruning (100, unsupported). | **Primitive.** Create-only exists only in the writer's own `noclobber` ([137](../../../experiments/e5-provider-capabilities/evidence/transcripts/137-sops-create-read-version.txt)). An update replaces the only copy (141-142). No version history (143) and no compare-and-set (146), both unsupported: two concurrent `sops set` both exit 0 and the last write wins ([144](../../../experiments/e5-provider-capabilities/evidence/transcripts/144-sops-create-read-version.txt)). |
-| **Artifact encryption** | **Native, primitive.** Transit: the compiler encrypts ([038](../../../experiments/e5-provider-capabilities/evidence/transcripts/038-openbao-artifact-encryption.txt)), only the executor decrypts ([039](../../../experiments/e5-provider-capabilities/evidence/transcripts/039-openbao-artifact-encryption.txt), 040-041 denied), and neither the executor nor the metadata identity can encrypt (042-043 denied). | **Primitive.** Encrypted to the executor's recipient ([101](../../../experiments/e5-provider-capabilities/evidence/transcripts/101-age-store-artifact-encryption.txt)); the executor opens it, the compiler cannot ([102](../../../experiments/e5-provider-capabilities/evidence/transcripts/102-age-store-artifact-encryption.txt), [103](../../../experiments/e5-provider-capabilities/evidence/transcripts/103-age-store-artifact-encryption.txt)). Anyone holding the public recipient can encrypt. | **Primitive.** The whole artifact is encrypted as binary input to the executor (147-148); the compiler cannot open it ([149](../../../experiments/e5-provider-capabilities/evidence/transcripts/149-sops-artifact-encryption.txt)). |
-| **Signing** | **Native, primitive.** An `ed25519` Transit key signs and verifies under the administrator ([045](../../../experiments/e5-provider-capabilities/evidence/transcripts/045-openbao-signing.txt)); the compiler is denied ([046](../../../experiments/e5-provider-capabilities/evidence/transcripts/046-openbao-signing.txt)). | **Unsupported** (104): age has no signatures. | **Unsupported** (150): the MAC authenticates the file to key holders only. |
-| **Key custody** | **Native.** The Transit key reports `exportable=false deletion_allowed=false` to the metadata identity ([047](../../../experiments/e5-provider-capabilities/evidence/transcripts/047-openbao-key-custody.txt)), and export is refused even to the administrator ([048](../../../experiments/e5-provider-capabilities/evidence/transcripts/048-openbao-key-custody.txt), "private key material is not exportable"). The barrier uses one Shamir share, threshold 1 ([049](../../../experiments/e5-provider-capabilities/evidence/transcripts/049-openbao-key-custody.txt)). | **Files.** Key files are `0600` in a `0700` directory; the object and metadata directories took the caller's umask, `0775` here ([088](../../../experiments/e5-provider-capabilities/evidence/transcripts/088-age-store-key-custody.txt)). No boundary between identities in one uid (089, unsupported). | **Files.** One key file per role, recipients chosen by `.sops.yaml` path rules (131-134). No boundary in one uid (135, unsupported). By default sops also tries the caller's own SSH keys as identities (§5.5). |
-| **Startup unlock** | **Native.** After a seal every read fails 503 "Vault is sealed" ([073](../../../experiments/e5-provider-capabilities/evidence/transcripts/073-openbao-startup-unlock.txt)); the operator unseals with the key share (074) and reads resume (075). A crash and restart through the fixture (076-078) comes back unsealed, because the fixture's `start` unseals (§7). | **Possession of an identity file.** An unencrypted identity reads unattended ([121](../../../experiments/e5-provider-capabilities/evidence/transcripts/121-age-store-startup-unlock.txt)). A passphrase-protected one cannot: age reads the passphrase from a terminal only ([123](../../../experiments/e5-provider-capabilities/evidence/transcripts/123-age-store-startup-unlock.txt), "/dev/tty is not available"). Fed through a pseudo-terminal it works ([124](../../../experiments/e5-provider-capabilities/evidence/transcripts/124-age-store-startup-unlock.txt)), so the feeding process holds the passphrase. | **Possession of an identity file.** Without one every read fails ([165](../../../experiments/e5-provider-capabilities/evidence/transcripts/165-sops-startup-unlock.txt)); with one it succeeds (166). |
-| **Rotation** | **Native, versioned.** `rotate` adds key version 2 ([051](../../../experiments/e5-provider-capabilities/evidence/transcripts/051-openbao-rotation.txt)); version-1 ciphertext still decrypts (052). `rewrap` moves ciphertext to the new version without returning plaintext, and only an identity granted it may ([054](../../../experiments/e5-provider-capabilities/evidence/transcripts/054-openbao-rotation.txt) denied, [055](../../../experiments/e5-provider-capabilities/evidence/transcripts/055-openbao-rotation.txt)). `min_decryption_version=2` blocks version 1 ("too old", [058](../../../experiments/e5-provider-capabilities/evidence/transcripts/058-openbao-rotation.txt)), and lowering it restores access ([061](../../../experiments/e5-provider-capabilities/evidence/transcripts/061-openbao-rotation.txt)): a reversible floor. A source secret rotates as a new generation beside the old (062-063). | **Primitive.** Re-encrypt a generation to a new key ([106](../../../experiments/e5-provider-capabilities/evidence/transcripts/106-age-store-rotation.txt)); the old key no longer reads it (108). The plaintext passes through the rotating process (110, unsupported: no rewrap). Blocking an old key means moving its file, which leaves nothing the store can report (111, unsupported: no reversible floor). | **Primitive.** `rotate` replaces the data key: the value's ciphertext changes ([155](../../../experiments/e5-provider-capabilities/evidence/transcripts/155-sops-rotation.txt)). `updatekeys` to a new compiler key keeps the data key: the ciphertext is unchanged ([160](../../../experiments/e5-provider-capabilities/evidence/transcripts/160-sops-rotation.txt)). The removed key is refused on the new file ([162](../../../experiments/e5-provider-capabilities/evidence/transcripts/162-sops-rotation.txt)). No reversible floor (164, unsupported). |
-| **Metadata-only checks** | **Native.** The metadata identity reads KV version metadata (`created_time`, `deletion_time`, `destroyed`, `current_version`, `oldest_version`, `max_versions`; [064](../../../experiments/e5-provider-capabilities/evidence/transcripts/064-openbao-metadata-only.txt)), lists paths (065), and reads Transit key state (067). It cannot decrypt (068). The compiler cannot read metadata (069), and the executor cannot read key state (070): metadata and data are separate grants. | **Convention.** The metadata file proves presence, recipient and that the ciphertext matches its recorded digest ([112](../../../experiments/e5-provider-capabilities/evidence/transcripts/112-age-store-metadata-only.txt)). A damaged ciphertext is caught ([120](../../../experiments/e5-provider-capabilities/evidence/transcripts/120-age-store-metadata-only.txt)). A generation whose only key was deleted still passes every metadata check ([117](../../../experiments/e5-provider-capabilities/evidence/transcripts/117-age-store-metadata-only.txt)) and cannot be read ([118](../../../experiments/e5-provider-capabilities/evidence/transcripts/118-age-store-metadata-only.txt)). The metadata is written by the writer, not by the store. | **Partial.** Without any key the file shows `lastmodified`, the recipient count, that a MAC is present, and the sops version ([151](../../../experiments/e5-provider-capabilities/evidence/transcripts/151-sops-metadata-only.txt)); decryption fails (153). There is no version history to report, and the MAC is verifiable only with a key. |
-| **Backup / restore** | **Native.** A Raft snapshot (079), a generation created after it (080), a forced restore (081): the older generation reads (082) and the newer one is gone ([083](../../../experiments/e5-provider-capabilities/evidence/transcripts/083-openbao-backup-restore.txt), "No value found"). Transit ciphertext from before the snapshot, including rewrapped ciphertext, still decrypts ([084](../../../experiments/e5-provider-capabilities/evidence/transcripts/084-openbao-backup-restore.txt), [085](../../../experiments/e5-provider-capabilities/evidence/transcripts/085-openbao-backup-restore.txt)). | **Files.** A tar of the store (125), a generation after it (126), a restore (127): the older generation reads (128), the newer has no metadata ([129](../../../experiments/e5-provider-capabilities/evidence/transcripts/129-age-store-backup-restore.txt)), and the artifact still opens (130). The keys are inside the snapshot (§6.3). | **Files.** A tar (167), a change (168), a restore (169): the value reads as before the change ([170](../../../experiments/e5-provider-capabilities/evidence/transcripts/170-sops-backup-restore.txt)), and the artifact opens (171). |
-| **Migration** | *Into OpenBao:* see the next two columns. *Out:* one KV version becomes an age generation ([178](../../../experiments/e5-provider-capabilities/evidence/transcripts/178-migration-openbao-to-age.txt), 179). Of 11 versions at a mutable path, 10 move and the pruned one cannot ([180](../../../experiments/e5-provider-capabilities/evidence/transcripts/180-migration-openbao-to-age.txt)). Transit ciphertext cannot move at all: the key is not exportable (182, unsupported). | *To OpenBao:* the migrating process needs the compiler's age key and the publisher's token at once ([172](../../../experiments/e5-provider-capabilities/evidence/transcripts/172-migration-age-to-openbao.txt)). The source's creation time is lost unless carried as custom metadata ([174](../../../experiments/e5-provider-capabilities/evidence/transcripts/174-migration-age-to-openbao.txt)). Repeating the migration is refused, because the publisher may only create ([175](../../../experiments/e5-provider-capabilities/evidence/transcripts/175-migration-age-to-openbao.txt)). An artifact moves to Transit only through a process holding the executor's age key and the compiler's token (176-177). | *Import:* a SOPS file becomes a new KV generation ([183](../../../experiments/e5-provider-capabilities/evidence/transcripts/183-migration-sops-import.txt), 184). *Export:* a KV generation becomes a SOPS file, which the recovery identity can read ([185](../../../experiments/e5-provider-capabilities/evidence/transcripts/185-migration-sops-export.txt), [186](../../../experiments/e5-provider-capabilities/evidence/transcripts/186-migration-sops-export.txt)). |
+| **Create / read / versioning** | **Native, versioned.** `cas=0` creates a generation once; a second create is refused ([003](../../../experiments/e5-provider-capabilities/evidence/transcripts/003-openbao-create-read-version.txt), 400 "check-and-set parameter did not match"). A mutable path keeps 10 versions: after 11 writes `oldest=2` and version 1 reads "No value found" ([019](../../../experiments/e5-provider-capabilities/evidence/transcripts/019-openbao-create-read-version.txt), [020](../../../experiments/e5-provider-capabilities/evidence/transcripts/020-openbao-create-read-version.txt)). An explicit `max_versions=0` does the same ([034](../../../experiments/e5-provider-capabilities/evidence/transcripts/034-openbao-create-read-version.txt)). `cas_required` refuses a write without CAS ([036](../../../experiments/e5-provider-capabilities/evidence/transcripts/036-openbao-create-read-version.txt)). The `gen/` paths are not `cas_required`, so create-only is the publisher's policy, not the path's: the administrator adds version 2 to a generation path without CAS ([087](../../../experiments/e5-provider-capabilities/evidence/transcripts/087-openbao-create-read-version.txt)), the metadata shows `current=2` (088), and both versions stay readable (089-090). | **Primitive; generations by convention.** `O_EXCL` refuses a second create ([096](../../../experiments/e5-provider-capabilities/evidence/transcripts/096-age-store-create-read-version.txt)), and of two concurrent creators exactly one wins ([101](../../../experiments/e5-provider-capabilities/evidence/transcripts/101-age-store-create-read-version.txt)). A writer that deletes the file first replaces a generation, and nothing records it (102-104). No retention limit and no pruning (105, unsupported). | **Primitive.** Create-only exists only in the writer's own `noclobber` ([142](../../../experiments/e5-provider-capabilities/evidence/transcripts/142-sops-create-read-version.txt)). An update replaces the only copy (146-147). No version history (148) and no compare-and-set or locking (150), both unsupported: two concurrent `sops set` adding different keys to one file both exit 0, and in 5 of 10 attempts one key was lost ([149](../../../experiments/e5-provider-capabilities/evidence/transcripts/149-sops-create-read-version.txt)). |
+| **Artifact encryption** | **Native, primitive.** Transit: the compiler encrypts ([038](../../../experiments/e5-provider-capabilities/evidence/transcripts/038-openbao-artifact-encryption.txt)), only the executor decrypts ([039](../../../experiments/e5-provider-capabilities/evidence/transcripts/039-openbao-artifact-encryption.txt), 040-041 denied), and neither the executor nor the metadata identity can encrypt (042-043 denied). | **Primitive.** Encrypted to the executor's recipient ([106](../../../experiments/e5-provider-capabilities/evidence/transcripts/106-age-store-artifact-encryption.txt)); the executor opens it, the compiler cannot ([107](../../../experiments/e5-provider-capabilities/evidence/transcripts/107-age-store-artifact-encryption.txt), [108](../../../experiments/e5-provider-capabilities/evidence/transcripts/108-age-store-artifact-encryption.txt)). Anyone holding the public recipient can encrypt. | **Primitive.** The whole artifact is encrypted as binary input to the executor (151-152); the compiler cannot open it ([153](../../../experiments/e5-provider-capabilities/evidence/transcripts/153-sops-artifact-encryption.txt)). |
+| **Signing** | **Native, primitive.** An `ed25519` Transit key signs and verifies under the administrator ([045](../../../experiments/e5-provider-capabilities/evidence/transcripts/045-openbao-signing.txt)); the compiler is denied ([046](../../../experiments/e5-provider-capabilities/evidence/transcripts/046-openbao-signing.txt)). | **Unsupported** (109): age has no signatures. | **Unsupported** (154): the MAC authenticates the file to key holders only. |
+| **Key custody** | **Native.** The Transit key reports `exportable=false deletion_allowed=false` to the metadata identity ([047](../../../experiments/e5-provider-capabilities/evidence/transcripts/047-openbao-key-custody.txt)), and export is refused even to the administrator ([048](../../../experiments/e5-provider-capabilities/evidence/transcripts/048-openbao-key-custody.txt), "private key material is not exportable"). The barrier uses one Shamir share, threshold 1 ([049](../../../experiments/e5-provider-capabilities/evidence/transcripts/049-openbao-key-custody.txt)). | **Files.** Key files are `0600` in a `0700` directory; the object and metadata directories took the caller's umask, `0775` here ([093](../../../experiments/e5-provider-capabilities/evidence/transcripts/093-age-store-key-custody.txt)). No boundary between identities in one uid (094, unsupported). | **Files.** One key file per role, recipients chosen by `.sops.yaml` path rules (136-139). No boundary in one uid (140, unsupported). By default sops also tries the caller's own SSH keys as identities (§5.5). |
+| **Startup unlock** | **Native.** After a seal a read fails 503 "Vault is sealed" ([073](../../../experiments/e5-provider-capabilities/evidence/transcripts/073-openbao-startup-unlock.txt)); the operator unseals with the key share (074) and reads resume (075). A crash and restart through the fixture (076-078) comes back unsealed, because the fixture's `start` unseals (§7). | **Possession of an identity file.** An unencrypted identity reads unattended ([126](../../../experiments/e5-provider-capabilities/evidence/transcripts/126-age-store-startup-unlock.txt)). A passphrase-protected one cannot: age reads the passphrase from a terminal only ([128](../../../experiments/e5-provider-capabilities/evidence/transcripts/128-age-store-startup-unlock.txt), "/dev/tty is not available"). Fed through a pseudo-terminal it works ([129](../../../experiments/e5-provider-capabilities/evidence/transcripts/129-age-store-startup-unlock.txt)), so the feeding process holds the passphrase. | **Possession of an identity file.** Without one a read fails ([171](../../../experiments/e5-provider-capabilities/evidence/transcripts/171-sops-startup-unlock.txt)); with one it succeeds (172). |
+| **Rotation** | **Native, versioned.** `rotate` adds key version 2 ([051](../../../experiments/e5-provider-capabilities/evidence/transcripts/051-openbao-rotation.txt)); version-1 ciphertext still decrypts (052). `rewrap` moves ciphertext to the new version without returning plaintext; the compiler is refused it and the administrator may ([054](../../../experiments/e5-provider-capabilities/evidence/transcripts/054-openbao-rotation.txt) denied, [055](../../../experiments/e5-provider-capabilities/evidence/transcripts/055-openbao-rotation.txt)). `min_decryption_version=2` blocks version 1 ("too old", [058](../../../experiments/e5-provider-capabilities/evidence/transcripts/058-openbao-rotation.txt)), and lowering it restores access ([061](../../../experiments/e5-provider-capabilities/evidence/transcripts/061-openbao-rotation.txt)): a reversible floor. A source secret rotates as a new generation beside the old (062-063). | **Primitive.** Re-encrypt a generation to a new key ([111](../../../experiments/e5-provider-capabilities/evidence/transcripts/111-age-store-rotation.txt)); the old key no longer reads it (113). The plaintext passes through the rotating process (115, unsupported: no rewrap). Blocking an old key means moving its file, which leaves nothing the store can report (116, unsupported: no reversible floor). | **Primitive.** `rotate` replaces the data key: the value's ciphertext changes ([159](../../../experiments/e5-provider-capabilities/evidence/transcripts/159-sops-rotation.txt)), and the new values no longer open under the file's old recipient stanzas ([160](../../../experiments/e5-provider-capabilities/evidence/transcripts/160-sops-rotation.txt), an AES-GCM authentication failure). `updatekeys` to a new compiler key keeps the data key: the ciphertext is unchanged ([165](../../../experiments/e5-provider-capabilities/evidence/transcripts/165-sops-rotation.txt)), and the old stanzas with the removed compiler key still open the current value ([166](../../../experiments/e5-provider-capabilities/evidence/transcripts/166-sops-rotation.txt)). The removed key is refused on the new file ([168](../../../experiments/e5-provider-capabilities/evidence/transcripts/168-sops-rotation.txt)). No reversible floor (170, unsupported). |
+| **Metadata-only checks** | **Native.** The metadata identity reads KV version metadata (`created_time`, `deletion_time`, `destroyed`, `current_version`, `oldest_version`, `max_versions`; [064](../../../experiments/e5-provider-capabilities/evidence/transcripts/064-openbao-metadata-only.txt)), lists paths (065), and reads Transit key state (067). It cannot decrypt (068). The compiler cannot read metadata (069), and the executor cannot read key state (070): metadata and data are separate grants. | **Convention.** The metadata file proves presence, recipient and that the ciphertext matches its recorded digest ([117](../../../experiments/e5-provider-capabilities/evidence/transcripts/117-age-store-metadata-only.txt)). A damaged ciphertext is caught ([125](../../../experiments/e5-provider-capabilities/evidence/transcripts/125-age-store-metadata-only.txt)). A generation whose only key was deleted still passes every metadata check ([122](../../../experiments/e5-provider-capabilities/evidence/transcripts/122-age-store-metadata-only.txt)) and cannot be read ([123](../../../experiments/e5-provider-capabilities/evidence/transcripts/123-age-store-metadata-only.txt)). The metadata is written by the writer, not by the store. | **Partial.** Without any key the file shows `lastmodified`, the recipient count, that a MAC is present, and the sops version ([155](../../../experiments/e5-provider-capabilities/evidence/transcripts/155-sops-metadata-only.txt)); decryption fails (157). There is no version history to report, and the MAC is verifiable only with a key. |
+| **Backup / restore** | **Native.** A Raft snapshot (079), a generation created after it (080), a forced restore (081): the older generation reads (082) and the newer one is gone ([083](../../../experiments/e5-provider-capabilities/evidence/transcripts/083-openbao-backup-restore.txt), "No value found"). Transit ciphertext from before the snapshot, including rewrapped ciphertext, still decrypts ([084](../../../experiments/e5-provider-capabilities/evidence/transcripts/084-openbao-backup-restore.txt), [085](../../../experiments/e5-provider-capabilities/evidence/transcripts/085-openbao-backup-restore.txt)). | **Files.** A tar of the store (130), a generation after it (131), a restore (132): the older generation reads (133), the newer has no metadata ([134](../../../experiments/e5-provider-capabilities/evidence/transcripts/134-age-store-backup-restore.txt)), and the artifact still opens (135). The keys are inside the snapshot (§6.3). | **Files.** A tar (173), a change read back (174-175), a restore (176): the value reads as before the change ([177](../../../experiments/e5-provider-capabilities/evidence/transcripts/177-sops-backup-restore.txt)), and the artifact opens (178). |
+| **Migration** | *Into OpenBao:* see the next two columns. *Out:* one KV version becomes an age generation ([185](../../../experiments/e5-provider-capabilities/evidence/transcripts/185-migration-openbao-to-age.txt), 186). Of 11 versions at a mutable path, 10 move and the pruned one cannot ([187](../../../experiments/e5-provider-capabilities/evidence/transcripts/187-migration-openbao-to-age.txt)). Transit ciphertext cannot move at all: the key is not exportable (189, unsupported). | *To OpenBao:* the migrating process needs the compiler's age key, the publisher's token, and the administrator's token for the custom metadata, at once ([179](../../../experiments/e5-provider-capabilities/evidence/transcripts/179-migration-age-to-openbao.txt)). The source's creation time is lost unless carried as custom metadata ([181](../../../experiments/e5-provider-capabilities/evidence/transcripts/181-migration-age-to-openbao.txt)). Repeating the migration is refused, because the publisher may only create ([182](../../../experiments/e5-provider-capabilities/evidence/transcripts/182-migration-age-to-openbao.txt)). An artifact moves to Transit only through a process holding the executor's age key and the compiler's token (183-184). | *Import:* a SOPS file becomes a new KV generation ([190](../../../experiments/e5-provider-capabilities/evidence/transcripts/190-migration-sops-import.txt), 191). *Export:* a KV generation becomes a SOPS file, which the recovery identity can read ([192](../../../experiments/e5-provider-capabilities/evidence/transcripts/192-migration-sops-export.txt), [193](../../../experiments/e5-provider-capabilities/evidence/transcripts/193-migration-sops-export.txt)). |
 
 ### 4.1 Permissions
 
@@ -184,7 +185,7 @@ mark is an observed cell.
 | Operation | publisher | compiler | executor | metadata | admin |
 |---|---|---|---|---|---|
 | create a generation (`cas=0`, new path) | ✓ 001 | | | | |
-| replace a generation | ✗ 002 (403) | | | | ✗ 003 (CAS) |
+| replace a generation | ✗ 002 (403) | | | | ✗ 003 with `cas=0`; ✓ 087 adds a version without CAS |
 | read a secret value | | ✓ 004 | ✗ 005 | ✗ 006 | ✓ 021 |
 | read KV metadata | | ✗ 069 | | ✓ 064 | ✓ 019 |
 | read Transit key state | | | ✗ 070 | ✓ 067 | |
@@ -198,17 +199,21 @@ mark is an observed cell.
 
 Unseal needs no token, only the key share (074).
 
+The admin column is the root token. No narrower policy was written or tested for rewrap, rotation,
+the decryption floor, signing or snapshots, so this run shows who is refused them, not the least
+privilege that allows them.
+
 **Local stores**, by key possession. The operating system does not separate these identities here
-(089, 135).
+(094, 140).
 
 | Operation | needs | age store | SOPS |
 |---|---|---|---|
-| create a secret | the public recipient and write access to the directory | ✓ publisher 090 | ✓ no key 136 |
-| replace a secret | write access to the directory | ✓ delete and recreate 097-098 | ✓ compiler 141 |
-| read a secret | the recipient's key | compiler ✓ 092, executor ✗ 093 | compiler ✓ 138, recovery ✓ 139, executor ✗ 140 |
-| open an artifact | the executor's key | executor ✓ 102, compiler ✗ 103 | executor ✓ 148, compiler ✗ 149 |
-| read metadata | read access to the files | ✓ 095, 112 | ✓ 151 |
-| rotate, change recipients | a key that decrypts | ✓ 106 | ✓ 154, 159 |
+| create a secret | the public recipient and write access to the directory | ✓ publisher 095 | ✓ no key 141 |
+| replace a secret | write access to the directory | ✓ delete and recreate 102-103 | ✓ compiler 146 |
+| read a secret | the recipient's key | compiler ✓ 097, executor ✗ 098 | compiler ✓ 143, recovery ✓ 144, executor ✗ 145 |
+| open an artifact | the executor's key | executor ✓ 107, compiler ✗ 108 | executor ✓ 152, compiler ✗ 153 |
+| read metadata | read access to the files | ✓ 100, 117 | ✓ 155 |
+| rotate, change recipients | a key that decrypts | ✓ 111 | ✓ 158, 164 |
 
 The SOPS replace ran under the compiler key; `sops set` was not tried without a key.
 
@@ -227,7 +232,8 @@ instance is sealed, and that is the answer, not an error. The helper now accepts
 
 The pseudo-terminal helper for the passphrase-protected identity typed the passphrase more times
 than age asked for it. The extra copy hit a closed pipe, and `pipefail` failed the cell. It now
-types exactly one copy per prompt. The same investigation showed that `age -o` creates its output
+types exactly one copy per prompt. The same investigation, in development runs that were not kept as
+evidence, showed that `age -o` creates its output
 under the caller's umask (`0664` with umask `002`): a decrypted file is group-readable unless the
 caller narrows the umask first. The helper narrows it to `077`.
 
@@ -237,17 +243,19 @@ In both local stores, a helper wrote under `noclobber`, and then printed its suc
 the write was refused, because the refusal did not stop the function. Every such helper now returns
 on the refusal. The age store's key creation and rotation steps had the same defect.
 
-### 5.4 The SOPS race left an unknown value behind
+### 5.4 The SOPS race could not fail
 
-After two concurrent writers, the file holds whichever landed last. That is the finding. The cells
-after it expected the earlier value and mismatched. A procedural cell now writes the known value
-back after the race. The winner differed between captures (writer a in one, writer b in another),
-as a last-write-wins race should.
+The first race cell ran two writers of the same key and recorded which value the file held. Either
+answer passed, so the cell showed nothing, and a procedural cell had to write a known value back for
+the cells after it. The race now runs on its own file: two writers each add a different key, ten
+times over, and the cell passes only if some attempt ends with both writers told they succeeded and
+one key missing. That happened in 5 of 10 attempts (149).
 
 ### 5.5 sops looked for the operator's own SSH keys
 
 The first complete capture's refusals listed where sops had looked for an identity, including
-`$HOME/.ssh/id_ed25519` and `$HOME/.ssh/id_rsa`. sops 3.13.3 looks for the caller's SSH keys as age
+`$HOME/.ssh/id_ed25519` and `$HOME/.ssh/id_rsa`. That capture was discarded; `run/test-lib`'s control
+check reproduces the lookup. sops 3.13.3 looks for the caller's SSH keys as age
 identities by default. The "no key" cells were therefore not isolated from the operator's keys, and
 the transcripts named the operator's home directory. They still failed, because no key there was a
 recipient.
@@ -265,18 +273,31 @@ decryption. A decryption through an SSH key that is a recipient was not exercise
 The SOPS `rotate` and `updatekeys` cells carried `kind=versioned`. SOPS keeps no versions, so both
 are primitives, and the label misstated exactly what acceptance criterion 2 asks about. While
 relabelling them, two metadata cells were added that show whether each operation replaced the data
-key (155, 160). They are read from the value's ciphertext alone, and each states its expectation
+key (159, 165). They are read from the value's ciphertext alone, and each states its expectation
 before it runs.
 
-### 5.7 A migration refusal failed for another reason
+A changed ciphertext alone could also be the same key under a fresh nonce, so review asked for
+proof by decryption. Two cells graft the recipient stanzas of a copy taken before the operation onto
+the file after it: after `rotate` the graft no longer opens the values (160), after `updatekeys` it
+still does (166).
+
+### 5.7 Local-store generations were labelled `versioned`
+
+The age store's generation cells carried `kind=versioned`. Its generations are file names that only
+the writer's convention keeps immutable; the store enforces nothing. They are now primitives, and
+`versioned` is reserved for behaviour the provider itself enforces. The same review found that the
+OpenBao create-only cells did not say whose restriction it was: the new cells 086-090 show that it
+is the publisher's policy, and that the administrator can add a version to a generation path.
+
+### 5.8 A migration refusal failed for another reason
 
 The cell showing that a repeated migration cannot replace a generation migrated generation `g2`,
 which is not encrypted to the rotated compiler key. age failed first, the write received empty
 input, and the 403 was real but not what the cell claimed to show. The cell now migrates `g1`
-again, and its transcript holds only the publisher's 403 (175). Every other expected-failure
+again, and its transcript holds only the publisher's 403 (182). Every other expected-failure
 transcript was checked for the same defect: each fails for the reason its cell names.
 
-### 5.8 Verbatim transcripts fail `git diff --check`
+### 5.9 Verbatim transcripts fail `git diff --check`
 
 bao's table headers (`======= Metadata =======`), its trailing blank lines and sops's
 space-padded blank lines trip the whitespace and conflict-marker checks that CI runs over the whole
@@ -288,22 +309,27 @@ exempts `evidence/transcripts/*.txt` alone.
 ### 6.1 Criterion 1: the capability and permission matrix
 
 Section 4 is the matrix: 3 candidates by the 9 §7.3 elements plus permissions, with every entry
-tied to observed cells and every absence named. 187 cells, 0 mismatches, one capture from
-a7c3ce7.
+tied to observed cells and every absence named. 194 cells, 0 mismatches, one capture from
+923ab37. The permission tables mark the operation/identity pairs that were not run as blank; not
+every operation was tried under every identity.
 
 ### 6.2 Criterion 2: primitive or versioned provider behaviour
 
-- **OpenBao** supplies complete versioned behaviour where the design needs it. Generations are
-  created once and cannot be replaced, even by the administrator under CAS. Version history has a
-  known limit that `max_versions=0` does not lift, which confirms §7.5's warning. Key versions have
-  a reversible floor. All of it is visible to an identity that cannot read values.
-- **The local age store** has versioned behaviour only by layout and convention. Its generations and
-  its metadata are what a well-behaved writer leaves. A writer that deletes and recreates a file
-  replaces a generation undetectably (097-099), and a writer that skips the metadata leaves the
+- **OpenBao** supplies complete versioned behaviour where the design needs it. A `cas=0` create
+  cannot replace a generation, and the publisher's policy allows nothing else. The path does not
+  enforce it on its own: the `gen/` paths are not `cas_required`, and the administrator added a
+  version to one (087). A generation is immutable because of who holds which policy, which OpenBao
+  enforces, not because of its path. Version history has a known limit that `max_versions=0` does
+  not lift, which confirms §7.5's warning. Key versions have a reversible floor. All of it is
+  visible to an identity that cannot read values.
+- **The local age store** has no versioned behaviour of its own; its cells are primitives. Its
+  generations are file names that a well-behaved writer never reuses, and its metadata is what that
+  writer leaves. A writer that deletes and recreates a file
+  replaces a generation undetectably (102-104), and a writer that skips the metadata leaves the
   store with nothing to report. The primitive underneath, age encryption to a recipient, works and
   gives the compiler/executor split by recipient choice.
-- **SOPS** is an encryption primitive over a file. It has no versions, no compare-and-set and no
-  store of its own. It is not a secret provider on its own.
+- **SOPS** is an encryption primitive over a file. It has no versions, no compare-and-set, no
+  locking and no store of its own: concurrent writers both succeed and one update is lost (149). It is not a secret provider on its own.
 
 The metadata evidence that decides each case is in the matrix's metadata row. The distinction that
 matters for §7.6 is between metadata the *provider* maintains (OpenBao's version and key state) and
@@ -353,34 +379,38 @@ observations need provider-aware reading:
 - The age store must decrypt to rotate. Rotation also rewrites a generation's ciphertext in place,
   so a dependency record that pins a ciphertext digest breaks on rotation, while the generation's
   identity (name and number) and its value do not change.
-- SOPS `updatekeys` removes a recipient without changing the data key (160). A removed holder who
-  kept the data key, or any older copy of the file, can still read the value. Revocation in SOPS
-  needs `rotate`, which replaces the data key (155).
+- SOPS `updatekeys` removes a recipient without changing the data key (165). A removed holder who
+  kept an older copy of the file can still read the current value: the old copy's stanzas open it
+  (166). Revocation in SOPS needs `rotate`, which replaces the data key (159-160).
 
 **Migration.** Keys differ between candidates, so every migration decrypts and re-encrypts. The
 migrating process holds both sides at once:
 
-- the compiler's source key and the publisher's token for a secret (172)
-- the executor's key and the compiler's token for an artifact (176)
+- the compiler's source key, the publisher's token, and the administrator's token for the carried
+  metadata, for a secret (179)
+- the executor's key and the compiler's token for an artifact (183)
 
 That process sees every plaintext it moves.
 
 - Generation identity survives, because the target path or file name carries it.
-- Creation time does not survive, unless it is carried as metadata (174).
-- Pruned versions cannot migrate at all (180).
-- Transit ciphertext can only move by an executor decrypting it (182).
+- Creation time does not survive, unless it is carried as metadata (181).
+- Pruned versions cannot migrate at all (187).
+- Transit ciphertext can only move by an executor decrypting it (189).
 
 Migrating away from OpenBao therefore means re-encrypting every retained artifact or regenerating
 it: the §7.5 distinction between applying stored ciphertext and regeneration.
 
-**Unsupported, all named in the matrix:**
+**Unsupported, each recorded as an `unsupported` cell:**
 
-- signing in both local candidates
-- rewrap without plaintext, and a reversible decryption floor, in both local candidates
-- retention limits in the age store
-- version history and compare-and-set in SOPS
-- an operating-system permission boundary in both local candidates as run here
-- moving Transit ciphertext out of OpenBao
+- signing in both local candidates (109, 154)
+- rewrap without plaintext in the age store (115). SOPS `updatekeys` re-wraps the data key for new
+  recipients without re-encrypting the values, but it decrypts the data key to do so, and the old
+  data key stays valid (166).
+- a reversible decryption floor in both local candidates (116, 170)
+- retention limits in the age store (105)
+- version history, and compare-and-set or locking, in SOPS (148, 150)
+- an operating-system permission boundary in both local candidates as run here (094, 140)
+- moving Transit ciphertext out of OpenBao (189)
 
 **Signing.** The PoC needs none. The only signing material the design names is for enrolment
 ([§5.1 core components](../Talos_Configuration_and_Machine_Management_Design.md#51-core-components),
@@ -414,7 +444,12 @@ capability exists and is a separate grant.
   synthetic value, because the digest is an argument of the check. The values are random per run
   and never committed, so the digests reveal nothing. The column is not free of value-derived
   data.
-- **One capture.** The race cells show that a race exists, not how often each side wins.
+- **One capture.** The SOPS race lost an update in 5 of 10 attempts here. That shows the race
+  exists, not how often it is lost.
+- **No administrator least privilege.** Rewrap, rotation, the decryption floor, signing and
+  snapshots ran under the root token (§4.1).
+- **Migration pairs.** Each local candidate was migrated to and from OpenBao, and SOPS imported
+  into and exported from it. Migration directly between the age store and SOPS was not run.
 
 ## 8. Recommendation
 
@@ -423,23 +458,26 @@ This does not select a provider. It narrows what
 between.
 
 1. **OpenBao KV v2 with Transit meets every evidenced part of the required provider contract.** It
-   does so natively and under least-privilege policies: create-only generations, the
-   compiler/executor split, metadata readable without values, a reversible decryption floor, and
-   rotation without plaintext leaving it. Keep it as the primary profile. No negative finding
-   blocks retention and metadata or key loss and restoration.
-2. **Do not offer the local age-backed store as a provider on the evidence so far.** Every property
-   it showed is the writer's convention, and nothing stops a writer with directory access from
-   replacing a generation or leaving stale metadata. Offering it would need three things first:
-   Bronzeward itself as the only writer; keys stored outside the backed-up tree; and a multi-user
-   run showing that operating-system separation enforces the compiler/executor/publisher split.
-   Until then, §7.1's condition ("if the investigation proves the required properties") is not met.
-3. **Treat SOPS/age as an import/export format, not a provider.** It has no versions and no
-   compare-and-set, and it loses concurrent writes silently. As an export format, document that
-   revoking a recipient takes `sops rotate`, not `updatekeys`. Run it with its default key
-   locations disabled, or it looks for the operator's SSH keys.
-4. **Decide in the profile whether migration between providers is supported.** Decide also which
-   identity may perform it. It always passes plaintext through one process holding both sides'
-   credentials, cannot carry pruned versions, and cannot move Transit ciphertext.
+   does so natively: create-only generations under the publisher's policy, the compiler/executor
+   split, metadata readable without values, a reversible decryption floor, and rotation without
+   plaintext leaving it. The publisher, compiler, executor and metadata identities ran under
+   least-privilege policies; the administrator's operations ran as root, so a narrower
+   administrator policy is still to be written and tested. Nothing here argues against keeping it
+   as the primary profile, and no negative finding blocks retention and metadata or key loss and
+   restoration.
+2. **On this evidence, §7.1's condition for the local age-backed store is not met** ("if the
+   investigation proves the required properties"). Every property it showed is the writer's
+   convention, and nothing stops a writer with directory access from replacing a generation or
+   leaving stale metadata. Meeting it would need three things first: Bronzeward itself as the only
+   writer; keys stored outside the backed-up tree; and a multi-user run showing that
+   operating-system separation enforces the compiler/executor/publisher split.
+3. **On this evidence, SOPS/age fits the import/export role §7.3 names, not the provider role.** It
+   has no versions and no compare-and-set, and it loses concurrent writes silently. As an export
+   format, revoking a recipient takes `sops rotate`, not `updatekeys`, and it must run with its
+   default key locations disabled, or it looks for the operator's SSH keys.
+4. **Migration between providers is a profile decision.** So is which identity may perform it. It
+   always passes plaintext through one process holding both sides' credentials, cannot carry
+   pruned versions, and cannot move Transit ciphertext.
 
 ## 9. Hand-off
 
@@ -450,9 +488,12 @@ between.
   `min_decryption_version`, `min_available_version`, `exportable` and `deletion_allowed`. All of
   these are readable by the fixture's metadata-only policy.
 - The Transit key listing hides versions below the decryption floor, so blocked and trimmed
-  versions must be told apart by `min_available_version` (§6.2).
+  versions must be told apart by `min_available_version` (§6.2). Trim was not exercised, so how a
+  trimmed version appears is unobserved.
+- The `gen/` paths' create-only property rests on the publisher's policy; the administrator can add
+  versions (087). A classifier that trusts "one version per generation path" must check it.
 - The local age store exposes only what its writer recorded. A lost key is invisible to its
-  metadata (117-118).
+  metadata (122-123).
 
 **To [key loss and restoration](https://github.com/ginsys/bronzeward/issues/10):**
 
