@@ -1,0 +1,14 @@
+commit	1f28961528ed8ee826093328f49457c664be1bcc
+uncommitted inputs	0
+started	2026-09-24T23:22:11Z
+go	go version go1.27.1 linux/amd64
+talosctl	Client: Talos v1.13.6
+talos worker	Client: Talos v1.13.6 Server: 	NODE:        10.55.0.3 	Tag:         v1.13.6 	SHA:         04318854 	Built:        	Go version:  go1.26.5 	OS/Arch:     linux/amd64 	Enabled:     RBAC
+postgres default isolation	read committed
+postgres image	docker.io/library/postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
+postgres server	PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+module	github.com/lib/pq v1.10.9
+settle	30s
+finished	2026-09-24T23:26:14Z
+rows	23
+mismatches	0

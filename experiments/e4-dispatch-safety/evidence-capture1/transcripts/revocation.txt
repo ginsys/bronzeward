@@ -1,0 +1,255 @@
+==> 001-revocation-happy <==
+==> pre (rc ) <==
+pre digest=f7961b6989ccd42b232561274ec59d5e446f3f93796fd3b30db56b6ec219873b version=1 machined_ok=0 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:06:51.618897665Z actor=harness event=setup machine=m1 applied=f7961b6989cc scope_index=true
+==> read-setup (rc 0) <==
+applied|f7961b6989ccd42b232561274ec59d5e446f3f93796fd3b30db56b6ec219873b
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/001-revocation-happy/a.yaml
+2026-09-24T23:06:51.965770238Z actor=harness event=planned id=A artifact=f83c2034b50c
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:06:51.978342598Z actor=harness event=approved id=A
+==> x (rc 0) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:06:52.024602623Z actor=X event=observation id=1 purpose=evidence digest=f7961b6989cc
+2026-09-24T23:06:52.032404614Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-24T23:06:52.038659106Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-24T23:07:52.0351Z
+2026-09-24T23:06:52.038685366Z actor=X event=send id=A n=1 transport_deadline=2026-09-24T23:07:07.038684816Z
+2026-09-24T23:06:52.062552531Z actor=X event=response id=A n=1 class=accepted elapsed_ms=23 detail="Applied configuration without a reboot"
+2026-09-24T23:06:52.065857539Z actor=X event=recorded id=A n=1 state=verifying
+2026-09-24T23:06:52.096677473Z actor=X event=observation id=2 purpose=completion digest=f83c2034b50c
+2026-09-24T23:06:52.100109837Z actor=X event=classified id=A state=completed
+==> read-op-A (rc 0) <==
+state|completed
+owner|X@1
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:accepted
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,response,verifying,completed
+==> worker (rc ) <==
+2026-09-24T23:06:52.263Z digest=f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e version=2 updated=2026-09-24T23:06:52Z machined_ok=1 machined_invalid=0
+==> 002-revocation-before-commit <==
+==> pre (rc ) <==
+pre digest=f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e version=2 machined_ok=1 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:06:52.456075774Z actor=harness event=setup machine=m1 applied=f83c2034b50c scope_index=true
+==> read-setup (rc 0) <==
+applied|f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/002-revocation-before-commit/a.yaml
+2026-09-24T23:06:52.598503267Z actor=harness event=planned id=A artifact=d1c6259e1ef6
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:06:52.610806782Z actor=harness event=approved id=A
+==> x (rc 3) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:06:52.653875216Z actor=X event=observation id=1 purpose=evidence digest=f83c2034b50c
+2026-09-24T23:06:52.653948811Z actor=X event=gate-reached gate=evidence
+2026-09-24T23:06:52.694100614Z actor=X event=gate-released gate=evidence
+2026-09-24T23:06:52.698610208Z actor=X event=refused comparison=1 reason="approval revoked"
+==> revoke (rc 0) <==
+$ E4X_OWNER=harness e4x revoke -id A
+2026-09-24T23:06:52.675412423Z actor=harness event=revoked id=A
+==> read-op-A (rc 0) <==
+state|cancelled
+owner|X@0
+attempts|0
+attempt_owners|none
+stale_attempts|0
+responses|none
+accounted|0
+revoked|1
+revocation|before-commit
+applied_is_artifact|0
+baseline_rev|1
+timeline|planned,approved,revoked,cancelled
+==> worker (rc ) <==
+2026-09-24T23:06:52.872Z digest=f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e version=2 updated=2026-09-24T23:06:52Z machined_ok=1 machined_invalid=0
+==> 003-revocation-during-commit <==
+==> pre (rc ) <==
+pre digest=f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e version=2 machined_ok=1 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:06:53.084811098Z actor=harness event=setup machine=m1 applied=f83c2034b50c scope_index=true
+==> read-setup (rc 0) <==
+applied|f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/003-revocation-during-commit/a.yaml
+2026-09-24T23:06:53.215178768Z actor=harness event=planned id=A artifact=f5d354cc9ac7
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:06:53.22759954Z actor=harness event=approved id=A
+==> x (rc 3) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:06:53.26979889Z actor=X event=observation id=1 purpose=evidence digest=f83c2034b50c
+2026-09-24T23:06:53.273590515Z actor=X event=gate-reached gate=commit
+2026-09-24T23:06:55.300133146Z actor=X event=gate-released gate=commit
+2026-09-24T23:06:55.311423871Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-24T23:06:55.311502467Z actor=X event=gate-reached gate=committed
+2026-09-24T23:06:55.331574444Z actor=X event=gate-released gate=committed
+2026-09-24T23:06:55.336674798Z actor=X event=refused comparison=1 reason="approval revoked"
+2026-09-24T23:06:55.336839511Z actor=X event=state id=A state=cancelled
+==> revoke (rc 0) <==
+$ E4X_OWNER=harness e4x revoke -id A
+2026-09-24T23:06:55.314501431Z actor=harness event=revoked id=A
+==> read-op-A (rc 0) <==
+state|cancelled
+owner|X@1
+attempts|0
+attempt_owners|none
+stale_attempts|0
+responses|none
+accounted|0
+revoked|1
+revocation|after-commit
+applied_is_artifact|0
+baseline_rev|1
+timeline|planned,approved,committed,revoked,unresolved,cancelled
+==> worker (rc ) <==
+2026-09-24T23:06:55.520Z digest=f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e version=2 updated=2026-09-24T23:06:52Z machined_ok=1 machined_invalid=0
+==> 004-revocation-after-commit <==
+==> pre (rc ) <==
+pre digest=f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e version=2 machined_ok=1 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:06:55.727633124Z actor=harness event=setup machine=m1 applied=f83c2034b50c scope_index=true
+==> read-setup (rc 0) <==
+applied|f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/004-revocation-after-commit/a.yaml
+2026-09-24T23:06:55.872667629Z actor=harness event=planned id=A artifact=888c57a84c50
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:06:55.885107169Z actor=harness event=approved id=A
+==> x (rc 3) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:06:55.930540185Z actor=X event=observation id=1 purpose=evidence digest=f83c2034b50c
+2026-09-24T23:06:55.936298879Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-24T23:06:55.936346223Z actor=X event=gate-reached gate=committed
+2026-09-24T23:06:55.956402079Z actor=X event=gate-released gate=committed
+2026-09-24T23:06:55.961045796Z actor=X event=refused comparison=1 reason="approval revoked"
+2026-09-24T23:06:55.961280367Z actor=X event=state id=A state=cancelled
+==> revoke (rc 0) <==
+$ E4X_OWNER=harness e4x revoke -id A
+2026-09-24T23:06:55.949678641Z actor=harness event=revoked id=A
+==> read-op-A (rc 0) <==
+state|cancelled
+owner|X@1
+attempts|0
+attempt_owners|none
+stale_attempts|0
+responses|none
+accounted|0
+revoked|1
+revocation|after-commit
+applied_is_artifact|0
+baseline_rev|1
+timeline|planned,approved,committed,revoked,unresolved,cancelled
+==> worker (rc ) <==
+2026-09-24T23:06:56.145Z digest=f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e version=2 updated=2026-09-24T23:06:52Z machined_ok=1 machined_invalid=0
+==> 005-revocation-after-attempt <==
+==> pre (rc ) <==
+pre digest=f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e version=2 machined_ok=1 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:06:56.359619795Z actor=harness event=setup machine=m1 applied=f83c2034b50c scope_index=true
+==> read-setup (rc 0) <==
+applied|f83c2034b50cc3459c43f0ab173b2e658162d3c936511211c30a6c0949f3b67e
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/005-revocation-after-attempt/a.yaml
+2026-09-24T23:06:56.504236846Z actor=harness event=planned id=A artifact=159e39d76569
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:06:56.516370277Z actor=harness event=approved id=A
+==> x (rc 0) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:06:56.558254582Z actor=X event=observation id=1 purpose=evidence digest=f83c2034b50c
+2026-09-24T23:06:56.564042868Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-24T23:06:56.569203194Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-24T23:07:56.566215Z
+2026-09-24T23:06:56.569252715Z actor=X event=gate-reached gate=send
+2026-09-24T23:06:56.589294757Z actor=X event=gate-released gate=send
+2026-09-24T23:06:56.589312496Z actor=X event=send id=A n=1 transport_deadline=2026-09-24T23:07:11.589311976Z
+2026-09-24T23:06:56.612336666Z actor=X event=response id=A n=1 class=accepted elapsed_ms=23 detail="Applied configuration without a reboot"
+2026-09-24T23:06:56.615576874Z actor=X event=recorded id=A n=1 state=verifying
+2026-09-24T23:06:56.649881353Z actor=X event=observation id=2 purpose=completion digest=159e39d76569
+2026-09-24T23:06:56.653520369Z actor=X event=classified id=A state=completed
+==> revoke (rc 0) <==
+$ E4X_OWNER=harness e4x revoke -id A
+2026-09-24T23:06:56.581283298Z actor=harness event=revoked id=A
+==> read-op-A (rc 0) <==
+state|completed
+owner|X@1
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:accepted
+accounted|0
+revoked|1
+revocation|after-attempt
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,revoked,response,verifying,completed
+==> worker (rc ) <==
+2026-09-24T23:06:56.825Z digest=159e39d765694e157a365adb1879d73b65da9e64bbc1b8e63d76e4c77654083f version=3 updated=2026-09-24T23:06:56Z machined_ok=2 machined_invalid=0
+==> 006-revocation-naive-control <==
+==> pre (rc ) <==
+pre digest=159e39d765694e157a365adb1879d73b65da9e64bbc1b8e63d76e4c77654083f version=3 machined_ok=2 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:06:57.052746146Z actor=harness event=setup machine=m1 applied=159e39d76569 scope_index=true
+==> read-setup (rc 0) <==
+applied|159e39d765694e157a365adb1879d73b65da9e64bbc1b8e63d76e4c77654083f
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/006-revocation-naive-control/a.yaml
+2026-09-24T23:06:57.180366115Z actor=harness event=planned id=A artifact=16d084900fbd
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:06:57.192777729Z actor=harness event=approved id=A
+==> x (rc 0) <==
+$ E4X_OWNER=X e4x run -id A -mode naive
+2026-09-24T23:06:57.205608549Z actor=X event=approval-checked id=A
+2026-09-24T23:06:57.236711326Z actor=X event=observation id=1 purpose=evidence digest=159e39d76569
+2026-09-24T23:06:57.236775582Z actor=X event=gate-reached gate=evidence
+2026-09-24T23:06:57.276894133Z actor=X event=gate-released gate=evidence
+2026-09-24T23:06:57.282266898Z actor=X event=committed id=A owner=X gen=1 mode=naive
+2026-09-24T23:06:57.287154152Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-24T23:07:57.284229Z
+2026-09-24T23:06:57.287175233Z actor=X event=send id=A n=1 transport_deadline=2026-09-24T23:07:12.287174461Z
+2026-09-24T23:06:57.311163901Z actor=X event=response id=A n=1 class=accepted elapsed_ms=23 detail="Applied configuration without a reboot"
+2026-09-24T23:06:57.31456259Z actor=X event=recorded id=A n=1 state=verifying
+2026-09-24T23:06:57.349127088Z actor=X event=observation id=2 purpose=completion digest=16d084900fbd
+2026-09-24T23:06:57.352581059Z actor=X event=classified id=A state=completed
+==> revoke (rc 0) <==
+$ E4X_OWNER=harness e4x revoke -id A
+2026-09-24T23:06:57.257342766Z actor=harness event=revoked id=A
+==> read-op-A (rc 0) <==
+state|completed
+owner|X@1
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:accepted
+accounted|0
+revoked|1
+revocation|before-commit
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,revoked,committed,attempt,response,verifying,completed
+==> worker (rc ) <==
+2026-09-24T23:06:57.527Z digest=16d084900fbd10bae74fd1e71e02cbd50e8dc73295de0374708e7b403489dee9 version=4 updated=2026-09-24T23:06:57Z machined_ok=3 machined_invalid=0
+==> end <==

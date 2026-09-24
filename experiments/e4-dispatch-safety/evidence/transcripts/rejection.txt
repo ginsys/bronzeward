@@ -1,0 +1,39 @@
+==> 022-rejection-invalid-machine-type <==
+==> pre (rc ) <==
+pre digest=45e59317ef8cb2d199392cfe1cb20e6da64a491c677776790f8a517640e8f7fc version=20 machined_ok=19 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:26:12.61116489Z actor=harness event=setup machine=m1 applied=45e59317ef8c scope_index=true
+==> read-setup (rc 0) <==
+applied|45e59317ef8cb2d199392cfe1cb20e6da64a491c677776790f8a517640e8f7fc
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/022-rejection-invalid-machine-type/bad.yaml
+2026-09-24T23:26:12.753774567Z actor=harness event=planned id=A artifact=bc78227cb3d4
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:26:12.766068921Z actor=harness event=approved id=A
+==> x (rc 5) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:26:12.809437416Z actor=X event=observation id=1 purpose=evidence digest=45e59317ef8c
+2026-09-24T23:26:12.8151539Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-24T23:26:12.820062472Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-24T23:27:12.817093Z
+2026-09-24T23:26:12.820080868Z actor=X event=send id=A n=1 transport_deadline=2026-09-24T23:26:27.820080343Z
+2026-09-24T23:26:12.843079135Z actor=X event=response id=A n=1 class=rejected elapsed_ms=22 detail="error applying new configuration: 1 error occurred: * 10.55.0.3: rpc error: code = InvalidArgument desc = 1 error occurred: * v1alpha1.Config: 1 error occurred: * unknown machine type \"bogus\""
+2026-09-24T23:26:12.846500095Z actor=X event=recorded id=A n=1 state=rejected
+==> read-op-A (rc 0) <==
+state|rejected
+owner|X@1
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:rejected
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|0
+baseline_rev|1
+timeline|planned,approved,committed,attempt,response,rejected
+==> worker (rc ) <==
+2026-09-24T23:26:13.024Z digest=45e59317ef8cb2d199392cfe1cb20e6da64a491c677776790f8a517640e8f7fc version=20 updated=2026-09-24T23:26:11Z machined_ok=19 machined_invalid=1
+==> end <==

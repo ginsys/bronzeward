@@ -1,0 +1,14 @@
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./fixtures-diff.txt
+28694b0531ba211b7694d2530c422e1a87a5d56f86cd5823b4fff0de5078e805  ./injections.log
+9315bc04790851c95926c16786c3b0b95ff90c33818984a2af46be99b3b9a5e2  ./leak-scan.txt
+6923f2d72ef47f7dc40d64ec226671d8d2a6f5151fcf2ed6706c0231ca31c51c  ./logs/bw-fixture-controlplane-1.log
+38793b5293791724dd583417f14b7ffe33e4c08f3ad13e87a89705e1932aecdc  ./logs/bw-fixture-openbao.log
+cc1aa2b0a61569c6a9e796c167026628e71c65402c12aeecc41708f637a74e7c  ./logs/bw-fixture-postgres.log
+db6edc1eb92850064383e534901d54c0add6094102218efdb2d1df8fa853ba00  ./logs/bw-fixture-worker-1.log
+bbd289738770598a99103fcc8236fa843529a650351aca0cf0244e4ebf4514cd  ./openbao-client-view.txt
+137a5952c259a7cfb6bf990908b4cad899f4614a61a9fc229efb89975fa293a6  ./openbao-metadata.jsonl
+cb96f028d356abd487beba5c1ed57931a2d7277a6a8cbd7c218144a0ced41eb1  ./postgres.sql
+4eddf20d01a0dbab6759331972261561d720657512badec0bf5814c476ce2003  ./talos-config-sha256.txt
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./up-fixtures-diff.txt
+72e29c7464fcacf050e7a35139c23666c0e781012c8ac631abf806cd71da608f  ./versions.txt
+bd5ae888cec0070090b8d3a94bc62c1c9e05cc9bb5f388d786b0503d3a10e670  ./postgres-data/ (1837 files: the sha256 of their lines in the full manifest, kept in E4D_OUT)
