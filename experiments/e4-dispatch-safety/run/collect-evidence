@@ -19,7 +19,9 @@ need grep sed find sort sha256sum cut
 
 # E4D_EVIDENCE names another directory of this experiment for an earlier capture kept alongside.
 dest=${E4D_EVIDENCE:-$E4D_DIR/evidence}
-case $dest in "$E4D_DIR"/evidence*) ;; *) die "E4D_EVIDENCE ($dest) must be $E4D_DIR/evidence*" ;; esac
+# One path component, evidence or evidence-<letters and digits>: nothing that can climb out.
+[[ $dest == "$E4D_DIR"/* && ${dest#"$E4D_DIR"/} =~ ^evidence(-[A-Za-z0-9]+)?$ ]] ||
+  die "E4D_EVIDENCE ($dest) must be $E4D_DIR/evidence or $E4D_DIR/evidence-<name>"
 incoming=$(mktemp -d "$E4D_DIR/.evidence-incoming.XXXXXX")
 trap 'rm -rf -- "$incoming"' EXIT
 
@@ -95,8 +97,9 @@ scan() {
 }
 
 # The control: a file holding one pattern, in a directory of its own so that a real leak cannot
-# be mistaken for a failed control, must be found, or the scan below proves nothing.
-ctl=$(mktemp -d "$E4D_DIR/.evidence-control.XXXXXX")
+# be mistaken for a failed control, must be found, or the scan below proves nothing. It lives in
+# E4D_OUT, outside the checkout, because the pattern it holds is one of the run's secrets.
+ctl=$(mktemp -d "$E4D_OUT/.evidence-control.XXXXXX")
 trap 'rm -rf -- "$incoming" "$ctl"' EXIT
 head -n 1 -- "$E4D_PATTERNS" >"$ctl/leak-control"
 hits=$(scan "$E4D_PATTERNS" "$ctl")

@@ -9,9 +9,9 @@ selects no executor design, schema or Talos client library.
 
 The [execution and recovery specification](../../docs/spec/execution-recovery.md) puts one
 database transaction between approval and dispatch: the **dispatch commitment boundary** (§3.2).
-Every approval, ownership, scope and evidence comparison happens inside it. The attempt
-transaction (§3.3) repeats them before each send. Recovery (§4) resolves an operation whose
-attempts have been accounted for. `e4x`, the executor here, implements that contract against the
+Its approval, scope and evidence comparisons happen inside it. The attempt transaction (§3.3)
+repeats them before each send and adds the owner, generation and state comparisons. Recovery (§4)
+resolves an operation whose attempts have been accounted for. `e4x`, the executor here, implements that contract against the
 fixture's PostgreSQL and applies a real machine configuration to the fixture's live Talos worker
 with `talosctl`. The boundary is the `COMMIT` in `Store.Commit` ([`store.go`](store.go)). An
 attempt is recorded by `Store.Attempt` before anything is sent.
@@ -19,7 +19,7 @@ attempt is recorded by `Store.Attempt` before anything is sent.
 | Group | Rows |
 |---|---|
 | revocation | none; before the commitment; during it; between the commitment and the attempt; after the attempt (the §8.1 residual); a control that checks the approval once, early |
-| ownership | taken over before the attempt; a control with no ownership comparison; a second executor for the same plan |
+| ownership | taken over before the attempt; a control with no owner, generation or state comparison; a second executor for the same plan |
 | scope | a second plan for the machine while the first is in flight, and after it; a control without the machine-scope index (§8.2's stale A after B) |
 | fault | a partition or pause of the worker during the send, through the control plane and directly; PostgreSQL killed before the response is recorded; a partition during verification; accounting on the executor's exit alone |
 | kill | the executor SIGKILLed at the evidence, committed, response and complete gates |
@@ -45,9 +45,10 @@ reader result as the row's transcript. A mismatch is recorded, not retried.
 
 **Digest normalization.** A digest is the SHA-256 of
 `talosctl get machineconfig v1alpha1 -o jsonpath='{.spec}'`, with its trailing newlines replaced
-by exactly one. The artifact file is hashed the same way. That is the fixture's own normalization
-(`fixtures/bin/selftest`): the jsonpath output carries one newline more than the file that was
-sent.
+by exactly one. That is the fixture's own normalization (`fixtures/bin/selftest`): the jsonpath
+output carries one newline more than the file that was sent. `e4x` normalizes both sides. The
+harness hashes the artifact file as written, which `talosctl machineconfig patch` ends with one
+newline; a difference would fail closed, as a mismatch.
 
 ## Running it
 

@@ -96,8 +96,9 @@ digest is the worker's current configuration. Each artifact is that configuratio
 label (`bronzeward.test/e4x=<row>-<artifact>`) added, so every row's artifact differs from every
 earlier one and from the pre-dispatch digest. The worker applies it without a reboot.
 
-`=` and `~` expectations are asserted. A `seen:` expectation is only recorded: it is used where a
-value is timing-dependent and the row's finding is its distribution, not one value.
+`=` and `~` expectations are asserted. A `seen:` expectation is recorded, not judged, though the
+row fails if it is missing. It is used where a value is timing-dependent and the row's finding
+is its distribution, not one value.
 
 ### 2.3 Independent readers
 
@@ -109,7 +110,7 @@ value is timing-dependent and the row's finding is its distribution, not one val
   fell relative to the commitment and the first attempt, by timeline revision.
 - **Worker:** the harness's own `talosctl` reads, outside `e4x`. They give the configuration's
   digest, named `pre` or after the row's artifact it matches; the machine-configuration resource's
-  version, which moves on every landed apply including an identical one; its last-change time; and
+  version, which moves on every landed apply; its last-change time; and
   machined's counts of `ApplyConfiguration` calls answered `OK` and `InvalidArgument`, as deltas
   since the row began (`worker.landed`, `worker.ok`, `worker.invalid`).
 - **Timeline:** the fixture's `injections.log`, with a `begin` line and a `done`, `failed rc=N` or
@@ -117,10 +118,12 @@ value is timing-dependent and the row's finding is its distribution, not one val
 
 **Digest normalization.** A digest is the SHA-256 of
 `talosctl get machineconfig v1alpha1 -o jsonpath='{.spec}'` with its trailing newlines replaced by
-exactly one; the artifact file is hashed the same way. This is the fixture's own normalization
-(`fixtures/bin/selftest`): the jsonpath output carries one newline more than the file that was
-sent. `e4x` and the harness compute it independently, in Go (`normalizeReadBack`, `talos.go:37`)
-and in the shell.
+exactly one. This is the fixture's own normalization (`fixtures/bin/selftest`): the jsonpath
+output carries one newline more than the file that was sent. `e4x` normalizes both sides, in Go
+(`normalizeReadBack`, `talos.go:37`). The harness normalizes only the read-back (`w_digest`,
+`run/lib.sh`) and hashes the artifact file as written. That is exact only because
+`talosctl machineconfig patch` ends the file with one newline. A difference would fail closed:
+the read-back would match no artifact (`is=other`), and the row would be a mismatch. None was.
 
 ### 2.4 Positive controls
 
@@ -130,7 +133,7 @@ prevents:
 | Control | Mechanism removed | Failure it must show |
 |---|---|---|
 | `-mode naive` | the approval comparison inside both transactions; the approval is checked once, before the evidence | a revocation after that check is not seen, and the artifact is sent |
-| `-mode nofence` | the owner and generation comparison in the attempt transaction | an executor that lost ownership records an attempt and sends |
+| `-mode nofence` | the owner, generation and state comparisons in the attempt transaction, which are where a takeover is seen | an executor that lost ownership records an attempt and sends |
 | `-no-scope` | the `operations_one_uncertain` index | a newer plan B commits and completes while A's attempt is held before its send; A's send then lands and overwrites B |
 
 ## 3. Reproduction and identities
@@ -173,10 +176,12 @@ list and the applied artifacts in `E4D_OUT`, none of which is committed.
 
 `f2c7c86` is not on this branch. It was rewritten as `1f28961` to drop a build output committed by
 mistake. The rewrite also changed the README, one `mise.toml` build line, and the collector, which
-now drops trailing whitespace and can write to `E4D_EVIDENCE`. `run/all`, `run/lib.sh`, the Go
-sources, the readers and the fixtures are byte-identical between the two. Capture 1's `run.txt`
-therefore names a commit that cannot be fetched. It is kept because it holds the one late landing
-(§4.4). Its evidence was re-collected with the current collector.
+now drops trailing whitespace. Later commits let the collector write to `E4D_EVIDENCE`, tightened
+its destination guard and moved its leak-scan control out of the checkout. `run/all`,
+`run/lib.sh`, the Go sources, the readers and the fixtures are byte-identical between the two.
+Capture 1's `run.txt` therefore names a commit that cannot be fetched. It is kept because it
+holds the one captured late landing (§4.4). Its evidence was re-collected with the current
+collector.
 
 ## 4. Results
 
@@ -197,14 +202,18 @@ cells, which §4.4 reports.
 | 005 | after the attempt was recorded, before the send | `completed`; the attempt was sent anyway | 1 | artifact, 1 landing |
 | 006 | control `-mode naive`: after its single early check | `completed`; the revocation was not seen | 1 | artifact, 1 landing |
 
-- **Row 003 places the boundary exactly.** From 23:22:14.893, X was held at the `commit` gate
-  inside its commitment transaction. A revocation started while X was held there waited on the
-  `FOR SHARE` lock. The harness found it still running before releasing X
+- **Row 003 places the revocation after the boundary.** From 23:22:14.893, X was held at the
+  `commit` gate inside its commitment transaction. A revocation started while X was held there
+  waited on the `FOR SHARE` lock. The harness found it still running before releasing X
   (`revoker_waited=yes`). X committed at 23:22:16.910, and the revocation's timeline entry followed
   at 23:22:16.913; the reader places it `after-commit`, by timeline revision. X's attempt
   transaction then failed comparison 1 at 23:22:16.936. No attempt had been recorded, so the
   operation went `committed` → `unresolved` → `cancelled`, as specification §8.1 describes.
-  Capture 1 gave the same order: commit at .311, revocation at .314.
+  Capture 1 gave the same order: commit at .311, revocation at .314. The row does not show the
+  lock itself. X writes its `committed` timeline entry before the gate, so any later revocation
+  reads `after-commit`. The attempt transaction's comparison 1 would also refuse X without
+  `FOR SHARE`. The evidence that the revocation waited is `revoker_waited=yes`: the harness
+  found it still running 2 s after it started. The 3 ms log order is further evidence.
 - **Rows 002 and 004** show the two sides of the boundary without a race. Before it, nothing is
   committed; after it, nothing is attempted.
 - **Row 005 is the residual that specification §3.3 states, measured.** The attempt was recorded at
@@ -221,10 +230,13 @@ cells, which §4.4 reports.
   X's attempt transaction refused on comparison 7 (owner). X exited with 3, having sent nothing.
   Y recovered with `-retry`. With no attempts recorded, it took a completion observation at `pre`,
   classified a retry and made one attempt as `Y@2`. `stale_attempts=0`, and one landing.
-- **Row 008, control `-mode nofence`:** the same interleaving without the owner comparison. X
-  recorded attempt 1 as `X@1` after the takeover (`stale_attempts=1`) and sent it, and the
-  configuration landed. The operation was left `sending`, owned by Y, with an attempt Y did not
-  make. The fence is what keeps a stale executor from sending.
+- **Row 008, control `-mode nofence`:** the same interleaving without the owner, generation and
+  state comparisons. X recorded attempt 1 as `X@1` after the takeover (`stale_attempts=1`) and
+  sent it, and the configuration landed. The operation was left `sending`, owned by Y, with an attempt Y did not
+  make. Those comparisons are what kept X from sending in row 007, but the rows do not separate
+  them. A takeover both raises the generation and moves in-flight work from `committed` to
+  `unresolved` (`Takeover`, `store.go`), and either comparison alone would have refused X. Row
+  007's refusal names the owner only because that check runs first.
 - **Row 009:** a second executor, Z, ran the same plan while X was held inside its commitment
   transaction. Z waited about two seconds, until X committed. It was then refused on comparison 0
   ("an operation for plan A exists", exit 3), and X completed. One attempt, one landing.
@@ -242,8 +254,9 @@ cells, which §4.4 reports.
   both operations recorded `completed`.** With the index, the same interleaving is row 010.
 
 The contract's A-after-B protection is therefore not a Talos property. It is comparison 4 plus
-the rule that an unresolved operation keeps the scope. Rows 012–015 below leave operations
-`unresolved` for 30 s or more, and throughout that time the index would refuse a newer plan.
+the rule that an unresolved operation keeps the scope. Rows 012, 014 and 015 below leave
+operations `unresolved` for 30 s or more (row 013 for 11 s), and throughout that time the index
+would refuse a newer plan.
 
 ### 4.4 Uncertain sends, reconnects and accounting (criteria 2 and 3)
 
@@ -263,8 +276,9 @@ waited a settle time before accounting. Row 013 is the exception: it accounts th
 **Capture 1's row 012 landed late.** The fault was the same: `netsplit` 23:07:04 → `netjoin`
 23:07:20, through the control plane. X's `talosctl` was killed at its transport deadline,
 23:07:19.87, and the partition healed at 23:07:20. The configuration then landed. The
-machine-configuration resource went from version 11 to 12 with `updated` 23:07:31, and machined
-counted one more `ApplyConfiguration` answered OK. Y observed the artifact after the settle and
+machine-configuration resource went from version 11 to 12 with `updated` 23:07:31 (the worker is
+a container on the same host and shares its clock; `updated` has whole-second resolution), and
+machined counted one more `ApplyConfiguration` answered OK. Y observed the artifact after the settle and
 completed the operation on its first attempt, with no retry. Capture 1's rows 013–017 had the
 same outcomes as capture 2's. Its row 013 also saw `pre` 11 s after the heal and classified the
 operation `failed`.
@@ -274,7 +288,8 @@ What these rows show:
 - **An executor's exit does not account for its attempt.** A request sent through the control
   plane's API proxy outlived the client that sent it, and landed about 11 s after the partition
   healed. That happened once in the four control-plane partitions over the two captures (rows 012
-  and 013 of each). The eight uncertain sends in rows 012–015 landed late only that once.
+  and 013 of each). A development probe, not committed, saw one more (§5). The eight uncertain
+  sends in rows 012–015 landed late only that once.
 - **Accounting on exit alone gave a wrong basis for a terminal state.** Row 013 accounts the
   moment X exits, and both captures classified it `failed` 11 s after the heal. That is when
   capture 1's row 012 request landed. Nothing landed in either row 013, so `failed` happened to
@@ -291,7 +306,8 @@ What these rows show:
 - **A retry is safe only as long as the accounting is true.** Those retries were accounted after a
   30 s settle and a `pre` observation. Suppose a request abandoned like capture 1's row 012 landed
   after that observation. Landing on top of the retry, it would re-apply the same artifact: for
-  `apply-config --mode=no-reboot`, that bumps the resource version and changes nothing else. But the
+  `apply-config --mode=no-reboot`, that should change no configuration. An identical re-apply was
+  not captured here (§5). But the
   retry's completion releases the scope. If a newer plan B then completed first, the late request
   would overwrite B. That is the stale A-after-B case of specification §8.2, reached through
   accounting that was recorded but not true.
@@ -299,9 +315,9 @@ What these rows show:
   reported `Unavailable` while dialing the partitioned worker directly. The prototype classes
   every `Unavailable` as `unknown`. Whether a dial error proves that nothing was sent is not tested
   here.
-- **Reconnects:** a database outage between the response and its recording (row 016) cost 7.4 s.
-  The executor retried the recording once a second until the database accepted it. A partition
-  during verification (row 017) cost one failed read. The operation completed within its
+- **Reconnects:** a database outage between the response and its recording (row 016) cost 7.4 s
+  from the response, 7.0 s of it after the harness released the executor. The executor retried
+  the recording once a second until the database accepted it. A partition during verification (row 017) cost one failed read. The operation completed within its
   verification deadline.
 
 ### 4.5 Executor kills at each gate (specification §5's interruption points)
@@ -341,6 +357,13 @@ skipped, in each capture.
   - Row 013 recovered before the worker was readable after the heal, so its completion read
     failed. It now waits up to 30 s for a readable worker and records the wait: 11 s in both
     captures.
+- **Development probes, not committed.** Manual probes against the fixture, run before the
+  harness, set two things that `run/lib.sh` comments on.
+  - One probe saw an abandoned request land 11.6 s after its client gave up, and 6 s after the
+    partition healed. That set the 30 s settle.
+  - Another saw the resource version move on an identical re-apply, and not on a rejected one.
+  Neither transcript is committed, so neither is evidence here. The first is a second late
+  landing beside capture 1's row 012.
 - **Test order.** The store's tests were written alongside it, and their first failing run was a
   compile failure, not a behavioural one. The one rule added after the development runs had a
   behavioural failing test first: only a retry may proceed on evidence showing the artifact's
@@ -351,16 +374,17 @@ skipped, in each capture.
   the rewritten commit (§3).
 - **An oversized manifest was avoided.** The committed bundle manifest follows the form used by
   the database-semantics experiment, where a PostgreSQL data directory, if present, is reduced to
-  one digest line. That experiment's review showed that 2000-odd per-file lines make a diff hunk
-  the pull-request review cannot read.
+  one digest line. There, 2000-odd per-file lines made a diff hunk the pull-request review could
+  not read.
 
 ## 6. What this decides
 
 ### 6.1 Criterion 1: the boundary and pre-commit revocation
 
 The dispatch commitment boundary is the `COMMIT` of `Store.Commit`.
-- In row 003, a revocation racing the boundary was serialized behind it by the approval's
-  `FOR SHARE` lock, and it prevented every attempt.
+- In row 003, a revocation racing the boundary finished after the commitment's `COMMIT` and
+  prevented every attempt. That it waited on the `FOR SHARE` lock is inferred from
+  `revoker_waited=yes` and the log order, not read from PostgreSQL's lock view (§4.1).
 - Rows 002 and 004 show the same outcome from either side.
 - The control row 006 shows the prevention failing without the in-transaction comparison.
 
@@ -376,9 +400,11 @@ specification's stated residual, not a defect.
   `talosctl apply-config` (`main.go:268`) follows a successful `Store.Attempt` (`main.go:245`) on
   every path. Every row's log shows `event=attempt` before `event=send`. This establishes
   specification invariant 2 for this prototype only, not for any other executor.
-- **Stale ownership is stopped by the generation fence in the attempt transaction** (row 007). The
-  control row 008 shows a stale executor sending without it. The fence stops only what has not
-  yet been sent: a database fence is not a Talos fence (§7).
+- **Stale ownership is stopped by the takeover fence.** A takeover raises the generation and
+  moves in-flight work to `unresolved`, and the attempt transaction compares both (row 007). The
+  control row 008, without those comparisons, shows a stale executor sending. The rows do not
+  show that either half alone suffices. The fence stops only what has not yet been sent: a
+  database fence is not a Talos fence (§7).
 - **A after B is demonstrably safe only because conflicting work is stopped.** Row 010 refuses B
   while A holds the scope, then refuses B's plan after A because the baseline moved. Row 011 shows
   A overwriting B without the scope index.
@@ -394,7 +420,7 @@ This covers one operation (`apply-config`), one mode (`no-reboot`) and one assig
 | `rejected` | a recorded `InvalidArgument` response to every attempt, with the worker's resource version unchanged |
 | `failed` | every attempt accounted for, and a completion observation contradicting the artifact. Row 013 shows that the accounting has to be true, not merely recorded |
 | safe to retry | every attempt accounted for; no accepted response; a completion observation at the pre-dispatch digest; a new attempt transaction bound to the classification's revision |
-| stop (`unresolved`) | any attempt with neither a response nor accounting (rows 012–015, 020). Also no successful completion read by the attempt deadline: in the code (`main.go:332`), but no row reaches it |
+| stop (`unresolved`) | any attempt with neither a definitive response nor accounting (rows 012–015, 020; rows 012–015 recorded an `unknown` response). Also no successful completion read by the attempt deadline: in the code (`main.go:332`), but no row reaches it |
 | stop (`cancelled`) | a revocation before the commitment, or after it with no attempt recorded |
 
 **Not established:** what evidence proves that an abandoned request can no longer land. The
@@ -409,22 +435,33 @@ retry is always safe: the retries were of one `no-reboot` apply, under one accou
 - **One worker, two captures, one operation and mode.** Every artifact adds one node label. There
   is no reboot-requiring or staged apply, no control-plane target and no maintenance mode.
 - **PostgreSQL only.** Specification §9 asks for this on each candidate profile. SQLite's locking
-  differs ([database-semantics report](20260924-database-semantics.md)), and the commitment and
-  attempt transactions were not run on it here.
+  differs ([database-semantics investigation](https://github.com/ginsys/bronzeward/issues/6)),
+  and the commitment and attempt transactions were not run on it here.
 - **A database fence is not a Talos fence.** The fence and the scope index stop only executors
   that consult the database. Nothing here stops a request already sent, or one sent by anything
   that bypasses the database, including direct `talosctl`.
-- **The late landing is one observation in four.** Only one of the four control-plane partitions
-  landed late, and the cause of the difference was not established. Candidates include the
-  control plane's API proxy, gRPC connection reuse, and the partition's effect on each.
+- **The late landing is one observation in four captured partitions.** A development probe saw
+  another (§5), but that one is not committed. Only one of the four captured control-plane
+  partitions landed late, and the cause of the difference was not established. Candidates
+  include the control plane's API proxy, gRPC connection reuse, and the partition's effect on
+  each.
 - **Accounting is a harness action.** `e4x account` stands for an operator or a supervisor
   attesting that an executor can no longer send. The prototype does not decide when that is true.
 - **No restoration, recovery epoch, drift freeze or rollout limit above one.**
   - Comparison 6 and the epoch check exist in the code, but no row exercises them.
+  - No row or test exercises plan expiry, the observation's maximum age, a newer contradicting
+    observation, or the attempt bound (comparison 9).
+  - `TestCommitRefusesStaleEvidence` tests a digest mismatch, not an observation's age.
   - Specification §9 also asks how pre-restoration executors are shown to be quiesced. That is not
     answered here.
 - **The evidence bundle was captured after the rows, with no node partitioned.** The fixture notes
   capture during a partition as never exercised, and it was not attempted.
+- **The kill rows do not record which process was signalled.** `ex_kill` signals the executor
+  it finds as the `timeout` wrapper's child, and falls back to the wrapper if it finds none. The
+  transcript names only a PID.
+  - Two things show the executor died: its log ends at the gate, and no later effect of it was
+    seen. Each row's starting resource version equals the previous row's final one.
+  - Neither proves the process exited.
 - **Mechanisms, not an implementation.** The schema, gates and executor are the smallest that carry
   the specification's comparisons.
 
@@ -432,9 +469,16 @@ retry is always safe: the retries were of one `no-reboot` apply, under one accou
 
 - **Keep the specification's commitment and attempt transactions as written.** Each comparison
   that a control removed let through the failure it exists to prevent.
-- **Take ownership fencing into the execution contract as the database generation fence,
-  compared inside the attempt transaction** (rows 007 and 008). Record in the contract that it
-  bounds only unsent work.
+- **Take ownership fencing into the execution contract as the takeover fence.** A takeover
+  raises the generation and moves in-flight work to `unresolved`. The attempt transaction
+  compares both (rows 007 and 008). Record in the contract that it bounds only unsent work.
+  - None of the alternatives was built or measured here:
+    - An expiring lease bounds a stale owner in time, but it too cannot stop a request that has
+      already been sent.
+    - An advisory lock held for the executor's lifetime ties ownership to one database
+      session. It is lost with the connection, not with the executor.
+    - A compare-and-apply on the Talos side would fence the node itself. Whether `apply-config`
+      offers any precondition on the current configuration was not checked.
 - **Do not treat an executor's exit, a killed client or a transport timeout as accounting.**
   Until there is evidence of a Talos-side bound on a proxied request's lifetime, accounting for an
   attempt whose response was lost needs an operator decision. A supervisor time bound would need
@@ -447,7 +491,8 @@ retry is always safe: the retries were of one `no-reboot` apply, under one accou
 
 - **To the [execution and recovery contracts](https://github.com/ginsys/bronzeward/issues/19):**
   - the boundary's location and behaviour (§6.1);
-  - the generation fence as the ownership mechanism for executors that use the database (§6.2);
+  - the takeover fence (generation and state) as the ownership mechanism for executors that use
+    the database (§6.2);
   - the §6.3 table of evidence per outcome, for `apply-config`/`no-reboot`;
   - `InvalidArgument` as a pre-mutation rejection, for validation errors;
   - the open questions:
