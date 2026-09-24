@@ -91,8 +91,9 @@ scan() {
 }
 
 # The control: a file holding one pattern, in a directory of its own so that a real leak cannot
-# be mistaken for a failed control, must be found, or the scan below proves nothing.
-ctl=$(mktemp -d "$E4_DIR/.evidence-control.XXXXXX")
+# be mistaken for a failed control, must be found, or the scan below proves nothing. It lives in
+# E4_OUT, outside the checkout, because the pattern it holds is one of the run's secrets.
+ctl=$(mktemp -d "$E4_OUT/.evidence-control.XXXXXX")
 trap 'rm -rf -- "$incoming" "$ctl"' EXIT
 head -n 1 -- "$E4_PATTERNS" >"$ctl/leak-control"
 hits=$(scan "$E4_PATTERNS" "$ctl")
