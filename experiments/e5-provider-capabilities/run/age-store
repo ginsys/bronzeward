@@ -14,6 +14,9 @@
 # key at all. All of them run as one uid here, so the separation is by which key file a command is
 # given, not by the operating system: that limit is recorded as a cell, not assumed away.
 #
+# A generation's identity here is its file name, which the writer chooses and nothing enforces, so
+# every non-metadata cell is a primitive, not versioned provider behaviour (README.md, kinds).
+#
 # Phase-0 evidence for the provider-capability experiment (ginsys/bronzeward issue 8). Not v1 tooling.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
@@ -135,18 +138,18 @@ unsupported $C $col 'no permission boundary between identities in one uid: posse
 # --- create, read, versioning -------------------------------------------------------------------------
 
 col='create-read-version'
-cell $C $col publisher ok versioned -- put compiler app-token g1 app-token-g1
-cell $C $col publisher fail versioned -- put compiler app-token g1 app-token-g2
-cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" get compiler app-token g1
-cell $C $col executor fail versioned -- get executor app-token g1
-cell $C $col publisher ok versioned -- put compiler app-token g2 app-token-g2
+cell $C $col publisher ok primitive -- put compiler app-token g1 app-token-g1
+cell $C $col publisher fail primitive -- put compiler app-token g1 app-token-g2
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g1)" get compiler app-token g1
+cell $C $col executor fail primitive -- get executor app-token g1
+cell $C $col publisher ok primitive -- put compiler app-token g2 app-token-g2
 cell $C $col metadata ok metadata -- list_gens app-token
-cell $C $col publisher ok versioned -- race app-token g-race
+cell $C $col publisher ok primitive -- race app-token g-race
 # Create-only is a convention of the writer, not a property of the store: a writer that removes the
 # file first replaces a generation, and nothing records that it did.
-cell $C $col publisher ok versioned -- rm -- "$S/objects/app-token/g2.age" "$S/meta/app-token/g2.json"
-cell $C $col publisher ok versioned -- put compiler app-token g2 app-token-g3
-cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g3)" get compiler app-token g2
+cell $C $col publisher ok - -- rm -- "$S/objects/app-token/g2.age" "$S/meta/app-token/g2.json"
+cell $C $col publisher ok primitive -- put compiler app-token g2 app-token-g3
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g3)" get compiler app-token g2
 unsupported $C $col 'no retention limit and no pruning: generations stay until a file is removed, which the store can neither prevent nor record'
 
 # --- artifact encryption ------------------------------------------------------------------------------
@@ -164,9 +167,9 @@ unsupported $C signing 'age encrypts and has no signatures; a signing need would
 
 col='rotation'
 cell $C $col operator ok primitive -- newkey compiler-2
-cell $C $col operator ok versioned -- rotate app-token g1 compiler compiler-2
-cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token g1
-cell $C $col compiler fail versioned -- get compiler app-token g1
+cell $C $col operator ok primitive -- rotate app-token g1 compiler compiler-2
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token g1
+cell $C $col compiler fail primitive -- get compiler app-token g1
 cell $C $col metadata ok metadata -- meta_check app-token g1
 unsupported $C $col 'no rewrap without plaintext: re-encryption decrypts in the rotating process'
 unsupported $C $col 'no reversible decryption floor: blocking an old key means moving its file, which leaves no metadata the store can report'
@@ -175,14 +178,14 @@ unsupported $C $col 'no reversible decryption floor: blocking an old key means m
 
 col='metadata-only'
 cell $C $col metadata ok metadata -- meta_check app-token g2
-cell $C $col metadata ok metadata -- ls -l "$S/objects/app-token"
+cell $C $col metadata ok metadata -- stat -c '%A %s %n' "$S/objects/app-token"/*
 # Presence is not usability (design §7.3): a generation encrypted to a key that is then lost still
 # passes every metadata check.
 cell $C $col operator ok primitive -- newkey lost
-cell $C $col publisher ok versioned -- put lost app-token g-lost app-token-g1
+cell $C $col publisher ok primitive -- put lost app-token g-lost app-token-g1
 cell $C $col operator ok - -- rm -- "$S/keys/lost.key"
 cell $C $col metadata ok metadata -- meta_check app-token g-lost
-cell $C $col compiler fail versioned -- get lost app-token g-lost
+cell $C $col compiler fail primitive -- get lost app-token g-lost
 # A damaged ciphertext is caught by the recorded digest, which a bare presence check would miss.
 cell $C $col operator ok - -- damage "$S/objects/app-token/g-race.age"
 cell $C $col metadata fail metadata -- meta_check app-token g-race
@@ -190,21 +193,21 @@ cell $C $col metadata fail metadata -- meta_check app-token g-race
 # --- startup unlock -----------------------------------------------------------------------------------
 
 col='startup-unlock'
-cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token g1
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token g1
 # A passphrase-protected identity: age reads the passphrase from a terminal only, so an unattended
 # restart cannot use it, and a process that feeds one through a pseudo-terminal holds the
 # passphrase itself.
 cell $C $col operator ok - -- with_pty 2 "$CACHE/age -p -o $S/keys/compiler-protected.key.age $S/keys/compiler-2.key"
-cell $C $col compiler fail versioned -- no_tty_decrypt
-cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" pty_decrypt
+cell $C $col compiler fail primitive -- no_tty_decrypt
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g1)" pty_decrypt
 
 # --- backup and restore -------------------------------------------------------------------------------
 
 col='backup-restore'
 cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-snapshot e5-age-store
-cell $C $col publisher ok versioned -- put compiler-2 app-token g3 app-token-g3
+cell $C $col publisher ok primitive -- put compiler-2 app-token g3 app-token-g3
 cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-restore e5-age-store
-cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token g1
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token g1
 cell $C $col metadata fail metadata -- meta_check app-token g3
 cell $C $col executor ok primitive -- open_artifact executor rel-1
 

@@ -57,21 +57,36 @@ get() { sops_as "$1" decrypt --extract '["value"]' "$D/secrets/$2.enc.json"; }
 meta() { # meta <file>: what the file says about itself without any key
   jq -r '.sops | "lastmodified=\(.lastmodified) recipients=\([.age[].recipient] | length) mac_present=\(.mac != null) version=\(.version)"' "$1"
 }
-race() { # race <name>: two writers of one file at once; both are told they succeeded
-  local a=0 b=0 got
-  set_value compiler "$1" race-a >/dev/null 2>&1 &
-  local pa=$!
-  set_value compiler "$1" race-b >/dev/null 2>&1 &
-  local pb=$!
-  wait "$pa" || a=1
-  wait "$pb" || b=1
-  got=$(get compiler "$1" | sha256sum | cut -d' ' -f1)
-  case $got in
-    "$(e5_digest race-a)") got=a ;;
-    "$(e5_digest race-b)") got=b ;;
-    *) got=neither ;;
-  esac
-  printf 'writer a rc=%s, writer b rc=%s, file holds writer %s\n' "$a" "$b" "$got"
+has_key() { # has_key <file> <key>: yes or no, the value itself discarded
+  if sops_as compiler decrypt --extract "[\"$2\"]" "$1" >/dev/null 2>&1; then echo yes; else echo no; fi
+}
+race() { # race <name>: two writers each add their own key to one fresh file at once, ten times
+  # A lost update is a file holding only one of the two keys although both writers exited 0. The
+  # cell passes if that happens at least once; every attempt is printed.
+  local f=$D/secrets/$1.enc.json i a b ka kb lost=0
+  for i in $(seq 1 10); do
+    rm -f -- "$f"
+    put "$1" race-base >/dev/null || return 1
+    a=0 b=0
+    jq -Rs . <"$(e5_value_file race-a)" | sops_as compiler set --value-stdin "$f" '["a"]' 2>/dev/null &
+    local pa=$!
+    jq -Rs . <"$(e5_value_file race-b)" | sops_as compiler set --value-stdin "$f" '["b"]' 2>/dev/null &
+    local pb=$!
+    wait "$pa" || a=1
+    wait "$pb" || b=1
+    ka=$(has_key "$f" a) kb=$(has_key "$f" b)
+    printf 'attempt %s: writer a rc=%s, writer b rc=%s, key a present=%s, key b present=%s\n' "$i" "$a" "$b" "$ka" "$kb"
+    [ "$a$b" != 00 ] || [ "$ka$kb" = yesyes ] || lost=$((lost + 1))
+  done
+  printf 'lost updates with both writers told success: %s of 10\n' "$lost"
+  [ "$lost" -gt 0 ]
+}
+# graft <name> <old-copy> <identity>: the current file's values under the old copy's recipient
+# stanzas, decrypted as <identity>. It opens only if the data key is still the old copy's.
+graft() {
+  local g=$W/graft.enc.json
+  jq --slurpfile old "$2" '.sops.age = $old[0].sops.age' "$D/secrets/$1.enc.json" >"$g" || return 1
+  sops_as "$3" decrypt --extract '["value"]' "$g"
 }
 # shellcheck disable=SC2094 # as for put
 seal_artifact() {
@@ -102,7 +117,7 @@ data_key() { # data_key <name> <digest-before> <same|new>: fails when the observ
 
 # --- inputs ------------------------------------------------------------------------------------------
 
-for v in app-token-g1 app-token-g2 race-a race-b artifact-token; do e5_secret "$v"; done
+for v in app-token-g1 app-token-g2 race-base race-a race-b artifact-token; do e5_secret "$v"; done
 {
   printf 'machine:\n  token: '
   cat "$(e5_value_file artifact-token)"
@@ -129,10 +144,8 @@ cell $C $col executor fail primitive -- get executor app-token
 cell $C $col compiler ok primitive -- set_value compiler app-token app-token-g2
 cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler app-token
 unsupported $C $col 'no version history: an update replaces the only copy; generations exist only as separate files or in an outside history such as git'
-cell $C $col compiler ok primitive -- race app-token
-# The race leaves whichever writer landed last; put the known value back for the cells below.
-cell $C $col compiler ok - -- set_value compiler app-token app-token-g2
-unsupported $C $col 'no compare-and-set: concurrent writers both succeed and the last write wins'
+cell $C $col compiler ok primitive -- race race
+unsupported $C $col 'no compare-and-set and no locking: two writers of one file both succeed, and the later write discards the other'
 
 # --- artifact encryption ------------------------------------------------------------------------------
 
@@ -156,17 +169,22 @@ cell $C $col metadata fail metadata -- sops_nokey decrypt --extract '["value"]' 
 
 col='rotation'
 before=$(ct_digest app-token)
+cp -- "$D/secrets/app-token.enc.json" "$W/pre-rotate.enc.json"
 cell $C $col compiler ok primitive -- sops_as compiler rotate -i "$D/secrets/app-token.enc.json"
 cell $C $col metadata ok metadata -- data_key app-token "$before" new
+# A changed ciphertext alone could be the same key with a fresh nonce; the old stanzas must no
+# longer open the new values if the data key really changed.
+cell $C $col compiler fail primitive -- check_digest "$(e5_digest app-token-g2)" graft app-token "$W/pre-rotate.enc.json" compiler
 cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler app-token
 cell $C $col operator ok primitive -- newkey compiler-2
 cell $C $col operator ok - -- rules compiler-2,recovery executor
 before=$(ct_digest app-token)
+cp -- "$D/secrets/app-token.enc.json" "$W/pre-updatekeys.enc.json"
 cell $C $col compiler ok primitive -- updatekeys compiler app-token
 # Expected: removing a recipient re-wraps the same data key for the remaining ones, so a holder
-# of the removed identity who kept an older copy of the file, or the data key itself, can still
-# read the value.
+# of the removed identity who kept an older copy of the file can still read the current value.
 cell $C $col metadata ok metadata -- data_key app-token "$before" same
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" graft app-token "$W/pre-updatekeys.enc.json" compiler
 cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
 cell $C $col compiler fail primitive -- get compiler app-token
 cell $C $col metadata ok metadata -- meta "$D/secrets/app-token.enc.json"
@@ -183,6 +201,7 @@ cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" g
 col='backup-restore'
 cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-snapshot e5-sops
 cell $C $col compiler ok primitive -- set_value compiler-2 app-token app-token-g1
+cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token
 cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-restore e5-sops
 cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
 cell $C $col executor ok primitive -- open_artifact executor rel-1
