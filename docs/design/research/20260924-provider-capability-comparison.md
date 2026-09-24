@@ -254,7 +254,7 @@ answer passed, so the cell showed nothing, and a procedural cell had to write a 
 the cells after it. The race now runs on its own file: two writers each add a different key, ten
 times over, and the cell passes only if some attempt ends with both writers told they succeeded and
 the file readable with exactly one of the two keys. A file holding neither key could be one sops
-cannot read at all, so it is counted apart rather than as a lost update. Updates were lost in 9 of
+cannot read at all, so it is counted apart rather than as a lost update. Updates were lost in 7 of
 10 attempts, and no attempt left a file holding neither key (149).
 
 ### 5.5 sops looked for the operator's own SSH keys
