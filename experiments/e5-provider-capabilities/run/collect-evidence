@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Copy the committable text of one capture into evidence/: the cell table, every transcript, the
+# summary, and the bundle's leak scan, versions, injection log and OpenBao metadata. Absolute paths
+# are rewritten, and the result is refused if it holds anything the fixture's own leak-scan patterns
+# match, an age secret key, or an OpenBao token this capture created. Run it with the fixture still
+# up: the patterns are rebuilt from this run's credentials.
+#
+# Phase-0 evidence for the provider-capability experiment (ginsys/bronzeward issue 8). Not v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+need grep sed find cp
+[ -s "$E5_OUT/summary.txt" ] || die "$E5_OUT/summary.txt is missing; only a run/all that completed writes it"
+[ -s "$STATE/scan-patterns.txt" ] || die "no scan patterns: run this with the fixture still up"
+
+dest=$E5_DIR/evidence
+incoming=$(mktemp -d "$E5_DIR/.evidence-incoming.XXXXXX")
+trap 'rm -rf -- "$incoming"' EXIT
+
+rewrite() { # rewrite <in> <out>: the checkout and E5_OUT become placeholders
+  sed -e "s#$REPO_DIR#<repo>#g" -e "s#$E5_OUT#<E5_OUT>#g" -- "$1" >"$2"
+}
+mkdir -p -- "$incoming/transcripts"
+rewrite "$E5_CELLS" "$incoming/cells.tsv"
+rewrite "$E5_OUT/summary.txt" "$incoming/summary.txt"
+for f in "$E5_TRANSCRIPTS"/*.txt; do
+  rewrite "$f" "$incoming/transcripts/${f##*/}"
+done
+for f in leak-scan.txt versions.txt injections.log openbao-metadata.jsonl; do
+  [ -f "$E5_OUT/bundle/$f" ] || die "the bundle has no $f"
+  rewrite "$E5_OUT/bundle/$f" "$incoming/$f"
+done
+
+# Refusals. A match is reported by file only, never by content.
+hits=$(grep -rlF -f "$STATE/scan-patterns.txt" -- "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence matches the fixture's leak-scan patterns in: $hits"
+hits=$(grep -rl 'AGE-SECRET-KEY-' -- "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence holds an age secret key in: $hits"
+hits=$(grep -rlE '\b(s|hvs)\.[A-Za-z0-9]{20,}' -- "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence holds what looks like an OpenBao token in: $hits"
+
+rm -rf -- "$dest"
+mv -T -- "$incoming" "$dest"
+trap - EXIT
+say "evidence collected in $dest: $(find "$dest" -type f | wc -l) files"

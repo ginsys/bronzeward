@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Migration between the candidates, and the SOPS import/export role (design §7.3). Runs after
+# run/openbao, run/age-store and run/sops, against the stores and keys they left.
+#
+# What a migration must preserve (design discussion §6, task 6): the logical reference, the
+# generation or version identity a release pins, and access to retained artifacts. Keys differ
+# between candidates, so every move below decrypts and re-encrypts; each cell records which roles
+# the migrating process had to hold at once.
+#
+# Phase-0 evidence for the provider-capability experiment (ginsys/bronzeward issue 8). Not v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+e5_init
+e5_need_fixture
+e5_bao_identities
+
+C=migration
+A=$STATE/data/age-store
+D=$STATE/data/sops
+[ -d "$A/objects" ] && [ -d "$D/secrets" ] || die "run run/age-store and run/sops first"
+
+age() { "$CACHE/age" "$@"; }
+sops_as() {
+  env -u SOPS_AGE_KEY -u SOPS_AGE_KEY_CMD SOPS_AGE_KEY_FILE="$D/keys/$1.key" XDG_CONFIG_HOME="$E5_WORK/no-config" \
+    "$CACHE/sops" --config "$D/.sops.yaml" "${@:2}"
+}
+kv_put_stdin() { bao_stdin kv put -cas=0 "$1" value=-; }
+kv_get() { bao kv get -field=value "$@"; }
+
+# --- helpers: values only ever cross a pipe inside one process ----------------------------------------
+
+age_to_bao() { # age_to_bao <name> <gen> <kv-path>: needs the age compiler key and the publisher token
+  age -d -i "$A/keys/compiler-2.key" "$A/objects/$1/$2.age" | as publisher kv_put_stdin "$3" || return 1
+  # The source's creation time is not the target's; carry it as metadata or lose it.
+  as admin bao kv metadata put -custom-metadata="source=age-store:$1/$2" \
+    -custom-metadata="source_created=$(jq -r .created "$A/meta/$1/$2.json")" "$3"
+}
+created_times() { # created_times <name> <gen> <kv-path>
+  printf 'age-store created=%s\n' "$(jq -r .created "$A/meta/$1/$2.json")"
+  as metadata bao kv metadata get -format=json "$3" |
+    jq -r '.data | "openbao created=\(.created_time) custom_metadata=\(.custom_metadata | tostring)"'
+}
+artifact_age_to_transit() { # needs the age executor key and the Transit compiler role at once
+  local ct
+  ct=$(age -d -i "$A/keys/executor.key" "$A/artifacts/$1.age" | base64 -w0 |
+    as compiler bao_stdin write -field=ciphertext transit/encrypt/bw-artifact plaintext=-) || return 1
+  printf '%s\n' "$ct" | tee "$E5_WORK/migrated-$1.ct"
+}
+open_transit() { # open_transit <ciphertext-file> <want-digest>
+  check_digest "$2" transit_plain "$1"
+}
+transit_plain() { as executor bao write -field=plaintext transit/decrypt/bw-artifact ciphertext="$(cat "$1")" | base64 -d; }
+bao_to_age() { # bao_to_age <kv-path> <version> <name> <gen>: needs the compiler token and a recipient
+  local obj=$A/objects/$3/$4.age
+  mkdir -p -- "$A/objects/$3" "$A/meta/$3"
+  as compiler kv_get -version="$2" "$1" |
+    (set -C && age -r "$(age_recipient compiler-2)" >"$obj") || return 1
+  jq -n --arg created "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" --arg source "openbao:$1@v$2" \
+    --arg sha256 "$(sha256sum <"$obj" | cut -d' ' -f1)" \
+    '{created: $created, source: $source, ciphertext_sha256: $sha256}' >"$A/meta/$3/$4.json" || return 1
+  echo "migrated $1 version $2 to $3/$4"
+}
+age_recipient() { "$CACHE/age-keygen" -y "$A/keys/$1.key"; }
+all_versions_to_age() { # every version the KV path still has; a pruned one is not there to move
+  local path=$1 name=$2 v moved=0 missing=0 current
+  current=$(as metadata bao kv metadata get -format=json "$path" | jq -r .data.current_version) || return 1
+  for ((v = 1; v <= current; v++)); do
+    if bao_to_age "$path" "$v" "$name" "v$v" >/dev/null 2>&1; then
+      moved=$((moved + 1))
+    else
+      missing=$((missing + 1))
+    fi
+  done
+  printf 'versions 1..%s: moved %s, not available %s\n' "$current" "$moved" "$missing"
+}
+sops_to_bao() { # import: needs the sops compiler key and the publisher token
+  sops_as compiler-2 decrypt --extract '["value"]' "$D/secrets/$1.enc.json" | as publisher kv_put_stdin "$2"
+}
+# shellcheck disable=SC2094 # --filename-override only names the file for rule matching; sops reads stdin
+bao_to_sops() { # export: needs the compiler token; any holder of a recipient can then decrypt
+  local f=$D/secrets/$2.enc.json
+  as compiler kv_get "$1" | jq -Rs '{value: .}' |
+    (set -C && env -u SOPS_AGE_KEY -u SOPS_AGE_KEY_FILE "$CACHE/sops" --config "$D/.sops.yaml" \
+      encrypt --filename-override "$f" --input-type json --output-type json /dev/stdin >"$f") || return 1
+  echo "exported $1 to $2"
+}
+
+# --- age-store to OpenBao -----------------------------------------------------------------------------
+
+cell $C age-to-openbao compiler+publisher ok versioned -- age_to_bao app-token g1 secret/gen/migrated/app-token/g1
+cell $C age-to-openbao compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" as compiler kv_get secret/gen/migrated/app-token/g1
+cell $C age-to-openbao metadata ok metadata -- created_times app-token g1 secret/gen/migrated/app-token/g1
+cell $C age-to-openbao publisher denied versioned -- age_to_bao app-token g2 secret/gen/migrated/app-token/g1
+cell $C age-artifact-to-transit executor+compiler ok primitive -- artifact_age_to_transit rel-1
+cell $C age-artifact-to-transit executor ok primitive -- open_transit "$E5_WORK/migrated-rel-1.ct" \
+  "$(sha256sum <"$E5_WORK/age-store/artifact.yaml" | cut -d' ' -f1)"
+
+# --- OpenBao to age-store -----------------------------------------------------------------------------
+
+cell $C openbao-to-age compiler ok versioned -- bao_to_age secret/gen/app-token/g2 1 app-token-from-bao g2
+cell $C openbao-to-age compiler ok versioned -- check_digest "$(e5_digest app-token-g2)" \
+  age -d -i "$A/keys/compiler-2.key" "$A/objects/app-token-from-bao/g2.age"
+cell $C openbao-to-age compiler ok versioned -- all_versions_to_age secret/mutable/registry registry-from-bao
+cell $C openbao-to-age compiler ok versioned -- check_digest "$(e5_digest registry-v11)" \
+  age -d -i "$A/keys/compiler-2.key" "$A/objects/registry-from-bao/v11.age"
+unsupported $C openbao-to-age 'Transit ciphertext cannot move: the key is not exportable, so every artifact must be decrypted by an executor and re-encrypted by the target'
+
+# --- SOPS import and export ---------------------------------------------------------------------------
+
+cell $C sops-import compiler+publisher ok versioned -- sops_to_bao app-token secret/gen/imported/app-token/g1
+cell $C sops-import compiler ok versioned -- check_digest "$(e5_digest app-token-g2)" as compiler kv_get secret/gen/imported/app-token/g1
+cell $C sops-export compiler ok primitive -- bao_to_sops secret/gen/app-token/g1 exported-app-token
+cell $C sops-export recovery ok primitive -- check_digest "$(e5_digest app-token-g1)" \
+  sops_as recovery decrypt --extract '["value"]' "$D/secrets/exported-app-token.enc.json"
+cell $C sops-export metadata ok metadata -- jq -r '.sops | "lastmodified=\(.lastmodified) recipients=\([.age[].recipient] | length)"' \
+  "$D/secrets/exported-app-token.enc.json"
+
+say "migrate: $(e5_mismatches) mismatch(es) so far in $E5_CELLS"
