@@ -1,0 +1,538 @@
+#!/usr/bin/env bash
+# The whole E4 matrix: every semantic on both backends, the interruption rows on the backend that
+# has them, then the prototype's own tests against both. Needs the fixture up (fixtures/bin/up);
+# E4_OUT names a new, empty directory outside the checkout. Each row's expectation is written here,
+# before the run, and compared with what the independent reader finds (run/lib.sh).
+#
+# Phase-0 evidence for the database-semantics experiment (ginsys/bronzeward issue 6). Not v1 tooling.
+set -uo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+e4_init
+e4_need_fixture
+e4_build
+
+migrate() { e4 migrate migrate -runner "${1:-setup}"; }
+
+# ---- S1 stale revision rejection ----
+
+s1_cas() { # 8 writers, 20 rounds, each round every writer holds the same read
+  row_begin s1 "$1" cas
+  migrate
+  e4 seed seed-fragment
+  e4 race race -writers 8 -rounds 20 -actor w
+  e4_read s1
+  row_end rc:race=0 out:race~'wins=20 conflicts=140 busy=0' revisions_recorded=20 duplicate_revisions=0 \
+    final_revision=20 lost_updates=0
+}
+
+s1_processes() { # four processes of four writers each, released together
+  local at i
+  row_begin s1 "$1" cas-processes
+  migrate
+  e4 seed seed-fragment
+  at=$(e4_start_at)
+  for i in 1 2 3 4; do e4_bg "p$i" race -writers 4 -rounds 10 -actor "p$i" -start-at "$at"; done
+  for i in 1 2 3 4; do e4_reap "p$i"; done
+  e4_read s1
+  row_end rc:p1=0 rc:p2=0 rc:p3=0 rc:p4=0 duplicate_revisions=0 lost_updates=0 'revisions_recorded>9'
+}
+
+s1_blind() { # control: no revision predicate, so the reader must find lost updates
+  row_begin s1 "$1" blind-control
+  migrate
+  e4 seed seed-fragment
+  e4 race race -writers 8 -rounds 20 -actor w -blind
+  e4_read s1
+  row_end rc:race=0 out:race~'wins=160' final_revision=20 revisions_recorded=160 lost_updates=140 duplicate_revisions=20
+}
+
+# ---- S2 all-or-nothing publication ----
+
+s2_setup() { migrate; e4 seed seed-fragment; }
+
+s2_normal() {
+  row_begin s2 "$1" normal
+  s2_setup
+  e4 publish publish -release r1 -actor p -pin f1=0 -artifacts 8
+  e4_read s2
+  row_end rc:publish=0 releases=1 artifacts=8 sources=1 incomplete_releases=0
+}
+
+s2_stale() {
+  row_begin s2 "$1" stale-input
+  s2_setup
+  e4 write update -actor w -read 0
+  e4 publish publish -release r1 -actor p -pin f1=0 -artifacts 8
+  e4_read s2
+  row_end rc:write=0 rc:publish=3 out:publish~'reason=stale' releases=0 artifacts=0 sources=0
+}
+
+s2_fail() {
+  row_begin s2 "$1" fail-at-5
+  s2_setup
+  e4 publish publish -release r1 -actor p -pin f1=0 -artifacts 8 -fail-at 5
+  e4_read s2
+  row_end rc:publish=1 out:publish~'injected failure' releases=0 artifacts=0 sources=0
+}
+
+s2_client_kill() { # SIGKILL with the release, its source and four artifacts written
+  row_begin s2 "$1" client-sigkill
+  s2_setup
+  e4_bg publish publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 30s
+  e4_wait_for publish '^hold='
+  e4_kill publish
+  e4_read s2
+  row_end rc:publish=137 releases=0 artifacts=0 sources=0
+}
+
+s2_server_kill() { # PostgreSQL: the server is killed with the transaction open
+  row_begin s2 postgres server-kill
+  s2_setup
+  e4_bg publish publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 10s
+  e4_wait_for publish '^hold='
+  e4_inject kill postgres
+  e4_reap publish
+  e4_inject start postgres
+  e4_read s2
+  row_end rc:inject-kill=0 rc:inject-start=0 rc:publish=1 out:publish~'class=conn' releases=0 artifacts=0
+}
+
+s2_server_pause() { # PostgreSQL: paused for 3s with the transaction open, then resumed
+  row_begin s2 postgres server-pause
+  s2_setup
+  e4_bg publish publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 1s
+  e4_wait_for publish '^hold='
+  e4_inject pause postgres
+  sleep 3
+  e4_inject unpause postgres
+  e4_reap publish
+  e4_read s2
+  row_end rc:inject-pause=0 rc:inject-unpause=0 rc:publish=0 releases=1 artifacts=8 incomplete_releases=0
+}
+
+s2_netsplit() { # PostgreSQL: the server leaves the network for 5s with the transaction open
+  row_begin s2 postgres netsplit
+  s2_setup
+  e4_bg publish publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 1s
+  e4_wait_for publish '^hold='
+  e4_inject netsplit postgres
+  sleep 5
+  e4_inject netjoin postgres
+  e4_reap publish
+  e4_read s2
+  # Either outcome is admissible for the client; what is not is a partial release.
+  row_end rc:inject-netsplit=0 rc:inject-netjoin=0 incomplete_releases=0
+}
+
+# Commit unknown. The client has sent COMMIT and is killed before it hears the answer: from the
+# client's side the outcome is unknown, and only the data says what happened. The retry with the
+# same release name and content must then leave exactly one complete release either way.
+s2_commit_unknown() { # PostgreSQL: COMMIT sent to a paused server, client killed, server resumed
+  local gate
+  row_begin s2 postgres commit-unknown
+  gate=$ROW_PARTS/commit-gate
+  s2_setup
+  e4_bg publish publish -release r1 -actor p -pin f1=0 -artifacts 8 -commit-gate "$gate"
+  e4_wait_for publish '^commit-ready'
+  e4_inject pause postgres
+  : >"$gate"
+  e4_wait_for publish '^commit-sent'
+  sleep 2
+  e4_kill publish
+  e4_inject unpause postgres
+  sleep 2
+  e4_read s2 after-kill
+  e4 retry publish -release r1 -actor p -pin f1=0 -artifacts 8
+  e4_read s2
+  row_end rc:inject-pause=0 rc:inject-unpause=0 rc:publish=137 out:publish~'^commit-sent' \
+    after-kill.incomplete_releases=0 rc:retry=0 releases=1 artifacts=8 incomplete_releases=0
+}
+
+s2_kill_before_commit() { # both: killed at the gate, before COMMIT; the retry publishes
+  local gate
+  row_begin s2 "$1" kill-before-commit
+  gate=$ROW_PARTS/commit-gate
+  s2_setup
+  e4_bg publish publish -release r1 -actor p -pin f1=0 -artifacts 8 -commit-gate "$gate"
+  e4_wait_for publish '^commit-ready'
+  e4_kill publish
+  e4_read s2 after-kill
+  e4 retry publish -release r1 -actor p -pin f1=0 -artifacts 8
+  e4_read s2
+  row_end rc:publish=137 after-kill.releases=0 after-kill.artifacts=0 rc:retry=0 out:retry~'existing=false' \
+    releases=1 artifacts=8
+}
+
+s2_retry() { # an identical retry returns the release; a different one is refused
+  row_begin s2 "$1" retry
+  s2_setup
+  e4 first publish -release r1 -actor p -pin f1=0 -artifacts 8
+  e4 same publish -release r1 -actor p -pin f1=0 -artifacts 8
+  e4 different publish -release r1 -actor p -pin f1=0 -artifacts 9
+  e4_read s2
+  row_end rc:first=0 rc:same=0 out:same~'existing=true' rc:different=3 out:different~'reason=conflict' \
+    releases=1 artifacts=8
+}
+
+# A writer races a publication holding its source comparison open. With the lock the writer
+# waits and the release is never stale at its commit; the control drops the lock.
+s2_race() {
+  local backend=$1 variant=$2 flag=() stale=0
+  [ "$variant" = unlocked-control ] && flag=(-no-source-lock)
+  [ "$variant" = unlocked-control ] && [ "$backend" = postgres ] && stale=1
+  row_begin s2 "$backend" "race-$variant"
+  s2_setup
+  e4_bg publish publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 3s "${flag[@]}"
+  e4_wait_for publish '^hold='
+  e4 write update -actor w -read 0
+  e4_reap publish
+  e4_read s2
+  row_end rc:publish=0 rc:write=0 releases=1 stale_at_commit=$stale
+}
+
+# ---- S3 unique operation intent ----
+
+s3_race() { # eight processes, eight keys, one machine scope
+  local at i
+  row_begin s3 "$1" race-processes
+  migrate
+  at=$(e4_start_at)
+  for i in 1 2 3 4 5 6 7 8; do e4_bg "c$i" intent -machine m1 -key "k$i" -owner "c$i" -start-at "$at"; done
+  for i in 1 2 3 4 5 6 7 8; do e4_reap "c$i"; done
+  e4_read s3
+  local created=0 busy=0
+  for i in 1 2 3 4 5 6 7 8; do
+    case ${RC[c$i]} in 0) created=$((created + 1)) ;; 3) busy=$((busy + 1)) ;; esac
+  done
+  row_note clients_created "$created"
+  row_note clients_scope_busy "$busy"
+  row_end clients_created=1 clients_scope_busy=7 operations=1 scopes_with_two_active=0 intents_recorded=1
+}
+
+s3_retry() {
+  row_begin s3 "$1" retry-same-key
+  migrate
+  e4 first intent -machine m1 -key k1 -owner c1
+  e4 retry intent -machine m1 -key k1 -owner c1
+  e4_read s3
+  row_end rc:first=0 rc:retry=0 out:retry~'op=1 created=false' operations=1 intents_recorded=1
+}
+
+s3_after_completion() {
+  row_begin s3 "$1" after-completion
+  migrate
+  e4 first intent -machine m1 -key k1 -owner c1
+  e4 blocked intent -machine m1 -key k2 -owner c2
+  e4 finish finish -op 1 -state completed
+  e4 second intent -machine m1 -key k2 -owner c2
+  e4 other intent -machine m2 -key k3 -owner c3
+  e4_read s3
+  row_end rc:first=0 rc:blocked=3 out:blocked~'reason=scope-busy' rc:finish=0 rc:second=0 rc:other=0 \
+    operations=3 scopes_with_two_active=0
+}
+
+# ---- S4 ownership transitions ----
+
+s4_race() { # eight processes take over generation 1 at once
+  local at i won=0
+  row_begin s4 "$1" takeover-race-processes
+  migrate
+  e4 intent intent -machine m1 -key k1 -owner o0
+  at=$(e4_start_at)
+  for i in 1 2 3 4 5 6 7 8; do e4_bg "t$i" takeover -op 1 -owner "o$i" -expect 1 -start-at "$at"; done
+  for i in 1 2 3 4 5 6 7 8; do
+    e4_reap "t$i"
+    [ "${RC[t$i]}" = 0 ] && won=$((won + 1))
+  done
+  row_note clients_won "$won"
+  e4_read s4
+  row_end clients_won=1 takeovers=1 stale_attempts=0
+}
+
+s4_fenced() {
+  row_begin s4 "$1" stale-owner-fenced
+  migrate
+  e4 intent intent -machine m1 -key k1 -owner a
+  e4 takeover takeover -op 1 -owner b -expect 1
+  e4 stale attempt -op 1 -owner a -gen 1
+  e4 current attempt -op 1 -owner b -gen 2
+  e4_read s4
+  row_end rc:takeover=0 rc:stale=3 out:stale~'reason=fenced' rc:current=0 attempts=1 stale_attempts=0 'op:1=b 2 1'
+}
+
+# An attempt holds its transaction after the ownership check while a takeover runs. Fenced, the
+# takeover waits; the check-then-insert control lets it in on PostgreSQL.
+s4_race_attempt() {
+  local backend=$1 variant=$2 flag=() stale=0
+  [ "$variant" = check-then-insert-control ] && flag=(-check-then-insert)
+  [ "$variant" = check-then-insert-control ] && [ "$backend" = postgres ] && stale=1
+  row_begin s4 "$backend" "attempt-race-$variant"
+  migrate
+  e4 intent intent -machine m1 -key k1 -owner a
+  e4_bg attempt attempt -op 1 -owner a -gen 1 -hold 3s "${flag[@]}"
+  e4_wait_for attempt '^hold='
+  e4 takeover takeover -op 1 -owner b -expect 1
+  e4_reap attempt
+  e4_read s4
+  row_end rc:attempt=0 rc:takeover=0 attempts=1 takeovers=1 stale_attempts=$stale
+}
+
+# ---- S5 queue claims ----
+
+s5_workers() { # eight worker processes drain 400 jobs
+  local backend=$1 claim_mode=$2 at i twice='jobs_claimed_twice=0' claims='claims=400'
+  row_begin s5 "$backend" "workers-$claim_mode"
+  migrate
+  e4 seed seed-jobs -n 400
+  at=$(e4_start_at)
+  for i in 1 2 3 4 5 6 7 8; do e4_bg "w$i" work -worker "w$i" -mode "$claim_mode" -start-at "$at"; done
+  for i in 1 2 3 4 5 6 7 8; do e4_reap "w$i"; done
+  e4_read s5
+  # The control must fire where the database allows it: PostgreSQL re-evaluates only the id
+  # predicate after waiting on a row another claimer changed.
+  [ "$claim_mode" = naive ] && [ "$backend" = postgres ] && twice='jobs_claimed_twice>0' claims='claims>400'
+  row_end rc:w1=0 rc:w2=0 rc:w3=0 rc:w4=0 rc:w5=0 rc:w6=0 rc:w7=0 rc:w8=0 done=400 "$claims" "$twice" \
+    completed_on_stale_fence=0
+}
+
+s5_lease() {
+  row_begin s5 "$1" lease-expiry
+  migrate
+  e4 seed seed-jobs -n 1
+  e4 claim-a claim -worker a -lease 1s
+  e4 claim-b-early claim -worker b -lease 1m
+  sleep 1.5
+  e4 claim-b claim -worker b -lease 1m
+  e4 late-a complete -job 1 -fence 1 -worker a
+  e4 complete-b complete -job 1 -fence 2 -worker b
+  e4_read s5-jobs
+  row_end rc:claim-a=0 rc:claim-b-early=3 out:claim-b-early~'reason=no-job' rc:claim-b=0 out:claim-b~'fence=2' \
+    rc:late-a=3 out:late-a~'reason=fenced' rc:complete-b=0 'job:1=done 2 b 2'
+}
+
+# ---- S6 migrations ----
+
+s6_reader() { e4_read "s6-$ROW_BACKEND" "$@"; }
+
+s6_fresh() {
+  row_begin s6 "$1" fresh
+  e4 migrate migrate -runner r1
+  s6_reader
+  row_end rc:migrate=0 migration:1=r1 migration:4=r1 has_job=1 has_job_state_check=1
+}
+
+s6_fail() { # a failure inside migration 3 rolls back migration 3 only; a re-run completes
+  row_begin s6 "$1" fail-then-rerun
+  e4 fail migrate -runner r1 -fail-at 3
+  s6_reader after-fail
+  e4 rerun migrate -runner r2
+  s6_reader
+  row_end rc:fail=1 out:fail~'injected failure' after-fail.migration:2=r1 after-fail.migration:3=unset \
+    after-fail.has_job=0 rc:rerun=0 out:rerun~'applied=\[3 4\]' migration:3=r2 has_job_state_check=1
+}
+
+s6_kill() { # SIGKILL inside migration 3's transaction; a re-run completes
+  row_begin s6 "$1" sigkill-then-rerun
+  e4_bg killed migrate -runner r1 -hold-at 3 -hold 30s
+  e4_wait_for killed '^hold='
+  e4_kill killed
+  s6_reader after-kill
+  e4 rerun migrate -runner r2
+  s6_reader
+  row_end rc:killed=137 after-kill.migration:2=r1 after-kill.migration:3=unset after-kill.has_job=0 \
+    rc:rerun=0 migration:3=r2 migration:4=r2 has_job_state_check=1
+}
+
+# Four runners released together, each holding migration 2 open for 500ms. With the lock (the
+# advisory lock on PostgreSQL, BEGIN IMMEDIATE on SQLite) all succeed and each version is applied
+# once. The control removes it: -no-lock, or a deferred SQLite transaction.
+s6_concurrent() {
+  local backend=$1 variant=$2 at i flag=() failed=0 expect_failed=clients_failed=0
+  if [ "$variant" = unlocked-control ]; then
+    expect_failed='clients_failed>0'
+    if [ "$backend" = postgres ]; then flag=(-no-lock); fi
+  fi
+  row_begin s6 "$backend" "concurrent-$variant"
+  [ "$variant" = unlocked-control ] && [ "$backend" = sqlite ] && export E4_SQLITE_TXLOCK=deferred
+  at=$(e4_start_at)
+  for i in 1 2 3 4; do e4_bg "r$i" migrate -runner "r$i" -hold-at 2 -hold 500ms -start-at "$at" "${flag[@]}"; done
+  for i in 1 2 3 4; do
+    e4_reap "r$i"
+    [ "${RC[r$i]}" = 0 ] || failed=$((failed + 1))
+  done
+  unset E4_SQLITE_TXLOCK
+  row_note clients_failed "$failed"
+  s6_reader
+  # Whatever the runners did, the schema_migrations key allows each version once.
+  local versions=0 v applied
+  for v in 1 2 3 4; do [ -n "${R[migration:$v]+set}" ] && versions=$((versions + 1)); done
+  row_note versions_recorded "$versions"
+  # Versions the runners report having applied, summed over all four: each version once.
+  applied=$(cat -- "$ROW_PARTS"/r?.txt | sed -n 's/.*applied=\[\([0-9 ]*\)\].*/\1/p' | wc -w)
+  row_note applied_total "$applied"
+  if [ "$variant" = locked ]; then
+    row_end "$expect_failed" versions_recorded=4 applied_total=4 has_job_state_check=1
+  else
+    row_end "$expect_failed" 'versions_recorded>0'
+  fi
+}
+
+# ---- S7 restored state ----
+
+# Snapshot after release r1 and operation 1 (owner x, generation 1). After the snapshot: release
+# r2, two takeovers (y at 2, x at 3) and an attempt at 3, operation 2. Restore. The reader shows
+# what the restore took back, and the next publication and takeover show what gets issued again.
+s7_restore() {
+  local backend=$1 snap=e4-s7-$1-$$
+  row_begin s7 "$backend" restore
+  migrate
+  e4 seed seed-fragment
+  e4 r1 publish -release r1 -actor p -pin f1=0 -artifacts 2
+  e4 op1 intent -machine m1 -key k1 -owner x
+  if [ "$backend" = sqlite ]; then
+    if e4_quiesced; then row_note quiesced-at-snapshot yes; else row_note quiesced-at-snapshot no; fi
+    e4_inject store-snapshot "$snap"
+  else
+    e4_inject db-snapshot "$snap"
+  fi
+  e4 r2 publish -release r2 -actor p -pin f1=0 -artifacts 2
+  e4 to-y takeover -op 1 -owner y -expect 1
+  e4 to-x takeover -op 1 -owner x -expect 2
+  e4 attempt-x3 attempt -op 1 -owner x -gen 3
+  e4 op2 intent -machine m2 -key k2 -owner z
+  e4_read s2 before-restore
+  e4_read s4 before-restore
+  if [ "$backend" = sqlite ]; then
+    if e4_quiesced; then row_note quiesced-at-restore yes; else row_note quiesced-at-restore no; fi
+    e4_inject store-restore "$snap"
+  else
+    e4_inject db-restore "$snap"
+  fi
+  e4_read s2 restored
+  e4_read s4 restored
+  e4_read s3 restored
+  # Issued again: the next release gets r2's id; y and then x take generations 2 and 3 again, so
+  # x's pre-restoration token (x, 3) passes the fence once more.
+  e4 r3 publish -release r3 -actor p -pin f1=0 -artifacts 2
+  e4 again-y takeover -op 1 -owner y -expect 1
+  e4 again-x takeover -op 1 -owner x -expect 2
+  e4 old-token attempt -op 1 -owner x -gen 3
+  local snapshot_rc
+  if [ "$backend" = sqlite ]; then snapshot_rc=rc:inject-store-snapshot=0; else snapshot_rc=rc:inject-db-snapshot=0; fi
+  local restore_rc
+  if [ "$backend" = sqlite ]; then restore_rc=rc:inject-store-restore=0; else restore_rc=rc:inject-db-restore=0; fi
+  local q=()
+  [ "$backend" = sqlite ] && q=(quiesced-at-snapshot=yes quiesced-at-restore=yes)
+  row_end "$snapshot_rc" "$restore_rc" "${q[@]}" before-restore.releases=2 before-restore.takeovers=2 \
+    before-restore.attempts=1 restored.releases=1 restored.takeovers=0 restored.attempts=0 restored.operations=1 \
+    'restored.op:1=x 1 0' rc:r3=0 out:r3~' id=2 ' rc:again-y=0 rc:again-x=0 out:again-x~'gen=3' rc:old-token=0
+}
+
+# ---- S8 the single-writer cost ----
+
+# A publication holds a write transaction for 7s; another client writes an unrelated fragment.
+# PostgreSQL lets it through at once. On SQLite it waits the whole busy timeout (5s) and fails.
+s8_unrelated_writer() {
+  local backend=$1
+  row_begin s8 "$backend" unrelated-writer
+  migrate
+  e4 seed seed-fragment
+  e4 seed2 seed-fragment -fragment f2
+  e4_bg publish publish -release r1 -actor p -pin f1=0 -artifacts 2 -hold 7s
+  e4_wait_for publish '^hold='
+  e4 write update -fragment f2 -actor w -read 0
+  e4_reap publish
+  e4_read s1
+  if [ "$backend" = postgres ]; then
+    row_end rc:publish=0 rc:write=0 out:write~'outcome=done elapsed_ms=[0-9]{1,3} ' revisions_recorded=1
+  else
+    row_end rc:publish=0 rc:write=1 out:write~'class=busy elapsed_ms=5[0-9]{3} ' revisions_recorded=0
+  fi
+}
+
+# ---- the prototype's own tests, on both backends ----
+
+go_tests() {
+  local backend=$1
+  row_begin tests "$backend" go-test
+  local part
+  part=$(e4_part go-test)
+  ROW_LABELS+=(go-test)
+  local rc=0
+  if [ "$backend" = postgres ]; then
+    printf '$ E4_TEST_PG_DSN=<fixture> go test -count=1 -v ./...\n' >"$part"
+    E4_TEST_PG_DSN=$(e4_dsn) go -C "$E4_DIR" test -count=1 -v ./... >>"$part" 2>&1 || rc=$?
+  else
+    printf '$ go test -count=1 -v ./...\n' >"$part"
+    env -u E4_TEST_PG_DSN go -C "$E4_DIR" test -count=1 -v ./... >>"$part" 2>&1 || rc=$?
+  fi
+  RC[go-test]=$rc
+  row_end rc:go-test=0 out:go-test~'^ok'
+}
+
+# ---- the matrix ----
+
+{
+  printf 'commit\t%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
+  printf 'uncommitted inputs\t%s\n' "$(git -C "$REPO_DIR" status --porcelain -- experiments/e4-database-semantics fixtures | wc -l)"
+  printf 'started\t%s\n' "$(date -u +%FT%TZ)"
+  printf 'go\t%s\n' "$(go version)"
+  printf 'host sqlite3\t%s\n' "$(sqlite3 --version | cut -d' ' -f1)"
+  printf 'postgres image\t%s\n' "$POSTGRES_IMAGE"
+  printf 'postgres server\t%s\n' "$(e4_psql -c 'SELECT version()')"
+  E4_BACKEND=sqlite E4_SQLITE_PATH=$E4_SQLITE_DIR/version.db "$E4_BIN" version | sed -n 's/.*engine="\(.*\)"/linked sqlite\t\1/p'
+  go version -m "$E4_BIN" | awk '$1 == "dep" { printf "module\t%s %s\n", $2, $3 }'
+} >"$E4_OUT/run.txt"
+rm -f -- "$E4_SQLITE_DIR/version.db" "$E4_SQLITE_DIR/version.db-wal" "$E4_SQLITE_DIR/version.db-shm"
+
+for b in postgres sqlite; do
+  s1_cas "$b"
+  s1_processes "$b"
+  s1_blind "$b"
+  s2_normal "$b"
+  s2_stale "$b"
+  s2_fail "$b"
+  s2_client_kill "$b"
+  s2_kill_before_commit "$b"
+  s2_retry "$b"
+  s2_race "$b" locked
+  s2_race "$b" unlocked-control
+  s3_race "$b"
+  s3_retry "$b"
+  s3_after_completion "$b"
+  s4_race "$b"
+  s4_fenced "$b"
+  s4_race_attempt "$b" fenced
+  s4_race_attempt "$b" check-then-insert-control
+  s5_workers "$b" guarded
+  s5_workers "$b" naive
+  s5_lease "$b"
+  s6_fresh "$b"
+  s6_fail "$b"
+  s6_kill "$b"
+  s6_concurrent "$b" locked
+  s6_concurrent "$b" unlocked-control
+  s7_restore "$b"
+  s8_unrelated_writer "$b"
+done
+s5_workers postgres skip-locked
+s2_server_kill
+s2_server_pause
+s2_netsplit
+s2_commit_unknown
+go_tests sqlite
+go_tests postgres
+
+install -m 600 -- "$STATE/scan-patterns.txt" "$E4_PATTERNS"
+cp -- "$STATE/injections.log" "$E4_OUT/injections.log"
+mismatches=$(e4_mismatches)
+rows=$(($(wc -l <"$E4_CELLS") - 1))
+{
+  printf 'finished\t%s\n' "$(date -u +%FT%TZ)"
+  printf 'rows\t%s\n' "$rows"
+  printf 'mismatches\t%s\n' "$mismatches"
+} >>"$E4_OUT/run.txt"
+printf 'rows %s, mismatches %s\n' "$rows" "$mismatches" >"$E4_OUT/complete"
+say "E4: $rows rows, $mismatches mismatches; cells in $E4_CELLS"
