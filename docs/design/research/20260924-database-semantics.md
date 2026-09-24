@@ -159,7 +159,9 @@ fixtures/bin/down
 committed. `run/collect-evidence` refuses to run without it and carries its versions and scan
 result into `evidence/` as [`bundle-summary.txt`](../../../experiments/e4-database-semantics/evidence/bundle-summary.txt),
 with every copied file and its SHA-256 in
-[`bundle-manifest.txt`](../../../experiments/e4-database-semantics/evidence/bundle-manifest.txt).
+[`bundle-manifest.txt`](../../../experiments/e4-database-semantics/evidence/bundle-manifest.txt);
+the 2338 files of the PostgreSQL data directory are one line there, the digest of their lines in
+the full manifest, which stays in `E4_OUT`.
 
 ## 4. Results
 
@@ -473,6 +475,12 @@ evidence.
   filesystems and multiple hosts were not tested and are outside SQLite's own documented use.
 - **Mechanisms, not an implementation.** The schema is the smallest that answers each semantic; it
   is not the Bronzeward schema.
+- **Two error paths an implementation must not copy.** `Classify` (`db.go`) treats any `net.Error`
+  as a lost connection, which would also catch `context.DeadlineExceeded`, and `TakeOver` and
+  `RecordAttempt` (`scenarios.go`) fold a `RowsAffected` error into the fenced result.
+  Neither could change this capture: the prototype sets no context deadline, and both drivers'
+  `RowsAffected` return a nil error (`database/sql/driver.RowsAffected`, which `lib/pq` returns,
+  and `modernc.org/sqlite`'s `result`). The measured code was left as captured.
 
 ## 8. Recommendation
 
