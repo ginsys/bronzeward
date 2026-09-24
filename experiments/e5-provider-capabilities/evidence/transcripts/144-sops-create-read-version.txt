@@ -1,1 +1,1 @@
-writer a rc=0, writer b rc=0, file holds writer a
+value digest matches

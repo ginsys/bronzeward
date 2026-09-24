@@ -1,2 +1,0 @@
-age: error: no identity matched any of the recipients
-age: report unexpected or unhelpful errors at https://filippo.io/age/report

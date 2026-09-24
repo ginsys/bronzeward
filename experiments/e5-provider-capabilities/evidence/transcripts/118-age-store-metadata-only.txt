@@ -1,2 +1,3 @@
-age: error: reading "<repo>/fixtures/.state/data/age-store/keys/lost.key": failed to open file: open <repo>/fixtures/.state/data/age-store/keys/lost.key: no such file or directory
-age: report unexpected or unhelpful errors at https://filippo.io/age/report
+-rw------- 248 <repo>/fixtures/.state/data/age-store/objects/app-token/g1.age
+-rw-rw-r-- 248 <repo>/fixtures/.state/data/age-store/objects/app-token/g2.age
+-rw-rw-r-- 242 <repo>/fixtures/.state/data/age-store/objects/app-token/g-race.age
