@@ -1,0 +1,504 @@
+#!/usr/bin/env bash
+# The whole E4 dispatch-safety matrix against the fixture's PostgreSQL and its live worker:
+# revocation around the commitment boundary, ownership loss, the machine scope, faults during the
+# send and the verification, executor kills at each gate, a rejection, then the prototype's own
+# tests. Needs the fixture up (fixtures/bin/up); E4D_OUT names a new, empty directory outside the
+# checkout. Each row's expectation is written here, before the run, and compared with what the
+# independent readers find (run/lib.sh). A control row removes one mechanism and expects the
+# failure that mechanism prevents.
+#
+# E4D_ONLY=<extended regex> runs only the rows whose function name matches, for development; the
+# run then records it and run/collect-evidence refuses the output.
+#
+# Phase-0 evidence for the dispatch-safety experiment (ginsys/bronzeward issue 7). Not v1 tooling.
+set -uo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+e4d_init
+e4d_need_fixture
+e4d_build
+
+# ---- revocation (specification §3.2 comparison 1, §8.1) ----
+
+revocation_happy() { # no interference: the baseline every other row departs from
+  row_begin revocation happy
+  artifact a
+  plan A "$ART_FILE"
+  ex x X run -id A
+  e4d_read op A
+  read_worker
+  row_end rc:x=0 A.state=completed A.attempts=1 A.responses=1:accepted A.applied_is_artifact=1 \
+    A.baseline_rev=2 worker.is=a worker.landed=1 worker.ok=1
+}
+
+revocation_before_commit() { # revoked after the executor's evidence, before its commitment
+  row_begin revocation before-commit
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x evidence
+  ex_bg x X run -id A
+  gate_wait x evidence
+  ex revoke harness revoke -id A
+  gate_release x evidence
+  ex_reap x
+  e4d_read op A
+  read_worker
+  row_end rc:revoke=0 rc:x=3 out:x~'event=refused comparison=1 ' A.state=cancelled A.attempts=0 \
+    A.revocation=before-commit worker.is=pre worker.landed=0
+}
+
+revocation_during_commit() { # the revoker arrives while the commitment transaction holds the approval
+  row_begin revocation during-commit
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x commit
+  gate_arm x committed
+  ex_bg x X run -id A
+  gate_wait x commit
+  ex_bg revoke harness revoke -id A
+  sleep 2
+  if ex_running revoke; then row_note revoker_waited yes; else row_note revoker_waited no; fi
+  gate_release x commit
+  ex_reap revoke
+  gate_wait x committed
+  gate_release x committed
+  ex_reap x
+  e4d_read op A
+  read_worker
+  row_end revoker_waited=yes rc:revoke=0 rc:x=3 out:x~'event=refused comparison=1 ' A.state=cancelled \
+    A.attempts=0 A.revocation=after-commit worker.is=pre worker.landed=0
+}
+
+revocation_after_commit() { # revoked between the commitment and the attempt
+  row_begin revocation after-commit
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x committed
+  ex_bg x X run -id A
+  gate_wait x committed
+  ex revoke harness revoke -id A
+  gate_release x committed
+  ex_reap x
+  e4d_read op A
+  read_worker
+  row_end rc:revoke=0 rc:x=3 out:x~'event=refused comparison=1 ' A.state=cancelled A.attempts=0 \
+    A.revocation=after-commit worker.is=pre worker.landed=0
+}
+
+revocation_after_attempt() { # the residual: an attempt already recorded is sent anyway (§8.1)
+  row_begin revocation after-attempt
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x send
+  ex_bg x X run -id A
+  gate_wait x send
+  ex revoke harness revoke -id A
+  gate_release x send
+  ex_reap x
+  e4d_read op A
+  read_worker
+  row_end rc:revoke=0 rc:x=0 A.state=completed A.attempts=1 A.revocation=after-attempt worker.is=a worker.landed=1
+}
+
+revocation_naive_control() { # control: the approval checked once, before the evidence, only
+  row_begin revocation naive-control
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x evidence
+  ex_bg x X run -id A -mode naive
+  gate_wait x evidence
+  ex revoke harness revoke -id A
+  gate_release x evidence
+  ex_reap x
+  e4d_read op A
+  read_worker
+  row_end rc:revoke=0 out:x~'event=approval-checked' rc:x=0 A.state=completed A.revocation=before-commit \
+    worker.is=a worker.landed=1
+}
+
+# ---- ownership (§3.3) ----
+
+ownership_before_attempt() { # taken over between the commitment and the attempt; the new owner recovers
+  row_begin ownership before-attempt
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x committed
+  ex_bg x X run -id A
+  gate_wait x committed
+  ex takeover harness takeover -id A -actor Y
+  gate_release x committed
+  ex_reap x
+  ex y Y recover -id A -retry
+  e4d_read op A
+  read_worker
+  row_end rc:takeover=0 rc:x=3 out:x~'event=refused comparison=7 ' rc:y=0 out:y~'safe_to_retry_rev=' \
+    A.state=completed A.owner=Y@2 A.attempts=1 A.attempt_owners=1:Y@2 A.stale_attempts=0 worker.is=a worker.landed=1
+}
+
+ownership_nofence_control() { # control: the attempt recorded without the ownership comparison
+  row_begin ownership nofence-control
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x committed
+  ex_bg x X run -id A -mode nofence
+  gate_wait x committed
+  ex takeover harness takeover -id A -actor Y
+  gate_release x committed
+  ex_reap x
+  e4d_read op A
+  read_worker
+  # Without the comparison the stale attempt also moves the new owner's unresolved operation back
+  # to sending, and its response cannot move it on: the owner is Y.
+  row_end rc:takeover=0 rc:x=4 A.state=sending A.owner=Y@2 A.attempt_owners=1:X@1 A.stale_attempts=1 \
+    worker.is=a worker.landed=1
+}
+
+two_executors() { # a second executor for the same plan while the first holds its commitment open
+  row_begin ownership two-executors
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x commit
+  ex_bg x X run -id A
+  gate_wait x commit
+  ex_bg z Z run -id A
+  sleep 2
+  if ex_running z; then row_note second_waited yes; else row_note second_waited no; fi
+  gate_release x commit
+  ex_reap z
+  ex_reap x
+  e4d_read op A
+  read_worker
+  row_end second_waited=yes rc:z=3 out:z~'event=refused comparison=(0|4) ' rc:x=0 A.state=completed \
+    A.attempt_owners=1:X@1 worker.is=a worker.landed=1
+}
+
+# ---- machine scope (invariant 1, §8.2) ----
+
+scope_held() { # B while A is in flight, refused; B's plan after A is stale; a fresh plan applies
+  row_begin scope held
+  artifact a
+  plan A "$ART_FILE"
+  artifact b
+  plan B "$ART_FILE"
+  ex_prepare x
+  gate_arm x send
+  ex_bg x X run -id A
+  gate_wait x send
+  ex z Z run -id B
+  gate_release x send
+  ex_reap x
+  ex z-after Z run -id B
+  artifact b2
+  plan B2 "$ART_FILE"
+  ex z-replanned Z run -id B2
+  e4d_read op A
+  e4d_read op B
+  e4d_read op B2
+  read_worker
+  row_end rc:z=3 out:z~'event=refused comparison=4 ' rc:x=0 A.state=completed rc:z-after=3 \
+    out:z-after~'event=refused comparison=2 ' B.state=none rc:z-replanned=0 B2.state=completed \
+    B2.baseline_rev=3 worker.is=b2 worker.landed=2
+}
+
+scope_noscope_control() { # control: no machine-scope index, so the stale A lands after B
+  row_begin scope noscope-control -no-scope
+  artifact a
+  plan A "$ART_FILE"
+  artifact b
+  plan B "$ART_FILE"
+  ex_prepare x
+  gate_arm x send
+  ex_bg x X run -id A
+  gate_wait x send
+  ex z Z run -id B
+  read_worker after-b
+  gate_release x send
+  ex_reap x
+  e4d_read op A
+  e4d_read op B
+  read_worker
+  row_end rc:z=0 B.state=completed after-b.is=b rc:x=0 A.state=completed worker.is=a worker.landed=2
+}
+
+# ---- faults during the send and the verification ----
+
+# recover_after_fault: the new owner cannot resolve while the attempt is unaccounted; the harness
+# accounts for it with the evidence given; the new owner then resolves, retrying if nothing landed.
+recover_after_fault() {
+  ex takeover harness takeover -id A -actor Y
+  ex y-unaccounted Y recover -id A -retry
+  ex account harness account -id A -n 1 -evidence "$1"
+  ex y Y recover -id A -retry
+}
+
+fault_netsplit_send() { # the worker partitioned while talosctl sends through the control plane
+  row_begin fault netsplit-send
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x send
+  ex_bg x X run -id A
+  gate_wait x send
+  e4d_inject netsplit worker
+  gate_release x send
+  ex_reap x
+  e4d_inject netjoin worker
+  settle
+  read_worker settled
+  recover_after_fault "executor X exited after its transport deadline; the partition healed ${E4D_SETTLE}s before"
+  e4d_read op A
+  read_worker
+  row_end rc:inject-netsplit-worker=0 rc:inject-netjoin-worker=0 rc:x=4 out:x~'class=unknown' seen:settled.landed \
+    rc:y-unaccounted=4 out:y-unaccounted~'event=unaccounted' rc:account=0 rc:y=0 A.state=completed seen:A.attempts \
+    worker.is=a seen:worker.landed
+}
+
+fault_early_accounting() { # the hazard: the attempt accounted for on the executor's exit alone
+  row_begin fault early-accounting-hazard
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x send
+  ex_bg x X run -id A
+  gate_wait x send
+  e4d_inject netsplit worker
+  gate_release x send
+  ex_reap x
+  ex takeover harness takeover -id A -actor Y
+  ex account harness account -id A -n 1 -evidence "executor X exited"
+  e4d_inject netjoin worker
+  worker_readable
+  ex y Y recover -id A
+  row_note y.rc "${RC[y]}"
+  e4d_read op A classified
+  settle
+  read_worker
+  row_end rc:inject-netsplit-worker=0 rc:inject-netjoin-worker=0 rc:x=4 rc:account=0 seen:y.rc \
+    seen:classified.state seen:worker.is seen:worker.landed
+}
+
+fault_pause_send() { # the worker paused across the whole transport deadline
+  row_begin fault pause-send
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x send
+  ex_bg x X run -id A
+  gate_wait x send
+  e4d_inject pause worker
+  gate_release x send
+  ex_reap x
+  sleep 5
+  e4d_inject unpause worker
+  settle
+  read_worker settled
+  recover_after_fault "executor X exited after its transport deadline; the worker was unpaused ${E4D_SETTLE}s before"
+  e4d_read op A
+  read_worker
+  row_end rc:inject-pause-worker=0 rc:inject-unpause-worker=0 rc:x=4 out:x~'class=unknown' seen:settled.landed \
+    rc:y-unaccounted=4 rc:account=0 rc:y=0 A.state=completed seen:A.attempts worker.is=a seen:worker.landed
+}
+
+fault_direct_netsplit() { # as netsplit-send, talosctl straight to the worker's own endpoint
+  row_begin fault direct-netsplit
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x send
+  E4X_ENDPOINT=$TALOS_WORKER_IP ex_bg x X run -id A
+  gate_wait x send
+  e4d_inject netsplit worker
+  gate_release x send
+  ex_reap x
+  e4d_inject netjoin worker
+  settle
+  read_worker settled
+  recover_after_fault "executor X exited after its transport deadline; the partition healed ${E4D_SETTLE}s before"
+  e4d_read op A
+  read_worker
+  row_end rc:inject-netsplit-worker=0 rc:inject-netjoin-worker=0 rc:x=4 out:x~'class=unknown' seen:settled.landed \
+    rc:y-unaccounted=4 rc:account=0 rc:y=0 A.state=completed seen:A.attempts worker.is=a seen:worker.landed
+}
+
+fault_db_restart() { # PostgreSQL killed after the send, before the response is recorded
+  row_begin fault db-restart
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x response
+  ex_bg x X run -id A
+  gate_wait x response
+  e4d_inject kill postgres
+  gate_release x response
+  sleep 5
+  e4d_inject start postgres
+  ex_reap x
+  e4d_read op A
+  read_worker
+  row_end rc:inject-kill-postgres=0 rc:inject-start-postgres=0 out:x~'event=db-retry step=record-response' rc:x=0 \
+    A.state=completed A.attempts=1 A.responses=1:accepted worker.is=a worker.landed=1
+}
+
+fault_verify_netsplit() { # the worker partitioned during the verification
+  row_begin fault verify-netsplit
+  artifact a
+  plan A "$ART_FILE"
+  ex_prepare x
+  gate_arm x verify
+  ex_bg x X run -id A
+  gate_wait x verify
+  e4d_inject netsplit worker
+  gate_release x verify
+  sleep 8
+  e4d_inject netjoin worker
+  ex_reap x
+  e4d_read op A
+  read_worker
+  row_end rc:inject-netsplit-worker=0 rc:inject-netjoin-worker=0 out:x~'purpose=completion err=' rc:x=0 \
+    A.state=completed worker.is=a worker.landed=1
+}
+
+# ---- executor killed at a gate; a new owner resolves ----
+
+kill_at() { # kill_at <gate>: SIGKILL the executor held at the gate
+  ex_prepare x
+  gate_arm x "$1"
+  ex_bg x X run -id A
+  gate_wait x "$1"
+  ex_kill x
+  e4d_read op A killed
+}
+
+kill_evidence() { # nothing committed: another executor runs the plan from the start
+  row_begin kill evidence
+  artifact a
+  plan A "$ART_FILE"
+  kill_at evidence
+  ex y Y run -id A
+  e4d_read op A
+  read_worker
+  row_end rc:x=137 killed.state=none rc:y=0 A.state=completed A.owner=Y@1 worker.is=a worker.landed=1
+}
+
+kill_committed() { # committed, no attempt: the new owner classifies a retry
+  row_begin kill committed
+  artifact a
+  plan A "$ART_FILE"
+  kill_at committed
+  ex takeover harness takeover -id A -actor Y
+  ex y Y recover -id A -retry
+  e4d_read op A
+  read_worker
+  row_end rc:x=137 killed.state=committed killed.attempts=0 rc:y=0 A.state=completed A.attempt_owners=1:Y@2 \
+    worker.is=a worker.landed=1
+}
+
+kill_response() { # sent and answered, the response never recorded
+  row_begin kill response
+  artifact a
+  plan A "$ART_FILE"
+  kill_at response
+  recover_after_fault "executor X killed after talosctl returned, and reaped"
+  e4d_read op A
+  read_worker
+  row_end rc:x=137 killed.state=sending killed.responses=1:none rc:y-unaccounted=4 rc:account=0 rc:y=0 \
+    A.state=completed A.attempts=1 worker.is=a worker.landed=1
+}
+
+kill_complete() { # the matching observation made, the completion never recorded
+  row_begin kill complete
+  artifact a
+  plan A "$ART_FILE"
+  kill_at complete
+  ex takeover harness takeover -id A -actor Y
+  ex y Y recover -id A
+  e4d_read op A
+  read_worker
+  row_end rc:x=137 killed.state=verifying rc:y=0 A.state=completed A.attempts=1 A.responses=1:accepted \
+    worker.is=a worker.landed=1
+}
+
+# ---- rejection ----
+
+rejected() { # a configuration the worker's validation refuses
+  row_begin rejection invalid-machine-type
+  rejected_artifact bad
+  plan A "$ART_FILE"
+  ex x X run -id A
+  e4d_read op A
+  read_worker
+  row_end rc:x=5 out:x~'class=rejected' A.state=rejected A.responses=1:rejected A.applied_is_artifact=0 \
+    worker.is=pre worker.landed=0 worker.invalid=1
+}
+
+# ---- the prototype's own tests against the fixture's PostgreSQL ----
+
+go_tests() {
+  row_begin tests go-test
+  local part rc=0
+  part=$(e4d_part go-test)
+  ROW_LABELS+=(go-test)
+  printf '$ E4X_TEST_PG_DSN=<fixture> go test -count=1 -p 1 -v ./...\n' >"$part"
+  E4X_TEST_PG_DSN=$(e4d_dsn) go -C "$E4D_DIR" test -count=1 -p 1 -v ./... >>"$part" 2>&1 || rc=$?
+  RC[go-test]=$rc
+  row_end rc:go-test=0 out:go-test~'^ok' 'out:go-test~^--- PASS: TestRetryRefusedAfterNewerTimelineFact'
+}
+
+# ---- the matrix ----
+
+# The inputs are the prototype and the fixture; evidence/ is this experiment's output. Each
+# uncommitted path is listed, so a nonzero count says what differed from the commit.
+uncommitted=$(git -C "$REPO_DIR" status --porcelain -- experiments/e4-dispatch-safety fixtures \
+  ':!experiments/e4-dispatch-safety/evidence')
+{
+  printf 'commit\t%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
+  printf 'uncommitted inputs\t%s\n' "$(printf '%s' "$uncommitted" | grep -c .)"
+  [ -z "$uncommitted" ] || printf '%s\n' "$uncommitted" | sed 's/^/uncommitted\t/'
+  [ -z "${E4D_ONLY:-}" ] || printf 'only\t%s\n' "$E4D_ONLY"
+  printf 'started\t%s\n' "$(date -u +%FT%TZ)"
+  printf 'go\t%s\n' "$(go version)"
+  printf 'talosctl\t%s\n' "$(talosctl_timed 10 version --client --short | tr '\n' ' ')"
+  printf 'talos worker\t%s\n' "$(w_talos version --short | tr '\n' ' ')"
+  printf 'postgres default isolation\t%s\n' "$(e4d_psql -c 'SHOW default_transaction_isolation')"
+  printf 'postgres image\t%s\n' "$POSTGRES_IMAGE"
+  printf 'postgres server\t%s\n' "$(e4d_psql -c 'SELECT version()')"
+  go version -m "$E4D_BIN" | awk '$1 == "dep" { printf "module\t%s %s\n", $2, $3 }'
+  printf 'settle\t%ss\n' "$E4D_SETTLE"
+} >"$E4D_OUT/run.txt"
+
+rows=(
+  revocation_happy revocation_before_commit revocation_during_commit revocation_after_commit
+  revocation_after_attempt revocation_naive_control
+  ownership_before_attempt ownership_nofence_control two_executors
+  scope_held scope_noscope_control
+  fault_netsplit_send fault_early_accounting fault_pause_send fault_direct_netsplit fault_db_restart
+  fault_verify_netsplit
+  kill_evidence kill_committed kill_response kill_complete
+  rejected
+  go_tests
+)
+for row in "${rows[@]}"; do
+  [[ -z ${E4D_ONLY:-} || $row =~ $E4D_ONLY ]] || continue
+  "$row"
+done
+
+install -m 600 -- "$STATE/scan-patterns.txt" "$E4D_PATTERNS"
+cp -- "$STATE/injections.log" "$E4D_OUT/injections.log"
+mismatches=$(e4d_mismatches)
+count=$(($(wc -l <"$E4D_CELLS") - 1))
+{
+  printf 'finished\t%s\n' "$(date -u +%FT%TZ)"
+  printf 'rows\t%s\n' "$count"
+  printf 'mismatches\t%s\n' "$mismatches"
+} >>"$E4D_OUT/run.txt"
+printf 'rows %s, mismatches %s\n' "$count" "$mismatches" >"$E4D_OUT/complete"
+say "E4 dispatch: $count rows, $mismatches mismatches; cells in $E4D_CELLS"

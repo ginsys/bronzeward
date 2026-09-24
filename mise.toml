@@ -14,7 +14,8 @@ run = """
 env -u SHELLCHECK_OPTS actionlint
 env -u SHELLCHECK_OPTS shellcheck scripts/ci/*.sh scripts/test/*.sh
 env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/bin/* experiments/e1-secret-ingress/run/* \
-  experiments/e5-provider-capabilities/run/* experiments/e5-retention-classification/run/*
+  experiments/e5-provider-capabilities/run/* experiments/e5-retention-classification/run/* \
+  experiments/e4-dispatch-safety/run/*
 """
 
 [tasks.test]
@@ -51,6 +52,12 @@ go -C experiments/e1-secret-ingress mod tidy -diff
 go -C experiments/e1-secret-ingress build ./...
 go -C experiments/e1-secret-ingress vet ./...
 go -C experiments/e1-secret-ingress test ./...
+gofmt -l experiments/e4-dispatch-safety | { ! grep . ; }
+go -C experiments/e4-dispatch-safety mod verify
+go -C experiments/e4-dispatch-safety mod tidy -diff
+go -C experiments/e4-dispatch-safety build -o /dev/null ./...
+go -C experiments/e4-dispatch-safety vet ./...
+go -C experiments/e4-dispatch-safety test ./...
 """
 
 [tasks.upstream-sync]
