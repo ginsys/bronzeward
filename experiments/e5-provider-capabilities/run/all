@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# The whole capture, on a fresh fixture: the three candidates, then migration, then one evidence
+# bundle whose leak scan covers the local stores, their snapshots and the provider snapshots.
+#
+# fixtures/bin/evidence already walks .state/data (the live age and SOPS stores) and .state/backups
+# (the store and OpenBao snapshots, store tars expanded), and plants its own positive control at
+# .state/data/canary-control.txt. That control is this capture's positive control for the stores:
+# a scan that does not report it walked nothing, and any other hit is a plaintext copy.
+#
+# Phase-0 evidence for the provider-capability experiment (ginsys/bronzeward issue 8). Not v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+e5_need_fixture
+[ ! -e "$E5_CELLS" ] || die "$E5_CELLS exists: a capture starts from an empty E5_OUT"
+[ ! -e "$STATE/data/age-store" ] && [ ! -e "$STATE/data/sops" ] ||
+  die "the local stores exist already: a capture needs a fresh fixture (fixtures/bin/down, then up)"
+e5_init
+
+for run in openbao age-store sops migrate; do
+  "$E5_RUN_DIR/$run"
+done
+
+bundle=$("$FIXTURES_DIR/bin/evidence") || die "fixtures/bin/evidence failed"
+mkdir -p -- "$E5_OUT/bundle"
+cp -a -- "$bundle/." "$E5_OUT/bundle/" || die "could not copy the bundle out of .state"
+printf '%s\n' "$bundle" >"$E5_OUT/bundle-source.txt"
+
+# The scan's verdict: the control and nothing else.
+scan=$E5_OUT/bundle/leak-scan.txt
+[ -f "$scan" ] || die "the bundle has no leak-scan.txt"
+controls=$(grep -c '/data/canary-control\.txt$' "$scan" || true)
+others=$(grep -vc '/data/canary-control\.txt$' "$scan" || true)
+{
+  printf 'leak-scan lines: %s\n' "$(wc -l <"$scan")"
+  printf 'positive control hits: %s\n' "$controls"
+  printf 'other hits: %s\n' "$others"
+  printf 'cells: %s, mismatches: %s\n' "$(($(wc -l <"$E5_CELLS") - 1))" "$(e5_mismatches)"
+} | tee "$E5_OUT/summary.txt"
+[ "$controls" -ge 1 ] || die "the positive control was not found: the stores were not scanned, and the scan proves nothing"
+[ "$others" -eq 0 ] || die "plaintext found outside the control: see $scan"
