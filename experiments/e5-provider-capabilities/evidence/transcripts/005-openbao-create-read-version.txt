@@ -1,0 +1,6 @@
+Error making API request.
+
+URL: GET http://127.0.0.1:8200/v1/sys/internal/ui/mounts/secret/gen/app-token/g1
+Code: 403. Errors:
+
+* preflight capability check returned 403, please ensure client's policies grant access to path "secret/gen/app-token/g1/"

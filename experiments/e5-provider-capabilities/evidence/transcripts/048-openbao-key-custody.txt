@@ -1,0 +1,6 @@
+Error reading transit/export/encryption-key/bw-artifact: Error making API request.
+
+URL: GET http://127.0.0.1:8200/v1/transit/export/encryption-key/bw-artifact
+Code: 400. Errors:
+
+* private key material is not exportable

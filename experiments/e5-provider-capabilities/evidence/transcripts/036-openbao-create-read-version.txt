@@ -1,0 +1,6 @@
+Error writing data to secret/data/mutable/cas: Error making API request.
+
+URL: PUT http://127.0.0.1:8200/v1/secret/data/mutable/cas
+Code: 400. Errors:
+
+* check-and-set parameter required for this call

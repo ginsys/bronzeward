@@ -1,0 +1,1 @@
+current=11 oldest=2 max_versions=0 kept=10

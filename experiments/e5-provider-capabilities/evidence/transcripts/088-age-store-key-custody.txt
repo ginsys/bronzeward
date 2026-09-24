@@ -1,0 +1,5 @@
+drwx------ keys
+-rw------- keys/compiler.key
+-rw------- keys/executor.key
+drwxrwxr-x objects
+drwxrwxr-x meta

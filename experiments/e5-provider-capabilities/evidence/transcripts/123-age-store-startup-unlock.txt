@@ -1,0 +1,2 @@
+age: error: failed to decrypt identity file: could not read passphrase: could not read passphrase: standard input is not a terminal, and /dev/tty is not available: open /dev/tty: no such device or address
+age: report unexpected or unhelpful errors at https://filippo.io/age/report

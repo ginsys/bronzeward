@@ -1,0 +1,1 @@
+type=aes256-gcm96 latest=2 min_decryption=2 min_available=0 min_encryption=0 exportable=false deletion_allowed=false versions=2
