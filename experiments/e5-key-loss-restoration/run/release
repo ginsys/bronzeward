@@ -8,12 +8,16 @@
 #                         the artifact again, compare its digest, and encrypt it under the release's
 #                         key without storing anything (regenerating the configuration)
 #   release check <id>    both, then a last line `class=<applicable|regenerable|blocked|absent>
-#                         reason=<text>`; stops there and shows that nothing was stored
+#                         reason=<text>`; stops there and shows that the release table is unchanged
 #
 # Design §14.4 and the execution-recovery specification §7 keep the two apart: applying a retained
 # artifact needs the artifact, its key version and the executor's credential; regenerating needs the
 # source version, a usable key and the compiler's credential, and makes a new release that needs its
-# own approval. Neither is attempted by the check for real: it prints what it found and stops.
+# own approval. The check stores no release and dispatches nothing, but it is not read-only at the
+# provider: its calls are a Transit decrypt and a Transit encrypt, and Transit treats an encrypt
+# under a missing key as an upsert that creates the key for an identity holding `create`. The
+# compiler holds `update` only, and run/scenario compares the provider's key state before and after
+# every check.
 #
 # Values never reach the output: every plaintext is reduced to a digest verdict.
 #
@@ -92,7 +96,7 @@ check() {
   # Read apart from the test: an unreadable database must fail the check, not read as no record.
   row=$(release_row "$1") || die "the restored database could not be read"
   if [ -z "$row" ]; then
-    echo "stopped: nothing applied, nothing regenerated, nothing stored"
+    echo "stopped: nothing dispatched, no release stored, no provider call made"
     echo "class=absent reason=the restored database has no record of release $1"
     return 0
   fi
@@ -100,7 +104,7 @@ check() {
   regen "$1" 2>&1 | sed 's/^/  /' || r=1
   after=$(releases_digest) || die "the restored database could not be read"
   [ "$before" = "$after" ] || die "the release table changed during the check"
-  echo "stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)"
+  echo "stopped: nothing dispatched, no release stored (release table digest unchanged)"
   if [ "$a" -eq 0 ]; then
     echo "class=applicable reason=the stored artifact decrypts to its recorded digest"
   elif [ "$r" -eq 0 ]; then

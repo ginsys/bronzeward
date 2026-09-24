@@ -9,5 +9,6 @@
   release R3: source kl/late version 1, stored artifact under kl-late key version 1
   No data found at secret/data/kl/late
   regen: source kl/late version 1 could not be read
-stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)
+stopped: nothing dispatched, no release stored (release table digest unchanged)
 class=blocked reason=neither the stored artifact nor its source is usable in this combination
+provider key state unchanged across the check (2 key(s))

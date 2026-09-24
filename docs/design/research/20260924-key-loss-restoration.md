@@ -51,7 +51,7 @@ each a role:
 | Generation | Built | Snapshotted |
 |---|---|---|
 | g1 | KV `kl/app` v1; key `kl-art` v1; release R1 = `kl/app@1` under `kl-art` v1; compiler and executor1 issued | all three families (row 001) |
-| g2 | KV `kl/app` v2; `kl-art` rotated to v2; R2 = `kl/app@2` under v2; R1 rewrapped to v2 in the database (002); decryption floor raised to 2 (003); executor2 issued (004), executor1 revoked (005) | all three families (006) |
+| g2 | KV `kl/app` v2; `kl-art` rotated to v2; R2 = `kl/app@2` under v2; R1 rewrapped to v2 in the database (002); decryption floor raised to 2 (003); executor2 issued (004), executor1 revoked (005, shown effective in L, 102) | all three families (006) |
 | g3 | KV `kl/late` v1; key `kl-late`; R3 = `kl/late@1` under `kl-late` v1 | never |
 
 Row 007 is the release table at the end of g3: R1 and R2 under `kl-art` v2, R3 under `kl-late` v1.
@@ -64,7 +64,7 @@ The injection log (`evidence/injections.log`) fixes which snapshot each restore 
 | compiler | read `secret/data/kl/*`; `update` on `transit/encrypt/kl-*` |
 | executor | `update` on `transit/decrypt/kl-*` |
 | admin | the root token, standing for the operator's administrator |
-| operator | runs the fixture's injections and the read-only check |
+| operator | runs the fixture's injections and the recovery check |
 
 `run/release` takes a release id and reads everything else from the restored state: the record
 from the database, the credential from the store, the key and source from the provider.
@@ -74,11 +74,16 @@ from the database, the credential from the store, the key and source from the pr
 - **regen** (compiler): read the recorded source version, render the artifact, compare its digest,
   and encrypt it under the release's key. Nothing is stored: a regenerated release is a new release
   that needs its own approval.
-- **check** (operator): run both, then stop. It prints `stopped: nothing applied, nothing
-  regenerated, nothing stored`, confirms that the release table's digest is unchanged, and ends
-  with one class: `applicable` (the stored artifact decrypts to its digest), `regenerable` (it
-  does not, and the source does regenerate it), `blocked` (neither), or `absent` (the restored
-  database has no such release).
+- **check** (operator): run both, then stop. It prints `stopped: nothing dispatched, no release
+  stored`, confirms that the release table's digest is unchanged, and ends with one class:
+  `applicable` (the stored artifact decrypts to its digest), `regenerable` (it does not, and the
+  source does regenerate it), `blocked` (neither), or `absent` (the restored database has no such
+  release).
+  The check is not read-only at the provider. Its regeneration step sends a real Transit encrypt,
+  and Transit turns an encrypt under a missing key into a key creation for an identity that holds
+  `create` (§3.2, case D). The scenario therefore reads the provider's Transit key state as the
+  administrator before and after every check, and records a change as the class
+  `provider-changed`.
 
 The artifact is a one-field YAML document, `machine:\n  token: <value>\n`, rendered
 deterministically so that a regeneration from the same source version reproduces its digest.
@@ -88,8 +93,11 @@ deterministically so that a regeneration from the same source version reproduces
 Every observation is one row of `evidence/verdicts.tsv`: the case, release, action and identity,
 the state bundle that is its ground truth, the expected outcome written into the script before the
 run, and the outcome observed from the command's exit status and output alone. For `apply` and
-`regen` the observation is `ok`, `denied` (HTTP 403 or "permission denied") or `fail`; for `check`
-it is the class printed. A mismatch is recorded and the run continues.
+`regen` the observation is `ok`, `denied` (the CLI's `Code: 403`, matched case-sensitively so that
+a local "Permission denied" on a file is not taken for the provider's) or `fail`; for `check` it is
+the class printed. A mismatch is recorded and the run continues. `fail` is matched on the exit
+status alone, so a row expecting `fail` would also match a failure for another reason; the reason
+each such row failed is quoted in §3.2 from its transcript.
 
 ### 2.4 Pinned versions
 
@@ -105,9 +113,9 @@ artifact exists only in a temporary file for the one call that needs it. Every d
 reduced to a digest verdict. Tokens pass through the environment; only accessors are printed.
 
 The fixture's leak scan (`fixtures/lib.sh:923`, patterns including `BWSYNTH-`) ran on each of the
-13 bundles, over the bundle, `.state/backups` and `.state/data`. Each scan found its positive
+14 bundles, over the bundle, `.state/backups` and `.state/data`. Each scan found its positive
 control three times (the live store and the two store archives the bundle expands) and nothing
-else: 39 control hits, 0 other hits (`evidence/leak-scans.txt`, `evidence/summary.txt`).
+else: 42 control hits, 0 other hits (`evidence/leak-scans.txt`, `evidence/summary.txt`).
 
 ### 2.6 Reproduction
 
@@ -118,14 +126,15 @@ KL_OUT=<the same directory> experiments/e5-key-loss-restoration/run/collect-evid
 fixtures/bin/down
 ```
 
-The committed capture: 98 rows, 0 mismatches, 13 state bundles.
+The committed capture: 112 rows, 0 mismatches, 14 state bundles.
 
 ## 3. Results
 
 ### 3.1 Case table
 
 "Live" is the state of each family at that point; `gN` names the snapshot a family was restored
-from.
+from. A live family carries every earlier case's loss until a restore undoes it: in D, `kl/app@1`
+is still destroyed from B and `kl-late` still deleted from C.
 
 | Case | Database | Provider | Store | Release | apply | regen | check | Outcome | Rows |
 |---|---|---|---|---|---|---|---|---|---|
@@ -144,6 +153,8 @@ from.
 | I store newer than provider | g1 | g1 | g2 | R1 | denied | ok | regenerable | recoverable: an administrator reissues the executor | 080-086 |
 | J credentials lost | g1 | g1 | none, then g1 | R1 | fail, then ok | fail, then ok | blocked, then applicable | recoverable from the store backup that matches the provider | 088-094 |
 | K provider sealed | g1 | g1 (sealed) | g1 | R1 | — | — | blocked, then applicable | recoverable with the unseal key share | 096-098 |
+| L store older than provider | g2 | g2 | g1 | R1, R2 | denied | ok | regenerable | recoverable: an administrator reissues the executor | 102-108 |
+| | | | | R2 after reissue | ok | ok | applicable | recoverable | 110-112 |
 
 ### 3.2 What each case showed
 
@@ -155,14 +166,16 @@ restore brought the version back (048), and R1 regenerated again (053).
 
 **C and E — irrecoverable, and why.** After `kl-late` was deleted and `kl/late@1` destroyed, R3
 neither applies ("encryption key not found", 028) nor regenerates (029). Restoring all three
-families to g2 brings back everything D had deleted: `kl-art` with its versions (047) and
-`kl/app@1` undestroyed (048). But `kl-late` and `kl/late` are absent from that snapshot (049,
+families to g2 brings back what B destroyed and what D deleted: `kl/app@1` undestroyed (048) and
+`kl-art` at latest version 2 with its floor (047); version 1, below the floor there, is shown
+decryptable again in G (064, 065). But `kl-late` and `kl/late` are absent from that snapshot (049,
 050), and so is R3's record (051, 058). R3 is irrecoverable because no snapshot holds its key, its
 source or its record, not because they were deleted: the same restore undid a destruction and a key
 deletion.
 
 **D — a deleted artifact key, and a key recreated under its name.** With `kl-art` deleted (032),
-no stored artifact applies (033, 036). R2's source is still readable and renders to its digest, but
+no stored artifact applies (033, 036). R1's regeneration fails for a reason carried over from B,
+not from the deletion: `kl/app@1` is still destroyed ("No data found at secret/data/kl/app", 034). R2's source is still readable and renders to its digest, but
 encryption is refused with HTTP 403 (037). Transit's encrypt endpoint creates a missing key, which
 needs the `create` capability, and the compiler holds `update` only. Rows 039-043 show what that
 refusal prevents. The administrator, who holds `create`, encrypted a probe under the missing name
@@ -200,6 +213,28 @@ the one matching the g1 provider, restores both (092-094).
 blocked: both paths got HTTP 503 "Vault is sealed" (096). After unsealing with the fixture's key
 share (097), R1 is applicable again (098).
 
+**L — credentials older than the provider.** The g1 store holds executor1, which the g2 provider
+revoked in setup (005). The provider has no token for its accessor ("invalid accessor", 102), and
+apply is denied with HTTP 403 for both releases (103, 106), although key, artifact and source are
+all present. The compiler token dates from g1, was never revoked and still works, so both
+regenerate (104, 107). After the administrator issued a new executor token (109), R2 applies
+again (110, 112). This is I in the other direction: a store backup that does not match the
+provider loses the credential whichever of the two is older.
+
+### 3.3 Custody and unlock prerequisites per case
+
+| Case | What was missing | Where it is kept | What made the release usable again |
+|---|---|---|---|
+| B | source `kl/app@1` | provider KV; provider backup | a provider restore (E, 048); apply was never affected (020) |
+| C | key `kl-late`, source `kl/late@1`, R3's record | provider and database; no backup holds them | nothing |
+| D | key `kl-art` | provider Transit; provider backup | a provider restore (E, 047) |
+| G | key version 1 above the floor; R2's record | the provider's key configuration; database backup | an administrator floor change (064); R2 needs a database backup no older than R2 |
+| H | key version 2; `kl/app@2` | provider backup no older than the database backup | a newer provider backup; R1 regenerates meanwhile (073) |
+| I | an executor credential this provider issued | credential store backup matching the provider | an administrator reissue (083) |
+| J | every credential | credential store backup | the store restore matching the provider (091) |
+| K | an unsealed provider | the unseal key share, held apart from every backup family | unsealing (097) |
+| L | an executor credential this provider has not revoked | credential store backup matching the provider | an administrator reissue (109) |
+
 ## 4. Failures hit while building it
 
 ### 4.1 The expected outcome of regenerating against a deleted key
@@ -207,9 +242,18 @@ share (097), R1 is applicable again (098).
 The first full capture expected row 037 to `fail` and observed `denied`: it was the one mismatch in
 93 rows. The script was right and the expectation was wrong. Transit's encrypt treats a missing key
 as an upsert, and the compiler's policy lacks `create`, so the provider refused the request with a
-403 rather than reporting a missing key. That capture was discarded. The second, committed capture
-expects `denied` and adds the administrator's upsert and its consequences (039-043) as the control
-for what the refusal prevents.
+403 rather than reporting a missing key. That capture was discarded. Later captures expect `denied`
+and add the administrator's upsert and its consequences (039-043) as the control for what the
+refusal prevents.
+
+### 4.3 The check was described as read-only
+
+A review of the second capture found that the report, `run/release` and the README called the
+check read-only, while its regeneration step sends a real encrypt (row 038 sends one to the deleted
+`kl-art`). The third, committed capture compares the provider's key state across every check,
+adds case L (a store older than the provider, which also shows the executor1 revocation took
+effect) and matches `denied` on the CLI's `Code: 403` only. Rows 001-098 have the same case,
+release, action, identity, state, expectation, observation and verdict in both captures.
 
 ### 4.2 Verbatim transcripts fail `git diff --check`
 
@@ -231,7 +275,7 @@ Each combination the issue names was restored and both paths were tried after it
 | provider backup newer | G |
 | missing key | C (never snapshotted), D (deleted, restorable) |
 | missing secret version | B (destroyed, restorable), C (destroyed, never snapshotted) |
-| missing management credentials | I (credential newer than the provider), J (credentials gone) |
+| missing management credentials | I (store newer than the provider), L (store older), J (credentials gone) |
 | explicit restoration | E (all three families to g2), J (store alone) |
 
 ### 5.2 Criterion 2: applying is not regenerating, and ciphertext is not executability
@@ -240,12 +284,15 @@ The two paths failed independently in both directions:
 
 - **Artifact applies, regeneration blocked:** B, where the source version was destroyed (020, 021).
 - **Artifact does not apply, regeneration works:** G (060, 061), H for R1 (072, 073), I (080, 081),
-  and D after the key was recreated (041, 042).
+  L (103, 104), and D after the key was recreated (041, 042).
 - **Both blocked:** C, D, H for R2, J and K.
 
-In every "does not apply" row the stored ciphertext was present and intact. The same ciphertext
-applied again once the missing piece came back: the key version (E, 052), the floor (065) or the
-credential (084). What made it executable was the key version, the provider's floor, the executor's
+In every "does not apply" row the stored ciphertext was present: each transcript's first line
+names its key version. The release then applied again once the missing piece came back: the key
+version (E, 052), the floor (065) or the credential (084, 110). That it was the same ciphertext is
+by construction, not observed: the scenario writes a release's ciphertext only when it makes the
+release and in the rewrap (002), and the evidence records its key-version prefix (007, 051), not
+its bytes. What made it executable was the key version, the provider's floor, the executor's
 credential and an unsealed provider. The ciphertext alone never did.
 
 ### 5.3 Criterion 3: outcomes, prerequisites and stopping
@@ -254,39 +301,60 @@ credential and an unsealed provider. The ciphertext alone never did.
 regeneration made the release usable again. Blocked meant a missing piece that another backup or
 action could supply. Irrecoverable meant that no snapshot held the piece:
 
-- *recoverable by apply*: A, B (R1), E (R1, R2), I after reissue, J after the store restore, K after
-  unsealing;
-- *recoverable by regeneration only*: G (R1), H (R1), I before reissue; each makes a new release that
-  needs its own approval;
+- *recoverable by apply*: A, B (R1), E (R1, R2), I and L after reissue, J after the store restore,
+  K after unsealing;
+- *recoverable by regeneration*: H (R1), and I and L before the executor was reissued; each makes
+  a new release that needs its own approval;
+- *recoverable by regeneration, or by apply once an administrator lowers the floor*: G (R1, 064,
+  065);
 - *blocked, then recovered by a restore*: D (by E);
 - *blocked in this combination*: H (R2), which needs a provider backup at least as new as g2;
 - *irrecoverable*: R3 (C, E). Its key, its source version and its record were all made after the
   last snapshot.
 
-**Custody and unlock prerequisites observed:**
+**Custody and unlock prerequisites observed**, by path (per case: §3.3):
 
 | Path | Needs |
 |---|---|
 | apply | the release record (database); the key version it names, present and at or above the decryption floor (provider); an executor credential the *restored* provider recognises (store matching provider); an unsealed provider (the unseal share) |
 | regen | the source version (provider KV); a key to encrypt under (provider); a compiler credential the restored provider recognises; an unsealed provider; then a new approval |
-| repair actions seen | lowering a decryption floor (064), reissuing a credential (083), creating a key (039): all administrator operations on the restored provider |
+| repair actions seen | lowering a decryption floor (064), reissuing a credential (083, 109), creating a key (039): all administrator operations on the restored provider |
 
-**Safe stopping.** Every `check` row reads and never writes. Each ends with `stopped: nothing
-applied, nothing regenerated, nothing stored`, and for every release present the release table's
-digest was confirmed unchanged across the check (for example 030 and 043). For the irrecoverable R3
-the check reports `absent` (058) or `blocked` (030) and stops. It creates no replacement key, no
-new release and no substitute record. The one way this run found to "recover" past a lost key
-without a backup was the recreated key in D (042). There a regeneration succeeds under a different
-key that carries the same name and version number. That is exactly what the recovery check must not
-do on its own. The compiler's lack of `create` is what stopped it (037).
+**Safe stopping.** The check stores no release and dispatches nothing. Each of the 25 `check` rows
+prints `stopped: nothing dispatched, no release stored`, and for every release present the release
+table's digest was the same before and after the check (for example 030 and 043). The check is not
+read-only at the provider, though. Its regeneration step sends a real Transit encrypt, and Transit
+creates a missing key on encrypt for an identity that holds `create` (039). So the scenario read
+the provider's Transit key state, as the administrator, before and after every check. It was
+unchanged in the 24 checks where the provider could answer, and not compared in the one where the
+provider was sealed (096). For the irrecoverable R3 the check reports `absent` (058) or `blocked`
+(030) and stops. It creates no new release and no substitute record. The one way this run found to
+"recover" past a lost key without a backup was the recreated key in D (042). There a regeneration
+succeeds under a different key that carries the same name and version number. The recovery check
+must not do that on its own. The compiler's lack of `create` is what kept D's checks (035, 038)
+from doing it (037); a recovery identity that held `create` would have minted the key.
+
+### 5.4 Alternative recovery paths compared
+
+| Path | Works when | Costs | Seen in |
+|---|---|---|---|
+| apply the retained artifact | the record exists, its key version is at or above the floor, the executor credential is one the provider honours, and the provider is unsealed | nothing beyond the original approval; the bytes approved are the bytes applied (design:287) | A, B, E, J, K, and I and L after reissue |
+| regenerate from source as a new release | the source version, a key to encrypt under and a compiler credential | a new release and a new approval; under another renderer the bytes could differ (not exercised: the renderer is fixed here) | G, H (R1), I, L |
+| restore another backup generation | a snapshot holds the missing piece | everything after that snapshot in the restored family is lost (R3 in E), and the pairing with the other families can break (G, H, I, L) | E, which undid B's and D's losses |
+| administrator repair on the restored provider | lowering the floor works while the key version still exists below it; reissuing a credential works while the policy exists | an administrator action outside the check, to be recorded (and, for the floor, reverted) | G (064-066), I (083), L (109) |
+| recreate a lost key under its name | never: the new key decrypts nothing stored | a regeneration appears to succeed under a different key with the lost key's labels | D (039-043) |
+
+Inference: apply loses least. Next come a restore or repair that makes apply possible again, then
+regeneration with re-approval. Recreating a key is not a recovery path.
 
 ## 6. Limits
 
 - **One provider and one topology.** OpenBao 2.6.1, single node, one unseal share. Every provider
   restore went back onto the same cluster, which keeps its unseal key. Restoring onto a new cluster,
   where unseal or recovery keys come from another custody path, was not exercised.
-- **The administrator ran as root** (003, 005, 064, 066, 083, 039). A least-privilege administrator
-  policy for floor changes, credential reissue and key creation is still unwritten.
+- **The administrator ran as root** for every change it made (002-005, 039, 064, 066, 083, 095, 109)
+  and every read of the ground truth. A least-privilege administrator policy for floor changes,
+  credential reissue and key creation is still unwritten.
 - **Apply is eligibility, not application.** Nothing was sent to a Talos machine. The artifact is a
   one-field synthetic document, not a rendered machine configuration.
 - **The release table is a stand-in.** It has no approvals, operation journal or recovery epoch.
@@ -297,7 +365,8 @@ do on its own. The compiler's lack of `create` is what stopped it (037).
   tested.
 - **One pass per case, in sequence, on one fixture.** Each case's ground truth is its bundle, and the
   injection log fixes the order. Case G's floor change was reverted within the case (066).
-- **The store is a file copy.** It held token files only; no process held a database open in it.
+- **The store is a file copy.** It held the token and accessor files and the fixture's own leak-scan
+  control (`canary-control.txt`); no process held a database open in it.
 - **What stays out of the repository.** The bundles under `KL_OUT` include the expanded store
   archives, which hold the run's tokens. `run/collect-evidence` copies none of them and refuses
   collected evidence that looks like an OpenBao token. The command column of `verdicts.tsv` holds
@@ -318,7 +387,8 @@ The recommendations below are inferences from the cases above. They are not obse
    records and can fall below a raised floor (G). For
    [issue 15](https://github.com/ginsys/bronzeward/issues/15): take the provider backup no earlier
    than the database backup it pairs with. Keep the credential store's backup matched to the
-   provider's (I, J).
+   provider's: a store newer than the provider (I) and one older (L) each lost the executor
+   credential, and a lost store needed the matching backup (J).
 3. **Tie floor raises and rewraps to the database retention window.** Rewrapping made every
    rewrapped artifact depend on the newest key version (H), and raising the floor made every older
    database's artifacts undecryptable (G). While a database backup that references a key version

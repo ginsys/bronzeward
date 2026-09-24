@@ -1,5 +1,5 @@
-rows: 98, mismatches: 0
-states: A-live B-source-destroyed C-late-lost D-key-deleted E-all-g2 final G-db-g1 H-bao-g1 I-store-g2 J-creds-lost J-store-g1 K-sealed K-unsealed
-bundles: 13, leak scans read: 13
-positive control hits: 39
+rows: 112, mismatches: 0
+states: A-live B-source-destroyed C-late-lost D-key-deleted E-all-g2 final G-db-g1 H-bao-g1 I-store-g2 J-creds-lost J-store-g1 K-sealed K-unsealed L-store-g1
+bundles: 14, leak scans read: 14
+positive control hits: 42
 other hits: 0

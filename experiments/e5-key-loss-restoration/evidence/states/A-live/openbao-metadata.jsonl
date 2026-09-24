@@ -1,6 +1,6 @@
-{"path":"fixture/inline","versions":{"1":{"created_time":"2026-09-24T19:42:26.037334127Z","deletion_time":"","destroyed":false}}}
-{"path":"kl/app","versions":{"1":{"created_time":"2026-09-24T19:44:22.249130495Z","deletion_time":"","destroyed":false},"2":{"created_time":"2026-09-24T19:44:24.008072419Z","deletion_time":"","destroyed":false}}}
-{"path":"kl/late","versions":{"1":{"created_time":"2026-09-24T19:44:26.732427597Z","deletion_time":"","destroyed":false}}}
+{"path":"fixture/inline","versions":{"1":{"created_time":"2026-09-24T20:02:37.594783899Z","deletion_time":"","destroyed":false}}}
+{"path":"kl/app","versions":{"1":{"created_time":"2026-09-24T20:04:23.552938979Z","deletion_time":"","destroyed":false},"2":{"created_time":"2026-09-24T20:04:24.985329858Z","deletion_time":"","destroyed":false}}}
+{"path":"kl/late","versions":{"1":{"created_time":"2026-09-24T20:04:27.219604771Z","deletion_time":"","destroyed":false}}}
 {"transit_key":"bw-artifact","latest":1,"min_decryption":1,"deletion_allowed":false}
 {"transit_key":"kl-art","latest":2,"min_decryption":2,"deletion_allowed":false}
 {"transit_key":"kl-late","latest":1,"min_decryption":1,"deletion_allowed":false}

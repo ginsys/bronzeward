@@ -2,5 +2,6 @@
   no executor credential in the restored store
   release R1: source kl/app version 1, stored artifact under kl-art key version 1
   no compiler credential in the restored store
-stopped: nothing applied, nothing regenerated, nothing stored (release table digest unchanged)
+stopped: nothing dispatched, no release stored (release table digest unchanged)
 class=blocked reason=neither the stored artifact nor its source is usable in this combination
+provider key state unchanged across the check (2 key(s))

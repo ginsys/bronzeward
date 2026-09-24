@@ -75,8 +75,8 @@ KL_STATE=-
 #
 # Runs one command and records one row. A command whose last output line is
 # `class=<c> reason=<r>` (the recovery check) is observed as <c>; any other command is observed as
-# ok for exit 0, denied when the provider said so (HTTP 403 or "permission denied"), fail
-# otherwise. The observation comes from the output and exit status alone, never from the
+# ok for exit 0, denied when the provider said so (the bao CLI's `Code: 403`, case-sensitive, so
+# that a local "Permission denied" on a file is not taken for the provider's), fail otherwise. The observation comes from the output and exit status alone, never from the
 # expectation. A mismatch is recorded and counted, never fatal.
 judge() {
   local case=$1 release=$2 action=$3 identity=$4 expected=$5 n transcript rc=0 observed reason=- verdict line
@@ -93,7 +93,7 @@ judge() {
     reason=${line#* reason=}
   elif [ "$rc" -eq 0 ]; then
     observed=ok
-  elif grep -qiE 'code: 403|permission denied' -- "$KL_OUT/$transcript"; then
+  elif grep -qF 'Code: 403' -- "$KL_OUT/$transcript"; then
     observed=denied
   else
     observed=fail

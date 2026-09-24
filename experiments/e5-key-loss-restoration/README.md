@@ -24,8 +24,12 @@ third never is. Then each case sets one loss or one restored combination, and `r
 judges every release it names on two separate rows. `apply` decrypts the stored artifact with the
 executor's credential and compares it to the recorded digest. `regen` reads the source version with
 the compiler's credential, renders it, compares the digest and encrypts it without storing anything.
-A third row, `check`, is the read-only recovery classification (`applicable`, `regenerable`,
-`blocked`, `absent`). It stops before either path and shows that the release table did not change.
+A third row, `check`, is the recovery classification (`applicable`, `regenerable`, `blocked`,
+`absent`). It stores no release, dispatches nothing and shows that the release table did not
+change. It is not read-only at the provider: its regeneration step sends a real Transit encrypt,
+which Transit turns into a key creation for an identity holding `create`. The scenario compares
+the provider's Transit key state before and after every check and records a change as the class
+`provider-changed`.
 
 Every observation is one row of `verdicts.tsv`: the command, the identity, the expected outcome
 written down before it runs, the observed outcome and the state bundle that is its ground truth. A
@@ -46,8 +50,10 @@ fixtures/bin/down
 `run/all` runs `run/scenario`, takes a final bundle and checks the leak scan of every bundle: the
 fixture's positive control must be found in each, and nothing else. It refuses a `KL_OUT` that
 already holds a capture, and a fixture that already holds the release table or the credential
-store. `run/collect-evidence` needs the fixture still up, because it rebuilds its refusal patterns
-from this run's credentials. It copies the text of the capture into `evidence/` and leaves the
+store. `run/collect-evidence` needs the capture's own fixture still up: it rebuilds the refusal
+patterns from the fixture's credentials, compares them with the fixture's pattern file, and compares
+that file with the digest `run/all` recorded, so a fixture recreated since the capture is refused. It
+copies the text of the capture into `evidence/` and leaves the
 bundles' database dumps, snapshots and expanded store archives behind. Those archives hold the
 management tokens, and so do the copies of the bundles under `KL_OUT`: delete `KL_OUT` once the
 evidence is collected.
