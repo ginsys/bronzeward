@@ -1,0 +1,86 @@
+==> binding-early/diff-base <==
+--- base
++++ binding-early
+@@ -19,0 +20,6 @@
++    registries:
++        config:
++            registry.example.test:
++                auth:
++                    username: e2-user
++                    password: e2-registry-password
+==> binding-early/resolutions.tsv <==
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth
+==> binding-early/sentinel-found.tsv <==
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth/username
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth/password
+==> binding-early/validate.txt <==
+cases/generated/map/binding-early/out.yaml is valid for metal mode
+==> binding-late/composed.yaml.skipped <==
+gen/map/binding/f1.yaml
+==> binding-late/diff-base <==
+--- base
++++ binding-late
+@@ -19,0 +20,6 @@
++    registries:
++        config:
++            registry.example.test:
++                auth:
++                    username: e2-user
++                    password: e2-registry-password
+==> binding-late/resolutions.tsv <==
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth
+==> binding-late/validate.txt <==
+cases/generated/map/binding-late/out.yaml is valid for metal mode
+==> marked-early/diff-base <==
+--- base
++++ marked-early
+@@ -19,0 +20,6 @@
++    registries:
++        config:
++            registry.example.test:
++                auth:
++                    username: e2-user
++                    password: e2-registry-password
+==> marked-early/resolutions.tsv <==
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth
+==> marked-early/sentinel-found.tsv <==
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth/username
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth/password
+==> marked-early/validate.txt <==
+cases/generated/map/marked-early/out.yaml is valid for metal mode
+==> marked-late/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 5: cannot construct !!str `bwref:r...` into v1alpha1.RegistryAuthConfig
+==> native/diff-base <==
+--- base
++++ native
+@@ -19,0 +20,6 @@
++    registries:
++        config:
++            registry.example.test:
++                auth:
++                    username: e2-user
++                    password: e2-registry-password
+==> native/validate.txt <==
+cases/generated/map/native/out.yaml is valid for metal mode
+==> tag-early/diff-base <==
+--- base
++++ tag-early
+@@ -19,0 +20,6 @@
++    registries:
++        config:
++            registry.example.test:
++                auth:
++                    username: e2-user
++                    password: e2-registry-password
+==> tag-early/resolutions.tsv <==
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth
+==> tag-early/sentinel-found.tsv <==
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth/username
+reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth/password
+==> tag-early/validate.txt <==
+cases/generated/map/tag-early/out.yaml is valid for metal mode
+==> tag-late/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 5: cannot construct !bwref `reg-auth` into v1alpha1.RegistryAuthConfig
+==> end <==

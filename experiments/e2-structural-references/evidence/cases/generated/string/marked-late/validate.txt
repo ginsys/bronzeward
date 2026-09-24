@@ -1,1 +1,0 @@
-cases/generated/string/marked-late/out.yaml is valid for metal mode

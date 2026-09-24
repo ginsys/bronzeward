@@ -1,8 +1,0 @@
---- base
-+++ tag-late
-@@ -95,0 +96,5 @@
-+---
-+apiVersion: v1alpha1
-+kind: TrustedRootsConfig
-+name: e2-roots
-+certificates: roots

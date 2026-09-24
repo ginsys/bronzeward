@@ -1,0 +1,30 @@
+==> binding/bindings.tsv <==
+f1.yaml	extra-ca	v1alpha1	machine/acceptedCAs[0]/crt
+==> binding/f1.yaml <==
+machine:
+    acceptedCAs:
+        - {}
+==> info.tsv <==
+fragment	f1.yaml
+native	pass
+expect	tag	late	rejected
+expect	tag	early	parity
+expect	marked	late	rejected
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity
+==> literal/f1.yaml <==
+machine:
+    acceptedCAs:
+        - crt: ZTItZXh0cmEtY2EtY2VydGlmaWNhdGU=
+==> marked/f1.yaml <==
+machine:
+    acceptedCAs:
+        - crt: "bwref:extra-ca"
+==> superset.tsv <==
+f1.yaml	extra-ca	v1alpha1	machine/acceptedCAs[0]/crt
+==> tag/f1.yaml <==
+machine:
+    acceptedCAs:
+        - crt: !bwref extra-ca
+==> end <==

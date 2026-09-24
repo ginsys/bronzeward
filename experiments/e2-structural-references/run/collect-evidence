@@ -27,16 +27,39 @@ rewrite() { # rewrite <in> <out>: the checkout and E2_OUT become placeholders
 for f in run.txt controls.tsv summary.txt matrix.tsv outputs.sha256; do
   rewrite "$E2_OUT/$f" "$incoming/$f"
 done
+# Per case, one text file rather than one file per cell: GitHub serves no pull-request diff of more
+# than 300 files, and a review that cannot read the diff reviews nothing. pack <dir> <out> [find
+# tests]: every non-empty file under <dir>, in path order, each after a `==> <path under dir> <==`
+# line, and a closing `==> end <==` so that no pack ends in the blank line talosctl validate prints.
 # An empty file is not collected: an empty message is no message, and an empty resolution list is
 # the matrix's `resolved` count of 0.
-cases=0
-while IFS= read -r -d '' f; do
-  rel=${f#"$E2_OUT"/}
-  rewrite "$f" "$incoming/$rel"
-  cases=1
-done < <(find "$E2_OUT/gen" "$E2_OUT/cases" -type f ! -empty \( -path "$E2_OUT/gen/*" -o -name '*.err' \
-  -o -name '*.tsv' -o -name 'diff-*' -o -name 'validate.txt' -o -name '*.skipped' \) -print0 | sort -z)
-[ "$cases" -eq 1 ] || die "no case evidence under $E2_OUT/cases"
+pack() {
+  local dir=$1 out=$2 f n=0
+  shift 2
+  mkdir -p -- "$(dirname -- "$out")"
+  {
+    while IFS= read -r -d '' f; do
+      printf '==> %s <==\n' "${f#"$dir"/}"
+      sed -e "s#$REPO_DIR#<repo>#g" -e "s#$E2_OUT#<E2_OUT>#g" -- "$f"
+      [ -z "$(tail -c 1 -- "$f")" ] || printf '\n'
+      n=$((n + 1))
+    done < <(find "$dir" -type f ! -empty "$@" -print0 | sort -z)
+    printf '==> end <==\n'
+  } >"$out"
+  [ "$n" -gt 0 ] || die "nothing to collect under $dir"
+}
+packs=0
+for g in "$E2_OUT"/gen/*/; do
+  pack "${g%/}" "$incoming/gen/$(basename -- "$g").txt"
+  packs=$((packs + 1))
+done
+for d in "$E2_OUT"/cases/*/*/; do
+  rel=${d#"$E2_OUT"/}
+  pack "${d%/}" "$incoming/${rel%/}.txt" \( -name '*.err' -o -name '*.tsv' -o -name 'diff-*' \
+    -o -name 'validate.txt' -o -name '*.skipped' \)
+  packs=$((packs + 1))
+done
+[ "$packs" -gt 0 ] || die "no case evidence under $E2_OUT/cases"
 
 # Each base with every line that holds a leak-refusal pattern redacted, and its validation message:
 # with a cell's diff-base, the materialized output that cell produced, less the secrets.

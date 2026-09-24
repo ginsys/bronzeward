@@ -1,8 +1,0 @@
-fragment	f1.yaml
-native	rejected
-expect	tag	late	rejected
-expect	tag	early	rejected
-expect	marked	late	rejected
-expect	marked	early	rejected
-expect	binding	late	rejected
-expect	binding	early	rejected

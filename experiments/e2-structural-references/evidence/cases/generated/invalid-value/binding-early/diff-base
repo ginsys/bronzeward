@@ -1,5 +1,0 @@
---- base
-+++ binding-early
-@@ -37 +37 @@
--        dnsDomain: cluster.local
-+        dnsDomain: e2 not a domain

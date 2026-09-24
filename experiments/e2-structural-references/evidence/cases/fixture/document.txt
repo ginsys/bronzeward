@@ -1,0 +1,100 @@
+==> binding-early/diff-base <==
+--- base
++++ binding-early
+@@ -96,0 +97,5 @@
++---
++apiVersion: v1alpha1
++kind: TrustedRootsConfig
++name: e2-roots
++certificates: e2-not-a-real-certificate
+==> binding-early/resolutions.tsv <==
+roots	TrustedRootsConfig/e2-roots	certificates
+==> binding-early/sentinel-found.tsv <==
+roots	TrustedRootsConfig/e2-roots	certificates
+==> binding-early/validate.txt <==
+cases/fixture/document/binding-early/out.yaml is valid for container mode
+==> binding-late/diff-base <==
+--- base
++++ binding-late
+@@ -96,0 +97,5 @@
++---
++apiVersion: v1alpha1
++kind: TrustedRootsConfig
++name: e2-roots
++certificates: e2-not-a-real-certificate
+==> binding-late/resolutions.tsv <==
+roots	TrustedRootsConfig/e2-roots	certificates
+==> binding-late/validate.txt <==
+cases/fixture/document/binding-late/out.yaml is valid for container mode
+==> marked-early/diff-base <==
+--- base
++++ marked-early
+@@ -96,0 +97,5 @@
++---
++apiVersion: v1alpha1
++kind: TrustedRootsConfig
++name: e2-roots
++certificates: e2-not-a-real-certificate
+==> marked-early/resolutions.tsv <==
+roots	TrustedRootsConfig/e2-roots	certificates
+==> marked-early/sentinel-found.tsv <==
+roots	TrustedRootsConfig/e2-roots	certificates
+==> marked-early/validate.txt <==
+cases/fixture/document/marked-early/out.yaml is valid for container mode
+==> marked-late/diff-base <==
+--- base
++++ marked-late
+@@ -96,0 +97,5 @@
++---
++apiVersion: v1alpha1
++kind: TrustedRootsConfig
++name: e2-roots
++certificates: e2-not-a-real-certificate
+==> marked-late/resolutions.tsv <==
+roots	TrustedRootsConfig/e2-roots	certificates
+==> marked-late/validate.txt <==
+cases/fixture/document/marked-late/out.yaml is valid for container mode
+==> native/diff-base <==
+--- base
++++ native
+@@ -96,0 +97,5 @@
++---
++apiVersion: v1alpha1
++kind: TrustedRootsConfig
++name: e2-roots
++certificates: e2-not-a-real-certificate
+==> native/validate.txt <==
+cases/fixture/document/native/out.yaml is valid for container mode
+==> tag-early/diff-base <==
+--- base
++++ tag-early
+@@ -96,0 +97,5 @@
++---
++apiVersion: v1alpha1
++kind: TrustedRootsConfig
++name: e2-roots
++certificates: e2-not-a-real-certificate
+==> tag-early/resolutions.tsv <==
+roots	TrustedRootsConfig/e2-roots	certificates
+==> tag-early/sentinel-found.tsv <==
+roots	TrustedRootsConfig/e2-roots	certificates
+==> tag-early/validate.txt <==
+cases/fixture/document/tag-early/out.yaml is valid for container mode
+==> tag-late/diff-base <==
+--- base
++++ tag-late
+@@ -96,0 +97,5 @@
++---
++apiVersion: v1alpha1
++kind: TrustedRootsConfig
++name: e2-roots
++certificates: roots
+==> tag-late/diff-native <==
+--- native
++++ tag-late
+@@ -101 +101 @@
+-certificates: e2-not-a-real-certificate
++certificates: roots
+==> tag-late/validate.txt <==
+cases/fixture/document/tag-late/out.yaml is valid for container mode
+==> end <==

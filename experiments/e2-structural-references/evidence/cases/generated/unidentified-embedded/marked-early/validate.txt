@@ -1,1 +1,0 @@
-cases/generated/unidentified-embedded/marked-early/out.yaml is valid for metal mode

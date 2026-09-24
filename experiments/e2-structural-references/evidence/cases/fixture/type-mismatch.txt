@@ -1,0 +1,32 @@
+==> binding-early/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 4: cannot construct !!str `e2-not-...` into int
+==> binding-early/resolutions.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> binding-late/composed.yaml.skipped <==
+gen/type-mismatch/binding/f1.yaml
+==> binding-late/normalize.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 23: cannot construct !!str `e2-not-...` into int
+==> binding-late/resolutions.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> marked-early/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 4: cannot construct !!str `e2-not-...` into int
+==> marked-early/resolutions.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> marked-late/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 4: cannot construct !!str `bwref:p...` into int
+==> native/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 4: cannot construct !!str `e2-not-...` into int
+==> tag-early/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 4: cannot construct !!str `e2-not-...` into int
+==> tag-early/resolutions.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> tag-late/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 4: cannot construct !bwref `prism-port` into int
+==> end <==

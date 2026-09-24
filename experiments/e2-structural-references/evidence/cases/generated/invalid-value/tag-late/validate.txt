@@ -1,1 +1,0 @@
-cases/generated/invalid-value/tag-late/out.yaml is valid for metal mode

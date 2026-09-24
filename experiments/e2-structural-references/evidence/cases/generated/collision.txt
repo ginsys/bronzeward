@@ -1,0 +1,142 @@
+==> binding-early/diff-base <==
+--- base
++++ binding-early
+@@ -19,0 +20,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> binding-early/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> binding-early/sentinel-found.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> binding-early/validate.txt <==
+cases/generated/collision/binding-early/out.yaml is valid for metal mode
+==> binding-late/diff-base <==
+--- base
++++ binding-late
+@@ -19,0 +20,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> binding-late/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> binding-late/validate.txt <==
+cases/generated/collision/binding-late/out.yaml is valid for metal mode
+==> marked-early/diff-base <==
+--- base
++++ marked-early
+@@ -19,0 +20,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> marked-early/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> marked-early/sentinel-found.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> marked-early/validate.txt <==
+cases/generated/collision/marked-early/out.yaml is valid for metal mode
+==> marked-late/diff-base <==
+--- base
++++ marked-late
+@@ -19,0 +20,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: e2-registry-password
+==> marked-late/diff-native <==
+--- native
++++ marked-late
+@@ -29 +29 @@
+-                    password: bwref:reg-pass
++                    password: e2-registry-password
+==> marked-late/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+reg-pass	v1alpha1	machine/registries/config/registry.example.test/auth/password
+==> marked-late/validate.txt <==
+cases/generated/collision/marked-late/out.yaml is valid for metal mode
+==> native/diff-base <==
+--- base
++++ native
+@@ -19,0 +20,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> native/validate.txt <==
+cases/generated/collision/native/out.yaml is valid for metal mode
+==> tag-early/diff-base <==
+--- base
++++ tag-early
+@@ -19,0 +20,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> tag-early/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> tag-early/sentinel-found.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> tag-early/validate.txt <==
+cases/generated/collision/tag-early/out.yaml is valid for metal mode
+==> tag-late/diff-base <==
+--- base
++++ tag-late
+@@ -19,0 +20,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: reg-pass
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> tag-late/diff-native <==
+--- native
++++ tag-late
+@@ -25 +25 @@
+-                    password: e2-registry-password
++                    password: reg-pass
+==> tag-late/validate.txt <==
+cases/generated/collision/tag-late/out.yaml is valid for metal mode
+==> end <==

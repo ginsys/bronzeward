@@ -1,1 +1,0 @@
-cases/fixture/bool/native/out.yaml is valid for container mode

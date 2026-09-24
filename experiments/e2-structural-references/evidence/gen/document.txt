@@ -1,0 +1,33 @@
+==> binding/bindings.tsv <==
+f1.yaml	roots	TrustedRootsConfig/e2-roots	certificates
+==> binding/f1.yaml <==
+apiVersion: v1alpha1
+kind: TrustedRootsConfig
+name: e2-roots
+==> info.tsv <==
+fragment	f1.yaml
+native	pass
+expect	tag	late	differs
+expect	tag	early	parity
+expect	marked	late	parity
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity
+==> literal/f1.yaml <==
+apiVersion: v1alpha1
+kind: TrustedRootsConfig
+name: e2-roots
+certificates: e2-not-a-real-certificate
+==> marked/f1.yaml <==
+apiVersion: v1alpha1
+kind: TrustedRootsConfig
+name: e2-roots
+certificates: "bwref:roots"
+==> superset.tsv <==
+f1.yaml	roots	TrustedRootsConfig/e2-roots	certificates
+==> tag/f1.yaml <==
+apiVersion: v1alpha1
+kind: TrustedRootsConfig
+name: e2-roots
+certificates: !bwref roots
+==> end <==

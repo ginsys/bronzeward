@@ -1,5 +1,0 @@
---- native
-+++ marked-late
-@@ -29 +29 @@
--                    password: bwref:reg-pass
-+                    password: e2-registry-password

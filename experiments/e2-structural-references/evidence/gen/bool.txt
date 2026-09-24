@@ -1,0 +1,28 @@
+==> binding/bindings.tsv <==
+f1.yaml	wipe	v1alpha1	machine/install/wipe
+==> binding/f1.yaml <==
+{}
+==> info.tsv <==
+fragment	f1.yaml
+native	pass
+expect	tag	late	rejected
+expect	tag	early	parity
+expect	marked	late	rejected
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity
+==> literal/f1.yaml <==
+machine:
+    install:
+        wipe: true
+==> marked/f1.yaml <==
+machine:
+    install:
+        wipe: "bwref:wipe"
+==> superset.tsv <==
+f1.yaml	wipe	v1alpha1	machine/install/wipe
+==> tag/f1.yaml <==
+machine:
+    install:
+        wipe: !bwref wipe
+==> end <==

@@ -1,5 +1,0 @@
---- native
-+++ binding-late
-@@ -25 +25 @@
--                    password: e2-override-literal
-+                    password: e2-registry-password

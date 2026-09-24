@@ -1,9 +1,0 @@
---- base
-+++ marked-late
-@@ -18,0 +19,6 @@
-+    registries:
-+        config:
-+            registry.example.test:
-+                auth:
-+                    username: e2-user
-+                    password: e2-override-literal

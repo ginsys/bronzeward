@@ -1,0 +1,74 @@
+==> binding/bindings.tsv <==
+f1.yaml	reg-pass	v1alpha1	machine/registries/config/registry.example.test/auth/password
+==> binding/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+==> binding/f2.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    password: e2-override-literal
+==> info.tsv <==
+fragment	f1.yaml
+fragment	f2.yaml
+native	pass
+expect	tag	late	parity
+expect	tag	early	parity
+expect	marked	late	parity
+expect	marked	early	parity
+expect	binding	late	differs
+expect	binding	early	parity
+==> literal/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: e2-registry-password
+==> literal/f2.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    password: e2-override-literal
+==> marked/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: "bwref:reg-pass"
+==> marked/f2.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    password: e2-override-literal
+==> superset.tsv <==
+f1.yaml	reg-pass	v1alpha1	machine/registries/config/registry.example.test/auth/password
+==> tag/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: !bwref reg-pass
+==> tag/f2.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    password: e2-override-literal
+==> end <==

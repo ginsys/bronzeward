@@ -1,7 +1,0 @@
-1 error occurred:
-	* v1alpha1.Config: 1 error occurred:
-	* "e2 not a domain" is not a valid DNS name
-
-
-
-

@@ -1,1 +1,0 @@
-cases/fixture/unidentified-embedded/tag-late/out.yaml is valid for container mode

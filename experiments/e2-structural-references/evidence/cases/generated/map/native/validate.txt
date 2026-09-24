@@ -1,1 +1,0 @@
-cases/generated/map/native/out.yaml is valid for metal mode

@@ -1,4 +1,0 @@
-machine:
-    features:
-        kubePrism:
-            port: "bwref:prism-port"

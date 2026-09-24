@@ -1,1 +1,0 @@
-cases/fixture/embedded-json/marked-late/out.yaml is valid for container mode

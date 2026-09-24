@@ -1,9 +1,0 @@
-machine:
-    registries:
-        config:
-            registry.example.test:
-                auth:
-                    username: e2-user
-            mirror.example.test:
-                auth:
-                    username: e2-user

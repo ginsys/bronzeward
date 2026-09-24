@@ -1,0 +1,142 @@
+==> binding-early/diff-base <==
+--- base
++++ binding-early
+@@ -18,0 +19,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> binding-early/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> binding-early/sentinel-found.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> binding-early/validate.txt <==
+cases/fixture/collision/binding-early/out.yaml is valid for container mode
+==> binding-late/diff-base <==
+--- base
++++ binding-late
+@@ -18,0 +19,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> binding-late/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> binding-late/validate.txt <==
+cases/fixture/collision/binding-late/out.yaml is valid for container mode
+==> marked-early/diff-base <==
+--- base
++++ marked-early
+@@ -18,0 +19,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> marked-early/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> marked-early/sentinel-found.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> marked-early/validate.txt <==
+cases/fixture/collision/marked-early/out.yaml is valid for container mode
+==> marked-late/diff-base <==
+--- base
++++ marked-late
+@@ -18,0 +19,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: e2-registry-password
+==> marked-late/diff-native <==
+--- native
++++ marked-late
+@@ -28 +28 @@
+-                    password: bwref:reg-pass
++                    password: e2-registry-password
+==> marked-late/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+reg-pass	v1alpha1	machine/registries/config/registry.example.test/auth/password
+==> marked-late/validate.txt <==
+cases/fixture/collision/marked-late/out.yaml is valid for container mode
+==> native/diff-base <==
+--- base
++++ native
+@@ -18,0 +19,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> native/validate.txt <==
+cases/fixture/collision/native/out.yaml is valid for container mode
+==> tag-early/diff-base <==
+--- base
++++ tag-early
+@@ -18,0 +19,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> tag-early/resolutions.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> tag-early/sentinel-found.tsv <==
+reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> tag-early/validate.txt <==
+cases/fixture/collision/tag-early/out.yaml is valid for container mode
+==> tag-late/diff-base <==
+--- base
++++ tag-late
+@@ -18,0 +19,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: reg-pass
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
+==> tag-late/diff-native <==
+--- native
++++ tag-late
+@@ -24 +24 @@
+-                    password: e2-registry-password
++                    password: reg-pass
+==> tag-late/validate.txt <==
+cases/fixture/collision/tag-late/out.yaml is valid for container mode
+==> end <==

@@ -1,0 +1,36 @@
+==> binding/bindings.tsv <==
+f1.yaml	reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth
+==> binding/f1.yaml <==
+{}
+==> info.tsv <==
+fragment	f1.yaml
+native	pass
+expect	tag	late	rejected
+expect	tag	early	parity
+expect	marked	late	rejected
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity
+==> literal/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: e2-registry-password
+==> marked/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth: "bwref:reg-auth"
+==> superset.tsv <==
+f1.yaml	reg-auth	v1alpha1	machine/registries/config/registry.example.test/auth
+==> tag/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth: !bwref reg-auth
+==> end <==

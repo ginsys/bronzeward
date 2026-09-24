@@ -1,0 +1,28 @@
+==> binding/bindings.tsv <==
+f1.yaml	dns-domain	v1alpha1	cluster/network/dnsDomain
+==> binding/f1.yaml <==
+{}
+==> info.tsv <==
+fragment	f1.yaml
+native	invalid
+expect	tag	late	differs
+expect	tag	early	parity
+expect	marked	late	parity
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity
+==> literal/f1.yaml <==
+cluster:
+    network:
+        dnsDomain: e2 not a domain
+==> marked/f1.yaml <==
+cluster:
+    network:
+        dnsDomain: "bwref:dns-domain"
+==> superset.tsv <==
+f1.yaml	dns-domain	v1alpha1	cluster/network/dnsDomain
+==> tag/f1.yaml <==
+cluster:
+    network:
+        dnsDomain: !bwref dns-domain
+==> end <==

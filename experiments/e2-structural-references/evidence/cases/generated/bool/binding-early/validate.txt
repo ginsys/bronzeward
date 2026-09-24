@@ -1,1 +1,0 @@
-cases/generated/bool/binding-early/out.yaml is valid for metal mode

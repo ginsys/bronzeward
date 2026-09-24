@@ -3,5 +3,3 @@
 experiments/e5-provider-capabilities/evidence/transcripts/*.txt -whitespace conflict-marker-size=64
 experiments/e5-retention-classification/evidence/transcripts/*.txt -whitespace conflict-marker-size=64
 experiments/e5-key-loss-restoration/evidence/transcripts/*.txt -whitespace conflict-marker-size=64
-# talosctl validate ends its message with a blank line.
-experiments/e2-structural-references/evidence/cases/**/validate.txt -whitespace

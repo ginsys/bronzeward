@@ -1,1 +1,0 @@
-cases/generated/document/binding-late/out.yaml is valid for metal mode

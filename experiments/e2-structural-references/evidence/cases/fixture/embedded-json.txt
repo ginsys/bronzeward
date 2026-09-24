@@ -1,0 +1,103 @@
+==> binding-early/diff-base <==
+--- base
++++ binding-early
+@@ -18,0 +19,6 @@
++    files:
++        - content: |
++            {"endpoint":"https://e2.example.test","token":"e2-app-token"}
++          permissions: 0o644
++          path: /var/etc/e2/config.json
++          op: create
+==> binding-early/resolutions.tsv <==
+app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> binding-early/sentinel-found.tsv <==
+app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> binding-early/validate.txt <==
+cases/fixture/embedded-json/binding-early/out.yaml is valid for container mode
+==> binding-late/diff-base <==
+--- base
++++ binding-late
+@@ -18,0 +19,6 @@
++    files:
++        - content: |
++            {"endpoint":"https://e2.example.test","token":"e2-app-token"}
++          permissions: 0o644
++          path: /var/etc/e2/config.json
++          op: create
+==> binding-late/resolutions.tsv <==
+app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> binding-late/validate.txt <==
+cases/fixture/embedded-json/binding-late/out.yaml is valid for container mode
+==> marked-early/diff-base <==
+--- base
++++ marked-early
+@@ -18,0 +19,6 @@
++    files:
++        - content: |
++            {"endpoint":"https://e2.example.test","token":"e2-app-token"}
++          permissions: 0o644
++          path: /var/etc/e2/config.json
++          op: create
+==> marked-early/resolutions.tsv <==
+app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> marked-early/sentinel-found.tsv <==
+app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> marked-early/validate.txt <==
+cases/fixture/embedded-json/marked-early/out.yaml is valid for container mode
+==> marked-late/diff-base <==
+--- base
++++ marked-late
+@@ -18,0 +19,6 @@
++    files:
++        - content: |
++            {"endpoint":"https://e2.example.test","token":"e2-app-token"}
++          permissions: 0o644
++          path: /var/etc/e2/config.json
++          op: create
+==> marked-late/resolutions.tsv <==
+app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> marked-late/validate.txt <==
+cases/fixture/embedded-json/marked-late/out.yaml is valid for container mode
+==> native/diff-base <==
+--- base
++++ native
+@@ -18,0 +19,6 @@
++    files:
++        - content: |
++            {"endpoint":"https://e2.example.test","token":"e2-app-token"}
++          permissions: 0o644
++          path: /var/etc/e2/config.json
++          op: create
+==> native/validate.txt <==
+cases/fixture/embedded-json/native/out.yaml is valid for container mode
+==> tag-early/diff-base <==
+--- base
++++ tag-early
+@@ -18,0 +19,6 @@
++    files:
++        - content: |
++            {"endpoint":"https://e2.example.test","token":"e2-app-token"}
++          permissions: 0o644
++          path: /var/etc/e2/config.json
++          op: create
+==> tag-early/resolutions.tsv <==
+app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> tag-early/sentinel-found.tsv <==
+app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> tag-early/validate.txt <==
+cases/fixture/embedded-json/tag-early/out.yaml is valid for container mode
+==> tag-late/diff-base <==
+--- base
++++ tag-late
+@@ -18,0 +19,6 @@
++    files:
++        - content: |
++            {"endpoint":"https://e2.example.test","token":"e2-app-token"}
++          permissions: 0o644
++          path: /var/etc/e2/config.json
++          op: create
+==> tag-late/resolutions.tsv <==
+app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> tag-late/validate.txt <==
+cases/fixture/embedded-json/tag-late/out.yaml is valid for container mode
+==> end <==
