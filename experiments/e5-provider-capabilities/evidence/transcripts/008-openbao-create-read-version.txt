@@ -4,7 +4,7 @@ secret/data/mutable/registry
 ======= Metadata =======
 Key                Value
 ---                -----
-created_time       2026-09-24T10:30:44.721409041Z
+created_time       2026-09-24T10:36:30.060000635Z
 custom_metadata    <nil>
 deletion_time      n/a
 destroyed          false

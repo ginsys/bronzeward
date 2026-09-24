@@ -4,7 +4,7 @@ secret/data/gen/app-token/g2
 ======= Metadata =======
 Key                Value
 ---                -----
-created_time       2026-09-24T10:30:55.491534471Z
+created_time       2026-09-24T10:36:38.246508576Z
 custom_metadata    <nil>
 deletion_time      n/a
 destroyed          false

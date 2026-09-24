@@ -4,7 +4,7 @@ secret/data/gen/migrated/app-token/g1
 ======= Metadata =======
 Key                Value
 ---                -----
-created_time       2026-09-24T10:31:16.455675578Z
+created_time       2026-09-24T10:36:56.069636372Z
 custom_metadata    <nil>
 deletion_time      n/a
 destroyed          false

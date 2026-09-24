@@ -1,4 +1,4 @@
 total 12
--rw------- 1 serge serge 248 sep 24 12:31 g1.age
--rw-rw-r-- 1 serge serge 248 sep 24 12:31 g2.age
--rw-rw-r-- 1 serge serge 242 sep 24 12:31 g-race.age
+-rw------- 1 serge serge 248 sep 24 12:36 g1.age
+-rw-rw-r-- 1 serge serge 248 sep 24 12:36 g2.age
+-rw-rw-r-- 1 serge serge 242 sep 24 12:36 g-race.age
