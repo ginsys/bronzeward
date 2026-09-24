@@ -13,8 +13,8 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner r1
-backend=postgres pid=2032621
-outcome=done elapsed_ms=34 applied=[1 2 3 4]
+backend=postgres pid=3952339
+outcome=done elapsed_ms=35 applied=[1 2 3 4]
 ==> read-s6-postgres (rc 0) <==
 migration:1|r1
 migration:2|r1
@@ -38,7 +38,7 @@ drop cascades to table job
 drop cascades to table job_event
 ==> fail (rc 1) <==
 $ e4db migrate -runner r1 -fail-at 3
-backend=postgres pid=2032790
+backend=postgres pid=3952673
 outcome=error class=other elapsed_ms=31 err="migration 3 (jobs): injected failure: pq: relation \"e4_injected_failure\" does not exist"
 ==> read-s6-postgres-after-fail (rc 0) <==
 migration:1|r1
@@ -48,7 +48,7 @@ has_job|0
 has_job_state_check|0
 ==> rerun (rc 0) <==
 $ e4db migrate -runner r2
-backend=postgres pid=2032845
+backend=postgres pid=3952860
 outcome=done elapsed_ms=14 applied=[3 4]
 ==> read-s6-postgres (rc 0) <==
 migration:1|r1
@@ -73,9 +73,9 @@ drop cascades to table job
 drop cascades to table job_event
 ==> killed (rc 137) <==
 $ e4db migrate -runner r1 -hold-at 3 -hold 30s
-backend=postgres pid=2032960
+backend=postgres pid=3953202
 hold="migration 3" for=30s
-# SIGKILL sent to 2032960
+# SIGKILL sent to 3953202
 ==> read-s6-postgres-after-kill (rc 0) <==
 migration:1|r1
 migration:2|r1
@@ -84,7 +84,7 @@ has_job|0
 has_job_state_check|0
 ==> rerun (rc 0) <==
 $ e4db migrate -runner r2
-backend=postgres pid=2033051
+backend=postgres pid=3953469
 outcome=done elapsed_ms=13 applied=[3 4]
 ==> read-s6-postgres (rc 0) <==
 migration:1|r1
@@ -109,30 +109,30 @@ drop cascades to table job
 drop cascades to table job_event
 ==> setup (rc 0) <==
 $ e4db migrate -runner r0 -upto 1
-backend=postgres pid=2033140
-outcome=done elapsed_ms=17 applied=[1]
+backend=postgres pid=3953845
+outcome=done elapsed_ms=18 applied=[1]
 ==> r1 (rc 0) <==
-$ e4db migrate -runner r1 -hold-at 2 -hold 500ms -start-at 1790287649453
-backend=postgres pid=2033156
-outcome=done elapsed_ms=536 applied=[]
-==> r2 (rc 0) <==
-$ e4db migrate -runner r2 -hold-at 2 -hold 500ms -start-at 1790287649453
-backend=postgres pid=2033160
+$ e4db migrate -runner r1 -hold-at 2 -hold 500ms -start-at 1790289186696
+backend=postgres pid=3953896
 outcome=done elapsed_ms=535 applied=[]
-==> r3 (rc 0) <==
-$ e4db migrate -runner r3 -hold-at 2 -hold 500ms -start-at 1790287649453
-backend=postgres pid=2033166
-outcome=done elapsed_ms=536 applied=[]
-==> r4 (rc 0) <==
-$ e4db migrate -runner r4 -hold-at 2 -hold 500ms -start-at 1790287649453
-backend=postgres pid=2033174
+==> r2 (rc 0) <==
+$ e4db migrate -runner r2 -hold-at 2 -hold 500ms -start-at 1790289186696
+backend=postgres pid=3953900
 hold="migration 2" for=500ms
 outcome=done elapsed_ms=535 applied=[2 3 4]
+==> r3 (rc 0) <==
+$ e4db migrate -runner r3 -hold-at 2 -hold 500ms -start-at 1790289186696
+backend=postgres pid=3953908
+outcome=done elapsed_ms=535 applied=[]
+==> r4 (rc 0) <==
+$ e4db migrate -runner r4 -hold-at 2 -hold 500ms -start-at 1790289186696
+backend=postgres pid=3953918
+outcome=done elapsed_ms=535 applied=[]
 ==> read-s6-postgres (rc 0) <==
 migration:1|r0
-migration:2|r4
-migration:3|r4
-migration:4|r4
+migration:2|r2
+migration:3|r2
+migration:4|r2
 tables|10
 has_job|1
 has_job_state_check|1
@@ -151,30 +151,30 @@ drop cascades to table job
 drop cascades to table job_event
 ==> setup (rc 0) <==
 $ e4db migrate -runner r0 -upto 1
-backend=postgres pid=2033394
-outcome=done elapsed_ms=18 applied=[1]
+backend=postgres pid=3957017
+outcome=done elapsed_ms=17 applied=[1]
 ==> r1 (rc 1) <==
-$ e4db migrate -runner r1 -hold-at 2 -hold 500ms -start-at 1790287651696 -no-lock
-backend=postgres pid=2033410
-outcome=error class=unique elapsed_ms=520 err="migration 2 (operations): pq: duplicate key value violates unique constraint \"pg_class_relname_nsp_index\""
-==> r2 (rc 0) <==
-$ e4db migrate -runner r2 -hold-at 2 -hold 500ms -start-at 1790287651696 -no-lock
-backend=postgres pid=2033414
-hold="migration 2" for=500ms
-outcome=done elapsed_ms=530 applied=[2 3 4]
+$ e4db migrate -runner r1 -hold-at 2 -hold 500ms -start-at 1790289188957 -no-lock
+backend=postgres pid=3957064
+outcome=error class=unique elapsed_ms=521 err="migration 2 (operations): pq: duplicate key value violates unique constraint \"pg_class_relname_nsp_index\""
+==> r2 (rc 1) <==
+$ e4db migrate -runner r2 -hold-at 2 -hold 500ms -start-at 1790289188957 -no-lock
+backend=postgres pid=3957068
+outcome=error class=unique elapsed_ms=521 err="migration 2 (operations): pq: duplicate key value violates unique constraint \"pg_type_typname_nsp_index\""
 ==> r3 (rc 1) <==
-$ e4db migrate -runner r3 -hold-at 2 -hold 500ms -start-at 1790287651696 -no-lock
-backend=postgres pid=2033422
-outcome=error class=unique elapsed_ms=520 err="migration 2 (operations): pq: duplicate key value violates unique constraint \"pg_class_relname_nsp_index\""
-==> r4 (rc 1) <==
-$ e4db migrate -runner r4 -hold-at 2 -hold 500ms -start-at 1790287651696 -no-lock
-backend=postgres pid=2033428
-outcome=error class=unique elapsed_ms=520 err="migration 2 (operations): pq: duplicate key value violates unique constraint \"pg_class_relname_nsp_index\""
+$ e4db migrate -runner r3 -hold-at 2 -hold 500ms -start-at 1790289188957 -no-lock
+backend=postgres pid=3957079
+outcome=error class=unique elapsed_ms=521 err="migration 2 (operations): pq: duplicate key value violates unique constraint \"pg_class_relname_nsp_index\""
+==> r4 (rc 0) <==
+$ e4db migrate -runner r4 -hold-at 2 -hold 500ms -start-at 1790289188957 -no-lock
+backend=postgres pid=3957085
+hold="migration 2" for=500ms
+outcome=done elapsed_ms=531 applied=[2 3 4]
 ==> read-s6-postgres (rc 0) <==
 migration:1|r0
-migration:2|r2
-migration:3|r2
-migration:4|r2
+migration:2|r4
+migration:3|r4
+migration:4|r4
 tables|10
 has_job|1
 has_job_state_check|1

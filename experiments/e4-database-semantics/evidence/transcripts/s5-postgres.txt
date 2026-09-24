@@ -13,51 +13,51 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2031488
+backend=postgres pid=3940618
 outcome=done elapsed_ms=34 applied=[1 2 3 4]
 ==> seed (rc 0) <==
 $ e4db seed-jobs -n 400
-backend=postgres pid=2031498
-outcome=done elapsed_ms=31 jobs=400
+backend=postgres pid=3940682
+outcome=done elapsed_ms=34 jobs=400
 ==> w1 (rc 0) <==
-$ e4db work -worker w1 -mode guarded -start-at 1790287640001
-backend=postgres pid=2031514
-outcome=done elapsed_ms=1374 claims=89 completed=89 refused=0 retries=215 busy=0 work_ms=1374
+$ e4db work -worker w1 -mode guarded -start-at 1790289177275
+backend=postgres pid=3940752
+outcome=done elapsed_ms=1360 claims=47 completed=47 refused=0 retries=294 busy=0 work_ms=1360
 ==> w2 (rc 0) <==
-$ e4db work -worker w2 -mode guarded -start-at 1790287640001
-backend=postgres pid=2031518
-outcome=done elapsed_ms=1373 claims=43 completed=43 refused=0 retries=304 busy=0 work_ms=1373
+$ e4db work -worker w2 -mode guarded -start-at 1790289177275
+backend=postgres pid=3940756
+outcome=done elapsed_ms=1362 claims=37 completed=37 refused=0 retries=320 busy=0 work_ms=1362
 ==> w3 (rc 0) <==
-$ e4db work -worker w3 -mode guarded -start-at 1790287640001
-backend=postgres pid=2031527
-outcome=done elapsed_ms=1373 claims=58 completed=58 refused=0 retries=282 busy=0 work_ms=1373
+$ e4db work -worker w3 -mode guarded -start-at 1790289177275
+backend=postgres pid=3940768
+outcome=done elapsed_ms=1361 claims=50 completed=50 refused=0 retries=296 busy=0 work_ms=1361
 ==> w4 (rc 0) <==
-$ e4db work -worker w4 -mode guarded -start-at 1790287640001
-backend=postgres pid=2031536
-outcome=done elapsed_ms=1374 claims=48 completed=48 refused=0 retries=291 busy=0 work_ms=1374
+$ e4db work -worker w4 -mode guarded -start-at 1790289177275
+backend=postgres pid=3940777
+outcome=done elapsed_ms=1360 claims=35 completed=35 refused=0 retries=319 busy=0 work_ms=1360
 ==> w5 (rc 0) <==
-$ e4db work -worker w5 -mode guarded -start-at 1790287640001
-backend=postgres pid=2031547
-outcome=done elapsed_ms=1374 claims=33 completed=33 refused=0 retries=326 busy=0 work_ms=1374
+$ e4db work -worker w5 -mode guarded -start-at 1790289177275
+backend=postgres pid=3940788
+outcome=done elapsed_ms=1363 claims=47 completed=47 refused=0 retries=301 busy=0 work_ms=1363
 ==> w6 (rc 0) <==
-$ e4db work -worker w6 -mode guarded -start-at 1790287640001
-backend=postgres pid=2031557
-outcome=done elapsed_ms=1374 claims=40 completed=40 refused=0 retries=318 busy=0 work_ms=1374
+$ e4db work -worker w6 -mode guarded -start-at 1790289177275
+backend=postgres pid=3940801
+outcome=done elapsed_ms=1360 claims=47 completed=47 refused=0 retries=307 busy=0 work_ms=1359
 ==> w7 (rc 0) <==
-$ e4db work -worker w7 -mode guarded -start-at 1790287640001
-backend=postgres pid=2031566
-outcome=done elapsed_ms=1373 claims=49 completed=49 refused=0 retries=299 busy=0 work_ms=1373
+$ e4db work -worker w7 -mode guarded -start-at 1790289177275
+backend=postgres pid=3940810
+outcome=done elapsed_ms=1360 claims=47 completed=47 refused=0 retries=302 busy=0 work_ms=1360
 ==> w8 (rc 0) <==
-$ e4db work -worker w8 -mode guarded -start-at 1790287640001
-backend=postgres pid=2031573
-outcome=done elapsed_ms=1376 claims=40 completed=40 refused=0 retries=312 busy=0 work_ms=1376
+$ e4db work -worker w8 -mode guarded -start-at 1790289177275
+backend=postgres pid=3940817
+outcome=done elapsed_ms=1360 claims=90 completed=90 refused=0 retries=221 busy=0 work_ms=1360
 ==> read-s5 (rc 0) <==
 jobs|400
 done|400
 claims|400
 jobs_claimed_twice|0
 completions|400
-completed_on_stale_fence|0
+jobs_completed_twice|0
 ==> 020-s5-postgres-workers-naive <==
 ==> reset (rc ) <==
 NOTICE:  drop cascades to 10 other objects
@@ -73,51 +73,51 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2031916
-outcome=done elapsed_ms=35 applied=[1 2 3 4]
+backend=postgres pid=3944752
+outcome=done elapsed_ms=36 applied=[1 2 3 4]
 ==> seed (rc 0) <==
 $ e4db seed-jobs -n 400
-backend=postgres pid=2031926
-outcome=done elapsed_ms=34 jobs=400
+backend=postgres pid=3944813
+outcome=done elapsed_ms=32 jobs=400
 ==> w1 (rc 0) <==
-$ e4db work -worker w1 -mode naive -start-at 1790287643147
-backend=postgres pid=2031942
-outcome=done elapsed_ms=1860 claims=134 completed=48 refused=86 retries=0 busy=0 work_ms=1860
+$ e4db work -worker w1 -mode naive -start-at 1790289180429
+backend=postgres pid=3944879
+outcome=done elapsed_ms=1847 claims=143 completed=49 refused=94 retries=0 busy=0 work_ms=1847
 ==> w2 (rc 0) <==
-$ e4db work -worker w2 -mode naive -start-at 1790287643147
-backend=postgres pid=2031946
-outcome=done elapsed_ms=1857 claims=133 completed=50 refused=83 retries=0 busy=0 work_ms=1857
+$ e4db work -worker w2 -mode naive -start-at 1790289180429
+backend=postgres pid=3944884
+outcome=done elapsed_ms=1841 claims=136 completed=53 refused=83 retries=0 busy=0 work_ms=1841
 ==> w3 (rc 0) <==
-$ e4db work -worker w3 -mode naive -start-at 1790287643147
-backend=postgres pid=2031955
-outcome=done elapsed_ms=1857 claims=128 completed=55 refused=73 retries=0 busy=0 work_ms=1857
+$ e4db work -worker w3 -mode naive -start-at 1790289180429
+backend=postgres pid=3944893
+outcome=done elapsed_ms=1847 claims=129 completed=47 refused=82 retries=0 busy=0 work_ms=1847
 ==> w4 (rc 0) <==
-$ e4db work -worker w4 -mode naive -start-at 1790287643147
-backend=postgres pid=2031964
-outcome=done elapsed_ms=1855 claims=129 completed=47 refused=82 retries=0 busy=0 work_ms=1855
+$ e4db work -worker w4 -mode naive -start-at 1790289180429
+backend=postgres pid=3944902
+outcome=done elapsed_ms=1846 claims=136 completed=43 refused=93 retries=0 busy=0 work_ms=1846
 ==> w5 (rc 0) <==
-$ e4db work -worker w5 -mode naive -start-at 1790287643147
-backend=postgres pid=2031975
-outcome=done elapsed_ms=1858 claims=140 completed=47 refused=93 retries=0 busy=0 work_ms=1858
+$ e4db work -worker w5 -mode naive -start-at 1790289180429
+backend=postgres pid=3944914
+outcome=done elapsed_ms=1849 claims=142 completed=51 refused=91 retries=0 busy=0 work_ms=1849
 ==> w6 (rc 0) <==
-$ e4db work -worker w6 -mode naive -start-at 1790287643147
-backend=postgres pid=2031985
-outcome=done elapsed_ms=1857 claims=141 completed=53 refused=88 retries=0 busy=0 work_ms=1857
+$ e4db work -worker w6 -mode naive -start-at 1790289180429
+backend=postgres pid=3944926
+outcome=done elapsed_ms=1844 claims=137 completed=54 refused=83 retries=0 busy=0 work_ms=1844
 ==> w7 (rc 0) <==
-$ e4db work -worker w7 -mode naive -start-at 1790287643147
-backend=postgres pid=2031994
-outcome=done elapsed_ms=1850 claims=140 completed=57 refused=83 retries=0 busy=0 work_ms=1850
+$ e4db work -worker w7 -mode naive -start-at 1790289180429
+backend=postgres pid=3944935
+outcome=done elapsed_ms=1841 claims=130 completed=49 refused=81 retries=0 busy=0 work_ms=1841
 ==> w8 (rc 0) <==
-$ e4db work -worker w8 -mode naive -start-at 1790287643147
-backend=postgres pid=2032001
-outcome=done elapsed_ms=1858 claims=133 completed=45 refused=88 retries=0 busy=0 work_ms=1858
+$ e4db work -worker w8 -mode naive -start-at 1790289180429
+backend=postgres pid=3944942
+outcome=done elapsed_ms=1847 claims=152 completed=55 refused=97 retries=0 busy=0 work_ms=1847
 ==> read-s5 (rc 0) <==
 jobs|400
 done|400
-claims|1078
-jobs_claimed_twice|303
-completions|402
-completed_on_stale_fence|0
+claims|1105
+jobs_claimed_twice|309
+completions|401
+jobs_completed_twice|1
 ==> 021-s5-postgres-lease-expiry <==
 ==> reset (rc ) <==
 NOTICE:  drop cascades to 10 other objects
@@ -133,32 +133,32 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2032336
+backend=postgres pid=3949780
 outcome=done elapsed_ms=35 applied=[1 2 3 4]
 ==> seed (rc 0) <==
 $ e4db seed-jobs -n 1
-backend=postgres pid=2032346
+backend=postgres pid=3949842
 outcome=done elapsed_ms=3 jobs=1
 ==> claim-a (rc 0) <==
 $ e4db claim -worker a -lease 1s
-backend=postgres pid=2032356
+backend=postgres pid=3949867
 outcome=done elapsed_ms=4 job=1 fence=1
 ==> claim-b-early (rc 3) <==
 $ e4db claim -worker b -lease 1m
-backend=postgres pid=2032371
-outcome=refused reason=no-job elapsed_ms=1 err="no eligible job"
+backend=postgres pid=3949892
+outcome=refused reason=no-job elapsed_ms=2 err="no eligible job"
 ==> claim-b (rc 0) <==
 $ e4db claim -worker b -lease 1m
-backend=postgres pid=2032492
-outcome=done elapsed_ms=5 job=1 fence=2
+backend=postgres pid=3951885
+outcome=done elapsed_ms=4 job=1 fence=2
 ==> late-a (rc 3) <==
 $ e4db complete -job 1 -fence 1 -worker a
-backend=postgres pid=2032502
+backend=postgres pid=3951915
 outcome=refused reason=fenced elapsed_ms=1 err="fenced: ownership or claim not current: job 1 is not claimed at fence 1"
 ==> complete-b (rc 0) <==
 $ e4db complete -job 1 -fence 2 -worker b
-backend=postgres pid=2032512
-outcome=done elapsed_ms=4 job=1 fence=2
+backend=postgres pid=3951936
+outcome=done elapsed_ms=3 job=1 fence=2
 ==> read-s5-jobs (rc 0) <==
 job:1|done 2 b 2
 event:1|1 claim a 1
@@ -179,49 +179,49 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2131013
-outcome=done elapsed_ms=38 applied=[1 2 3 4]
+backend=postgres pid=4032496
+outcome=done elapsed_ms=33 applied=[1 2 3 4]
 ==> seed (rc 0) <==
 $ e4db seed-jobs -n 400
-backend=postgres pid=2131095
-outcome=done elapsed_ms=33 jobs=400
+backend=postgres pid=4032556
+outcome=done elapsed_ms=34 jobs=400
 ==> w1 (rc 0) <==
-$ e4db work -worker w1 -mode skip-locked -start-at 1790287719544
-backend=postgres pid=2131175
-outcome=done elapsed_ms=383 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=383
+$ e4db work -worker w1 -mode skip-locked -start-at 1790289256309
+backend=postgres pid=4032621
+outcome=done elapsed_ms=364 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=364
 ==> w2 (rc 0) <==
-$ e4db work -worker w2 -mode skip-locked -start-at 1790287719544
-backend=postgres pid=2131181
-outcome=done elapsed_ms=383 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=383
+$ e4db work -worker w2 -mode skip-locked -start-at 1790289256309
+backend=postgres pid=4032625
+outcome=done elapsed_ms=363 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=363
 ==> w3 (rc 0) <==
-$ e4db work -worker w3 -mode skip-locked -start-at 1790287719544
-backend=postgres pid=2131191
-outcome=done elapsed_ms=383 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=383
+$ e4db work -worker w3 -mode skip-locked -start-at 1790289256309
+backend=postgres pid=4032635
+outcome=done elapsed_ms=364 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=364
 ==> w4 (rc 0) <==
-$ e4db work -worker w4 -mode skip-locked -start-at 1790287719544
-backend=postgres pid=2131202
-outcome=done elapsed_ms=383 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=383
+$ e4db work -worker w4 -mode skip-locked -start-at 1790289256309
+backend=postgres pid=4032645
+outcome=done elapsed_ms=365 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=365
 ==> w5 (rc 0) <==
-$ e4db work -worker w5 -mode skip-locked -start-at 1790287719544
-backend=postgres pid=2131211
-outcome=done elapsed_ms=383 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=383
+$ e4db work -worker w5 -mode skip-locked -start-at 1790289256309
+backend=postgres pid=4032655
+outcome=done elapsed_ms=364 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=364
 ==> w6 (rc 0) <==
-$ e4db work -worker w6 -mode skip-locked -start-at 1790287719544
-backend=postgres pid=2131225
-outcome=done elapsed_ms=381 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=381
+$ e4db work -worker w6 -mode skip-locked -start-at 1790289256309
+backend=postgres pid=4032667
+outcome=done elapsed_ms=365 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=365
 ==> w7 (rc 0) <==
-$ e4db work -worker w7 -mode skip-locked -start-at 1790287719544
-backend=postgres pid=2131237
-outcome=done elapsed_ms=383 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=383
+$ e4db work -worker w7 -mode skip-locked -start-at 1790289256309
+backend=postgres pid=4032678
+outcome=done elapsed_ms=364 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=364
 ==> w8 (rc 0) <==
-$ e4db work -worker w8 -mode skip-locked -start-at 1790287719544
-backend=postgres pid=2131245
-outcome=done elapsed_ms=383 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=383
+$ e4db work -worker w8 -mode skip-locked -start-at 1790289256309
+backend=postgres pid=4032685
+outcome=done elapsed_ms=365 claims=50 completed=50 refused=0 retries=0 busy=0 work_ms=365
 ==> read-s5 (rc 0) <==
 jobs|400
 done|400
 claims|400
 jobs_claimed_twice|0
 completions|400
-completed_on_stale_fence|0
+jobs_completed_twice|0
 ==> end <==

@@ -13,24 +13,24 @@ drop cascades to table schema_migrations
 drop cascades to table timeline
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2035045
-outcome=done elapsed_ms=37 applied=[1 2 3 4]
+backend=postgres pid=3964028
+outcome=done elapsed_ms=36 applied=[1 2 3 4]
 ==> seed (rc 0) <==
 $ e4db seed-fragment
-backend=postgres pid=2035055
+backend=postgres pid=3964090
 outcome=done elapsed_ms=2 fragment=f1
 ==> seed2 (rc 0) <==
 $ e4db seed-fragment -fragment f2
-backend=postgres pid=2035065
+backend=postgres pid=3964113
 outcome=done elapsed_ms=2 fragment=f2
 ==> publish (rc 0) <==
 $ e4db publish -release r1 -actor p -pin f1=0 -artifacts 2 -hold 7s
-backend=postgres pid=2035077
+backend=postgres pid=3964139
 hold="after artifact 1 of 2" for=7s
-outcome=done elapsed_ms=7015 release=r1 id=1 existing=false digest=c8ce64ba97e5592628676f2e4b2cc366085a78d799de6515c0a14787eceb3371
+outcome=done elapsed_ms=7006 release=r1 id=1 existing=false digest=c8ce64ba97e5592628676f2e4b2cc366085a78d799de6515c0a14787eceb3371
 ==> write (rc 0) <==
 $ e4db update -fragment f2 -actor w -read 0
-backend=postgres pid=2035090
+backend=postgres pid=3964215
 outcome=done elapsed_ms=3 fragment=f2 revision=1
 ==> read-s1 (rc 0) <==
 revisions_recorded|1

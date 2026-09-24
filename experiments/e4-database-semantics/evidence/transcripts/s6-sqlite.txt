@@ -1,7 +1,7 @@
 ==> 050-s6-sqlite-fresh <==
 ==> migrate (rc 0) <==
 $ e4db migrate -runner r1
-backend=sqlite pid=2106105
+backend=sqlite pid=4015312
 outcome=done elapsed_ms=46 applied=[1 2 3 4]
 ==> read-s6-sqlite (rc 0) <==
 migration:1|r1
@@ -14,8 +14,8 @@ has_job_state_check|1
 ==> 051-s6-sqlite-fail-then-rerun <==
 ==> fail (rc 1) <==
 $ e4db migrate -runner r1 -fail-at 3
-backend=sqlite pid=2106356
-outcome=error class=other elapsed_ms=48 err="migration 3 (jobs): injected failure: SQL logic error: no such table: e4_injected_failure (1)"
+backend=sqlite pid=4015438
+outcome=error class=other elapsed_ms=32 err="migration 3 (jobs): injected failure: SQL logic error: no such table: e4_injected_failure (1)"
 ==> read-s6-sqlite-after-fail (rc 0) <==
 migration:1|r1
 migration:2|r1
@@ -24,7 +24,7 @@ has_job|0
 has_job_state_check|0
 ==> rerun (rc 0) <==
 $ e4db migrate -runner r2
-backend=sqlite pid=2106642
+backend=sqlite pid=4015564
 outcome=done elapsed_ms=26 applied=[3 4]
 ==> read-s6-sqlite (rc 0) <==
 migration:1|r1
@@ -37,9 +37,9 @@ has_job_state_check|1
 ==> 052-s6-sqlite-sigkill-then-rerun <==
 ==> killed (rc 137) <==
 $ e4db migrate -runner r1 -hold-at 3 -hold 30s
-backend=sqlite pid=2106815
+backend=sqlite pid=4015667
 hold="migration 3" for=30s
-# SIGKILL sent to 2106815
+# SIGKILL sent to 4015667
 ==> read-s6-sqlite-after-kill (rc 0) <==
 migration:1|r1
 migration:2|r1
@@ -48,7 +48,7 @@ has_job|0
 has_job_state_check|0
 ==> rerun (rc 0) <==
 $ e4db migrate -runner r2
-backend=sqlite pid=2107203
+backend=sqlite pid=4015874
 outcome=done elapsed_ms=26 applied=[3 4]
 ==> read-s6-sqlite (rc 0) <==
 migration:1|r1
@@ -61,55 +61,55 @@ has_job_state_check|1
 ==> 053-s6-sqlite-concurrent-locked <==
 ==> setup (rc 0) <==
 $ e4db migrate -runner r0 -upto 1
-backend=sqlite pid=2107365
-outcome=done elapsed_ms=25 applied=[1]
+backend=sqlite pid=4015982
+outcome=done elapsed_ms=26 applied=[1]
 ==> r1 (rc 0) <==
-$ e4db migrate -runner r1 -hold-at 2 -hold 500ms -start-at 1790287706809
-backend=sqlite pid=2107488
+$ e4db migrate -runner r1 -hold-at 2 -hold 500ms -start-at 1790289243671
+backend=sqlite pid=4016069
 outcome=done elapsed_ms=629 applied=[]
 ==> r2 (rc 0) <==
-$ e4db migrate -runner r2 -hold-at 2 -hold 500ms -start-at 1790287706809
-backend=sqlite pid=2107492
-hold="migration 2" for=500ms
-outcome=done elapsed_ms=542 applied=[2 3 4]
+$ e4db migrate -runner r2 -hold-at 2 -hold 500ms -start-at 1790289243671
+backend=sqlite pid=4016074
+outcome=done elapsed_ms=729 applied=[]
 ==> r3 (rc 0) <==
-$ e4db migrate -runner r3 -hold-at 2 -hold 500ms -start-at 1790287706809
-backend=sqlite pid=2107500
-outcome=done elapsed_ms=828 applied=[]
+$ e4db migrate -runner r3 -hold-at 2 -hold 500ms -start-at 1790289243671
+backend=sqlite pid=4016082
+hold="migration 2" for=500ms
+outcome=done elapsed_ms=533 applied=[2 3 4]
 ==> r4 (rc 0) <==
-$ e4db migrate -runner r4 -hold-at 2 -hold 500ms -start-at 1790287706809
-backend=sqlite pid=2107507
-outcome=done elapsed_ms=728 applied=[]
+$ e4db migrate -runner r4 -hold-at 2 -hold 500ms -start-at 1790289243671
+backend=sqlite pid=4016092
+outcome=done elapsed_ms=629 applied=[]
 ==> read-s6-sqlite (rc 0) <==
 migration:1|r0
-migration:2|r2
-migration:3|r2
-migration:4|r2
+migration:2|r3
+migration:3|r3
+migration:4|r3
 tables|10
 has_job|1
 has_job_state_check|1
 ==> 054-s6-sqlite-concurrent-unlocked-control <==
 ==> setup (rc 0) <==
 $ e4db migrate -runner r0 -upto 1
-backend=sqlite pid=2111095
-outcome=done elapsed_ms=27 applied=[1]
+backend=sqlite pid=4018971
+outcome=done elapsed_ms=25 applied=[1]
 ==> r1 (rc 1) <==
-$ e4db migrate -runner r1 -hold-at 2 -hold 500ms -start-at 1790287709233
-backend=sqlite pid=2111205
+$ e4db migrate -runner r1 -hold-at 2 -hold 500ms -start-at 1790289246009
+backend=sqlite pid=4019062
 outcome=error class=busy elapsed_ms=0 err="migration 2 (operations): database is locked (5) (SQLITE_BUSY)"
 ==> r2 (rc 1) <==
-$ e4db migrate -runner r2 -hold-at 2 -hold 500ms -start-at 1790287709233
-backend=sqlite pid=2111211
+$ e4db migrate -runner r2 -hold-at 2 -hold 500ms -start-at 1790289246009
+backend=sqlite pid=4019066
 outcome=error class=busy elapsed_ms=0 err="migration 2 (operations): database is locked (5) (SQLITE_BUSY)"
 ==> r3 (rc 1) <==
-$ e4db migrate -runner r3 -hold-at 2 -hold 500ms -start-at 1790287709233
-backend=sqlite pid=2111220
+$ e4db migrate -runner r3 -hold-at 2 -hold 500ms -start-at 1790289246009
+backend=sqlite pid=4019075
 outcome=error class=busy elapsed_ms=0 err="migration 2 (operations): database is locked (5) (SQLITE_BUSY)"
 ==> r4 (rc 0) <==
-$ e4db migrate -runner r4 -hold-at 2 -hold 500ms -start-at 1790287709233
-backend=sqlite pid=2111227
+$ e4db migrate -runner r4 -hold-at 2 -hold 500ms -start-at 1790289246009
+backend=sqlite pid=4019082
 hold="migration 2" for=500ms
-outcome=done elapsed_ms=542 applied=[2 3 4]
+outcome=done elapsed_ms=533 applied=[2 3 4]
 ==> read-s6-sqlite (rc 0) <==
 migration:1|r0
 migration:2|r4

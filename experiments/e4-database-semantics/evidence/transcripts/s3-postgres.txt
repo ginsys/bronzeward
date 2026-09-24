@@ -13,45 +13,45 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2019782
-outcome=done elapsed_ms=35 applied=[1 2 3 4]
+backend=postgres pid=3925036
+outcome=done elapsed_ms=40 applied=[1 2 3 4]
 ==> c1 (rc 3) <==
-$ e4db intent -machine m1 -key k1 -owner c1 -start-at 1790287629073
-backend=postgres pid=2019852
-outcome=refused reason=scope-busy elapsed_ms=14 err="machine scope busy"
+$ e4db intent -machine m1 -key k1 -owner c1 -start-at 1790289166363
+backend=postgres pid=3925109
+outcome=refused reason=scope-busy elapsed_ms=13 err="machine scope busy"
 ==> c2 (rc 3) <==
-$ e4db intent -machine m1 -key k2 -owner c2 -start-at 1790287629073
-backend=postgres pid=2019856
-outcome=refused reason=scope-busy elapsed_ms=14 err="machine scope busy"
+$ e4db intent -machine m1 -key k2 -owner c2 -start-at 1790289166363
+backend=postgres pid=3925113
+outcome=refused reason=scope-busy elapsed_ms=13 err="machine scope busy"
 ==> c3 (rc 3) <==
-$ e4db intent -machine m1 -key k3 -owner c3 -start-at 1790287629073
-backend=postgres pid=2019866
-outcome=refused reason=scope-busy elapsed_ms=14 err="machine scope busy"
+$ e4db intent -machine m1 -key k3 -owner c3 -start-at 1790289166363
+backend=postgres pid=3925122
+outcome=refused reason=scope-busy elapsed_ms=13 err="machine scope busy"
 ==> c4 (rc 3) <==
-$ e4db intent -machine m1 -key k4 -owner c4 -start-at 1790287629073
-backend=postgres pid=2019879
+$ e4db intent -machine m1 -key k4 -owner c4 -start-at 1790289166363
+backend=postgres pid=3925131
 outcome=refused reason=scope-busy elapsed_ms=14 err="machine scope busy"
-==> c5 (rc 0) <==
-$ e4db intent -machine m1 -key k5 -owner c5 -start-at 1790287629073
-backend=postgres pid=2019890
-outcome=done elapsed_ms=13 op=2 created=true
-==> c6 (rc 3) <==
-$ e4db intent -machine m1 -key k6 -owner c6 -start-at 1790287629073
-backend=postgres pid=2019900
-outcome=refused reason=scope-busy elapsed_ms=14 err="machine scope busy"
+==> c5 (rc 3) <==
+$ e4db intent -machine m1 -key k5 -owner c5 -start-at 1790289166363
+backend=postgres pid=3925144
+outcome=refused reason=scope-busy elapsed_ms=13 err="machine scope busy"
+==> c6 (rc 0) <==
+$ e4db intent -machine m1 -key k6 -owner c6 -start-at 1790289166363
+backend=postgres pid=3925155
+outcome=done elapsed_ms=13 op=1 created=true
 ==> c7 (rc 3) <==
-$ e4db intent -machine m1 -key k7 -owner c7 -start-at 1790287629073
-backend=postgres pid=2019909
+$ e4db intent -machine m1 -key k7 -owner c7 -start-at 1790289166363
+backend=postgres pid=3925164
 outcome=refused reason=scope-busy elapsed_ms=14 err="machine scope busy"
 ==> c8 (rc 3) <==
-$ e4db intent -machine m1 -key k8 -owner c8 -start-at 1790287629073
-backend=postgres pid=2019918
-outcome=refused reason=scope-busy elapsed_ms=14 err="machine scope busy"
+$ e4db intent -machine m1 -key k8 -owner c8 -start-at 1790289166363
+backend=postgres pid=3925173
+outcome=refused reason=scope-busy elapsed_ms=13 err="machine scope busy"
 ==> read-s3 (rc 0) <==
 operations|1
 scopes_with_two_active|0
 intents_recorded|1
-op:k5|2 m1 committed c5
+op:k6|1 m1 committed c6
 ==> 013-s3-postgres-retry-same-key <==
 ==> reset (rc ) <==
 NOTICE:  drop cascades to 10 other objects
@@ -67,15 +67,15 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2022208
-outcome=done elapsed_ms=35 applied=[1 2 3 4]
+backend=postgres pid=3927805
+outcome=done elapsed_ms=33 applied=[1 2 3 4]
 ==> first (rc 0) <==
 $ e4db intent -machine m1 -key k1 -owner c1
-backend=postgres pid=2022271
+backend=postgres pid=3927869
 outcome=done elapsed_ms=4 op=1 created=true
 ==> retry (rc 0) <==
 $ e4db intent -machine m1 -key k1 -owner c1
-backend=postgres pid=2022293
+backend=postgres pid=3927893
 outcome=done elapsed_ms=1 op=1 created=false
 ==> read-s3 (rc 0) <==
 operations|1
@@ -97,27 +97,27 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2022622
+backend=postgres pid=3928259
 outcome=done elapsed_ms=34 applied=[1 2 3 4]
 ==> first (rc 0) <==
 $ e4db intent -machine m1 -key k1 -owner c1
-backend=postgres pid=2022663
+backend=postgres pid=3928322
 outcome=done elapsed_ms=4 op=1 created=true
 ==> blocked (rc 3) <==
 $ e4db intent -machine m1 -key k2 -owner c2
-backend=postgres pid=2022684
+backend=postgres pid=3928347
 outcome=refused reason=scope-busy elapsed_ms=1 err="machine scope busy"
 ==> finish (rc 0) <==
 $ e4db finish -op 1 -state completed
-backend=postgres pid=2022707
+backend=postgres pid=3928368
 outcome=done elapsed_ms=3 op=1 state=completed
 ==> second (rc 0) <==
 $ e4db intent -machine m1 -key k2 -owner c2
-backend=postgres pid=2022734
+backend=postgres pid=3928391
 outcome=done elapsed_ms=3 op=3 created=true
 ==> other (rc 0) <==
 $ e4db intent -machine m2 -key k3 -owner c3
-backend=postgres pid=2022759
+backend=postgres pid=3928414
 outcome=done elapsed_ms=3 op=4 created=true
 ==> read-s3 (rc 0) <==
 operations|3

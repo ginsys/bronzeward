@@ -13,49 +13,49 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2023156
-outcome=done elapsed_ms=34 applied=[1 2 3 4]
+backend=postgres pid=3928773
+outcome=done elapsed_ms=36 applied=[1 2 3 4]
 ==> intent (rc 0) <==
 $ e4db intent -machine m1 -key k1 -owner o0
-backend=postgres pid=2023218
+backend=postgres pid=3928863
 outcome=done elapsed_ms=4 op=1 created=true
 ==> t1 (rc 3) <==
-$ e4db takeover -op 1 -owner o1 -expect 1 -start-at 1790287631331
-backend=postgres pid=2023249
-outcome=refused reason=fenced elapsed_ms=5 err="fenced: ownership or claim not current"
-==> t2 (rc 3) <==
-$ e4db takeover -op 1 -owner o2 -expect 1 -start-at 1790287631331
-backend=postgres pid=2023255
-outcome=refused reason=fenced elapsed_ms=6 err="fenced: ownership or claim not current"
-==> t3 (rc 0) <==
-$ e4db takeover -op 1 -owner o3 -expect 1 -start-at 1790287631331
-backend=postgres pid=2023264
-outcome=done elapsed_ms=5 op=1 owner=o3 gen=2
+$ e4db takeover -op 1 -owner o1 -expect 1 -start-at 1790289168678
+backend=postgres pid=3928892
+outcome=refused reason=fenced elapsed_ms=4 err="fenced: ownership or claim not current"
+==> t2 (rc 0) <==
+$ e4db takeover -op 1 -owner o2 -expect 1 -start-at 1790289168678
+backend=postgres pid=3928896
+outcome=done elapsed_ms=4 op=1 owner=o2 gen=2
+==> t3 (rc 3) <==
+$ e4db takeover -op 1 -owner o3 -expect 1 -start-at 1790289168678
+backend=postgres pid=3928905
+outcome=refused reason=fenced elapsed_ms=4 err="fenced: ownership or claim not current"
 ==> t4 (rc 3) <==
-$ e4db takeover -op 1 -owner o4 -expect 1 -start-at 1790287631331
-backend=postgres pid=2023274
-outcome=refused reason=fenced elapsed_ms=6 err="fenced: ownership or claim not current"
+$ e4db takeover -op 1 -owner o4 -expect 1 -start-at 1790289168678
+backend=postgres pid=3928913
+outcome=refused reason=fenced elapsed_ms=4 err="fenced: ownership or claim not current"
 ==> t5 (rc 3) <==
-$ e4db takeover -op 1 -owner o5 -expect 1 -start-at 1790287631331
-backend=postgres pid=2023284
-outcome=refused reason=fenced elapsed_ms=6 err="fenced: ownership or claim not current"
+$ e4db takeover -op 1 -owner o5 -expect 1 -start-at 1790289168678
+backend=postgres pid=3928924
+outcome=refused reason=fenced elapsed_ms=4 err="fenced: ownership or claim not current"
 ==> t6 (rc 3) <==
-$ e4db takeover -op 1 -owner o6 -expect 1 -start-at 1790287631331
-backend=postgres pid=2023299
-outcome=refused reason=fenced elapsed_ms=6 err="fenced: ownership or claim not current"
+$ e4db takeover -op 1 -owner o6 -expect 1 -start-at 1790289168678
+backend=postgres pid=3928935
+outcome=refused reason=fenced elapsed_ms=4 err="fenced: ownership or claim not current"
 ==> t7 (rc 3) <==
-$ e4db takeover -op 1 -owner o7 -expect 1 -start-at 1790287631331
-backend=postgres pid=2023308
-outcome=refused reason=fenced elapsed_ms=6 err="fenced: ownership or claim not current"
+$ e4db takeover -op 1 -owner o7 -expect 1 -start-at 1790289168678
+backend=postgres pid=3928944
+outcome=refused reason=fenced elapsed_ms=4 err="fenced: ownership or claim not current"
 ==> t8 (rc 3) <==
-$ e4db takeover -op 1 -owner o8 -expect 1 -start-at 1790287631331
-backend=postgres pid=2023314
-outcome=refused reason=fenced elapsed_ms=5 err="fenced: ownership or claim not current"
+$ e4db takeover -op 1 -owner o8 -expect 1 -start-at 1790289168678
+backend=postgres pid=3928951
+outcome=refused reason=fenced elapsed_ms=4 err="fenced: ownership or claim not current"
 ==> read-s4 (rc 0) <==
 takeovers|1
 attempts|0
 stale_attempts|0
-op:1|o3 2 0
+op:1|o2 2 0
 ==> 016-s4-postgres-stale-owner-fenced <==
 ==> reset (rc ) <==
 NOTICE:  drop cascades to 10 other objects
@@ -71,23 +71,23 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2026036
-outcome=done elapsed_ms=35 applied=[1 2 3 4]
+backend=postgres pid=3931307
+outcome=done elapsed_ms=33 applied=[1 2 3 4]
 ==> intent (rc 0) <==
 $ e4db intent -machine m1 -key k1 -owner a
-backend=postgres pid=2026083
+backend=postgres pid=3931369
 outcome=done elapsed_ms=4 op=1 created=true
 ==> takeover (rc 0) <==
 $ e4db takeover -op 1 -owner b -expect 1
-backend=postgres pid=2026098
+backend=postgres pid=3931391
 outcome=done elapsed_ms=4 op=1 owner=b gen=2
 ==> stale (rc 3) <==
 $ e4db attempt -op 1 -owner a -gen 1
-backend=postgres pid=2026123
+backend=postgres pid=3931416
 outcome=refused reason=fenced elapsed_ms=1 err="fenced: ownership or claim not current"
 ==> current (rc 0) <==
 $ e4db attempt -op 1 -owner b -gen 2
-backend=postgres pid=2026148
+backend=postgres pid=3931438
 outcome=done elapsed_ms=4 op=1 owner=b gen=2
 ==> read-s4 (rc 0) <==
 takeovers|1
@@ -109,21 +109,21 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2026509
+backend=postgres pid=3931791
 outcome=done elapsed_ms=35 applied=[1 2 3 4]
 ==> intent (rc 0) <==
 $ e4db intent -machine m1 -key k1 -owner a
-backend=postgres pid=2026574
+backend=postgres pid=3931852
 outcome=done elapsed_ms=4 op=1 created=true
 ==> attempt (rc 0) <==
 $ e4db attempt -op 1 -owner a -gen 1 -hold 3s
-backend=postgres pid=2026599
+backend=postgres pid=3931879
 hold="after the ownership check" for=3s
-outcome=done elapsed_ms=3013 op=1 owner=a gen=1
+outcome=done elapsed_ms=3004 op=1 owner=a gen=1
 ==> takeover (rc 0) <==
 $ e4db takeover -op 1 -owner b -expect 1
-backend=postgres pid=2026686
-outcome=done elapsed_ms=2962 op=1 owner=b gen=2
+backend=postgres pid=3931961
+outcome=done elapsed_ms=2953 op=1 owner=b gen=2
 ==> read-s4 (rc 0) <==
 takeovers|1
 attempts|1
@@ -144,21 +144,21 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2028921
-outcome=done elapsed_ms=44 applied=[1 2 3 4]
+backend=postgres pid=3936259
+outcome=done elapsed_ms=36 applied=[1 2 3 4]
 ==> intent (rc 0) <==
 $ e4db intent -machine m1 -key k1 -owner a
-backend=postgres pid=2029020
+backend=postgres pid=3936321
 outcome=done elapsed_ms=4 op=1 created=true
 ==> attempt (rc 0) <==
 $ e4db attempt -op 1 -owner a -gen 1 -hold 3s -check-then-insert
-backend=postgres pid=2029037
+backend=postgres pid=3936346
 hold="after the ownership check" for=3s
-outcome=done elapsed_ms=3013 op=1 owner=a gen=1
+outcome=done elapsed_ms=3004 op=1 owner=a gen=1
 ==> takeover (rc 0) <==
 $ e4db takeover -op 1 -owner b -expect 1
-backend=postgres pid=2029090
-outcome=done elapsed_ms=7 op=1 owner=b gen=2
+backend=postgres pid=3936427
+outcome=done elapsed_ms=3 op=1 owner=b gen=2
 ==> read-s4 (rc 0) <==
 takeovers|1
 attempts|1

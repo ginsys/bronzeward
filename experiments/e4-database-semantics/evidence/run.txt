@@ -1,8 +1,9 @@
-commit	22c7990dc65e9db21fe4d365d417417835638b92
+commit	ee8d7e2c5a3e9952723fc7a79604037d4f625747
 uncommitted inputs	0
-started	2026-09-24T22:06:55Z
+started	2026-09-24T22:32:32Z
 go	go version go1.27.1 linux/amd64
 host sqlite3	3.46.1
+postgres default isolation	read committed
 postgres image	docker.io/library/postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
 postgres server	PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
 linked sqlite	3.53.4
@@ -15,6 +16,6 @@ module	modernc.org/libc v1.75.7
 module	modernc.org/mathutil v1.7.1
 module	modernc.org/memory v1.12.1
 module	modernc.org/sqlite v1.59.0
-finished	2026-09-24T22:09:15Z
+finished	2026-09-24T22:34:52Z
 rows	63
 mismatches	0

@@ -1,42 +1,42 @@
 ==> 055-s7-sqlite-restore <==
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=sqlite pid=2114499
+backend=sqlite pid=4021722
 outcome=done elapsed_ms=46 applied=[1 2 3 4]
 ==> seed (rc 0) <==
 $ e4db seed-fragment
-backend=sqlite pid=2114640
-outcome=done elapsed_ms=19 fragment=f1
+backend=sqlite pid=4021821
+outcome=done elapsed_ms=18 fragment=f1
 ==> r1 (rc 0) <==
 $ e4db publish -release r1 -actor p -pin f1=0 -artifacts 2
-backend=sqlite pid=2114697
-outcome=done elapsed_ms=19 release=r1 id=1 existing=false digest=c8ce64ba97e5592628676f2e4b2cc366085a78d799de6515c0a14787eceb3371
+backend=sqlite pid=4021870
+outcome=done elapsed_ms=18 release=r1 id=1 existing=false digest=c8ce64ba97e5592628676f2e4b2cc366085a78d799de6515c0a14787eceb3371
 ==> op1 (rc 0) <==
 $ e4db intent -machine m1 -key k1 -owner x
-backend=sqlite pid=2114764
+backend=sqlite pid=4021913
 outcome=done elapsed_ms=19 op=1 created=true
 ==> inject-store-snapshot (rc 0) <==
-$ fixtures/bin/inject store-snapshot e4-s7-sqlite-2001504
+$ fixtures/bin/inject store-snapshot e4-s7-sqlite-3906245
 ==> r2 (rc 0) <==
 $ e4db publish -release r2 -actor p -pin f1=0 -artifacts 2
-backend=sqlite pid=2115252
-outcome=done elapsed_ms=19 release=r2 id=2 existing=false digest=f03621fb30dbd170184bca4673449e7e45492bf14dfab930ab0d929c978caf75
+backend=sqlite pid=4022302
+outcome=done elapsed_ms=27 release=r2 id=2 existing=false digest=f03621fb30dbd170184bca4673449e7e45492bf14dfab930ab0d929c978caf75
 ==> to-y (rc 0) <==
 $ e4db takeover -op 1 -owner y -expect 1
-backend=sqlite pid=2115326
+backend=sqlite pid=4022356
 outcome=done elapsed_ms=18 op=1 owner=y gen=2
 ==> to-x (rc 0) <==
 $ e4db takeover -op 1 -owner x -expect 2
-backend=sqlite pid=2115392
+backend=sqlite pid=4022413
 outcome=done elapsed_ms=18 op=1 owner=x gen=3
 ==> attempt-x3 (rc 0) <==
 $ e4db attempt -op 1 -owner x -gen 3
-backend=sqlite pid=2115459
+backend=sqlite pid=4022457
 outcome=done elapsed_ms=19 op=1 owner=x gen=3
 ==> op2 (rc 0) <==
 $ e4db intent -machine m2 -key k2 -owner z
-backend=sqlite pid=2115521
-outcome=done elapsed_ms=19 op=2 created=true
+backend=sqlite pid=4022499
+outcome=done elapsed_ms=18 op=2 created=true
 ==> read-s2-before-restore (rc 0) <==
 releases|2
 artifacts|4
@@ -52,7 +52,7 @@ stale_attempts|0
 op:1|x 3 1
 op:2|z 1 0
 ==> inject-store-restore (rc 0) <==
-$ fixtures/bin/inject store-restore e4-s7-sqlite-2001504
+$ fixtures/bin/inject store-restore e4-s7-sqlite-3906245
 ==> read-s2-restored (rc 0) <==
 releases|1
 artifacts|2
@@ -72,18 +72,18 @@ intents_recorded|1
 op:k1|1 m1 committed x
 ==> r3 (rc 0) <==
 $ e4db publish -release r3 -actor p -pin f1=0 -artifacts 2
-backend=sqlite pid=2116016
-outcome=done elapsed_ms=51 release=r3 id=2 existing=false digest=9f77444920c472d993b0ff758294a328ba8d5565870fd84ba0c19bb2ed1a9a29
+backend=sqlite pid=4022969
+outcome=done elapsed_ms=47 release=r3 id=2 existing=false digest=9f77444920c472d993b0ff758294a328ba8d5565870fd84ba0c19bb2ed1a9a29
 ==> again-y (rc 0) <==
 $ e4db takeover -op 1 -owner y -expect 1
-backend=sqlite pid=2116136
+backend=sqlite pid=4023084
 outcome=done elapsed_ms=18 op=1 owner=y gen=2
 ==> again-x (rc 0) <==
 $ e4db takeover -op 1 -owner x -expect 2
-backend=sqlite pid=2116193
+backend=sqlite pid=4023131
 outcome=done elapsed_ms=18 op=1 owner=x gen=3
 ==> old-token (rc 0) <==
 $ e4db attempt -op 1 -owner x -gen 3
-backend=sqlite pid=2116260
+backend=sqlite pid=4023180
 outcome=done elapsed_ms=18 op=1 owner=x gen=3
 ==> end <==
