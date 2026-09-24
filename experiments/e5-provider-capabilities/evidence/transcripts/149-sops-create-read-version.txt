@@ -1,11 +1,12 @@
-attempt 1: writer a rc=0, writer b rc=0, key a present=no, key b present=yes
+attempt 1: writer a rc=0, writer b rc=0, key a present=yes, key b present=no
 attempt 2: writer a rc=0, writer b rc=0, key a present=yes, key b present=no
 attempt 3: writer a rc=0, writer b rc=0, key a present=no, key b present=yes
-attempt 4: writer a rc=0, writer b rc=0, key a present=yes, key b present=yes
-attempt 5: writer a rc=0, writer b rc=0, key a present=yes, key b present=yes
-attempt 6: writer a rc=0, writer b rc=0, key a present=yes, key b present=no
-attempt 7: writer a rc=0, writer b rc=0, key a present=yes, key b present=yes
-attempt 8: writer a rc=0, writer b rc=0, key a present=yes, key b present=yes
-attempt 9: writer a rc=0, writer b rc=0, key a present=yes, key b present=yes
-attempt 10: writer a rc=0, writer b rc=0, key a present=no, key b present=yes
-lost updates with both writers told success: 5 of 10
+attempt 4: writer a rc=0, writer b rc=0, key a present=no, key b present=yes
+attempt 5: writer a rc=0, writer b rc=0, key a present=no, key b present=yes
+attempt 6: writer a rc=0, writer b rc=0, key a present=no, key b present=yes
+attempt 7: writer a rc=0, writer b rc=0, key a present=no, key b present=yes
+attempt 8: writer a rc=0, writer b rc=0, key a present=yes, key b present=no
+attempt 9: writer a rc=0, writer b rc=0, key a present=no, key b present=yes
+attempt 10: writer a rc=0, writer b rc=0, key a present=yes, key b present=no
+lost updates with both writers told success: 10 of 10
+files holding neither key, not counted as lost: 0 of 10

@@ -1,7 +1,7 @@
 Failed to get the data key required to decrypt the SOPS file.
 
 Group 0: FAILED
-  age1p4gjh5qcpckc7y4henckr6l2v9grl33t0lzxmu55vs2st9zymezqs3v4m7: FAILED
+  age10sv56am682h2n538vezmcfz7qzrjufjr6ynaqyx0epek9ngp0yyq35sh3a: FAILED
     - | failed to create reader for decrypting sops data key with
       | age: identity did not match any of the recipients: incorrect
       | identity for recipient block. Did not find keys in locations
