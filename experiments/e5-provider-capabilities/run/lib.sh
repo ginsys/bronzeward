@@ -103,3 +103,69 @@ unsupported() {
 }
 
 e5_mismatches() { awk -F'\t' 'NR > 1 && $9 == "mismatch"' "$E5_CELLS" | wc -l; }
+
+# Synthetic values. Each starts with the fixture's BWSYNTH- prefix, so the fixture's own leak scan
+# finds any plaintext copy. They live under $E5_OUT/work, outside the checkout, and are never
+# committed; commands see them over stdin only.
+E5_WORK=$E5_OUT/work
+e5_secret() { # e5_secret <name>: create a value once
+  mkdir -p -- "$E5_WORK/values"
+  [ -f "$E5_WORK/values/$1" ] && return 0
+  (umask 077 && printf 'BWSYNTH-e5-%s-%s' "$1" "$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+    >"$E5_WORK/values/$1")
+}
+e5_value_file() { printf '%s' "$E5_WORK/values/$1"; }
+e5_digest() { sha256sum <"$E5_WORK/values/$1" | cut -d' ' -f1; }
+
+# check_digest <want> <cmd...>: run a read, compare the digest of what it printed to <want>, and
+# print only the verdict: the value itself must never reach a transcript. The read's stderr passes
+# through, so a denial is still seen as one.
+check_digest() {
+  local want=$1 got
+  shift
+  got=$("$@" | sha256sum | cut -d' ' -f1) || return 1
+  if [ "$got" = "$want" ]; then
+    echo "value digest matches"
+  else
+    echo "value digest differs"
+    return 1
+  fi
+}
+
+# OpenBao identities. The fixture supplies the root and metadata-only tokens; the experiment adds
+# one policy per role the specification names, so that the permission matrix is measured under
+# least privilege rather than asserted:
+#   compiler   reads source secrets and encrypts artifacts (design §7.4 step 2-3)
+#   executor   decrypts artifacts only (docs/spec/execution-recovery.md §3.1)
+#   publisher  creates new immutable generations, never overwrites
+#   metadata   the fixture's metadata-only token (design §7.6)
+#   admin      the root token, standing for the operator's administrator
+declare -A E5_TOKEN=()
+e5_bao_identities() {
+  local role
+  BAO_TOKEN=$BW_BAO_ROOT_TOKEN bao_stdin policy write bw-e5-compiler - >/dev/null <<'POLICY'
+path "secret/data/*"               { capabilities = ["read"] }
+path "transit/encrypt/bw-artifact" { capabilities = ["update"] }
+POLICY
+  BAO_TOKEN=$BW_BAO_ROOT_TOKEN bao_stdin policy write bw-e5-executor - >/dev/null <<'POLICY'
+path "transit/decrypt/bw-artifact" { capabilities = ["update"] }
+POLICY
+  BAO_TOKEN=$BW_BAO_ROOT_TOKEN bao_stdin policy write bw-e5-publisher - >/dev/null <<'POLICY'
+path "secret/data/gen/*" { capabilities = ["create"] }
+POLICY
+  for role in compiler executor publisher; do
+    E5_TOKEN[$role]=$(BAO_TOKEN=$BW_BAO_ROOT_TOKEN bao token create -policy="bw-e5-$role" -format=json |
+      jq -er .auth.client_token) || die "could not create the $role token"
+  done
+  E5_TOKEN[metadata]=$BW_BAO_METADATA_TOKEN
+  E5_TOKEN[admin]=$BW_BAO_ROOT_TOKEN
+}
+
+# as <identity> <cmd...>: run one command under that identity's token. The token goes through the
+# environment, never argv, and the identity's name is what the cell's command column shows.
+as() {
+  local role=$1
+  shift
+  [ -n "${E5_TOKEN[$role]:-}" ] || die "no token for identity $role"
+  BAO_TOKEN=${E5_TOKEN[$role]} "$@"
+}
