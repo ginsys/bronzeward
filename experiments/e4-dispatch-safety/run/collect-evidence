@@ -17,7 +17,9 @@ need grep sed find sort sha256sum cut
 [ -s "$E4D_PATTERNS" ] || die "$E4D_PATTERNS is missing or empty"
 ! grep -q '^only' -- "$E4D_OUT/run.txt" || die "$E4D_OUT is a partial run (E4D_ONLY was set); run the whole matrix"
 
-dest=$E4D_DIR/evidence
+# E4D_EVIDENCE names another directory of this experiment for an earlier capture kept alongside.
+dest=${E4D_EVIDENCE:-$E4D_DIR/evidence}
+case $dest in "$E4D_DIR"/evidence*) ;; *) die "E4D_EVIDENCE ($dest) must be $E4D_DIR/evidence*" ;; esac
 incoming=$(mktemp -d "$E4D_DIR/.evidence-incoming.XXXXXX")
 trap 'rm -rf -- "$incoming"' EXIT
 
