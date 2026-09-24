@@ -345,9 +345,11 @@ s6_kill() { # SIGKILL inside migration 3's transaction; a re-run completes
     rc:rerun=0 migration:3=r2 migration:4=r2 has_job_state_check=1
 }
 
-# Four runners released together, each holding migration 2 open for 500ms. With the lock (the
-# advisory lock on PostgreSQL, BEGIN IMMEDIATE on SQLite) all succeed and each version is applied
-# once. The control removes it: -no-lock, or a deferred SQLite transaction.
+# Migration 1 is applied first, so that four runners released together all find migration 2
+# missing and race to apply it; each holds it open for 500ms. With the lock (the advisory lock on
+# PostgreSQL, BEGIN IMMEDIATE on SQLite) all succeed and each version is applied once. The control
+# removes it: -no-lock, or a deferred SQLite transaction, which reads, then must upgrade to write
+# after another runner has committed.
 s6_concurrent() {
   local backend=$1 variant=$2 at i flag=() failed=0 expect_failed=clients_failed=0
   if [ "$variant" = unlocked-control ]; then
@@ -355,6 +357,7 @@ s6_concurrent() {
     if [ "$backend" = postgres ]; then flag=(-no-lock); fi
   fi
   row_begin s6 "$backend" "concurrent-$variant"
+  e4 setup migrate -runner r0 -upto 1
   [ "$variant" = unlocked-control ] && [ "$backend" = sqlite ] && export E4_SQLITE_TXLOCK=deferred
   at=$(e4_start_at)
   for i in 1 2 3 4; do e4_bg "r$i" migrate -runner "r$i" -hold-at 2 -hold 500ms -start-at "$at" "${flag[@]}"; done
@@ -373,9 +376,9 @@ s6_concurrent() {
   applied=$(cat -- "$ROW_PARTS"/r?.txt | sed -n 's/.*applied=\[\([0-9 ]*\)\].*/\1/p' | wc -w)
   row_note applied_total "$applied"
   if [ "$variant" = locked ]; then
-    row_end "$expect_failed" versions_recorded=4 applied_total=4 has_job_state_check=1
+    row_end rc:setup=0 "$expect_failed" migration:1=r0 versions_recorded=4 applied_total=3 has_job_state_check=1
   else
-    row_end "$expect_failed" 'versions_recorded>0'
+    row_end rc:setup=0 "$expect_failed" 'versions_recorded>0'
   fi
 }
 
