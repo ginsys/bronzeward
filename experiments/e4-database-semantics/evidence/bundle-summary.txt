@@ -1,8 +1,8 @@
-# fixtures/bin/evidence bundle 20260924T220916Z, captured after run/all with E4_OUT as an extra scan path
+# fixtures/bin/evidence bundle, captured after run/all with E4_OUT as an extra scan path
 ## versions.txt
-captured        2026-09-24T22:09:16Z
-manifest commit 22c7990dc65e9db21fe4d365d417417835638b92
-created at      22c7990dc65e9db21fe4d365d417417835638b92
+captured        2026-09-24T22:34:53Z
+manifest commit ee8d7e2c5a3e9952723fc7a79604037d4f625747
+created at      ee8d7e2c5a3e9952723fc7a79604037d4f625747
 host            Linux 7.1.3+deb13-amd64 x86_64
 docker          client 26.1.5+dfsg1 server 26.1.5+dfsg1
 compose         2.27.1
@@ -20,7 +20,7 @@ image          bw-fixture-controlplane-1 ghcr.io/siderolabs/talos:v1.13.6@sha256
 image          bw-fixture-worker-1 ghcr.io/siderolabs/talos:v1.13.6@sha256:f2e2b7e5812b2b59c1acfe6af7516231aeeef79fb1ffff6b57ad987f8dd47a6e -> sha256:96e24ac256111a3fcb7a43a0abe1e5acf6fe23a1b8ffdfd0530eac41c4d10ab1 running=true paused=false networks=[bw-fixture ]
 ## leak-scan.txt (files matched; canary-control files are the planted positive controls, scan-patterns.txt is the pattern list itself)
 1 <repo>/fixtures/.state/data/canary-control.txt
-1 <repo>/fixtures/.state/evidence/20260924T220916Z/backups/store-e4-s7-sqlite-2001504/data/canary-control.txt
+1 <repo>/fixtures/.state/evidence/20260924T223453Z/backups/store-e4-s7-sqlite-3906245/data/canary-control.txt
 16 <E4_OUT>/scan-patterns.txt
 ## fixtures-diff.txt lines: 0; up-fixtures-diff.txt lines: 0
 ## unavailable.txt: absent

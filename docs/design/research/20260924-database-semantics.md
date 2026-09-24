@@ -34,7 +34,7 @@ replication, failover and the operator's backup tooling, which the design assign
 | Engine | 17.11 (`version()`: "PostgreSQL 17.11 on x86_64-pc-linux-musl"), the investigation fixture's container, image `docker.io/library/postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995` | 3.53.4 (`sqlite_version()`), linked into the prototype by `modernc.org/sqlite` v1.59.0 |
 | Driver | `github.com/lib/pq` v1.10.9, the driver E1 used | `modernc.org/sqlite` v1.59.0, pure Go, no cgo |
 | Connection | TCP to the fixture's published port; the DSN, which carries this run's generated password, reaches the client through the environment only | a file under `fixtures/.state/data/e4`; every connection sets `busy_timeout(5000)`, `journal_mode(WAL)`, `foreign_keys(1)`, and begins every transaction `IMMEDIATE` ([`db.go:136`](../../../experiments/e4-database-semantics/db.go)) |
-| Isolation | the server's default, `read committed` (`SHOW default_transaction_isolation`, read from the running fixture during the final capture, outside the collected evidence); the prototype sets none | one writer at a time: `BEGIN IMMEDIATE` takes the write lock at `BEGIN` |
+| Isolation | the server's default, `read committed` (`SHOW default_transaction_isolation`, recorded in [`run.txt`](../../../experiments/e4-database-semantics/evidence/run.txt)); the prototype sets none | one writer at a time: `BEGIN IMMEDIATE` takes the write lock at `BEGIN` |
 | Independent reader | `psql` inside the PostgreSQL container, over its unix socket | the host's `sqlite3` CLI, 3.46.1, a separate build from the one the prototype links |
 
 The two drivers are measurement tools. Neither is proposed for v1.
@@ -84,9 +84,12 @@ that removes it:
 | guarded claim (S5) | claim without re-checking eligibility | PostgreSQL; SQLite as above |
 | migration lock (S6) | no advisory lock on PostgreSQL; a deferred transaction on SQLite | both backends |
 
-Where a control cannot fire on SQLite, the reason is the same each time: `BEGIN IMMEDIATE`
-serializes every write transaction, so no row lock is needed to keep a read valid until commit. The
-S6 SQLite control removes that serialization and shows what happens without it.
+On SQLite the S2, S4 and S5 control rows (039, 046, 048) still begin every transaction `IMMEDIATE`,
+which serializes every write transaction, so they remove nothing there: they show only that the
+naive code is also safe while the write lock is taken at `BEGIN`. The S6 SQLite control (054) is
+the only row that runs without `IMMEDIATE`. Whether S2, S4 or S5 would stay correct on SQLite in
+deferred mode was not run; SQLite's snapshot rules would likely refuse a stale read-then-write with
+`SQLITE_BUSY_SNAPSHOT` rather than commit it, which is an inference, not a result.
 
 ### 3.3 One schema, and every difference counted
 
@@ -94,13 +97,13 @@ The schema is four migrations per dialect
 ([`migrations/`](../../../experiments/e4-database-semantics/migrations/)). The scenario SQL is shared
 and written with `?` placeholders. Every place where SQL or transaction handling differs is a branch
 on the dialect value, so the inventory below is complete for this prototype
-(`grep -n 'case Postgres\|case SQLite\|== Postgres\|== SQLite\|!= Postgres'` over the non-test
+(`grep -n 'case Postgres\|case SQLite\|[!=]= Postgres\|[!=]= SQLite'` over the non-test
 sources, plus the two migration trees):
 
 | # | Difference | PostgreSQL | SQLite | Where |
 |---|---|---|---|---|
 | 1 | placeholders | `$n`, rebound from `?` for every statement | `?` | [`db.go:42`](../../../experiments/e4-database-semantics/db.go) |
-| 2 | connection setup | none | four DSN settings; `_txlock=immediate` is what every other SQLite result rests on | [`db.go:136`](../../../experiments/e4-database-semantics/db.go) |
+| 2 | connection setup | none | four DSN settings; `_txlock=immediate`, under which every SQLite row except the S6 control ran | [`db.go:136`](../../../experiments/e4-database-semantics/db.go) |
 | 3 | error classification | SQLSTATE codes | primary and extended result codes | [`db.go:195`](../../../experiments/e4-database-semantics/db.go) |
 | 4 | holding a read valid until commit | `SELECT … FOR SHARE` on the source revision | nothing: the write lock is already held | [`scenarios.go:222`](../../../experiments/e4-database-semantics/scenarios.go) |
 | 5 | non-blocking queue claim | `FOR UPDATE SKIP LOCKED` | unavailable; refused | [`scenarios.go:457`](../../../experiments/e4-database-semantics/scenarios.go) |
@@ -151,9 +154,12 @@ E4_OUT=<E4_OUT> experiments/e4-database-semantics/run/collect-evidence
 fixtures/bin/down
 ```
 
-`run/all` took under three minutes after `up` in the final capture (`started` and `finished` in `run.txt`). The bundle stays in `E4_OUT`: it holds a PostgreSQL
-data directory and dumps and is not committed; `bundle-summary.txt` carries its versions and scan
-result into `evidence/`.
+`run/all` took under three minutes after `up` in the final capture (`started` and `finished` in
+`run.txt`). The bundle stays in `E4_OUT`: it holds a PostgreSQL data directory and dumps and is not
+committed. `run/collect-evidence` refuses to run without it and carries its versions and scan
+result into `evidence/` as [`bundle-summary.txt`](../../../experiments/e4-database-semantics/evidence/bundle-summary.txt),
+with every copied file and its SHA-256 in
+[`bundle-manifest.txt`](../../../experiments/e4-database-semantics/evidence/bundle-manifest.txt).
 
 ## 4. Results
 
@@ -243,9 +249,9 @@ both checks and locks, and appends the attempt to the timeline only if it matche
 
 This is the database half of the specification's requirement that the attempt transaction
 "confirms that the executor recording it is the operation's current owner" and that "reading the
-approval or the ownership and recording the attempt later is not sufficient" (§3.2). Row 018 is that
-insufficiency, measured. It is database fencing only: nothing here stops an executor that already
-committed its attempt from sending, which the specification says in the same section.
+approval or the ownership and recording the attempt later is not sufficient" (specification §3.3).
+Row 018 is that insufficiency, measured. It is database fencing only: nothing here stops an
+executor that already committed its attempt from sending, which specification §3.3 also says.
 
 ### 4.5 S5: queue claims
 
@@ -255,24 +261,29 @@ A claim sets `state = 'claimed'`, increments the job's fence and sets a lease; c
 
 | Row | Mode | PostgreSQL | SQLite |
 |---|---|---|---|
-| workers-guarded (019, 047) | `WHERE id = (SELECT … LIMIT 1) AND <eligible>` | 400 done, 400 claims, 0 claimed twice, 0 completed on a stale fence | same |
-| workers-naive (020, 048) | the same without re-checking eligibility | **1078 claims, 303 jobs claimed twice**, yet 0 completed on a stale fence: the fence refused every stale completion | 400 claims, 0 twice |
-| workers-skip-locked (057) | `… FOR UPDATE SKIP LOCKED` | 400 done, 0 twice | unavailable |
+| workers-guarded (019, 047) | `WHERE id = (SELECT … LIMIT 1) AND <eligible>` | 400 done, 400 claims, 400 completions, 0 jobs claimed or completed more than once | same |
+| workers-naive (020, 048) | the same without re-checking eligibility | **1105 claims, 309 jobs claimed more than once, 401 completions, 1 job completed twice**; the fence refused the other 704 completions | 400 claims, 400 completions, 0 more than once |
+| workers-skip-locked (057) | `… FOR UPDATE SKIP LOCKED` | 400 done, 400 completions, 0 more than once | unavailable |
 | lease-expiry (021, 049) | worker a claims with a 1 s lease; b cannot claim early, then claims after expiry at fence 2; a's late completion is refused | as described; the job ends `done` by b at fence 2 | same |
 
 The naive mode is the portable-looking query that is wrong on PostgreSQL: under the default
 isolation, an `UPDATE` that waited on a row another claimer changed re-checks only its own `WHERE`
 against the new row version, and `id = <the id the subquery already chose>` still holds. The guarded
 mode adds the eligibility predicate to that `WHERE`, so the re-check fails and the claimer retries.
-The fence then makes a stale completion impossible even where a claim was duplicated.
+The fence refuses the superseded claimer's completion, but it does not make the naive mode safe.
+A claimer that waited on a job whose holder then completed it re-claims the `done` job: the
+re-check sees only `id = …`, the claim sets `state = 'claimed'` and a new fence, and the second
+completion carries that new fence and succeeds. Row 020 recorded this once in 400 jobs; the row
+asserts only that the counts were recorded, because how often the interleaving happens varies
+between captures. The guarded and `SKIP LOCKED` rows assert 400 completions and none twice.
 
 Cost under contention, from the per-worker lines in the transcripts (one capture; timings vary
 between captures):
 
 | | PostgreSQL guarded | PostgreSQL `SKIP LOCKED` | SQLite guarded | SQLite naive |
 |---|---|---|---|---|
-| wall time for 400 jobs | about 1.4 s | about 0.4 s | about 7.5 s | about 5.3-5.9 s |
-| per worker | 33-89 jobs, 215-326 lost races each | 50 jobs, 0 lost races | 0-156 jobs; one worker waited out the 5 s busy timeout, failed once with `SQLITE_BUSY` and then found the queue empty | one worker did all 400; the other seven each waited out the busy timeout, failed once, and found the queue empty |
+| wall time for 400 jobs | about 1.4 s | about 0.4 s | about 7.2-7.3 s | about 5.4-5.8 s |
+| per worker | 35-90 jobs, 221-320 lost races each | 50 jobs, 0 lost races | 1-262 jobs; two workers each waited out the 5 s busy timeout and failed once with `SQLITE_BUSY` | one worker did all 400; the other seven each waited out the busy timeout, failed once, and found the queue empty |
 
 On SQLite more workers buy nothing, and the hand-off of the write lock is not fair: a worker that
 keeps committing can keep the lock while others wait out their busy timeout. How the jobs spread
@@ -330,13 +341,14 @@ A publication holds its write transaction for 7 s; another client updates an unr
 | unrelated-writer (028, 056) | the write completes in 3 ms | the write waits the whole 5 s busy timeout and fails with `SQLITE_BUSY`; nothing written |
 
 Every write transaction on SQLite blocks every other writer for its whole duration. This is the
-cost S2-S6 were safe because of.
+cost of the serialization under which every SQLite row except the S6 control ran.
 
 ### 4.9 The prototype's tests
 
 `go test` passed against both backends at the captured commit (rows 062, 063). The tests cover the
 placeholder rebinding, error classification, the busy timeout, the migration runner (fresh,
-failure rollback, concurrent runners, the SQLite rebuild) and S1-S5 with their controls.
+failure rollback, concurrent runners, the SQLite rebuild), S1-S5, and the S1, S2 and S4 controls.
+The S5 naive claim and the S6 unlocked runners have no test; their rows are their only evidence.
 
 ## 5. Failures hit while building it
 
@@ -386,8 +398,9 @@ Exercised on both backends:
 - **Unique intent** holds with one schema (§4.3).
 - **Ownership transitions** hold when the ownership check is part of the write that records the
   attempt; a separate read is unsafe on PostgreSQL (§4.4).
-- **Queue claims** are safe with the guarded claim and fencing on both; the naive claim
-  double-claims on PostgreSQL, and the fence still refuses every stale completion (§4.5).
+- **Queue claims** are safe with the guarded claim and fencing on both. The naive claim is unsafe
+  on PostgreSQL even with the fence: it claims jobs more than once, and it can re-claim a job that
+  is already `done` and complete it again, which the fence cannot see (§4.5).
 - **Migrations** roll back on failure and on kill, and concurrent runners apply each version once
   under the lock (§4.6).
 - **Restored state** rewinds data, identifiers and fencing generations together; tokens issued after
@@ -414,8 +427,10 @@ lock at `BEGIN`. That is also its limitation:
 - one writer at a time, for the whole write transaction (S8), so a long write stalls every other
   write and a busy timeout must be longer than the longest write transaction;
 - no useful write concurrency, and an unfair hand-off under contention (S5);
-- every result above depends on `_txlock=immediate`; the deferred default fails (row 054) where the
-  same code on PostgreSQL waits;
+- every SQLite row except the S6 control ran under `_txlock=immediate`. The one deferred-mode row
+  (054) failed its concurrent runners with `SQLITE_BUSY` where PostgreSQL waits: an availability
+  failure, not a wrong result. Whether the other semantics would stay correct in deferred mode was
+  not run (§3.2);
 - schema changes that PostgreSQL does in one statement need a rebuild (§3.3 item 7);
 - a file copy is a valid backup only while nothing holds the database open (the issue's own limit;
   S7 quiesced before both snapshot and restore);
@@ -470,10 +485,11 @@ This does not select a database. It narrows what
    that can fail.
 2. **SQLite meets every semantic for a single-instance deployment in which write transactions are
    short**, because it serializes all writes. The cost is throughput and write latency under
-   contention, not correctness. If it is offered, every transaction must begin `IMMEDIATE`, write
-   transactions must not span slow work (encryption, provider calls, network I/O), and a file-copy
-   backup must be taken with the database quiesced (tested here); SQLite's online backup API was
-   not tested.
+   contention, not correctness. If it is offered, every transaction should begin `IMMEDIATE`, the
+   mode every SQLite result here was measured in (deferred mode was measured for migrations only,
+   §3.2), write transactions must not span slow work (encryption, provider calls, network I/O), and
+   a file-copy backup must be taken with the database quiesced: a quiesced copy restored correctly
+   here, and an unquiesced copy was not tried. SQLite's online backup API was not tested.
 3. **Supporting both roughly doubles the database test matrix and keeps two migration trees**, on
    top of the dialect branches in §3.3. If the PoC needs one database, PostgreSQL is the one the
    design already names as the server option, and the one on which every control found the failure
@@ -491,7 +507,8 @@ This does not select a database. It narrows what
 - A restore re-issues owner generations: a pre-restore token passes the fence again (§4.7). Any
   executor running across a restore must be stopped by something other than the fence, which is
   what specification §7 step 1 requires.
-- Commit-unknown resolves only by reading the data and retrying idempotently (row 061).
+- In the one commit-unknown row (061), the client could not tell whether its release committed;
+  reading the data and retrying idempotently resolved it without a duplicate.
 
 **To [persistence/API contracts](https://github.com/ginsys/bronzeward/issues/18):**
 

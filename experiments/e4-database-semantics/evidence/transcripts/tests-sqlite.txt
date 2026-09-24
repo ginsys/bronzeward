@@ -18,17 +18,17 @@ $ go test -count=1 -v ./...
 === RUN   TestMigrateFailureRollsBackThatMigration
 --- PASS: TestMigrateFailureRollsBackThatMigration (0.08s)
 === RUN   TestMigrateConcurrentRunnersApplyOnce
---- PASS: TestMigrateConcurrentRunnersApplyOnce (0.12s)
+--- PASS: TestMigrateConcurrentRunnersApplyOnce (0.14s)
 === RUN   TestSQLiteRebuildNeedsForeignKeysOff
---- PASS: TestSQLiteRebuildNeedsForeignKeysOff (0.10s)
+--- PASS: TestSQLiteRebuildNeedsForeignKeysOff (0.09s)
 === RUN   TestReaderStatementsSkipsComments
 --- PASS: TestReaderStatementsSkipsComments (0.00s)
 === RUN   TestS1CompareAndSetKeepsEveryWrite
---- PASS: TestS1CompareAndSetKeepsEveryWrite (0.36s)
+--- PASS: TestS1CompareAndSetKeepsEveryWrite (0.46s)
 === RUN   TestS1BlindWriteLosesUpdates
---- PASS: TestS1BlindWriteLosesUpdates (0.98s)
+--- PASS: TestS1BlindWriteLosesUpdates (0.95s)
 === RUN   TestS2PublishIsAllOrNothing
---- PASS: TestS2PublishIsAllOrNothing (0.11s)
+--- PASS: TestS2PublishIsAllOrNothing (0.10s)
 === RUN   TestS2PublishRacingWriterIsNeverStaleAtCommit
 --- PASS: TestS2PublishRacingWriterIsNeverStaleAtCommit (0.43s)
 === RUN   TestS2UnlockedSourceCheckControl
@@ -36,11 +36,11 @@ $ go test -count=1 -v ./...
 === RUN   TestS2PublishRetryIsIdempotent
 --- PASS: TestS2PublishRetryIsIdempotent (0.09s)
 === RUN   TestS3OneActiveIntentPerScope
---- PASS: TestS3OneActiveIntentPerScope (0.16s)
+--- PASS: TestS3OneActiveIntentPerScope (0.22s)
 === RUN   TestS3RetryReturnsTheSameIntent
 --- PASS: TestS3RetryReturnsTheSameIntent (0.10s)
 === RUN   TestS4ConcurrentTakeoverHasOneWinner
---- PASS: TestS4ConcurrentTakeoverHasOneWinner (0.12s)
+--- PASS: TestS4ConcurrentTakeoverHasOneWinner (0.17s)
 === RUN   TestS4StaleOwnerIsFenced
 --- PASS: TestS4StaleOwnerIsFenced (0.10s)
 === RUN   TestS4CheckThenInsertAttempt
@@ -50,7 +50,7 @@ $ go test -count=1 -v ./...
 --- PASS: TestS5WorkersClaimEachJobOnce (1.12s)
     --- PASS: TestS5WorkersClaimEachJobOnce/guarded (1.12s)
 === RUN   TestS5ExpiredLeaseIsReclaimedAndLateCompletionFenced
---- PASS: TestS5ExpiredLeaseIsReclaimedAndLateCompletionFenced (0.41s)
+--- PASS: TestS5ExpiredLeaseIsReclaimedAndLateCompletionFenced (0.42s)
 PASS
-ok  	github.com/ginsys/bronzeward/experiments/e4-database-semantics	5.311s
+ok  	github.com/ginsys/bronzeward/experiments/e4-database-semantics	5.506s
 ==> end <==

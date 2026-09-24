@@ -2,16 +2,16 @@
 ==> reset (rc ) <==
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2002785
-outcome=done elapsed_ms=45 applied=[1 2 3 4]
+backend=postgres pid=3907508
+outcome=done elapsed_ms=37 applied=[1 2 3 4]
 ==> seed (rc 0) <==
 $ e4db seed-fragment
-backend=postgres pid=2002882
+backend=postgres pid=3907554
 outcome=done elapsed_ms=2 fragment=f1
 ==> race (rc 0) <==
 $ e4db race -writers 8 -rounds 20 -actor w
-backend=postgres pid=2002910
-outcome=done elapsed_ms=374 wins=20 conflicts=140 busy=0
+backend=postgres pid=3907573
+outcome=done elapsed_ms=360 wins=20 conflicts=140 busy=0
 ==> read-s1 (rc 0) <==
 revisions_recorded|20
 duplicate_revisions|0
@@ -32,32 +32,32 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2003987
-outcome=done elapsed_ms=35 applied=[1 2 3 4]
+backend=postgres pid=3908335
+outcome=done elapsed_ms=34 applied=[1 2 3 4]
 ==> seed (rc 0) <==
 $ e4db seed-fragment
-backend=postgres pid=2004051
+backend=postgres pid=3908381
 outcome=done elapsed_ms=2 fragment=f1
 ==> p1 (rc 0) <==
-$ e4db race -writers 4 -rounds 10 -actor p1 -start-at 1790287618032
-backend=postgres pid=2004080
-outcome=done elapsed_ms=175 wins=7 conflicts=33 busy=0
+$ e4db race -writers 4 -rounds 10 -actor p1 -start-at 1790289155133
+backend=postgres pid=3908412
+outcome=done elapsed_ms=170 wins=2 conflicts=38 busy=0
 ==> p2 (rc 0) <==
-$ e4db race -writers 4 -rounds 10 -actor p2 -start-at 1790287618032
-backend=postgres pid=2004086
-outcome=done elapsed_ms=190 wins=2 conflicts=38 busy=0
+$ e4db race -writers 4 -rounds 10 -actor p2 -start-at 1790289155133
+backend=postgres pid=3908416
+outcome=done elapsed_ms=175 wins=4 conflicts=36 busy=0
 ==> p3 (rc 0) <==
-$ e4db race -writers 4 -rounds 10 -actor p3 -start-at 1790287618032
-backend=postgres pid=2004094
-outcome=done elapsed_ms=180 wins=5 conflicts=35 busy=0
+$ e4db race -writers 4 -rounds 10 -actor p3 -start-at 1790289155133
+backend=postgres pid=3908425
+outcome=done elapsed_ms=175 wins=8 conflicts=32 busy=0
 ==> p4 (rc 0) <==
-$ e4db race -writers 4 -rounds 10 -actor p4 -start-at 1790287618032
-backend=postgres pid=2004100
-outcome=done elapsed_ms=176 wins=3 conflicts=37 busy=0
+$ e4db race -writers 4 -rounds 10 -actor p4 -start-at 1790289155133
+backend=postgres pid=3908431
+outcome=done elapsed_ms=179 wins=7 conflicts=33 busy=0
 ==> read-s1 (rc 0) <==
-revisions_recorded|17
+revisions_recorded|21
 duplicate_revisions|0
-final_revision|17
+final_revision|21
 lost_updates|0
 ==> 003-s1-postgres-blind-control <==
 ==> reset (rc ) <==
@@ -74,16 +74,16 @@ drop cascades to table job
 drop cascades to table job_event
 ==> migrate (rc 0) <==
 $ e4db migrate -runner setup
-backend=postgres pid=2006739
-outcome=done elapsed_ms=35 applied=[1 2 3 4]
+backend=postgres pid=3910813
+outcome=done elapsed_ms=39 applied=[1 2 3 4]
 ==> seed (rc 0) <==
 $ e4db seed-fragment
-backend=postgres pid=2006803
+backend=postgres pid=3910880
 outcome=done elapsed_ms=2 fragment=f1
 ==> race (rc 0) <==
 $ e4db race -writers 8 -rounds 20 -actor w -blind
-backend=postgres pid=2006825
-outcome=done elapsed_ms=607 wins=160 conflicts=0 busy=0
+backend=postgres pid=3910898
+outcome=done elapsed_ms=617 wins=160 conflicts=0 busy=0
 ==> read-s1 (rc 0) <==
 revisions_recorded|160
 duplicate_revisions|20
