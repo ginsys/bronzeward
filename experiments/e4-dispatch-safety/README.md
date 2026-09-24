@@ -73,6 +73,10 @@ secrets, and they stay in `E4D_OUT` with the bundle. The committed manifest give
 bundle file its SHA-256, except the PostgreSQL data directory: that gets a single line, the digest
 of its part of the full manifest.
 
+[`evidence-capture1/`](evidence-capture1/) holds an earlier complete capture from the same measured
+inputs, collected with `E4D_EVIDENCE=<this directory>/evidence-capture1`; the report says why it is
+kept.
+
 The unit tests need no fixture for the Talos parsing. The store tests skip unless
 `E4X_TEST_PG_DSN=<dsn>` names a PostgreSQL database they may reset.
 
