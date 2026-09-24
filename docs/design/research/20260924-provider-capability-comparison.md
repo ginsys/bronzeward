@@ -112,7 +112,7 @@ something else.
 | `age`, `age-keygen` | v1.3.2 |
 | `sops` | 3.13.3 |
 | Pins | `fixtures/versions.env` as of c74f953; binaries checked against the manifest digests |
-| Captured from | d1d2efb (`manifest commit` in [`versions.txt`](../../../experiments/e5-provider-capabilities/evidence/versions.txt)) |
+| Captured from | 269d22a (`manifest commit` in [`versions.txt`](../../../experiments/e5-provider-capabilities/evidence/versions.txt)) |
 
 ### 3.4 Synthetic values and the leak scan
 
@@ -312,7 +312,7 @@ exempts `evidence/transcripts/*.txt` alone.
 
 Section 4 is the matrix: 3 candidates by the 9 §7.3 elements plus permissions, with every entry
 tied to observed cells and every absence named. 194 cells, 0 mismatches, one capture from
-d1d2efb. The permission tables mark the operation/identity pairs that were not run as blank; not
+269d22a. The permission tables mark the operation/identity pairs that were not run as blank; not
 every operation was tried under every identity.
 
 ### 6.2 Criterion 2: primitive or versioned provider behaviour
