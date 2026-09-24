@@ -42,6 +42,19 @@ check 'a soft-deleted version is blocked' blocked "$(cls <<<"$out")"
 out=$(kv "{\"1\":$scheduled}" 1 0 | decide_kv 1 "$NOW")
 check 'a deletion scheduled in the future is still retained' retained "$(cls <<<"$out")"
 check 'and the reason says it is scheduled' 'deletion scheduled for 2026-09-24T13:00:00Z' "$(why <<<"$out")"
+# The comparison instant is the provider's own Date header, whole seconds: a deletion time in the
+# same second may fall on either side of it, and a client clock is never asked.
+same_second='{"created_time":"2026-09-24T10:00:00.1Z","deletion_time":"2026-09-24T12:00:00.7Z","destroyed":false}'
+out=$(kv "{\"1\":$same_second}" 1 0 | decide_kv 1 "$NOW")
+check 'a deletion time in the same second as the answer is unknown' unknown "$(cls <<<"$out")"
+out=$(kv "{\"1\":$deleted}" 1 0 | decide_kv 1 '')
+check 'a deletion time with no provider time to compare it with is unknown' unknown "$(cls <<<"$out")"
+check 'and the reason says so' 'deletion time 2026-09-24T11:00:00Z, and no provider time to compare it with' "$(why <<<"$out")"
+out=$(kv "{\"1\":$deleted}" 1 0 | decide_kv 1 'Thu, 24 Sep')
+check 'a provider time that cannot be read is unknown' unknown "$(cls <<<"$out")"
+check 'and the reason says so' 'deletion time 2026-09-24T11:00:00Z, and no provider time to compare it with' "$(why <<<"$out")"
+out=$(kv "{\"1\":$live}" 1 0 | decide_kv 1 '')
+check 'a version never deleted needs no provider time' retained "$(cls <<<"$out")"
 out=$(kv "{\"2\":$live,\"3\":$live}" 3 2 | decide_kv 1 "$NOW")
 check 'a version below oldest_version is lost (pruned)' lost "$(cls <<<"$out")"
 out=$(kv "{\"1\":$live}" 1 0 | decide_kv 4 "$NOW")

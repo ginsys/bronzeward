@@ -57,13 +57,15 @@ ciphertext's digest. It never opens a key file.
 ### 3.1 Rules, classifier, rows
 
 `run/decide.sh` holds the OpenBao rules and the monitor as pure functions over one provider answer.
-`run/test-decide` checks them with 42 checks on synthetic answers written out in the script, before
+`run/test-decide` checks them with 48 checks on synthetic answers written out in the script, before
 any capture uses them (the first rules were written after their checks had been seen to fail
 against a stub). `run/classify` asks the
 provider and applies the rules. For OpenBao it sends one GET per dependency over HTTP to the
 published port, from the host, with the metadata token, and refuses a name that is not a plain
 OpenBao path. It does not use the fixtures' `bao` wrapper, which runs inside the container, where a
-partition cannot be seen (fixtures report §7).
+partition cannot be seen (fixtures report §7). A KV deletion time is compared with the provider's
+own time for the same answer, its `Date` header, never with the client's clock (§5.6). The header
+has whole seconds, so a deletion time in that same second could fall on either side and is unknown.
 
 The rules:
 
@@ -71,8 +73,9 @@ The rules:
 |---|---|---|
 | any | a version that is not a positive integer | unknown |
 | KV v2 | version present, no `deletion_time` | retained |
-| KV v2 | `deletion_time` in the future (`delete_version_after`) | retained, reason names the scheduled time |
-| KV v2 | `deletion_time` now or past | blocked (undelete reverses it) |
+| KV v2 | `deletion_time` after the provider's time for the answer (`delete_version_after`) | retained, reason names the scheduled time |
+| KV v2 | `deletion_time` before the provider's time for the answer | blocked (undelete reverses it) |
+| KV v2 | `deletion_time` in the same second as the provider's time, or no provider time | unknown |
 | KV v2 | `destroyed: true` | lost |
 | KV v2 | version below `oldest_version` (when that is above 0) | lost (pruned) |
 | KV v2 | version above `current_version`, or missing with no recorded removal | unknown |
@@ -164,7 +167,7 @@ RC_OUT=<the same directory> experiments/e5-retention-classification/run/collect-
 fixtures/bin/down
 ```
 
-The committed capture took under three minutes after `up`: 107 rows, 0 mismatches, 42 of 42 rule
+The committed capture took under three minutes after `up`: 107 rows, 0 mismatches, 48 of 48 rule
 checks.
 
 ## 4. Results
@@ -276,6 +279,18 @@ the file by name. This was caught before any capture.
 
 As in the provider-capability run, bao's trailing blank lines trip the whitespace check.
 `.gitattributes` exempts this experiment's `evidence/transcripts/*.txt` alone.
+
+### 5.6 A deletion time compared with the client's clock
+
+The advisory review of the draft found that the classifier compared a KV `deletion_time`, which the
+provider sets, with the client's own clock, read before the request. With the client behind the
+provider, a version soft-deleted a moment earlier would have looked scheduled and been reported
+retained, not blocked. The classifier now takes the comparison instant from the answer's `Date`
+header, and a deletion time in the same second, or an answer without a readable `Date`, is
+unknown. The rule checks cover each case. The earlier capture was not exposed to the defect, because
+the provider's container shares the host's clock. It was nevertheless redone with the corrected
+classifier, and the committed evidence is that capture. In it, the one soft deletion, made at
+19:51:17 by the provider's clock, was classified blocked at a provider time of 19:51:29 (021).
 
 ## 6. What this decides
 
@@ -401,6 +416,10 @@ specification, and §7 records it as a limit.
 - **Transit `soft_deleted`** is present in the 2.6.1 key answer (027) and was false throughout.
   Transit soft deletion was not exercised, so a set flag is classified unknown rather than blocked.
 - **Host curl.** The classifier's client is the host's curl, not a pinned image.
+- **The same-second window was not captured.** The run's one soft deletion was classified 12 s after
+  it was made (021). The unknown for a deletion time in the answer's own second, and for an answer
+  without a `Date` header, rests on the rule checks. Clock skew between a client and a provider on
+  separate hosts was not produced.
 - **Local stores ran as one uid**, as before. Denial was produced with file modes, not separate
   users. SOPS was exercised in JSON format only.
 - **What the evidence carries.** The command column of `verdicts.tsv` holds the SHA-256 of each

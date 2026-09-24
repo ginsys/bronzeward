@@ -1,4 +1,4 @@
-rule checks: 42 passed, 0 failed
+rule checks: 48 passed, 0 failed
 leak-scan lines: 1
 positive control hits: 1
 other hits: 0
