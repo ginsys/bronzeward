@@ -1,0 +1,6 @@
+Error making API request.
+
+URL: GET http://127.0.0.1:8200/v1/sys/internal/ui/mounts/secret/gen/app-token/g1
+Code: 503. Errors:
+
+* Vault is sealed

@@ -1,0 +1,13 @@
+{
+  "request_id": "7c2c3058-081a-4b37-5ee0-26a9bbe71906",
+  "lease_id": "",
+  "lease_duration": 0,
+  "renewable": false,
+  "data": {
+    "cas_required": false,
+    "delete_version_after": "0s",
+    "max_versions": 0,
+    "metadata_cas_required": false
+  },
+  "warnings": null
+}

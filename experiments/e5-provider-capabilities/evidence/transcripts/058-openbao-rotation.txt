@@ -1,0 +1,6 @@
+Error writing data to transit/decrypt/bw-artifact: Error making API request.
+
+URL: PUT http://127.0.0.1:8200/v1/transit/decrypt/bw-artifact
+Code: 400. Errors:
+
+* ciphertext or signature version is disallowed by policy (too old)

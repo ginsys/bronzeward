@@ -1,0 +1,2 @@
+age: error: reading "<repo>/fixtures/.state/data/age-store/keys/lost.key": failed to open file: open <repo>/fixtures/.state/data/age-store/keys/lost.key: no such file or directory
+age: report unexpected or unhelpful errors at https://filippo.io/age/report
