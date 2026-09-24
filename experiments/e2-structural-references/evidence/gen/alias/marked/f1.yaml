@@ -1,0 +1,11 @@
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: &secret "bwref:reg-secret"
+            mirror.example.test:
+                auth:
+                    username: e2-user
+                    password: *secret

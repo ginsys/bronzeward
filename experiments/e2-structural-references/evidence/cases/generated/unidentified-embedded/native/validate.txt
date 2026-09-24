@@ -1,0 +1,1 @@
+cases/generated/unidentified-embedded/native/out.yaml is valid for metal mode

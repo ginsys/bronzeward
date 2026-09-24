@@ -1,0 +1,7 @@
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: "bwref:reg-pass"

@@ -1,0 +1,211 @@
+base	case	candidate	order	expected	observed	stage	validate	resolved	superset	effective	message
+fixture	alias	native	-	pass	pass	-	pass	-	reg-secret	-	-
+fixture	alias	tag	late	differs	differs	-	pass	0	reg-secret	-	-
+fixture	alias	tag	early	parity	parity	-	pass	2	reg-secret	reg-secret	-
+fixture	alias	marked	late	parity	parity	-	pass	2	reg-secret	reg-secret	-
+fixture	alias	marked	early	parity	parity	-	pass	2	reg-secret	reg-secret	-
+fixture	alias	binding	late	parity	parity	-	pass	2	reg-secret	reg-secret	-
+fixture	alias	binding	early	parity	parity	-	pass	2	reg-secret	reg-secret	-
+fixture	bool	native	-	pass	pass	-	pass	-	wipe	-	-
+fixture	bool	tag	late	rejected	rejected	compose	-	0	wipe	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 3: cannot construct !bwref `wipe` into bool
+fixture	bool	tag	early	parity	parity	-	pass	1	wipe	- (+unidentifiable: wipe)	-
+fixture	bool	marked	late	rejected	rejected	compose	-	0	wipe	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 3: cannot construct !!str `bwref:wipe` into bool
+fixture	bool	marked	early	parity	parity	-	pass	1	wipe	- (+unidentifiable: wipe)	-
+fixture	bool	binding	late	parity	parity	-	pass	1	wipe	wipe	-
+fixture	bool	binding	early	parity	parity	-	pass	1	wipe	- (+unidentifiable: wipe)	-
+fixture	bytes	native	-	pass	pass	-	pass	-	extra-ca	-	-
+fixture	bytes	tag	late	rejected	rejected	compose	-	0	extra-ca	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 3: illegal base64 data at input byte 5
+fixture	bytes	tag	early	parity	parity	-	pass	1	extra-ca	extra-ca	-
+fixture	bytes	marked	late	rejected	rejected	compose	-	0	extra-ca	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 3: illegal base64 data at input byte 5
+fixture	bytes	marked	early	parity	parity	-	pass	1	extra-ca	extra-ca	-
+fixture	bytes	binding	late	parity	parity	-	pass	1	extra-ca	extra-ca	-
+fixture	bytes	binding	early	parity	parity	-	pass	1	extra-ca	extra-ca	-
+fixture	collision	native	-	pass	pass	-	pass	-	reg-pass	-	-
+fixture	collision	tag	late	differs	differs	-	pass	0	reg-pass	-	-
+fixture	collision	tag	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	collision	marked	late	differs	differs	-	pass	2	reg-pass	reg-pass	-
+fixture	collision	marked	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	collision	binding	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	collision	binding	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	document	native	-	pass	pass	-	pass	-	roots	-	-
+fixture	document	tag	late	differs	differs	-	pass	0	roots	-	-
+fixture	document	tag	early	parity	parity	-	pass	1	roots	roots	-
+fixture	document	marked	late	parity	parity	-	pass	1	roots	roots	-
+fixture	document	marked	early	parity	parity	-	pass	1	roots	roots	-
+fixture	document	binding	late	parity	parity	-	pass	1	roots	roots	-
+fixture	document	binding	early	parity	parity	-	pass	1	roots	roots	-
+fixture	embedded-json	native	-	pass	pass	-	pass	-	app-token	-	-
+fixture	embedded-json	tag	late	parity	parity	-	pass	1	app-token	app-token	-
+fixture	embedded-json	tag	early	parity	parity	-	pass	1	app-token	app-token	-
+fixture	embedded-json	marked	late	parity	parity	-	pass	1	app-token	app-token	-
+fixture	embedded-json	marked	early	parity	parity	-	pass	1	app-token	app-token	-
+fixture	embedded-json	binding	late	parity	parity	-	pass	1	app-token	app-token	-
+fixture	embedded-json	binding	early	parity	parity	-	pass	1	app-token	app-token	-
+fixture	embedded-yaml	native	-	pass	pass	-	pass	-	app-pass	-	-
+fixture	embedded-yaml	tag	late	parity	parity	-	pass	1	app-pass	app-pass	-
+fixture	embedded-yaml	tag	early	parity	parity	-	pass	1	app-pass	app-pass	-
+fixture	embedded-yaml	marked	late	parity	parity	-	pass	1	app-pass	app-pass	-
+fixture	embedded-yaml	marked	early	parity	parity	-	pass	1	app-pass	app-pass	-
+fixture	embedded-yaml	binding	late	parity	parity	-	pass	1	app-pass	app-pass	-
+fixture	embedded-yaml	binding	early	parity	parity	-	pass	1	app-pass	app-pass	-
+fixture	int	native	-	pass	pass	-	pass	-	prism-port	-	-
+fixture	int	tag	late	rejected	rejected	compose	-	0	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !bwref `prism-port` into int
+fixture	int	tag	early	parity	parity	-	pass	1	prism-port	prism-port	-
+fixture	int	marked	late	rejected	rejected	compose	-	0	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `bwref:p...` into int
+fixture	int	marked	early	parity	parity	-	pass	1	prism-port	prism-port	-
+fixture	int	binding	late	parity	parity	-	pass	1	prism-port	prism-port	-
+fixture	int	binding	early	parity	parity	-	pass	1	prism-port	prism-port	-
+fixture	invalid-value	native	-	invalid	invalid	-	fail	-	dns-domain	-	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+fixture	invalid-value	tag	late	differs	differs	-	pass	0	dns-domain	-	-
+fixture	invalid-value	tag	early	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+fixture	invalid-value	marked	late	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+fixture	invalid-value	marked	early	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+fixture	invalid-value	binding	late	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+fixture	invalid-value	binding	early	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+fixture	map	native	-	pass	pass	-	pass	-	reg-auth	-	-
+fixture	map	tag	late	rejected	rejected	compose	-	0	reg-auth	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 5: cannot construct !bwref `reg-auth` into v1alpha1.RegistryAuthConfig
+fixture	map	tag	early	parity	parity	-	pass	1	reg-auth	reg-auth	-
+fixture	map	marked	late	rejected	rejected	compose	-	0	reg-auth	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 5: cannot construct !!str `bwref:r...` into v1alpha1.RegistryAuthConfig
+fixture	map	marked	early	parity	parity	-	pass	1	reg-auth	reg-auth	-
+fixture	map	binding	late	parity	parity	-	pass	1	reg-auth	reg-auth	-
+fixture	map	binding	early	parity	parity	-	pass	1	reg-auth	reg-auth	-
+fixture	override-literal	native	-	pass	pass	-	pass	-	reg-pass	-	-
+fixture	override-literal	tag	late	parity	parity	-	pass	0	reg-pass	-	-
+fixture	override-literal	tag	early	parity	parity	-	pass	1	reg-pass	-	-
+fixture	override-literal	marked	late	parity	parity	-	pass	0	reg-pass	-	-
+fixture	override-literal	marked	early	parity	parity	-	pass	1	reg-pass	-	-
+fixture	override-literal	binding	late	differs	differs	-	pass	1	reg-pass	reg-pass	-
+fixture	override-literal	binding	early	parity	parity	-	pass	1	reg-pass	-	-
+fixture	override-ref	native	-	pass	pass	-	pass	-	reg-pass	-	-
+fixture	override-ref	tag	late	differs	differs	-	pass	0	reg-pass	-	-
+fixture	override-ref	tag	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	override-ref	marked	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	override-ref	marked	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	override-ref	binding	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	override-ref	binding	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	string	native	-	pass	pass	-	pass	-	reg-pass	-	-
+fixture	string	tag	late	differs	differs	-	pass	0	reg-pass	-	-
+fixture	string	tag	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	string	marked	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	string	marked	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	string	binding	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	string	binding	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+fixture	type-mismatch	native	-	rejected	rejected	-	-	-	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `e2-not-...` into int
+fixture	type-mismatch	tag	late	rejected	rejected	compose	-	0	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !bwref `prism-port` into int
+fixture	type-mismatch	tag	early	rejected	rejected	compose	-	1	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `e2-not-...` into int
+fixture	type-mismatch	marked	late	rejected	rejected	compose	-	0	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `bwref:p...` into int
+fixture	type-mismatch	marked	early	rejected	rejected	compose	-	1	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `e2-not-...` into int
+fixture	type-mismatch	binding	late	rejected	rejected	normalize	-	1	prism-port	prism-port	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 23: cannot construct !!str `e2-not-...` into int
+fixture	type-mismatch	binding	early	rejected	rejected	compose	-	1	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `e2-not-...` into int
+fixture	unidentified-embedded	native	-	pass	pass	-	pass	-	app-pass	-	-
+fixture	unidentified-embedded	tag	late	differs	differs	-	pass	0	app-pass	-	-
+fixture	unidentified-embedded	tag	early	differs	differs	-	pass	0	app-pass	-	-
+fixture	unidentified-embedded	marked	late	differs	differs	-	pass	0	app-pass	-	-
+fixture	unidentified-embedded	marked	early	differs	differs	-	pass	0	app-pass	-	-
+fixture	unidentified-embedded	binding	late	refused	refused	resolve	-	0	app-pass	-	bwref: binding v1alpha1 cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password: cluster/inlineManifests[name=e2-secret]/contents is not an identified embedded document
+fixture	unidentified-embedded	binding	early	refused	refused	resolve	-	0	app-pass	-	bwref: binding v1alpha1 cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password: cluster/inlineManifests[name=e2-secret]/contents is not an identified embedded document
+generated	alias	native	-	pass	pass	-	pass	-	reg-secret	-	-
+generated	alias	tag	late	differs	differs	-	pass	0	reg-secret	-	-
+generated	alias	tag	early	parity	parity	-	pass	2	reg-secret	reg-secret	-
+generated	alias	marked	late	parity	parity	-	pass	2	reg-secret	reg-secret	-
+generated	alias	marked	early	parity	parity	-	pass	2	reg-secret	reg-secret	-
+generated	alias	binding	late	parity	parity	-	pass	2	reg-secret	reg-secret	-
+generated	alias	binding	early	parity	parity	-	pass	2	reg-secret	reg-secret	-
+generated	bool	native	-	pass	pass	-	pass	-	wipe	-	-
+generated	bool	tag	late	rejected	rejected	compose	-	0	wipe	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 3: cannot construct !bwref `wipe` into bool
+generated	bool	tag	early	parity	parity	-	pass	1	wipe	- (+unidentifiable: wipe)	-
+generated	bool	marked	late	rejected	rejected	compose	-	0	wipe	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 3: cannot construct !!str `bwref:wipe` into bool
+generated	bool	marked	early	parity	parity	-	pass	1	wipe	- (+unidentifiable: wipe)	-
+generated	bool	binding	late	parity	parity	-	pass	1	wipe	wipe	-
+generated	bool	binding	early	parity	parity	-	pass	1	wipe	- (+unidentifiable: wipe)	-
+generated	bytes	native	-	pass	pass	-	pass	-	extra-ca	-	-
+generated	bytes	tag	late	rejected	rejected	compose	-	0	extra-ca	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 3: illegal base64 data at input byte 5
+generated	bytes	tag	early	parity	parity	-	pass	1	extra-ca	extra-ca	-
+generated	bytes	marked	late	rejected	rejected	compose	-	0	extra-ca	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 3: illegal base64 data at input byte 5
+generated	bytes	marked	early	parity	parity	-	pass	1	extra-ca	extra-ca	-
+generated	bytes	binding	late	parity	parity	-	pass	1	extra-ca	extra-ca	-
+generated	bytes	binding	early	parity	parity	-	pass	1	extra-ca	extra-ca	-
+generated	collision	native	-	pass	pass	-	pass	-	reg-pass	-	-
+generated	collision	tag	late	differs	differs	-	pass	0	reg-pass	-	-
+generated	collision	tag	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	collision	marked	late	differs	differs	-	pass	2	reg-pass	reg-pass	-
+generated	collision	marked	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	collision	binding	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	collision	binding	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	document	native	-	pass	pass	-	pass	-	roots	-	-
+generated	document	tag	late	differs	differs	-	pass	0	roots	-	-
+generated	document	tag	early	parity	parity	-	pass	1	roots	roots	-
+generated	document	marked	late	parity	parity	-	pass	1	roots	roots	-
+generated	document	marked	early	parity	parity	-	pass	1	roots	roots	-
+generated	document	binding	late	parity	parity	-	pass	1	roots	roots	-
+generated	document	binding	early	parity	parity	-	pass	1	roots	roots	-
+generated	embedded-json	native	-	pass	pass	-	pass	-	app-token	-	-
+generated	embedded-json	tag	late	parity	parity	-	pass	1	app-token	app-token	-
+generated	embedded-json	tag	early	parity	parity	-	pass	1	app-token	app-token	-
+generated	embedded-json	marked	late	parity	parity	-	pass	1	app-token	app-token	-
+generated	embedded-json	marked	early	parity	parity	-	pass	1	app-token	app-token	-
+generated	embedded-json	binding	late	parity	parity	-	pass	1	app-token	app-token	-
+generated	embedded-json	binding	early	parity	parity	-	pass	1	app-token	app-token	-
+generated	embedded-yaml	native	-	pass	pass	-	pass	-	app-pass	-	-
+generated	embedded-yaml	tag	late	parity	parity	-	pass	1	app-pass	app-pass	-
+generated	embedded-yaml	tag	early	parity	parity	-	pass	1	app-pass	app-pass	-
+generated	embedded-yaml	marked	late	parity	parity	-	pass	1	app-pass	app-pass	-
+generated	embedded-yaml	marked	early	parity	parity	-	pass	1	app-pass	app-pass	-
+generated	embedded-yaml	binding	late	parity	parity	-	pass	1	app-pass	app-pass	-
+generated	embedded-yaml	binding	early	parity	parity	-	pass	1	app-pass	app-pass	-
+generated	int	native	-	pass	pass	-	pass	-	prism-port	-	-
+generated	int	tag	late	rejected	rejected	compose	-	0	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !bwref `prism-port` into int
+generated	int	tag	early	parity	parity	-	pass	1	prism-port	prism-port	-
+generated	int	marked	late	rejected	rejected	compose	-	0	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `bwref:p...` into int
+generated	int	marked	early	parity	parity	-	pass	1	prism-port	prism-port	-
+generated	int	binding	late	parity	parity	-	pass	1	prism-port	prism-port	-
+generated	int	binding	early	parity	parity	-	pass	1	prism-port	prism-port	-
+generated	invalid-value	native	-	invalid	invalid	-	fail	-	dns-domain	-	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+generated	invalid-value	tag	late	differs	differs	-	pass	0	dns-domain	-	-
+generated	invalid-value	tag	early	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+generated	invalid-value	marked	late	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+generated	invalid-value	marked	early	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+generated	invalid-value	binding	late	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+generated	invalid-value	binding	early	parity	parity	-	fail	1	dns-domain	dns-domain	1 error occurred: * v1alpha1.Config: 1 error occurred: * "e2 not a domain" is not a valid DNS name
+generated	map	native	-	pass	pass	-	pass	-	reg-auth	-	-
+generated	map	tag	late	rejected	rejected	compose	-	0	reg-auth	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 5: cannot construct !bwref `reg-auth` into v1alpha1.RegistryAuthConfig
+generated	map	tag	early	parity	parity	-	pass	1	reg-auth	reg-auth	-
+generated	map	marked	late	rejected	rejected	compose	-	0	reg-auth	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 5: cannot construct !!str `bwref:r...` into v1alpha1.RegistryAuthConfig
+generated	map	marked	early	parity	parity	-	pass	1	reg-auth	reg-auth	-
+generated	map	binding	late	parity	parity	-	pass	1	reg-auth	reg-auth	-
+generated	map	binding	early	parity	parity	-	pass	1	reg-auth	reg-auth	-
+generated	override-literal	native	-	pass	pass	-	pass	-	reg-pass	-	-
+generated	override-literal	tag	late	parity	parity	-	pass	0	reg-pass	-	-
+generated	override-literal	tag	early	parity	parity	-	pass	1	reg-pass	-	-
+generated	override-literal	marked	late	parity	parity	-	pass	0	reg-pass	-	-
+generated	override-literal	marked	early	parity	parity	-	pass	1	reg-pass	-	-
+generated	override-literal	binding	late	differs	differs	-	pass	1	reg-pass	reg-pass	-
+generated	override-literal	binding	early	parity	parity	-	pass	1	reg-pass	-	-
+generated	override-ref	native	-	pass	pass	-	pass	-	reg-pass	-	-
+generated	override-ref	tag	late	differs	differs	-	pass	0	reg-pass	-	-
+generated	override-ref	tag	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	override-ref	marked	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	override-ref	marked	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	override-ref	binding	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	override-ref	binding	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	string	native	-	pass	pass	-	pass	-	reg-pass	-	-
+generated	string	tag	late	differs	differs	-	pass	0	reg-pass	-	-
+generated	string	tag	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	string	marked	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	string	marked	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	string	binding	late	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	string	binding	early	parity	parity	-	pass	1	reg-pass	reg-pass	-
+generated	type-mismatch	native	-	rejected	rejected	-	-	-	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `e2-not-...` into int
+generated	type-mismatch	tag	late	rejected	rejected	compose	-	0	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !bwref `prism-port` into int
+generated	type-mismatch	tag	early	rejected	rejected	compose	-	1	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `e2-not-...` into int
+generated	type-mismatch	marked	late	rejected	rejected	compose	-	0	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `bwref:p...` into int
+generated	type-mismatch	marked	early	rejected	rejected	compose	-	1	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `e2-not-...` into int
+generated	type-mismatch	binding	late	rejected	rejected	normalize	-	1	prism-port	prism-port	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 24: cannot construct !!str `e2-not-...` into int
+generated	type-mismatch	binding	early	rejected	rejected	compose	-	1	prism-port	-	error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `e2-not-...` into int
+generated	unidentified-embedded	native	-	pass	pass	-	pass	-	app-pass	-	-
+generated	unidentified-embedded	tag	late	differs	differs	-	pass	0	app-pass	-	-
+generated	unidentified-embedded	tag	early	differs	differs	-	pass	0	app-pass	-	-
+generated	unidentified-embedded	marked	late	differs	differs	-	pass	0	app-pass	-	-
+generated	unidentified-embedded	marked	early	differs	differs	-	pass	0	app-pass	-	-
+generated	unidentified-embedded	binding	late	refused	refused	resolve	-	0	app-pass	-	bwref: binding v1alpha1 cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password: cluster/inlineManifests[name=e2-secret]/contents is not an identified embedded document
+generated	unidentified-embedded	binding	early	refused	refused	resolve	-	0	app-pass	-	bwref: binding v1alpha1 cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password: cluster/inlineManifests[name=e2-secret]/contents is not an identified embedded document

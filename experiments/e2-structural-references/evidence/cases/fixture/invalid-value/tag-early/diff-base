@@ -1,0 +1,5 @@
+--- base
++++ tag-early
+@@ -36 +36 @@
+-        dnsDomain: cluster.local
++        dnsDomain: e2 not a domain

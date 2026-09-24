@@ -1,0 +1,1 @@
+cases/fixture/override-literal/tag-early/out.yaml is valid for container mode

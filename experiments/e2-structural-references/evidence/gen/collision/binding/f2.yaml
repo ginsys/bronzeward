@@ -1,0 +1,6 @@
+machine:
+    registries:
+        config:
+            mirror.example.test:
+                auth:
+                    username: e2-mirror-user

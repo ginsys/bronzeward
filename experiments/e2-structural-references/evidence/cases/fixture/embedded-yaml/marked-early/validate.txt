@@ -1,0 +1,1 @@
+cases/fixture/embedded-yaml/marked-early/out.yaml is valid for container mode

@@ -1,0 +1,1 @@
+cases/generated/bool/native/out.yaml is valid for metal mode

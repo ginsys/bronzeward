@@ -1,0 +1,1 @@
+base/fixture.yaml is valid for container mode

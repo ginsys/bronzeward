@@ -1,0 +1,1 @@
+cases/generated/bytes/binding-early/out.yaml is valid for metal mode

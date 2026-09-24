@@ -1,0 +1,11 @@
+cluster:
+    inlineManifests:
+        - name: e2-secret
+          contents: |
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: e2-secret
+              namespace: default
+            stringData:
+              password: "bwref:app-pass"

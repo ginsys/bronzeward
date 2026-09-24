@@ -1,0 +1,43 @@
+cases	15
+bases	fixture generated
+rows	210
+unexpected	0
+bases-agree	yes
+outcome	fixture binding early parity	13
+outcome	fixture binding early refused	1
+outcome	fixture binding early rejected	1
+outcome	fixture binding late differs	1
+outcome	fixture binding late parity	12
+outcome	fixture binding late refused	1
+outcome	fixture binding late rejected	1
+outcome	fixture marked early differs	1
+outcome	fixture marked early parity	13
+outcome	fixture marked early rejected	1
+outcome	fixture marked late differs	2
+outcome	fixture marked late parity	8
+outcome	fixture marked late rejected	5
+outcome	fixture tag early differs	1
+outcome	fixture tag early parity	13
+outcome	fixture tag early rejected	1
+outcome	fixture tag late differs	7
+outcome	fixture tag late parity	3
+outcome	fixture tag late rejected	5
+outcome	generated binding early parity	13
+outcome	generated binding early refused	1
+outcome	generated binding early rejected	1
+outcome	generated binding late differs	1
+outcome	generated binding late parity	12
+outcome	generated binding late refused	1
+outcome	generated binding late rejected	1
+outcome	generated marked early differs	1
+outcome	generated marked early parity	13
+outcome	generated marked early rejected	1
+outcome	generated marked late differs	2
+outcome	generated marked late parity	8
+outcome	generated marked late rejected	5
+outcome	generated tag early differs	1
+outcome	generated tag early parity	13
+outcome	generated tag early rejected	1
+outcome	generated tag late differs	7
+outcome	generated tag late parity	3
+outcome	generated tag late rejected	5

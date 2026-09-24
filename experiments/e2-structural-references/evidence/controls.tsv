@@ -1,0 +1,6 @@
+control	fixture	noop-normalization	reformatted
+control	fixture	validates-container	pass
+control	generated	noop-normalization	identical
+control	generated	validates-metal	pass
+control	fixture	key-material-covered	yes (the check alone finds 11 key-like lines)
+control	generated	key-material-covered	yes (the check alone finds 11 key-like lines)

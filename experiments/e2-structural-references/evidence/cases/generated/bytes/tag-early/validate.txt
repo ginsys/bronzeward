@@ -1,0 +1,1 @@
+cases/generated/bytes/tag-early/out.yaml is valid for metal mode

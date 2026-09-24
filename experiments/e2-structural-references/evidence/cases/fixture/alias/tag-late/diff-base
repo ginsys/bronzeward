@@ -1,0 +1,13 @@
+--- base
++++ tag-late
+@@ -18,0 +19,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-user
++                    password: reg-secret
++            registry.example.test:
++                auth:
++                    username: e2-user
++                    password: reg-secret

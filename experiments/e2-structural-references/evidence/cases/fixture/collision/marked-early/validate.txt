@@ -1,0 +1,1 @@
+cases/fixture/collision/marked-early/out.yaml is valid for container mode

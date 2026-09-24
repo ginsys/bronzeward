@@ -1,0 +1,7 @@
+machine:
+    files:
+        - path: /var/etc/e2/config.json
+          op: create
+          permissions: 0o644
+          content: |
+            {"endpoint": "https://e2.example.test", "token": !bwref app-token}

@@ -1,0 +1,13 @@
+--- base
++++ marked-early
+@@ -19,0 +20,10 @@
++    registries:
++        config:
++            mirror.example.test:
++                auth:
++                    username: e2-mirror-user
++                    password: e2-registry-password
++            registry.example.test:
++                auth:
++                    username: '!bwref reg-user'
++                    password: bwref:reg-pass
