@@ -47,16 +47,19 @@ check 'mismatch count' 1 "$(e5_mismatches)"
 
 # sops isolation. A file for a recipient nobody holds; sops's refusal lists every place it looked
 # for an identity. Raw sops must name the caller's ~/.ssh keys (the control: the check can see
-# them), and e5_sops must not.
+# them), and e5_sops must not, while naming its own empty home instead (so an e5_sops run that
+# failed before searching cannot pass).
 if [ -x "$CACHE/sops" ] && [ -x "$CACHE/age-keygen" ]; then
   recipient=$("$CACHE/age-keygen" 2>/dev/null | awk '/^# public key:/ {print $4}')
   printf 'creation_rules:\n  - age: %s\n' "$recipient" >"$E5_OUT/sops.yaml"
   printf '{"k": "v"}\n' | e5_sops - --config "$E5_OUT/sops.yaml" encrypt --input-type json --output-type json \
     /dev/stdin >"$E5_OUT/nobody.enc.json"
   looked() { { "$@" --config "$E5_OUT/sops.yaml" decrypt "$E5_OUT/nobody.enc.json" >/dev/null; } 2>&1 || true; }
-  names_home() { if looked "$@" | grep -qF -- "$HOME/.ssh/"; then echo yes; else echo no; fi; }
-  check 'raw sops looks in the caller ~/.ssh (control)' yes "$(names_home "$CACHE/sops")"
-  check 'e5_sops does not look in the caller ~/.ssh' no "$(names_home e5_sops -)"
+  names() { local where=$1; shift; if looked "$@" | grep -qF -- "$where"; then echo yes; else echo no; fi; }
+  check 'raw sops looks in the caller ~/.ssh (control)' yes "$(names "$HOME/.ssh/" "$CACHE/sops")"
+  check 'raw sops does not look in the empty home (control)' no "$(names "$E5_WORK/no-home/.ssh/" "$CACHE/sops")"
+  check 'e5_sops does not look in the caller ~/.ssh' no "$(names "$HOME/.ssh/" e5_sops -)"
+  check 'e5_sops looks in its own empty home' yes "$(names "$E5_WORK/no-home/.ssh/" e5_sops -)"
 else
   printf 'FAIL sops isolation: no sops/age-keygen in %s (run fixtures/bin/up once)\n' "$CACHE"
   failures=$((failures + 1))

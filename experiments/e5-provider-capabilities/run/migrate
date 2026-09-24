@@ -60,16 +60,25 @@ bao_to_age() { # bao_to_age <kv-path> <version> <name> <gen>: needs the compiler
 }
 age_recipient() { "$CACHE/age-keygen" -y "$A/keys/$1.key"; }
 all_versions_to_age() { # every version the KV path still has; a pruned one is not there to move
-  local path=$1 name=$2 v moved=0 missing=0 current
-  current=$(as metadata bao kv metadata get -format=json "$path" | jq -r .data.current_version) || return 1
+  # Fails unless exactly the versions below oldest_version (the pruned ones) are the ones that fail.
+  local path=$1 name=$2 v moved=0 missing=0 unexpected=0 meta current oldest
+  meta=$(as metadata bao kv metadata get -format=json "$path") || return 1
+  current=$(jq -er .data.current_version <<<"$meta") || return 1
+  oldest=$(jq -er .data.oldest_version <<<"$meta") || return 1
+  echo "current_version $current, oldest_version $oldest"
   for ((v = 1; v <= current; v++)); do
-    if bao_to_age "$path" "$v" "$name" "v$v" >/dev/null 2>&1; then
+    if bao_to_age "$path" "$v" "$name" "v$v" 2>&1; then
       moved=$((moved + 1))
+      [ "$v" -ge "$oldest" ] || unexpected=$((unexpected + 1))
     else
+      echo "version $v: not migrated"
       missing=$((missing + 1))
+      [ "$v" -lt "$oldest" ] || unexpected=$((unexpected + 1))
     fi
   done
-  printf 'versions 1..%s: moved %s, not available %s\n' "$current" "$moved" "$missing"
+  printf 'versions 1..%s: moved %s, not available %s, outside the pruned range %s\n' \
+    "$current" "$moved" "$missing" "$unexpected"
+  [ "$unexpected" -eq 0 ]
 }
 sops_to_bao() { # import: needs the sops compiler key and the publisher token
   sops_as compiler-2 decrypt --extract '["value"]' "$D/secrets/$1.enc.json" | as publisher kv_put_stdin "$2"
