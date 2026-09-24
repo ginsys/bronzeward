@@ -177,11 +177,13 @@ s2_retry() { # an identical retry returns the release; a different one is refuse
 }
 
 # A writer races a publication holding its source comparison open. With the lock the writer
-# waits and the release is never stale at its commit; the control drops the lock.
+# waits and the release is never stale at its commit; the control drops the lock. The row only
+# counts if the two overlapped: the writer waited out most of the 3s hold, or, where the control
+# lets it through, the release is stale at its commit.
 s2_race() {
-  local backend=$1 variant=$2 flag=() stale=0
+  local backend=$1 variant=$2 flag=() stale=0 overlap="out:write~elapsed_ms=[1-9][0-9]{3} "
   [ "$variant" = unlocked-control ] && flag=(-no-source-lock)
-  [ "$variant" = unlocked-control ] && [ "$backend" = postgres ] && stale=1
+  [ "$variant" = unlocked-control ] && [ "$backend" = postgres ] && stale=1 overlap=rc:write=0
   row_begin s2 "$backend" "race-$variant"
   s2_setup
   e4_bg publish publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 3s "${flag[@]}"
@@ -189,7 +191,7 @@ s2_race() {
   e4 write update -actor w -read 0
   e4_reap publish
   e4_read s2
-  row_end rc:publish=0 rc:write=0 releases=1 stale_at_commit=$stale
+  row_end rc:publish=0 rc:write=0 releases=1 stale_at_commit=$stale "$overlap"
 }
 
 # ---- S3 unique operation intent ----
@@ -263,11 +265,12 @@ s4_fenced() {
 }
 
 # An attempt holds its transaction after the ownership check while a takeover runs. Fenced, the
-# takeover waits; the check-then-insert control lets it in on PostgreSQL.
+# takeover waits; the check-then-insert control lets it in on PostgreSQL. As in S2, the row only
+# counts if the takeover waited out the hold or the control shows the stale attempt.
 s4_race_attempt() {
-  local backend=$1 variant=$2 flag=() stale=0
+  local backend=$1 variant=$2 flag=() stale=0 overlap="out:takeover~elapsed_ms=[1-9][0-9]{3} "
   [ "$variant" = check-then-insert-control ] && flag=(-check-then-insert)
-  [ "$variant" = check-then-insert-control ] && [ "$backend" = postgres ] && stale=1
+  [ "$variant" = check-then-insert-control ] && [ "$backend" = postgres ] && stale=1 overlap=rc:takeover=0
   row_begin s4 "$backend" "attempt-race-$variant"
   migrate
   e4 intent intent -machine m1 -key k1 -owner a
@@ -276,13 +279,14 @@ s4_race_attempt() {
   e4 takeover takeover -op 1 -owner b -expect 1
   e4_reap attempt
   e4_read s4
-  row_end rc:attempt=0 rc:takeover=0 attempts=1 takeovers=1 stale_attempts=$stale
+  row_end rc:attempt=0 rc:takeover=0 attempts=1 takeovers=1 stale_attempts=$stale "$overlap"
 }
 
 # ---- S5 queue claims ----
 
 s5_workers() { # eight worker processes drain 400 jobs
-  local backend=$1 claim_mode=$2 at i twice='jobs_claimed_twice=0' claims='claims=400'
+  local backend=$1 claim_mode=$2 at i twice='jobs_claimed_twice=0' claims='claims=400' \
+    completions='completions=400' completed_twice='jobs_completed_twice=0'
   row_begin s5 "$backend" "workers-$claim_mode"
   migrate
   e4 seed seed-jobs -n 400
@@ -291,10 +295,15 @@ s5_workers() { # eight worker processes drain 400 jobs
   for i in 1 2 3 4 5 6 7 8; do e4_reap "w$i"; done
   e4_read s5
   # The control must fire where the database allows it: PostgreSQL re-evaluates only the id
-  # predicate after waiting on a row another claimer changed.
-  [ "$claim_mode" = naive ] && [ "$backend" = postgres ] && twice='jobs_claimed_twice>0' claims='claims>400'
+  # predicate after waiting on a row another claimer changed. That can also take a job that is
+  # already done, so its completions are recorded rather than judged: the fence refuses a stale
+  # completion, and cannot refuse one made under a fence the duplicate claim issued.
+  if [ "$claim_mode" = naive ] && [ "$backend" = postgres ]; then
+    twice='jobs_claimed_twice>0' claims='claims>400' completions=seen:completions
+    completed_twice=seen:jobs_completed_twice
+  fi
   row_end rc:w1=0 rc:w2=0 rc:w3=0 rc:w4=0 rc:w5=0 rc:w6=0 rc:w7=0 rc:w8=0 done=400 "$claims" "$twice" \
-    completed_on_stale_fence=0
+    "$completions" "$completed_twice"
 }
 
 s5_lease() {
@@ -378,7 +387,7 @@ s6_concurrent() {
   if [ "$variant" = locked ]; then
     row_end rc:setup=0 "$expect_failed" migration:1=r0 versions_recorded=4 applied_total=3 has_job_state_check=1
   else
-    row_end rc:setup=0 "$expect_failed" 'versions_recorded>0'
+    row_end rc:setup=0 "$expect_failed" 'versions_recorded>0' applied_total=3
   fi
 }
 
@@ -489,6 +498,7 @@ uncommitted=$(git -C "$REPO_DIR" status --porcelain -- experiments/e4-database-s
   printf 'started\t%s\n' "$(date -u +%FT%TZ)"
   printf 'go\t%s\n' "$(go version)"
   printf 'host sqlite3\t%s\n' "$(sqlite3 --version | cut -d' ' -f1)"
+  printf 'postgres default isolation\t%s\n' "$(e4_psql -c 'SHOW default_transaction_isolation')"
   printf 'postgres image\t%s\n' "$POSTGRES_IMAGE"
   printf 'postgres server\t%s\n' "$(e4_psql -c 'SELECT version()')"
   E4_BACKEND=sqlite E4_SQLITE_PATH=$E4_SQLITE_DIR/version.db "$E4_BIN" version | sed -n 's/.*engine="\(.*\)"/linked sqlite\t\1/p'

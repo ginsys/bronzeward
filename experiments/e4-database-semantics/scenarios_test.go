@@ -393,7 +393,8 @@ func TestS5WorkersClaimEachJobOnce(t *testing.T) {
 			want(t, r, "done", "60")
 			want(t, r, "claims", "60")
 			want(t, r, "jobs_claimed_twice", "0")
-			want(t, r, "completed_on_stale_fence", "0")
+			want(t, r, "completions", "60")
+			want(t, r, "jobs_completed_twice", "0")
 		})
 	}
 }
