@@ -31,6 +31,10 @@ Each row also carries a `kind`, the distinction acceptance criterion 2 asks for:
 | `unsupported` | the candidate has no such capability; named, never left blank |
 | `-` | a procedural step (a seal, a crash, a snapshot) that the cells after it depend on; not a capability claim |
 
+`versioned` is reserved for behaviour the provider itself enforces. The local age store's
+generations are file names that only the writer's convention keeps immutable, and SOPS keeps no
+versions, so their cells are primitives.
+
 ## Why shell, not Go
 
 The issue's limits say the pinned `age` and `sops` are command-line versions and that a library

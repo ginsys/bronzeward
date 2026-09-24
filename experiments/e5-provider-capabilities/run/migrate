@@ -27,7 +27,7 @@ kv_get() { bao kv get -field=value "$@"; }
 
 # --- helpers: values only ever cross a pipe inside one process ----------------------------------------
 
-age_to_bao() { # age_to_bao <name> <gen> <kv-path>: needs the age compiler key and the publisher token
+age_to_bao() { # age_to_bao <name> <gen> <kv-path>: needs the age compiler key, the publisher and admin tokens
   age -d -i "$A/keys/compiler-2.key" "$A/objects/$1/$2.age" | as publisher kv_put_stdin "$3" || return 1
   # The source's creation time is not the target's; carry it as metadata or lose it.
   as admin bao kv metadata put -custom-metadata="source=age-store:$1/$2" \
@@ -84,11 +84,11 @@ bao_to_sops() { # export: needs the compiler token; any holder of a recipient ca
 
 # --- age-store to OpenBao -----------------------------------------------------------------------------
 
-cell $C age-to-openbao compiler+publisher ok versioned -- age_to_bao app-token g1 secret/gen/migrated/app-token/g1
+cell $C age-to-openbao compiler+publisher+admin ok versioned -- age_to_bao app-token g1 secret/gen/migrated/app-token/g1
 cell $C age-to-openbao compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" as compiler kv_get secret/gen/migrated/app-token/g1
 cell $C age-to-openbao metadata ok metadata -- created_times app-token g1 secret/gen/migrated/app-token/g1
 # Migrating the same generation again must not replace it: the publisher may create, never update.
-cell $C age-to-openbao compiler+publisher denied versioned -- age_to_bao app-token g1 secret/gen/migrated/app-token/g1
+cell $C age-to-openbao compiler+publisher+admin denied versioned -- age_to_bao app-token g1 secret/gen/migrated/app-token/g1
 cell $C age-artifact-to-transit executor+compiler ok primitive -- artifact_age_to_transit rel-1
 cell $C age-artifact-to-transit executor ok primitive -- open_transit "$E5_WORK/migrated-rel-1.ct" \
   "$(sha256sum <"$E5_WORK/age-store/artifact.yaml" | cut -d' ' -f1)"

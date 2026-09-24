@@ -182,4 +182,15 @@ cell $C $col compiler fail versioned -- as compiler kv_get secret/gen/app-token/
 cell $C $col executor ok versioned -- as executor decrypt "$W/artifact-v1.ct"
 cell $C $col executor ok versioned -- as executor decrypt "$W/artifact-v1-rewrapped.ct"
 
-say "openbao: $(e5_mismatches) mismatch(es) so far in $E5_CELLS"
+# --- create-only is the publisher's policy, not the path's -------------------------------------------
+# The publisher cannot replace a generation (its policy has no update) and CAS refuses a second
+# create, but gen/ paths do not set cas_required: an identity holding update adds a version. The
+# metadata records it, and a read pinned to version 1 still returns the original.
+col='create-read-version'
+cell $C $col publisher ok versioned -- as publisher kv_put app-token-g1 -cas=0 secret/gen/probe/g1
+cell $C $col admin ok versioned -- as admin kv_put app-token-g2 secret/gen/probe/g1
+cell $C $col metadata ok metadata -- as metadata versions secret/gen/probe/g1
+cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g2)" as compiler kv_get secret/gen/probe/g1
+cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" as compiler kv_get -version=1 secret/gen/probe/g1
+
+say "openbao:$(e5_mismatches) mismatch(es) so far in $E5_CELLS"

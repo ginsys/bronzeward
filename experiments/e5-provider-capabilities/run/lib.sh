@@ -122,7 +122,7 @@ e5_value_file() { printf '%s' "$E5_WORK/values/$1"; }
 # HOME and XDG_CONFIG_HOME point at an empty directory and every key variable is cleared.
 e5_sops() {
   local nohome=$E5_WORK/no-home
-  local -a set=(HOME="$nohome" XDG_CONFIG_HOME="$nohome/.config")
+  local -a set=(HOME="$nohome" XDG_CONFIG_HOME="$nohome/.config" TZ=UTC)
   [ "$1" = - ] || set+=(SOPS_AGE_KEY_FILE="$1")
   shift
   mkdir -p -- "$nohome"
