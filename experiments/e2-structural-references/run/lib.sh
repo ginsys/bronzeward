@@ -4,8 +4,8 @@
 #
 # It reuses fixtures/lib.sh for the one thing E2 needs from it: the pinned talosctl, fetched and
 # checked against the digest in fixtures/versions.env, and run only through the wrapper that checks
-# it. E2 starts no fixture (the composition and validation it measures are offline talosctl
-# commands), so nothing here reads .state; loading the file still needs the docker CLI on PATH.
+# it. The composition and validation E2 measures are offline talosctl commands; run/all reads the
+# running fixture's .state only for one of its two bases. Loading the file needs the docker CLI.
 #
 # Phase-0 evidence for the structural-reference experiment (ginsys/bronzeward issue 3). Not v1 tooling.
 

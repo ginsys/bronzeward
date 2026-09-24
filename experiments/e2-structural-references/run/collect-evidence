@@ -52,17 +52,25 @@ for b in fixture generated; do
   rewrite "$E2_OUT/base/$b.validate.txt" "$incoming/base/$b.validate.txt"
 done
 
+# scan <fixed-strings-file>: the files under incoming that hold any of the strings. grep exits 1
+# for no match; any other failure (an unreadable file) ends the run rather than reading as clean.
+scan() {
+  local rc=0
+  grep -rlF -f "$1" -- "$incoming" || rc=$?
+  [ "$rc" -le 1 ] || die "the leak scan failed (grep exit $rc)"
+}
+
 # The control: a file holding one pattern must be found, or the scan below proves nothing.
 head -n 1 -- "$E2_PATTERNS" >"$incoming/leak-control"
-hits=$(grep -rlF -f "$E2_PATTERNS" -- "$incoming" || true)
+hits=$(scan "$E2_PATTERNS")
 [ "$hits" = "$incoming/leak-control" ] && control=fired || control="did not fire as expected"
 rm -- "$incoming/leak-control"
 [ "$control" = fired ] || die "leak-scan control $control; the scan cannot be trusted"
 
 # Refusals. A match is reported by file only, never by content.
-hits=$(grep -rlF -f "$E2_PATTERNS" -- "$incoming" || true)
+hits=$(scan "$E2_PATTERNS")
 [ -z "$hits" ] || die "collected evidence matches a leak-refusal pattern in: $hits"
-hits=$(grep -rlF -- "$HOME/" "$incoming" || true)
+hits=$(scan <(printf '%s/\n' "$HOME"))
 [ -z "$hits" ] || die "collected evidence names a path in the operator's home in: $hits"
 printf 'leak-scan\t%s patterns\tcontrol %s\t0 hits in %s files\n' "$(wc -l <"$E2_PATTERNS")" "$control" \
   "$(find "$incoming" -type f | wc -l)" >"$incoming/leak-scan.tsv"
