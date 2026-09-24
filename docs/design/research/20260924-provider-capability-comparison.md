@@ -254,7 +254,7 @@ recipient.
 
 Every sops call now goes through `e5_sops`, which points `HOME` and `XDG_CONFIG_HOME` at an empty
 directory and clears every `SOPS_AGE_*` key variable. `run/test-lib` checks this against raw sops
-as a control: raw sops must name `~/.ssh`, and `e5_sops` must not. `run/collect-evidence` now also
+as a control: raw sops must name `$HOME/.ssh`, and `e5_sops` must not. `run/collect-evidence` now also
 refuses any path in the operator's home.
 
 This is also a custody finding (§6.3): identities a caller never passed to sops are candidates for
