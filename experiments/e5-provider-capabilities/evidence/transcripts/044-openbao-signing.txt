@@ -6,7 +6,7 @@ deletion_allowed          false
 derived                   false
 exportable                false
 imported_key              false
-keys                      map[1:map[certificate_chain: creation_time:2026-09-24T13:05:41.037632171Z name:ed25519 public_key:H0WGF/GwiSrp9AsKPQih0ImVgcCaLVLKyUSnzjvoa3M=]]
+keys                      map[1:map[certificate_chain: creation_time:2026-09-24T13:57:50.048980143Z name:ed25519 public_key:T9E09EeQADHT3Ukgmh4judqyOZ/T/IGl6EbTVz+2YYE=]]
 latest_version            1
 min_available_version     0
 min_decryption_version    1
