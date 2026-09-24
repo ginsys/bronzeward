@@ -26,8 +26,10 @@ case $RC_OUT in
   /*) ;;
   *) die "RC_OUT must be an absolute path" ;;
 esac
-[ "${RC_OUT#"$REPO_DIR"}" = "$RC_OUT" ] ||
-  die "RC_OUT is inside the checkout; a bundle there would not survive fixtures/bin/down"
+# On a path boundary: a sibling such as <checkout>-evidence is outside it.
+case $RC_OUT/ in
+  "$REPO_DIR"/*) die "RC_OUT is inside the checkout; a bundle there would not survive fixtures/bin/down" ;;
+esac
 
 RC_ROWS=$RC_OUT/verdicts.tsv
 RC_TRANSCRIPTS=$RC_OUT/transcripts

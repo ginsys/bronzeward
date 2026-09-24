@@ -49,15 +49,22 @@ for f in leak-scan.txt injections.log; do
   rewrite "$RC_OUT/states/final/$f" "$incoming/$f"
 done
 
-# Refusals. A match is reported by file only, never by content.
-hits=$(grep -rlF -f "$STATE/scan-patterns.txt" -- "$incoming" || true)
-[ -z "$hits" ] || die "collected evidence matches the fixture's leak-scan patterns in: $hits"
-hits=$(grep -rl 'AGE-SECRET-KEY-' -- "$incoming" || true)
-[ -z "$hits" ] || die "collected evidence holds an age secret key in: $hits"
-hits=$(grep -rlE '\b(s|hvs)\.[A-Za-z0-9]{20,}' -- "$incoming" || true)
-[ -z "$hits" ] || die "collected evidence holds what looks like an OpenBao token in: $hits"
-hits=$(grep -rlF -- "$HOME/" "$incoming" || true)
-[ -z "$hits" ] || die "collected evidence names a path in the operator's home in: $hits"
+# Refusals. A match is reported by file only, never by content. grep exits 1 for no match and 2
+# for an error (an unreadable file or pattern file); an error must not read as clean.
+refuse() { # refuse <what the evidence would hold> <grep arguments...>
+  local what=$1 hits rc=0
+  shift
+  hits=$(grep -rl "$@") || rc=$?
+  case $rc in
+    0) die "collected evidence $what in: $hits" ;;
+    1) ;;
+    *) die "the scan for evidence that $what could not run (grep exit $rc); nothing was collected" ;;
+  esac
+}
+refuse "matches the fixture's leak-scan patterns" -F -f "$STATE/scan-patterns.txt" -- "$incoming"
+refuse "holds an age secret key" -- 'AGE-SECRET-KEY-' "$incoming"
+refuse "holds what looks like an OpenBao token" -E -- '\b(s|hvs)\.[A-Za-z0-9]{20,}' "$incoming"
+refuse "names a path in the operator's home" -F -- "$HOME/" "$incoming"
 
 rm -rf -- "$dest"
 mv -T -- "$incoming" "$dest"
