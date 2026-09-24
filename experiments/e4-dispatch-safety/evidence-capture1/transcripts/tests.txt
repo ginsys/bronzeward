@@ -1,0 +1,36 @@
+==> 023-tests-go-test <==
+==> pre (rc ) <==
+pre digest=d28b7d9731a1cd49908cc653c32e95f98533eff1e50b1eebe5c73ecf14324962 version=20 machined_ok=19 machined_invalid=1
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:10:52.737079231Z actor=harness event=setup machine=m1 applied=d28b7d9731a1 scope_index=true
+==> read-setup (rc 0) <==
+applied|d28b7d9731a1cd49908cc653c32e95f98533eff1e50b1eebe5c73ecf14324962
+machines|1
+==> go-test (rc 0) <==
+$ E4X_TEST_PG_DSN=<fixture> go test -count=1 -p 1 -v ./...
+=== RUN   TestCommitRefusesRevokedApproval
+--- PASS: TestCommitRefusesRevokedApproval (0.07s)
+=== RUN   TestCommitRefusesStaleEvidence
+--- PASS: TestCommitRefusesStaleEvidence (0.07s)
+=== RUN   TestCommitRefusesHeldScope
+--- PASS: TestCommitRefusesHeldScope (0.09s)
+=== RUN   TestCommitWithoutScopeIndexAdmitsSecondOperation
+--- PASS: TestCommitWithoutScopeIndexAdmitsSecondOperation (0.08s)
+=== RUN   TestAttemptRefusesLostOwnership
+--- PASS: TestAttemptRefusesLostOwnership (0.08s)
+=== RUN   TestAttemptAfterRevocationCancels
+--- PASS: TestAttemptAfterRevocationCancels (0.08s)
+=== RUN   TestCompleteNeedsEveryAttemptAccounted
+--- PASS: TestCompleteNeedsEveryAttemptAccounted (0.09s)
+=== RUN   TestEvidenceMayShowArtifactOnlyOnRetry
+--- PASS: TestEvidenceMayShowArtifactOnlyOnRetry (0.10s)
+=== RUN   TestRetryRefusedAfterNewerTimelineFact
+--- PASS: TestRetryRefusedAfterNewerTimelineFact (0.09s)
+=== RUN   TestNormalizeReadBack
+--- PASS: TestNormalizeReadBack (0.00s)
+=== RUN   TestClassifyApply
+--- PASS: TestClassifyApply (0.00s)
+PASS
+ok  	github.com/ginsys/bronzeward/experiments/e4-dispatch-safety	0.766s
+==> end <==

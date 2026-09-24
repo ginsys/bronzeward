@@ -1,0 +1,247 @@
+==> 018-kill-evidence <==
+==> pre (rc ) <==
+pre digest=5007c88b7d14332959afcb7752743feae3320df9c99a8ed81d4531036890f38a version=16 machined_ok=15 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:10:48.575420605Z actor=harness event=setup machine=m1 applied=5007c88b7d14 scope_index=true
+==> read-setup (rc 0) <==
+applied|5007c88b7d14332959afcb7752743feae3320df9c99a8ed81d4531036890f38a
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/018-kill-evidence/a.yaml
+2026-09-24T23:10:48.72030984Z actor=harness event=planned id=A artifact=2478412aa2bd
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:10:48.73315622Z actor=harness event=approved id=A
+==> x (rc 137) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:10:48.779415392Z actor=X event=observation id=1 purpose=evidence digest=5007c88b7d14
+2026-09-24T23:10:48.779483904Z actor=X event=gate-reached gate=evidence
+# SIGKILL sent to 3228022
+==> read-op-A-killed (rc 0) <==
+state|none
+owner|none
+attempts|0
+attempt_owners|none
+stale_attempts|0
+responses|none
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|0
+baseline_rev|1
+timeline|planned,approved
+==> y (rc 0) <==
+$ E4X_OWNER=Y e4x run -id A
+2026-09-24T23:10:48.931272959Z actor=Y event=observation id=2 purpose=evidence digest=5007c88b7d14
+2026-09-24T23:10:48.937292103Z actor=Y event=committed id=A owner=Y gen=1 mode=protocol
+2026-09-24T23:10:48.942443317Z actor=Y event=attempt id=A n=1 owner=Y gen=1 deadline=2026-09-24T23:11:48.939422Z
+2026-09-24T23:10:48.942467153Z actor=Y event=send id=A n=1 transport_deadline=2026-09-24T23:11:03.942466403Z
+2026-09-24T23:10:48.967563434Z actor=Y event=response id=A n=1 class=accepted elapsed_ms=25 detail="Applied configuration without a reboot"
+2026-09-24T23:10:48.97073473Z actor=Y event=recorded id=A n=1 state=verifying
+2026-09-24T23:10:49.00618999Z actor=Y event=observation id=3 purpose=completion digest=2478412aa2bd
+2026-09-24T23:10:49.009800345Z actor=Y event=classified id=A state=completed
+==> read-op-A (rc 0) <==
+state|completed
+owner|Y@1
+attempts|1
+attempt_owners|1:Y@1
+stale_attempts|0
+responses|1:accepted
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,response,verifying,completed
+==> worker (rc ) <==
+2026-09-24T23:10:49.193Z digest=2478412aa2bda2750847458543bd3f2a4f82bab75700526cceb3c3c342569534 version=17 updated=2026-09-24T23:10:48Z machined_ok=16 machined_invalid=0
+==> 019-kill-committed <==
+==> pre (rc ) <==
+pre digest=2478412aa2bda2750847458543bd3f2a4f82bab75700526cceb3c3c342569534 version=17 machined_ok=16 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:10:49.424452815Z actor=harness event=setup machine=m1 applied=2478412aa2bd scope_index=true
+==> read-setup (rc 0) <==
+applied|2478412aa2bda2750847458543bd3f2a4f82bab75700526cceb3c3c342569534
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/019-kill-committed/a.yaml
+2026-09-24T23:10:49.577255246Z actor=harness event=planned id=A artifact=92aa7d2c735b
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:10:49.589929859Z actor=harness event=approved id=A
+==> x (rc 137) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:10:49.632858355Z actor=X event=observation id=1 purpose=evidence digest=2478412aa2bd
+2026-09-24T23:10:49.638789869Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-24T23:10:49.638843739Z actor=X event=gate-reached gate=committed
+# SIGKILL sent to 3230657
+==> read-op-A-killed (rc 0) <==
+state|committed
+owner|X@1
+attempts|0
+attempt_owners|none
+stale_attempts|0
+responses|none
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|0
+baseline_rev|1
+timeline|planned,approved,committed
+==> takeover (rc 0) <==
+$ E4X_OWNER=harness e4x takeover -id A -actor Y
+2026-09-24T23:10:49.76300329Z actor=Y event=takeover id=A owner=Y gen=2
+==> y (rc 0) <==
+$ E4X_OWNER=Y e4x recover -id A -retry
+2026-09-24T23:10:49.808279252Z actor=Y event=observation id=2 purpose=completion digest=2478412aa2bd
+2026-09-24T23:10:49.812264188Z actor=Y event=classified id=A safe_to_retry_rev=7
+2026-09-24T23:10:49.817508365Z actor=Y event=attempt id=A n=1 owner=Y gen=2 deadline=2026-09-24T23:11:49.814604Z
+2026-09-24T23:10:49.817532585Z actor=Y event=send id=A n=1 transport_deadline=2026-09-24T23:11:04.817531958Z
+2026-09-24T23:10:49.84146666Z actor=Y event=response id=A n=1 class=accepted elapsed_ms=23 detail="Applied configuration without a reboot"
+2026-09-24T23:10:49.844815165Z actor=Y event=recorded id=A n=1 state=verifying
+2026-09-24T23:10:49.87739614Z actor=Y event=observation id=3 purpose=completion digest=92aa7d2c735b
+2026-09-24T23:10:49.880772429Z actor=Y event=classified id=A state=completed
+==> read-op-A (rc 0) <==
+state|completed
+owner|Y@2
+attempts|1
+attempt_owners|1:Y@2
+stale_attempts|0
+responses|1:accepted
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,ownership,classified,attempt,response,verifying,completed
+==> worker (rc ) <==
+2026-09-24T23:10:50.067Z digest=92aa7d2c735b1114407b1e8b094513ba2fe17eed13d2d9b2eb8b1080fc7426df version=18 updated=2026-09-24T23:10:49Z machined_ok=17 machined_invalid=0
+==> 020-kill-response <==
+==> pre (rc ) <==
+pre digest=92aa7d2c735b1114407b1e8b094513ba2fe17eed13d2d9b2eb8b1080fc7426df version=18 machined_ok=17 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:10:50.301946898Z actor=harness event=setup machine=m1 applied=92aa7d2c735b scope_index=true
+==> read-setup (rc 0) <==
+applied|92aa7d2c735b1114407b1e8b094513ba2fe17eed13d2d9b2eb8b1080fc7426df
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/020-kill-response/a.yaml
+2026-09-24T23:10:50.451747787Z actor=harness event=planned id=A artifact=3bebe743109c
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:10:50.464505383Z actor=harness event=approved id=A
+==> x (rc 137) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:10:50.506382933Z actor=X event=observation id=1 purpose=evidence digest=92aa7d2c735b
+2026-09-24T23:10:50.512446131Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-24T23:10:50.517602055Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-24T23:11:50.514625Z
+2026-09-24T23:10:50.517620209Z actor=X event=send id=A n=1 transport_deadline=2026-09-24T23:11:05.517619485Z
+2026-09-24T23:10:50.540698667Z actor=X event=response id=A n=1 class=accepted elapsed_ms=23 detail="Applied configuration without a reboot"
+2026-09-24T23:10:50.540753587Z actor=X event=gate-reached gate=response
+# SIGKILL sent to 3233253
+==> read-op-A-killed (rc 0) <==
+state|sending
+owner|X@1
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:none
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|0
+baseline_rev|1
+timeline|planned,approved,committed,attempt
+==> takeover (rc 0) <==
+$ E4X_OWNER=harness e4x takeover -id A -actor Y
+2026-09-24T23:10:50.685425805Z actor=Y event=takeover id=A owner=Y gen=2
+==> y-unaccounted (rc 4) <==
+$ E4X_OWNER=Y e4x recover -id A -retry
+2026-09-24T23:10:50.696223059Z actor=Y event=unaccounted id=A n=1 owner=X gen=1
+==> account (rc 0) <==
+$ E4X_OWNER=harness e4x account -id A -n 1 -evidence executor X killed after talosctl returned, and reaped
+2026-09-24T23:10:50.708240127Z actor=harness event=accounted id=A n=1
+==> y (rc 0) <==
+$ E4X_OWNER=Y e4x recover -id A -retry
+2026-09-24T23:10:50.751692882Z actor=Y event=observation id=2 purpose=completion digest=3bebe743109c
+2026-09-24T23:10:50.756122106Z actor=Y event=classified id=A state=completed
+==> read-op-A (rc 0) <==
+state|completed
+owner|Y@2
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:none
+accounted|1
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,ownership,accounted,completed
+==> worker (rc ) <==
+2026-09-24T23:10:50.937Z digest=3bebe743109c83fac88c05b7e6a2da71be1efee8b0b825c84ccddf0caec938d8 version=19 updated=2026-09-24T23:10:50Z machined_ok=18 machined_invalid=0
+==> 021-kill-complete <==
+==> pre (rc ) <==
+pre digest=3bebe743109c83fac88c05b7e6a2da71be1efee8b0b825c84ccddf0caec938d8 version=19 machined_ok=18 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-24T23:10:51.1742908Z actor=harness event=setup machine=m1 applied=3bebe743109c scope_index=true
+==> read-setup (rc 0) <==
+applied|3bebe743109c83fac88c05b7e6a2da71be1efee8b0b825c84ccddf0caec938d8
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/021-kill-complete/a.yaml
+2026-09-24T23:10:51.30573317Z actor=harness event=planned id=A artifact=d28b7d9731a1
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-24T23:10:51.31849832Z actor=harness event=approved id=A
+==> x (rc 137) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-24T23:10:51.361027636Z actor=X event=observation id=1 purpose=evidence digest=3bebe743109c
+2026-09-24T23:10:51.367160459Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-24T23:10:51.372223882Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-24T23:11:51.369222Z
+2026-09-24T23:10:51.372238189Z actor=X event=send id=A n=1 transport_deadline=2026-09-24T23:11:06.372237756Z
+2026-09-24T23:10:51.396068005Z actor=X event=response id=A n=1 class=accepted elapsed_ms=23 detail="Applied configuration without a reboot"
+2026-09-24T23:10:51.399284621Z actor=X event=recorded id=A n=1 state=verifying
+2026-09-24T23:10:51.432448904Z actor=X event=observation id=2 purpose=completion digest=d28b7d9731a1
+2026-09-24T23:10:51.432524781Z actor=X event=gate-reached gate=complete
+# SIGKILL sent to 3235909
+==> read-op-A-killed (rc 0) <==
+state|verifying
+owner|X@1
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:accepted
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|0
+baseline_rev|1
+timeline|planned,approved,committed,attempt,response,verifying
+==> takeover (rc 0) <==
+$ E4X_OWNER=harness e4x takeover -id A -actor Y
+2026-09-24T23:10:51.602369563Z actor=Y event=takeover id=A owner=Y gen=2
+==> y (rc 0) <==
+$ E4X_OWNER=Y e4x recover -id A
+2026-09-24T23:10:51.644581919Z actor=Y event=observation id=3 purpose=completion digest=d28b7d9731a1
+2026-09-24T23:10:51.64993022Z actor=Y event=classified id=A state=completed
+==> read-op-A (rc 0) <==
+state|completed
+owner|Y@2
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:accepted
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,response,verifying,ownership,completed
+==> worker (rc ) <==
+2026-09-24T23:10:51.837Z digest=d28b7d9731a1cd49908cc653c32e95f98533eff1e50b1eebe5c73ecf14324962 version=20 updated=2026-09-24T23:10:51Z machined_ok=19 machined_invalid=0
+==> end <==

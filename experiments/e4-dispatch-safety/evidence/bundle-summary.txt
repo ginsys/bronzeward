@@ -1,0 +1,76 @@
+# fixtures/bin/evidence bundle, captured after run/all with E4D_OUT as an extra scan path
+## versions.txt
+captured        2026-09-24T23:26:14Z
+manifest commit 1f28961528ed8ee826093328f49457c664be1bcc
+created at      1f28961528ed8ee826093328f49457c664be1bcc
+host            Linux 7.1.3+deb13-amd64 x86_64
+docker          client 26.1.5+dfsg1 server 26.1.5+dfsg1
+compose         2.27.1
+tools           talosctl, sops, age, age-keygen in .cache checked against the manifest digests
+talosctl        Client: Talos v1.13.6
+talos nodes     10.55.0.2 v1.13.6, 10.55.0.3 v1.13.6
+kubernetes      1.36.2 (requested)
+openbao         OpenBao v2.6.1 (ba7ad8861d0578cd4da4f7b9e5a6756d30484f8f), committed 2026-07-22T14:22:20Z
+postgres        17.11
+sops            sops 3.13.3
+age             v1.3.2
+image          bw-fixture-postgres docker.io/library/postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995 -> sha256:79bd7c99e923138f136f8009d6bffa66e21e9d4fda5c0c561b00fc9c90cfe537 running=true paused=false networks=[bw-fixture_default ]
+image          bw-fixture-openbao ghcr.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0 -> sha256:fcf218b8c39fb58a8efa4758a68667342ef3c5e5a2b18839b40285a39f7585db running=true paused=false networks=[bw-fixture_default ]
+image          bw-fixture-controlplane-1 ghcr.io/siderolabs/talos:v1.13.6@sha256:f2e2b7e5812b2b59c1acfe6af7516231aeeef79fb1ffff6b57ad987f8dd47a6e -> sha256:96e24ac256111a3fcb7a43a0abe1e5acf6fe23a1b8ffdfd0530eac41c4d10ab1 running=true paused=false networks=[bw-fixture ]
+image          bw-fixture-worker-1 ghcr.io/siderolabs/talos:v1.13.6@sha256:f2e2b7e5812b2b59c1acfe6af7516231aeeef79fb1ffff6b57ad987f8dd47a6e -> sha256:96e24ac256111a3fcb7a43a0abe1e5acf6fe23a1b8ffdfd0530eac41c4d10ab1 running=true paused=false networks=[bw-fixture ]
+## leak-scan.txt (files matched; canary-control files are the planted positive controls, scan-patterns.txt is the pattern list itself)
+1 <repo>/fixtures/.state/data/canary-control.txt
+3 <E4D_OUT>/parts/001-revocation-happy/a-base.yaml
+3 <E4D_OUT>/parts/001-revocation-happy/a.yaml
+3 <E4D_OUT>/parts/002-revocation-before-commit/a-base.yaml
+3 <E4D_OUT>/parts/002-revocation-before-commit/a.yaml
+3 <E4D_OUT>/parts/003-revocation-during-commit/a-base.yaml
+3 <E4D_OUT>/parts/003-revocation-during-commit/a.yaml
+3 <E4D_OUT>/parts/004-revocation-after-commit/a-base.yaml
+3 <E4D_OUT>/parts/004-revocation-after-commit/a.yaml
+3 <E4D_OUT>/parts/005-revocation-after-attempt/a-base.yaml
+3 <E4D_OUT>/parts/005-revocation-after-attempt/a.yaml
+3 <E4D_OUT>/parts/006-revocation-naive-control/a-base.yaml
+3 <E4D_OUT>/parts/006-revocation-naive-control/a.yaml
+3 <E4D_OUT>/parts/007-ownership-before-attempt/a-base.yaml
+3 <E4D_OUT>/parts/007-ownership-before-attempt/a.yaml
+3 <E4D_OUT>/parts/008-ownership-nofence-control/a-base.yaml
+3 <E4D_OUT>/parts/008-ownership-nofence-control/a.yaml
+3 <E4D_OUT>/parts/009-ownership-two-executors/a-base.yaml
+3 <E4D_OUT>/parts/009-ownership-two-executors/a.yaml
+3 <E4D_OUT>/parts/010-scope-held/a-base.yaml
+3 <E4D_OUT>/parts/010-scope-held/a.yaml
+3 <E4D_OUT>/parts/010-scope-held/b2-base.yaml
+3 <E4D_OUT>/parts/010-scope-held/b2.yaml
+3 <E4D_OUT>/parts/010-scope-held/b-base.yaml
+3 <E4D_OUT>/parts/010-scope-held/b.yaml
+3 <E4D_OUT>/parts/011-scope-noscope-control/a-base.yaml
+3 <E4D_OUT>/parts/011-scope-noscope-control/a.yaml
+3 <E4D_OUT>/parts/011-scope-noscope-control/b-base.yaml
+3 <E4D_OUT>/parts/011-scope-noscope-control/b.yaml
+3 <E4D_OUT>/parts/012-fault-netsplit-send/a-base.yaml
+3 <E4D_OUT>/parts/012-fault-netsplit-send/a.yaml
+3 <E4D_OUT>/parts/013-fault-early-accounting-hazard/a-base.yaml
+3 <E4D_OUT>/parts/013-fault-early-accounting-hazard/a.yaml
+3 <E4D_OUT>/parts/014-fault-pause-send/a-base.yaml
+3 <E4D_OUT>/parts/014-fault-pause-send/a.yaml
+3 <E4D_OUT>/parts/015-fault-direct-netsplit/a-base.yaml
+3 <E4D_OUT>/parts/015-fault-direct-netsplit/a.yaml
+3 <E4D_OUT>/parts/016-fault-db-restart/a-base.yaml
+3 <E4D_OUT>/parts/016-fault-db-restart/a.yaml
+3 <E4D_OUT>/parts/017-fault-verify-netsplit/a-base.yaml
+3 <E4D_OUT>/parts/017-fault-verify-netsplit/a.yaml
+3 <E4D_OUT>/parts/018-kill-evidence/a-base.yaml
+3 <E4D_OUT>/parts/018-kill-evidence/a.yaml
+3 <E4D_OUT>/parts/019-kill-committed/a-base.yaml
+3 <E4D_OUT>/parts/019-kill-committed/a.yaml
+3 <E4D_OUT>/parts/020-kill-response/a-base.yaml
+3 <E4D_OUT>/parts/020-kill-response/a.yaml
+3 <E4D_OUT>/parts/021-kill-complete/a-base.yaml
+3 <E4D_OUT>/parts/021-kill-complete/a.yaml
+3 <E4D_OUT>/parts/022-rejection-invalid-machine-type/bad-source-base.yaml
+3 <E4D_OUT>/parts/022-rejection-invalid-machine-type/bad-source.yaml
+3 <E4D_OUT>/parts/022-rejection-invalid-machine-type/bad.yaml
+16 <E4D_OUT>/scan-patterns.txt
+## fixtures-diff.txt lines: 0; up-fixtures-diff.txt lines: 0
+## unavailable.txt: absent
