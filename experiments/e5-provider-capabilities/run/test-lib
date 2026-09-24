@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Self-test of the cell recorder in lib.sh. Needs no fixture: it checks that a row is written for
-# every cell, that the observed outcome is derived from the exit status and the transcript and not
-# from the expectation, and that a mismatch is recorded rather than hidden or fatal.
+# Self-test of lib.sh. Needs no running fixture, only the sops and age binaries fixtures/bin/up
+# caches. It checks that the recorder writes a row for every cell, that the observed outcome is
+# derived from the exit status and the transcript and not from the expectation, that a mismatch is
+# recorded rather than hidden or fatal, and that e5_sops keeps sops away from the caller's own keys.
 #
 # Phase-0 evidence for the provider-capability experiment (ginsys/bronzeward issue 8). Not v1 tooling.
 set -euo pipefail
@@ -43,6 +44,23 @@ check 'stdin reaches the command' from-stdin "$(cat "$E5_OUT/$(field 4 11)")"
 check 'unsupported row kind' unsupported "$(field 5 5)"
 check 'unsupported row is not a command' n/a "$(field 5 7)"
 check 'mismatch count' 1 "$(e5_mismatches)"
+
+# sops isolation. A file for a recipient nobody holds; sops's refusal lists every place it looked
+# for an identity. Raw sops must name the caller's ~/.ssh keys (the control: the check can see
+# them), and e5_sops must not.
+if [ -x "$CACHE/sops" ] && [ -x "$CACHE/age-keygen" ]; then
+  recipient=$("$CACHE/age-keygen" 2>/dev/null | awk '/^# public key:/ {print $4}')
+  printf 'creation_rules:\n  - age: %s\n' "$recipient" >"$E5_OUT/sops.yaml"
+  printf '{"k": "v"}\n' | e5_sops - --config "$E5_OUT/sops.yaml" encrypt --input-type json --output-type json \
+    /dev/stdin >"$E5_OUT/nobody.enc.json"
+  looked() { { "$@" --config "$E5_OUT/sops.yaml" decrypt "$E5_OUT/nobody.enc.json" >/dev/null; } 2>&1 || true; }
+  names_home() { if looked "$@" | grep -qF -- "$HOME/.ssh/"; then echo yes; else echo no; fi; }
+  check 'raw sops looks in the caller ~/.ssh (control)' yes "$(names_home "$CACHE/sops")"
+  check 'e5_sops does not look in the caller ~/.ssh' no "$(names_home e5_sops -)"
+else
+  printf 'FAIL sops isolation: no sops/age-keygen in %s (run fixtures/bin/up once)\n' "$CACHE"
+  failures=$((failures + 1))
+fi
 
 [ "$failures" -eq 0 ] || { printf '%d check(s) failed\n' "$failures"; exit 1; }
 printf 'all checks passed\n'

@@ -24,17 +24,9 @@ chmod 700 "$D/keys"
 age_keygen() { "$CACHE/age-keygen" "$@"; }
 recipient() { age_keygen -y "$D/keys/$1.key"; }
 # sops_as <identity> <sops-args...>: the identity is the key file sops is given; no other key is
-# reachable (SOPS_AGE_KEY and the default key location are cleared).
-sops_as() {
-  local role=$1
-  shift
-  env -u SOPS_AGE_KEY -u SOPS_AGE_KEY_CMD SOPS_AGE_KEY_FILE="$D/keys/$role.key" XDG_CONFIG_HOME="$W/no-config" \
-    "$CACHE/sops" --config "$D/.sops.yaml" "$@"
-}
-sops_nokey() {
-  env -u SOPS_AGE_KEY -u SOPS_AGE_KEY_CMD -u SOPS_AGE_KEY_FILE XDG_CONFIG_HOME="$W/no-config" \
-    "$CACHE/sops" --config "$D/.sops.yaml" "$@"
-}
+# reachable (e5_sops).
+sops_as() { e5_sops "$D/keys/$1.key" --config "$D/.sops.yaml" "${@:2}"; }
+sops_nokey() { e5_sops - --config "$D/.sops.yaml" "$@"; }
 
 # --- helpers: each prints a verdict or non-secret metadata, never a value ---------------------------
 

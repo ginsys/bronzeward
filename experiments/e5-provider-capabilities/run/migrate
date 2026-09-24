@@ -21,10 +21,7 @@ D=$STATE/data/sops
 [ -d "$A/objects" ] && [ -d "$D/secrets" ] || die "run run/age-store and run/sops first"
 
 age() { "$CACHE/age" "$@"; }
-sops_as() {
-  env -u SOPS_AGE_KEY -u SOPS_AGE_KEY_CMD SOPS_AGE_KEY_FILE="$D/keys/$1.key" XDG_CONFIG_HOME="$E5_WORK/no-config" \
-    "$CACHE/sops" --config "$D/.sops.yaml" "${@:2}"
-}
+sops_as() { e5_sops "$D/keys/$1.key" --config "$D/.sops.yaml" "${@:2}"; }
 kv_put_stdin() { bao_stdin kv put -cas=0 "$1" value=-; }
 kv_get() { bao kv get -field=value "$@"; }
 
@@ -81,8 +78,7 @@ sops_to_bao() { # import: needs the sops compiler key and the publisher token
 bao_to_sops() { # export: needs the compiler token; any holder of a recipient can then decrypt
   local f=$D/secrets/$2.enc.json
   as compiler kv_get "$1" | jq -Rs '{value: .}' |
-    (set -C && env -u SOPS_AGE_KEY -u SOPS_AGE_KEY_FILE "$CACHE/sops" --config "$D/.sops.yaml" \
-      encrypt --filename-override "$f" --input-type json --output-type json /dev/stdin >"$f") || return 1
+    (set -C && e5_sops - --config "$D/.sops.yaml" encrypt --filename-override "$f" --input-type json --output-type json /dev/stdin >"$f") || return 1
   echo "exported $1 to $2"
 }
 

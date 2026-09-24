@@ -38,6 +38,8 @@ hits=$(grep -rl 'AGE-SECRET-KEY-' -- "$incoming" || true)
 [ -z "$hits" ] || die "collected evidence holds an age secret key in: $hits"
 hits=$(grep -rlE '\b(s|hvs)\.[A-Za-z0-9]{20,}' -- "$incoming" || true)
 [ -z "$hits" ] || die "collected evidence holds what looks like an OpenBao token in: $hits"
+hits=$(grep -rlF -- "$HOME/" "$incoming" || true)
+[ -z "$hits" ] || die "collected evidence names a path in the operator's home in: $hits"
 
 rm -rf -- "$dest"
 mv -T -- "$incoming" "$dest"
