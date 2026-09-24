@@ -61,9 +61,10 @@ has_key() { # has_key <file> <key>: yes or no, the value itself discarded
   if sops_as compiler decrypt --extract "[\"$2\"]" "$1" >/dev/null 2>&1; then echo yes; else echo no; fi
 }
 race() { # race <name>: two writers each add their own key to one fresh file at once, ten times
-  # A lost update is a file holding only one of the two keys although both writers exited 0. The
-  # cell passes if that happens at least once; every attempt is printed.
-  local f=$D/secrets/$1.enc.json i a b ka kb lost=0
+  # A lost update is a file that still decrypts and holds exactly one of the two keys although both
+  # writers exited 0. A file holding neither is counted apart: it may be unreadable, not a lost
+  # update. The cell passes if a lost update happens at least once; every attempt is printed.
+  local f=$D/secrets/$1.enc.json i a b ka kb lost=0 neither=0
   for i in $(seq 1 10); do
     rm -f -- "$f"
     put "$1" race-base >/dev/null || return 1
@@ -76,9 +77,14 @@ race() { # race <name>: two writers each add their own key to one fresh file at 
     wait "$pb" || b=1
     ka=$(has_key "$f" a) kb=$(has_key "$f" b)
     printf 'attempt %s: writer a rc=%s, writer b rc=%s, key a present=%s, key b present=%s\n' "$i" "$a" "$b" "$ka" "$kb"
-    [ "$a$b" != 00 ] || [ "$ka$kb" = yesyes ] || lost=$((lost + 1))
+    [ "$a$b" = 00 ] || continue
+    case $ka$kb in
+      yesno | noyes) lost=$((lost + 1)) ;;
+      nono) neither=$((neither + 1)) ;;
+    esac
   done
   printf 'lost updates with both writers told success: %s of 10\n' "$lost"
+  printf 'files holding neither key, not counted as lost: %s of 10\n' "$neither"
   [ "$lost" -gt 0 ]
 }
 # graft <name> <old-copy> <identity>: the current file's values under the old copy's recipient
