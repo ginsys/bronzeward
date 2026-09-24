@@ -58,7 +58,7 @@ bao_to_age() { # bao_to_age <kv-path> <version> <name> <gen>: needs the compiler
     '{created: $created, source: $source, ciphertext_sha256: $sha256}' >"$A/meta/$3/$4.json" || return 1
   echo "migrated $1 version $2 to $3/$4"
 }
-age_recipient() { "$CACHE/age-keygen" -y "$A/keys/$1.key"; }
+age_recipient() { cat -- "$A/recipients/$1.pub"; }
 all_versions_to_age() { # every version the KV path still has; a pruned one is not there to move
   # Fails unless exactly the versions below oldest_version (the pruned ones) are the ones that fail.
   local path=$1 name=$2 v moved=0 missing=0 unexpected=0 meta current oldest

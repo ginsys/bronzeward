@@ -5,6 +5,7 @@
 #
 #   .state/data/age-store/
 #     keys/<identity>.key          age identities, one per role (0600)
+#     recipients/<identity>.pub    public recipients, published when a key is made; all encryption uses these
 #     objects/<name>/<gen>.age     one immutable generation per file, created with O_EXCL
 #     artifacts/<id>.age           rendered artifacts, encrypted to the executor only
 #     meta/<name>/<gen>.json       plaintext metadata: created, recipient, ciphertext SHA-256; no value
@@ -27,18 +28,19 @@ e5_need_fixture
 C=age-store
 S=$STATE/data/age-store
 W=$E5_WORK/age-store
-mkdir -p -- "$S/keys" "$S/objects" "$S/artifacts" "$S/meta" "$W"
+mkdir -p -- "$S/keys" "$S/recipients" "$S/objects" "$S/artifacts" "$S/meta" "$W"
 chmod 700 "$S/keys"
 
 age() { "$CACHE/age" "$@"; }
 age_keygen() { "$CACHE/age-keygen" "$@"; }
-recipient() { age_keygen -y "$S/keys/$1.key"; }
+recipient() { cat -- "$S/recipients/$1.pub"; } # public only: encrypting never opens a private key
 
 # --- helpers: each prints a verdict or non-secret metadata, never a value ---------------------------
 
 newkey() { # newkey <identity>
   (umask 077 && age_keygen -o "$S/keys/$1.key" 2>/dev/null) || return 1
-  printf 'identity %s recipient %s\n' "$1" "$(recipient "$1")"
+  age_keygen -y "$S/keys/$1.key" >"$S/recipients/$1.pub" || return 1
+  printf 'identity %s recipient %s (published as recipients/%s.pub)\n' "$1" "$(recipient "$1")" "$1"
 }
 put() { # put <recipient-identity> <name> <gen> <value-name>: create-only, as a publisher would
   local obj=$S/objects/$2/$3.age r
