@@ -11,7 +11,7 @@
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
-need grep sed find sort
+need grep sed find sort sha256sum cut
 [ -s "$E4_MARK" ] || die "$E4_OUT is not an E4 run directory ($E4_MARK is missing)"
 [ -s "$E4_OUT/complete" ] || die "$E4_OUT/complete is missing: run/all did not finish"
 [ -s "$E4_PATTERNS" ] || die "$E4_PATTERNS is missing or empty"
@@ -48,8 +48,19 @@ bundle=$E4_OUT/bundle
   fi
 } >"$E4_OUT/bundle-summary.txt"
 rewrite "$E4_OUT/bundle-summary.txt" "$incoming/bundle-summary.txt"
+# The full manifest stays in E4_OUT. The committed one lists every file outside postgres-data/ and
+# gives that data directory one line, the digest of its part of the full manifest: its
+# 2000-odd per-file lines made the diff hunk too large for the pull-request review to read.
 (cd -- "$bundle" && find . -type f -print0 | sort -z | xargs -0 sha256sum) >"$E4_OUT/bundle-manifest.txt"
-rewrite "$E4_OUT/bundle-manifest.txt" "$incoming/bundle-manifest.txt"
+{
+  grep -v '  \./postgres-data/' -- "$E4_OUT/bundle-manifest.txt" || true
+  pgdata=$(grep '  \./postgres-data/' -- "$E4_OUT/bundle-manifest.txt" || true)
+  if [ -n "$pgdata" ]; then
+    printf '%s  ./postgres-data/ (%s files: the sha256 of their lines in the full manifest, kept in E4_OUT)\n' \
+      "$(printf '%s\n' "$pgdata" | sha256sum | cut -d' ' -f1)" "$(printf '%s\n' "$pgdata" | wc -l)"
+  fi
+} >"$E4_OUT/bundle-manifest-committed.txt"
+rewrite "$E4_OUT/bundle-manifest-committed.txt" "$incoming/bundle-manifest.txt"
 
 # One file per scenario and backend rather than one per row: GitHub serves no pull-request diff of
 # more than 300 files, and a review that cannot read the diff reviews nothing. Each row's
@@ -70,19 +81,23 @@ while IFS= read -r key; do
 done < <(awk -F'\t' 'NR > 1 { print $2 "-" $3 }' "$E4_CELLS" | sort -u)
 [ "$packs" -gt 0 ] || die "no rows in $E4_CELLS"
 
-# scan <fixed-strings-file>: the files under incoming that hold any of the strings. grep exits 1
-# for no match; any other failure (an unreadable file) ends the run rather than reading as clean.
+# scan <fixed-strings-file> [dir]: the files under dir (incoming by default) that hold any of the
+# strings. grep exits 1 for no match; any other failure (an unreadable file) ends the run rather
+# than reading as clean.
 scan() {
   local rc=0
-  grep -rlF -f "$1" -- "$incoming" || rc=$?
+  grep -rlF -f "$1" -- "${2:-$incoming}" || rc=$?
   [ "$rc" -le 1 ] || die "the leak scan failed (grep exit $rc)"
 }
 
-# The control: a file holding one pattern must be found, or the scan below proves nothing.
-head -n 1 -- "$E4_PATTERNS" >"$incoming/leak-control"
-hits=$(scan "$E4_PATTERNS")
-[ "$hits" = "$incoming/leak-control" ] && control=fired || control="did not fire as expected"
-rm -- "$incoming/leak-control"
+# The control: a file holding one pattern, in a directory of its own so that a real leak cannot
+# be mistaken for a failed control, must be found, or the scan below proves nothing.
+ctl=$(mktemp -d "$E4_DIR/.evidence-control.XXXXXX")
+trap 'rm -rf -- "$incoming" "$ctl"' EXIT
+head -n 1 -- "$E4_PATTERNS" >"$ctl/leak-control"
+hits=$(scan "$E4_PATTERNS" "$ctl")
+[ "$hits" = "$ctl/leak-control" ] && control=fired || control="did not fire as expected"
+rm -rf -- "$ctl"
 [ "$control" = fired ] || die "leak-scan control $control; the scan cannot be trusted"
 
 # Refusals. A match is reported by file only, never by content.

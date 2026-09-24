@@ -62,7 +62,8 @@ fixtures/bin/down
 paths to placeholders, and refuses anything matching this run's fixture credentials or a path in
 the operator's home. It refuses to run without the bundle copied to `E4_OUT/bundle`, which stays
 there, and commits a summary of it (`bundle-summary.txt`: versions and leak scan) and a manifest
-of every copied file with its SHA-256 (`bundle-manifest.txt`).
+of every copied file with its SHA-256 (`bundle-manifest.txt`), with the PostgreSQL data directory
+as one line: the digest of its part of the full manifest, which stays in `E4_OUT`.
 
 The unit tests need no fixture: `go test ./...` runs them on a temporary SQLite file, and
 `E4_TEST_PG_DSN=<dsn> go test ./...` on PostgreSQL.
