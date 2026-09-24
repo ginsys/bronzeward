@@ -477,9 +477,15 @@ go_tests() {
 
 # ---- the matrix ----
 
+# The inputs are the prototype and the fixture; evidence/ is this experiment's output, which an
+# earlier collect-evidence may have left uncommitted, so it is not counted. Each uncommitted path
+# is listed, so a nonzero count says what differed from the commit.
+uncommitted=$(git -C "$REPO_DIR" status --porcelain -- experiments/e4-database-semantics fixtures \
+  ':!experiments/e4-database-semantics/evidence')
 {
   printf 'commit\t%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
-  printf 'uncommitted inputs\t%s\n' "$(git -C "$REPO_DIR" status --porcelain -- experiments/e4-database-semantics fixtures | wc -l)"
+  printf 'uncommitted inputs\t%s\n' "$(printf '%s' "$uncommitted" | grep -c .)"
+  [ -z "$uncommitted" ] || printf '%s\n' "$uncommitted" | sed 's/^/uncommitted\t/'
   printf 'started\t%s\n' "$(date -u +%FT%TZ)"
   printf 'go\t%s\n' "$(go version)"
   printf 'host sqlite3\t%s\n' "$(sqlite3 --version | cut -d' ' -f1)"
