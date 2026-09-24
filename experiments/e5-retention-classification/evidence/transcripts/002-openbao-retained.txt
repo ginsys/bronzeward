@@ -1,3 +1,3 @@
 asked GET /v1/secret/metadata/gen/scheduled/g1 with the metadata-only token: curl exit 0, HTTP 200
-{"cas_required":false,"created_time":"2026-09-24T18:25:33.919466702Z","current_metadata_version":1,"current_version":1,"custom_metadata":null,"delete_version_after":"1h0m0s","max_versions":0,"metadata_cas_required":false,"oldest_version":0,"updated_time":"2026-09-24T18:25:34.071410878Z","versions":{"1":{"created_time":"2026-09-24T18:25:34.071410878Z","deletion_time":"2026-09-24T19:25:34.071410878Z","destroyed":false}}}
-class=retained reason=deletion scheduled for 2026-09-24T19:25:34Z
+{"cas_required":false,"created_time":"2026-09-24T18:54:21.04719341Z","current_metadata_version":1,"current_version":1,"custom_metadata":null,"delete_version_after":"1h0m0s","max_versions":0,"metadata_cas_required":false,"oldest_version":0,"updated_time":"2026-09-24T18:54:21.192574939Z","versions":{"1":{"created_time":"2026-09-24T18:54:21.192574939Z","deletion_time":"2026-09-24T19:54:21.192574939Z","destroyed":false}}}
+class=retained reason=deletion scheduled for 2026-09-24T19:54:21Z

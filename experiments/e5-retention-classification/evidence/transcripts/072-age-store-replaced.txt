@@ -1,2 +1,2 @@
 reading meta/replaced/g1.json and the digest of objects/replaced/g1.age
-class=lost reason=ciphertext replaced: digest differs from the recorded one, and the store keeps no history
+class=unknown reason=rewritten: ciphertext digest differs from the one the store recorded (replaced, or a re-encryption in progress; no history to tell which)

@@ -14,11 +14,22 @@
 
 say_class() { printf 'class=%s reason=%s\n' "$1" "$2"; }
 
+# version_ok <version>: a provider version is a positive integer without a leading zero. Anything
+# else names no version the provider has, and would otherwise compare below a floor and read as
+# lost. The answer on stdin is drained either way, so that its writer never sees a closed pipe.
+version_ok() {
+  [[ $1 =~ ^[1-9][0-9]*$ ]] && return 0
+  cat >/dev/null
+  say_class unknown "'$1' is not a version number"
+  return 1
+}
+
 # decide_kv <version> <now-rfc3339>: stdin is the data object of a KV v2 metadata read
 # (GET secret/metadata/<path>). Deletion times carry fractional seconds, which jq's date parser
 # does not take, so they are cut to whole seconds before comparing.
 decide_kv() {
   local version=$1 now=$2 out
+  version_ok "$version" || return 0
   out=$(jq -r --arg v "$version" --arg now "$now" '
     def secs: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
     if (.versions | type) != "object" or (.current_version | type) != "number" or (.oldest_version | type) != "number"
@@ -39,11 +50,14 @@ decide_kv() {
 
 # decide_transit <key-version>: stdin is the data object of a Transit key read
 # (GET transit/keys/<key>). The key's version list is not used: it hides versions below the
-# decryption floor (ginsys/bronzeward#8 hand-off), so the floors decide.
+# decryption floor (ginsys/bronzeward#8 hand-off), so the floors decide. A key flagged
+# soft_deleted is unknown, not blocked: that it can be restored was not observed here.
 decide_transit() {
   local version=$1 out
+  version_ok "$version" || return 0
   out=$(jq -r --argjson v "$version" '
-    if (.latest_version | type) != "number" or (.min_decryption_version | type) != "number"
+    if (.soft_deleted // false) != false then "unknown\tkey soft_deleted is \(.soft_deleted | tojson) (reversibility not established)"
+    elif (.latest_version | type) != "number" or (.min_decryption_version | type) != "number"
        or (.min_available_version | type) != "number"
     then "unknown\tkey metadata has no version floors"
     elif .min_available_version > 0 and $v < .min_available_version then "lost\ttrimmed: below min_available_version \(.min_available_version)"

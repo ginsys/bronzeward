@@ -177,6 +177,7 @@ judge $C unreachable gen/destroy/g1@1 metadata unknown -- classify openbao-kv se
 judge $C unreachable rc-art@1 metadata unknown -- classify openbao-transit transit rc-art 1
 judge $C watch gen/app/g1@1 metadata unknown -- watch gen-app-g1 3 4 openbao-kv secret gen/app/g1 1
 judge $C inject openbao operator ok -- inject netjoin openbao
+rc_bundle rejoined
 judge $C rejoined gen/app/g1@1 metadata retained -- classify openbao-kv secret gen/app/g1 1
 
 # --- state: paused -----------------------------------------------------------------------------------
@@ -196,6 +197,7 @@ judge $C inject openbao admin ok -- as admin bao operator seal
 rc_bundle sealed
 judge $C sealed gen/app/g1@1 metadata unknown -- classify openbao-kv secret gen/app/g1 1
 judge $C unseal openbao operator ok -- bao_unseal
+rc_bundle unsealed
 judge $C unsealed gen/app/g1@1 metadata retained -- classify openbao-kv secret gen/app/g1 1
 
 # --- retention is not authority (acceptance criterion 3) ---------------------------------------------

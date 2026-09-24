@@ -52,7 +52,9 @@ openbao() {
   body=$(sed '$d' <<<"$out")
   printf 'asked GET /v1/%s with the metadata-only token: curl exit %s, HTTP %s\n' "$1" "${status% *}" "${status#* }"
   # The body is metadata only (versions, times, floors); errors are OpenBao's own text.
-  printf '%s\n' "$body" | jq -c '.data // .errors // .' 2>/dev/null || printf '%s\n' "$body" | head -c 400
+  # Not through head: on a long body head closes the pipe early, and under pipefail the SIGPIPE
+  # would end the script before it printed a class.
+  printf '%s\n' "$body" | jq -c '.data // .errors // .' 2>/dev/null || printf '%s\n' "${body:0:400}"
   local verdict data
   verdict=$(answer_class "${status% *}" "${status#* }")
   if [ -n "$verdict" ]; then
@@ -66,9 +68,11 @@ openbao() {
 
 # age_store <store> <name> <gen>: metadata present and the ciphertext's digest is what it
 # recorded: retained. Neither says anything about the keys (the store keeps none in metadata).
-# A ciphertext that is there but differs from the recorded digest is positive evidence that the
-# referenced generation was replaced, and the store keeps no history: lost. An absent file, a
-# denied directory, or metadata that cannot be read is unknown.
+# A ciphertext whose digest differs from the recorded one is unknown, not lost: the digest is the
+# store's own record, not one the reference pinned, and a re-encryption that replaces the
+# ciphertext before it updates the metadata (the provider-capability run's rotation) shows the same
+# mismatch while the value is still there. An absent file, a denied directory, or metadata that
+# cannot be read is unknown too.
 age_store() {
   local store=$1 name=$2 gen=$3 m obj err want got
   m=$store/meta/$name/$gen.json obj=$store/objects/$name/$gen.age
@@ -97,13 +101,15 @@ age_store() {
   if [ "$got" = "$want" ]; then
     say_class retained "metadata present, ciphertext digest matches (no key is checked)"
   else
-    say_class lost "ciphertext replaced: digest differs from the recorded one, and the store keeps no history"
+    say_class unknown "rewritten: ciphertext digest differs from the one the store recorded (replaced, or a re-encryption in progress; no history to tell which)"
   fi
 }
 
 # sops <file> <mac>: the sops block is readable without a key. The same MAC as when referenced:
-# retained. A different MAC is positive evidence that the file was re-encrypted with other
-# content, and sops keeps no versions: lost. An absent, denied or unparsable file is unknown.
+# retained. A different MAC is unknown, not lost: sops encrypts the MAC with a fresh IV on every
+# save, so a re-save, a key rotation or an edit of another key in the file changes it while the
+# referenced value is unchanged. An absent, denied or unparsable file is unknown too. JSON-format
+# files only: the classifier parses the sops block with jq.
 sops_file() {
   local file=$1 mac=$2 err got
   printf 'reading the sops metadata block of %s\n' "${file##*/}"
@@ -117,12 +123,20 @@ sops_file() {
     return 0
   fi
   got=$err
-  jq -r '.sops | "lastmodified=\(.lastmodified) recipients=\([.age[].recipient] | length)"' -- "$file"
+  jq -r '.sops | "lastmodified=\(.lastmodified) age_recipients=\((.age // []) | length)"' -- "$file" || true
   if [ "$got" = "$mac" ]; then
     say_class retained "same MAC as when referenced (no key is checked)"
   else
-    say_class lost "replaced: the MAC differs from the referenced one, and sops keeps no versions"
+    say_class unknown "rewritten: the MAC differs from the referenced one (a re-save changes it; without a key, whether the value changed cannot be told)"
   fi
+}
+
+# api_name <name>: a mount, KV path or key goes into the URL path as is, so it is held to the
+# characters OpenBao names use and no '.' or '..' component: a '#', '?' or '..' would have curl
+# ask for another resource, whose answer would then be classified as this dependency.
+api_name() {
+  [[ $1 =~ ^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$ && /$1/ != */./* && /$1/ != */../* ]] ||
+    die "not a plain OpenBao name: '$1'"
 }
 
 [ $# -ge 1 ] || die "usage: classify openbao-kv|openbao-transit|age-store|sops ..."
@@ -130,8 +144,10 @@ kind=$1
 shift
 case $kind in
   openbao-kv) [ $# -eq 3 ] || die "usage: classify openbao-kv <mount> <path> <version>"
+    api_name "$1" && api_name "$2"
     openbao decide_kv "$3" "$(now_rfc3339)" -- "$1/metadata/$2" ;;
   openbao-transit) [ $# -eq 3 ] || die "usage: classify openbao-transit <mount> <key> <key-version>"
+    api_name "$1" && api_name "$2"
     openbao decide_transit "$3" -- "$1/keys/$2" ;;
   age-store) [ $# -eq 3 ] || die "usage: classify age-store <store> <name> <gen>"
     age_store "$@" ;;

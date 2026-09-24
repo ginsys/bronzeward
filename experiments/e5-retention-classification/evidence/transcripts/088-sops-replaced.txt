@@ -1,3 +1,0 @@
-reading the sops metadata block of edited.enc.json
-lastmodified=2026-09-24T18:27:45Z recipients=1
-class=lost reason=replaced: the MAC differs from the referenced one, and sops keeps no versions

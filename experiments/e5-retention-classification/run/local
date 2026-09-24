@@ -46,9 +46,14 @@ put() { # put <identity> <name> <gen> <value-name>: create-only, as in the provi
 }
 get() { age -d -i "$A/keys/$1.key" "$A/objects/$2/$3.age"; }
 replace() { # replace <identity> <name> <gen> <value-name>: another ciphertext under the same name
-  age -r "$(cat -- "$A/recipients/$1.pub")" <"$(rc_value_file "$4")" >"$A/objects/$2/$3.age"
+  age -r "$(cat -- "$A/recipients/$1.pub")" <"$(rc_value_file "$4")" >"$A/objects/$2/$3.age" || return 1
   echo "replaced the ciphertext of $2/$3; its metadata still records the old digest"
 }
+
+# The local stores have no evidence bundle of their own: fixtures/bin/evidence records OpenBao, not
+# these files. The ground truth of each row below is the injection row just before it, which
+# changed the files, and the read rows, which open the value with the key.
+RC_STATE=local-files
 
 newkey compiler
 newkey gone
@@ -56,6 +61,7 @@ put compiler app g1 age-g1 >/dev/null
 put compiler app g2 age-g2 >/dev/null
 put compiler removed g1 age-g1 >/dev/null
 put compiler replaced g1 age-g1 >/dev/null
+put compiler rewrapped g1 age-g1 >/dev/null
 put compiler denied g1 age-g1 >/dev/null
 put gone keyless g1 age-g1 >/dev/null
 
@@ -66,7 +72,14 @@ judge $C absent app@g9 metadata unknown -- classify age-store "$A" app g9
 judge $C inject removed@g1 operator ok -- rm -- "$A/objects/removed/g1.age"
 judge $C removed removed@g1 metadata unknown -- classify age-store "$A" removed g1
 judge $C inject replaced@g1 operator ok -- replace compiler replaced g1 age-other
-judge $C replaced replaced@g1 metadata lost -- classify age-store "$A" replaced g1
+judge $C replaced replaced@g1 metadata unknown -- classify age-store "$A" replaced g1
+judge $C replaced replaced@g1 compiler fail -- check_digest "$(rc_digest age-g1)" get compiler replaced g1
+# The same mismatch with the value still there: a re-encryption of the same value that has
+# replaced the ciphertext and not yet updated the metadata, as a rotation interrupted between its
+# two steps leaves it. This is why a digest mismatch is unknown and not lost.
+judge $C inject rewrapped@g1 operator ok -- replace compiler rewrapped g1 age-g1
+judge $C rewrapped rewrapped@g1 metadata unknown -- classify age-store "$A" rewrapped g1
+judge $C rewrapped rewrapped@g1 compiler ok -- check_digest "$(rc_digest age-g1)" get compiler rewrapped g1
 judge $C inject denied@g1 operator ok -- chmod 000 "$A/meta/denied/g1.json"
 judge $C denied denied@g1 metadata unknown -- classify age-store "$A" denied g1
 judge $C inject denied@g1 operator ok -- chmod 644 "$A/meta/denied/g1.json"
@@ -100,24 +113,33 @@ sput() { # sput <name> <value-name>: create-only, the value over stdin
     (set -C && rc_sops - --config "$D/.sops.yaml" encrypt --filename-override "$f" --input-type json --output-type json /dev/stdin >"$f")
   echo "created $1"
 }
-sset() { # sset <name> <value-name>: overwrite in place, as an edit would
-  jq -Rs . <"$(rc_value_file "$2")" | rc_sops "$D/keys/compiler.key" --config "$D/.sops.yaml" set --value-stdin "$D/secrets/$1.enc.json" '["value"]'
-  echo "value of $1 replaced"
+sset() { # sset <name> <value-name> [<key>]: overwrite one key in place, as an edit would
+  jq -Rs . <"$(rc_value_file "$2")" |
+    rc_sops "$D/keys/compiler.key" --config "$D/.sops.yaml" set --value-stdin "$D/secrets/$1.enc.json" "[\"${3:-value}\"]" ||
+    return 1
+  echo "key ${3:-value} of $1 set"
 }
 sget() { rc_sops "$D/keys/$1.key" --config "$D/.sops.yaml" decrypt --extract '["value"]' "$D/secrets/$2.enc.json"; }
 mac() { jq -er .sops.mac -- "$D/secrets/$1.enc.json"; } # the MAC a reference pins; not a secret
 
 rules compiler
-for n in app edited removed denied; do sput "$n" sops-v1 >/dev/null; done
+for n in app edited resaved removed denied; do sput "$n" sops-v1 >/dev/null; done
 rules gone
 sput keyless sops-v1 >/dev/null
+rules compiler
 declare -A MAC=()
-for n in app edited removed denied keyless; do MAC[$n]=$(mac "$n"); done
+for n in app edited resaved removed denied keyless; do MAC[$n]=$(mac "$n"); done
 
 judge $C retained app metadata retained -- classify sops "$D/secrets/app.enc.json" "${MAC[app]}"
 judge $C read app compiler ok -- check_digest "$(rc_digest sops-v1)" sget compiler app
 judge $C inject edited operator ok -- sset edited sops-v2
-judge $C replaced edited metadata lost -- classify sops "$D/secrets/edited.enc.json" "${MAC[edited]}"
+judge $C replaced edited metadata unknown -- classify sops "$D/secrets/edited.enc.json" "${MAC[edited]}"
+judge $C replaced edited compiler fail -- check_digest "$(rc_digest sops-v1)" sget compiler edited
+# Another key added to the file: the referenced value is untouched, and the MAC changes all the
+# same. This is why a changed MAC is unknown and not lost.
+judge $C inject resaved operator ok -- sset resaved sops-v2 other
+judge $C resaved resaved metadata unknown -- classify sops "$D/secrets/resaved.enc.json" "${MAC[resaved]}"
+judge $C resaved resaved compiler ok -- check_digest "$(rc_digest sops-v1)" sget compiler resaved
 judge $C inject removed operator ok -- rm -- "$D/secrets/removed.enc.json"
 judge $C removed removed metadata unknown -- classify sops "$D/secrets/removed.enc.json" "${MAC[removed]}"
 judge $C inject denied operator ok -- chmod 000 "$D/secrets/denied.enc.json"

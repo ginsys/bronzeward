@@ -1,3 +1,3 @@
 asked GET /v1/secret/metadata/gen/soft/g1 with the metadata-only token: curl exit 0, HTTP 200
-{"cas_required":false,"created_time":"2026-09-24T18:25:33.307483509Z","current_metadata_version":0,"current_version":1,"custom_metadata":null,"delete_version_after":"0s","max_versions":0,"metadata_cas_required":false,"oldest_version":0,"updated_time":"2026-09-24T18:25:33.307483509Z","versions":{"1":{"created_time":"2026-09-24T18:25:33.307483509Z","deletion_time":"","destroyed":false}}}
+{"cas_required":false,"created_time":"2026-09-24T18:54:20.472852757Z","current_metadata_version":0,"current_version":1,"custom_metadata":null,"delete_version_after":"0s","max_versions":0,"metadata_cas_required":false,"oldest_version":0,"updated_time":"2026-09-24T18:54:20.472852757Z","versions":{"1":{"created_time":"2026-09-24T18:54:20.472852757Z","deletion_time":"","destroyed":false}}}
 class=retained reason=version present, not deleted

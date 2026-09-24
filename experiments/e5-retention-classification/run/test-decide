@@ -48,6 +48,10 @@ out=$(kv "{\"1\":$live}" 1 0 | decide_kv 4 "$NOW")
 check 'a version above current_version is unknown' unknown "$(cls <<<"$out")"
 out=$(kv "{\"1\":$live,\"3\":$live}" 3 1 | decide_kv 2 "$NOW")
 check 'a version missing without an explanation is unknown, never lost' unknown "$(cls <<<"$out")"
+for v in 0 -1 1.5 01 x ''; do
+  out=$(kv "{\"2\":$live}" 2 2 | decide_kv "$v" "$NOW")
+  check "a KV version that is not a positive integer ('$v') is unknown, never lost" unknown "$(cls <<<"$out")"
+done
 out=$(printf 'not json' | decide_kv 1 "$NOW")
 check 'an answer that cannot be read is unknown' unknown "$(cls <<<"$out")"
 out=$(printf '{}' | decide_kv 1 "$NOW")
@@ -65,6 +69,18 @@ out=$(tk 2 1 0 | decide_transit 3)
 check 'a key version above latest is unknown' unknown "$(cls <<<"$out")"
 out=$(printf '{"latest_version":2}' | decide_transit 1)
 check 'an answer without the floors is unknown' unknown "$(cls <<<"$out")"
+for v in 0 -1 1.5 x ''; do
+  out=$(tk 3 2 2 | decide_transit "$v")
+  check "a Transit version that is not a positive integer ('$v') is unknown" unknown "$(cls <<<"$out")"
+done
+# A Transit key soft deletion: its reversibility was not observed here, so it is not called
+# blocked; a key flagged soft-deleted is never retained.
+out=$(tk 2 1 0 | jq -c '.soft_deleted = true' | decide_transit 2)
+check 'a soft-deleted Transit key is unknown, never retained' unknown "$(cls <<<"$out")"
+out=$(tk 2 1 0 | jq -c '.soft_deleted = "yes"' | decide_transit 2)
+check 'a soft_deleted that is not a boolean is unknown' unknown "$(cls <<<"$out")"
+out=$(tk 2 1 0 | jq -c '.soft_deleted = false' | decide_transit 2)
+check 'soft_deleted false leaves the floors to decide' retained "$(cls <<<"$out")"
 
 # --- answers that are not metadata ---------------------------------------------------------------
 check 'HTTP 403 is unknown (denied)' 'unknown denied: HTTP 403' "$(answer_class 0 403 | sed 's/^class=\([a-z]*\) reason=/\1 /')"
