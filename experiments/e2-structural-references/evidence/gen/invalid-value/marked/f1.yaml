@@ -1,3 +1,0 @@
-cluster:
-    network:
-        dnsDomain: "bwref:dns-domain"

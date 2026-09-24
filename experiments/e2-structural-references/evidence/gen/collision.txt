@@ -1,0 +1,78 @@
+==> binding/bindings.tsv <==
+f2.yaml	reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> binding/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: "!bwref reg-user"
+                    password: "bwref:reg-pass"
+==> binding/f2.yaml <==
+machine:
+    registries:
+        config:
+            mirror.example.test:
+                auth:
+                    username: e2-mirror-user
+==> info.tsv <==
+fragment	f1.yaml
+fragment	f2.yaml
+native	pass
+expect	tag	late	differs
+expect	tag	early	parity
+expect	marked	late	differs
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity
+==> literal/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: "!bwref reg-user"
+                    password: "bwref:reg-pass"
+==> literal/f2.yaml <==
+machine:
+    registries:
+        config:
+            mirror.example.test:
+                auth:
+                    username: e2-mirror-user
+                    password: e2-registry-password
+==> marked/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: "!bwref reg-user"
+                    password: "bwref:reg-pass"
+==> marked/f2.yaml <==
+machine:
+    registries:
+        config:
+            mirror.example.test:
+                auth:
+                    username: e2-mirror-user
+                    password: "bwref:reg-pass"
+==> superset.tsv <==
+f2.yaml	reg-pass	v1alpha1	machine/registries/config/mirror.example.test/auth/password
+==> tag/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: "!bwref reg-user"
+                    password: "bwref:reg-pass"
+==> tag/f2.yaml <==
+machine:
+    registries:
+        config:
+            mirror.example.test:
+                auth:
+                    username: e2-mirror-user
+                    password: !bwref reg-pass
+==> end <==

@@ -1,8 +1,0 @@
---- base
-+++ binding-early
-@@ -96,0 +97,5 @@
-+---
-+apiVersion: v1alpha1
-+kind: TrustedRootsConfig
-+name: e2-roots
-+certificates: e2-not-a-real-certificate

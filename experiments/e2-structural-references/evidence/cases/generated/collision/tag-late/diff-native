@@ -1,5 +1,0 @@
---- native
-+++ tag-late
-@@ -25 +25 @@
--                    password: e2-registry-password
-+                    password: reg-pass

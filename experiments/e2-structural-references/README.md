@@ -82,3 +82,10 @@ output's diff against native and against its base, each base with its secret lin
 the SHA-256 of every materialized output. It does not hold the outputs themselves or either
 secrets bundle: those carry synthetic keys and stay in `E2_OUT`. A base's redacted copy plus a
 cell's `diff-base` is that cell's output, less the redacted lines. An empty file is not collected.
+
+Per-case files are packed, one text file per case: `gen/<case>.txt` (the fragment forms, bindings
+and superset) and `cases/<base>/<case>.txt` (per cell: messages, `resolutions.tsv`,
+`sentinel-found.tsv`, `diff-native`, `diff-base`, `validate.txt`, `*.skipped`). Each file starts
+after a `==> <cell>/<file> <==` line; the pack ends with `==> end <==`. One file per cell would be
+about 750 files, and GitHub serves no pull-request diff of more than 300 files, so no review could
+read it.

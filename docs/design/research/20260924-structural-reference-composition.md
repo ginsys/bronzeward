@@ -111,9 +111,10 @@ The two bases must agree cell by cell on everything but the message, whose line 
 | `gopkg.in/yaml.v3` | v3.0.1 |
 
 `evidence/run.txt` records the prototype commit of the capture (`dc26305`), zero uncommitted
-inputs, and the `talosctl` version and digest. Later commits change only comments in `run/` and
-make `collect-evidence` stop on a failed scan instead of reading it as clean; the evidence was
-collected again from the same capture with that collector and is byte-identical.
+inputs, and the `talosctl` version and digest. Later commits change only comments in `run/all` and
+`run/lib.sh`, and `collect-evidence`: it stops on a failed scan instead of reading it as clean, and
+packs each case into one file (§7.7). The evidence was collected again from the same capture with
+that collector; unpacked, it is byte-identical to the first collection.
 
 ### 3.4 Synthetic values and the leak scan
 
@@ -131,7 +132,8 @@ the fixture's own scan list: 35 patterns. Two controls stand behind a clean scan
 - **Scan fires**: `collect-evidence` plants one pattern in a control file and requires the scan to
   report exactly that file before the real scan runs.
 
-Result: `35 patterns, control fired, 0 hits in 752 files` (`evidence/leak-scan.tsv`).
+Result: `35 patterns, control fired, 0 hits in 54 files` (`evidence/leak-scan.tsv`). The per-cell
+files are packed one text file per case (§7.7).
 
 ### 3.5 Reproduction
 
@@ -191,7 +193,8 @@ Three late parities are coincidental and do not count in a candidate's favour:
 These are observed behaviours of `talosctl` v1.13.6 strategic merge, recorded with the exact output.
 
 - **A tag on a string field is dropped silently.** Composition keeps the scalar and loses the tag,
-  so the reference name becomes the value (`evidence/cases/generated/string/tag-late/diff-native`):
+  so the reference name becomes the value (`evidence/cases/generated/string.txt`, section
+  `tag-late/diff-native`):
 
   ```diff
   -                    password: e2-registry-password
@@ -393,8 +396,16 @@ killed it part-way, leaving a partial fixture; `fixtures/bin/down` removed it cl
 
 An empty message cell ended every such matrix row in a tab, the `talosctl` version line ended in a
 space, and `talosctl validate` ends its message with a blank line. The first two are the runner's
-own formats and were fixed; the validation messages are kept verbatim and exempted in
-`.gitattributes`, as E5's transcripts are.
+own formats and were fixed; the validation messages are kept verbatim, inside the per-case packs
+(§7.7), each of which ends with a closing marker line.
+
+### 7.7 One evidence file per cell made the pull request unreviewable
+
+The first collection wrote about 750 files, one per cell output. GitHub serves no pull-request diff
+of more than 300 files, and the advisory review skipped with `PR diff too large for GitHub API (HTTP
+406), skipping.` while its check still reported success. `collect-evidence` now packs each case into
+one text file, each cell file after a `==> <cell>/<file> <==` line: 55 files. Unpacking the packs
+reproduces every earlier per-cell file byte for byte.
 
 ## 8. Limits
 

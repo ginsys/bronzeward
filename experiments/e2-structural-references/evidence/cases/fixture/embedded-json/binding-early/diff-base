@@ -1,9 +1,0 @@
---- base
-+++ binding-early
-@@ -18,0 +19,6 @@
-+    files:
-+        - content: |
-+            {"endpoint":"https://e2.example.test","token":"e2-app-token"}
-+          permissions: 0o644
-+          path: /var/etc/e2/config.json
-+          op: create

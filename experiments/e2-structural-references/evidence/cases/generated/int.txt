@@ -1,0 +1,63 @@
+==> binding-early/diff-base <==
+--- base
++++ binding-early
+@@ -24 +24 @@
+-            port: 7445
++            port: 7446
+==> binding-early/resolutions.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> binding-early/sentinel-found.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> binding-early/validate.txt <==
+cases/generated/int/binding-early/out.yaml is valid for metal mode
+==> binding-late/composed.yaml.skipped <==
+gen/int/binding/f1.yaml
+==> binding-late/diff-base <==
+--- base
++++ binding-late
+@@ -24 +24 @@
+-            port: 7445
++            port: 7446
+==> binding-late/resolutions.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> binding-late/validate.txt <==
+cases/generated/int/binding-late/out.yaml is valid for metal mode
+==> marked-early/diff-base <==
+--- base
++++ marked-early
+@@ -24 +24 @@
+-            port: 7445
++            port: 7446
+==> marked-early/resolutions.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> marked-early/sentinel-found.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> marked-early/validate.txt <==
+cases/generated/int/marked-early/out.yaml is valid for metal mode
+==> marked-late/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 4: cannot construct !!str `bwref:p...` into int
+==> native/diff-base <==
+--- base
++++ native
+@@ -24 +24 @@
+-            port: 7445
++            port: 7446
+==> native/validate.txt <==
+cases/generated/int/native/out.yaml is valid for metal mode
+==> tag-early/diff-base <==
+--- base
++++ tag-early
+@@ -24 +24 @@
+-            port: 7445
++            port: 7446
+==> tag-early/resolutions.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> tag-early/sentinel-found.tsv <==
+prism-port	v1alpha1	machine/features/kubePrism/port
+==> tag-early/validate.txt <==
+cases/generated/int/tag-early/out.yaml is valid for metal mode
+==> tag-late/compose.err <==
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 4: cannot construct !bwref `prism-port` into int
+==> end <==

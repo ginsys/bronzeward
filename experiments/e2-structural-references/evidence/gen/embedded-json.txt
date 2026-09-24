@@ -1,0 +1,46 @@
+==> binding/bindings.tsv <==
+f1.yaml	app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> binding/f1.yaml <==
+machine:
+    files:
+        - path: /var/etc/e2/config.json
+          op: create
+          permissions: 0o644
+          content: |
+            {"endpoint":"https://e2.example.test"}
+==> info.tsv <==
+fragment	f1.yaml
+native	pass
+expect	tag	late	parity
+expect	tag	early	parity
+expect	marked	late	parity
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity
+==> literal/f1.yaml <==
+machine:
+    files:
+        - path: /var/etc/e2/config.json
+          op: create
+          permissions: 0o644
+          content: |
+            {"endpoint":"https://e2.example.test","token":"e2-app-token"}
+==> marked/f1.yaml <==
+machine:
+    files:
+        - path: /var/etc/e2/config.json
+          op: create
+          permissions: 0o644
+          content: |
+            {"endpoint":"https://e2.example.test","token":"bwref:app-token"}
+==> superset.tsv <==
+f1.yaml	app-token	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token
+==> tag/f1.yaml <==
+machine:
+    files:
+        - path: /var/etc/e2/config.json
+          op: create
+          permissions: 0o644
+          content: |
+            {"endpoint": "https://e2.example.test", "token": !bwref app-token}
+==> end <==

@@ -1,1 +1,0 @@
-cases/fixture/collision/tag-early/out.yaml is valid for container mode

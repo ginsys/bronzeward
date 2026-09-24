@@ -1,0 +1,60 @@
+==> binding/bindings.tsv <==
+f1.yaml	app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> binding/f1.yaml <==
+cluster:
+    inlineManifests:
+        - name: e2-secret
+          contents: |
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: e2-secret
+              namespace: default
+==> info.tsv <==
+fragment	f1.yaml
+native	pass
+expect	tag	late	differs
+expect	tag	early	differs
+expect	marked	late	differs
+expect	marked	early	differs
+expect	binding	late	refused
+expect	binding	early	refused
+==> literal/f1.yaml <==
+cluster:
+    inlineManifests:
+        - name: e2-secret
+          contents: |
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: e2-secret
+              namespace: default
+            stringData:
+              password: e2-app-password
+==> marked/f1.yaml <==
+cluster:
+    inlineManifests:
+        - name: e2-secret
+          contents: |
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: e2-secret
+              namespace: default
+            stringData:
+              password: "bwref:app-pass"
+==> superset.tsv <==
+f1.yaml	app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> tag/f1.yaml <==
+cluster:
+    inlineManifests:
+        - name: e2-secret
+          contents: |
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: e2-secret
+              namespace: default
+            stringData:
+              password: !bwref app-pass
+==> end <==

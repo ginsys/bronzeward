@@ -1,1 +1,0 @@
-cases/fixture/document/marked-late/out.yaml is valid for container mode

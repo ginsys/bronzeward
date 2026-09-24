@@ -1,0 +1,131 @@
+==> binding-early/diff-base <==
+--- base
++++ binding-early
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: e2-app-password
+==> binding-early/resolutions.tsv <==
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> binding-early/sentinel-found.tsv <==
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> binding-early/validate.txt <==
+cases/generated/embedded-yaml/binding-early/out.yaml is valid for metal mode
+==> binding-late/diff-base <==
+--- base
++++ binding-late
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: e2-app-password
+==> binding-late/resolutions.tsv <==
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> binding-late/validate.txt <==
+cases/generated/embedded-yaml/binding-late/out.yaml is valid for metal mode
+==> marked-early/diff-base <==
+--- base
++++ marked-early
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: e2-app-password
+==> marked-early/resolutions.tsv <==
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> marked-early/sentinel-found.tsv <==
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> marked-early/validate.txt <==
+cases/generated/embedded-yaml/marked-early/out.yaml is valid for metal mode
+==> marked-late/diff-base <==
+--- base
++++ marked-late
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: e2-app-password
+==> marked-late/resolutions.tsv <==
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> marked-late/validate.txt <==
+cases/generated/embedded-yaml/marked-late/out.yaml is valid for metal mode
+==> native/diff-base <==
+--- base
++++ native
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: e2-app-password
+==> native/validate.txt <==
+cases/generated/embedded-yaml/native/out.yaml is valid for metal mode
+==> tag-early/diff-base <==
+--- base
++++ tag-early
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: e2-app-password
+==> tag-early/resolutions.tsv <==
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> tag-early/sentinel-found.tsv <==
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> tag-early/validate.txt <==
+cases/generated/embedded-yaml/tag-early/out.yaml is valid for metal mode
+==> tag-late/diff-base <==
+--- base
++++ tag-late
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: e2-app-password
+==> tag-late/resolutions.tsv <==
+app-pass	v1alpha1	cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password
+==> tag-late/validate.txt <==
+cases/generated/embedded-yaml/tag-late/out.yaml is valid for metal mode
+==> end <==

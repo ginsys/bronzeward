@@ -1,0 +1,117 @@
+==> binding-early/diff-base <==
+--- base
++++ binding-early
+@@ -36 +36 @@
+-        dnsDomain: cluster.local
++        dnsDomain: e2 not a domain
+==> binding-early/resolutions.tsv <==
+dns-domain	v1alpha1	cluster/network/dnsDomain
+==> binding-early/sentinel-found.tsv <==
+dns-domain	v1alpha1	cluster/network/dnsDomain
+==> binding-early/validate.txt <==
+1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* "e2 not a domain" is not a valid DNS name
+
+
+
+
+==> binding-late/composed.yaml.skipped <==
+gen/invalid-value/binding/f1.yaml
+==> binding-late/diff-base <==
+--- base
++++ binding-late
+@@ -36 +36 @@
+-        dnsDomain: cluster.local
++        dnsDomain: e2 not a domain
+==> binding-late/resolutions.tsv <==
+dns-domain	v1alpha1	cluster/network/dnsDomain
+==> binding-late/validate.txt <==
+1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* "e2 not a domain" is not a valid DNS name
+
+
+
+
+==> marked-early/diff-base <==
+--- base
++++ marked-early
+@@ -36 +36 @@
+-        dnsDomain: cluster.local
++        dnsDomain: e2 not a domain
+==> marked-early/resolutions.tsv <==
+dns-domain	v1alpha1	cluster/network/dnsDomain
+==> marked-early/sentinel-found.tsv <==
+dns-domain	v1alpha1	cluster/network/dnsDomain
+==> marked-early/validate.txt <==
+1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* "e2 not a domain" is not a valid DNS name
+
+
+
+
+==> marked-late/diff-base <==
+--- base
++++ marked-late
+@@ -36 +36 @@
+-        dnsDomain: cluster.local
++        dnsDomain: e2 not a domain
+==> marked-late/resolutions.tsv <==
+dns-domain	v1alpha1	cluster/network/dnsDomain
+==> marked-late/validate.txt <==
+1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* "e2 not a domain" is not a valid DNS name
+
+
+
+
+==> native/diff-base <==
+--- base
++++ native
+@@ -36 +36 @@
+-        dnsDomain: cluster.local
++        dnsDomain: e2 not a domain
+==> native/validate.txt <==
+1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* "e2 not a domain" is not a valid DNS name
+
+
+
+
+==> tag-early/diff-base <==
+--- base
++++ tag-early
+@@ -36 +36 @@
+-        dnsDomain: cluster.local
++        dnsDomain: e2 not a domain
+==> tag-early/resolutions.tsv <==
+dns-domain	v1alpha1	cluster/network/dnsDomain
+==> tag-early/sentinel-found.tsv <==
+dns-domain	v1alpha1	cluster/network/dnsDomain
+==> tag-early/validate.txt <==
+1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* "e2 not a domain" is not a valid DNS name
+
+
+
+
+==> tag-late/diff-base <==
+--- base
++++ tag-late
+@@ -36 +36 @@
+-        dnsDomain: cluster.local
++        dnsDomain: dns-domain
+==> tag-late/diff-native <==
+--- native
++++ tag-late
+@@ -36 +36 @@
+-        dnsDomain: e2 not a domain
++        dnsDomain: dns-domain
+==> tag-late/validate.txt <==
+cases/fixture/invalid-value/tag-late/out.yaml is valid for container mode
+==> end <==

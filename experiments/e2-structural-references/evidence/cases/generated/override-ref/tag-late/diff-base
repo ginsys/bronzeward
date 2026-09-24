@@ -1,9 +1,0 @@
---- base
-+++ tag-late
-@@ -19,0 +20,6 @@
-+    registries:
-+        config:
-+            registry.example.test:
-+                auth:
-+                    username: e2-user
-+                    password: reg-pass

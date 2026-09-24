@@ -1,4 +1,0 @@
-machine:
-    features:
-        kubePrism:
-            port: e2-not-a-port

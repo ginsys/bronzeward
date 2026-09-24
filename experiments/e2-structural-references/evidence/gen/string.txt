@@ -1,0 +1,45 @@
+==> binding/bindings.tsv <==
+f1.yaml	reg-pass	v1alpha1	machine/registries/config/registry.example.test/auth/password
+==> binding/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+==> info.tsv <==
+fragment	f1.yaml
+native	pass
+expect	tag	late	differs
+expect	tag	early	parity
+expect	marked	late	parity
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity
+==> literal/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: e2-registry-password
+==> marked/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: "bwref:reg-pass"
+==> superset.tsv <==
+f1.yaml	reg-pass	v1alpha1	machine/registries/config/registry.example.test/auth/password
+==> tag/f1.yaml <==
+machine:
+    registries:
+        config:
+            registry.example.test:
+                auth:
+                    username: e2-user
+                    password: !bwref reg-pass
+==> end <==

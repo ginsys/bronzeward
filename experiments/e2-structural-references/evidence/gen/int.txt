@@ -1,0 +1,31 @@
+==> binding/bindings.tsv <==
+f1.yaml	prism-port	v1alpha1	machine/features/kubePrism/port
+==> binding/f1.yaml <==
+{}
+==> info.tsv <==
+fragment	f1.yaml
+native	pass
+expect	tag	late	rejected
+expect	tag	early	parity
+expect	marked	late	rejected
+expect	marked	early	parity
+expect	binding	late	parity
+expect	binding	early	parity
+==> literal/f1.yaml <==
+machine:
+    features:
+        kubePrism:
+            port: 7446
+==> marked/f1.yaml <==
+machine:
+    features:
+        kubePrism:
+            port: "bwref:prism-port"
+==> superset.tsv <==
+f1.yaml	prism-port	v1alpha1	machine/features/kubePrism/port
+==> tag/f1.yaml <==
+machine:
+    features:
+        kubePrism:
+            port: !bwref prism-port
+==> end <==

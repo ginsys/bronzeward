@@ -1,0 +1,109 @@
+==> binding-early/resolve.err <==
+bwref: binding v1alpha1 cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password: cluster/inlineManifests[name=e2-secret]/contents is not an identified embedded document
+==> binding-late/resolve.err <==
+bwref: binding v1alpha1 cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password: cluster/inlineManifests[name=e2-secret]/contents is not an identified embedded document
+==> marked-early/diff-base <==
+--- base
++++ marked-early
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: "bwref:app-pass"
+==> marked-early/diff-native <==
+--- native
++++ marked-early
+@@ -101 +101 @@
+-              password: e2-app-password
++              password: "bwref:app-pass"
+==> marked-early/validate.txt <==
+cases/generated/unidentified-embedded/marked-early/out.yaml is valid for metal mode
+==> marked-late/diff-base <==
+--- base
++++ marked-late
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: "bwref:app-pass"
+==> marked-late/diff-native <==
+--- native
++++ marked-late
+@@ -101 +101 @@
+-              password: e2-app-password
++              password: "bwref:app-pass"
+==> marked-late/validate.txt <==
+cases/generated/unidentified-embedded/marked-late/out.yaml is valid for metal mode
+==> native/diff-base <==
+--- base
++++ native
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: e2-app-password
+==> native/validate.txt <==
+cases/generated/unidentified-embedded/native/out.yaml is valid for metal mode
+==> tag-early/diff-base <==
+--- base
++++ tag-early
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: !bwref app-pass
+==> tag-early/diff-native <==
+--- native
++++ tag-early
+@@ -101 +101 @@
+-              password: e2-app-password
++              password: !bwref app-pass
+==> tag-early/validate.txt <==
+cases/generated/unidentified-embedded/tag-early/out.yaml is valid for metal mode
+==> tag-late/diff-base <==
+--- base
++++ tag-late
+@@ -91,0 +92,10 @@
++    inlineManifests:
++        - name: e2-secret
++          contents: |
++            apiVersion: v1
++            kind: Secret
++            metadata:
++              name: e2-secret
++              namespace: default
++            stringData:
++              password: !bwref app-pass
+==> tag-late/diff-native <==
+--- native
++++ tag-late
+@@ -101 +101 @@
+-              password: e2-app-password
++              password: !bwref app-pass
+==> tag-late/validate.txt <==
+cases/generated/unidentified-embedded/tag-late/out.yaml is valid for metal mode
+==> end <==
