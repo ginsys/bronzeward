@@ -37,8 +37,8 @@ The candidates are those of the [provider-capability comparison](20260924-provid
   run it (single node, integrated Raft, real init and unseal).
 - **The local age store**, in the layout the provider-capability run built: one ciphertext per
   generation, with a metadata file beside it recording the recipient and the ciphertext's SHA-256.
-- **SOPS files** (sops 3.13.3 with age 1.3.2), whose metadata is the `sops` block, readable without a
-  key, including the MAC.
+- **SOPS files** (sops 3.13.3 with age 1.3.2, JSON format), whose metadata is the `sops` block,
+  readable without a key, including the MAC.
 
 | Identity | Holds | Used for |
 |---|---|---|
@@ -56,31 +56,35 @@ ciphertext's digest. It never opens a key file.
 
 ### 3.1 Rules, classifier, rows
 
-`run/decide.sh` holds the rules as pure functions over one provider answer. `run/test-decide`
-checks them on 28 synthetic answers, written out in the script, before any capture uses them (the
-rules were written after those checks had been seen to fail against a stub). `run/classify` asks
-the provider and applies the rules. For OpenBao it sends one GET per dependency over HTTP to the
-published port, from the host, with the metadata token. It does not use the fixtures' `bao` wrapper,
-which runs inside the container, where a partition cannot be seen (fixtures report §7).
+`run/decide.sh` holds the OpenBao rules and the monitor as pure functions over one provider answer.
+`run/test-decide` checks them with 42 checks on synthetic answers written out in the script, before
+any capture uses them (the first rules were written after their checks had been seen to fail
+against a stub). `run/classify` asks the
+provider and applies the rules. For OpenBao it sends one GET per dependency over HTTP to the
+published port, from the host, with the metadata token, and refuses a name that is not a plain
+OpenBao path. It does not use the fixtures' `bao` wrapper, which runs inside the container, where a
+partition cannot be seen (fixtures report §7).
 
 The rules:
 
 | Candidate | Answer | Class |
 |---|---|---|
+| any | a version that is not a positive integer | unknown |
 | KV v2 | version present, no `deletion_time` | retained |
 | KV v2 | `deletion_time` in the future (`delete_version_after`) | retained, reason names the scheduled time |
 | KV v2 | `deletion_time` now or past | blocked (undelete reverses it) |
 | KV v2 | `destroyed: true` | lost |
 | KV v2 | version below `oldest_version` (when that is above 0) | lost (pruned) |
 | KV v2 | version above `current_version`, or missing with no recorded removal | unknown |
+| Transit | `soft_deleted` anything but `false` | unknown (reversibility not observed) |
 | Transit | version below `min_available_version` (when above 0) | lost (trimmed) |
 | Transit | version below `min_decryption_version` | blocked |
 | Transit | version above `latest_version`, or a floor missing from the answer | unknown |
 | Transit | otherwise | retained |
 | age store | metadata readable, ciphertext digest as recorded | retained |
-| age store | ciphertext present with another digest | lost (replaced; the store keeps no history) |
+| age store | ciphertext digest differs from the recorded one | unknown (rewritten) |
 | SOPS | MAC as referenced | retained |
-| SOPS | another MAC | lost (replaced; sops keeps no versions) |
+| SOPS | another MAC | unknown (rewritten) |
 | any | HTTP 403 or a file permission error | unknown (denied) |
 | any | HTTP 404 or no such file | unknown (absent) |
 | any | HTTP 503 | unknown (sealed or unavailable) |
@@ -90,6 +94,10 @@ Transit's own `keys` map is not used. It hides versions below the decryption flo
 provider-capability run found, and it also hides trimmed versions (027: after the trim, the map
 holds only version 2). The floors are what distinguish blocked from lost.
 
+Neither local candidate can show lost. A changed ciphertext digest or SOPS MAC shows that the file
+was rewritten, not that the referenced value is gone, and §5.2 has rows where the value survived
+each.
+
 A monitor (`monitor` in `decide.sh`) records each observation of a dependency. It prints the class
 it was given and an alert: `regression` when a dependency seen retained turns unknown,
 `persistent` once unknown has lasted `RC_ALERT_AFTER` seconds, and `blocked` or `lost` for those
@@ -97,8 +105,8 @@ classes. It never changes the class.
 
 `run/openbao` and `run/local` put the dependencies into each state and record one row per
 observation in `verdicts.tsv`: the expected class, written before the command runs; the observed
-class and reason, taken from the classifier's last line; and the evidence bundle of that state. A
-row that differs from its expectation is a mismatch and the run carries on.
+class and reason, taken from the classifier's last line; and the state it was observed in. A row
+that differs from its expectation is a mismatch and the run carries on.
 
 ### 3.2 States and their ground truth
 
@@ -113,16 +121,22 @@ port answered) and `versions.txt` (the container's state and networks):
 | removed | `inject bao-soft-delete`, `bao-destroy`, `bao-delete-key`; admin metadata delete, rotate + floor, trim | HTTP 200 | complete |
 | reversed | admin undelete, floor lowered; a trim reversal attempted | HTTP 200 | complete |
 | partitioned | `inject netsplit openbao` | curl exit 7 | complete; `networks=[]` |
+| rejoined | `inject netjoin openbao` | HTTP 200 | complete |
 | paused | `inject pause openbao` | curl exit 28 | unknown: nothing could be read |
 | after-uncertain | a `bao-destroy` sent while paused, then `unpause` | HTTP 200 | complete |
 | sealed | admin `bao operator seal` | HTTP 503 | unknown: nothing could be read |
-| authority | unsealed again | HTTP 200 | complete |
+| unsealed | the fixture's unseal | HTTP 200 | complete |
+| authority | as unsealed, with the authority checks run in it | HTTP 200 | complete |
 | final | after the local runs; its leak scan covers the local stores | HTTP 200 | complete |
 
 The bundle's KV records carry each version's `deletion_time` and `destroyed`, but not
 `current_version` or `oldest_version`. Its Transit records carry `latest` and `min_decryption`,
 but not `min_available_version`. The admin rows read what the bundle lacks: 005 for the pruned
 path, 028 for the trimmed key, 051 for the path the unanswered destroy was aimed at.
+
+The local stores have no bundle, since `fixtures/bin/evidence` records OpenBao and not these files.
+Their rows carry the state `local-files`. Their ground truth is the injection row before each
+classification, which changed the files, and the read rows, which open the value with its key.
 
 ### 3.3 Pinned versions
 
@@ -150,7 +164,8 @@ RC_OUT=<the same directory> experiments/e5-retention-classification/run/collect-
 fixtures/bin/down
 ```
 
-The capture took about nine minutes after `up`: 99 rows, 0 mismatches, 28 of 28 rule checks.
+The committed capture took under three minutes after `up`: 107 rows, 0 mismatches, 42 of 42 rule
+checks.
 
 ## 4. Results
 
@@ -199,24 +214,26 @@ the provider's.
 
 ### 4.2 Local stores
 
-| Dependency and state | Row | Answer | Class |
-|---|---|---|---|
-| age generation, as written | 065-066 | digest matches | retained |
-| age generation never written | 068 | no metadata file | unknown |
-| ciphertext removed, metadata kept | 070 | no such file | unknown |
-| ciphertext replaced under the same name | 072 | digest differs | lost |
-| metadata file mode 000 | 074 | permission denied | unknown |
-| ciphertext mode 000 | 077 | permission denied | unknown |
-| modes restored | 079 | digest matches | retained |
-| key file deleted | 081 | digest matches | retained |
-| SOPS file, as referenced | 085 | same MAC | retained |
-| SOPS file edited in place | 088 | another MAC | lost |
-| SOPS file removed | 090 | no such file | unknown |
-| SOPS file mode 000 | 092 | permission denied | unknown |
-| mode restored | 094 | same MAC | retained |
-| key file deleted | 096 | same MAC | retained |
+| Dependency and state | Row | Answer | Class | Value, read with the key |
+|---|---|---|---|---|
+| age generation, as written | 065-066 | digest matches | retained | as written (067) |
+| age generation never written | 068 | no metadata file | unknown | |
+| ciphertext removed, metadata kept | 070 | no such file | unknown | |
+| ciphertext replaced by another value | 072 | digest differs | unknown | gone (073) |
+| ciphertext re-encrypted, metadata not yet updated | 075 | digest differs | unknown | still there (076) |
+| metadata file mode 000 | 078 | permission denied | unknown | |
+| ciphertext mode 000 | 081 | permission denied | unknown | |
+| modes restored | 083 | digest matches | retained | |
+| key file deleted | 085 | digest matches | retained | unreadable (086) |
+| SOPS file, as referenced | 089 | same MAC | retained | as written (090) |
+| SOPS file, referenced value edited | 092 | another MAC | unknown | gone (093) |
+| SOPS file, another key added | 095 | another MAC | unknown | still there (096) |
+| SOPS file removed | 098 | no such file | unknown | |
+| SOPS file mode 000 | 100 | permission denied | unknown | |
+| mode restored | 102 | same MAC | retained | |
+| key file deleted | 104 | same MAC | retained | unreadable (105) |
 
-Neither local candidate has a blocked or an unreachable state, and rows 083-084 and 098-099 record
+Neither local candidate has a blocked or an unreachable state, and rows 087-088 and 106-107 record
 that rather than leaving the cells blank. Nothing hides a file reversibly while keeping it. A local
 file has no remote end: an unreadable file is either denied or absent.
 
@@ -228,18 +245,34 @@ A first capture set `rc-trim`'s decryption floor to 2 and then asked for a trim 
 it with HTTP 400: "minimum available version cannot be set when minimum encryption version is not
 set". The key stayed untrimmed, so the classifier correctly reported it blocked, and the three trim
 rows were mismatches. The script now raises `min_encryption_version` along with the decryption
-floor. That capture was discarded and the fixture rebuilt; the committed evidence is the second,
-complete capture.
+floor. That capture was discarded.
 
-### 5.2 A denied ciphertext read as absent
+### 5.2 A changed digest or MAC was first classified lost
+
+The first version of the classifier called a local ciphertext whose digest differed from the
+recorded one lost, and so a SOPS file whose MAC differed from the referenced one. The branch review
+showed both overclaim. The age store's digest is its own record, and the provider-capability run's
+rotation replaces the ciphertext before it updates the metadata. sops encrypts the MAC with a fresh
+IV on every save, so adding another key to the file changes it. The rows now show both: 075 and 095
+are unknown while the value is still there (076, 096), exactly as 072 and 092 are where it is gone
+(073, 093). Metadata cannot tell the two apart, so both are unknown. The capture made before this
+change was discarded; the committed evidence is the capture after it.
+
+### 5.3 Rules that accepted any version string
+
+The same review found that a KV version of `0`, `-1` or `1.5` came out lost against an
+`oldest_version` of 2, and that a Transit answer's `soft_deleted` field was ignored. Both are now
+unknown, with checks for each in `run/test-decide`.
+
+### 5.4 A denied ciphertext read as absent
 
 The age-store classifier first took the ciphertext's digest through a redirection
 (`sha256sum <file`). A redirection that fails reports on the shell's own stderr, before the
 command's `2>&1` applies. A mode-000 ciphertext therefore produced no captured error and would have
 been reported as absent instead of denied. Both are unknown, but the reason was wrong. It now passes
-the file by name. The mistake was caught on review of the script, before any capture.
+the file by name. This was caught before any capture.
 
-### 5.3 Verbatim transcripts fail `git diff --check`
+### 5.5 Verbatim transcripts fail `git diff --check`
 
 As in the provider-capability run, bao's trailing blank lines trip the whitespace check.
 `.gitattributes` exempts this experiment's `evidence/transcripts/*.txt` alone.
@@ -251,19 +284,21 @@ As in the provider-capability run, bao's trailing blank lines trip the whitespac
 **OpenBao** supplies every state from the metadata token alone: read on `secret/metadata/*` and
 `transit/keys/*`, plus list. Retained, blocked (soft delete, decryption floor) and lost
 (destruction, pruning, trim) each rest on a field of the answer (§3.1, §4.1), and each was
-observed against its ground truth. Scheduled deletion is retained until its time and blocked after
-it. The reason names the time, so a monitor can warn before it arrives.
+observed against its ground truth. A version with a scheduled deletion was observed retained, with
+the reason naming the time (002), so a monitor can warn before it arrives. That it turns blocked
+once the time has passed is the soft-delete rule, covered by the rule checks and not captured.
 
-**The local age store** supplies retained and one form of lost: a replaced ciphertext, detected by
-the digest its metadata recorded. It supplies no blocked state. Its lost is only as good as its
-metadata: a writer that updates the metadata along with the ciphertext, as the
-provider-capability run's rotation does, leaves nothing to detect.
+**The local age store** supplies retained and unknown only. A missing, denied or changed file is
+unknown (§4.2). It has no blocked state, and no lost either: a digest that differs from its own
+record does not show the value gone (075-076).
 
-**SOPS** supplies retained and lost against a pinned MAC, and no blocked state. The reference has to
-carry the MAC: the file itself has no version number to refer to.
+**SOPS** likewise supplies retained and unknown only, against a MAC pinned when the file was
+referenced. The reference has to carry the MAC, since the file has no version number, and any
+rewrite changes it (095-096).
 
 For both local candidates, **retained means the metadata file and the ciphertext are there, and
-nothing about the key** (081, 096 retained with the key file gone; 082, 097 the decrypt failing).
+nothing about the key** (085 and 104 retained with the key file gone; 086 and 105 the decrypt
+failing).
 
 ### 6.2 Criterion 2: nothing uncertain becomes lost
 
@@ -271,24 +306,29 @@ Each cause of uncertainty was produced and each landed on unknown:
 
 | Cause | Rows |
 |---|---|
-| denied metadata | 008, 009 (OpenBao); 074, 077 (age store); 092 (SOPS) |
-| missing path or listing entry | 010, 023, 024 (OpenBao); 068, 070 (age store); 090 (SOPS) |
+| denied metadata | 008, 009 (OpenBao); 078, 081 (age store); 100 (SOPS) |
+| a name the provider does not answer for | 010, 023, 024 (OpenBao); 068, 070 (age store); 098 (SOPS) |
 | unreachable | 040-042 (partition, curl exit 7) |
 | no answer | 047 (paused, curl exit 28) |
 | sealed | 053 (HTTP 503) |
-| insufficient evidence | 006 (a version above `current_version`); the rule checks for missing floors, missing version maps and unparseable answers |
+| insufficient evidence | 006 (a version above `current_version`); 072, 075, 092, 095 (a rewritten local file); the rule checks for malformed versions, a set `soft_deleted`, missing floors, missing version maps and unparseable answers |
 
-No timeout moves unknown to lost. Row 043 is three observations of a partitioned dependency, 4 s
+**Missing listings.** The classifier never lists. It asks for each referenced dependency by name,
+so a listing without the entry is never evidence it uses. The same condition reaches it as the 404
+on the direct read (023, 024), and is unknown. That a listing is never read was a design choice
+made to keep this criterion true; no LIST request was exercised.
+
+**No timeout moves unknown to lost.** Row 043 is three observations of a partitioned dependency, 4 s
 apart, with the alert interval set to 5 s. The monitor raised `regression` at once, because the
 dependency had been retained, and `persistent` at the third observation. The class stayed unknown
 throughout. The rule checks cover the same with an unknown observed 99,900 s after it began, and
 with a dependency never seen retained.
 
-The uncertain mutation: a `bao-destroy` sent while OpenBao was paused got no answer, and the fixture
-logged it `unknown rc=28` (048, `injections.log`). After `unpause`, the version was not destroyed in
-this run (050, with the admin read 051 agreeing). The classifier reported what the provider then
-held, and the fixture's `unknown` log line is the only record that a destroy may have been sent.
-That is a single observation, not proof that OpenBao never applies such a request later.
+**The uncertain mutation.** A `bao-destroy` sent while OpenBao was paused got no answer, and the
+fixture logged it `unknown rc=28` (048, `injections.log`). After `unpause`, the version was not
+destroyed in this run (050, with the admin read 051 agreeing). The classifier reported what the
+provider then held, and the fixture's `unknown` log line is the only record that a destroy may have
+been sent. That is a single observation, not proof that OpenBao never applies such a request later.
 
 ### 6.3 Criterion 3: a retained verdict grants nothing
 
@@ -302,8 +342,15 @@ In the `authority` state (056-064), each dependency was classified retained and 
   denied (064).
 
 The same holds with a floor in the way: the executor's decrypt of version 1 failed while it was
-blocked (029), and succeeded once the floor was lowered (038). Retention is a property of the provider's state. Authority is the identity's policy at the moment
-of use. The experiment observed them change independently.
+blocked (029), and succeeded once the floor was lowered (038). Retention is a property of the
+provider's state. Authority is the identity's policy at the moment of use. The experiment observed
+them change independently.
+
+**Dispatch** is half of the criterion that this phase can only show by construction. There is no
+dispatcher in Phase 0 to consume a verdict. The classifier's only effect is a line of output, and
+the metadata token it holds can read no value (057) and use no key. A verdict can therefore
+authorize nothing by itself. Whether the v1 dispatcher treats it that way is for the execution
+specification, and §7 records it as a limit.
 
 ### 6.4 Criterion 4: provider limits and the alert policy the evidence supports
 
@@ -319,8 +366,8 @@ of use. The experiment observed them change independently.
 - OpenBao: a sealed or paused provider hides everything. The fixture's out-of-band read failed too,
   so for those states the ground truth is the state set, not a reading (§3.2).
 - OpenBao: whether an unanswered mutation was applied can only be learned by asking afterwards.
-- Local stores: no blocked state, and no removal that the metadata can see except a replacement
-  against a recorded digest or MAC. A deleted key is invisible.
+- Local stores: only retained and unknown. No blocked state, and no removal the metadata can prove.
+  A deleted key is invisible.
 - Every candidate: presence is not usability (§6.1, §6.3).
 
 **Alert policy the evidence supports.** It is a proposal for
@@ -330,7 +377,8 @@ of use. The experiment observed them change independently.
 2. **blocked**: alert at once, and say it is reversible. The admin's undelete or lowered floor
    restored use (034-035, 038).
 3. **retained → unknown**: alert at once as a regression. A 404 for a name that resolved before is
-   what a deleted key or deleted metadata looks like (023-024), and only the transition gives it
+   what a deleted key or deleted metadata looks like (023-024), and a rewritten local file looks
+   the same whether its value survived or not (072-075, 092-095). Only the transition gives these
    away.
 4. **unknown that persists**: alert after the interval. The evidence does not fix the interval; it
    shows only that a partition, a pause and a seal all look alike from the client, apart from the
@@ -345,15 +393,20 @@ of use. The experiment observed them change independently.
 - **The administrator ran as root.** Rows 015-020 and 031-033 used the root token. A least-privilege
   administrator policy is still unwritten.
 - **One pass per state.** In particular, the unanswered destroy was not applied in this one run.
+- **Dispatch is shown by construction only** (§6.3). No dispatcher exists yet to test against.
+- **No LIST request** was exercised (§6.2).
 - **The alert interval is a parameter** (`RC_ALERT_AFTER`, 5 s in row 043). It shows how the monitor
   behaves, not what the interval should be.
-- **KV `delete_version_after` was observed only before its time.** Blocked after the time is the
-  same rule as a past `deletion_time` and is covered by the rule checks, not by a capture.
+- **KV `delete_version_after` was observed only before its time** (§6.1).
+- **Transit `soft_deleted`** is present in the 2.6.1 key answer (027) and was false throughout.
+  Transit soft deletion was not exercised, so a set flag is classified unknown rather than blocked.
 - **Host curl.** The classifier's client is the host's curl, not a pinned image.
 - **Local stores ran as one uid**, as before. Denial was produced with file modes, not separate
-  users.
-- **OpenBao's Transit `soft_deleted` field** is present in the 2.6.1 key answer (027) and false
-  throughout. Transit soft deletion was not exercised.
+  users. SOPS was exercised in JSON format only.
+- **What the evidence carries.** The command column of `verdicts.tsv` holds the SHA-256 of each
+  expected synthetic value, since the digest is an argument of the check, and row 062 holds the
+  executor token's accessor, which identifies a token and cannot be used as one. The values and the
+  token were per run and never committed.
 
 ## 8. Recommendation
 
@@ -365,10 +418,10 @@ can rest on.
    whole-key and whole-path deletion come out as unknown, not lost. §7.5 already makes restricting
    them a deployment requirement. The classifier needs Bronzeward's own record of what was
    referenced to turn that 404 into a regression alert.
-2. **The local candidates meet §7.6 only as far as their metadata goes.** They have no blocked state
-   and cannot see a key loss. Their lost depends on the writer keeping the recorded digest honest.
-   This supports the provider-capability run's conclusion: on this evidence, §7.1's condition for a
-   local provider is not met.
+2. **The local candidates give only retained and unknown.** They have no blocked state, cannot prove
+   a removal, and cannot see a key loss. §7.6 requires a local provider to "prove equivalent
+   metadata behavior"; on this evidence neither does. This agrees with the provider-capability
+   run: §7.1's condition for a local provider is not met.
 3. **Retention and authority must stay separate checks**, as §7.6 says. Nothing observed here would
    let a retained verdict stand in for a point-of-use read or decrypt.
 
@@ -383,5 +436,5 @@ Transit key deletion and KV metadata deletion, whose results the classifier cann
 that never existed; and set KV `max_versions` explicitly wherever a path is overwritten.
 
 **To [key loss and restoration](https://github.com/ginsys/bronzeward/issues/10):** a deleted key
-file leaves both local candidates retained (081, 096). Key loss has to be found by a use-time check
+file leaves both local candidates retained (085, 104). Key loss has to be found by a use-time check
 or a key inventory, not by this classifier.

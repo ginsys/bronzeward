@@ -1,3 +1,3 @@
 reading the sops metadata block of denied.enc.json
-lastmodified=2026-09-24T18:27:45Z recipients=1
+lastmodified=2026-09-24T18:56:48Z age_recipients=1
 class=retained reason=same MAC as when referenced (no key is checked)

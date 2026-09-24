@@ -19,15 +19,18 @@ classifier against the provider's own view of each state:
 The rules themselves are pure functions in `run/decide.sh`, checked on synthetic provider answers by
 `run/test-decide` before any capture relies on them. `run/classify` asks the provider and applies
 them. Every observation is one row of `verdicts.tsv`: the command, the identity, the expected
-class written down before it runs, the observed class and reason, and the state whose evidence
-bundle is the ground truth for it. A row whose observation differs from the expectation is recorded
+class written down before it runs, the observed class and reason, and the state it was observed
+in. For OpenBao that state names the evidence bundle that is its ground truth. The local stores
+have no bundle (`local-files`): their ground truth is the injection row before, and the read rows
+that open the value with its key. A row whose observation differs from the expectation is recorded
 as a mismatch and the run continues.
 
 The rules follow the design's two constraints. **Lost** needs positive evidence of an irreversible
 removal in the answer itself: a destroyed version, a version below the oldest kept, a Transit
-version below the trimmed floor, a ciphertext or MAC that differs from the one referenced. Anything
-the classifier cannot see (a denied read, an absent path, a failed or missing answer, a sealed or
-unreachable provider) is **unknown**. A monitor records how long a dependency has been unknown and
+version below the trimmed floor. Anything the classifier cannot tell apart from that (a denied
+read, an absent path, a failed or missing answer, a sealed or unreachable provider, a version that
+is not a number, a local ciphertext or SOPS MAC that changed since it was referenced) is
+**unknown**. A monitor records how long a dependency has been unknown and
 raises an alert after an interval, and never changes the class.
 
 Rows that check authority, not retention, use the other identities: a compiler that may read only

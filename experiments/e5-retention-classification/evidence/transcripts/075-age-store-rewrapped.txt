@@ -1,0 +1,2 @@
+reading meta/rewrapped/g1.json and the digest of objects/rewrapped/g1.age
+class=unknown reason=rewritten: ciphertext digest differs from the one the store recorded (replaced, or a re-encryption in progress; no history to tell which)
