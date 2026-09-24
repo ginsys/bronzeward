@@ -24,22 +24,29 @@ version_ok() {
   return 1
 }
 
-# decide_kv <version> <now-rfc3339>: stdin is the data object of a KV v2 metadata read
-# (GET secret/metadata/<path>). Deletion times carry fractional seconds, which jq's date parser
-# does not take, so they are cut to whole seconds before comparing.
+# decide_kv <version> <served-rfc3339>: stdin is the data object of a KV v2 metadata read
+# (GET secret/metadata/<path>); <served-rfc3339> is the provider's own time for that answer (its
+# Date header), never the client's clock, whose skew would turn a version deleted a moment ago
+# into a scheduled one. Deletion times carry fractional seconds, which jq's date parser does not
+# take, so both sides are compared in whole seconds; a deletion time in the same second as the
+# answer may fall on either side of it, and is unknown.
 decide_kv() {
   local version=$1 now=$2 out
   version_ok "$version" || return 0
   out=$(jq -r --arg v "$version" --arg now "$now" '
     def secs: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
-    if (.versions | type) != "object" or (.current_version | type) != "number" or (.oldest_version | type) != "number"
+    def whole: sub("\\.[0-9]+Z$"; "Z");
+    (try ($now | secs) catch null) as $served
+    | if (.versions | type) != "object" or (.current_version | type) != "number" or (.oldest_version | type) != "number"
     then "unknown\tmetadata has no version map"
     elif .versions[$v] != null then
       .versions[$v] as $m
       | if $m.destroyed == true then "lost\tdestroyed"
         elif ($m.deletion_time // "") == "" then "retained\tversion present, not deleted"
-        elif ($m.deletion_time | secs) <= ($now | secs) then "blocked\tsoft-deleted at \($m.deletion_time | sub("\\.[0-9]+Z$"; "Z")) (reversible by undelete)"
-        else "retained\tdeletion scheduled for \($m.deletion_time | sub("\\.[0-9]+Z$"; "Z"))"
+        elif $served == null then "unknown\tdeletion time \($m.deletion_time | whole), and no provider time to compare it with"
+        elif ($m.deletion_time | secs) < $served then "blocked\tsoft-deleted at \($m.deletion_time | whole) (reversible by undelete)"
+        elif ($m.deletion_time | secs) == $served then "unknown\tdeletion time \($m.deletion_time | whole) is in the same second as the provider answered"
+        else "retained\tdeletion scheduled for \($m.deletion_time | whole)"
         end
     elif ($v | tonumber) > .current_version then "unknown\tversion \($v) is above current_version \(.current_version)"
     elif .oldest_version > 0 and ($v | tonumber) < .oldest_version then "lost\tpruned: below oldest_version \(.oldest_version)"

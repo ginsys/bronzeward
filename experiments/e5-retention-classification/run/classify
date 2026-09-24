@@ -24,39 +24,48 @@ here=$(dirname -- "${BASH_SOURCE[0]}")
 . "$here/decide.sh"
 
 die() { printf 'classify: %s\n' "$*" >&2; exit 2; }
-now_rfc3339() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-
 # ask <api-path>: GET one path with the metadata-only token; prints the body, then a last line
-# `<curl-exit> <http-code>`. A bounded wait: a paused provider accepts the connection and never
-# answers, and the classifier must still answer unknown.
+# `<curl-exit> <http-code> <served>`, where <served> is the answer's Date header as RFC 3339 in
+# whole seconds, or `-` when there is none that parses. A bounded wait: a paused provider accepts
+# the connection and never answers, and the classifier must still answer unknown.
 ask() {
-  local body code rc=0
+  local body headers code rc=0 date served=-
   [ -n "${BW_BAO_METADATA_TOKEN:-}" ] || die "BW_BAO_METADATA_TOKEN is not set"
   [ -n "${OPENBAO_PORT:-}" ] || die "OPENBAO_PORT is not set"
   body=$(mktemp)
+  headers=$(mktemp)
   code=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN curl --noproxy '*' --silent --connect-timeout 5 --max-time "${RC_ASK_LIMIT:-10}" \
     --variable '%BAO_TOKEN' --expand-header 'X-Vault-Token: {{BAO_TOKEN}}' \
-    --output "$body" --write-out '%{http_code}' "http://127.0.0.1:$OPENBAO_PORT/v1/$1") || rc=$?
+    --dump-header "$headers" --output "$body" --write-out '%{http_code}' "http://127.0.0.1:$OPENBAO_PORT/v1/$1") || rc=$?
+  date=$(sed -n 's/^[Dd]ate:[[:space:]]*//p' -- "$headers" | tr -d '\r' | tail -n 1)
+  [ -z "$date" ] || served=$(date -u -d "$date" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || served=-
   cat -- "$body"
-  rm -f -- "$body"
-  printf '\n%s %s\n' "$rc" "${code:-000}"
+  rm -f -- "$body" "$headers"
+  printf '\n%s %s %s\n' "$rc" "${code:-000}" "$served"
 }
 
-# openbao <decider> <decider-args...> -- <api-path>
+# openbao <decider> <decider-args...> -- <api-path>: a decider argument `@served` is replaced by
+# the provider's own time for the answer (ask's <served>, empty when there was none).
 openbao() {
-  local decider=() out status body
+  local decider=() out status body rc code served a
   while [ "$1" != -- ]; do decider+=("$1"); shift; done
   shift
   out=$(ask "$1")
   status=$(tail -n 1 <<<"$out")
   body=$(sed '$d' <<<"$out")
-  printf 'asked GET /v1/%s with the metadata-only token: curl exit %s, HTTP %s\n' "$1" "${status% *}" "${status#* }"
+  read -r rc code served <<<"$status"
+  [ "$served" != - ] || served=
+  for a in "${!decider[@]}"; do
+    [ "${decider[$a]}" != @served ] || decider[a]=$served
+  done
+  printf 'asked GET /v1/%s with the metadata-only token: curl exit %s, HTTP %s, provider time %s\n' \
+    "$1" "$rc" "$code" "${served:-none}"
   # The body is metadata only (versions, times, floors); errors are OpenBao's own text.
   # Not through head: on a long body head closes the pipe early, and under pipefail the SIGPIPE
   # would end the script before it printed a class.
   printf '%s\n' "$body" | jq -c '.data // .errors // .' 2>/dev/null || printf '%s\n' "${body:0:400}"
   local verdict data
-  verdict=$(answer_class "${status% *}" "${status#* }")
+  verdict=$(answer_class "$rc" "$code")
   if [ -n "$verdict" ]; then
     printf '%s\n' "$verdict"
   else
@@ -145,7 +154,7 @@ shift
 case $kind in
   openbao-kv) [ $# -eq 3 ] || die "usage: classify openbao-kv <mount> <path> <version>"
     api_name "$1" && api_name "$2"
-    openbao decide_kv "$3" "$(now_rfc3339)" -- "$1/metadata/$2" ;;
+    openbao decide_kv "$3" @served -- "$1/metadata/$2" ;;
   openbao-transit) [ $# -eq 3 ] || die "usage: classify openbao-transit <mount> <key> <key-version>"
     api_name "$1" && api_name "$2"
     openbao decide_transit "$3" -- "$1/keys/$2" ;;

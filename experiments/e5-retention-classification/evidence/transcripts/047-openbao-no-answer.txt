@@ -1,2 +1,2 @@
-asked GET /v1/secret/metadata/gen/app/g1 with the metadata-only token: curl exit 28, HTTP 000
+asked GET /v1/secret/metadata/gen/app/g1 with the metadata-only token: curl exit 28, HTTP 000, provider time none
 class=unknown reason=no answer: curl exit 28

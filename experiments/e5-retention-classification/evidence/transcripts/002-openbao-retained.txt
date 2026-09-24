@@ -1,3 +1,3 @@
-asked GET /v1/secret/metadata/gen/scheduled/g1 with the metadata-only token: curl exit 0, HTTP 200
-{"cas_required":false,"created_time":"2026-09-24T18:54:21.04719341Z","current_metadata_version":1,"current_version":1,"custom_metadata":null,"delete_version_after":"1h0m0s","max_versions":0,"metadata_cas_required":false,"oldest_version":0,"updated_time":"2026-09-24T18:54:21.192574939Z","versions":{"1":{"created_time":"2026-09-24T18:54:21.192574939Z","deletion_time":"2026-09-24T19:54:21.192574939Z","destroyed":false}}}
-class=retained reason=deletion scheduled for 2026-09-24T19:54:21Z
+asked GET /v1/secret/metadata/gen/scheduled/g1 with the metadata-only token: curl exit 0, HTTP 200, provider time 2026-09-24T19:51:16Z
+{"cas_required":false,"created_time":"2026-09-24T19:51:04.238996845Z","current_metadata_version":1,"current_version":1,"custom_metadata":null,"delete_version_after":"1h0m0s","max_versions":0,"metadata_cas_required":false,"oldest_version":0,"updated_time":"2026-09-24T19:51:04.390083212Z","versions":{"1":{"created_time":"2026-09-24T19:51:04.390083212Z","deletion_time":"2026-09-24T20:51:04.390083212Z","destroyed":false}}}
+class=retained reason=deletion scheduled for 2026-09-24T20:51:04Z

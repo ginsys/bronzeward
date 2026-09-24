@@ -1,7 +1,7 @@
 Failed to get the data key required to decrypt the SOPS file.
 
 Group 0: FAILED
-  age16krf6wlf859x9erxhsaa34vjzzrhkq3kmqe3a7nhqfr537f8lpgse2hqgn: FAILED
+  age16v5zdmekmqyjm35mwfmtf0976mw9fdk0xhvuxqxt7pmm3632nezqn4uttw: FAILED
     - | failed to load age identities. Errors while loading age
       | identities: failed to open SOPS_AGE_KEY_FILE file: open
       | <repo>/fixtures/.state/data/rc-sops/keys/gone.key:
