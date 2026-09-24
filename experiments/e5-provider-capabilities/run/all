@@ -43,3 +43,5 @@ others=$(grep -vc '/data/canary-control\.txt$' "$scan" || true)
 } | tee "$E5_OUT/summary.txt"
 [ "$controls" -ge 1 ] || die "the positive control was not found: the stores were not scanned, and the scan proves nothing"
 [ "$others" -eq 0 ] || die "plaintext found outside the control: see $scan"
+# Written last, only after both leak-scan checks passed; run/collect-evidence refuses a capture without it.
+echo "run/all completed and the leak scan passed" >"$E5_OUT/complete"

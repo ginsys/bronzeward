@@ -185,7 +185,7 @@ cell $C $col operator ok primitive -- newkey lost
 cell $C $col publisher ok primitive -- put lost app-token g-lost app-token-g1
 cell $C $col operator ok - -- rm -- "$S/keys/lost.key"
 cell $C $col metadata ok metadata -- meta_check app-token g-lost
-cell $C $col compiler fail primitive -- get lost app-token g-lost
+cell $C $col lost fail primitive -- get lost app-token g-lost
 # A damaged ciphertext is caught by the recorded digest, which a bare presence check would miss.
 cell $C $col operator ok - -- damage "$S/objects/app-token/g-race.age"
 cell $C $col metadata fail metadata -- meta_check app-token g-race

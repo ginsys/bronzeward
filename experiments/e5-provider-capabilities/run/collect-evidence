@@ -10,7 +10,8 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 need grep sed find cp
-[ -s "$E5_OUT/summary.txt" ] || die "$E5_OUT/summary.txt is missing; only a run/all that completed writes it"
+[ -s "$E5_OUT/complete" ] || die "$E5_OUT/complete is missing: run/all did not finish, or its leak scan failed"
+[ -s "$E5_OUT/summary.txt" ] || die "$E5_OUT/summary.txt is missing"
 [ -s "$STATE/scan-patterns.txt" ] || die "no scan patterns: run this with the fixture still up"
 
 dest=$E5_DIR/evidence
