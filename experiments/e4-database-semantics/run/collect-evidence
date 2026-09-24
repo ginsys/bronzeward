@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Copy the committable text of one run into evidence/: the cell table, the run record, the
+# fixture's injection timeline, and every row's transcript (each client's output, each injection,
+# each reader's output), packed one file per scenario and backend. The SQLite files, the
+# PostgreSQL dumps and the fixture's evidence bundle stay in E4_OUT. Absolute paths are rewritten,
+# and the result is refused if it holds any of the fixture's leak-scan patterns (this run's
+# password, canary and tokens); a planted control file proves the scan matches before the real
+# scan runs.
+#
+# Phase-0 evidence for the database-semantics experiment (ginsys/bronzeward issue 6). Not v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+need grep sed find sort
+[ -s "$E4_MARK" ] || die "$E4_OUT is not an E4 run directory ($E4_MARK is missing)"
+[ -s "$E4_OUT/complete" ] || die "$E4_OUT/complete is missing: run/all did not finish"
+[ -s "$E4_PATTERNS" ] || die "$E4_PATTERNS is missing or empty"
+
+dest=$E4_DIR/evidence
+incoming=$(mktemp -d "$E4_DIR/.evidence-incoming.XXXXXX")
+trap 'rm -rf -- "$incoming"' EXIT
+
+rewrite() { # rewrite <in> <out>: the checkout, E4_OUT and the fixture state become placeholders
+  mkdir -p -- "$(dirname -- "$2")"
+  sed -e "s#$REPO_DIR#<repo>#g" -e "s#$E4_OUT#<E4_OUT>#g" -e "s#$STATE#<fixture-state>#g" -- "$1" >"$2"
+}
+for f in run.txt cells.tsv injections.log; do
+  rewrite "$E4_OUT/$f" "$incoming/$f"
+done
+[ ! -f "$E4_OUT/bundle-summary.txt" ] || rewrite "$E4_OUT/bundle-summary.txt" "$incoming/bundle-summary.txt"
+
+# One file per scenario and backend rather than one per row: GitHub serves no pull-request diff of
+# more than 300 files, and a review that cannot read the diff reviews nothing. Each row's
+# transcript follows a `==> <row> <==` line, in row order; the pack ends with `==> end <==`.
+packs=0
+while IFS= read -r key; do
+  out=$incoming/transcripts/$key.txt
+  mkdir -p -- "$(dirname -- "$out")"
+  {
+    while IFS= read -r -d '' f; do
+      printf '==> %s <==\n' "$(basename -- "$f" .txt)"
+      sed -e "s#$REPO_DIR#<repo>#g" -e "s#$E4_OUT#<E4_OUT>#g" -e "s#$STATE#<fixture-state>#g" -- "$f"
+      [ -z "$(tail -c 1 -- "$f")" ] || printf '\n'
+    done < <(find "$E4_T" -type f -name "[0-9][0-9][0-9]-$key-*.txt" -print0 | sort -z)
+    printf '==> end <==\n'
+  } >"$out"
+  packs=$((packs + 1))
+done < <(awk -F'\t' 'NR > 1 { print $2 "-" $3 }' "$E4_CELLS" | sort -u)
+[ "$packs" -gt 0 ] || die "no rows in $E4_CELLS"
+
+# scan <fixed-strings-file>: the files under incoming that hold any of the strings. grep exits 1
+# for no match; any other failure (an unreadable file) ends the run rather than reading as clean.
+scan() {
+  local rc=0
+  grep -rlF -f "$1" -- "$incoming" || rc=$?
+  [ "$rc" -le 1 ] || die "the leak scan failed (grep exit $rc)"
+}
+
+# The control: a file holding one pattern must be found, or the scan below proves nothing.
+head -n 1 -- "$E4_PATTERNS" >"$incoming/leak-control"
+hits=$(scan "$E4_PATTERNS")
+[ "$hits" = "$incoming/leak-control" ] && control=fired || control="did not fire as expected"
+rm -- "$incoming/leak-control"
+[ "$control" = fired ] || die "leak-scan control $control; the scan cannot be trusted"
+
+# Refusals. A match is reported by file only, never by content.
+hits=$(scan "$E4_PATTERNS")
+[ -z "$hits" ] || die "collected evidence matches a leak-scan pattern in: $hits"
+hits=$(scan <(printf '%s/\n' "$HOME"))
+[ -z "$hits" ] || die "collected evidence names a path in the operator's home in: $hits"
+printf 'leak-scan\t%s patterns\tcontrol %s\t0 hits in %s files\n' "$(wc -l <"$E4_PATTERNS")" "$control" \
+  "$(find "$incoming" -type f | wc -l)" >"$incoming/leak-scan.tsv"
+
+rm -rf -- "$dest"
+mv -T -- "$incoming" "$dest"
+trap - EXIT
+say "evidence collected in $dest: $(find "$dest" -type f | wc -l) files"
