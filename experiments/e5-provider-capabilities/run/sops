@@ -193,7 +193,7 @@ cell $C $col compiler ok primitive -- updatekeys compiler app-token
 # of the removed identity who kept an older copy of the file can still read the current value.
 cell $C $col metadata ok metadata -- data_key app-token "$before" same
 cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" graft app-token "$W/pre-updatekeys.enc.json" compiler
-cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
+cell $C $col compiler-2 ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
 cell $C $col compiler fail primitive -- get compiler app-token
 cell $C $col metadata ok metadata -- meta "$D/secrets/app-token.enc.json"
 unsupported $C $col 'no reversible decryption floor: removing a recipient re-encrypts the data key, and restoring access means re-adding it with a key that can still decrypt'
@@ -202,16 +202,16 @@ unsupported $C $col 'no reversible decryption floor: removing a recipient re-enc
 
 col='startup-unlock'
 cell $C $col compiler fail primitive -- sops_nokey decrypt "$D/secrets/app-token.enc.json"
-cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
+cell $C $col compiler-2 ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
 
 # --- backup and restore -------------------------------------------------------------------------------
 
 col='backup-restore'
 cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-snapshot e5-sops
-cell $C $col compiler ok primitive -- set_value compiler-2 app-token app-token-g1
-cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token
+cell $C $col compiler-2 ok primitive -- set_value compiler-2 app-token app-token-g1
+cell $C $col compiler-2 ok primitive -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token
 cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-restore e5-sops
-cell $C $col compiler ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
+cell $C $col compiler-2 ok primitive -- check_digest "$(e5_digest app-token-g2)" get compiler-2 app-token
 cell $C $col executor ok primitive -- open_artifact executor rel-1
 
 say "sops: $(e5_mismatches) mismatch(es) so far in $E5_CELLS"
