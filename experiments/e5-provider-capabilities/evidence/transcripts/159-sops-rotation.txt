@@ -1,1 +1,7 @@
-value digest matches
+2026/09/24 12:31:13 Syncing keys for file <repo>/fixtures/.state/data/sops/secrets/app-token.enc.json
+The following changes will be made to the file's groups:
+Group 1
+    age18fv8tp8e05453dstah5e8jqll3s9w3dz4hmkcv9kxdt9magkputqh4a7yu
++++ age1jf3yfp23e48nc3k233grvwm878kaqk3psdagls3gy9fp9a4wu5jss6dee8
+--- age1dtzrl6mn2j8q5kfyummuhjlpna24e2sm7u674sk6f292kmpnfsxqj6ev79
+2026/09/24 12:31:13 File <repo>/fixtures/.state/data/sops/secrets/app-token.enc.json synced with new keys
