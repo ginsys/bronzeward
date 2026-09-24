@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# Candidate B: a local age-backed store, built here because no such store exists to measure (the
+# fixtures report §6 leaves "the local-store candidates themselves" to this experiment). It is the
+# smallest layout that can answer the design §7.3 inventory, not a proposal for v1:
+#
+#   .state/data/age-store/
+#     keys/<identity>.key          age identities, one per role (0600)
+#     objects/<name>/<gen>.age     one immutable generation per file, created with O_EXCL
+#     artifacts/<id>.age           rendered artifacts, encrypted to the executor only
+#     meta/<name>/<gen>.json       plaintext metadata: created, recipient, ciphertext SHA-256; no value
+#
+# Roles are the OpenBao run's: the compiler holds the key the source secrets are encrypted to, the
+# executor the artifact key, the publisher only public recipients, and the metadata identity no
+# key at all. All of them run as one uid here, so the separation is by which key file a command is
+# given, not by the operating system: that limit is recorded as a cell, not assumed away.
+#
+# Phase-0 evidence for the provider-capability experiment (ginsys/bronzeward issue 8). Not v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+e5_init
+e5_need_fixture
+
+C=age-store
+S=$STATE/data/age-store
+W=$E5_WORK/age-store
+mkdir -p -- "$S/keys" "$S/objects" "$S/artifacts" "$S/meta" "$W"
+chmod 700 "$S/keys"
+
+age() { "$CACHE/age" "$@"; }
+age_keygen() { "$CACHE/age-keygen" "$@"; }
+recipient() { age_keygen -y "$S/keys/$1.key"; }
+
+# --- helpers: each prints a verdict or non-secret metadata, never a value ---------------------------
+
+newkey() { # newkey <identity>
+  (umask 077 && age_keygen -o "$S/keys/$1.key" 2>/dev/null)
+  printf 'identity %s recipient %s\n' "$1" "$(recipient "$1")"
+}
+put() { # put <recipient-identity> <name> <gen> <value-name>: create-only, as a publisher would
+  local obj=$S/objects/$2/$3.age r
+  r=$(recipient "$1") || return 1
+  mkdir -p -- "$S/objects/$2" "$S/meta/$2"
+  (set -C && age -r "$r" <"$(e5_value_file "$4")" >"$obj") || return 1
+  jq -n --arg created "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" --arg recipient "$r" \
+    --arg sha256 "$(sha256sum <"$obj" | cut -d' ' -f1)" \
+    '{created: $created, recipient: $recipient, ciphertext_sha256: $sha256}' >"$S/meta/$2/$3.json"
+  printf 'created %s/%s\n' "$2" "$3"
+}
+get() { # get <identity> <name> <gen>: decrypt with that identity's key file
+  age -d -i "$S/keys/$1.key" "$S/objects/$2/$3.age"
+}
+meta_check() { # meta_check <name> <gen>: presence and integrity from metadata alone, no key
+  local m=$S/meta/$1/$2.json obj=$S/objects/$1/$2.age want got
+  [ -f "$m" ] || { echo "no metadata for $1/$2"; return 1; }
+  [ -f "$obj" ] || { echo "metadata present, ciphertext absent"; return 1; }
+  want=$(jq -r .ciphertext_sha256 "$m")
+  got=$(sha256sum <"$obj" | cut -d' ' -f1)
+  [ "$want" = "$got" ] || { echo "ciphertext digest differs from metadata"; return 1; }
+  jq -r '"present created=\(.created) recipient=\(.recipient) ciphertext digest matches"' "$m"
+}
+list_gens() { find "$S/meta/$1" -maxdepth 1 -name '*.json' -printf '%f\n' | sed 's/\.json$//' | sort; }
+damage() { printf x >>"$1"; }
+race() { # race <name> <gen>: two creators of one generation at once; exactly one may win
+  local a=0 b=0
+  put compiler "$1" "$2" race-a >/dev/null 2>&1 &
+  local pa=$!
+  put compiler "$1" "$2" race-b >/dev/null 2>&1 &
+  local pb=$!
+  wait "$pa" || a=1
+  wait "$pb" || b=1
+  printf 'writer a rc=%s, writer b rc=%s\n' "$a" "$b"
+  [ $((a + b)) -eq 1 ]
+}
+seal_artifact() { # seal_artifact <id>: encrypt the rendered artifact to the executor
+  (set -C && age -r "$(recipient executor)" <"$W/artifact.yaml" >"$S/artifacts/$1.age")
+  echo "artifact $1 encrypted to the executor"
+}
+open_artifact() { # open_artifact <identity> <id>: the plaintext digest's verdict only
+  check_digest "$(sha256sum <"$W/artifact.yaml" | cut -d' ' -f1)" age -d -i "$S/keys/$1.key" "$S/artifacts/$2.age"
+}
+rotate() { # rotate <name> <gen> <old-identity> <new-identity>: re-encrypt; plaintext passes the pipe
+  local obj=$S/objects/$1/$2.age tmp
+  tmp=$(mktemp "$S/objects/$1/.$2.XXXXXX")
+  age -d -i "$S/keys/$3.key" "$obj" | age -r "$(recipient "$4")" >"$tmp" || { rm -f -- "$tmp"; return 1; }
+  mv -- "$tmp" "$obj"
+  jq --arg r "$(recipient "$4")" --arg sha256 "$(sha256sum <"$obj" | cut -d' ' -f1)" \
+    '.recipient = $r | .ciphertext_sha256 = $sha256' "$S/meta/$1/$2.json" >"$S/meta/$1/$2.json.new"
+  mv -- "$S/meta/$1/$2.json.new" "$S/meta/$1/$2.json"
+  echo "re-encrypted $1/$2 from $3 to $4"
+}
+modes() { stat -c '%A %n' "$S/keys" "$S"/keys/*.key "$S/objects" "$S/meta" | sed "s|$S/||"; }
+no_tty_decrypt() { # decrypt with a passphrase-protected identity and no terminal
+  setsid -w "$CACHE/age" -d -i "$S/keys/compiler-protected.key.age" "$S/objects/app-token/g1.age" </dev/null
+}
+# with_pty <prompts> <command-line>: run it on a pseudo-terminal, typing the passphrase once per
+# prompt. Exactly once per prompt: a copy typed after the command exits hits a closed pipe. The
+# terminal echoes what is typed before the prompt turns echo off, so the output is discarded; age -o
+# creates its file under the caller's umask, so the umask is narrowed first.
+with_pty() {
+  local pf i
+  pf=$(e5_value_file passphrase)
+  (
+    umask 077
+    for ((i = 0; i < $1; i++)); do
+      cat "$pf"
+      printf '\n'
+      sleep 1
+    done | script -qec "$2" /dev/null >/dev/null
+  )
+}
+pty_decrypt() { # the same decryption, with the passphrase typed on a pseudo-terminal; prints the value
+  rm -f -- "$W/unlocked.out"
+  with_pty 1 "$CACHE/age -d -i $S/keys/compiler-protected.key.age -o $W/unlocked.out $S/objects/app-token/g1.age" &&
+    cat "$W/unlocked.out" && rm -f -- "$W/unlocked.out"
+}
+
+# --- inputs ------------------------------------------------------------------------------------------
+
+for v in app-token-g1 app-token-g2 app-token-g3 race-a race-b artifact-token passphrase; do e5_secret "$v"; done
+{
+  printf 'machine:\n  token: '
+  cat "$(e5_value_file artifact-token)"
+  printf '\n'
+} >"$W/artifact.yaml"
+
+# --- key custody --------------------------------------------------------------------------------------
+
+col='key-custody'
+cell $C $col operator ok primitive -- newkey compiler
+cell $C $col operator ok primitive -- newkey executor
+cell $C $col operator ok metadata -- modes
+unsupported $C $col 'no permission boundary between identities in one uid: possession of a key file is the only control, enforced by filesystem modes and process separation outside the store'
+
+# --- create, read, versioning -------------------------------------------------------------------------
+
+col='create-read-version'
+cell $C $col publisher ok versioned -- put compiler app-token g1 app-token-g1
+cell $C $col publisher fail versioned -- put compiler app-token g1 app-token-g2
+cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" get compiler app-token g1
+cell $C $col executor fail versioned -- get executor app-token g1
+cell $C $col publisher ok versioned -- put compiler app-token g2 app-token-g2
+cell $C $col metadata ok metadata -- list_gens app-token
+cell $C $col publisher ok versioned -- race app-token g-race
+# Create-only is a convention of the writer, not a property of the store: a writer that removes the
+# file first replaces a generation, and nothing records that it did.
+cell $C $col publisher ok versioned -- rm -- "$S/objects/app-token/g2.age" "$S/meta/app-token/g2.json"
+cell $C $col publisher ok versioned -- put compiler app-token g2 app-token-g3
+cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g3)" get compiler app-token g2
+unsupported $C $col 'no retention limit and no pruning: generations stay until a file is removed, which the store can neither prevent nor record'
+
+# --- artifact encryption ------------------------------------------------------------------------------
+
+col='artifact-encryption'
+cell $C $col compiler ok primitive -- seal_artifact rel-1
+cell $C $col executor ok primitive -- open_artifact executor rel-1
+cell $C $col compiler fail primitive -- open_artifact compiler rel-1
+
+# --- signing ------------------------------------------------------------------------------------------
+
+unsupported $C signing 'age encrypts and has no signatures; a signing need would require a separate tool and key'
+
+# --- rotation -----------------------------------------------------------------------------------------
+
+col='rotation'
+cell $C $col operator ok primitive -- newkey compiler-2
+cell $C $col operator ok versioned -- rotate app-token g1 compiler compiler-2
+cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token g1
+cell $C $col compiler fail versioned -- get compiler app-token g1
+cell $C $col metadata ok metadata -- meta_check app-token g1
+unsupported $C $col 'no rewrap without plaintext: re-encryption decrypts in the rotating process'
+unsupported $C $col 'no reversible decryption floor: blocking an old key means moving its file, which leaves no metadata the store can report'
+
+# --- metadata-only checks -----------------------------------------------------------------------------
+
+col='metadata-only'
+cell $C $col metadata ok metadata -- meta_check app-token g2
+cell $C $col metadata ok metadata -- ls -l "$S/objects/app-token"
+# Presence is not usability (design §7.3): a generation encrypted to a key that is then lost still
+# passes every metadata check.
+cell $C $col operator ok primitive -- newkey lost
+cell $C $col publisher ok versioned -- put lost app-token g-lost app-token-g1
+cell $C $col operator ok - -- rm -- "$S/keys/lost.key"
+cell $C $col metadata ok metadata -- meta_check app-token g-lost
+cell $C $col compiler fail versioned -- get lost app-token g-lost
+# A damaged ciphertext is caught by the recorded digest, which a bare presence check would miss.
+cell $C $col operator ok - -- damage "$S/objects/app-token/g-race.age"
+cell $C $col metadata fail metadata -- meta_check app-token g-race
+
+# --- startup unlock -----------------------------------------------------------------------------------
+
+col='startup-unlock'
+cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token g1
+# A passphrase-protected identity: age reads the passphrase from a terminal only, so an unattended
+# restart cannot use it, and a process that feeds one through a pseudo-terminal holds the
+# passphrase itself.
+cell $C $col operator ok - -- with_pty 2 "$CACHE/age -p -o $S/keys/compiler-protected.key.age $S/keys/compiler-2.key"
+cell $C $col compiler fail versioned -- no_tty_decrypt
+cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" pty_decrypt
+
+# --- backup and restore -------------------------------------------------------------------------------
+
+col='backup-restore'
+cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-snapshot e5-age-store
+cell $C $col publisher ok versioned -- put compiler-2 app-token g3 app-token-g3
+cell $C $col operator ok - -- "$FIXTURES_DIR/bin/inject" store-restore e5-age-store
+cell $C $col compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" get compiler-2 app-token g1
+cell $C $col metadata fail metadata -- meta_check app-token g3
+cell $C $col executor ok primitive -- open_artifact executor rel-1
+
+say "age-store: $(e5_mismatches) mismatch(es) so far in $E5_CELLS"
