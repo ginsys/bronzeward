@@ -39,19 +39,25 @@ being measured, and a program linking the libraries would measure something else
 
 ## Running it
 
-The fixtures must be up first (`fixtures/bin/up`), and `E5_OUT` must name an absolute path on disk,
-outside this checkout:
+A capture needs a fresh fixture, and `E5_OUT` must name an empty absolute path on disk, outside this
+checkout:
 
 ```sh
+fixtures/bin/up
 E5_OUT=<somewhere with ~100 MiB> experiments/e5-provider-capabilities/run/test-lib
 E5_OUT=<the same directory>      experiments/e5-provider-capabilities/run/all
 E5_OUT=<the same directory>      experiments/e5-provider-capabilities/run/collect-evidence
+fixtures/bin/down
 ```
 
-`run/test-lib` checks the cell recorder and needs no fixture. `E5_OUT` has no default, for the same
-reasons as E1's: an evidence bundle carries a PostgreSQL data directory, a default under `/tmp`
-would put it in RAM on most systems, and one inside the checkout would be removed by
-`fixtures/bin/down`. Deleting it afterwards is part of finishing the run.
+`run/test-lib` checks the cell recorder and `e5_sops`; it needs the `sops` and `age` binaries that
+`fixtures/bin/up` caches, not a running fixture. `run/all` refuses an `E5_OUT` that already holds a
+capture, and a fixture that still holds the local stores of an earlier one. `run/collect-evidence`
+needs the fixture still up, because it rebuilds its refusal patterns from this run's credentials.
+
+`E5_OUT` has no default, for the same reasons as E1's: an evidence bundle carries a PostgreSQL data
+directory, a default under `/tmp` would put it in RAM on most systems, and one inside the checkout
+would be removed by `fixtures/bin/down`. Deleting it afterwards is part of finishing the run.
 
 No secret value is ever an argument. Values go to the CLIs over stdin, as the fixtures' own canary
 does, because argv is readable by any local user.

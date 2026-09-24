@@ -87,7 +87,8 @@ bao_to_sops() { # export: needs the compiler token; any holder of a recipient ca
 cell $C age-to-openbao compiler+publisher ok versioned -- age_to_bao app-token g1 secret/gen/migrated/app-token/g1
 cell $C age-to-openbao compiler ok versioned -- check_digest "$(e5_digest app-token-g1)" as compiler kv_get secret/gen/migrated/app-token/g1
 cell $C age-to-openbao metadata ok metadata -- created_times app-token g1 secret/gen/migrated/app-token/g1
-cell $C age-to-openbao publisher denied versioned -- age_to_bao app-token g2 secret/gen/migrated/app-token/g1
+# Migrating the same generation again must not replace it: the publisher may create, never update.
+cell $C age-to-openbao compiler+publisher denied versioned -- age_to_bao app-token g1 secret/gen/migrated/app-token/g1
 cell $C age-artifact-to-transit executor+compiler ok primitive -- artifact_age_to_transit rel-1
 cell $C age-artifact-to-transit executor ok primitive -- open_transit "$E5_WORK/migrated-rel-1.ct" \
   "$(sha256sum <"$E5_WORK/age-store/artifact.yaml" | cut -d' ' -f1)"
