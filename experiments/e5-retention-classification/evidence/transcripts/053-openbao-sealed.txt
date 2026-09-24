@@ -1,0 +1,3 @@
+asked GET /v1/secret/metadata/gen/app/g1 with the metadata-only token: curl exit 0, HTTP 503
+["Vault is sealed"]
+class=unknown reason=sealed or unavailable: HTTP 503

@@ -1,0 +1,3 @@
+reading meta/denied/g1.json and the digest of objects/denied/g1.age
+sha256sum: <repo>/fixtures/.state/data/rc-age-store/objects/denied/g1.age: Permission denied
+class=unknown reason=denied: ciphertext not readable

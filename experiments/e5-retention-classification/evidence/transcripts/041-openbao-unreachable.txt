@@ -1,0 +1,2 @@
+asked GET /v1/secret/metadata/gen/destroy/g1 with the metadata-only token: curl exit 7, HTTP 000
+class=unknown reason=unreachable: curl exit 7

@@ -1,0 +1,3 @@
+asked GET /v1/transit/keys/rc-del with the metadata-only token: curl exit 0, HTTP 404
+[]
+class=unknown reason=absent: HTTP 404

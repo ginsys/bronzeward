@@ -14,7 +14,7 @@ run = """
 env -u SHELLCHECK_OPTS actionlint
 env -u SHELLCHECK_OPTS shellcheck scripts/ci/*.sh scripts/test/*.sh
 env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/bin/* experiments/e1-secret-ingress/run/* \
-  experiments/e5-provider-capabilities/run/*
+  experiments/e5-provider-capabilities/run/* experiments/e5-retention-classification/run/*
 """
 
 [tasks.test]

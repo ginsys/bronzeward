@@ -1,0 +1,2 @@
+reading meta/app/g1.json and the digest of objects/app/g1.age
+class=retained reason=metadata present, ciphertext digest matches (no key is checked)

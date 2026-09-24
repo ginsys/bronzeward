@@ -1,0 +1,6 @@
+rule checks: 28 passed, 0 failed
+leak-scan lines: 1
+positive control hits: 1
+other hits: 0
+rows: 99, mismatches: 0
+states: after-uncertain authority baseline final partitioned paused removed reversed sealed

@@ -1,3 +1,4 @@
 # Transcripts are verbatim tool output: bao prints "======= Metadata =======" headers and trailing
 # blank lines, and sops pads blank lines with spaces. Keep them byte-exact rather than tidied.
 experiments/e5-provider-capabilities/evidence/transcripts/*.txt -whitespace conflict-marker-size=64
+experiments/e5-retention-classification/evidence/transcripts/*.txt -whitespace conflict-marker-size=64

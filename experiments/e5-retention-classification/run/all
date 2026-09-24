@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# The whole capture, on a fresh fixture: the rule checks, the OpenBao states, the local stores, then
+# one final evidence bundle whose leak scan covers the local stores.
+#
+# fixtures/bin/evidence walks .state/data (where run/local keeps its age store and SOPS files) and
+# plants its own positive control at .state/data/canary-control.txt. That control is this capture's
+# positive control: a scan that does not report it walked nothing, and any other hit is a plaintext
+# copy.
+#
+# Phase-0 evidence for the retention-classification experiment (ginsys/bronzeward issue 9). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+rc_need_fixture
+[ ! -e "$RC_ROWS" ] || die "$RC_ROWS exists: a capture starts from an empty RC_OUT"
+[ ! -e "$STATE/data/rc-age-store" ] && [ ! -e "$STATE/data/rc-sops" ] ||
+  die "the local stores exist already: a capture needs a fresh fixture (fixtures/bin/down, then up)"
+rc_init
+
+"$RC_RUN_DIR/test-decide" >"$RC_OUT/test-decide.txt" 2>&1 || die "the rule checks failed: see $RC_OUT/test-decide.txt"
+for run in openbao local; do
+  "$RC_RUN_DIR/$run"
+done
+
+rc_bundle final
+scan=$RC_OUT/states/final/leak-scan.txt
+[ -f "$scan" ] || die "the final bundle has no leak-scan.txt"
+controls=$(grep -c '/data/canary-control\.txt$' "$scan" || true)
+others=$(grep -vc '/data/canary-control\.txt$' "$scan" || true)
+{
+  printf 'rule checks: %s\n' "$(tail -n 1 "$RC_OUT/test-decide.txt")"
+  printf 'leak-scan lines: %s\n' "$(wc -l <"$scan")"
+  printf 'positive control hits: %s\n' "$controls"
+  printf 'other hits: %s\n' "$others"
+  printf 'rows: %s, mismatches: %s\n' "$(($(wc -l <"$RC_ROWS") - 1))" "$(rc_mismatches)"
+  printf 'states: %s\n' "$(find "$RC_OUT/states" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | paste -sd' ' -)"
+} | tee "$RC_OUT/summary.txt"
+[ "$controls" -ge 1 ] || die "the positive control was not found: the stores were not scanned, and the scan proves nothing"
+[ "$others" -eq 0 ] || die "plaintext found outside the control: see $scan"
+# Written last, only after both leak-scan checks passed; run/collect-evidence refuses a capture without it.
+echo "run/all completed and the leak scan passed" >"$RC_OUT/complete"

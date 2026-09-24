@@ -1,0 +1,3 @@
+asked GET /v1/secret/metadata/gen/metadel/g1 with the metadata-only token: curl exit 0, HTTP 404
+[]
+class=unknown reason=absent: HTTP 404

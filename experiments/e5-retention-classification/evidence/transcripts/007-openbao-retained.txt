@@ -1,0 +1,3 @@
+asked GET /v1/transit/keys/rc-art with the metadata-only token: curl exit 0, HTTP 200
+{"allow_plaintext_backup":false,"auto_rotate_period":0,"deletion_allowed":false,"derived":false,"exportable":false,"imported_key":false,"keys":{"1":1790274336},"latest_version":1,"min_available_version":0,"min_decryption_version":1,"min_encryption_version":0,"name":"rc-art","soft_deleted":false,"supports_decryption":true,"supports_derivation":true,"supports_encryption":true,"supports_signing":false,"type":"aes256-gcm96"}
+class=retained reason=key version 1 within latest 1, decryption floor 1

@@ -1,0 +1,3 @@
+reading meta/denied/g1.json and the digest of objects/denied/g1.age
+jq: error: Could not open file <repo>/fixtures/.state/data/rc-age-store/meta/denied/g1.json: Permission denied
+class=unknown reason=denied: metadata not readable

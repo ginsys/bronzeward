@@ -1,0 +1,3 @@
+observation 1: class=retained reason=version present, not deleted
+monitor: class=retained alert=no
+class=retained reason=monitor after 1 observations: alert=no
