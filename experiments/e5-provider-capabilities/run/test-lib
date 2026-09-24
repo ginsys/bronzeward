@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Self-test of the cell recorder in lib.sh. Needs no fixture: it checks that a row is written for
+# every cell, that the observed outcome is derived from the exit status and the transcript and not
+# from the expectation, and that a mismatch is recorded rather than hidden or fatal.
+#
+# Phase-0 evidence for the provider-capability experiment (ginsys/bronzeward issue 8). Not v1 tooling.
+set -euo pipefail
+
+[ -n "${E5_OUT:-}" ] || { printf 'set E5_OUT (see README.md)\n' >&2; exit 2; }
+E5_OUT=$E5_OUT/test-lib
+rm -rf -- "$E5_OUT"
+export E5_OUT
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+e5_init
+
+failures=0
+check() { # check <description> <expected> <actual>
+  if [ "$2" = "$3" ]; then
+    printf 'ok   %s\n' "$1"
+  else
+    printf 'FAIL %s: expected [%s], got [%s]\n' "$1" "$2" "$3"
+    failures=$((failures + 1))
+  fi
+}
+field() { awk -F'\t' -v n="$1" -v f="$2" 'NR == n + 1 {print $f}' "$E5_CELLS"; }
+
+cell t col1 nobody ok primitive -- true
+cell t col1 nobody ok primitive -- false
+cell t col2 nobody denied metadata -- sh -c 'echo "Code: 403. Errors: * permission denied" >&2; exit 2'
+printf 'from-stdin\n' | cell t col3 nobody ok versioned -- cat
+unsupported t col4 'no such operation in this candidate'
+
+check 'header plus five rows' 6 "$(wc -l <"$E5_CELLS")"
+check 'passing command observed ok' ok "$(field 1 7)"
+check 'passing command matches' match "$(field 1 9)"
+check 'failing command observed fail' fail "$(field 2 7)"
+check 'failing command recorded as mismatch' mismatch "$(field 2 9)"
+check 'failing command exit status kept' 1 "$(field 2 8)"
+check 'a 403 is observed as denied' denied "$(field 3 7)"
+check 'expected denial matches' match "$(field 3 9)"
+check 'stdin reaches the command' from-stdin "$(cat "$E5_OUT/$(field 4 11)")"
+check 'unsupported row kind' unsupported "$(field 5 5)"
+check 'unsupported row is not a command' n/a "$(field 5 7)"
+check 'mismatch count' 1 "$(e5_mismatches)"
+
+[ "$failures" -eq 0 ] || { printf '%d check(s) failed\n' "$failures"; exit 1; }
+printf 'all checks passed\n'
