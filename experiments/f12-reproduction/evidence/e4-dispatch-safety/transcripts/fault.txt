@@ -1,0 +1,354 @@
+==> 012-fault-netsplit-send <==
+==> pre (rc ) <==
+pre digest=b626580240fe3b19f769833cd24a2a9ac6cd9c8893be14e560561f3fb8e99cde version=11 machined_ok=10 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-25T15:39:33.363484205Z actor=harness event=setup machine=m1 applied=b626580240fe scope_index=true
+==> read-setup (rc 0) <==
+applied|b626580240fe3b19f769833cd24a2a9ac6cd9c8893be14e560561f3fb8e99cde
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/012-fault-netsplit-send/a.yaml
+2026-09-25T15:39:33.510577197Z actor=harness event=planned id=A artifact=d767535910eb
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-25T15:39:33.523933276Z actor=harness event=approved id=A
+==> x (rc 4) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-25T15:39:33.565404212Z actor=X event=observation id=1 purpose=evidence digest=b626580240fe
+2026-09-25T15:39:33.571250536Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-25T15:39:33.576348546Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-25T15:40:33.573366Z
+2026-09-25T15:39:33.576398738Z actor=X event=gate-reached gate=send
+2026-09-25T15:39:33.957298845Z actor=X event=gate-released gate=send
+2026-09-25T15:39:33.957327501Z actor=X event=send id=A n=1 transport_deadline=2026-09-25T15:39:48.957320941Z
+2026-09-25T15:39:48.960301625Z actor=X event=response id=A n=1 class=unknown elapsed_ms=15002 detail="transport deadline reached, talosctl killed: "
+2026-09-25T15:39:48.964164719Z actor=X event=recorded id=A n=1 state=unresolved
+==> inject-netsplit-worker (rc 0) <==
+$ fixtures/bin/inject netsplit worker
+==> inject-netjoin-worker (rc 0) <==
+$ fixtures/bin/inject netjoin worker
+==> settle (rc ) <==
+# settled 30s at 2026-09-25T15:39:49Z
+==> settled (rc ) <==
+2026-09-25T15:40:19.290Z digest=d767535910eb66f9d3b764cb85060cbc7c04804ed35b244a5778a71c6072c034 version=12 updated=2026-09-25T15:40:00Z machined_ok=11 machined_invalid=0
+==> takeover (rc 0) <==
+$ E4X_OWNER=harness e4x takeover -id A -actor Y
+2026-09-25T15:40:19.303000721Z actor=Y event=takeover id=A owner=Y gen=2
+==> y-unaccounted (rc 4) <==
+$ E4X_OWNER=Y e4x recover -id A -retry
+2026-09-25T15:40:19.313460688Z actor=Y event=unaccounted id=A n=1 owner=X gen=1
+==> account (rc 0) <==
+$ E4X_OWNER=harness e4x account -id A -n 1 -evidence executor X exited after its transport deadline; the partition healed 30s before
+2026-09-25T15:40:19.325419981Z actor=harness event=accounted id=A n=1
+==> y (rc 0) <==
+$ E4X_OWNER=Y e4x recover -id A -retry
+2026-09-25T15:40:19.367054891Z actor=Y event=observation id=2 purpose=completion digest=d767535910eb
+2026-09-25T15:40:19.371517232Z actor=Y event=classified id=A state=completed
+==> read-op-A (rc 0) <==
+state|completed
+owner|Y@2
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:unknown
+accounted|1
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,response,unresolved,ownership,accounted,completed
+==> worker (rc ) <==
+2026-09-25T15:40:19.562Z digest=d767535910eb66f9d3b764cb85060cbc7c04804ed35b244a5778a71c6072c034 version=12 updated=2026-09-25T15:40:00Z machined_ok=11 machined_invalid=0
+==> 013-fault-early-accounting-hazard <==
+==> pre (rc ) <==
+pre digest=d767535910eb66f9d3b764cb85060cbc7c04804ed35b244a5778a71c6072c034 version=12 machined_ok=11 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-25T15:40:19.79414347Z actor=harness event=setup machine=m1 applied=d767535910eb scope_index=true
+==> read-setup (rc 0) <==
+applied|d767535910eb66f9d3b764cb85060cbc7c04804ed35b244a5778a71c6072c034
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/013-fault-early-accounting-hazard/a.yaml
+2026-09-25T15:40:19.92932767Z actor=harness event=planned id=A artifact=bb9772fa80e5
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-25T15:40:19.94216933Z actor=harness event=approved id=A
+==> x (rc 4) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-25T15:40:19.983720872Z actor=X event=observation id=1 purpose=evidence digest=d767535910eb
+2026-09-25T15:40:19.98938985Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-25T15:40:19.994344924Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-25T15:41:19.991478Z
+2026-09-25T15:40:19.994404411Z actor=X event=gate-reached gate=send
+2026-09-25T15:40:20.295275567Z actor=X event=gate-released gate=send
+2026-09-25T15:40:20.295287679Z actor=X event=send id=A n=1 transport_deadline=2026-09-25T15:40:35.29528711Z
+2026-09-25T15:40:35.298600852Z actor=X event=response id=A n=1 class=unknown elapsed_ms=15003 detail="transport deadline reached, talosctl killed: "
+2026-09-25T15:40:35.302382364Z actor=X event=recorded id=A n=1 state=unresolved
+==> inject-netsplit-worker (rc 0) <==
+$ fixtures/bin/inject netsplit worker
+==> takeover (rc 0) <==
+$ E4X_OWNER=harness e4x takeover -id A -actor Y
+2026-09-25T15:40:35.315019534Z actor=Y event=takeover id=A owner=Y gen=2
+==> account (rc 0) <==
+$ E4X_OWNER=harness e4x account -id A -n 1 -evidence executor X exited
+2026-09-25T15:40:35.327636006Z actor=harness event=accounted id=A n=1
+==> inject-netjoin-worker (rc 0) <==
+$ fixtures/bin/inject netjoin worker
+==> readable (rc ) <==
+# worker readable after 11s at 2026-09-25T15:40:46Z
+==> y (rc 0) <==
+$ E4X_OWNER=Y e4x recover -id A
+2026-09-25T15:40:46.868528067Z actor=Y event=observation id=2 purpose=completion digest=bb9772fa80e5
+2026-09-25T15:40:46.873414875Z actor=Y event=classified id=A state=completed
+==> read-op-A-classified (rc 0) <==
+state|completed
+owner|Y@2
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:unknown
+accounted|1
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,response,unresolved,ownership,accounted,completed
+==> settle (rc ) <==
+# settled 30s at 2026-09-25T15:40:46Z
+==> worker (rc ) <==
+2026-09-25T15:41:17.043Z digest=bb9772fa80e5c7d6c2a929b38a61545483e3c404284a3b10e6024772a77d7e40 version=13 updated=2026-09-25T15:40:46Z machined_ok=12 machined_invalid=0
+==> 014-fault-pause-send <==
+==> pre (rc ) <==
+pre digest=bb9772fa80e5c7d6c2a929b38a61545483e3c404284a3b10e6024772a77d7e40 version=13 machined_ok=12 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-25T15:41:17.274721242Z actor=harness event=setup machine=m1 applied=bb9772fa80e5 scope_index=true
+==> read-setup (rc 0) <==
+applied|bb9772fa80e5c7d6c2a929b38a61545483e3c404284a3b10e6024772a77d7e40
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/014-fault-pause-send/a.yaml
+2026-09-25T15:41:17.426755776Z actor=harness event=planned id=A artifact=1cfdb8a71e86
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-25T15:41:17.439773305Z actor=harness event=approved id=A
+==> x (rc 4) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-25T15:41:17.480124014Z actor=X event=observation id=1 purpose=evidence digest=bb9772fa80e5
+2026-09-25T15:41:17.485955378Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-25T15:41:17.490831039Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-25T15:42:17.487931Z
+2026-09-25T15:41:17.490881926Z actor=X event=gate-reached gate=send
+2026-09-25T15:41:17.671391313Z actor=X event=gate-released gate=send
+2026-09-25T15:41:17.671402362Z actor=X event=send id=A n=1 transport_deadline=2026-09-25T15:41:32.671401828Z
+2026-09-25T15:41:32.674432968Z actor=X event=response id=A n=1 class=unknown elapsed_ms=15003 detail="transport deadline reached, talosctl killed: "
+2026-09-25T15:41:32.677823264Z actor=X event=recorded id=A n=1 state=unresolved
+==> inject-pause-worker (rc 0) <==
+$ fixtures/bin/inject pause worker
+==> inject-unpause-worker (rc 0) <==
+$ fixtures/bin/inject unpause worker
+==> settle (rc ) <==
+# settled 30s at 2026-09-25T15:41:37Z
+==> settled (rc ) <==
+2026-09-25T15:42:07.954Z digest=bb9772fa80e5c7d6c2a929b38a61545483e3c404284a3b10e6024772a77d7e40 version=13 updated=2026-09-25T15:40:46Z machined_ok=12 machined_invalid=0
+==> takeover (rc 0) <==
+$ E4X_OWNER=harness e4x takeover -id A -actor Y
+2026-09-25T15:42:07.975441889Z actor=Y event=takeover id=A owner=Y gen=2
+==> y-unaccounted (rc 4) <==
+$ E4X_OWNER=Y e4x recover -id A -retry
+2026-09-25T15:42:07.986712844Z actor=Y event=unaccounted id=A n=1 owner=X gen=1
+==> account (rc 0) <==
+$ E4X_OWNER=harness e4x account -id A -n 1 -evidence executor X exited after its transport deadline; the worker was unpaused 30s before
+2026-09-25T15:42:07.998957931Z actor=harness event=accounted id=A n=1
+==> y (rc 0) <==
+$ E4X_OWNER=Y e4x recover -id A -retry
+2026-09-25T15:42:08.041468596Z actor=Y event=observation id=2 purpose=completion digest=bb9772fa80e5
+2026-09-25T15:42:08.045582256Z actor=Y event=classified id=A safe_to_retry_rev=11
+2026-09-25T15:42:08.051266755Z actor=Y event=attempt id=A n=2 owner=Y gen=2 deadline=2026-09-25T15:43:08.048566Z
+2026-09-25T15:42:08.051287049Z actor=Y event=send id=A n=2 transport_deadline=2026-09-25T15:42:23.051286503Z
+2026-09-25T15:42:08.075067019Z actor=Y event=response id=A n=2 class=accepted elapsed_ms=23 detail="Applied configuration without a reboot"
+2026-09-25T15:42:08.078244569Z actor=Y event=recorded id=A n=2 state=verifying
+2026-09-25T15:42:08.112076628Z actor=Y event=observation id=3 purpose=completion digest=1cfdb8a71e86
+2026-09-25T15:42:08.115445184Z actor=Y event=classified id=A state=completed
+==> read-op-A (rc 0) <==
+state|completed
+owner|Y@2
+attempts|2
+attempt_owners|1:X@1,2:Y@2
+stale_attempts|0
+responses|1:unknown,2:accepted
+accounted|1
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,response,unresolved,ownership,accounted,classified,attempt,response,verifying,completed
+==> worker (rc ) <==
+2026-09-25T15:42:08.289Z digest=1cfdb8a71e86c26483b4b06121e0cd2d555100a427a65c61085892d0b0a6f1f5 version=14 updated=2026-09-25T15:42:08Z machined_ok=13 machined_invalid=0
+==> 015-fault-direct-netsplit <==
+==> pre (rc ) <==
+pre digest=1cfdb8a71e86c26483b4b06121e0cd2d555100a427a65c61085892d0b0a6f1f5 version=14 machined_ok=13 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-25T15:42:08.53139787Z actor=harness event=setup machine=m1 applied=1cfdb8a71e86 scope_index=true
+==> read-setup (rc 0) <==
+applied|1cfdb8a71e86c26483b4b06121e0cd2d555100a427a65c61085892d0b0a6f1f5
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/015-fault-direct-netsplit/a.yaml
+2026-09-25T15:42:08.660276229Z actor=harness event=planned id=A artifact=b0782a4ccdc7
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-25T15:42:08.672524845Z actor=harness event=approved id=A
+==> x (rc 4) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-25T15:42:08.713584194Z actor=X event=observation id=1 purpose=evidence digest=1cfdb8a71e86
+2026-09-25T15:42:08.719475929Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-25T15:42:08.724379604Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-25T15:43:08.721432Z
+2026-09-25T15:42:08.724426203Z actor=X event=gate-reached gate=send
+2026-09-25T15:42:09.025325786Z actor=X event=gate-released gate=send
+2026-09-25T15:42:09.025338005Z actor=X event=send id=A n=1 transport_deadline=2026-09-25T15:42:24.025337479Z
+2026-09-25T15:42:23.280825655Z actor=X event=response id=A n=1 class=unknown elapsed_ms=14255 detail="exit status 1: error applying new configuration: rpc error: code = Unavailable desc = connection error: desc = \"transport: Error while dialing: dial tcp 10.55.0.3:50000: connect: no route to host\""
+2026-09-25T15:42:23.283988898Z actor=X event=recorded id=A n=1 state=unresolved
+==> inject-netsplit-worker (rc 0) <==
+$ fixtures/bin/inject netsplit worker
+==> inject-netjoin-worker (rc 0) <==
+$ fixtures/bin/inject netjoin worker
+==> settle (rc ) <==
+# settled 30s at 2026-09-25T15:42:23Z
+==> settled (rc ) <==
+2026-09-25T15:42:53.611Z digest=1cfdb8a71e86c26483b4b06121e0cd2d555100a427a65c61085892d0b0a6f1f5 version=14 updated=2026-09-25T15:42:08Z machined_ok=13 machined_invalid=0
+==> takeover (rc 0) <==
+$ E4X_OWNER=harness e4x takeover -id A -actor Y
+2026-09-25T15:42:53.633210209Z actor=Y event=takeover id=A owner=Y gen=2
+==> y-unaccounted (rc 4) <==
+$ E4X_OWNER=Y e4x recover -id A -retry
+2026-09-25T15:42:53.643743044Z actor=Y event=unaccounted id=A n=1 owner=X gen=1
+==> account (rc 0) <==
+$ E4X_OWNER=harness e4x account -id A -n 1 -evidence executor X exited after its transport deadline; the partition healed 30s before
+2026-09-25T15:42:53.656602652Z actor=harness event=accounted id=A n=1
+==> y (rc 0) <==
+$ E4X_OWNER=Y e4x recover -id A -retry
+2026-09-25T15:42:53.697936456Z actor=Y event=observation id=2 purpose=completion digest=1cfdb8a71e86
+2026-09-25T15:42:53.701871766Z actor=Y event=classified id=A safe_to_retry_rev=11
+2026-09-25T15:42:53.707161005Z actor=Y event=attempt id=A n=2 owner=Y gen=2 deadline=2026-09-25T15:43:53.704585Z
+2026-09-25T15:42:53.707176643Z actor=Y event=send id=A n=2 transport_deadline=2026-09-25T15:43:08.70717609Z
+2026-09-25T15:42:53.729768413Z actor=Y event=response id=A n=2 class=accepted elapsed_ms=22 detail="Applied configuration without a reboot"
+2026-09-25T15:42:53.734225811Z actor=Y event=recorded id=A n=2 state=verifying
+2026-09-25T15:42:53.763089211Z actor=Y event=observation id=3 purpose=completion digest=b0782a4ccdc7
+2026-09-25T15:42:53.766390692Z actor=Y event=classified id=A state=completed
+==> read-op-A (rc 0) <==
+state|completed
+owner|Y@2
+attempts|2
+attempt_owners|1:X@1,2:Y@2
+stale_attempts|0
+responses|1:unknown,2:accepted
+accounted|1
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,response,unresolved,ownership,accounted,classified,attempt,response,verifying,completed
+==> worker (rc ) <==
+2026-09-25T15:42:53.952Z digest=b0782a4ccdc77a53f14995008c531559816ccd4a714685a42aa320c17a24964c version=15 updated=2026-09-25T15:42:53Z machined_ok=14 machined_invalid=0
+==> 016-fault-db-restart <==
+==> pre (rc ) <==
+pre digest=b0782a4ccdc77a53f14995008c531559816ccd4a714685a42aa320c17a24964c version=15 machined_ok=14 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-25T15:42:54.202117444Z actor=harness event=setup machine=m1 applied=b0782a4ccdc7 scope_index=true
+==> read-setup (rc 0) <==
+applied|b0782a4ccdc77a53f14995008c531559816ccd4a714685a42aa320c17a24964c
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/016-fault-db-restart/a.yaml
+2026-09-25T15:42:54.331058063Z actor=harness event=planned id=A artifact=ff2416708735
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-25T15:42:54.344529005Z actor=harness event=approved id=A
+==> x (rc 0) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-25T15:42:54.387457385Z actor=X event=observation id=1 purpose=evidence digest=b0782a4ccdc7
+2026-09-25T15:42:54.393380324Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-25T15:42:54.398368629Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-25T15:43:54.395424Z
+2026-09-25T15:42:54.398382975Z actor=X event=send id=A n=1 transport_deadline=2026-09-25T15:43:09.398382338Z
+2026-09-25T15:42:54.42187222Z actor=X event=response id=A n=1 class=accepted elapsed_ms=23 detail="Applied configuration without a reboot"
+2026-09-25T15:42:54.421955149Z actor=X event=gate-reached gate=response
+2026-09-25T15:42:54.903364251Z actor=X event=gate-released gate=response
+2026-09-25T15:42:54.903562Z actor=X event=db-retry step=record-response err="dial tcp 127.0.0.1:55432: connect: connection refused"
+2026-09-25T15:42:55.903821911Z actor=X event=db-retry step=record-response err="dial tcp 127.0.0.1:55432: connect: connection refused"
+2026-09-25T15:42:56.904025816Z actor=X event=db-retry step=record-response err="dial tcp 127.0.0.1:55432: connect: connection refused"
+2026-09-25T15:42:57.904264423Z actor=X event=db-retry step=record-response err="dial tcp 127.0.0.1:55432: connect: connection refused"
+2026-09-25T15:42:58.904555934Z actor=X event=db-retry step=record-response err="dial tcp 127.0.0.1:55432: connect: connection refused"
+2026-09-25T15:42:59.904774179Z actor=X event=db-retry step=record-response err="dial tcp 127.0.0.1:55432: connect: connection refused"
+2026-09-25T15:43:00.905844292Z actor=X event=db-retry step=record-response err="pq: the database system is starting up"
+2026-09-25T15:43:01.915757499Z actor=X event=recorded id=A n=1 state=verifying
+2026-09-25T15:43:01.946100473Z actor=X event=observation id=34 purpose=completion digest=ff2416708735
+2026-09-25T15:43:01.95079338Z actor=X event=classified id=A state=completed
+==> inject-kill-postgres (rc 0) <==
+$ fixtures/bin/inject kill postgres
+==> inject-start-postgres (rc 0) <==
+$ fixtures/bin/inject start postgres
+==> read-op-A (rc 0) <==
+state|completed
+owner|X@1
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:accepted
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,response,verifying,completed
+==> worker (rc ) <==
+2026-09-25T15:43:02.150Z digest=ff241670873559e7a6575d84d810a24642a868d626a23b441721959863b712c7 version=16 updated=2026-09-25T15:42:54Z machined_ok=15 machined_invalid=0
+==> 017-fault-verify-netsplit <==
+==> pre (rc ) <==
+pre digest=ff241670873559e7a6575d84d810a24642a868d626a23b441721959863b712c7 version=16 machined_ok=15 machined_invalid=0
+==> setup (rc 0) <==
+$ E4X_OWNER=harness e4x setup
+2026-09-25T15:43:02.385475008Z actor=harness event=setup machine=m1 applied=ff2416708735 scope_index=true
+==> read-setup (rc 0) <==
+applied|ff241670873559e7a6575d84d810a24642a868d626a23b441721959863b712c7
+machines|1
+==> plan-A (rc 0) <==
+$ E4X_OWNER=harness e4x plan -id A -artifact <E4D_OUT>/parts/017-fault-verify-netsplit/a.yaml
+2026-09-25T15:43:02.535095965Z actor=harness event=planned id=A artifact=81967e6be943
+==> approve-A (rc 0) <==
+$ E4X_OWNER=harness e4x approve -id A
+2026-09-25T15:43:02.547982349Z actor=harness event=approved id=A
+==> x (rc 0) <==
+$ E4X_OWNER=X e4x run -id A
+2026-09-25T15:43:02.588956657Z actor=X event=observation id=1 purpose=evidence digest=ff2416708735
+2026-09-25T15:43:02.594470047Z actor=X event=committed id=A owner=X gen=1 mode=protocol
+2026-09-25T15:43:02.599219391Z actor=X event=attempt id=A n=1 owner=X gen=1 deadline=2026-09-25T15:44:02.596346Z
+2026-09-25T15:43:02.599238898Z actor=X event=send id=A n=1 transport_deadline=2026-09-25T15:43:17.599238341Z
+2026-09-25T15:43:02.622389305Z actor=X event=response id=A n=1 class=accepted elapsed_ms=23 detail="Applied configuration without a reboot"
+2026-09-25T15:43:02.625674779Z actor=X event=recorded id=A n=1 state=verifying
+2026-09-25T15:43:02.625742213Z actor=X event=gate-reached gate=verify
+2026-09-25T15:43:02.906640656Z actor=X event=gate-released gate=verify
+2026-09-25T15:43:12.92297273Z actor=X event=observation id=2 purpose=completion err="read-back: signal: killed: "
+2026-09-25T15:43:16.027850513Z actor=X event=observation id=3 purpose=completion digest=81967e6be943
+2026-09-25T15:43:16.031252268Z actor=X event=classified id=A state=completed
+==> inject-netsplit-worker (rc 0) <==
+$ fixtures/bin/inject netsplit worker
+==> inject-netjoin-worker (rc 0) <==
+$ fixtures/bin/inject netjoin worker
+==> read-op-A (rc 0) <==
+state|completed
+owner|X@1
+attempts|1
+attempt_owners|1:X@1
+stale_attempts|0
+responses|1:accepted
+accounted|0
+revoked|0
+revocation|none
+applied_is_artifact|1
+baseline_rev|2
+timeline|planned,approved,committed,attempt,response,verifying,completed
+==> worker (rc ) <==
+2026-09-25T15:43:16.212Z digest=81967e6be94350fdef64aa23c893599663c71611c8a6a7573e34d5a47faded64 version=17 updated=2026-09-25T15:43:02Z machined_ok=16 machined_invalid=0
+==> end <==

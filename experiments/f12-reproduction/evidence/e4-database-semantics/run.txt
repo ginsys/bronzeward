@@ -1,0 +1,21 @@
+commit	41c995cf65fbfc8326f76e33bd43d130035d30f9
+uncommitted inputs	0
+started	2026-09-25T15:32:17Z
+go	go version go1.27.1 linux/amd64
+host sqlite3	3.46.1
+postgres default isolation	read committed
+postgres image	docker.io/library/postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
+postgres server	PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+linked sqlite	3.53.4
+module	github.com/dustin/go-humanize v1.0.1
+module	github.com/google/uuid v1.6.0
+module	github.com/lib/pq v1.10.9
+module	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec
+module	golang.org/x/sys v0.47.0
+module	modernc.org/libc v1.75.7
+module	modernc.org/mathutil v1.7.1
+module	modernc.org/memory v1.12.1
+module	modernc.org/sqlite v1.59.0
+finished	2026-09-25T15:34:36Z
+rows	63
+mismatches	0

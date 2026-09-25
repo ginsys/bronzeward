@@ -1,0 +1,131 @@
+==> 047-s5-sqlite-workers-guarded <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=3708784
+outcome=done elapsed_ms=52 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-jobs -n 400
+backend=sqlite pid=3708804
+outcome=done elapsed_ms=24 jobs=400
+==> w1 (rc 0) <==
+$ e4db work -worker w1 -mode guarded -start-at 1790350409497
+backend=sqlite pid=3708832
+outcome=done elapsed_ms=5430 claims=0 completed=0 refused=0 retries=0 busy=1 work_ms=5430
+==> w2 (rc 0) <==
+$ e4db work -worker w2 -mode guarded -start-at 1790350409497
+backend=sqlite pid=3708836
+outcome=done elapsed_ms=5330 claims=0 completed=0 refused=0 retries=0 busy=1 work_ms=5330
+==> w3 (rc 0) <==
+$ e4db work -worker w3 -mode guarded -start-at 1790350409497
+backend=sqlite pid=3708845
+outcome=done elapsed_ms=5831 claims=0 completed=0 refused=0 retries=0 busy=1 work_ms=5831
+==> w4 (rc 0) <==
+$ e4db work -worker w4 -mode guarded -start-at 1790350409497
+backend=sqlite pid=3708854
+outcome=done elapsed_ms=5531 claims=0 completed=0 refused=0 retries=0 busy=1 work_ms=5531
+==> w5 (rc 0) <==
+$ e4db work -worker w5 -mode guarded -start-at 1790350409497
+backend=sqlite pid=3708863
+outcome=done elapsed_ms=5931 claims=0 completed=0 refused=0 retries=0 busy=1 work_ms=5931
+==> w6 (rc 0) <==
+$ e4db work -worker w6 -mode guarded -start-at 1790350409497
+backend=sqlite pid=3708872
+outcome=done elapsed_ms=5631 claims=0 completed=0 refused=0 retries=0 busy=1 work_ms=5631
+==> w7 (rc 0) <==
+$ e4db work -worker w7 -mode guarded -start-at 1790350409497
+backend=sqlite pid=3708880
+outcome=done elapsed_ms=5302 claims=400 completed=400 refused=0 retries=0 busy=0 work_ms=5302
+==> w8 (rc 0) <==
+$ e4db work -worker w8 -mode guarded -start-at 1790350409497
+backend=sqlite pid=3708886
+outcome=done elapsed_ms=5731 claims=0 completed=0 refused=0 retries=0 busy=1 work_ms=5731
+==> read-s5 (rc 0) <==
+jobs|400
+done|400
+claims|400
+jobs_claimed_twice|0
+completions|400
+jobs_completed_twice|0
+==> 048-s5-sqlite-workers-naive <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=3713478
+outcome=done elapsed_ms=47 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-jobs -n 400
+backend=sqlite pid=3713614
+outcome=done elapsed_ms=24 jobs=400
+==> w1 (rc 0) <==
+$ e4db work -worker w1 -mode naive -start-at 1790350417110
+backend=sqlite pid=3713697
+outcome=done elapsed_ms=6952 claims=31 completed=31 refused=0 retries=0 busy=0 work_ms=6952
+==> w2 (rc 0) <==
+$ e4db work -worker w2 -mode naive -start-at 1790350417110
+backend=sqlite pid=3713701
+outcome=done elapsed_ms=6888 claims=46 completed=46 refused=0 retries=0 busy=0 work_ms=6888
+==> w3 (rc 0) <==
+$ e4db work -worker w3 -mode naive -start-at 1790350417110
+backend=sqlite pid=3713713
+outcome=done elapsed_ms=6908 claims=9 completed=9 refused=0 retries=0 busy=0 work_ms=6908
+==> w4 (rc 0) <==
+$ e4db work -worker w4 -mode naive -start-at 1790350417110
+backend=sqlite pid=3713724
+outcome=done elapsed_ms=6861 claims=129 completed=129 refused=0 retries=0 busy=0 work_ms=6861
+==> w5 (rc 0) <==
+$ e4db work -worker w5 -mode naive -start-at 1790350417110
+backend=sqlite pid=3713734
+outcome=done elapsed_ms=7031 claims=0 completed=0 refused=0 retries=0 busy=1 work_ms=7031
+==> w6 (rc 0) <==
+$ e4db work -worker w6 -mode naive -start-at 1790350417110
+backend=sqlite pid=3713743
+outcome=done elapsed_ms=6838 claims=154 completed=154 refused=0 retries=0 busy=0 work_ms=6838
+==> w7 (rc 0) <==
+$ e4db work -worker w7 -mode naive -start-at 1790350417110
+backend=sqlite pid=3713754
+outcome=done elapsed_ms=6855 claims=31 completed=31 refused=0 retries=0 busy=0 work_ms=6855
+==> w8 (rc 0) <==
+$ e4db work -worker w8 -mode naive -start-at 1790350417110
+backend=sqlite pid=3713761
+outcome=done elapsed_ms=6931 claims=0 completed=0 refused=0 retries=0 busy=1 work_ms=6931
+==> read-s5 (rc 0) <==
+jobs|400
+done|400
+claims|400
+jobs_claimed_twice|0
+completions|400
+jobs_completed_twice|0
+==> 049-s5-sqlite-lease-expiry <==
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=sqlite pid=3728957
+outcome=done elapsed_ms=46 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-jobs -n 1
+backend=sqlite pid=3729108
+outcome=done elapsed_ms=18 jobs=1
+==> claim-a (rc 0) <==
+$ e4db claim -worker a -lease 1s
+backend=sqlite pid=3729171
+outcome=done elapsed_ms=18 job=1 fence=1
+==> claim-b-early (rc 3) <==
+$ e4db claim -worker b -lease 1m
+backend=sqlite pid=3729234
+outcome=refused reason=no-job elapsed_ms=0 err="no eligible job"
+==> claim-b (rc 0) <==
+$ e4db claim -worker b -lease 1m
+backend=sqlite pid=3731711
+outcome=done elapsed_ms=19 job=1 fence=2
+==> late-a (rc 3) <==
+$ e4db complete -job 1 -fence 1 -worker a
+backend=sqlite pid=3731723
+outcome=refused reason=fenced elapsed_ms=0 err="fenced: ownership or claim not current: job 1 is not claimed at fence 1"
+==> complete-b (rc 0) <==
+$ e4db complete -job 1 -fence 2 -worker b
+backend=sqlite pid=3731732
+outcome=done elapsed_ms=16 job=1 fence=2
+==> read-s5-jobs (rc 0) <==
+job:1|done 2 b 2
+event:1|1 claim a 1
+event:2|1 claim b 2
+event:3|1 complete b 2
+==> end <==
