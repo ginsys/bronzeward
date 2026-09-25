@@ -469,9 +469,11 @@ decision.
   does not trust fence generations (DB §4.7), ciphertext is not executability (KL §5.2), and a
   record of what a re-encoding patch changed (E3 §7).
 
-Apart from §9 item 3, which the execution candidates above carry into ginsys/bronzeward#19, the
-§9 gaps are not covered by any of these. Each needs its own tracked work, or an explicit owner
-deferral recorded where the PoC acceptance lives.
+Two §9 gaps are carried in part. The execution candidates carry item 3 into ginsys/bronzeward#19.
+The restore epoch (#18) and post-restore recovery that does not trust fence generations (#19)
+carry item 4's fencing half; its recovery-mode entry and executor quiescence remain uncovered. No
+candidate covers the other §9 gaps. Each uncovered gap needs its own tracked work, or an explicit
+owner deferral recorded where the PoC acceptance lives.
 
 ## 11. Acceptance criteria
 
