@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# Copy the committable text of one complete run into evidence/: the run record, the summary and
+# merged tables, the digests of every composition, one pack per case (both bases' artifacts under
+# the combined representation, path+schema+value), one pack per revision pair, and the fixture leak
+# scan's per-representation counts. The unredacted artifacts, the compositions and both secrets
+# bundles stay in E2SP_OUT.
+#
+# Before the refusal scan, every long scalar of the two secrets bundles that is not itself a secret
+# (certificates, the cluster ID) is masked as <masked:bundle-public>, with a count: the combined
+# representation keeps certificates, which are public. A secret of either bundle, a fixture
+# credential, any synthetic case value (the fixture list holds the BWSYNTH- prefix) or a path in the
+# operator's home fails the collection; a planted control file proves the scan matches first.
+#
+# Phase-0 evidence for the sensitivity and provenance experiment (ginsys/bronzeward issue 4). Not
+# v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+need grep sed awk find sort cp head wc mktemp
+[ -s "$E2SP_MARK" ] || die "$E2SP_OUT is not a sensitivity-provenance run directory ($E2SP_MARK is missing)"
+[ -s "$E2SP_OUT/complete" ] || die "$E2SP_OUT/complete is missing: run/all did not finish complete"
+bundle_scan=$E2SP_OUT/fixture-bundle/leak-scan.txt
+[ -f "$bundle_scan" ] || die "$bundle_scan is missing: copy the fixtures/bin/evidence bundle to $E2SP_OUT/fixture-bundle first"
+
+dest=$E2SP_DIR/evidence
+incoming=$(mktemp -d "$E2SP_DIR/.evidence-incoming.XXXXXX")
+trap 'rm -rf -- "$incoming"' EXIT
+work=$(mktemp -d "$E2SP_OUT/collect.XXXXXX")
+
+# Patterns. refuse: everything that may not be committed. mask: the bundles' long scalars that are
+# not secrets, replaced before the scan.
+{
+  bwref patterns "$E2SP_OUT/base/generated.bundle.yaml"
+  bwref patterns "$E2SP_OUT/base/fixture.bundle.yaml"
+} | sort -u >"$work/bundle-patterns.txt"
+cut -f2 "$E2SP_OUT"/base/*.secrets.tsv | sort -u >"$work/bundle-secrets.txt"
+{
+  cat -- "$work/bundle-patterns.txt" "$work/bundle-secrets.txt" "$E2SP_OUT/base/fixture.scan-patterns.txt"
+  printf 'BWSYNTH\n'
+} | awk 'length($0)' | sort -u >"$work/refuse.txt"
+# A public scalar that holds a secret (none should) is not masked: the scan then refuses it.
+awk 'NR == FNR { s[++n] = $0; next }
+  { for (i = 1; i <= n; i++) if (index($0, s[i]) || index(s[i], $0)) next; print }' \
+  "$work/bundle-secrets.txt" "$work/bundle-patterns.txt" >"$work/mask.txt"
+[ "$(wc -l <"$work/refuse.txt")" -ge 20 ] || die "fewer than 20 refusal patterns; a bundle is not what talosctl writes"
+
+masked=0
+# put <in> <out>: the file with the checkout and E2SP_OUT as placeholders and every mask pattern
+# replaced; the replacements are counted.
+put() {
+  mkdir -p -- "$(dirname -- "$2")"
+  : >"$2"
+  local n
+  n=$(awk -v repo="$REPO_DIR" -v out="$E2SP_OUT" -v dst="$2" '
+    NR == FNR { if (length($0)) m[++k] = $0; next }
+    {
+      line = $0
+      for (i = 1; i <= k; i++) {
+        while ((p = index(line, m[i])) > 0) {
+          line = substr(line, 1, p - 1) "<masked:bundle-public>" substr(line, p + length(m[i]))
+          c++
+        }
+      }
+      while ((p = index(line, out)) > 0) line = substr(line, 1, p - 1) "<E2SP_OUT>" substr(line, p + length(out))
+      while ((p = index(line, repo)) > 0) line = substr(line, 1, p - 1) "<repo>" substr(line, p + length(repo))
+      print line > dst
+    }
+    END { close(dst); print c + 0 }' "$work/mask.txt" "$1")
+  masked=$((masked + n))
+}
+for f in run.txt controls.tsv outputs.sha256; do
+  put "$E2SP_OUT/$f" "$incoming/${f/controls.tsv/base-controls.tsv}"
+done
+for f in summary.txt controls.tsv expectations.tsv leaks.tsv pair-leaks.tsv cells.tsv provenance.tsv dependencies.tsv; do
+  put "$E2SP_OUT/results/$f" "$incoming/$f"
+done
+
+# pack <out> <label> <file>...: each file after a `==> <label>/<name> <==` line, and `==> end <==`.
+pack() {
+  local out=$1 label=$2 f
+  shift 2
+  mkdir -p -- "$(dirname -- "$out")"
+  for f in "$@"; do
+    [ -f "$f" ] || die "missing artifact $f"
+    printf '==> %s/%s <==\n' "$label" "$(basename -- "$f")" >>"$out"
+    put "$f" "$work/one"
+    cat -- "$work/one" >>"$out"
+    [ -z "$(tail -c 1 -- "$work/one")" ] || printf '\n' >>"$out"
+  done
+}
+read -r -a bases <<<"$(awk -F'\t' '$1 == "bases" { print $2 }' "$E2SP_OUT/run.txt")"
+cases=0
+for dir in "$E2SP_DIR"/cases/*/; do
+  n=$(basename -- "$dir")
+  for b in "${bases[@]}"; do
+    a=$E2SP_OUT/artifacts/path+schema+value/$n/$b
+    pack "$incoming/cases/$n.txt" "$b" "$a/diff.txt" "$a/errors.txt" "$a/log.txt" "$a/support.txt"
+  done
+  printf '==> end <==\n' >>"$incoming/cases/$n.txt"
+  cases=$((cases + 1))
+done
+for p in moved rotate; do
+  for b in "${bases[@]}"; do
+    pack "$incoming/pairs/$p.txt" "$b/path+schema+value" "$E2SP_OUT/artifacts/path+schema+value/$p/$b/diff.txt"
+    pack "$incoming/pairs/$p.txt" "$b/composed-path" "$E2SP_OUT/artifacts/composed-path/$p/$b/diff.txt"
+    pack "$incoming/pairs/$p.txt" "$b" "$E2SP_OUT/pairs/$b/$p/controls.tsv" "$E2SP_OUT/pairs/$b/$p/expectations.tsv"
+  done
+  printf '==> end <==\n' >>"$incoming/pairs/$p.txt"
+done
+
+# The fixture's own leak scan (corroboration only): per representation, the files with hits of the
+# fixture's pattern list (its credentials, its Talos secrets and the BWSYNTH- prefix), out of all.
+{
+  printf 'representation\tfiles\tfiles-with-hits\n'
+  for r in none composed-path path+schema+value; do
+    total=$(find "$E2SP_OUT/artifacts/$r" -type f | wc -l)
+    hit=$(awk -v p="$E2SP_OUT/artifacts/$r/" 'index($0, p) { n++ } END { print n + 0 }' "$bundle_scan")
+    printf '%s\t%d\t%d\n' "$r" "$total" "$hit"
+  done
+} >"$incoming/fixture-scan.tsv"
+
+# scan <fixed-strings-file>: the files under incoming that hold any of the strings. grep exits 1 for
+# no match; any other failure ends the run rather than reading as clean.
+scan() {
+  local rc=0
+  grep -rlF -f "$1" -- "$incoming" || rc=$?
+  [ "$rc" -le 1 ] || die "the leak scan failed (grep exit $rc)"
+}
+head -n 1 -- "$work/refuse.txt" >"$incoming/leak-control"
+hits=$(scan "$work/refuse.txt")
+[ "$hits" = "$incoming/leak-control" ] && control=fired || control="did not fire as expected"
+rm -- "$incoming/leak-control"
+[ "$control" = fired ] || die "leak-scan control $control; the scan cannot be trusted"
+hits=$(scan "$work/refuse.txt")
+[ -z "$hits" ] || die "collected evidence matches a refusal pattern in: $hits"
+hits=$(scan <(printf '%s/\n' "$HOME"))
+[ -z "$hits" ] || die "collected evidence names a path in the operator's home in: $hits"
+printf 'leak-scan\t%s patterns\tcontrol %s\t0 hits in %s files\t%d non-secret bundle values masked\n' \
+  "$(wc -l <"$work/refuse.txt")" "$control" "$(find "$incoming" -type f | wc -l)" "$masked" >"$incoming/leak-scan.tsv"
+[ "$cases" -gt 0 ] || die "no cases collected"
+
+rm -rf -- "$dest" "$work"
+mv -T -- "$incoming" "$dest"
+trap - EXIT
+say "evidence collected in $dest: $(find "$dest" -type f | wc -l) files"
