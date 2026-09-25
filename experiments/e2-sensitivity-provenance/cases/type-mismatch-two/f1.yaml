@@ -1,0 +1,7 @@
+cluster:
+  controlPlane:
+    localAPIServerPort: !ref api-port
+machine:
+  features:
+    kubePrism:
+      port: !ref prism-port

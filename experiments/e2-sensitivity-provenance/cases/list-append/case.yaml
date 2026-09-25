@@ -1,0 +1,17 @@
+description: A list element added by a reference in the second fragment. Strategic merge appends it after the first fragment's element, so the index the resolver recorded in its own fragment is not its index in the composition.
+transformation: list-change
+fragments:
+  - file: f1.yaml
+    marked: false
+  - file: f2.yaml
+    marked: true
+values:
+  manifest-url: https://e2sp.example.test/BWSYNTH-manifest-token.yaml
+native: pass
+expect:
+  # Issue 3's binding form cannot hold a reference that is a list element (found by the first
+  # development run, before any result was read).
+  premise: {binding: refused}
+  effective: [manifest-url]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: leak, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

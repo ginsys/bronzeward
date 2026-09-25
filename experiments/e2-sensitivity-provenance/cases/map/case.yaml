@@ -1,0 +1,12 @@
+description: Issue 3's map case. One reference is a whole mapping; the schema marks the password but not the user name.
+transformation: resolution
+from: map
+values:
+  reg-auth:
+    username: BWSYNTH-registry-user
+    password: BWSYNTH-registry-password
+native: pass
+expect:
+  effective: [reg-auth]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

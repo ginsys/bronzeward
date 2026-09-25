@@ -1,0 +1,10 @@
+description: Issue 3's int case. A port is too short, and not text, for value matching; the schema does not mark it.
+transformation: resolution
+from: int
+values:
+  prism-port: 7446
+native: pass
+expect:
+  effective: [prism-port]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: leak, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

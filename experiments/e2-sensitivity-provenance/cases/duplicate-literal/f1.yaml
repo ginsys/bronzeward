@@ -1,0 +1,9 @@
+machine:
+  nodeAnnotations:
+    e2sp.example.test/pasted: BWSYNTH-duplicated-literal-password
+  registries:
+    config:
+      registry.example.test:
+        auth:
+          username: e2sp-user
+          password: !ref reg-pass

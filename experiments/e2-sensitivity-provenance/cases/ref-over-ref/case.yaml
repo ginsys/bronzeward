@@ -1,0 +1,16 @@
+description: A reference overwritten by another reference at the same path. Both are in the reproduction record; only the second is effective.
+transformation: reference-overwritten-by-reference
+fragments:
+  - file: f1.yaml
+    marked: true
+  - file: f2.yaml
+    marked: true
+values:
+  pass-a: BWSYNTH-first-reference-value
+  pass-b: BWSYNTH-second-reference-value
+native: pass
+expect:
+  effective: [pass-b]
+  overridden: [pass-a]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}

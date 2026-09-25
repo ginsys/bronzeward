@@ -1,0 +1,14 @@
+description: A reference removed by a later fragment's strategic-merge delete directive. It stays in the reproduction record; nothing of it is effective.
+transformation: reference-overwritten-by-literal
+fragments:
+  - file: f1.yaml
+    marked: true
+  - file: f2.yaml
+    marked: false
+values:
+  reg-pass: BWSYNTH-deleted-password
+native: pass
+expect:
+  overridden: [reg-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}

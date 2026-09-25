@@ -1,0 +1,11 @@
+cluster:
+  inlineManifests:
+    - name: e2sp-dup
+      contents: |
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: e2sp-dup
+          namespace: default
+        data:
+          note: e2sp-literal-contents

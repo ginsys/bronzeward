@@ -1,0 +1,5 @@
+machine:
+  registries:
+    config:
+      registry.example.test:
+        auth: !ref reg-auth

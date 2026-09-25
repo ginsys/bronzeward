@@ -1,0 +1,10 @@
+description: Issue 3's invalid-value case. The configuration composes, and validation quotes the whole value.
+transformation: resolution
+from: invalid-value
+values:
+  dns-domain: BWSYNTH-dns domain value
+native: invalid
+expect:
+  effective: [dns-domain]
+  messages: {patch: none, validate: redacted}
+  leaks: {none: leak, value: clean, resolution-path: leak, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

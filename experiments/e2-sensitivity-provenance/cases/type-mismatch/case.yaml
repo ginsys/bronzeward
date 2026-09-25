@@ -1,0 +1,9 @@
+description: Issue 3's type-mismatch case. talosctl refuses the composition and its decode error quotes the value's first seven bytes, which value matching cannot know (positive control).
+transformation: resolution
+from: type-mismatch
+values:
+  prism-port: BWSYNTH-not-a-port
+native: rejected
+expect:
+  messages: {patch: redacted, validate: skipped}
+  leaks: {none: leak, value: leak, resolution-path: leak, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

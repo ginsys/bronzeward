@@ -1,0 +1,10 @@
+description: Issue 3's override-literal case. The reference is overwritten by a literal in the second fragment; it stays in the reproduction record and in the resolved first fragment.
+transformation: reference-overwritten-by-literal
+from: override-literal
+values:
+  reg-pass: BWSYNTH-registry-password
+native: pass
+expect:
+  overridden: [reg-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}

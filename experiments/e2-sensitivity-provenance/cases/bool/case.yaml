@@ -1,0 +1,10 @@
+description: Issue 3's bool case. A boolean cannot carry a tracer; its flip pass attributes it. The base's own value beside it in a diff discloses it unless the diff pairs the redaction.
+transformation: resolution
+from: bool
+values:
+  wipe: true
+native: pass
+expect:
+  effective: [wipe]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: leak, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

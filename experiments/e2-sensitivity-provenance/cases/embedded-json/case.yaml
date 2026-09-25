@@ -1,0 +1,10 @@
+description: Issue 3's embedded-json case, with a value JSON encoding escapes (angle brackets, an ampersand and quotes). Value matching knows the raw value; the output holds its escaped form (positive control).
+transformation: embedded-json
+from: embedded-json
+values:
+  app-token: "BWSYNTH-app-token<&>\"x\""
+native: pass
+expect:
+  effective: [app-token]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: leak, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}
