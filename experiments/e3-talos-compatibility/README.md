@@ -12,7 +12,7 @@ This experiment measures, for six renderer versions ([`versions.env`](versions.e
 does with each target contract, through two implementations of the same operation:
 
 - **talosctl as a subprocess:** that release's `talosctl`, downloaded once and checked against the
-  release's own `sha256sum.txt`;
+  SHA-256 pinned for it in [`versions.env`](versions.env);
 - **the Go machinery:** `e3m` ([`machinery/src/`](machinery/src/)), one source built against the
   same tag's `pkg/machinery` module. Each version has its own module under `machinery/<version>/`,
   whose `.go` files are links to `src/`. Two shims differ by version: `secrets.Bundle.Validate`
