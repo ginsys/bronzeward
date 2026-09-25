@@ -33,6 +33,13 @@ rewrite() { # rewrite <in> <out>; trailing whitespace (talosctl's version lines 
 for f in run.txt cells.tsv injections.log; do
   rewrite "$E4D_OUT/$f" "$incoming/$f"
 done
+# The transcript column names each row's section in its group's pack (below), not the per-row file
+# run/all wrote, which is not committed.
+awk -F'\t' -v OFS='\t' 'NR > 1 {
+  if ($7 != "transcripts/" $1 "-" $2 "-" $3 ".txt") { print "unexpected transcript " $7 > "/dev/stderr"; exit 1 }
+  $7 = "transcripts/" $2 ".txt#" $1 "-" $2 "-" $3
+} { print }' "$incoming/cells.tsv" >"$incoming/cells.tsv.new" || die "cannot point cells.tsv at the packed transcripts"
+mv -- "$incoming/cells.tsv.new" "$incoming/cells.tsv"
 
 # The fixture's evidence bundle, copied to E4D_OUT/bundle before teardown (README), stays there.
 # What is committed is its summary and a manifest of what was copied.

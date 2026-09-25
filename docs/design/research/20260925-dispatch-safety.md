@@ -153,8 +153,9 @@ uncommitted input, the Go, `talosctl`, Talos, PostgreSQL and module versions, th
 isolation and the settle time. `run/collect-evidence` refuses a partial run. It packs the
 transcripts one file per group under
 [`evidence/transcripts/`](../../../experiments/e4-dispatch-safety/evidence/transcripts/): each
-row's section begins with a `==> <n>-<group>-<row> <==` line. The row number used in this report
-is the `n` column of `cells.tsv`. The bundle stays outside the repository: it holds the fixture's
+row's section begins with a `==> <n>-<group>-<row> <==` line, and the `transcript` column of
+`cells.tsv` names it as `transcripts/<group>.txt#<n>-<group>-<row>`. The row number used in this
+report is the `n` column of `cells.tsv`. The bundle stays outside the repository: it holds the fixture's
 state, and the applied artifacts hold the fixture's synthetic Talos secrets. What is committed is
 a summary of the bundle and a manifest of it.
 
@@ -462,6 +463,21 @@ retry is always safe: the retries were of one `no-reboot` apply, under one accou
   - Two things show the executor died: its log ends at the gate, and no later effect of it was
     seen. Each row's starting resource version equals the previous row's final one.
   - Neither proves the process exited.
+- **Error paths no row reaches, left as captured.** The advisory review of the pull request found
+  four; each is true, and none changes a recorded row.
+  - `recover` treats any error from `ApprovalHolds` as a failed comparison 1.
+  - `CancelUnattempted` reports any non-refusal error from `checkApproval` as "the approval still
+    holds".
+    - Together, a database failure while recovering an unattempted operation is reported as a
+      comparison-1 refusal rather than as the failure.
+    - No operation is wrongly cancelled: the cancellation re-checks the approval in its own
+      transaction, and cancels only on a refusal.
+  - `Plan` for a machine the schema lacks inserts no row, returns no error, and still writes a
+    `planned` timeline entry. Every row plans for the one machine it set up.
+  - The `E4D_OUT` guard refuses any path beginning with the checkout's path, a sibling such as
+    `<checkout>-out` included. It fails closed.
+  - An implementation distinguishes a refusal from a failure at each of these points. The
+    prototype was not changed after capture, so the evidence stays that of the committed code.
 - **Mechanisms, not an implementation.** The schema, gates and executor are the smallest that carry
   the specification's comparisons.
 
