@@ -145,8 +145,8 @@ The September review then narrowed first delivery to existing-cluster configurat
 | Relational backend | PostgreSQL for the PoC (§7.7); SQLite single-instance deferred until dispatch is evidenced on it; MySQL/MariaDB only if required semantics come at negligible extra cost | Decided for the PoC |
 | Secret backend | OpenBao KV v2 and Transit for the PoC (§7.7); local age-backed store not selected; SOPS/age import/export only; provider-neutral references | Decided for the PoC |
 | Secret authoring | Automatic Talos bundle extraction; operator marking for other secrets; whole-value structural references | Decided; syntax and resolution timing open |
-| Approval | Trusted controller enforces immutable approved plans; PoC: one approval per plan, self-approval allowed and recorded, revocation by any `approver` or `recovery-admin` until the dispatch commitment (§13.7) | Boundary decided; decided for the PoC |
-| Identity and roles | PoC: OIDC for humans, hashed Bronzeward-issued bearer tokens for automation; `viewer`, `author`, `publisher`, `approver` and `recovery-admin`; automation never `approver` or `recovery-admin` (§13.7) | Decided for the PoC |
+| Approval | Trusted controller enforces immutable approved plans; PoC: one approval per plan, adoption baselines included; self-approval allowed and recorded; revocation by any `approver` or `recovery-admin`, effective against every attempt not yet recorded (§13.7) | Boundary decided; decided for the PoC |
+| Identity and roles | PoC: OIDC for humans, with roles from identity-provider group claims; hashed Bronzeward-issued bearer tokens for automation, issued with a server-side tool; `viewer`, `author`, `publisher`, `approver` and `recovery-admin`, granted installation-wide; automation never `approver` or `recovery-admin` (§13.7) | Decided for the PoC |
 | Recovery | Evidence-based interrupted-operation handling; explicit recovery mode after restoration | Decided |
 | Retention and alerts | PoC removes no provider object (and, derived, no release, artifact or source record); recovery window is the operator's backup retention; persistent-unknown alert after 15 minutes; manual unseal (§7.8) | Decided for the PoC |
 | First milestone | Configuration control on an existing cluster | Decided |
@@ -769,21 +769,35 @@ The product requires a proper web API independent of machine transport. UI, auto
 
 - Redacted diffs and plans in API responses; secrets never appear in normal API payloads.
 
-This request shape is illustrative. The server must resolve the immutable plan and reject fields that differ from its approved binding (§12.7).
+This request shape is illustrative. A client creates a plan against an exact release and records an approval of it; neither request dispatches anything, and no role may request dispatch (§13.7). The controller then dispatches the approved plan (§12.7), and the client follows the operation it creates. The server resolves the immutable plan and rejects an approval whose binding differs from it (§12.7).
 
 ```http
-POST /api/v1/machines/{machine}/operations/apply-config
+POST /api/v1/plans
 Idempotency-Key: 7fe9...
 
 {
-  "planId": "plan_23",
   "releaseId": "rel_42",
-  "mode": "no-reboot",
-  "approvalId": "apr_19"
+  "machine": "m_07",
+  "operation": "apply-config",
+  "mode": "no-reboot"
 }
 
-HTTP/1.1 202 Accepted
-Location: /api/v1/operations/op_01K...
+HTTP/1.1 201 Created
+Location: /api/v1/plans/plan_23
+
+POST /api/v1/plans/plan_23/approvals
+Idempotency-Key: 3c1a...
+
+{
+  "planRevision": 1
+}
+
+HTTP/1.1 201 Created
+Location: /api/v1/approvals/apr_19
+
+GET /api/v1/operations?plan=plan_23
+
+HTTP/1.1 200 OK
 ```
 
 ### 11.2 API resource boundaries
@@ -847,7 +861,7 @@ Out-of-band talosctl changes will happen during emergencies. Automatically rever
 
 - **Adopt** only after extracting known/marked secrets from the observed effective config (§7.1). Persist a sanitized draft with references and an encrypted exact baseline, then review, publish and approve changes. Failed or interrupted adoption must not leave plaintext secrets in drafts, indexes, staging or logs.
 
-- **Freeze** reconciliation temporarily while incident work continues.
+- **Freeze** reconciliation temporarily while incident work continues. The PoC roles that may freeze and unfreeze are in §13.7.
 
 - **Ignore** a known difference for a bounded time, with audit history.
 
@@ -935,97 +949,131 @@ Application audit events explain the human and application intent: draft changed
 
 ### 13.7 PoC identity and approval policy
 
-**Decision** (owner, 25 September 2026, [identity and approval policy](https://github.com/ginsys/bronzeward/issues/14)). For the configuration-control PoC (§18.2):
+**Decision** (owner, 25 September 2026, [identity and approval policy](https://github.com/ginsys/bronzeward/issues/14); follow-up decisions on the same issue that day settled plan creation, role administration, revocation after the commitment, grant scope, the approval-count rationale and the remaining PoC acts). For the configuration-control PoC (§18.2):
 
-1. **Authentication.** Humans sign in with OIDC against an identity provider the operator runs; no provider product is selected. Automation uses Bronzeward-issued bearer tokens, one per service identity, stored only as hashes, as §13.3 already requires of enrolment tokens. Internal components keep their separate OpenBao identities (§13.2); no human or automation identity is given one.
+Items labelled *derived* are the recorder's inferences, not the owner's decision, and remain for the owner to review.
+
+1. **Authentication.** Humans sign in with OIDC against an identity provider the operator runs; no provider product is selected. Automation uses Bronzeward-issued bearer tokens, one per service identity, stored only as hashes, as §13.3 already requires of enrolment tokens. Internal components keep their separate OpenBao identities (§13.2).
+
+   *Derived:* no human or automation identity is given an OpenBao identity. This is stronger than the owner's words and than §13.1, which says only that a client never receives broad OpenBao access.
 2. **Roles.** Five application roles, enforced by the trusted controller (§12.7). No role executes: the controller dispatches approved plans.
 
    | Role | Capabilities | Automation may hold it |
    |---|---|---|
-   | `viewer` | Read inventory, drafts, releases, plans, redacted diffs, operation timelines and audit; never secret values (§5.2) | Yes (derived) |
-   | `author` | Create and edit drafts: fragments, profiles, assignments and references | Yes (derived) |
-   | `publisher` | Publish a release from drafts (§7.4); create a plan from a published release (derived) | Yes (derived) |
-   | `approver` | Approve a plan; revoke an approval | No |
-   | `recovery-admin` | Enter and leave recovery mode and release scopes from it (§14.6); revoke an approval | No |
+   | `viewer` | Read inventory, drafts, releases, plans, redacted diffs and operation timelines; read audit records (derived); never secret values (§5.2) | Yes (derived) |
+   | `author` | Create and edit drafts: fragments, profiles and references; edit assignments (derived); freeze a scope | Yes (derived) |
+   | `publisher` | Publish a release from drafts (§7.4); create a plan from a published release; cancel a plan it created; freeze a scope | Yes (derived) |
+   | `approver` | Approve a plan, including an adoption baseline; revoke an approval; cancel a plan; freeze and unfreeze a scope | No |
+   | `recovery-admin` | Enter and leave recovery mode and release scopes from it (§14.6); resolve an `unresolved` operation; record an identity revocation; revoke an approval; cancel a plan; freeze a scope | No |
 
-   *Derived, not separately decided:*
-   - Automation may hold `viewer`, `author` and `publisher`. The owner excluded only `approver` and `recovery-admin`, and publication never authorizes dispatch (§7.4 step 5).
-   - Creating a plan belongs to `publisher`. A plan, like a release, authorizes nothing until it is approved (§12.7), so automation may prepare one for a human to approve.
-   - Roles are separate grants, not a hierarchy, and one identity may hold several. Every role includes `viewer`'s read access. Each act is recorded with its identity and the role it was performed under.
-   - Roles are granted per installation. Narrower grants are not settled here.
-3. **Approval: one per plan; self-approval allowed and recorded.** One approval by an `approver` authorizes a plan. An approver may approve their own work, and the operation timeline (§15.2) records that approval as self-approval.
+   *Derived:*
+   - Automation may hold `viewer`, `author` and `publisher`. The owner excluded only `approver` and `recovery-admin`, and publication never authorizes dispatch (§7.4 step 5). Automation holding `author` or `publisher` may therefore freeze a scope and, as a plan's creator, cancel it.
+   - Roles are separate grants and are not ordered; one identity may hold several. Every grant also confers read access. Each act is recorded with its identity and the role it was performed under.
 
-   *Derived, not separately decided:* an approval is self-approval when the approving identity authored a draft change in the release, published the release or created the plan.
-4. **Revocation.** Any `approver` or `recovery-admin` may revoke an approval until the dispatch commitment (§12.7). Revoking an identity invalidates every approval it gave that no dispatch commitment has yet used. What a revocation reaches was measured on PostgreSQL for one `no-reboot` apply ([dispatch safety §4.1](research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1)):
-   - Before the commitment transaction's `COMMIT`, a revocation cancels the operation and nothing is sent (row 002).
-   - After that `COMMIT`, a revocation still refuses every attempt not yet recorded, and the operation is cancelled (rows 003 and 004; [execution and recovery §3.3](../spec/execution-recovery.md#33-after-commitment)).
-   - An attempt already recorded is sent anyway (row 005). This is the stated residual ([dispatch safety §6.1](research/20260925-dispatch-safety.md#61-criterion-1-the-boundary-and-pre-commit-revocation)). After it, revocation undoes nothing (§12.7): only a new approved plan, such as a revert (§12.4), or recovery changes the machine.
-   - A restored database can predate a revocation. An approval recorded before the current recovery epoch authorizes nothing ([execution and recovery §7](../spec/execution-recovery.md#7-recovery-after-management-state-restoration)), so a restore does not revive a revoked approval.
+   **Role administration.** Human roles come from identity-provider group claims, mapped to roles in deployment configuration. Automation tokens are issued and revoked with a server-side command-line tool, not through the API. `recovery-admin` records an identity revocation in the application (item 4). No application role grants roles or issues tokens. An in-application administrator role, for simple setups without an identity provider, may be needed later; it is later work, not a rejected option.
 
-   *Derived, not separately decided:* a revocation after the commitment is accepted and recorded. "Until the dispatch commitment" is how far a revocation is guaranteed to prevent dispatch, not a cut-off for recording one.
-5. **Recovery authority.** `recovery-admin` enters and leaves recovery mode and releases eligible scopes (§14.6). A released scope still needs a plan approved by an `approver` in the current recovery epoch; the release is not approval (§14.6). OpenBao repairs, such as unsealing, restoring and key or policy changes, stay with the OpenBao administrator, outside Bronzeward's roles. Break-glass access stays independent of both (§13.5).
+   **Grant scope.** Grants are installation-wide in the PoC; per-cluster scoping is later work. This is how the PoC meets the issue's "scoped role/capability boundaries" and §18.2's "scoped authorization": authorization is scoped by capability, each role granting only its listed acts, not by cluster or machine.
+3. **Approval: one per plan; self-approval allowed and recorded.** One approval by an `approver` authorizes a plan, adoption baselines (§9.1, §12.1) included. An approver may approve their own work, including a plan they created, and the operation timeline (§15.2) records that approval as self-approval. The same rule applies to adoption approval.
 
-**Evidence and its limit.** No investigation tested application authentication, roles or approval cardinality ([feasibility evidence review §9](research/20260925-feasibility-evidence-review.md#9-gaps) gap 5, SP30); the provider investigations ran their administrator operations as root. This is policy, not evidence. Three results bound it:
+   *Recording rule, derived:* an approval is also marked self-approval when the approving identity published the release or authored a draft change the release contains. Two cases are not settled, and the persistence and API contracts (#18) and the execution and recovery contracts (#19) refine them:
+   - a fragment revision authored long before, reused unchanged in this release;
+   - a human approving what an automation token they control authored or published.
+4. **Revocation.** Any `approver` or `recovery-admin` may revoke an approval. A revocation after the dispatch commitment is still accepted, and it stops every attempt not yet recorded. `recovery-admin` records an identity revocation. It invalidates every approval that identity gave and that no attempt has used yet, including approvals already used by a commitment.
 
-- Item 4's revocation reach is measured, for one operation and mode on one worker ([dispatch safety §7](research/20260925-dispatch-safety.md#7-limits)).
-- The publisher/executor split can rest on OpenBao policy: the publisher identity may only create a generation, and of the identities tried, only the executor decrypts an artifact ([provider comparison §4.1](research/20260924-provider-capability-comparison.md#41-permissions)). An administrator can still add a version to a generation path (row 087), so OpenBao administration sits outside application control, as §7.5 already states.
+   What revoking an *approval* reaches was measured on PostgreSQL only, for one `no-reboot` apply, in dispatch-safety rows 002–005 ([dispatch safety §4.1](research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1)). The measurement supports the decision's first half. Revoking an *identity* was not measured.
+   - Before the commitment transaction's `COMMIT`, a revocation cancels the operation, and nothing is sent (dispatch-safety row 002).
+   - After that `COMMIT`, with no attempt recorded, a revocation refuses every attempt not yet recorded. The operation becomes `unresolved` with its scope held, then `cancelled`. This follows the draft execution contract ([execution and recovery §3.3](../spec/execution-recovery.md#33-after-commitment); landed but not yet accepted: #19 is open, and acceptance belongs to the specification review, #20). Dispatch-safety row 003 shows `committed` → `unresolved` → `cancelled`, and row 004 the same outcome.
+   - An attempt already recorded is sent anyway (dispatch-safety row 005). This is the stated residual ([dispatch safety §6.1](research/20260925-dispatch-safety.md#61-criterion-1-the-boundary-and-pre-commit-revocation)). After it, revocation undoes nothing (§12.7): only a new approved plan, such as a revert (§12.4), or recovery changes the machine.
+   - A restored database can predate a revocation. The draft execution contract makes an approval recorded before the current recovery epoch authorize nothing ([execution and recovery §7](../spec/execution-recovery.md#7-recovery-after-management-state-restoration)), so a restore would not revive a revoked approval. This rests on that contract, not on a measurement: no dispatch-safety row exercises restoration or the epoch ([dispatch safety §7](research/20260925-dispatch-safety.md#7-limits)).
+5. **Recovery authority.** `recovery-admin` enters and leaves recovery mode, releases eligible scopes (§14.6) and resolves `unresolved` operations. A released scope still needs a plan approved by an `approver` after recovery-mode entry: the draft execution contract's "current recovery epoch" (execution and recovery §7). The release is not approval (§14.6). OpenBao repairs, such as unsealing, restoring and key or policy changes, stay with the OpenBao administrator, outside Bronzeward's roles. Break-glass access stays independent of both (§13.5).
+
+   *Derived:* recording that an attempt is accounted for, the operator decision a resolution needs ([dispatch safety §8](research/20260925-dispatch-safety.md#8-recommendation)), is part of resolving and is `recovery-admin`'s.
+6. **Freeze and cancellation.** Any `author`, `publisher`, `approver` or `recovery-admin` may freeze a scope (§12.4); unfreezing takes an `approver`. A plan may be cancelled by its creator, by any `approver` or by `recovery-admin`.
+
+**Evidence and its limit.** No investigation tested application authentication, scoped authorization or the operation timeline ([feasibility evidence review §9](research/20260925-feasibility-evidence-review.md#9-gaps) gap 5, SP30). There is no evidence on identity or approval cardinality ([feasibility evidence review §10](research/20260925-feasibility-evidence-review.md#10-recommendations)), and the provider investigations ran their administrator operations as root. This is policy, not evidence. Three results bound it:
+
+- Approval revocation's reach (item 4) was measured for one operation and mode on one worker, on PostgreSQL only. Identity revocation, restoration and the recovery epoch were not measured ([dispatch safety §7](research/20260925-dispatch-safety.md#7-limits)).
+- The publisher/administrator split rests on OpenBao policy. The component publisher identity may only create a generation ([provider comparison §4.1](research/20260924-provider-capability-comparison.md#41-permissions)). An administrator can still add a version to a generation path (provider comparison row 087), so OpenBao administration sits outside application control, as §7.5 already states. The component identities are not the application roles (§13.2).
 - A `retained` verdict grants nothing ([retention classification §6.3](research/20260924-retention-metadata-classification.md#63-criterion-3-a-retained-verdict-grants-nothing)): dependency status never stands in for a role or an approval.
 
 **Scenarios.** Representative outcomes, by act. "Automation" is a bearer-token identity holding any role it may hold.
 
 | Act | Scenario | Outcome |
 |---|---|---|
-| Publish | Automation holding `author` and `publisher` edits a draft and publishes a release | Allowed; no dispatch follows (§7.4 step 5) |
+| Publish | Automation holding `author` and `publisher` edits a draft and publishes a release | Allowed (automation's roles derived); no dispatch follows (§7.4 step 5) |
 | Publish | An identity with only `author` publishes | Denied: publishing is `publisher`'s |
 | Publish | An identity with only `viewer` edits a draft or publishes | Denied |
-| Plan | Automation holding `publisher` creates a plan for a published release | Allowed (derived); the plan waits for approval |
-| Plan | An identity with only `approver` creates a plan | Denied (derived): planning is `publisher`'s |
+| Plan | Automation holding `publisher` creates a plan for a published release | Allowed (automation's roles derived); the plan waits for approval |
+| Plan | An identity with only `approver` creates a plan | Denied: planning is `publisher`'s |
+| Plan | A plan's creator, an `approver` or `recovery-admin` cancels the plan | Allowed |
+| Plan | A `publisher` without `approver` or `recovery-admin` cancels a plan another identity created | Denied |
 | Approve | A human `approver` approves a plan another identity created | Allowed; one approval suffices, and the controller may then dispatch it (§12.7) |
 | Approve | One human holding `author`, `publisher` and `approver` edits, publishes, plans and approves the same change | Allowed; the approval is recorded as self-approval |
+| Approve | An `approver` approves an adopted baseline (§12.1) | Allowed; the self-approval rule applies |
 | Approve | Automation approves a plan | Denied: automation is never `approver` |
 | Approve | A human with only `recovery-admin` approves a plan | Denied: `recovery-admin` carries no approval, and releasing a scope is not approval (§14.6). One person holding both roles performs each act under its own role |
-| Approve | An approval given by an identity since revoked, not yet used by a dispatch commitment | Invalid; the plan cannot commit |
+| Approve | An approval given by an identity since revoked, not yet used by an attempt, committed or not | Invalid; the plan cannot commit, or its attempt is refused (identity revocation unmeasured) |
 | Execute | Any human or automation asks to dispatch directly | Denied: no role executes. Only the controller dispatches, and only an approved plan through the §12.7 commitment |
-| Execute | The controller dispatches an approved plan | Allowed if the commitment's comparisons hold (§12.7) |
+| Execute | The controller dispatches an approved plan | Allowed if the commitment's comparisons hold ([execution and recovery §3.2](../spec/execution-recovery.md#32-the-commitment-transaction), draft) |
 | Execute | Every dependency reads `retained`, but the plan is not approved | Not dispatched: a retained verdict grants nothing |
-| Revoke | An `approver` or `recovery-admin` revokes an approval before the commitment | Allowed; the operation is cancelled (row 002) |
-| Revoke | A revocation lands after the commitment, before any attempt is recorded | Recorded (derived); no attempt is made and the operation is cancelled (rows 003 and 004) |
-| Revoke | A revocation lands after an attempt is recorded | Recorded; that attempt is still sent (row 005), the stated residual |
+| Revoke | An `approver` or `recovery-admin` revokes an approval before the commitment | Allowed; the operation is cancelled (dispatch-safety row 002) |
+| Revoke | A revocation lands after the commitment, before any attempt is recorded | Accepted; no attempt is made, and the operation goes `unresolved`, then `cancelled` (dispatch-safety rows 003 and 004) |
+| Revoke | A revocation lands after an attempt is recorded | Accepted; that attempt is still sent (dispatch-safety row 005), the stated residual |
 | Revoke | Automation, or a human with only `author` or `publisher`, revokes an approval | Denied |
-| Recover | `recovery-admin` enters recovery mode after a restore, then releases a `ready` scope | Allowed; the scope still needs a plan approved in the current recovery epoch |
+| Revoke | `recovery-admin` records an identity revocation | Allowed; every approval that identity gave and no attempt has used is invalidated |
+| Revoke | An `approver` without `recovery-admin` records an identity revocation | Denied (derived: the owner assigned the act to `recovery-admin`) |
+| Revoke | Anyone issues or revokes an automation token through the API | Denied: tokens are issued and revoked with the server-side tool only |
+| Freeze | An `author`, `publisher`, `approver` or `recovery-admin` freezes a scope | Allowed |
+| Freeze | An identity without `approver` unfreezes a scope, or one with only `viewer` freezes it | Denied |
+| Recover | `recovery-admin` enters recovery mode after a restore, then releases a `ready` scope | Allowed; the scope still needs a plan approved after recovery-mode entry (execution and recovery §7, draft) |
 | Recover | An `approver` without `recovery-admin` releases a scope | Denied |
+| Recover | `recovery-admin` resolves an `unresolved` operation on recorded evidence | Allowed, into a target the draft execution contract permits ([execution and recovery §4](../spec/execution-recovery.md#4-operation-timeline-and-states)) |
+| Recover | An `approver` without `recovery-admin` resolves an `unresolved` operation | Denied |
 | Recover | Automation enters or leaves recovery mode | Denied: automation is never `recovery-admin` |
 | Recover | The OpenBao administrator unseals, restores or adds a version at a generation path | Outside Bronzeward's control (provider comparison row 087); §7.5's restrictions are deployment requirements |
 | Recover | An operator uses break-glass credentials against a node | Independent of every role (§13.5); seen afterwards as drift (§12.7) |
 
-**Alternatives.**
+**Alternatives.** The owner stated a rationale for the approval count only; the other rows' rationale is the recorder's.
 
-| Question | Chosen | Not chosen | Why |
+| Question | Chosen | Not chosen | Rationale |
 |---|---|---|---|
 | Authentication | OIDC for humans; hashed Bronzeward-issued tokens for automation; separate OpenBao identities for components | Local accounts with passwords stored in Bronzeward; static API tokens for everyone | No stored passwords; matches the leaning §16 recorded (OIDC for humans, service identities for automation); hashed tokens follow §13.3's store-only-hashes rule; the components' separate OpenBao identities are evidenced ([provider comparison §8](research/20260924-provider-capability-comparison.md#8-recommendation) item 1) |
-| Roles | Five roles, publishing separate from authoring | Four roles with `author` both editing and publishing; admin versus everyone else | The finer split separates publishing from authoring |
-| Approval count | One approval; self-approval allowed and recorded | One approval without self-approval; two approvers | The PoC is a single-human deployment: either alternative forces a second identity with no second person's check behind it. Recording self-approval keeps the audit honest, and a later policy can move to either |
+| Roles | Five roles, publishing separate from authoring | Four roles with `author` both editing and publishing; admin versus everyone else | Publishing makes a release available for planning and approval (§7.4 step 5). A separate `publisher` lets an identity edit drafts without releasing them, and lets automation hold either act alone. The four-role option gives every editor release authority. The admin option cannot keep approval and recovery apart from editing, or keep automation out of them |
+| Approval count | One approval; self-approval allowed and recorded | One approval without self-approval; two approvers | The owner's: the PoC has one operator, and moving later to either alternative remains possible. The recorder adds that either alternative needs a second identity, which one operator holding both would give no second person's check, and that recording self-approval keeps the audit honest |
 | Revocation | Any `approver` or `recovery-admin` | Only the approval's own granter | Revocation only removes authority, so widening who may revoke is the safe direction |
 | Recovery authority | A separate `recovery-admin` role | Folding recovery into `approver` | Releasing a scope from recovery is explicitly not approval (§14.6); a separate role keeps the acts apart in the audit even when one person holds both |
+| Role administration | Identity-provider group claims mapped in deployment configuration; tokens through a server-side tool | An in-application administrator role | Kept out of the PoC, not rejected: it may be needed later for simple setups without an identity provider |
 
 **Consequences.**
 
-- The [persistence and API contracts](https://github.com/ginsys/bronzeward/issues/18) must specify OIDC and bearer-token authentication, token storage as hashes with one token per service identity, role checks on each API resource (§11.2), and the acting identity, its role and any self-approval mark recorded with every act.
-- The [execution and recovery contracts](https://github.com/ginsys/bronzeward/issues/19) must make the commitment transaction's approval comparison cover identity revocation; restrict recovery-mode entry, exit and scope release to `recovery-admin`; and cover the revocation interleavings: before the commitment, after it with no attempt, after an attempt, by identity revocation, and under a restore that predates a revocation.
+- The [persistence and API contracts](https://github.com/ginsys/bronzeward/issues/18) must specify:
+  - OIDC and bearer-token authentication;
+  - the mapping of identity-provider group claims to roles in deployment configuration;
+  - the server-side tool that issues and revokes automation tokens, with no API path for either;
+  - token storage as hashes, one token per service identity;
+  - the identity-revocation record;
+  - role checks on each API resource (§11.2);
+  - the acting identity, its role and any self-approval mark, recorded with every act.
+- The [execution and recovery contracts](https://github.com/ginsys/bronzeward/issues/19) must:
+  - make the approval comparison in both the commitment and the attempt transactions cover identity revocation, since it also invalidates committed, unattempted approvals;
+  - restrict recovery-mode entry, exit, scope release and resolution of `unresolved` operations to `recovery-admin`, freeze to the four non-`viewer` roles and unfreeze to `approver`;
+  - allow cancellation by a plan's creator, `approver` or `recovery-admin`;
+  - cover the revocation interleavings: before the commitment, after it with no attempt, after an attempt, by identity revocation, and under a restore that predates a revocation.
 
 **Limits and what stays open.**
 
 - This is owner policy with no supporting investigation. The issue's verification is the owner's walk-through of the scenarios above.
-- In a single-human deployment, self-approval gives no second check. Recording makes it visible; it does not prevent a mistaken approval.
+- With one operator holding every role, self-approval gives no second check. Recording makes it visible; it does not prevent a mistaken approval.
 - Roles bind Bronzeward only. OpenBao does not know them (§13.2); its administrator and break-glass access act outside them, and a least-privilege administrator policy is still unwritten (§7.7).
 - A database fence is not a Talos fence: nothing here stops a request already sent, or one sent around the database (dispatch safety §7).
 - The policy is independent of the project licence ([licence decision](https://github.com/ginsys/bronzeward/issues/16)).
-- Not settled here:
-  - token lifetimes, expiry and rotation (persistence and API contracts);
-  - who grants roles, issues and revokes automation tokens and records an identity's revocation, since none of the five roles carries it, and how a disablement at the identity provider reaches Bronzeward;
-  - whether removing a role, rather than revoking the identity, invalidates approvals given under it, and whether revoking an identity stops an operation its approval already committed with no attempt recorded;
-  - who resolves an `unresolved` operation or accounts for an attempt ([dispatch safety §8](research/20260925-dispatch-safety.md#8-recommendation)), who freezes or ignores drift, who performs privileged ingestion and adoption handover (§9.1, §12.4), and who cancels a plan;
-  - per-cluster or per-scope role grants, tenant isolation (§17.2), and per-cluster or per-operation approval policy, including multi-party approval for the later destructive and PKI operations (Appendix B).
+- Later work, not part of the PoC: per-cluster grant scoping, and an in-application administrator role for setups without an identity provider. Tenant isolation stays deferred (§17.2). Per-operation approval policy, including multi-party approval for the later destructive and PKI operations, belongs to those operations' phases (Appendix B).
+- Not settled here, each with its owner:
+  - Token lifetimes, expiry and rotation: persistence and API contracts (#18).
+  - How a disablement or a removed group claim at the identity provider reaches Bronzeward: persistence and API contracts (#18). Whether losing a role, rather than an identity revocation, invalidates approvals given under it is an owner decision pending on #14.
+  - Which role performs the privileged ingestion that feeds an adoption (§9.1, Appendix B AdoptCluster) is an owner decision pending on #14. Its mechanics belong to the [secret ingress and compilation contracts](https://github.com/ginsys/bronzeward/issues/17).
+  - Which role may ignore a known drift difference for a bounded time (§12.4) is an owner decision pending on #14, carried into the execution and recovery contracts (#19).
+  - The two self-approval edge cases in item 3: persistence and API contracts (#18) and execution and recovery contracts (#19).
 
 ## 14. Reliability, high availability and disaster recovery
 
@@ -1061,7 +1109,7 @@ Check retained dependencies (§7.6), verify required decryption/credentials unde
 
 The operator explicitly releases eligible scopes from recovery mode. This is not blanket approval for pending mutations; plans, preconditions and normal approval still apply. Missing dependencies or unresolved old execution keep the affected scope blocked without inventing a new assignment or blindly replaying journal entries.
 
-In the PoC, entering and leaving recovery mode and releasing scopes belong to the `recovery-admin` role, apart from `approver`, the OpenBao administrator and break-glass access (§13.7).
+In the PoC, entering and leaving recovery mode, releasing scopes and resolving `unresolved` operations belong to the `recovery-admin` role, apart from `approver`, the OpenBao administrator and break-glass access (§13.7).
 
 ## 15. Observability and operational support
 
@@ -1223,7 +1271,7 @@ First-milestone acceptance is:
 6. Detect an external change and exercise freeze, sanitized adoption and approved revert.
 7. Recover from interrupted execution and external restoration using evidence and explicit recovery mode; stop unresolved/conflicting work.
 
-This milestone requires the selected database/provider behavior (§7.7), scoped authorization under the PoC identity and approval policy (§13.7) and a usable operation timeline. It excludes new-machine enrolment, reset/reuse, cluster bootstrap, upgrades, remote transports and managed-cluster etcd recovery until the later phases prove those operation classes.
+This milestone requires the selected database/provider behavior (§7.7), scoped authorization under the PoC identity and approval policy, with installation-wide grants scoped by capability (§13.7), and a usable operation timeline. It excludes new-machine enrolment, reset/reuse, cluster bootstrap, upgrades, remote transports and managed-cluster etcd recovery until the later phases prove those operation classes.
 
 ### 18.3 Phase 2 - machine lifecycle
 
@@ -1317,7 +1365,7 @@ Additional critical risks are plaintext entering persistent history before extra
 
 - Is a single administrative domain sufficient initially, or is tenant isolation a first-release requirement?
 
-- What human identity provider and service-account model should the management API use? *Answered for the PoC in §13.7: OIDC against an identity provider the operator runs, with no product selected, and Bronzeward-issued bearer tokens stored as hashes, one per service identity.*
+- What human identity provider and service-account model should the management API use? *Answered for the PoC in §13.7: OIDC against an identity provider the operator runs, with no product selected and roles from its group claims, and Bronzeward-issued bearer tokens stored as hashes, one per service identity, issued and revoked with a server-side tool.*
 
 - What exact break-glass custody and audit procedure is acceptable?
 
