@@ -84,8 +84,9 @@ again rather than repairing the plan in place.
 
 Approval authorizes exactly this binding. Publication and a green dependency
 retention check never authorize dispatch. The trusted application boundary
-enforces authorization; the provider does not. Approval self-use and
-multi-party rules remain policy inputs, not implicit guarantees of this PoC.
+enforces authorization; the provider does not. The PoC's identity and
+approval policy, including self-approval, is set in design
+[§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy).
 
 ## 3. Dispatch commitment
 
