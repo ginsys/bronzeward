@@ -1,0 +1,357 @@
+base	case	control	result	detail
+fixture	alias	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	alias	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	alias	resolution-records-match	pass	2 records
+fixture	alias	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	alias	base-holds-no-case-secret	pass	-
+fixture	alias	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	bool	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+fixture	bool	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	bool	resolution-records-match	pass	1 records
+fixture	bool	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 0 case values (1 exempt: booleans, authored literals)
+fixture	bool	base-holds-no-case-secret	pass	-
+fixture	bool	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	bool	per-side-diff-exposes-base-value	fired	1 base leaves shown beside a redacted output leaf without pairing
+fixture	bytes	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+fixture	bytes	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	bytes	resolution-records-match	pass	1 records
+fixture	bytes	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	bytes	base-holds-no-case-secret	pass	-
+fixture	bytes	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	collision	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	collision	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	collision	resolution-records-match	pass	1 records
+fixture	collision	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+fixture	collision	base-holds-no-case-secret	pass	-
+fixture	collision	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	delete	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+fixture	delete	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	delete	resolution-records-match	pass	1 records
+fixture	delete	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	delete	base-holds-no-case-secret	pass	-
+fixture	delete	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	document	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	document	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	document	resolution-records-match	pass	1 records
+fixture	document	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	document	base-holds-no-case-secret	pass	-
+fixture	document	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	duplicate-literal	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	duplicate-literal	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	duplicate-literal	resolution-records-match	pass	1 records
+fixture	duplicate-literal	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 0 case values (1 exempt: booleans, authored literals)
+fixture	duplicate-literal	base-holds-no-case-secret	pass	-
+fixture	duplicate-literal	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	embedded-json	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	embedded-json	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	embedded-json	resolution-records-match	pass	1 records
+fixture	embedded-json	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	embedded-json	base-holds-no-case-secret	pass	-
+fixture	embedded-json	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	embedded-yaml	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	embedded-yaml	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	embedded-yaml	resolution-records-match	pass	1 records
+fixture	embedded-yaml	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	embedded-yaml	base-holds-no-case-secret	pass	-
+fixture	embedded-yaml	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	int	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+fixture	int	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	int	resolution-records-match	pass	1 records
+fixture	int	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	int	base-holds-no-case-secret	pass	-
+fixture	int	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	int	per-side-diff-exposes-base-value	fired	1 base leaves shown beside a redacted output leaf without pairing
+fixture	invalid-value	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	invalid-value	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	invalid-value	resolution-records-match	pass	1 records
+fixture	invalid-value	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	invalid-value	base-holds-no-case-secret	pass	-
+fixture	invalid-value	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	invalid-value	template-check-fires-validate	fired	a real message with text its template does not have
+fixture	invalid-value	per-side-diff-exposes-base-value	fired	1 base leaves shown beside a redacted output leaf without pairing
+fixture	list-append	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	list-append	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	list-append	resolution-records-match	pass	1 records
+fixture	list-append	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	list-append	base-holds-no-case-secret	pass	-
+fixture	list-append	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	list-duplicate	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	list-duplicate	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	list-duplicate	resolution-records-match	pass	1 records
+fixture	list-duplicate	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	list-duplicate	base-holds-no-case-secret	pass	-
+fixture	list-duplicate	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	map	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	map	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	map	resolution-records-match	pass	1 records
+fixture	map	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+fixture	map	base-holds-no-case-secret	pass	-
+fixture	map	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	map-partial	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	map-partial	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	map-partial	resolution-records-match	pass	1 records
+fixture	map-partial	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+fixture	map-partial	base-holds-no-case-secret	pass	-
+fixture	map-partial	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	moved-r1	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	moved-r1	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	moved-r1	resolution-records-match	pass	1 records
+fixture	moved-r1	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	moved-r1	base-holds-no-case-secret	pass	-
+fixture	moved-r1	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	moved-r2	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	moved-r2	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	moved-r2	resolution-records-match	pass	1 records
+fixture	moved-r2	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	moved-r2	base-holds-no-case-secret	pass	-
+fixture	moved-r2	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	override-literal	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+fixture	override-literal	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	override-literal	resolution-records-match	pass	1 records
+fixture	override-literal	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	override-literal	base-holds-no-case-secret	pass	-
+fixture	override-literal	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	override-ref	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	override-ref	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	override-ref	resolution-records-match	pass	1 records
+fixture	override-ref	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	override-ref	base-holds-no-case-secret	pass	-
+fixture	override-ref	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	ref-over-ref	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	ref-over-ref	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	ref-over-ref	resolution-records-match	pass	2 records
+fixture	ref-over-ref	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+fixture	ref-over-ref	base-holds-no-case-secret	pass	-
+fixture	ref-over-ref	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	rotate-r1	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	rotate-r1	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	rotate-r1	resolution-records-match	pass	1 records
+fixture	rotate-r1	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	rotate-r1	base-holds-no-case-secret	pass	-
+fixture	rotate-r1	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	rotate-r2	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	rotate-r2	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	rotate-r2	resolution-records-match	pass	1 records
+fixture	rotate-r2	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	rotate-r2	base-holds-no-case-secret	pass	-
+fixture	rotate-r2	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	string	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	string	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	string	resolution-records-match	pass	1 records
+fixture	string	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	string	base-holds-no-case-secret	pass	-
+fixture	string	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	type-mismatch	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	type-mismatch	resolution-records-match	pass	1 records
+fixture	type-mismatch	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	type-mismatch	base-holds-no-case-secret	pass	-
+fixture	type-mismatch	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	type-mismatch	template-check-fires-patch	fired	a real message with text its template does not have
+fixture	type-mismatch-two	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	type-mismatch-two	resolution-records-match	pass	2 records
+fixture	type-mismatch-two	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+fixture	type-mismatch-two	base-holds-no-case-secret	pass	-
+fixture	type-mismatch-two	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	type-mismatch-two	template-check-fires-patch	fired	a real message with text its template does not have
+fixture	unidentified-embedded	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+fixture	unidentified-embedded	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	unidentified-embedded	resolution-records-match	pass	0 records
+fixture	unidentified-embedded	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	unidentified-embedded	base-holds-no-case-secret	pass	-
+fixture	unidentified-embedded	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	whole-content	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	whole-content	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	whole-content	resolution-records-match	pass	1 records
+fixture	whole-content	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	whole-content	base-holds-no-case-secret	pass	-
+fixture	whole-content	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	yaml-escape	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+fixture	yaml-escape	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+fixture	yaml-escape	resolution-records-match	pass	1 records
+fixture	yaml-escape	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+fixture	yaml-escape	base-holds-no-case-secret	pass	-
+fixture	yaml-escape	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+fixture	moved	stale-paths-leak	fired	1 findings of revision b's values under revision a's composed paths
+fixture	moved	stale-paths-version	did-not-fire	0 leaves where revision a's token names another reference or version than b's own
+fixture	moved	stale-values-leak	did-not-fire	0 findings of revision b's values under revision a's values
+fixture	rotate	stale-paths-leak	did-not-fire	0 findings of revision b's values under revision a's composed paths
+fixture	rotate	stale-paths-version	fired	1 leaves where revision a's token names another reference or version than b's own
+fixture	rotate	stale-values-leak	fired	1 findings of revision b's values under revision a's values
+generated	alias	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	alias	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	alias	resolution-records-match	pass	2 records
+generated	alias	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	alias	base-holds-no-case-secret	pass	-
+generated	alias	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	bool	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+generated	bool	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	bool	resolution-records-match	pass	1 records
+generated	bool	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 0 case values (1 exempt: booleans, authored literals)
+generated	bool	base-holds-no-case-secret	pass	-
+generated	bool	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	bool	per-side-diff-exposes-base-value	fired	1 base leaves shown beside a redacted output leaf without pairing
+generated	bytes	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+generated	bytes	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	bytes	resolution-records-match	pass	1 records
+generated	bytes	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	bytes	base-holds-no-case-secret	pass	-
+generated	bytes	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	collision	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	collision	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	collision	resolution-records-match	pass	1 records
+generated	collision	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+generated	collision	base-holds-no-case-secret	pass	-
+generated	collision	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	delete	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+generated	delete	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	delete	resolution-records-match	pass	1 records
+generated	delete	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	delete	base-holds-no-case-secret	pass	-
+generated	delete	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	document	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	document	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	document	resolution-records-match	pass	1 records
+generated	document	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	document	base-holds-no-case-secret	pass	-
+generated	document	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	duplicate-literal	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	duplicate-literal	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	duplicate-literal	resolution-records-match	pass	1 records
+generated	duplicate-literal	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 0 case values (1 exempt: booleans, authored literals)
+generated	duplicate-literal	base-holds-no-case-secret	pass	-
+generated	duplicate-literal	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	embedded-json	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	embedded-json	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	embedded-json	resolution-records-match	pass	1 records
+generated	embedded-json	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	embedded-json	base-holds-no-case-secret	pass	-
+generated	embedded-json	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	embedded-yaml	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	embedded-yaml	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	embedded-yaml	resolution-records-match	pass	1 records
+generated	embedded-yaml	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	embedded-yaml	base-holds-no-case-secret	pass	-
+generated	embedded-yaml	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	int	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+generated	int	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	int	resolution-records-match	pass	1 records
+generated	int	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	int	base-holds-no-case-secret	pass	-
+generated	int	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	int	per-side-diff-exposes-base-value	fired	1 base leaves shown beside a redacted output leaf without pairing
+generated	invalid-value	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	invalid-value	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	invalid-value	resolution-records-match	pass	1 records
+generated	invalid-value	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	invalid-value	base-holds-no-case-secret	pass	-
+generated	invalid-value	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	invalid-value	template-check-fires-validate	fired	a real message with text its template does not have
+generated	invalid-value	per-side-diff-exposes-base-value	fired	1 base leaves shown beside a redacted output leaf without pairing
+generated	list-append	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	list-append	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	list-append	resolution-records-match	pass	1 records
+generated	list-append	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	list-append	base-holds-no-case-secret	pass	-
+generated	list-append	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	list-duplicate	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	list-duplicate	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	list-duplicate	resolution-records-match	pass	1 records
+generated	list-duplicate	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	list-duplicate	base-holds-no-case-secret	pass	-
+generated	list-duplicate	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	map	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	map	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	map	resolution-records-match	pass	1 records
+generated	map	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+generated	map	base-holds-no-case-secret	pass	-
+generated	map	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	map-partial	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	map-partial	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	map-partial	resolution-records-match	pass	1 records
+generated	map-partial	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+generated	map-partial	base-holds-no-case-secret	pass	-
+generated	map-partial	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	moved-r1	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	moved-r1	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	moved-r1	resolution-records-match	pass	1 records
+generated	moved-r1	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	moved-r1	base-holds-no-case-secret	pass	-
+generated	moved-r1	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	moved-r2	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	moved-r2	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	moved-r2	resolution-records-match	pass	1 records
+generated	moved-r2	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	moved-r2	base-holds-no-case-secret	pass	-
+generated	moved-r2	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	override-literal	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+generated	override-literal	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	override-literal	resolution-records-match	pass	1 records
+generated	override-literal	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	override-literal	base-holds-no-case-secret	pass	-
+generated	override-literal	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	override-ref	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	override-ref	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	override-ref	resolution-records-match	pass	1 records
+generated	override-ref	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	override-ref	base-holds-no-case-secret	pass	-
+generated	override-ref	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	ref-over-ref	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	ref-over-ref	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	ref-over-ref	resolution-records-match	pass	2 records
+generated	ref-over-ref	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+generated	ref-over-ref	base-holds-no-case-secret	pass	-
+generated	ref-over-ref	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	rotate-r1	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	rotate-r1	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	rotate-r1	resolution-records-match	pass	1 records
+generated	rotate-r1	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	rotate-r1	base-holds-no-case-secret	pass	-
+generated	rotate-r1	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	rotate-r2	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	rotate-r2	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	rotate-r2	resolution-records-match	pass	1 records
+generated	rotate-r2	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	rotate-r2	base-holds-no-case-secret	pass	-
+generated	rotate-r2	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	string	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	string	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	string	resolution-records-match	pass	1 records
+generated	string	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	string	base-holds-no-case-secret	pass	-
+generated	string	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	type-mismatch	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	type-mismatch	resolution-records-match	pass	1 records
+generated	type-mismatch	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	type-mismatch	base-holds-no-case-secret	pass	-
+generated	type-mismatch	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	type-mismatch	template-check-fires-patch	fired	a real message with text its template does not have
+generated	type-mismatch-two	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	type-mismatch-two	resolution-records-match	pass	2 records
+generated	type-mismatch-two	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 2 case values (0 exempt: booleans, authored literals)
+generated	type-mismatch-two	base-holds-no-case-secret	pass	-
+generated	type-mismatch-two	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	type-mismatch-two	template-check-fires-patch	fired	a real message with text its template does not have
+generated	unidentified-embedded	fidelity-check-fires	not-applicable	a trace leaf's tracer replaced by a non-tracer
+generated	unidentified-embedded	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	unidentified-embedded	resolution-records-match	pass	0 records
+generated	unidentified-embedded	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	unidentified-embedded	base-holds-no-case-secret	pass	-
+generated	unidentified-embedded	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	whole-content	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	whole-content	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	whole-content	resolution-records-match	pass	1 records
+generated	whole-content	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	whole-content	base-holds-no-case-secret	pass	-
+generated	whole-content	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	yaml-escape	fidelity-check-fires	fired	a trace leaf's tracer replaced by a non-tracer
+generated	yaml-escape	render-identity	pass	every configuration re-rendered with nothing redacted is the text talosctl or bwref wrote
+generated	yaml-escape	resolution-records-match	pass	1 records
+generated	yaml-escape	trace-holds-no-secret	pass	the trace pass's compositions, fragments and messages hold no form of 1 case values (0 exempt: booleans, authored literals)
+generated	yaml-escape	base-holds-no-case-secret	pass	-
+generated	yaml-escape	schema-covers-base-secrets	pass	9 schema leaves hold every secrets-bundle value
+generated	moved	stale-paths-leak	fired	1 findings of revision b's values under revision a's composed paths
+generated	moved	stale-paths-version	did-not-fire	0 leaves where revision a's token names another reference or version than b's own
+generated	moved	stale-values-leak	did-not-fire	0 findings of revision b's values under revision a's values
+generated	rotate	stale-paths-leak	did-not-fire	0 findings of revision b's values under revision a's composed paths
+generated	rotate	stale-paths-version	fired	1 leaves where revision a's token names another reference or version than b's own
+generated	rotate	stale-values-leak	fired	1 findings of revision b's values under revision a's values

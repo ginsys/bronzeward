@@ -1,0 +1,7 @@
+base	case	rep	artifact	secret	class	form	count
+fixture	moved	none	diff	reg-pass@1	ref	exact	1
+fixture	rotate	none	diff	reg-pass@1	ref	exact	1
+fixture	rotate	none	diff	reg-pass@2	ref	exact	1
+generated	moved	none	diff	reg-pass@1	ref	exact	1
+generated	rotate	none	diff	reg-pass@1	ref	exact	1
+generated	rotate	none	diff	reg-pass@2	ref	exact	1

@@ -1,0 +1,109 @@
+==> fixture/diff.txt <==
+(no composition: talosctl machineconfig patch exited 1)
+==> fixture/errors.txt <==
+--- patch (exit 1, redacted) ---
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 3: cannot construct !!str `<redacted:api-port@1>` into int
+  line 7: cannot construct !!str `<redacted:prism-port@1>...` into int
+--- validate (not run) ---
+==> fixture/log.txt <==
+resolve fragment=f1.yaml ref=api-port@1 doc=v1alpha1 path=cluster/controlPlane/localAPIServerPort
+resolve fragment=f1.yaml ref=prism-port@1 doc=v1alpha1 path=machine/features/kubePrism/port
+compose fragments=f1.yaml exit=1
+patch exit=1 message=redacted
+| error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+|   line 3: cannot construct !!str `<redacted:api-port@1>` into int
+|   line 7: cannot construct !!str `<redacted:prism-port@1>...` into int
+validate not run
+provenance effective=- overridden=- unresolved=-
+==> fixture/support.txt <==
+### configuration
+(no composition)
+### fragment f1.yaml, resolved
+(schema redaction unavailable: the Talos machinery cannot load this fragment)
+cluster:
+    controlPlane:
+        localAPIServerPort: <redacted:api-port@1>
+machine:
+    features:
+        kubePrism:
+            port: <redacted:prism-port@1>
+### provenance
+occurrence	ref	version	modifier	leaf	fragment	fragment-sha256	source-doc	source-path	status	output-doc	output-path	overridden-by
+0	api-port	1	-	-	f1.yaml	e1e4316ba3932aad5aebcf36ef1e25dfde3758341eb26cd8165db107f2cf0686	v1alpha1	cluster/controlPlane/localAPIServerPort	not-composed	-	-	-
+1	prism-port	1	-	-	f1.yaml	e1e4316ba3932aad5aebcf36ef1e25dfde3758341eb26cd8165db107f2cf0686	v1alpha1	machine/features/kubePrism/port	not-composed	-	-	-
+### dependencies
+record	reference	fragments
+reproduction	api-port@1	f1.yaml@e1e4316ba393
+reproduction	prism-port@1	f1.yaml@e1e4316ba393
+### errors
+--- patch (exit 1, redacted) ---
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 3: cannot construct !!str `<redacted:api-port@1>` into int
+  line 7: cannot construct !!str `<redacted:prism-port@1>...` into int
+--- validate (not run) ---
+### log
+resolve fragment=f1.yaml ref=api-port@1 doc=v1alpha1 path=cluster/controlPlane/localAPIServerPort
+resolve fragment=f1.yaml ref=prism-port@1 doc=v1alpha1 path=machine/features/kubePrism/port
+compose fragments=f1.yaml exit=1
+patch exit=1 message=redacted
+| error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+|   line 3: cannot construct !!str `<redacted:api-port@1>` into int
+|   line 7: cannot construct !!str `<redacted:prism-port@1>...` into int
+validate not run
+provenance effective=- overridden=- unresolved=-
+==> generated/diff.txt <==
+(no composition: talosctl machineconfig patch exited 1)
+==> generated/errors.txt <==
+--- patch (exit 1, redacted) ---
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 3: cannot construct !!str `<redacted:api-port@1>` into int
+  line 7: cannot construct !!str `<redacted:prism-port@1>...` into int
+--- validate (not run) ---
+==> generated/log.txt <==
+resolve fragment=f1.yaml ref=api-port@1 doc=v1alpha1 path=cluster/controlPlane/localAPIServerPort
+resolve fragment=f1.yaml ref=prism-port@1 doc=v1alpha1 path=machine/features/kubePrism/port
+compose fragments=f1.yaml exit=1
+patch exit=1 message=redacted
+| error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+|   line 3: cannot construct !!str `<redacted:api-port@1>` into int
+|   line 7: cannot construct !!str `<redacted:prism-port@1>...` into int
+validate not run
+provenance effective=- overridden=- unresolved=-
+==> generated/support.txt <==
+### configuration
+(no composition)
+### fragment f1.yaml, resolved
+(schema redaction unavailable: the Talos machinery cannot load this fragment)
+cluster:
+    controlPlane:
+        localAPIServerPort: <redacted:api-port@1>
+machine:
+    features:
+        kubePrism:
+            port: <redacted:prism-port@1>
+### provenance
+occurrence	ref	version	modifier	leaf	fragment	fragment-sha256	source-doc	source-path	status	output-doc	output-path	overridden-by
+0	api-port	1	-	-	f1.yaml	e1e4316ba3932aad5aebcf36ef1e25dfde3758341eb26cd8165db107f2cf0686	v1alpha1	cluster/controlPlane/localAPIServerPort	not-composed	-	-	-
+1	prism-port	1	-	-	f1.yaml	e1e4316ba3932aad5aebcf36ef1e25dfde3758341eb26cd8165db107f2cf0686	v1alpha1	machine/features/kubePrism/port	not-composed	-	-	-
+### dependencies
+record	reference	fragments
+reproduction	api-port@1	f1.yaml@e1e4316ba393
+reproduction	prism-port@1	f1.yaml@e1e4316ba393
+### errors
+--- patch (exit 1, redacted) ---
+error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+  line 3: cannot construct !!str `<redacted:api-port@1>` into int
+  line 7: cannot construct !!str `<redacted:prism-port@1>...` into int
+--- validate (not run) ---
+### log
+resolve fragment=f1.yaml ref=api-port@1 doc=v1alpha1 path=cluster/controlPlane/localAPIServerPort
+resolve fragment=f1.yaml ref=prism-port@1 doc=v1alpha1 path=machine/features/kubePrism/port
+compose fragments=f1.yaml exit=1
+patch exit=1 message=redacted
+| error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors:
+|   line 3: cannot construct !!str `<redacted:api-port@1>` into int
+|   line 7: cannot construct !!str `<redacted:prism-port@1>...` into int
+validate not run
+provenance effective=- overridden=- unresolved=-
+==> end <==
