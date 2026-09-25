@@ -489,12 +489,15 @@ evidence.
   filesystems and multiple hosts were not tested and are outside SQLite's own documented use.
 - **Mechanisms, not an implementation.** The schema is the smallest that answers each semantic; it
   is not the Bronzeward schema.
-- **Two error paths an implementation must not copy.** `Classify` (`db.go`) treats any `net.Error`
+- **Three error paths an implementation must not copy.** `Classify` (`db.go`) treats any `net.Error`
   as a lost connection, which would also catch `context.DeadlineExceeded`, and `TakeOver` and
   `RecordAttempt` (`scenarios.go`) fold a `RowsAffected` error into the fenced result.
   Neither could change this capture: the prototype sets no context deadline, and both drivers'
   `RowsAffected` return a nil error (`database/sql/driver.RowsAffected`, which `lib/pq` returns,
-  and `modernc.org/sqlite`'s `result`). The measured code was left as captured.
+  and `modernc.org/sqlite`'s `result`). A third: on SQLite, `migrateOne` (`migrate.go`) restores
+  `foreign_keys` in a deferred call that writes the named `err`, so a failed restore after a
+  committed migration would report that migration as failed. No migration error in the evidence
+  comes from the pragma. The measured code was left as captured.
 - **The S6 SQLite control's transcript does not show what makes it a control.** Row 054 selects
   deferred transactions through `E4_SQLITE_TXLOCK=deferred` (`run/all`, `s6_concurrent`), not a
   flag, so its recorded command lines are the same as row 053's. Only the outcomes differ.
