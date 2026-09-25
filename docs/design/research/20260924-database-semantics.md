@@ -81,7 +81,7 @@ that removes it:
 | revision compare-and-set (S1) | blind writes, no revision predicate | both backends |
 | source lock at publication (S2) | the revision check without `FOR SHARE` | PostgreSQL; SQLite needs no row lock (§4.2) |
 | ownership check inside the write (S4) | check, then insert | PostgreSQL; SQLite as above |
-| guarded claim (S5) | claim without re-checking eligibility | PostgreSQL; SQLite as above |
+| guarded claim (S5) | claim without re-checking eligibility | PostgreSQL; SQLite unmeasured (row 048 had one claimer) |
 | migration lock (S6) | no advisory lock on PostgreSQL; a deferred transaction on SQLite | both backends |
 
 On SQLite the S2, S4 and S5 control rows (039, 046, 048) still begin every transaction `IMMEDIATE`,
@@ -211,6 +211,11 @@ release; the same name with different content is refused.
 | netsplit (060) | `inject netsplit postgres` for 5 s with the transaction open | client `class=conn`; nothing written | no server |
 | commit-unknown (061) | `COMMIT` sent to a paused server, the client killed, the server resumed, then a retry | **the release committed** (read before the retry: 1 release, 8 artifacts); the retry returns `existing=true` for the same id | no server |
 
+For rows 059-061 some of the values above are read from the transcripts, not asserted by the row's
+expectation: row 060's `class=conn` and zero releases, row 061's one release before the retry and
+the retry's `existing=true`, and row 059's stall, which is inferred from its 3364 ms against the
+1 s hold. A later capture with other values there would still record `match`.
+
 Atomicity holds on both, including every interruption tried. Two findings matter for the design:
 
 - **On PostgreSQL, a revision check alone is not enough.** §7.4 step 4 requires "rejecting stale
@@ -309,7 +314,7 @@ IMMEDIATE` is the lock.
 | fail-then-rerun (023, 051) | an injected error inside migration 3, then a second runner | migration 2 kept, migration 3 and its table absent; the re-run applies 3 and 4 | same |
 | sigkill-then-rerun (024, 052) | the runner killed inside migration 3's transaction | as above | same |
 | concurrent-locked (025, 053) | migration 1 applied, then 4 runners released together, each holding migration 2 open 500 ms | 0 failures; each version applied once (3 applications across the 4 runners) | same |
-| concurrent-unlocked-control (026, 054) | the same without the lock | 3 of 4 runners fail with a unique violation on the system catalog (`pg_class_relname_nsp_index`) as they create the same table; each version still recorded once | 3 of 4 fail with `SQLITE_BUSY` at once, not after the busy timeout: a deferred transaction that has read cannot wait its way into a write |
+| concurrent-unlocked-control (026, 054) | the same without the lock | 3 of 4 runners fail with a unique violation on a system catalog index (`pg_class_relname_nsp_index` twice, `pg_type_typname_nsp_index` once) as they create the same table; each version still recorded once | 3 of 4 fail with `SQLITE_BUSY` at once, not after the busy timeout: a deferred transaction that has read cannot wait its way into a write |
 
 Transactional DDL holds on both: a failed or killed migration leaves nothing of itself. Without
 the lock neither backend applied a migration twice, but concurrent runners failed instead of
@@ -392,8 +397,8 @@ runs `PRAGMA foreign_key_check` before `COMMIT`, and switches it back on afterwa
 
 ### 6.1 Criterion 1: stale revision rejection and all-or-nothing publication
 
-Reproduced on both backends: S1 (§4.1) and S2 (§4.2), including client kill before and during the
-transaction on both, and server kill, pause, network partition and commit-unknown on PostgreSQL.
+Reproduced on both backends: S1 (§4.1) and S2 (§4.2), including client kill during the transaction
+and just before `COMMIT` on both, and server kill, pause, network partition and commit-unknown on PostgreSQL.
 On PostgreSQL stale rejection at publication additionally needs the source rows locked for the
 check (`FOR SHARE`); without it a release commits on a superseded source (row 011).
 
@@ -422,10 +427,11 @@ tool, for online migration of a large table, or for downgrade, none of which was
 ### 6.3 Criterion 3: backend-specific limitations and costs
 
 **PostgreSQL** supplies every semantic, but not with the SQL that looks portable. Four of the
-prototype's correct statements are correct on PostgreSQL only because of a clause or predicate that
-SQLite does not need: `FOR SHARE` at publication, the ownership check inside the attempt's
-`UPDATE`, the eligibility re-check in the claim, and the migration advisory lock. Each control shows
-the failure without it (rows 011, 018, 020, 026). Its costs are operational: a server to run, which §7.2 assigns to the
+prototype's correct statements are correct on PostgreSQL only because of a clause or predicate:
+`FOR SHARE` at publication, the ownership check inside the attempt's `UPDATE`, the eligibility
+re-check in the claim, and the migration advisory lock. Each control shows the failure without it
+(rows 011, 018, 020, 026). SQLite does not need the first, second or fourth; whether it needs the
+eligibility re-check was not measured, because its naive row had one claimer (§3.2). Its costs are operational: a server to run, which §7.2 assigns to the
 operator.
 
 **SQLite** supplies every semantic here, by one mechanism: every write transaction takes the write
@@ -446,9 +452,9 @@ lock at `BEGIN`. That is also its limitation:
 **Implementation cost of supporting both**, measured on this prototype: 8 differences (§3.3). Two
 concern the semantics themselves (items 4 and 6) and one is an optional PostgreSQL-only claim mode
 (item 5); one is a migration that differs completely (item 7); four are mechanical (placeholders,
-connection setup, error codes, column types). The two shared statements PostgreSQL needs and SQLite
-does not (the ownership and eligibility predicates) are not branches, because they are harmless on
-SQLite; they are a cost all the same, since only a PostgreSQL test shows why they are there. Two migration trees must be kept in step. Every semantic needs its own test on each
+connection setup, error codes, column types). The two shared predicates PostgreSQL needs (ownership,
+which SQLite does not need, and eligibility, whose need on SQLite was not measured) are not
+branches, because they are harmless on SQLite; they are a cost all the same, since only a PostgreSQL test shows why they are there. Two migration trees must be kept in step. Every semantic needs its own test on each
 backend, because the controls show that a query correct on one can be wrong on the other; this
 prototype's matrix runs each row twice for that reason.
 
@@ -542,8 +548,9 @@ This does not select a database. It narrows what
 **To [persistence/API contracts](https://github.com/ginsys/bronzeward/issues/18):**
 
 - Required locking per semantic: `FOR SHARE` on source revisions at publication, a conditional
-  `UPDATE` for ownership and completion, an eligibility-re-checking claim, an advisory lock for
-  migrations (PostgreSQL); `BEGIN IMMEDIATE` for every transaction (SQLite).
+  `UPDATE` for ownership and completion, an advisory lock for migrations (PostgreSQL);
+  `BEGIN IMMEDIATE` for every transaction (SQLite); an eligibility-re-checking claim on both, since
+  its need on SQLite was not measured.
 - Idempotency by name plus content digest resolved commit-unknown without a duplicate.
 - Identifiers and generations are not unique across a restore (§4.7). Inference, not measured: a
   recovery epoch stored in the same database is rewound by the same restore, so "greater than any
