@@ -85,8 +85,12 @@ that removes it:
 | migration lock (S6) | no advisory lock on PostgreSQL; a deferred transaction on SQLite | both backends |
 
 On SQLite the S2, S4 and S5 control rows (039, 046, 048) still begin every transaction `IMMEDIATE`,
-which serializes every write transaction, so they remove nothing there: they show only that the
-naive code is also safe while the write lock is taken at `BEGIN`. The S6 SQLite control (054) is
+which serializes every write transaction, so they remove nothing there. The S2 and S4 rows show only
+that the naive code is also safe while the write lock is taken at `BEGIN`. The S5 row (048) does
+not show even that: one worker made all 400 claims, and the other seven each waited out the busy
+timeout once and then found the queue empty, so no two naive claimers ever competed for a job
+(§4.5). Whether the naive claim is safe on SQLite under concurrent claimers was not measured.
+The S6 SQLite control (054) is
 the only row that runs without `IMMEDIATE`. Whether S2, S4 or S5 would stay correct on SQLite in
 deferred mode was not run; SQLite's snapshot rules would likely refuse a stale read-then-write with
 `SQLITE_BUSY_SNAPSHOT` rather than commit it, which is an inference, not a result.
@@ -264,7 +268,7 @@ A claim sets `state = 'claimed'`, increments the job's fence and sets a lease; c
 | Row | Mode | PostgreSQL | SQLite |
 |---|---|---|---|
 | workers-guarded (019, 047) | `WHERE id = (SELECT … LIMIT 1) AND <eligible>` | 400 done, 400 claims, 400 completions, 0 jobs claimed or completed more than once | same |
-| workers-naive (020, 048) | the same without re-checking eligibility | **1105 claims, 309 jobs claimed more than once, 401 completions, 1 job completed twice**; the fence refused the other 704 completions | 400 claims, 400 completions, 0 more than once |
+| workers-naive (020, 048) | the same without re-checking eligibility | **1105 claims, 309 jobs claimed more than once, 401 completions, 1 job completed twice**; the fence refused the other 704 completions | 400 claims, 400 completions, 0 more than once, all 400 by one worker: no claimers competed, so this is not evidence the naive claim is safe |
 | workers-skip-locked (057) | `… FOR UPDATE SKIP LOCKED` | 400 done, 400 completions, 0 more than once | unavailable |
 | lease-expiry (021, 049) | worker a claims with a 1 s lease; b cannot claim early, then claims after expiry at fence 2; a's late completion is refused | as described; the job ends `done` by b at fence 2 | same |
 
@@ -402,7 +406,8 @@ Exercised on both backends:
   attempt; a separate read is unsafe on PostgreSQL (§4.4).
 - **Queue claims** are safe with the guarded claim and fencing on both. The naive claim is unsafe
   on PostgreSQL even with the fence: it claims jobs more than once, and it can re-claim a job that
-  is already `done` and complete it again, which the fence cannot see (§4.5).
+  is already `done` and complete it again, which the fence cannot see (§4.5). On SQLite the naive
+  row had a single active claimer, so it says nothing about the naive claim there.
 - **Migrations** roll back on failure and on kill, and concurrent runners apply each version once
   under the lock (§4.6).
 - **Restored state** rewinds data, identifiers and fencing generations together; tokens issued after
@@ -463,6 +468,9 @@ evidence.
   change several control results into serialization failures, was not run.
 - **Client-clock leases.** Lease expiry compares the claiming client's clock (S5). Workers with
   skewed clocks were not tested; a server-clock lease is an implementation choice this does not make.
+- **SQLite naive claim not contended.** In row 048 one worker made every claim and the other seven
+  never claimed, so the naive claim on SQLite is unmeasured, not shown safe. A run that forces
+  claimers to interleave (for example by yielding the write lock between claims) was not made.
 - **Ledger order is insert order.** The S2 and S4 readers order events by an identity column, which
   records when a row was inserted, not when its transaction committed. In the rows that use it the
   competing transaction commits before the one it is compared with, by construction.
