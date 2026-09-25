@@ -37,7 +37,7 @@ The representations, from none to all:
 | Representation | Redacts |
 |---|---|
 | `none` | nothing |
-| `value` | every text occurrence of a known secret value (the baseline) |
+| `value` | every text occurrence of a known secret value as the case stores it, before any modifier; strings and bytes only (the baseline) |
 | `resolution-path` | the leaf each fragment's resolution wrote, at that fragment's path |
 | `schema` | every field the Talos machinery marks secret |
 | `composed-path` | the output leaf each reference's value became, found by tracer |
@@ -71,13 +71,17 @@ composition reproduced the real one's shape, and every control that must fire fi
 observation that differs from its expectation is a result, counted as `unexpected` in the summary,
 not a failure of the run.
 
-Controls, in `controls.tsv`: a corrupted tracer must fail the fidelity check; a template check per
-talosctl step must redact a message that quotes a value; a per-side diff must expose a base value
-that the paired diff hides; the stale-provenance controls on the revision pairs must fire; the
-trace pass must hold no secret, and the base no case value; the schema must cover each base's
-secrets; every configuration re-rendered with nothing redacted must be the text talosctl or bwref
-wrote; the trace pass must resolve the same paths as the real one. `collect-evidence` plants one pattern in a control file and requires the scan to find
-it before the real scan runs.
+Controls, in `controls.tsv`: one string tracer leaf replaced by a non-tracer must fail the fidelity
+check (a one-mutation smoke test); per talosctl step with a redacted message, a real message with
+text its template lacks must be withheld; a per-side diff must show the base value that the paired
+diff hides; the stale-provenance controls on the revision pairs must fire; the trace pass must hold
+no case value other than the exempt ones (booleans, authored literals), and the base none; no base
+leaf holding a bundle secret may lie outside the schema's leaves; every configuration re-rendered
+with nothing redacted must be the text talosctl or bwref wrote; the trace pass must resolve the
+same paths as the real one. `collect-evidence` plants one pattern in a control file and requires
+the scan to find it before the real scan runs.
+
+The log and support data are formats bwprov writes itself, not talosctl or system logs.
 
 ## What evidence/ holds and does not
 
