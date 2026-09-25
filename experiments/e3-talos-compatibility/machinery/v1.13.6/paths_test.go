@@ -1,0 +1,1 @@
+../src/paths_test.go
