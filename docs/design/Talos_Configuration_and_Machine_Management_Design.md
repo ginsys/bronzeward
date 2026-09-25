@@ -147,6 +147,7 @@ The September review then narrowed first delivery to existing-cluster configurat
 | Secret authoring | Automatic Talos bundle extraction; operator marking for other secrets; whole-value structural references | Decided; syntax and resolution timing open |
 | Approval | Trusted controller enforces immutable approved plans; self/multi-party policy remains open | Boundary decided |
 | Recovery | Evidence-based interrupted-operation handling; explicit recovery mode after restoration | Decided |
+| Retention and alerts | PoC removes no provider object; recovery window is the operator's backup retention; persistent-unknown alert after 15 minutes; manual unseal (§7.8) | Decided for the PoC |
 | First milestone | Configuration control on an existing cluster | Decided |
 | CAPI                             | Avoided and outside scope                                                                                              | Decided            |
 | Infrastructure provisioning      | Outside initial scope                                                                                                  | Decided            |
@@ -418,7 +419,7 @@ A provider must expose enough metadata, without secret values, to classify each 
 | **lost** | Evidence establishes irreversible removal from the current provider, such as destruction, pruning or trim. Separate backup recovery may still exist. |
 | **unknown** | The check could not be completed or metadata is insufficient to distinguish the other states. |
 
-An absent listing, denied access or unreachable provider is not by itself proof of loss. Providers must document the evidence and metadata permissions needed for classification; archives, scheduled deletion timestamps and key versions need provider-aware interpretation. `unknown` never counts as a pass or becomes `lost` by timeout. Persistent unknown state is itself alertable after a defined interval; the interval and other alert thresholds remain to be specified.
+An absent listing, denied access or unreachable provider is not by itself proof of loss. Providers must document the evidence and metadata permissions needed for classification; archives, scheduled deletion timestamps and key versions need provider-aware interpretation. `unknown` never counts as a pass or becomes `lost` by timeout. Persistent unknown state is itself alertable after a defined interval; §7.8 sets the interval and the other alert thresholds for the PoC.
 
 This check establishes retention status only. Readability, authorization and successful decryption are checked under the identity performing compilation or execution **at the point of use**. A passing monitor check neither authorizes dispatch nor replaces these checks. OpenBao's separate metadata/data access paths are one implementation basis; a local provider must prove equivalent metadata behavior without claiming cryptographic usability from file presence. [O7] [O8]
 
@@ -460,7 +461,49 @@ This check establishes retention status only. Readability, authorization and suc
 5. Restrict delete/destroy/trim, whole-key deletion and dangerous configuration writes (§7.5); whole-key and whole-path deletion classify as unknown, not lost (retention classification §8 item 1).
 6. After restoring either service, enter explicit recovery mode (§14.6) before normal startup.
 
-[Retention and recovery policy](https://github.com/ginsys/bronzeward/issues/15) owns retention windows and alert intervals; [identity and approval policy](https://github.com/ginsys/bronzeward/issues/14) owns the application identities.
+§7.8 sets the PoC's retention windows and alert intervals; [identity and approval policy](https://github.com/ginsys/bronzeward/issues/14) owns the application identities.
+
+### 7.8 PoC retention and recovery policy
+
+**Decision** (owner, 25 September 2026, [retention and recovery policy](https://github.com/ginsys/bronzeward/issues/15)). For the PoC profile (§7.7):
+
+1. **Retention: nothing is removed.** Bronzeward deletes, soft-deletes, destroys and trims no provider object: no KV secret version, Transit key or key version, and no stored artifact or release record. Each generation is its own immutable object (§7.3), so no write prunes a referenced version past KV's `max_versions`, which prunes beyond ten by default ([retention classification §6.4](research/20260924-retention-metadata-classification.md#64-criterion-4-provider-limits-and-the-alert-policy-the-evidence-supports)).
+2. **Recovery window: the operator's backup retention.** Any backup generation still retained can be restored under §7.7's pairing duties. What can be lost for good is what was created after the newest snapshot of any backup family, so the backup interval bounds that exposure ([key loss §7](research/20260924-key-loss-restoration.md#7-recommendation) item 5, inferred). The operator chooses both the interval and the retention.
+3. **Alerts.** The dependency monitor (§7.6) raises:
+
+   | Observation | Alert |
+   |---|---|
+   | `lost` | at once |
+   | `blocked` | at once, stating that the block is reversible |
+   | `retained` becoming `unknown` | at once, as a regression |
+   | `unknown` persisting, including a dependency never seen `retained` | after **15 minutes** |
+   | `retained` with a scheduled deletion | a warning before the scheduled time |
+
+   A 404 for a referenced name stays `unknown` and never becomes `lost`, because OpenBao answers a deleted key, deleted metadata and a name that never existed alike. Only the change from `retained` shows the loss (retention classification §6.4). The 15-minute interval is a choice, not a measurement: a partition, a pause and a seal look alike from the client, and the interval is meant to ride out a restart or an unseal.
+4. **Custody and startup unlock: manual unseal.** The operator holds the unseal key share (or shares, at a threshold of their choosing) apart from every backup family (§7.7). After any OpenBao restart, Bronzeward can neither compile nor execute until the operator unseals, while clusters keep running (§14.1). Auto-unseal was not exercised and is not part of the PoC ([provider comparison §7](research/20260924-provider-capability-comparison.md#7-limits)).
+5. **Backup alignment.** §7.7's duties 3 and 4 are mandatory: provider backups no older than the database backup they pair with, credential-store backups matched to the provider, and no floor raise or rewrap while a database backup that references the old version is within retention. They are inferred, and two database/provider/store age combinations (g1/g2/g1 and g2/g1/g2) were not tested ([key loss §6](research/20260924-key-loss-restoration.md#6-limits)). The duties stay mandatory at least until those are tested.
+
+**Guarantees kept apart.**
+
+- **Applying a retained artifact** needs its release record, the key version it names at or above the decryption floor, an executor credential the provider recognises and an unsealed provider. **Regenerating** needs the source version, a key, a compiler credential and an unsealed provider, and then a new release and a new approval. Either path can fail while the other works, and stored ciphertext alone never made a release executable ([key loss §5.2](research/20260924-key-loss-restoration.md#52-criterion-2-applying-is-not-regenerating-and-ciphertext-is-not-executability), [§5.3](research/20260924-key-loss-restoration.md#53-criterion-3-outcomes-prerequisites-and-stopping)).
+- **A `retained` verdict** is not authorization. The metadata identity could read no value, and authority changed independently of retention ([retention classification §6.3](research/20260924-retention-metadata-classification.md#63-criterion-3-a-retained-verdict-grants-nothing)). Compilation and execution check readability and decryption at the point of use (§7.6).
+
+**Alternatives.**
+
+- **Bounded windows with application cleanup** (for example, keeping the last N releases per assignment) were deferred. Cleanup needs the reference graph and in-flight checks of §7.4, which the PoC does not build.
+- **A shorter persistent-unknown interval** would alert on every routine restart. **A longer one** delays noticing a sealed or partitioned provider.
+- **Auto-unseal** would allow unattended restarts but is unmeasured.
+
+**Consequences and limits.**
+
+- Provider and database storage grow without bound during the PoC. At PoC scale that growth is accepted.
+- This policy does not prevent an administrator from destroying the only remaining key or version. §7.5's restrictions are deployment requirements, and an alarm cannot undo a destruction.
+- The following are unmeasured:
+  - restoring onto a new OpenBao cluster;
+  - token expiry across a restore;
+  - Transit soft deletion;
+  - a deletion inside the answer's own second ([key loss §6](research/20260924-key-loss-restoration.md#6-limits), [retention classification §7](research/20260924-retention-metadata-classification.md#7-limits)).
+- A least-privilege administrator policy is still unwritten (§7.7).
 
 ## 8. Machine identity, discovery and enrolment
 
@@ -961,7 +1004,7 @@ The platform should generate redacted support bundles containing machine invento
 | Restricted remote network       | SideroLink gRPC tunnel versus site relay versus REST-polling connector.                          | No concrete site yet; target egress requirement stated in 10.10; REST polling kept as fallback. |
 | SideroLink headend              | Build on open SideroLink packages or implement only a site relay initially.                      | Prototype before committing to production support.                                            |
 | Configuration compiler          | Pinned talosctl subprocess versus Talos Go machinery.                                            | Open pending typed-reference composition and native compatibility experiments.                                 |
-| Artifact retention | Retention windows and provider layout remain open | Exact encrypted artifacts decided; no silent re-render at apply; retain secret/key dependencies for promised actions |
+| Artifact retention | Retention windows and provider layout remain open beyond the PoC | Exact encrypted artifacts decided; no silent re-render at apply; retain secret/key dependencies for promised actions; the PoC removes nothing (§7.8) |
 | Adoption baseline               | Exact current per-node configurations versus immediate refactor into profiles.                   | Exact baseline first, refactor later.                                                         |
 | Drift response                  | Automatic revert versus report/adopt/freeze.                                                     | Report by default.                                                                            |
 | Machine discovery               | Pre-created inventory, DHCP integration, subnet discovery, talos.config call-home or SideroLink. | Support inventory + manual claim first.                                                       |
@@ -978,7 +1021,7 @@ The platform should generate redacted support bundles containing machine invento
 | Installer image sourcing        | Public Image Factory, self-hosted Image Factory or static image list.                            | Decided: public Image Factory in v1; per-site platform image proxy/cache in a later phase.    |
 | Project licence                 | Apache-2.0 versus AGPLv3 versus MPL-2.0.                                                         | Open; must be chosen before first public release; fork-and-SaaS stance undecided.             |
 
-Additional decisions still open: reference grammar/declaration, resolution timing, closed encoding enum, provider layout and retention windows, unknown-alert interval, and, beyond the PoC profile (§7.7), local encryption/key custody, SQLite suitability and any cost-free additional database support; approval identity/policy and dispatch/ownership protocol. Section 18.1 assigns evidence rather than pretending these are settled implementations.
+Additional decisions still open: reference grammar/declaration, resolution timing, closed encoding enum, the physical provider layout, and, beyond the PoC profile and policy (§7.7, §7.8), retention windows with cleanup, local encryption/key custody, SQLite suitability and any cost-free additional database support; approval identity/policy and dispatch/ownership protocol. Section 18.1 assigns evidence rather than pretending these are settled implementations.
 
 ## 17. Recommended baseline and initial scope
 
