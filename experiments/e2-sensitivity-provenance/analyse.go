@@ -379,7 +379,10 @@ func analyse(dir, baseSecretsPath, artifacts, baseName, caseName string) error {
 			}
 		}
 		v.setResolution(recs, version)
-		if tt, ok := c.read("trace/tag/frag", f); ok {
+		tt, ok := c.read("trace/tag/frag", f)
+		if !ok {
+			fidelity = append(fidelity, "fragment "+f+": the trace pass left no resolved fragment")
+		} else {
 			tr, err := parseTree([]byte(tt), emb)
 			if err != nil {
 				return err
@@ -393,7 +396,10 @@ func analyse(dir, baseSecretsPath, artifacts, baseName, caseName string) error {
 				if t.Kind != "bool" {
 					continue
 				}
-				if ft, ok := c.read(fmt.Sprintf("flip-%d/tag/frag", t.ID), f); ok {
+				ft, ok := c.read(fmt.Sprintf("flip-%d/tag/frag", t.ID), f)
+				if !ok {
+					fidelity = append(fidelity, fmt.Sprintf("fragment %s: flip pass %d left no resolved fragment", f, t.ID))
+				} else {
 					fl, err := parseTree([]byte(ft), emb)
 					if err != nil {
 						return err

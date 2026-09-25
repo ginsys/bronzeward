@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,106 @@ func TestAnalyseRedactsFromProvenance(t *testing.T) {
 		if !strings.Contains(ctl, want) {
 			t.Errorf("controls lack %q:\n%s", want, ctl)
 		}
+	}
+}
+
+// A resolved fragment the trace pass left no file for cannot be attributed, so the composed-path
+// representation must fail closed on it rather than render it unredacted.
+func TestAnalyseFailsClosedOnAFragmentWithoutATracePass(t *testing.T) {
+	cell, secrets, artifacts := buildCell(t)
+	if err := os.Remove(filepath.Join(cell, "trace", "tag", "frag", "f1.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := analyse(cell, secrets, artifacts, "gen", "string"); err != nil {
+		t.Fatal(err)
+	}
+	fid := readFile(t, filepath.Join(cell, "analysis", "fidelity.txt"))
+	if !strings.Contains(fid, "fragment f1.yaml") {
+		t.Errorf("no fidelity failure names the fragment:\n%s", fid)
+	}
+	exp := readFile(t, filepath.Join(cell, "analysis", "expectations.tsv"))
+	if !strings.Contains(exp, "fidelity\tok\tfail\tno") {
+		t.Errorf("the fidelity expectation did not fail:\n%s", exp)
+	}
+}
+
+// buildBoolCell lays out a cell whose one reference is a boolean, so that it has a flip pass, and
+// returns the boolean tracer's id.
+func buildBoolCell(t *testing.T) (cell, secrets, artifacts string, id int) {
+	t.Helper()
+	dir := t.TempDir()
+	cell = filepath.Join(dir, "cell")
+	caseDir := filepath.Join(dir, "cell-case")
+	writeFile(t, filepath.Join(caseDir, "case.yaml"), "description: one boolean reference\ntransformation: resolution\n"+
+		"fragments:\n  - file: f1.yaml\n    marked: true\nvalues:\n  wipe: true\nnative: pass\n"+
+		"expect:\n  effective: [wipe]\n  messages: {patch: none, validate: verbatim}\n  leaks: {none: leak}\n")
+	writeFile(t, filepath.Join(caseDir, "f1.yaml"), "machine:\n  install:\n    wipe: !ref wipe\n")
+	if err := derive(caseDir, dir, filepath.Join(cell, "derived")); err != nil {
+		t.Fatal(err)
+	}
+	var tracers []Tracer
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(cell, "derived", "tracers.json"))), &tracers); err != nil {
+		t.Fatal(err)
+	}
+	if len(tracers) != 1 || tracers[0].Kind != "bool" {
+		t.Fatalf("want one boolean tracer, got %+v", tracers)
+	}
+	id = tracers[0].ID
+	writeFile(t, filepath.Join(cell, "base.yaml"), cellBase)
+	wiped := strings.Replace(cellBase, "wipe: false", "wipe: true", 1)
+	frag := "machine:\n    install:\n        wipe: "
+	rec := "\tv1alpha1\tmachine/install/wipe\n"
+	pass := func(d, out, fragValue, res string) {
+		writeFile(t, filepath.Join(d, "frag", "f1.yaml"), frag+fragValue+"\n")
+		writeFile(t, filepath.Join(d, "out.yaml"), out)
+		writeFile(t, filepath.Join(d, "patch.err"), "")
+		writeFile(t, filepath.Join(d, "patch.rc"), "0\n")
+		if res != "" {
+			writeFile(t, filepath.Join(d, "res", "f1.yaml.tsv"), res+rec)
+		}
+	}
+	for _, form := range []string{"literal", "tag", "marked", "binding"} {
+		res := "wipe"
+		if form == "literal" {
+			res = ""
+		}
+		pass(filepath.Join(cell, "real", form), wiped, "true", res)
+	}
+	pass(filepath.Join(cell, "trace", "tag"), wiped, "true", "wipe~0")
+	pass(filepath.Join(cell, fmt.Sprintf("flip-%d", id), "tag"), cellBase, "false", "wipe~0")
+	for _, v := range []string{"real/tag", "real/literal", "trace/tag"} {
+		writeFile(t, filepath.Join(cell, v, "validate.txt"), "out.yaml is valid for metal mode\n")
+		writeFile(t, filepath.Join(cell, v, "validate.rc"), "0\n")
+	}
+	secrets = filepath.Join(dir, "base-secrets.tsv")
+	writeFile(t, secrets, "token:\tBWSYNTH-base-machine-token\n")
+	return cell, secrets, filepath.Join(dir, "artifacts"), id
+}
+
+// A resolved fragment a flip pass left no file for leaves its boolean unattributed there, so the
+// fidelity check must fail on it too.
+func TestAnalyseFailsClosedOnAFragmentWithoutAFlipPass(t *testing.T) {
+	cell, secrets, artifacts, id := buildBoolCell(t)
+	if err := analyse(cell, secrets, artifacts, "gen", "bool"); err != nil {
+		t.Fatal(err)
+	}
+	if exp := readFile(t, filepath.Join(cell, "analysis", "expectations.tsv")); !strings.Contains(exp, "fidelity\tok\tok\tyes") {
+		t.Fatalf("the intact cell does not reproduce, so the check below proves nothing:\n%s\n%s",
+			exp, readFile(t, filepath.Join(cell, "analysis", "fidelity.txt")))
+	}
+	if err := os.Remove(filepath.Join(cell, fmt.Sprintf("flip-%d", id), "tag", "frag", "f1.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := analyse(cell, secrets, artifacts, "gen", "bool"); err != nil {
+		t.Fatal(err)
+	}
+	fid := readFile(t, filepath.Join(cell, "analysis", "fidelity.txt"))
+	if want := fmt.Sprintf("fragment f1.yaml: flip pass %d", id); !strings.Contains(fid, want) {
+		t.Errorf("no fidelity failure names %q:\n%s", want, fid)
+	}
+	exp := readFile(t, filepath.Join(cell, "analysis", "expectations.tsv"))
+	if !strings.Contains(exp, "fidelity\tok\tfail\tno") {
+		t.Errorf("the fidelity expectation did not fail:\n%s", exp)
 	}
 }
 

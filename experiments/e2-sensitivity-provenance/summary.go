@@ -22,8 +22,9 @@ func isMustFire(name string) bool {
 }
 
 // summarise merges every listed cell's and pair's analysis into <results>/ and decides whether
-// the run is complete: every listed unit analysed, every expectation met, no control failed or
-// inconclusive, every must-fire control fired, and every pair's named controls fired. The list's
+// the run is complete: every listed unit analysed, every fidelity expectation met, no control
+// failed or inconclusive, every must-fire control fired, and every pair's named controls fired.
+// Any other expectation that is not met is a result, counted as unexpected. The list's
 // lines are `cell|pair <tab> base <tab> name <tab> analysis-dir [<tab> controls a pair requires]`.
 func summarise(listPath, results string) (bool, error) {
 	units, err := readTSV(listPath)

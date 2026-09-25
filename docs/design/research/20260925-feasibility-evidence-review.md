@@ -377,10 +377,11 @@ Not re-run, with the reason:
   recreated-key prefix), R10 (RC unanswered destroy) and R12 (the SP fidelity and E3 diff-filter
   checkers). None of them sets a grade in §5 or a gap boundary in §9, each report already states
   the limit, and each needs its own fixture run; they remain as their reports record them. For
-  R12: the SP fidelity check could pass silently only when a trace or flip fragment is missing,
-  and SP §4.2 records that none was; E3's diff filter fails open on an unrecognised diff format,
-  and E3 §7 records that no refused row's output held a scan pattern. Both reports recommend the
-  implementation fail closed.
+  R12: the SP fidelity check as captured could pass silently only when a trace or flip fragment
+  was missing, and SP §8 records that none was; the SP analyser has since been changed to record
+  a missing one as a fidelity failure, without re-running the capture. E3's diff filter fails open
+  on an unrecognised diff format, and E3 §7 records that no refused row's output held a scan
+  pattern; E3 recommends the implementation fail closed.
 
 ## 8. Cross-report findings
 

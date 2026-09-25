@@ -516,12 +516,15 @@ that did not fire makes a run incomplete.
 - **The fidelity control was not exercised in 16 cells** (§4.4): 12 with no string-kind tracer in
   the output and 4 with no composition. There the fidelity check itself still ran and passed.
   Where it fired, it is a one-mutation smoke test: no structural change was injected.
-- **A latent fail-open in the fidelity check.** When a trace or flip fragment is missing for a real
-  fragment, the analysis skips that fragment's attribution instead of counting a fidelity failure.
-  Its references would then get no composed path, so path representations would show them
-  unredacted, with the run still reported complete. It did not arise here: each of the 72 resolved
-  real fragments in the capture has its trace fragment, and each of the 2 flip passes (bool, both
-  bases) has its fragment.
+- **A latent fail-open in the fidelity check, in the analyser as captured.** When a trace or flip
+  fragment was missing for a real fragment, that analyser skipped the fragment's attribution
+  instead of counting a fidelity failure. Its references would then have got no composed path, so
+  path representations would have shown them unredacted, with the run still reported complete. It
+  did not arise in this capture: each of the 72 resolved real fragments has its trace fragment, and
+  each of the 2 flip passes (bool, both bases) has its fragment. The analyser now fails closed: a
+  missing trace or flip fragment is recorded as a fidelity failure, which makes the run incomplete
+  (`TestAnalyseFailsClosedOnAFragmentWithoutATracePass`,
+  `TestAnalyseFailsClosedOnAFragmentWithoutAFlipPass`). The capture was not re-run.
 - **A message quoting a boolean or an authored literal would be shown verbatim** (§6.3). No case
   produced one.
 - **`per-side-diff-exposes-base-value` is loose.** Its test that the per-side diff holds a `-` is
