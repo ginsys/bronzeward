@@ -1,0 +1,446 @@
+==> 004-s2-postgres-normal <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3676798
+outcome=done elapsed_ms=34 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3676808
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=postgres pid=3676818
+outcome=done elapsed_ms=6 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 005-s2-postgres-stale-input <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3676925
+outcome=done elapsed_ms=35 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3676942
+outcome=done elapsed_ms=2 fragment=f1
+==> write (rc 0) <==
+$ e4db update -actor w -read 0
+backend=postgres pid=3676953
+outcome=done elapsed_ms=3 fragment=f1 revision=1
+==> publish (rc 3) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=postgres pid=3676963
+outcome=refused reason=stale elapsed_ms=1 err="stale source revision: f1 is at 1, publication pinned 0"
+==> read-s2 (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> 006-s2-postgres-fail-at-5 <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3677089
+outcome=done elapsed_ms=32 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3677099
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 1) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -fail-at 5
+backend=postgres pid=3677109
+outcome=error class=other elapsed_ms=3 err="injected failure before artifact 5 of 8"
+==> read-s2 (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> 007-s2-postgres-client-sigkill <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3677207
+outcome=done elapsed_ms=38 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3677217
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 137) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 30s
+backend=postgres pid=3677229
+hold="after artifact 4 of 8" for=30s
+# SIGKILL sent to 3677229
+==> read-s2 (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> 008-s2-postgres-kill-before-commit <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3677332
+outcome=done elapsed_ms=33 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3677342
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 137) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -commit-gate <E4_OUT>/parts/008-s2-postgres-kill-before-commit/commit-gate
+backend=postgres pid=3677354
+commit-ready
+# SIGKILL sent to 3677354
+==> read-s2-after-kill (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> retry (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=postgres pid=3677399
+outcome=done elapsed_ms=5 release=r1 id=2 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|2 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 009-s2-postgres-retry <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3677515
+outcome=done elapsed_ms=33 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3677525
+outcome=done elapsed_ms=2 fragment=f1
+==> first (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=postgres pid=3677535
+outcome=done elapsed_ms=6 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> same (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=postgres pid=3677545
+outcome=done elapsed_ms=1 release=r1 id=1 existing=true digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> different (rc 3) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 9
+backend=postgres pid=3677555
+outcome=refused reason=conflict elapsed_ms=1 err="existing record differs"
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 010-s2-postgres-race-locked <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3677667
+outcome=done elapsed_ms=33 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3677677
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 3s
+backend=postgres pid=3677689
+hold="after artifact 4 of 8" for=3s
+outcome=done elapsed_ms=3007 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> write (rc 0) <==
+$ e4db update -actor w -read 0
+backend=postgres pid=3677702
+outcome=done elapsed_ms=2956 fragment=f1 revision=1
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 011-s2-postgres-race-unlocked-control <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3677915
+outcome=done elapsed_ms=37 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3677925
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 3s -no-source-lock
+backend=postgres pid=3677937
+hold="after artifact 4 of 8" for=3s
+outcome=done elapsed_ms=3016 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> write (rc 0) <==
+$ e4db update -actor w -read 0
+backend=postgres pid=3677950
+outcome=done elapsed_ms=3 fragment=f1 revision=1
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|1
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 058-s2-postgres-server-kill <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3738718
+outcome=done elapsed_ms=33 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3738728
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 1) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 10s
+backend=postgres pid=3738741
+hold="after artifact 4 of 8" for=10s
+outcome=error class=conn elapsed_ms=10004 err="driver: bad connection"
+==> inject-kill (rc 0) <==
+$ fixtures/bin/inject kill postgres
+==> inject-start (rc 0) <==
+$ fixtures/bin/inject start postgres
+==> read-s2 (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> 059-s2-postgres-server-pause <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3749162
+outcome=done elapsed_ms=37 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3749247
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 1s
+backend=postgres pid=3749275
+hold="after artifact 4 of 8" for=1s
+outcome=done elapsed_ms=3347 release=r1 id=1 existing=false digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> inject-pause (rc 0) <==
+$ fixtures/bin/inject pause postgres
+==> inject-unpause (rc 0) <==
+$ fixtures/bin/inject unpause postgres
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> 060-s2-postgres-netsplit <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3756004
+outcome=done elapsed_ms=33 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3756084
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 1) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -hold 1s
+backend=postgres pid=3756113
+hold="after artifact 4 of 8" for=1s
+outcome=error class=conn elapsed_ms=1004 err="driver: bad connection"
+==> inject-netsplit (rc 0) <==
+$ fixtures/bin/inject netsplit postgres
+==> inject-netjoin (rc 0) <==
+$ fixtures/bin/inject netjoin postgres
+==> read-s2 (rc 0) <==
+releases|0
+artifacts|0
+sources|0
+incomplete_releases|0
+stale_at_commit|0
+==> 061-s2-postgres-commit-unknown <==
+==> reset (rc ) <==
+NOTICE:  drop cascades to 10 other objects
+DETAIL:  drop cascades to table schema_migrations
+drop cascades to table fragment
+drop cascades to table ledger
+drop cascades to table release
+drop cascades to table release_source
+drop cascades to table release_artifact
+drop cascades to table operation
+drop cascades to table timeline
+drop cascades to table job
+drop cascades to table job_event
+==> migrate (rc 0) <==
+$ e4db migrate -runner setup
+backend=postgres pid=3764450
+outcome=done elapsed_ms=33 applied=[1 2 3 4]
+==> seed (rc 0) <==
+$ e4db seed-fragment
+backend=postgres pid=3764543
+outcome=done elapsed_ms=2 fragment=f1
+==> publish (rc 137) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8 -commit-gate <E4_OUT>/parts/061-s2-postgres-commit-unknown/commit-gate
+backend=postgres pid=3764573
+commit-ready
+commit-sent
+# SIGKILL sent to 3764573
+==> inject-pause (rc 0) <==
+$ fixtures/bin/inject pause postgres
+==> inject-unpause (rc 0) <==
+$ fixtures/bin/inject unpause postgres
+==> read-s2-after-kill (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> retry (rc 0) <==
+$ e4db publish -release r1 -actor p -pin f1=0 -artifacts 8
+backend=postgres pid=3768429
+outcome=done elapsed_ms=1 release=r1 id=1 existing=true digest=90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> read-s2 (rc 0) <==
+releases|1
+artifacts|8
+sources|1
+incomplete_releases|0
+stale_at_commit|0
+release:r1|1 8 90f4645a2a8650a3522ea53c425ea483e29e9a7c7effeca026d0ae1e7b0fdbdc
+==> end <==
