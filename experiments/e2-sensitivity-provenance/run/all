@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# Run the whole sensitivity-provenance experiment into E2SP_OUT: every case under cases/ on each of
+# two bases, then the two revision pairs, then the summary.
+#
+# Per cell (one case on one base), in order:
+#   1. bwprov derive: the real pass (the case's values), the trace pass (every reference occurrence
+#      renamed and given a tracer value of the same shape) and one flip pass per boolean tracer;
+#   2. bwref gen and bwref resolve (issue 3's resolver, unchanged) on each fragment of each pass:
+#      every candidate form for the real pass, the tag form for the others;
+#   3. talosctl machineconfig patch (strategic merge) of the resolved fragments onto the base, each
+#      pass from its own directory with the same relative paths, so messages differ only by value;
+#      for the trace pass also every proper prefix of the fragments;
+#   4. talosctl validate --strict of the reference-free (literal) and tag compositions, real and
+#      trace, in the base's mode;
+#   5. bwprov analyse: provenance through the composition, every representation's redacted diff,
+#      errors, log and support data, the oracle's findings, the expectations and the controls.
+# talosctl is the only thing that composes; nothing here merges.
+#
+# Phase-0 evidence for the sensitivity and provenance experiment (ginsys/bronzeward issue 4). Not
+# v1 tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+need go git cmp diff sha256sum awk sed tr sort install find xargs
+
+mkdir -p -- "$E2SP_OUT"
+[ -z "$(ls -A -- "$E2SP_OUT")" ] ||
+  die "$E2SP_OUT is not empty; give each run a new directory, so evidence from two runs cannot mix"
+printf 'E2 sensitivity and provenance, started %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$E2SP_MARK"
+cd -- "$E2SP_OUT"
+
+e2sp_build
+e2sp_talosctl_ready
+# Both bases are required for a complete run. E2SP_BASES narrows a development run; its summary is
+# then incomplete by construction and collect-evidence refuses it.
+read -r -a bases <<<"${E2SP_BASES:-fixture generated}"
+{
+  printf 'commit\t%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
+  # Uncommitted changes to what this run executes. evidence/ is output, not input.
+  printf 'uncommitted-inputs\t%s\n' "$(git -C "$REPO_DIR" status --porcelain -- experiments/e2-sensitivity-provenance \
+    ':!experiments/e2-sensitivity-provenance/evidence' experiments/e2-structural-references fixtures | wc -l)"
+  printf 'talosctl\t%s\n' "$(talosctl version --client --short | tr '\n' ' ' | sed 's/ *$//')"
+  printf 'talosctl-sha256\t%s\n' "$TALOSCTL_SHA256"
+  printf 'go\t%s\n' "$(go version)"
+  printf 'bases\t%s\n' "${bases[*]}"
+} >run.txt
+
+# Bases, as issue 3 built them:
+#   fixture    the running fixture's own control-plane configuration (container mode);
+#   generated  `gen config` output for a metal node, without documentation or examples (metal mode).
+# Each is re-read through the no-op patch, and must validate. Its secrets are the scalars of its
+# secrets bundle under a key, secret or token field (the fixture's bundle is the one bin/up
+# extracted from this same configuration): value matching knows them, and the oracle looks for them.
+mkdir base
+printf 'machine: {}\n' >noop.yaml
+printf '{}\n' >empty.yaml
+declare -A modes=([fixture]=container [generated]=metal)
+: >controls.tsv
+for b in "${bases[@]}"; do
+  case $b in
+    fixture)
+      need_state
+      [ -s "$STATE/controlplane.yaml" ] || die "the fixture has no $STATE/controlplane.yaml; run fixtures/bin/up first"
+      cp -- "$STATE/controlplane.yaml" base/fixture.source.yaml
+      cp -- "$STATE/talos-secrets.yaml" base/fixture.bundle.yaml
+      # The fixture's leak-scan list, for collect-evidence to refuse after the fixture is down.
+      cp -- "$STATE/scan-patterns.txt" base/fixture.scan-patterns.txt
+      ;;
+    generated)
+      talosctl gen secrets -o base/generated.bundle.yaml 2>base/gen.err
+      talosctl gen config e2-sensitivity https://192.0.2.10:6443 --with-secrets base/generated.bundle.yaml \
+        --output-types controlplane --with-docs=false --with-examples=false -o base/generated.source.yaml 2>>base/gen.err
+      ;;
+    *) die "unknown base $b" ;;
+  esac
+  talosctl machineconfig patch "base/$b.source.yaml" --patch @noop.yaml -o "base/$b.yaml" 2>>base/gen.err
+  talosctl validate --config "base/$b.yaml" --mode "${modes[$b]}" --strict >"base/$b.validate.txt" 2>&1 ||
+    die "control failed: the $b base does not validate in ${modes[$b]} mode"
+  printf '%s\tbase\tvalidates-%s\tpass\n' "$b" "${modes[$b]}" >>controls.tsv
+  awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ && NF == 2 {
+      print $1 "\t" $2 }' "base/$b.bundle.yaml" >"base/$b.secrets.tsv"
+  [ "$(wc -l <"base/$b.secrets.tsv")" -ge 5 ] || die "fewer than 5 secrets in the $b bundle; it is not what talosctl writes"
+done
+
+# A failed talosctl step is a result, not an error of the run: its messages and exit status are
+# recorded beside it.
+# compose <dir> <base> <fragment-dir> <fragment>...: talosctl's strategic merge from <dir>. A
+# fragment that is only `{}` (what the binding form leaves when every key was bound) is left out
+# and named in skipped.txt; with nothing left the composition is the base itself.
+compose() {
+  local dir=$1 base=$2 fdir=$3 f args=()
+  shift 3
+  for f in "$@"; do
+    if cmp -s -- "$dir/$fdir/$f" empty.yaml; then
+      printf '%s\n' "$f" >>"$dir/skipped.txt"
+    else
+      args+=(--patch "@$fdir/$f")
+    fi
+  done
+  if [ "${#args[@]}" -eq 0 ]; then
+    cp -- "$dir/$base" "$dir/out.yaml"
+    : >"$dir/patch.err"
+    printf '0\n' >"$dir/patch.rc"
+    return
+  fi
+  local rc=0
+  (cd -- "$dir" && talosctl machineconfig patch "$base" "${args[@]}" -o out.yaml 2>patch.err) || rc=$?
+  printf '%s\n' "$rc" >"$dir/patch.rc"
+}
+validate() { # validate <dir>: the composition in <dir>, when there is one
+  [ -f "$1/patch.rc" ] && [ "$(cat -- "$1/patch.rc")" = 0 ] || return 0
+  local rc=0
+  (cd -- "$1" && talosctl validate --config out.yaml --mode "${modes[$b]}" --strict >validate.txt 2>&1) || rc=$?
+  printf '%s\n' "$rc" >"$1/validate.rc"
+}
+
+: >list.tsv
+run_cell() {
+  local n=$1 d=cells/$b/$1 pass form f v rc
+  mkdir -p -- "$d"
+  bwprov derive "$E2SP_DIR/cases/$n" "$E2SP_BWREF_DIR/cases" "$d/derived"
+  cp -- "base/$b.yaml" "$d/base.yaml"
+  mapfile -t frags < <(awk -F'\t' '$1 == "fragment" { print $2 }' "$d/derived/info.tsv")
+  local passes=(real trace)
+  while IFS= read -r id; do passes+=("flip-$id"); done < <(awk -F'\t' '$1 == "flip" { print $2 }' "$d/derived/info.tsv")
+  for pass in "${passes[@]}"; do
+    # gen writes the forms in order (literal, tag, marked, binding) and stops at the first it cannot
+    # write: the binding form cannot hold a reference that is a list element. A form it did not
+    # write is refused below with gen's message, as the resolver would refuse it.
+    rc=0
+    bwref gen "$d/derived/$pass/case" "$d/gen/$pass" 2>"$d/gen-$pass.err" || rc=$?
+    [ "$rc" -eq 0 ] || [ -d "$d/gen/$pass/tag" ] || die "bwref gen wrote no tag form for $n ($pass): $(cat -- "$d/gen-$pass.err")"
+    local forms=(tag)
+    [ "$pass" != real ] || forms=(literal tag marked binding)
+    for form in "${forms[@]}"; do
+      v=$d/$pass/$form
+      mkdir -p -- "$v/frag" "$v/res"
+      rc=0
+      : >"$v/resolve.err"
+      for f in "${frags[@]}"; do
+        if [ ! -f "$d/gen/$pass/$form/$f" ]; then
+          cat -- "$d/gen-$pass.err" >>"$v/resolve.err"
+          rc=2
+          break
+        elif [ "$form" = literal ]; then
+          cp -- "$d/gen/$pass/literal/$f" "$v/frag/$f"
+        else
+          bwref resolve "$form" "$d/derived/$pass/case" "$d/gen/$pass" "$d/gen/$pass/$form/$f" "$v/frag/$f" "$f" \
+            >"$v/res/$f.tsv" 2>>"$v/resolve.err" || { rc=$?; break; }
+        fi
+      done
+      printf '%s\n' "$rc" >"$v/resolve.rc"
+      [ "$rc" -eq 0 ] || continue
+      compose "$v" ../../base.yaml frag "${frags[@]}"
+    done
+  done
+  validate "$d/real/literal"
+  validate "$d/real/tag"
+  validate "$d/trace/tag"
+  # The trace pass's proper prefixes: after which fragment an overridden tracer disappears.
+  local j
+  if [ "$(cat -- "$d/trace/tag/resolve.rc")" = 0 ]; then
+    for ((j = 1; j < ${#frags[@]}; j++)); do
+      mkdir -p -- "$d/trace/tag/prefix-$j"
+      compose "$d/trace/tag/prefix-$j" ../../../base.yaml ../frag "${frags[@]:0:j}"
+    done
+  fi
+  bwprov analyse "$d" "base/$b.secrets.tsv" artifacts "$b" "$n"
+  printf 'cell\t%s\t%s\t%s\n' "$b" "$n" "$d/analysis" >>list.tsv
+}
+
+names=()
+for dir in "$E2SP_DIR"/cases/*/; do
+  names+=("$(basename -- "$dir")")
+done
+# The revision pairs, and the stale-provenance controls each must fire.
+pairs=("moved moved-r1 moved-r2 stale-paths-leak" "rotate rotate-r1 rotate-r2 stale-values-leak,stale-paths-version")
+for b in "${bases[@]}"; do
+  for n in "${names[@]}"; do
+    run_cell "$n"
+  done
+  for p in "${pairs[@]}"; do
+    read -r pn pa pb req <<<"$p"
+    bwprov pair "cells/$b/$pa" "cells/$b/$pb" "base/$b.secrets.tsv" artifacts "pairs/$b/$pn" "$pn" "$b"
+    printf 'pair\t%s\t%s\t%s\t%s\n' "$b" "$pn" "pairs/$b/$pn" "$req" >>list.tsv
+  done
+done
+
+# Completeness: one cell per case and base and one pair per pair and base, both bases, every row
+# analysed, every control that must fire fired (bwprov summary decides the last three).
+want=$(((${#names[@]} + ${#pairs[@]}) * 2))
+rows=$(wc -l <list.tsv)
+rc=0
+bwprov summary list.tsv results || rc=$?
+[ "$rc" -le 3 ] || die "bwprov summary failed"
+find cells -name out.yaml -type f -print0 | sort -z | xargs -0 sha256sum -- >outputs.sha256
+if [ "$rc" -ne 0 ] || [ "$rows" -ne "$want" ]; then
+  printf 'incomplete: %d of %d units listed, summary exit %d\n' "$rows" "$want" "$rc" >incomplete
+  die "the run is incomplete ($rows of $want units, summary exit $rc); see $E2SP_OUT/results/summary.txt"
+fi
+printf 'complete %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >complete
+say "E2 sensitivity-provenance: ${#names[@]} cases and ${#pairs[@]} pairs on ${#bases[@]} bases; see $E2SP_OUT/results/summary.txt"
