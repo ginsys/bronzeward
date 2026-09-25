@@ -468,6 +468,14 @@ reproduces every earlier per-cell file byte for byte.
   counted as a surviving reference. No value here has more than two leaves (map's `reg-auth`), one
   reference is an integer (int's `prism-port`), and no case fragment or base under
   `evidence/base/` holds a 61xxx number.
+- **Harness properties no capture reached.** Each fails closed or did not arise:
+  - The `E2_OUT` guard compares the path as given, not canonicalized, so a path reaching the
+    checkout through `..` or a symlink would pass it.
+  - `run/collect-evidence` requires the leak-scan control to be the scan's only hit
+    (`run/collect-evidence:89`). A real leak alongside it would stop the collection as "control did
+    not fire", not name the leaking file.
+  - Its `need` preflight (`run/collect-evidence:14`) lists `cp`, which it does not use, and omits
+    `tail`, `awk`, `sort`, `wc` and `mktemp`, which it does.
 - **The resolver is disposable.** Its choices (per-fragment opt-in, path syntax, alias handling by
   replacing the anchor node) are this experiment's, not a proposed design.
 - **Error messages carry value prefixes.** `talosctl`'s decode errors quote the first characters of
