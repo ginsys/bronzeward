@@ -17,6 +17,7 @@ need grep sed find sort sha256sum cut awk
 [ -s "$E3_OUT/complete" ] || die "$E3_OUT/complete is missing: run/all did not finish"
 [ -s "$E3_PATTERNS" ] || die "$E3_PATTERNS is missing or empty"
 ! grep -q '^only' -- "$E3_OUT/run.txt" || die "$E3_OUT is a partial run (E3_ONLY was set); run the whole matrix"
+grep -qx 'control mismatches 0' -- "$E3_OUT/run.txt" || die "$E3_OUT is inconclusive: a control failed (run.txt)"
 
 dest=$E3_DIR/evidence
 incoming=$(mktemp -d "$E3_DIR/.evidence-incoming.XXXXXX")

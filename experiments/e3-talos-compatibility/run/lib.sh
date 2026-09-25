@@ -96,7 +96,8 @@ e3_tools() {
       "$(e3_sha "$v")")
     install -m 0755 "$file" "$E3_BIN/talosctl-$v"
     go -C "$E3_DIR/machinery/$v" build -o "$E3_BIN/e3m-$v" . || die "could not build e3m against machinery $v"
-    printf '%s\t%s\t%s\t%s\n' "$v" "$(e3_sha "$v")" \
+    # The installed binary's digest as measured here, not the pin it was fetched against.
+    printf '%s\t%s\t%s\t%s\n' "$v" "$(sha256sum <"$E3_BIN/talosctl-$v" | cut -d' ' -f1)" \
       "$(tc "$v" version --client --short 2>&1 | awk 'NF { printf "%s%s", sep, $0; sep = " | " }')" \
       "$(m "$v" info)" >>"$E3_OUT/tools.tsv"
   done

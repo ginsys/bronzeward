@@ -22,11 +22,11 @@ does with each target contract, through two implementations of the same operatio
 | Group | What it records |
 |---|---|
 | gen | every renderer x target (`current`, v1.10.0 .. v1.15.0, and the version-string edges `1.13`, `v1.13.6`, `v1.15.0-alpha.0`, `v1.99.0`, `bogus`) x Kubernetes (the renderer's default, and the fixture's 1.36.2): both implementations' exit and output, the output digests, whether they are byte-identical, and whether talosctl repeats itself |
-| validate | every generated configuration (Kubernetes 1.36.2, `current` and the six contracts) validated by every renderer, container and metal mode, through both |
+| validate | every generated configuration (Kubernetes 1.36.2, `current` and the six contracts) validated by every renderer: one row per configuration and validator, holding four cells (talosctl and machinery, each in container and metal mode) |
 | strict | each renderer's own output with `--strict` |
 | policy | the Kubernetes and upgrade windows each machinery's `compatibility` package encodes |
 | rpc-client | each renderer as a client of the fixture's v1.13.6 worker, through both: version, read the configuration, a dry-run apply and a real apply of a label patch in no-reboot mode |
-| rpc-contract | every renderer's worker configuration for every contract, as a no-reboot dry run through the pinned client |
+| rpc-contract | every renderer's worker configuration for every contract, as a no-reboot dry run through the pinned client, both implementations |
 | controls | `bogus` refused everywhere; generation repeatable; a different input compares unequal; an invalid configuration refused by every validator and by the node |
 | tests | `e3m`'s own tests |
 
@@ -40,16 +40,17 @@ The rpc and control groups are rows, each with its expectation written in [`run/
 before the run and compared by [`run/lib.sh`](run/lib.sh) with what the harness reads back through
 the fixture's pinned `talosctl`: the worker's configuration digest and its machine-configuration
 resource version. The rpc-client rows expect every client to work; a mismatch there is a finding.
-A control row proves a check can fail; a mismatch there makes the run inconclusive.
+A control row proves a check can fail; a mismatch there makes the run inconclusive: `run/all`
+exits non-zero and `run/collect-evidence` refuses the run.
 
 **Digest normalization.** A digest is the SHA-256 of the configuration with its trailing newlines
 replaced by exactly one, as the fixture's own normalization (`fixtures/bin/selftest`) and `e3m`'s
-`digest` compute it.
+`digest` compute it. "Identical" in the tables means identical after this normalization.
 
 **Secrets.** Every configuration is generated from the fixture cluster's own secrets bundle, so
 that it could be applied to the worker. The configurations, the raw outputs and every read of the
 worker stay in `E3_OUT`. A transcript keeps an apply's output up to its first diff line, and a
-read's standard error only. What is committed of a configuration is its digest and its key-path
+read's standard error only; `e3m` withholds the diff from an error the same way. What is committed of a configuration is its digest and its key-path
 differences (`e3m paths`), never a value.
 
 ## Running it
@@ -66,9 +67,9 @@ fixtures/bin/down
 E3_OUT=<the same directory> experiments/e3-talos-compatibility/run/collect-evidence
 ```
 
-`run/all` downloads the six renderers' `talosctl` into `fixtures/.cache` (about 500 MiB, once;
+`run/all` downloads the six renderers' `talosctl` into `fixtures/.cache` (about 610 MiB, once;
 `fixtures/bin/down --purge` removes them), copies them and six `e3m` builds into `E3_OUT/bin`
-(most of its size), and runs the matrix in a few minutes. `run.txt` records the commit, every
+(most of its size), and runs the matrix in under two minutes once the fixture is up. `run.txt` records the commit, every
 uncommitted input, `started` and `finished`. `run/collect-evidence` copies the text evidence into
 [`evidence/`](evidence/), packs the transcripts and the key-path differences one file per group,
 rewrites local paths to placeholders, and refuses the result if it holds any of the fixture's
