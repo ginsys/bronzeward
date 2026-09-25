@@ -417,7 +417,11 @@ release, was not exercised as a recovery path.
   `run/collect-evidence:38` rewrites the checkout path before `KL_OUT`, so a sibling
   `<checkout>-evidence` output, which `run/lib.sh:28-31` allows, would come out as
   `<repo>-evidence`. The committed evidence holds neither `<KL_OUT>` nor `<repo>-evidence`, and does
-  not record which `KL_OUT` the capture used.
+  not record which `KL_OUT` the capture used. That guard also compares `KL_OUT` as given, not
+  canonicalized, so a path reaching the checkout through `..` or a symlink would pass it.
+  `key_state` folds the listing's stderr into its output, so a mount with no key whose listing
+  prints an error would read as `unreadable`, not as no keys. No check row had an empty mount:
+  every check compared one to three keys, except the sealed row 096.
 - **The store is a file copy.** It held the token and accessor files and the fixture's own leak-scan
   control (`canary-control.txt`); no process held a database open in it.
 - **What stays out of the repository.** The bundles under `KL_OUT` include the expanded store
