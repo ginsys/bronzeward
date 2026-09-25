@@ -70,7 +70,7 @@ to that work:
 | Ingestion | create-only secret generations; HMAC with the digest key (§4.1); encrypt and decrypt with the staging key (§3); encrypt with the baseline key (§2.3) | secret reads; artifact and baseline decryption; machine operation | `publisher`: `create` on `secret/data/gen/*` only, and a refused replace ([PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities), [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) rows 001, 002). Staging-key, baseline-key and HMAC use were not measured. |
 | Compiler | read the pinned secret versions; encrypt with the artifact key | artifact, baseline or staging decryption; secret creation; machine operation | `compiler`: `read` on `secret/data/*`, encrypt on the artifact key, decrypt refused (PC §4.1 rows 004, 038, 040) |
 | Executor | decrypt artifacts, gated by approval | secret reads; staging and baseline decryption | `executor`: decrypt only, secret read refused (PC §4.1 rows 039, 005); [execution and recovery §3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
-| Metadata | §7.6 classification | any value | `metadata`: KV metadata and Transit key state, no data (PC §4.1) |
+| Metadata | [design §7.6](../design/Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks) classification | any value | `metadata`: KV metadata and Transit key state, no data (PC §4.1) |
 | Normal API | metadata and workflow | any secret value, any plaintext input | not measured; design §13.1 |
 
 Ingestion and compilation run in protected processing: a process that holds
@@ -133,6 +133,11 @@ second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/passw
    refuses the input before any provider write, as E1's rejected rows were
    ([E1 §4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#4-expected-and-observed),
    4.6). What the schema list is evidenced to cover, and what not, is §2.4.
+   A node that already carries a `!bwref` tag is excluded from identification
+   and substitution: it is already a reference, so a draft update of a
+   sanitized document, or a further mark on a staged one (§3), mints no second
+   name for it. Its content is a reference name, not a value, so it adds
+   nothing to the extracted values the guard (§4.2) searches for.
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
    candidate sanitized document. Names are minted as §5.1 states.
