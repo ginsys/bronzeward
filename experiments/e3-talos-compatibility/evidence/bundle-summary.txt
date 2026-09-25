@@ -1,8 +1,8 @@
 # fixtures/bin/evidence bundle, captured after run/all with E3_OUT as an extra scan path
 ## versions.txt
-captured        2026-09-25T00:25:54Z
-manifest commit 477e851aea3de5daed6229089cee646c5a4e3caa
-created at      477e851aea3de5daed6229089cee646c5a4e3caa
+captured        2026-09-25T00:55:29Z
+manifest commit 28099154a391c6c61b4e7fbf5f62c8e14b06686e
+created at      28099154a391c6c61b4e7fbf5f62c8e14b06686e
 host            Linux 7.1.3+deb13-amd64 x86_64
 docker          client 26.1.5+dfsg1 server 26.1.5+dfsg1
 compose         2.27.1

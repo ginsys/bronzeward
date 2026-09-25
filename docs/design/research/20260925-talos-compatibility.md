@@ -10,7 +10,8 @@
 
 **This is not a pass of design experiment E3.** The §18.1 row for E3 includes the
 Upgrade/LifecycleClient transition. Nothing here executed an upgrade, a reboot or any lifecycle
-RPC; the fixture's Talos nodes are containers, where those operations do not exist (§6.3).
+RPC; the fixture's Talos nodes are containers, where those operations do not exist (this
+report's §6.3).
 
 ## 1. Question
 
@@ -67,14 +68,17 @@ Every cell runs through both implementations:
 
 ### 3.1 Groups
 
-| Group | Cells or rows | What it records |
+A table row holds several cells: one per implementation, and for validation one per
+implementation and runtime mode.
+
+| Group | Rows (cells) | What it records |
 |---|---|---|
-| gen | 144 cells | every renderer x target x Kubernetes: both implementations' exit and output, the output digests, whether the two are byte-identical, and whether talosctl repeats itself |
-| validate | 504 cells | every generated configuration at Kubernetes 1.36.2 (`current` and the six contracts, both machine types) validated by every renderer, container and metal mode, through both |
-| strict | 84 cells | each renderer's own output with `--strict` |
+| gen | 144 rows (288 cells) | every renderer x target x Kubernetes setting: both implementations' exit and output, the output digests, whether the two are identical, and whether talosctl repeats itself |
+| validate | 504 rows (2016 cells) | every generated configuration at Kubernetes 1.36.2 (7 targets x 2 machine types per renderer) x every renderer as validator; each row's four cells are talosctl and the machinery, each in container and metal mode |
+| strict | 84 rows (336 cells) | each renderer's own output with `--strict`, the same four cells |
 | policy | 96 answers per machinery | the Kubernetes and upgrade windows each machinery's `compatibility` package encodes |
 | rpc-client | 12 rows | each renderer as a client of the v1.13.6 worker, through both: version, read, dry-run apply and real apply of a label patch in no-reboot mode |
-| rpc-contract | 42 rows | every renderer's worker configuration for `current` and each contract, as a no-reboot dry run through the pinned client |
+| rpc-contract | 42 rows | every renderer's worker configuration for `current` and each contract, as a no-reboot dry run through the pinned client, both implementations |
 | controls | 5 rows | positive controls, below |
 | tests | 1 row | `e3m`'s own tests |
 
@@ -89,11 +93,11 @@ digest and the machine-configuration resource version.
 
 | Control | Proves | Observed |
 |---|---|---|
-| `gen-bogus-refused` | generation can fail | `bogus` refused by all 12 renderer x implementation cells |
-| `gen-repeatable` | a digest difference is not noise | two generations from the same inputs: 0 differ |
+| `gen-bogus-refused` | generation can fail | `bogus` refused in all 12 gen rows for it (6 renderers x 2 Kubernetes settings), through both implementations in each |
+| `gen-repeatable` | a digest difference is not noise | every one of the 132 generating rows compares `same` with its talosctl repeat; 0 differ |
 | `compare-unequal` | the comparison can report a difference | a different cluster name compares unequal, and `e3m paths` names `0/cluster/clusterName` |
-| `validate-invalid-refused` | validation can fail | a worker with `type: bogus` accepted by 0 of 24 validator cells |
-| `rpc-invalid-refused` | the node can refuse | the same file refused by the node through both clients (`InvalidArgument … unknown machine type "bogus"`); the worker's digest and version unchanged |
+| `validate-invalid-refused` | validation can fail | a worker with `type: bogus` accepted by 0 of 24 validator cells (6 renderers x 2 modes x 2 implementations), and all 24 outputs name `unknown machine type "bogus"` |
+| `rpc-invalid-refused` | the node can refuse | the same file refused by the node through both clients, each naming `unknown machine type "bogus"`; the worker's digest and version unchanged |
 
 ### 3.2 Pinned versions
 
@@ -104,7 +108,7 @@ digest and the machine-configuration resource version.
 | Go | go1.27.1 |
 | Live node | Talos v1.13.6 control plane and worker, Kubernetes 1.36.2; image digests in [`bundle-summary.txt`](../../../experiments/e3-talos-compatibility/evidence/bundle-summary.txt) |
 | Fixture pins | `fixtures/versions.env` as of c74f953 |
-| Captured from | 477e851, 0 uncommitted inputs ([`run.txt`](../../../experiments/e3-talos-compatibility/evidence/run.txt)) |
+| Captured from | 2809915, 0 uncommitted inputs ([`run.txt`](../../../experiments/e3-talos-compatibility/evidence/run.txt)) |
 
 The machinery defaults Kubernetes to 1.35.8 (v1.12.12), 1.36.0 (v1.13.0), 1.36.2 (v1.13.6), 1.36.3
 (v1.13.10) and 1.37.0 (v1.14.1, v1.15.0-alpha.0). Every configuration names the installer image
@@ -118,7 +122,8 @@ applied to the worker. The configurations, raw outputs and worker reads therefor
 fixture's secrets, and stay in `E3_OUT` outside the checkout. What is committed of a configuration
 is its digest and its key-path differences (`e3m paths`: `+`/`-`/`~` and a path, never a value).
 A transcript keeps an apply's output only up to its first diff line, and a read's standard error
-only, with a line count and digest for what was withheld.
+only, with a line count and digest for what was withheld. `e3m` withholds a diff from its own
+errors the same way, printing `withheld_lines=` instead.
 
 `fixtures/bin/evidence` ran with `E3_OUT` as an extra scan path. It matched its planted control,
 the pattern list, and the generated and raw configurations in `E3_OUT`, as expected, and nothing
@@ -137,7 +142,7 @@ fixtures/bin/down
 E3_OUT=<the same path> experiments/e3-talos-compatibility/run/collect-evidence
 ```
 
-`run/all` took 84 seconds with the six `talosctl` downloads already cached
+`run/all` took 84 seconds with the six `talosctl` downloads already cached and the fixture up
 (`started`/`finished` in `run.txt`). `E3_OUT` needs about 1 GiB, mostly the tool copies.
 
 ## 4. The matrix
@@ -150,13 +155,14 @@ upstream support.
 
 Source: [`gen.tsv`](../../../experiments/e3-talos-compatibility/evidence/gen.tsv).
 
-- **talosctl and the machinery are byte-identical in all 132 generating cells**, and talosctl
-  repeats itself byte for byte in every one.
+- **talosctl and the machinery produce identical output in all 132 generating rows**, and talosctl
+  repeats itself in every one. "Identical" here and below means equal digests after the
+  trailing-newline normalization (the experiment's README).
 - **`bogus` is refused** by every renderer through both (M3, M4: `error parsing version "vbogus"`).
 - **A target newer than the renderer is not refused. The renderer silently produces its own current
   contract.** At Kubernetes 1.36.2, grouping each renderer's outputs by digest:
 
-  | Renderer | Byte-identical groups of targets |
+  | Renderer | Identical groups of targets |
   |---|---|
   | v1.12.12 | {v1.10.0, v1.11.0}; {current, v1.12.0, v1.13.0, v1.14.0, v1.15.0, 1.13, v1.13.6, v1.15.0-alpha.0, v1.99.0} |
   | v1.13.0, v1.13.6, v1.13.10 | {v1.10.0, v1.11.0}; {v1.12.0}; {current, v1.13.0, v1.14.0, v1.15.0, 1.13, v1.13.6, v1.15.0-alpha.0, v1.99.0} |
@@ -194,11 +200,19 @@ Source: [`validate.tsv`](../../../experiments/e3-talos-compatibility/evidence/va
 | any renderer's v1.10 to v1.13 contract, or a pre-v1.14 renderer's clamped output | valid, container and metal, both | valid, both |
 | v1.14.1 or v1.15.0-alpha.0 at `current`, v1.14.0 or v1.15.0 | **refused** by both: `"DiscoveryServiceConfig" "v1alpha1": not registered` (M8 to M11) | valid, both |
 
-- Of 504 cells, 456 are valid and 48 refused (4 validators x 6 configurations x 2 machine types).
-  talosctl and the machinery agree in every cell, with the same message text.
+- Of 504 rows, 456 are valid in all four cells and 48 are refused in all four (4 validators x
+  6 configurations x 2 machine types): no row mixes verdicts, so talosctl and the machinery agree in
+  all 2016 cells, with the same message text. Validation was only given talosctl's files, which
+  are identical to the machinery's (§4.1).
 - v1.14.1 accepts v1.15.0-alpha.0's output, which is the v1.14 layout (§4.1).
-- `--strict` refuses nothing: all 84 own-output cells valid, because no renderer emits a warning for
-  its own output.
+- **Neither generation nor validation enforces the Kubernetes window.** v1.12.12 generates and
+  validates a worker for Kubernetes 1.36.2 (`gen.tsv`, `validate.tsv`) although its own
+  `compatibility` package refuses 1.36.2 for the v1.12 target as too new
+  ([`policy/v1.12.12.tsv`](../../../experiments/e3-talos-compatibility/evidence/policy/v1.12.12.tsv));
+  every renderer's v1.10 contract, whose window ends at 1.33 (§4.4), does the same. Only the
+  `compatibility` package refuses such a combination, and only when asked.
+- `--strict` refuses nothing: all 84 own-output rows (336 cells) valid, because no renderer emits
+  a warning for its own output.
 
 ### 4.3 Operation/RPC compatibility against v1.13.6
 
@@ -209,18 +223,23 @@ Source: [`rows.tsv`](../../../experiments/e3-talos-compatibility/evidence/rows.t
 reads the node's version (`v1.13.6`), reads its machine configuration with the same digest as the
 harness's own read, completes a no-reboot dry run that leaves the configuration and its version
 unchanged, and applies a label patch that the harness then reads back as landed. The three
-`talosctl` clients newer than the node print, on standard error only:
+`talosctl` clients newer than the node print, on standard error and only for the configuration read
+(`talosctl get`):
 
 ```text
 WARNING: 10.55.0.3: server version 1.13.6 is older than client version 1.13.10
 ```
 
-(and the same for 1.14.1 and 1.15.0-alpha.0). The machinery client prints no warning. Standard
-output was unaffected, so a subprocess caller that separates the streams reads the same bytes.
+(and the same for 1.14.1 and 1.15.0-alpha.0). Their `version` and `apply-config` steps print none.
+The node returned no apply warnings to the machinery client (`apply_warnings=0` in every row). The
+machinery module has no skew check of this kind, so `e3m` prints none by construction; a machinery
+caller that wants one has to compare versions itself. Standard output was unaffected, so a
+subprocess caller that separates the streams reads the same bytes.
 
-**Configurations (rpc-contract, 42 of 42 rows match their expectation that nothing lands).** Each
-renderer's worker configuration was dry-run applied to the live worker in no-reboot mode through
-the pinned client:
+**Configurations (rpc-contract, 42 of 42 rows match: both implementations reach the same verdict
+and nothing lands).** Each renderer's worker configuration was dry-run applied to the live worker
+in no-reboot mode through the pinned client, as `talosctl` and as the machinery. The node's reason
+is the same text through both in every refused row, once `e3m`'s quoting of `"` is removed:
 
 | Worker configuration | Node's answer |
 |---|---|
@@ -229,12 +248,16 @@ the pinned client:
 | v1.14.1 or v1.15.0-alpha.0 at `current`, v1.14.0 or v1.15.0 | refused: `error decoding document v1alpha1/DiscoveryServiceConfig/default … not registered` |
 | v1.10 or v1.11 contract, from any renderer | refused: `this config change can't be applied in immediate mode` |
 
-The v1.10/v1.11 refusal is about the apply mode, not the contract's decodability: the node decoded
-and validated the file, then declined to apply it without a reboot. Against the live worker, those
-contracts differ in the paths above (§4.1) plus the fixture's own `certSANs`, `nodeLabels` and the
-generated `install` fields ([`paths/live-worker.txt`](../../../experiments/e3-talos-compatibility/evidence/paths/live-worker.txt)).
-Which path makes the change reboot-only is not isolated here. Whether they apply with a reboot
-cannot be measured in containers.
+The v1.10/v1.11 refusal is about the apply mode, not the contract's decodability. That is an
+inference from the refusal text and from §4.2, where v1.13.6 validates these files: the node
+appears to have decoded the file and declined to apply it without a reboot. Against the live
+worker, those contracts differ in the paths above (§4.1) plus `certSANs`, the `nodeLabels` left by
+the rpc-client rows' label patches, and the generated `install` fields
+([`paths/live-worker.txt`](../../../experiments/e3-talos-compatibility/evidence/paths/live-worker.txt)).
+The accepted v1.12 contract and the refused v1.10/v1.11 contracts differ from each other only in
+`machine/features/{apidCheckExtKeyUsage,rbac,stableHostname}`, `machine/install/grubUseUKICmdline`
+and the `HostnameConfig` document, so the reboot-only change is among those; which one is not
+isolated here. Whether they apply with a reboot cannot be measured in containers.
 
 ### 4.4 Upstream support policy
 
@@ -259,7 +282,9 @@ Kubernetes accepted by `KubernetesVersion.SupportedWith`, over the points 1.29.0
 - The "upgrade" window includes newer host versions, that is, downgrades: 1.13 accepts a 1.14
   host, and refuses 1.15 as `too new to downgrade`.
 
-**What the upstream documentation states** (read 2026-09-25, no last-updated date on the pages):
+**What the upstream documentation states** (read 2026-09-25, no last-updated date on the pages;
+the cells and sentences used here are recorded verbatim in
+[`upstream-docs.md`](../../../experiments/e3-talos-compatibility/upstream-docs.md)):
 
 - The [v1.13 support matrix](https://docs.siderolabs.com/talos/v1.13/getting-started/support-matrix)
   lists Kubernetes 1.31 to 1.36 for 1.13 and 1.30 to 1.35 for 1.12; community support for 1.13
@@ -300,7 +325,11 @@ configuration and standard error in the transcript.
 
 A refused or dry-run apply prints a configuration diff, which holds the fixture's secrets.
 Transcripts keep an apply's output up to the first diff line and record the line count and digest
-of the rest. Tested against the 49 raw outputs of the second capture: 0 leak-pattern hits.
+of the rest. That was tested against the raw outputs of the second capture (0 leak-pattern hits);
+those outputs were not kept. The pre-draft review then found that `e3m` printed a refusal's whole
+error, diff included, on one line that this filter could not see. `e3m` now withholds the diff
+itself: in the final capture each of the 12 immediate-mode refusals through the machinery withheld
+13 lines.
 
 ### 5.5 The first committed bundle manifest was 124 KB
 
@@ -308,7 +337,16 @@ The fixture bundle's `postgres-data/` alone is over a thousand manifest lines. T
 manifest lists everything else and gives that directory one line, the digest of its part of the
 full manifest, which stays in `E3_OUT`.
 
-### 5.6 The packed transcripts failed the whitespace check
+### 5.6 The harness did not enforce its own controls
+
+The pre-draft review found that `run/all` wrote `control mismatches N` and finished normally
+whatever N was, and that `run/collect-evidence` never read it. A failed control now makes `run/all`
+exit non-zero, and the collector refuses the run. The same review hardened two controls that could
+pass vacuously: repeatability now requires every generating row to compare `same`, and the invalid-
+configuration controls require the refusal to name the planted reason, so that a connection
+failure cannot read as a refusal. The capture was repeated at 2809915 with every control firing.
+
+### 5.7 The packed transcripts failed the whitespace check
 
 `talosctl version` ends its `Built:` line in spaces. The collector already dropped trailing
 whitespace from the tables but not from the packed transcripts, and the first commit of this
@@ -325,16 +363,22 @@ live v1.13.6 node:
 | Renderer | Generation | Validation by v1.13.6 | Node accepts (no-reboot dry run) | Upstream |
 |---|---|---|---|---|
 | v1.12.12 | v1.10 to v1.12; newer targets clamped to v1.12 | valid | v1.12 contract yes; v1.10/v1.11 not in immediate mode | client one minor older than the node; not the documented recommendation |
-| v1.13.0, v1.13.6, v1.13.10 | v1.10 to v1.13; newer clamped to v1.13 | valid | v1.12, v1.13 yes; v1.10/v1.11 not in immediate mode | matches the node's minor; v1.13.10 warns that the server is older |
-| v1.14.1 | v1.10 to v1.14; newer clamped to v1.14 | v1.14 output refused | v1.12, v1.13 yes; v1.14 refused; v1.10/v1.11 not in immediate mode | next minor; warns |
-| v1.15.0-alpha.0 | as v1.14.1; the v1.15 contract equals v1.14 | as v1.14.1 | as v1.14.1 | prerelease; warns |
+| v1.13.0, v1.13.6, v1.13.10 | v1.10 to v1.13; newer clamped to v1.13 | valid | v1.12, v1.13 yes; v1.10/v1.11 not in immediate mode | matches the node's minor |
+| v1.14.1 | v1.10 to v1.14; newer clamped to v1.14 | v1.14 output refused | v1.12, v1.13 yes; v1.14 refused; v1.10/v1.11 not in immediate mode | next minor; not the documented recommendation |
+| v1.15.0-alpha.0 | as v1.14.1; the v1.15 contract equals v1.14 | as v1.14.1 | as v1.14.1 | prerelease |
+
+The clients' own skew warning (v1.13.10 and later `talosctl`, on reads only) is an RPC observation
+and stays in §4.3.
 
 ### 6.2 Criterion 2: subprocess against machinery, and the structural-reference evidence
 
-**Behaviour is the same.** In every cell the two implementations agree: byte-identical generation
-(132 of 132), the same validation verdict and message text (504 of 504, strict 84 of 84), and the
-same RPC outcomes (6 client pairs; the node's refusal of the invalid control through both). The
-choice between them is not a compatibility choice within this matrix. It is a packaging and
+**Behaviour is the same.** In every cell measured through both, the two implementations agree:
+identical generation (132 of 132 rows), the same validation verdict and message text (504 rows,
+2016 cells; strict 84 rows, 336 cells), the same RPC outcomes for the 6 client pairs, the same
+node verdict and reason for all 42 contract dry runs, and the node's refusal of the invalid
+control. Two things were not compared: validation of the machinery's own files (identical to
+talosctl's, §4.1), and the skew warning, which the machinery has no code for (§4.3). The choice
+between them is not a compatibility choice within this matrix. It is a packaging and
 maintenance one:
 
 | | talosctl subprocess | Go machinery |
@@ -351,19 +395,20 @@ maintenance one:
 references must be resolved *before* native composition, so that `talosctl` receives only
 reference-free fragments, and it measured that on v1.13.6 only. E3 adds:
 
-- Because generation is byte-identical between the two implementations, early resolution's parity
+- Because generation is identical between the two implementations, early resolution's parity
   result does not depend on the choice between them **for generation at v1.13.6**. E3 did not
   compose patches through the machinery's `configpatcher`; every patch here went through the pinned
   `talosctl machineconfig patch`, so parity of composition through the machinery is inferred, not
   measured.
-- Because a contract's output is byte-identical across every renderer that knows it (§4.1), the
+- Because a contract's output is identical across every renderer that knows it (§4.1), the
   issue-3 parity verdicts plausibly hold for the v1.12 and v1.13 contracts from other renderers.
   That is an inference from generation only; composition on other renderers was not run.
 - The v1.14 layout moves many v1alpha1 paths into separate documents (§4.1). A reference addressed
   by document and path, as issue 3's binding candidate is, would point somewhere else under a v1.14
   contract. A contract change is therefore also a reference-address change, and the compiler must
   version its paths with the contract.
-- The machinery returns the same error text as `talosctl` (M3/M4, M8/M9 and the controls). Issue
+- The machinery returns the same error text as `talosctl` (M8/M9, the rpc-contract reasons and the
+  controls; M4's `invalid talos-version:` prefix is `e3m`'s own). Issue
   3's observation that decode errors quote a value prefix is a property of the machinery's decoder,
   not of the CLI, and applies to both implementations.
 
@@ -378,9 +423,12 @@ reference-free fragments, and it measured that on v1.13.6 only. E3 adds:
 3. **v1.10/v1.11 contracts applied to a v1.13 node in no-reboot mode.** Refused by the node as not
    applicable in immediate mode (§4.3). With a reboot: not measurable here.
 4. **An unparseable version string** (`bogus`). Refused by every renderer.
-5. **Kubernetes outside a target's `SupportedWith` window, and Talos targets a machinery predates.**
-   Refused by the machinery's policy (§4.4); not exercised against a node.
-6. **The v1.15.0-alpha.0 prerelease as a v1.15 renderer.** It produces no v1.15-specific output
+5. **Kubernetes outside a target's `SupportedWith` window.** Generated and validated without
+   complaint (§4.2); only the machinery's `compatibility` package refuses it (§4.4). Like item 1, a
+   manager that relies on the renderer would not notice. Not exercised against a node.
+6. **Talos targets a machinery predates.** The `compatibility` package has no answer for them
+   (§4.4).
+7. **The v1.15.0-alpha.0 prerelease as a v1.15 renderer.** It produces no v1.15-specific output
    (§4.1), so it cannot stand in for v1.15.0.
 
 **Deferred: Upgrade/LifecycleClient transition execution.** Not tested. The fixture's Talos nodes
@@ -412,8 +460,10 @@ Upgrade/LifecycleClient transition, which the §18.1 row names, was not executed
   behaviour; no remote transport; no multi-worker rollout.
 - **Validation and RPC coverage is narrower than generation.** Validation covers Kubernetes 1.36.2
   and `current` plus the six contracts, not the version-string edges or the renderers' default
-  Kubernetes versions. The contract dry runs used the worker configuration and the pinned client
-  only; the machinery client applied only the label patch.
+  Kubernetes versions. The contract dry runs used the worker configuration and the pinned version
+  of each implementation only; only the label patch was really applied.
+- **The contract dry runs ran against the worker as the rpc-client rows left it**, carrying their
+  12 label patches, not against the fixture's initial configuration.
 - **One set of generation inputs.** One cluster name, endpoint, installer image and secrets bundle,
   no patches at generation, no docs or examples. Other options may change which contracts differ.
 - **The policy points are a sample.** Kubernetes 1.29.0 to 1.37.0 (ten points) and Talos v1.10 to
@@ -422,9 +472,10 @@ Upgrade/LifecycleClient transition, which the §18.1 row names, was not executed
   carries a last-updated date, and the two disagree (§4.4).
 - **The `--mode reboot` observation** (§6.2) comes from each binary's `--help`, read after the
   capture; it is not in the committed evidence.
-- **`E3_OUT`'s guard is a prefix test.** It refuses a path inside the checkout, but a sibling
-  directory whose name begins with the checkout's path passes. It fails closed for the paths it
-  does test.
+- **`E3_OUT`'s guard is a prefix test on the path as given.** It refuses any path beginning with
+  the checkout's path, a sibling such as `<checkout>-out` included, which fails closed. Nothing is
+  canonicalized, so a path that reaches the checkout through a `..` component or a symlink without
+  beginning with its path passes.
 - **Kubernetes component images inside the nodes are pinned by version, not by digest**
   ([fixtures report](20260919-investigation-fixtures.md)).
 
@@ -433,15 +484,15 @@ Upgrade/LifecycleClient transition, which the §18.1 row names, was not executed
 For the PoC's existing-cluster configuration control:
 
 - **Pin the renderer to the node's minor**, as the upstream client guidance recommends. In this
-  matrix, a v1.13 renderer's default output is accepted by the v1.13.6 node, a v1.14 renderer's is
-  refused, and every client newer than the node warns.
-- **Refuse, in Bronzeward itself, any target contract whose minor exceeds the renderer's.** The
-  renderers do not refuse it (§6.3 item 1). §6.5's "prerequisite" is therefore Bronzeward's check
-  to make, not the renderer's.
+  matrix, a v1.13 renderer's default output is accepted by the v1.13.6 node and a v1.14 renderer's is
+  refused. Only `talosctl` warns about the skew, and only on reads.
+- **Refuse, in Bronzeward itself, any target contract whose minor exceeds the renderer's, and any
+  Kubernetes version outside the target's window.** The renderers refuse neither (§6.3 items 1 and
+  5). §6.5's "prerequisite" is therefore Bronzeward's check to make, not the renderer's.
 - **Record the contract, not only the renderer.** A release that records "rendered by v1.14.1" does
   not say whether a v1.13 node can decode it; the contract does.
 - **Choose between subprocess and machinery on packaging, not compatibility.** Within this matrix
-  they behave identically (§6.2). Either way, several renderer versions mean several binaries.
+  they behaved identically wherever both were measured (§6.2). Either way, several renderer versions mean several binaries.
 - **Treat the machinery's `compatibility` answers as permissive,** wider than the documented tested
   path. A Bronzeward support policy, if one is wanted, is a separate decision.
 
