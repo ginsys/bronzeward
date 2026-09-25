@@ -478,6 +478,24 @@ retry is always safe: the retries were of one `no-reboot` apply, under one accou
     `<checkout>-out` included. It fails closed.
   - An implementation distinguishes a refusal from a failure at each of these points. The
     prototype was not changed after capture, so the evidence stays that of the committed code.
+- **The observation basis is not sound under concurrent writers, and no row runs them.** `Observe`
+  takes its basis as the operation's highest committed timeline revision, read without the
+  operation's lock. A revision is allocated at insert and becomes visible at commit, so an
+  accounting fact allocated earlier can still commit after a higher revision is visible: when an
+  unlocked observation commits in between. A completion observation could then count as "after"
+  an accounting that its read preceded. No row was built to produce that interleaving, which needs
+  an accounting transaction still open while another observation commits and a third reads, and
+  none is known to have. The prototype therefore does not show §6.3's ordering rule holding under
+  concurrency. An implementation takes the basis under the
+  operation's lock (or a snapshot boundary), not from `max(rev)` alone.
+- **Two harness properties differ from their own description.** The PostgreSQL connection string,
+  which carries the fixture's synthetic database password, is exported into the harness shell for
+  each row, not only an executor's environment, so the row's other children (`talosctl`, the
+  fixture scripts) inherit it. The password is not one of the fixture's leak-scan patterns, so the
+  scan's clean result says nothing about it; no command line or transcript prints the
+  environment. `e4x -mode` accepts any
+  string and runs the protocol for an unknown one; `run/all` passes only the three modes, and each
+  control row shows its control's unsafe outcome, which the protocol would not produce.
 - **Mechanisms, not an implementation.** The schema, gates and executor are the smallest that carry
   the specification's comparisons.
 
@@ -513,6 +531,8 @@ retry is always safe: the retries were of one `no-reboot` apply, under one accou
   - `InvalidArgument` as a pre-mutation rejection, for validation errors;
   - the open questions:
     - what accounts for an attempt whose request may still be held by the control plane's proxy;
-    - whether a dial failure proves no send.
+    - whether a dial failure proves no send;
+    - how an observation's basis is ordered against concurrent accounting (§7: not from
+      `max(rev)` read without the operation's lock).
 - **To profile selection:** the SQLite gap in §7. The commitment and attempt transactions were not
   run on SQLite.
