@@ -6,14 +6,14 @@ $ tc v1.12.12 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
 	Tag:         v1.12.12
 	SHA:         a58adaab
-	Built:       
+	Built:
 	Go version:  go1.25.14
 	OS/Arch:     linux/amd64
 Server:
 	NODE:        10.55.0.3
 	Tag:         v1.13.6
 	SHA:         04318854
-	Built:       
+	Built:
 	Go version:  go1.26.5
 	OS/Arch:     linux/amd64
 	Enabled:     RBAC
@@ -59,14 +59,14 @@ $ tc v1.13.0 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
 	Tag:         v1.13.0
 	SHA:         b9e9c657
-	Built:       
+	Built:
 	Go version:  go1.26.2
 	OS/Arch:     linux/amd64
 Server:
 	NODE:        10.55.0.3
 	Tag:         v1.13.6
 	SHA:         04318854
-	Built:       
+	Built:
 	Go version:  go1.26.5
 	OS/Arch:     linux/amd64
 	Enabled:     RBAC
@@ -112,14 +112,14 @@ $ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
 	Tag:         v1.13.6
 	SHA:         04318854
-	Built:       
+	Built:
 	Go version:  go1.26.5
 	OS/Arch:     linux/amd64
 Server:
 	NODE:        10.55.0.3
 	Tag:         v1.13.6
 	SHA:         04318854
-	Built:       
+	Built:
 	Go version:  go1.26.5
 	OS/Arch:     linux/amd64
 	Enabled:     RBAC
@@ -165,14 +165,14 @@ $ tc v1.13.10 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
 	Tag:         v1.13.10
 	SHA:         00ca4c98
-	Built:       
+	Built:
 	Go version:  go1.26.7
 	OS/Arch:     linux/amd64
 Server:
 	NODE:        10.55.0.3
 	Tag:         v1.13.6
 	SHA:         04318854
-	Built:       
+	Built:
 	Go version:  go1.26.5
 	OS/Arch:     linux/amd64
 	Enabled:     RBAC
@@ -219,14 +219,14 @@ $ tc v1.14.1 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
 	Tag:         v1.14.1
 	SHA:         2f86b9d2
-	Built:       
+	Built:
 	Go version:  go1.26.8
 	OS/Arch:     linux/amd64
 Server:
 	NODE:        10.55.0.3
 	Tag:         v1.13.6
 	SHA:         04318854
-	Built:       
+	Built:
 	Go version:  go1.26.5
 	OS/Arch:     linux/amd64
 	Enabled:     RBAC
@@ -273,14 +273,14 @@ $ tc v1.15.0-alpha.0 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
 	Tag:         v1.15.0-alpha.0
 	SHA:         12dfb8e1
-	Built:       
+	Built:
 	Go version:  go1.26.8
 	OS/Arch:     linux/amd64
 Server:
 	NODE:        10.55.0.3
 	Tag:         v1.13.6
 	SHA:         04318854
-	Built:       
+	Built:
 	Go version:  go1.26.5
 	OS/Arch:     linux/amd64
 	Enabled:     RBAC

@@ -44,7 +44,8 @@ mv -- "$incoming/rows.tsv.new" "$incoming/rows.tsv"
 
 # pack <out> <files...>: one file whose sections each follow a `==> <name> <==` line, ending with
 # `==> end <==`. One file per group rather than one per row or per comparison keeps the pull request
-# under GitHub's diff limits.
+# under GitHub's diff limits. Trailing whitespace is dropped as in rewrite: talosctl's version
+# output ends its `Built:` line in spaces.
 pack() {
   local out=$1 f
   shift
@@ -52,7 +53,7 @@ pack() {
   {
     for f in "$@"; do
       printf '==> %s <==\n' "$(basename -- "$f" .txt)"
-      placeholders "$f"
+      placeholders "$f" | sed 's/[[:space:]]*$//'
       [ -z "$(tail -c 1 -- "$f")" ] || printf '\n'
     done
     printf '==> end <==\n'
