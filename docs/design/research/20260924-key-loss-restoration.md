@@ -83,7 +83,11 @@ from the database, the credential from the store, the key and source from the pr
   and Transit turns an encrypt under a missing key into a key creation for an identity that holds
   `create` (§3.2, case D). The scenario therefore reads the provider's Transit key state as the
   administrator before and after every check, and records a change as the class
-  `provider-changed`.
+  `provider-changed`. The comparison brackets `check` rows only (`run/scenario:111-124`, called
+  from `judge_release`, 130-134). A standalone `regen` row is not bracketed. Row 037, for one,
+  sends a Transit encrypt to the deleted `kl-art` outside any check. A key created there would
+  show only as part of the next check's "before" state. None did: the checks either side of 037
+  (035, 038) both count one key.
 
 The artifact is a one-field YAML document, `machine:\n  token: <value>\n`, rendered
 deterministically so that a regeneration from the same source version reproduces its digest.
@@ -98,6 +102,11 @@ a local "Permission denied" on a file is not taken for the provider's) or `fail`
 the class printed. A mismatch is recorded and the run continues. `fail` is matched on the exit
 status alone, so a row expecting `fail` would also match a failure for another reason; the reason
 each such row failed is quoted in §3.2 from its transcript.
+
+The state column names the last bundle taken, not always the state the row ran in. Rows 040-043,
+065-067, 084-086 and 110-112 name a bundle taken before an in-case change: the administrator's
+upsert of `kl-art` (039), the floor changes (064, 066) and the executor reissues (083, 109). The
+bundle does not show that change; the change's own row and its transcript do.
 
 ### 2.4 Pinned versions
 
@@ -127,6 +136,17 @@ fixtures/bin/down
 ```
 
 The committed capture: 112 rows, 0 mismatches, 14 state bundles.
+
+The fixture records the commit it was brought up at in each bundle's `versions.txt`: `created at
+5b29fed`, in all 14. The capture ran on 24 September 2026. The fixture wrote its own secret
+`fixture/inline` at 22:02 CEST (20:02:37Z), the scenario wrote its first source version at
+20:04:23Z, and the final bundle was taken at 20:07:57Z (`openbao-metadata.jsonl` and
+`versions.txt` of each bundle). It ran from a working tree whose `run/` scripts were last modified
+at 22:01:47 CEST, before the capture began. Those scripts are committed unchanged in 3c715e6,
+together with the evidence. The evidence itself does not record the scripts' commit or their
+hashes, so the tie between the capture and the committed scripts rests on those times and that
+commit, not on anything the capture recorded. A future capture should record `git rev-parse HEAD`
+and the hashes of `run/`.
 
 ## 3. Results
 
@@ -196,8 +216,10 @@ applied (065), and failed again once the floor was put back (066, 067).
 **H — the provider older than the database.** The g2 database holds R1 rewrapped and R2 encrypted
 under `kl-art` version 2. The g1 provider has only version 1 (071). Both applications fail with
 "invalid ciphertext: version is too new" (072, 075). R1 regenerates from `kl/app@1` (073), but R2
-cannot: `kl/app@2` does not exist in the g1 provider (076). The rewrap in g2 is what cost R1 its
-applicability here. Before it, R1's artifact was under version 1, which this provider holds.
+cannot: the compiler's read of `kl/app` version 2 answers "No value found at secret/data/kl/app"
+(076). Case H has no `kv_truth` row; the H bundle's provider metadata lists version 1 of `kl/app`
+only. The rewrap in g2 is what cost R1 its applicability here. Before it, R1's artifact was under
+version 1, which this provider holds.
 
 **I — credentials newer than the provider.** The g2 store holds executor2, which the g1 provider
 never issued: apply is denied with HTTP 403 (080). The compiler token dates from g1 and still
@@ -242,20 +264,24 @@ provider loses the credential whichever of the two is older.
 The first full capture expected row 037 to `fail` and observed `denied`: it was the one mismatch in
 93 rows. The script was right and the expectation was wrong. Transit's encrypt treats a missing key
 as an upsert, and the compiler's policy lacks `create`, so the provider refused the request with a
-403 rather than reporting a missing key. That capture was discarded. Later captures expect `denied`
-and add the administrator's upsert and its consequences (039-043) as the control for what the
-refusal prevents.
+403 rather than reporting a missing key. That capture was discarded and is not committed; the
+mismatch count comes from its run, not from evidence in this repository. Later captures expect
+`denied` and add the administrator's upsert and its consequences (039-043) as the control for what
+the refusal prevents.
 
-### 4.3 The check was described as read-only
+### 4.2 The check was described as read-only
 
 A review of the second capture found that the report, `run/release` and the README called the
 check read-only, while its regeneration step sends a real encrypt (row 038 sends one to the deleted
 `kl-art`). The third, committed capture compares the provider's key state across every check,
 adds case L (a store older than the provider, which also shows the executor1 revocation took
 effect) and matches `denied` on the CLI's `Code: 403` only. Rows 001-098 have the same case,
-release, action, identity, state, expectation, observation and verdict in both captures.
+release, action, identity, state, expectation, observation and verdict in both captures. The
+second capture is not part of the current evidence: it was committed in 5b29fed and replaced by
+this one in 3c715e6, so the comparison rests on that earlier commit's `verdicts.tsv`, not on
+anything under `evidence/` now.
 
-### 4.2 Verbatim transcripts fail `git diff --check`
+### 4.3 Verbatim transcripts fail `git diff --check`
 
 The indented error text inside the check transcripts carries trailing whitespace. `.gitattributes`
 exempts this experiment's `evidence/transcripts/*.txt`, as it already does for the
@@ -265,7 +291,11 @@ provider-capability run's.
 
 ### 5.1 Criterion 1: restoration cases
 
-Each combination the issue names was restored and both paths were tried after it:
+Each combination the issue's run design names was restored, and both paths were tried after it:
+application older than provider, provider older than application, a destroyed secret version, a
+deleted Transit key and missing management credentials. Of the eight database/provider/store age
+combinations, six were set up: g2/g2/g2 (E), g1/g2/g2 (G), g2/g1/g1 (H), g1/g1/g2 (I), g1/g1/g1
+(J after the store restore, K) and g2/g2/g1 (L). The other two were not (§6).
 
 | Asked for | Case |
 |---|---|
@@ -342,10 +372,12 @@ from doing it (037); a recovery identity that held `create` would have minted th
 | regenerate from source as a new release | the source version, a key to encrypt under and a compiler credential | a new release and a new approval; under another renderer the bytes could differ (not exercised: the renderer is fixed here) | G, H (R1), I, L |
 | restore another backup generation | a snapshot holds the missing piece | everything after that snapshot in the restored family is lost (R3 in E), and the pairing with the other families can break (G, H, I, L) | E, which undid B's and D's losses |
 | administrator repair on the restored provider | lowering the floor works while the key version still exists below it; reissuing a credential works while the policy exists | an administrator action outside the check, to be recorded (and, for the floor, reverted) | G (064-066), I (083), L (109) |
-| recreate a lost key under its name | never: the new key decrypts nothing stored | a regeneration appears to succeed under a different key with the lost key's labels | D (039-043) |
+| recreate a lost key under its name | for apply, never: the new key decrypts nothing stored (041). A regeneration does succeed under it (042) | the regenerated ciphertext reuses the lost key's name and its `vault:v1:` label, so a record of key name and version cannot tell the new key from the lost one | D (039-043) |
 
 Inference: apply loses least. Next come a restore or repair that makes apply possible again, then
-regeneration with re-approval. Recreating a key is not a recovery path.
+regeneration with re-approval. Recreating a key under the lost key's name, reusing its name and
+`vault:vN` labels, is not a recovery path. Regenerating under a new key with a new name, as a new
+release, was not exercised as a recovery path.
 
 ## 6. Limits
 
@@ -365,6 +397,27 @@ regeneration with re-approval. Recreating a key is not a recovery path.
   tested.
 - **One pass per case, in sequence, on one fixture.** Each case's ground truth is its bundle, and the
   injection log fixes the order. Case G's floor change was reverted within the case (066).
+- **Two age combinations were not set up.** Database/provider/store at g1/g2/g1 and at g2/g1/g2
+  (§5.1). The issue's verification method asks for each backup-age combination; these two are
+  open.
+- **The capture does not record its scripts.** Each bundle records the fixture's commit (5b29fed,
+  §2.6), not the commit or the hashes of the `run/` scripts that drove it. The tie to 3c715e6 rests
+  on the scripts' modification times, before the capture began. A future capture should record
+  `git rev-parse HEAD` and the `run/` hashes.
+- **The key-state comparison brackets `check` rows only** (§2.2). A key created by a standalone
+  `regen` row, such as 037, would show only in the next check's "before" state.
+- **`run/all` tells the control by its file name.** It counts a leak-scan hit on any path ending in
+  `/data/canary-control.txt` as the control (`run/all:32-33`). The fixture's own control test also
+  checks the file's content and links, but its verdict goes to `states-<label>.stderr`, which
+  `run/all` does not read and `run/collect-evidence` does not copy.
+- **Smaller harness properties.** `revoked()` (`run/scenario:278-285`) takes any lookup error as
+  revoked; row 102 shows the error was `invalid accessor`, so the result stands. `key_state` (`run/scenario:96-101`) takes a failed listing with empty output as no keys.
+  `make_release` (`run/scenario:66-80`) would run as the root token if the compiler's token file
+  were empty, since the fixture's `bao` falls back to it (`fixtures/lib.sh:687`).
+  `run/collect-evidence:38` rewrites the checkout path before `KL_OUT`, so a sibling
+  `<checkout>-evidence` output, which `run/lib.sh:28-31` allows, would come out as
+  `<repo>-evidence`. The committed evidence holds neither `<KL_OUT>` nor `<repo>-evidence`, and does
+  not record which `KL_OUT` the capture used.
 - **The store is a file copy.** It held the token and accessor files and the fixture's own leak-scan
   control (`canary-control.txt`); no process held a database open in it.
 - **What stays out of the repository.** The bundles under `KL_OUT` include the expanded store
@@ -414,5 +467,6 @@ The recommendations below are inferences from the cases above. They are not obse
 - **[Issue 13](https://github.com/ginsys/bronzeward/issues/13), deployment profile:** Transit's
   upsert-on-encrypt and the `create` capability (D); the unseal share as a custody item separate
   from every backup family (K).
-- **Not covered, for whoever takes it up:** restore onto a new provider cluster, token expiry
-  across a restore, and a least-privilege administrator policy (§6).
+- **Not covered, for whoever takes it up:** the age combinations g1/g2/g1 and g2/g1/g2, restore
+  onto a new provider cluster, token expiry across a restore, a least-privilege administrator
+  policy, and a capture that records its own scripts (§6).
