@@ -29,8 +29,11 @@ was copied here and the committed evidence left as it was.
   149 transcript.
 - `evidence/SHA256SUMS`: a digest of each file above.
 
-Each experiment's leak scan ran as documented and found only its controls. The fixture bundles and
-the applied artifacts hold synthetic secrets and are not kept.
+Each experiment's leak scan matched only what its report documents: for database semantics the
+control, its copy inside the S7 store backup, and the pattern list; for dispatch safety the control, the
+pattern list and the applied artifacts in `E4D_OUT`; for provider capabilities the 3 controls and
+nothing else (`bundle-summary.txt` and `leak-scan.txt` here). The fixture bundles and the applied
+artifacts hold synthetic secrets and are not kept.
 
 ## Reading them
 
