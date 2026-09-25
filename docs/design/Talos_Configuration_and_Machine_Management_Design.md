@@ -56,7 +56,7 @@ At this scope, Omni is the reference implementation and primary comparison. Omni
 
 The intended differentiators are operator custody of native Talos configuration and cluster secrets, first-class reusable fragments and profiles across clusters, explicit draft/publish/approve releases, source provenance and managed drift, optional rather than constitutive transport, retained direct Talos access, infrastructure provisioning outside the product, and an open-source licensing target.
 
-The emerging architecture uses native Talos multi-document YAML and Talos APIs as the canonical configuration model, an authoritative relational database, and versioned secret and encryption providers. PostgreSQL is the server option and, with OpenBao as the primary provider, forms the one PoC profile (§7.7); SQLite and simpler local encryption alternatives were investigated and are not part of it. Git is not the backend. Talhelper is not required. CAPI is explicitly avoided.
+The emerging architecture uses native Talos multi-document YAML and Talos APIs as the canonical configuration model, an authoritative relational database, and versioned secret and encryption providers. PostgreSQL is the server option and, with OpenBao as the primary provider, forms the one PoC profile (§7.7); SQLite and a local age-backed store were investigated and are not part of it, and SOPS/age is kept for import/export only. Git is not the backend. Talhelper is not required. CAPI is explicitly avoided.
 
 The connectivity layer is deliberately transport-independent. For routed internal environments, direct access to each machine on the Talos API is the simplest baseline. SideroLink remains an optional call-home transport for NAT, edge or less trusted networks; its grpc_tunnel mode avoids UDP by carrying WireGuard traffic over the long-lived SideroLink gRPC connection on TCP; the SideroLink endpoint URL and port are deployment-defined, commonly exposed on 443. A site relay is another option for reaching an entire remote network through one outbound web-compatible connector. [T1]
 
@@ -363,7 +363,7 @@ Record sensitive paths at resolution and carry them through composition, list ch
 
 ### 7.1 Responsibility split and secret ingress
 
-The application database stores inventory, sanitized YAML sources, revisions, assignments, immutable releases, ciphertext, approval/operation journals and observations. Secret providers hold Talos bundles, other marked secrets and management credentials; encryption providers protect rendered artifacts. OpenBao KV v2 and Transit are the primary deployment profile. The interfaces must also permit a simpler local provider if the investigation proves the required properties.
+The application database stores inventory, sanitized YAML sources, revisions, assignments, immutable releases, ciphertext, approval/operation journals and observations. Secret providers hold Talos bundles, other marked secrets and management credentials; encryption providers protect rendered artifacts. OpenBao KV v2 and Transit are the primary deployment profile. The interfaces must also permit a simpler local provider if the investigation proves the required properties; on the current evidence it does not (§7.7).
 
 **Known or operator-marked secrets must be extracted before any ordinary plaintext persistence.** This applies to initial import, drift adoption, draft updates, original YAML text, parsed indexes, request logs, error reports and staging. Retaining the observed effective config in a plaintext draft and redacting it later is forbidden. Database backups and historical records would already contain it.
 
@@ -428,7 +428,7 @@ This check establishes retention status only. Readability, authorization and suc
 
 **Rationale.** It is the only pairing with evidence on every axis exercised ([feasibility evidence review §10](research/20260925-feasibility-evidence-review.md#10-recommendations)):
 
-- PostgreSQL met every semantic §7.2 names, provided the implementation locks what it checks, and every control found the failure it looks for ([database semantics §8](research/20260924-database-semantics.md#8-recommendation)). Dispatch safety was measured on PostgreSQL only ([dispatch safety](research/20260925-dispatch-safety.md)).
+- PostgreSQL met every semantic §7.2 names, provided the implementation locks what it checks, and every control found the failure it looks for ([database semantics §8](research/20260924-database-semantics.md#8-recommendation)). Dispatch safety was measured on PostgreSQL only ([dispatch safety §7](research/20260925-dispatch-safety.md#7-limits)).
 - OpenBao met every evidenced part of the provider contract natively: create-only generations, the compiler/executor split, value-free metadata, a reversible decryption floor and rotation without plaintext leaving it ([provider comparison §8](research/20260924-provider-capability-comparison.md#8-recommendation)). Its metadata classifies retained, blocked, lost and unknown under a metadata-only policy ([retention classification §8](research/20260924-retention-metadata-classification.md#8-recommendation)).
 - One dialect keeps one migration tree; a second backend roughly doubles the database test matrix (database semantics §8 item 3).
 
@@ -436,24 +436,24 @@ This check establishes retention status only. Readability, authorization and suc
 
 | Alternative | Disposition | What would reopen it |
 |---|---|---|
-| SQLite with OpenBao | Deferred. It met the measured §7.2 semantics with every transaction begun `IMMEDIATE`, but every write blocks every other writer ([database semantics §4.8](research/20260924-database-semantics.md#48-s8-the-single-writer-cost)), and dispatch safety was not measured on it. | Dispatch-safety evidence on SQLite and a small-deployment requirement |
+| SQLite with OpenBao | Deferred. It met the measured §7.2 semantics for one instance whose transactions all begin `IMMEDIATE` and whose write transactions are short and span no provider or network I/O (database semantics §8 item 2), but every write blocks every other writer ([database semantics §4.8](research/20260924-database-semantics.md#48-s8-the-single-writer-cost)), and dispatch safety was not measured on it. | Dispatch-safety evidence on SQLite |
 | Local age-backed store | Not selected: §7.1's condition is not met. Every property it showed is writer convention, and it yields only retained and unknown (provider comparison §8 item 2, retention classification §8 item 2). | Bronzeward as the only writer, keys outside the backed-up tree, and a multi-user run showing that operating-system separation enforces the role split |
 | SOPS/age | Import/export only, not a provider: no versions or compare-and-set, and concurrent writes are lost silently (provider comparison §8 item 3). | None proposed |
-| MySQL/MariaDB | Unsupported: no evidence, and several required features would each need their own ([database semantics §6.3](research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs)). | Equivalent evidence and a negligible-cost case (§7.2) |
+| MySQL/MariaDB | Unsupported: no evidence, and each feature the prototype relied on (`SKIP LOCKED`, advisory locks, partial unique indexes, transactional DDL, `RETURNING`) would need its own ([database semantics §6.3](research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs)). | Equivalent evidence and a negligible-cost case (§7.2) |
 
-**Topology and limits.** The evidence covers one PostgreSQL 17.11 server at default isolation and one OpenBao 2.6.1 node with integrated Raft and one unseal share ([database semantics §7](research/20260924-database-semantics.md#7-limits), [provider comparison §7](research/20260924-provider-capability-comparison.md#7-limits)). That is the PoC's supported topology. Replication, failover, pooling, standby nodes, auto-unseal and seal wrapping remain operator choices (§14.2) on which the PoC makes no correctness claim. Results hold for those versions, not across versions.
+**Topology and limits.** The evidence covers one PostgreSQL 17.11 server at default isolation and one OpenBao 2.6.1 node with integrated Raft and one unseal share ([database semantics §7](research/20260924-database-semantics.md#7-limits), [provider comparison §7](research/20260924-provider-capability-comparison.md#7-limits)). The PoC supports only this single-instance topology. Replication, failover, pooling, standby nodes, auto-unseal and seal wrapping are unmeasured and unsupported for the PoC; an operator may still run them (§14.2), without a PoC correctness claim. Those versions are the evidenced baseline, recorded rather than pinned; no result is claimed across versions. Restoration is evidenced for a logical `pg_dump` and OpenBao snapshots only; a physical backup or point-in-time recovery was not run (database semantics §7).
 
 **Consequences.**
 
-- The persistence contract carries the PostgreSQL clauses whose controls showed the failure without them: `FOR SHARE` at publication, the ownership check inside the attempt's `UPDATE`, the claim's eligibility re-check and the migration advisory lock, each with a test that can fail (database semantics §6.3).
+- The [persistence contract](https://github.com/ginsys/bronzeward/issues/18) must address the PostgreSQL clauses whose controls showed the failure without them: `FOR SHARE` at publication, the ownership check inside the attempt's `UPDATE`, the claim's eligibility re-check and the migration advisory lock, each with a test that can fail (database semantics §6.3).
 - A restore rewinds identifiers and fence generations, so a pre-restore token passes the fence again ([database semantics §4.7](research/20260924-database-semantics.md#47-s7-restored-state)). This profile does not remove that hazard; the persistence and execution/recovery contracts must.
-- Transit keys never leave OpenBao. Moving off it means re-encrypting or regenerating every retained artifact through one process that holds both sides' credentials and sees every plaintext it moves ([provider comparison §6.3](research/20260924-provider-capability-comparison.md#63-criterion-3-custody-unlock-and-migration-trade-offs)).
+- Transit keys never leave OpenBao. Moving off it means regenerating every retained artifact or re-encrypting it; re-encryption runs through one process that holds both sides' credentials and sees every plaintext it moves ([provider comparison §6.3](research/20260924-provider-capability-comparison.md#63-criterion-3-custody-unlock-and-migration-trade-offs)).
 - Record a release's Transit key by an identity the provider cannot reissue, not by name and version alone: a key recreated under a lost key's name yields ciphertext with the same `vault:v1:` prefix ([key loss §7](research/20260924-key-loss-restoration.md#7-recommendation) item 1, inferred).
 - The evidence ran administrator operations as root. A least-privilege administrator policy is still to be written and tested (provider comparison §8 item 1).
 
 **Operator responsibilities and recovery prerequisites**, in addition to §7.2, §7.5 and §14.2:
 
-1. Run, secure and back up the PostgreSQL server and the OpenBao node. Bronzeward owns the schema, migrations and connection/transaction behavior.
+1. Run, secure and back up the PostgreSQL server, the OpenBao node and the credential store holding Bronzeward's provider tokens: the three backup families of the key-loss evidence ([key loss §2.1](research/20260924-key-loss-restoration.md#21-three-backup-families-three-generations)). Bronzeward owns the schema, migrations and connection/transaction behavior.
 2. Hold the OpenBao unseal key share apart from every backup family. Nothing is available until it is supplied (provider comparison §6.3; [key loss §3.3](research/20260924-key-loss-restoration.md#33-custody-and-unlock-prerequisites-per-case) case K).
 3. Take the provider backup no earlier than the database backup it pairs with, and keep the credential store's backup matched to the provider's (key loss §7 item 2, inferred from the cases).
 4. While a database backup that references a key version may still be restored, keep that version decryptable, or accept regeneration and re-approval for those releases (key loss §7 item 3, inferred).
@@ -893,7 +893,7 @@ The management platform is not in the Kubernetes runtime path. If it is down, cl
 
 ### 14.2 Operator-owned database and vault services
 
-Operators run database/vault services and choose HA, replication, backups and restoration procedures. CloudNativePG is an optional PostgreSQL deployment example, not a Bronzeward dependency or managed service. OpenBao integrated Raft is the primary vault deployment recommendation. Bronzeward owns schema/migrations, safe connection behavior, backup prerequisites and application recovery instructions. SQLite investigation includes safe file-backup guidance, not database server management.
+Operators run database/vault services and choose HA, replication, backups and restoration procedures. CloudNativePG is an optional PostgreSQL deployment example, not a Bronzeward dependency or managed service. OpenBao integrated Raft is the primary vault deployment recommendation. Bronzeward owns schema/migrations, safe connection behavior, backup prerequisites and application recovery instructions. SQLite, if later offered, needs safe file-backup guidance, not database server management. The PoC's operator duties are in §7.7.
 
 Managed-cluster etcd snapshots are a separate, later lifecycle feature already in version 1 scope; they do not replace backups of Bronzeward's database or secret/encryption providers.
 
@@ -1305,7 +1305,7 @@ The reasons to build concern the control model. The list combines requirements a
 
 - Production operation under an open-source licence.
 
-- Talos cluster secrets and PKI must remain in operator-controlled secret storage; OpenBao is the primary provider direction, with simpler alternatives under investigation.
+- Talos cluster secrets and PKI must remain in operator-controlled secret storage; OpenBao is the primary provider and the PoC's only one (§7.7).
 
 - Native Talos fragments and shared profiles must be first-class reusable database objects across clusters.
 
