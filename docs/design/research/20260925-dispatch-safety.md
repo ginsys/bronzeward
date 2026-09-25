@@ -463,8 +463,14 @@ retry is always safe: the retries were of one `no-reboot` apply, under one accou
   - Two things show the executor died: its log ends at the gate, and no later effect of it was
     seen. Each row's starting resource version equals the previous row's final one.
   - Neither proves the process exited.
-- **Error paths no row reaches, left as captured.** The advisory review of the pull request found
-  four; each is true, and none changes a recorded row.
+- **Error paths no row reaches, left as captured.** The advisory reviews of the pull request found
+  six; each is true, and none changes a recorded row.
+  - A gate treats any error from checking its `.hold` file as "not armed", not only its absence.
+    No row lost a gate this way: every armed gate was reached (no `gate_wait` failure in the
+    transcripts).
+  - `MarkUnresolved` returns success, and records nothing, when the caller no longer owns the
+    operation at its generation, where the other transitions refuse. No row reached it: no
+    transcript holds `event=unresolved`.
   - `recover` treats any error from `ApprovalHolds` as a failed comparison 1.
   - `CancelUnattempted` reports any non-refusal error from `checkApproval` as "the approval still
     holds".
