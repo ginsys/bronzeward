@@ -29,6 +29,19 @@ was copied here and the committed evidence left as it was.
   149 transcript.
 - `evidence/SHA256SUMS`: a digest of each file above.
 
+Each `cells.tsv` keeps its harness's `transcript` column unchanged, so most of the paths it names
+are not in this directory:
+
+- **Database semantics** names one file per row (`transcripts/020-s5-postgres-workers-naive.txt`),
+  but its collector packs every row's transcript into one file per scenario and backend, each row
+  after a `==> <row> <==` line (`transcripts/s5-postgres.txt`, section `020-s5-postgres-workers-naive`).
+  The experiment's own `evidence/` uses the same packing.
+- **Dispatch safety** names the pack and section directly (`transcripts/fault.txt#012-fault-netsplit-send`).
+- **Provider capabilities** names one file per row. Only row 149's is kept here.
+
+A transcript that is not kept can be read in the same place under the experiment's own
+`evidence/`. Treat it as the committed capture's transcript, not this re-run's.
+
 Each experiment's leak scan matched only what its report documents: for database semantics the
 control, its copy inside the S7 store backup, and the pattern list; for dispatch safety the control, the
 pattern list and the applied artifacts in `E4D_OUT`; for provider capabilities the 3 controls and
