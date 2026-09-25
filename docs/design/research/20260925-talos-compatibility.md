@@ -308,6 +308,13 @@ The fixture bundle's `postgres-data/` alone is over a thousand manifest lines. T
 manifest lists everything else and gives that directory one line, the digest of its part of the
 full manifest, which stays in `E3_OUT`.
 
+### 5.6 The packed transcripts failed the whitespace check
+
+`talosctl version` ends its `Built:` line in spaces. The collector already dropped trailing
+whitespace from the tables but not from the packed transcripts, and the first commit of this
+capture's evidence failed `git diff --check` on twelve such lines. The packs now drop it too, and
+the evidence was collected again from the same capture; only those twelve lines changed.
+
 ## 6. What this decides
 
 ### 6.1 Criterion 1: a matrix with four separate columns
