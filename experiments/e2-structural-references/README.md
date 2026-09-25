@@ -38,7 +38,7 @@ The candidate forms, as `bwref gen` writes them for a reference named `reg-pass`
 | reference-free (native) | `password: e2-registry-password` |
 | tag | `password: !bwref reg-pass` |
 | marked | `password: "bwref:reg-pass"`, honoured only in a fragment the case opts in (`marked: true`) |
-| binding | the key is absent; `bindings.tsv` holds `f1.yaml reg-pass v1alpha1 machine/registries/.../password` |
+| binding | the key is absent (a list element whose only key is bound stays as `{}`); `bindings.tsv` holds `f1.yaml reg-pass v1alpha1 machine/registries/.../password` |
 
 ## Running the matrix
 

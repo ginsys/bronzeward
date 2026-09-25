@@ -39,7 +39,12 @@ derives four forms of the same intent from it:
 | reference-free (native) | `password: e2-registry-password` |
 | tag | `password: !bwref reg-pass` |
 | marked | `password: "bwref:reg-pass"`, a reference only in a fragment the case opts in |
-| binding | the key is absent; `bindings.tsv` holds fragment, reference, document and path |
+| binding | the key is absent (a list element whose only key is bound stays as `{}`); `bindings.tsv` holds fragment, reference, document and path |
+
+The binding form deletes each bound key and prunes a mapping that only bound keys filled, but not a
+list element: an element whose only key is bound stays as an empty `{}`. The bytes case's CA
+element has no other field, so its binding fragment holds `acceptedCAs` with the one element
+`- {}` (`evidence/gen/bytes.txt`). Resolving a binding adds a missing key at the end of its mapping.
 
 Each candidate is resolved in two orders:
 
@@ -174,9 +179,11 @@ expectation, both bases agree (`evidence/summary.txt`). Per base:
 | type-mismatch (native rejected) | rejected | rejected | rejected | rejected | rejected | rejected |
 | invalid-value (native invalid) | differs | parity | parity | parity | parity | parity |
 
-Totals per base: **early** reaches parity on all 13 positive cases for every candidate, matches the
-native rejection on type-mismatch, and fails as designed on unidentified-embedded. **Late** reaches
-parity on 3 cases with the tag, 8 with the marked string and 12 with the binding.
+Totals per base: **early** reaches parity for every candidate on all 13 cases other than
+type-mismatch and unidentified-embedded (invalid-value included: there parity means failing
+validation as native does), matches the native rejection on type-mismatch, and fails as designed on
+unidentified-embedded. **Late** reaches parity on 3 cases with the tag, 8 with the marked string
+and 12 with the binding.
 
 Three late parities are coincidental and do not count in a candidate's favour:
 
@@ -186,7 +193,10 @@ Three late parities are coincidental and do not count in a candidate's favour:
   after composition gives the value composition would have kept.
 - **binding late, bytes**: the binding's path is `machine/acceptedCAs[0]/crt`, an index into the
   fragment's list applied to the composed list. Neither base has `acceptedCAs`, so index 0 is the
-  fragment's element. On a base that already held a CA, the binding would overwrite the base's.
+  fragment's element: the `{}` placeholder (§2) that the binding fills. On a base that already held
+  a CA, the binding would overwrite the base's first CA, and if composition appends the fragment's
+  element to the base's list, the placeholder would stay behind as an empty `{}` CA. Neither was
+  run.
 
 ## 5. What each late failure is
 
@@ -221,12 +231,18 @@ These are observed behaviours of `talosctl` v1.13.6 strategic merge, recorded wi
   (each prefixed `error decoding document /v1alpha1/ (line 1): error decoding to *v1alpha1.Config:
   yaml: construct errors: line <n>:`). A marker on a string field survives composition as a string.
 
-  The rejection is shown for the integer, boolean and struct targets. The bytes rejection is weaker
-  evidence: `talosctl` base64-decodes the placeholder text, and fails at byte 5 because the
-  reference name `extra-ca` holds a `-`. `yaml.v3` decodes a tagged scalar into a string field
-  whatever its tag, so a reference name that happens to be valid base64 would likely compose into
-  wrong bytes silently, as on a string field. That was not run; likewise a boolean field would
-  accept a marker or tag whose text YAML reads as a boolean.
+  The rejection is shown for the integer, boolean and struct targets. On the bytes target both
+  forms fail with the same message, `talosctl` base64-decoding the placeholder text, but for
+  different reasons. The marker's byte 5 is the `:` of `bwref:extra-ca`, and `:` is never valid
+  base64, so every marked value is rejected on a bytes field whatever its reference name. The tag's
+  text is the bare name `extra-ca`, whose byte 5 is a `-`: only the tag's rejection depends on the
+  name. A tag on a string field loses its tag and keeps its text (above), so a tag whose name
+  happens to be valid base64 would likely compose into wrong bytes silently. That was not run.
+  A marker cannot read as a YAML boolean, because of its `bwref:` prefix. A tag could, but only
+  through YAML 1.1 compatibility: `yaml.v3` decodes the strings `yes`, `on`, `off` and their
+  variants into a boolean field whatever their tag. Whether `talosctl`'s decoder (its errors say
+  `construct`, where `yaml.v3`'s say `unmarshal`) does the same was not checked, and no such name
+  was run.
 - **A marker cannot honour a per-fragment opt-in after composition.** In the collision case,
   fragment 1 is not opted in and holds the literal `bwref:reg-pass`; resolved late, it is taken for
   a reference:
@@ -310,8 +326,12 @@ The distinction the design asks for follows directly:
 - **Rejections**: type-mismatch is rejected natively with ``cannot construct !!str `e2-not-...`
   into int``. Every early cell and the binding late are rejected with the same message; the
   binding late at the re-read rather than at composition, and so at a different line of the
-  document, because the key it fills is absent from its fragments. The tag and marked late are rejected on their own placeholder instead (§5). The
-  resolver refusal, binding only:
+  document (line 23 on the fixture base and 24 on the generated one, against line 4 for native and
+  every early cell), because the key it fills is absent from its fragments. The tag and marked late
+  are rejected on their own placeholder instead (§5). `run/all` compares a rejection with its
+  expectation by outcome only, and the two bases with each other on everything but the message: that
+  the messages are the same was read from the `message` column of `matrix.tsv`, not checked by the
+  harness. The resolver refusal, binding only:
 
   ```text
   bwref: binding v1alpha1 cluster/inlineManifests[name=e2-secret]/contents|yaml/stringData/password:
@@ -329,12 +349,13 @@ constraint:
 | Candidate | Late failure | Why it is not fixable in the renderer without a merge engine |
 |---|---|---|
 | tag | dropped silently on strings; rejected on integer, boolean and struct fields | composition discards it before the renderer runs |
-| marked | rejected on integer, boolean and struct fields; misreads literals | typed decode runs first; opt-in is a fragment property composition erases |
+| marked | rejected on integer, boolean, bytes and struct fields; misreads literals | typed decode runs first; opt-in is a fragment property composition erases |
 | binding | wrong value when a later fragment overrides; a list index names the fragment's list, not the composed one | needs per-path last-writer knowledge |
 
-**Early resolution reaches native parity for all three candidates.** It hands `talosctl` only
-reference-free fragments, so upstream composition and validation are untouched. What each candidate
-then demands of a renderer:
+**Early resolution reaches native parity for all three candidates on every case run but the two
+where parity is not expected** (§4), with one scope limit for the binding in embedded YAML, below.
+It hands `talosctl` only reference-free fragments, so upstream composition and validation are
+untouched. What each candidate then demands of a renderer:
 
 - **tag**: a YAML parser that keeps tags, since resolution must happen before any typed decode.
   Quoted text that looks like a tag is safely literal. An unresolved tag inside unidentified
@@ -347,12 +368,26 @@ then demands of a renderer:
   reference into unidentified embedded content instead of leaving reference text behind. (Resolved
   late, a fragment that holds only bound values is empty, and `talosctl` refuses an empty patch, so
   such a fragment must be left out of composition: §7.1. Early, each fragment is refilled first.)
+  A list element whose only key is bound is left as a `{}` placeholder (§2), so the fragment's list
+  keeps its length. Early, the placeholder is filled before composition and never reaches
+  `talosctl`. Late, it is composed first; §4 shows the one base-dependent consequence.
+- **binding, embedded YAML**: the refill adds a missing key at the end of its mapping. For a typed
+  field that should not matter, because `talosctl` decodes into its typed configuration and writes
+  the fields in that type's order, though no case here binds a typed key that is not last in its
+  fragment either. An embedded document is an opaque string to `talosctl`, so there key order is
+  part of the bytes. The embedded-yaml case binds `stringData.password`; the binding fragment has
+  no `stringData` at all (`evidence/gen/embedded-yaml.txt`, pruned as in §7.2), the refill appends
+  it after `metadata`, and that matches native only because `stringData` is the last key. A binding
+  to a key that is not last, such as `metadata.name`, would move that key to the end of its mapping
+  and so differ from native. That was not run.
 
 For identified embedded documents, every candidate re-serializes the whole document it resolves
-into: the prototype writes JSON with sorted keys and no whitespace. The native literal form was
-derived through the same encoder, so embedded-json's parity does not show that an author's
-hand-formatted literal would survive; it would differ in formatting. The tag form of the embedded
-JSON (`"token": !bwref app-token`) is not JSON either; the prototype parses it as YAML.
+into: the prototype writes JSON with sorted keys and no whitespace, and YAML through `yaml.v3` with
+two-space indentation. The native literal form was derived through the same encoders, so neither
+embedded-json's nor embedded-yaml's parity shows that an author's hand-formatted literal would
+survive: JSON would differ in formatting, and for YAML, keeping an author's indentation, comments
+or quoting is unproven. The tag form of the embedded JSON (`"token": !bwref app-token`) is not
+JSON either; the prototype parses it as YAML.
 
 For every candidate, early resolution means the compiler identity must read the whole superset
 (§6.2), and the release must record the effective set separately if dependency tracking is to be
@@ -416,11 +451,23 @@ reproduces every earlier per-cell file byte for byte.
 - **Fifteen cases, one machine type.** Both bases are control-plane configurations. Not covered:
   worker configurations, duration and IP/CIDR fields, a list as a reference target, list-element
   overrides (the bytes case's list merged into a base with no such list, §4), `$patch: delete`,
-  more than two fragments, and a tag whose reference name is valid base64 or reads as a boolean
-  (§5).
+  more than two fragments, a tag whose reference name is valid base64 or a YAML 1.1 boolean word
+  (§5), a binding to an embedded-YAML key that is not the last in its mapping, and a hand-formatted
+  embedded literal (§6.4).
+- **Embedded-YAML parity is shown for a last key only.** The binding refills a key at the end of
+  its mapping, and the one embedded-YAML reference is to the last key (§6.4). Parity there, late or
+  early, is not shown for a binding to any other key.
 - **The fixture base validates in container mode.** Its read-back configuration is a Docker node's;
   `metal` validation applies only to the generated base.
 - **Boolean effective dependencies are unmeasured early** (§6.2).
+- **The sentinel pass has two flaws no case reaches.** It reports every value that is neither a
+  string nor an integer (a float, a null, binary) as "a boolean value cannot be told apart from a
+  literal"; the only such value here is bool's `wipe: true`. Integer sentinels are 61000 plus ten
+  times the reference's index plus the leaf's, so in a value with eleven or more leaves an integer
+  leaf could take the next reference's sentinel, and an integer literal equal to a sentinel would be
+  counted as a surviving reference. No value here has more than two leaves (map's `reg-auth`), one
+  reference is an integer (int's `prism-port`), and no case fragment or base under
+  `evidence/base/` holds a 61xxx number.
 - **The resolver is disposable.** Its choices (per-fragment opt-in, path syntax, alias handling by
   replacing the anchor node) are this experiment's, not a proposed design.
 - **Error messages carry value prefixes.** `talosctl`'s decode errors quote the first characters of
@@ -435,9 +482,11 @@ form is the baseline. Not compared: a custom merge engine (excluded by §6.9), g
 (excluded), substring references in opaque text (§6.9 references whole content initially).
 
 Decision enabled: **§6.9's preferred late order is ruled out on this evidence, and early
-materialization with a recorded superset is the order that keeps native composition for all three
-syntaxes.** The syntax choice is not decided by composition parity, because all three reach it
-early; it turns on the renderer implications in §6.4, which the
+materialization with a recorded superset is the order that kept native composition for all three
+syntaxes on every case where parity was expected.** That holds within the cases' scope (§8), most
+visibly for the binding in embedded YAML, where parity is shown only for a last key (§6.4). The
+syntax choice is not decided by composition parity, because all three reach it early on these
+cases; it turns on the renderer implications in §6.4, which the
 [compiler specification](https://github.com/ginsys/bronzeward/issues/17) must weigh. Adopting early
 resolution is a change to §6.9's stated preference and belongs in the design once accepted.
 
