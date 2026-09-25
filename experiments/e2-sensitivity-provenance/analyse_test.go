@@ -151,12 +151,15 @@ func TestAnalyseFailsClosedOnAFragmentWithoutATracePass(t *testing.T) {
 		t.Fatal(err)
 	}
 	fid := readFile(t, filepath.Join(cell, "analysis", "fidelity.txt"))
-	if !strings.Contains(fid, "fragment f1.yaml") {
+	if !strings.Contains(fid, "fragment f1.yaml: the trace pass left no resolved fragment") {
 		t.Errorf("no fidelity failure names the fragment:\n%s", fid)
 	}
 	exp := readFile(t, filepath.Join(cell, "analysis", "expectations.tsv"))
 	if !strings.Contains(exp, "fidelity\tok\tfail\tno") {
 		t.Errorf("the fidelity expectation did not fail:\n%s", exp)
+	}
+	if strings.Contains(exp, "leak.composed-path\tclean\tleak\t") {
+		t.Errorf("the composed path leaked:\n%s", exp)
 	}
 }
 
