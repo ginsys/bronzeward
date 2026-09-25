@@ -27,7 +27,8 @@ links), with one schema and every dialect difference an explicit, countable bran
 
 Five negative claims have a positive control that removes the mechanism and must make the reader
 find the failure: blind writes (S1), an unlocked source check (S2's race), check-then-insert
-ownership (S4's attempt), a naive claim (S5), unlocked or deferred migration runners (S6). S2's
+ownership (S4's attempt), a naive claim (S5), unlocked or deferred migration runners (S6). On SQLite
+the S2, S4 and S5 controls find no failure; see the report §3.2. S2's
 interruption rows, S3's scope uniqueness and S4's takeover have none; those claims rest on the
 reader's result alone.
 
