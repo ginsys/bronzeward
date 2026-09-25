@@ -1,0 +1,55 @@
+==> controlplane-v1.13.6-v1.10.0-vs-current <==
++ 0/cluster/apiServer/certSANs
++ 0/cluster/apiServer/disablePodSecurityPolicy
++ 0/machine/features/apidCheckExtKeyUsage
++ 0/machine/features/rbac
++ 0/machine/features/stableHostname
+- 0/machine/install/grubUseUKICmdline
++ 0/machine/network
+- HostnameConfig
+result=paths differing=8
+==> controlplane-v1.13.6-v1.11.0-vs-current <==
++ 0/cluster/apiServer/certSANs
++ 0/cluster/apiServer/disablePodSecurityPolicy
++ 0/machine/features/apidCheckExtKeyUsage
++ 0/machine/features/rbac
++ 0/machine/features/stableHostname
+- 0/machine/install/grubUseUKICmdline
++ 0/machine/network
+- HostnameConfig
+result=paths differing=8
+==> controlplane-v1.13.6-v1.12.0-vs-current <==
++ 0/machine/network
+result=paths differing=1
+==> controlplane-v1.13.6-v1.13.0-vs-current <==
+result=paths differing=0
+==> controlplane-v1.13.6-v1.14.0-vs-current <==
+result=paths differing=0
+==> controlplane-v1.13.6-v1.15.0-vs-current <==
+result=paths differing=0
+==> worker-v1.13.6-v1.10.0-vs-current <==
++ 0/machine/features/apidCheckExtKeyUsage
++ 0/machine/features/rbac
++ 0/machine/features/stableHostname
+- 0/machine/install/grubUseUKICmdline
++ 0/machine/network
+- HostnameConfig
+result=paths differing=6
+==> worker-v1.13.6-v1.11.0-vs-current <==
++ 0/machine/features/apidCheckExtKeyUsage
++ 0/machine/features/rbac
++ 0/machine/features/stableHostname
+- 0/machine/install/grubUseUKICmdline
++ 0/machine/network
+- HostnameConfig
+result=paths differing=6
+==> worker-v1.13.6-v1.12.0-vs-current <==
++ 0/machine/network
+result=paths differing=1
+==> worker-v1.13.6-v1.13.0-vs-current <==
+result=paths differing=0
+==> worker-v1.13.6-v1.14.0-vs-current <==
+result=paths differing=0
+==> worker-v1.13.6-v1.15.0-vs-current <==
+result=paths differing=0
+==> end <==

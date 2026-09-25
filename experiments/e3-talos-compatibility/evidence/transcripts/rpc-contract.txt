@@ -1,0 +1,427 @@
+==> 013-rpc-contract-v1.12.12-current <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.12.12/current/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 014-rpc-contract-v1.12.12-v1.10.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.12.12/v1.10.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 015-rpc-contract-v1.12.12-v1.11.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.12.12/v1.11.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 016-rpc-contract-v1.12.12-v1.12.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.12.12/v1.12.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 017-rpc-contract-v1.12.12-v1.13.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.12.12/v1.13.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 018-rpc-contract-v1.12.12-v1.14.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.12.12/v1.14.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 019-rpc-contract-v1.12.12-v1.15.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.12.12/v1.15.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 020-rpc-contract-v1.13.0-current <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.0/current/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 021-rpc-contract-v1.13.0-v1.10.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.0/v1.10.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 022-rpc-contract-v1.13.0-v1.11.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.0/v1.11.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 023-rpc-contract-v1.13.0-v1.12.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.0/v1.12.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 024-rpc-contract-v1.13.0-v1.13.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.0/v1.13.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 025-rpc-contract-v1.13.0-v1.14.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.0/v1.14.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 026-rpc-contract-v1.13.0-v1.15.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.0/v1.15.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 027-rpc-contract-v1.13.6-current <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.6/current/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 028-rpc-contract-v1.13.6-v1.10.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.6/v1.10.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 029-rpc-contract-v1.13.6-v1.11.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.6/v1.11.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 030-rpc-contract-v1.13.6-v1.12.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.6/v1.12.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 031-rpc-contract-v1.13.6-v1.13.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.6/v1.13.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 032-rpc-contract-v1.13.6-v1.14.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.6/v1.14.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 033-rpc-contract-v1.13.6-v1.15.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.6/v1.15.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 034-rpc-contract-v1.13.10-current <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.10/current/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 035-rpc-contract-v1.13.10-v1.10.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.10/v1.10.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 036-rpc-contract-v1.13.10-v1.11.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.10/v1.11.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 037-rpc-contract-v1.13.10-v1.12.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.10/v1.12.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 038-rpc-contract-v1.13.10-v1.13.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.10/v1.13.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 039-rpc-contract-v1.13.10-v1.14.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.10/v1.14.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 040-rpc-contract-v1.13.10-v1.15.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.13.10/v1.15.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 041-rpc-contract-v1.14.1-current <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.14.1/current/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/DiscoveryServiceConfig/default (line 16): "DiscoveryServiceConfig" "v1alpha1": not registered
+
+
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 042-rpc-contract-v1.14.1-v1.10.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.14.1/v1.10.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 043-rpc-contract-v1.14.1-v1.11.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.14.1/v1.11.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 044-rpc-contract-v1.14.1-v1.12.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.14.1/v1.12.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 045-rpc-contract-v1.14.1-v1.13.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.14.1/v1.13.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 046-rpc-contract-v1.14.1-v1.14.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.14.1/v1.14.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/DiscoveryServiceConfig/default (line 16): "DiscoveryServiceConfig" "v1alpha1": not registered
+
+
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 047-rpc-contract-v1.14.1-v1.15.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.14.1/v1.15.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/DiscoveryServiceConfig/default (line 16): "DiscoveryServiceConfig" "v1alpha1": not registered
+
+
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 048-rpc-contract-v1.15.0-alpha.0-current <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.15.0-alpha.0/current/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/DiscoveryServiceConfig/default (line 16): "DiscoveryServiceConfig" "v1alpha1": not registered
+
+
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 049-rpc-contract-v1.15.0-alpha.0-v1.10.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.15.0-alpha.0/v1.10.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 050-rpc-contract-v1.15.0-alpha.0-v1.11.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.15.0-alpha.0/v1.11.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = this config change can't be applied in immediate mode
+# diff withheld (may hold the configuration): 16 lines; output sha256 1a097092d41603d70067453524f5c355e6a266071711408f585a33085c1b4ad2
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 051-rpc-contract-v1.15.0-alpha.0-v1.12.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.15.0-alpha.0/v1.12.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 32 lines; output sha256 6dd786e479e0f86760b738496ad2d52ddfd94c5b849036040e3fa867fb3926ff
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 052-rpc-contract-v1.15.0-alpha.0-v1.13.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 0) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.15.0-alpha.0/v1.13.0/1.36.2/talosctl/worker.yaml
+Dry run summary:
+Applied configuration without a reboot (skipped in dry-run).
+# diff withheld (may hold the configuration): 31 lines; output sha256 1541537ffe60ef10830a67c3755983652daf5be5e0c3107960f0c737763d884a
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 053-rpc-contract-v1.15.0-alpha.0-v1.14.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.15.0-alpha.0/v1.14.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/DiscoveryServiceConfig/default (line 16): "DiscoveryServiceConfig" "v1alpha1": not registered
+
+
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> 054-rpc-contract-v1.15.0-alpha.0-v1.15.0 <==
+==> pre (rc ) <==
+pre digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> dry (rc 1) <==
+$ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/gen/v1.15.0-alpha.0/v1.15.0/1.36.2/talosctl/worker.yaml
+error applying new configuration: 1 error occurred:
+	* 10.55.0.3: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/DiscoveryServiceConfig/default (line 16): "DiscoveryServiceConfig" "v1alpha1": not registered
+
+
+==> after (rc ) <==
+worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+==> end <==
