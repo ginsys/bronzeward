@@ -1,0 +1,569 @@
+==> controlplane-current-v1.12.12-vs-v1.13.6 <==
++ 0/machine/network
+result=paths differing=1
+==> controlplane-current-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-current-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-current-v1.14.1-vs-v1.13.6 <==
+- 0/cluster/aggregatorCA
+- 0/cluster/apiServer
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/controllerManager
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/proxy
+- 0/cluster/scheduler
+- 0/cluster/secret
+- 0/cluster/secretboxEncryptionSecret
+- 0/cluster/serviceAccount
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
+- 0/machine/nodeLabels
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeAPIServerConfig
++ KubeAdmissionControlConfig/PodSecurity
++ KubeAggregatorCAConfig
++ KubeAuditPolicyConfig
++ KubeAuthenticationConfig
++ KubeAuthorizerConfig/node
++ KubeAuthorizerConfig/rbac
++ KubeClusterConfig
++ KubeControllerManagerConfig
++ KubeCoreDNSConfig
++ KubeEtcdEncryptionConfig
++ KubeFlannelCNIConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeProxyConfig
++ KubeSchedulerConfig
++ KubeServiceAccountConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=46
+==> controlplane-current-v1.15.0-alpha.0-vs-v1.13.6 <==
+- 0/cluster/aggregatorCA
+- 0/cluster/apiServer
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/controllerManager
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/proxy
+- 0/cluster/scheduler
+- 0/cluster/secret
+- 0/cluster/secretboxEncryptionSecret
+- 0/cluster/serviceAccount
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
+- 0/machine/nodeLabels
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeAPIServerConfig
++ KubeAdmissionControlConfig/PodSecurity
++ KubeAggregatorCAConfig
++ KubeAuditPolicyConfig
++ KubeAuthenticationConfig
++ KubeAuthorizerConfig/node
++ KubeAuthorizerConfig/rbac
++ KubeClusterConfig
++ KubeControllerManagerConfig
++ KubeCoreDNSConfig
++ KubeEtcdEncryptionConfig
++ KubeFlannelCNIConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeProxyConfig
++ KubeSchedulerConfig
++ KubeServiceAccountConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=46
+==> controlplane-v1.10.0-v1.12.12-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.10.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.10.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.10.0-v1.14.1-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.10.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.11.0-v1.12.12-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.11.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.11.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.11.0-v1.14.1-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.11.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.12.0-v1.12.12-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.12.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.12.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.12.0-v1.14.1-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.12.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.13.0-v1.12.12-vs-v1.13.6 <==
++ 0/machine/network
+result=paths differing=1
+==> controlplane-v1.13.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.13.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.13.0-v1.14.1-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.13.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.14.0-v1.12.12-vs-v1.13.6 <==
++ 0/machine/network
+result=paths differing=1
+==> controlplane-v1.14.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.14.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.14.0-v1.14.1-vs-v1.13.6 <==
+- 0/cluster/aggregatorCA
+- 0/cluster/apiServer
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/controllerManager
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/proxy
+- 0/cluster/scheduler
+- 0/cluster/secret
+- 0/cluster/secretboxEncryptionSecret
+- 0/cluster/serviceAccount
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
+- 0/machine/nodeLabels
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeAPIServerConfig
++ KubeAdmissionControlConfig/PodSecurity
++ KubeAggregatorCAConfig
++ KubeAuditPolicyConfig
++ KubeAuthenticationConfig
++ KubeAuthorizerConfig/node
++ KubeAuthorizerConfig/rbac
++ KubeClusterConfig
++ KubeControllerManagerConfig
++ KubeCoreDNSConfig
++ KubeEtcdEncryptionConfig
++ KubeFlannelCNIConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeProxyConfig
++ KubeSchedulerConfig
++ KubeServiceAccountConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=46
+==> controlplane-v1.14.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+- 0/cluster/aggregatorCA
+- 0/cluster/apiServer
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/controllerManager
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/proxy
+- 0/cluster/scheduler
+- 0/cluster/secret
+- 0/cluster/secretboxEncryptionSecret
+- 0/cluster/serviceAccount
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
+- 0/machine/nodeLabels
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeAPIServerConfig
++ KubeAdmissionControlConfig/PodSecurity
++ KubeAggregatorCAConfig
++ KubeAuditPolicyConfig
++ KubeAuthenticationConfig
++ KubeAuthorizerConfig/node
++ KubeAuthorizerConfig/rbac
++ KubeClusterConfig
++ KubeControllerManagerConfig
++ KubeCoreDNSConfig
++ KubeEtcdEncryptionConfig
++ KubeFlannelCNIConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeProxyConfig
++ KubeSchedulerConfig
++ KubeServiceAccountConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=46
+==> controlplane-v1.15.0-v1.12.12-vs-v1.13.6 <==
++ 0/machine/network
+result=paths differing=1
+==> controlplane-v1.15.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.15.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> controlplane-v1.15.0-v1.14.1-vs-v1.13.6 <==
+- 0/cluster/aggregatorCA
+- 0/cluster/apiServer
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/controllerManager
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/proxy
+- 0/cluster/scheduler
+- 0/cluster/secret
+- 0/cluster/secretboxEncryptionSecret
+- 0/cluster/serviceAccount
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
+- 0/machine/nodeLabels
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeAPIServerConfig
++ KubeAdmissionControlConfig/PodSecurity
++ KubeAggregatorCAConfig
++ KubeAuditPolicyConfig
++ KubeAuthenticationConfig
++ KubeAuthorizerConfig/node
++ KubeAuthorizerConfig/rbac
++ KubeClusterConfig
++ KubeControllerManagerConfig
++ KubeCoreDNSConfig
++ KubeEtcdEncryptionConfig
++ KubeFlannelCNIConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeProxyConfig
++ KubeSchedulerConfig
++ KubeServiceAccountConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=46
+==> controlplane-v1.15.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+- 0/cluster/aggregatorCA
+- 0/cluster/apiServer
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/controllerManager
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/proxy
+- 0/cluster/scheduler
+- 0/cluster/secret
+- 0/cluster/secretboxEncryptionSecret
+- 0/cluster/serviceAccount
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
+- 0/machine/nodeLabels
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeAPIServerConfig
++ KubeAdmissionControlConfig/PodSecurity
++ KubeAggregatorCAConfig
++ KubeAuditPolicyConfig
++ KubeAuthenticationConfig
++ KubeAuthorizerConfig/node
++ KubeAuthorizerConfig/rbac
++ KubeClusterConfig
++ KubeControllerManagerConfig
++ KubeCoreDNSConfig
++ KubeEtcdEncryptionConfig
++ KubeFlannelCNIConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeProxyConfig
++ KubeSchedulerConfig
++ KubeServiceAccountConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=46
+==> worker-current-v1.12.12-vs-v1.13.6 <==
++ 0/machine/network
+result=paths differing=1
+==> worker-current-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-current-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-current-v1.14.1-vs-v1.13.6 <==
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/secret
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeClusterConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=24
+==> worker-current-v1.15.0-alpha.0-vs-v1.13.6 <==
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/secret
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeClusterConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=24
+==> worker-v1.10.0-v1.12.12-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.10.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.10.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.10.0-v1.14.1-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.10.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.11.0-v1.12.12-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.11.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.11.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.11.0-v1.14.1-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.11.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.12.0-v1.12.12-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.12.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.12.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.12.0-v1.14.1-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.12.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.13.0-v1.12.12-vs-v1.13.6 <==
++ 0/machine/network
+result=paths differing=1
+==> worker-v1.13.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.13.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.13.0-v1.14.1-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.13.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.14.0-v1.12.12-vs-v1.13.6 <==
++ 0/machine/network
+result=paths differing=1
+==> worker-v1.14.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.14.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.14.0-v1.14.1-vs-v1.13.6 <==
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/secret
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeClusterConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=24
+==> worker-v1.14.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/secret
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeClusterConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=24
+==> worker-v1.15.0-v1.12.12-vs-v1.13.6 <==
++ 0/machine/network
+result=paths differing=1
+==> worker-v1.15.0-v1.13.0-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.15.0-v1.13.10-vs-v1.13.6 <==
+result=paths differing=0
+==> worker-v1.15.0-v1.14.1-vs-v1.13.6 <==
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/secret
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeClusterConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=24
+==> worker-v1.15.0-v1.15.0-alpha.0-vs-v1.13.6 <==
+- 0/cluster/ca
+- 0/cluster/clusterName
+- 0/cluster/controlPlane
+- 0/cluster/discovery
+- 0/cluster/id
+- 0/cluster/network
+- 0/cluster/secret
+- 0/machine/features/hostDNS
+- 0/machine/features/kubePrism
+- 0/machine/install
+- 0/machine/kubelet
++ DiscoveryIdentityConfig
++ DiscoveryServiceConfig/default
++ FilesystemTrimConfig
++ KubeAPIServerCAConfig
++ KubeClusterConfig
++ KubeNetworkConfig
++ KubeNodeConfig
++ KubePrismConfig
++ KubeletConfig
++ ResolverConfig
++ SecurityProfileConfig
++ UnattendedInstallConfig
++ VolumeConfig/EPHEMERAL
+result=paths differing=24
+==> end <==

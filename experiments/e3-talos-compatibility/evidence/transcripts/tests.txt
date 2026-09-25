@@ -1,0 +1,5 @@
+==> 060-tests-e3m-paths <==
+==> go (rc 0) <==
+$ go -C <repo>/experiments/e3-talos-compatibility/machinery/v1.13.6 test -count=1 ./...
+ok  	github.com/ginsys/bronzeward/experiments/e3-talos-compatibility/machinery/talos-v1.13.6	0.005s
+==> end <==

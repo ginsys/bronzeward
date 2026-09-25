@@ -1,0 +1,12 @@
+id	message
+M1	generating PKI and tokens | Created <file> | Created <file>
+M2	generating PKI and tokens | result=generated
+M3	invalid talos-version: error parsing version "vbogus"
+M4	error="invalid talos-version: error parsing version \"vbogus\""
+M5	<file> is valid for container mode
+M6	<file> is valid for metal mode
+M7	result=valid
+M8	error decoding document v1alpha1/DiscoveryServiceConfig/default (line 20): "DiscoveryServiceConfig" "v1alpha1": not registered
+M9	error="error decoding document v1alpha1/DiscoveryServiceConfig/default (line 20): \"DiscoveryServiceConfig\" \"v1alpha1\": not registered"
+M10	error decoding document v1alpha1/DiscoveryServiceConfig/default (line 16): "DiscoveryServiceConfig" "v1alpha1": not registered
+M11	error="error decoding document v1alpha1/DiscoveryServiceConfig/default (line 16): \"DiscoveryServiceConfig\" \"v1alpha1\": not registered"

@@ -1,0 +1,7 @@
+renderer	talosctl_sha256	talosctl_client	e3m
+v1.12.12	3a3ad9fe02df94f8bcfe85a9d982991fbf510a2167fb0e5d1b2c149d6541090e	Client: | Talos v1.12.12	machinery=v1.12.12 kubernetes_default=1.35.8 go=go1.27.1
+v1.13.0	4aa5cd191c708b8c1a3b358bfd7dd21fb0cc6bd4dc7a07f2aa925cd2a8473bae	Client: | Talos v1.13.0	machinery=v1.13.0 kubernetes_default=1.36.0 go=go1.27.1
+v1.13.6	540c5e7cb0d3fa3a9b2e1c717ced212727b73bcaf0cf9cf9ba2472ec381041d4	Client: | Talos v1.13.6	machinery=v1.13.6 kubernetes_default=1.36.2 go=go1.27.1
+v1.13.10	28e9ccd9aebd690fa03d8cf2582221d87ea38b2a1704f411d75a03589c58f2aa	Client: | Talos v1.13.10	machinery=v1.13.10 kubernetes_default=1.36.3 go=go1.27.1
+v1.14.1	7233ece94c94296a033a6ddb5efe0baf508a94c71de7e6c7b286500705924208	Client: | Talos v1.14.1	machinery=v1.14.1 kubernetes_default=1.37.0 go=go1.27.1
+v1.15.0-alpha.0	d0779b799815aeebccc18cf98851928ff1b050434c96831259b2e4ceafdb5399	Client: | Talos v1.15.0-alpha.0	machinery=v1.15.0-alpha.0 kubernetes_default=1.37.0 go=go1.27.1
