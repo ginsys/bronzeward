@@ -1,0 +1,327 @@
+#!/usr/bin/env bash
+# The whole E3 Talos compatibility matrix: each renderer's generation for every target contract,
+# every generated configuration validated by every renderer, the support policy each machinery
+# encodes, the PoC RPC set of every client against the fixture's live v1.13.6 worker, a dry run
+# of every contract's worker configuration on that worker, then the controls and the prototype's
+# own tests. Needs the fixture up (fixtures/bin/up); E3_OUT names a new, empty directory outside
+# the checkout.
+#
+# The generation, validation, strict and policy groups are measurements: their tables record what
+# each renderer did, with every distinct output once in messages.tsv. The RPC and control groups
+# are rows, each with its expectation written here before the run (run/lib.sh). The RPC rows
+# expect every client to work against the node; a mismatch there is a finding, not a harness
+# fault. The control rows each prove a check can fail: a mismatch there makes the run
+# inconclusive.
+#
+# E3_ONLY=<extended regex> runs only the groups whose name matches, for development; the run then
+# records it and run/collect-evidence refuses the output.
+#
+# Phase-0 evidence for the Talos compatibility experiment (ginsys/bronzeward issue 5). Not v1
+# tooling.
+set -uo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+e3_init
+started=$(date -u +%FT%TZ)
+# The inputs are the prototype and the fixture; evidence/ is this experiment's output. Each
+# uncommitted path is listed, so a nonzero count says what differed from the commit.
+uncommitted=$(git -C "$REPO_DIR" status --porcelain -- experiments/e3-talos-compatibility fixtures \
+  ':!experiments/e3-talos-compatibility/evidence')
+e3_need_fixture
+cp -- "$STATE/talos-secrets.yaml" "$E3_SECRETS"
+cp -- "$STATE/scan-patterns.txt" "$E3_PATTERNS"
+e3_tools
+
+group() { [ -z "${E3_ONLY:-}" ] || [[ $1 =~ $E3_ONLY ]]; }
+TARGETS="current $E3_CONTRACTS $E3_EDGES"
+
+# ---- generation: renderer x target contract x Kubernetes version, through both ----
+
+# gen_run <renderer> <target> <k8s> <dir> <impl>: one generation into <dir>.
+gen_run() {
+  local r=$1 t=$2 k=$3 dir=$4 flags=()
+  mkdir -p -- "$dir"
+  if [ "$5" = talosctl ]; then
+    [ "$t" = current ] || flags+=(--talos-version "$t")
+    [ "$k" = default ] || flags+=(--kubernetes-version "$k")
+    run_cell "$dir.out" tc "$r" gen config "$E3_CLUSTER" "$E3_ENDPOINT" --with-secrets "$E3_SECRETS" \
+      --output-types controlplane,worker --output "$dir" --install-image "$E3_INSTALL_IMAGE" \
+      --with-docs=false --with-examples=false "${flags[@]}"
+  else
+    [ "$t" = current ] || flags+=(-talos-version "$t")
+    [ "$k" = default ] || flags+=(-kubernetes-version "$k")
+    run_cell "$dir.out" m "$r" gen -with-secrets "$E3_SECRETS" -install-image "$E3_INSTALL_IMAGE" \
+      -out "$dir" "${flags[@]}" "$E3_CLUSTER" "$E3_ENDPOINT"
+  fi
+}
+
+# same <dirA> <dirB>: whether two generations wrote the same two files (none: neither wrote).
+same() {
+  local f a b out=same
+  for f in controlplane worker; do
+    a=$(digest "$1/$f.yaml") b=$(digest "$2/$f.yaml")
+    [ "$a" = "$b" ] || out=differs
+  done
+  [ "$out" = same ] && [ "$(digest "$1/worker.yaml")" = none ] && out=none
+  printf '%s\n' "$out"
+}
+
+if group gen; then
+  say "group gen"
+  printf 'renderer\ttarget\tkubernetes\ttalosctl\tmachinery\tcontrolplane_sha256\tworker_sha256\tmachinery_output\ttalosctl_repeat\n' \
+    >"$E3_OUT/gen.tsv"
+  for r in $E3_RENDERERS; do
+    for t in $TARGETS; do
+      for k in default "$E3_K8S_FIXED"; do
+        d=$E3_GEN/$r/$t/$k
+        gen_run "$r" "$t" "$k" "$d/talosctl" talosctl
+        ct=$CELL
+        gen_run "$r" "$t" "$k" "$d/talosctl-repeat" talosctl
+        gen_run "$r" "$t" "$k" "$d/machinery" machinery
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$r" "$t" "$k" "$ct" "$CELL" \
+          "$(digest "$d/talosctl/controlplane.yaml")" "$(digest "$d/talosctl/worker.yaml")" \
+          "$(same "$d/talosctl" "$d/machinery")" "$(same "$d/talosctl" "$d/talosctl-repeat")" >>"$E3_OUT/gen.tsv"
+      done
+    done
+  done
+fi
+
+# Key-path differences (never values) of the configurations the later groups use: each renderer's
+# output for a contract against the pinned renderer's for the same contract, and the pinned
+# renderer's for each contract against its current one. The fixture's Kubernetes version only.
+# paths_run <name> <a.yaml> <b.yaml>
+paths_run() {
+  [ -f "$2" ] && [ -f "$3" ] || return 0
+  m "$E3_PINNED" paths "$2" "$3" >"$E3_PATHS/$1.txt" 2>&1 || printf '# e3m paths exit %s\n' "$?" >>"$E3_PATHS/$1.txt"
+}
+if group gen; then
+  for t in current $E3_CONTRACTS; do
+    for f in controlplane worker; do
+      for r in $E3_RENDERERS; do
+        [ "$r" = "$E3_PINNED" ] ||
+          paths_run "$f-$t-$r-vs-$E3_PINNED" "$E3_GEN/$E3_PINNED/$t/$E3_K8S_FIXED/talosctl/$f.yaml" \
+            "$E3_GEN/$r/$t/$E3_K8S_FIXED/talosctl/$f.yaml"
+      done
+      [ "$t" = current ] ||
+        paths_run "$f-$E3_PINNED-$t-vs-current" "$E3_GEN/$E3_PINNED/current/$E3_K8S_FIXED/talosctl/$f.yaml" \
+          "$E3_GEN/$E3_PINNED/$t/$E3_K8S_FIXED/talosctl/$f.yaml"
+    done
+  done
+fi
+
+# ---- validation: every generated configuration by every renderer, both modes, through both ----
+
+# val_cells <config> <validator> [strict]: sets VAL to the four cells talosctl/container,
+# talosctl/metal, machinery/container, machinery/metal, tab-separated.
+declare -g VAL
+val_cells() {
+  local f=$1 v=$2 mode cells=() tag=$2 tflags=() mflags=()
+  if [ "${3:-}" = strict ]; then
+    tag=strict-$v tflags=(--strict) mflags=(-strict)
+  fi
+  for mode in container metal; do
+    run_cell "$E3_RAW/validate/${f#"$E3_GEN"/}.$tag.talosctl.$mode" tc "$v" validate --config "$f" --mode "$mode" "${tflags[@]}"
+    cells+=("$CELL")
+  done
+  for mode in container metal; do
+    run_cell "$E3_RAW/validate/${f#"$E3_GEN"/}.$tag.machinery.$mode" m "$v" validate -config "$f" -mode "$mode" "${mflags[@]}"
+    cells+=("$CELL")
+  done
+  local IFS=$'\t'
+  VAL="${cells[*]}"
+}
+
+if group validate; then
+  say "group validate"
+  printf 'renderer\ttarget\tfile\tvalidator\ttalosctl_container\ttalosctl_metal\tmachinery_container\tmachinery_metal\n' \
+    >"$E3_OUT/validate.tsv"
+  for r in $E3_RENDERERS; do
+    for t in current $E3_CONTRACTS; do
+      for f in controlplane worker; do
+        c=$E3_GEN/$r/$t/$E3_K8S_FIXED/talosctl/$f.yaml
+        for v in $E3_RENDERERS; do
+          if [ -f "$c" ]; then
+            val_cells "$c" "$v"
+          else
+            VAL=$'no-config\tno-config\tno-config\tno-config'
+          fi
+          printf '%s\t%s\t%s\t%s\t%s\n' "$r" "$t" "$f" "$v" "$VAL" >>"$E3_OUT/validate.tsv"
+        done
+      done
+    done
+  done
+fi
+
+# Strict: each renderer's own output, validated by that renderer with warnings as errors.
+if group strict; then
+  say "group strict"
+  printf 'renderer\ttarget\tfile\tvalidator\ttalosctl_container\ttalosctl_metal\tmachinery_container\tmachinery_metal\n' \
+    >"$E3_OUT/strict.tsv"
+  for r in $E3_RENDERERS; do
+    for t in current $E3_CONTRACTS; do
+      for f in controlplane worker; do
+        c=$E3_GEN/$r/$t/$E3_K8S_FIXED/talosctl/$f.yaml
+        if [ -f "$c" ]; then val_cells "$c" "$r" strict; else VAL=$'no-config\tno-config\tno-config\tno-config'; fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "$r" "$t" "$f" "$r" "$VAL" >>"$E3_OUT/strict.tsv"
+      done
+    done
+  done
+fi
+
+# ---- support policy, as each machinery encodes it ----
+
+if group policy; then
+  say "group policy"
+  mkdir -p -- "$E3_OUT/policy"
+  for r in $E3_RENDERERS; do
+    m "$r" policy >"$E3_OUT/policy/$r.tsv" 2>&1 || printf '# e3m policy exit %s\n' "$?" >>"$E3_OUT/policy/$r.tsv"
+  done
+fi
+
+# ---- RPC: every client, both implementations, against the live worker ----
+
+# The node's tag in `talosctl version` output: the Tag line after Server:.
+server_tag() { awk '/^Server:/ { s = 1 } s && $1 == "Tag:" { print $2; exit }' "$(row_part "$1")"; }
+# A key=value field of e3m's result line.
+field() { sed -n "s/.*[[:space:]]$2=\\([^[:space:]]*\\).*/\\1/p" "$(row_part "$1")" | head -n 1; }
+
+rpc_talosctl() {
+  local r=$1
+  row_begin rpc-client "$r-talosctl" worker
+  step version tc "$r" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" version
+  row_note node_tag "$(server_tag version)"
+  step_read read tc "$r" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" get machineconfig v1alpha1 -o 'jsonpath={.spec}'
+  row_note skew_warning "$(grep -c '^WARNING: .*older than client' "$(row_part read)")"
+  if [ "$(row_read_digest read)" = "$PRE_DIGEST" ]; then row_note read match; else row_note read differs; fi
+  artifact a
+  step_quiet dry tc "$r" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" apply-config --dry-run --mode no-reboot --file "$ART_FILE"
+  read_worker after-dry
+  step apply tc "$r" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" apply-config --mode no-reboot --file "$ART_FILE"
+  read_worker after
+  row_end rc:version=0 node_tag="$TALOS_VERSION" rc:read=0 read=match seen:skew_warning rc:dry=0 after-dry.is=pre \
+    after-dry.landed=0 rc:apply=0 after.is=artifact after.landed=1
+}
+
+rpc_machinery() {
+  local r=$1
+  row_begin rpc-client "$r-machinery" worker
+  step version m "$r" version
+  row_note node_tag "$(field version node_tag)"
+  step read m "$r" read
+  if [ "$(field read digest)" = "$PRE_DIGEST" ]; then row_note read match; else row_note read differs; fi
+  artifact a
+  step dry m "$r" apply -dry-run -file "$ART_FILE"
+  read_worker after-dry
+  step apply m "$r" apply -file "$ART_FILE"
+  read_worker after
+  row_end rc:version=0 node_tag="$TALOS_VERSION" rc:read=0 read=match rc:dry=0 after-dry.is=pre after-dry.landed=0 \
+    rc:apply=0 after.is=artifact after.landed=1
+}
+
+if group rpc-client; then
+  say "group rpc-client"
+  for r in $E3_RENDERERS; do
+    rpc_talosctl "$r"
+    rpc_machinery "$r"
+  done
+fi
+
+# Every renderer's worker configuration for every contract, as a dry run through the pinned
+# client: which the v1.13.6 node accepts. Recorded, not judged, except that nothing lands. The
+# key paths each would change on the worker go to paths/.
+if group rpc-contract; then
+  say "group rpc-contract"
+  for r in $E3_RENDERERS; do
+    for t in current $E3_CONTRACTS; do
+      c=$E3_GEN/$r/$t/$E3_K8S_FIXED/talosctl/worker.yaml
+      [ -f "$c" ] || continue
+      row_begin rpc-contract "$r-$t" worker
+      w_config >"$E3_RAW/rows/$ROW_ID-live.yaml" || die "row $ROW_ID: could not read the worker's configuration"
+      paths_run "live-worker-vs-$r-$t" "$E3_RAW/rows/$ROW_ID-live.yaml" "$c"
+      step_quiet dry tc "$E3_PINNED" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" apply-config --dry-run --mode no-reboot \
+        --file "$c"
+      row_note dry "${RC[dry]}"
+      # The node's reason for a refusal, as the gRPC status description, spaces made underscores.
+      reason=$(sed -n 's/.*desc = //p' "$(row_part dry)" | head -n 1 | tr ' ' _)
+      row_note reason "${reason:--}"
+      read_worker after
+      row_end seen:dry seen:reason after.is=pre after.landed=0
+    done
+  done
+fi
+
+# ---- controls ----
+
+if group controls; then
+  say "group controls"
+
+  # Every renderer, both implementations, refuses the unparseable contract `bogus`.
+  row_begin controls gen-bogus-refused
+  row_note refused "$(awk -F'\t' '$2 == "bogus" && $4 !~ /^0:/ && $5 !~ /^0:/' "$E3_OUT/gen.tsv" | wc -l)"
+  row_note cells "$(awk -F'\t' '$2 == "bogus"' "$E3_OUT/gen.tsv" | wc -l)"
+  row_end refused="$(($(wc -w <<<"$E3_RENDERERS") * 2))" cells="$(($(wc -w <<<"$E3_RENDERERS") * 2))"
+
+  # Generation is repeatable: the byte comparisons below mean something only if it is.
+  row_begin controls gen-repeatable
+  row_note differs "$(awk -F'\t' 'NR > 1 && $9 == "differs"' "$E3_OUT/gen.tsv" | wc -l)"
+  row_end differs=0
+
+  # A deliberately different input compares unequal, by digest and by key path.
+  row_begin controls compare-unequal
+  d=$E3_GEN/control-other
+  E3_CLUSTER=bw-other gen_run "$E3_PINNED" current "$E3_K8S_FIXED" "$d" talosctl
+  row_note digest "$(same "$E3_GEN/$E3_PINNED/current/$E3_K8S_FIXED/talosctl" "$d")"
+  step paths m "$E3_PINNED" paths "$E3_GEN/$E3_PINNED/current/$E3_K8S_FIXED/talosctl/controlplane.yaml" "$d/controlplane.yaml"
+  row_end digest=differs rc:paths=0 'out:paths~^~ 0/cluster/clusterName$'
+
+  # An invalid configuration (an unknown machine type) is refused by every validator.
+  invalid=$E3_RAW/control-invalid-worker.yaml
+  sed '0,/^    type: worker$/s//    type: bogus/' "$E3_GEN/$E3_PINNED/current/$E3_K8S_FIXED/talosctl/worker.yaml" >"$invalid"
+  [ "$(grep -c '^    type: bogus$' "$invalid")" = 1 ] || die "could not make the invalid control configuration"
+  row_begin controls validate-invalid-refused
+  accepted=0
+  for v in $E3_RENDERERS; do
+    for mode in container metal; do
+      step "tc-$v-$mode" tc "$v" validate --config "$invalid" --mode "$mode"
+      [ "${RC[tc-$v-$mode]}" = 0 ] && accepted=$((accepted + 1))
+      step "m-$v-$mode" m "$v" validate -config "$invalid" -mode "$mode"
+      [ "${RC[m-$v-$mode]}" = 0 ] && accepted=$((accepted + 1))
+    done
+  done
+  row_note accepted "$accepted"
+  row_end accepted=0
+
+  # The node refuses it on a dry run, through both, and nothing lands.
+  row_begin controls rpc-invalid-refused worker
+  step_quiet tc tc "$E3_PINNED" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" apply-config --dry-run --mode no-reboot \
+    --file "$invalid"
+  step m m "$E3_PINNED" apply -dry-run -file "$invalid"
+  read_worker after
+  row_end 'rc:tc!=0' 'rc:m!=0' after.is=pre after.landed=0
+fi
+
+# ---- the prototype's own tests ----
+
+if group tests; then
+  row_begin tests e3m-paths
+  step go go -C "$E3_DIR/machinery/$E3_PINNED" test -count=1 ./...
+  row_end rc:go=0
+fi
+
+{
+  printf 'commit %s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
+  printf 'uncommitted inputs %s\n' "$(printf '%s' "$uncommitted" | grep -c .)"
+  [ -z "$uncommitted" ] || printf '%s\n' "$uncommitted" | sed 's/^/uncommitted /'
+  printf 'go %s\n' "$(go version)"
+  printf 'started %s\n' "$started"
+  printf 'finished %s\n' "$(date -u +%FT%TZ)"
+  printf 'renderers %s\n' "$E3_RENDERERS"
+  printf 'targets %s\n' "$TARGETS"
+  printf 'node %s\n' "$TALOS_VERSION"
+  [ -z "${E3_ONLY:-}" ] || printf 'only %s\n' "$E3_ONLY"
+  printf 'rows %s mismatches %s\n' "$(($(wc -l <"$E3_ROWS") - 1))" "$(e3_mismatches)"
+  printf 'control mismatches %s\n' "$(awk -F'\t' '$2 == "controls" && $6 == "mismatch"' "$E3_ROWS" | wc -l)"
+} >"$E3_OUT/run.txt"
+cat -- "$E3_OUT/run.txt" >&2
+date -u +%FT%TZ >"$E3_OUT/complete"

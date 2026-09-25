@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# Copy the committable text of one run into evidence/: the run record, the tool table, the
+# generation, validation and strict tables with every distinct output they cite, each machinery's
+# support-policy table, the key-path differences (never values), the row table and every row's
+# transcript, packed one file per group. The generated configurations, which hold the fixture's
+# Talos secrets, the raw outputs and the fixture's evidence bundle stay in E3_OUT. Absolute paths
+# are rewritten, and the result is refused if it holds any of the fixture's leak-scan patterns; a
+# planted control file proves the scan matches before the real scan runs.
+#
+# Phase-0 evidence for the Talos compatibility experiment (ginsys/bronzeward issue 5). Not v1
+# tooling.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+need grep sed find sort sha256sum cut awk
+[ -s "$E3_MARK" ] || die "$E3_OUT is not an E3 talos-compatibility run directory ($E3_MARK is missing)"
+[ -s "$E3_OUT/complete" ] || die "$E3_OUT/complete is missing: run/all did not finish"
+[ -s "$E3_PATTERNS" ] || die "$E3_PATTERNS is missing or empty"
+! grep -q '^only' -- "$E3_OUT/run.txt" || die "$E3_OUT is a partial run (E3_ONLY was set); run the whole matrix"
+
+dest=$E3_DIR/evidence
+incoming=$(mktemp -d "$E3_DIR/.evidence-incoming.XXXXXX")
+trap 'rm -rf -- "$incoming"' EXIT
+
+placeholders() { sed -e "s#$REPO_DIR#<repo>#g" -e "s#$E3_OUT#<E3_OUT>#g" -e "s#$STATE#<fixture-state>#g" -- "$@"; }
+rewrite() { # rewrite <in> <out>; trailing whitespace (talosctl's version lines end in a space) is dropped
+  mkdir -p -- "$(dirname -- "$2")"
+  placeholders "$1" | sed 's/[[:space:]]*$//' >"$2"
+}
+for f in run.txt tools.tsv gen.tsv validate.tsv strict.tsv messages.tsv; do
+  rewrite "$E3_OUT/$f" "$incoming/$f"
+done
+for f in "$E3_OUT"/policy/*.tsv; do
+  rewrite "$f" "$incoming/policy/$(basename -- "$f")"
+done
+
+# The row table's transcript column names each row's section in its group's pack (below).
+rewrite "$E3_ROWS" "$incoming/rows.tsv"
+awk -F'\t' -v OFS='\t' 'NR > 1 {
+  if ($7 != "transcripts/" $1 "-" $2 "-" $3 ".txt") { print "unexpected transcript " $7 > "/dev/stderr"; exit 1 }
+  $7 = "transcripts/" $2 ".txt#" $1 "-" $2 "-" $3
+} { print }' "$incoming/rows.tsv" >"$incoming/rows.tsv.new" || die "cannot point rows.tsv at the packed transcripts"
+mv -- "$incoming/rows.tsv.new" "$incoming/rows.tsv"
+
+# pack <out> <files...>: one file whose sections each follow a `==> <name> <==` line, ending with
+# `==> end <==`. One file per group rather than one per row or per comparison keeps the pull request
+# under GitHub's diff limits.
+pack() {
+  local out=$1 f
+  shift
+  mkdir -p -- "$(dirname -- "$out")"
+  {
+    for f in "$@"; do
+      printf '==> %s <==\n' "$(basename -- "$f" .txt)"
+      placeholders "$f"
+      [ -z "$(tail -c 1 -- "$f")" ] || printf '\n'
+    done
+    printf '==> end <==\n'
+  } >"$out"
+}
+
+groups=0
+while IFS= read -r group; do
+  mapfile -t files < <(find "$E3_T" -type f -name "[0-9][0-9][0-9]-$group-*.txt" | sort)
+  [ "${#files[@]}" -gt 0 ] || die "no transcripts for group $group"
+  pack "$incoming/transcripts/$group.txt" "${files[@]}"
+  groups=$((groups + 1))
+done < <(awk -F'\t' 'NR > 1 { print $2 }' "$E3_ROWS" | sort -u)
+[ "$groups" -gt 0 ] || die "no rows in $E3_ROWS"
+
+# The key-path differences, packed by what they compare: renderer against the pinned renderer,
+# the pinned renderer's contracts against its current one, and the live worker against each
+# contract's worker configuration.
+mapfile -t files < <(find "$E3_PATHS" -type f -name '*-vs-v*.txt' ! -name 'live-worker-*' | sort)
+pack "$incoming/paths/renderers.txt" "${files[@]}"
+mapfile -t files < <(find "$E3_PATHS" -type f -name "*-$E3_PINNED-*-vs-current.txt" | sort)
+pack "$incoming/paths/contracts.txt" "${files[@]}"
+mapfile -t files < <(find "$E3_PATHS" -type f -name 'live-worker-*' | sort)
+pack "$incoming/paths/live-worker.txt" "${files[@]}"
+
+# The fixture's evidence bundle, copied to E3_OUT/bundle before teardown (README), stays there.
+# What is committed is its summary and its manifest.
+bundle=$E3_OUT/bundle
+[ -s "$bundle/versions.txt" ] || die "$bundle/versions.txt is missing: copy the fixture's bundle there first"
+{
+  printf '# fixtures/bin/evidence bundle, captured after run/all with E3_OUT as an extra scan path\n'
+  printf '## versions.txt\n'
+  cat -- "$bundle/versions.txt"
+  printf '## leak-scan.txt (files matched; canary-control files are the planted positive controls, scan-patterns.txt is the pattern list itself)\n'
+  cat -- "$bundle/leak-scan.txt"
+  printf '## fixtures-diff.txt lines: %s; up-fixtures-diff.txt lines: %s\n' \
+    "$(wc -l <"$bundle/fixtures-diff.txt")" "$(wc -l <"$bundle/up-fixtures-diff.txt")"
+  if [ -e "$bundle/unavailable.txt" ]; then
+    printf '## unavailable.txt\n'
+    cat -- "$bundle/unavailable.txt"
+  else
+    printf '## unavailable.txt: absent\n'
+  fi
+} >"$E3_OUT/bundle-summary.txt"
+rewrite "$E3_OUT/bundle-summary.txt" "$incoming/bundle-summary.txt"
+# The full manifest stays in E3_OUT. The committed one lists every file outside postgres-data/ and
+# gives that data directory one line, the digest of its part of the full manifest: E3 does not use
+# the fixture's PostgreSQL, and its 1000-odd per-file lines would dominate the pull request's diff.
+(cd -- "$bundle" && find . -type f -print0 | sort -z | xargs -0 sha256sum) >"$E3_OUT/bundle-manifest.txt"
+{
+  grep -v '  \./postgres-data/' -- "$E3_OUT/bundle-manifest.txt" || true
+  pgdata=$(grep '  \./postgres-data/' -- "$E3_OUT/bundle-manifest.txt" || true)
+  if [ -n "$pgdata" ]; then
+    printf '%s  ./postgres-data/ (%s files: the sha256 of their lines in the full manifest, kept in E3_OUT)\n' \
+      "$(printf '%s\n' "$pgdata" | sha256sum | cut -d' ' -f1)" "$(printf '%s\n' "$pgdata" | wc -l)"
+  fi
+} >"$E3_OUT/bundle-manifest-committed.txt"
+rewrite "$E3_OUT/bundle-manifest-committed.txt" "$incoming/bundle-manifest.txt"
+
+# scan <fixed-strings-file> [dir]: the files under dir (incoming by default) that hold any of the
+# strings. grep exits 1 for no match; any other failure (an unreadable file) ends the run rather
+# than reading as clean.
+scan() {
+  local rc=0
+  grep -rlF -f "$1" -- "${2:-$incoming}" || rc=$?
+  [ "$rc" -le 1 ] || die "the leak scan failed (grep exit $rc)"
+}
+
+# The control: a file holding one pattern, in a directory of its own so that a real leak cannot
+# be mistaken for a failed control, must be found, or the scan below proves nothing. It lives in
+# E3_OUT, outside the checkout, because the pattern it holds is one of the run's secrets.
+ctl=$(mktemp -d "$E3_OUT/.evidence-control.XXXXXX")
+trap 'rm -rf -- "$incoming" "$ctl"' EXIT
+head -n 1 -- "$E3_PATTERNS" >"$ctl/leak-control"
+hits=$(scan "$E3_PATTERNS" "$ctl")
+[ "$hits" = "$ctl/leak-control" ] && control=fired || control="did not fire as expected"
+rm -rf -- "$ctl"
+[ "$control" = fired ] || die "leak-scan control $control; the scan cannot be trusted"
+
+hits=$(scan "$E3_PATTERNS")
+[ -z "$hits" ] || die "collected evidence matches a leak-scan pattern in: $hits"
+hits=$(scan <(printf '%s/\n' "$HOME"))
+[ -z "$hits" ] || die "collected evidence names a path in the operator's home in: $hits"
+printf 'leak-scan\t%s patterns\tcontrol %s\t0 hits in %s files\n' "$(wc -l <"$E3_PATTERNS")" "$control" \
+  "$(find "$incoming" -type f | wc -l)" >"$incoming/leak-scan.tsv"
+
+rm -rf -- "$dest"
+mv -T -- "$incoming" "$dest"
+trap - EXIT
+say "evidence collected in $dest: $(find "$dest" -type f | wc -l) files"

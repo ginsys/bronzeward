@@ -17,7 +17,8 @@ env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/bin/* experiments/
   experiments/e5-provider-capabilities/run/* experiments/e5-retention-classification/run/* \
   experiments/e4-dispatch-safety/run/* \
   experiments/e5-key-loss-restoration/run/* \
-  experiments/e2-structural-references/run/*
+  experiments/e2-structural-references/run/* \
+  experiments/e3-talos-compatibility/run/*
 """
 
 [tasks.test]
@@ -66,6 +67,26 @@ go -C experiments/e2-structural-references mod tidy -diff
 go -C experiments/e2-structural-references build -o /dev/null ./...
 go -C experiments/e2-structural-references vet ./...
 go -C experiments/e2-structural-references test ./...
+gofmt -l experiments/e3-talos-compatibility/machinery/src | { ! grep . ; }
+go -C experiments/e3-talos-compatibility/machinery/v1.12.12 mod verify
+go -C experiments/e3-talos-compatibility/machinery/v1.12.12 mod tidy -diff
+go -C experiments/e3-talos-compatibility/machinery/v1.12.12 vet ./...
+go -C experiments/e3-talos-compatibility/machinery/v1.13.0 mod verify
+go -C experiments/e3-talos-compatibility/machinery/v1.13.0 mod tidy -diff
+go -C experiments/e3-talos-compatibility/machinery/v1.13.0 vet ./...
+go -C experiments/e3-talos-compatibility/machinery/v1.13.6 mod verify
+go -C experiments/e3-talos-compatibility/machinery/v1.13.6 mod tidy -diff
+go -C experiments/e3-talos-compatibility/machinery/v1.13.6 vet ./...
+go -C experiments/e3-talos-compatibility/machinery/v1.13.10 mod verify
+go -C experiments/e3-talos-compatibility/machinery/v1.13.10 mod tidy -diff
+go -C experiments/e3-talos-compatibility/machinery/v1.13.10 vet ./...
+go -C experiments/e3-talos-compatibility/machinery/v1.14.1 mod verify
+go -C experiments/e3-talos-compatibility/machinery/v1.14.1 mod tidy -diff
+go -C experiments/e3-talos-compatibility/machinery/v1.14.1 vet ./...
+go -C experiments/e3-talos-compatibility/machinery/v1.15.0-alpha.0 mod verify
+go -C experiments/e3-talos-compatibility/machinery/v1.15.0-alpha.0 mod tidy -diff
+go -C experiments/e3-talos-compatibility/machinery/v1.15.0-alpha.0 vet ./...
+go -C experiments/e3-talos-compatibility/machinery/v1.13.6 test ./...
 """
 
 [tasks.upstream-sync]
