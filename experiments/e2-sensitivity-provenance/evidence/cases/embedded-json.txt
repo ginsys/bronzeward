@@ -1,0 +1,314 @@
+==> fixture/diff.txt <==
+--- base
++++ output
+@@ -16,6 +16,12 @@
+     install:
+         wipe: false
+         grubUseUKICmdline: true
++    files:
++        - content: |
++            {"endpoint":"https://e2.example.test","token":"\u003credacted:app-token@1\u003e"}
++          permissions: 0o644
++          path: /var/etc/e2/config.json
++          op: create
+     features:
+         diskQuotaSupport: true
+         kubePrism:
+==> fixture/errors.txt <==
+--- patch (exit 0, none) ---
+--- validate (exit 0, verbatim) ---
+out.yaml is valid for container mode
+==> fixture/log.txt <==
+resolve fragment=f1.yaml ref=app-token@1 doc=v1alpha1 path=machine/files[path=/var/etc/e2/config.json]/content|json/token
+compose fragments=f1.yaml exit=0
+patch exit=0 message=none
+validate exit=0 message=verbatim
+| out.yaml is valid for container mode
+provenance effective=app-token overridden=- unresolved=-
+==> fixture/support.txt <==
+### configuration
+version: v1alpha1
+debug: false
+persist: true
+machine:
+    type: controlplane
+    token: <redacted:schema>
+    ca:
+        crt: <masked:bundle-public>
+        key: <redacted:schema>
+    certSANs:
+        - 127.0.0.1
+    kubelet:
+        image: ghcr.io/siderolabs/kubelet:v1.36.2
+        defaultRuntimeSeccompProfileEnabled: true
+        disableManifestsDirectory: true
+    install:
+        wipe: false
+        grubUseUKICmdline: true
+    files:
+        - content: |
+            {"endpoint":"https://e2.example.test","token":"\u003credacted:app-token@1\u003e"}
+          permissions: 0o644
+          path: /var/etc/e2/config.json
+          op: create
+    features:
+        diskQuotaSupport: true
+        kubePrism:
+            enabled: true
+            port: 7445
+        hostDNS:
+            enabled: true
+            forwardKubeDNSToHost: true
+    nodeLabels:
+        node.kubernetes.io/exclude-from-external-load-balancers: ""
+cluster:
+    id: <masked:bundle-public>
+    secret: <redacted:schema>
+    controlPlane:
+        endpoint: https://10.55.0.2:6443
+    clusterName: bw-fixture
+    network:
+        dnsDomain: cluster.local
+        podSubnets:
+            - 10.244.0.0/16
+        serviceSubnets:
+            - 10.96.0.0/12
+    token: <redacted:schema>
+    secretboxEncryptionSecret: <redacted:schema>
+    ca:
+        crt: <masked:bundle-public>
+        key: <redacted:schema>
+    aggregatorCA:
+        crt: <masked:bundle-public>
+        key: <redacted:schema>
+    serviceAccount:
+        key: <redacted:schema>
+    apiServer:
+        image: registry.k8s.io/kube-apiserver:v1.36.2
+        certSANs:
+            - 127.0.0.1
+        admissionControl:
+            - name: PodSecurity
+              configuration:
+                apiVersion: pod-security.admission.config.k8s.io/v1alpha1
+                defaults:
+                    audit: restricted
+                    audit-version: latest
+                    enforce: baseline
+                    enforce-version: latest
+                    warn: restricted
+                    warn-version: latest
+                exemptions:
+                    namespaces:
+                        - kube-system
+                    runtimeClasses: []
+                    usernames: []
+                kind: PodSecurityConfiguration
+        auditPolicy:
+            apiVersion: audit.k8s.io/v1
+            kind: Policy
+            rules:
+                - level: Metadata
+    controllerManager:
+        image: registry.k8s.io/kube-controller-manager:v1.36.2
+    proxy:
+        image: registry.k8s.io/kube-proxy:v1.36.2
+    scheduler:
+        image: registry.k8s.io/kube-scheduler:v1.36.2
+    discovery:
+        enabled: true
+        registries:
+            kubernetes:
+                disabled: true
+            service: {}
+    etcd:
+        ca:
+            crt: <masked:bundle-public>
+            key: <redacted:schema>
+---
+apiVersion: v1alpha1
+kind: HostnameConfig
+auto: stable
+### fragment f1.yaml, resolved
+machine:
+    files:
+        - path: /var/etc/e2/config.json
+          op: create
+          permissions: 0o644
+          content: |
+            {"endpoint":"https://e2.example.test","token":"\u003credacted:app-token@1\u003e"}
+### provenance
+occurrence	ref	version	modifier	leaf	fragment	fragment-sha256	source-doc	source-path	status	output-doc	output-path	overridden-by
+0	app-token	1	-	-	f1.yaml	304565443a1027d3f6dbc626b4d7cf071c34cfa5e325335fbfc07aaf9feb6e04	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token	effective	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token	-
+### dependencies
+record	reference	fragments
+effective	app-token@1	-
+reproduction	app-token@1	f1.yaml@304565443a10
+### errors
+--- patch (exit 0, none) ---
+--- validate (exit 0, verbatim) ---
+out.yaml is valid for container mode
+### log
+resolve fragment=f1.yaml ref=app-token@1 doc=v1alpha1 path=machine/files[path=/var/etc/e2/config.json]/content|json/token
+compose fragments=f1.yaml exit=0
+patch exit=0 message=none
+validate exit=0 message=verbatim
+| out.yaml is valid for container mode
+provenance effective=app-token overridden=- unresolved=-
+==> generated/diff.txt <==
+--- base
++++ output
+@@ -17,6 +17,12 @@
+         image: ghcr.io/siderolabs/installer:v1.13.6
+         wipe: false
+         grubUseUKICmdline: true
++    files:
++        - content: |
++            {"endpoint":"https://e2.example.test","token":"\u003credacted:app-token@1\u003e"}
++          permissions: 0o644
++          path: /var/etc/e2/config.json
++          op: create
+     features:
+         diskQuotaSupport: true
+         kubePrism:
+==> generated/errors.txt <==
+--- patch (exit 0, none) ---
+--- validate (exit 0, verbatim) ---
+out.yaml is valid for metal mode
+==> generated/log.txt <==
+resolve fragment=f1.yaml ref=app-token@1 doc=v1alpha1 path=machine/files[path=/var/etc/e2/config.json]/content|json/token
+compose fragments=f1.yaml exit=0
+patch exit=0 message=none
+validate exit=0 message=verbatim
+| out.yaml is valid for metal mode
+provenance effective=app-token overridden=- unresolved=-
+==> generated/support.txt <==
+### configuration
+version: v1alpha1
+debug: false
+persist: true
+machine:
+    type: controlplane
+    token: <redacted:schema>
+    ca:
+        crt: <masked:bundle-public>
+        key: <redacted:schema>
+    certSANs: []
+    kubelet:
+        image: ghcr.io/siderolabs/kubelet:v1.36.2
+        defaultRuntimeSeccompProfileEnabled: true
+        disableManifestsDirectory: true
+    install:
+        disk: /dev/sda
+        image: ghcr.io/siderolabs/installer:v1.13.6
+        wipe: false
+        grubUseUKICmdline: true
+    files:
+        - content: |
+            {"endpoint":"https://e2.example.test","token":"\u003credacted:app-token@1\u003e"}
+          permissions: 0o644
+          path: /var/etc/e2/config.json
+          op: create
+    features:
+        diskQuotaSupport: true
+        kubePrism:
+            enabled: true
+            port: 7445
+        hostDNS:
+            enabled: true
+            forwardKubeDNSToHost: true
+    nodeLabels:
+        node.kubernetes.io/exclude-from-external-load-balancers: ""
+cluster:
+    id: <masked:bundle-public>
+    secret: <redacted:schema>
+    controlPlane:
+        endpoint: https://192.0.2.10:6443
+    clusterName: e2-sensitivity
+    network:
+        dnsDomain: cluster.local
+        podSubnets:
+            - 10.244.0.0/16
+        serviceSubnets:
+            - 10.96.0.0/12
+    token: <redacted:schema>
+    secretboxEncryptionSecret: <redacted:schema>
+    ca:
+        crt: <masked:bundle-public>
+        key: <redacted:schema>
+    aggregatorCA:
+        crt: <masked:bundle-public>
+        key: <redacted:schema>
+    serviceAccount:
+        key: <redacted:schema>
+    apiServer:
+        image: registry.k8s.io/kube-apiserver:v1.36.2
+        admissionControl:
+            - name: PodSecurity
+              configuration:
+                apiVersion: pod-security.admission.config.k8s.io/v1alpha1
+                defaults:
+                    audit: restricted
+                    audit-version: latest
+                    enforce: baseline
+                    enforce-version: latest
+                    warn: restricted
+                    warn-version: latest
+                exemptions:
+                    namespaces:
+                        - kube-system
+                    runtimeClasses: []
+                    usernames: []
+                kind: PodSecurityConfiguration
+        auditPolicy:
+            apiVersion: audit.k8s.io/v1
+            kind: Policy
+            rules:
+                - level: Metadata
+    controllerManager:
+        image: registry.k8s.io/kube-controller-manager:v1.36.2
+    proxy:
+        image: registry.k8s.io/kube-proxy:v1.36.2
+    scheduler:
+        image: registry.k8s.io/kube-scheduler:v1.36.2
+    discovery:
+        enabled: true
+        registries:
+            kubernetes:
+                disabled: true
+            service: {}
+    etcd:
+        ca:
+            crt: <masked:bundle-public>
+            key: <redacted:schema>
+---
+apiVersion: v1alpha1
+kind: HostnameConfig
+auto: stable
+### fragment f1.yaml, resolved
+machine:
+    files:
+        - path: /var/etc/e2/config.json
+          op: create
+          permissions: 0o644
+          content: |
+            {"endpoint":"https://e2.example.test","token":"\u003credacted:app-token@1\u003e"}
+### provenance
+occurrence	ref	version	modifier	leaf	fragment	fragment-sha256	source-doc	source-path	status	output-doc	output-path	overridden-by
+0	app-token	1	-	-	f1.yaml	304565443a1027d3f6dbc626b4d7cf071c34cfa5e325335fbfc07aaf9feb6e04	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token	effective	v1alpha1	machine/files[path=/var/etc/e2/config.json]/content|json/token	-
+### dependencies
+record	reference	fragments
+effective	app-token@1	-
+reproduction	app-token@1	f1.yaml@304565443a10
+### errors
+--- patch (exit 0, none) ---
+--- validate (exit 0, verbatim) ---
+out.yaml is valid for metal mode
+### log
+resolve fragment=f1.yaml ref=app-token@1 doc=v1alpha1 path=machine/files[path=/var/etc/e2/config.json]/content|json/token
+compose fragments=f1.yaml exit=0
+patch exit=0 message=none
+validate exit=0 message=verbatim
+| out.yaml is valid for metal mode
+provenance effective=app-token overridden=- unresolved=-
+==> end <==

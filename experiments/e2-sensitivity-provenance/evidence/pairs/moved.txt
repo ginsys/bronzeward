@@ -1,0 +1,65 @@
+==> fixture/path+schema+value/diff.txt <==
+--- revision-a
++++ revision-b
+@@ -18,7 +18,7 @@
+         grubUseUKICmdline: true
+     registries:
+         config:
+-            registry.example.test:
++            mirror.example.test:
+                 auth:
+                     username: e2sp-user
+                     password: <redacted:reg-pass@1>
+==> fixture/composed-path/diff.txt <==
+--- revision-a
++++ revision-b
+@@ -18,7 +18,7 @@
+         grubUseUKICmdline: true
+     registries:
+         config:
+-            registry.example.test:
++            mirror.example.test:
+                 auth:
+                     username: e2sp-user
+                     password: <redacted:reg-pass@1>
+==> fixture/controls.tsv <==
+fixture	moved	stale-paths-leak	fired	1 findings of revision b's values under revision a's composed paths
+fixture	moved	stale-paths-version	did-not-fire	0 leaves where revision a's token names another reference or version than b's own
+fixture	moved	stale-values-leak	did-not-fire	0 findings of revision b's values under revision a's values
+==> fixture/expectations.tsv <==
+fixture	moved	pair-leak.none	leak	leak	yes
+fixture	moved	pair-leak.path+schema+value	clean	clean	yes
+fixture	moved	fidelity	ok	ok	yes
+==> generated/path+schema+value/diff.txt <==
+--- revision-a
++++ revision-b
+@@ -19,7 +19,7 @@
+         grubUseUKICmdline: true
+     registries:
+         config:
+-            registry.example.test:
++            mirror.example.test:
+                 auth:
+                     username: e2sp-user
+                     password: <redacted:reg-pass@1>
+==> generated/composed-path/diff.txt <==
+--- revision-a
++++ revision-b
+@@ -19,7 +19,7 @@
+         grubUseUKICmdline: true
+     registries:
+         config:
+-            registry.example.test:
++            mirror.example.test:
+                 auth:
+                     username: e2sp-user
+                     password: <redacted:reg-pass@1>
+==> generated/controls.tsv <==
+generated	moved	stale-paths-leak	fired	1 findings of revision b's values under revision a's composed paths
+generated	moved	stale-paths-version	did-not-fire	0 leaves where revision a's token names another reference or version than b's own
+generated	moved	stale-values-leak	did-not-fire	0 findings of revision b's values under revision a's values
+==> generated/expectations.tsv <==
+generated	moved	pair-leak.none	leak	leak	yes
+generated	moved	pair-leak.path+schema+value	clean	clean	yes
+generated	moved	fidelity	ok	ok	yes
+==> end <==

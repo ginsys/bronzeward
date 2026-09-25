@@ -1,0 +1,65 @@
+==> fixture/path+schema+value/diff.txt <==
+--- revision-a
++++ revision-b
+@@ -21,7 +21,7 @@
+             registry.example.test:
+                 auth:
+                     username: e2sp-user
+-                    password: <redacted:reg-pass@1>
++                    password: <redacted:reg-pass@2>
+     features:
+         diskQuotaSupport: true
+         kubePrism:
+==> fixture/composed-path/diff.txt <==
+--- revision-a
++++ revision-b
+@@ -21,7 +21,7 @@
+             registry.example.test:
+                 auth:
+                     username: e2sp-user
+-                    password: <redacted:reg-pass@1>
++                    password: <redacted:reg-pass@2>
+     features:
+         diskQuotaSupport: true
+         kubePrism:
+==> fixture/controls.tsv <==
+fixture	rotate	stale-paths-leak	did-not-fire	0 findings of revision b's values under revision a's composed paths
+fixture	rotate	stale-paths-version	fired	1 leaves where revision a's token names another reference or version than b's own
+fixture	rotate	stale-values-leak	fired	1 findings of revision b's values under revision a's values
+==> fixture/expectations.tsv <==
+fixture	rotate	pair-leak.none	leak	leak	yes
+fixture	rotate	pair-leak.path+schema+value	clean	clean	yes
+fixture	rotate	fidelity	ok	ok	yes
+==> generated/path+schema+value/diff.txt <==
+--- revision-a
++++ revision-b
+@@ -22,7 +22,7 @@
+             registry.example.test:
+                 auth:
+                     username: e2sp-user
+-                    password: <redacted:reg-pass@1>
++                    password: <redacted:reg-pass@2>
+     features:
+         diskQuotaSupport: true
+         kubePrism:
+==> generated/composed-path/diff.txt <==
+--- revision-a
++++ revision-b
+@@ -22,7 +22,7 @@
+             registry.example.test:
+                 auth:
+                     username: e2sp-user
+-                    password: <redacted:reg-pass@1>
++                    password: <redacted:reg-pass@2>
+     features:
+         diskQuotaSupport: true
+         kubePrism:
+==> generated/controls.tsv <==
+generated	rotate	stale-paths-leak	did-not-fire	0 findings of revision b's values under revision a's composed paths
+generated	rotate	stale-paths-version	fired	1 leaves where revision a's token names another reference or version than b's own
+generated	rotate	stale-values-leak	fired	1 findings of revision b's values under revision a's values
+==> generated/expectations.tsv <==
+generated	rotate	pair-leak.none	leak	leak	yes
+generated	rotate	pair-leak.path+schema+value	clean	clean	yes
+generated	rotate	fidelity	ok	ok	yes
+==> end <==

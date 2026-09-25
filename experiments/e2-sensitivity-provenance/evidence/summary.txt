@@ -1,0 +1,31 @@
+cells	56
+pairs	4
+expectations	1356
+unexpected	2
+  fixture/alias leak.resolution-path expected leak observed clean
+  generated/alias leak.resolution-path expected leak observed clean
+
+rep	cells-leaking-a-reference-value	cells-leaking-a-base-secret
+none	54	52
+value	16	0
+resolution-path	10	52
+schema	30	0
+composed-path	2	52
+path+schema	2	0
+path+schema+value	0	0
+
+control	results
+base-holds-no-case-secret	pass=56
+fidelity-check-fires	fired=40 not-applicable=12
+per-side-diff-exposes-base-value	fired=6
+render-identity	pass=56
+resolution-records-match	pass=56
+schema-covers-base-secrets	pass=56
+stale-paths-leak	did-not-fire=2 fired=2
+stale-paths-version	did-not-fire=2 fired=2
+stale-values-leak	did-not-fire=2 fired=2
+template-check-fires-patch	fired=4
+template-check-fires-validate	fired=2
+trace-holds-no-secret	pass=56
+
+verdict	complete
