@@ -57,7 +57,9 @@ fixture's 1.36.2.
 Every cell runs through both implementations:
 
 - **talosctl as a subprocess:** that release's `talosctl`, downloaded once and checked against the
-  release's own `sha256sum.txt`.
+  SHA-256 pinned for it in `versions.env`. The v1.13.6 pin is the fixture's, which the
+  [fixtures report](20260919-investigation-fixtures.md) records as taken from upstream
+  `sha256sum.txt`; the committed evidence does not record where the other five pins came from.
 - **the Go machinery:** `e3m`, one source
   ([`machinery/src/main.go`](../../../experiments/e3-talos-compatibility/machinery/src/main.go))
   built once per version against that tag's `pkg/machinery` module. `gen` goes through
@@ -236,10 +238,13 @@ machinery module has no skew check of this kind, so `e3m` prints none by constru
 caller that wants one has to compare versions itself. Standard output was unaffected, so a
 subprocess caller that separates the streams reads the same bytes.
 
-**Configurations (rpc-contract, 42 of 42 rows match: both implementations reach the same verdict
-and nothing lands).** Each renderer's worker configuration was dry-run applied to the live worker
-in no-reboot mode through the pinned client, as `talosctl` and as the machinery. The node's reason
-is the same text through both in every refused row, once `e3m`'s quoting of `"` is removed:
+**Configurations (rpc-contract, 42 of 42 rows match: both implementations exit alike, both zero or
+both non-zero, and nothing lands).** Each renderer's worker configuration was dry-run applied to the
+live worker in no-reboot mode through the pinned client, as `talosctl` and as the machinery. The
+node's reason is the same text through both in all 18 refused rows, once `e3m`'s quoting of `"` is
+removed. That was checked by reading the `reason` and `mreason` fields of `rows.tsv`, not by the
+harness: its verdict compares exit statuses only and records the two reasons without comparing
+them (§7).
 
 | Worker configuration | Node's answer |
 |---|---|
@@ -296,7 +301,8 @@ the cells and sentences used here are recorded verbatim in
   says the migration "is only tested between adjacent minor releases" and recommends upgrading
   through the latest patch of every intermediate minor. For the client, it recommends "the version
   that matches the current running version of the cluster".
-- The older `talos.dev/v1.13/introduction/support-matrix/` URL now returns 404.
+- The older `talos.dev/v1.13/introduction/support-matrix/` URL returned 404 when the pages were
+  read. That is not recorded in `upstream-docs.md` and is outside the committed evidence (§7).
 
 So the machinery's windows are wider than the documented tested path: it accepts a two-minor
 upgrade and a one-minor downgrade that the documentation does not describe as tested, and one
@@ -373,20 +379,23 @@ and stays in §4.3.
 ### 6.2 Criterion 2: subprocess against machinery, and the structural-reference evidence
 
 **Behaviour is the same.** In every cell measured through both, the two implementations agree:
-identical generation (132 of 132 rows), the same validation verdict and message text (504 rows,
-2016 cells; strict 84 rows, 336 cells), the same RPC outcomes for the 6 client pairs, the same
-node verdict and reason for all 42 contract dry runs, and the node's refusal of the invalid
-control. Two things were not compared: validation of the machinery's own files (identical to
-talosctl's, §4.1), and the skew warning, which the machinery has no code for (§4.3). The choice
-between them is not a compatibility choice within this matrix. It is a packaging and
-maintenance one:
+identical generation (132 of 132 rows), the same validation verdict (504 rows, 2016 cells; strict
+84 rows, 336 cells), the same refusal text in the 48 refused validation rows (M8/M9 and M10/M11,
+differing only in `e3m`'s `error="…"` wrapper, its escaped quotes and its `withheld_lines=0`), the
+same RPC outcomes for the 6 client pairs, the same node verdict for all 42 contract dry runs and the
+same reason in the 18 refused ones, and the node's refusal of the invalid control. A valid cell's
+output is not the same text: talosctl prints M5 or M6, `e3m` prints M7. The 18 reasons were
+compared by reading `rows.tsv`, not by the harness (§4.3). Two things were not compared: validation
+of the machinery's own files (identical to talosctl's, §4.1), and the skew warning, which the
+machinery has no code for (§4.3). The choice between them is not a compatibility choice within this
+matrix. It is a packaging and maintenance one:
 
 | | talosctl subprocess | Go machinery |
 |---|---|---|
-| Several renderer versions in one manager | one binary per version (98 to 119 MB each here), checked by digest | one build per version: a Go build links a single version of `pkg/machinery`, so several versions mean several binaries or plugin processes anyway (the six modules under `machinery/`) |
+| Several renderer versions in one manager | one binary per version (98 to 119 MB each here; not in the committed evidence), checked by digest | one build per version: a Go build links a single version of `pkg/machinery`, so several versions mean several binaries or plugin processes anyway (the six modules under `machinery/`) |
 | Version-to-version API drift | CLI flags: `apply-config --mode` lists `auto, no-reboot, reboot, staged, try` in v1.12.12 to v1.13.10 and drops `reboot` from v1.14.1 on (`talosctl apply-config --help`; not in the committed evidence) | `secrets.Bundle.Validate` gained a version-contract parameter in v1.14, which needed two shims selected per module (`bundle_v112.go`, `bundle_v114.go`) |
 | API surface not public | none needed | `talosctl validate`'s `--mode` type lives in the talos module's `internal/` tree; `e3m` implements the machinery's `RuntimeMode` interface itself |
-| Output handling | separate stdout from stderr (skew warning, §4.3); parse text | structured errors and results; the dry-run `ModeDetails` still carry the configuration diff and must be treated as secret |
+| Output handling | separate stdout from stderr (skew warning, §4.3); parse text | a refusal is a gRPC status whose message string embeds the configuration diff, and a dry run's `ModeDetails` string carries it too; both must be filtered as text, as for talosctl (`e3m` keeps an error up to its first diff line and only the first line of `ModeDetails`, §7) |
 | Silent clamping (§4.1) | same | same: the caller must enforce "renderer minor ≥ target minor" itself |
 
 **Structural references.** The
@@ -409,8 +418,9 @@ reference-free fragments, and it measured that on v1.13.6 only. E3 adds:
   version its paths with the contract.
 - The machinery returns the same error text as `talosctl` (M8/M9, the rpc-contract reasons and the
   controls; M4's `invalid talos-version:` prefix is `e3m`'s own). Issue
-  3's observation that decode errors quote a value prefix is a property of the machinery's decoder,
-  not of the CLI, and applies to both implementations.
+  3's observation that decode errors quote a value prefix plausibly holds for both implementations,
+  since the decoder is the machinery's and not the CLI's. That is an inference: no output in this
+  run quotes a value.
 
 ### 6.3 Criterion 3: unsupported combinations, and the deferred lifecycle tests
 
@@ -464,6 +474,33 @@ Upgrade/LifecycleClient transition, which the §18.1 row names, was not executed
   of each implementation only; only the label patch was really applied.
 - **The contract dry runs ran against the worker as the rpc-client rows left it**, carrying their
   12 label patches, not against the fixture's initial configuration.
+- **"A label patch" was applied as a full re-encode.** Each rpc-client artifact is
+  `talosctl machineconfig patch`'s output for the whole configuration, and the worker's
+  configuration read 428 lines at row 001 and 55 lines at row 003, after the first two applies
+  ([`transcripts/rpc-client.txt`](../../../experiments/e3-talos-compatibility/evidence/transcripts/rpc-client.txt)).
+  What the re-encode changed beyond the label is not recorded.
+- **The rpc-contract verdict compares exit statuses only.** `verdict=agree` whenever both exits are
+  zero or both are non-zero; `reason` and `mreason` are `seen:` readings, which only require the
+  reading to exist, and `run/all` always sets both (`-` when there is none). The same reason
+  through both (§4.3) was read from `rows.tsv`, and no control shows a `differ` verdict firing.
+- **`e3m`'s diff filter fails open.** `withholdDiff` (`machinery/src/main.go`) cuts an error at the
+  first line that starts with `diff:`, `Config diff:` or `--- `, as the harness's `step_quiet` does
+  for talosctl; a diff in any other format would be printed into a committed transcript, with the
+  leak scan's fixed-string patterns as the only backstop. In this capture no refusal's output held
+  a scan pattern: the leak-scan list in
+  [`bundle-summary.txt`](../../../experiments/e3-talos-compatibility/evidence/bundle-summary.txt)
+  names none of the 18 refused rows' raw talosctl outputs, while it names all 24 accepted rows'. So
+  the filter was never exercised on a diff holding a secret; its unit test uses a synthetic
+  `token:` line. A later implementation should fail closed: withhold everything it cannot
+  positively recognise as safe.
+- **Missing inputs shrink the tables instead of failing the run.** An rpc-contract row whose worker
+  configuration is missing is skipped (`continue` in `run/all`), and `paths_run` writes no section
+  when either file is missing (`return 0`); only the validate and strict groups record the gap, as
+  `no-config`. The `gen-bogus-refused` control accepts any non-zero exit, a timeout included. In
+  this capture every expected row is present (60 rows in `run.txt`: 12 rpc-client, 42
+  rpc-contract, 5 controls, 1 test), every `paths/` section is present (70 in `renderers.txt`, 12
+  in `contracts.txt`, 42 in `live-worker.txt`), no cell is `no-config`, and all 12 `bogus` rows
+  exit 1 through both implementations.
 - **One set of generation inputs.** One cluster name, endpoint, installer image and secrets bundle,
   no patches at generation, no docs or examples. Other options may change which contracts differ.
 - **The policy points are a sample.** Kubernetes 1.29.0 to 1.37.0 (ten points) and Talos v1.10 to
@@ -471,7 +508,8 @@ Upgrade/LifecycleClient transition, which the §18.1 row names, was not executed
 - **Upstream documentation is dated by reading, not by the page.** Neither support-matrix page
   carries a last-updated date, and the two disagree (§4.4).
 - **The `--mode reboot` observation** (§6.2) comes from each binary's `--help`, read after the
-  capture; it is not in the committed evidence.
+  capture; it is not in the committed evidence. Nor are the `talosctl` binary sizes (§6.2) or the
+  404 of the older support-matrix URL (§4.4).
 - **`E3_OUT`'s guard is a prefix test on the path as given.** It refuses any path beginning with
   the checkout's path, a sibling such as `<checkout>-out` included, which fails closed. Nothing is
   canonicalized, so a path that reaches the checkout through a `..` component or a symlink without
@@ -492,14 +530,17 @@ For the PoC's existing-cluster configuration control:
 - **Record the contract, not only the renderer.** A release that records "rendered by v1.14.1" does
   not say whether a v1.13 node can decode it; the contract does.
 - **Choose between subprocess and machinery on packaging, not compatibility.** Within this matrix
-  they behaved identically wherever both were measured (§6.2). Either way, several renderer versions mean several binaries.
+  they reached the same outcomes wherever both were measured (§6.2). Either way, several renderer
+  versions mean several binaries.
 - **Treat the machinery's `compatibility` answers as permissive,** wider than the documented tested
   path. A Bronzeward support policy, if one is wanted, is a separate decision.
 
 ## 9. Hand-off
 
 - **To [renderer selection](https://github.com/ginsys/bronzeward/issues/17):** §6.2's packaging
-  table, the silent clamping (§4.1), and the contract-versioned paths under v1.14 (§6.2).
+  table, the silent clamping (§4.1), and the contract-versioned paths under v1.14 (§6.2). Either
+  implementation returns the configuration diff as text in its errors and dry-run results; the
+  filter that keeps it out of logs and evidence should fail closed, unlike this prototype's (§7).
 - **To the [feasibility review](https://github.com/ginsys/bronzeward/issues/12):** the deferred
   lifecycle execution (§6.3) is a permanent caveat of this investigation; design E3 did not pass
   (§6.4).
