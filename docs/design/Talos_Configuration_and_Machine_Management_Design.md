@@ -147,7 +147,7 @@ The September review then narrowed first delivery to existing-cluster configurat
 | Secret authoring | Automatic Talos bundle extraction; operator marking for other secrets; whole-value structural references | Decided; syntax and resolution timing open |
 | Approval | Trusted controller enforces immutable approved plans; self/multi-party policy remains open | Boundary decided |
 | Recovery | Evidence-based interrupted-operation handling; explicit recovery mode after restoration | Decided |
-| Retention and alerts | PoC removes no provider object; recovery window is the operator's backup retention; persistent-unknown alert after 15 minutes; manual unseal (§7.8) | Decided for the PoC |
+| Retention and alerts | PoC removes no provider object (and, derived, no release, artifact or source record); recovery window is the operator's backup retention; persistent-unknown alert after 15 minutes; manual unseal (§7.8) | Decided for the PoC |
 | First milestone | Configuration control on an existing cluster | Decided |
 | CAPI                             | Avoided and outside scope                                                                                              | Decided            |
 | Infrastructure provisioning      | Outside initial scope                                                                                                  | Decided            |
@@ -457,7 +457,7 @@ This check establishes retention status only. Readability, authorization and suc
 1. Run, secure and back up the PostgreSQL server, the OpenBao node and the credential store holding Bronzeward's provider tokens: the three backup families of the key-loss evidence ([key loss §2.1](research/20260924-key-loss-restoration.md#21-three-backup-families-three-generations)). Bronzeward owns the schema, migrations and connection/transaction behavior.
 2. Hold the OpenBao unseal key share apart from every backup family. Nothing is available until it is supplied (provider comparison §6.3; [key loss §3.3](research/20260924-key-loss-restoration.md#33-custody-and-unlock-prerequisites-per-case) case K).
 3. Take the provider backup no earlier than the database backup it pairs with, and keep the credential store's backup matched to the provider's (key loss §7 item 2, inferred from the cases).
-4. While a database backup that references a key version may still be restored, keep that version decryptable, or accept regeneration and re-approval for those releases (key loss §7 item 3, inferred).
+4. While a database backup that references a key version may still be restored, keep that version decryptable, or accept regeneration and re-approval for those releases (key loss §7 item 3, inferred). The PoC takes the first branch (§7.8).
 5. Restrict delete/destroy/trim, whole-key deletion and dangerous configuration writes (§7.5); whole-key and whole-path deletion classify as unknown, not lost (retention classification §8 item 1).
 6. After restoring either service, enter explicit recovery mode (§14.6) before normal startup.
 
@@ -467,7 +467,9 @@ This check establishes retention status only. Readability, authorization and suc
 
 **Decision** (owner, 25 September 2026, [retention and recovery policy](https://github.com/ginsys/bronzeward/issues/15)). For the PoC profile (§7.7):
 
-1. **Retention: nothing is removed.** Bronzeward deletes, soft-deletes, destroys and trims no provider object: no KV secret version, Transit key or key version, and no stored artifact or release record. Each generation is its own immutable object (§7.3), so no write prunes a referenced version past KV's `max_versions`, which prunes beyond ten by default ([retention classification §6.4](research/20260924-retention-metadata-classification.md#64-criterion-4-provider-limits-and-the-alert-policy-the-evidence-supports)).
+1. **Retention: the provider loses nothing through Bronzeward.** Bronzeward deletes, soft-deletes, destroys and trims no provider object: no KV secret version, Transit key or key version. KV prunes past `max_versions`, ten by default ([retention classification §6.4](research/20260924-retention-metadata-classification.md#64-criterion-4-provider-limits-and-the-alert-policy-the-evidence-supports)), so Bronzeward also never writes a referenced path past its `max_versions`. It either creates each generation with `cas=0` at a path of its own, or sets `max_versions` explicitly where a path is overwritten ([retention classification §9](research/20260924-retention-metadata-classification.md#9-hand-off)). The physical layout stays open (§7.3). Neither choice binds an administrator, who can still add or remove versions (§7.5).
+
+   *Derived, not separately decided:* application-controlled deletion of database records (releases, stored artifacts, source revisions, dependency records) needs the same reference graph as provider cleanup (§7.4). Without that graph, the PoC deletes none of them either.
 2. **Recovery window: the operator's backup retention.** Any backup generation still retained can be restored under §7.7's pairing duties. What can be lost for good is what was created after the newest snapshot of any backup family, so the backup interval bounds that exposure ([key loss §7](research/20260924-key-loss-restoration.md#7-recommendation) item 5, inferred). The operator chooses both the interval and the retention.
 3. **Alerts.** The dependency monitor (§7.6) raises:
 
@@ -477,11 +479,11 @@ This check establishes retention status only. Readability, authorization and suc
    | `blocked` | at once, stating that the block is reversible |
    | `retained` becoming `unknown` | at once, as a regression |
    | `unknown` persisting, including a dependency never seen `retained` | after **15 minutes** |
-   | `retained` with a scheduled deletion | a warning before the scheduled time |
+   | `retained` with a scheduled deletion | a warning at once when the scheduled deletion is first observed |
 
-   A 404 for a referenced name stays `unknown` and never becomes `lost`, because OpenBao answers a deleted key, deleted metadata and a name that never existed alike. Only the change from `retained` shows the loss (retention classification §6.4). The 15-minute interval is a choice, not a measurement: a partition, a pause and a seal look alike from the client, and the interval is meant to ride out a restart or an unseal.
-4. **Custody and startup unlock: manual unseal.** The operator holds the unseal key share (or shares, at a threshold of their choosing) apart from every backup family (§7.7). After any OpenBao restart, Bronzeward can neither compile nor execute until the operator unseals, while clusters keep running (§14.1). Auto-unseal was not exercised and is not part of the PoC ([provider comparison §7](research/20260924-provider-capability-comparison.md#7-limits)).
-5. **Backup alignment.** §7.7's duties 3 and 4 are mandatory: provider backups no older than the database backup they pair with, credential-store backups matched to the provider, and no floor raise or rewrap while a database backup that references the old version is within retention. They are inferred, and two database/provider/store age combinations (g1/g2/g1 and g2/g1/g2) were not tested ([key loss §6](research/20260924-key-loss-restoration.md#6-limits)). The duties stay mandatory at least until those are tested.
+   A 404 for a referenced name stays `unknown` and never becomes `lost`, because OpenBao answers a deleted key, deleted metadata and a name that never existed alike. Only the change from `retained` shows the loss (retention classification §6.4). A restart, seal or partition that makes a retained dependency unreadable therefore alerts at once, as a regression. The 15-minute interval governs only a dependency already `unknown`, or never seen `retained`, re-alerting it as persistent ([retention classification §6.2](research/20260924-retention-metadata-classification.md#62-criterion-2-nothing-uncertain-becomes-lost), row 043). It is a fixed PoC value and a choice, not a measurement: the evidence does not fix an interval, and a partition, a pause and a seal look alike from the client.
+4. **Custody and startup unlock: manual unseal.** The operator holds the unseal key share apart from every backup family (§7.7). One share is the evidenced configuration; a multi-share threshold was not exercised. A sealed OpenBao answers nothing a compiler or executor needs ([provider comparison §6.3](research/20260924-provider-capability-comparison.md#63-criterion-3-custody-unlock-and-migration-trade-offs)), so after an OpenBao restart leaves it sealed, Bronzeward can neither compile nor execute until the operator unseals, while clusters keep running (§14.1). Auto-unseal was not exercised and is not part of the PoC ([provider comparison §7](research/20260924-provider-capability-comparison.md#7-limits)).
+5. **Backup alignment.** §7.7's duties 3 and 4 are mandatory: provider backups no older than the database backup they pair with, credential-store backups matched to the provider, and no floor raise or rewrap while a database backup that references the old version is within retention. They are inferred from the cases, and two database/provider/store age combinations (g1/g2/g1 and g2/g1/g2) were not tested ([key loss §6](research/20260924-key-loss-restoration.md#6-limits)).
 
 **Guarantees kept apart.**
 
@@ -490,13 +492,13 @@ This check establishes retention status only. Readability, authorization and suc
 
 **Alternatives.**
 
-- **Bounded windows with application cleanup** (for example, keeping the last N releases per assignment) were deferred. Cleanup needs the reference graph and in-flight checks of §7.4, which the PoC does not build.
-- **A shorter persistent-unknown interval** would alert on every routine restart. **A longer one** delays noticing a sealed or partitioned provider.
+- **Bounded windows with application cleanup** (for example, keeping the last N releases per assignment) were deferred. Cleanup needs the reference graph and in-flight checks of §7.4, which removing nothing avoids.
+- **A shorter persistent-unknown interval** re-alerts sooner on a dependency whose state is already unclear, at the cost of more repeats. **A longer one** delays that reminder. Neither changes the immediate regression alert.
 - **Auto-unseal** would allow unattended restarts but is unmeasured.
 
 **Consequences and limits.**
 
-- Provider and database storage grow without bound during the PoC. At PoC scale that growth is accepted.
+- Consequence: provider and database storage grow without bound during the PoC, which is small at PoC scale.
 - This policy does not prevent an administrator from destroying the only remaining key or version. §7.5's restrictions are deployment requirements, and an alarm cannot undo a destruction.
 - The following are unmeasured:
   - restoring onto a new OpenBao cluster;
@@ -984,7 +986,7 @@ Every operation should have a single timeline containing the approved plan, mach
 
 - Database release publication or queue lag.
 
-- Blocked/lost dependencies, provider metadata-check failure and unknown dependencies beyond the configured interval; never report monitor silence as health.
+- Blocked/lost dependencies, a retained dependency turning unknown, scheduled deletions, provider metadata-check failure and unknown dependencies beyond the persistent-unknown interval (15 minutes in the PoC, §7.8); never report monitor silence as health.
 
 - Cluster etcd/API health during rollout.
 
