@@ -144,7 +144,7 @@ The September review then narrowed first delivery to existing-cluster configurat
 | Git                              | Not the backend; export/import only                                                                                    | Decided            |
 | Relational backend | PostgreSQL for the PoC (§7.7); SQLite single-instance deferred until dispatch is evidenced on it; MySQL/MariaDB only if required semantics come at negligible extra cost | Decided for the PoC |
 | Secret backend | OpenBao KV v2 and Transit for the PoC (§7.7); local age-backed store not selected; SOPS/age import/export only; provider-neutral references | Decided for the PoC |
-| Secret authoring | Automatic Talos bundle extraction; operator marking for other secrets; whole-value structural references | Decided; syntax and resolution timing open |
+| Secret authoring | Automatic Talos bundle extraction; operator marking for other secrets; whole-value structural references | Decided; for the PoC an explicit `!bwref` tag resolved before composition ([compilation contract §5–§6](../spec/compilation.md#5-reference-grammar-and-declaration)) |
 | Approval | Trusted controller enforces immutable approved plans; PoC: one approval per plan, adoption baselines included; self-approval allowed and recorded; revocation by any `approver` or `recovery-admin`, effective against every attempt not yet recorded (§13.7) | Boundary decided; decided for the PoC |
 | Identity and roles | PoC: OIDC for humans, with roles from identity-provider group claims; hashed Bronzeward-issued bearer tokens for automation, issued with a server-side tool; `viewer`, `author`, `publisher`, `approver` and `recovery-admin`, granted installation-wide; automation never `approver` or `recovery-admin` (§13.7) | Decided for the PoC |
 | Recovery | Evidence-based interrupted-operation handling; explicit recovery mode after restoration | Decided |
@@ -290,7 +290,7 @@ A release records target Talos and Kubernetes versions, configuration contract, 
 
 Compatibility mirrors native talosctl capabilities. A pinned machinery version may generate several older contracts; one binary per target contract is not required. The machinery minor being at least the target contract minor is a prerequisite, not a sufficient compatibility test. Backward-generation constants, upstream release-support policy and working machine operations are separate axes. The pinned v1.13.6 contract code includes older contracts through v1.0; this is not a promise to support every historical fleet or RPC. [T16]
 
-The compatibility investigation must cover rendered output, validation, patch/prerelease boundaries and operation/RPC combinations for the intended fleet. The [renderer research](research/20260826-talhelper-internals-and-topf-successor.md) already records the version-gated legacy Upgrade versus LifecycleClient path around v1.13. A subprocess or Go machinery implementation remains open pending this evidence.
+The compatibility investigation must cover rendered output, validation, patch/prerelease boundaries and operation/RPC combinations for the intended fleet. The [renderer research](research/20260826-talhelper-internals-and-topf-successor.md) already records the version-gated legacy Upgrade versus LifecycleClient path around v1.13. The [compatibility evidence](research/20260925-talos-compatibility.md#8-recommendation) found subprocess and Go machinery equivalent within its matrix; the [compilation contract §10](../spec/compilation.md#10-renderer-selection-and-compatibility-limits) selects the Go machinery in process for the PoC, conditional on re-measuring composition parity through it. Upgrade/LifecycleClient execution remains deferred and design E3 has not passed.
 
 Retain artifact bytes and provenance for the chosen retention period. Preserving historical toolchains or extending compatibility beyond upstream is not a product requirement. A retained artifact still needs current credentials, usable encryption dependencies and an applicable approved plan.
 
@@ -306,7 +306,7 @@ flowchart LR
   A --> X[Authorized dispatch and verification]
 ```
 
-*Figure 3 - Encryption precedes release persistence. Reference resolution relative to upstream typed composition remains an investigation; this diagram does not prescribe that ordering.*
+*Figure 3 - Encryption precedes release persistence. References are resolved per fragment before upstream composition, which then receives only reference-free fragments ([compilation contract §6](../spec/compilation.md#6-resolution-order-and-composition)).*
 
 Publication produces encrypted exact full configurations, redacted structural diffs, source provenance and validation evidence. It does not authorize or cause machine mutation. The application separately plans and approves deployment of the exact published artifacts.
 
@@ -340,7 +340,7 @@ Without those features, this subsystem would largely be a younger and less capab
 
 The Talos-generated secret bundle is the default automated extraction case. Other secrets, including registry passwords, provider tokens and secrets inside inline YAML, remain the operator's responsibility to mark. Bronzeward should assist where upstream schema or redaction metadata identifies them reliably. Unknown, unmarked values cannot be promised automatic detection. Handling embedded software credentials does not extend scope into Kubernetes workload GitOps.
 
-References replace complete parsed values. They name a scoped logical secret and resolve to an exact version; provider layout is separate from authoring syntax. No loops, conditionals, includes, arbitrary functions, recursive evaluation or general string interpolation are allowed. Literal text must remain literal unless explicitly declared as a reference. Any encoding modifier must come from a closed enum; the enum and declaration mechanism are still open.
+References replace complete parsed values. They name a scoped logical secret and resolve to an exact version; provider layout is separate from authoring syntax. No loops, conditionals, includes, arbitrary functions, recursive evaluation or general string interpolation are allowed. Literal text must remain literal unless explicitly declared as a reference. Any encoding modifier must come from a closed enum; the [compilation contract §5](../spec/compilation.md#5-reference-grammar-and-declaration) specifies the PoC enum and declaration mechanism.
 
 | Candidate syntax | Distinguishing tradeoff |
 |---|---|
@@ -348,9 +348,9 @@ References replace complete parsed values. They name a scoped logical secret and
 | Opted-in marked string | Convenient in string fields; literal collisions need explicit declaration and non-string targets may reject the placeholder. |
 | External path binding | Keeps placeholders out of native values; bindings must track document identity, paths and composition changes. |
 
-Embedded YAML/JSON is opaque to all three forms unless explicitly identified and parsed. For identified embedded documents, replace structural values and serialize with sensitivity provenance intact. For arbitrary scripts/text, initially reference the entire content rather than interpolate substrings. No syntax is selected by this comparison.
+Embedded YAML/JSON is opaque to all three forms unless explicitly identified and parsed. For identified embedded documents, replace structural values and serialize with sensitivity provenance intact. For arbitrary scripts/text, initially reference the entire content rather than interpolate substrings. No syntax is selected by this comparison; the [compilation contract §5](../spec/compilation.md#5-reference-grammar-and-declaration) selects the explicit tag for the PoC from the E2 evidence.
 
-Prefer resolving only effective references after upstream composition if upstream typed machinery permits it. Experiment E2 must also test early materialization with a recorded provenance superset, non-string targets, overridden references and embedded content. Distinguish effective artifact dependencies from dependencies needed to reproduce the complete source graph. A custom merge engine is excluded; if no candidate works within that constraint, revise the reference design before implementation.
+The original preference was to resolve only effective references after upstream composition if upstream typed machinery permits it. [E2](research/20260924-structural-reference-composition.md#64-criterion-4-candidate-failures-and-renderer-implications) ruled that out for every candidate, so the [compilation contract §6](../spec/compilation.md#6-resolution-order-and-composition) resolves every reference early and records the superset. Experiment E2 must also test early materialization with a recorded provenance superset, non-string targets, overridden references and embedded content. Distinguish effective artifact dependencies from dependencies needed to reproduce the complete source graph. A custom merge engine is excluded; if no candidate works within that constraint, revise the reference design before implementation.
 
 Validation must state its guarantee:
 
@@ -1152,7 +1152,7 @@ The platform should generate redacted support bundles containing machine invento
 | Default connectivity policy     | Direct-only first versus shipping direct and SideroLink in the initial release.                  | Start direct; preserve transport interface.                                                   |
 | Restricted remote network       | SideroLink gRPC tunnel versus site relay versus REST-polling connector.                          | No concrete site yet; target egress requirement stated in 10.10; REST polling kept as fallback. |
 | SideroLink headend              | Build on open SideroLink packages or implement only a site relay initially.                      | Prototype before committing to production support.                                            |
-| Configuration compiler          | Pinned talosctl subprocess versus Talos Go machinery.                                            | Open pending typed-reference composition and native compatibility experiments.                                 |
+| Configuration compiler          | Pinned talosctl subprocess versus Talos Go machinery.                                            | Go machinery in process for the PoC, conditional on re-measured composition parity ([compilation contract §10](../spec/compilation.md#10-renderer-selection-and-compatibility-limits)). |
 | Artifact retention | Retention windows and provider layout remain open beyond the PoC | Exact encrypted artifacts decided; no silent re-render at apply; retain secret/key dependencies for promised actions; the PoC removes nothing (§7.8) |
 | Adoption baseline               | Exact current per-node configurations versus immediate refactor into profiles.                   | Exact baseline first, refactor later.                                                         |
 | Drift response                  | Automatic revert versus report/adopt/freeze.                                                     | Report by default.                                                                            |
@@ -1170,7 +1170,7 @@ The platform should generate redacted support bundles containing machine invento
 | Installer image sourcing        | Public Image Factory, self-hosted Image Factory or static image list.                            | Decided: public Image Factory in v1; per-site platform image proxy/cache in a later phase.    |
 | Project licence                 | Apache-2.0 versus AGPLv3 versus MPL-2.0.                                                         | Open; must be chosen before first public release; fork-and-SaaS stance undecided.             |
 
-Additional decisions still open: reference grammar/declaration, resolution timing, closed encoding enum, the physical provider layout, and, beyond the PoC profile and policy (§7.7, §7.8), retention windows with cleanup, local encryption/key custody, SQLite suitability and any cost-free additional database support; API token lifetimes and, beyond the PoC identity and approval policy (§13.7), narrower role grants and multi-party approval; and the dispatch/ownership protocol. Section 18.1 assigns evidence rather than pretending these are settled implementations.
+Reference grammar/declaration, resolution timing and the closed encoding enum are specified for the PoC in the [compilation contract](../spec/compilation.md). Additional decisions still open: the physical provider layout, and, beyond the PoC profile and policy (§7.7, §7.8), retention windows with cleanup, local encryption/key custody, SQLite suitability and any cost-free additional database support; API token lifetimes and, beyond the PoC identity and approval policy (§13.7), narrower role grants and multi-party approval; and the dispatch/ownership protocol. Section 18.1 assigns evidence rather than pretending these are settled implementations.
 
 ## 17. Recommended baseline and initial scope
 
