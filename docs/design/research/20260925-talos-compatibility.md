@@ -203,8 +203,10 @@ Source: [`validate.tsv`](../../../experiments/e3-talos-compatibility/evidence/va
 | v1.14.1 or v1.15.0-alpha.0 at `current`, v1.14.0 or v1.15.0 | **refused** by both: `"DiscoveryServiceConfig" "v1alpha1": not registered` (M8 to M11) | valid, both |
 
 - Of 504 rows, 456 are valid in all four cells and 48 are refused in all four (4 validators x
-  6 configurations x 2 machine types): no row mixes verdicts, so talosctl and the machinery agree in
-  all 2016 cells, with the same message text. Validation was only given talosctl's files, which
+  6 configurations x 2 machine types): no row mixes verdicts, so talosctl and the machinery reach
+  the same verdict in all 2016 cells. The message text is not the same: a valid cell prints M5 or
+  M6 through talosctl and M7 through `e3m`, and a refusal differs by `e3m`'s wrapper (§6.2).
+  Validation was only given talosctl's files, which
   are identical to the machinery's (§4.1).
 - v1.14.1 accepts v1.15.0-alpha.0's output, which is the v1.14 layout (§4.1).
 - **Neither generation nor validation enforces the Kubernetes window.** v1.12.12 generates and
@@ -514,6 +516,11 @@ Upgrade/LifecycleClient transition, which the §18.1 row names, was not executed
   the checkout's path, a sibling such as `<checkout>-out` included, which fails closed. Nothing is
   canonicalized, so a path that reaches the checkout through a `..` component or a symlink without
   beginning with its path passes.
+- **A missing pin aborts with the wrong message.** `e3_sha` (`run/lib.sh`) dies when
+  `versions.env` pins no digest for a version, but it runs inside a command substitution, so only
+  the subshell exits. The caller goes on with an empty digest, which still fails closed: `fetch`
+  reports a sha256 mismatch and `tc` reports that the binary is not the pinned one. Every version
+  run here is pinned.
 - **Kubernetes component images inside the nodes are pinned by version, not by digest**
   ([fixtures report](20260919-investigation-fixtures.md)).
 
