@@ -24,8 +24,8 @@ nothing of a referenced value in the artifacts value matching would leak.
 | Acceptance criterion | Answered in |
 |---|---|
 | 1. Path/source sensitivity through each transformation, including moved or overwritten values | §3.1 (the cases), §4.2 (provenance per case), §6.1 |
-| 2. Redaction of diffs and errors without relying solely on matching secret values | §4.1 (the leak matrix), §5, §6.2 |
-| 3. Remaining leakage risks; the provenance needed for effective and reproduction dependency records | §6.3 |
+| 2. Redaction of diffs and errors without relying solely on matching secret values | §4.1 (the leak matrix), §4.4 (the controls and the positive control weighed), §5, §6.2 |
+| 3. Remaining leakage risks; the provenance needed for effective and reproduction dependency records | §6.3, §8 |
 
 ## 2. Candidates
 
@@ -35,7 +35,7 @@ redaction, and the value matching §6.9 calls insufficient.
 | Representation | Redacts |
 |---|---|
 | `none` | nothing |
-| `value` | every text occurrence of a known resolved value (strings and bytes; integers and booleans are not matchable text) |
+| `value` | every text occurrence of a known value as the case stores it, before any modifier (strings and bytes of six bytes or more; integers and booleans are not given to it) |
 | `resolution-path` | the leaf each fragment's resolution wrote, at that fragment's path, read on the composed output |
 | `schema` | every field the Talos machinery (`pkg/machinery` v1.13.6, `RedactSecrets`) marks secret |
 | `composed-path` | the output leaf each reference's value became, found by a tracer pass through composition |
@@ -66,16 +66,21 @@ replaced by its reference's token. A message whose text differs in a way no trac
 whose step succeeded in one pass and failed in the other, is withheld. Representations without a
 composed path show messages as `talosctl` printed them (`value` then value-matches them).
 
-**Diffs.** A diff that shows a base leaf beside its redacted output leaf would reveal a boolean or
-an integer by elimination (`-wipe: false` next to `+wipe: <redacted:...>`). A path representation
-therefore redacts the base side of such a pair as `<redacted:paired>`.
+**Diffs.** A diff that shows a base leaf beside its redacted output leaf would reveal a boolean by
+elimination (`-wipe: false` next to `+wipe: <redacted:...>`), and shows what the reference
+replaced. A path representation therefore redacts the base side of every such pair as
+`<redacted:paired>`, whatever its kind (bool, int and invalid-value's DNS domain here).
 
 ## 3. What was built
 
 - **`bwprov`** (Go, `gopkg.in/yaml.v3`, `pkg/machinery` for the schema representation): derives the
   real, trace and flip passes, attributes tracers after composition, writes every representation's
   diff, errors, log and support data, the provenance and dependency records, the expectations and
-  the controls; pairs two revisions; merges and summarises the run.
+  the controls; pairs two revisions; merges and summarises the run. The diff and the errors come
+  from `talosctl`'s own outputs and messages; the **log and support data are formats `bwprov`
+  writes itself** (resolution and composition lines with the messages, and a bundle of the
+  configuration, each resolved fragment, the provenance and the messages), not `talosctl` or
+  system logs. What §6.2 shows for logs and support data holds for these formats only.
 - **`bwref`**, built unchanged from issue 3's module: generates the forms and resolves them.
 - **`run/all`**: per base and case, derives, resolves (the tag form, early, for the trace passes;
   every candidate for the real pass, to re-check issue 3's premise), composes, validates, analyses;
@@ -89,8 +94,9 @@ therefore redacts the base side of such a pair as `<redacted:paired>`.
   nor the case's fragments also hold; and, for an integer or a boolean, `<key>: <value>`. A base
   secret is looked for exact.
 
-Every expectation was written into `case.yaml` before the first run. As in issue 3, that is
-asserted, not shown by the history, because cases and prototype landed together.
+Every expectation was written into `case.yaml` before the first run, with one exception:
+list-append's `premise: {binding: refused}`, added after the first development run (§7.1). As in
+issue 3, that is asserted, not shown by the history, because cases and prototype landed together.
 
 ### 3.1 Cases
 
@@ -121,7 +127,7 @@ Thirteen are new:
 | list-append | a literal `extraManifests` URL, then a referenced one in fragment 2 | list change: the reference lands at composed index 1, not its fragment index 0 |
 | list-duplicate | two inline manifests named `e2sp-dup`, the second holding a reference | list change; native fails validation on the duplicate name |
 | ref-over-ref | reference `pass-a`, then reference `pass-b` at the same path | reference overwritten by a reference |
-| delete | a reference, then `$patch: delete` on it | reference removed |
+| delete | a reference, then `$patch: delete` on it | reference removed (labelled `reference-overwritten-by-literal` in its `case.yaml` and in `cells.tsv`, a mislabel: no literal is involved) |
 | map-partial | a mapping reference whose password a later literal overwrites | partially overwritten |
 | whole-content | a multi-line script as a machine file's whole content | resolution, block scalar |
 | yaml-escape | a password with a tab, quotes and a backslash | YAML escaping |
@@ -150,7 +156,10 @@ the oracle looks for them as base secrets, separately from reference values.
 | `gopkg.in/yaml.v3` | v3.0.1 |
 
 `evidence/run.txt` records the capture's commit (`456df31`), zero uncommitted inputs, and the
-`talosctl` version and digest.
+`talosctl` version and digest. That commit predates this branch's rebase onto `main`; its rebased
+counterpart, `feat(e2sp): run the matrix on both bases and collect the evidence`, holds the same
+`experiments/e2-sensitivity-provenance/`, `experiments/e2-structural-references/` and `fixtures/`
+trees byte for byte.
 
 ### 3.4 Synthetic values and the leak scan
 
@@ -262,8 +271,9 @@ From `evidence/cells.tsv` and `evidence/provenance.tsv`, per base (both identica
 | unidentified-embedded | 1 | 0 | unresolved (no tracer could be placed) |
 | type-mismatch, type-mismatch-two | 1, 2 | 0 | not composed |
 
-Every other case: one output leaf per tracer, effective. The fidelity check held in every cell: the
-real and trace compositions had the same shape, and the trace pass resolved the same paths as the
+Every other case: one output leaf per tracer, effective. The fidelity check held in every cell (every
+resolved real fragment had its trace and flip counterparts, §8): the real and trace compositions
+had the same shape, and the trace pass resolved the same paths as the
 real one (`resolution-records-match`, 56 of 56).
 
 `resolution-path`, read on the composed output, misses 1 leaf and names 1 wrong leaf in
@@ -281,31 +291,47 @@ wrong, not the representation. It is kept as written and counted as unexpected.
 
 | Control | Claim it guards | Result, all cells |
 |---|---|---|
-| `fidelity-check-fires` | "the trace composition reproduced the real one": a corrupted string tracer must fail it | fired 40; not applicable 12 (no string tracer in the output: bool, int, bytes, delete, override-literal, unidentified-embedded); absent 4 (the two type-mismatch cases, nothing composed) |
+| `fidelity-check-fires` | "the trace composition reproduced the real one": a one-mutation smoke test, replacing one string tracer leaf by a non-tracer, which the check must report; it never exercises a structural change (a leaf added, dropped or moved) | fired 40; not applicable 12 (no string-kind tracer in the output: bool, int and bytes, whose tracer kind is not string, and delete, override-literal and unidentified-embedded, which leave none); absent 4 (the two type-mismatch cases, nothing composed) |
 | `template-check-fires-patch`, `-validate` | "the message template matched": a real message with text its template lacks must be withheld | fired 4 and 2, every cell with a redacted message |
-| `per-side-diff-exposes-base-value` | "the paired diff hides a non-string base value": without pairing the base value shows | fired 6 (bool, int, invalid-value, both bases) |
-| `stale-paths-leak` | moved-r2 under moved-r1's composed paths must leak | fired 2 (moved); did not fire on rotate, as expected |
-| `stale-values-leak` | rotate-r2 under rotate-r1's values must leak | fired 2 (rotate); did not fire on moved, as expected |
-| `stale-paths-version` | rotate-r1's tokens must name another version than rotate-r2's | fired 2 (rotate); did not fire on moved, as expected |
+| `per-side-diff-exposes-base-value` | "the paired diff hides the base value beside a redacted leaf": without pairing, a base leaf's `key: value` text appears in the diff | fired 6 (bool, int, invalid-value, both bases; invalid-value's base value is a string, the base's default DNS domain); the test is loose (§8) |
+| `stale-paths-leak` | moved-r2 under moved-r1's composed paths must leak | fired 2 (moved); did not fire on rotate, observed and not checked (`run/all` requires only moved's) |
+| `stale-values-leak` | rotate-r2 under rotate-r1's values must leak | fired 2 (rotate); did not fire on moved, observed and not checked |
+| `stale-paths-version` | rotate-r1's tokens must name another version than rotate-r2's | fired 2 (rotate); did not fire on moved, observed and not checked |
 | leak-scan planted control | "the committed evidence holds no refusal pattern" | fired |
-| positive control (not a row) | value matching misses and provenance catches | `value` leaks and `composed-path` is clean in 8 cases per base (§4.1) |
+| positive control (not a row) | value matching misses and provenance catches | `value` leaks and `composed-path` is clean in 8 cases per base (§4.1); in 3 of them by construction of the baseline (below) |
 | negative control (not a row) | provenance misses a copy it did not produce | duplicate-literal leaks under every representation without `value` |
-| `trace-holds-no-secret`, `base-holds-no-case-secret` | the passes are separated | pass 56 each |
-| `schema-covers-base-secrets` | every bundle secret is at a schema leaf of its base | pass 56 |
+| `trace-holds-no-secret` | the trace pass holds no case value | pass 56; 52 cells checked, 4 had nothing to check (bool and duplicate-literal on both bases, whose only value is exempt: §6.3) |
+| `base-holds-no-case-secret` | the base holds no case value | pass 56 |
+| `schema-covers-base-secrets` | no leaf of the base holding a bundle secret lies outside the schema's leaves | pass 56 (9 schema leaves per base) |
 | `render-identity`, base `validates-*` | rendering with nothing redacted is the text `talosctl` wrote; each base validates | pass |
 
 `bwprov summary` makes the run incomplete if any must-fire control did not fire where applicable,
 if a pair's required control did not fire, if a fidelity check failed, or if a unit is missing.
 
+**The positive control, weighed.** The `value` baseline is given each value as the case stores it,
+before any modifier, and only string and bytes values of six bytes or more. So 3 of the 8 cases
+where it leaks leak by construction: bytes, because the configuration holds the base64 the
+modifier wrote and the matcher holds the raw bytes; int and bool, because the matcher is never
+given them. The 5 that would survive a fairer matcher given the placed values are yaml-escape,
+embedded-yaml and embedded-json (escaped encodings of the value) and type-mismatch and
+type-mismatch-two (a quoted prefix). A matcher that also knew every escaping and the prefix form
+would close those too; what it cannot close is a form nobody enumerated, which provenance does not
+need to know.
+
 ## 5. What each failure is
 
-Every leak in §4.1 is one of the following. Each is an observed artifact of this capture.
+Every leak in §4.1 is one of the following. Each is an observed artifact of this capture. The
+committed record of every leak is `evidence/leaks.tsv` (artifact, reference, form, count); the
+committed packs hold only `path+schema+value` artifacts, so the quotations below of other
+representations' artifacts are from the capture's uncommitted run output.
 
 - **Value matching misses re-encoded and non-text values.** bytes appears base64-encoded
   (`crt: QldTWU5USC1leHRyYS1jYS1jZXJ0aWZpY2F0ZQ==`), yaml-escape and embedded-yaml as escaped YAML
-  (`"BWSYNTH-app-password\twith \"quotes\""`), embedded-json as escaped JSON (`<&>`),
-  and integers and booleans are not matchable at all. Under `composed-path` each is the token of the
-  leaf the tracer reached: `crt: <redacted:extra-ca@1>`, `"token":"<redacted:app-token@1>"`.
+  (`"BWSYNTH-app-password\twith \"quotes\""`), embedded-json as escaped JSON
+  (`"BWSYNTH-app-token\u003c\u0026\u003e\"x\""`),
+  and integers and booleans are never given to the matcher (§4.4). Under `composed-path` each is
+  the token of the leaf the tracer reached: `crt: <redacted:extra-ca@1>`, and in embedded-json
+  `"token":"\u003credacted:app-token@1\u003e"` (`evidence/cases/embedded-json.txt:10`).
 - **Value matching misses a quoted prefix.** `talosctl`'s decode error quotes the first seven bytes
   of a value longer than ten and adds `...`:
 
@@ -328,10 +354,12 @@ Every leak in §4.1 is one of the following. Each is an observed artifact of thi
   also leave every message unredacted (invalid-value, type-mismatch).
 - **The schema covers only fields Talos types mark secret.** A registry password is one; a registry
   user name, a port, a boolean, a CA certificate, a manifest URL, an inline manifest, a file's
-  content, a DNS domain and an annotation are not, so `schema` leaks in 15 cases. When the machinery cannot load a composition (both
-  type-mismatch cases), there is no schema at all.
+  content, a DNS domain and an annotation are not, so `schema` leaks in 15 cases. When the
+  machinery cannot load a composition (both type-mismatch cases), there is no schema at all.
 - **A composed path covers only what came through a reference.** Base secrets are not references,
-  so `composed-path` leaks them in every composed cell's support data (the full configuration); the
+  so `composed-path` leaks them in every composed cell's support data (the full configuration), and
+  in 12 diffs as context lines beside a change (bytes, duplicate-literal, embedded-yaml,
+  list-append, list-duplicate and unidentified-embedded, on both bases, per `leaks.tsv`); the
   schema covers them. A literal copy of a referenced value is not a reference either:
 
   ```text
@@ -364,15 +392,19 @@ per boolean and one per fragment prefix. **The negative result that would have c
 design revision, provenance needing a merge engine, was not found.**
 
 What the tracer cannot place, it reports: an unresolved reference inside unidentified embedded text
-(no value to trace), and a composition that failed (not composed).
+(no value to trace), and a composition that failed (not composed). A missing trace or flip fragment
+would not be reported (§8); none was missing in this capture.
 
 ### 6.2 Criterion 2: redaction without relying on value matching
 
 Redaction from composed paths plus the Talos schema (`path+schema`) left no referenced value and no
 base secret in the diffs, errors, logs and support data of 27 of 28 cases per base, including the 8
-where value matching leaks (§4.1). Every token in those artifacts comes from an attribution, not from
-the value's text; messages are redacted by the trace pass's template, not by searching for the
-value. The one case it leaks is the literal copy (duplicate-literal), which has no provenance by
+where the value baseline leaks (§4.1; 3 of those by the baseline's construction, 5 against a
+fairer matcher too, §4.4). The logs and support data are the formats `bwprov` writes (§3), so the
+result is shown for those formats only. Every reference token in those artifacts comes from an
+attribution, not from the value's text; messages are redacted by the trace pass's template, not by
+searching for the value. The template cannot mark a quoted boolean or authored literal (§6.3); no
+message here quoted one. The one case it leaks is the literal copy (duplicate-literal), which has no provenance by
 construction; adding value matching (`path+schema+value`) closes it for the exact form. So value
 matching is a supplement for text the author wrote outside a reference, not the mechanism.
 
@@ -417,11 +449,17 @@ here):
 - **Messages the template cannot explain are withheld, not shown**, so a support bundle loses them.
   A tracer that changed a message's outcome (a validation rule judging the stand-in differently from
   the value) would be withheld the same way; no case produced one.
-- **Tokens inside re-serialized embedded JSON are escaped** (`<redacted:app-token@1>`),
-  so a reader searching for `<redacted:` will not find them. The redaction re-serializes the
-  document it enters (compact, sorted keys, as `bwref` wrote it).
-- **A boolean's trace pass holds the real boolean**, since its tracer is the value; only the flip
-  pass attributes it. The trace pass is internal and never shown.
+- **Tokens inside re-serialized embedded JSON are escaped** (`\u003credacted:app-token@1\u003e`,
+  `evidence/cases/embedded-json.txt:10`), so a reader searching for `<redacted:` will not find
+  them. The redaction re-serializes the document it enters (compact, sorted keys, as `bwref` wrote
+  it).
+- **A message quoting a boolean or an authored literal would be shown verbatim.** A boolean's tracer
+  is the real value, and an authored literal is the same in both passes, so the trace message would
+  equal the real one and the template reports `verbatim`: nothing marks the quote. Value matching
+  would still catch an authored string literal of six bytes or more, but nothing would catch a
+  boolean. `trace-holds-no-secret` exempts exactly these values, so it cannot see this either. No
+  case produced such a message: the trace pass's messages are compared, not shown, but its
+  verbatim outcome is.
 
 ## 7. Failures hit while building it
 
@@ -473,9 +511,28 @@ that did not fire makes a run incomplete.
 - **Controls that passed without a firing counterpart.** `trace-holds-no-secret`,
   `base-holds-no-case-secret` and `schema-covers-base-secrets` passed in every cell; the first two
   use the same oracle that fired in 27 of 28 cells under `none`, and the first failed during
-  development (§7.2), but the third was never seen to fail.
-- **The fidelity control was not exercised in 16 cells** (§4.4): 12 with no string tracer in the
-  output and 4 with no composition. There the fidelity check itself still ran and passed.
+  development (§7.2), but the third was never seen to fail. `trace-holds-no-secret` had nothing to
+  check in 4 cells (§4.4).
+- **The fidelity control was not exercised in 16 cells** (§4.4): 12 with no string-kind tracer in
+  the output and 4 with no composition. There the fidelity check itself still ran and passed.
+  Where it fired, it is a one-mutation smoke test: no structural change was injected.
+- **A latent fail-open in the fidelity check.** When a trace or flip fragment is missing for a real
+  fragment, the analysis skips that fragment's attribution instead of counting a fidelity failure.
+  Its references would then get no composed path, so path representations would show them
+  unredacted, with the run still reported complete. It did not arise here: each of the 72 resolved
+  real fragments in the capture has its trace fragment, and each of the 2 flip passes (bool, both
+  bases) has its fragment.
+- **A message quoting a boolean or an authored literal would be shown verbatim** (§6.3). No case
+  produced one.
+- **`per-side-diff-exposes-base-value` is loose.** Its test that the per-side diff holds a `-` is
+  always true (the `---` header line), and it counts a base leaf's `key: value` text on any line,
+  context and `+` lines included. It fired where the paired leaves were, but it shows only that the
+  text is present in the per-side diff, not that it sits on a removed line.
+- **`value-substitutions` in `cells.tsv` counts diff and support substitutions only**; the value
+  matcher's substitutions in messages and logs are not counted.
+- **The output-directory guard compares against the checkout the scripts run from.** In a linked
+  worktree that is the worktree, so a directory inside the main checkout but outside the worktree
+  passes it. The capture's directory was outside both.
 - **The oracle searches nine forms.** A transformation outside them (hashing, splitting across
   lines other than a value's own) would be invisible to it, as to the fixture's scan.
 - **The prototype is disposable.** Its tracer format, token syntax and table layouts are this
@@ -492,8 +549,10 @@ by composing a shape-preserving tracer pass with `talosctl` alongside the real o
 from those composed paths plus the Talos schema covers every referenced value and base secret here
 except an authored literal copy.** A redaction and provenance contract can rest on: per-occurrence
 provenance recorded at resolution; a tracer composition for every shown composition; template-based
-message redaction with withholding as the fallback; paired redaction of non-string diff sides;
-the schema for base and Talos-typed secrets; value matching only as a supplement for literal copies.
+message redaction with withholding as the fallback, plus a way to mark a quoted boolean, which the
+template cannot (§6.3); paired redaction of the base side of every redacted diff leaf; the schema
+for base and Talos-typed secrets; value matching only as a supplement for literal copies. The
+logs and support data it was shown on are this prototype's own formats.
 Whether that is the contract, and at what cost per render (one extra composition per boolean and
 per fragment prefix), is for the [compiler specification](https://github.com/ginsys/bronzeward/issues/17).
 
@@ -505,7 +564,8 @@ per fragment prefix), is for the [compiler specification](https://github.com/gin
   boolean dependency is measurable by a flip pass.
 - The tracer pass as the provenance method, and its limits (§8).
 - Open there: whether a renderer must refuse literal copies of a referenced value (duplicate-literal
-  shows only value matching sees them), how withheld messages reach a support bundle, how embedded
+  shows only value matching sees them), how a message quoting a boolean or an authored literal is
+  marked (§6.3), how withheld messages reach a support bundle, how embedded
   documents keep their author's formatting once a token is written into them, and whether provenance
   must be recomputed per shown revision (§5, stale provenance: it must, on this evidence).
 
