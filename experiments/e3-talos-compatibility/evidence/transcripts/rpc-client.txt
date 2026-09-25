@@ -1,6 +1,6 @@
 ==> 001-rpc-client-v1.12.12-talosctl <==
 ==> pre (rc ) <==
-pre digest=a4620ae73bbab675ef9c3b0eec3b28dabd5b0d173222a9cd9b073696876f5b07 version=1
+pre digest=66376c841b9bd27efc4e11215759bb46566fe51699814e6b47847094a3eea825 version=1
 ==> version (rc 0) <==
 $ tc v1.12.12 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
@@ -19,41 +19,41 @@ Server:
 	Enabled:     RBAC
 ==> read (rc 0) <==
 $ tc v1.12.12 -e 10.55.0.2 -n 10.55.0.3 get machineconfig v1alpha1 -o jsonpath={.spec}
-# configuration withheld: 428 lines, digest a4620ae73bbab675ef9c3b0eec3b28dabd5b0d173222a9cd9b073696876f5b07
+# configuration withheld: 428 lines, digest 66376c841b9bd27efc4e11215759bb46566fe51699814e6b47847094a3eea825
 ==> dry (rc 0) <==
 $ tc v1.12.12 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/raw/rows/001-rpc-client-v1.12.12-talosctl-a.yaml
 Dry run summary:
 Applied configuration without a reboot (skipped in dry-run).
-# diff withheld (may hold the configuration): 14 lines; output sha256 b19d49e09a43c6b7052b7f29284aeeef75176e957d01bfca0767920c090738df
+# diff withheld (may hold the configuration): 14 lines; output sha256 79ff6d7dec2cb4ec739d09ab2289a929bf5e370384bf452df467d110c9da1991
 ==> after-dry (rc ) <==
-worker digest=a4620ae73bbab675ef9c3b0eec3b28dabd5b0d173222a9cd9b073696876f5b07 version=1
+worker digest=66376c841b9bd27efc4e11215759bb46566fe51699814e6b47847094a3eea825 version=1
 ==> apply (rc 0) <==
 $ tc v1.12.12 -e 10.55.0.2 -n 10.55.0.3 apply-config --mode no-reboot --file <E3_OUT>/raw/rows/001-rpc-client-v1.12.12-talosctl-a.yaml
 Applied configuration without a reboot
 ==> after (rc ) <==
-worker digest=1ac0641154b04b03fe4882912d09a8a420572a0f849ef1d9ede03945571018c2 version=2
+worker digest=fafe0b67fa34df8c3720ed65d86d05c29cce12cce38adc12131a8b451439b277 version=2
 ==> 002-rpc-client-v1.12.12-machinery <==
 ==> pre (rc ) <==
-pre digest=1ac0641154b04b03fe4882912d09a8a420572a0f849ef1d9ede03945571018c2 version=2
+pre digest=fafe0b67fa34df8c3720ed65d86d05c29cce12cce38adc12131a8b451439b277 version=2
 ==> version (rc 0) <==
 $ m v1.12.12 version
 result=version node_tag=v1.13.6
 ==> read (rc 0) <==
 $ m v1.12.12 read
-result=read version=2 digest=1ac0641154b04b03fe4882912d09a8a420572a0f849ef1d9ede03945571018c2
+result=read version=2 digest=fafe0b67fa34df8c3720ed65d86d05c29cce12cce38adc12131a8b451439b277
 ==> dry (rc 0) <==
 $ m v1.12.12 apply -dry-run -file <E3_OUT>/raw/rows/002-rpc-client-v1.12.12-machinery-a.yaml
 result=applied dry_run=true mode=NO_REBOOT details="Dry run summary:"
 ==> after-dry (rc ) <==
-worker digest=1ac0641154b04b03fe4882912d09a8a420572a0f849ef1d9ede03945571018c2 version=2
+worker digest=fafe0b67fa34df8c3720ed65d86d05c29cce12cce38adc12131a8b451439b277 version=2
 ==> apply (rc 0) <==
 $ m v1.12.12 apply -file <E3_OUT>/raw/rows/002-rpc-client-v1.12.12-machinery-a.yaml
 result=applied dry_run=false mode=NO_REBOOT details="Applied configuration without a reboot"
 ==> after (rc ) <==
-worker digest=5c00ef028213b757570b70a754af20f8f83e1a761cf2cf30613d5dbb6e0b2cf1 version=3
+worker digest=35d058b8e613d7e9f610e3cb2e435a28ac7d8ec6fe81c4f82ddcf14d3e3ab6ed version=3
 ==> 003-rpc-client-v1.13.0-talosctl <==
 ==> pre (rc ) <==
-pre digest=5c00ef028213b757570b70a754af20f8f83e1a761cf2cf30613d5dbb6e0b2cf1 version=3
+pre digest=35d058b8e613d7e9f610e3cb2e435a28ac7d8ec6fe81c4f82ddcf14d3e3ab6ed version=3
 ==> version (rc 0) <==
 $ tc v1.13.0 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
@@ -72,41 +72,41 @@ Server:
 	Enabled:     RBAC
 ==> read (rc 0) <==
 $ tc v1.13.0 -e 10.55.0.2 -n 10.55.0.3 get machineconfig v1alpha1 -o jsonpath={.spec}
-# configuration withheld: 55 lines, digest 5c00ef028213b757570b70a754af20f8f83e1a761cf2cf30613d5dbb6e0b2cf1
+# configuration withheld: 55 lines, digest 35d058b8e613d7e9f610e3cb2e435a28ac7d8ec6fe81c4f82ddcf14d3e3ab6ed
 ==> dry (rc 0) <==
 $ tc v1.13.0 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/raw/rows/003-rpc-client-v1.13.0-talosctl-a.yaml
 Dry run summary:
 Applied configuration without a reboot (skipped in dry-run).
-# diff withheld (may hold the configuration): 14 lines; output sha256 2ee18fb49ab98e63455105260b0e203b1beba599d7029a595ce545b329fd4346
+# diff withheld (may hold the configuration): 14 lines; output sha256 83895ba3ff49d5c8ba7d6b7fdffd63f28ea19acf3adcc40eb102b2f927f4e7fc
 ==> after-dry (rc ) <==
-worker digest=5c00ef028213b757570b70a754af20f8f83e1a761cf2cf30613d5dbb6e0b2cf1 version=3
+worker digest=35d058b8e613d7e9f610e3cb2e435a28ac7d8ec6fe81c4f82ddcf14d3e3ab6ed version=3
 ==> apply (rc 0) <==
 $ tc v1.13.0 -e 10.55.0.2 -n 10.55.0.3 apply-config --mode no-reboot --file <E3_OUT>/raw/rows/003-rpc-client-v1.13.0-talosctl-a.yaml
 Applied configuration without a reboot
 ==> after (rc ) <==
-worker digest=7726b68a0d92febede082f68dae2b9eca80b1011718c56e1eab1a1e3b6f1d311 version=4
+worker digest=3fddcc3da60f64f2c7d0442c1a249e0978fe51efa78005842baae3e30d9f920e version=4
 ==> 004-rpc-client-v1.13.0-machinery <==
 ==> pre (rc ) <==
-pre digest=7726b68a0d92febede082f68dae2b9eca80b1011718c56e1eab1a1e3b6f1d311 version=4
+pre digest=3fddcc3da60f64f2c7d0442c1a249e0978fe51efa78005842baae3e30d9f920e version=4
 ==> version (rc 0) <==
 $ m v1.13.0 version
 result=version node_tag=v1.13.6
 ==> read (rc 0) <==
 $ m v1.13.0 read
-result=read version=4 digest=7726b68a0d92febede082f68dae2b9eca80b1011718c56e1eab1a1e3b6f1d311
+result=read version=4 digest=3fddcc3da60f64f2c7d0442c1a249e0978fe51efa78005842baae3e30d9f920e
 ==> dry (rc 0) <==
 $ m v1.13.0 apply -dry-run -file <E3_OUT>/raw/rows/004-rpc-client-v1.13.0-machinery-a.yaml
 result=applied dry_run=true mode=NO_REBOOT details="Dry run summary:"
 ==> after-dry (rc ) <==
-worker digest=7726b68a0d92febede082f68dae2b9eca80b1011718c56e1eab1a1e3b6f1d311 version=4
+worker digest=3fddcc3da60f64f2c7d0442c1a249e0978fe51efa78005842baae3e30d9f920e version=4
 ==> apply (rc 0) <==
 $ m v1.13.0 apply -file <E3_OUT>/raw/rows/004-rpc-client-v1.13.0-machinery-a.yaml
 result=applied dry_run=false mode=NO_REBOOT details="Applied configuration without a reboot"
 ==> after (rc ) <==
-worker digest=a0e339d26c4223351d4b781db017fe4b8c6a4cac2708c0f266dfb3987a83d57c version=5
+worker digest=b91f3c44171cc159c8af959725366edb05b21de9196d4001131c342ec3a75a57 version=5
 ==> 005-rpc-client-v1.13.6-talosctl <==
 ==> pre (rc ) <==
-pre digest=a0e339d26c4223351d4b781db017fe4b8c6a4cac2708c0f266dfb3987a83d57c version=5
+pre digest=b91f3c44171cc159c8af959725366edb05b21de9196d4001131c342ec3a75a57 version=5
 ==> version (rc 0) <==
 $ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
@@ -125,41 +125,41 @@ Server:
 	Enabled:     RBAC
 ==> read (rc 0) <==
 $ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 get machineconfig v1alpha1 -o jsonpath={.spec}
-# configuration withheld: 55 lines, digest a0e339d26c4223351d4b781db017fe4b8c6a4cac2708c0f266dfb3987a83d57c
+# configuration withheld: 55 lines, digest b91f3c44171cc159c8af959725366edb05b21de9196d4001131c342ec3a75a57
 ==> dry (rc 0) <==
 $ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/raw/rows/005-rpc-client-v1.13.6-talosctl-a.yaml
 Dry run summary:
 Applied configuration without a reboot (skipped in dry-run).
-# diff withheld (may hold the configuration): 14 lines; output sha256 da4e5582df176a776530b9500842ffdb7c419ddd57a39e29463dc8acec477988
+# diff withheld (may hold the configuration): 14 lines; output sha256 96e28e6524284ffc65e779dad3e694ed933b97d7b10af357a0fb40306ed21ae5
 ==> after-dry (rc ) <==
-worker digest=a0e339d26c4223351d4b781db017fe4b8c6a4cac2708c0f266dfb3987a83d57c version=5
+worker digest=b91f3c44171cc159c8af959725366edb05b21de9196d4001131c342ec3a75a57 version=5
 ==> apply (rc 0) <==
 $ tc v1.13.6 -e 10.55.0.2 -n 10.55.0.3 apply-config --mode no-reboot --file <E3_OUT>/raw/rows/005-rpc-client-v1.13.6-talosctl-a.yaml
 Applied configuration without a reboot
 ==> after (rc ) <==
-worker digest=2c1604e901a1be378935d12b37ab8c83989e8ac445687c3ffa92d314b13777ef version=6
+worker digest=aec659f5f9fd459f25db965332336606809fb641b66295619a4de088995d683d version=6
 ==> 006-rpc-client-v1.13.6-machinery <==
 ==> pre (rc ) <==
-pre digest=2c1604e901a1be378935d12b37ab8c83989e8ac445687c3ffa92d314b13777ef version=6
+pre digest=aec659f5f9fd459f25db965332336606809fb641b66295619a4de088995d683d version=6
 ==> version (rc 0) <==
 $ m v1.13.6 version
 result=version node_tag=v1.13.6
 ==> read (rc 0) <==
 $ m v1.13.6 read
-result=read version=6 digest=2c1604e901a1be378935d12b37ab8c83989e8ac445687c3ffa92d314b13777ef
+result=read version=6 digest=aec659f5f9fd459f25db965332336606809fb641b66295619a4de088995d683d
 ==> dry (rc 0) <==
 $ m v1.13.6 apply -dry-run -file <E3_OUT>/raw/rows/006-rpc-client-v1.13.6-machinery-a.yaml
 result=applied dry_run=true mode=NO_REBOOT details="Dry run summary:"
 ==> after-dry (rc ) <==
-worker digest=2c1604e901a1be378935d12b37ab8c83989e8ac445687c3ffa92d314b13777ef version=6
+worker digest=aec659f5f9fd459f25db965332336606809fb641b66295619a4de088995d683d version=6
 ==> apply (rc 0) <==
 $ m v1.13.6 apply -file <E3_OUT>/raw/rows/006-rpc-client-v1.13.6-machinery-a.yaml
 result=applied dry_run=false mode=NO_REBOOT details="Applied configuration without a reboot"
 ==> after (rc ) <==
-worker digest=1c792b97f43e36fd01a628f82d175d7abe8d849155838064090e8489fe1b5741 version=7
+worker digest=90d838c262f991a2134c8e57ab04eb3c39b871cfbf802b95ac302198ec9abaf9 version=7
 ==> 007-rpc-client-v1.13.10-talosctl <==
 ==> pre (rc ) <==
-pre digest=1c792b97f43e36fd01a628f82d175d7abe8d849155838064090e8489fe1b5741 version=7
+pre digest=90d838c262f991a2134c8e57ab04eb3c39b871cfbf802b95ac302198ec9abaf9 version=7
 ==> version (rc 0) <==
 $ tc v1.13.10 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
@@ -179,41 +179,41 @@ Server:
 ==> read (rc 0) <==
 $ tc v1.13.10 -e 10.55.0.2 -n 10.55.0.3 get machineconfig v1alpha1 -o jsonpath={.spec}
 WARNING: 10.55.0.3: server version 1.13.6 is older than client version 1.13.10
-# configuration withheld: 55 lines, digest 1c792b97f43e36fd01a628f82d175d7abe8d849155838064090e8489fe1b5741
+# configuration withheld: 55 lines, digest 90d838c262f991a2134c8e57ab04eb3c39b871cfbf802b95ac302198ec9abaf9
 ==> dry (rc 0) <==
 $ tc v1.13.10 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/raw/rows/007-rpc-client-v1.13.10-talosctl-a.yaml
 Dry run summary:
 Applied configuration without a reboot (skipped in dry-run).
-# diff withheld (may hold the configuration): 14 lines; output sha256 77927fbb4db7184d19d27a35b7dc9029bdb858e6a6a275f0d03551ab9a07358c
+# diff withheld (may hold the configuration): 14 lines; output sha256 8c82877ad3aa0a960f9693765829266c83bd16f0bd54ec9dc1bec5325df7b442
 ==> after-dry (rc ) <==
-worker digest=1c792b97f43e36fd01a628f82d175d7abe8d849155838064090e8489fe1b5741 version=7
+worker digest=90d838c262f991a2134c8e57ab04eb3c39b871cfbf802b95ac302198ec9abaf9 version=7
 ==> apply (rc 0) <==
 $ tc v1.13.10 -e 10.55.0.2 -n 10.55.0.3 apply-config --mode no-reboot --file <E3_OUT>/raw/rows/007-rpc-client-v1.13.10-talosctl-a.yaml
 Applied configuration without a reboot
 ==> after (rc ) <==
-worker digest=7642065089dc6c56c464e72718c48880df6bab425ae03e5e17ac9583d876f61f version=8
+worker digest=53be6e6eb3d408076acdeb841c74480321c5d515fc51f135d8cebb4ede8cdb98 version=8
 ==> 008-rpc-client-v1.13.10-machinery <==
 ==> pre (rc ) <==
-pre digest=7642065089dc6c56c464e72718c48880df6bab425ae03e5e17ac9583d876f61f version=8
+pre digest=53be6e6eb3d408076acdeb841c74480321c5d515fc51f135d8cebb4ede8cdb98 version=8
 ==> version (rc 0) <==
 $ m v1.13.10 version
 result=version node_tag=v1.13.6
 ==> read (rc 0) <==
 $ m v1.13.10 read
-result=read version=8 digest=7642065089dc6c56c464e72718c48880df6bab425ae03e5e17ac9583d876f61f
+result=read version=8 digest=53be6e6eb3d408076acdeb841c74480321c5d515fc51f135d8cebb4ede8cdb98
 ==> dry (rc 0) <==
 $ m v1.13.10 apply -dry-run -file <E3_OUT>/raw/rows/008-rpc-client-v1.13.10-machinery-a.yaml
 result=applied dry_run=true mode=NO_REBOOT details="Dry run summary:"
 ==> after-dry (rc ) <==
-worker digest=7642065089dc6c56c464e72718c48880df6bab425ae03e5e17ac9583d876f61f version=8
+worker digest=53be6e6eb3d408076acdeb841c74480321c5d515fc51f135d8cebb4ede8cdb98 version=8
 ==> apply (rc 0) <==
 $ m v1.13.10 apply -file <E3_OUT>/raw/rows/008-rpc-client-v1.13.10-machinery-a.yaml
 result=applied dry_run=false mode=NO_REBOOT details="Applied configuration without a reboot"
 ==> after (rc ) <==
-worker digest=43d5442fac56a68882e61518afc1006206022ac0248686079097490b8f0eab97 version=9
+worker digest=cc00faffe7847ed34ef16a12960d52679599ba0225b89e86b45602f63c41c37c version=9
 ==> 009-rpc-client-v1.14.1-talosctl <==
 ==> pre (rc ) <==
-pre digest=43d5442fac56a68882e61518afc1006206022ac0248686079097490b8f0eab97 version=9
+pre digest=cc00faffe7847ed34ef16a12960d52679599ba0225b89e86b45602f63c41c37c version=9
 ==> version (rc 0) <==
 $ tc v1.14.1 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
@@ -233,41 +233,41 @@ Server:
 ==> read (rc 0) <==
 $ tc v1.14.1 -e 10.55.0.2 -n 10.55.0.3 get machineconfig v1alpha1 -o jsonpath={.spec}
 WARNING: 10.55.0.3: server version 1.13.6 is older than client version 1.14.1
-# configuration withheld: 55 lines, digest 43d5442fac56a68882e61518afc1006206022ac0248686079097490b8f0eab97
+# configuration withheld: 55 lines, digest cc00faffe7847ed34ef16a12960d52679599ba0225b89e86b45602f63c41c37c
 ==> dry (rc 0) <==
 $ tc v1.14.1 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/raw/rows/009-rpc-client-v1.14.1-talosctl-a.yaml
 Dry run summary:
 Applied configuration without a reboot (skipped in dry-run).
-# diff withheld (may hold the configuration): 14 lines; output sha256 82e353f3c7cb5d95a7564104c1328ceac3cb20c6cd29a3f49cccf58cabd89add
+# diff withheld (may hold the configuration): 14 lines; output sha256 d5c81ef05ea9c5e5b69aac6f955a32644672bd5e09e2677f702cefb361c3235e
 ==> after-dry (rc ) <==
-worker digest=43d5442fac56a68882e61518afc1006206022ac0248686079097490b8f0eab97 version=9
+worker digest=cc00faffe7847ed34ef16a12960d52679599ba0225b89e86b45602f63c41c37c version=9
 ==> apply (rc 0) <==
 $ tc v1.14.1 -e 10.55.0.2 -n 10.55.0.3 apply-config --mode no-reboot --file <E3_OUT>/raw/rows/009-rpc-client-v1.14.1-talosctl-a.yaml
 Applied configuration without a reboot
 ==> after (rc ) <==
-worker digest=7ead7a7dce378646e224d838d284798360686cbfdd598c8062cc0bd50705654e version=10
+worker digest=c735d8f1cf7c8b3e50c2f67c03c62ff00c17fb57e63dfb748e486368d7fea885 version=10
 ==> 010-rpc-client-v1.14.1-machinery <==
 ==> pre (rc ) <==
-pre digest=7ead7a7dce378646e224d838d284798360686cbfdd598c8062cc0bd50705654e version=10
+pre digest=c735d8f1cf7c8b3e50c2f67c03c62ff00c17fb57e63dfb748e486368d7fea885 version=10
 ==> version (rc 0) <==
 $ m v1.14.1 version
 result=version node_tag=v1.13.6
 ==> read (rc 0) <==
 $ m v1.14.1 read
-result=read version=10 digest=7ead7a7dce378646e224d838d284798360686cbfdd598c8062cc0bd50705654e
+result=read version=10 digest=c735d8f1cf7c8b3e50c2f67c03c62ff00c17fb57e63dfb748e486368d7fea885
 ==> dry (rc 0) <==
 $ m v1.14.1 apply -dry-run -file <E3_OUT>/raw/rows/010-rpc-client-v1.14.1-machinery-a.yaml
 result=applied dry_run=true mode=NO_REBOOT details="Dry run summary:"
 ==> after-dry (rc ) <==
-worker digest=7ead7a7dce378646e224d838d284798360686cbfdd598c8062cc0bd50705654e version=10
+worker digest=c735d8f1cf7c8b3e50c2f67c03c62ff00c17fb57e63dfb748e486368d7fea885 version=10
 ==> apply (rc 0) <==
 $ m v1.14.1 apply -file <E3_OUT>/raw/rows/010-rpc-client-v1.14.1-machinery-a.yaml
 result=applied dry_run=false mode=NO_REBOOT details="Applied configuration without a reboot"
 ==> after (rc ) <==
-worker digest=cd5c1c1a2caed2d8670430e7eda81d63339ef74d8ac83b5851dac33ba2fe6425 version=11
+worker digest=873d46c670f77418ec9351eab017e7d9f0aeede25b9250f255313d695b6efc6a version=11
 ==> 011-rpc-client-v1.15.0-alpha.0-talosctl <==
 ==> pre (rc ) <==
-pre digest=cd5c1c1a2caed2d8670430e7eda81d63339ef74d8ac83b5851dac33ba2fe6425 version=11
+pre digest=873d46c670f77418ec9351eab017e7d9f0aeede25b9250f255313d695b6efc6a version=11
 ==> version (rc 0) <==
 $ tc v1.15.0-alpha.0 -e 10.55.0.2 -n 10.55.0.3 version
 Client:
@@ -287,36 +287,36 @@ Server:
 ==> read (rc 0) <==
 $ tc v1.15.0-alpha.0 -e 10.55.0.2 -n 10.55.0.3 get machineconfig v1alpha1 -o jsonpath={.spec}
 WARNING: 10.55.0.3: server version 1.13.6 is older than client version 1.15.0-alpha.0
-# configuration withheld: 55 lines, digest cd5c1c1a2caed2d8670430e7eda81d63339ef74d8ac83b5851dac33ba2fe6425
+# configuration withheld: 55 lines, digest 873d46c670f77418ec9351eab017e7d9f0aeede25b9250f255313d695b6efc6a
 ==> dry (rc 0) <==
 $ tc v1.15.0-alpha.0 -e 10.55.0.2 -n 10.55.0.3 apply-config --dry-run --mode no-reboot --file <E3_OUT>/raw/rows/011-rpc-client-v1.15.0-alpha.0-talosctl-a.yaml
 Dry run summary:
 Applied configuration without a reboot (skipped in dry-run).
-# diff withheld (may hold the configuration): 14 lines; output sha256 590fc3a43b443bc661644387b68cf528c843b53eebd5a0ea31557dfcbaed48f0
+# diff withheld (may hold the configuration): 14 lines; output sha256 22088acc61b4f1b1fa7c4faefbdab6fa60130f3797570dfdfafd8d46d550a937
 ==> after-dry (rc ) <==
-worker digest=cd5c1c1a2caed2d8670430e7eda81d63339ef74d8ac83b5851dac33ba2fe6425 version=11
+worker digest=873d46c670f77418ec9351eab017e7d9f0aeede25b9250f255313d695b6efc6a version=11
 ==> apply (rc 0) <==
 $ tc v1.15.0-alpha.0 -e 10.55.0.2 -n 10.55.0.3 apply-config --mode no-reboot --file <E3_OUT>/raw/rows/011-rpc-client-v1.15.0-alpha.0-talosctl-a.yaml
 Applied configuration without a reboot
 ==> after (rc ) <==
-worker digest=4620d29a2b50a21f2090d876fe908fb840bcc7fbb73d571cf0967b3f185dd0ad version=12
+worker digest=1282b419c1eff7da7237b104584b8b23b46fb191291935d12f3aeba93749424b version=12
 ==> 012-rpc-client-v1.15.0-alpha.0-machinery <==
 ==> pre (rc ) <==
-pre digest=4620d29a2b50a21f2090d876fe908fb840bcc7fbb73d571cf0967b3f185dd0ad version=12
+pre digest=1282b419c1eff7da7237b104584b8b23b46fb191291935d12f3aeba93749424b version=12
 ==> version (rc 0) <==
 $ m v1.15.0-alpha.0 version
 result=version node_tag=v1.13.6
 ==> read (rc 0) <==
 $ m v1.15.0-alpha.0 read
-result=read version=12 digest=4620d29a2b50a21f2090d876fe908fb840bcc7fbb73d571cf0967b3f185dd0ad
+result=read version=12 digest=1282b419c1eff7da7237b104584b8b23b46fb191291935d12f3aeba93749424b
 ==> dry (rc 0) <==
 $ m v1.15.0-alpha.0 apply -dry-run -file <E3_OUT>/raw/rows/012-rpc-client-v1.15.0-alpha.0-machinery-a.yaml
 result=applied dry_run=true mode=NO_REBOOT details="Dry run summary:"
 ==> after-dry (rc ) <==
-worker digest=4620d29a2b50a21f2090d876fe908fb840bcc7fbb73d571cf0967b3f185dd0ad version=12
+worker digest=1282b419c1eff7da7237b104584b8b23b46fb191291935d12f3aeba93749424b version=12
 ==> apply (rc 0) <==
 $ m v1.15.0-alpha.0 apply -file <E3_OUT>/raw/rows/012-rpc-client-v1.15.0-alpha.0-machinery-a.yaml
 result=applied dry_run=false mode=NO_REBOOT details="Applied configuration without a reboot"
 ==> after (rc ) <==
-worker digest=fbfa228b02d27d7ca1191214a732025814fb9dab58e4d78d9f7b83ebcec4f52b version=13
+worker digest=11e09a0293a2b6978a99af280c3652abd90f93a1c3b932a1cbc8c72bda674fa7 version=13
 ==> end <==

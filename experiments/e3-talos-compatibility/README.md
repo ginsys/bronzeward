@@ -21,7 +21,7 @@ does with each target contract, through two implementations of the same operatio
 
 | Group | What it records |
 |---|---|
-| gen | every renderer x target (`current`, v1.10.0 .. v1.15.0, and the version-string edges `1.13`, `v1.13.6`, `v1.15.0-alpha.0`, `v1.99.0`, `bogus`) x Kubernetes (the renderer's default, and the fixture's 1.36.2): both implementations' exit and output, the output digests, whether they are byte-identical, and whether talosctl repeats itself |
+| gen | every renderer x target (`current`, v1.10.0 .. v1.15.0, and the version-string edges `1.13`, `v1.13.6`, `v1.15.0-alpha.0`, `v1.99.0`, `bogus`) x Kubernetes (the renderer's default, and the fixture's 1.36.2): both implementations' exit and output, the output digests, whether they are identical, and whether talosctl repeats itself |
 | validate | every generated configuration (Kubernetes 1.36.2, `current` and the six contracts) validated by every renderer: one row per configuration and validator, holding four cells (talosctl and machinery, each in container and metal mode) |
 | strict | each renderer's own output with `--strict` |
 | policy | the Kubernetes and upgrade windows each machinery's `compatibility` package encodes |
