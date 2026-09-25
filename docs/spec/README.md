@@ -4,7 +4,7 @@ This directory reserves the location for detailed contracts produced during [02 
 
 | Contract artifact | Work item |
 | --- | --- |
-| `docs/spec/compilation.md` | [Secret ingress and compilation](https://github.com/ginsys/bronzeward/issues/17) |
+| [`docs/spec/compilation.md`](compilation.md) | [Secret ingress and compilation](https://github.com/ginsys/bronzeward/issues/17) |
 | `docs/spec/persistence-api.md` | [Persistence and API contracts](https://github.com/ginsys/bronzeward/issues/18) |
 | [`docs/spec/execution-recovery.md`](execution-recovery.md) | [Execution and recovery](https://github.com/ginsys/bronzeward/issues/19) |
 
