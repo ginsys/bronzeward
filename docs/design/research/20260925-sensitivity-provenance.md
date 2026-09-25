@@ -392,8 +392,9 @@ per boolean and one per fragment prefix. **The negative result that would have c
 design revision, provenance needing a merge engine, was not found.**
 
 What the tracer cannot place, it reports: an unresolved reference inside unidentified embedded text
-(no value to trace), and a composition that failed (not composed). A missing trace or flip fragment
-would not be reported (§8); none was missing in this capture.
+(no value to trace), and a composition that failed (not composed). The analyser as captured would
+not have reported a missing trace or flip fragment; it now does (§8). None was missing in this
+capture.
 
 ### 6.2 Criterion 2: redaction without relying on value matching
 
