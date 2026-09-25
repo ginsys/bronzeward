@@ -23,10 +23,17 @@ The evidence it rests on, abbreviated below:
 | KL | [Key loss and restoration](../design/research/20260924-key-loss-restoration.md) |
 | PC | [Provider capability comparison](../design/research/20260924-provider-capability-comparison.md) |
 
-Every result in those reports holds for one Talos version (v1.13.6), strategic
-merge patches only, container nodes and exact-copy leak scanning
-([FR §2](../design/research/20260925-feasibility-evidence-review.md#2-what-binds-every-conclusion-here)).
+Every result in those reports holds for one Talos version (v1.13.6), container
+nodes with one control plane and one worker, and exact-copy leak scanning
+([FR §2](../design/research/20260925-feasibility-evidence-review.md#2-what-binds-every-conclusion-here)),
+and the composition results for strategic merge patches only
+([SR §8](../design/research/20260924-structural-reference-composition.md#8-limits);
+[SP §8](../design/research/20260925-sensitivity-provenance.md#8-limits)).
 This contract inherits those limits; §15 lists them.
+
+Where the evidence does not decide a question, this contract takes the most
+conservative option and marks it in place as **(choice §16.n)**; §16 lists each
+with its alternative for owner review.
 
 ## 1. Scope, roles and interfaces
 
@@ -51,16 +58,20 @@ the adoption workflow ([ginsys/bronzeward#22](https://github.com/ginsys/bronzewa
 and the edit and publication user flow
 ([ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23)).
 
-The design's "privileged ingestion/compiler" role is split into two
-identities, so that the one that creates secrets never reads them:
+The design's single "privileged ingestion/compiler" role (design §13.2) is
+split into two identities, so that the one that creates secrets never reads
+them **(choice §16.1)**. The application identities themselves are owned by
+[identity and approval policy](https://github.com/ginsys/bronzeward/issues/14)
+(design §7.7); this table states what this contract needs from them, as input
+to that work:
 
-| Identity | Needs | Must not have | Evidence for the split |
+| Identity | Needs | Must not have | What PC measured |
 | --- | --- | --- | --- |
-| Ingestion | create-only secret generations; encrypt and decrypt with the staging key (§3); encrypt with the artifact key, for the baseline (§2.3) | secret reads; artifact decryption; machine operation | PC `publisher`: create on its generation paths only ([PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities)) |
-| Compiler | read the pinned secret versions; encrypt with the artifact key | artifact or staging decryption; secret creation; machine operation | PC `compiler`: read on secret data, encrypt on the artifact key (PC §2) |
-| Executor | decrypt artifacts, gated by approval | secret reads; staging decryption | PC `executor`; [execution and recovery §3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
-| Metadata | §7.6 classification | any value | PC `metadata` |
-| Normal API | metadata and workflow | any secret value, any plaintext input | design §13.1 |
+| Ingestion | create-only secret generations; HMAC with the digest key (§4.1); encrypt and decrypt with the staging key (§3); encrypt with the baseline key (§2.3) | secret reads; artifact and baseline decryption; machine operation | `publisher`: `create` on `secret/data/gen/*` only, and a refused replace ([PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities), [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) rows 001, 002). Staging-key, baseline-key and HMAC use were not measured. |
+| Compiler | read the pinned secret versions; encrypt with the artifact key | artifact, baseline or staging decryption; secret creation; machine operation | `compiler`: `read` on `secret/data/*`, encrypt on the artifact key, decrypt refused (PC §4.1 rows 004, 038, 040) |
+| Executor | decrypt artifacts, gated by approval | secret reads; staging and baseline decryption | `executor`: decrypt only, secret read refused (PC §4.1 rows 039, 005); [execution and recovery §3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
+| Metadata | §7.6 classification | any value | `metadata`: KV metadata and Transit key state, no data (PC §4.1) |
+| Normal API | metadata and workflow | any secret value, any plaintext input | not measured; design §13.1 |
 
 Ingestion and compilation run in protected processing: a process that holds
 plaintext only in memory, writes no temporary file, and does not log input,
@@ -103,13 +114,16 @@ JSON Pointer inside that document, for example
 key, is addressable: `doc[0]/machine/nodeLabels/example.test~1role`. Every
 document of the stream is addressable. E1 found both gaps in its own path
 syntax ([E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits);
-E1 §8 item 5); this escaping scheme is chosen here and is untested.
+E1 §8 item 5); this escaping scheme is chosen here and is untested
+**(choice §16.2)**.
 
 A path inside an identified embedded document (§5.4) appends `|<format>` and a
 second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/password`.
 
 ### 2.3 Pipeline
 
+0. **Claim.** The claim row (§3.2) is created in state `held`, with no
+   payload, before the input is read.
 1. **Read** into the unresolved type (§2.1).
 2. **Parse** every document of the stream. A parse failure refuses the input;
    the refusal quotes no input text.
@@ -118,43 +132,84 @@ second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/passw
    every path the operator marks in the request. A mark that addresses no node
    refuses the input before any provider write, as E1's rejected rows were
    ([E1 §4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#4-expected-and-observed),
-   4.6). Over-extraction is accepted: E1's detector extracted `cluster.id`,
-   which is not a secret, and that is a cost, not a leak (E1 4.7).
-4. **Substitute** each identified value by a reference (§5) with a new logical
-   name, version and declaration, producing the candidate sanitized document.
+   4.6). What the schema list is evidenced to cover, and what not, is §2.4.
+4. **Substitute** each identified value by a reference (§5) under a newly
+   minted logical name at version 1, with its declaration (§5.2), producing the
+   candidate sanitized document. Names are minted as §5.1 states.
 5. **Guard** (§4.2). A guard hit refuses the input; no provider object has been
    created yet.
 6. **Create** one provider generation per extracted value, create-only (`cas=0`)
-   at a path of its own, which also satisfies design §7.8's rule never to write
-   a path past its `max_versions`. The path includes a component that the
-   database does not issue, because a restore rewinds database identifiers
-   ([DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state))
-   and a path derived from one alone could collide after a restore; with
-   `cas=0` such a collision is refused rather than overwritten.
+   at a path of its own. This takes the first branch of design §7.8 item 1
+   (a path of its own, rather than an overwritten path with an explicit
+   `max_versions`) **(choice §16.3)**. The path includes a component that the
+   database does not issue. The reason is inferred, not measured: a restore
+   rewinds database identifiers
+   ([DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state)),
+   and DB infers that a provider object named after such an identifier could
+   then match a different object issued after the restore
+   ([DB §9](../design/research/20260924-database-semantics.md#9-hand-off));
+   with `cas=0`, such a collision is refused rather than overwritten.
 7. **Construct** the sanitized value. Only now may it reach staging (§3) or the
    draft transaction.
-8. For import and drift adoption, **encrypt the exact input** as a baseline
-   artifact under the artifact rules of §11, and record its digest (§4.1). The
-   baseline is the only persisted form of the unextracted input.
+8. For import and drift adoption, **encrypt the exact input** as the baseline
+   under the baseline key, and record its keyed digest (§4.1). The baseline
+   ciphertext is persisted by the draft transaction, with the draft. It is the
+   only persisted form of the unextracted input. The baseline key is separate
+   from the artifact key: ingestion may encrypt with it, and no identity in §1
+   may decrypt with it, so the executor cannot read a baseline
+   **(choice §16.4)**. Decrypting a baseline, for example to compare its bytes
+   with the node's configuration, is an administrative operation outside this
+   contract.
 
-An interruption at any step leaves no plaintext on a backup-visible surface,
-which is what E1's 80-row screen, interrupting runs at ten points, and its
-crashed and held bundles measured for its prototype (E1 4.2, 4.6). It can leave provider generations
-that no draft references (step 6 done, step 7 not). They are unused provider
-objects under [design §7.4](../design/Talos_Configuration_and_Machine_Management_Design.md#74-publication-without-distributed-transactions);
-the PoC deletes none of them (§7.8).
+Under encrypted staging, the claim's payload is written after step 8, and not
+before: one envelope holding the sanitized document, its references and, for
+import and drift adoption, the baseline ciphertext, so that a taker has
+everything the draft transaction persists.
+
+What E1 measured about interruption, for its own prototype and pipeline: its
+80-row screen interrupted runs at ten points and found no synthetic secret in
+the run root and the live tables at that moment, and "says nothing about the
+heap, the write-ahead log or the backups" (E1 4.6). The database's disk and
+backup-visible surfaces were read only in the captured bundles: the honest
+runs, the runs held and killed in review, the run killed inside the database
+transaction, and the recovery runs (E1 4.2). This pipeline differs from E1's
+(the guard runs before the provider write, digests are keyed, the baseline is
+step 8), so no interruption of this pipeline has been measured; §15 requires
+it.
+
+An interruption after step 6 can leave provider generations that no draft
+references. They are unused provider objects under
+[design §7.4](../design/Talos_Configuration_and_Machine_Management_Design.md#74-publication-without-distributed-transactions);
+the PoC deletes none of them (design §7.8).
 
 ### 2.4 What identification does not promise
 
-Schema identification covers Talos-typed secret fields only. E1 measured recall
-9/9 and precision 9/10 on the fields its environment produced, and a secret
-placed at `machine.files[].content` was missed until the operator marked it
-(E1 4.7). Talos exposes no field-level sensitivity metadata through its API
-(E1 4.7); the library's field list exists but covers only Talos-typed secret
-fields ([FR §8](../design/research/20260925-feasibility-evidence-review.md#8-cross-report-findings)
-C1). Operator marking is therefore load-bearing, not a fallback, and an
-unmarked value outside those fields carries no promise of detection (design
-§6.9; E1 §8 item 4).
+The selected detector is the machinery's `RedactSecrets` field list, not E1's
+detector. The evidence for it is SP's `schema-covers-base-secrets` control: no
+leaf of either base that holds a bundle secret lay outside the schema's leaves,
+in all 56 cells, with 9 schema leaves per base
+([SP §4.4](../design/research/20260925-sensitivity-provenance.md#44-controls)).
+Its limits: that control was never seen to fail, and both bases are
+control-plane configurations (SP §8); the Docker-provisioned environment has no
+disk-encryption, installer or disk configuration, which are secret-bearing
+areas ([E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits)).
+The list covers Talos-typed secret fields only (SP §5;
+[FR §8](../design/research/20260925-feasibility-evidence-review.md#8-cross-report-findings)
+C1): a file's content, an inline manifest, a registry user name and an
+annotation are not among them (SP §5), and the schema alone left the
+whole-content case unredacted (SP §4.1). Talos exposes no field-level
+sensitivity metadata through its running API (E1 4.7).
+
+E1's own figures describe a different detector, its 11 name-keyed rules: recall
+9/9, precision 9/10 with `cluster.id` over-extracted, and a secret at
+`machine.files[].content` missed until the operator marked it (E1 4.7). They
+show the division of responsibility, not the coverage of the selected list.
+Over-extraction by the selected list is accepted as a cost, not a leak, but no
+measurement of its precision exists.
+
+Operator marking is therefore load-bearing, not a fallback, and an unmarked
+value outside those fields carries no promise of detection (design §6.9; E1 §8
+item 4).
 
 ## 3. Staging, ownership and interruption recovery
 
@@ -170,38 +225,49 @@ pipeline at §2.3 step 3 on the staged document.
 | Mode | Where the change lives | Recovery owner | Use |
 | --- | --- | --- | --- |
 | Protected transient | the ingesting process's memory only; the claim row carries no payload | none | default, for every ingestion that does not pause across the lifetime of its process |
-| Encrypted staging | the claim row carries the change as one envelope (document and references) encrypted under a staging key | a second ingestion principal (§3.4) | only an ingestion whose review must survive its process |
+| Encrypted staging | the claim row carries the change as one envelope (document, references and any baseline ciphertext, §2.3) encrypted under a staging key | a second ingestion principal (§3.4) | only an ingestion whose review must survive its process |
 
 The difference is a recovery owner, not secrecy: both keep plaintext out of
 ordinary persistence (E1 §6). Transient staging has no recovery owner by
 construction; the only correct answer to its interruption is to abandon the
 claim and ingest again. Encrypted staging recovers through a second principal
 at the price of a total provider dependency at recovery: with the provider
-unreachable the recovery fails and the claim stays held (E1 4.2, §6, §8 item 3).
+unreachable, E1's recovery failed and its claim stayed `held` (E1 4.2, §6, §8
+item 3). Under this contract the takeover's conditional `UPDATE` precedes the
+decryption, so the same failure leaves the claim `resumed` under the taker
+(§3.4). Transient staging by default and encrypted staging only where a review
+must survive its process follow E1's recommendation **(choice §16.5)**.
 
-The staging key is separate from the artifact key, and only ingestion
-identities can decrypt it, so the executor, which can decrypt artifacts, cannot
-read staged changes. A resume decrypts the envelope, refuses a payload that is
-not a complete envelope, checks its digest, and only then constructs the
-sanitized value through the ingestion package, as E1's resume path did (E1 §3).
+The staging key is separate from the artifact key **(choice §16.5)**, and only
+ingestion identities can decrypt it, so the executor, which can decrypt
+artifacts, cannot read staged changes. A resume decrypts the envelope, refuses
+a payload that is not a complete envelope, checks its digest, and only then
+constructs the sanitized value through the ingestion package, as E1's resume
+path did (E1 §3).
 It cannot re-run the guard: the extracted values are in the provider, and the
 ingestion identity cannot read them. E1 found a recovery that silently dropped
 the references because only the document was staged (E1 5.16).
 
 ### 3.2 Claim states and timers
 
-A claim row exists for every ingestion in either mode, with a state, an owner,
-an owner generation and two server-clock times: a **lease** that only its
-owner can extend, and an **absolute expiry** fixed when the claim is created
-and never extended. Both are evaluated by the database clock, not the caller's
-(E1 5.15).
+A claim row exists for every ingestion in either mode, created at §2.3 step 0,
+with a state, an owner, an owner generation and two server-clock times: a
+**lease** that only its owner can extend, and an **absolute expiry** fixed when
+the claim is created and never extended **(choice §16.6)**. Both are evaluated
+by the database clock, not the caller's (E1 5.15). E1's claims had a lease and
+server-side expiry only; the absolute expiry is added here so that repeated
+takeovers cannot keep a staged change alive indefinitely.
+
+The lease length, the absolute expiry and the heartbeat interval are **open**:
+no evidence bounds them. The contract requires only that the heartbeat interval
+is shorter than the lease and the lease shorter than the absolute expiry.
 
 | State | Meaning |
 | --- | --- |
-| `held` | Owned by the ingestion that created it. |
+| `held` | Owned by the ingestion that created it, including while that ingestion continues after its own review. |
 | `resumed` | Taken over by another ingestion principal (encrypted staging only). |
 | `released` | The draft transaction committed. The payload is cleared to `NULL`; the row stays (E1 §6). |
-| `abandoned` | Terminal without a draft: absolute expiry, a lapsed transient claim, an operator's abandonment or recovery-mode entry (§3.5). The payload is cleared. |
+| `abandoned` | Terminal without a draft: a refused input, absolute expiry, a lapsed transient claim, a takeover with nothing to decrypt, an operator's abandonment or recovery-mode entry (§3.5). The payload is cleared. |
 
 Owner identity: for transient staging, the run identity, process id and
 process start token, as in E1; for encrypted staging, the ingestion principal
@@ -215,16 +281,16 @@ write recorded a stale attempt in its control row 018
 ### 3.3 Lease extension (E1 decision 3)
 
 Only the current owner at the current owner generation may extend a lease, and
-only while the lease and the absolute expiry are both still in the future. A
-lapsed lease is never revived by its old owner; after the lapse only a takeover
-(§3.4) or abandonment can change the claim. E1's prototype extended any live
-`held` claim for any caller and left the question to this contract (E1 5.16,
-§7).
+only while the lease and the absolute expiry are both still in the future
+**(choice §16.7)**. A lapsed lease is never revived by its old owner; after the
+lapse only a takeover (§3.4) or abandonment can change the claim. E1's
+prototype extended any live `held` claim for any caller and left the question
+to this contract (E1 5.16, §7).
 
 ### 3.4 Takeover (E1 decision 2)
 
 A claim is taken over only when all of these hold, in one conditional `UPDATE`
-that sets the new owner and increments the owner generation:
+that sets the new owner and increments the owner generation **(choice §16.7)**:
 
 - the claim is under encrypted staging and in state `held` or `resumed`;
 - its lease has lapsed and its absolute expiry has not;
@@ -232,12 +298,20 @@ that sets the new owner and increments the owner generation:
 - the request comes from an ingestion principal, on an explicit operator
   recovery request recorded with the operator's identity.
 
-The new state is `resumed`. Accepting `resumed` claims is what removes E1's
-stranded case: its `Resume` accepted only `held`, so a claim whose taker
-crashed stayed `resumed` with its ciphertext and no one could take it over
-(E1 4.2, §7). The generation fence is the same mechanism DB measured for queue
-claims, where a worker whose lease expired had its late completion refused at
-the newer fence (DB §4.5 row 021,
+The new state is `resumed`. In E1, `resumed` also marked the original run's own
+continuation after review (E1 5.7), and the run killed inside the draft
+transaction left its own claim `resumed` with its ciphertext; E1's `Resume`
+accepted only `held`, so no one could take that claim over (E1 4.2, §7). Here
+an owner's own continuation leaves the claim `held`, `resumed` means only taken
+over, and both states can be taken over, which removes that stranded case.
+
+A claim whose payload was never written (encrypted staging interrupted before
+the end of §2.3 step 8) has nothing to decrypt: a takeover of it abandons it,
+and the input is ingested again.
+
+The generation fence is the same mechanism DB measured for queue claims, where
+a worker whose lease expired had its late completion refused at the newer fence
+(DB §4.5 row 021,
 [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims)).
 Its effects:
 
@@ -262,11 +336,19 @@ At absolute expiry, or when a transient claim's lease lapses, the claim becomes
 `abandoned`, its payload is cleared, and the input must be ingested again. An
 abandoned run's provider generations remain as unused objects (§2.3).
 
+Abandonment is evaluated at read time and written by a sweep
+**(choice §16.8)**: every transition and every read treats a claim past its
+absolute expiry, or a transient claim past its lease, as `abandoned`, whether
+or not the row says so yet; an ingestion-identity sweep then writes the state
+and clears the payload, at startup and periodically. A late sweep therefore
+delays only the clearing of ciphertext, never a refusal. The sweep interval is
+open.
+
 A restore rewinds claim rows and fence generations with the rest of the
 database (DB §4.7). A claim created before the current recovery epoch
 ([execution and recovery §7](execution-recovery.md#7-recovery-after-management-state-restoration))
 is therefore never resumed or committed: recovery-mode entry abandons it, and
-its input is ingested again.
+its input is ingested again **(choice §16.9)**.
 
 ## 4. Correlation digests and the extraction guard
 
@@ -276,8 +358,9 @@ Design: [§7.1](../design/Talos_Configuration_and_Machine_Management_Design.md#7
 
 Every persisted correlator of a secret value (journal records, reference rows,
 the baseline's per-value records) is HMAC-SHA-256 under a key held by the
-provider, not by the database or its backups. The record names the key's
-identity and version. An unkeyed digest of a secret value is never persisted.
+provider, not by the database or its backups **(choice §16.10)**. The record
+names the key's identity and version. An unkeyed digest of a secret value is
+never persisted.
 
 E1 persisted unsalted SHA-256 digests. For long random Talos key material that
 is not a practical guessing target; for an operator-marked low-entropy value it
@@ -308,11 +391,12 @@ and checked twice against every value extracted in this run:
    substring. This catches a secret embedded in a larger value, such as a token
    inside a URL or a join command, which value comparison cannot see.
 
-Both checks skip the scalar content of this run's `!bwref` nodes, which is a
-reference name, as E1 skipped the references it substituted (E1 5.19).
+The substring search skips the scalar content of this run's `!bwref` nodes,
+which is a reference name, as E1's substring search skipped the references it
+substituted (E1 5.19). The value comparison does not skip them.
 
-v1 keeps both. A false refusal leaks nothing; a false pass persists plaintext
-(E1 5.19). The refusal names the matching paths and the rule, never the value.
+v1 keeps both **(choice §16.11)**. A false refusal leaks nothing; a false pass
+persists plaintext (E1 5.19). The refusal names the matching paths and the rule, never the value.
 The remedy is to mark the containing scalar, which is then referenced whole, as
 design §6.9 requires for arbitrary text. The accepted cost: a very short marked
 value can match unrelated scalars and refuse the input until the mark is
@@ -344,11 +428,36 @@ machine:
 
 Name grammar: one or more segments joined by `/`; a segment is one or more
 lowercase ASCII letters, digits and hyphens, and begins and ends with a letter
-or digit. The grammar fixes only the lexical form; how a logical name maps to a
-provider path is provider layout, which stays separate and open (design §7.3). A reference resolves to one exact version, pinned at
-publication (§6).
+or digit. The grammar fixes only the lexical form. How a logical name maps to a
+provider path is provider layout (design §7.3), open beyond the PoC constraints
+of §2.3 step 6.
 
-The tag is chosen over the opted-in marked string and the external path binding.
+**Scope, naming and versions** (design §6.9: a reference names "a scoped
+logical secret" and resolves "to an exact version"):
+
+- **Scope.** Every logical secret belongs to one cluster, recorded when it is
+  created; the scope is metadata of the secret, not part of the name's lexical
+  form. A machine's compilation refuses a reference whose secret belongs to
+  another cluster. Library-wide secrets shared across clusters are not provided
+  in the PoC **(choice §16.12)**.
+- **Naming.** Ingestion mints a new name for every value it extracts, including
+  a value it extracted before, at re-adoption or in a later draft update. A
+  minted name is unique within its scope, never reused for another secret, and
+  contains no part of the value and no digest of it. The exact scheme is open
+  beyond those constraints. The cost is churn: re-adopting an unchanged
+  configuration yields new names, so diffs and dependency records change for
+  secrets that did not. Deduplicating by keyed digest (§4.1) is the
+  alternative, deferred until the digest mechanism is evidenced
+  **(choice §16.13)**.
+- **Versions.** The declaration (§5.2) names the exact version. The compiler
+  never selects a latest version; a different version is a new fragment
+  revision, reviewed as a source change **(choice §16.14)**. In the PoC every
+  secret ingestion creates is at version 1 (§2.3 step 4); a later version is
+  created only by rotation tooling (design §13.2), which this contract does not
+  specify.
+
+The tag is chosen over the opted-in marked string and the external path binding
+**(choice §16.15)**.
 All three reach native parity when resolved early, so composition parity does
 not decide between them ([SR §9](../design/research/20260924-structural-reference-composition.md#9-alternatives-and-decision-enabled));
 the renderer implications do
@@ -361,8 +470,9 @@ the renderer implications do
 - The binding needs bindings kept in step with fragment edits, including list
   selectors; it cannot hold a list-element reference
   ([SP §7.1](../design/research/20260925-sensitivity-provenance.md#71-the-binding-form-cannot-hold-a-list-element-reference));
-  its refill moves a key to the end of its mapping, which changes the bytes of an
-  embedded YAML document for any key that is not last (SR §6.4); and a
+  its refill adds a key at the end of its mapping, so SR expects a binding to
+  an embedded-YAML key that is not last to change the document's bytes, a case
+  it did not run (SR §6.4, §8); and a
   document-and-path address points elsewhere after the v1.14 layout change
   ([E3 §6.2](../design/research/20260925-talos-compatibility.md#62-criterion-2-subprocess-against-machinery-and-the-structural-reference-evidence)).
 - The tag's costs are a tag-preserving parser before any typed decode (§6) and
@@ -379,18 +489,19 @@ declaration for every name it references:
 
 ```yaml
 references:
-  registry/example-pass: {kind: string}
-  pki/extra-ca: {kind: string, encoding: base64}
-  app/db-pass: {kind: string}
+  registry/example-pass: {kind: string, version: 1}
+  pki/extra-ca: {kind: string, version: 1, encoding: base64}
+  app/db-pass: {kind: string, version: 1}
 embedded:
   - {path: "doc[0]/cluster/inlineManifests/0/contents", format: yaml}
 ```
 
 - `kind` is one of `string`, `integer`, `boolean` or `mapping` (a mapping of
-  those scalar kinds). It must equal the kind stored in the pinned secret
-  version; a mismatch refuses compilation and nothing is coerced.
-- `encoding` is optional and comes from a closed enum. The PoC enum has one
-  member, `base64`, which places the standard base64 encoding of a `string`
+  those scalar kinds) **(choice §16.16)**. It must equal the kind stored in the
+  pinned secret version; a mismatch refuses compilation and nothing is coerced.
+- `version` is the exact version the reference resolves to (§5.1).
+- `encoding` is optional and comes from a closed enum **(choice §16.17)**. The
+  PoC enum has one member, `base64`, which places the standard base64 encoding of a `string`
   secret's UTF-8 bytes. It is the only modifier the evidence defined (SP's
   prototype refuses any other). A value already stored in its placed form, as
   in SR's bytes case, needs no modifier. One name has one declaration per
@@ -407,8 +518,11 @@ authoring error.
 
 - On a scalar or mapping node that is a mapping value or a list element, in any
   document of the stream, or inside an identified embedded document. SR ran
-  integer, boolean, base64-bytes, string and whole-mapping targets, a list
-  element and a second document (SR §3.1, §4).
+  integer, boolean, base64-bytes, string and whole-mapping targets, a value
+  inside a list element's mapping (`machine.acceptedCAs[0].crt`) and a second
+  document (SR §3.1, §4); a reference that is itself a list element is
+  evidenced by SP's list-append case, which landed at
+  `cluster/extraManifests[1]` (SP §3.1, §4.2).
 - Not on a mapping key, and not on a sequence as a whole: a list as a reference
   target was not run (SR §8), so the PoC refuses it.
 - References replace complete parsed values. There is no interpolation, and
@@ -429,9 +543,12 @@ parsed in its declared format, its references resolved, and the whole document
 re-serialized: JSON compact with sorted keys, YAML with two-space indentation
 through the pinned encoder. The author's formatting, comments and quoting are
 not preserved, and an identified JSON document is authored as YAML, because a
-tagged value is not JSON (SR §6.4). Parity was shown only for documents whose
-literal form was derived through the same encoders, and for embedded YAML only
-with the reference at the last key of its mapping (SR §6.4, §8).
+tagged value is not JSON (SR §6.4). These are SR's prototype rules, which SR
+calls the experiment's and not a design (SR §8); they are adopted because they
+are the only rules parity was shown for **(choice §16.18)**. Parity was shown
+only for documents whose literal form was derived through the same encoders,
+and for embedded YAML only with the reference at the last key of its mapping
+(SR §6.4, §8).
 
 **Unidentified embedded text** is opaque: nothing resolves inside it, and a
 secret in it must be marked as the whole scalar (§4.2).
@@ -442,7 +559,7 @@ A string scalar that contains the text `!bwref` is refused, at authoring (§7
 stage 1) and again in the composed output (§6 step 7). A tag inside
 unidentified embedded text is such a string, and SR shows it would otherwise be
 left in the output with validation passing (SR §6.4). The cost is that a literal
-look-alike, which YAML would keep literal, is refused too.
+look-alike, which YAML would keep literal, is refused too **(choice §16.19)**.
 
 ## 6. Resolution order and composition
 
@@ -464,32 +581,58 @@ on unidentified embedded text: 210 rows, 0 differing from expectation
 This departs from design §6.9's stated preference for late resolution, which SR
 rules out on this evidence.
 
+**The first composition input is the machine's import base.** The PoC excludes
+new-machine enrolment and cluster bootstrap
+([design §18.2](../design/Talos_Configuration_and_Machine_Management_Design.md#182-phase-1---configuration-control-on-an-existing-cluster)),
+so the compiler never generates a base configuration and never assembles a
+secrets bundle. The import base is the sanitized document ingested for the
+machine at import, or at its latest accepted drift adoption: a source revision
+of its own, not a fragment in any layer, holding a reference for every value
+ingestion extracted, the Talos bundle's included. Every selected fragment is a
+patch onto it, as SR's and SP's fragments were patches onto their bases.
+
+This departs from design §6.7, which gives cluster identity and secrets
+"dedicated cluster and secret-generation resources; injected by the compiler
+and protected from ordinary fragments", and from the `secretGeneration` field
+of the illustrative release record in design A.3. For the PoC, the import base's
+references stand in for those resources, a release records its import base
+revision in their place, and they are protected by refusal: publication is
+refused when an ordinary fragment overrides or deletes a value the import base
+holds as a reference, which the prefix compositions of §8.1 detect
+**(choice §16.20)**. A later phase that generates configurations must specify
+the dedicated resources and how a bundle is assembled from them.
+
 For each machine:
 
-1. **Snapshot** the source and assignment revisions and order the fragments by
-   the fixed layers of design §6.2 and their explicit order within a layer.
-2. **Pin** a version for every declared reference in every selected fragment,
-   including references a later fragment will override. This is the source
-   superset; resolving early necessarily reads all of it (SR §6.2, §6.4).
+1. **Snapshot** the import base, the source and assignment revisions, and
+   order the fragments by the fixed layers of design §6.2 and their explicit
+   order within a layer.
+2. **Pin** every declared reference in the import base and in every selected
+   fragment, including references a later fragment will override: record the
+   declared version (§5.1) together with the provider object it names. This is
+   the source superset; resolving early necessarily reads all of it (SR §6.2,
+   §6.4).
 3. **Check dependencies**: every pinned secret version must classify `retained`
    (design §7.6), and the compiler identity must read it at the point of use.
    `blocked`, `lost` or `unknown` refuses publication.
-4. **Resolve** each fragment with a tag-preserving parser, replacing each tagged
-   node by its typed value (with its encoding) before any typed decode, and each
-   identified embedded document as in §5.4. Every tag must resolve; there is no
-   partial result.
-5. **Compose** the reference-free fragments with the selected renderer (§10) in
-   the order of step 1, using native strategic-merge semantics: last writer
-   wins, and `$patch: delete` removes. The compiler performs no merge of its own
-   (design §6.9). JSON6902 patches are refused: they were not tested and are
-   refused for the v1.13 multi-document configuration (SR §8).
+4. **Resolve** the import base and each fragment with a tag-preserving parser,
+   replacing each tagged node by its typed value (with its encoding) before any
+   typed decode, and each identified embedded document as in §5.4. Every tag
+   must resolve; there is no partial result.
+5. **Compose** the reference-free fragments onto the resolved import base with
+   the selected renderer (§10) in the order of step 1, using native
+   strategic-merge semantics: last writer wins, and `$patch: delete` removes.
+   The compiler performs no merge of its own (design §6.9). JSON6902 patches
+   are refused: they were not tested and are refused for the v1.13
+   multi-document configuration (SR §8).
 6. **Trace** the composition for provenance (§8.1).
 7. **Check the output**: no string scalar holds reserved text (§5.5), and no
    resolved `string` value of six bytes or more, in its stored or placed form,
    appears as an exact copy at an output leaf that provenance does not attribute
-   to its reference. A copy is refused and reported by path only, as a
-   source-side exposure: the value was already written in plaintext into a
-   fragment, and its remedy is to mark that literal, which extracts it to a new
+   to its reference; and no ordinary fragment overrode a reference of the
+   import base (choice §16.20). A copy is refused **(choice §16.21)** and
+   reported by path only, as a source-side exposure: the value was already
+   written in plaintext into a fragment, and its remedy is to mark that literal, which extracts it to a new
    generation; whether to rotate the secret is the operator's decision. SP's
    duplicate-literal case is the evidence that only value matching sees such a
    copy ([SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records));
@@ -509,7 +652,7 @@ Design: [§6.9](../design/Talos_Configuration_and_Machine_Management_Design.md#6
 
 | Stage | Checks | Guarantee | On failure |
 | --- | --- | --- | --- |
-| 1. Authoring | YAML syntax of every document; tags only as §5.3 allows; every tag declared and every declaration used; name grammar; `kind` and `encoding` values; embedded identifications; reserved text (§5.5); paths well-formed (§2.2) | The fragment is well-formed source. A draft with references is not a validated native configuration. | The draft update is refused, naming paths |
+| 1. Authoring | YAML syntax of every document; tags only as §5.3 allows; every tag declared and every declaration used; name grammar; `kind`, `version` and `encoding` values; embedded identifications; reserved text (§5.5); paths well-formed (§2.2) | The fragment is well-formed source. A draft with references is not a validated native configuration. | The draft update is refused, naming paths |
 | 2. Composition and materialization | §6 steps 1–7 under the compiler identity: pinning, dependency state, kind match, resolution, native composition, tracing, output checks | The configuration was produced by native composition of reference-free fragments, with every reference resolved and attributed | Publication is refused; nothing is committed |
 | 3. Release validation | §6 step 8 on the actual complete configuration with the pinned renderer; then redaction (§8) and artifact encryption (§11) | The encrypted artifact is exactly what upstream validation accepted | Publication is refused; the validation message is shown only as §8.3 allows |
 | 4. Execution checks | Plan, target and operation preconditions; decryption and credentials under the executor identity at use | Owned by [execution and recovery §3](execution-recovery.md#3-dispatch-commitment) | As specified there |
@@ -526,12 +669,16 @@ Design: [§6.9](../design/Talos_Configuration_and_Machine_Management_Design.md#6
 ### 8.1 Provenance by tracer composition
 
 For every composition that is published or shown, the compiler composes, with
-the same renderer and the same fragment order:
+the same renderer, the same import base and the same fragment order:
 
 - a **trace pass**, in which every resolved value is replaced by a
-  shape-preserving stand-in (letters become `x`, digits `0`, other bytes stay; an
-  integer gets a reserved stand-in), so that every output leaf holding a
-  stand-in is attributed to its reference occurrence;
+  shape-preserving stand-in, so that every output leaf holding a stand-in is
+  attributed to its reference occurrence. The stand-in format is SP's: each
+  letter becomes `x`, each digit `0`, every other byte stays, each line of five
+  bytes or more starts with `zq` and a three-digit occurrence id, and an integer
+  becomes 61000 plus its id (SP §2). SP calls that format the experiment's, not
+  a design (SP §8); it is adopted because SP's results were measured with it
+  **(choice §16.22)**;
 - a **flip pass** per boolean reference, whose flipped leaf is that boolean's;
 - a composition of each proper **fragment prefix**, to name the fragment after
   which an overridden reference's stand-in disappears.
@@ -554,6 +701,10 @@ compositions differ in tree shape, or when one pass composes or validates and
 the other does not. SP's prototype skipped a fragment whose trace was missing,
 which would have shown its references unredacted while reporting the run
 complete ([SP §8](../design/research/20260925-sensitivity-provenance.md#8-limits)).
+SP's control for the fidelity check was a one-mutation smoke test that never
+injected a structural change, and it was not exercised in 16 of 56 cells
+(SP §4.4, §8), so the tree-shape comparison is required here without evidence
+that it detects a structural difference (§15).
 
 ### 8.2 The provenance record
 
@@ -564,16 +715,20 @@ composition (SP §6.3):
 | --- | --- |
 | reference, version | logical name and pinned version |
 | encoding | the declared modifier, if any |
-| source | fragment revision, its SHA-256, source document and path |
+| source | import base or fragment revision, its SHA-256, source document and path |
 | outcome | exactly one of: output document and path (one row per path, so an alias has two); or the fragment that overrode it |
 
 SP's third outcome, `unresolved`, cannot occur in a published release, because
 every tag must resolve (§6 step 4) and a tag inside unidentified text is
 refused (§5.5).
 
-Provenance is recomputed for every composition that is shown. Reusing another
-revision's paths leaked a moved value, and reusing its values leaked a rotated
-one (SP §4.4, §5).
+Provenance is computed from each composition's own trace pass, never carried
+over from another revision's. Reusing another revision's paths leaked a moved
+value, and reusing its values leaked a rotated one (SP §4.4, §5). This does not
+mean reading secrets again to display a stored diff: the redacted review data
+of a published release (§11) is derived once, at publication, from that
+release's own trace, and is shown as stored. A composition that is not a
+published release, such as a draft preview, is traced when it is composed.
 
 ### 8.3 Redaction
 
@@ -588,11 +743,13 @@ is redacted by three complementary means, all applied:
 | Value | exact copies of resolved values that no path covers | `<redacted:value>` |
 
 Together they left no referenced value and no base secret in any of the 28
-cases on either base; composed paths alone leaked base secrets in 26 cells per base, the
-schema alone referenced values in 15, and value matching alone 8
+cases on either base; composed paths alone leaked base secrets in 26 cells per
+base, the schema alone referenced values in 15, and value matching alone 8
 ([SP §4.1](../design/research/20260925-sensitivity-provenance.md#41-which-representations-leak-a-referenced-value)).
 A token names the reference and version, so a rotation shows as
 `<redacted:reg-pass@1>` becoming `<redacted:reg-pass@2>` without either value.
+The token syntax is SP's, which SP calls the experiment's (SP §8); it is adopted
+with the stand-in format **(choice §16.22)**.
 
 - **Paired diffs.** Where a diff shows a base leaf beside a redacted output
   leaf, the base side is redacted as `<redacted:paired>`, whatever its kind; a
@@ -607,10 +764,21 @@ A token names the reference and version, so a rotation shows as
   is its own value, so a message quoting it matches its trace message and
   nothing marks the quote (SP §6.3). Until a way to mark such a quote exists, a
   message that the template reports verbatim is withheld when the step's input
-  holds a boolean reference.
+  holds a boolean reference **(choice §16.23)**.
+- **Verbatim messages quoting an authored literal are shown.** SP hands this
+  case to this contract (SP §10). An authored literal is source text that
+  ingestion has already passed as not secret and that ordinary persistence
+  holds in the fragment, so quoting it discloses nothing the fragment does not.
+  The exception is a literal that copies a secret. The value means redacts an
+  exact copy of a resolved `string` value of six bytes or more in any message,
+  and §6 step 7 refuses publication when such a copy stands at an output leaf. A
+  copy that is shorter, or of an integer or boolean value, is not detected and
+  is listed in §8.4 **(choice §16.23)**.
 - **Withheld means not persisted.** A withheld message is replaced by a fixed
   notice naming the step; its text is not stored, logged or put into a support
-  bundle, consistent with design §15.4.
+  bundle, consistent with design §15.4 **(choice §16.23)**. SP leaves open how
+  withheld messages reach a support bundle (SP §10); under this contract they
+  do not.
 - **Output that embeds the configuration.** Renderer output that carries a
   configuration or configuration diff, such as a refused or dry-run apply
   (E3 5.4, §7), is withheld as a whole unless it is positively recognised as
@@ -629,6 +797,8 @@ A token names the reference and version, so a rotation shows as
   references. Ingestion (§2) is what must keep such values out of fragments.
 - Unidentified embedded text, which is opaque to every means except exact value
   matching.
+- An authored literal that copies a secret value shorter than six bytes, or an
+  integer or boolean secret value, quoted verbatim in a message (§8.3).
 - The formats: SP measured its prototype's own log and support formats (SP §3).
   The PoC's formats must be re-checked against the same oracle (§15).
 
@@ -648,8 +818,8 @@ provenance record (§8.2) (SP §6.3; SR §6.2):
   dependencies with its sentinel method; SP's flip pass can, and supersedes it
   (FR §8 C2).
 - **Reproduction (source) dependencies**: every reference occurrence in the
-  source fragments, with the fragment revision and its digest, overridden ones
-  included. This is what rendering the same release again from
+  import base and the source fragments, with the revision and its digest,
+  overridden ones included. This is what rendering the same release again from
   source needs.
 
 A reproduction dependency can outlive every effective one: an overridden
@@ -670,34 +840,40 @@ Design: [§6.5](../design/Talos_Configuration_and_Machine_Management_Design.md#6
 
 ### 10.1 Selection: the Go machinery, in process
 
-The PoC compiler generates, composes and validates through the Talos Go
-machinery (`pkg/machinery`) linked into the protected compilation process, not
-by running `talosctl` as a subprocess.
+The PoC compiler composes and validates through the Talos Go machinery
+(`pkg/machinery`) linked into the protected compilation process, not by
+running `talosctl` as a subprocess **(choice §16.24)**. It generates no base
+configuration (§6).
 
 Within E3's matrix the two are the same: identical generation in 132 of 132
-rows, the same validation verdict in all 2016 cells, the same RPC outcomes in
-12 of 12 client rows and 42 of 42 contract rows (E3 §4.3, §6.2). The choice is
-packaging, not compatibility (E3 §8). On packaging:
+rows, the same validation verdict in all 2016 cells, the same RPC outcomes for
+the 6 client pairs, and the same exit status for both in 42 of 42 contract dry
+runs, a verdict that compares exit statuses only
+(E3 §4.3, §6.2, [§7](../design/research/20260925-talos-compatibility.md#7-limits)).
+The choice is packaging, not compatibility (E3 §8). On packaging:
 
-- **The plaintext boundary.** Early resolution hands the renderer fragments
-  that hold resolved secret values, and generating a base configuration needs
-  the secrets bundle. A subprocess receives them as files or as arguments. A
-  command-line argument is readable by other local processes, and a temporary
-  file is one of the surfaces design §7.1 names and E1 had to control for
+- **The plaintext boundary.** Early resolution hands the renderer an import
+  base and fragments that hold resolved secret values. A subprocess must
+  receive them through some channel, such as files, arguments or inherited
+  descriptors. A command-line argument is readable by other local processes,
+  and a temporary file is one of the surfaces design §7.1 names and E1 had to
+  control for
   ([E1 §3](../design/research/20260922-secret-ingress-extraction-before-persistence.md#3-what-was-built),
   4.3). In process, they stay in the memory of the one process that already
-  holds them. This is the deciding reason.
+  holds them. This is the deciding reason, and it is inferred: neither path's
+  exposure was measured, and §15 requires the compiler process to be scanned as
+  E1 scanned ingestion.
 - **The machinery is needed anyway.** Schema redaction uses its secret-field
   list (SP §2), and only its `compatibility` package refuses a Kubernetes
   version outside a target's window (E3 §6.3 item 5).
 - **Costs accepted.** `talosctl validate`'s mode type is under the talos
-  module's `internal/` tree, so the compiler implements the machinery's runtime
-  mode interface itself, as E3's prototype did; `secrets.Bundle.Validate`
-  changed signature in v1.14, so a second contract minor needs a shim and a
-  second build (E3 §6.2). While a deployment targets one minor, neither is
-  needed. A second minor means a second binary in either
-  implementation (E3 §8), and then the plaintext boundary returns between the
-  builds; that is outside the PoC.
+  module's `internal/` tree, so the compiler implements the machinery's
+  `RuntimeMode` interface itself, as E3's prototype did, whatever the minor
+  (E3 §6.2). `secrets.Bundle.Validate` changed signature in v1.14, so a second
+  contract minor needs a shim and a second build (E3 §6.2); while a deployment
+  targets one minor, neither the shim nor the second build is needed. A second
+  minor means a second binary in either implementation (E3 §8), and then the
+  plaintext boundary returns between the builds; that is outside the PoC.
 
 **Condition on the selection.** SR's and SP's parity and provenance results were
 measured through `talosctl machineconfig patch`. Composition through the
@@ -706,7 +882,8 @@ the compiler is accepted, the SR and SP matrices must be re-run with composition
 through the compiler's own machinery path and reach the same verdicts. If they
 do not, this selection is reopened; the alternative is the pinned `talosctl`
 subprocess, with plaintext passed only through inherited descriptors, never a
-named file or an argument, which would then need its own leak evidence.
+named file or an argument. That channel's exposure is unmeasured too, and it
+would need the same leak scan.
 
 The executor's Talos client is not selected here. E3 shows the same RPC
 outcomes through both implementations (E3 §4.3); the choice belongs to
@@ -717,9 +894,10 @@ outcomes through both implementations (E3 §4.3); the choice belongs to
 - **Pin to the node's minor.** The machinery module's minor equals the target
   node's running Talos minor. In E3, a v1.13 renderer's output was accepted by
   the v1.13.6 node and a v1.14 renderer's was refused (E3 §8).
-- **The PoC compiles only the node's running contract minor.** A v1.12 contract
-  was also accepted, but v1.10 and v1.11 contracts were refused in immediate
-  mode (E3 §4.3), and the PoC applies in `no-reboot` mode only.
+- **The PoC compiles only the node's running contract minor**
+  **(choice §16.25)**. A v1.12 contract was also accepted, but v1.10 and v1.11
+  contracts were refused in immediate mode (E3 §4.3), and the PoC applies in
+  `no-reboot` mode only.
 - **Refuse, in Bronzeward, a target contract whose minor exceeds the
   renderer's.** The renderer silently renders its own contract instead
   (E3 §4.1, §6.3 item 1).
@@ -771,23 +949,23 @@ Design: [§7.4](../design/Talos_Configuration_and_Machine_Management_Design.md#7
 
 §6 performs design §7.4 steps 1 and 2. Step 3 is the compiler's: derive the
 redacted review data (§8) and encrypt every full artifact under the artifact
-key with the compiler identity, which can encrypt but not decrypt (PC §2). Step 4
-is persistence's: the compiler hands over, as one unit, only sanitized or
-encrypted values:
+key with the compiler identity, which can encrypt but not decrypt (PC §2).
+Step 4 is persistence's: the compiler hands over, as one unit, only sanitized
+or encrypted values:
 
-- release metadata: source and assignment revisions, the renderer and contract
-  record (§10.2), the stage 3 result;
+- release metadata: the import base, source and assignment revisions, the
+  renderer and contract record (§10.2), the stage 3 result;
 - per machine: the artifact ciphertext and its digest, the redacted review
   data, the provenance records (§8.2) and both dependency records with the
   encryption dependency (§9).
 
 The persistence contract commits them atomically and rejects stale inputs
-([ginsys/bronzeward#18](https://github.com/ginsys/bronzeward/issues/18)). A failure
-before that commit persists nothing of the release: the ciphertext is held only
-by the compiler until the commit, and the secret generations pinned in step 2
-already existed. Step 5
-is unchanged: publication makes a release available for planning and approval
-and never authorizes dispatch (execution and recovery §2).
+([ginsys/bronzeward#18](https://github.com/ginsys/bronzeward/issues/18)). A
+failure before that commit persists nothing of the release: the ciphertext is
+held only by the compiler until the commit, and the secret generations pinned in
+step 2 already existed. Step 5 is unchanged: publication makes a release
+available for planning and approval and never authorizes dispatch (execution
+and recovery §2).
 
 The interface types hold no plaintext. The plaintext configuration exists only
 inside the compilation process between §6 step 4 and encryption.
@@ -798,7 +976,8 @@ inside the compilation process between §6 step 4 and encryption.
 
 Fragment 1 (cluster layer) sets `password: !bwref registry/example-pass`;
 fragment 2 (cluster-machine override) sets `password: example-override` at the
-same path. Both are resolved (step 4), native composition keeps fragment 2's
+same path. Neither is the import base, so §6's import-base protection does not
+apply. Both are resolved (step 4), native composition keeps fragment 2's
 literal, and the prefix composition shows the stand-in disappearing after
 fragment 2. Result, as in SR's and SP's override-literal case:
 
@@ -816,13 +995,14 @@ retained artifact (§9).
 `password: &p !bwref registry/example-pass` on one registry and `password: *p` on
 another yield one occurrence effective at two output paths, each redacted as
 `<redacted:registry/example-pass@1>`. `wipe: !bwref install/wipe` with
-`{kind: boolean}` is attributed by its flip pass; a diff against a base with
-`wipe: false` shows `-wipe: <redacted:paired>` beside
+`{kind: boolean, version: 1}` is attributed by its flip pass; a diff against a
+previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 `+wipe: <redacted:install/wipe@1>`.
 
 ### 12.3 An interrupted, reviewed import under encrypted staging
 
-1. The operator imports a worker and marks `doc[0]/machine/files/0/content`.
+1. The operator imports a worker, choosing encrypted staging because the review
+   must survive the process, and marks `doc[0]/machine/files/0/content`.
    Ingestion identifies the bundle's secret fields and the marked path, the guard
    passes, provider generations are created, and the sanitized change is staged
    encrypted with a claim `held` by ingestion instance A.
@@ -838,20 +1018,68 @@ another yield one occurrence effective at two output paths, each redacted as
    takeover could retry until the absolute expiry, after which the claim is
    abandoned and the worker is imported again.
 
+### 12.4 A rejected draft update
+
+1. An operator submits a draft update that adds a node label holding a token
+   and a machine file whose script embeds the same token in a command line. The
+   operator marks the label, `doc[0]/machine/nodeLabels/example.test~1token`
+   (§2.2 escaping); the file content is not marked, and the schema does not
+   cover it (§2.4).
+2. Steps 0 to 4 run: the claim is `held`, the label's value is substituted by
+   a reference under a newly minted name.
+3. Step 5: the value comparison passes, because no other scalar equals the
+   token; the substring search finds it inside
+   `doc[0]/machine/files/0/content`. The input is refused with that path and the
+   rule `substring`, and no value. No provider generation was created, and the
+   claim becomes `abandoned` with no payload.
+4. The operator marks `doc[0]/machine/files/0/content` as well and resubmits.
+   Both values are extracted, the script under its own name, referenced whole
+   (design §6.9), and the guard passes.
+
+### 12.5 From draft to encrypted release
+
+1. Worker `w1` has an import base from its import. A cluster-layer fragment
+   sets `password: !bwref registry/example-pass`, declared
+   `{kind: string, version: 1}`; a cluster-machine fragment adds a node label.
+2. §6 steps 1 to 3: the import base and both fragments are snapshotted, every
+   reference in them is pinned with its provider object, and each classifies
+   `retained`.
+3. Steps 4 and 5: all three are resolved and composed through the machinery
+   onto the import base. Step 6: the trace pass and the proper prefix
+   compositions (the import base alone, and with the first fragment) attribute
+   every stand-in; there is no boolean, so no flip pass. Step 7: no reserved
+   text, no unattributed copy, no import-base reference overridden.
+4. Step 8: the configuration validates in the node's platform mode. The review
+   data is derived from this composition's trace: a diff against `w1`'s previous
+   release shows the password as `<redacted:registry/example-pass@1>`, the
+   label in clear, and the import base's secrets under their own tokens and
+   `<redacted:schema>`.
+5. The compiler encrypts the configuration under the artifact key and hands
+   persistence one unit (§11): the import base, source and assignment
+   revisions, the renderer and contract record, the ciphertext and its digest,
+   the review data, the provenance and both dependency records. Persistence
+   commits it atomically; nothing is dispatched.
+6. Had step 8 rejected the configuration, the message would be shown through
+   its template or withheld (§8.3), and nothing of the release would be
+   persisted.
+
 ## 13. Failure and rejection cases
 
 | Stage | Condition | Outcome | Persisted |
 | --- | --- | --- | --- |
-| Ingestion | Parse failure, or a mark addressing no node | Refused before any provider write | Nothing |
-| Ingestion | Guard hit (§4.2) | Refused, naming paths | Nothing |
-| Ingestion | Provider write fails part-way | Refused | Unused provider generations only |
-| Ingestion | Crash before staging or the draft transaction | Transient: claim abandoned at lease lapse; encrypted: takeover (§3.4) | No plaintext; unused generations; claim row |
+| Ingestion | Parse failure, or a mark addressing no node | Refused before any provider write; claim abandoned | Claim row, no payload |
+| Ingestion | Guard hit (§4.2) | Refused, naming paths and rule; claim abandoned | Claim row, no payload |
+| Ingestion | Provider write fails part-way | Refused; claim abandoned | Claim row, no payload; unused provider generations |
+| Ingestion | Crash before the payload is written (end of §2.3 step 8) | Transient: abandoned at lease lapse; encrypted: a takeover finds nothing to decrypt and abandons it | Claim row, no payload; unused generations if past step 6 |
+| Ingestion | Crash after the payload is written, before the draft transaction | Transient: abandoned at lease lapse; encrypted: takeover (§3.4) | Claim row with ciphertext (encrypted); unused generations until the draft commits |
 | Ingestion | Crash inside the draft transaction | Claim unreleased with payload; no draft | Claim row with ciphertext (encrypted) |
 | Ingestion | Stale owner heartbeat, commit or release | Refused by owner generation | Nothing |
 | Ingestion | Absolute expiry, or recovery-mode entry | Claim abandoned; re-ingest | Claim row, payload cleared |
 | Authoring | Undeclared or unused name, other local tag, tag on a key or sequence, reserved text, bad path | Draft update refused | Nothing |
 | Compilation | Dependency not `retained`, or unreadable by the compiler | Publication refused | Nothing |
 | Compilation | Kind mismatch, or `base64` on a non-string | Publication refused | Nothing |
+| Compilation | A reference to a secret of another cluster (§5.1) | Publication refused | Nothing |
+| Compilation | An ordinary fragment overrides or deletes an import-base reference (§6) | Publication refused, naming the fragment and path | Nothing |
 | Compilation | Contract newer than renderer or not the node's minor; Kubernetes outside the window | Publication refused | Nothing |
 | Compilation | Native composition or validation rejects | Publication refused; message redacted or withheld (§8.3) | Nothing |
 | Compilation | Trace or flip fragment missing, shape differs, or passes disagree | Publication refused (§8.1) | Nothing |
@@ -891,37 +1119,72 @@ An implementation of this contract must show, with a control that can fail for
 each:
 
 - successful, rejected and interrupted ingestion through import, drift adoption
-  and a draft update, scanning drafts, indexes, logs, temporary files, staging,
-  the write-ahead log and backups, as E1 did (E1 §4);
+  and a draft update, with this pipeline interrupted at each of its steps
+  (§2.3), scanning drafts, indexes, logs, temporary files, staging, the
+  database's data directory, the write-ahead log and backups for every run, not
+  only for selected bundles as E1 did (E1 4.2, 4.6);
+- the same scan of the compiler process's surfaces (temporary files, logs,
+  error reports and, if the §10.1 fallback is taken, the subprocess channel)
+  over successful, rejected and interrupted publications (§10.1);
 - lease extension refused to a non-owner; takeover of `held` and `resumed`
-  claims only after lease lapse; a stale owner refused after takeover; a crash
-  inside the draft transaction; recovery with the provider unreachable;
+  claims only after lease lapse; a takeover with nothing to decrypt; a stale
+  owner refused after takeover; a crash inside the draft transaction; recovery
+  with the provider unreachable;
 - the SR and SP matrices through the compiler's own composition path (§10.1),
-  and SP's oracle over the PoC's own log and support formats (§8.4);
+  with references in the import base as well as in fragments, and SP's oracle
+  over the PoC's own log and support formats (§8.4);
+- a fidelity check that fires on an injected structural change (§8.1);
 - every refusal in §13.
 
 Evidence gaps this contract carries rather than closes:
 
+**Ingestion and staging**
+
+- **Interruption of this pipeline**: never measured. E1's screen covered the
+  run root and live tables only, and backup-visible surfaces were read only in
+  its captured bundles, for a different pipeline (§2.3; E1 4.2, 4.6).
+- **Schema detector coverage**: `schema-covers-base-secrets` was never seen to
+  fail and ran on control-plane bases only; disk-encryption, installer and disk
+  configuration were absent from the environment; the list's precision was not
+  measured (§2.4; SP §4.4, §8; E1 §7).
 - **Keyed-digest mechanism**: no provider HMAC primitive was exercised, and
   comparison across its key rotation is undesigned (§4.1).
-- **Machinery composition parity**: inferred only (FR §8 C4); the §10.1
-  condition.
 - **Claim contention**: E1 ran one process against one claim; no two
-  principals raced, and no clock was skewed (E1 §7).
+  principals raced, and no clock was skewed (E1 §7). Lease, expiry and
+  heartbeat values are open (§3.2).
+- **Identities**: PC measured the `publisher` create-only policy and the
+  compiler and executor policies, not staging-key, baseline-key or HMAC use
+  (§1).
 - **Addressing**: the JSON Pointer scheme (§2.2) is untested.
+- **Ingestion input**: only configurations read back from a node were
+  ingested; a generated configuration before Talos normalizes it was not (E1 §7).
+
+**Composition, provenance and redaction**
+
+- **Machinery composition parity**: inferred only (FR §8 C4); the §10.1
+  condition. References inside a base were never resolved: SR's and SP's bases
+  held literal secrets (§6).
 - **Kinds and cases not run**: durations, IP and CIDR fields, a list as a
   target, list-element overrides by selector, more than two fragments, worker
   configurations, a tag name that is valid base64 or a YAML 1.1 boolean word,
   and a hand-formatted embedded literal (SR §8; SP §8).
-- **Messages**: a quoted boolean or authored literal cannot be marked (§8.3
-  withholds rather than marks); withheld messages reach no support bundle.
+- **Fidelity control**: a one-mutation smoke test that never injected a
+  structural change, not exercised in 16 of 56 cells (SP §4.4, §8).
+- **Paired-diff control**: loose; it shows the base text is present in the
+  per-side diff, not that it sits on a removed line (SP §8).
+- **Messages**: a quoted boolean cannot be marked, so such messages are
+  withheld; an authored literal copying a short, integer or boolean secret is
+  not detected; withheld messages reach no support bundle (§8.3, §8.4).
 - **Tracer limits no case reached**: a string line under five bytes carries no
   id, an integer stand-in can equal a literal integer, and a validation rule can
   judge a stand-in differently from its value (SP §8); the last is refused under
   §8.1.
 - **Embedded formatting**: an author's formatting is not preserved (§5.4).
-- **Ingestion input**: only configurations read back from a node were
-  ingested; a generated configuration before Talos normalizes it was not (E1 §7).
+
+**Renderer and environment**
+
+- **Plaintext boundary**: neither the in-process path nor a subprocess channel
+  was scanned for exposure; the deciding reason in §10.1 is inferred.
 - **Leak detection**: exact copies only; the OpenBao storage volume is not
   observable, and Transit plaintext crossed loopback without TLS in the fixture
   (E1 §7).
@@ -934,72 +1197,104 @@ claim full E3, upgrade support or lifecycle execution.
 ## 16. Choices for owner review
 
 Each is the most conservative option consistent with the design where the
-evidence does not settle the question.
+evidence does not settle the question. Each is marked in place as
+**(choice §16.n)**.
 
-1. **Tag syntax `!bwref <name>`.** Alternatives: marked string, binding. All
-   reach early parity; the tag has no opt-in, no collision and no stale address
-   (§5.1).
-2. **Declarations beside the fragment, `encoding` enum `{base64}`, one
-   declaration per name per fragment.** Alternative: per-occurrence modifiers;
-   not evidenced (§5.2).
-3. **Kinds string, integer, boolean, mapping; lists, floats and nulls
-   refused.** List targets were not run (§5.3).
-4. **RFC 6901 addressing with `doc[n]`.** Untested; any scheme that escapes `.`
-   and `[` would meet E1's finding (§2.2).
-5. **Reserved text `!bwref` refused in any string.** Catches a tag left in
-   unidentified text at the cost of refusing literal look-alikes (§5.5).
-6. **An exact literal copy of a resolved value refuses publication.**
-   Alternative: redact by value and publish; rejected because the copy is
-   already a plaintext exposure in source (§6 step 7).
-7. **Transient staging by default; encrypted only for review that must survive
-   the process; a separate staging key.** E1 recommends the split, not the key
-   separation (§3.1).
-8. **Takeover only after lease lapse, before absolute expiry, on an explicit
-   operator request, fenced by owner generation.** Alternative: automatic
-   takeover; no contention evidence supports it (§3.4).
-9. **Claims from an earlier recovery epoch are abandoned.** A restore rewinds
-   generations (§3.5).
-10. **HMAC under a provider-held key for persisted value digests.** Alternative:
-    per-run salt, which breaks cross-run comparison (§4.1).
-11. **Keep the substring search beside value comparison.** Alternative: value
-    comparison only, which misses embedded secrets (§4.2).
-12. **Withhold verbatim messages from steps with boolean inputs, and never
-    persist a withheld message.** Until a quote can be marked (§8.3).
-13. **Go machinery in process, conditional on a parity re-run.** Alternative:
-    pinned `talosctl` subprocess, which keeps measured parity but moves
-    plaintext across a process boundary (§10.1).
-14. **Compile only the node's running contract minor.** v1.12 would also be
-    accepted by a v1.13 node; one contract keeps paths and validation single
-    (§10.2).
-15. **Provider generation paths include a component the database does not
-    issue.** Guards against identifier reuse after a restore (§2.3).
+1. **Ingestion and compiler as two identities** (§1). Alternative: design
+   §13.2's single role. Input to identity and approval policy, which owns the
+   identities.
+2. **RFC 6901 addressing with `doc[n]`** (§2.2). Untested; any scheme that
+   escapes `.` and `[` would meet E1's finding.
+3. **Create-only `cas=0` generations at paths of their own, with a component
+   the database does not issue** (§2.3 step 6). Alternative: design §7.8 item
+   1's overwritten path with explicit `max_versions`. Collision rationale
+   inferred (DB §9).
+4. **Baseline under its own key, decryptable by no runtime identity** (§2.3
+   step 8). Alternative: the artifact key, which makes it executor-decryptable.
+5. **Transient staging by default; encrypted only for review that must survive
+   the process; a separate staging key** (§3.1). E1 recommends the split, not
+   the key separation.
+6. **An absolute expiry beside the lease** (§3.2). Alternative: lease only, as
+   in E1; repeated takeovers could then keep a claim alive indefinitely.
+7. **Owner-only lease extension; takeover only after lease lapse, before
+   absolute expiry, on an explicit operator request, fenced by owner
+   generation** (§3.3, §3.4). Alternative: automatic takeover; no contention
+   evidence supports it.
+8. **Abandonment evaluated at read time, written by a sweep** (§3.5).
+   Alternative: a sweep alone, which would let a late sweep delay refusals.
+9. **Claims from an earlier recovery epoch are abandoned** (§3.5). A restore
+   rewinds generations.
+10. **HMAC under a provider-held key for persisted value digests** (§4.1).
+    Alternative: per-run salt, which breaks cross-run comparison.
+11. **Keep the substring search beside value comparison** (§4.2). Alternative:
+    value comparison only, which misses embedded secrets.
+12. **Every secret scoped to one cluster; no library-wide secrets** (§5.1).
+    Alternative: library-wide scope for cross-cluster fragments.
+13. **A new name for every extracted value, even an unchanged one** (§5.1).
+    Alternative: deduplicate by keyed digest; avoids churn, but rests on the
+    unevidenced digest mechanism.
+14. **Declarations name the exact version; no latest-version selection**
+    (§5.1, §5.2). Alternative: pin the latest `retained` version at
+    publication.
+15. **Tag syntax `!bwref <name>`** (§5.1). Alternatives: marked string,
+    binding. All reach early parity; the tag has no opt-in, no collision and no
+    stale address.
+16. **Kinds string, integer, boolean, mapping; lists, floats and nulls
+    refused** (§5.2, §5.3). List targets were not run.
+17. **Declarations beside the fragment, `encoding` enum `{base64}`, one
+    declaration per name per fragment** (§5.2). Alternative: per-occurrence
+    modifiers; not evidenced.
+18. **SR's re-serialization rules for identified embedded documents; JSON
+    authored as YAML** (§5.4). SR calls them the experiment's; parity was shown
+    only for them.
+19. **Reserved text `!bwref` refused in any string** (§5.5). Catches a tag left
+    in unidentified text at the cost of refusing literal look-alikes.
+20. **The import base stands in for design §6.7's secret-generation resources;
+    overriding its references is refused** (§6). Alternative: allow overrides,
+    flagged in review.
+21. **An exact literal copy of a resolved value refuses publication** (§6 step
+    7). Alternative: redact by value and publish; the copy is already a
+    plaintext exposure in source.
+22. **SP's stand-in format and token syntax** (§8.1, §8.3). SP calls them the
+    experiment's; its results were measured with them.
+23. **Withhold verbatim messages from steps with boolean inputs, show verbatim
+    authored literals, never persist a withheld message** (§8.3). Until a quote
+    can be marked.
+24. **Go machinery in process, conditional on a parity re-run** (§10.1).
+    Alternative: pinned `talosctl` subprocess; keeps measured parity, moves
+    plaintext across a process boundary. The deciding reason is inferred.
+25. **Compile only the node's running contract minor** (§10.2). v1.12 would
+    also be accepted by a v1.13 node; one contract keeps paths and validation
+    single.
 
 ## 17. Traceability
 
 | Clause | Design | Evidence |
 | --- | --- | --- |
-| §1 identities | §13.1, §13.2 | [PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities) |
+| §1 identities | §7.7, §13.1, §13.2 | [PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities), [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) |
 | §2.1 typed boundary | §7.1 | [E1 §6](../design/research/20260922-secret-ingress-extraction-before-persistence.md#6-what-this-decides), [E1 §8](../design/research/20260922-secret-ingress-extraction-before-persistence.md#8-recommendation) item 2 |
 | §2.2 addressing | §7.1 | [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits); E1 §8 item 5 |
-| §2.3 pipeline, orphans | §7.1, §7.4, §7.8 | [E1 §4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#4-expected-and-observed) (4.2, 4.4, 4.6); [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) |
-| §2.4 identification limits | §6.9 | E1 4.7; [FR §8](../design/research/20260925-feasibility-evidence-review.md#8-cross-report-findings) C1; [SP §5](../design/research/20260925-sensitivity-provenance.md#5-what-each-failure-is) |
+| §2.3 pipeline, orphans | §7.1, §7.4, §7.8 | [E1 §4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#4-expected-and-observed) (4.2, 4.4, 4.6); [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state), [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
+| §2.4 identification limits | §6.9 | [SP §4.4](../design/research/20260925-sensitivity-provenance.md#44-controls), [SP §5](../design/research/20260925-sensitivity-provenance.md#5-what-each-failure-is), [SP §8](../design/research/20260925-sensitivity-provenance.md#8-limits); E1 4.7, [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits); [FR §8](../design/research/20260925-feasibility-evidence-review.md#8-cross-report-findings) C1 |
 | §3.1 staging modes | §7.1 | E1 4.2, §6, §8 item 3; E1 5.16 |
 | §3.2–§3.4 claims, lease, takeover | §7.1 | E1 4.2, 5.15, 5.16, 5.20, §7; [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions), [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) row 021 |
 | §3.5 restoration | §14.6 | DB §4.7; [execution and recovery §7](execution-recovery.md#7-recovery-after-management-state-restoration) |
 | §4.1 keyed digests | §7.1 | E1 §7, §8 item 7 |
 | §4.2 guard | §7.1, §6.9 | [E1 5.18](../design/research/20260922-secret-ingress-extraction-before-persistence.md#518-the-fourth-review-and-the-fixes-made-after-the-evidence), [E1 5.19](../design/research/20260922-secret-ingress-extraction-before-persistence.md#519-advisory-rounds-five-to-eighteen-the-prototype-hardened-the-evidence-unchanged) |
+| §5.1 scope, naming, versions | §6.9, §13.2 | none: choices §16.12 to §16.14 |
 | §5.1 tag syntax | §6.9 | [SR §5](../design/research/20260924-structural-reference-composition.md#5-what-each-late-failure-is), [SR §6.4](../design/research/20260924-structural-reference-composition.md#64-criterion-4-candidate-failures-and-renderer-implications), [SR §9](../design/research/20260924-structural-reference-composition.md#9-alternatives-and-decision-enabled); [SP §7.1](../design/research/20260925-sensitivity-provenance.md#71-the-binding-form-cannot-hold-a-list-element-reference); [E3 §6.2](../design/research/20260925-talos-compatibility.md#62-criterion-2-subprocess-against-machinery-and-the-structural-reference-evidence) |
 | §5.2 declarations, enum | §6.9 | [SP §2](../design/research/20260925-sensitivity-provenance.md#2-candidates); SR §3.1 |
-| §5.3, §5.4 targets, aliases, embedded | §6.3, §6.9 | [SR §4](../design/research/20260924-structural-reference-composition.md#4-the-matrix), SR §6.2, §6.4, [SR §8](../design/research/20260924-structural-reference-composition.md#8-limits); [SP §4.2](../design/research/20260925-sensitivity-provenance.md#42-provenance-per-case) |
+| §5.3, §5.4 targets, aliases, embedded | §6.3, §6.9 | [SR §4](../design/research/20260924-structural-reference-composition.md#4-the-matrix), SR §6.2, §6.4, [SR §8](../design/research/20260924-structural-reference-composition.md#8-limits); [SP §3.1](../design/research/20260925-sensitivity-provenance.md#31-cases), [SP §4.2](../design/research/20260925-sensitivity-provenance.md#42-provenance-per-case) |
 | §5.5 reserved text | §6.9 | SR §6.4, [SR §10](../design/research/20260924-structural-reference-composition.md#10-hand-off) |
+| §6 import base | §6.7, §18.2, A.3 | none: a departure recorded as choice §16.20 |
 | §6 early resolution, superset | §6.2, §6.9, §7.4 | SR §4, §5, [SR §6.2](../design/research/20260924-structural-reference-composition.md#62-criterion-2-effective-and-superset-dependencies), §6.4, §9 |
 | §6 step 7 literal copies | §6.9 | [SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records), [SP §10](../design/research/20260925-sensitivity-provenance.md#10-hand-off) |
 | §7 validation stages | §6.9 | [SR §6.3](../design/research/20260924-structural-reference-composition.md#63-criterion-3-parity-validation-collisions-and-rejections) |
 | §8.1 tracer, fidelity | §6.9 | [SP §6.1](../design/research/20260925-sensitivity-provenance.md#61-criterion-1-sensitivity-through-each-transformation), [SP §8](../design/research/20260925-sensitivity-provenance.md#8-limits), [SP §9](../design/research/20260925-sensitivity-provenance.md#9-alternatives-and-decision-enabled) |
 | §8.2 provenance record | §6.9 | SP §6.3; [SP §4.4](../design/research/20260925-sensitivity-provenance.md#44-controls) |
-| §8.3 redaction | §6.9, §15.4 | [SP §4.1](../design/research/20260925-sensitivity-provenance.md#41-which-representations-leak-a-referenced-value), [SP §6.2](../design/research/20260925-sensitivity-provenance.md#62-criterion-2-redaction-without-relying-on-value-matching), SP §6.3; [E3 §7](../design/research/20260925-talos-compatibility.md#7-limits) |
+| §8.3 redaction | §6.9, §15.4 | [SP §4.1](../design/research/20260925-sensitivity-provenance.md#41-which-representations-leak-a-referenced-value), [SP §6.2](../design/research/20260925-sensitivity-provenance.md#62-criterion-2-redaction-without-relying-on-value-matching), SP §6.3, SP §10; [E3 §7](../design/research/20260925-talos-compatibility.md#7-limits) |
 | §9 dependency records | §6.9, §7.5, §7.8 | SR §6.2; SP §6.3; FR §8 C2; [KL §5.2](../design/research/20260924-key-loss-restoration.md#52-criterion-2-applying-is-not-regenerating-and-ciphertext-is-not-executability), [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation) item 1 |
-| §10.1 renderer selection | §6.5 | E3 §6.2, [E3 §8](../design/research/20260925-talos-compatibility.md#8-recommendation); FR §8 C4; [E1 §3](../design/research/20260922-secret-ingress-extraction-before-persistence.md#3-what-was-built) |
+| §10.1 renderer selection | §6.5 | E3 §6.2, E3 §7, [E3 §8](../design/research/20260925-talos-compatibility.md#8-recommendation); FR §8 C4; [E1 §3](../design/research/20260922-secret-ingress-extraction-before-persistence.md#3-what-was-built) |
 | §10.2 pinning, refusals | §6.5 | [E3 §4.1](../design/research/20260925-talos-compatibility.md#41-generation-capability), [E3 §4.2](../design/research/20260925-talos-compatibility.md#42-validation), [E3 §4.3](../design/research/20260925-talos-compatibility.md#43-operationrpc-compatibility-against-v1136), [E3 §4.4](../design/research/20260925-talos-compatibility.md#44-upstream-support-policy), E3 §8 |
 | §10.3 limits, deferral | §6.5, §18.1 E3 | [E3 §6.3](../design/research/20260925-talos-compatibility.md#63-criterion-3-unsupported-combinations-and-the-deferred-lifecycle-tests), E3 §7; [FR §2](../design/research/20260925-feasibility-evidence-review.md#2-what-binds-every-conclusion-here) |
 | §11 publication hand-off | §6.6, §7.4 | PC §2; [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) |
