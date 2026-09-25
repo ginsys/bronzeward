@@ -27,7 +27,7 @@ started=$(date -u +%FT%TZ)
 # The inputs are the prototype and the fixture; evidence/ is this experiment's output. Each
 # uncommitted path is listed, so a nonzero count says what differed from the commit.
 uncommitted=$(git -C "$REPO_DIR" status --porcelain -- experiments/e3-talos-compatibility fixtures \
-  ':!experiments/e3-talos-compatibility/evidence')
+  ':!experiments/e3-talos-compatibility/evidence') || die "git status failed: the uncommitted inputs are unknown"
 e3_need_fixture
 cp -- "$STATE/talos-secrets.yaml" "$E3_SECRETS"
 cp -- "$STATE/scan-patterns.txt" "$E3_PATTERNS"
@@ -35,6 +35,7 @@ e3_tools
 
 group() { [ -z "${E3_ONLY:-}" ] || [[ $1 =~ $E3_ONLY ]]; }
 TARGETS="current $E3_CONTRACTS $E3_EDGES"
+K8S_SETTINGS="default $E3_K8S_FIXED"
 
 # ---- generation: renderer x target contract x Kubernetes version, through both ----
 
@@ -73,7 +74,7 @@ if group gen; then
     >"$E3_OUT/gen.tsv"
   for r in $E3_RENDERERS; do
     for t in $TARGETS; do
-      for k in default "$E3_K8S_FIXED"; do
+      for k in $K8S_SETTINGS; do
         d=$E3_GEN/$r/$t/$k
         gen_run "$r" "$t" "$k" "$d/talosctl" talosctl
         ct=$CELL
@@ -197,7 +198,7 @@ rpc_talosctl() {
   artifact a
   step_quiet dry tc "$r" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" apply-config --dry-run --mode no-reboot --file "$ART_FILE"
   read_worker after-dry
-  step apply tc "$r" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" apply-config --mode no-reboot --file "$ART_FILE"
+  step_quiet apply tc "$r" -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_WORKER_IP" apply-config --mode no-reboot --file "$ART_FILE"
   read_worker after
   row_end rc:version=0 node_tag="$TALOS_VERSION" rc:read=0 read=match seen:skew_warning rc:dry=0 after-dry.is=pre \
     after-dry.landed=0 rc:apply=0 after.is=artifact after.landed=1
@@ -214,9 +215,11 @@ rpc_machinery() {
   step dry m "$r" apply -dry-run -file "$ART_FILE"
   read_worker after-dry
   step apply m "$r" apply -file "$ART_FILE"
+  # The node's warnings on the apply, which e3m prints as talosctl does.
+  row_note apply_warnings "$(grep -c '^warning=' "$(row_part apply)")"
   read_worker after
   row_end rc:version=0 node_tag="$TALOS_VERSION" rc:read=0 read=match rc:dry=0 after-dry.is=pre after-dry.landed=0 \
-    rc:apply=0 after.is=artifact after.landed=1
+    rc:apply=0 seen:apply_warnings after.is=artifact after.landed=1
 }
 
 if group rpc-client; then
@@ -228,8 +231,9 @@ if group rpc-client; then
 fi
 
 # Every renderer's worker configuration for every contract, as a dry run through the pinned
-# client: which the v1.13.6 node accepts. Recorded, not judged, except that nothing lands. The
-# key paths each would change on the worker go to paths/.
+# client, both implementations: which the v1.13.6 node accepts. Which one it accepts is recorded,
+# not judged; judged are that both implementations get the same verdict and that nothing lands.
+# The key paths each would change on the worker go to paths/.
 if group rpc-contract; then
   say "group rpc-contract"
   for r in $E3_RENDERERS; do
@@ -245,8 +249,18 @@ if group rpc-contract; then
       # The node's reason for a refusal, as the gRPC status description, spaces made underscores.
       reason=$(sed -n 's/.*desc = //p' "$(row_part dry)" | head -n 1 | tr ' ' _)
       row_note reason "${reason:--}"
+      step mdry m "$E3_PINNED" apply -dry-run -file "$c"
+      row_note mdry "${RC[mdry]}"
+      # e3m prints the same description inside its quoted error= field, newlines escaped.
+      mreason=$(sed -n 's/^error=".*desc = \(.*\)" withheld_lines=[0-9]*$/\1/p' "$(row_part mdry)" |
+        sed 's/\\n.*//' | tr ' ' _)
+      row_note mreason "${mreason:--}"
+      verdict=differ
+      { [ "${RC[dry]}" = 0 ] && [ "${RC[mdry]}" = 0 ]; } && verdict=agree
+      { [ "${RC[dry]}" != 0 ] && [ "${RC[mdry]}" != 0 ]; } && verdict=agree
+      row_note verdict "$verdict"
       read_worker after
-      row_end seen:dry seen:reason after.is=pre after.landed=0
+      row_end seen:dry seen:reason seen:mdry seen:mreason verdict=agree after.is=pre after.landed=0
     done
   done
 fi
@@ -256,16 +270,23 @@ fi
 if group controls; then
   say "group controls"
 
-  # Every renderer, both implementations, refuses the unparseable contract `bogus`.
+  # Every renderer refuses the unparseable contract `bogus`, through both implementations, at
+  # both Kubernetes settings: one gen.tsv row per renderer and setting, each holding both.
   row_begin controls gen-bogus-refused
-  row_note refused "$(awk -F'\t' '$2 == "bogus" && $4 !~ /^0:/ && $5 !~ /^0:/' "$E3_OUT/gen.tsv" | wc -l)"
-  row_note cells "$(awk -F'\t' '$2 == "bogus"' "$E3_OUT/gen.tsv" | wc -l)"
-  row_end refused="$(($(wc -w <<<"$E3_RENDERERS") * 2))" cells="$(($(wc -w <<<"$E3_RENDERERS") * 2))"
+  bogus_rows=$(($(wc -w <<<"$E3_RENDERERS") * $(wc -w <<<"$K8S_SETTINGS")))
+  row_note refused_rows "$(awk -F'\t' '$2 == "bogus" && $4 !~ /^0:/ && $5 !~ /^0:/' "$E3_OUT/gen.tsv" | wc -l)"
+  row_note rows "$(awk -F'\t' '$2 == "bogus"' "$E3_OUT/gen.tsv" | wc -l)"
+  row_end refused_rows="$bogus_rows" rows="$bogus_rows"
 
-  # Generation is repeatable: the byte comparisons below mean something only if it is.
+  # Generation is repeatable: the byte comparisons below mean something only if it is. Every row
+  # whose first talosctl generation succeeded must compare `same` with its repeat, and there must
+  # be such rows.
   row_begin controls gen-repeatable
+  generating=$(awk -F'\t' 'NR > 1 && $4 ~ /^0:/' "$E3_OUT/gen.tsv" | wc -l)
   row_note differs "$(awk -F'\t' 'NR > 1 && $9 == "differs"' "$E3_OUT/gen.tsv" | wc -l)"
-  row_end differs=0
+  row_note same "$(awk -F'\t' 'NR > 1 && $4 ~ /^0:/ && $9 == "same"' "$E3_OUT/gen.tsv" | wc -l)"
+  row_note any_generating "$([ "$generating" -gt 0 ] && echo yes || echo no)"
+  row_end differs=0 same="$generating" any_generating=yes
 
   # A deliberately different input compares unequal, by digest and by key path.
   row_begin controls compare-unequal
@@ -290,7 +311,13 @@ if group controls; then
     done
   done
   row_note accepted "$accepted"
-  row_end accepted=0
+  # Refused for the planted reason, not for any failure: every output names the unknown type.
+  named=0
+  for l in "${ROW_LABELS[@]}"; do
+    grep -qE -- 'unknown machine type \\?"bogus\\?"' "$(row_part "$l")" && named=$((named + 1))
+  done
+  row_note named "$named"
+  row_end accepted=0 named="${#ROW_LABELS[@]}"
 
   # The node refuses it on a dry run, through both, and nothing lands.
   row_begin controls rpc-invalid-refused worker
@@ -298,7 +325,8 @@ if group controls; then
     --file "$invalid"
   step m m "$E3_PINNED" apply -dry-run -file "$invalid"
   read_worker after
-  row_end 'rc:tc!=0' 'rc:m!=0' after.is=pre after.landed=0
+  row_end 'rc:tc!=0' 'rc:m!=0' 'out:tc~unknown machine type "bogus"' 'out:m~unknown machine type \\"bogus\\"' \
+    after.is=pre after.landed=0
 fi
 
 # ---- the prototype's own tests ----
@@ -325,3 +353,5 @@ fi
 } >"$E3_OUT/run.txt"
 cat -- "$E3_OUT/run.txt" >&2
 date -u +%FT%TZ >"$E3_OUT/complete"
+# A failed control makes the run inconclusive; run/collect-evidence refuses it as well.
+grep -qx 'control mismatches 0' -- "$E3_OUT/run.txt" || die "a control failed: the run is inconclusive"

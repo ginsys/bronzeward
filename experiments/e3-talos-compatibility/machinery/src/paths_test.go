@@ -61,3 +61,16 @@ func TestDigestNormalizesTrailingNewlines(t *testing.T) {
 		t.Fatal("different content gave one digest")
 	}
 }
+
+func TestWithholdDiffKeepsTheReasonAndDropsTheDiff(t *testing.T) {
+	for _, marker := range []string{"diff:", "Config diff:", "--- a"} {
+		kept, withheld := withholdDiff("rpc error: desc = can't be applied\n\t* reason\n" + marker + "\n-  token: aaaa\n+  token: bbbb\n")
+		if kept != "rpc error: desc = can't be applied\n\t* reason" || withheld != 3 {
+			t.Fatalf("withholdDiff with %q = %q, %d", marker, kept, withheld)
+		}
+	}
+	msg := "1 error occurred:\n\t* unknown machine type \"bogus\"\n\n"
+	if kept, withheld := withholdDiff(msg); kept != msg || withheld != 0 {
+		t.Fatalf("withholdDiff without a diff = %q, %d", kept, withheld)
+	}
+}

@@ -62,9 +62,31 @@ func main() {
 		usage()
 	}
 	if err != nil {
-		fmt.Printf("error=%q\n", err.Error())
+		// A node's refusal of a change it cannot apply in the requested mode carries the
+		// configuration diff, which can hold secrets: it is withheld, with a count of its lines.
+		kept, withheld := withholdDiff(err.Error())
+		fmt.Printf("error=%q withheld_lines=%d\n", kept, withheld)
 		os.Exit(1)
 	}
+}
+
+// withholdDiff returns s up to its first diff line (one starting `diff:`, `Config diff:` or
+// `--- `, as the harness's step_quiet recognises talosctl's), and the number of non-empty lines
+// from there on.
+func withholdDiff(s string) (string, int) {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "diff:") || strings.HasPrefix(l, "Config diff:") || strings.HasPrefix(l, "--- ") {
+			withheld := 0
+			for _, r := range lines[i:] {
+				if r != "" {
+					withheld++
+				}
+			}
+			return strings.Join(lines[:i], "\n"), withheld
+		}
+	}
+	return s, 0
 }
 
 func usage() {
@@ -254,6 +276,10 @@ func rpc(op string, args []string) error {
 			// only its first line is printed.
 			details, _, _ := strings.Cut(m.GetModeDetails(), "\n")
 			fmt.Printf("result=applied dry_run=%t mode=%s details=%q\n", *dryRun, m.GetMode(), details)
+			// The node's warnings, which talosctl also prints.
+			for _, w := range m.GetWarnings() {
+				fmt.Printf("warning=%q\n", w)
+			}
 		}
 	}
 	return nil
