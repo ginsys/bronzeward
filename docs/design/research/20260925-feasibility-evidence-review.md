@@ -60,8 +60,13 @@ cell recorded against a different one is not merged silently.
 - `fixtures/versions.env` last changed at c74f953; its blob is `8171420` at `main`.
 - Every fixture-based capture commit carries the same blob: E1 e637bf0, SR dc26305, SP 456df31,
   E3 2809915, DB ee8d7e2, DS 1f28961 and f2c7c86, PC aecdef4, RC 1c057f7, KL 5b29fed (checked with
-  `git rev-parse <commit>:fixtures/versions.env`). The capture commits are pre-merge objects; the
-  PRs were rebase-merged, so not all of them are ancestors of `main`.
+  `git rev-parse <commit>:fixtures/versions.env` in a clone that holds them). None of the ten is an
+  ancestor of `main`: each PR was rebased, and several rewritten, before it merged. Three can still
+  be fetched through their pull-request refs: e637bf0 (`refs/pull/37/head`), aecdef4
+  (`refs/pull/38/head`) and 1c057f7 (`refs/pull/39/head`). The other seven exist only in the
+  author's clone, and DS §3 already records that f2c7c86 cannot be fetched. For those seven the pin
+  rests on that local check and on `versions.env` being unchanged on `main` since c74f953, which
+  predates every capture.
 - **Every fixture-based cell is therefore directly comparable.** OM uses no fixture (Omni v1.12.2,
   read 2026-09-24).
 
@@ -71,8 +76,8 @@ E3 renderers v1.12.12 to v1.15.0-alpha.0; DB SQLite 3.53.4 (modernc v1.59.0); DS
 
 ## 4. Properties
 
-One row per property the design requires of the PoC, drawn from §18.1 (lines for E1–E6 and the
-Omni refresh) and the §18.2 acceptance list. Line numbers are in the design document at `main`.
+One row per property the design requires of the PoC, drawn from the §18.1 table rows E1–E6, the
+Omni refresh paragraph after it, and the numbered §18.2 acceptance items, as read at `main`.
 
 | ID | Property | Design |
 |---|---|---|
@@ -103,10 +108,11 @@ Omni refresh) and the §18.2 acceptance list. Line numbers are in the design doc
 | SP25 | Metadata-only classification; unknown is never pass or lost; retained grants nothing | §18.1 E5 |
 | SP26 | Pruning, soft deletion, destruction, reversible-decryption floors | §18.1 E5 |
 | SP27 | Key loss and differing-age restores; applying ciphertext versus regeneration | §18.1 E5 |
-| SP28 | Additional SQL backends and SQLite parity | §18.1 E4; §18.2 closing paragraph |
+| SP28 | Additional SQL backends and SQLite parity | §18.1 E4 |
 | SP29 | Omni build-gate refresh | §18.1, paragraph after the table |
 | SP30 | Minimal authenticated API, scoped authorization, usable operation timeline | §18.2 item 4 and closing paragraph |
 | SP31 | E6 existing-cluster vertical slice | §18.1 E6 |
+| SP32 | Immutable encrypted per-machine artifacts | §18.2 item 3 |
 
 Not a property of this PoC: reset/reachability and the remote proxy/tunnel spikes. §18.1 assigns
 them to later phases and §18.2 excludes them.
@@ -148,23 +154,26 @@ Codes, mapped to the issue's pass/fail/unknown:
 | SP22 | – | – | – | – | – | – | – | – | – | – | – | G |
 | SP23 | – | – | – | – | – | N | G | – | – | p | – | N |
 | SP24 | – | – | – | – | – | – | – | P | – | – | – | p |
-| SP25 | – | – | – | – | – | – | – | – | P | p | – | P |
+| SP25 | – | – | – | – | – | – | – | – | P | – | – | p |
 | SP26 | – | – | – | – | – | – | – | P | p | – | – | p |
 | SP27 | p | – | – | – | – | – | – | – | – | p | – | p |
 | SP28 | – | – | – | – | – | p | G | – | – | – | – | p |
 | SP29 | – | – | – | – | – | – | – | – | – | – | P | P |
 | SP30 | – | – | – | – | – | – | – | G | G | G | – | G |
 | SP31 | – | – | – | – | – | – | – | – | – | – | – | G |
+| SP32 | – | – | – | – | – | – | – | p | – | – | – | p |
 
-**Overall, 31 properties:** P 9 (SP01, SP05, SP06, SP12, SP13, SP15, SP19, SP25, SP29), p 17, N 1
-(SP23), G 4 (SP11, SP22, SP30, SP31).
+**Overall, 32 properties:** P 8 (SP01, SP05, SP06, SP12, SP13, SP15, SP19, SP29), p 19, N 1 (SP23),
+G 4 (SP11, SP22, SP30, SP31).
 
-**Cells, 47 bearing on a property:** P 15, p 24, N 1, G 7.
+**Cells, 47 bearing on a property:** P 16, p 23, N 1, G 7.
 
 An overall grade can differ from a single cell. SP24 is partial although the PC cell passes,
 because OpenBao passes and the local candidates do not, and no profile is selected yet
 (ginsys/bronzeward#13). SP06 passes although the E3 cell is partial, because E3 only infers parity
-beyond the SR boundary (§8, C4); the SR boundary itself is measured.
+beyond the SR boundary (§8, C4); the SR boundary itself is measured. SP25 is partial although the
+RC cell passes, for the same reason SP14 is: the classification is measured, but that a retained
+verdict grants no dispatch authority is shown by construction only (RC §6.3).
 
 ## 6. Evidence per property
 
@@ -196,7 +205,7 @@ syntaxes. SR §5, §9: late resolution is ruled out. E3 §6.2: parity through th
 configpatcher and on other renderers is **inferred, not measured** (C4). Limits (SR §8): one
 version, strategic merge only, control-plane bases only.
 
-**SP07.** SR §6.3: 124 parity cells validate as native does (observed). SR §5: the tag syntax is
+**SP07.** SR §6.3: 124 parity cells validate as native does (observed). SR §5: under late resolution the tag syntax is
 dropped silently and validation passes the wrong value; tag and marker are rejected on typed fields
 (negative sub-results). E3 §4.2: v1.14 output is refused by pre-v1.14 validators, `--strict`
 refuses nothing, and the Kubernetes window is not enforced. *Partial because* named validation
@@ -208,7 +217,7 @@ SP §4: 56 cells, 1356 expectations, 2 unexpected observations, both the same ex
 (SP §4.3). SP §6.3 names the residual risks (literal copies in other forms, unmarked base fields,
 unidentified embedded text, stale provenance). E1 §5.17: redaction covered only exported fields
 until fixed. *Overall partial because* the passing representation depends on marking, which E1 §8
-and SP §5 both call load-bearing.
+calls load-bearing; SP §5 shows why: the schema covers only Talos-typed secret fields.
 
 **SP09.** SR §6.2: boolean effective dependencies could not be identified under early resolution.
 SP §6.1–§6.3: a flip pass measures them (C2). *SR partial, SP pass.* Overall partial, because the
@@ -227,9 +236,11 @@ deferred by decision; see §2.**
 
 **SP12.** DB §4.1 (S1): compare-and-swap rejection on both backends.
 
-**SP13.** DB §4.2 (S2): both backends; PostgreSQL needs `FOR SHARE` (row 011 is the control).
-Kill, pause, netsplit and commit-unknown, PostgreSQL only, are resolved by idempotent retry
-(row 061).
+**SP13.** DB §4.2 (S2): all-or-nothing on both backends, including every interruption tried;
+PostgreSQL needs `FOR SHARE` (row 011 is the control). On PostgreSQL only, a server kill and a
+netsplit write nothing, a pause stalls and then commits, and a commit-unknown (row 061) committed
+and was resolved by an idempotent retry. For rows 059–061 those values are read from the
+transcripts, not asserted by the rows (DB §4.2).
 
 **SP14.** RC §6.3: retained grants carry no authority; that dispatch needs more is shown by
 construction only. PC §4: the compiler/executor split holds through OpenBao policy (create-only for
@@ -273,29 +284,32 @@ freeze was tested. KL §6: no recovery-mode entry or quiescence was modelled. **
 design** (fences alone do not survive a restore), and **unknown** for the explicit recovery mode
 the design requires, which nothing exercised.
 
-**SP24.** PC §4 (9 elements, 194 cells, 0 mismatches) and §8: OpenBao meets every evidenced part;
+**SP24.** PC §4 and §6.1 (9 elements, 194 cells, 0 mismatches) and PC §8: OpenBao meets every evidenced part;
 the local age store is convention-only and fails the design §7.1 condition (negative); SOPS is a
 primitive that loses concurrent writes (row 149, negative) and is import/export only. PC §6.2–§6.3:
-keys live in the same tree as the backup; migration passes plaintext through one process; pruned
+in both local layouts the keys live in the same tree as the ciphertext; migration passes plaintext through one process; pruned
 versions and Transit ciphertext cannot move.
 
 **SP25.** RC §4.1: OpenBao yields retained, blocked, lost and unknown. RC §6.2: nothing uncertain
 becomes lost. RC §6.4: a deleted key or its metadata returns 404, the same as a name that never
 existed, so it is unknown, not lost. RC §4.2: the local candidates give retained or unknown only.
-KL §5.3: the prerequisite check stops and names what is missing, but is not read-only at the
-provider (Transit upsert).
+*Partial because* RC §6.3 shows that a retained verdict grants no dispatch authority by
+construction only (see SP14).
 
 **SP26.** PC §4: reversible floor and rewrap. RC §7: Transit `soft_deleted` and the same-second
 window were not exercised. RC §8: OpenBao is sufficient except for whole-key or whole-path deletion.
 
-**SP27.** KL §3.1: cases A–L, 112 rows, 0 mismatches. KL §3.2 case D: a key recreated under the
+**SP27.** KL §3.1: cases A–L (there is no case F), 112 rows, 0 mismatches. KL §3.2 case D: a key recreated under the
 lost name yields `vault:v1:`, indistinguishable from the lost key's prefix. KL §5.1: 6 of 8 age
 combinations; g1/g2/g1 and g2/g1/g2 stay open. KL §5.2: applying stored ciphertext is not
-regeneration, and ciphertext is not executability. KL §6: no restore onto a new cluster. Fx §4
+regeneration, and ciphertext is not executability. KL §5.3: the recovery prerequisite check stops
+and names what is missing, but is not read-only at the provider (Transit upsert). KL §6: no restore
+onto a new cluster. Fx §4
 check 8: a provider snapshot restores a destroyed version and a deleted key (fixture self-test).
 
 **SP28.** DB §4.1–§4.4: S1–S4 on both backends. DB §4.5 (S5): the naive claim is unsafe on
-PostgreSQL; on SQLite it is unmeasured, because row 048 had one active claimer. DB §4.8: SQLite
+PostgreSQL; on SQLite it is unmeasured, because row 048 had one active claimer (the re-run in §7
+had six, with no double claim, still under serialized writers). DB §4.8: SQLite
 blocks writers. DB §6.3: eight dialect differences. MySQL/MariaDB: no evidence. DS §7: dispatch ran
 on PostgreSQL only.
 
@@ -304,9 +318,16 @@ SideroLink only, with the local API disabled), with absences bounded to the sour
 commercial-plan row is unresolved. OM §6: retain the build decision. Documentation and source review
 only.
 
-**SP30.** No investigation. PC §7, RC §7 and KL §6 all ran as root or administrator. **Gap.**
+**SP30.** No investigation. In PC, RC and KL the administrator's operations ran as root (PC §7,
+RC §7, KL §6), while the other provider identities ran under least-privilege policies (PC §8); no
+report tested application authentication, scoped authorization or an operation timeline. **Gap.**
 
 **SP31.** No investigation. **Gap.**
+
+**SP32.** PC §6.2: a `cas=0` create cannot replace a generation, and the publisher's policy allows
+nothing else; but the `gen/` paths are not `cas_required`, and the administrator added a version to
+one (row 087). A generation is immutable because of who holds which policy, not because of its
+path. *Partial because* immutability against the administrator is not provided.
 
 ## 7. Reproduction of the disputed results
 
@@ -328,7 +349,7 @@ compared by value.
 | R3, DB row 061: commit-unknown | release committed after the kill; the retry returns the existing release | identical | **Reproduced** |
 | R4, DB rows 027 and 055: restore | the next release reuses id 2; generations 2 and 3 are issued again; the pre-restore token passes | identical on both backends | **Reproduced.** The SP23 negative stands |
 | R1, DS row 012: late landing | primary capture: no late landing, retry; capture 1: landed about 11 s after the heal | landed about 11 s after the heal; completed with no retry | **Differs from the primary capture, matches capture 1** |
-| R1, DS row 013: accounting on exit | both captures: nothing landed, classified `failed` | landed about 11 s after the heal, just before Y's first readable observation; classified `completed` | **Differs.** The race DS §4.4 argues for occurred |
+| R1, DS row 013: accounting on exit | both captures: nothing landed, classified `failed` | landed about 11 s after the heal, just before Y's first readable observation; classified `completed` | **Differs.** A late landing occurred inside row 013's window; it came before the observation, so the classification was correct this time |
 | R5, DS row 003: `FOR SHARE` wait | the revoker waited; revocation 3 ms after the commit | identical | **Reproduced**, with DS §4.1's caveat that the wait is inferred from the revoker's record |
 | DS rows 014–017 | as DS §4.4 | same outcomes | **Reproduced** |
 | R11, PC row 149: SOPS concurrent writes | 9 of 10 updates lost, both writers exit 0 | 8 of 10 lost, both writers exit 0 | **Reproduced; the count differs** |
@@ -339,8 +360,10 @@ What changes:
   four control-plane partitions over two captures. With this run it is three in six (both
   partitions here landed). This does not move SP20's grade, which was already partial because no
   bound on late landing is established (DS §6.3), but it makes that gap more urgent for
-  ginsys/bronzeward#19. Exit-only accounting gave `failed` twice and `completed` once for the same
-  fault, depending on whether the landing beat the observation.
+  ginsys/bronzeward#19. In row 013 nothing landed in either committed capture, and here the landing
+  preceded the observation, so no misclassification has been observed; but a landing can now fall
+  inside the window between exit-only accounting and the observation, which is the hazard DS §4.4
+  describes.
 - **DB §4.5's naive-claim figures are per-capture.** The PostgreSQL double claim is stable (309,
   308); the double completion is not (1, 0). On SQLite, the naive claim has now been observed once
   with competing claimers and no double claim, under serialized writers; that stays short of the
@@ -366,8 +389,8 @@ Not re-run, with the reason:
   (35 of 167 resource definitions) and talosctl exports no schema (E1 §4.7). SP §2 and §4.4 use the
   `pkg/machinery` v1.13.6 `RedactSecrets` field list, a library surface E1 did not examine. Both
   are right about the surface each read. The qualification for ginsys/bronzeward#17: a field-level
-  list exists in the library, and it covers only Talos-typed secret fields (SP §5, E1 §4.7), so
-  marking stays load-bearing.
+  list exists in the library, and it covers only Talos-typed secret fields (SP §5), so marking
+  stays load-bearing (E1 §8).
 - **C2: refinement.** SR §6.2 found boolean effective dependencies unidentifiable under early
   resolution; SP §6.3 measures them with a flip pass. SP supersedes SR on that point.
 - **C3: dependency.** SP rests on SR's early-resolution premise (SP §8). A change to the SR choice
@@ -383,14 +406,18 @@ Required by the PoC and not evidenced:
 
 1. **Drift freeze, sanitized adoption and approved revert, and the E6 vertical slice** (SP22,
    SP31). No investigation exists.
-2. **Upgrade/LifecycleClient transition** (SP11). Deferred by decision (§2). With it goes any
-   Talos-side bound on when an abandoned request can no longer land (DS §6.3, SP20).
-3. **Recovery mode after external restoration** (SP23). A restore rewinds fence generations
+2. **Upgrade/LifecycleClient transition** (SP11). Deferred by decision (§2).
+3. **A bound on when an abandoned request can no longer land** (SP20, §18.2 item 7). The executor's
+   exit is not accounting, and the 30 s settle is a choice, not a bound (DS §6.3). Late landings
+   occurred in three of six control-plane partitions (§7). DS §8 assigns this to
+   ginsys/bronzeward#19, and it is not part of the lifecycle deferral: it was observed on the
+   PoC's own `apply-config` path.
+4. **Recovery mode after external restoration** (SP23). A restore rewinds fence generations
    (DB §4.7); recovery-mode entry, executor quiescence and a restore epoch are unmodelled (DS §7,
    KL §6).
-4. **Authenticated API, scoped authorization and the operation timeline** (SP30). Untested; every
-   E5 report ran as root or administrator.
-5. **Dispatch on SQLite** (SP28, DS §7) and any MySQL/MariaDB evidence (DB §6.3).
+5. **Authenticated API, scoped authorization and the operation timeline** (SP30). Untested; the E5
+   reports ran their administrator operations as root, and no application identity was tested.
+6. **Dispatch on SQLite** (SP28, DS §7) and any MySQL/MariaDB evidence (DB §6.3).
 
 Narrower, and open:
 
@@ -411,15 +438,16 @@ decision.
 
 - **Profile selection (ginsys/bronzeward#13).** PostgreSQL with OpenBao is the only pairing with
   evidence on every exercised axis: DB §8 names PostgreSQL the design's server option; DS ran on
-  PostgreSQL only; PC §8 and RC §8 find OpenBao sufficient; the local age store fails the custody
-  condition (PC §8, RC §4.2); SOPS is import/export only (PC §8, row 149). Choosing SQLite would
+  PostgreSQL only; PC §8 and RC §8 find OpenBao sufficient; the local age store does not meet §7.1's
+  required-properties condition, because every property it showed is writer convention (PC §8,
+  RC §4.2); SOPS is import/export only (PC §8, row 149). Choosing SQLite would
   need dispatch evidence on it first.
 - **Identity and approval (ginsys/bronzeward#14).** The revocation boundary is the COMMIT inside
   `Store.Commit`, with a stated residual (DS §4.1 row 005). There is no evidence on identity or
   approval cardinality (SP30). The publisher/administrator split relies on OpenBao policy, and an
   administrator can still add a version (PC §4 row 087).
 - **Retention and recovery (ginsys/bronzeward#15).** RC §6.4 proposes an alert policy in which a
-  404 stays unknown. Keys sit with the backups (PC §6.2). Pairing backups by age is inferred
+  404 stays unknown. Keys sit in the same tree as the ciphertext in both local layouts (PC §6.3). Pairing backups by age is inferred
   (KL §7). A recreated key cannot be told apart by ciphertext prefix (KL §3.2 case D).
 - **Licence (ginsys/bronzeward#16).** No report evidences bronzeward's own licence choice. OM §3.1
   (Omni's BUSL) bears only on the build-versus-adopt gate.
@@ -427,7 +455,7 @@ decision.
 **Specifications.**
 
 - **Compiler (ginsys/bronzeward#17).** Early resolution with a source superset (SR §9). Marking is
-  load-bearing (E1 §8, SP §5, C1). Redact by path, schema and value (SP §4.1). Pin the renderer to
+  load-bearing (E1 §8; SP §5 and C1 for why). Redact by path, schema and value (SP §4.1). Pin the renderer to
   the node's minor version, refuse a newer target contract and an out-of-window Kubernetes version,
   and record the contract (E3 §8). Reference configuration by contract, since v1.14 changes paths
   (E3 §6.2).
@@ -441,8 +469,9 @@ decision.
   does not trust fence generations (DB §4.7), ciphertext is not executability (KL §5.2), and a
   record of what a re-encoding patch changed (E3 §7).
 
-The gaps in §9 are not covered by any of these; each needs its own tracked work, or an explicit
-owner deferral recorded where the PoC acceptance lives.
+Apart from §9 item 3, which the execution candidates above carry into ginsys/bronzeward#19, the
+§9 gaps are not covered by any of these. Each needs its own tracked work, or an explicit owner
+deferral recorded where the PoC acceptance lives.
 
 ## 11. Acceptance criteria
 
