@@ -40,8 +40,8 @@ compared, a link and that date.
   v1.12.2 (23 September 2026) as Latest. Release pages for v1.10.0, v1.11.0, v1.12.0, v1.12.1 and
   v1.12.2 were read, and in review the v1.10.1 to v1.10.6 patch notes as well. `CHANGELOG.md` at
   v1.12.2 was searched for approval, draft, SideroLink, direct-access and licence entries since
-  v1.9.3. It holds main-line and beta sections only (1.10.0-beta.0 onwards, with no final v1.10.0,
-  v1.11.0 or v1.10.x patch sections).
+  v1.9.3. It holds final sections for 1.12.0 to 1.12.2 and beta sections from 1.10.0-beta.0
+  onwards; it has no final v1.10.0, v1.11.0 or v1.10.x patch sections.
 - **Documentation.** docs.siderolabs.com does not show a version or date for Omni pages. Its pages
   link to their sources in [siderolabs/docs](https://github.com/siderolabs/docs), so each page was
   read as its `.mdx` source at that repository's `main` on the read date,
@@ -57,8 +57,11 @@ compared, a link and that date.
   re-read at its tag.
 
 **Tooling caveat.** Release pages and the pricing page were read through a summarising web fetch,
-then cross-checked: release notes against the beta and main-line sections of `CHANGELOG.md` at
-v1.12.2, the pricing page against its raw text. Licence files and documentation sources were read verbatim. All sources in scope were
+then cross-checked. The pricing page was checked against its raw text. `CHANGELOG.md` at v1.12.2
+covers only 1.12.0 to 1.12.2 and the betas, so in review all eleven release bodies (v1.10.0 to
+v1.12.2) were re-read raw through the GitHub releases API on 25 September 2026. None mentions an
+approval, a draft or direct management; the only SideroLink entries (v1.10.6, v1.11.0) are library
+bumps and fixes. Licence files and documentation sources were read verbatim. All sources in scope were
 reachable; nothing below depends on a page that could not be fetched.
 
 **Status values.** *current-verified*: stated by a primary source read on 24 September 2026.
@@ -102,7 +105,7 @@ change can wait for an approval before it applies.
 | Ways to hold a change back | Node locks and rolling machine-set strategies (§20.6, M3). | Locked nodes "retain their configuration from the time they were locked"; "Control plane nodes cannot be locked". A rollout can be staged by locking the nodes to hold back. For worker machine sets, `updateStrategy` and `upgradeStrategy` default to rolling, one machine at a time; control-plane sets always roll one at a time. An imported cluster stays `locked` until `omnictl cluster unlock`, and pending changes can be reviewed before that. Since v1.10.0 a config patch can be disabled: "retained as a resource but is never applied". These hold or pace changes; none is an approval bound to an immutable release. | current-verified | [upgrading-clusters](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/cluster-management/upgrading-clusters.mdx), [cluster-templates reference](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/reference/cluster-templates.mdx), [importing-talos-clusters](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/cluster-management/importing-talos-clusters.mdx), docs `67daa27`; [v1.10.0 release](https://github.com/siderolabs/omni/releases/tag/v1.10.0) (7 Aug 2026); all read 2026-09-24 |
 | Cluster templates | Templates can support Git-managed workflows; the live control plane is API-driven (§20.1, M3). | Templates make configuration "reviewable" when kept in a change management system such as `git`; "Syncing the template causes Omni to create the cluster and reconcile it to the declared state." Review happens outside Omni, before the sync. | current-verified | [cluster-template](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/omni-cluster-setup/cluster-template.mdx), docs `67daa27`, read 2026-09-24 |
 | Kubernetes bootstrap manifests | Not recorded. | After a Kubernetes upgrade, "Omni shows a diff of the proposed changes before applying them"; the operator applies what is appropriate. This covers bootstrap manifests only, not Talos machine configuration. | current-verified | [upgrading-clusters](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/cluster-management/upgrading-clusters.mdx), docs `67daa27`, read 2026-09-24 |
-| No draft/approve release gate | "As of 1.9.3 there is still no draft/approve release gate" (§20.1, M9). | No approval, draft or release-approval feature appears in the release notes of v1.10.0 to v1.10.6, v1.11.0 and v1.12.0 to v1.12.2, or in the beta and main-line sections of `CHANGELOG.md` at v1.12.2 since v1.9.3. None is described on the configuration, patch, template or upgrade pages above. Bounded to those sources. | current-verified | [Releases](https://github.com/siderolabs/omni/releases), latest v1.12.2 (23 Sep 2026); [`CHANGELOG.md` at v1.12.2](https://github.com/siderolabs/omni/blob/v1.12.2/CHANGELOG.md); pages above at docs `67daa27`; read 2026-09-24 |
+| No draft/approve release gate | "As of 1.9.3 there is still no draft/approve release gate" (§20.1, M9). | No approval, draft or release-approval feature appears in the release notes of v1.10.0 to v1.10.6, v1.11.0 and v1.12.0 to v1.12.2, or in `CHANGELOG.md` at v1.12.2 since v1.9.3 (its 1.12.0 to 1.12.2 and beta sections). None is described on the configuration, patch, template or upgrade pages above. Bounded to those sources. | current-verified | [Releases](https://github.com/siderolabs/omni/releases), latest v1.12.2 (23 Sep 2026); [`CHANGELOG.md` at v1.12.2](https://github.com/siderolabs/omni/blob/v1.12.2/CHANGELOG.md); pages above at docs `67daa27`; read 2026-09-24 |
 
 ### 3.3 Requirement 3: direct Talos access with optional SideroLink
 
@@ -114,7 +117,8 @@ Talos mTLS stays available, and that SideroLink is an optional transport (§10, 
 | Registration uses SideroLink | Registration is SideroLink-based through v1.9.3 (§20.1, M7). | Two join paths: boot with a "preconfigured SideroLink configuration", or boot standard media and supply a Machine Join Config. The join token that path uses authenticates machines "when they first establish a WireGuard tunnel connection to Omni". Import adds a `SideroLinkConfig` document to each node. "Machine registration is built on top of ... WireGuard"; "SideroLink builds upon WireGuard". | current-verified | [join-machines-to-omni](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/omni-cluster-setup/registering-machines/join-machines-to-omni.mdx), [rotate-siderolink-join-token](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/security-and-authentication/rotate-siderolink-join-token.mdx), [machine-registration](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/infrastructure-and-extensions/machine-registration.mdx), [importing-talos-clusters](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/cluster-management/importing-talos-clusters.mdx), docs `67daa27`, read 2026-09-24 |
 | Local Talos API after joining | Disabled once a machine joins (design reference M7). | "The local Talos API is disabled for security reasons, and all future configuration changes must be made through Omni. If you want to access the Talos APIs you will need to re-provision the machine". | current-verified | [join-machines-to-omni](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/omni-cluster-setup/registering-machines/join-machines-to-omni.mdx), docs `67daa27`, read 2026-09-24 |
 | Direct configuration writes | Blocked through `talosctl` (§20.6, M2). | "In Omni-managed clusters, direct writes via `talosctl` are **blocked at the API layer**." Omni "*is* the authentication mechanism for external access to Talos and Kubernetes". | current-verified | [how-configuration-works-in-omni](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/omni-cluster-setup/how-configuration-works-in-omni.mdx), [options-for-running-omni](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/self-hosted/options-for-running-omni.mdx), docs `67daa27`, read 2026-09-24 |
-| Emergency direct access | Break glass when the management plane is unavailable; the v1.7 direct node access is Omni-mediated (§20.6, M9, M10). | Break glass lets nodes "temporarily allow direct API access on any network interface" with the `os:operator` role. It needs the `--enable-break-glass-configs` server flag on-premises ("Recommended to be disabled") or a support request on SaaS. Afterwards the cluster is "tainted" until CA rotation. An emergency path, not a management transport. Whether the v1.7 Omni-mediated node access the August column cites is still offered was not checked; the pages read do not describe it. | current-verified | [break-glass-emergency-access](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/security-and-authentication/break-glass-emergency-access.mdx), [omni-configuration reference](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/reference/omni-configuration.mdx), docs `67daa27`, read 2026-09-24 |
+| Emergency direct access | Break glass when the management plane is unavailable (§20.6, M10). | Break glass lets nodes "temporarily allow direct API access on any network interface" with the `os:operator` role. It needs the `--enable-break-glass-configs` server flag on-premises ("Recommended to be disabled") or a support request on SaaS. Afterwards the cluster is "tainted" until CA rotation. An emergency path, not a management transport. | current-verified | [break-glass-emergency-access](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/security-and-authentication/break-glass-emergency-access.mdx), [omni-configuration reference](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/reference/omni-configuration.mdx), docs `67daa27`, read 2026-09-24 |
+| Omni-mediated node access | v1.7 added direct Talos node access through SideroLink (§20.6, M9). | Not checked: the pages read do not describe it, so whether it is still offered is open. | unresolved | — |
 | No SideroLink-free management mode | "No SideroLink-free management mode" as of v1.9.3 (§20.1, M9). | The configuration reference's `services.siderolink` options select a transport variant (`useGRPCTunnel` tunnels WireGuard over gRPC); none turns SideroLink off. The egress page says "Talos nodes must be able to connect to Omni for cluster management and SideroLink". No release note read (v1.10.0 to v1.10.6, v1.11.0, v1.12.0 to v1.12.2) adds direct management. Bounded to those sources. | current-verified | [omni-configuration reference](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/reference/omni-configuration.mdx), [omni-firewall-egress-requirement](https://github.com/siderolabs/docs/blob/67daa278b9378db3da5b80f6cb38f41db37baa2d/public/omni/omni-cluster-setup/omni-firewall-egress-requirement.mdx), docs `67daa27`; [Releases](https://github.com/siderolabs/omni/releases), latest v1.12.2; read 2026-09-24 |
 
 ### 3.4 Outside the three requirements
@@ -159,9 +163,9 @@ comparison, not a change in Omni.
   may serve a different build later. The August column cannot be re-read at its August state,
   except the v1.9.3 `LICENSE`.
 - **Summarised pages.** Release pages and the pricing page were read through a summarising fetch.
-  The release findings were cross-checked against the beta and main-line sections of
-  `CHANGELOG.md` at v1.12.2, which carry no patch-release sections, and the pricing page
-  against its raw text.
+  The release findings were cross-checked against the raw release bodies (v1.10.0 to v1.12.2)
+  and, where it has a matching section, `CHANGELOG.md` at v1.12.2; the pricing page against its
+  raw text.
 - **Not a legal opinion.** Licence rows record what the text says. The production-use page is
   Sidero Labs' own interpretation, as it says itself. Commercial terms were not negotiated or
   confirmed with the vendor.
@@ -182,9 +186,10 @@ still does not meet it:
 2. **Explicit releases and approvals: not met.** A saved patch applies. Locks, disabled patches,
    rolling strategies and external Git review hold or pace changes, but no approval binds an
    immutable release before it applies (§3.2).
-3. **Direct Talos access with optional SideroLink: not met.** SideroLink is the only documented
-   registration and management path. The local Talos API is disabled after joining, and direct
-   writes are blocked outside break glass (§3.3).
+3. **Direct Talos access with optional SideroLink: not met.** Among the pages read, SideroLink is
+   the only documented registration and management path. The local Talos API is disabled after
+   joining, and direct `talosctl` configuration writes are blocked. Break glass gives temporary
+   `os:operator` API access for emergencies only (§3.3).
 
 The August conclusion therefore stands on current evidence, not only on the snapshot. The three
 limits that bind it: every absence is bounded to the sources read, nothing was run, and the
@@ -207,7 +212,8 @@ config patches, or a documented way to manage machines without SideroLink.
   head of the design, which both say current Omni was not re-verified, can cite it instead. The §3 gate
   row ("re-check each Omni release") can add this reading's date. That design edit is not made here.
 - The commercial-plan claim in design §20.2 ("self-hosting requires an Enterprise subscription;
-  the lowest tier is a paid, non-commercial Hobby plan") is not confirmed by the current pricing
-  page (§3.1, unresolved). It does not bear on the gate, but the design's wording should not be
+  the lowest tier is a paid, non-commercial Hobby plan") and its reference M11 ("self-hosted Omni
+  requires an Enterprise subscription") are not confirmed by the current pricing page (§3.1,
+  unresolved). It does not bear on the gate, but the design's wording should not be
   treated as current.
 - OpenBao custody remains a preference and was not re-evaluated.
