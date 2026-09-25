@@ -1,0 +1,12 @@
+description: The author also pasted the referenced value as a literal node annotation. Provenance marks only what came through the reference and the schema does not mark annotations, so both leave the literal copy; value matching catches it (the control that provenance can miss).
+transformation: duplicate-value
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  reg-pass: BWSYNTH-duplicated-literal-password
+native: pass
+expect:
+  effective: [reg-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: leak, schema: leak, composed-path: leak, path+schema: leak, path+schema+value: clean}

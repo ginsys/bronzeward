@@ -1,0 +1,19 @@
+description: Two inline manifests with the same name, the second holding a reference in its identified embedded document. Strategic merge keeps both; validation rejects the duplicate without quoting a value.
+transformation: list-change
+fragments:
+  - file: f1.yaml
+    marked: false
+  - file: f2.yaml
+    marked: true
+embedded:
+  - doc: v1alpha1
+    path: cluster/inlineManifests[name=e2sp-dup]/contents
+    format: yaml
+    identified: true
+values:
+  dup-pass: BWSYNTH-duplicate-manifest-password
+native: invalid
+expect:
+  effective: [dup-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

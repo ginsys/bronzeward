@@ -1,0 +1,11 @@
+cluster:
+  inlineManifests:
+    - name: e2sp-dup
+      contents: |
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: e2sp-dup
+          namespace: default
+        stringData:
+          password: !ref dup-pass

@@ -1,0 +1,12 @@
+description: A registry password with a tab, quotes and a backslash, which talosctl writes double-quoted and escaped. Value matching knows the raw value only (positive control); the schema and provenance mark the field.
+transformation: escaping
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  reg-pass: "BWSYNTH-escaped-password\twith \"quotes\" and a \\ backslash"
+native: pass
+expect:
+  effective: [reg-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: leak, resolution-path: clean, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}

@@ -1,0 +1,7 @@
+machine:
+  registries:
+    config:
+      mirror.example.test:
+        auth:
+          username: e2sp-user
+          password: !ref reg-pass

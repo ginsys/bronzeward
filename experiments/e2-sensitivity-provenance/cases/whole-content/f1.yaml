@@ -1,0 +1,6 @@
+machine:
+  files:
+    - path: /var/etc/e2sp/run.sh
+      op: create
+      permissions: 0o755
+      content: !ref script

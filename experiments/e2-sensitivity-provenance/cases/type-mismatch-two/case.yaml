@@ -1,0 +1,13 @@
+description: Two string references in integer fields. talosctl's decode error quotes both - one truncated to its first seven bytes, one whole - so the message template has two value spans.
+transformation: resolution
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  prism-port: BWSYNTH-not-a-port-either
+  api-port: BWSYNTH-42
+native: rejected
+expect:
+  premise: {tag: rejected, marked: rejected, binding: rejected}
+  messages: {patch: redacted, validate: skipped}
+  leaks: {none: leak, value: leak, resolution-path: leak, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

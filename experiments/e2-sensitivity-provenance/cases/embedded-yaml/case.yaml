@@ -1,0 +1,10 @@
+description: Issue 3's embedded-yaml case, with a value the embedded document's encoder must escape (a tab and quotes). Value matching knows the raw value; the output holds its escaped form (positive control).
+transformation: embedded-yaml
+from: embedded-yaml
+values:
+  app-pass: "BWSYNTH-app-password\twith \"quotes\""
+native: pass
+expect:
+  effective: [app-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: leak, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

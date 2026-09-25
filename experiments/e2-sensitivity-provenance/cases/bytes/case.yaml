@@ -1,0 +1,12 @@
+description: Issue 3's bytes case with the value returned raw and base64-encoded as it is placed. Value matching knows the raw value only (positive control - value matching misses, provenance catches).
+transformation: bytes
+from: bytes
+values:
+  extra-ca: BWSYNTH-extra-ca-certificate
+modifiers:
+  extra-ca: base64
+native: pass
+expect:
+  effective: [extra-ca]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: leak, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

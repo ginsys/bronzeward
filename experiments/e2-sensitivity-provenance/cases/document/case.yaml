@@ -1,0 +1,10 @@
+description: Issue 3's document case. The reference is in a separate document the fragment adds, a field the schema does not mark.
+transformation: resolution
+from: document
+values:
+  roots: BWSYNTH-not-a-real-certificate
+native: pass
+expect:
+  effective: [roots]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

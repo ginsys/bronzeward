@@ -1,0 +1,11 @@
+description: Issue 3's string case. One registry password, a field the Talos schema marks secret.
+transformation: resolution
+from: string
+values:
+  reg-pass: BWSYNTH-registry-password
+native: pass
+# Written before the first run; the run records what happened next to each.
+expect:
+  effective: [reg-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}

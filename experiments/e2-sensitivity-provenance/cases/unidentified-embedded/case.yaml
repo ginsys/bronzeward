@@ -1,0 +1,10 @@
+description: Issue 3's unidentified-embedded case. No candidate may parse the document, so the reference is never resolved and its value reaches nothing; provenance records it unresolved.
+transformation: embedded-yaml
+from: unidentified-embedded
+values:
+  app-pass: BWSYNTH-app-password
+native: pass
+expect:
+  unresolved: [app-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: clean, value: clean, resolution-path: clean, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}

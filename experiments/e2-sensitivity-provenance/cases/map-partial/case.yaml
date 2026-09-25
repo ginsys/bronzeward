@@ -1,0 +1,17 @@
+description: A mapping reference whose password leaf a later literal overwrites. The user name leaf stays effective, so the reference is both effective and (in part) overridden.
+transformation: reference-overwritten-by-literal
+fragments:
+  - file: f1.yaml
+    marked: true
+  - file: f2.yaml
+    marked: false
+values:
+  reg-auth:
+    username: BWSYNTH-partial-user
+    password: BWSYNTH-partial-password
+native: pass
+expect:
+  effective: [reg-auth]
+  overridden: [reg-auth]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

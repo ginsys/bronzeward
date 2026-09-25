@@ -1,0 +1,3 @@
+cluster:
+  extraManifests:
+    - !ref manifest-url

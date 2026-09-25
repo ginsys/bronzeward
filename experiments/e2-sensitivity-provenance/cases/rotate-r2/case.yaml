@@ -1,0 +1,14 @@
+description: Revision 2 of the rotate pair. The same fragment, the password rotated to version 2; revision 1's values no longer match it, and revision 1's paths name the old version.
+transformation: rotation
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  reg-pass: BWSYNTH-rotation-second-value
+versions:
+  reg-pass: "2"
+native: pass
+expect:
+  effective: [reg-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}

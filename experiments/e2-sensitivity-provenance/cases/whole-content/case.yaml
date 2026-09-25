@@ -1,0 +1,15 @@
+description: A reference that is a machine file's whole multi-line content, with no embedded document declared. talosctl writes it as a block, indented; value matching finds its lines, not the whole value.
+transformation: resolution
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  script: |
+    #!/bin/sh
+    echo BWSYNTH-script-line-one
+    echo BWSYNTH-script-line-two
+native: pass
+expect:
+  effective: [script]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: leak, composed-path: clean, path+schema: clean, path+schema+value: clean}

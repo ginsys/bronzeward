@@ -1,0 +1,10 @@
+description: Issue 3's alias case. One reference under a YAML anchor lands at two paths once talosctl expands the alias; the resolver records only the anchor's.
+transformation: alias
+from: alias
+values:
+  reg-secret: BWSYNTH-shared-secret
+native: pass
+expect:
+  effective: [reg-secret]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: leak, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}

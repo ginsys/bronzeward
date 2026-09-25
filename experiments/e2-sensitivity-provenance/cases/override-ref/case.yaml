@@ -1,0 +1,10 @@
+description: Issue 3's override-ref case. A literal is overwritten by a reference in the second fragment.
+transformation: literal-overwritten-by-reference
+from: override-ref
+values:
+  reg-pass: BWSYNTH-registry-password
+native: pass
+expect:
+  effective: [reg-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}

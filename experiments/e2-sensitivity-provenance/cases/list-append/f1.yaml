@@ -1,0 +1,3 @@
+cluster:
+  extraManifests:
+    - https://e2sp.example.test/first-literal.yaml

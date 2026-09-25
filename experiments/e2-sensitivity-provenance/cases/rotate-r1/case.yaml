@@ -1,0 +1,12 @@
+description: Revision 1 of the rotate pair. The registry password at version 1.
+transformation: rotation
+fragments:
+  - file: f1.yaml
+    marked: true
+values:
+  reg-pass: BWSYNTH-rotation-first-value
+native: pass
+expect:
+  effective: [reg-pass]
+  messages: {patch: none, validate: verbatim}
+  leaks: {none: leak, value: clean, resolution-path: clean, schema: clean, composed-path: clean, path+schema: clean, path+schema+value: clean}
