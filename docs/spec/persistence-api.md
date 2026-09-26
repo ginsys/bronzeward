@@ -298,10 +298,13 @@ that can cover it is one carrying an import base revision.
 
 Between an adoption's publication and its adoption record, another publication
 covering the machine compiles on the old base and becomes the machine's
-`Desired` (§6.2). The adoption record then sets `Applied` and `Desired` to the
-adopted release (execution and recovery, adopt), so that intervening release is
-superseded for the machine, and any plan made before the record fails the
-baseline comparison afterwards (execution and recovery, comparison 2).
+`Desired` (§6.2). The adopt plan binds the machine's `Desired` at its creation,
+and the adoption record refuses if it has changed since (execution and
+recovery, adopt, requirement 4.3). A publication before the plan is created is
+therefore superseded only by a plan whose approval sees it; one after needs a
+new adopt plan. The adoption record sets `Applied` and `Desired` to the adopted
+release, and any plan made before the record fails the baseline comparison
+afterwards (execution and recovery, comparison 2).
 
 ## 4. Revisions and optimistic concurrency
 
@@ -976,7 +979,7 @@ idempotency and conflict behavior.
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
 | `POST /drafts/{id}/publications` | 202, `publish` | `publisher`; `If-Match` |
 | `POST /plans` with `operation: apply-config` | 201 | `publisher` (EaR) |
-| `POST /plans` with `operation: adopt` | 201 | `author`, human only (EaR; §10.3) |
+| `POST /plans` with `operation: adopt` | 201 | `publisher` (EaR; §10.3) |
 | `POST /plans/{id}/cancellations` | 200 | the creating identity, under the role it created the plan with; `approver`; `recovery-admin` (EaR; design §13.7 item 6) |
 | `POST /plans/{id}/approvals` | 201 | `approver`, human only (EaR) |
 | `POST /approvals/{id}/revocations` | 201 | `approver`, `recovery-admin` (EaR) |
@@ -1350,12 +1353,13 @@ under a single named role (design §13.7 item 2).
 Human-only routes refuse automation even where a role would allow it:
 approval, recovery and identity revocation because automation never holds
 those roles (design §13.7 item 2); and, as an interim position, ingestion
-(with its marks, takeover and abandonment), inventory creation and the creation
-of adoption plans, which require `author` held by a human
-**(choice §17.22)**. Design §13.7 lists "which role performs the privileged
-ingestion that feeds an adoption" among the questions it does not settle, as an
-owner decision, and names no role for inventory records. An adoption plan's
-approval is an `approver`'s, as design §13.7 item 3 already says.
+(with its marks, takeover and abandonment) and inventory creation, which
+require `author` held by a human **(choice §17.22)**. Design §13.7 lists
+"which role performs the privileged ingestion that feeds an adoption" among the
+questions it does not settle, as an owner decision, and names no role for
+inventory records. An adoption plan is a plan: a `publisher` creates it, as
+every plan (design §13.7 item 2; owner decision 2a on #14), and an `approver`
+approves it, as design §13.7 item 3 already says.
 
 Drift **Ignore** is outside PoC scope (execution and recovery, supported
 values) and has no route.
@@ -1522,6 +1526,11 @@ startup", and design §13.7 item 5 and §14.6 give entering it to
 `recovery-admin`. The two meet in execution and recovery's recovery start
 **(choice §17.26)**:
 
+- Before any process can reach the restored database, the operator stops, or
+  establishes as stopped, every service process that ran against the
+  pre-restoration state (execution and recovery §7.2). This is an operator
+  step: nothing here enforces it, and until entry commits the epoch fence
+  cannot tell such a process from a current one.
 - After a restore, the operator starts the service with a server-side
   **recovery-start flag**. The flag is process state, not database state. Under
   it the process runs no executor and no job worker, attempts no commitment or
@@ -1784,8 +1793,9 @@ equals neither the restored epoch nor the lost one.
   `ep_bqeknkmarvikuy7ofil2okekgi`, not the current epoch, and is refused,
   whichever generation the rows now hold. With a counter alone, the next two
   takeovers would reissue generations 2 and 3, and X's token would pass, as in
-  DB row 027. Execution and recovery's first procedure step stops X, or
-  establishes it as stopped; the fence refuses only its database writes.
+  DB row 027. The operator was to stop X, or establish it as stopped, before
+  any process could reach the restored database (§12.2); the fence refuses
+  only its database writes, and only after entry.
 - A client that recorded `ep_e3t4dznwcjg4uoahvfjk4w6kwy` sees
   `ep_53wiltmcac6xxdggvgg7zcoh5y` in `Bronzeward-Epoch` and knows its events and
   cursors do not resume.
@@ -2047,10 +2057,10 @@ design and evidence do not settle the question. Each is marked in place as
     (§10.5). Alternative: mark neither, or only (b).
 22. **Interim, until the owner decides the question design §13.7 leaves open
     ("which role performs the privileged ingestion that feeds an adoption"):
-    ingestion, with its marks, takeover and abandonment, inventory creation
-    and the creation of adoption plans need a human `author`; an `approver`
-    approves adoption plans** (§9.2, §10.3). Alternatives: `publisher`;
-    automation allowed.
+    ingestion, with its marks, takeover and abandonment, and inventory
+    creation need a human `author`; a `publisher` creates adoption plans, as
+    every plan, and an `approver` approves them** (§9.2, §10.3).
+    Alternatives: `publisher` for ingestion; automation allowed.
 23. **Interim, until the owner decides the question design §13.7 leaves open
     (whether losing a role invalidates approvals given under it): losing a
     role does not invalidate approvals** (§10.4). The alternative needs a
