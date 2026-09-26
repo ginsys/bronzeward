@@ -146,7 +146,8 @@ silently substitutes a newer artifact. The immutable plan binds:
 - the machine's **baseline revision**, a per-machine counter advanced by every
   change of `Applied`, whether by a completed operation or by an adoption
   record (§6.3). A machine with no `Applied` has no baseline revision, so no
-  plan can be made for it before its baseline is accepted;
+  `apply-config` plan can be made for it before its baseline is accepted; the
+  adopt plan that accepts it binds none (§6.3);
 - the expected pre-dispatch configuration digest. This is mandatory for every
   `apply-config` plan, because the request replaces the whole configuration;
 - the open drift record, if the machine has one; such a plan is a revert
@@ -344,8 +345,9 @@ persistence's (see `persistence-api.md`).
    comparison 4's is on the machine scope; a limit above one needs a counted
    lock, which is open (choice §10.5); and
 6. the **scope gate** is open: the machine scope is not frozen (§6.2), no
-   drift record is open on the machine other than one the plan binds (§6.4),
-   and either recovery mode is not in effect or the scope was explicitly released
+   drift record is open on the machine other than one the plan binds, a drift
+   record the plan binds is still open (§6.4; a revert whose record has closed
+   is stale), and either recovery mode is not in effect or the scope was explicitly released
    in the current recovery epoch (§7.3 step 7). The freeze, the open drift
    record and the scope's recovery state are read under the machine row's
    lock, and recovery mode
@@ -363,7 +365,9 @@ leave a race in which dispatch proceeds while mutation is meant to be paused.
 The machine scope also protects the binding it was taken for. Any transaction
 that changes a machine's assignment checks that machine's coordination scope
 and is refused while an operation on it is `committed`, `sending`, `verifying`
-or `unresolved`. Detecting a changed assignment revision only during
+or `unresolved`, and, in recovery mode, while the scope has not been released
+in the current recovery epoch (§7.3 step 7): an attempt the restored state does
+not hold may still be in flight for the old assignment. Detecting a changed assignment revision only during
 verification would be too late: the artifact for the old revision would already
 have reached the machine.
 
@@ -650,6 +654,12 @@ higher revision in that order. E4's prototype took an observation's basis as
 the highest committed revision read without the lock, which is unsound under
 concurrent writers: an accounting could commit after an observation that read
 before it ([DS §7](../design/research/20260925-dispatch-safety.md#7-limits)).
+An observation is ordered by when its remote read began, not by when it is
+recorded: before the read starts, the controller records an "observation
+started" entry, whose revision is the observation's **basis**, and the
+observation is recorded with that basis. For an observation, "after X" means a
+basis higher than X's revision, so an observation whose read began before an
+accounting and was recorded after it counts as before that accounting.
 Per-operation allocation would not order a `drift` observation against an
 adoption approval or a drift record, which §6.3 needs. The counter and its
 schema are persistence's; see `persistence-api.md`.
@@ -728,10 +738,10 @@ this contract adopts it and adds nothing it did not show:
 | Outcome | Evidence required |
 | --- | --- |
 | Completed | every attempt accounted for; then a completion observation of the artifact's digest and the other postconditions |
-| Rejected | a recorded `InvalidArgument` response to every attempt. E4 showed it before any mutation for a validation error only, with the resource version unchanged ([DS §4.6](../design/research/20260925-dispatch-safety.md#46-a-definitive-rejection-row-022)); no other code or error class is proven pre-mutation |
+| Rejected | a recorded `InvalidArgument` response of the validation-error class to every attempt; any other `InvalidArgument`, such as the immediate-mode refusal below, accounts for its attempt and leaves the outcome to a completion observation. E4 showed it before any mutation for a validation error only, with the resource version unchanged ([DS §4.6](../design/research/20260925-dispatch-safety.md#46-a-definitive-rejection-row-022)); no other code or error class is proven pre-mutation |
 | Failed | every attempt accounted for, and a completion observation contradicting a postcondition. The accounting must be true, not merely recorded (DS row 013) |
 | Safe to retry | every attempt accounted for, or none recorded; no accepted response; a completion or recovery observation at the pre-dispatch digest; attempts left, an approval passing comparison 1 and an open scope gate (§5); a new attempt transaction bound to the classification's revision |
-| Unresolved | any attempt with neither a recorded response nor an accounting decision; or no successful completion observation by the verification deadline |
+| Unresolved | any attempt with neither a recorded response from the target nor an accounting decision; or no successful completion observation by the verification deadline |
 | Cancelled | after the commitment, with no attempt recorded: a revocation of the approval or of its identity, a cancellation, the plan's expiry, an approval from an earlier recovery epoch, or a `recovery-admin` resolution. Before the commitment there is no operation; the plan ends `revoked`, `cancelled` or `expired` (§2) |
 
 Two response classes are deliberately not rejections. A dial failure
@@ -740,6 +750,11 @@ Two response classes are deliberately not rejections. A dial failure
 mode was seen only on dry runs (E3 §4.3); a recorded response of that kind
 accounts for its attempt, but the outcome is decided by a completion
 observation, not by the response.
+
+Only a response from the target (an acceptance or a gRPC code the node
+returned) accounts for its attempt. A transport outcome (a dial failure, a
+timeout, a reset connection) is recorded as the response class of §4.1 but
+accounts for nothing: the attempt stays unaccounted until a §5.2 decision.
 
 A retry re-applies the same artifact. If an earlier, abandoned request landed
 on top of it, it would apply the same configuration again, which should change
@@ -1094,7 +1109,9 @@ epoch, and recovery mode stays in effect until §7.6.
    it could have been takes its place: the stop of the pre-restoration
    instances plus the **maximum transport deadline**, a static deployment
    setting held outside the application database like the settle floor. Plan
-   creation refuses a transport deadline above it. One decision may cover many
+   creation refuses a transport deadline above it. The setting is a high-water
+   mark: it may be raised but never lowered, because a plan made under a higher
+   value may be the one whose attempt the restore erased. One decision may cover many
    scopes, each with its own recovery observation.
 2. **Verify** schema, revisions, releases, operation journals and provider and
    key references from the restored state. Re-record, from the operator's
@@ -1148,7 +1165,7 @@ release is not blanket approval for pending mutations.
 | pre-restore unaccounted | set at entry; a request sent before the restore may still land | the step 1 accounting decision, to one of the next three |
 | `unresolved` | a restored operation on the scope is `unresolved` | its resolution under §4 and §5, then re-marking |
 | `blocked` | the `restoration` observation failed, or a dependency to apply the machine's `Desired` release is missing: its release record, its artifact's key version at or above the decryption floor and decryptable by the executor identity, or the executor's operation credentials (§3.1 item 2) | the dependency restored or repaired, or a newly published release selected as `Desired` whose dependencies are present; then re-marking |
-| `ready` | accounted, no operation holds the scope, the dependencies above present, a `restoration` observation recorded after step 1 | release |
+| `ready` | accounted, no operation holds the scope, the dependencies above present, a `restoration` observation whose basis (§4.1) follows step 1 | release |
 | released | released in the current epoch | recovery-mode exit, or a new entry |
 
 The dependency set is the one dispatch checks at use time (§3.1), for the
@@ -1456,7 +1473,7 @@ E4 proved and the selected policies:
 | Takeover at controller start | **unsupported**: E4's takeovers were harness commands | DS §2.1 |
 | Safe retry against `failed` on a pre-dispatch observation (§5) | **unsupported**: a harness flag in E4 | DS §2.1 |
 | Identity revocation, including its refusal of retries | **unsupported**: not measured | design §13.7 item 4 |
-| Observation ordering under concurrent writers | **unsupported**: prototype basis unsound | DS §7 |
+| Observation ordering under concurrent writers | **unsupported**: prototype basis unsound; this contract's read-start basis (§4.1) is not yet evidenced | DS §7 |
 | Machinery Talos client | **unsupported**: E4 used `talosctl` | §3.5 |
 | Drift freeze, adoption record, revert | **unsupported**: no investigation | FR §9 item 1 |
 | Recovery-mode entry, quiescence, epoch, per-scope gating | **unsupported**: not modelled; fences rewind | DB §4.7; FR §9 item 4 |
