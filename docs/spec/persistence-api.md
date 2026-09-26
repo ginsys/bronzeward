@@ -915,8 +915,9 @@ idempotency and conflict behavior.
 | `POST /identity-revocations` | 201 | `recovery-admin`, human only (§10.4) |
 
 Every `POST`, `PUT` and `DELETE` needs an `Idempotency-Key` (§7). There is no
-route that dispatches, and none that issues, lists or revokes automation tokens
-or grants roles: those requests reach no handler and answer `404` (design
+route that dispatches, none that issues, rotates or lists automation tokens,
+none that revokes a token except by revoking its service identity (T5c,
+§10.4), and none that grants roles: those requests reach no handler and answer `404` (design
 §13.7 items 1 and 2). How a staged ingestion is reviewed, and when its `ingest`
 operation ends, belong to the edit and publication flow
 ([ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23)); this
@@ -1219,8 +1220,10 @@ guessing concern of compilation §4.1 applies to low-entropy values. The
 comparison is constant-time.
 
 The server-side command-line tool, run by the operator with database access,
-is the only way to issue, rotate, revoke or list tokens; no API route exists
-(design §13.7 item 2). It:
+is the only way to issue, rotate or list tokens, and to revoke one without
+revoking its identity; no API route does any of that (design §13.7 item 2).
+An identity revocation through the API (§10.4) revokes the identity's token
+with it. It:
 
 - creates a service identity with roles drawn only from `viewer`, `author` and
   `publisher`, refusing `approver` and `recovery-admin`; a check constraint
@@ -1420,10 +1423,14 @@ startup", and design §13.7 item 5 and §14.6 give entering it to
 - After a restore, the operator starts the service with a server-side
   **recovery-start flag**. The flag is process state, not database state. Under
   it the process runs no executor and no job worker, attempts no commitment or
-  attempt transaction, serves reads, observation and the recovery routes, and
-  refuses every other mutation with `409 recovery-mode-active` until entry has
-  committed. The dispatch gates therefore stay closed before entry, whatever
-  the restored database says.
+  attempt transaction, and until entry has committed serves reads and
+  `POST /recovery/entries` only: every other mutation, the other recovery
+  routes and observation included, is refused with `409 recovery-mode-active`,
+  so nothing is recorded in the restored epoch that entry is about to fence.
+  After entry, still under the flag, it serves what execution and recovery's
+  recovery start serves (observation, the recovery routes and the
+  installation-wide acts of its §7.5). The dispatch gates therefore stay closed
+  before entry, whatever the restored database says.
 - Entry itself is an API act by `recovery-admin`, human only:
   `POST /recovery/entries`, whose body names each restored backup family with
   the backup's identity and age (§9.3). No server-side command enters recovery
