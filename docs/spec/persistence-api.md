@@ -304,7 +304,9 @@ recovery, adopt, requirement 4.3). A publication before the plan is created is
 therefore superseded only by a plan whose approval sees it; one after needs a
 new adopt plan. The adoption record sets `Applied` and `Desired` to the adopted
 release, and any plan made before the record fails the baseline comparison
-afterwards (execution and recovery, comparison 2).
+afterwards (execution and recovery, comparison 2). A publication compiled on
+the old base but committing after the record is refused `409 stale-input`
+(§4.2).
 
 ## 4. Revisions and optimistic concurrency
 
@@ -343,7 +345,9 @@ ETag: "5-m3oxmlfh6phr7aigshdydcb4ji"
 
 The server compares the whole value. After a restore, a record's revision 5
 can be issued again with other content (DB §4.7); its token will differ, so an
-ETag a client saw before the restore never matches.
+ETag issued after the backup never matches a reissued revision. An ETag of the
+revision the backup holds still matches the restored record, whose content it
+describes; the epoch does not enter the ETag.
 
 Mutations of a draft require `If-Match` with the draft's current ETag. A
 mismatch is `412 precondition-failed`; a missing header is
@@ -358,18 +362,22 @@ through `If-Match` by the API in the PoC: heads move only by publication
 
 ### 4.2 Concurrency conflicts in publication
 
-Publication rejects stale input (design §7.4 step 4) in two forms, both
-`409 stale-input`, which names each head with its expected and actual head
-revision:
+Publication rejects stale input (design §7.4 step 4) in three forms, all
+`409 stale-input`, which names each head, or machine, with its expected and
+actual revision:
 
 - a head the draft changes has moved since the draft's base: another
   publication changed the same fragment, profile or assignment, or introduced
   the name the draft introduces (expected "absent");
 - a head the release uses unchanged has moved since compilation's snapshot
-  (compilation §6 step 1).
+  (compilation §6 step 1);
+- a covered machine's import base (§3.2), where the draft carries none for it,
+  is no longer the import base revision the snapshot read: an adoption record
+  or a completed operation changed its `Applied` in between.
 
-The second check covers inputs the draft did not touch **(choice §17.4)**: DB
-row 011 is exactly that case, a release committed on a superseded source. The
+The second and third checks cover inputs the draft did not touch
+**(choice §17.4)**: DB row 011 is exactly that case, a release committed on a
+superseded source. The
 author's remedy is a new draft revision from the current heads; how the edit
 flow offers that is ginsys/bronzeward#23's.
 
@@ -426,7 +434,7 @@ The transactions this contract defines or constrains:
 | T5c | Identity revocation | key lock; installation state `FOR SHARE`; principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked, idempotency record, act |
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6 | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
-| T8 | Job claim, lease extension and completion | §5.1 | operation owner fields |
+| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7) | operation owner fields; for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7) |
 | T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE` | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
 | T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect | the effect, idempotency record, act |
@@ -468,7 +476,9 @@ UPDATE operation
 A takeover moves a `committed`, `sending` or `verifying` operation to
 `unresolved` and keeps an `unresolved` one `unresolved` under its new owner; it
 never touches a terminal one. Those state semantics are execution and
-recovery's (its §3.4); this contract only makes them one conditional write.
+recovery's (its §3.4); this contract only makes them one conditional write,
+in the same transaction as the ownership-transition entry its timeline
+requires (its §4.1), under the machine row's lock (T8, T7).
 The ownership check is part of the write, never a prior `SELECT`: the
 check-then-insert control recorded a stale attempt
 ([DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions),
@@ -559,6 +569,8 @@ SELECT id, digest FROM release
   -- draft open, revision equals the bound draft revision
   -- $changed head revisions equal the draft's base
   -- $unchanged head revisions equal the snapshot
+  -- each covered machine's import base, where the draft carries none,
+  --   equals the snapshot's (§4.2), read under the MachineState lock
   -- for each machine whose assignment head is in $changed:
   --   no operation on its scope is committed, sending, verifying or unresolved;
   --   in recovery mode, its scope released in the current epoch
@@ -1621,7 +1633,7 @@ For a database restored to a backup taken at time *T*:
 | Record | After the restore | Consequence |
 | --- | --- | --- |
 | Identifiers issued after *T* | absent, never reissued (§2) | a client's handle for a lost release or operation answers `404`, never another record |
-| Revision numbers issued after *T* | reissued with new tokens | a pre-restore ETag answers `412` |
+| Revision numbers issued after *T* | reissued with new tokens | an ETag issued after *T* answers `412`; one of the revision the backup holds still matches (§4.1) |
 | Fence generations issued after *T* | reissued | refused after entry by the epoch term (§5.1) |
 | Head advances, drafts and releases after *T* | heads rewound; drafts and releases absent | re-edited and republished; release records lost this way are KL case G |
 | Staging claims | from before *T*, earlier epoch | abandoned at entry; inputs ingested again (compilation §3.5) |
@@ -1833,7 +1845,7 @@ equals neither the restored epoch nor the lost one.
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
 | Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record; orphans if past compilation §2.3 step 6 |
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
-| Publish | Moved head | operation `failed`, `409 stale-input` | operation, act |
+| Publish | Moved head, or a covered machine's import base changed (§4.2) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
 | Publish | Dependency not `retained`, or provider sealed | `failed`, `503 dependency-unavailable` or `422` | operation, act |
@@ -1978,7 +1990,8 @@ design and evidence do not settle the question. Each is marked in place as
    revision numbers alone, which match again after a restore.
 3. **Immutability enforced by database triggers** (§3). Alternative:
    application convention with tests.
-4. **Publication checks every input head, changed or not** (§4.2).
+4. **Publication checks every input head, changed or not, and each covered
+   machine's import base** (§4.2).
    Alternative: check only heads the draft changes, accepting releases built on
    moved unchanged inputs.
 5. **The import base is the Applied release's; no separate head** (§3.2).
