@@ -514,7 +514,12 @@ The response's class (gRPC code, or transport outcome) is always recorded.
 Design: [§12.5](../design/Talos_Configuration_and_Machine_Management_Design.md#125-durable-operations-and-uncertain-outcomes),
 [§15.2](../design/Talos_Configuration_and_Machine_Management_Design.md#152-operation-timeline).
 
-An operation exists from its plan's dispatch commitment (§2, §3.2). Its one
+An operation exists from its plan's dispatch commitment (§2, §3.2), except an
+`adopt` operation: the adoption record of an `adopt` plan creates it directly in
+`completed` (§6.3). It holds no scope or rollout slot and has no attempt, and
+its `completed` rests on the adoption record's observation, not on a
+completion observation of a sent artifact; none of the rows below after the
+first two applies to it. An operation's one
 durable timeline links, before its own entries, the plan and approval,
 plan-time evidence and the execution-time evidence the commitment relied on;
 it then holds ownership transitions, dispatch commitment, request attempts,
@@ -527,7 +532,7 @@ with a current projection. §4.1 specifies the entries.
 | `committed` | The commitment transaction created the operation; the machine scope and a rollout slot are held. |
 | `sending` | An attempt is recorded; the request is in flight or its outcome is unknown. |
 | `verifying` | The request was accepted; the manager is collecting identity, digest and health evidence. |
-| `completed` | Terminal. Postconditions prove the bound artifact is applied and healthy; `Applied` is updated. |
+| `completed` | Terminal. Postconditions prove the bound artifact is applied and healthy; `Applied` is updated. For an `adopt` operation: the adoption record is committed (§6.3). |
 | `rejected` | Terminal. Every recorded attempt has a recorded, definitive Talos response of a class proven to precede any mutation (§5.1). |
 | `failed` | Terminal. At least one attempt was recorded, every attempt is accounted for, and a completion observation contradicts the postconditions, whether a request changed the machine wrongly or no request took effect. `Applied` is not updated. |
 | `cancelled` | Terminal. No attempt was ever recorded. This is never an undo of remote work. |
@@ -1021,8 +1026,10 @@ handles them.
 
 The controller supports a **recovery start**, a startup option under which it
 keeps every dispatch gate closed: it runs no executor, attempts no commitment
-or attempt transaction, and serves observation, the checks of §7.3 and the
-recovery API. After a restore of any of the three backup families, the
+or attempt transaction, and serves observation, the checks of §7.3, the
+recovery API and the installation-wide acts of §7.5 (drafts, ingestion,
+compilation and publication), so that a `blocked` scope's exit through a new
+release (§7.4) exists before any scope is released. After a restore of any of the three backup families, the
 operator starts it that way, and `recovery-admin` records recovery-mode entry
 through the API (design §13.7 item 5, §14.6). The start option only keeps the
 gates closed; no server-side command enters recovery mode by itself
@@ -1061,9 +1068,11 @@ epoch, and recovery mode stays in effect until §7.6.
    prevents a further attempt; the epoch refuses one from any instance that was
    missed (§7.1). Neither prevents a request already sent from landing. Every
    scope stays pre-restore unaccounted until `recovery-admin` records the §5.2
-   accounting decision for it, with the executor's stop taken as the stop of
-   every pre-restoration instance and the settle floor measured from it; one
-   decision may cover many scopes, each with its own recovery observation.
+   accounting decision for it. In §5.2 condition 2 the stop of every
+   pre-restoration instance takes the place of the executor's stop, and the
+   settle floor runs from the latest of the three times that condition names,
+   not from the stop alone. One decision may cover many scopes, each with its
+   own recovery observation.
 2. **Verify** schema, revisions, releases, operation journals and provider and
    key references from the restored state. Re-record, from the operator's
    records, every identity revocation made after the restored backup, which the
@@ -1153,7 +1162,12 @@ refuses the commitment.
 released **(choice §10.22)**. A scope that cannot yet be released keeps the
 installation in recovery mode, but blocks only itself: released scopes are
 fully usable (§7.5), and a `blocked` scope has an exit through a new release
-(§7.4), so waiting for every release cannot deadlock the installation. Leaving
+(§7.4). One case has no exit: a machine that can never be observed again
+(destroyed or permanently unreachable) cannot supply the `restoration` or
+recovery observation that `ready` and the §5.2 decision need, so its scope
+keeps the installation in recovery mode. The PoC specifies no decommission or
+exclusion act for it; that is a gap (§9.3), and until one exists the other
+scopes stay fully usable because they are released individually. Leaving
 never reopens a scope that was not checked. Leaving ends the recovery
 timeline; the epoch stays current until the next entry.
 
@@ -1243,8 +1257,10 @@ partitions. The controller restarts as Y and takes A over; A becomes
   becomes *a*, the scope is released, and B's plan, made against the old
   baseline, now fails comparison 2; a plan made afresh, B2, can proceed (DS row
   010).
-- If M still reports the pre-dispatch digest, A is classified safe to retry and
-  one bounded retry runs (DS rows 012, 014, 015).
+- If M still reports the pre-dispatch digest, A is safe to retry only while
+  attempts remain, its approval still passes comparison 1 and the scope gate is
+  open; then one bounded retry runs (DS rows 012, 014, 015). Otherwise A is
+  `failed` (§5, §8.4, choice §10.10).
 
 ### 8.3 Crash between commitment and send
 
@@ -1496,7 +1512,9 @@ observation ordering under concurrency (DS §7); `InvalidArgument` beyond a
 validation error, and every other response class (DS §4.6); identity
 revocation (design §13.7); the machinery client (§3.5); the backup age
 combinations g1/g2/g1 and g2/g1/g2, a restore onto a new OpenBao cluster and
-token expiry across a restore (KL §6).
+token expiry across a restore (KL §6). A specification gap, not an evidence
+one: no act decommissions or excludes a machine that can never be observed
+again, so its scope keeps the installation in recovery mode (§7.6).
 
 Until these close, an implementation must expose unresolved outcomes and stop
 conflicting work rather than claim safe retry beyond §5.1, exactly-once
