@@ -338,7 +338,9 @@ Mutations of a draft require `If-Match` with the draft's current ETag. A
 mismatch is `412 precondition-failed`; a missing header is
 `428 precondition-required`. The handler compares `If-Match` before it runs
 ingestion, so a stale edit creates no provider generation, and T1 compares it
-again under the draft's lock (§5). Heads, clusters and machines are not written
+again under the draft's lock (§5). `POST /ingestions` writes its draft later,
+from an `ingest` job: its `If-Match` is bound to the operation, and the job's
+T1 compares that bound revision instead. Heads, clusters and machines are not written
 through `If-Match` by the API in the PoC: heads move only by publication
 (§6.2), which checks them itself.
 
@@ -403,12 +405,12 @@ The transactions this contract defines or constrains:
 
 | # | Transaction | Locks and checks | Writes |
 | --- | --- | --- | --- |
-| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction writes neither record: the `POST /ingestions` request's T11 wrote them |
+| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed` |
 | T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
 | T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published; execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
 | T5a | Approval | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted; approver's principal `FOR SHARE`, not revoked; plan state `FOR UPDATE`, unexpired, and `proposed`, or `approved` by an approval from an earlier epoch | approval (unique per plan and epoch, with the self-approval mark), plan state `approved`, machine timeline entry, idempotency record, act |
-| T5b | Approval revocation | key lock; installation state `FOR SHARE`; machine row `FOR UPDATE`; approval `FOR UPDATE`, which waits for a commitment or attempt holding it `FOR SHARE` (§1.2 item 3); plan state `FOR UPDATE` | revocation row, plan state `revoked` unless `committed`, machine timeline entry, idempotency record, act |
+| T5b | Approval revocation | key lock; installation state `FOR SHARE`; machine row `FOR UPDATE`; approval `FOR UPDATE`, which waits for a commitment or attempt holding it `FOR SHARE` (§1.2 item 3); plan state `FOR UPDATE` | revocation row; plan state `revoked` only when the plan is `approved` by the named approval (an earlier-epoch approval that a current one replaced, or a plan already terminal, keeps its state); machine timeline entry, idempotency record, act |
 | T5c | Identity revocation | key lock; installation state `FOR SHARE`; principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked, idempotency record, act |
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6 | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
@@ -527,10 +529,11 @@ SELECT current_epoch FROM installation_state FOR SHARE;
 SELECT ... FROM machine WHERE id = ANY($covered) ORDER BY id FOR SHARE;
 SELECT ... FROM machine_state
  WHERE machine_id = ANY($covered) ORDER BY machine_id FOR UPDATE;
-SELECT head_revision FROM <head tables>
- WHERE id = ANY($changed) ORDER BY id FOR UPDATE;
-SELECT head_revision FROM <head tables>
- WHERE id = ANY($unchanged) ORDER BY id FOR SHARE;
+-- one pass over $changed ∪ $unchanged in id order, one row at a time:
+SELECT head_revision FROM <head table> WHERE id = $head FOR UPDATE;
+  -- a changed head
+SELECT head_revision FROM <head table> WHERE id = $head FOR SHARE;
+  -- an unchanged head
 SELECT state, revision FROM draft WHERE id = $draft FOR UPDATE;
 SELECT ... FROM operation WHERE id = $op FOR UPDATE;
   -- owner, owner_gen, owner_epoch are this worker's (§5.1)
@@ -570,7 +573,12 @@ INSERT INTO timeline_event ...;      -- T7 rules
 COMMIT;
 ```
 
-The locks follow rule 5's order, and the checks run after all of them. The
+The locks follow rule 5's order, and the checks run after all of them. Heads
+are locked in one pass by id, whatever their mode: two publications that each
+change a head the other uses unchanged then meet in the same order, one waiting
+for the other, where two separate passes (changed heads first, then unchanged)
+could each hold one head and wait for the other's. Head identifiers carry their
+kind's prefix (§2), so one id order covers every head table. The
 release lookup comes first, so that a second commit for a draft revision
 already published, after a commit-unknown or from a worker that superseded the
 first, meets the existing release before the draft and head checks that the
@@ -723,11 +731,11 @@ record without executing. The request's transaction then takes, as its first
 statement, a transaction-scoped advisory lock on a hash of the principal and
 key (`pg_advisory_xact_lock`), and looks the key up again under it. A
 concurrent duplicate therefore waits for the first transaction to end. The
-unique index on principal and key backs the lock. A handler that works before
-its transaction, as the draft entry routes run ingestion before T1, can do that
-work twice for two concurrent duplicates: the second then replays the first's
-record, and the generations its own ingestion created become orphans (§6.4,
-source 2).
+unique index on principal and key backs the lock. The draft entry routes run
+ingestion before T1, outside that lock; their claim carries the principal and
+key under a partial unique index over live claims, so of two concurrent
+duplicates only one creates a claim and ingests, and the other is answered as
+below.
 
 The draft entry routes are also the one exception to "a refusal commits no
 record", because their ingestion persists a staging claim before T1 that a
@@ -735,11 +743,14 @@ refusal does not undo. Their claim records the principal and the idempotency
 key. A refusal after the claim exists (compilation's `422`) commits the
 idempotency record with the refusal's response, in the transaction that records
 the claim's outcome. A retry therefore replays the refusal and ingests nothing.
-A retry that finds a claim for its key but no record (the earlier attempt ended
-before any commit, as a `503` inside T1 does) first abandons that claim
-(compilation §3.5) and then ingests afresh. Each key thus holds at most one
-live claim, and the abandoned claim's generations are reported as orphans
-(§6.4).
+A retry that finds a claim for its key but no record looks at the claim's
+lease (compilation §3). While the lease is live, the first request may still be
+ingesting, and the retry answers `409 conflict` naming the request in progress;
+the client retries later and then gets the first request's replay. Once the
+lease has lapsed, the earlier attempt has ended without a commit (a `503`
+inside T1, a killed handler), and the retry abandons that claim (compilation
+§3.5) and ingests afresh. Each key thus holds at most one live claim, and an
+abandoned claim's generations are reported as orphans (§6.4).
 
 | Situation | Response |
 | --- | --- |
@@ -815,7 +826,7 @@ The plan's state is a mutable projection beside the immutable binding
 | `proposed` | plan creation (T4) |
 | `approved` | the approval (T5a) |
 | `committed` | the commitment, which creates the operation (T6); terminal for the plan |
-| `revoked` | before the commitment: a revocation of its approval (T5b) or of the approving identity (T5c); terminal |
+| `revoked` | before the commitment: a revocation of the approval currently authorizing it (T5b) or of that approval's identity (T5c); terminal |
 | `cancelled` | before the commitment: a cancellation (T11); terminal |
 | `expired` | before the commitment: the plan's expiry; terminal |
 
@@ -930,7 +941,7 @@ idempotency and conflict behavior.
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments | 200 | any role |
 | `GET /drafts[/{id}]`, `/ingestions/{id}`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
-| `POST /ingestions` (import or drift adoption of a machine's configuration) | 202, `ingest` | `author`, human only (§10.3) |
+| `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest` | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/takeovers` (a further mark on a staged ingestion; compilation's explicit operator recovery request, §3.4 there) | 202, `ingest` | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2) | 200 | `author`, human only (§10.3) |
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster) | 201 | `author`, human only (§10.3) |
@@ -1087,6 +1098,7 @@ Starting an import, and reading a release and a machine:
 ```http
 POST /api/v1/ingestions
 Idempotency-Key: 8e2b1c64-5d0a-4f97-a3c8-19b7e6d4f052
+If-Match: "7-shw6tpirbqvgj3qjuv2hicf6vm"
 
 {"kind": "import", "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
  "draft": "drf_2rmpezm5rfx47azsgmp66z457a",
@@ -1174,7 +1186,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an entry whose key has a record from before this recovery start (§12.4)) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
@@ -1336,9 +1348,13 @@ transaction that locks the principal row `FOR UPDATE` (T5c). From its commit:
   service needs a new identity.
 
 A restore can remove a revocation recorded after the backup. The deployment
-configuration's `deniedSubjects` list survives a database restore; the
-recovery procedure re-records the lost revocations and the operator adds the
-subjects to that list (§12.3) **(choice §17.19)**.
+configuration's `deniedSubjects` list survives a database restore, so a human
+revocation is complete only when the operator has also added the subject to
+that list, at the time of the revocation, not after a restore; the revocation's
+response says so. A restored database that lost the revocation then still
+refuses the subject before and after entry, so a revoked `recovery-admin` can
+neither enter recovery mode nor act in it. The recovery procedure re-records
+the lost revocation rows (§12.3) **(choice §17.19)**.
 
 **Losing a role** without an identity revocation is not acted on
 **(choice §17.23)**. A human's roles are known only from the token presented
@@ -1558,7 +1574,7 @@ For a database restored to a backup taken at time *T*:
 | Ingestion generations after *T* | in the provider if its backup is newer | orphans (§6.4); not reattached |
 | Approvals, scope releases | earlier epoch | authorize nothing; a plan needs an approval in the new epoch |
 | Idempotency records after *T* | absent | a retry executes afresh (§12.4) |
-| Identity revocations after *T* | absent | re-recorded by `recovery-admin`, and the subjects added to `deniedSubjects` |
+| Identity revocations after *T* | absent | re-recorded by `recovery-admin`; a human subject is already refused by `deniedSubjects` (§10.4) |
 | Automation tokens | earlier epoch | refused; reissued with the tool **(choice §17.27)** |
 | Tokens revoked after *T* | valid again in the rows | refused anyway: earlier epoch |
 | `DependencyStatus` | as at *T* | a dependency recorded `retained` and now answering 404 alerts at once as a regression (§6.3) |
@@ -1580,6 +1596,16 @@ so its retry executes again. That is the intended result: the effect is gone,
 and executing it again is the only way to have it. Its provider side is not
 repeated: an ingestion retried after a restore mints new names and new
 generations, and the first attempt's generations stay as orphans.
+
+The one record a restore must not replay is an earlier entry. A restored
+database can hold the idempotency record of a `POST /recovery/entries` from an
+earlier recovery cycle; replaying it would answer `201` with no new epoch
+minted and no scope closed. The process started with the recovery-start flag
+remembers the epoch its own entry minted. Until it has one, an entry request
+whose key has a stored record is not replayed: it is refused with
+`409 conflict`, naming the stored entry and its epoch, and the operator
+retries under a new key. Once this process's entry has committed, a retry of
+that entry replays as usual.
 
 ## 13. Worked examples
 
@@ -1654,9 +1680,9 @@ knows:
    `202` is replayed with `Idempotent-Replayed: true`. No second operation.
 3. The client retries while T2 is still open: the retry's transaction waits on
    the key's lock, then finds the committed record and replays it (not
-   measured, §7.2). Had the request been a draft entry update, both copies
-   could already have run ingestion; the second then replays the first's
-   response, and its own generations are orphans (§6.4).
+   measured, §7.2). Had the request been a draft entry update, the second copy
+   would have found the first's live claim for the key before ingesting and
+   been answered `409 conflict`; a later retry replays the first's response.
 4. The client reuses the key for a different draft: `422
    idempotency-key-reused`.
 5. The client, having lost everything, posts again with a new key. While the
@@ -1695,7 +1721,7 @@ After *T*:
    `ep_e3t4dznwcjg4uoahvfjk4w6kwy`, and leaves it.
 4. An ingestion creates generations under claim
    `ing_4ycffhy7bf4o2w6pz5b4r75hmu`.
-5. `recovery-admin` revokes human `idn_6woutisn7uensexh3kk2qlz6ma`.
+5. `recovery-admin` revokes human `idn_6woutisn7uensexh3kk2qlz6ma`, and the operator adds the subject to `deniedSubjects` (§10.4).
 
 The operator restores the database from *T* and the provider from a snapshot
 taken after it. The restored database names `ep_bqeknkmarvikuy7ofil2okekgi` as
@@ -1719,9 +1745,10 @@ equals neither the restored epoch nor the lost one.
   `ep_53wiltmcac6xxdggvgg7zcoh5y` in `Bronzeward-Epoch` and knows its events and
   cursors do not resume.
 - The generations of step 4 are orphans; the input is ingested again.
-- The revocation of step 5 is gone. The recovery procedure re-records it, and
-  the subject is added to `deniedSubjects`; until then the human could sign
-  in, but any approval they gave before entry authorizes nothing.
+- The revocation row of step 5 is gone, but its subject has been in
+  `deniedSubjects` since step 5 (§10.4), so the human is refused before and
+  after entry. The recovery procedure re-records the row; any approval they
+  gave before entry authorizes nothing in any case.
 - Every automation token is refused until the tool reissues it.
 - During recovery mode an `author` edits the change that step 1 published into
   a draft again and a `publisher` publishes it, which recovery mode allows. A
@@ -1741,7 +1768,8 @@ equals neither the restored epoch nor the lost one.
 | Auth | No qualifying role; automation on a human-only route | `403 forbidden` | nothing |
 | Request | Missing `Idempotency-Key` or `If-Match` | `428` | nothing |
 | Request | Key reused for another request | `422` | nothing |
-| Request | Same key while the first is in flight | waits on the key's lock, then replays or executes | one effect; on a draft entry route, the second copy's generations are orphans |
+| Request | Same key while the first is in flight | waits on the key's lock, then replays or executes; on a draft entry route whose first request still holds a live claim, `409 conflict` (§7.2) | one effect |
+| Request | Entry retried with a key whose record predates this recovery start | `409 conflict` naming the stored entry (§12.4) | nothing |
 | Draft | ETag mismatch | `412` | nothing |
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
 | Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record; orphans if past compilation §2.3 step 6 |
@@ -1783,7 +1811,9 @@ equals neither the restored epoch nor the lost one.
 8. **Heads move only at publication**, and never past a head revision other
    than the one the draft or snapshot read.
 9. **Every committed API request has an act and an idempotency record** in
-   its own transaction; no refused request has either. Transactions that serve
+   its own transaction; no refused request has either, except a draft entry
+   route refused after its staging claim exists, which commits the refusal's
+   idempotency record (§7.2). Transactions that serve
    no request record timeline entries instead.
 10. **No request body, secret value or ciphertext in an idempotency record, an
     act or a problem document.**
