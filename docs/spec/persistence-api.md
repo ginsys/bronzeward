@@ -934,7 +934,9 @@ Idempotent-Replayed: true
 ```
 
 Planning and approving, as design §11.1 illustrates, with this contract's
-identifiers:
+identifiers. The automation identity `idn_5u4k6llt7jsktfhcfv35xmdetu` creates
+the plan; the approving human is its responsible human (§10.2) and authored one
+of the draft's revisions, so the approval is marked with both reasons (§10.5):
 
 ```http
 POST /api/v1/plans
@@ -959,7 +961,7 @@ Location: /api/v1/approvals/apr_2ztr33rjgnabf5zxbwwf7c47vy
  "plan": "pln_f645lvrsgsehfn6fuboigpcawy",
  "approver": {"principal": "idn_6woutisn7uensexh3kk2qlz6ma", "role": "approver"},
  "epoch": "ep_bqeknkmarvikuy7ofil2okekgi",
- "selfApproval": {"marked": true, "reasons": ["created-plan", "authored-change"]}}
+ "selfApproval": {"marked": true, "reasons": ["owned-automation", "authored-change"]}}
 
 GET /api/v1/plans/pln_f645lvrsgsehfn6fuboigpcawy
 
@@ -1041,7 +1043,7 @@ HTTP/1.1 200 OK
 
 {"id": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
  "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
- "draft": "drf_2rmpezm5rfx47azsgmp66z457a", "draftRevision": 8,
+ "draft": "drf_2rmpezm5rfx47azsgmp66z457a", "draftRevision": 7,
  "publishedBy": {"principal": "idn_5u4k6llt7jsktfhcfv35xmdetu", "role": "publisher"},
  "publishedAt": "2026-09-26T09:14:05Z",
  "sources": [{"head": "frg_rgkebwvneg6mxhid62gec5difi",
@@ -1109,7 +1111,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | Status | Code | When |
 | --- | --- | --- |
 | 400 | `invalid-request`, `cursor-invalid` | malformed body, unknown field, bad cursor |
-| 401 | `unauthenticated` | no credential, or one that fails §10; with `WWW-Authenticate: Bearer error="invalid_token"` |
+| 401 | `unauthenticated` | no credential, or one that fails §10's token checks (a revoked or denied subject is `403 identity-revoked`); with `WWW-Authenticate: Bearer error="invalid_token"` |
 | 403 | `forbidden` | no qualifying role; the body names the roles that would qualify |
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
@@ -1151,7 +1153,9 @@ Bronzeward keeps no server session **(choice §17.16)**:
   audience, `exp` and `nbf` with at most 60 seconds' skew;
 - `exp - iat` at most the configured maximum lifetime, default 15 minutes; a
   longer-lived token is refused;
-- the subject is not revoked (§10.4).
+- the subject is not revoked or denied (§10.4). A token that passes the
+  checks above but names a revoked or denied subject is answered
+  `403 identity-revoked`, not `401`.
 
 The groups claim is mapped to roles in deployment configuration (design §13.7
 item 2):
@@ -1650,7 +1654,7 @@ equals neither the restored epoch nor the lost one.
 | Area | Condition | Outcome | Persisted |
 | --- | --- | --- | --- |
 | Auth | Missing, malformed, expired, over-long or wrongly signed token | `401` | nothing |
-| Auth | Revoked or denied subject; token from an earlier epoch | `403 identity-revoked` or `401` | nothing |
+| Auth | Revoked or denied subject; token from an earlier epoch | `403 identity-revoked` for a revoked or denied subject; `401` for a token from an earlier epoch | nothing |
 | Auth | No qualifying role; automation on a human-only route | `403 forbidden` | nothing |
 | Request | Missing `Idempotency-Key` or `If-Match` | `428` | nothing |
 | Request | Key reused for another request | `422` | nothing |
