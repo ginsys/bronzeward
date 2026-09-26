@@ -432,7 +432,11 @@ attempt already recorded is sent anyway and runs to its own classification
 (DS row 005); after it, revocation undoes nothing, and only a new approved
 plan, such as a revert (§6.4), or recovery changes the machine (design §13.7
 item 4). Freezing the scope or entering recovery mode closes the scope gate
-with the same effect through comparison 6.
+through comparison 6, which likewise permits no further attempt, and an
+operation with no recorded attempt becomes `unresolved` with its scope held.
+A closed gate can reopen, so it is not grounds for `cancelled`: the operation
+stays `unresolved` until the gate reopens and it is classified under §5, or
+`recovery-admin` resolves it (§4).
 
 An identity revocation has the same effect. Design §13.7 item 4 makes it
 invalidate every approval the identity gave that no attempt has used; this
@@ -696,8 +700,8 @@ to precede mutation (§5.1). `Failed` needs a completion observation that
 contradicts the postconditions, not evidence that is merely missing, and every
 attempt accounted for (§4). Every other error or gap is `unresolved`.
 
-One case fits two rows: every attempt accounted for, none accepted, and an
-observation at the pre-dispatch digest, which both contradicts the
+One case fits two rows: at least one recorded attempt, every attempt accounted
+for, none accepted, and an observation at the pre-dispatch digest, which both contradicts the
 postconditions and meets the safe-to-retry evidence. The controller classifies
 it safe to retry only while the operation has attempts left under the bound,
 its approval passes comparison 1 and its scope gate is open; otherwise it
@@ -1040,8 +1044,9 @@ handles them.
 The controller supports a **recovery start**, a startup option under which it
 keeps every dispatch gate closed: it runs no executor, attempts no commitment
 or attempt transaction, and serves observation, the checks of §7.3, the
-recovery API and the installation-wide acts of §7.5 (drafts, ingestion,
-compilation and publication), so that a `blocked` scope's exit through a new
+recovery API, the acts §7.5 always allows (approval and identity revocation,
+plan cancellation, freeze) and the installation-wide acts of §7.5 (drafts,
+ingestion, compilation and publication), so that a `blocked` scope's exit through a new
 release (§7.4) exists before any scope is released. After a restore of any of the three backup families, the
 operator starts it that way, and `recovery-admin` records recovery-mode entry
 through the API (design §13.7 item 5, §14.6). The start option only keeps the
@@ -1117,8 +1122,12 @@ epoch, and recovery mode stays in effect until §7.6.
    journal entry because it is pending. A restored operation never retries:
    its approval is from an earlier epoch (§5). One with no attempt ends
    `cancelled`; one with an attempt is accounted, by its recorded response or
-   by a §5.2 decision such as step 1's, and ends `completed` or `failed` by a
-   completion observation taken after that accounting.
+   by a §5.2 decision such as step 1's, and is classified by the §5.1 table:
+   `completed` or `failed` by a completion observation taken after that
+   accounting, `rejected` when the restored journal holds a definitive
+   pre-mutation rejection for every attempt, and otherwise `unresolved`, which
+   holds the scope until a later classification or a `recovery-admin`
+   resolution.
 6. **Mark** each scope `ready`, `blocked` or `unresolved`, recording the
    missing dependency or evidence (§7.4). An observed digest that the restored
    `Applied` does not explain is drift (§6), not grounds for an apply, even when
