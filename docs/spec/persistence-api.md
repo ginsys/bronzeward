@@ -1003,7 +1003,8 @@ An adoption approval is requested as a plan with `"operation": "adopt"`, which
 binds what execution and recovery's adoption section lists, is approved by an
 `approver` like any plan, and whose commitment records the adoption, creating
 the plan's `adopt` operation directly in `completed`, and sends nothing
-**(choice §17.15)**. Its creator is a human `author` **(choice §17.22)**.
+**(choice §17.15)**. Its creator is a `publisher`, as for every plan
+**(choice §17.22)**.
 
 ### 9.3 Examples
 
