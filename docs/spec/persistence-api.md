@@ -250,13 +250,24 @@ not, is stored as an immutable revision first; design §7.2's "mutable drafts
 remain distinct from releases" is met by the draft being the only mutable
 record of unpublished work.
 
+A head is created by the publication that first introduces its name. There is
+one head per kind, name and scope (a cluster or the library; an assignment's
+machine), backed by a unique index. A removal does not delete the head (§3): it
+sets the head's revision pointer to none and advances its head revision, so the
+releases that used it still name it, a later draft can introduce it again from
+that head revision, and compilation treats it as absent.
+
 A **draft** belongs to one cluster. It holds entries, each naming a head (or a
-new fragment, profile or assignment), the proposed revision (or removal) and
-the head revision the author edited from, its **base**. A draft update is
-compilation's draft transaction: it inserts the new immutable revision and its
-reference rows, sets the entry, and advances the draft's revision (§5, T1).
-A draft ends `published` (by §6.2) or `discarded`; neither state accepts
-further edits.
+new fragment, profile or assignment, whose base is "absent"), the proposed
+revision (or removal) and the head revision the author edited from, its
+**base**. A draft update is compilation's draft transaction: it inserts the new
+immutable revision and its reference rows, sets the entry, and advances the
+draft's revision (§5, T1). A draft ends `published` (by §6.2) or `discarded`;
+neither state accepts further edits. While a `publish` operation for the draft
+is `queued` or `running`, the draft accepts neither an update nor a discard:
+both answer `409 conflict` naming the operation, so the revision the operation
+is bound to cannot move under it. Once the operation fails, the draft accepts
+edits again.
 
 A draft and its release cover one cluster, while a fragment may belong to the
 library. A library fragment changed in one cluster's draft is published once,
@@ -338,7 +349,8 @@ Publication rejects stale input (design §7.4 step 4) in two forms, both
 revision:
 
 - a head the draft changes has moved since the draft's base: another
-  publication changed the same fragment, profile or assignment;
+  publication changed the same fragment, profile or assignment, or introduced
+  the name the draft introduces (expected "absent");
 - a head the release uses unchanged has moved since compilation's snapshot
   (compilation §6 step 1).
 
@@ -391,7 +403,7 @@ The transactions this contract defines or constrains:
 
 | # | Transaction | Locks and checks | Writes |
 | --- | --- | --- | --- |
-| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`; claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction writes neither record: the `POST /ingestions` request's T11 wrote them |
+| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction writes neither record: the `POST /ingestions` request's T11 wrote them |
 | T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
 | T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published; execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
@@ -539,6 +551,10 @@ INSERT INTO dependency ...;          -- both records and the encryption dependen
 UPDATE <head> SET head_revision_id = ..., head_revision = head_revision + 1,
                   etag_token = ...
  WHERE id = ... AND head_revision = $base;
+                                     -- a removal sets head_revision_id = NULL
+INSERT INTO <head> ...;              -- per name the draft introduces,
+                                     -- head_revision 1; unique (kind, scope,
+                                     -- name): a violation is 409 stale-input
 UPDATE machine_state SET desired_release = $release, revision = revision + 1
  WHERE machine_id = ANY($covered);   -- rows locked above
 UPDATE draft SET state = 'published', release_id = $release,
@@ -564,7 +580,11 @@ writer wait. Atomicity held
 for an injected error, a client kill, a server kill and a network partition
 with the transaction open (rows 006–008, 058, 060). The machine-scope check is
 the rule execution and recovery states for any assignment change; §1.2 item 2
-makes it race-free. T3 does not consult recovery mode: publication writes only
+makes it race-free. A name the draft introduces has no row to lock: two
+publications introducing the same name meet at the unique index, where the
+second insert waits for the first transaction and fails once it commits, so
+the second publication fails `409 stale-input` with the head's expected
+revision "absent" and its actual one. T3 does not consult recovery mode: publication writes only
 the database and sends nothing to a machine, and stays allowed during it
 (§12.2).
 
@@ -1115,8 +1135,8 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `forbidden` | no qualifying role; the body names the roles that would qualify |
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
-| 409 | `stale-input` | a publication input moved (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch) |
+| 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, or any mutation but entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
@@ -1151,6 +1171,7 @@ Bronzeward keeps no server session **(choice §17.16)**:
   (`none` and HMAC algorithms refused);
 - `iss` equal to the configured issuer, `aud` containing the configured
   audience, `exp` and `nbf` with at most 60 seconds' skew;
+- `iat` present; a token without it is refused;
 - `exp - iat` at most the configured maximum lifetime, default 15 minutes; a
   longer-lived token is refused;
 - the subject is not revoked or denied (§10.4). A token that passes the
@@ -1660,9 +1681,11 @@ equals neither the restored epoch nor the lost one.
 | Request | Key reused for another request | `422` | nothing |
 | Request | Same key while the first is in flight | waits on the key's lock, then replays or executes | one effect; on a draft entry route, the second copy's generations are orphans |
 | Draft | ETag mismatch | `412` | nothing |
+| Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
 | Draft | Compilation refuses the input | `422`, paths only | claim row; orphans if past compilation §2.3 step 6 |
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
 | Publish | Moved head | operation `failed`, `409 stale-input` | operation, act |
+| Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
 | Publish | Dependency not `retained`, or provider sealed | `failed`, `503 dependency-unavailable` or `422` | operation, act |
 | Publish | Commit-unknown | resolved by reading the natural key | the release, once |
