@@ -157,7 +157,11 @@ second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/passw
 7. **Construct** the sanitized value. Only now may it reach staging (§3) or the
    draft transaction.
 8. For import and drift adoption, **encrypt the exact input** as the baseline
-   under the baseline key, and record its keyed digest (§4.1). The baseline
+   under the baseline key, and record its keyed digest (§4.1) and its
+   configuration digest, the function of
+   [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)
+   over the same input, read as that section defines **(choice §16.26)**. The
+   baseline
    ciphertext is persisted by the draft transaction, with the draft. It is the
    only persisted form of the unextracted input. The baseline key is separate
    from the artifact key: ingestion may encrypt with it, and no identity in §1
@@ -380,7 +384,11 @@ compared across a rotation of its key, is not evidenced and is open (§15).
 This covers digests of individual secret values. Whole-configuration digests
 used to compare observed and applied state
 ([execution and recovery §3.2](execution-recovery.md#32-the-commitment-transaction))
-are not changed by this contract; their guessability was not assessed.
+are not changed by this contract; their guessability was not assessed. Two of
+them are recorded here, unkeyed: the baseline's configuration digest (§2.3
+step 8) and each artifact's plaintext configuration digest (§11)
+**(choice §16.26)**. Execution and recovery needs both, and no identity that
+plans, dispatches or observes can compute them.
 
 ### 4.2 The guard (E1 decision 4)
 
@@ -960,9 +968,11 @@ or encrypted values:
 
 - release metadata: the import base, source and assignment revisions, the
   renderer and contract record (§10.2), the stage 3 result;
-- per machine: the artifact ciphertext and its digest, the redacted review
-  data, the provenance records (§8.2) and both dependency records with the
-  encryption dependency (§9).
+- per machine: the artifact ciphertext and its digest, the configuration
+  digest of its plaintext
+  ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)),
+  the redacted review data, the provenance records (§8.2) and both dependency
+  records with the encryption dependency (§9).
 
 The persistence contract commits them atomically and rejects stale inputs
 ([ginsys/bronzeward#18](https://github.com/ginsys/bronzeward/issues/18)). A
@@ -1062,7 +1072,8 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 5. The compiler encrypts the configuration under the artifact key and hands
    persistence one unit (§11): the import base, source and assignment
    revisions, the renderer and contract record, the ciphertext and its digest,
-   the review data, the provenance and both dependency records. Persistence
+   the configuration digest of its plaintext (execution and recovery §1), the
+   review data, the provenance and both dependency records. Persistence
    commits it atomically; nothing is dispatched.
 6. Had step 8 rejected the configuration, the message would be shown through
    its template or withheld (§8.3), and nothing of the release would be
@@ -1111,7 +1122,9 @@ check.
 7. **One owner per claim generation.** Every claim transition is conditional on
    the owner generation, and an owner's transitions on the owner too; no
    transition revives a lapsed lease for its old owner.
-8. **No unkeyed secret digest is persisted.**
+8. **No unkeyed secret digest is persisted.** The only unkeyed digests over
+   plaintext are the whole-configuration digests of §4.1; an artifact's
+   ciphertext digest (§11) is over ciphertext.
 9. **Renderer minor equals the node's minor and is at least the target
    contract's**; Kubernetes is inside the window.
 
@@ -1154,6 +1167,9 @@ Evidence gaps this contract carries rather than closes:
   measured (§2.4; SP §4.4, §8; E1 §7).
 - **Keyed-digest mechanism**: no provider HMAC primitive was exercised, and
   comparison across its key rotation is undesigned (§4.1).
+- **Whole-configuration digests**: the unkeyed baseline and artifact
+  configuration digests are only as unguessable as the whole configuration;
+  that was not assessed (§4.1).
 - **Claim contention**: E1 ran one process against one claim; no two
   principals raced, and no clock was skewed (E1 §7). Lease, expiry and
   heartbeat values are open (§3.2).
@@ -1202,7 +1218,8 @@ claim full E3, upgrade support or lifecycle execution.
 ## 16. Choices for owner review
 
 Each is the most conservative option consistent with the design where the
-evidence does not settle the question. Each is marked in place as
+evidence does not settle the question, unless it says otherwise. Each is marked
+in place as
 **(choice §16.n)**.
 
 1. **Ingestion and compiler as two identities** (§1). Alternative: design
@@ -1271,6 +1288,17 @@ evidence does not settle the question. Each is marked in place as
 25. **Compile only the node's running contract minor** (§10.2). v1.12 would
     also be accepted by a v1.13 node; one contract keeps paths and validation
     single.
+26. **Record the unkeyed configuration digest of each baseline and each
+    artifact's plaintext** (§2.3 step 8, §4.1, §11). Added for
+    [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values),
+    which compares them with observed digests to plan, verify and adopt, and
+    whose planning and observing identities cannot decrypt either. Not the
+    most conservative option: an unkeyed digest of a whole configuration is
+    only as unguessable as the whole configuration, and a configuration whose
+    only unknown parts are low-entropy secrets is a guessing target.
+    Alternative: a keyed digest under the §4.1 key for these too, at the cost
+    of a provider call per observation (execution and recovery choice
+    §10.2).
 
 ## 17. Traceability
 
@@ -1285,6 +1313,7 @@ evidence does not settle the question. Each is marked in place as
 | §3.2–§3.4 claims, lease, takeover | §7.1 | E1 4.2, 5.15, 5.16, 5.20, §7; [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions), [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) row 021 |
 | §3.5 restoration | §14.6 | DB §4.7; [execution and recovery §7](execution-recovery.md#7-recovery-after-management-state-restoration) |
 | §4.1 keyed digests | §7.1 | E1 §7, §8 item 7 |
+| §2.3 step 8, §4.1, §11 whole-configuration digests | §7.1, §12.1 | none: choice §16.26; [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values) |
 | §4.2 guard | §7.1, §6.9 | [E1 5.18](../design/research/20260922-secret-ingress-extraction-before-persistence.md#518-the-fourth-review-and-the-fixes-made-after-the-evidence), [E1 5.19](../design/research/20260922-secret-ingress-extraction-before-persistence.md#519-advisory-rounds-five-to-eighteen-the-prototype-hardened-the-evidence-unchanged) |
 | §5.1 scope, naming, versions | §6.9, §13.2 | none: choices §16.12 to §16.14 |
 | §5.1 tag syntax | §6.9 | [SR §5](../design/research/20260924-structural-reference-composition.md#5-what-each-late-failure-is), [SR §6.4](../design/research/20260924-structural-reference-composition.md#64-criterion-4-candidate-failures-and-renderer-implications), [SR §9](../design/research/20260924-structural-reference-composition.md#9-alternatives-and-decision-enabled); [SP §7.1](../design/research/20260925-sensitivity-provenance.md#71-the-binding-form-cannot-hold-a-list-element-reference); [E3 §6.2](../design/research/20260925-talos-compatibility.md#62-criterion-2-subprocess-against-machinery-and-the-structural-reference-evidence) |
