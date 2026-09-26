@@ -144,6 +144,9 @@ It needs from compilation, as cross-contract points:
    also marked when the token created the plan, and "self-approval
    undetermined" never arises, because every automation identity names a
    responsible human **(choice §17.18)**.
+10. The recovery epoch is a never-reissued random identity compared by
+    equality (§12.1), replacing the counter incremented at entry that its
+    earlier text required.
 
 ## 2. Identifiers
 
@@ -199,7 +202,7 @@ Design: [§7.2](../design/Talos_Configuration_and_Machine_Management_Design.md#7
 [§6.2](../design/Talos_Configuration_and_Machine_Management_Design.md#62-fragments-profiles-and-assignments).
 
 A record is **immutable** (insert-only) or **mutable** (updated in place under a
-revision or a fence). No record of either kind is deleted in the PoC: design
+revision, a fence or a row lock, §4). No record of either kind is deleted in the PoC: design
 §7.8 item 1 derives that no release, artifact, source revision or dependency
 record is deleted without a reference graph, and this contract extends that to
 every table **(choice §17.9)**. The only in-place clearing is compilation's: a
@@ -234,7 +237,7 @@ that the trigger fires **(choice §17.3)**.
 | Drift record | mutable projection | machine, observed digest, open or closed with the resolution that closed it; opening and closing are timeline entries | execution and recovery §6 |
 | Adoption record | immutable | the adopt plan and its `completed` operation, the adopted release, the baseline digest compared, the observation relied on | execution and recovery §6.3 |
 | Scope state mark, scope release, freeze, unfreeze | immutable | per machine, with epoch, identity and role | execution and recovery §6, §7 |
-| Principal | mutable | human (`iss`, `sub`) or service identity; revoked flag | §10 |
+| Principal | mutable | human (`iss`, `sub`) or service identity; creation time; revoked flag | §10 |
 | AutomationToken | mutable | token id, SHA-256 of the secret, roles, owner, expiry, epoch, revoked time | §10.2 |
 | Act | immutable | every mutating act: principal, role, action, subject, epoch, time | §10.5 |
 | IdempotencyRecord | immutable | key, fingerprint, stored response | §7 |
@@ -305,8 +308,13 @@ baseline comparison afterwards (execution and recovery, comparison 2).
 Design: [§7.2](../design/Talos_Configuration_and_Machine_Management_Design.md#72-relational-revision-model-and-backend-contract),
 [§11.1](../design/Talos_Configuration_and_Machine_Management_Design.md#111-api-style).
 
-Every mutable record carries an integer `revision`, incremented by every write,
-and every write is a compare-and-set:
+A record the §3 table marks revisioned, and a head's head revision (§3.1),
+carries an integer `revision`, incremented by every write. Every write to a
+mutable record is conditional, in one of the three forms of §15 invariant 3: a
+fenced `UPDATE` (§5.1), a write under a row lock the same transaction took
+`FOR UPDATE` and then checked, or a compare-and-set on the revision. The
+compare-and-set is the form for a revision read outside the transaction (an
+`If-Match`, a draft's base, a revision an operation bound):
 
 ```sql
 UPDATE draft
@@ -339,8 +347,9 @@ mismatch is `412 precondition-failed`; a missing header is
 `428 precondition-required`. The handler compares `If-Match` before it runs
 ingestion, so a stale edit creates no provider generation, and T1 compares it
 again under the draft's lock (§5). `POST /ingestions` writes its draft later,
-from an `ingest` job: its `If-Match` is bound to the operation, and the job's
-T1 compares that bound revision instead. Heads, clusters and machines are not written
+from an `ingest` job: its T11 compares `If-Match` before it creates the
+operation, which binds it, and the job's T1 compares that bound revision
+instead. Heads, clusters and machines are not written
 through `If-Match` by the API in the PoC: heads move only by publication
 (§6.2), which checks them itself.
 
@@ -415,7 +424,7 @@ The transactions this contract defines or constrains:
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6 | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
 | T8 | Job claim, lease extension and completion | §5.1 | operation owner fields |
-| T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`; every machine row `FOR UPDATE` | §12.2 |
+| T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE` | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
 | T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect | the effect, idempotency record, act |
 
@@ -548,7 +557,8 @@ SELECT id, digest FROM release
   -- $changed head revisions equal the draft's base
   -- $unchanged head revisions equal the snapshot
   -- for each machine whose assignment head is in $changed:
-  --   no operation on its scope is committed, sending, verifying or unresolved
+  --   no operation on its scope is committed, sending, verifying or unresolved;
+  --   in recovery mode, its scope released in the current epoch
 INSERT INTO release ...;             -- unique (draft_id, draft_revision)
 INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
                                      -- configuration digest, review data
@@ -595,9 +605,13 @@ makes it race-free. A name the draft introduces has no row to lock: two
 publications introducing the same name meet at the unique index, where the
 second insert waits for the first transaction and fails once it commits, so
 the second publication fails `409 stale-input` with the head's expected
-revision "absent" and its actual one. T3 does not consult recovery mode: publication writes only
-the database and sends nothing to a machine, and stays allowed during it
-(§12.2).
+revision "absent" and its actual one. Publication writes only the database and
+sends nothing to a machine, and stays allowed during recovery mode (§12.2).
+T3 consults recovery mode only for an assignment change: execution and
+recovery refuses one, in recovery mode, on a scope not released in the current
+epoch, because an attempt the restored state does not hold may still be in
+flight for the old assignment. T3 reads that scope state from the machine row
+it holds `FOR SHARE` and refuses `409 recovery-mode-active`, naming the scope.
 
 The release's covered machines are selected as their `Desired` release in the
 same transaction **(choice §17.6)**. Design §11.2 describes a release as
@@ -695,7 +709,7 @@ key independently. The record stores:
 | `principal_id`, `key` | unique together |
 | `fingerprint` | method, route template, path parameters, `If-Match` and the canonical JSON body (RFC 8785), hashed |
 | `fingerprint_key` | for a keyed fingerprint, the digest key's identity and version (compilation §4.1); otherwise empty |
-| `epoch` | the epoch identity at commit |
+| `epoch` | the epoch identity at commit; for an entry (T9), the epoch it minted |
 | `status`, `location`, `etag`, `body` | the response to replay; never a secret value (design §11.1) |
 | `operation_id` | for a `202`, the operation it created |
 
@@ -707,8 +721,12 @@ retry's fingerprint is recomputed under that version, not the current one, so a
 rotation of the digest key does not turn a retry into
 `422 idempotency-key-reused`. If the provider can no longer compute under that
 version, the retry cannot be compared and is answered `422` all the same; the
-client retries under a new key, and T1's `If-Match` refuses a draft update that
-already committed. How digests compare across a rotation is open in
+client retries under a new key. T1's `If-Match` refuses a draft update that
+already committed. An ingestion whose `ingest` operation is still `queued` or
+`running` is refused by that operation's natural key (§7.3), which names it;
+once the operation succeeded its draft write moved the draft, and `If-Match`
+refuses the new request, and once it failed the new request is the only one.
+How digests compare across a rotation is open in
 compilation §4.1. An unkeyed digest of a low-entropy
 secret would be an offline guessing oracle
 ([E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits);
@@ -727,9 +745,15 @@ cannot duplicate anything. Transactions that serve
 no request (T3, T6, T7, T8) write no record.
 
 Before running anything, the handler looks the key up and replays a committed
-record without executing. The request's transaction then takes, as its first
-statement, a transaction-scoped advisory lock on a hash of the principal and
-key (`pg_advisory_xact_lock`), and looks the key up again under it. A
+record without executing. A record whose `epoch` is not the current one is not
+replayed: its response describes an act that a recovery-mode entry has since
+fenced (an approval that authorizes nothing, a job that entry failed), and
+executing it afresh would repeat the act without the client asking again. The
+request is refused `409 conflict`, naming the stored request and its epoch,
+and the client retries under a new key **(choice §17.9)**. The request's
+transaction then takes, as its first statement, a transaction-scoped advisory
+lock on a hash of the principal and key (`pg_advisory_xact_lock`), and looks
+the key up again under it, by the same rules. A
 concurrent duplicate therefore waits for the first transaction to end. The
 unique index on principal and key backs the lock. The draft entry routes run
 ingestion before T1, outside that lock; their claim carries the principal and
@@ -755,7 +779,8 @@ abandoned claim's generations are reported as orphans (§6.4).
 | Situation | Response |
 | --- | --- |
 | New key | executed; record committed with the effect |
-| Same key, same fingerprint, record exists | the stored status, headers and body, with `Idempotent-Replayed: true`; nothing executes |
+| Same key, same fingerprint, record from the current epoch | the stored status, headers and body, with `Idempotent-Replayed: true`; nothing executes |
+| Same key, record from an earlier epoch | `409 conflict` naming the stored request and its epoch; nothing executes |
 | Same key, other fingerprint | `422 idempotency-key-reused` |
 | Same key while the first request's transaction is open | waits on the key's lock; then replays if the first committed, or executes if it rolled back |
 | Same key after the request that used it was refused | executed afresh; on a draft entry route refused after ingestion, the stored refusal replayed |
@@ -781,6 +806,7 @@ retries with a new idempotency key:
 | --- | --- | --- |
 | Release | `(draft_id, draft_revision)` | the existing release if the digests match, else `409 conflict` (§6.2) |
 | Publish operation | at most one `queued` or `running` per `(draft_id, draft_revision)`, by partial unique index | the existing operation, `202` |
+| Ingest operation of `POST /ingestions` | at most one `queued` or `running` per `(draft_id, draft_revision)` it binds, by partial unique index: only one of them could write that draft revision, and each would write the provider | `409 conflict` naming the existing operation |
 | Operation | one per plan, by unique index on the plan, created at the commitment (§8.1) | execution and recovery's comparison 0 refuses a second commitment (DS row 009) |
 | Approval | one per plan and epoch, by unique index on `(plan_id, epoch)` (design §13.7 item 3); a revoked approval makes its uncommitted plan `revoked` (§8.1), and only an unexpired plan approved in an earlier epoch is approved again, in the current one (execution and recovery §2) | `409 conflict` |
 | Active operation per machine scope | partial unique index over `committed`, `sending`, `verifying`, `unresolved` | execution and recovery's refusal (DB row 012; DS row 010) |
@@ -1186,9 +1212,9 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an entry whose key has a record from before this recovery start (§12.4)) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `queued` or `running` (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
-| 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
+| 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
 | 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13) |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
@@ -1209,14 +1235,21 @@ Every request authenticates; there is no anonymous route besides a liveness
 probe that returns no data. A principal is a human, identified by the OIDC
 issuer and subject, or a service identity.
 
-A human's Principal row is created on first use. When a verified token names an
-`(iss, sub)` with no row, the handler inserts one in its own short transaction
-before the request's transaction:
+A human's Principal row is created on first use by a mutating request that has
+been admitted: authenticated, its role checked (§10.3), and past the checks
+that need no transaction (§9.4's `400` and `428`, and the recovery-start
+flag's refusals, §12.2). A read, and a request
+refused before that point, creates no row. When an admitted request's verified
+token names an `(iss, sub)` with no row, the handler inserts one in its own
+short transaction before the request's transaction:
 `INSERT INTO principal (kind, iss, sub) VALUES ('human', $iss, $sub) ON CONFLICT (iss, sub) DO NOTHING`,
 backed by a unique index on `(iss, sub)`, then reads the row. Of two concurrent
 first requests, one inserts and the other finds the committed row, so both use
 one principal. The row starts unrevoked and stores no roles: roles come from
-each request's token (§10.3). A `deniedSubjects` entry is checked from
+each request's token (§10.3). It records its creation time. If the request
+is then refused inside its transaction, the row stays: it names only a subject
+that held a qualifying role, and grants nothing (§14). A
+`deniedSubjects` entry is checked from
 configuration before the insert, so a denied subject gets no row. An identity
 revocation (T5c) naming an `(iss, sub)` that has never signed in creates the
 row the same way, then locks it, so a revocation can precede a first sign-in.
@@ -1465,7 +1498,8 @@ entry).
 
 An epoch is an **identity**: 128 random bits (§2), minted at installation and
 at every recovery-mode entry, never issued again, and compared by equality
-only, as execution and recovery requires **(choice §17.25)**. An approval, a
+only, as execution and recovery's revision requires (§1.2 item 10)
+**(choice §17.25)**. An approval, a
 scope release, a fence, a claim and an automation token are valid only if the
 epoch they carry is the current one. No counter orders epochs; where a reader
 wants them in order, the entry time of their `RecoveryEpoch` rows orders them
@@ -1504,9 +1538,10 @@ startup", and design §13.7 item 5 and §14.6 give entering it to
   before entry, whatever the restored database says.
 - Entry itself is an API act by `recovery-admin`, human only:
   `POST /recovery/entries`, whose body names each restored backup family with
-  the backup's identity and age (§9.3). No server-side command enters recovery
-  mode on its own; the command-line tool of §10.2 handles automation tokens
-  only.
+  the backup's identity and age (§9.3). Only a process started with the flag
+  serves it, and at most one entry commits per start (step 1 below). No
+  server-side command enters recovery mode on its own; the command-line tool
+  of §10.2 handles automation tokens only.
 - Once entry has committed, recovery mode and the scope gates are database
   facts that every commitment and attempt compares, so the service may be
   restarted without the flag.
@@ -1514,7 +1549,12 @@ startup", and design §13.7 item 5 and §14.6 give entering it to
 Entry runs as one transaction (T9). It:
 
 1. locks `InstallationState` `FOR UPDATE`, which waits for every transaction
-   that read it `FOR SHARE`, then every machine row `FOR UPDATE`;
+   that read it `FOR SHARE`, and checks that the current epoch is still the
+   one the process read when it started with the recovery-start flag;
+   otherwise an entry has already committed since that start, and the request
+   is refused `409 conflict` naming that entry's epoch, so two entry requests
+   under different keys mint one epoch between them **(choice §17.26)**; then
+   locks every machine row `FOR UPDATE`;
 2. inserts the `RecoveryEpoch` row and makes it current, and sets recovery
    mode;
 3. marks every staging claim from an earlier epoch `abandoned` and clears its
@@ -1541,16 +1581,20 @@ the scope **(choice §17.13)**:
   freeze) and acts that record recovery (accounting decisions, takeover
   requests, scope marks, scope release, resolutions, leaving recovery mode).
 - **Accepted installation-wide**: inventory, drafts, ingestion and
-  publication. They write the database and the provider and send nothing to a
-  machine, and clearing a scope `blocked` on a lost key version needs a new
-  publication, followed by re-approval (design §7.7 duty 4).
+  publication. They write the database and the provider and change nothing on
+  a machine; a `source: machine` ingestion reads the node, which is the
+  observation design §14.6 allows. Clearing a scope `blocked` on a lost key
+  version needs a new publication, followed by re-approval (design §7.7 duty
+  4).
 - **Refused with `409 recovery-mode-active` on a scope still pre-restore
   unaccounted**: plan creation, approval, adoption plans and unfreezing.
 - **Refused on every scope not released in the current epoch**: the
   commitment, the attempt and the adoption record, by execution and recovery's
-  scope gate (its comparison 6 and adoption requirement 4.5). An approval on a
-  scope accounted for but not yet released is accepted and authorizes nothing
-  until the release.
+  scope gate (its comparison 6 and adoption requirement 4.5), and a
+  publication that changes the machine's assignment, which T3 refuses
+  `409 recovery-mode-active` by execution and recovery's rule for assignment
+  changes (§6.2). An approval on a scope accounted for but not yet released is
+  accepted and authorizes nothing until the release.
 - **A released scope is fully usable**, as execution and recovery states.
 
 Design §14.6 "pauses mutation and automatic resumption while allowing the
@@ -1574,6 +1618,7 @@ For a database restored to a backup taken at time *T*:
 | Ingestion generations after *T* | in the provider if its backup is newer | orphans (§6.4); not reattached |
 | Approvals, scope releases | earlier epoch | authorize nothing; a plan needs an approval in the new epoch |
 | Idempotency records after *T* | absent | a retry executes afresh (§12.4) |
+| Idempotency records from before *T* | earlier epoch once entry commits | a retry is refused `409 conflict` (§7.2) |
 | Identity revocations after *T* | absent | re-recorded by `recovery-admin`; a human subject is already refused by `deniedSubjects` (§10.4) |
 | Automation tokens | earlier epoch | refused; reissued with the tool **(choice §17.27)** |
 | Tokens revoked after *T* | valid again in the rows | refused anyway: earlier epoch |
@@ -1751,7 +1796,8 @@ equals neither the restored epoch nor the lost one.
   gave before entry authorizes nothing in any case.
 - Every automation token is refused until the tool reissues it.
 - During recovery mode an `author` edits the change that step 1 published into
-  a draft again and a `publisher` publishes it, which recovery mode allows. A
+  a draft again and a `publisher` publishes it, which recovery mode allows
+  unless it changes the assignment of a scope not yet released (§6.2). A
   plan for `mch_tqhcznunhyle4hnxru5hkt35uq` is refused `409
   recovery-mode-active` while its scope is pre-restore unaccounted. Once the
   scope is accounted for, its restored operation resolved and the scope
@@ -1770,6 +1816,8 @@ equals neither the restored epoch nor the lost one.
 | Request | Key reused for another request | `422` | nothing |
 | Request | Same key while the first is in flight | waits on the key's lock, then replays or executes; on a draft entry route whose first request still holds a live claim, `409 conflict` (§7.2) | one effect |
 | Request | Entry retried with a key whose record predates this recovery start | `409 conflict` naming the stored entry (§12.4) | nothing |
+| Request | Key whose record is from an earlier epoch | `409 conflict` naming the stored request and its epoch (§7.2) | nothing |
+| Request | Keyed fingerprint whose digest-key version the provider can no longer compute under | `422`; under a new key, an ingestion whose operation is still active is `409 conflict` naming it (§7.1, §7.3) | nothing |
 | Draft | ETag mismatch | `412` | nothing |
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
 | Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record; orphans if past compilation §2.3 step 6 |
@@ -1785,11 +1833,18 @@ equals neither the restored epoch nor the lost one.
 | Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
 | Recovery | Plan creation, approval, adoption plan or unfreeze on a scope still pre-restore unaccounted | `409 recovery-mode-active` | nothing |
 | Recovery | Commitment, attempt or adoption record on a scope not released in the current epoch | refused by execution and recovery's scope gate | its refusal entry |
+| Recovery | Publication changing the assignment of a scope not released in the current epoch | operation `failed`, `409 recovery-mode-active` (§6.2) | operation, act |
 | Recovery | Any request but liveness and entry under the recovery-start flag, before entry | `409 recovery-mode-active` | nothing |
+| Recovery | A second entry in one recovery start, under another key | `409 conflict` naming the epoch the first minted (§12.2) | nothing |
 | Any | Deadlock retries exhausted | `503 transient-conflict` | nothing |
 | Migrate | Failure or kill inside a migration | migration absent; server refuses to start | earlier migrations |
 | Startup | Schema or checksum mismatch | refuses to start | nothing |
 | Restore | No recovery-mode entry after a restore | undetected (design §14.6); pre-restore tokens can pass | the residual of §12.1 |
+
+"Nothing" is apart from a human's Principal row, which a first admitted
+mutating request creates before its transaction and a refusal inside that
+transaction leaves (§10). The `401`, `403` and `428` rows, and the refusals
+under the recovery-start flag before entry, create none.
 
 ## 15. Invariants
 
@@ -1929,9 +1984,10 @@ design and evidence do not settle the question. Each is marked in place as
    separate ledger written before each create; reattaching orphans on
    re-ingestion. Needs a line in compilation §2.3 step 6.
 9. **An idempotency key on every mutating request, recorded only with a
-   committed effect, and kept; no deletion of any record** (§3, §7).
-   Alternatives: keys optional; refusals recorded and replayed; records
-   expiring after a window.
+   committed effect, and kept; a record replayed only in its own epoch; no
+   deletion of any record** (§3, §7). Alternatives: keys optional; refusals
+   recorded and replayed; records expiring after a window; replay across
+   epochs, whose response then describes a fenced act.
 10. **The release's natural key is the draft revision, compared by a digest
     without ciphertext** (§6.2). Alternative: DB's release name plus content
     digest over everything.
@@ -1948,7 +2004,8 @@ design and evidence do not settle the question. Each is marked in place as
     active jobs** (§5.1, §8.2). Alternative: resume jobs after recovery.
 13. **Recovery mode is per scope** (§12.2): acts that only remove authority or
     record recovery are always accepted; inventory, drafts, ingestion and
-    publication are accepted installation-wide; plan creation, approval,
+    publication are accepted installation-wide, except a publication changing
+    the assignment of a scope not yet released; plan creation, approval,
     adoption plans and unfreezing are refused on a scope still pre-restore
     unaccounted; commitments, attempts and adoption records are refused on
     every scope not released in the current epoch; a released scope is fully
@@ -2002,15 +2059,19 @@ design and evidence do not settle the question. Each is marked in place as
     any schema or checksum mismatch; no rewrite of immutable rows; no
     downgrade** (§11). Alternative: migrate at startup.
 25. **The epoch is a random, never-reissued 128-bit identity compared by
-    equality, with no counter** (§12.1), as execution and recovery requires.
+    equality, with no counter** (§12.1), as execution and recovery's revision
+    requires (§1.2 item 10).
     Alternatives: a counter in the database, which a restore rewinds; an
     external high-water mark (for example in OpenBao or a file) checked at
     startup, which could detect some restores but adds a dependency that can
     itself be restored.
 26. **A server-side recovery-start flag keeps the dispatch gates closed; entry
-    still needs the `recovery-admin` API act** (§12.2). Alternative: entry by a
+    still needs the `recovery-admin` API act, served only under the flag and
+    committed at most once per start** (§12.2). Alternatives: entry by a
     server-side command before the service starts, which performs no role
-    check and so sidesteps design §13.7 item 5.
+    check and so sidesteps design §13.7 item 5; for the once-per-start rule, an
+    expected epoch the client sends with the entry, which fences the same
+    duplicate but lets any process enter.
 27. **Automation tokens from an earlier epoch are refused** (§12.3).
     Alternative: keep them, reviving any token whose revocation the restore
     removed.
