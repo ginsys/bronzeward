@@ -1122,8 +1122,9 @@ check.
 7. **One owner per claim generation.** Every claim transition is conditional on
    the owner generation, and an owner's transitions on the owner too; no
    transition revives a lapsed lease for its old owner.
-8. **No unkeyed secret digest is persisted.** The only unkeyed digests are
-   the whole-configuration digests of §4.1.
+8. **No unkeyed secret digest is persisted.** The only unkeyed digests over
+   plaintext are the whole-configuration digests of §4.1; an artifact's
+   ciphertext digest (§11) is over ciphertext.
 9. **Renderer minor equals the node's minor and is at least the target
    contract's**; Kubernetes is inside the window.
 
