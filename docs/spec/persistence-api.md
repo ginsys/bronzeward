@@ -89,7 +89,8 @@ compilation §1: it holds no secret value and no plaintext input.
 - The publication hand-off unit (compilation §11): release metadata, and per
   machine the artifact ciphertext and digest, redacted review data, provenance
   and both dependency records with the encryption dependency. §6 commits it.
-- The import base as a per-machine source revision (compilation §6).
+- The import base as a per-machine source revision (compilation §6), with the
+  baseline ciphertext and its keyed digest (compilation §2.3 step 8).
 - Keyed digests under a provider-held key (compilation §4.1), which §7 uses to
   fingerprint request bodies that can hold secrets.
 - Staging claims with owner generation, server-clock lease and absolute expiry,
@@ -100,9 +101,13 @@ It needs from compilation, as cross-contract points:
 1. The component of a generation path "that the database does not issue"
    (compilation §2.3 step 6) is the ingestion's claim identifier followed by a
    random value identifier (§6.4) **(choice §17.8)**.
-2. The per-machine digest in the hand-off unit is the digest of the
-   configuration, not of its ciphertext, so that it is stable across a second
-   encryption (§6.2).
+2. The hand-off unit carries, per machine, the plaintext configuration digest
+   (execution and recovery's configuration digest function, over the artifact's
+   plaintext), not only the ciphertext's digest, so that the release records a
+   digest stable across a second encryption (§6.2). The import base carries the
+   baseline's unkeyed configuration digest next to its keyed digest. The
+   execution and recovery work amends compilation §2.3 step 8 and §11 to hand
+   both over; until that amendment lands, this is an open cross-contract point.
 
 ### 1.2 What this contract needs from execution and recovery
 
@@ -114,15 +119,31 @@ It needs from compilation, as cross-contract points:
    commitment serialize: the rule "any transaction that changes a machine's
    assignment must check that machine's coordination scope" in the
    dispatch commitment section of execution and recovery.
-3. An approval's epoch comparison is equality with the current epoch's
-   identity. The contract's "recorded in the current recovery epoch" already
-   reads this way; its counter is kept for order (§12.1).
-4. Recovery-mode entry runs as one transaction that also performs §12.2's
-   persistence effects.
-5. The post-restore procedure includes re-recording identity revocations made
-   after the backup was taken, and reissuing automation tokens (§12.3).
-6. The operation is created with its plan, in state `planned` (§8.1)
-   **(choice §17.11)**.
+3. Comparison 1 of the commitment and of every attempt transaction reads the
+   approval row and the approving principal's row `FOR SHARE`, so that an
+   approval revocation (which locks the approval row `FOR UPDATE`) and an
+   identity revocation (which locks the principal row `FOR UPDATE`) wait for it
+   or precede it (T5; DS row 003).
+4. Recovery-mode entry is the `recovery-admin` API act of §12.2, run as one
+   transaction (T9) that also performs §12.2's persistence effects, after the
+   service was started with the recovery-start flag **(choice §17.26)**.
+5. The post-restore procedure re-records identity revocations made after the
+   backup was taken, and reissues automation tokens rather than re-recording
+   their revocations: every token from an earlier epoch is refused (§12.3).
+6. The operation of a plan is created by the dispatch commitment, not with the
+   plan (§8.1) **(choice §17.11)**; comparison 0 ("no operation exists for this
+   plan yet") is the unique index of §7.3.
+7. The adoption record is the commitment of a plan with `operation: adopt`
+   (§9.2), taken under the machine-scope lock like any commitment
+   **(choice §17.15)**.
+8. Its statement that a restore makes the next release reuse an erased
+   release's identifier is dropped: identifiers here are never reissued (§2).
+   Its rule that nothing is matched across a restore by identifier stays, as
+   defence in depth.
+9. The self-approval reasons agree with §10.5: a token's responsible human is
+   also marked when the token created the plan, and "self-approval
+   undetermined" never arises, because every automation identity names a
+   responsible human **(choice §17.18)**.
 
 ## 2. Identifiers
 
@@ -159,7 +180,10 @@ rel_fgqvcvz3ck7h7234ljgdbzsj6m
 | `req` | API request | | |
 
 A collision is not checked for beyond the primary-key constraint, which refuses
-it. The manager machine ID of design §4.4 is the `mch` identifier.
+it. The manager machine ID of design §4.4, a "stable UUID allocated by this
+platform", is the `mch` identifier: stable and platform-allocated, with 128
+random bits in this text form rather than in RFC 9562's UUID layout
+**(choice §17.1)**.
 
 Internal `bigint` sequence keys may exist for joins and ordering, but never
 appear in an API payload, a URL, a cursor, a provider path or a log line. A
@@ -187,30 +211,34 @@ that the trigger fires **(choice §17.3)**.
 | Entity | Kind | Holds | Owner of semantics |
 | --- | --- | --- | --- |
 | Cluster | mutable, revisioned | name, endpoint, contract, status | this contract |
-| Machine | mutable, revisioned | `mch` id, hardware evidence, cluster membership, current freeze (projected from freeze facts) | this contract; freeze is execution and recovery's |
+| Machine | mutable, revisioned | `mch` id, hardware evidence, cluster membership, current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
 | Profile / ProfileRevision | mutable head / immutable | ordered fragment revision ids | this contract |
 | Assignment / AssignmentRevision | mutable head / immutable | per machine: selected profiles and fragments per layer | this contract |
-| ImportBaseRevision | immutable | a machine's sanitized imported document with references, baseline ciphertext and its keyed digest | compilation §2.3, §6 |
+| ImportBaseRevision | immutable | a machine's sanitized imported document with references, baseline ciphertext, its keyed digest and its configuration digest | compilation §2.3, §6 |
 | Draft | mutable, revisioned | change set: entries and their base head revisions | this contract |
-| Release, ReleaseMachine | immutable | the compilation §11 unit; the release covers one cluster and a set of its machines | compilation §11; this contract |
+| Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1); the release covers one cluster and a set of its machines | compilation §11; this contract |
 | Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity | compilation §9 |
 | DependencyStatus | mutable | last classification per dependency and when first seen `retained` | design §7.6, §7.8 |
 | Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload | compilation §3 |
 | MachineState | mutable, revisioned | Desired, Applied (with source), baseline revision | execution and recovery (Desired, Applied and Observed) |
-| Observation | immutable | observation revision, identity, digest, health | execution and recovery |
-| Plan | immutable | the binding | execution and recovery (plan binding) |
-| Approval | immutable | plan, approver, role, epoch, self-approval mark | execution and recovery; §10.5 |
-| Approval revocation, identity revocation | immutable | who, when, epoch, reason | §10.4; execution and recovery |
-| Operation | mutable projection, fenced | kind, state, owner, owner generation, owner epoch, timeline revision | §8; execution and recovery for `apply-config` |
-| TimelineEvent, Attempt | immutable | append-only facts of one operation | execution and recovery |
-| Scope release, freeze fact | immutable | per machine, with epoch | execution and recovery |
+| Observation | immutable | purpose, machine revision, identity, assignment evidence, running version, configuration digest, health, or what could not be read | execution and recovery §4.1 |
+| Plan | immutable | the binding, creator and role | execution and recovery (plan binding) |
+| PlanState | mutable, revisioned | the plan's state (§8.1) with its reason, and its operation once committed | execution and recovery §2; §8.1 |
+| Approval | immutable | plan, plan revision, approver, role, epoch, self-approval mark | execution and recovery; §10.5 |
+| Approval revocation, identity revocation, plan cancellation | immutable | what it names, who, role, when, epoch, reason | §10.4; execution and recovery |
+| Operation | mutable projection, fenced | kind, state, owner, owner generation, owner epoch, lease; for `publish` and `ingest`, the last event number | §8; execution and recovery for `apply-config` and `adopt` |
+| TimelineEvent | immutable | append-only entries of a machine scope (plans, operations and machine-scope facts) with the machine revision, or of a `publish` or `ingest` operation with its event number (§5, T7) | execution and recovery §4.1 |
+| Attempt, Response, Accounting decision | immutable | an attempt with its owner token, route and deadlines; its response class and redacted text; an accounting's basis, decider and role | execution and recovery §3, §5 |
+| Drift record | mutable projection | machine, observed digest, open or closed with the resolution that closed it; opening and closing are timeline entries | execution and recovery §6 |
+| Adoption record | immutable | the adopt plan and its `completed` operation, the adopted release, the baseline digest compared, the observation relied on | execution and recovery §6.3 |
+| Scope state mark, scope release, freeze, unfreeze | immutable | per machine, with epoch, identity and role | execution and recovery §6, §7 |
 | Principal | mutable | human (`iss`, `sub`) or service identity; revoked flag | §10 |
 | AutomationToken | mutable | token id, SHA-256 of the secret, roles, owner, expiry, epoch, revoked time | §10.2 |
 | Act | immutable | every mutating act: principal, role, action, subject, epoch, time | §10.5 |
 | IdempotencyRecord | immutable | key, fingerprint, stored response | §7 |
-| InstallationState, RecoveryEpoch | mutable singleton / immutable | current epoch, recovery mode | §12 |
+| InstallationState, RecoveryEpoch | mutable singleton / immutable | current epoch, recovery mode; each entry with its restored backups | §12 |
 | schema_migrations | immutable | applied migrations | §11 |
 
 ### 3.1 Sources, drafts and heads
@@ -230,18 +258,36 @@ reference rows, sets the entry, and advances the draft's revision (§5, T1).
 A draft ends `published` (by §6.2) or `discarded`; neither state accepts
 further edits.
 
+A draft and its release cover one cluster, while a fragment may belong to the
+library. A library fragment changed in one cluster's draft is published once,
+through that cluster's release; another cluster using it picks up the new head
+at its own next publication, with no draft of its own naming the change. Its
+approver sees the change in the plan's redacted whole-configuration diff
+(execution and recovery, plan binding) **(choice §17.28)**.
+
 ### 3.2 The import base
 
 A machine's import base (compilation §6) is not a head. It is the import base
 revision of the machine's `Applied` release **(choice §17.5)**. `Applied`
 changes only through a completed operation or an adoption record (execution and
-recovery, Desired, Applied and Observed), so the import base changes only when
-a release carrying a new import base becomes `Applied`. Compilation §6 names
-that base the "latest accepted drift adoption"; reading it from `Applied` is
-this contract's choice. A draft built from an import or an adoption carries
-its new import base revision as an entry. A machine with no `Applied` has no
-import base; the only draft that can cover it is one carrying an import base
-revision.
+recovery, Desired, Applied and Observed), so the import base every other
+publication compiles on changes only when a release carrying a new import base
+becomes `Applied`. Compilation §6 names that base the "latest accepted drift
+adoption"; reading it from `Applied` is this contract's choice.
+
+A draft built from an import or an adoption carries its new import base
+revision as an entry, so the release published from it compiles on the new
+base at once: this is execution and recovery's "the sanitized document becomes
+the machine's new import base, and a release compiled from it is published"
+(adopt, step 2). A machine with no `Applied` has no import base; the only draft
+that can cover it is one carrying an import base revision.
+
+Between an adoption's publication and its adoption record, another publication
+covering the machine compiles on the old base and becomes the machine's
+`Desired` (§6.2). The adoption record then sets `Applied` and `Desired` to the
+adopted release (execution and recovery, adopt), so that intervening release is
+superseded for the machine, and any plan made before the record fails the
+baseline comparison afterwards (execution and recovery, comparison 2).
 
 ## 4. Revisions and optimistic concurrency
 
@@ -270,7 +316,7 @@ A revision number leaves the database only inside a strong ETag that also
 carries a random token, replaced on every write **(choice §17.2)**:
 
 ```text
-ETag: "5-shw6tpirbqvgj3qjuv2hicf6vm"
+ETag: "5-m3oxmlfh6phr7aigshdydcb4ji"
 ```
 
 The server compares the whole value. After a restore, a record's revision 5
@@ -311,7 +357,8 @@ Rules for every transaction:
 1. **No provider or network I/O inside a transaction** **(choice §17.7)**.
    Provider calls, compilation, Talos requests and response writing happen
    between transactions. A paused server kept a publication's transaction open
-   for its whole pause (DB row 059), and every lock it held with it.
+   for its whole pause (DB row 059, a stall DB infers from the row's timing),
+   and with it, by inference, every lock the transaction held.
 2. **Lock what you check.** A value a transaction's decision depends on is
    either locked by the transaction (`FOR SHARE` to hold it, `FOR UPDATE` to
    change it) or tested in the predicate of the conditional write that acts
@@ -325,10 +372,13 @@ Rules for every transaction:
    `now()`, never the caller's clock. DB's leases used the client clock and
    left skew untested (DB §7); compilation §3.2 makes the same choice for
    claims.
-5. **Lock order.** Installation state, then machine rows by id, then heads by
-   id, then the draft, then operations by id. A detected deadlock aborts the
-   transaction, which is retried whole, at most three times, then fails
-   `503 transient-conflict` **(choice §17.7)**.
+5. **Lock order.** The request's idempotency-key lock (§7.2), installation
+   state, machine rows by id (each with its MachineState), heads by id, the
+   draft, principals by id, approvals by id, plan states by id, then operations
+   by id. A read of an immutable row needs no lock and may come first, for
+   example the plan binding that names the machine to lock. A detected
+   deadlock aborts the transaction, which is retried whole, at most three
+   times, then fails `503 transient-conflict` **(choice §17.7)**.
 6. **Commit-unknown is resolved by reading, not by assuming.** A connection
    error after `COMMIT` was sent leaves the outcome to the server. In DB row
    061 the release committed after the client was gone, and an idempotent
@@ -341,24 +391,31 @@ The transactions this contract defines or constrains:
 
 | # | Transaction | Locks and checks | Writes |
 | --- | --- | --- | --- |
-| T1 | Draft update (compilation's draft transaction) | installation state `FOR SHARE` (not in recovery mode); draft `FOR UPDATE`, revision equals `If-Match`; claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act |
-| T2 | Publication request | installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match` | publish operation `queued`, idempotency record, act |
-| T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded` |
-| T4 | Plan creation | release published; ER's binding checks | plan, operation `planned`, idempotency record, act |
-| T5 | Approval, approval revocation, identity revocation | plan state; principal row `FOR UPDATE` for identity revocation | approval (with epoch and self-approval mark) or revocation, act |
-| T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 | execution and recovery |
-| T7 | Timeline append | operation row `FOR UPDATE` | event at `timeline_revision + 1` |
-| T8 | Job claim and completion | §5.1 | operation owner fields |
-| T9 | Recovery-mode entry | installation state `FOR UPDATE` | §12.2 |
+| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`; claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction writes neither record: the `POST /ingestions` request's T11 wrote them |
+| T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active one, §7.3), idempotency record, act |
+| T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
+| T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published; execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
+| T5a | Approval | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted; approver's principal `FOR SHARE`, not revoked; plan state `FOR UPDATE`, unexpired, and `proposed`, or `approved` by an approval from an earlier epoch | approval (unique per plan and epoch, with the self-approval mark), plan state `approved`, machine timeline entry, idempotency record, act |
+| T5b | Approval revocation | key lock; installation state `FOR SHARE`; machine row `FOR UPDATE`; approval `FOR UPDATE`, which waits for a commitment or attempt holding it `FOR SHARE` (§1.2 item 3); plan state `FOR UPDATE` | revocation row, plan state `revoked` unless `committed`, machine timeline entry, idempotency record, act |
+| T5c | Identity revocation | key lock; installation state `FOR SHARE`; principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked, idempotency record, act |
+| T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6 | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
+| T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
+| T8 | Job claim, lease extension and completion | §5.1 | operation owner fields |
+| T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`; every machine row `FOR UPDATE` | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
+| T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect | the effect, idempotency record, act |
 
-T7 allocates a timeline revision under the operation's row lock, so that for
-one operation revision order is commit order. DS found that taking an
-observation basis as the highest committed revision, without that lock, is
-unsound under concurrent writers
-([DS §7](../design/research/20260925-dispatch-safety.md#7-limits)); this
-allocation removes the case for the timeline, and execution and recovery's
-observation ordering relies on it.
+T7 allocates every revision in a machine scope, for a plan, an operation or a
+machine-scope fact alike, from one per-machine counter under the machine row's
+lock, which is the machine-scope lock of this contract, so that revision order
+within a scope is commit order, as execution and recovery's timeline ordering
+rule requires (its §4.1). DS found that taking an observation basis as the
+highest committed revision, without such a lock, is unsound under concurrent
+writers ([DS §7](../design/research/20260925-dispatch-safety.md#7-limits));
+this allocation removes that case. A `publish` or `ingest` operation has no
+machine scope; its entries carry an event number allocated under the
+operation's row lock, which orders that operation's entries for the event
+stream (§8.3) and nothing else.
 
 ### 5.1 Fences and claims
 
@@ -368,10 +425,12 @@ was issued. A takeover or claim and every owner transition are single
 conditional `UPDATE`s:
 
 ```sql
--- takeover (DB §4.4 row 015)
+-- takeover of an apply-config operation (DB §4.4 row 015)
 UPDATE operation
-   SET owner = $new, owner_gen = owner_gen + 1, owner_epoch = $current_epoch
- WHERE id = $id AND owner_gen = $seen_gen;
+   SET owner = $new, owner_gen = owner_gen + 1, owner_epoch = $current_epoch,
+       state = 'unresolved'
+ WHERE id = $id AND owner_gen = $seen_gen
+   AND state IN ('committed', 'sending', 'verifying', 'unresolved');
 
 -- an owner's own transition, after reading installation_state FOR SHARE
 UPDATE operation
@@ -380,30 +439,51 @@ UPDATE operation
    AND owner_epoch = $my_epoch AND $my_epoch = $current_epoch;
 ```
 
+A takeover moves a `committed`, `sending` or `verifying` operation to
+`unresolved` and keeps an `unresolved` one `unresolved` under its new owner; it
+never touches a terminal one. Those state semantics are execution and
+recovery's (its §3.4); this contract only makes them one conditional write.
 The ownership check is part of the write, never a prior `SELECT`: the
 check-then-insert control recorded a stale attempt
 ([DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions),
 row 018). The epoch term is §12's: after recovery-mode entry no token issued
 before it matches, whatever generation the restored row holds.
 
-A job claim re-checks eligibility in the `UPDATE`'s own predicate:
+A job claim re-checks eligibility in the `UPDATE`'s own predicate. For a
+`publish` job, a `running` job whose lease has lapsed is eligible again
+**(choice §17.12)**:
 
 ```sql
 UPDATE operation
    SET state = 'running', owner = $me, owner_gen = owner_gen + 1,
        owner_epoch = $current_epoch, lease_until = now() + $lease
  WHERE id = (SELECT id FROM operation
-              WHERE state = 'queued' AND kind = $kind
+              WHERE kind = 'publish'
+                AND (state = 'queued'
+                     OR (state = 'running' AND lease_until < now()))
               ORDER BY seq LIMIT 1)
-   AND state = 'queued';
+   AND (state = 'queued' OR (state = 'running' AND lease_until < now()));
+
+-- lease extension, by the owner only, while the lease is still live
+UPDATE operation
+   SET lease_until = now() + $lease
+ WHERE id = $id AND owner = $me AND owner_gen = $my_gen
+   AND owner_epoch = $my_epoch AND $my_epoch = $current_epoch
+   AND state = 'running' AND lease_until > now();
 ```
+
+An `ingest` job is claimed from `queued` only: a lapsed `ingest` job is not
+re-run, and compilation's claim rules decide its fate (§8.2).
 
 Without the re-check, 309 of 400 jobs were claimed more than once and one was
 completed twice ([DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims),
-row 020). A claimer whose lease lapsed is superseded, and its late completion
-is refused at the newer generation (row 021). A fence coordinates workers that
-use the database; it stops a stale worker's commit, not its work outside the
-database (DS §7).
+row 020). A claimer whose lease lapsed is superseded by the next claim, and its
+late completion is refused at the newer generation, as row 021 claimed a job
+after its lease expired and refused the first claimer's completion. A lapsed
+lease is never extended by its old owner. The lease length and extension
+interval are open, as compilation §3.2 leaves its own. A fence coordinates
+workers that use the database; it stops a stale worker's commit, not its work
+outside the database (DS §7).
 
 ## 6. Publication protocol
 
@@ -422,51 +502,71 @@ Design: [§7.4](../design/Talos_Configuration_and_Machine_Management_Design.md#7
 
 Publication writes nothing to the provider. The only provider objects
 Bronzeward creates in the PoC are ingestion's generations, created before the
-draft transaction that references them (compilation §2.3). A key version is
-created by the OpenBao administrator, outside Bronzeward (design §7.5).
+draft transaction that references them (compilation §2.3). Key changes stay
+with the OpenBao administrator, outside Bronzeward's roles (design §13.7
+item 5).
 
 ### 6.2 The commit transaction (T3)
 
 ```sql
 BEGIN;
-SELECT current_epoch, recovery_mode FROM installation_state FOR SHARE;
-  -- recovery_mode false; current_epoch equals the job's owner_epoch
+SELECT current_epoch FROM installation_state FOR SHARE;
+  -- equals the job's owner_epoch
+SELECT ... FROM machine WHERE id = ANY($covered) ORDER BY id FOR SHARE;
+SELECT ... FROM machine_state
+ WHERE machine_id = ANY($covered) ORDER BY machine_id FOR UPDATE;
+SELECT head_revision FROM <head tables>
+ WHERE id = ANY($changed) ORDER BY id FOR UPDATE;
+SELECT head_revision FROM <head tables>
+ WHERE id = ANY($unchanged) ORDER BY id FOR SHARE;
+SELECT state, revision FROM draft WHERE id = $draft FOR UPDATE;
 SELECT ... FROM operation WHERE id = $op FOR UPDATE;
   -- owner, owner_gen, owner_epoch are this worker's (§5.1)
-SELECT ... FROM machine WHERE id = ANY($covered) ORDER BY id FOR SHARE;
-SELECT head_revision FROM <head tables>
- WHERE id = ANY($changed) ORDER BY id FOR UPDATE;   -- equal to the draft's base
-SELECT head_revision FROM <head tables>
- WHERE id = ANY($unchanged) ORDER BY id FOR SHARE;  -- equal to the snapshot
-SELECT state, revision FROM draft WHERE id = $draft FOR UPDATE;
-  -- open, revision equals the bound draft revision
--- for each machine whose assignment head is in $changed:
---   no operation on its scope is committed, sending, verifying or unresolved
+SELECT id, digest FROM release
+ WHERE draft_id = $draft AND draft_revision = $bound_revision;
+  -- present: digests equal -> skip to the operation's UPDATE with that
+  -- release; digests differ -> 409 conflict. Absent: continue.
+  -- draft open, revision equals the bound draft revision
+  -- $changed head revisions equal the draft's base
+  -- $unchanged head revisions equal the snapshot
+  -- for each machine whose assignment head is in $changed:
+  --   no operation on its scope is committed, sending, verifying or unresolved
 INSERT INTO release ...;             -- unique (draft_id, draft_revision)
-INSERT INTO release_machine ...;     -- per machine: ciphertext, digest, review
+INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
+                                     -- configuration digest, review data
 INSERT INTO release_source ...;      -- every revision and head revision used
 INSERT INTO dependency ...;          -- both records and the encryption dependency
 UPDATE <head> SET head_revision_id = ..., head_revision = head_revision + 1,
                   etag_token = ...
  WHERE id = ... AND head_revision = $base;
 UPDATE machine_state SET desired_release = $release, revision = revision + 1
- WHERE machine_id = ANY($covered);
+ WHERE machine_id = ANY($covered);   -- rows locked above
 UPDATE draft SET state = 'published', release_id = $release,
-                 revision = revision + 1 WHERE id = $draft;
-UPDATE operation SET state = 'succeeded', result_release = $release ...;
+                 revision = revision + 1, etag_token = ...
+ WHERE id = $draft AND state = 'open' AND revision = $bound_revision;
+UPDATE operation SET state = 'succeeded', result_release = $release ...
+ WHERE id = $op AND owner = $me AND owner_gen = $my_gen
+   AND owner_epoch = $my_epoch;
 INSERT INTO timeline_event ...;      -- T7 rules
 COMMIT;
 ```
 
-Any failed comparison rolls the transaction back; a separate transaction then
-records the publish operation `failed` with the error of §9.4. `FOR SHARE` on
+The locks follow rule 5's order, and the checks run after all of them. The
+release lookup comes first, so that a second commit for a draft revision
+already published, after a commit-unknown or from a worker that superseded the
+first, meets the existing release before the draft and head checks that the
+first commit has made fail. Any failed comparison rolls the transaction back; a
+separate transaction then records the publish operation `failed` with the error
+of §9.4. `FOR SHARE` on
 the unchanged heads is the clause without which DB row 011 committed a release
 on a superseded source; row 010 is the same race with the lock, which made the
 writer wait. Atomicity held
 for an injected error, a client kill, a server kill and a network partition
 with the transaction open (rows 006–008, 058, 060). The machine-scope check is
 the rule execution and recovery states for any assignment change; §1.2 item 2
-makes it race-free.
+makes it race-free. T3 does not consult recovery mode: publication writes only
+the database and sends nothing to a machine, and stays allowed during it
+(§12.2).
 
 The release's covered machines are selected as their `Desired` release in the
 same transaction **(choice §17.6)**. Design §11.2 describes a release as
@@ -475,12 +575,15 @@ Desired as the release recorded as selected; neither says when it is selected.
 Selection is not authorization: dispatch still needs a plan and an approval.
 
 The release's natural key is `(draft_id, draft_revision)`
-**(choice §17.10)**. A release carries a content digest over its metadata and
-each machine's configuration digest, not over ciphertext. A second commit for
-the same draft revision, after a commit-unknown or from a second worker, finds
-the unique key taken; it returns the existing release if the digests match, as
-DB row 061 returned `existing=true`, and otherwise fails `409 conflict`, as row
-009 refused the same name with different content.
+**(choice §17.10)**. Each release machine records the plaintext configuration
+digest compilation hands over (§1.1), and the release carries a content digest
+over its metadata and those configuration digests, not over ciphertext. A
+second commit for the same draft revision, after a commit-unknown or from a
+second worker, finds that release by the lookup above (the draft's lock
+serializes the two commits, and the unique key backs the lookup); it returns the existing
+release if the digests match, as DB row 061 returned `existing=true`, and
+otherwise fails `409 conflict`, as row 009 refused the same name with different
+content.
 
 ### 6.3 Partial publication
 
@@ -535,8 +638,9 @@ Handling in the PoC:
 - **Reported.** An orphan report lists generation paths whose claim component
   names an `abandoned` claim, or no claim at all, with the claim's state and
   times. It reads provider metadata under the metadata identity and names only
-  paths, never values. Whether that identity may list the generation tree was
-  not measured (PC measured metadata reads, not listing); if it may not, the
+  paths, never values. PC's metadata identity listed paths (row 065, under
+  one generation path); whether the PoC's policy grants list at each level of
+  `gen/<cluster>/<claim id>/<value id>` is not measured. If it does not, the
   report covers abandoned claims only, from the claim's own recorded paths.
 
 ## 7. Idempotency
@@ -576,24 +680,38 @@ later rolled back: a rolled-back row still reached the write-ahead log
 ### 7.2 Behavior
 
 The record is inserted by the same transaction that commits the request's
-effect (T1–T5), and by no other **(choice §17.9)**. A refused request commits no
-effect and no record, so a retry is evaluated afresh against current state;
-since the refusal changed nothing, re-evaluating it cannot duplicate anything.
+effect (T1, T2, T4, T5a–T5c, T9 and T11 of §5), and by no other
+**(choice §17.9)**. A refused request commits no effect and no record, so a
+retry is evaluated afresh against current state; since the refusal changed
+nothing, re-evaluating it cannot duplicate anything. Transactions that serve
+no request (T3, T6, T7, T8) write no record.
+
+Before running anything, the handler looks the key up and replays a committed
+record without executing. The request's transaction then takes, as its first
+statement, a transaction-scoped advisory lock on a hash of the principal and
+key (`pg_advisory_xact_lock`), and looks the key up again under it. A
+concurrent duplicate therefore waits for the first transaction to end. The
+unique index on principal and key backs the lock. A handler that works before
+its transaction, as the draft entry routes run ingestion before T1, can do that
+work twice for two concurrent duplicates: the second then replays the first's
+record, and the generations its own ingestion created become orphans (§6.4,
+source 2).
 
 | Situation | Response |
 | --- | --- |
 | New key | executed; record committed with the effect |
 | Same key, same fingerprint, record exists | the stored status, headers and body, with `Idempotent-Replayed: true`; nothing executes |
 | Same key, other fingerprint | `422 idempotency-key-reused` |
-| Same key while the first request's transaction is open | waits on the unique index; then replays if the first committed, or executes if it rolled back |
+| Same key while the first request's transaction is open | waits on the key's lock; then replays if the first committed, or executes if it rolled back |
 | Same key after the request that used it was refused | executed afresh |
 | Same key after a restore that removed the record | executed afresh (§12.4) |
 
-The waiting row follows PostgreSQL's unique-index semantics and is not
-measured: DB row 013 retried the same key sequentially and got the first
-operation back with `created=false`
+The waiting row follows PostgreSQL's advisory-lock semantics and is not
+measured for requests: DB row 013 retried the same key sequentially and got the
+first operation back with `created=false`
 ([DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent)),
-but no row raced two requests with one key.
+and the migration runners waited on a transaction-scoped advisory lock
+(DB §4.6), but no row raced two requests with one key.
 
 Records are kept for the PoC (§3). An idempotency key prevents duplicate
 intent in the manager; it does not make a remote effect exactly once (design
@@ -608,8 +726,8 @@ retries with a new idempotency key:
 | --- | --- | --- |
 | Release | `(draft_id, draft_revision)` | the existing release if the digests match, else `409 conflict` (§6.2) |
 | Publish operation | at most one `queued` or `running` per `(draft_id, draft_revision)`, by partial unique index | the existing operation, `202` |
-| Operation | one per plan | the plan's operation |
-| Approval | at most one unrevoked approval per plan (design §13.7 item 3) | `409 conflict` |
+| Operation | one per plan, by unique index on the plan, created at the commitment (§8.1) | execution and recovery's comparison 0 refuses a second commitment (DS row 009) |
+| Approval | one per plan and epoch, by unique index on `(plan_id, epoch)` (design §13.7 item 3); a revoked approval makes its uncommitted plan `revoked` (§8.1), and only an unexpired plan approved in an earlier epoch is approved again, in the current one (execution and recovery §2) | `409 conflict` |
 | Active operation per machine scope | partial unique index over `committed`, `sending`, `verifying`, `unresolved` | execution and recovery's refusal (DB row 012; DS row 010) |
 
 ## 8. Asynchronous operations
@@ -617,30 +735,56 @@ retries with a new idempotency key:
 Design: [§11.1](../design/Talos_Configuration_and_Machine_Management_Design.md#111-api-style),
 [§15.2](../design/Talos_Configuration_and_Machine_Management_Design.md#152-operation-timeline).
 
-Long work is an **operation**: a durable record with an `op` identifier,
-returned in `202 Accepted` with `Location: /api/v1/operations/<id>`. The
-identifier is generated and committed with the idempotency record before the
-response is written, so a retry of the request returns the same handle.
+Long work is an **operation**: a durable record with an `op` identifier. A
+request that starts one returns it in `202 Accepted` with
+`Location: /api/v1/operations/<id>`; the identifier is generated and committed
+with the idempotency record before the response is written, so a retry of the
+request returns the same handle. The controller creates the operation of a
+plan itself, at the dispatch commitment (§8.1).
 
 | Kind | Created by | States |
 | --- | --- | --- |
 | `publish` | `POST /drafts/{id}/publications` | job states (§8.2) |
-| `ingest` | `POST /ingestions` (import, drift adoption) | job states (§8.2) |
-| `apply-config` | `POST /plans` | execution and recovery's operation states |
-| `adopt` | `POST /plans` with `operation: adopt` | execution and recovery's adoption rules |
+| `ingest` | `POST /ingestions` (import, drift adoption), and a mark or takeover on a staged ingestion | job states (§8.2) |
+| `apply-config` | the dispatch commitment of an approved plan | execution and recovery's operation states |
+| `adopt` | the commitment of an approved plan with `operation: adopt`, which records the adoption and sends nothing | created directly in `completed`, with the adoption record as its outcome (execution and recovery §6.3) |
 
-### 8.1 Operations of a plan
+### 8.1 Plans and their operations
 
-The operation of a plan is created with the plan, in state `planned`
-**(choice §17.11)**. Execution and recovery's state table begins at `planned`
-("the immutable plan exists but is not authorized"), and design §11.1's
-example reads the plan's operation with `GET /api/v1/operations?plan=...`.
-Design §11.1 also says the controller dispatches the plan "and the client
-follows the operation it creates"; the alternative reading creates the
-operation at the commitment. Either way there is one operation per plan: DS row
-009 refused a second executor on "an operation for plan A exists". Here the
-commitment is the conditional transition `approved` → `committed`, which a
-second executor fails.
+A plan's operation is created by the dispatch commitment, not with the plan
+**(choice §17.11)**. Until then the plan resource is the handle: design §11.1
+has the client create a plan and record an approval, "the controller then
+dispatches the approved plan (§12.7), and the client follows the operation it
+creates", and its `GET /api/v1/operations?plan=...` answers an empty list until
+the commitment and the one operation after it. Design §12.5 asks for "durable
+intent before send", which the commitment's operation row is. The commitment
+transaction inserts the operation, links the plan state to it and moves the
+plan to `committed`; the unique index on the operation's plan (§7.3) is
+execution and recovery's comparison 0, which DS row 009 exercised when it
+refused a second executor on "an operation for plan A exists".
+
+The plan's state is a mutable projection beside the immutable binding
+(PlanState, §3); its semantics are execution and recovery's:
+
+| Plan state | Entered by |
+| --- | --- |
+| `proposed` | plan creation (T4) |
+| `approved` | the approval (T5a) |
+| `committed` | the commitment, which creates the operation (T6); terminal for the plan |
+| `revoked` | before the commitment: a revocation of its approval (T5b) or of the approving identity (T5c); terminal |
+| `cancelled` | before the commitment: a cancellation (T11); terminal |
+| `expired` | before the commitment: the plan's expiry; terminal |
+
+A cancellation and an approval revocation write the projection in their own
+transaction. Expiry and a revocation of the approving identity are evaluated
+by the server clock and the principal's `revoked` flag whenever the plan is
+read or locked, and are written by the next transaction that locks the plan
+state; execution and recovery's comparison 1 refuses such a plan either way.
+An `approved` plan whose approval is from an earlier epoch stays `approved`
+but cannot commit until an `approver` approves it again in the current epoch
+(execution and recovery §2; T5a). After `committed`, the operation carries the
+state; a revocation, cancellation or expiry after it is recorded against the
+plan and reaches the operation through execution and recovery's §3.3.
 
 ### 8.2 Job states
 
@@ -670,7 +814,7 @@ Recovery-mode entry fails every `queued` or `running` job with
   "kind": "publish",
   "state": "running",
   "epoch": "ep_bqeknkmarvikuy7ofil2okekgi",
-  "timelineRevision": 3,
+  "lastEvent": 3,
   "subject": {"draft": "drf_2rmpezm5rfx47azsgmp66z457a", "draftRevision": 7},
   "createdBy": {"principal": "idn_5u4k6llt7jsktfhcfv35xmdetu",
                 "role": "publisher"},
@@ -683,10 +827,16 @@ Recovery-mode entry fails every `queued` or `running` job with
 Progress is the operation's timeline. `GET /api/v1/operations/{id}/events`
 returns it as a cursor-paginated JSON list, or as Server-Sent Events when the
 request accepts `text/event-stream`. Each event's SSE `id` is
-`<epoch>:<timelineRevision>`. A client resumes with `Last-Event-ID`; an id from
-another epoch cannot be resumed, so the server sends a `reset` event and the
-timeline from its start. Polling the resource is always supported (design
-§11.1). WebSocket is not offered in the PoC.
+`<epoch>:<revision>`, where the revision is the entry's machine revision for
+a plan operation and its event number for a `publish` or `ingest` operation
+(§5, T7); either increases along one operation's events. A client resumes
+with `Last-Event-ID`; an id from another epoch cannot be resumed, so the
+server sends a `reset` event and the timeline from its start. Epochs are compared by equality only; the entry
+time of each `RecoveryEpoch` row orders them for display. A plan operation's
+events begin at its commitment and link its plan and approval, whose entries
+are on the machine's timeline (`GET /machines/{id}/timeline`). Polling the
+resource is always supported (design §11.1). WebSocket is not offered in the
+PoC **(choice §17.14)**.
 
 ## 9. API
 
@@ -695,7 +845,8 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
 
 ### 9.1 Conventions
 
-- JSON over HTTPS, under `/api/v1`. Unknown request fields are refused.
+- JSON over HTTPS, under `/api/v1`. Unknown request fields are refused
+  **(choice §17.14)**.
 - **Deprecation policy** **(choice §17.14)**: within `v1`, fields and routes
   are added, never removed or changed in meaning. A route due for removal
   answers with a `Deprecation` header for at least one minor release first. A
@@ -719,34 +870,43 @@ idempotency and conflict behavior.
 
 | Route | Result | Roles |
 | --- | --- | --- |
-| `GET /clusters`, `/clusters/{id}`, `/machines`, `/machines/{id}`, `/machines/{id}/observations` | 200 | any role |
+| `GET /clusters`, `/clusters/{id}`, `/machines`, `/machines/{id}`, `/machines/{id}/observations`, `/machines/{id}/timeline` | 200 | any role |
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments | 200 | any role |
-| `GET /drafts[/{id}]`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
+| `GET /drafts[/{id}]`, `/ingestions/{id}`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration) | 202, `ingest` | `author`, human only (§10.3) |
+| `POST /ingestions/{id}/marks`, `/takeovers` (a further mark on a staged ingestion; compilation's explicit operator recovery request, §3.4 there) | 202, `ingest` | `author`, human only (§10.3) |
+| `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2) | 200 | `author`, human only (§10.3) |
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster) | 201 | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
 | `POST /drafts/{id}/publications` | 202, `publish` | `publisher`; `If-Match` |
-| `POST /plans` | 201 | `publisher` (EaR) |
-| `POST /plans/{id}/cancellations` | 200 | plan creator, `approver`, `recovery-admin` (EaR) |
+| `POST /plans` with `operation: apply-config` | 201 | `publisher` (EaR) |
+| `POST /plans` with `operation: adopt` | 201 | `author`, human only (EaR; §10.3) |
+| `POST /plans/{id}/cancellations` | 200 | the creating identity, under the role it created the plan with; `approver`; `recovery-admin` (EaR; design §13.7 item 6) |
 | `POST /plans/{id}/approvals` | 201 | `approver`, human only (EaR) |
 | `POST /approvals/{id}/revocations` | 201 | `approver`, `recovery-admin` (EaR) |
 | `POST /machines/{id}/freezes` | 201 | `author`, `publisher`, `approver`, `recovery-admin` (EaR) |
 | `POST /machines/{id}/unfreezes` | 201 | `approver` (EaR) |
-| `POST /recovery/entries`, `/recovery/exits`, `/recovery/scopes/{machine}/releases` | 201 | `recovery-admin`, human only (EaR; §12) |
-| `POST /operations/{id}/resolutions` | 201 | `recovery-admin`, human only (EaR) |
+| `POST /recovery/entries`, `/recovery/exits`, `/recovery/scopes/{machine}/marks`, `/recovery/scopes/{machine}/releases` | 201 | `recovery-admin`, human only (EaR; §12) |
+| `POST /recovery/accountings` (the post-restore accounting decision, covering one or more scopes) | 201 | `recovery-admin`, human only (EaR) |
+| `POST /operations/{id}/attempts/{attempt}/accountings`, `/operations/{id}/takeovers`, `/operations/{id}/resolutions` | 201 | `recovery-admin`, human only (EaR) |
 | `POST /identity-revocations` | 201 | `recovery-admin`, human only (§10.4) |
 
 Every `POST`, `PUT` and `DELETE` needs an `Idempotency-Key` (§7). There is no
 route that dispatches, and none that issues, lists or revokes automation tokens
 or grants roles: those requests reach no handler and answer `404` (design
-§13.7 items 1 and 2).
+§13.7 items 1 and 2). How a staged ingestion is reviewed, and when its `ingest`
+operation ends, belong to the edit and publication flow
+([ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23)); this
+contract fixes those routes' roles, idempotency and records.
 
-An adoption approval is requested as a plan with `"operation": "adopt"`, bound
-and approved as execution and recovery's drift section describes; its
-operation sends nothing and ends in the adoption record **(choice §17.15)**.
+An adoption approval is requested as a plan with `"operation": "adopt"`, which
+binds what execution and recovery's adoption section lists, is approved by an
+`approver` like any plan, and whose commitment records the adoption, creating
+the plan's `adopt` operation directly in `completed`, and sends nothing
+**(choice §17.15)**. Its creator is a human `author` **(choice §17.22)**.
 
 ### 9.3 Examples
 
@@ -800,6 +960,129 @@ Location: /api/v1/approvals/apr_2ztr33rjgnabf5zxbwwf7c47vy
  "approver": {"principal": "idn_6woutisn7uensexh3kk2qlz6ma", "role": "approver"},
  "epoch": "ep_bqeknkmarvikuy7ofil2okekgi",
  "selfApproval": {"marked": true, "reasons": ["created-plan", "authored-change"]}}
+
+GET /api/v1/plans/pln_f645lvrsgsehfn6fuboigpcawy
+
+HTTP/1.1 200 OK
+
+{"id": "pln_f645lvrsgsehfn6fuboigpcawy",
+ "revision": 1,
+ "state": "approved",
+ "committedOperation": null,
+ "release": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
+ "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+ "operation": "apply-config", "mode": "no-reboot",
+ "approval": "apr_2ztr33rjgnabf5zxbwwf7c47vy",
+ "createdBy": {"principal": "idn_5u4k6llt7jsktfhcfv35xmdetu", "role": "publisher"},
+ "expiresAt": "2026-09-26T21:14:02Z"}
+```
+
+`committedOperation` stays `null` until the commitment (§8.1). The plan's
+other bound values and its plan-time evidence (execution and recovery, plan
+binding) are omitted here.
+
+Creating a draft and updating one of its fragments. A request body that can
+hold a secret value is fingerprinted with a keyed digest and never stored
+(§7.1); the response carries only the sanitized document:
+
+```http
+POST /api/v1/drafts
+Idempotency-Key: 0c6a55e2-8f3b-4a17-9d20-6b1e4f7a3c98
+
+{"cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha", "title": "registry mirror"}
+
+HTTP/1.1 201 Created
+Location: /api/v1/drafts/drf_2rmpezm5rfx47azsgmp66z457a
+ETag: "1-ebup2hadf76apv5qcz6j6ai2q4"
+
+{"id": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
+ "state": "open", "revision": 1, "entries": []}
+
+PUT /api/v1/drafts/drf_2rmpezm5rfx47azsgmp66z457a/fragments/registries
+Idempotency-Key: 6f1d8b40-2a7e-4c53-b9e1-0d4c7a2f5e36
+If-Match: "6-o3nj2wivrgbpbet4kq43iz4hlq"
+
+{"layer": "cluster",
+ "document": "machine:\n  nodeLabels:\n    example.test/token: <value>\n",
+ "marks": ["doc[0]/machine/nodeLabels/example.test~1token"]}
+
+HTTP/1.1 200 OK
+ETag: "7-shw6tpirbqvgj3qjuv2hicf6vm"
+
+{"draft": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "entry": {"kind": "fragment", "name": "registries",
+           "head": "frg_rgkebwvneg6mxhid62gec5difi", "base": 3,
+           "revision": "frv_sqb745zrpl2xltek22ai7sbdue",
+           "document": "machine:\n  nodeLabels:\n    example.test/token: !bwref registry/example-token\n"},
+ "ingestion": "ing_iehib5tgttedjuggkawygvlnym"}
+```
+
+`<value>` stands for the value the operator submits; it appears in no stored
+record or response. `DELETE` on the same route proposes the removal, with no
+body. `marks` are compilation §2.2 paths.
+
+Starting an import, and reading a release and a machine:
+
+```http
+POST /api/v1/ingestions
+Idempotency-Key: 8e2b1c64-5d0a-4f97-a3c8-19b7e6d4f052
+
+{"kind": "import", "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+ "draft": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "source": "machine", "staging": "transient", "marks": []}
+
+HTTP/1.1 202 Accepted
+Location: /api/v1/operations/op_f6hekztxvswfhzqoe2wbyqnbtq
+
+GET /api/v1/releases/rel_fgqvcvz3ck7h7234ljgdbzsj6m
+
+HTTP/1.1 200 OK
+
+{"id": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
+ "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
+ "draft": "drf_2rmpezm5rfx47azsgmp66z457a", "draftRevision": 8,
+ "publishedBy": {"principal": "idn_5u4k6llt7jsktfhcfv35xmdetu", "role": "publisher"},
+ "publishedAt": "2026-09-26T09:14:05Z",
+ "sources": [{"head": "frg_rgkebwvneg6mxhid62gec5difi",
+              "revision": "frv_sqb745zrpl2xltek22ai7sbdue", "headRevision": 4}],
+ "machines": [{"machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+               "review": "/api/v1/releases/rel_fgqvcvz3ck7h7234ljgdbzsj6m/machines/mch_tqhcznunhyle4hnxru5hkt35uq/review"}]}
+
+GET /api/v1/machines/mch_tqhcznunhyle4hnxru5hkt35uq
+
+HTTP/1.1 200 OK
+
+{"id": "mch_tqhcznunhyle4hnxru5hkt35uq",
+ "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
+ "hardware": {"smbiosUuid": "...", "serial": "..."},
+ "desired": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
+ "applied": {"release": "rel_uxpkmwd6ckxmj4z75j7y2mcxb4", "source": "operation"},
+ "frozen": false, "scopeState": "normal", "openDrift": null}
+```
+
+`source` is `machine` to read the configuration from the node, or `document`
+with the text in a `document` field. `scopeState` is `normal`, or one of
+execution and recovery's recovery scope states while recovery mode is in
+effect.
+
+Entering recovery mode, which names the restored backups (§12.2):
+
+```http
+POST /api/v1/recovery/entries
+Idempotency-Key: 3a9f0d71-c6e2-4b85-8f14-72d0b5a9e6c3
+
+{"restored": [
+   {"family": "database", "backup": "pg-2026-09-25T02:00Z",
+    "takenAt": "2026-09-25T02:00:00Z"},
+   {"family": "provider", "backup": "bao-2026-09-25T02:30Z",
+    "takenAt": "2026-09-25T02:30:00Z"}],
+ "reason": "database restored after storage failure"}
+
+HTTP/1.1 201 Created
+Location: /api/v1/recovery
+Bronzeward-Epoch: ep_53wiltmcac6xxdggvgg7zcoh5y
+Bronzeward-Recovery-Mode: true
 ```
 
 ### 9.4 Errors
@@ -818,7 +1101,7 @@ value; `instance` is the request's identifier, also written to the server log.
   "conflicts": [
     {"head": "frg_rgkebwvneg6mxhid62gec5difi",
      "expected": "3-hnztg6eb5jepsmpyarveova3be",
-     "actual": "4-4ycffhy7bf4o2w6pz5b4r75hmu"}
+     "actual": "4-2sconqraq7nviey6wt7h3th3ry"}
   ]
 }
 ```
@@ -831,9 +1114,9 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, an approved plan, a second approval) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
-| 409 | `recovery-mode-active` | a mutation refused during recovery mode (§12.2) |
+| 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, or any mutation but entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
 | 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13) |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
@@ -932,7 +1215,7 @@ A token issued before the current recovery epoch is refused (§12.3).
 Each route names its roles (§9.2). The check runs in the request handler
 before any transaction, and again inside the transaction for acts whose
 validity the database must hold: an approval checks that the approver is not
-revoked, with the principal row read `FOR SHARE`.
+revoked, with the principal row read `FOR SHARE` (T5a).
 
 When a principal holds several roles that qualify for a route, the act is
 recorded under the first qualifying role in the route's listed order
@@ -941,12 +1224,13 @@ under a single named role (design §13.7 item 2).
 
 Human-only routes refuse automation even where a role would allow it:
 approval, recovery and identity revocation because automation never holds
-those roles (design §13.7 item 2); and, as an interim position, ingestion and
-inventory creation, which require `author` held by a human
-**(choice §17.22)**. Design §13.7 leaves "which role performs the privileged
-ingestion that feeds an adoption" to an owner decision pending on
-[ginsys/bronzeward#14](https://github.com/ginsys/bronzeward/issues/14), and
-names no role for inventory records.
+those roles (design §13.7 item 2); and, as an interim position, ingestion
+(with its marks, takeover and abandonment), inventory creation and the creation
+of adoption plans, which require `author` held by a human
+**(choice §17.22)**. Design §13.7 lists "which role performs the privileged
+ingestion that feeds an adoption" among the questions it does not settle, as an
+owner decision, and names no role for inventory records. An adoption plan's
+approval is an `approver`'s, as design §13.7 item 3 already says.
 
 Drift **Ignore** is outside PoC scope (execution and recovery, supported
 values) and has no route.
@@ -955,14 +1239,20 @@ values) and has no route.
 
 **Identity revocation** is recorded by `recovery-admin` (design §13.7 item 4):
 an immutable revocation row and the principal's `revoked` flag, in one
-transaction that locks the principal row. From its commit:
+transaction that locks the principal row `FOR UPDATE` (T5c). From its commit:
 
-- every approval that identity gave and that no attempt has used authorizes
-  nothing: the commitment and attempt transactions read the approver's
-  principal row `FOR SHARE` (execution and recovery, dispatch commitment);
+- no commitment or attempt transaction admits an approval that identity gave:
+  execution and recovery's comparison 1, repeated in every attempt transaction,
+  refuses it, and reads the principal row `FOR SHARE` so that the revocation
+  waits for it or precedes it (§1.2 item 3). An attempt already recorded is not
+  reached; an operation left with an attempt in flight becomes `unresolved`
+  and goes to `recovery-admin`'s accounting (execution and recovery, accounting
+  a lost response). The uncommitted plans it approved read `revoked` (§8.1);
 - the identity cannot authenticate again: a revoked human subject is refused
   at §10.1, and a service identity's token is revoked with it
-  **(choice §17.19)**. A revocation is permanent in the PoC; the person or
+  **(choice §17.19)**. This goes beyond design §13.7 item 4, which states what
+  the revocation invalidates and not whether the identity may still sign in; it
+  does not contradict it. A revocation is permanent in the PoC; the person or
   service needs a new identity.
 
 A restore can remove a revocation recorded after the backup. The deployment
@@ -973,12 +1263,16 @@ subjects to that list (§12.3) **(choice §17.19)**.
 **Losing a role** without an identity revocation is not acted on
 **(choice §17.23)**. A human's roles are known only from the token presented
 with a request, so a role removed at the identity provider is not observable
-for approvals already given. Whether it should invalidate them is an owner
-decision pending on ginsys/bronzeward#14; the available remedy is an identity
-revocation.
+for approvals already given. Whether it should invalidate them is among the
+questions design §13.7 does not settle, as an owner decision; the available
+remedy is an identity revocation.
 
 Approval revocation is execution and recovery's; this contract records it as
-an immutable row with its act (T5).
+an immutable row with its act, in a transaction that first locks the approval
+row `FOR UPDATE`, so that it waits for a commitment or attempt transaction
+reading that approval `FOR SHARE` (T5b; DS row 003). A lock read does not fire
+the approval table's immutability trigger, which refuses only `UPDATE` and
+`DELETE`.
 
 ### 10.5 Recording every act
 
@@ -1068,19 +1362,18 @@ item 4).
 
 `InstallationState` is a single row: the current epoch's identity, whether
 recovery mode is in effect, and the schema version. `RecoveryEpoch` rows are
-immutable: identity, sequence number, entry time and entering principal.
+immutable: identity, entry time, entering principal and, for an entry after a
+restore, each restored backup family with the backup's identity and age, so
+that the pairing duties of design §7.7 can be checked (execution and recovery,
+entry).
 
-An epoch has two values **(choice §17.25)**:
-
-- an **identity**, 128 random bits (§2), minted at installation and at every
-  recovery-mode entry;
-- a **sequence number**, one more than the highest in the database, which is
-  execution and recovery's counter.
-
-Every comparison is equality with the current identity: an approval, a scope
-release, a fence, a claim and an automation token are valid only if the epoch
-they carry is the current one. The sequence number orders epochs for display
-within one history and decides nothing.
+An epoch is an **identity**: 128 random bits (§2), minted at installation and
+at every recovery-mode entry, never issued again, and compared by equality
+only, as execution and recovery requires **(choice §17.25)**. An approval, a
+scope release, a fence, a claim and an automation token are valid only if the
+epoch they carry is the current one. No counter orders epochs; where a reader
+wants them in order, the entry time of their `RecoveryEpoch` rows orders them
+for display, and decides nothing.
 
 This answers DB §9's question. An epoch stored in the database is rewound with
 it, so a counter is "greater than any value in the restored state" but can
@@ -1094,34 +1387,75 @@ it.
 
 ### 12.2 Entry
 
-Entry runs as one transaction (T9), from the API (`recovery-admin`) or, for the
-case design §7.7 duty 6 describes ("before normal startup"), from a
-server-side command run against the database before the service starts
-**(choice §17.26)**. It:
+Design §7.7 duty 6 has the operator enter recovery mode "before normal
+startup", and design §13.7 item 5 and §14.6 give entering it to
+`recovery-admin`. The two meet in execution and recovery's recovery start
+**(choice §17.26)**:
+
+- After a restore, the operator starts the service with a server-side
+  **recovery-start flag**. The flag is process state, not database state. Under
+  it the process runs no executor and no job worker, attempts no commitment or
+  attempt transaction, serves reads, observation and the recovery routes, and
+  refuses every other mutation with `409 recovery-mode-active` until entry has
+  committed. The dispatch gates therefore stay closed before entry, whatever
+  the restored database says.
+- Entry itself is an API act by `recovery-admin`, human only:
+  `POST /recovery/entries`, whose body names each restored backup family with
+  the backup's identity and age (§9.3). No server-side command enters recovery
+  mode on its own; the command-line tool of §10.2 handles automation tokens
+  only.
+- Once entry has committed, recovery mode and the scope gates are database
+  facts that every commitment and attempt compares, so the service may be
+  restarted without the flag.
+
+Entry runs as one transaction (T9). It:
 
 1. locks `InstallationState` `FOR UPDATE`, which waits for every transaction
-   that read it `FOR SHARE`;
-2. inserts a new epoch and makes it current, and sets recovery mode;
+   that read it `FOR SHARE`, then every machine row `FOR UPDATE`;
+2. inserts the `RecoveryEpoch` row and makes it current, and sets recovery
+   mode;
 3. marks every staging claim from an earlier epoch `abandoned` and clears its
    payload (compilation §3.5);
 4. fails every `queued` or `running` job with `recovery-mode-entered`
    (§8.2);
-5. performs execution and recovery's entry effects: every operation in
-   `committed`, `sending` or `verifying` becomes `unresolved`, and every
-   machine scope's gate closes;
-6. writes the act record.
+5. performs execution and recovery's entry effects: it closes every machine
+   scope's gate, takes over every non-terminal operation into the new epoch
+   (each in `committed`, `sending` or `verifying` becomes `unresolved`), and
+   marks every machine scope pre-restore unaccounted, each recorded on the
+   machine's timeline (T7);
+6. writes the idempotency record and the act.
 
 From the commit, every fence and claim issued before it fails the epoch term of
 §5.1, whatever generation it carries; every approval and scope release from an
 earlier epoch authorizes nothing; and every automation token from an earlier
 epoch is refused.
 
-While recovery mode is in effect, the API refuses every mutation with
-`409 recovery-mode-active`, except recovery acts, freezes, approval and
-identity revocations, and plan cancellations, which only remove authority or
-record recovery **(choice §17.13)**. Design §14.6 pauses mutation while
-allowing observation; reads are unaffected. Leaving recovery mode and
-releasing scopes are execution and recovery's.
+While recovery mode is in effect, what the API accepts depends on the act and
+the scope **(choice §17.13)**:
+
+- **Always accepted**, by the roles design §13.7 gives them: acts that only
+  remove authority (approval and identity revocation, plan cancellation,
+  freeze) and acts that record recovery (accounting decisions, takeover
+  requests, scope marks, scope release, resolutions, leaving recovery mode).
+- **Accepted installation-wide**: inventory, drafts, ingestion and
+  publication. They write the database and the provider and send nothing to a
+  machine, and clearing a scope `blocked` on a lost key version needs a new
+  publication, followed by re-approval (design §7.7 duty 4).
+- **Refused with `409 recovery-mode-active` on a scope still pre-restore
+  unaccounted**: plan creation, approval, adoption plans and unfreezing.
+- **Refused on every scope not released in the current epoch**: the
+  commitment, the attempt and the adoption record, by execution and recovery's
+  scope gate (its comparison 6 and adoption requirement 4.5). An approval on a
+  scope accounted for but not yet released is accepted and authorizes nothing
+  until the release.
+- **A released scope is fully usable**, as execution and recovery states.
+
+Design §14.6 "pauses mutation and automatic resumption while allowing the
+observation and checks needed"; this contract reads the pause as covering
+everything that can reach a machine through a scope not yet accounted for.
+Reads are unaffected. Leaving recovery mode needs every scope released
+(execution and recovery); since nothing refused above is needed to account for,
+repair or release a scope, leaving cannot deadlock.
 
 ### 12.3 What a restored state means, record by record
 
@@ -1212,8 +1546,9 @@ knows:
   connection. The release committed, as in DB row 061. The worker cannot tell,
   so it reads: a release exists for `(drf_2rmpezm5rfx47azsgmp66z457a, 8)`
   with matching digests, so it records the operation `succeeded` if its fence
-  still holds. If another worker superseded it, that worker's own T3 hits the
-  unique key, finds matching digests and succeeds with the same release. The
+  still holds. If another worker superseded it, that worker's own T3 finds the
+  release by its first check (§6.2), before the draft and head checks the first
+  commit made fail, compares digests and succeeds with the same release. The
   client following the operation sees one release.
 - **Provider behind the database.** OpenBao is restored from a snapshot older
   than generations the database references. Nothing in Bronzeward wrote this
@@ -1230,13 +1565,17 @@ knows:
    `op_zcfwgr7trb76z3zmsndrnk5mcm` and the record.
 2. A proxy retries the request: the key and fingerprint match; the stored
    `202` is replayed with `Idempotent-Replayed: true`. No second operation.
-3. The client retries while T2 is still open: the second insert waits on the
-   unique index, then replays (not measured, §7.2).
+3. The client retries while T2 is still open: the retry's transaction waits on
+   the key's lock, then finds the committed record and replays it (not
+   measured, §7.2). Had the request been a draft entry update, both copies
+   could already have run ingestion; the second then replays the first's
+   response, and its own generations are orphans (§6.4).
 4. The client reuses the key for a different draft: `422
    idempotency-key-reused`.
-5. The client, having lost everything, posts again with a new key. The partial
-   unique index on active publish operations returns the running operation;
-   after it succeeded, the natural key returns the existing release.
+5. The client, having lost everything, posts again with a new key. While the
+   operation is queued or running, the partial unique index on active publish
+   operations returns it, `202`. After it succeeded, the draft is `published`,
+   and T2 answers `409 conflict` naming the draft's release.
 6. A human approves the plan twice with two keys: the second is `409
    conflict`, one approval per plan.
 
@@ -1255,9 +1594,10 @@ knows:
 
 ### 13.6 A restore to an older backup
 
-State at backup time *T*: epoch `ep_bqeknkmarvikuy7ofil2okekgi` (sequence 1),
-release `rel_fgqvcvz3ck7h7234ljgdbzsj6m`, operation
-`op_e4t4jm7vp3b5fvmbvossyj43hq` owned by executor X at generation 1.
+State at backup time *T*: epoch `ep_bqeknkmarvikuy7ofil2okekgi`, release
+`rel_fgqvcvz3ck7h7234ljgdbzsj6m`, operation `op_e4t4jm7vp3b5fvmbvossyj43hq`
+on machine `mch_tqhcznunhyle4hnxru5hkt35uq`, owned by executor X at
+generation 1.
 
 After *T*:
 
@@ -1265,25 +1605,29 @@ After *T*:
 2. X is taken over by Y (generation 2) and back by X (generation 3); X holds
    token `(ep_bqeknkmarvikuy7ofil2okekgi, 3)`.
 3. `recovery-admin` enters recovery mode for an unrelated reason, minting
-   `ep_e3t4dznwcjg4uoahvfjk4w6kwy` (sequence 2), and leaves it.
+   `ep_e3t4dznwcjg4uoahvfjk4w6kwy`, and leaves it.
 4. An ingestion creates generations under claim
    `ing_4ycffhy7bf4o2w6pz5b4r75hmu`.
 5. `recovery-admin` revokes human `idn_6woutisn7uensexh3kk2qlz6ma`.
 
 The operator restores the database from *T* and the provider from a snapshot
-taken after it, then, before starting the service, runs the entry command. It
-mints `ep_53wiltmcac6xxdggvgg7zcoh5y`, sequence 2 again: the lost epoch's
-sequence number, a different identity.
+taken after it. The restored database names `ep_bqeknkmarvikuy7ofil2okekgi` as
+current and knows nothing of `ep_e3t4dznwcjg4uoahvfjk4w6kwy`. The operator
+stops every service instance and starts one with the recovery-start flag; its
+dispatch gates stay closed and it refuses every mutation but entry.
+`recovery-admin` then records entry through the API, naming both restored
+backups. Entry mints `ep_53wiltmcac6xxdggvgg7zcoh5y`, a new random identity: it
+equals neither the restored epoch nor the lost one.
 
 - `rel_e7d7ysg556p667w5aausvvyrne` answers `404`; no new release can be given
   that identifier.
-- The operation is `unresolved` (entry). If X is still running with its
-  token, its next write carries `ep_bqeknkmarvikuy7ofil2okekgi`, not the
-  current epoch, and is refused, whichever generation the rows now hold. With a
-  counter alone, the next two takeovers would reissue generations 2 and 3, and
-  X's token would pass, as in DB row 027. Execution and recovery's first
-  procedure step stops X or waits out its maximum request lifetime; the fence
-  refuses only its database writes.
+- The operation is `unresolved` (entry) and its machine's scope is pre-restore
+  unaccounted. If X is still running with its token, its next write carries
+  `ep_bqeknkmarvikuy7ofil2okekgi`, not the current epoch, and is refused,
+  whichever generation the rows now hold. With a counter alone, the next two
+  takeovers would reissue generations 2 and 3, and X's token would pass, as in
+  DB row 027. Execution and recovery's first procedure step stops X, or
+  establishes it as stopped; the fence refuses only its database writes.
 - A client that recorded `ep_e3t4dznwcjg4uoahvfjk4w6kwy` sees
   `ep_53wiltmcac6xxdggvgg7zcoh5y` in `Bronzeward-Epoch` and knows its events and
   cursors do not resume.
@@ -1292,6 +1636,14 @@ sequence number, a different identity.
   the subject is added to `deniedSubjects`; until then the human could sign
   in, but any approval they gave before entry authorizes nothing.
 - Every automation token is refused until the tool reissues it.
+- During recovery mode an `author` edits the change that step 1 published into
+  a draft again and a `publisher` publishes it, which recovery mode allows. A
+  plan for `mch_tqhcznunhyle4hnxru5hkt35uq` is refused `409
+  recovery-mode-active` while its scope is pre-restore unaccounted. Once the
+  scope is accounted for, its restored operation resolved and the scope
+  released (execution and recovery), it is fully usable: a plan, an approval in
+  the new epoch and the commitment proceed there, while other scopes stay
+  closed until they are released too.
 
 ## 14. Failure and rejection cases
 
@@ -1302,6 +1654,7 @@ sequence number, a different identity.
 | Auth | No qualifying role; automation on a human-only route | `403 forbidden` | nothing |
 | Request | Missing `Idempotency-Key` or `If-Match` | `428` | nothing |
 | Request | Key reused for another request | `422` | nothing |
+| Request | Same key while the first is in flight | waits on the key's lock, then replays or executes | one effect; on a draft entry route, the second copy's generations are orphans |
 | Draft | ETag mismatch | `412` | nothing |
 | Draft | Compilation refuses the input | `422`, paths only | claim row; orphans if past compilation §2.3 step 6 |
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
@@ -1309,8 +1662,13 @@ sequence number, a different identity.
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
 | Publish | Dependency not `retained`, or provider sealed | `failed`, `503 dependency-unavailable` or `422` | operation, act |
 | Publish | Commit-unknown | resolved by reading the natural key | the release, once |
-| Publish | Worker superseded | its commit refused by the fence | the other worker's result |
-| Any | Mutation during recovery mode | `409 recovery-mode-active` | nothing |
+| Publish | Worker superseded, or its lease lapsed | its commit refused by the fence; the job claimed again | the other worker's result |
+| Publish | New request for a draft already published | `409 conflict` naming the release | nothing |
+| Plan | Second approval of a plan in one epoch | `409 conflict` | nothing |
+| Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
+| Recovery | Plan creation, approval, adoption plan or unfreeze on a scope still pre-restore unaccounted | `409 recovery-mode-active` | nothing |
+| Recovery | Commitment, attempt or adoption record on a scope not released in the current epoch | refused by execution and recovery's scope gate | its refusal entry |
+| Recovery | Any mutation but entry under the recovery-start flag, before entry | `409 recovery-mode-active` | nothing |
 | Any | Deadlock retries exhausted | `503 transient-conflict` | nothing |
 | Migrate | Failure or kill inside a migration | migration absent; server refuses to start | earlier migrations |
 | Startup | Schema or checksum mismatch | refuses to start | nothing |
@@ -1323,8 +1681,9 @@ sequence number, a different identity.
 2. **Immutable is insert-only.** Immutable tables refuse `UPDATE` and
    `DELETE`; no table is deleted from in the PoC.
 3. **Every write is conditional.** A mutable record changes only by a
-   compare-and-set on its revision, or a fenced `UPDATE` whose predicate
-   includes owner, generation and epoch.
+   compare-and-set on its revision, by a fenced `UPDATE` whose predicate
+   includes owner, generation and epoch, or under a row lock that the same
+   transaction took `FOR UPDATE` and then checked.
 4. **Lock what you check.** Every value a transaction's decision rests on is
    locked or in the predicate of the write that acts on it.
 5. **No provider I/O in a transaction.**
@@ -1334,8 +1693,9 @@ sequence number, a different identity.
 7. **One release per draft revision**, and a release is complete or absent.
 8. **Heads move only at publication**, and never past a head revision other
    than the one the draft or snapshot read.
-9. **Every committed mutation has an act and an idempotency record** in its
-   own transaction; no refused request has either.
+9. **Every committed API request has an act and an idempotency record** in
+   its own transaction; no refused request has either. Transactions that serve
+   no request record timeline entries instead.
 10. **No request body, secret value or ciphertext in an idempotency record, an
     act or a problem document.**
 11. **Everything that authorizes carries the current epoch** (approvals, scope
@@ -1343,6 +1703,11 @@ sequence number, a different identity.
 12. **No automation principal holds `approver` or `recovery-admin`**, and no
     route issues tokens or grants roles.
 13. **The server runs only on the schema it was built for.**
+14. **One approval per plan and epoch, and at most one operation per plan**,
+    the operation created by the dispatch commitment.
+15. **Timeline order is commit order within a machine scope.**
+16. **Recovery mode never blocks its own exit.** Nothing it refuses is needed to
+    account for, repair or release a scope.
 
 ## 16. Verification and evidence limits
 
@@ -1359,7 +1724,20 @@ each (design §7.7 consequences):
 - the epoch term: a fence token issued before a recovery-mode entry refused
   after it, with a control that drops the term and passes the token, run across
   a real `pg_dump` restore as DB row 027 was;
-- two requests with one idempotency key in flight together;
+- two requests with one idempotency key in flight together, with a control
+  that drops the key lock;
+- an approval revocation and an identity revocation each started while a
+  commitment holds the approval, waiting for it, with a control that inserts
+  the revocation without the lock and does not wait (DS row 003);
+- a lapsed `publish` job claimed again and its first worker's completion
+  refused;
+- machine revisions, shared by plan, operation and machine-scope entries,
+  allocated in commit order under concurrent writers to one scope, with a
+  control that allocates without the lock;
+- a takeover keeping an `unresolved` operation `unresolved`, and refusing a
+  terminal one;
+- recovery mode's per-scope refusals and allowances of §12.2, and the refusal
+  of every mutation but entry under the recovery-start flag;
 - every walk-through of §13, and every refusal of §14;
 - the immutability triggers, and startup refusal on each schema mismatch;
 - authentication refusals for each token defect in §10.1 and §10.2, and each
@@ -1381,8 +1759,17 @@ Evidence gaps this contract carries rather than closes:
 - **Recovery-mode entry and executor quiescence**: the other half of FR §9
   item 4, execution and recovery's and still unmodelled.
 - **Same-key concurrency**: unmeasured (§7.2).
-- **Orphan listing**: the metadata identity's permission to list the
-  generation tree was not measured (§6.4).
+- **Orphan listing**: PC measured listing under one generation path (row
+  065), not whether the PoC policy grants it at each level of the generation
+  tree (§6.4).
+- **Unkeyed configuration digests**: releases and import base revisions persist
+  unkeyed SHA-256 digests of whole configurations (§1.1, §6.2), whose
+  guessability was not assessed (compilation §4.1; execution and recovery's
+  configuration digest). Such a digest is only as unguessable as the whole
+  configuration it covers.
+- **Cross-contract points still open**: the compilation hand-off of the
+  configuration digests (§1.1 item 2) until its amendment lands, and every
+  item of §1.2 until the execution and recovery contract lands stating it.
 - **Migrations**: no v1 tool, online migration or downgrade was tested (DB
   §6.2); rule 1 of §11 relies on the operator stopping the service.
 - **Isolation**: only read committed was measured; serializable was not
@@ -1398,8 +1785,10 @@ design and evidence do not settle the question. Each is marked in place as
 **(choice §17.n)**.
 
 1. **Random application-generated identifiers; sequences never leave the
-   database** (§2). Alternative: sequence ids with an epoch prefix, which
-   still reissue within an epoch no one entered.
+   database; the manager machine ID is a `mch` identifier** (§2).
+   Alternatives: sequence ids with an epoch prefix, which still reissue within
+   an epoch no one entered; for machines, an RFC 9562 UUID, as design §4.4's
+   wording suggests.
 2. **ETags carry a random token beside the revision** (§4.1). Alternative:
    revision numbers alone, which match again after a restore.
 3. **Immutability enforced by database triggers** (§3). Alternative:
@@ -1411,7 +1800,8 @@ design and evidence do not settle the question. Each is marked in place as
    Alternative: an import-base head advanced by the adoption record, which puts
    a persistence write into execution and recovery's transaction.
 6. **Publication selects the release as Desired for its machines** (§6.2).
-   Alternative: select at plan creation or at approval.
+   Alternative: select at plan creation or at approval, towards which design
+   §12.6's "select the latest applicable **approved** release" points.
 7. **No provider or network I/O inside a transaction; fixed lock order; three
    deadlock retries** (§5). Alternative: provider calls inside the
    transaction, holding its locks for the provider's latency, or a pause.
@@ -1426,24 +1816,41 @@ design and evidence do not settle the question. Each is marked in place as
 10. **The release's natural key is the draft revision, compared by a digest
     without ciphertext** (§6.2). Alternative: DB's release name plus content
     digest over everything.
-11. **An operation is created with its plan, in `planned`** (§8.1).
-    Alternative: created at the commitment, the other reading of design §11.1.
-    Needs confirming in execution and recovery.
-12. **Job states `queued`, `running`, `succeeded`, `failed`; ingestion not
-    re-run; entry fails active jobs** (§8.2). Alternative: resume jobs after
-    recovery.
-13. **Recovery mode refuses every mutation except those that only remove
-    authority or record recovery** (§12.2). Alternative: refuse only machine
-    mutation, allowing edits and publication.
+11. **A plan's operation is created by the dispatch commitment; before it, the
+    plan is the handle, with execution and recovery's states `proposed`,
+    `approved`, `committed` and terminal `revoked`, `cancelled` and
+    `expired`; an adopt plan's commitment creates its operation in
+    `completed`** (§1.2, §8.1). Design §11.1 and §12.5 do not settle when the
+    operation is created. Alternative: create it with the plan, in a
+    pre-commitment state, and make the commitment its conditional transition
+    to `committed`.
+12. **Job states `queued`, `running`, `succeeded`, `failed`; a lapsed
+    `publish` job is claimed again, an `ingest` job is not re-run; entry fails
+    active jobs** (§5.1, §8.2). Alternative: resume jobs after recovery.
+13. **Recovery mode is per scope** (§12.2): acts that only remove authority or
+    record recovery are always accepted; inventory, drafts, ingestion and
+    publication are accepted installation-wide; plan creation, approval,
+    adoption plans and unfreezing are refused on a scope still pre-restore
+    unaccounted; commitments, attempts and adoption records are refused on
+    every scope not released in the current epoch; a released scope is fully
+    usable. This reads design §14.6's
+    pause as covering what can reach a machine. Alternative: refuse every
+    mutation but removals of authority and recovery acts installation-wide,
+    which cannot clear a scope blocked on a lost key version while exit needs
+    every scope released.
 14. **Problem documents with codes; a `v1` additive deprecation policy;
-    cursors and event ids tied to the epoch** (§8.3, §9). Alternatives: any
-    other error format or policy; cursors that survive a restore.
-15. **Adoption approval requested as a plan with `operation: adopt`** (§9.2).
+    unknown request fields refused; pagination of 50 by default and 500 at
+    most; cursors and event ids tied to the epoch; Server-Sent Events, no
+    WebSocket** (§8.3, §9). Alternatives: any other error format or policy;
+    unknown fields ignored; cursors that survive a restore; WebSocket, which
+    design §11.1 also allows.
+15. **Adoption approval is a plan with `operation: adopt`, approved by an
+    `approver`, whose commitment records the adoption** (§1.2, §9.2).
     Alternative: a separate adoption resource.
 16. **OIDC access tokens verified per request, no session, 15-minute maximum
-    lifetime** (§10.1). Alternative: server sessions with introspection or
-    back-channel logout, which propagate disablement faster at the cost of
-    state.
+    lifetime; asymmetric signatures only, `iat` required, 60 seconds' skew**
+    (§10.1). Alternative: server sessions with introspection or back-channel
+    logout, which propagate disablement faster at the cost of state.
 17. **One valid automation token per identity, rotated by replacement,
     mandatory expiry of 30 days by default and 90 at most** (§10.2).
     Alternatives: an overlap window during rotation; longer or no expiry.
@@ -1451,33 +1858,48 @@ design and evidence do not settle the question. Each is marked in place as
     Alternative: none, leaving edge case (b) of design §13.7 item 3
     unrecordable.
 19. **Identity revocation is permanent and refuses authentication; a
-    deny list in deployment configuration survives restore** (§10.4).
-    Alternative: revocation that only invalidates approvals, as design §13.7
-    item 4 states it.
+    deny list in deployment configuration survives restore** (§10.4). This
+    goes beyond design §13.7 item 4, which states what a revocation
+    invalidates, without contradicting it. Because identity providers usually
+    keep a subject stable, a mistaken revocation locks that person out until
+    they are given a new identity. Alternative: revocation that only
+    invalidates approvals, as design §13.7 item 4 states it.
 20. **With several qualifying roles, the act is recorded under the first in
     the route's order** (§10.3). Alternative: the client names its role in a
     header.
 21. **Both unsettled self-approval cases are marked, each with its reason**
     (§10.5). Alternative: mark neither, or only (b).
-22. **Interim, pending ginsys/bronzeward#14: ingestion and inventory creation
-    need a human `author`** (§10.3). Alternatives: `publisher`; automation
-    allowed.
-23. **Interim, pending ginsys/bronzeward#14: losing a role does not
-    invalidate approvals** (§10.4). The alternative needs a directory lookup
-    or a session to observe the loss.
+22. **Interim, until the owner decides the question design §13.7 leaves open
+    ("which role performs the privileged ingestion that feeds an adoption"):
+    ingestion, with its marks, takeover and abandonment, inventory creation
+    and the creation of adoption plans need a human `author`; an `approver`
+    approves adoption plans** (§9.2, §10.3). Alternatives: `publisher`;
+    automation allowed.
+23. **Interim, until the owner decides the question design §13.7 leaves open
+    (whether losing a role invalidates approvals given under it): losing a
+    role does not invalidate approvals** (§10.4). The alternative needs a
+    directory lookup or a session to observe the loss.
 24. **Migrations by explicit command with the service stopped; startup refuses
     any schema or checksum mismatch; no rewrite of immutable rows; no
     downgrade** (§11). Alternative: migrate at startup.
-25. **The epoch is a random identity compared by equality, with a counter for
-    order** (§12.1). Alternative: an external high-water mark (for example in
-    OpenBao or a file) checked at startup, which could detect some restores
-    but adds a dependency that can itself be restored.
-26. **Recovery-mode entry also by a server-side command before the service
-    starts** (§12.2). Alternative: API only, which needs the service running on
-    restored state first.
+25. **The epoch is a random, never-reissued 128-bit identity compared by
+    equality, with no counter** (§12.1), as execution and recovery requires.
+    Alternatives: a counter in the database, which a restore rewinds; an
+    external high-water mark (for example in OpenBao or a file) checked at
+    startup, which could detect some restores but adds a dependency that can
+    itself be restored.
+26. **A server-side recovery-start flag keeps the dispatch gates closed; entry
+    still needs the `recovery-admin` API act** (§12.2). Alternative: entry by a
+    server-side command before the service starts, which performs no role
+    check and so sidesteps design §13.7 item 5.
 27. **Automation tokens from an earlier epoch are refused** (§12.3).
     Alternative: keep them, reviving any token whose revocation the restore
     removed.
+28. **Drafts and releases cover one cluster, while library fragments are
+    shared** (§3.1): a library change published through one cluster reaches
+    another only at that cluster's next publication, reviewed in its plan's
+    diff. Alternatives: a library change in a draft of its own; a publication
+    that covers every cluster using the changed fragment.
 
 ## 18. Traceability
 
@@ -1485,18 +1907,18 @@ design and evidence do not settle the question. Each is marked in place as
 | --- | --- | --- |
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
-| §3 entities, immutability | §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5 |
+| §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28 |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
 | §5 transactions | §7.2, §7.4 | DB §4.2 rows 059, 061; [DB §6.3](../design/research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs); [DB §7](../design/research/20260924-database-semantics.md#7-limits); [DS §7](../design/research/20260925-dispatch-safety.md#7-limits) |
 | §5.1 fences, claims | §7.2, §12.5 | [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions) rows 015–018; [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) rows 019–021 |
 | §6 publication | §7.4, §7.8 | DB §4.2 rows 004–011, 058–061; KL §7 item 1 |
 | §6.3 partial publication | §7.4, §7.6, §7.8 | [PC §4](../design/research/20260924-provider-capability-comparison.md#4-the-matrix) row 083; [KL §3.2](../design/research/20260924-key-loss-restoration.md#32-what-each-case-showed) cases G, H; [RC §6.4](../design/research/20260924-retention-metadata-classification.md#64-criterion-4-provider-limits-and-the-alert-policy-the-evidence-supports) |
-| §6.4 orphans | §7.4, §7.8 | DB §9; KL case G |
-| §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |
-| §8 operations | §11.1, §15.2 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2) row 009; DB §4.5 |
+| §6.4 orphans | §7.4, §7.8 | DB §9; KL case G; PC §4 row 065 |
+| §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; DB §4.6 (advisory lock); [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |
+| §8 operations | §11.1, §12.5, §15.2 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2) row 009; DB §4.5 rows 020, 021 |
 | §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5 |
-| §10 authentication, authorization | §13.1, §13.3, §13.6, §13.7 | none: FR §9 item 5; [DS §4.1](../design/research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1) for approval revocation |
+| §10 authentication, authorization | §13.1, §13.3, §13.6, §13.7 | none: FR §9 item 5; [DS §4.1](../design/research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1) row 003 for approval revocation and its lock |
 | §11 migrations | §7.2, §14.2 | [DB §4.6](../design/research/20260924-database-semantics.md#46-s6-migrations) rows 022–026; [DB §6.2](../design/research/20260924-database-semantics.md#62-criterion-2-intent-ownership-queue-claims-migrations-restored-state) |
 | §12 restored state, epoch | §7.7, §7.8, §14.6 | DB §4.7 row 027; DB §9 (inferred); [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation) items 2, 5; FR §9 item 4 |
 | §16 gaps | §18.1, §18.2 | [FR §9](../design/research/20260925-feasibility-evidence-review.md#9-gaps), FR §10 |
