@@ -815,8 +815,13 @@ the interval is open. A mismatch in a `drift` observation, or in a
 `restoration` observation after a restore (§7.3 step 4), opens a **drift
 record** on the machine's
 timeline, naming the observation, the `Applied` digest and the observed digest,
-and raises the design §15.3 digest-mismatch alert. A machine has at most one
-open drift record. A drift whose observed digest equals the artifact of an
+and raises the design §15.3 digest-mismatch alert. The definition above holds
+for a `restoration` observation too: while a restored operation on the scope is
+still `unresolved`, the mismatch is evidence for its classification (§7.3 step
+5), and the drift record opens only once that operation is terminal, at the
+scope's marking (§7.3 step 6). A scope whose restored operation stays
+`unresolved` is marked `unresolved` and opens no drift record yet. A machine
+has at most one open drift record. A drift whose observed digest equals the artifact of an
 operation accounted by decision is linked to it as a possible late landing
 (§5.2).
 
@@ -1071,8 +1076,13 @@ epoch, and recovery mode stays in effect until §7.6.
    accounting decision for it. In §5.2 condition 2 the stop of every
    pre-restoration instance takes the place of the executor's stop, and the
    settle floor runs from the latest of the three times that condition names,
-   not from the stop alone. One decision may cover many scopes, each with its
-   own recovery observation.
+   not from the stop alone. For a scope whose attempt the restored state does
+   not hold, the attempt's transport deadline is unknown, and the latest time
+   it could have been takes its place: the stop of the pre-restoration
+   instances plus the **maximum transport deadline**, a static deployment
+   setting held outside the application database like the settle floor. Plan
+   creation refuses a transport deadline above it. One decision may cover many
+   scopes, each with its own recovery observation.
 2. **Verify** schema, revisions, releases, operation journals and provider and
    key references from the restored state. Re-record, from the operator's
    records, every identity revocation made after the restored backup, which the
@@ -1203,9 +1213,11 @@ An implementation and its reviewer can check these directly:
    change while an operation on it is `committed`, `sending`, `verifying` or
    `unresolved`.
 10. **No mutation through a closed gate.** No commitment or attempt
-    transaction succeeds for a scope that is frozen, and none of them nor an
-    adoption record for a scope under recovery mode without a release in the
-    current epoch.
+    transaction succeeds for a scope that is frozen, except the adoption
+    record, the adopt plan's commitment, which changes nothing on the machine
+    (§6.3 requirement 4.5). None of them, the adoption record included,
+    succeeds for a scope under recovery mode without a release in the current
+    epoch.
 11. **Only a stated identity decides.** Every accounting decision and every
     operator resolution is `recovery-admin`'s, recorded with its basis; the
     controller decides only what evidence determines.
@@ -1332,7 +1344,8 @@ observation reads d9. No operation holds M's scope, so drift record D opens.
   digest d9. Release r5 is published from the new import base. An `author`
   creates an adopt plan binding M, its assignment and baseline revisions, D, r5
   and d9, and an `approver` approves it. A `drift` observation after the
-  approval still reads d9 and D is still open, so the adoption record commits:
+  approval still reads d9 and D is still open, so the adoption record commits
+  (the freeze does not block it, §6.3 requirement 4.5, invariant 10):
   `Applied` is (r5, d9, adopted), `Desired` is r5, the baseline
   revision advances, D closes. P now also fails comparison 2 and must be
   planned again. The freeze stays until an `approver` lifts it. If r5's artifact
