@@ -221,7 +221,7 @@ that the trigger fires **(choice §17.3)**.
 | Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1); the release covers one cluster and a set of its machines | compilation §11; this contract |
 | Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity | compilation §9 |
 | DependencyStatus | mutable | last classification per dependency and when first seen `retained` | design §7.6, §7.8 |
-| Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload | compilation §3 |
+| Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload; for a draft entry route, the principal and idempotency key (§7.2) | compilation §3 |
 | MachineState | mutable, revisioned | Desired, Applied (with source), baseline revision | execution and recovery (Desired, Applied and Observed) |
 | Observation | immutable | purpose, machine revision, identity, assignment evidence, running version, configuration digest, health, or what could not be read | execution and recovery §4.1 |
 | Plan | immutable | the binding, creator and role | execution and recovery (plan binding) |
@@ -536,8 +536,11 @@ SELECT ... FROM operation WHERE id = $op FOR UPDATE;
   -- owner, owner_gen, owner_epoch are this worker's (§5.1)
 SELECT id, digest FROM release
  WHERE draft_id = $draft AND draft_revision = $bound_revision;
-  -- present: digests equal -> skip to the operation's UPDATE with that
-  -- release; digests differ -> 409 conflict. Absent: continue.
+  -- present, digests equal, and this operation already `succeeded` with
+  -- that release -> COMMIT with no write and return it (a commit-unknown
+  -- retry); present, digests equal, operation not yet `succeeded` -> skip to
+  -- the operation's UPDATE and its event with that release; digests
+  -- differ -> 409 conflict. Absent: continue.
   -- draft open, revision equals the bound draft revision
   -- $changed head revisions equal the draft's base
   -- $unchanged head revisions equal the snapshot
@@ -683,6 +686,7 @@ key independently. The record stores:
 | --- | --- |
 | `principal_id`, `key` | unique together |
 | `fingerprint` | method, route template, path parameters, `If-Match` and the canonical JSON body (RFC 8785), hashed |
+| `fingerprint_key` | for a keyed fingerprint, the digest key's identity and version (compilation §4.1); otherwise empty |
 | `epoch` | the epoch identity at commit |
 | `status`, `location`, `etag`, `body` | the response to replay; never a secret value (design §11.1) |
 | `operation_id` | for a `202`, the operation it created |
@@ -690,7 +694,14 @@ key independently. The record stores:
 The fingerprint is SHA-256, except for a route whose body can carry
 unextracted input (a draft source update or an ingestion request): its
 fingerprint is HMAC-SHA-256 under compilation's digest key, computed inside the
-ingestion package (compilation §4.1). An unkeyed digest of a low-entropy
+ingestion package (compilation §4.1). The record names the key version, and a
+retry's fingerprint is recomputed under that version, not the current one, so a
+rotation of the digest key does not turn a retry into
+`422 idempotency-key-reused`. If the provider can no longer compute under that
+version, the retry cannot be compared and is answered `422` all the same; the
+client retries under a new key, and T1's `If-Match` refuses a draft update that
+already committed. How digests compare across a rotation is open in
+compilation §4.1. An unkeyed digest of a low-entropy
 secret would be an offline guessing oracle
 ([E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits);
 compilation §4.1). A request body is never stored, not even in a transaction
@@ -701,9 +712,10 @@ later rolled back: a rolled-back row still reached the write-ahead log
 
 The record is inserted by the same transaction that commits the request's
 effect (T1, T2, T4, T5a–T5c, T9 and T11 of §5), and by no other
-**(choice §17.9)**. A refused request commits no effect and no record, so a
-retry is evaluated afresh against current state; since the refusal changed
-nothing, re-evaluating it cannot duplicate anything. Transactions that serve
+**(choice §17.9)**, apart from the draft entry routes' refusals below. A
+refused request commits no effect and no record, so a retry is evaluated afresh
+against current state; since the refusal changed nothing, re-evaluating it
+cannot duplicate anything. Transactions that serve
 no request (T3, T6, T7, T8) write no record.
 
 Before running anything, the handler looks the key up and replays a committed
@@ -717,13 +729,25 @@ work twice for two concurrent duplicates: the second then replays the first's
 record, and the generations its own ingestion created become orphans (§6.4,
 source 2).
 
+The draft entry routes are also the one exception to "a refusal commits no
+record", because their ingestion persists a staging claim before T1 that a
+refusal does not undo. Their claim records the principal and the idempotency
+key. A refusal after the claim exists (compilation's `422`) commits the
+idempotency record with the refusal's response, in the transaction that records
+the claim's outcome. A retry therefore replays the refusal and ingests nothing.
+A retry that finds a claim for its key but no record (the earlier attempt ended
+before any commit, as a `503` inside T1 does) first abandons that claim
+(compilation §3.5) and then ingests afresh. Each key thus holds at most one
+live claim, and the abandoned claim's generations are reported as orphans
+(§6.4).
+
 | Situation | Response |
 | --- | --- |
 | New key | executed; record committed with the effect |
 | Same key, same fingerprint, record exists | the stored status, headers and body, with `Idempotent-Replayed: true`; nothing executes |
 | Same key, other fingerprint | `422 idempotency-key-reused` |
 | Same key while the first request's transaction is open | waits on the key's lock; then replays if the first committed, or executes if it rolled back |
-| Same key after the request that used it was refused | executed afresh |
+| Same key after the request that used it was refused | executed afresh; on a draft entry route refused after ingestion, the stored refusal replayed |
 | Same key after a restore that removed the record | executed afresh (§12.4) |
 
 The waiting row follows PostgreSQL's advisory-lock semantics and is not
@@ -805,6 +829,18 @@ but cannot commit until an `approver` approves it again in the current epoch
 (execution and recovery §2; T5a). After `committed`, the operation carries the
 state; a revocation, cancellation or expiry after it is recorded against the
 plan and reaches the operation through execution and recovery's §3.3.
+
+T5b, T5c and a cancellation do not change the operation themselves. A
+`committed` operation always has an owner holding a lease (§5.1), and the
+owner's next attempt transaction fails comparison 1. That transaction rolls
+back, and a separate T6 transaction, under the machine row and operation locks,
+records the operation `unresolved` with its timeline entry (execution and
+recovery §4, `committed` → `unresolved`). With no attempt ever committed and
+none possible, the same transaction records it `cancelled` (`unresolved` →
+`cancelled`), which releases its scope. An owner that stops before that loses
+its lease: the takeover (T8) records the operation `unresolved`, and the new
+owner performs the same classification. The scope is therefore released
+without operator action.
 
 ### 8.2 Job states
 
@@ -1004,9 +1040,10 @@ HTTP/1.1 200 OK
 other bound values and its plan-time evidence (execution and recovery, plan
 binding) are omitted here.
 
-Creating a draft and updating one of its fragments. A request body that can
-hold a secret value is fingerprinted with a keyed digest and never stored
-(§7.1); the response carries only the sanitized document:
+Creating a draft, and later updating one of its fragments after five other
+updates have taken the draft to revision 6. A request body that can hold a
+secret value is fingerprinted with a keyed digest and never stored (§7.1); the
+response carries only the sanitized document:
 
 ```http
 POST /api/v1/drafts
@@ -1139,7 +1176,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
 | 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
-| 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, or any mutation but entry under the recovery-start flag before entry (§12.2); the body names the scope |
+| 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
 | 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13) |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
@@ -1158,7 +1195,21 @@ Design: [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#
 
 Every request authenticates; there is no anonymous route besides a liveness
 probe that returns no data. A principal is a human, identified by the OIDC
-issuer and subject, or a service identity. No human or automation principal
+issuer and subject, or a service identity.
+
+A human's Principal row is created on first use. When a verified token names an
+`(iss, sub)` with no row, the handler inserts one in its own short transaction
+before the request's transaction:
+`INSERT INTO principal (kind, iss, sub) VALUES ('human', $iss, $sub) ON CONFLICT (iss, sub) DO NOTHING`,
+backed by a unique index on `(iss, sub)`, then reads the row. Of two concurrent
+first requests, one inserts and the other finds the committed row, so both use
+one principal. The row starts unrevoked and stores no roles: roles come from
+each request's token (§10.3). A `deniedSubjects` entry is checked from
+configuration before the insert, so a denied subject gets no row. An identity
+revocation (T5c) naming an `(iss, sub)` that has never signed in creates the
+row the same way, then locks it, so a revocation can precede a first sign-in.
+A service identity's row is created by the command-line tool with its token
+(§10.2). No human or automation principal
 has an OpenBao identity (design §13.7 item 1, derived).
 
 ### 10.1 Humans: OIDC
@@ -1172,7 +1223,8 @@ Bronzeward keeps no server session **(choice §17.16)**:
   (`none` and HMAC algorithms refused);
 - `iss` equal to the configured issuer, `aud` containing the configured
   audience, `exp` and `nbf` with at most 60 seconds' skew;
-- `iat` present; a token without it is refused;
+- `iat` present and no later than `now()` plus the 60 seconds' skew; a token
+  without it, or issued in the future, is refused;
 - `exp - iat` at most the configured maximum lifetime, default 15 minutes; a
   longer-lived token is refused;
 - the subject is not revoked or denied (§10.4). A token that passes the
@@ -1423,10 +1475,13 @@ startup", and design §13.7 item 5 and §14.6 give entering it to
 - After a restore, the operator starts the service with a server-side
   **recovery-start flag**. The flag is process state, not database state. Under
   it the process runs no executor and no job worker, attempts no commitment or
-  attempt transaction, and until entry has committed serves reads and
-  `POST /recovery/entries` only: every other mutation, the other recovery
-  routes and observation included, is refused with `409 recovery-mode-active`,
-  so nothing is recorded in the restored epoch that entry is about to fence.
+  attempt transaction, and until entry has committed serves the liveness probe
+  and `POST /recovery/entries` only. Every other request, reads, the other
+  recovery routes and observation included, is refused with
+  `409 recovery-mode-active`. Nothing is then recorded in the restored epoch
+  that entry is about to fence, and nothing is disclosed to a credential that
+  the restored database still accepts: an automation token revoked after the
+  backup is valid in the restored epoch until entry mints the new one (§12.3).
   After entry, still under the flag, it serves what execution and recovery's
   recovery start serves (observation, the recovery routes and the
   installation-wide acts of its §7.5). The dispatch gates therefore stay closed
@@ -1646,7 +1701,7 @@ The operator restores the database from *T* and the provider from a snapshot
 taken after it. The restored database names `ep_bqeknkmarvikuy7ofil2okekgi` as
 current and knows nothing of `ep_e3t4dznwcjg4uoahvfjk4w6kwy`. The operator
 stops every service instance and starts one with the recovery-start flag; its
-dispatch gates stay closed and it refuses every mutation but entry.
+dispatch gates stay closed and it refuses every request but liveness and entry.
 `recovery-admin` then records entry through the API, naming both restored
 backups. Entry mints `ep_53wiltmcac6xxdggvgg7zcoh5y`, a new random identity: it
 equals neither the restored epoch nor the lost one.
@@ -1689,7 +1744,7 @@ equals neither the restored epoch nor the lost one.
 | Request | Same key while the first is in flight | waits on the key's lock, then replays or executes | one effect; on a draft entry route, the second copy's generations are orphans |
 | Draft | ETag mismatch | `412` | nothing |
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
-| Draft | Compilation refuses the input | `422`, paths only | claim row; orphans if past compilation §2.3 step 6 |
+| Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record; orphans if past compilation §2.3 step 6 |
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
 | Publish | Moved head | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
@@ -1702,7 +1757,7 @@ equals neither the restored epoch nor the lost one.
 | Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
 | Recovery | Plan creation, approval, adoption plan or unfreeze on a scope still pre-restore unaccounted | `409 recovery-mode-active` | nothing |
 | Recovery | Commitment, attempt or adoption record on a scope not released in the current epoch | refused by execution and recovery's scope gate | its refusal entry |
-| Recovery | Any mutation but entry under the recovery-start flag, before entry | `409 recovery-mode-active` | nothing |
+| Recovery | Any request but liveness and entry under the recovery-start flag, before entry | `409 recovery-mode-active` | nothing |
 | Any | Deadlock retries exhausted | `503 transient-conflict` | nothing |
 | Migrate | Failure or kill inside a migration | migration absent; server refuses to start | earlier migrations |
 | Startup | Schema or checksum mismatch | refuses to start | nothing |
@@ -1771,7 +1826,7 @@ each (design §7.7 consequences):
 - a takeover keeping an `unresolved` operation `unresolved`, and refusing a
   terminal one;
 - recovery mode's per-scope refusals and allowances of §12.2, and the refusal
-  of every mutation but entry under the recovery-start flag;
+  of every request but liveness and entry under the recovery-start flag;
 - every walk-through of §13, and every refusal of §14;
 - the immutability triggers, and startup refusal on each schema mismatch;
 - authentication refusals for each token defect in §10.1 and §10.2, and each
