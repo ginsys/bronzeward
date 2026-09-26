@@ -604,7 +604,8 @@ An observation ordered after an attempt does not show that the attempt's
 request has executed or can no longer execute. The scope is therefore released
 only when every recorded attempt is **accounted for**, meaning one of:
 
-- its response is recorded on the timeline (DS rows 016, 022); or
+- a response from the target is recorded on the timeline (DS rows 016, 022);
+  a recorded transport outcome is not one (§5.1); or
 - `recovery-admin` has recorded an accounting decision under §5.2.
 
 An executor's exit, a killed client or a transport timeout is not accounting
