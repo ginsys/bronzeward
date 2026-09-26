@@ -338,11 +338,17 @@ persistence's (see `persistence-api.md`).
    [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent));
 5. this operation takes a slot in the plan's rollout scope, counting every
    operation of that scope in `committed`, `sending`, `verifying` or
-   `unresolved` against the bound rollout limit; and
-6. the **scope gate** is open: the machine scope is not frozen (§6.2), and
-   either recovery mode is not in effect or the scope was explicitly released
-   in the current recovery epoch (§7.3 step 7). The freeze and the scope's
-   recovery state are read under the machine row's lock, and recovery mode
+   `unresolved` against the bound rollout limit. The machine row's lock does
+   not cover other machines' operations, so at the PoC limit of one the slot
+   is a partial unique index on the rollout scope over those states, as
+   comparison 4's is on the machine scope; a limit above one needs a counted
+   lock, which is open (choice §10.5); and
+6. the **scope gate** is open: the machine scope is not frozen (§6.2), no
+   drift record is open on the machine other than one the plan binds (§6.4),
+   and either recovery mode is not in effect or the scope was explicitly released
+   in the current recovery epoch (§7.3 step 7). The freeze, the open drift
+   record and the scope's recovery state are read under the machine row's
+   lock, and recovery mode
    with the installation state of comparison 1.
 
 The commitment transaction also creates the operation in `committed`, links the
@@ -361,8 +367,9 @@ or `unresolved`. Detecting a changed assignment revision only during
 verification would be too late: the artifact for the old revision would already
 have reached the machine.
 
-The PoC rollout limit is one **(choice §10.5)**; at that limit the machine
-scope stands for comparison 5, as it did in E4 (DS §2.1). Drain is not
+The PoC rollout limit is one **(choice §10.5)**. E4 exercised it only on a
+rollout scope of one machine, where the machine scope stood for comparison 5
+(DS §2.1); comparison 5's index on the rollout scope is not evidenced. Drain is not
 required for a `no-reboot` apply at the limit of one (inferred: design §12.3
 names drain with worker concurrency, and no E4 row drained); the cluster
 health and capacity gate is a bound precondition checked under comparison 3.
@@ -826,10 +833,11 @@ operation accounted by decision is linked to it as a possible late landing
 (§5.2).
 
 Drift is never an automatic apply trigger, and detection does not freeze the
-scope by itself **(choice §10.12)**. It needs no freeze to stop stale work: any
-plan made before the drift binds the old pre-dispatch digest and fails
-comparison 3 (§3.2), and any plan made after it binds the drift record and is a
-revert (§6.4). Design §12.4 has the operator choose freeze, adopt or revert.
+scope by itself **(choice §10.12)**. It needs no freeze to stop stale work:
+while the record is open, comparison 6 refuses every plan that does not bind it
+(§3.2), including an older plan whose bound pre-dispatch digest happens to
+equal the drifted one, and a plan that binds it is a revert (§6.4) or an adopt
+plan (§6.3). Design §12.4 has the operator choose freeze, adopt or revert.
 
 External Talos access, break-glass included, remains independent of
 application approval and is reconciled as drift afterward (design §12.7,
@@ -1337,8 +1345,9 @@ M's `Applied` is release r3 with digest d3, and plan P (r4, pre-dispatch d3)
 is approved. During an incident an operator edits M with `talosctl`; a `drift`
 observation reads d9. No operation holds M's scope, so drift record D opens.
 
-- P cannot commit: comparison 3 fails, d9 ≠ d3. An `author` freezes M's scope
-  while the incident continues; comparison 6 would now fail too.
+- P cannot commit: comparison 3 fails, d9 ≠ d3, and comparison 6 fails because
+  D is open and P does not bind it. An `author` freezes M's scope while the
+  incident continues.
 - **Adopt.** The drifted configuration is ingested as a drift adoption; its
   secrets are extracted and its exact bytes encrypted as the baseline with
   digest d9. Release r5 is published from the new import base. An `author`
