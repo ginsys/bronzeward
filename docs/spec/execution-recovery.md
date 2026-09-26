@@ -129,8 +129,8 @@ Design: [§12.2](../design/Talos_Configuration_and_Machine_Management_Design.md#
 [§12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary),
 [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy).
 
-A `publisher` creates a plan from a published release (design §13.7 item 2);
-an adoption plan, which sends nothing, is §6.3's. Planning resolves a published
+A `publisher` creates every plan from a published release, the adoption plan
+of §6.3 included (design §13.7 item 2). Planning resolves a published
 artifact. Dispatch never re-renders a draft or
 silently substitutes a newer artifact. The immutable plan binds:
 
@@ -194,8 +194,8 @@ operation's states (§4) carry the outcome **(choice §10.3)**.
 | `committed` | Terminal for the plan. Its operation exists and holds the outcome. | none |
 | `revoked`, `cancelled`, `expired` | Terminal. No operation was created and nothing was sent (DS row 002, where the prototype reports the outcome as `cancelled`). | none |
 
-An approval recorded before the current recovery epoch authorizes nothing
-(§7.1); an unexpired `approved` plan whose approval is from an earlier epoch
+An approval whose epoch is not the current recovery epoch authorizes nothing
+(§7.1); an unexpired `approved` plan whose approval carries another epoch
 cannot commit until an `approver` approves it again in the current epoch.
 Revocation, cancellation and expiry after commitment are recorded against the
 plan and reach its operation through §3.3.
@@ -572,7 +572,7 @@ expires first ends in the plan state of that name (§2; DS row 002).
 | `unresolved` | `failed` | A completion observation contradicts the postconditions, every recorded attempt is accounted for, and the operation is not classified safe to retry (§5). | DS row 013, on untrue accounting |
 | `unresolved` | `rejected` | A delayed definitive pre-mutation rejection is recorded, and with it every recorded attempt has one. An attempt that was accepted, or whose outcome is unknown, rules `rejected` out. | none |
 | `unresolved` | `sending` | Classified safe to retry (§5) and the §3.3 attempt transaction succeeds. | DS rows 012, 014, 015, 019 |
-| `unresolved` | `cancelled` | No attempt transaction ever committed for this operation, and either none can (the approval or its identity is revoked, the approval is from an earlier recovery epoch, the plan expired or is cancelled) or `recovery-admin` resolves it so on a recorded reason. | DS rows 003, 004 |
+| `unresolved` | `cancelled` | No attempt transaction ever committed for this operation, and either none can (the approval or its identity is revoked, the approval's epoch is not the current one, the plan expired or is cancelled) or `recovery-admin` resolves it so on a recorded reason. | DS rows 003, 004 |
 
 No other transition is valid. A takeover of an `unresolved` operation changes
 its owner and leaves its state. Recovery-mode entry takes over every
@@ -701,24 +701,31 @@ the controller classifies the outcome:
 | Unresolved | Preserve the assignment and stop dependent or conflicting mutations; observe further or request a specific `recovery-admin` decision. |
 | Rejected | Record the response as proof of non-mutation, release the scope and slot, and require a corrected plan; the unchanged plan is not retried. |
 | Failed | Record the contradicting completion observation, leave `Applied` unchanged, release the scope and slot, and require a corrective plan; any difference between the machine's state and `Applied` is then handled as drift (§6). |
+| Cancelled | Record what ended it (§5.1) and release the scope and slot; no attempt is recorded, and nothing is undone. |
 
 Completed, safe to retry and unresolved are the design's classifications for
 an outcome made uncertain by restart, ownership loss or transport failure.
-`Rejected` and `Failed` cover an outcome that is known. `Rejected` needs a
+`Rejected` and `Failed` cover an outcome that is known, and `Cancelled` an
+operation that never recorded an attempt, under the §4 condition. `Rejected` needs a
 definitive response received and recorded for every recorded attempt, never
 when an earlier attempt was accepted or is unknown, and only of a class proven
 to precede mutation (§5.1). `Failed` needs a completion observation that
 contradicts the postconditions, not evidence that is merely missing, and every
 attempt accounted for (§4). Every other error or gap is `unresolved`.
 
+A definitive rejection of any attempt rules out safe to retry: the retry would
+send the same artifact the node refused. With every attempt rejected the
+operation is `rejected`; otherwise, once every attempt is accounted for, a
+completion observation at the pre-dispatch digest makes it `failed`.
+
 One case fits two rows: at least one recorded attempt, every attempt accounted
-for, none accepted, and an observation at the pre-dispatch digest, which both contradicts the
+for, none accepted or definitively rejected, and an observation at the pre-dispatch digest, which both contradicts the
 postconditions and meets the safe-to-retry evidence. The controller classifies
 it safe to retry only while the operation has attempts left under the bound,
 its approval passes comparison 1 and its scope gate is open; otherwise it
 classifies it `failed` **(choice §10.10)**. E4 left this to a harness flag: row
 013 ended `failed`, and rows 012, 014 and 015 retried (DS §2.1). A restored
-operation therefore never retries: its approval is from an earlier epoch
+operation therefore never retries: its approval's epoch is not the current one
 (§7.1).
 
 The controller observes after a lost response, restart, ownership loss or
@@ -741,9 +748,9 @@ this contract adopts it and adds nothing it did not show:
 | Completed | every attempt accounted for; then a completion observation of the artifact's digest and the other postconditions |
 | Rejected | a recorded `InvalidArgument` response of the validation-error class to every attempt; any other `InvalidArgument`, such as the immediate-mode refusal below, accounts for its attempt and leaves the outcome to a completion observation. E4 showed it before any mutation for a validation error only, with the resource version unchanged ([DS §4.6](../design/research/20260925-dispatch-safety.md#46-a-definitive-rejection-row-022)); no other code or error class is proven pre-mutation |
 | Failed | every attempt accounted for, and a completion observation contradicting a postcondition. The accounting must be true, not merely recorded (DS row 013) |
-| Safe to retry | every attempt accounted for, or none recorded; no accepted response; a completion or recovery observation at the pre-dispatch digest; attempts left, an approval passing comparison 1 and an open scope gate (§5); a new attempt transaction bound to the classification's revision |
+| Safe to retry | every attempt accounted for, or none recorded; no accepted response and no definitive rejection of the Rejected row's class (§5); a completion or recovery observation at the pre-dispatch digest; attempts left, an approval passing comparison 1 and an open scope gate (§5); a new attempt transaction bound to the classification's revision |
 | Unresolved | any attempt with neither a recorded response from the target nor an accounting decision; or no successful completion observation by the verification deadline |
-| Cancelled | after the commitment, with no attempt recorded: a revocation of the approval or of its identity, a cancellation, the plan's expiry, an approval from an earlier recovery epoch, or a `recovery-admin` resolution. Before the commitment there is no operation; the plan ends `revoked`, `cancelled` or `expired` (§2) |
+| Cancelled | after the commitment, with no attempt recorded: a revocation of the approval or of its identity, a cancellation, the plan's expiry, an approval whose epoch is not the current one, or a `recovery-admin` resolution. Before the commitment there is no operation; the plan ends `revoked`, `cancelled` or `expired` (§2) |
 
 Two response classes are deliberately not rejections. A dial failure
 (`Unavailable`) is an unknown outcome: whether it proves no send was not tested
@@ -852,6 +859,14 @@ has at most one open drift record. A drift whose observed digest equals the arti
 operation accounted by decision is linked to it as a possible late landing
 (§5.2).
 
+An observation is compared with the `Applied` that held at its basis (§4.1),
+not with a later one. If the machine's baseline revision (§2) changed after
+that basis, the observation opens and closes no drift record, and a later
+observation decides; a `drift` observation likewise opens none if an operation
+held or took the machine scope at or after its basis. A read that began before
+an operation applied a new release therefore cannot report the old digest as
+drift.
+
 Drift is never an automatic apply trigger, and detection does not freeze the
 scope by itself **(choice §10.12)**. It needs no freeze to stop stale work:
 while the record is open, comparison 6 refuses every plan that does not bind it
@@ -898,10 +913,11 @@ state is being accepted (design §12.1).
    and a release compiled from it is published (compilation contract §6, §11).
    Publication resolves nothing and authorizes nothing.
 3. **Plan and approve.** An adoption is requested as a plan with operation
-   `adopt` **(choice §10.13)**, created by an `author` **(choice §10.14)** and
-   approved by an `approver`, as design §13.7 item 3 allows, with the
-   self-approval rule. The adopt plan binds the machine, its assignment
-   revision, its baseline revision (none for a machine with no `Applied`), the
+   `adopt` **(choice §10.13)**, created by a `publisher` like every plan (§2;
+   design §13.7 item 2) and approved by an `approver`, as design §13.7 item 3
+   allows, with the self-approval rule. The adopt plan binds the machine, its
+   assignment revision, its baseline revision (none for a machine with no
+   `Applied`), the machine's `Desired` release at plan creation (or none), the
    open drift record (none for a handover), the adopted release, the baseline's
    configuration digest, a maximum observation age, its expiry, the approval
    policy, and the plan revision with its creator. It has the plan states of
@@ -914,9 +930,9 @@ state is being accepted (design §12.1).
    2. the plan's approval passes §3.2 comparison 1, under the same locks:
       unexpired, not revoked, its identity not revoked, and recorded in the
       current recovery epoch;
-   3. the machine's assignment revision and baseline revision equal the bound
-      ones, and the bound drift record is still open (for a handover, the
-      machine still has no `Applied`);
+   3. the machine's assignment revision, baseline revision and `Desired`
+      release equal the bound ones, and the bound drift record is still open
+      (for a handover, the machine still has no `Applied`);
    4. the machine's latest observation, by revision, was taken after the
       approval, is no older than the age the plan binds, and shows the
       machine's configuration digest equal to the baseline's and its
@@ -949,8 +965,11 @@ release, fails comparison 2 and must be planned and approved again. It closes
 the drift record. If a newer observation shows the machine has changed again,
 it is the latest one, requirement 4.4 fails and the machine stays drifted. If a
 revert closed the drift record first, requirement 4.3 fails, even when a later
-edit restored the adopted bytes. Publishing and approving an adopted release
-does not by itself resolve drift.
+edit restored the adopted bytes. If another release was selected as `Desired`
+after the plan was created, requirement 4.3 fails too: the record would
+overwrite that newer selection unseen, so a new adopt plan, whose approval sees
+the selection it supersedes, is needed. Publishing and approving an adopted
+release does not by itself resolve drift.
 
 If the adopted release's artifact digest differs from the baseline's, the
 machine is then pending convergence (§1), not drifted. Converging it is an
@@ -984,11 +1003,11 @@ advances `Applied` when it reaches `completed`, which closes the drift record.
 
 | From | To | Condition |
 | --- | --- | --- |
-| none | open | A `drift` or `restoration` observation's digest differs from `Applied` with the scope free (§6.1). |
+| none | open | A `drift` or `restoration` observation's digest differs from the `Applied` at its basis, with the scope free (§6.1). |
 | open | open | Freeze or unfreeze; a further differing observation is recorded on the same record. |
 | open | closed (adopted) | An adoption record (§6.3). |
 | open | closed (reverted) | The revert operation reaches `completed` (§6.4). |
-| open | closed (returned) | A later observation equals `Applied` again with no Bronzeward action, such as a manual revert; recorded as such. |
+| open | closed (returned) | A later observation equals the `Applied` at its basis again with no Bronzeward action, such as a manual revert; recorded as such. |
 
 A revert that ends `failed`, `rejected` or `cancelled` leaves the record open.
 An operation's own digest mismatch while it holds the scope never opens a
@@ -1064,7 +1083,14 @@ recovery API, the acts §7.5 always allows (approval and identity revocation,
 plan cancellation, freeze) and the installation-wide acts of §7.5 (drafts,
 ingestion, compilation and publication), so that a `blocked` scope's exit through a new
 release (§7.4) exists before any scope is released. After a restore of any of the three backup families, the
-operator starts it that way, and `recovery-admin` records recovery-mode entry
+operator first stops, or establishes as stopped, every controller instance
+that ran against the pre-restoration state, before any controller can reach
+the restored database, and records the time (§7.3 step 1). Until entry commits,
+the restored epoch is still current, so such an instance would pass the
+comparisons of §3.2 and §3.3 on restored approvals and ownership: only this
+stop prevents that. It is an operator step that Bronzeward neither enforces
+nor detects, like the restore itself (design §14.6). The operator then starts
+one controller with recovery start, and `recovery-admin` records recovery-mode entry
 through the API (design §13.7 item 5, §14.6). The start option only keeps the
 gates closed; no server-side command enters recovery mode by itself
 **(choice §10.18)**. Bronzeward does not claim to detect a rollback (design
@@ -1085,11 +1111,11 @@ and 4) can be checked (§7.3 step 3). Entry is one transaction that:
    journal can omit operations dispatched after the snapshot, so no scope is
    presumed quiet because its restored journal shows nothing
    **(choice §10.19)**; and
-5. abandons every ingestion claim created before the new epoch (compilation
+5. abandons every ingestion claim whose epoch is not the new one (compilation
    contract §3.5).
 
-Approvals from earlier epochs need no action: they fail comparison 1 from the
-moment the epoch changes (§3.2).
+Approvals carrying another epoch need no action: they fail comparison 1 from
+the moment the epoch changes (§3.2).
 
 Once the first scope is released, the operator may restart the controller
 normally; comparison 6 still refuses every scope not released in the current
@@ -1097,10 +1123,11 @@ epoch, and recovery mode stays in effect until §7.6.
 
 ### 7.3 Procedure
 
-1. **Quiesce.** Stop, or establish as stopped, every controller instance that
-   ran against the pre-restoration state, and record the time. Stopping is what
-   prevents a further attempt; the epoch refuses one from any instance that was
-   missed (§7.1). Neither prevents a request already sent from landing. Every
+1. **Quiesce.** Every controller instance that ran against the
+   pre-restoration state was stopped, or established as stopped, before the
+   restored database was reachable (§7.2), and the time is recorded. Stopping
+   is what prevents a further attempt; after entry, the epoch refuses one from
+   any instance that was missed (§7.1). Neither prevents a request already sent from landing. Every
    scope stays pre-restore unaccounted until `recovery-admin` records the §5.2
    accounting decision for it. In §5.2 condition 2 the stop of every
    pre-restoration instance takes the place of the executor's stop, and the
@@ -1119,7 +1146,7 @@ epoch, and recovery mode stays in effect until §7.6.
    records, every identity revocation made after the restored backup, which the
    restore erased (design §13.7 item 4). A token revoked after the backup must
    not authenticate again; persistence meets this by refusing every automation
-   token from an earlier epoch, so every token is reissued with the server-side
+   token whose epoch is not the current one, so every token is reissued with the server-side
    tool, and by a denied-subject list in deployment configuration, to which
    the re-recorded identities are added (design §13.7 item 1; see
    `persistence-api.md`).
@@ -1138,14 +1165,17 @@ epoch, and recovery mode stays in effect until §7.6.
    (purpose `restoration`).
 5. **Reclassify** restored pending operations under §5, never replaying a
    journal entry because it is pending. A restored operation never retries:
-   its approval is from an earlier epoch (§5). One with no attempt ends
-   `cancelled`; one with an attempt is accounted, by its recorded response or
+   its approval's epoch is not the current one (§5). One with no attempt ends
+   `cancelled`, which claims only that the restored journal records none: an
+   attempt the restore erased is covered by step 1's decision, and a landing of
+   it is drift at step 6. One with an attempt is accounted, by its recorded response or
    by a §5.2 decision such as step 1's, and is classified by the §5.1 table:
    `completed` or `failed` by a completion observation taken after that
-   accounting, `rejected` when the restored journal holds a definitive
-   pre-mutation rejection for every attempt, and otherwise `unresolved`, which
-   holds the scope until a later classification or a `recovery-admin`
-   resolution.
+   accounting, and otherwise `unresolved`, which holds the scope until a later
+   classification or a `recovery-admin` resolution. It is never `rejected`,
+   even when every restored attempt has a definitive rejection: the restored
+   journal can omit a later attempt (§7.2 item 4), which step 1's decision
+   accounts for but no response shows rejected.
 6. **Mark** each scope `ready`, `blocked` or `unresolved`, recording the
    missing dependency or evidence (§7.4). An observed digest that the restored
    `Applied` does not explain is drift (§6), not grounds for an apply, even when
@@ -1241,8 +1271,8 @@ An implementation and its reviewer can check these directly:
    attempt.
 7. **No plaintext before extraction.** Known and marked secrets never reach a
    backup-visible write in plaintext, adoption included.
-8. **Nothing from an earlier epoch authorizes.** An approval, ownership token
-   or scope release from before the current recovery epoch never satisfies
+8. **Nothing from another epoch authorizes.** An approval, ownership token or
+   scope release whose epoch is not the current recovery epoch never satisfies
    §3.2 or §3.3.
 9. **A held scope freezes the assignment.** A machine's assignment does not
    change while an operation on it is `committed`, `sending`, `verifying` or
@@ -1377,9 +1407,9 @@ observation reads d9. No operation holds M's scope, so drift record D opens.
   incident continues.
 - **Adopt.** The drifted configuration is ingested as a drift adoption; its
   secrets are extracted and its exact bytes encrypted as the baseline with
-  digest d9. Release r5 is published from the new import base. An `author`
-  creates an adopt plan binding M, its assignment and baseline revisions, D, r5
-  and d9, and an `approver` approves it. A `drift` observation after the
+  digest d9. Release r5 is published from the new import base. A `publisher`
+  creates an adopt plan binding M, its assignment and baseline revisions, its
+  current `Desired` release, D, r5 and d9, and an `approver` approves it. A `drift` observation after the
   approval still reads d9 and D is still open, so the adoption record commits
   (the freeze does not block it, §6.3 requirement 4.5, invariant 10):
   `Applied` is (r5, d9, adopted), `Desired` is r5, the baseline
@@ -1404,15 +1434,17 @@ held by the control plane's proxy; approver P was identity-revoked. The
 database is then restored to T0: S is `sending` again with no response, and r4,
 A, C and P's revocation do not exist.
 
-- **Entry.** The operator stops every controller instance, starts one in
-  recovery start, and `recovery-admin` records entry. A new epoch E is issued;
+- **Entry.** Before the restored database is reachable, the operator stops
+  every controller instance; then it starts one in recovery start, and
+  `recovery-admin` records entry. A new epoch E is issued;
   every scope's gate closes; every restored non-terminal operation is taken
   over into E, so S becomes `unresolved`; every scope is pre-restore
   unaccounted; ingestion claims are abandoned. Every approval, P's revived ones
-  included, is from an earlier epoch and authorizes nothing.
-- **A stale instance that was missed** reconnects with a pre-restore token. The
-  restore reissued its generation (DB §4.7), but its token's epoch is not E, so
-  comparison 7 refuses it; comparison 6 would too.
+  included, carries an epoch other than E and authorizes nothing.
+- **A stale instance that was missed** reconnects after entry with a
+  pre-restore token. The restore reissued its generation (DB §4.7), but its
+  token's epoch is not E, so comparison 7 refuses it; comparison 6 would too.
+  Before entry nothing would have refused it (§7.2).
 - **Step 2.** `recovery-admin` re-records P's identity revocation from the
   operator's records, and P is added to the deployment's denied subjects;
   automation tokens are reissued (§7.3 step 2).
@@ -1427,7 +1459,7 @@ A, C and P's revocation do not exist.
 - **Step 5.** A completion observation of M3, taken after that accounting,
   reads *s*: S completes and `Applied` becomes *s*. Had it read S's
   pre-dispatch digest, S would end `failed` rather than retry, since its
-  approval is from an earlier epoch (§5).
+  approval's epoch is not E (§5).
 - **Steps 3, 6 and 7.** M2's artifact key version is present and decryptable
   under the executor identity: M2 is `ready` and released. M1 and M3 are
   `ready` and released, and M1 is then handled under §6. Had the provider been
@@ -1503,13 +1535,14 @@ fail:
   release;
 - takeover at controller start of every operation another instance owns;
 - the §5 precedence: a retry admitted only with attempts left, a passing
-  approval and an open gate, and `failed` otherwise;
+  approval, an open gate and no definitive rejection, and `failed` otherwise;
 - identity revocation before commitment, after it with no attempt, and after an
   attempt, with a retry refused;
 - observation ordering under a concurrent accounting transaction (§4.1);
-- drift detection, freeze, adoption record (success, stale observation,
-  changed-again machine, revoked approval, changed baseline revision, drift
-  record closed by a revert) and revert (success, re-drift before commitment),
+- drift detection (including no record from a read begun before an `Applied`
+  change), freeze, adoption record (success, stale observation,
+  changed-again machine, revoked approval, changed baseline revision, changed
+  `Desired` selection, drift record closed by a revert) and revert (success, re-drift before commitment),
   with E1's leak screen over adoption's backup-visible surfaces;
 - recovery-mode entry after a database restore to a snapshot older than a
   takeover, an approval, a revocation and an attempt: a stale instance refused
@@ -1636,11 +1669,11 @@ conservative option; those that do not say so. Each is marked in place as
     commitment is the adoption record** (§6.3). It reuses the plan binding,
     approval, revocation and epoch rules. Alternative: a separate adoption
     approval resource with its own rules.
-14. **`author` performs the ingestion that feeds an adoption and creates the
-    adopt plan; `approver` approves it** (§6.3). Interim: the design leaves the
-    ingestion role open as an owner decision (design §13.7, "Limits and what
-    stays open"). Alternative: `publisher`, which design §13.7 item 2 gives
-    plan creation, or a new privileged-ingestion role.
+14. **`author` performs the ingestion that feeds an adoption** (§6.3).
+    Interim: the design leaves the ingestion role open as an owner decision
+    (design §13.7, "Limits and what stays open"). The adopt plan is a
+    `publisher`'s like every plan (design §13.7 item 2), and its approval an
+    `approver`'s. Alternative: `publisher`, or a new privileged-ingestion role.
 15. **The adoption record compares with the baseline's digest, not the
     recompiled artifact's** (§6.3). Alternative: require the artifact to
     reproduce the node's bytes, as the prior draft did; unevidenced, and E3's
