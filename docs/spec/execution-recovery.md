@@ -357,7 +357,8 @@ The commitment transaction also creates the operation in `committed`, links the
 plan and its §3.1 evidence to it, and makes the committing controller instance
 the operation's owner at generation 1 in the current epoch (§3.4).
 
-If any comparison fails, nothing is committed and nothing is sent. Freeze,
+If any comparison fails, nothing is committed and nothing is sent; the refusal
+is recorded afterwards in its own transaction (§4.1). Freeze,
 recovery mode and scope release are durable database facts precisely so that
 they can be compared here; checking them only before the transaction would
 leave a race in which dispatch proceeds while mutation is meant to be paused.
@@ -633,7 +634,7 @@ Required entries:
 | Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read |
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |
-| Refusal | the transaction and the comparison that failed, by number |
+| Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) |
 | Attempt | attempt id, owner token, route, transport and verification deadlines; for a retry, the classification revision it is bound to |
 | Response | attempt id, class (acceptance, gRPC code, transport outcome), redacted text or the withheld notice (§3.5) |
 | Ownership transition | from and to owner, generation, epoch, reason |
@@ -1195,7 +1196,7 @@ release is not blanket approval for pending mutations.
 | --- | --- | --- |
 | pre-restore unaccounted | set at entry; a request sent before the restore may still land | the step 1 accounting decision, to one of the next three |
 | `unresolved` | a restored operation on the scope is `unresolved` | its resolution under §4 and §5, then re-marking |
-| `blocked` | the `restoration` observation failed, or a dependency to apply the machine's `Desired` release is missing: its release record, its artifact's key version at or above the decryption floor and decryptable by the executor identity, or the executor's operation credentials (§3.1 item 2) | the dependency restored or repaired, or a newly published release selected as `Desired` whose dependencies are present; then re-marking |
+| `blocked` | the `restoration` observation failed, or a dependency to apply the machine's `Desired` release is missing: its release record, its artifact's key version at or above the decryption floor and decryptable by the executor identity, or the executor's operation credentials (§3.1 item 2) | a later successful `restoration` observation, for a failed one; the dependency restored or repaired, or a newly published release selected as `Desired` whose dependencies are present; then re-marking |
 | `ready` | accounted, no operation holds the scope, the dependencies above present, a `restoration` observation whose basis (§4.1) follows step 1 | release |
 | released | released in the current epoch | recovery-mode exit, or a new entry |
 
@@ -1235,14 +1236,21 @@ refuses the commitment.
 
 `recovery-admin` leaves recovery mode only when every machine scope is
 released **(choice §10.22)**. A scope that cannot yet be released keeps the
-installation in recovery mode, but blocks only itself: released scopes are
-fully usable (§7.5), and a `blocked` scope has an exit through a new release
-(§7.4). One case has no exit: a machine that can never be observed again
-(destroyed or permanently unreachable) cannot supply the `restoration` or
-recovery observation that `ready` and the §5.2 decision need, so its scope
-keeps the installation in recovery mode. The PoC specifies no decommission or
-exclusion act for it; that is a gap (§9.3), and until one exists the other
-scopes stay fully usable because they are released individually. Leaving
+installation in recovery mode, but blocks only itself and, while a restored
+operation on it is `unresolved`, its rollout scope: that operation keeps its
+rollout slot (§3.2 comparison 5), so at the PoC limit of one no plan for
+another machine of that rollout scope commits until the operation is terminal.
+Released scopes outside that rollout scope are fully usable (§7.5), and a
+`blocked` scope has an exit through a successful observation, a repair or a
+new release (§7.4). One
+case has no exit: a machine that can never be observed again (destroyed or
+permanently unreachable) cannot supply the `restoration`, recovery or
+completion observation that `ready`, the §5.2 decision and a restored
+operation with an attempt need, so its scope keeps the installation in
+recovery mode, and such an operation keeps its rollout slot. The PoC specifies
+no decommission or exclusion act for it; that is a gap (§9.3), and until one
+exists the scopes outside its rollout scope stay fully usable because they are
+released individually. Leaving
 never reopens a scope that was not checked. Leaving ends the recovery
 timeline; the epoch stays current until the next entry.
 
@@ -1596,7 +1604,8 @@ revocation (design §13.7); the machinery client (§3.5); the backup age
 combinations g1/g2/g1 and g2/g1/g2, a restore onto a new OpenBao cluster and
 token expiry across a restore (KL §6). A specification gap, not an evidence
 one: no act decommissions or excludes a machine that can never be observed
-again, so its scope keeps the installation in recovery mode (§7.6).
+again, so its scope keeps the installation in recovery mode, and a restored
+operation on it with an attempt keeps its rollout slot (§7.6).
 
 Until these close, an implementation must expose unresolved outcomes and stop
 conflicting work rather than claim safe retry beyond §5.1, exactly-once
@@ -1698,7 +1707,7 @@ conservative option; those that do not say so. Each is marked in place as
 21. **Recovery mode is enforced per scope** (§7.5): authority-removing and
     recovery acts always; drafts, ingestion and publication installation-wide;
     approval, adoption and dispatch refused on a pre-restore unaccounted scope;
-    released scopes fully usable. Alternative: refuse every mutation
+    released scopes usable as outside recovery mode. Alternative: refuse every mutation
     installation-wide except those acts until exit, which with choice §10.22
     lets one scope hold the whole installation.
 22. **Leaving recovery mode needs every scope released** (§7.6). Alternative:
