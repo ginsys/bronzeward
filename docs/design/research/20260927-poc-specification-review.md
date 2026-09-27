@@ -335,7 +335,7 @@ owner decide explicitly; each is expanded below the table.
 | PA17.20 | Several qualifying roles: first in the route's order | accept as specified |
 | PA17.21 | Both unsettled self-approval cases marked | accept as specified |
 | PA17.22 | Ingestion and inventory need a human `author` | FLAG F4, decided |
-| PA17.23 | Losing a role does not invalidate approvals (interim) | FLAG F5 |
+| PA17.23 | Losing a role does not invalidate approvals | FLAG F5, decided |
 | PA17.24 | Migrations by explicit command, service stopped; no downgrade | accept as specified |
 | PA17.25 | Epoch a random 128-bit identity, no counter | accept as specified |
 | PA17.26 | Recovery-start flag; entry once per start by the API act | accept as specified |
@@ -376,6 +376,9 @@ owner decide explicitly; each is expanded below the table.
   `approver` role; only an identity revocation (item 4) reaches them. The alternative needs a
   directory lookup or session state. Recommendation: accept the interim for the PoC, stated in
   ginsys/bronzeward#30's limits, and record the owner's answer on ginsys/bronzeward#14.
+  **Owner decision (2026-09-27): accepted for the PoC**; the operator revokes the approval or the
+  identity when someone loses the role, ginsys/bronzeward#30's limits say so, and design §13.7 no
+  longer lists the question as open.
 - **F6: identity revocation scope (PA17.19, ER10.6).** Both go beyond §13.7 item 4 without
   contradicting it: revocation is permanent, refuses authentication, and refuses retries of an
   already-used approval. A mistaken revocation locks the person out until given a new identity.
@@ -553,7 +556,8 @@ and the row count stated in the line must match.
   commitment and after it with no attempt (ER §9.2); approval revocation before and
   after commitment with the DS row 003 lock control; identity revocation before and after
   commitment; publication alone dispatches nothing.
-- Carries: identity revocation unmeasured. Owner choice F5; F6 decided (permanent revocation).
+- Carries: identity revocation unmeasured. F5 decided (role loss not acted on); F6 decided
+  (permanent revocation).
 
 **ginsys/bronzeward#26, safe apply.**
 - Contracts: `execution-recovery.md` §1, §3.1–§3.5, §4, §5.1, §8; `persistence-api.md` §8.3.
@@ -614,7 +618,8 @@ and the row count stated in the line must match.
 - Required verification: no AP §7.1 row names #30.
 - Checks: a reviewer runs the walkthrough from a fresh checkout and disposable environment,
   including interruption and restoration; limits list the profile and versions, the gaps §10 marks
-  beyond the PoC, the interim owner choices, that a mistaken identity revocation is corrected only
+  beyond the PoC, that losing a role leaves approvals valid until the approval or identity is
+  revoked (F5), that a mistaken identity revocation is corrected only
   by a new subject (F6), that the unkeyed whole-configuration digest is an unassessed guessing
   oracle for a configuration without generated key material (F1), and that E3 is not complete.
 
@@ -649,12 +654,11 @@ and the row count stated in the line must match.
 
 ## 14. Hand-off
 
-- ginsys/bronzeward#20: the owner's acceptance (criterion 5), the open flagged choice F5
-  (§9; F1 to F4 and F6 to F10 are decided), gaps E and G, and approval of the acceptance plan
-  (criterion 4).
+- ginsys/bronzeward#20: the owner's acceptance (criterion 5), gaps E and G, and approval of the
+  acceptance plan (criterion 4); every flagged choice, F1 to F10, is decided (§9).
 - ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
-- ginsys/bronzeward#14: the role-loss question (F5); the ingestion role (F4) was decided on
-  ginsys/bronzeward#20.
+- ginsys/bronzeward#14: a note that the role-loss question (F5) and the ingestion role (F4) were
+  decided on ginsys/bronzeward#20.
 - ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text with the AP §7.1 rows its Required
   verification line counts, then removal of
   `status/needs-refinement` once each issue carries it and no open decision it depends on remains.

@@ -1070,10 +1070,10 @@ Items labelled *derived* are the recorder's inferences, not the owner's decision
 - Later work, not part of the PoC: per-cluster grant scoping, and an in-application administrator role for setups without an identity provider. Tenant isolation stays deferred (§17.2). Per-operation approval policy, including multi-party approval for the later destructive and PKI operations, belongs to those operations' phases (Appendix B).
 - Not settled here, each with its owner:
   - Token lifetimes, expiry and rotation: persistence and API contracts (#18).
-  - How a disablement or a removed group claim at the identity provider reaches Bronzeward: persistence and API contracts (#18). Whether losing a role, rather than an identity revocation, invalidates approvals given under it is an owner decision pending on #14.
+  - How a disablement or a removed group claim at the identity provider reaches Bronzeward: persistence and API contracts (#18).
   - Which role may ignore a known drift difference for a bounded time (§12.4) is an owner decision pending on #14, carried into the execution and recovery contracts (#19).
   - The two self-approval edge cases in item 3: persistence and API contracts (#18) and execution and recovery contracts (#19).
-- Settled since, on [#20](https://github.com/ginsys/bronzeward/issues/20): the privileged ingestion that feeds an adoption (§9.1, Appendix B AdoptCluster) is a human `author`'s, and automation does not ingest ([persistence and API contracts](../spec/persistence-api.md) choice §17.22). Its mechanics belong to the [secret ingress and compilation contracts](https://github.com/ginsys/bronzeward/issues/17).
+- Settled since, on [#20](https://github.com/ginsys/bronzeward/issues/20): the privileged ingestion that feeds an adoption (§9.1, Appendix B AdoptCluster) is a human `author`'s, and automation does not ingest ([persistence and API contracts](../spec/persistence-api.md) choice §17.22). Its mechanics belong to the [secret ingress and compilation contracts](https://github.com/ginsys/bronzeward/issues/17). For the PoC, losing a role, rather than an identity revocation, does not invalidate approvals given under it; the operator revokes the approval or the identity instead (persistence and API contracts choice §17.23).
 
 ## 14. Reliability, high availability and disaster recovery
 
