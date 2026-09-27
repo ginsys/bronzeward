@@ -611,10 +611,10 @@ expires first ends in the plan state of that name (§2; DS row 002).
 | `sending` | `rejected` | A definitive pre-mutation rejection is recorded for this attempt, and every earlier attempt has one too. | DS row 022 |
 | `sending` | `unresolved` | Lost response, transport failure or timeout, or takeover; a recorded response of any other class; or a definitive rejection while an earlier attempt has none, which accounts for this attempt only. | DS rows 012–015, 020 |
 | `verifying` | `completed` | Postconditions established by a completion observation, and every recorded attempt accounted for. | DS rows 001, 017 |
-| `verifying` | `failed` | A completion observation contradicts the postconditions, and every recorded attempt is accounted for. | none |
-| `verifying` | `unresolved` | Postconditions not established before the recorded verification deadline, an attempt is not accounted for, or takeover. | DS row 021 (takeover) |
+| `verifying` | `failed` | A completion observation contradicts the postconditions (a bound health check only at or after the verification deadline, below), and every recorded attempt is accounted for. | none |
+| `verifying` | `unresolved` | Postconditions neither established nor contradicted by the recorded verification deadline, an attempt is not accounted for, or takeover. | DS row 021 (takeover) |
 | `unresolved` | `completed` | Postconditions later established by a completion observation, at least one attempt recorded, and every recorded attempt accounted for. | DS rows 020, 021; capture 1 row 012 |
-| `unresolved` | `failed` | A completion observation contradicts the postconditions, at least one attempt is recorded, every recorded attempt is accounted for, and the operation is not classified safe to retry (§5). | DS row 013, on untrue accounting |
+| `unresolved` | `failed` | A completion observation contradicts the postconditions (a bound health check only at or after the verification deadline, below), at least one attempt is recorded, every recorded attempt is accounted for, and the operation is not classified safe to retry (§5). | DS row 013, on untrue accounting |
 | `unresolved` | `rejected` | A delayed definitive pre-mutation rejection is recorded, and with it every recorded attempt has one. An attempt that was accepted, or whose outcome is unknown, rules `rejected` out. | none |
 | `unresolved` | `sending` | Classified safe to retry (§5) and the §3.3 attempt transaction succeeds. | DS rows 012, 014, 015, 019 |
 | `unresolved` | `cancelled` | No attempt is recorded for this operation (after a restore, in the restored journal; §7.3 step 5), and either none can (the approval or its identity is revoked, the approval's epoch is not the current one, the plan expired or is cancelled) or `recovery-admin` resolves it so on a recorded reason. | DS rows 003, 004 |
@@ -636,9 +636,17 @@ recorded attempt of the operation is accounted for, and recorded on its
 timeline. It records the machine identity, assignment revision, running Talos
 version, configuration digest, machine-configuration resource version and the
 bound health results. Values matching the bound postconditions establish them
-and yield `completed`; a value that contradicts them, such as another digest or
-a failed bound health check, yields `failed`; an observation that could not
-read a value does neither. Nor does one when a recorded observation of the
+and yield `completed`; a value that contradicts them, such as another digest,
+yields `failed`; an observation that could not read a value does neither. A
+bound health check has a **convergence window**: a failed health result in a
+completion observation taken before the recorded verification deadline is
+recorded and yields neither, the controller takes further completion
+observations, and the first that establishes every postcondition yields
+`completed`; a completion observation taken at or after the deadline that
+still reports it failed yields `failed` **(choice §10.25)**. The machine
+identity, assignment revision and configuration digest have no window: once
+every attempt is accounted for, no request of the operation can still change
+them. Nor does one when a recorded observation of the
 machine with a higher basis (§4.1), of any purpose, reports for any bound
 postcondition (the machine identity, the assignment revision, the
 configuration digest or a bound health check) a value that differs from the
@@ -819,9 +827,9 @@ this contract adopts it and adds nothing it did not show:
 | --- | --- |
 | Completed | at least one attempt recorded and every attempt accounted for; then a completion observation of the artifact's digest and the other postconditions |
 | Rejected | a recorded `InvalidArgument` response of the validation-error class to every attempt; any other `InvalidArgument`, such as the immediate-mode refusal below, accounts for its attempt and leaves the outcome to a completion observation. E4 showed it before any mutation for a validation error only, with the resource version unchanged ([DS §4.6](../design/research/20260925-dispatch-safety.md#46-a-definitive-rejection-row-022)); no other code or error class is proven pre-mutation |
-| Failed | at least one attempt recorded and every attempt accounted for, and a completion observation contradicting a postcondition. The accounting must be true, not merely recorded (DS row 013) |
+| Failed | at least one attempt recorded and every attempt accounted for, and a completion observation contradicting a postcondition, a bound health check only at or after the verification deadline (§4). The accounting must be true, not merely recorded (DS row 013) |
 | Safe to retry | every attempt accounted for, or none recorded; no accepted response and no definitive rejection of the Rejected row's class (§5); a completion or recovery observation at the pre-dispatch digest; attempts left, an approval passing comparison 1 and an open scope gate (§5); a new attempt transaction bound to the classification's revision |
-| Unresolved | any attempt with neither a recorded response from the target nor an accounting decision; or no successful completion observation by the verification deadline |
+| Unresolved | any attempt with neither a recorded response from the target nor an accounting decision; or no completion observation by the verification deadline that establishes or contradicts the postconditions |
 | Cancelled | after the commitment, with no attempt recorded: a revocation of the approval or of its identity, a cancellation, the plan's expiry, an approval whose epoch is not the current one, or a `recovery-admin` resolution. Before the commitment there is no operation; the plan ends `revoked`, `cancelled` or `expired` (§2) |
 
 Two response classes are deliberately not rejections. A dial failure
@@ -1674,6 +1682,10 @@ fail:
   digest other than `Applied`'s, and a commitment whose evidence shows an
   undetected out-of-band change refused, with a drift record opened by the
   transaction that records the refusal (§2, §3.2);
+- a bound health check failing in a completion observation before the
+  verification deadline and passing in a later one: `completed`; still failing
+  at or after the deadline: `failed`; unreadable at the deadline: `unresolved`;
+  and a contradicting digest before the deadline: `failed` at once (§4);
 - plan creation refusing an `apply-config` plan whose release is not the
   machine's `Desired`, a commitment refused when another release was published
   after plan creation, and a publication racing a commitment waiting for it or
@@ -1890,6 +1902,16 @@ conservative option; those that do not say so. Each is marked in place as
     machine invalidates its approved, uncommitted plans, which must be planned
     and approved again. Alternative: bind only the artifact and let the
     approver's plan stand until it is committed or expires.
+25. **A bound health check has a convergence window up to the verification
+    deadline; the identity, assignment revision and digest have none** (§4).
+    A health check can be briefly red after a `no-reboot` apply that landed;
+    failing at once would leave `Applied` behind the node and open a drift
+    record for a change that succeeded. Once every attempt is accounted for,
+    waiting cannot change the other postconditions. Owner decision, 2026-09-27
+    (ginsys/bronzeward#20). E4 bound no health check, so the window is
+    unevidenced. Alternatives: fail on the first contradiction of any
+    postcondition, as the prior text did; or a window for every postcondition,
+    which only delays outcomes already known.
 
 ## 11. Traceability
 

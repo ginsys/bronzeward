@@ -707,6 +707,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing; the bound exhausted after a lost response leaves no further attempt and ends `failed` | S3, S4 negative controls; *check* for the last two | #25, #26, #28 |
 | ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls | #25 |
 | ER §9.2: a plan for a release that is not the machine's `Desired` refused at creation; a commitment refused after a publication that changed `Desired`, with S4's commitment as the control; a publication racing the commitment waits for it or precedes it, with the unlocked control | S3 negative controls plus *check* for the race | #25 |
+| ER §9.2: a bound health check failing before the verification deadline then passing: `completed`; failing at or after it: `failed`; unreadable at it: `unresolved`; a contradicting digest before it: `failed` at once | *check* | #26 |
 | ER §9.2: an `apply-config` operation with no attempt not completed by a completion observation of its artifact applied out of band | *check* | #28 |
 | ER §9.2: assignment change refused while the scope is held; comparison 6 under a freeze and under recovery mode before release | S4, S7 negative controls | #26, #29 |
 | ER §9.2: takeover at start; the §5 precedence; PA §16: a takeover keeps `unresolved` and refuses a terminal operation | S6.1 plus *check* | #28 |
