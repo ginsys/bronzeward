@@ -446,8 +446,9 @@ for each adoption run; step 5's measurement; the resource version series.
    at its start (ER §3.4) and its attempts are then legitimate.
 4. Partition the worker during a send over its own endpoint, the only dispatch route (ER §10.9):
    the response is lost. Restart B: it takes the operation over at its start (ER §3.4), so the
-   executor that sent can record no further attempt (ER §5.2 item 1).
-5. After the takeover, `h-recovery` records the accounting decision after the settle floor, with a recovery observation
+   executor that sent can record no further attempt (ER §5.2 item 1). Then heal the partition,
+   so the worker is readable again.
+5. After the takeover and the heal, `h-recovery` records the accounting decision after the settle floor, with a recovery observation
    and the resource version read at both ends of the settle; a completion observation classifies
    the operation.
 6. While one operation is `unresolved`, try a newer plan for the worker.
@@ -567,7 +568,8 @@ second worker plan is approved; an approval is revoked; an approver's subject is
 **Pass criteria.** Before entry, B answers every request but liveness and entry
 `409 recovery-mode-active` and runs no executor. After entry every scope is pre-restore
 unaccounted, every non-terminal operation is `unresolved` under B, and the ingestion claim is
-abandoned. A's attempt, under its pre-entry fence token, is refused by the epoch term; its job
+abandoned. A's attempt, under its pre-entry fence token, is refused by the fence: entry's takeover moved
+the owner, generation and epoch; its job
 claim, takeover and ingestion start are refused by the process-epoch comparison (PA §5.1). Its
 commitment of the pre-entry plan is refused, by comparisons 1 and 6 among others. In step 9 its commitment of
 the new-epoch plan on the released scope, which passes every other comparison, is refused by the
@@ -585,9 +587,11 @@ restored operation was retried.
 committed with the scope gate removed (ER §7.5). Plan creation and approval on a pre-restore
 unaccounted scope, and release
 of a scope not `ready`: refused. A pre-entry approval: refused by comparison 1. A second entry under
-another key in the same recovery start: `409`. Exit with a scope unreleased: refused. The epoch
-term dropped from the fence: A's token passes across the `pg_dump` restore, as DB row 027 showed;
-the process-epoch comparison dropped: A's job claim, takeover and ingestion start in step 4 and
+another key in the same recovery start: `409`. Exit with a scope unreleased: refused. Entry's
+takeover also advances the generation, so the epoch term is isolated by a separate *check* that reproduces
+DB row 027's collision in the new epoch: A's pre-restore token was issued by takeovers after the
+snapshot, and takeovers after entry reissue the same owner and generation (DB §4.7), so only the
+epoch term tells them apart. A's write is refused with the epoch term and passes with it dropped. The process-epoch comparison dropped: A's job claim, takeover and ingestion start in step 4 and
 its commitment in step 9 pass.
 The same restore started normally, with no entry: A's token passes; this residual is stated (PA
 §14, last row) and shown, not claimed closed. A variant deleting the Transit key the `Desired`
@@ -625,8 +629,8 @@ separately (§2).
    carried and when it was recorded, whether its sending is known from a response or accounting or
    stays unknown, what was observed, why the scope was held, who decided an accounting and on what, and how it
    ended.
-3. Hold an event stream open past its token's expiry; resume it with `Last-Event-ID` after
-   revoking the subject.
+3. Hold an event stream open past its token's expiry. Then, with a fresh unexpired token for the
+   same subject, revoke the subject and resume the stream with `Last-Event-ID` and that token.
 
 **Clauses exercised.** ER [§4.1](execution-recovery.md#41-timeline-content),
 [§3.5](execution-recovery.md#35-talos-client-and-route) (response text); C
@@ -636,7 +640,8 @@ separately (§2).
 **Pass criteria.** Each answer is reached by following links from the operation or the machine, and
 entries are in commit order within the scope. Response text is redacted or withheld, and no served
 timeline holds a synthetic secret. The stream ends no later than the token's `exp`, and the
-resumption is refused. After S7 the `Bronzeward-Epoch` header differs from the pre-restore one. A
+resumption with the unexpired token is refused for the revoked subject; the same resumption before
+the revocation succeeds, the control. After S7 the `Bronzeward-Epoch` header differs from the pre-restore one. A
 second reviewer following the walkthrough reaches the same answers.
 
 **Negative controls.** `h-viewer` mutating anything: `403`. A Talos error whose text embeds
