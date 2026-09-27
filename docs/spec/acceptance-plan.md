@@ -143,8 +143,10 @@ one synthetic secret outside the Talos schema's secret fields, in `machine.files
 **Steps.**
 
 1. `h-author` records the cluster and both machines (`POST /clusters`, `POST /machines`).
-2. `h-author` imports each node (`POST /ingestions`), marking the file content's path on the worker.
-3. The draft transaction commits and releases the claim.
+2. `h-author` opens the import draft (`POST /drafts`) and keeps its ETag. It imports each node in
+   turn (`POST /ingestions` naming that draft, with `If-Match` its current ETag), marking the file
+   content's path on the worker, and reads the draft's new ETag after each ingestion succeeds.
+3. Each ingestion's draft transaction commits and releases its claim.
 4. `h-publisher` publishes the import draft, as in S2 steps 4 and 5.
 5. `h-publisher` creates an `adopt` plan per machine, binding no drift record and no baseline
    revision; `h-approver` approves each.
@@ -363,8 +365,9 @@ run: **drift freeze, sanitized adoption and approved revert**
 2. The next `drift` observation opens a drift record and raises the digest-mismatch alert; the scope
    is not frozen by detection.
 3. `h-author` freezes the scope.
-4. **Adopt.** `h-author` ingests the drifted configuration as a drift adoption, marking the new
-   file's content; `h-publisher` publishes it and creates an `adopt` plan binding the drift record;
+4. **Adopt.** `h-author` opens a new draft (`POST /drafts`), since the import draft is published,
+   and ingests the drifted configuration into it as a drift adoption (`POST /ingestions` naming
+   that draft, with `If-Match` its ETag), marking the new file's content; `h-publisher` publishes it and creates an `adopt` plan binding the drift record;
    `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
    record commits under the freeze.
 5. Measure whether an artifact compiled from the unchanged import base reproduces the baseline
@@ -516,8 +519,9 @@ second worker plan is approved; an approval is revoked; an approver's subject is
 8. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
    has committed.
 9. **Release** the worker scope; `h-publisher` and `h-approver` plan and approve a worker change in
-   the new epoch, which applies as S4. If the held request landed, the change is a revert binding
-   the drift record, as in S5 step 6.
+   the new epoch. With B paused, A's executor tries to commit that plan; unpause B, which commits
+   it and applies it as S4. If the held request landed, the change is a revert binding the drift
+   record, as in S5 step 6.
 10. Unpause the control plane; after a successful `restoration` observation, re-mark and release
     its scope.
 11. **Exit** recovery mode.
@@ -538,9 +542,11 @@ second worker plan is approved; an approval is revoked; an approver's subject is
 `409 recovery-mode-active` and runs no executor. After entry every scope is pre-restore
 unaccounted, every non-terminal operation is `unresolved` under B, and the ingestion claim is
 abandoned. A's attempt, under its pre-entry fence token, is refused by the epoch term; its job
-claim, commitment, takeover and ingestion start are refused by the process-epoch comparison
-(PA §5.1). After entry B takes over and
-starts an ingestion in the new epoch (PA §16). The restored operation, whose
+claim, takeover and ingestion start are refused by the process-epoch comparison (PA §5.1). Its
+commitment of the pre-entry plan is refused by comparisons 1 and 6. In step 9 its commitment of
+the new-epoch plan on the released scope, which passes every other comparison, is refused by the
+process-epoch comparison. After entry B takes over and starts an ingestion in the new epoch
+(PA §16). The restored operation, whose
 journal holds no attempt, ends `cancelled`; a landing of the held request is recorded as drift at
 the scope's marking, not applied over. The revoked approver is refused before and after entry, and
 every pre-restore automation token until reissued. The worker scope is `ready`, is released and
@@ -555,7 +561,8 @@ unaccounted scope, and release
 of a scope not `ready`: refused. A pre-entry approval: refused by comparison 1. A second entry under
 another key in the same recovery start: `409`. Exit with a scope unreleased: refused. The epoch
 term dropped from the fence: A's token passes across the `pg_dump` restore, as DB row 027 showed;
-the process-epoch comparison dropped: each of A's other step 4 writes passes.
+the process-epoch comparison dropped: A's job claim, takeover and ingestion start in step 4 and
+its commitment in step 9 pass.
 The same restore started normally, with no entry: A's token passes; this residual is stated (PA
 §14, last row) and shown, not claimed closed. A variant deleting the Transit key the `Desired`
 releases name: each scope is `blocked` on it and leaves only through a newly published release
@@ -628,7 +635,7 @@ support them, and the reviewer's record.
 | Item 7: external restoration through explicit recovery mode | S7 | [ginsys/bronzeward#29](https://github.com/ginsys/bronzeward/issues/29) |
 | Closing paragraph: selected database/provider behaviour (§7.7) | S0 to S8 on the §2 fixture | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30) |
 | Closing paragraph: scoped authorization (§13.7) | S0 step 4, S3 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) |
-| Closing paragraph: usable operation timeline | S8 | [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
+| Closing paragraph: usable operation timeline | S8 | [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30), [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 | §18.1 E6: the existing-cluster vertical slice | the integrated run, S0 to S8 | [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 
 ### 7.1 Required verification
