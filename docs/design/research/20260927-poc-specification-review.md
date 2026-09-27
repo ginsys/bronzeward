@@ -315,7 +315,7 @@ owner decide explicitly; each is expanded below the table.
 | PA17.3 | Immutability enforced by database triggers | accept as specified |
 | PA17.4 | Publication checks every input head and import base | accept as specified |
 | PA17.5 | Import base is the Applied release's; no separate head | accept as specified |
-| PA17.6 | Publication selects the release as Desired | FLAG F7 |
+| PA17.6 | Publication selects the release as Desired | FLAG F7, decided |
 | PA17.7 | No provider I/O inside a transaction; fixed lock order | accept as specified |
 | PA17.8 | Generation paths carry claim id and random value id; orphans reported | accept as specified; C §2.3 step 6 now states the component (§6 item 6) |
 | PA17.9 | Idempotency key on every mutating request, kept, epoch-bound | accept as specified |
@@ -374,6 +374,8 @@ owner decide explicitly; each is expanded below the table.
   release" points to selection at approval. Selecting at publication is what AP S2 tests ("the
   release is `Desired` for the worker, with no plan"). Recommendation: the owner confirms; if
   accepted, design §12.6 needs matching wording so the contract does not silently override it.
+  **Owner decision (2026-09-27): selection at publication**; design §12.6 now says so, and
+  approval gates only the plan that applies it.
 - **F8: settle floor (ER10.11).** Accounting a lost response is a `recovery-admin` decision after at
   least 30 s, a choice not a bound (FR §9 item 3). Recommendation: accept for the PoC; AP S6.2's
   measurement is the input for any change.
@@ -460,9 +462,11 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 **ginsys/bronzeward#21, runnable foundation.**
 - Contracts: `persistence-api.md` §2, §5, §9, §10, §11; §14 rows for authentication and migration.
 - Acceptance: AP S0 steps 1–5 and its negative controls; AP §2 fixture additions (instances A and B,
-  disposable OIDC issuer, automation token tool, deployment settings).
+  disposable OIDC issuer, automation token tool, OpenBao seal and unseal actions, deployment
+  settings).
 - Checks: concurrent migrate runs with the advisory-lock control; startup refusal on schema or
-  checksum mismatch; every token defect `401`; each design §13.7 scenario row through the API; no
+  checksum mismatch; every token defect `401`; each design §13.7 row that role alone decides through
+  the API, the others mapped to S1–S7; no
   dispatch, token or role route (`404`); same-key idempotency with the key-lock control.
 - Carries: authentication is untested by any investigation (PA §16).
 
@@ -479,18 +483,19 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 
 **ginsys/bronzeward#23, edit and publish.**
 - Contracts: `compilation.md` §5–§11; `persistence-api.md` §4, §6, §7.
-- Acceptance: AP S2 steps 1–4 and negative controls.
+- Acceptance: AP S2 steps 1–5 and negative controls.
 - Checks: SR and SP matrices through the compiler's own path (the C §10.1 condition, before relying
-  on the machinery); ETag `412`; `409 stale-input` with the `FOR SHARE` control; literal copy and
+  on the machinery); a profile revision selected through the assignment, recorded on the release
+  and in provenance; ETag `412` on fragment and profile; `409 stale-input` with the `FOR SHARE` control; literal copy and
   reserved text refused; fidelity check fires on an injected change; immutable rows refuse writes;
   idempotent replay and `422` on reuse; publication creates no plan or operation.
 - Carries: machinery parity inferred; paired-diff control loose; messages withheld (C §15). Owner
-  choice F7 (Desired at publication).
+  choice F7 decided: `Desired` at publication.
 
 **ginsys/bronzeward#24, retention checks.**
 - Contracts: design §7.6, §7.8 and §15.3 (the decided PoC policy); `persistence-api.md` §3
   (DependencyStatus), §6.3; `compilation.md` §6 step 3, §9. No contract section owns the monitor.
-- Acceptance: AP S2 step 5 and its soft-delete, destroy and partition controls; AP S7 variants.
+- Acceptance: AP S2 step 6 and its soft-delete, destroy and partition controls; AP S7 variants.
 - Checks: `retained`, `blocked`, `lost`, `unknown` per RC's evidence; a 404 stays `unknown`; a
   `retained` dependency turning unreadable alerts at once; persistent unknown re-alerts after 15
   minutes; the monitor reads metadata only; publication pinning a non-`retained` version refused;

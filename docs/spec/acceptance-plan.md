@@ -61,6 +61,8 @@ none changing a pin the Phase-0 evidence was captured against:
 - one automation identity holding `author` and `publisher`, its token issued by the server-side tool
   and `h-all` named as its responsible human
   ([PA §10.2](persistence-api.md#102-automation-bronzeward-issued-tokens));
+- `bin/inject seal openbao` and `unseal openbao`, sealing the running provider without stopping it,
+  since `start openbao` unseals as it starts;
 - the deployment settings held outside the database: a settle floor of 30 s
   ([ER §5.2](execution-recovery.md#52-accounting-a-lost-response)), the maximum transport deadline
   ([ER §7.3](execution-recovery.md#73-procedure) step 1) and `deniedSubjects`
@@ -94,10 +96,19 @@ closing paragraph.
    the liveness route.
 3. Send a request with no token, then one per token defect of PA §10.1 and §10.2, a missing, empty
    and non-string `sub` included.
-4. Walk every row of the
+4. From a separate `bin/up` seeded with a draft, a release, a plan and a scope, walk through the API,
+   as the identity each names, the rows of the
    [design §13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy)
-   scenario table through the API, as the identity it names.
+   scenario table that role alone decides: every Publish, Plan and Freeze row, the Approve rows but
+   the revoked-identity one, the Revoke rows by role, and the Recover rows that deny by role.
 5. Request a dispatch, token-issuing or role-granting path.
+
+The other rows need state S0 does not create, or lie outside the API, and are exercised where it
+exists: the adopted-baseline approval in S1; the revoked-identity approval, revocation before
+commitment and unapproved dispatch in S3; the controller's dispatch and revocation after commitment
+or attempt (DS rows 002 to 005) in S4; resolving an `unresolved` operation in S6.1; entry and scope
+release in S7. The OpenBao administrator's and break-glass rows are outside Bronzeward: break-glass
+is seen as drift in S5, and the provider's acts are S2's and S7's injections.
 
 **Clauses exercised.** PA [§9.2](persistence-api.md#92-resources-and-routes),
 [§10.1](persistence-api.md#101-humans-oidc),
@@ -108,7 +119,7 @@ closing paragraph.
 
 **Pass criteria.** One migrate run applies the schema; the other waits, then skips it. Every token
 defect answers `401`, except a revoked or denied subject, which answers `403 identity-revoked`; none
-creates a principal row. Each §13.7 row ends as the table says, and each
+creates a principal row. Each row step 4 walks ends as the table says, and each
 allowed act is recorded with its identity and role. Step 5 answers `404`: no handler exists.
 
 **Negative controls.** A binary that does not know the newest migration, and a checksum mismatch,
@@ -134,7 +145,7 @@ one synthetic secret outside the Talos schema's secret fields, in `machine.files
 1. `h-author` records the cluster and both machines (`POST /clusters`, `POST /machines`).
 2. `h-author` imports each node (`POST /ingestions`), marking the file content's path on the worker.
 3. The draft transaction commits and releases the claim.
-4. `h-publisher` publishes the import draft, as in S2 steps 3 and 4.
+4. `h-publisher` publishes the import draft, as in S2 steps 4 and 5.
 5. `h-publisher` creates an `adopt` plan per machine, binding no drift record and no baseline
    revision; `h-approver` approves each.
 6. The controller commits each adopt plan, which records the adoption.
@@ -189,11 +200,14 @@ is reopened and this scenario does not run.
 
 1. `h-author` drafts a worker fragment with one node-label change, the safe `no-reboot` change S4
    applies, and a `!bwref` reference to a value extracted in S1.
-2. The draft compiles and validates; `h-author` reads the worker's redacted review data.
-3. `h-publisher` publishes; the `publish` operation succeeds.
-4. The release is read back: artifacts, dependency records, renderer and contract record,
-   configuration digests; `bin/evidence` records the worker's resource version.
-5. The dependency monitor classifies the release's dependencies.
+2. In the same draft, `h-author` creates a worker profile revision listing that fragment revision,
+   and revises the worker's assignment to select the profile.
+3. The draft compiles and validates; `h-author` reads the worker's redacted review data.
+4. `h-publisher` publishes; the `publish` operation succeeds.
+5. The release is read back: artifacts, the source, profile and assignment revisions it snapshotted,
+   dependency records, renderer and contract record, configuration digests; `bin/evidence` records
+   the worker's resource version.
+6. The dependency monitor classifies the release's dependencies.
 
 **Clauses exercised.** C [§5.1](compilation.md#51-syntax),
 [§6](compilation.md#6-resolution-order-and-composition), [§7](compilation.md#7-validation-stages),
@@ -209,13 +223,16 @@ ER [§1](execution-recovery.md#1-supported-operation-and-state-values).
 **Pass criteria.** The artifact is Transit ciphertext under a key identity the provider cannot
 reissue; dependency records name exact versions; the renderer is the pinned machinery at the node's
 running contract minor. The review data shows the label change and redacts every resolved value and
-every value whose provenance is sensitive. The release is `Desired` for the worker, with no plan, no
+every value whose provenance is sensitive. The release records the profile and assignment revisions
+of step 2, and the label's provenance names the fragment revision the profile selected. The release
+is `Desired` for the worker, with no plan, no
 operation but `publish` and no change of the worker's resource version. Immutable rows refuse
 `UPDATE` and `DELETE`. Every dependency classifies `retained`
 ([design §7.8](../design/Talos_Configuration_and_Machine_Management_Design.md#78-poc-retention-and-recovery-policy)).
 
-**Negative controls.** Two authors on one ETag: the second gets `412`, nothing persisted. A head
-moved by another publication: `409 stale-input`; without `FOR SHARE` the stale release commits (DB
+**Negative controls.** Two authors on one ETag, of the fragment and of the profile: the second gets
+`412`, nothing persisted. A fragment or profile head moved by another publication:
+`409 stale-input`; without `FOR SHARE` the stale release commits (DB
 row 011). A literal copy of a resolved value, and the reserved text `!bwref` in a string: refused,
 paths only. A fidelity check firing on an injected structural change (C §8.1). A pinned KV version
 soft-deleted, then destroyed, then OpenBao partitioned: `blocked`, `lost`, `unknown`, each alerted
@@ -243,8 +260,9 @@ after.
    deadlines, maximum attempts, expiry and maximum observation age; `h-viewer` reads its redacted
    whole-configuration diff.
 3. `h-approver` approves it.
-4. Separately, `h-all` authors, publishes, plans and approves a change, and approves a plan the
-   automation identity created.
+4. From snapshots taken before step 2 (`bin/inject db-snapshot`, `bao-snapshot`), `h-all` authors, publishes, plans and approves a change, and
+   approves a plan the automation identity created. These plans stay out of the integrated run, where
+   the controller could commit them before S4.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding),
 [§3.2](execution-recovery.md#32-the-commitment-transaction) comparisons 1 and 2,
@@ -304,8 +322,9 @@ the completion observation's basis follows the recorded response. `Desired`, `Ap
 released on `completed`.
 
 **Negative controls.** A plan binding the control plane's proxied route: refused at creation (ER
-§10.9). OpenBao sealed (`bin/inject kill openbao`): the use-time check fails, and nothing commits
-until it is unsealed. An observation older than the plan's maximum age: commitment
+§10.9). OpenBao running but sealed (`bin/inject seal openbao`, §2), and OpenBao stopped
+(`bin/inject kill openbao`): the use-time check fails, and nothing commits until it is unsealed or
+started. An observation older than the plan's maximum age: commitment
 refused. A second plan for the worker while the first holds the scope: refused by comparison 4;
 without the unique index both commit (DS row 011). An assignment change while the scope is held,
 and a frozen scope: refused. An artifact failing node validation: `InvalidArgument`, `rejected`,
@@ -460,10 +479,12 @@ second worker plan is approved; an approval is revoked; an approver's subject is
 **Steps.**
 
 1. **Restore.** Stop B and record the time. A stays paused, not stopped: it is the missed stale
-   instance, whose owner generation the restore makes current again. Restore the database to *T*.
+   instance, whose owner generation the restore makes current again. Restore the database to *T*
+   and OpenBao to its snapshot (`bin/inject db-restore`, `bao-restore`), paired as PA §12.3 requires:
+   the provider backup no older than the database's.
 2. **Recovery start.** Start B with the recovery-start flag.
-3. **Entry.** `h-recovery` records entry through the API, naming both backups and their ages; a new
-   epoch is minted.
+3. **Entry.** `h-recovery` records entry through the API, naming both restored backups, `database`
+   and `provider`, with their ages; a new epoch is minted.
 4. Unpause A; it tries a takeover, a commitment and an attempt.
 5. Unpause the worker: the held request may land.
 6. `h-recovery` re-records the identity revocation; the automation token is reissued with the
