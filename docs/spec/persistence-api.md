@@ -1478,11 +1478,12 @@ transaction that locks the principal row `FOR UPDATE` (T5c). From its commit:
   service needs a new identity.
 
 A restore can remove a revocation recorded after the backup. The deployment
-configuration's `deniedSubjects` list survives a database restore, so an
-identity revocation is complete only when the operator has also added the
-subject to that list, at the time of the revocation, not after a restore: a
-human by `(iss, sub)`, a service identity by its `idn` identifier. The
-revocation's response says so. A restored database that lost the revocation
+configuration's `deniedSubjects` list survives a database restore, so the
+operator adds the subject to that list before recording the revocation, not
+after it and not after a restore: a human by `(iss, sub)`, a service identity
+by its `idn` identifier. A revocation recorded first could be lost to a
+failure and a restore before the list names the subject, leaving no trace of
+it. The revocation's response restates the rule. A restored database that lost the revocation
 then still refuses the subject before and after entry, so a revoked
 `recovery-admin` can neither enter recovery mode nor act in it, and the tool
 issues no token to a listed service identity, even before the lost revocation
@@ -1881,7 +1882,7 @@ After *T*:
    `ep_e3t4dznwcjg4uoahvfjk4w6kwy`, and leaves it.
 4. An ingestion creates generations under claim
    `ing_4ycffhy7bf4o2w6pz5b4r75hmu`.
-5. `recovery-admin` revokes human `idn_6woutisn7uensexh3kk2qlz6ma`, and the operator adds the subject to `deniedSubjects` (§10.4).
+5. The operator adds human `idn_6woutisn7uensexh3kk2qlz6ma`'s subject to `deniedSubjects`, then `recovery-admin` revokes the identity (§10.4).
 
 The operator stops every service instance, then restores the database from *T*
 and the provider from a snapshot taken after it. The restored database names
