@@ -1133,17 +1133,22 @@ handles them.
 ### 7.2 Entry
 
 The controller supports a **recovery start**, a startup option under which it
-keeps every dispatch gate closed: it runs no executor, attempts no commitment
-or attempt transaction, and serves observation, the checks of §7.3, the
-recovery API, the acts §7.5 always allows (approval and identity revocation,
-plan cancellation, freeze) and the installation-wide acts of §7.5 (drafts,
-ingestion, compilation and publication), so that a `blocked` scope's exit through a new
-release (§7.4) exists before any scope is released. For a restore of any of
-the three backup families, the operator stops, or establishes as stopped,
-every controller instance before the restore of any family begins, records
-the time (§7.3 step 1), and keeps every instance stopped until recovery-mode
-entry commits; the only controller started meanwhile is the one with recovery
-start, after the restore. Until entry commits, the epoch the instances hold is
+keeps every dispatch gate closed: it runs no executor and attempts no
+commitment or attempt transaction. Until recovery-mode entry commits it serves
+only a liveness probe and the entry act itself: the restored epoch is still
+current until then, so a token revoked after the snapshot still authenticates,
+and any other act served would be taken on that token's authority (see
+`persistence-api.md`). Once entry has committed, it serves observation, the
+checks of §7.3, the recovery API, the acts §7.5 always allows (approval and
+identity revocation, plan cancellation, freeze) and the installation-wide acts
+of §7.5 (drafts, ingestion, compilation and publication), so that a `blocked`
+scope's exit through a new release (§7.4) exists before any scope is
+released. For a restore of any of the three backup families, the operator
+stops, or establishes as stopped, every controller instance before the restore
+of any family begins, records the time (§7.3 step 1), and keeps every instance
+stopped until recovery-mode entry commits; the only controller started
+meanwhile is the one with recovery start, after the restore. Until entry
+commits, the epoch the instances hold is
 still current, whichever family was restored, so an instance left running
 would pass the comparisons of §3.2 and §3.3 on the approvals and ownership it
 reads: only this stop prevents that. It is an operator step that Bronzeward
@@ -1207,8 +1212,11 @@ epoch, and recovery mode stays in effect until §7.6.
    restore erased (design §13.7 item 4). A token revoked after the backup must
    not authenticate again; persistence meets this by refusing every automation
    token whose epoch is not the current one, so every token is reissued with the server-side
-   tool, and by a denied-subject list in deployment configuration, to which
-   the re-recorded identities are added (design §13.7 item 1; see
+   tool, and by a denied-subject list in deployment configuration, which a
+   restore does not rewind: each identity revocation, of a human or a service
+   identity, adds its subject to the list when it is made, and the tool issues
+   no token to a listed identity, so a reissue that precedes the re-recording
+   cannot revive a revoked service identity (design §13.7 item 1; see
    `persistence-api.md`).
 3. **Check dependencies.** Check retained dependencies (design §7.6) and the
    backup pairing of design §7.7, and test the decryption and credentials each
@@ -1514,8 +1522,9 @@ A, C and P's revocation do not exist.
   token's epoch is not E, so comparison 7 refuses it; comparison 6 would too.
   Before entry nothing would have refused it (§7.2).
 - **Step 2.** `recovery-admin` re-records P's identity revocation from the
-  operator's records, and P is added to the deployment's denied subjects;
-  automation tokens are reissued (§7.3 step 2).
+  operator's records. P has been in the deployment's denied subjects since the
+  revocation, so P was refused before entry too; automation tokens are
+  reissued (§7.3 step 2).
 - **Steps 1 and 4.** After the settle floor from the stop, `recovery-admin`
   records the accounting decision for M1, M2 and M3, each with its recovery
   observation; for M3 it accounts S's attempt too, whose response the restore
@@ -1783,8 +1792,9 @@ conservative option; those that do not say so. Each is marked in place as
 17. **The recovery epoch is a never-reissued random identifier compared for
     equality** (§7.1). Alternative: a counter held outside the database, which
     another restore could also rewind.
-18. **Recovery start keeps the gates closed; entry is always the
-    `recovery-admin` API act; no rollback detection** (§7.2). Alternatives:
+18. **Recovery start keeps the gates closed and serves nothing but liveness
+    and entry until entry commits; entry is always the `recovery-admin` API
+    act; no rollback detection** (§7.2). Alternatives:
     entry by a server-side command before the controller starts; or detection
     through a high-water mark held outside the database, which this contract
     does not specify.

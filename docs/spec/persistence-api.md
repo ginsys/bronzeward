@@ -130,6 +130,9 @@ It needs from compilation, as cross-contract points:
 5. The post-restore procedure re-records identity revocations made after the
    backup was taken, and reissues automation tokens rather than re-recording
    their revocations: every token from an earlier epoch is refused (§12.3).
+   The tool reissues no token to a service identity that `deniedSubjects`
+   lists, so a reissue before the re-recording cannot revive a revoked one
+   (§10.2, §10.4).
 6. The operation of a plan is created by the dispatch commitment, not with the
    plan (§8.1) **(choice §17.11)**; comparison 0 ("no operation exists for this
    plan yet") is the unique index of §7.3.
@@ -1406,7 +1409,8 @@ with it. It:
   not, in the same transaction, so one token is valid at a time. The
   reissue after a restore (§12.3) is such a rotation. Every tool transaction
   that issues or revokes an identity's token first locks its principal row
-  `FOR UPDATE`, the lock T5c takes, and refuses a revoked identity: two
+  `FOR UPDATE`, the lock T5c takes, and refuses to issue a token to a revoked
+  identity or to one that `deniedSubjects` lists (§10.4): two
   rotations of one identity serialize, the second replacing the first's
   token, and a rotation racing an identity revocation either precedes it,
   its token then revoked by T5c, or waits and is refused. A partial unique
@@ -1414,7 +1418,9 @@ with it. It:
 - prints the token once, and writes an act record naming the operator as
   given to the tool.
 
-A token issued before the current recovery epoch is refused (§12.3).
+A token issued before the current recovery epoch is refused (§12.3), and the
+token of an identity that `deniedSubjects` lists is refused
+`403 identity-revoked` (§10.4).
 
 ### 10.3 Authorization
 
@@ -1463,13 +1469,16 @@ transaction that locks the principal row `FOR UPDATE` (T5c). From its commit:
   service needs a new identity.
 
 A restore can remove a revocation recorded after the backup. The deployment
-configuration's `deniedSubjects` list survives a database restore, so a human
-revocation is complete only when the operator has also added the subject to
-that list, at the time of the revocation, not after a restore; the revocation's
-response says so. A restored database that lost the revocation then still
-refuses the subject before and after entry, so a revoked `recovery-admin` can
-neither enter recovery mode nor act in it. The recovery procedure re-records
-the lost revocation rows (§12.3) **(choice §17.19)**.
+configuration's `deniedSubjects` list survives a database restore, so an
+identity revocation is complete only when the operator has also added the
+subject to that list, at the time of the revocation, not after a restore: a
+human by `(iss, sub)`, a service identity by its `idn` identifier. The
+revocation's response says so. A restored database that lost the revocation
+then still refuses the subject before and after entry, so a revoked
+`recovery-admin` can neither enter recovery mode nor act in it, and the tool
+issues no token to a listed service identity, even before the lost revocation
+is re-recorded (§10.2). The recovery procedure re-records the lost revocation
+rows (§12.3) **(choice §17.19)**.
 
 **Losing a role** without an identity revocation is not acted on
 **(choice §17.23)**. A human's roles are known only from the token presented
@@ -1711,7 +1720,7 @@ For a database restored to a backup taken at time *T*:
 | Approvals, scope releases | earlier epoch | authorize nothing; a plan needs an approval in the new epoch |
 | Idempotency records after *T* | absent | a retry executes afresh (§12.4) |
 | Idempotency records from before *T* | earlier epoch once entry commits | a retry is refused `409 conflict` (§7.2) |
-| Identity revocations after *T* | absent | re-recorded by `recovery-admin`; a human subject is already refused by `deniedSubjects` (§10.4) |
+| Identity revocations after *T* | absent | re-recorded by `recovery-admin`; the subject, human or service identity, is already refused by `deniedSubjects`, and the tool reissues no token to a listed service identity (§10.2, §10.4) |
 | Automation tokens | earlier epoch | refused; reissued with the tool **(choice §17.27)** |
 | Tokens revoked after *T* | valid again in the rows | refused anyway: earlier epoch |
 | `DependencyStatus` | as at *T* | a dependency recorded `retained` and now answering 404 alerts at once as a regression (§6.3) |
@@ -2014,7 +2023,9 @@ each (design §7.7 consequences):
   refused;
 - two concurrent rotations of one service identity, and a rotation racing its
   identity revocation, leaving at most one valid token and none after the
-  revocation, with a control that drops the principal lock; two concurrent
+  revocation, with a control that drops the principal lock; a reissue after a
+  restore refused for a service identity that `deniedSubjects` lists although
+  the restored database lost its revocation; two concurrent
   inventory requests for one SMBIOS UUID under different keys, one refused;
 - machine revisions, shared by plan, operation and machine-scope entries,
   allocated in commit order under concurrent writers to one scope, with a
@@ -2153,7 +2164,8 @@ design and evidence do not settle the question. Each is marked in place as
     Alternative: none, leaving edge case (b) of design §13.7 item 3
     unrecordable.
 19. **Identity revocation is permanent and refuses authentication; a
-    deny list in deployment configuration survives restore** (§10.4). This
+    deny list in deployment configuration, naming humans and service
+    identities, survives restore and blocks a token reissue** (§10.4). This
     goes beyond design §13.7 item 4, which states what a revocation
     invalidates, without contradicting it. Because identity providers usually
     keep a subject stable, a mistaken revocation locks that person out until
