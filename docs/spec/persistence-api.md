@@ -881,9 +881,10 @@ inventoried in the PoC. The index cannot catch a record entered with a wrong
 UUID at inventory; execution and recovery refuses it at dispatch instead.
 There, the node's observed SMBIOS UUID and cluster membership must match this
 record before any send (its §3.2 comparison 3) and before a scope is `ready`
-after a restore (its §7.4), so a node that is not the recorded machine, or a
-record entered with a wrong UUID, is refused before anything reaches it
-(its choice §10.26).
+after a restore (its §7.4), so a dispatch whose evidence read shows a node
+that is not the recorded machine, or a record entered with a wrong UUID, is
+refused before it sends. A node swapped between that read and the send is a
+residual its choice §10.26 states.
 
 ## 8. Asynchronous operations
 
