@@ -529,7 +529,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
   precede the request; Desired, Applied, Observed served separately; sealed OpenBao, stale
   observation, second plan (scope-index control), frozen scope, a proxied-route plan (F3) and
   `InvalidArgument` each refused.
-- Gap to close first: the pre-send identity check (§10, PR19). Owner choices F2, F3.
+- Gaps to close first: the pre-send identity check (§10, PR19) and gap E, whether the verification
+  deadline is a convergence window and the ER §4 change that follows. Owner choice F2; F3 decided.
 
 **ginsys/bronzeward#27, drift.**
 - Contracts: `execution-recovery.md` §6, §8.6; `compilation.md` §2.3 (drift adoption);
@@ -561,6 +562,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
   epoch-term and process-epoch controls (PA §16); restored operation never retried; per-scope
   refusals; exit only when every scope is released; the no-entry restart residual shown.
 - Depends on the §6 item 2 repair (what the recovery start serves).
+- Gap to close first: gap G, what a restoration read must match, with PR19, decided and written
+  into ER §7.3.
 
 **ginsys/bronzeward#30, package and document.**
 - Acceptance: AP S8 step 1's walkthrough; AP §8 and §9 as the documented limits.
@@ -573,7 +576,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Contract: the acceptance plan, `docs/spec/acceptance-plan.md`, as accepted under
   ginsys/bronzeward#20.
 - Checks: one integrated run of S0–S8 from a fresh `bin/up`; negatives and matrices separately;
-  common evidence per AP §2; the coverage table of AP §7 answered row by row; no production claim.
+  common evidence per AP §2; the coverage tables of AP §7 and §7.1 answered row by row, each
+  required-verification item with a retained result; no production claim.
 
 ## 12. Acceptance criteria
 

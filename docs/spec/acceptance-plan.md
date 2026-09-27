@@ -362,8 +362,8 @@ run: **drift freeze, sanitized adoption and approved revert**
    record commits under the freeze.
 5. Measure whether an artifact compiled from the unchanged import base reproduces the baseline
    digest.
-6. **Revert.** Patch the worker out of band again. `h-publisher` creates a revert plan binding the
-   new drift record and its drifted digest; `h-approver` approves it, recorded as approving an
+6. **Revert.** Patch the worker out of band again; the next `drift` observation opens a new drift
+   record. `h-publisher` creates a revert plan binding that record and its drifted digest; `h-approver` approves it, recorded as approving an
    unseen overwrite, and unfreezes; the revert runs as S4.
 
 **Clauses exercised.** ER [§6.1](execution-recovery.md#61-detection),
@@ -617,6 +617,53 @@ support them, and the reviewer's record.
 | Closing paragraph: scoped authorization (§13.7) | S0 step 4, S3 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) |
 | Closing paragraph: usable operation timeline | S8 | [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 | §18.1 E6: the existing-cluster vertical slice | the integrated run, S0 to S8 | [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
+
+### 7.1 Required verification
+
+Each contract ends with a list of checks an implementation must show, each with a control that can
+fail: [C §15](compilation.md#15-verification-and-evidence-limits),
+[ER §9.2](execution-recovery.md#92-required-verification) and
+[PA §16](persistence-api.md#16-verification-and-evidence-limits). **Every item of those lists is
+part of this plan.** The scenarios above carry the items on the integrated path; an item marked
+*check* runs separately, from a fresh `bin/up` or a recorded snapshot (§2), under the issue named,
+with its control and the retained evidence of §2. An issue is not complete while an item mapped to
+it has no retained result, and ginsys/bronzeward#31 confirms the table row by row.
+
+| Contract item | Where | Issue (ginsys/bronzeward) |
+| --- | --- | --- |
+| C §15: ingestion success, refusal and interruption at each pipeline step, every surface scanned | S1 (import); S5 step 4 plus *check* (drift adoption); S2 negative controls (draft update) | #22, #27, #23 |
+| C §15: the compiler process's surfaces scanned over successful, rejected and interrupted publications, killed at each point before `COMMIT` while plaintext is held | *check* | #23 |
+| C §15: claim lease, takeover, stale owner, crash inside the draft transaction, provider unreachable | S1 negative controls plus *check* | #22 |
+| C §15: SR and SP matrices through the compiler's path; fidelity check | S2 precondition and negative controls | #23 |
+| C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | the scenario of each clause's issue, plus *check* for the rest | #21 to #29 |
+| ER §9.2: DS rows 001–023 through the implementation, with controls 006, 008, 011 | S4 precondition | #26 |
+| ER §9.2: sending only after the attempt commits; each §3.2 and §3.3 lock with its unlocked control | S4, S3 (DS row 003), S4 negative controls (DS row 011) plus *check* | #25, #26 |
+| ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing; the bound exhausted after a lost response leaves no further attempt and ends `failed` | S3, S4 negative controls; *check* for the last two | #25, #26, #28 |
+| ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls | #25 |
+| ER §9.2: an `apply-config` operation with no attempt not completed by a completion observation of its artifact applied out of band | *check* | #28 |
+| ER §9.2: assignment change refused while the scope is held; comparison 6 under a freeze and under recovery mode | S4, S7 negative controls | #26, #29 |
+| ER §9.2: takeover at start; the §5 precedence; PA §16: a takeover keeps `unresolved` and refuses a terminal operation | S6.1 plus *check* | #28 |
+| ER §9.2: identity revocation before commitment, after it with no attempt, after an attempt with its retry refused | S3 negative controls; *check* for the last | #25, #28 |
+| ER §9.2: observation ordering, contradicting higher-basis reads, confirmed reads, the late-read residual | *check* | #28, #27 (adoption read) |
+| ER §9.2: plan and commitment refusals on undetected drift; drift detection, freeze, adoption record and revert cases, with the leak screen | S5 and its negative controls | #27 |
+| ER §9.2: recovery-mode entry after a restore older than a takeover, an approval, a revocation and an attempt | S7 | #29 |
+| ER §9.2: the complete existing-cluster E6 slice | the integrated run | #31 |
+| PA §16: `FOR SHARE` at publication (DB row 011) | S2 negative controls | #23 |
+| PA §16: ownership check inside the attempt's `UPDATE` (row 018) | S4 negative controls | #26 |
+| PA §16: claim eligibility re-check (row 020) | *check* | #22 |
+| PA §16: migration advisory lock (row 026); immutability triggers; startup refusal on each schema mismatch; authentication refusals and role checks | S0, S2 pass criteria, plus *check* for startup | #21, #23 |
+| PA §16: the epoch term and process-epoch checks; the recovery-start process in the new epoch; per-scope refusals and the recovery-start refusal | S7 | #29 |
+| PA §16: one idempotency key in flight twice, with the key-lock control | *check* | #21 |
+| PA §16: approval revocation racing commitment (DS row 003) | S3 negative controls | #25 |
+| PA §16: identity revocation racing commitment, with the lock control; its timeline entries on exactly the machines it touches (T5c) | *check* | #25 |
+| PA §16: a lapsed `publish` job claimed again | S2 negative controls | #23 |
+| PA §16: leaving recovery mode racing an inventory request, with the `FOR SHARE` control | *check* | #29 |
+| PA §16: concurrent rotations of one service identity, and rotation racing its revocation, with the principal-lock control | *check* | #21 |
+| PA §16: a reissue after a restore refused for a service identity `deniedSubjects` lists | *check* | #29 |
+| PA §16: two inventory requests for one SMBIOS UUID under different keys, one refused | *check* | #22 |
+| PA §16: machine revisions allocated in commit order under concurrent writers, with the unlocked control | *check* | #26 |
+| PA §16: an event stream ended by its token's `exp`, resumption refused after revocation | S8 step 3 | #26 |
+| PA §16: no request body in the data directory, write-ahead log or backups | S1, S2 scans | #22, #23 |
 
 ## 8. Not covered by the PoC
 
