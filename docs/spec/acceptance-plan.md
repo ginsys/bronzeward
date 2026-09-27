@@ -181,8 +181,9 @@ observation.
 - The same under encrypted staging: takeover by a second ingestion principal only after lease lapse;
   the old owner's draft transaction refused; a takeover with nothing to decrypt abandons; with
   OpenBao partitioned the taker keeps the claim `resumed`
-  ([C §3.4](compilation.md#34-takeover-e1-decision-2)). A crash inside the draft transaction: no
-  draft, and the claim stays unreleased.
+  ([C §3.4](compilation.md#34-takeover-e1-decision-2)). A crash inside the draft transaction: the
+  draft opened in step 2 is unchanged, with the ETag it had before the ingestion; no revision or
+  entry the transaction wrote is committed, and the claim stays unreleased.
 - Automation on `POST /ingestions`: `403`. An adoption record whose latest observation is older than
   the bound age, or shows another digest: refused, and `Applied` stays unset.
 
@@ -228,12 +229,13 @@ scenario runs.
 ER [§1](execution-recovery.md#1-supported-operation-and-state-values).
 
 **Pass criteria.** The artifact is Transit ciphertext under a key identity the provider cannot
-reissue; dependency records name exact versions; the renderer is the pinned machinery at the node's
+reissue; dependency records name exact versions; the renderer is the one the precondition's re-run
+selected, the pinned machinery or the pinned `talosctl` subprocess (C §10.1), at the node's
 running contract minor. The review data shows the label change and redacts every resolved value and
 every value whose provenance is sensitive. The release records the profile and assignment revisions
 of step 2, and the label's provenance names the fragment revision the profile selected. The release
-is `Desired` for the worker, with no plan, no
-operation but `publish` and no change of the worker's resource version. Immutable rows refuse
+is `Desired` for the worker, with no plan and no operation but `publish` created since S1's
+completed `adopt` operations, and no change of the worker's resource version. Immutable rows refuse
 `UPDATE` and `DELETE`. Every dependency classifies `retained`
 ([design §7.8](../design/Talos_Configuration_and_Machine_Management_Design.md#78-poc-retention-and-recovery-policy)).
 
@@ -259,12 +261,13 @@ after.
 [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25). Design §18.2 item 4,
 [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy).
 
-**Preconditions.** S2 passed; no plan exists for the worker.
+**Preconditions.** S2 passed; the worker has no plan but S1's completed `adopt` plan.
 
 **Steps.**
 
-1. After at least one `drift` observation of the worker following S2, confirm that no plan or
-   operation exists for it: publication alone dispatches nothing.
+1. After at least one `drift` observation of the worker following S2, confirm that no plan and no
+   operation but `publish` exists for it besides S1's completed `adopt` plan and operation:
+   publication alone dispatches nothing.
 2. `h-publisher` creates an `apply-config` plan from the S2 release: `no-reboot`, a bound route,
    deadlines, maximum attempts, expiry and maximum observation age; `h-viewer` reads its redacted
    whole-configuration diff.
@@ -367,8 +370,9 @@ run: **drift freeze, sanitized adoption and approved revert**
 3. `h-author` freezes the scope.
 4. **Adopt.** `h-author` opens a new draft (`POST /drafts`), since the import draft is published,
    and ingests the drifted configuration into it as a drift adoption (`POST /ingestions` naming
-   that draft, with `If-Match` its ETag), marking the new file's content; `h-publisher` publishes it and creates an `adopt` plan binding the drift record;
-   `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
+   that draft, with `If-Match` its ETag), marking the new file's content. After the ingestion
+   succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
+   `adopt` plan binding the drift record; `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
    record commits under the freeze.
 5. Measure whether an artifact compiled from the unchanged import base reproduces the baseline
    digest.
@@ -384,8 +388,9 @@ run: **drift freeze, sanitized adoption and approved revert**
 [§9.2](persistence-api.md#92-resources-and-routes).
 
 **Pass criteria.** The drift record names the observation, `Applied`'s digest and the observed one;
-`Desired`, `Applied` and `Observed` stay distinct throughout. No Talos request is sent while the
-record is open and the scope frozen: the resource version changes only with the out-of-band patches
+`Desired`, `Applied` and `Observed` stay distinct throughout. While the record is open and the
+scope frozen, Bronzeward sends no Talos request that changes the machine, only the reads that
+observations and the drift adoption's ingestion make: the resource version changes only with the out-of-band patches
 and the revert. After step 4, `Applied` is the adopted release with the baseline's digest, the
 baseline revision has advanced and the record is closed `adopted`; the new secret is found nowhere
 outside OpenBao, on success, rejection and each interruption of the ingestion. After step 6, the
@@ -517,7 +522,9 @@ second worker plan is approved; an approval is revoked; an approver's subject is
    dependencies under the recovery identities. Then pause the control plane, take `restoration`
    observations, reclassify the restored operation and mark the scopes.
 8. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
-   has committed.
+   has committed. B's job worker runs the `publish` job queued in step 3; once it has succeeded
+   and changed the worker's `Desired`, `h-recovery` marks the worker scope again against that
+   release (ER §7.3 step 6, §7.4).
 9. **Release** the worker scope; `h-publisher` and `h-approver` plan and approve a worker change in
    the new epoch. With B paused, A's executor tries to commit that plan; unpause B, which commits
    it and applies it as S4. If the held request landed, the change is a revert binding the drift
