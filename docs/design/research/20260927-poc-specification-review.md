@@ -57,8 +57,8 @@ No row below is a production claim.
 The E-reports (Fx, E1, SR, SP, E3, DB, DS, PC, RC, KL, OM) keep the keys, issues and pins of
 [FR §3](20260925-feasibility-evidence-review.md#3-sources); FR §3.1 establishes that every
 fixture-based capture carries the same `fixtures/versions.env` blob, which is unchanged at aa58272.
-Line numbers in §6 are at aa58272. A parallel change is repairing ER and PA; its register fills §7,
-and a line cited here can move with it.
+Line numbers in §6 are at aa58272. The repairs of §7 moved some of those lines; the section cited
+with each stays the reference.
 
 ## 4. Properties
 
@@ -146,8 +146,11 @@ Status codes:
 ## 6. Cross-contract consistency
 
 Checked where two contracts state the same fact. Paths are under `docs/spec/`, lines at aa58272.
+Items 1, 2, 4, 6 and 7 are repaired by
+[ginsys/bronzeward#56](https://github.com/ginsys/bronzeward/pull/56), which lands before this
+report; item 3 stays a gap (§10); item 5 needs no change.
 
-**Inconsistent or open:**
+**Inconsistent or open at aa58272:**
 
 1. **Configuration-digest hand-off called open, but landed.** `persistence-api.md:104-110` (PA §1.1
    item 2) says the compilation hand-off of the plaintext and baseline configuration digests is open
@@ -158,7 +161,8 @@ Checked where two contracts state the same fact. Paths are under `docs/spec/`, l
    compilation and publication, without distinguishing before and after entry;
    `persistence-api.md:1616-1625` (PA §12.2) serves only liveness and entry until entry commits, and
    `persistence-api.md:1935` (PA §14) refuses every other request. PA is stricter and is what AP S7
-   tests; ER needs the same before-entry limit.
+   tests; ER needs the same before-entry limit. ER §7.2 also allowed the normal restart only after
+   the first released scope, PA §12.2 after entry; the repair aligns both (§7).
 3. **Pre-send identity check.** `persistence-api.md:869-873` (PA §7.3) records that no contract
    refuses a node whose observed identity differs from the plan's before the first send; in
    `execution-recovery.md:163-167` (ER §2) machine identity is a postcondition, not a precondition,
@@ -183,7 +187,36 @@ rule; and the choice pairs in §9.
 
 ## 7. Carried findings
 
-<!-- carried-findings: filled from the spec-repairs branch register -->
+The findings carried into this review on
+[ginsys/bronzeward#20](https://github.com/ginsys/bronzeward/issues/20): two from the final head of
+the first execution-recovery pull request (A, B), the post-round findings of the persistence (J–N)
+and execution-recovery (C–I) pull requests, and six review threads declined there. Each was
+re-verified against aa58272; the repairs are
+[ginsys/bronzeward#56](https://github.com/ginsys/bronzeward/pull/56).
+
+| ID | Finding | Disposition |
+|---|---|---|
+| A | ER §4: an attempt already sent when its executor dies can land after a newer operation | Addressed as disclosed: ER §5.2 states the residual, a late landing is detected as drift, not prevented; ER §9.3 gap 2 and PR22 carry the missing bound |
+| B | ER §7: a reconnecting executor passes comparison 1 on a restored approval before entry | Addressed as an operator step: ER §7.2 requires every controller stopped until entry commits, which Bronzeward neither enforces nor detects (choice ER §10.18); an enforced fence would be a new mechanism |
+| C | ER §7.2 served drafts, ingestion and publication before entry; PA §12.2 serves only liveness and entry | Fixed: ER §7.2 and choice §10.18 now match PA |
+| D | ER §6.3: the adoption record compared no machine identity | Fixed: the adopt plan binds the identity and requirement 4.4 compares it |
+| E | ER §4: a first contradicting completion read fails the operation before the verification deadline | Gap, owner decision: whether the deadline is a convergence window, and for which postconditions (§10) |
+| F | ER §4: an operation with no attempt could complete after a takeover | Fixed: an `apply-config` operation needs a recorded attempt to complete |
+| G | ER §7.3: any successful restoration read makes a scope `ready` | Gap, owner decision: what the read must match, with PR19 (§10) |
+| H | ER §7.3: a restored operation ends `cancelled` though an attempt may have been sent after the snapshot | Fixed as wording: `cancelled` after a restore refers to the restored journal and is never proof that nothing was sent |
+| I | ER §3.3: `unresolved` and `cancelled` read as simultaneous | Fixed: a sequence |
+| J | PA: a service identity's token reissued after a restore before its revocation is re-recorded | Fixed: `deniedSubjects` names service identities from the revocation on, and the tool issues no token to a listed identity |
+| K | PA T11: leaving recovery mode and inventory both read installation state `FOR SHARE` | Fixed: leaving takes it `FOR UPDATE` |
+| L | PA §8.2, T8, T9: jobs failed without a terminal event | Fixed: every move of a job to a terminal state appends its terminal event |
+| M | PA §7.2: a refused ingestion retried under a new key after rotation ingests again | Fixed as disclosure: the cost is stated in PA §7.1 and §14 |
+| N | PA §10.5: a refused draft entry that persists a claim wrote no act | Fixed: it writes the act |
+| Threads | Epoch representation, adoption `Desired` binding, pre-commitment states, first-baseline adoption plan | Addressed by the execution-recovery text as landed |
+| Threads | `Desired` selection on the machine timeline; drift reads after an assignment change | Refuted: ER §4.1 excludes `Desired` selection from the machine-scope facts; drift compares with `Applied`, which an assignment change does not move |
+
+The fresh review of the repairs raised one further point: under recovery start no job worker runs
+(PA §12.2), and ER §7.2 allowed the normal restart only once the first scope was released while
+PA §12.2 allows it once entry has committed, so a publication clearing a `blocked` scope could not
+run. ginsys/bronzeward#56 aligns ER §7.2 with PA: the restart may follow entry.
 
 ## 8. E3 disposition
 
@@ -277,7 +310,7 @@ owner decide explicitly; each is expanded below the table.
 | PA17.5 | Import base is the Applied release's; no separate head | accept as specified |
 | PA17.6 | Publication selects the release as Desired | FLAG F7 |
 | PA17.7 | No provider I/O inside a transaction; fixed lock order | accept as specified |
-| PA17.8 | Generation paths carry claim id and random value id; orphans reported | accept as specified; C §2.3 step 6 needs the line (§6 item 6) |
+| PA17.8 | Generation paths carry claim id and random value id; orphans reported | accept as specified; C §2.3 step 6 now states the component (§6 item 6) |
 | PA17.9 | Idempotency key on every mutating request, kept, epoch-bound | accept as specified |
 | PA17.10 | Release natural key is the draft revision | accept as specified |
 | PA17.11 | Operation created by the dispatch commitment | accept as specified |
@@ -377,7 +410,7 @@ residuals stated in ER §9.3, unless the owner asks for a rule first.
 **PA §16** ([PA §16](../../spec/persistence-api.md#16-verification-and-evidence-limits)):
 authentication, same-key concurrency and migrations to ginsys/bronzeward#21; restore epoch and
 recovery-entry quiescence to ginsys/bronzeward#29; orphan listing to ginsys/bronzeward#22; unkeyed
-digests to F1; the cross-contract bullet to §6 and §7. Beyond the PoC: undetected restore (design
+digests to F1; the cross-contract bullet was stale and is removed (§6 item 1). Beyond the PoC: undetected restore (design
 §14.6 accepts it), online migration and downgrade, serializable isolation, ciphertext determinism.
 
 **C §15** ([C §15](../../spec/compilation.md#15-verification-and-evidence-limits)): pipeline
@@ -390,8 +423,15 @@ metal-mode validation.
 
 **Found by this review:**
 
-- **PR19, pre-send identity.** Needs ER §2 to bind machine identity as a precondition and ER §3.2
-  comparison 3 to check it. Owned by the spec repairs (§7); ginsys/bronzeward#26 carries the check.
+- **PR19, pre-send identity, with G.** Needs ER §2 to bind machine identity as a precondition and
+  ER §3.2 comparison 3 to check it, and the same rule to define what a restoration read must match
+  before a scope is `ready` (§7 G). An owner decision on the identity evidence (hardware identity,
+  assignment evidence, membership) precedes the rule; ginsys/bronzeward#26 and ginsys/bronzeward#29
+  carry the checks once it exists.
+- **E, the verification deadline.** Whether a first contradicting completion read may fail an
+  operation before its deadline, or the deadline is a convergence window, and for which
+  postconditions (§7 E). An owner decision, then an ER §4 state-machine change;
+  ginsys/bronzeward#26 carries the check.
 - **PR13, the dependency monitor.** No contract section owns the classification procedure, alert
   timing or least-privilege metadata access; design §7.6, §7.8 and §15.3 set the policy.
   ginsys/bronzeward#24 takes design §7.8 and RC §6.4 as its contract.
