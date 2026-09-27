@@ -297,7 +297,7 @@ owner decide explicitly; each is expanded below the table.
 | ER10.8 | Machinery Talos client in process, conditional on DS re-runs | FLAG F2 |
 | ER10.9 | Route bound in the plan; the worker's own endpoint only (owner, F3) | FLAG F3, decided |
 | ER10.10 | Retry after full accounting only with attempts, approval and gate | accept as specified |
-| ER10.11 | Accounting by `recovery-admin` after a 30 s settle floor | FLAG F8 |
+| ER10.11 | Accounting by `recovery-admin` after a 30 s settle floor | FLAG F8, decided |
 | ER10.12 | Drift detection does not freeze by itself | accept as specified |
 | ER10.13 | Adoption as a plan with operation `adopt` | accept as specified |
 | ER10.14 | `author` performs the ingestion feeding an adoption (interim) | FLAG F4 |
@@ -380,7 +380,8 @@ owner decide explicitly; each is expanded below the table.
   approval gates only the plan that applies it.
 - **F8: settle floor (ER10.11).** Accounting a lost response is a `recovery-admin` decision after at
   least 30 s, a choice not a bound (FR §9 item 3). Recommendation: accept for the PoC; AP S6.2's
-  measurement is the input for any change.
+  measurement is the input for any change. **Owner decision (2026-09-27): accepted, 30 s**; F3 keeps
+  the proxy, the only path seen landing late, out of dispatch.
 - **F9: deny-list order (PA17.19, ER §7.3 step 2).** The operator adds a revoked subject to
   `deniedSubjects` before the revocation is recorded; nothing enforces it. A missed entry, then a
   restore to an earlier backup, then a token reissue before re-recording revives the identity.
@@ -542,7 +543,7 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
   `recovery-admin` decision after the settle floor; newer plan refused (DS row 011 control); retry
   only under ER §5's conditions; observation ordering under a concurrent accounting transaction
   (ER §4.1, §9.2); the late-landing distribution recorded whichever way it falls.
-- Carries: no bound unless S6.2 produces one. Owner choice F8.
+- Carries: no bound unless S6.2 produces one. Owner choice F8 decided: a 30 s floor.
 
 **ginsys/bronzeward#29, restoration.**
 - Contracts: `execution-recovery.md` §7, §8.7; `persistence-api.md` §12, §13.6;

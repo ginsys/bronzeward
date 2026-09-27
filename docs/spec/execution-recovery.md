@@ -1795,8 +1795,10 @@ conservative option; those that do not say so. Each is marked in place as
     `failed`, requiring a new plan; or stay `unresolved` until the gate
     reopens, which keeps the scope held.
 11. **Accounting a lost response needs a `recovery-admin` decision after a
-    settle floor of at least 30 s, held outside the database** (§5.2).
-    Alternatives: no floor, leaving it to judgement; a longer floor; or a
+    settle floor of at least 30 s, held outside the database** (§5.2). Owner
+    decision, 2026-09-27 (ginsys/bronzeward#20): 30 s, with choice §10.9
+    keeping the proxy, the only path seen landing late, out of dispatch; the
+    §9.3 item 2 measurement is the input for any change. Alternatives: no floor, leaving it to judgement; a longer floor; or a
     supervisor time bound, which DS §8 says would need its own evidence.
 12. **Drift detection does not freeze by itself** (§6.1). Design §12.4 reports
     and lets the operator choose. Alternative: freeze on detection.
