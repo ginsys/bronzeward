@@ -878,10 +878,12 @@ keys cannot both commit. It is design §8.5's detection of a duplicate SMBIOS
 UUID, never a merge. Design §4.4 calls hardware evidence "not an infallible
 primary key": a clone sharing a UUID, or a machine reporting none, cannot be
 inventoried in the PoC. The index cannot catch a record entered with a wrong
-UUID. Execution and recovery compares observed identity after a send, not
-before the first one, so refusing a node whose observed identity differs from
-the plan's bound machine identity before any send is an open cross-contract
-requirement (ginsys/bronzeward#20), not a check either contract makes.
+UUID at inventory; execution and recovery refuses it at dispatch instead.
+There, the node's observed SMBIOS UUID and cluster membership must match this
+record before any send (its §3.2 comparison 3) and before a scope is `ready`
+after a restore (its §7.4), so a node that is not the recorded machine, or a
+record entered with a wrong UUID, is refused before anything reaches it
+(its choice §10.26).
 
 ## 8. Asynchronous operations
 
