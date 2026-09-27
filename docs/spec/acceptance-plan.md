@@ -148,7 +148,9 @@ one synthetic secret outside the Talos schema's secret fields, in `machine.files
 4. `h-publisher` publishes the import draft, as in S2 steps 4 and 5.
 5. `h-publisher` creates an `adopt` plan per machine, binding no drift record and no baseline
    revision; `h-approver` approves each.
-6. The controller commits each adopt plan, which records the adoption.
+6. The controller takes an `evidence` observation of each machine, begun after its approval, then
+   commits the adopt plan, which records the adoption
+   ([ER §6.3](execution-recovery.md#63-adopt) step 4 item 4).
 7. `bin/evidence` records the post-state and scans.
 
 **Clauses exercised.** C [§2.3](compilation.md#23-pipeline), [§3.1](compilation.md#31-two-modes),
@@ -239,7 +241,9 @@ soft-deleted, then destroyed, then OpenBao partitioned: `blocked`, `lost`, `unkn
 as design §7.8 sets, and a publication pinning it refused. A repeated request under one key
 replays; the key reused for another body answers `422`; a `publish` worker killed after `COMMIT`
 leaves one release; a lapsed `publish` job is claimed again and its first worker's completion
-refused.
+refused. The draft-update ingestion, as S1's matrix runs it for import: success, refusal, and the
+process killed after each pipeline step 0 to 8, each followed by a scan of every persistence
+surface ([C §15](compilation.md#15-verification-and-evidence-limits)).
 
 **Retained evidence.** The release record and artifact metadata, the review data as served, the
 classifications and alerts, each refusal's problem document, and the resource version before and
@@ -277,7 +281,9 @@ marked self-approval. The plan is `approved`, and no operation exists before com
 
 **Negative controls.** Automation, and `h-recovery` alone, approving: `403`; a second approval:
 `409`. The worker's assignment changed after planning: commitment refused by comparison 2. A plan
-past its expiry: `expired`, no operation. An approval revoked before commitment: `revoked`, nothing
+past its expiry: `expired`, no operation. A plan cancelled before commitment: `cancelled`, no
+operation; one cancelled after commitment with no attempt: the operation goes `unresolved`, then
+`cancelled`, and nothing is sent (ER §9.2). An approval revoked before commitment: `revoked`, nothing
 sent; a revocation started while a commitment holds the approval waits for it, and the control that
 inserts without the lock does not wait (DS row 003). The approver's identity revoked before
 commitment, and after it with no attempt: the plan cannot commit, or its operation ends
@@ -323,8 +329,8 @@ released on `completed`.
 
 **Negative controls.** A plan binding the control plane's proxied route: refused at creation (ER
 §10.9). OpenBao running but sealed (`bin/inject seal openbao`, §2), and OpenBao stopped
-(`bin/inject kill openbao`): the use-time check fails, and nothing commits until it is unsealed or
-started. An observation older than the plan's maximum age: commitment
+(`bin/inject kill openbao`): the use-time check fails and is recorded with its result, and no
+operation commits and nothing is sent until OpenBao is unsealed or started. An observation older than the plan's maximum age: commitment
 refused. A second plan for the worker while the first holds the scope: refused by comparison 4;
 without the unique index both commit (DS row 011). An assignment change while the scope is held,
 and a frozen scope: refused. An artifact failing node validation: `InvalidArgument`, `rejected`,
@@ -352,7 +358,8 @@ run: **drift freeze, sanitized adoption and approved revert**
 3. `h-author` freezes the scope.
 4. **Adopt.** `h-author` ingests the drifted configuration as a drift adoption, marking the new
    file's content; `h-publisher` publishes it and creates an `adopt` plan binding the drift record;
-   `h-approver` approves; the adoption record commits under the freeze.
+   `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
+   record commits under the freeze.
 5. Measure whether an artifact compiled from the unchanged import base reproduces the baseline
    digest.
 6. **Revert.** Patch the worker out of band again. `h-publisher` creates a revert plan binding the
@@ -470,7 +477,9 @@ Closing run: **a restoration run with a missed stale instance**
 ([ER §9.3](execution-recovery.md#93-gaps-carried-and-what-would-close-them) item 3).
 
 **Preconditions.** S4 passed; both machines have `Applied`. Before time *T*, an ingestion claim is
-taken, and A commits a worker plan and is paused before its attempt (S6.1's stale owner). At *T*:
+taken, a control-plane plan is approved but not committed, and A commits a worker plan and is
+paused before its attempt (S6.1's stale owner), with a `publish` job queued and unclaimed at the
+pause. At *T*:
 `bin/inject db-snapshot`. After *T*: B starts, takes the operation over, classifies it safe to retry
 on a recovery observation and records an attempt whose request is held by pausing the worker; a
 second worker plan is approved; an approval is revoked; an approver's subject is added to
@@ -485,10 +494,12 @@ second worker plan is approved; an approval is revoked; an approver's subject is
 2. **Recovery start.** Start B with the recovery-start flag.
 3. **Entry.** `h-recovery` records entry through the API, naming both restored backups, `database`
    and `provider`, with their ages; a new epoch is minted.
-4. Unpause A; it tries a takeover, a commitment and an attempt.
+4. Unpause A: it tries the attempt it was paused before, its job worker tries to claim the queued
+   `publish` job, and its executor tries to commit the approved control-plane plan. Through A,
+   `h-recovery` requests a takeover of the restored operation and `h-author` starts an ingestion.
 5. Unpause the worker: the held request may land.
 6. `h-recovery` re-records the identity revocation; the automation token is reissued with the
-   server-side tool.
+   server-side tool; `h-author` starts an ingestion through B.
 7. Account every scope with one decision after the settle floor, using the maximum transport
    deadline for the attempt the restore erased, each with its recovery observation; check
    dependencies under the recovery identities. Then pause the control plane, take `restoration`
@@ -517,7 +528,9 @@ second worker plan is approved; an approval is revoked; an approver's subject is
 **Pass criteria.** Before entry, B answers every request but liveness and entry
 `409 recovery-mode-active` and runs no executor. After entry every scope is pre-restore
 unaccounted, every non-terminal operation is `unresolved` under B, and the ingestion claim is
-abandoned. Each of A's writes in step 4 is refused by the epoch. The restored operation, whose
+abandoned. Each of A's five writes in step 4, the attempt, the job claim, the commitment, the
+takeover and the ingestion start, is refused by the epoch term, and after entry B takes over and
+starts an ingestion in the new epoch (PA §16). The restored operation, whose
 journal holds no attempt, ends `cancelled`; a landing of the held request is recorded as drift at
 the scope's marking, not applied over. The revoked approver is refused before and after entry, and
 every pre-restore automation token until reissued. The worker scope is `ready`, is released and
@@ -528,7 +541,8 @@ restored operation was retried.
 **Negative controls.** Plan creation and approval on a pre-restore unaccounted scope, and release
 of a scope not `ready`: refused. A pre-entry approval: refused by comparison 1. A second entry under
 another key in the same recovery start: `409`. Exit with a scope unreleased: refused. The epoch
-term dropped from the fence: A's token passes across the `pg_dump` restore, as DB row 027 showed.
+term dropped from the fence: A's token passes across the `pg_dump` restore, as DB row 027 showed;
+the process-epoch comparison dropped: each of A's other step 4 writes passes.
 The same restore started normally, with no entry: A's token passes; this residual is stated (PA
 §14, last row) and shown, not claimed closed. A variant deleting the Transit key the `Desired`
 releases name: each scope is `blocked` on it and leaves only through a newly published release
@@ -552,16 +566,18 @@ paragraph,
 Closing run: **the operation timeline**
 ([ER §9.3](execution-recovery.md#93-gaps-carried-and-what-would-close-them) item 4).
 
-**Preconditions.** The integrated run's S4 change, one S6 interruption, the S5 drift and the S7
-restoration are on record.
+**Preconditions.** The integrated run's S4 change, S5 drift and S7 restoration are on record, and
+the served timeline retained from S6.1's lost-response operation (steps 4 and 5), which runs
+separately (§2).
 
 **Steps.**
 
 1. As `h-viewer`, following the documented walkthrough of
    [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30), read the worker's
    timeline and each operation's events.
-2. From the timeline alone, answer for each of the four: who approved what, what was sent and when,
-   what was observed, why the scope was held, who decided an accounting and on what, and how it
+2. From the timeline alone, answer for each of the four: who approved what, what each attempt
+   carried and when it was recorded, whether its sending is known from a response or accounting or
+   stays unknown, what was observed, why the scope was held, who decided an accounting and on what, and how it
    ended.
 3. Hold an event stream open past its token's expiry; resume it with `Last-Event-ID` after
    revoking the subject.

@@ -1298,7 +1298,11 @@ in place as
     whose planning and observing identities cannot decrypt either. Not the
     most conservative option: an unkeyed digest of a whole configuration is
     only as unguessable as the whole configuration, and a configuration whose
-    only unknown parts are low-entropy secrets is a guessing target.
+    only unknown parts are low-entropy secrets is a guessing target. Owner
+    decision, 2026-09-27 (ginsys/bronzeward#20): accepted for the PoC. A Talos
+    configuration also holds the cluster's generated key material, which an
+    attacker would need to know before the digest could test a guess; a
+    configuration without such material stays an unassessed residual.
     Alternative: a keyed digest under the §4.1 key for these too, at the cost
     of a provider call per observation (execution and recovery choice
     §10.2).

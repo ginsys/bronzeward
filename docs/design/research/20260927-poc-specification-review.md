@@ -286,9 +286,9 @@ owner decide explicitly; each is expanded below the table.
 | C16.23 | Withhold verbatim messages from boolean-input steps | accept as specified |
 | C16.24 | Go machinery renderer in process, conditional on a parity re-run | FLAG F2 |
 | C16.25 | Compile only the node's running contract minor | accept as specified |
-| C16.26 | Unkeyed configuration digest of baselines and artifacts | FLAG F1 |
+| C16.26 | Unkeyed configuration digest of baselines and artifacts | FLAG F1, decided |
 | ER10.1 | Ignore is not a PoC drift policy | accept as specified; the role question stays open beyond the PoC |
-| ER10.2 | Configuration digest is SHA-256 over the normalized read-back | FLAG F1 |
+| ER10.2 | Configuration digest is SHA-256 over the normalized read-back | FLAG F1, decided |
 | ER10.3 | Operation created by the dispatch commitment | accept as specified |
 | ER10.4 | Self-approval marked for any contained revision and a token's human | accept as specified |
 | ER10.5 | Rollout limit fixed at one | accept as specified |
@@ -346,7 +346,10 @@ owner decide explicitly; each is expanded below the table.
   parts are low-entropy secrets, and PA §16 and C §15 carry it as unassessed. The alternative, a
   keyed digest under the C §4.1 HMAC key, costs a provider call per observation and rests on an
   HMAC primitive no investigation exercised. Recommendation: accept for the PoC, with the residual
-  recorded in the acceptance evidence; revisit before any production use.
+  recorded in the acceptance evidence; revisit before any production use. **Owner decision
+  (2026-09-27): accepted**; a Talos configuration also holds the cluster's generated key material,
+  which a guess would need, and a configuration without it stays an unassessed residual in
+  ginsys/bronzeward#30's limits.
 - **F2: machinery in process (C16.24, ER10.8).** The renderer and the Talos client both leave what
   was measured (subprocess `talosctl`), to keep plaintext in one process; the deciding reason is
   inferred. Both are conditional on re-runs (SR/SP matrices through the compiler, DS rows through
@@ -489,9 +492,11 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Acceptance: AP S2 steps 1–5 and negative controls.
 - Checks: SR and SP matrices through the compiler's own path (the C §10.1 condition, before relying
   on the machinery); a profile revision selected through the assignment, recorded on the release
-  and in provenance; ETag `412` on fragment and profile; `409 stale-input` with the `FOR SHARE` control; literal copy and
-  reserved text refused; fidelity check fires on an injected change; immutable rows refuse writes;
-  idempotent replay and `422` on reuse; publication creates no plan or operation.
+  and in provenance; ETag `412` on fragment and profile; `409 stale-input` with the `FOR SHARE`
+  control; literal copy and reserved text refused; fidelity check fires on an injected change;
+  immutable rows refuse writes; idempotent replay and `422` on reuse; publication creates no plan or
+  operation; the draft-update ingestion's success, refusal and every-step interruption matrix with
+  scans (C §15).
 - Carries: machinery parity inferred; paired-diff control loose; messages withheld (C §15). Owner
   choice F7 decided: `Desired` at publication.
 
@@ -510,7 +515,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
   `persistence-api.md` §8.1, §10.3–§10.5.
 - Acceptance: AP S3.
 - Checks: plan binds every ER §2 value; one approval, automation and non-approvers `403`; both
-  self-approval marks; assignment change refuses commitment; expiry; approval revocation before and
+  self-approval marks; assignment change refuses commitment; expiry; plan cancellation before
+  commitment and after it with no attempt (ER §9.2); approval revocation before and
   after commitment with the DS row 003 lock control; identity revocation before and after
   commitment; publication alone dispatches nothing.
 - Carries: identity revocation unmeasured. Owner choice F5; F6 decided (permanent revocation).
@@ -550,8 +556,9 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
   `compilation.md` §3.5.
 - Acceptance: AP S7 (ER §9.3 closing run 3), including its Transit-key and older-OpenBao variants.
 - Checks: recovery start answers only liveness and entry before entry; entry mints an epoch, marks
-  every scope, takes over non-terminal operations, abandons claims; the missed stale instance
-  refused by the epoch, with the epoch-term control; restored operation never retried; per-scope
+  every scope, takes over non-terminal operations, abandons claims; the missed stale instance's
+  attempt, job claim, commitment, takeover and ingestion start each refused by the epoch, with the
+  epoch-term and process-epoch controls (PA §16); restored operation never retried; per-scope
   refusals; exit only when every scope is released; the no-entry restart residual shown.
 - Depends on the §6 item 2 repair (what the recovery start serves).
 
@@ -591,10 +598,14 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 
 ## 14. Hand-off
 
-- ginsys/bronzeward#20: the owner's acceptance (criterion 5), the eight open flagged choices F1–F8
-  (§9; F9 is decided), and approval of the acceptance plan (criterion 4).
+- ginsys/bronzeward#20: the owner's acceptance (criterion 5), the open flagged choices F2, F4 and F5
+  (§9; F1, F3 and F6 to F9 are decided), gaps E and G, and approval of the acceptance plan
+  (criterion 4).
 - ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
 - ginsys/bronzeward#14: the ingestion-role and role-loss questions (F4, F5).
 - ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text, then removal of
-  `status/needs-refinement` once each issue carries it.
+  `status/needs-refinement` once each issue carries it and no open decision it depends on remains.
+  ginsys/bronzeward#26 and ginsys/bronzeward#29 keep the label until gap E (the verification
+  deadline) and gap G with PR19 (the restoration read and the pre-send identity check) are decided
+  and in their contracts.
 - Later lifecycle work: the upgrade-transition item of design §18.3 (§8).

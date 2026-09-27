@@ -1751,7 +1751,8 @@ conservative option; those that do not say so. Each is marked in place as
    does not require Ignore.
 2. **Configuration digest is SHA-256 over the normalized read-back** (§1). E4
    and the fixtures measured it; compilation records it for artifacts and
-   baselines (compilation contract choice §16.26). Alternative: a keyed digest
+   baselines (compilation contract choice §16.26). Owner decision, 2026-09-27
+   (ginsys/bronzeward#20), with that choice. Alternative: a keyed digest
    under the compilation contract's HMAC key, which removes any guessing oracle
    at the cost of a provider call per observation and an unevidenced primitive.
 3. **The operation is created by the dispatch commitment; before it the plan is
