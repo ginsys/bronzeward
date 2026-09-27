@@ -286,7 +286,6 @@ implementation's Talos client, reaching DS's outcomes: the condition of
    `no-reboot`, over the bound route.
 4. The acceptance is recorded (`verifying`), then a `completion` observation.
 5. The operation is `completed`, and `Applied` moves to the release.
-6. Repeat over the other route with a second release.
 
 **Clauses exercised.** ER
 [§3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction),
@@ -304,8 +303,9 @@ the completion observation's basis follows the recorded response. `Desired`, `Ap
 `Observed` are served as three values and agree only after completion. Scope and rollout slot are
 released on `completed`.
 
-**Negative controls.** OpenBao sealed (`bin/inject kill openbao`): the use-time check fails, and
-nothing commits until it is unsealed. An observation older than the plan's maximum age: commitment
+**Negative controls.** A plan binding the control plane's proxied route: refused at creation (ER
+§10.9). OpenBao sealed (`bin/inject kill openbao`): the use-time check fails, and nothing commits
+until it is unsealed. An observation older than the plan's maximum age: commitment
 refused. A second plan for the worker while the first holds the scope: refused by comparison 4;
 without the unique index both commit (DS row 011). An assignment change while the scope is held,
 and a frozen scope: refused. An artifact failing node validation: `InvalidArgument`, `rejected`,
@@ -387,8 +387,8 @@ for each adoption run; step 5's measurement; the resource version series.
 2. Start B; it takes over every non-terminal operation A owned.
 3. Unpause A; let it try to record its attempt. A restarted instance would not do: it takes over
    at its start (ER §3.4) and its attempts are then legitimate.
-4. Partition the worker during a send over the worker route, and the control plane during one over
-   its route: the response is lost.
+4. Partition the worker during a send over its own endpoint, the only dispatch route (ER §10.9):
+   the response is lost.
 5. `h-recovery` records the accounting decision after the settle floor, with a recovery observation
    and the resource version read at both ends of the settle; a completion observation classifies
    the operation.
@@ -421,6 +421,9 @@ Closing run: **the bound on when an abandoned request can no longer land**
 ([ER §9.3](execution-recovery.md#93-gaps-carried-and-what-would-close-them) item 2).
 
 **Steps.**
+
+The proxied route is not a PoC dispatch route (ER §10.9): its landings are measured with the E4
+harness, not through the executor, and its result is the input to any amendment re-admitting it.
 
 1. From the Talos v1.13.6 source, establish how the control plane's API proxy forwards and cancels
    a proxied request, and state what that predicts.

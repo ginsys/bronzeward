@@ -532,12 +532,16 @@ an inherited descriptor, never a named file or an argument, as for the
 compiler's fallback. That is not E4's channel either, so the fallback carries
 the same condition: the same rows re-run through it.
 
-The plan binds the **route**: through the control plane's endpoint with the
-worker as target node, or to the worker's own endpoint. Both are allowed, as E4
-exercised both (DS §2.1, row 015) **(choice §10.9)**. The late landings were all
-through the control plane's proxy; the one row sent to the worker's endpoint
-did not land late, and whether a dial failure there proves no send was not
-tested (DS §4.4). The route therefore changes no accounting rule (§5.2).
+The plan binds the **route**, and in the PoC the only route allowed is the
+target machine's own endpoint; a plan naming the control plane's endpoint with
+the worker as target node is refused at plan creation **(choice §10.9)**. E4
+exercised both (DS §2.1, row 015), and every late landing came through the
+control plane's proxy; the one row sent to the worker's endpoint did not land
+late. The proxied route stays refused until the §9.3 item 2 measurement states
+its late-landing distribution, and it is re-admitted only by an amendment of
+this choice. One row is thin evidence, and whether a dial failure at the
+worker's endpoint proves no send was not tested (DS §4.4), so the route
+changes no accounting rule (§5.2).
 
 A Talos response or error can embed the configuration or its diff (E3 §5.4,
 §7). The controller records response text on the timeline only through the
@@ -1776,12 +1780,13 @@ conservative option; those that do not say so. Each is marked in place as
    client nor the fallback's descriptor channel is what E4 measured.
    Alternative: the pinned `talosctl` subprocess with `--file`, as E4 ran it,
    which puts the plaintext artifact in a named file.
-9. **The route is bound in the plan; both E4 routes are allowed** (§3.5).
-   Chosen for route flexibility, not as the most conservative option:
-   allowing both keeps the control plane's proxy, through which every late
-   landing came.
-   Alternative: the worker's endpoint only, which avoids that proxy but has one
-   row of evidence.
+9. **The route is bound in the plan; only the target machine's own endpoint
+   is allowed in the PoC** (§3.5). Owner decision, 2026-09-27 (ginsys/bronzeward#20):
+   it removes the control plane's proxy, through which every observed late
+   landing came, from the PoC's dispatch, until §9.3 item 2 measures it. The
+   cost is that a worker unreachable on its own endpoint cannot be configured.
+   Alternative: both E4 routes, for route flexibility, which keeps that proxy
+   in the dispatch path with no bound on its late landings.
 10. **On a pre-dispatch observation after full accounting, retry only while
     attempts remain, the approval passes and the gate is open; otherwise
     `failed`** (§5). E4 left it to a harness flag. Alternative: always
