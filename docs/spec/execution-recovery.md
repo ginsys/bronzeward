@@ -600,8 +600,9 @@ digest or another result for a bound health check: the machine changed after
 the completion read began, and a later completion observation decides. Only a
 recorded observation blocks: a higher-basis read that has started but not yet
 recorded its result does not, and its result, recorded after the `Applied`
-change, opens no drift record (§6.1). That change is detected by the next
-`drift` observation, not prevented (§9.3). The
+change, opens no drift record (§6.1). A digest change that persists is
+detected by the next `drift` observation, not prevented; a late health-check
+contradiction with an unchanged digest reopens nothing (§9.3). The
 transaction that records `failed` also opens a drift record when the completion
 observation's digest differs from the `Applied` digest, or records the
 observation on the one already open, because releasing the scope makes that
@@ -1632,9 +1633,11 @@ specification gap: completion and adoption consult recorded observations only
 (§4, §6.3), so a machine change read by a started but unrecorded higher-basis
 observation is neither refused nor recorded as drift; `Applied` names a digest
 the node no longer runs until the next `drift` observation opens a drift
-record. No request is sent on the wrong baseline meanwhile: a later
-`apply-config` plan binds its expected pre-dispatch digest, and its §3.1
-evidence contradicts it. Closing it needs a rule that retires an interrupted
+record, and a health-only contradiction is never recorded against the
+operation. A later `apply-config` plan that expects the stale digest is
+refused, because its §3.1 evidence reports the running one; a plan approved
+against the running digest may proceed, subject to the §3.3 residual window.
+Closing it needs a rule that retires an interrupted
 read, so that completion can wait for outstanding reads without waiting
 forever.
 
