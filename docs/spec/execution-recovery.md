@@ -597,7 +597,11 @@ a failed bound health check, yields `failed`; an observation that could not
 read a value does neither. Nor does one when an observation of the machine
 with a higher basis (§4.1), of any purpose, reports another configuration
 digest or another result for a bound health check: the machine changed after
-the completion read began, and a later completion observation decides. The
+the completion read began, and a later completion observation decides. Only a
+recorded observation blocks: a higher-basis read that has started but not yet
+recorded its result does not, and its result, recorded after the `Applied`
+change, opens no drift record (§6.1). That change is detected by the next
+`drift` observation, not prevented (§9.3). The
 transaction that records `failed` also opens a drift record when the completion
 observation's digest differs from the `Applied` digest, or records the
 observation on the one already open, because releasing the scope makes that
@@ -948,7 +952,8 @@ state is being accepted (design §12.1).
       purpose, began its read after the approval, is no older than the age the
       plan binds, and shows the
       machine's configuration digest equal to the baseline's and its
-      assignment revision unchanged; and
+      assignment revision unchanged; a started read with no recorded result
+      does not count (§9.3); and
    5. no operation holds the machine scope, and the scope gate is open apart
       from a freeze: adoption changes nothing on the machine, so a freeze does
       not block it, but recovery mode without a release of the scope in the
@@ -1560,7 +1565,10 @@ fail:
   attempt, with a retry refused;
 - observation ordering under a concurrent accounting transaction (§4.1), and
   a completion or adoption read refused when a higher-basis read contradicts
-  it (§4, §6.3);
+  it (§4, §6.3), and, as the residual's evidence, a completion and an
+  adoption committed while a contradicting higher-basis read is still
+  unrecorded, whose late result opens no drift record while the next `drift`
+  observation does;
 - drift detection (including no record from a read begun before an `Applied`
   change, and a record opened with a `failed` operation), freeze, adoption record (success, stale observation,
   changed-again machine, revoked approval, changed baseline revision, changed
@@ -1619,12 +1627,22 @@ combinations g1/g2/g1 and g2/g1/g2, a restore onto a new OpenBao cluster and
 token expiry across a restore (KL §6). A specification gap, not an evidence
 one: no act decommissions or excludes a machine that can never be observed
 again, so its scope keeps the installation in recovery mode, and a restored
-operation on it with an attempt keeps its rollout slot (§7.6).
+operation on it with an attempt keeps its rollout slot (§7.6). A second
+specification gap: completion and adoption consult recorded observations only
+(§4, §6.3), so a machine change read by a started but unrecorded higher-basis
+observation is neither refused nor recorded as drift; `Applied` names a digest
+the node no longer runs until the next `drift` observation opens a drift
+record. No request is sent on the wrong baseline meanwhile: a later
+`apply-config` plan binds its expected pre-dispatch digest, and its §3.1
+evidence contradicts it. Closing it needs a rule that retires an interrupted
+read, so that completion can wait for outstanding reads without waiting
+forever.
 
 Until these close, an implementation must expose unresolved outcomes and stop
 conflicting work rather than claim safe retry beyond §5.1, exactly-once
 execution, universal stale-worker prevention, a bound on late landing, or
-detection of an out-of-band change overwritten inside the §3.3 residual window.
+detection of an out-of-band change overwritten inside the §3.3 residual window,
+or refusal of a completion or adoption that an unrecorded read contradicts.
 
 The Upgrade/LifecycleClient compatibility deferral remains explicit: this
 contract does not claim full E3, upgrade support or lifecycle execution.
