@@ -1633,8 +1633,8 @@ specification gap: completion and adoption consult recorded observations only
 (§4, §6.3), so a machine change read by a started but unrecorded higher-basis
 observation is neither refused nor recorded as drift; `Applied` names a digest
 the node no longer runs until the next `drift` observation opens a drift
-record, and a health-only contradiction is never recorded against the
-operation. A later `apply-config` plan that expects the stale digest is
+record, and a late health-only contradiction neither reopens the completed
+operation nor opens a drift record. A later `apply-config` plan that expects the stale digest is
 refused, because its §3.1 evidence reports the running one; a plan approved
 against the running digest may proceed, subject to the §3.3 residual window.
 Closing it needs a rule that retires an interrupted
