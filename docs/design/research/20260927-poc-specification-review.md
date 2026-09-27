@@ -475,7 +475,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
   disposable OIDC issuer, automation token tool, OpenBao seal and unseal actions, deployment
   settings).
 - Checks: concurrent migrate runs with the advisory-lock control; startup refusal on schema or
-  checksum mismatch; every token defect `401`; each design §13.7 row that role alone decides through
+  checksum mismatch; every token defect `401`, except a revoked or deployment-denied subject,
+  `403 identity-revoked` (PA §9.4); each design §13.7 row that role alone decides through
   the API, the others mapped to S1–S7; no
   dispatch, token or role route (`404`); same-key idempotency with the key-lock control.
 - Carries: authentication is untested by any investigation (PA §16).
@@ -591,7 +592,7 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 | 2. E3 disposition and design wording; no full-E3 claim | §8; design §18.1, §18.3, §18.5; `CONTRIBUTING.md` | Recorded here and in the design |
 | 3. Refine every P issue before removing its label | §11 | Text ready; the issues are not yet edited and keep their labels |
 | 4. Approve an integrated acceptance plan | [AP](../../spec/acceptance-plan.md) | Plan landed; approval is the owner's |
-| 5. Owner or designated reviewer acceptance, without S04 | not this report | Recorded by the owner on ginsys/bronzeward#20 |
+| 5. Owner or designated reviewer acceptance, without S04 | not this report | Pending: the owner records acceptance on ginsys/bronzeward#20 |
 
 ## 13. Limits
 

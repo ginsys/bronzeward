@@ -1071,9 +1071,9 @@ Items labelled *derived* are the recorder's inferences, not the owner's decision
 - Not settled here, each with its owner:
   - Token lifetimes, expiry and rotation: persistence and API contracts (#18).
   - How a disablement or a removed group claim at the identity provider reaches Bronzeward: persistence and API contracts (#18). Whether losing a role, rather than an identity revocation, invalidates approvals given under it is an owner decision pending on #14.
-  - Which role performs the privileged ingestion that feeds an adoption (§9.1, Appendix B AdoptCluster): decided by the owner on [#20](https://github.com/ginsys/bronzeward/issues/20), a human `author`; automation does not ingest ([persistence and API contracts](../spec/persistence-api.md) choice §17.22). Its mechanics belong to the [secret ingress and compilation contracts](https://github.com/ginsys/bronzeward/issues/17).
   - Which role may ignore a known drift difference for a bounded time (§12.4) is an owner decision pending on #14, carried into the execution and recovery contracts (#19).
   - The two self-approval edge cases in item 3: persistence and API contracts (#18) and execution and recovery contracts (#19).
+- Settled since, on [#20](https://github.com/ginsys/bronzeward/issues/20): the privileged ingestion that feeds an adoption (§9.1, Appendix B AdoptCluster) is a human `author`'s, and automation does not ingest ([persistence and API contracts](../spec/persistence-api.md) choice §17.22). Its mechanics belong to the [secret ingress and compilation contracts](https://github.com/ginsys/bronzeward/issues/17).
 
 ## 14. Reliability, high availability and disaster recovery
 
