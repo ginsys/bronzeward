@@ -957,7 +957,7 @@ state is being accepted (design §12.1).
    responses or logs; sanitizing a record afterwards does not satisfy this
    (design §7.1; E1 §6). Which role performs this ingestion the design leaves
    open as an owner decision (design §13.7, "Limits and what stays open"); until
-   the owner decides, it is `author`'s, as in persistence's interim rule (see
+   the owner decides, it is a human `author`'s, as in persistence's interim rule (see
    `persistence-api.md`) **(choice §10.14)**. Ingestion records the baseline's
    configuration digest (§1) over the same input it encrypts (compilation
    contract §2.3 step 8). An existing-cluster import records it the same way, so

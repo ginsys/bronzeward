@@ -103,9 +103,8 @@ It needs from compilation, as cross-contract points:
    (execution and recovery's configuration digest function, over the artifact's
    plaintext), not only the ciphertext's digest, so that the release records a
    digest stable across a second encryption (§6.2). The import base carries the
-   baseline's unkeyed configuration digest next to its keyed digest. The
-   execution and recovery work amends compilation §2.3 step 8 and §11 to hand
-   both over; until that amendment lands, this is an open cross-contract point.
+   baseline's unkeyed configuration digest next to its keyed digest.
+   Compilation §2.3 step 8 and §11 hand both over (compilation choice §16.26).
 
 ### 1.2 What this contract needs from execution and recovery
 
@@ -2121,7 +2120,7 @@ design and evidence do not settle the question. Each is marked in place as
 8. **Generation paths carry the claim id and a random value id; orphans are
    reported, never reattached or deleted** (§1.1, §6.4). Alternatives: a
    separate ledger written before each create; reattaching orphans on
-   re-ingestion. Needs a line in compilation §2.3 step 6.
+   re-ingestion. Compilation §2.3 step 6 states the component.
 9. **An idempotency key on every mutating request, recorded only with a
    committed effect, and kept; a record replayed only in its own epoch; no
    deletion of any record** (§3, §7). Alternatives: keys optional; refusals

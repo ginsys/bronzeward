@@ -147,7 +147,10 @@ second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/passw
    at a path of its own. This takes the first branch of design §7.8 item 1
    (a path of its own, rather than an overwritten path with an explicit
    `max_versions`) **(choice §16.3)**. The path includes a component that the
-   database does not issue. The reason is inferred, not measured: a restore
+   database does not issue: the staging claim's identifier followed by a random
+   value identifier
+   ([persistence §1.1](persistence-api.md#11-what-this-contract-takes-from-compilation)
+   item 1). The reason is inferred, not measured: a restore
    rewinds database identifiers
    ([DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state)),
    and DB infers that a provider object named after such an identifier could
