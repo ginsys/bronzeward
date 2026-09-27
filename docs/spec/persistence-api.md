@@ -2200,8 +2200,10 @@ design and evidence do not settle the question. Each is marked in place as
     ("which role performs the privileged ingestion that feeds an adoption"):
     ingestion, with its marks, takeover and abandonment, and inventory
     creation need a human `author`; a `publisher` creates adoption plans, as
-    every plan, and an `approver` approves them** (§9.2, §10.3).
-    Alternatives: `publisher` for ingestion; automation allowed.
+    every plan, and an `approver` approves them** (§9.2, §10.3). Owner
+    decision, 2026-09-27 (ginsys/bronzeward#20): no longer interim; a human
+    `author` ingests and automation does not. Alternatives: `publisher` for
+    ingestion; a dedicated ingestion role; automation allowed.
 23. **Interim, until the owner decides the question design §13.7 leaves open
     (whether losing a role invalidates approvals given under it): losing a
     role does not invalidate approvals** (§10.4). The alternative needs a

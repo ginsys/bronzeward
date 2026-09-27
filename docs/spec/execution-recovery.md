@@ -1813,7 +1813,9 @@ conservative option; those that do not say so. Each is marked in place as
     Interim: the design leaves the ingestion role open as an owner decision
     (design §13.7, "Limits and what stays open"). The adopt plan is a
     `publisher`'s like every plan (design §13.7 item 2), and its approval an
-    `approver`'s. Alternative: `publisher`, or a new privileged-ingestion role.
+    `approver`'s. Owner decision, 2026-09-27 (ginsys/bronzeward#20): final,
+    with persistence contract choice §17.22; automation does not ingest.
+    Alternative: `publisher`, or a new privileged-ingestion role.
 15. **The adoption record compares with the baseline's digest, not the
     recompiled artifact's** (§6.3). Alternative: require the artifact to
     reproduce the node's bytes, as the prior draft did; unevidenced, and E3's

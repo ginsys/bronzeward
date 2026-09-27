@@ -194,9 +194,12 @@ approvals and adoption records.
 [ginsys/bronzeward#24](https://github.com/ginsys/bronzeward/issues/24). Design §18.2 items 2 and 3.
 
 **Preconditions.** S1 passed; the worker has `Applied` from its adoption. The SR and SP matrices
-re-run with composition through the compiler's own machinery path reach the same verdicts
-([C §10.1](compilation.md#101-selection-the-go-machinery-in-process)); otherwise the machinery selection
-is reopened and this scenario does not run.
+re-run with composition through the compiler's own machinery path reach the same verdicts, with
+cells adding references in the import base as well as in fragments, and SP's oracle run over
+Bronzeward's own log and support formats
+([C §10.1](compilation.md#101-selection-the-go-machinery-in-process), §15); otherwise the compiler
+takes the subprocess fallback (C choice §16.24) and the re-run repeats through it before this
+scenario runs.
 
 **Steps.**
 
@@ -264,9 +267,11 @@ after.
    deadlines, maximum attempts, expiry and maximum observation age; `h-viewer` reads its redacted
    whole-configuration diff.
 3. `h-approver` approves it.
-4. From snapshots taken before step 2 (`bin/inject db-snapshot`, `bao-snapshot`), `h-all` authors, publishes, plans and approves a change, and
-   approves a plan the automation identity created. These plans stay out of the integrated run, where
-   the controller could commit them before S4.
+4. From snapshots taken before step 2 (`bin/inject db-snapshot`, `bao-snapshot`): `h-all` authors,
+   publishes, plans and approves a change; approves a plan the automation identity created; and,
+   after `h-author` publishes a later release that reuses `h-all`'s fragment revision unchanged,
+   approves a plan for that release. These plans stay out of the integrated run, where the
+   controller could commit them before S4.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding),
 [§3.2](execution-recovery.md#32-the-commitment-transaction) comparisons 1 and 2,
@@ -276,8 +281,9 @@ after.
 [§10.5](persistence-api.md#105-recording-every-act).
 
 **Pass criteria.** The plan binds every value ER §2 lists, its expected pre-dispatch digest equal to
-`Applied`'s. The approval names plan revision, approver, role and epoch; both step 4 approvals are
-marked self-approval. The plan is `approved`, and no operation exists before commitment.
+`Applied`'s. The approval names plan revision, approver, role and epoch; the three step 4 approvals
+are marked self-approval with the reasons `authored-change`, `owned-automation` and
+`authored-reused` respectively (PA §10.5). The plan is `approved`, and no operation exists before commitment.
 
 **Negative controls.** Automation, and `h-recovery` alone, approving: `403`; a second approval:
 `409`. The worker's assignment changed after planning: commitment refused by comparison 2. A plan
@@ -297,9 +303,10 @@ entries.
 [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26). Design §18.2 item 5,
 [§12.1](../design/Talos_Configuration_and_Machine_Management_Design.md#121-desired-applied-and-observed-state).
 
-**Preconditions.** S3's plan `approved`. DS rows 001 to 005, 012 to 017 and 022 re-run through the
-implementation's Talos client, reaching DS's outcomes: the condition of
-[ER §3.5](execution-recovery.md#35-talos-client-and-route).
+**Preconditions.** S3's plan `approved`. DS rows 001 to 023, with controls 006, 008 and 011, re-run
+through the implementation's own controller and Talos client, reaching DS's outcomes: the condition
+of [ER §3.5](execution-recovery.md#35-talos-client-and-route) and the first item of
+[ER §9.2](execution-recovery.md#92-required-verification).
 
 **Steps.**
 
@@ -386,7 +393,8 @@ whichever way it falls.
 A plan expecting `Applied`'s digest while the machine runs another: commitment refused on its
 evidence, and the refusal's transaction opens a drift record (ER choice §10.23). Unfreezing by a
 non-`approver`: `403`. The adoption record refused on a stale observation, a machine changed again,
-a revoked approval, a changed baseline revision, a changed `Desired` and a record already closed by
+a post-approval observation showing another machine identity with a matching digest, a revoked
+approval, a changed baseline revision, a changed `Desired` and a record already closed by
 a revert. A revert refused by re-drift before commitment, and one refused after a manual return,
 whose refusal closes the record `returned`. A read begun before an `Applied` change opens no
 record.
@@ -538,7 +546,10 @@ dispatches under a new-epoch approval while the control-plane scope is `blocked`
 observation, until step 10 clears it. Exit succeeds only once both scopes are released, and no
 restored operation was retried.
 
-**Negative controls.** Plan creation and approval on a pre-restore unaccounted scope, and release
+**Negative controls.** A plan created and approved in the new epoch on the worker scope once it is
+`ready` but before its release: its commitment refused by comparison 6 until the release, and
+committed with the scope gate removed (ER §7.5). Plan creation and approval on a pre-restore
+unaccounted scope, and release
 of a scope not `ready`: refused. A pre-entry approval: refused by comparison 1. A second entry under
 another key in the same recovery start: `409`. Exit with a scope unreleased: refused. The epoch
 term dropped from the fence: A's token passes across the `pg_dump` restore, as DB row 027 showed;
@@ -634,14 +645,14 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | C §15: ingestion success, refusal and interruption at each pipeline step, every surface scanned | S1 (import); S5 step 4 plus *check* (drift adoption); S2 negative controls (draft update) | #22, #27, #23 |
 | C §15: the compiler process's surfaces scanned over successful, rejected and interrupted publications, killed at each point before `COMMIT` while plaintext is held | *check* | #23 |
 | C §15: claim lease, takeover, stale owner, crash inside the draft transaction, provider unreachable | S1 negative controls plus *check* | #22 |
-| C §15: SR and SP matrices through the compiler's path; fidelity check | S2 precondition and negative controls | #23 |
+| C §15: SR and SP matrices through the compiler's path, with import-base references and SP's oracle over Bronzeward's own log and support formats; fidelity check | S2 precondition and negative controls | #23 |
 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | the scenario of each clause's issue, plus *check* for the rest | #21 to #29 |
 | ER §9.2: DS rows 001–023 through the implementation, with controls 006, 008, 011 | S4 precondition | #26 |
 | ER §9.2: sending only after the attempt commits; each §3.2 and §3.3 lock with its unlocked control | S4, S3 (DS row 003), S4 negative controls (DS row 011) plus *check* | #25, #26 |
 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing; the bound exhausted after a lost response leaves no further attempt and ends `failed` | S3, S4 negative controls; *check* for the last two | #25, #26, #28 |
 | ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls | #25 |
 | ER §9.2: an `apply-config` operation with no attempt not completed by a completion observation of its artifact applied out of band | *check* | #28 |
-| ER §9.2: assignment change refused while the scope is held; comparison 6 under a freeze and under recovery mode | S4, S7 negative controls | #26, #29 |
+| ER §9.2: assignment change refused while the scope is held; comparison 6 under a freeze and under recovery mode before release | S4, S7 negative controls | #26, #29 |
 | ER §9.2: takeover at start; the §5 precedence; PA §16: a takeover keeps `unresolved` and refuses a terminal operation | S6.1 plus *check* | #28 |
 | ER §9.2: identity revocation before commitment, after it with no attempt, after an attempt with its retry refused | S3 negative controls; *check* for the last | #25, #28 |
 | ER §9.2: observation ordering, contradicting higher-basis reads, confirmed reads, the late-read residual | *check* | #28, #27 (adoption read) |

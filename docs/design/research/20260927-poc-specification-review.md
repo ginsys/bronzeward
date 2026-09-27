@@ -300,7 +300,7 @@ owner decide explicitly; each is expanded below the table.
 | ER10.11 | Accounting by `recovery-admin` after a 30 s settle floor | FLAG F8, decided |
 | ER10.12 | Drift detection does not freeze by itself | accept as specified |
 | ER10.13 | Adoption as a plan with operation `adopt` | accept as specified |
-| ER10.14 | `author` performs the ingestion feeding an adoption (interim) | FLAG F4 |
+| ER10.14 | `author` performs the ingestion feeding an adoption | FLAG F4, decided |
 | ER10.15 | Adoption record compares with the baseline's digest | accept as specified |
 | ER10.16 | A revert's approval recorded as approving an unseen overwrite | accept as specified |
 | ER10.17 | Recovery epoch a never-reissued random identifier | accept as specified |
@@ -331,7 +331,7 @@ owner decide explicitly; each is expanded below the table.
 | PA17.19 | Identity revocation permanent; deny list survives restore | FLAG F6, decided |
 | PA17.20 | Several qualifying roles: first in the route's order | accept as specified |
 | PA17.21 | Both unsettled self-approval cases marked | accept as specified |
-| PA17.22 | Ingestion and inventory need a human `author` (interim) | FLAG F4 |
+| PA17.22 | Ingestion and inventory need a human `author` | FLAG F4, decided |
 | PA17.23 | Losing a role does not invalidate approvals (interim) | FLAG F5 |
 | PA17.24 | Migrations by explicit command, service stopped; no downgrade | accept as specified |
 | PA17.25 | Epoch a random 128-bit identity, no counter | accept as specified |
@@ -367,6 +367,8 @@ owner decide explicitly; each is expanded below the table.
 - **F4: ingestion role (ER10.14, PA17.22).** Interim, pending the question design §13.7 leaves open.
   A human `author` ingests; automation cannot. Recommendation: decide the question on
   ginsys/bronzeward#14 before ginsys/bronzeward#22 starts; the interim is safe to accept if not.
+  **Owner decision (2026-09-27): the interim is final**; a human `author` ingests, automation does
+  not, and design §13.7 no longer lists the question as open.
 - **F5: role loss (PA17.23).** Interim, pending §13.7's open question. Approvals survive loss of the
   `approver` role; only an identity revocation (item 4) reaches them. The alternative needs a
   directory lookup or session state. Recommendation: accept the interim for the PoC, stated in
@@ -487,7 +489,7 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
   takeover only after lease lapse; orphans listed, none deleted; automation refused on ingestion;
   executor cannot decrypt the baseline.
 - Carries: pipeline interruption unmeasured; HMAC primitive unexercised; JSON Pointer addressing
-  untested (C §15). Owner choice F4 decides who ingests.
+  untested (C §15). Owner choice F4 decided: a human `author` ingests.
 
 **ginsys/bronzeward#23, edit and publish.**
 - Contracts: `compilation.md` §5–§11; `persistence-api.md` §4, §6, §7.
@@ -604,11 +606,12 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 
 ## 14. Hand-off
 
-- ginsys/bronzeward#20: the owner's acceptance (criterion 5), the open flagged choices F4 and F5
-  (§9; F1 to F3 and F6 to F9 are decided), gaps E and G, and approval of the acceptance plan
+- ginsys/bronzeward#20: the owner's acceptance (criterion 5), the open flagged choice F5
+  (§9; F1 to F4 and F6 to F9 are decided), gaps E and G, and approval of the acceptance plan
   (criterion 4).
 - ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
-- ginsys/bronzeward#14: the ingestion-role and role-loss questions (F4, F5).
+- ginsys/bronzeward#14: the role-loss question (F5); the ingestion role (F4) was decided on
+  ginsys/bronzeward#20.
 - ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text, then removal of
   `status/needs-refinement` once each issue carries it and no open decision it depends on remains.
   ginsys/bronzeward#26 and ginsys/bronzeward#29 keep the label until gap E (the verification
