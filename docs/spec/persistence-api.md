@@ -428,7 +428,7 @@ The transactions this contract defines or constrains:
 | T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed`, with its terminal event (§8.2). Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
 | T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active `publish` one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
-| T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published; execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
+| T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published and, for an `apply-config` plan, the machine's `Desired` (execution and recovery choice §10.24); execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
 | T5a | Approval | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted; approver's principal `FOR SHARE`, not revoked; plan state `FOR UPDATE`, unexpired, and `proposed`, or `approved` by an approval from an earlier epoch | approval (unique per plan and epoch, with the self-approval mark), plan state `approved`, machine timeline entry, idempotency record, act |
 | T5b | Approval revocation | key lock; installation state `FOR SHARE`; machine row `FOR UPDATE`; approval `FOR UPDATE`, which waits for a commitment or attempt holding it `FOR SHARE` (§1.2 item 3); plan state `FOR UPDATE` | revocation row; plan state `revoked` only when the plan is `approved` by the named approval (an earlier-epoch approval that a current one replaced, or a plan already terminal, keeps its state); machine timeline entry, idempotency record, act |
 | T5c | Identity revocation | key lock; installation state `FOR SHARE`; every machine row `FOR UPDATE`, in id order, as T9 (rule 5); principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked; an identity revocation entry (T7) on the timeline of each machine with a plan that identity approved whose plan or operation is not terminal, read under those machine locks (execution and recovery §4.1); idempotency record, act |
@@ -662,6 +662,10 @@ same transaction **(choice §17.6)**. Design §11.2 describes a release as
 "published cluster/machine desired state" and execution and recovery defines
 Desired as the release recorded as selected; neither says when it is selected.
 Selection is not authorization: dispatch still needs a plan and an approval.
+Every plan binds the `Desired` release current at its creation, and its
+commitment compares it under the machine row's lock that T3 also holds, so a
+publication leaves each covered machine's uncommitted plans unable to commit
+(execution and recovery §2, §3.2 comparison 2).
 
 The release's natural key is `(draft_id, draft_revision)`
 **(choice §17.10)**. Each release machine records the plaintext configuration
@@ -1951,6 +1955,7 @@ equals neither the restored epoch nor the lost one.
 | Publish | Worker superseded, or its lease lapsed | its commit refused by the fence; the job claimed again | the other worker's result |
 | Publish | New request for a draft already published | `409 conflict` naming the release | nothing |
 | Plan | Second approval of a plan in one epoch | `409 conflict` | nothing |
+| Plan | An `apply-config` plan for a release that is not the machine's `Desired` | `409 conflict` naming the `Desired` release | nothing |
 | Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
 | Recovery | Plan creation, approval, adoption plan or unfreeze on a scope still pre-restore unaccounted | `409 recovery-mode-active` | nothing |
 | Recovery | Commitment, attempt or adoption record on a scope not released in the current epoch | refused by execution and recovery's scope gate | its refusal entry |
@@ -2116,7 +2121,9 @@ design and evidence do not settle the question. Each is marked in place as
    a persistence write into execution and recovery's transaction.
 6. **Publication selects the release as Desired for its machines** (§6.2).
    Owner decision, 2026-09-27 (ginsys/bronzeward#20); design §12.6 now says
-   so, and approval gates only the plan that applies the release.
+   so, and approval gates only the plan that applies the release, which binds
+   the selection current at its creation (execution and recovery choice
+   §10.24).
    Alternative: select at plan creation or at approval, towards which design
    §12.6's earlier "select the latest applicable approved release" pointed.
 7. **No provider or network I/O inside a transaction; fixed lock order; three
