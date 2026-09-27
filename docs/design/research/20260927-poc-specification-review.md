@@ -295,7 +295,7 @@ owner decide explicitly; each is expanded below the table.
 | ER10.6 | Identity revocation refuses every later attempt, retries included | FLAG F6 |
 | ER10.7 | Takeover at start and on request only; no timer | accept as specified |
 | ER10.8 | Machinery Talos client in process, conditional on DS re-runs | FLAG F2 |
-| ER10.9 | Route bound in the plan; both E4 routes allowed | FLAG F3 |
+| ER10.9 | Route bound in the plan; the worker's own endpoint only (owner, F3) | FLAG F3, decided |
 | ER10.10 | Retry after full accounting only with attempts, approval and gate | accept as specified |
 | ER10.11 | Accounting by `recovery-admin` after a 30 s settle floor | FLAG F8 |
 | ER10.12 | Drift detection does not freeze by itself | accept as specified |
@@ -354,9 +354,11 @@ owner decide explicitly; each is expanded below the table.
   re-run as selecting the subprocess fallback, not as a contract change.
 - **F3: both routes allowed (ER10.9).** Chosen for route flexibility. Every late landing DS observed
   came through the control plane's proxy, and PR22 has no bound. The alternative, the worker's own
-  endpoint only, has one row of evidence. Recommendation: the owner decides; the reviewer leans to
-  the worker route only until AP S6.2 records a proxy distribution, since that removes the observed
-  late-landing path from the PoC's dispatch.
+  endpoint only, has one row of evidence. Recommendation: the worker route only until AP S6.2
+  records a proxy distribution, since that removes the observed late-landing path from the PoC's
+  dispatch. **Owner decision (2026-09-27): the worker's own endpoint only**; ER §3.5 and choice
+  §10.9 now say so, a proxied-route plan is refused at creation, and AP S6.2 measures the proxy
+  outside the dispatch path.
 - **F4: ingestion role (ER10.14, PA17.22).** Interim, pending the question design §13.7 leaves open.
   A human `author` ingests; automation cannot. Recommendation: decide the question on
   ginsys/bronzeward#14 before ginsys/bronzeward#22 starts; the interim is safe to accept if not.
@@ -511,7 +513,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Checks: DS rows 001–005, 012–017 and 022 re-run through the implementation's client (ER §3.5
   condition); digest equals the artifact's after completion; evidence, commitment and attempt
   precede the request; Desired, Applied, Observed served separately; sealed OpenBao, stale
-  observation, second plan (scope-index control), frozen scope and `InvalidArgument` each refused.
+  observation, second plan (scope-index control), frozen scope, a proxied-route plan (F3) and
+  `InvalidArgument` each refused.
 - Gap to close first: the pre-send identity check (§10, PR19). Owner choices F2, F3.
 
 **ginsys/bronzeward#27, drift.**
