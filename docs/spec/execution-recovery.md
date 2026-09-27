@@ -530,7 +530,8 @@ reach the same outcomes before this contract's dispatch is accepted. The
 fallback is the pinned `talosctl` subprocess with the artifact passed through
 an inherited descriptor, never a named file or an argument, as for the
 compiler's fallback. That is not E4's channel either, so the fallback carries
-the same condition: the same rows re-run through it.
+the same condition: the same rows re-run through it. If they fail there too,
+dispatch is not accepted and the selection returns to the owner.
 
 The plan binds the **route**, and in the PoC the only route allowed is the
 target machine's own endpoint; a plan naming the control plane's endpoint with
@@ -1783,7 +1784,8 @@ conservative option; those that do not say so. Each is marked in place as
    Alternative: the pinned `talosctl` subprocess with `--file`, as E4 ran it,
    which puts the plaintext artifact in a named file. Owner decision,
    2026-09-27 (ginsys/bronzeward#20): in process; a failed DS re-run selects
-   the fallback without reopening this choice.
+   the fallback without reopening this choice; only a failure of the fallback
+   too returns it to the owner.
 9. **The route is bound in the plan; only the target machine's own endpoint
    is allowed in the PoC** (§3.5). Owner decision, 2026-09-27 (ginsys/bronzeward#20):
    it removes the control plane's proxy, through which every observed late

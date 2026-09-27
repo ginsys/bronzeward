@@ -276,9 +276,10 @@ after.
    whole-configuration diff.
 3. `h-approver` approves it.
 4. From snapshots taken before step 2 (`bin/inject db-snapshot`, `bao-snapshot`): `h-all` authors,
-   publishes, plans and approves a change; approves a plan the automation identity created; and,
-   after `h-author` drafts an unrelated change and `h-publisher` publishes it as a later release
-   that reuses `h-all`'s fragment revision unchanged, approves a plan for that release. These plans stay out of the integrated run, where the
+   publishes, plans and approves a change; as the automation identity's responsible human,
+   approves a plan the automation identity created from the S2 release; and, after `h-author`
+   drafts an unrelated change and `h-publisher` publishes it as a later release that reuses
+   `h-all`'s fragment revision unchanged, approves `h-publisher`'s plan for that release. These plans stay out of the integrated run, where the
    controller could commit them before S4.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding),
@@ -290,8 +291,9 @@ after.
 
 **Pass criteria.** The plan binds every value ER §2 lists, its expected pre-dispatch digest equal to
 `Applied`'s. The approval names plan revision, approver, role and epoch; the three step 4 approvals
-are marked self-approval with the reasons `authored-change`, `owned-automation` and
-`authored-reused` respectively (PA §10.5). The plan is `approved`, and no operation exists before commitment.
+are marked self-approval with exactly these reason sets, since every reason that holds is recorded
+(PA §10.5): `created-plan`, `published` and `authored-change`; `owned-automation`; and
+`authored-reused`. The plan is `approved`, and no operation exists before commitment.
 
 **Negative controls.** Automation, and `h-recovery` alone, approving: `403`; a second approval:
 `409`. The worker's assignment changed after planning: commitment refused by comparison 2. A plan
@@ -497,8 +499,8 @@ Closing run: **a restoration run with a missed stale instance**
 ([ER §9.3](execution-recovery.md#93-gaps-carried-and-what-would-close-them) item 3).
 
 **Preconditions.** S4 passed; both machines have `Applied`. Before time *T*, an ingestion claim is
-taken, a control-plane plan is approved but not committed, and A commits a worker plan and is
-paused before its attempt (S6.1's stale owner). At *T*:
+taken, a worker plan is approved but not committed (the pre-entry plan; ER §1 supports no
+control-plane plan), and A commits another worker plan and is paused before its attempt (S6.1's stale owner). At *T*:
 `bin/inject db-snapshot`. After *T*: B starts, takes the operation over, classifies it safe to retry
 on a recovery observation and records an attempt whose request is held by pausing the worker; a
 second worker plan is approved; an approval is revoked; an approver's subject is added to
@@ -517,7 +519,7 @@ second worker plan is approved; an approval is revoked; an approver's subject is
    it; B's recovery start runs no job worker, so the new-epoch `publish` job stays queued.
    `h-author` opens a second draft through B and keeps its ETag.
 4. Unpause A: it tries the attempt it was paused before, its job worker tries to claim that
-   `publish` job, and its executor tries to commit the approved control-plane plan. Through A,
+   `publish` job, and its executor tries to commit the approved pre-entry plan. Through A,
    `h-recovery` requests a takeover of the restored operation and `h-author` starts an ingestion
    into the second draft with its ETag.
 5. Unpause the worker: the held request may land.
@@ -557,7 +559,7 @@ second worker plan is approved; an approval is revoked; an approver's subject is
 unaccounted, every non-terminal operation is `unresolved` under B, and the ingestion claim is
 abandoned. A's attempt, under its pre-entry fence token, is refused by the epoch term; its job
 claim, takeover and ingestion start are refused by the process-epoch comparison (PA §5.1). Its
-commitment of the pre-entry plan is refused by comparisons 1 and 6. In step 9 its commitment of
+commitment of the pre-entry plan is refused, by comparisons 1 and 6 among others. In step 9 its commitment of
 the new-epoch plan on the released scope, which passes every other comparison, is refused by the
 process-epoch comparison. After entry B takes over and starts an ingestion in the new epoch
 (PA §16). The restored operation, whose
