@@ -435,7 +435,7 @@ The transactions this contract defines or constrains:
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6; a commitment also compares the committing process's epoch with the current one (§5.1) | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
 | T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, and its abandonment by the sweep or by a takeover with nothing to decrypt (compilation §3.4, §3.5) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a job's completion, also its state and terminal event (§8.2); for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, and an abandonment fails the operation `ingestion-abandoned` with its terminal event (§8.2) |
-| T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE` | §12.2 |
+| T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE`; the row of each `publish` or `ingest` operation it fails `FOR UPDATE` (T7), in rule 5's order | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
 | T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect. Leaving recovery mode takes installation state `FOR UPDATE` instead, before it checks that every machine scope is released: it waits for an inventory request, which holds that row `FOR SHARE`, and then sees the machine that request inserted | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together, only if the serving process's epoch is the current one (§5.1); an abandonment also fails the claim's `ingest` operation `ingestion-abandoned`, with its terminal event (§8.2) |
 
@@ -1694,7 +1694,9 @@ the scope **(choice §17.13)**:
 - **Accepted installation-wide**: inventory, drafts, ingestion and
   publication. They write the database and the provider and change nothing on
   a machine; a `source: machine` ingestion reads the node, which is the
-  observation design §14.6 allows. Clearing a scope `blocked` on a lost key
+  observation design §14.6 allows. A machine inventoried after entry gets a
+  scope that is accounted and closed, and is then marked and released as
+  execution and recovery §7.4 says. Clearing a scope `blocked` on a lost key
   version needs a new publication, followed by re-approval (design §7.7 duty
   4).
 - **Refused with `409 recovery-mode-active` on a scope still pre-restore

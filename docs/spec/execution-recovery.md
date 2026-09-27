@@ -656,11 +656,12 @@ operation be overwritten by the late request (DS row 011). An `apply-config`
 operation with no recorded attempt never completes, even when a completion
 observation shows its artifact: it sent nothing that could have put the
 artifact there. It stays `unresolved` until it is classified safe to retry
-(§5) or ends `cancelled` (the `unresolved` → `cancelled` row above). An
-observation recorded while the scope was held opens no drift record (§6.1),
-and cancellation does not re-evaluate it: if the artifact's digest differs from
-`Applied`, the first observation after the scope is released opens the drift
-record.
+(§5) or ends `cancelled` (the `unresolved` → `cancelled` row above). A
+`drift` or `evidence` observation recorded while the scope was held opens no
+drift record (§6.1), and cancellation does not re-evaluate it: if the
+artifact's digest differs from `Applied`, the first observation after the scope
+is released opens the drift record. After a restore, the scope's marking
+evaluates its `restoration` observation instead (§6.1, §7.3 step 6).
 
 ### 4.1 Timeline content
 
@@ -1275,6 +1276,11 @@ release is not blanket approval for pending mutations.
 | `blocked` | the `restoration` observation failed, or a dependency to apply the machine's `Desired` release is missing: its release record, its artifact's key version at or above the decryption floor and decryptable by the executor identity, or the executor's operation credentials (§3.1 item 2) | a later successful `restoration` observation, for a failed one; the dependency restored or repaired, or a newly published release selected as `Desired` whose dependencies are present; then re-marking |
 | `ready` | accounted, no operation holds the scope, the dependencies above present, a `restoration` observation whose basis (§4.1) follows step 1 | release |
 | released | released in the current epoch | recovery-mode exit, or a new entry |
+
+A machine inventoried after entry has no journal from before the restore, so
+nothing is left to account for: its scope starts accounted and closed, and is
+marked from its `restoration` observation and released like any other, before
+recovery mode can be left (§7.6).
 
 The dependency set is the one dispatch checks at use time (§3.1), for the
 release a plan would target, not the dependencies of regenerating it
