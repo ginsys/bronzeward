@@ -1181,9 +1181,12 @@ and 4) can be checked (§7.3 step 3). Entry is one transaction that:
 Approvals carrying another epoch need no action: they fail comparison 1 from
 the moment the epoch changes (§3.2).
 
-Once the first scope is released, the operator may restart the controller
-normally; comparison 6 still refuses every scope not released in the current
-epoch, and recovery mode stays in effect until §7.6.
+Once entry has committed, the operator may restart the controller normally, as
+persistence also allows: recovery mode and the scope gates are then database
+facts, comparison 6 still refuses every scope not released in the current
+epoch, and recovery mode stays in effect until §7.6. The restart is what runs
+the job worker that publishes the release clearing a `blocked` scope (§7.4),
+which the recovery start does not run (see `persistence-api.md`).
 
 ### 7.3 Procedure
 
