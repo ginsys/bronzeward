@@ -425,19 +425,19 @@ The transactions this contract defines or constrains:
 
 | # | Transaction | Locks and checks | Writes |
 | --- | --- | --- | --- |
-| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed` |
-| T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active one, §7.3), idempotency record, act |
+| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed`. Its claim owner and generation are the operation's (§5.1) |
+| T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active `publish` one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
 | T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published; execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
 | T5a | Approval | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted; approver's principal `FOR SHARE`, not revoked; plan state `FOR UPDATE`, unexpired, and `proposed`, or `approved` by an approval from an earlier epoch | approval (unique per plan and epoch, with the self-approval mark), plan state `approved`, machine timeline entry, idempotency record, act |
 | T5b | Approval revocation | key lock; installation state `FOR SHARE`; machine row `FOR UPDATE`; approval `FOR UPDATE`, which waits for a commitment or attempt holding it `FOR SHARE` (§1.2 item 3); plan state `FOR UPDATE` | revocation row; plan state `revoked` only when the plan is `approved` by the named approval (an earlier-epoch approval that a current one replaced, or a plan already terminal, keeps its state); machine timeline entry, idempotency record, act |
-| T5c | Identity revocation | key lock; installation state `FOR SHARE`; principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked, idempotency record, act |
+| T5c | Identity revocation | key lock; installation state `FOR SHARE`; every machine row `FOR UPDATE`, in id order, as T9 (rule 5); principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked; an identity revocation entry (T7) on the timeline of each machine with a plan that identity approved whose plan or operation is not terminal, read under those machine locks (execution and recovery §4.1); idempotency record, act |
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6 | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
-| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7) | operation owner fields; for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7) |
+| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, and its abandonment by the sweep or by a takeover with nothing to decrypt (compilation §3.4, §3.5) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, and an abandonment fails the operation `ingestion-abandoned` (§8.2) |
 | T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE` | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
-| T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect | the effect, idempotency record, act |
+| T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together (§5.1); an abandonment also fails the claim's `ingest` operation `ingestion-abandoned` (§8.2) |
 
 T7 allocates every revision in a machine scope, for a plan, an operation or a
 machine-scope fact alike, from one per-machine counter under the machine row's
@@ -459,11 +459,12 @@ was issued. A takeover or claim and every owner transition are single
 conditional `UPDATE`s:
 
 ```sql
--- takeover of an apply-config operation (DB §4.4 row 015)
+-- takeover of an apply-config operation (DB §4.4 row 015),
+-- after reading installation_state FOR SHARE
 UPDATE operation
    SET owner = $new, owner_gen = owner_gen + 1, owner_epoch = $current_epoch,
        state = 'unresolved'
- WHERE id = $id AND owner_gen = $seen_gen
+ WHERE id = $id AND owner_gen = $seen_gen AND $my_epoch = $current_epoch
    AND state IN ('committed', 'sending', 'verifying', 'unresolved');
 
 -- an owner's own transition, after reading installation_state FOR SHARE
@@ -483,13 +484,21 @@ The ownership check is part of the write, never a prior `SELECT`: the
 check-then-insert control recorded a stale attempt
 ([DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions),
 row 018). The epoch term is §12's: after recovery-mode entry no token issued
-before it matches, whatever generation the restored row holds.
+before it matches, whatever generation the restored row holds. A takeover and a
+job claim issue a new generation in the current epoch, so each also requires
+the caller's own epoch, the one its process read at its start, to be the
+current one, read from `installation_state` `FOR SHARE` in the same
+transaction (`$my_epoch = $current_epoch`): a process started before a
+recovery-mode entry can neither take an operation over nor claim a job after
+it. Entry's own takeovers make that comparison before entry mints the new
+epoch, and take over into it (§12.2 steps 1 and 5).
 
 A job claim re-checks eligibility in the `UPDATE`'s own predicate. For a
 `publish` job, a `running` job whose lease has lapsed is eligible again
 **(choice §17.12)**:
 
 ```sql
+-- after reading installation_state FOR SHARE
 UPDATE operation
    SET state = 'running', owner = $me, owner_gen = owner_gen + 1,
        owner_epoch = $current_epoch, lease_until = now() + $lease
@@ -498,7 +507,8 @@ UPDATE operation
                 AND (state = 'queued'
                      OR (state = 'running' AND lease_until < now()))
               ORDER BY seq LIMIT 1)
-   AND (state = 'queued' OR (state = 'running' AND lease_until < now()));
+   AND (state = 'queued' OR (state = 'running' AND lease_until < now()))
+   AND $my_epoch = $current_epoch;
 
 -- lease extension, by the owner only, while the lease is still live
 UPDATE operation
@@ -508,8 +518,17 @@ UPDATE operation
    AND state = 'running' AND lease_until > now();
 ```
 
-An `ingest` job is claimed from `queued` only: a lapsed `ingest` job is not
-re-run, and compilation's claim rules decide its fate (§8.2).
+An `ingest` operation has no job claim: the staging claim is the single
+ownership of an ingestion. `POST /ingestions` creates the operation `running`
+in the transaction that creates its claim (compilation §2.3 step 0; T11),
+with the claim's owner, owner generation and epoch; it is never `queued`, and
+the job claim above, which selects `publish` operations only, never takes it.
+Its lease is the claim's, which only the claim's owner extends (compilation
+§3.3). A takeover of the claim (compilation §3.4) moves the operation's owner
+fields to the claim's new owner and generation in the same transaction (T8),
+conditional on the generation the takeover read, and the draft transaction (T1) compares the claim's owner and generation, as
+compilation §3.2 requires. A lapsed `ingest` operation is not re-run:
+compilation's claim rules decide between takeover and abandonment (§8.2).
 
 Without the re-check, 309 of 400 jobs were claimed more than once and one was
 completed twice ([DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims),
@@ -737,8 +756,8 @@ rotation of the digest key does not turn a retry into
 `422 idempotency-key-reused`. If the provider can no longer compute under that
 version, the retry cannot be compared and is answered `422` all the same; the
 client retries under a new key. T1's `If-Match` refuses a draft update that
-already committed. An ingestion whose `ingest` operation is still `queued` or
-`running` is refused by that operation's natural key (§7.3), which names it;
+already committed. An ingestion whose `ingest` operation is still `running` is
+refused by that operation's natural key (§7.3), which names it;
 once the operation succeeded its draft write moved the draft, and `If-Match`
 refuses the new request, and once it failed the new request is the only one.
 How digests compare across a rotation is open in
@@ -820,12 +839,17 @@ retries with a new idempotency key:
 | Effect | Natural key | On a second request |
 | --- | --- | --- |
 | Release | `(draft_id, draft_revision)` | the existing release if the digests match, else `409 conflict` (§6.2) |
-| Publish operation | at most one `queued` or `running` per `(draft_id, draft_revision)`, by partial unique index | the existing operation, `202` |
-| Ingest operation of `POST /ingestions` | at most one `queued` or `running` per `(draft_id, draft_revision)` it binds, by partial unique index: only one of them could write that draft revision, and each would write the provider | `409 conflict` naming the existing operation |
+| Publish operation | at most one `queued` or `running` `publish` operation per `(draft_id, draft_revision)`, by a partial unique index over `kind = 'publish'` only | the existing `publish` operation, `202` |
+| Ingest operation of `POST /ingestions` | at most one `running` `ingest` operation per `(draft_id, draft_revision)` it binds, by a partial unique index over `kind = 'ingest'` only: only one of them could write that draft revision, and each would write the provider | `409 conflict` naming the existing operation |
 | Operation | one per plan, by unique index on the plan, created at the commitment (§8.1) | execution and recovery's comparison 0 refuses a second commitment (DS row 009) |
 | Approval | one per plan and epoch, by unique index on `(plan_id, epoch)` (design §13.7 item 3); a revoked approval makes its uncommitted plan `revoked` (§8.1), and only an unexpired plan approved in an earlier epoch is approved again, in the current one (execution and recovery §2) | `409 conflict` |
 | Active operation per machine scope | partial unique index over `committed`, `sending`, `verifying`, `unresolved` | execution and recovery's refusal (DB row 012; DS row 010) |
+| Active operation per rollout scope | at the PoC rollout limit of one, a partial unique index on the rollout scope over `committed`, `sending`, `verifying`, `unresolved` (execution and recovery §3.2, comparison 5); not evidenced there | execution and recovery's refusal |
 | Machine | its SMBIOS UUID, required by `POST /machines`, by unique index across the installation | `409 conflict` naming the existing machine |
+
+The publish and ingest indexes are separate, each over its own kind, so a
+`publish` and an `ingest` operation bound to one draft revision never collide,
+and T2 returns only a `publish` operation as the existing one.
 
 The machine key makes one supplied SMBIOS UUID one record, so one
 coordination scope: two inventory requests for it under different idempotency
@@ -853,7 +877,7 @@ plan itself, at the dispatch commitment (§8.1).
 | Kind | Created by | States |
 | --- | --- | --- |
 | `publish` | `POST /drafts/{id}/publications` | job states (§8.2) |
-| `ingest` | `POST /ingestions` (import, drift adoption), and a mark or takeover on a staged ingestion | job states (§8.2) |
+| `ingest` | `POST /ingestions` (import, drift adoption), `running` with its staging claim (§5.1); a mark or takeover on a staged ingestion answers with that ingestion's operation | job states (§8.2), never `queued` |
 | `apply-config` | the dispatch commitment of an approved plan | execution and recovery's operation states |
 | `adopt` | the commitment of an approved plan with `operation: adopt`, which records the adoption and sends nothing | created directly in `completed`, with the adoption record as its outcome (execution and recovery §6.3) |
 
@@ -910,21 +934,26 @@ without operator action.
 
 | State | Meaning |
 | --- | --- |
-| `queued` | Accepted; no worker holds it. |
-| `running` | A worker holds it under a fence and lease (§5.1). |
+| `queued` | Accepted; no worker holds it. A `publish` operation only. |
+| `running` | A worker holds it under a fence and lease (§5.1); an `ingest` operation, the owner of its staging claim. |
 | `succeeded` | Terminal. `result` names the release or draft produced. |
 | `failed` | Terminal. `error` is a problem document (§9.4). |
 
 A worker whose lease lapses is superseded by the next claim; its late commit
 is refused by the fence. A `publish` job is safe to run again, because its
-commit is keyed by draft revision (§6.2). An `ingest` job is not re-run: its
-input was held in memory or in staging, and compilation's claim rules decide
-between takeover and abandonment (compilation §3.4, §3.5). A lapsed `ingest`
-job whose claim is abandoned fails with `ingestion-abandoned`
+commit is keyed by draft revision (§6.2). An `ingest` operation is not re-run:
+its input was held in memory or in staging, and compilation's claim rules
+decide between takeover and abandonment (compilation §3.4, §3.5). Every
+transaction that writes a staging claim `abandoned` fails that claim's
+`ingest` operation, if one is still `running`, with `ingestion-abandoned` in
+the same transaction: the operator's abandonment (T11), the sweep that writes
+a lapsed transient claim or an expired one abandoned and a takeover with
+nothing to decrypt (T8; compilation §3.4, §3.5), and recovery-mode entry (T9)
 **(choice §17.12)**.
 
-Recovery-mode entry fails every `queued` or `running` job with
-`recovery-mode-entered` (§12.2) **(choice §17.12)**.
+Recovery-mode entry fails every `queued` or `running` `publish` job with
+`recovery-mode-entered`, and every `running` `ingest` operation with
+`ingestion-abandoned` as it abandons its claim (§12.2) **(choice §17.12)**.
 
 ### 8.3 The resource and its progress
 
@@ -951,7 +980,11 @@ request accepts `text/event-stream`. Each event's SSE `id` is
 a plan operation and its event number for a `publish` or `ingest` operation
 (§5, T7); either increases along one operation's events. A client resumes
 with `Last-Event-ID`; an id from another epoch cannot be resumed, so the
-server sends a `reset` event and the timeline from its start. Epochs are compared by equality only; the entry
+server sends a `reset` event and the timeline from its start. The server ends
+a stream no later than the `exp` of the token that opened it; the client
+reconnects with `Last-Event-ID` and a fresh token, verified as any request
+(§10.1), so an identity revocation, a denied subject or a changed group takes
+effect on a stream within the token's lifetime. Epochs are compared by equality only; the entry
 time of each `RecoveryEpoch` row orders them for display. A plan operation's
 events begin at its commitment and link its plan and approval, whose entries
 are on the machine's timeline (`GET /machines/{id}/timeline`). Polling the
@@ -994,9 +1027,9 @@ idempotency and conflict behavior.
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments | 200 | any role |
 | `GET /drafts[/{id}]`, `/ingestions/{id}`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
-| `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest` | `author`, human only (§10.3) |
-| `POST /ingestions/{id}/marks`, `/takeovers` (a further mark on a staged ingestion; compilation's explicit operator recovery request, §3.4 there) | 202, `ingest` | `author`, human only (§10.3) |
-| `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2) | 200 | `author`, human only (§10.3) |
+| `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
+| `POST /ingestions/{id}/marks`, `/takeovers` (a further mark on a staged ingestion; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation | `author`, human only (§10.3) |
+| `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster) | 201 | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
@@ -1240,7 +1273,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `queued` or `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
@@ -1289,13 +1322,15 @@ has an OpenBao identity (design §13.7 item 1, derived).
 
 Bronzeward is an OAuth 2.0 resource server. A human's client obtains a JWT
 access token from the operator's identity provider and sends it as
-`Authorization: Bearer`. Each request is verified on its own;
-Bronzeward keeps no server session **(choice §17.16)**:
+`Authorization: Bearer`. Each request is verified on its own, and an event
+stream ends no later than its token's `exp` (§8.3); Bronzeward keeps no server
+session **(choice §17.16)**:
 
 - signature against the issuer's published keys, asymmetric algorithms only
   (`none` and HMAC algorithms refused);
 - `iss` equal to the configured issuer, `aud` containing the configured
   audience, `exp` and `nbf` with at most 60 seconds' skew;
+- `sub` present and a non-empty string; otherwise the token is refused `401`;
 - `iat` present and no later than `now()` plus the 60 seconds' skew; a token
   without it, or issued in the future, is refused;
 - `exp - iat` at most the configured maximum lifetime, default 15 minutes; a
@@ -1558,11 +1593,15 @@ startup", and design §13.7 item 5 and §14.6 give entering it to
 `recovery-admin`. The two meet in execution and recovery's recovery start
 **(choice §17.26)**:
 
-- Before any process can reach the restored database, the operator stops, or
-  establishes as stopped, every service process that ran against the
-  pre-restoration state (execution and recovery §7.2). This is an operator
-  step: nothing here enforces it, and until entry commits the epoch fence
-  cannot tell such a process from a current one.
+- Before the restore of any backup family begins, the operator stops, or
+  establishes as stopped, every controller and API process, and keeps them
+  stopped until entry commits, except the single process started with the
+  recovery-start flag after the restore (execution and recovery §7.2). A
+  restore of OpenBao or of the credential store alone restores no database,
+  so stopping processes only before they reach the restored database would
+  fence nothing. This is an operator step: nothing here enforces it, and
+  until entry commits the epoch fence cannot tell such a process from a
+  current one.
 - After a restore, the operator starts the service with a server-side
   **recovery-start flag**. The flag is process state, not database state. Under
   it the process runs no executor and no job worker, attempts no commitment or
@@ -1598,10 +1637,11 @@ Entry runs as one transaction (T9). It:
    locks every machine row `FOR UPDATE`;
 2. inserts the `RecoveryEpoch` row and makes it current, and sets recovery
    mode;
-3. marks every staging claim from an earlier epoch `abandoned` and clears its
-   payload (compilation §3.5);
-4. fails every `queued` or `running` job with `recovery-mode-entered`
-   (§8.2);
+3. marks every staging claim from an earlier epoch `abandoned`, clears its
+   payload (compilation §3.5) and fails its `ingest` operation, if one is
+   still `running`, with `ingestion-abandoned` (§8.2);
+4. fails every `queued` or `running` `publish` job with
+   `recovery-mode-entered` (§8.2);
 5. performs execution and recovery's entry effects: it closes every machine
    scope's gate, takes over every non-terminal operation into the new epoch
    (each in `committed`, `sending` or `verifying` becomes `unresolved`), and
@@ -1721,17 +1761,20 @@ that entry replays as usual.
 ### 13.2 Provider write succeeded, database commit failed
 
 1. An author imports worker `mch_tqhcznunhyle4hnxru5hkt35uq`. `POST
-   /ingestions` commits an `ingest` operation and claim
-   `ing_4ycffhy7bf4o2w6pz5b4r75hmu` (compilation §2.3 step 0).
+   /ingestions` commits claim `ing_4ycffhy7bf4o2w6pz5b4r75hmu` (compilation
+   §2.3 step 0) and its `ingest` operation, `running` under the claim's owner
+   and generation (§5.1).
 2. Extraction substitutes three values; step 6 creates three generations at
    `gen/cl_oxbgrzprzpvnecj5ve3jht3dha/ing_4ycffhy7bf4o2w6pz5b4r75hmu/<value id>`
    with `cas=0`.
 3. The database connection breaks inside the draft transaction. Nothing of the
    draft is committed (DB rows 007, 058, 060 show the same for publication).
    The claim is unreleased.
-4. Under transient staging the claim is abandoned at lease lapse; the
-   operation fails `ingestion-abandoned`. Under encrypted staging a takeover
-   may resume it (compilation §3.4).
+4. Under transient staging the claim is abandoned at lease lapse; the sweep
+   that writes the abandonment fails the operation `ingestion-abandoned` in
+   the same transaction (§8.2). Under encrypted staging a takeover may resume
+   it, moving the operation's owner fields with the claim (compilation §3.4;
+   §5.1).
 5. If it is abandoned, the three generations are orphans. The orphan report
    lists their paths under the abandoned claim. Nothing deletes them (design
    §7.8), and a new import mints new names.
@@ -1809,11 +1852,13 @@ After *T*:
    `ing_4ycffhy7bf4o2w6pz5b4r75hmu`.
 5. `recovery-admin` revokes human `idn_6woutisn7uensexh3kk2qlz6ma`, and the operator adds the subject to `deniedSubjects` (§10.4).
 
-The operator restores the database from *T* and the provider from a snapshot
-taken after it. The restored database names `ep_bqeknkmarvikuy7ofil2okekgi` as
-current and knows nothing of `ep_e3t4dznwcjg4uoahvfjk4w6kwy`. The operator
-stops every service instance and starts one with the recovery-start flag; its
-dispatch gates stay closed and it refuses every request but liveness and entry.
+The operator stops every service instance, then restores the database from *T*
+and the provider from a snapshot taken after it. The restored database names
+`ep_bqeknkmarvikuy7ofil2okekgi` as current and knows nothing of
+`ep_e3t4dznwcjg4uoahvfjk4w6kwy`. The operator starts one instance with the
+recovery-start flag, whose dispatch gates stay closed and which refuses every
+request but liveness and entry, and keeps the others stopped until entry
+commits.
 `recovery-admin` then records entry through the API, naming both restored
 backups. Entry mints `ep_53wiltmcac6xxdggvgg7zcoh5y`, a new random identity: it
 equals neither the restored epoch nor the lost one.
@@ -1826,8 +1871,8 @@ equals neither the restored epoch nor the lost one.
   whichever generation the rows now hold. With a counter alone, the next two
   takeovers would reissue generations 2 and 3, and X's token would pass, as in
   DB row 027. The operator was to stop X, or establish it as stopped, before
-  any process could reach the restored database (§12.2); the fence refuses
-  only its database writes, and only after entry.
+  the restore began and keep it stopped until entry committed (§12.2); the
+  fence refuses only its database writes, and only after entry.
 - A client that recorded `ep_e3t4dznwcjg4uoahvfjk4w6kwy` sees
   `ep_53wiltmcac6xxdggvgg7zcoh5y` in `Bronzeward-Epoch` and knows its events and
   cursors do not resume.
@@ -1939,12 +1984,17 @@ each (design §7.7 consequences):
   advisory lock, against row 026;
 - the epoch term: a fence token issued before a recovery-mode entry refused
   after it, with a control that drops the term and passes the token, run across
-  a real `pg_dump` restore as DB row 027 was;
+  a real `pg_dump` restore as DB row 027 was; and a takeover and a job claim by
+  a process started before the entry refused after it, with a control that
+  drops `$my_epoch = $current_epoch` (§5.1);
 - two requests with one idempotency key in flight together, with a control
   that drops the key lock;
 - an approval revocation and an identity revocation each started while a
   commitment holds the approval, waiting for it, with a control that inserts
   the revocation without the lock and does not wait (DS row 003);
+- an identity revocation appending its entry to the timeline of every machine
+  with a plan that identity approved whose plan or operation is not terminal,
+  and of no other machine (T5c);
 - a lapsed `publish` job claimed again and its first worker's completion
   refused;
 - two concurrent rotations of one service identity, and a rotation racing its
@@ -1960,8 +2010,12 @@ each (design §7.7 consequences):
   of every request but liveness and entry under the recovery-start flag;
 - every walk-through of §13, and every refusal of §14;
 - the immutability triggers, and startup refusal on each schema mismatch;
-- authentication refusals for each token defect in §10.1 and §10.2, and each
-  route's role check against the scenarios of design §13.7;
+- authentication refusals for each token defect in §10.1 and §10.2, a
+  missing, empty and non-string `sub` included, and each route's role check
+  against the scenarios of design §13.7;
+- an event stream ended no later than its token's `exp`, and its resumption
+  with `Last-Event-ID` refused under a token whose subject was revoked
+  meanwhile (§8.3);
 - that no request body reaches the database's data directory, write-ahead log
   or backups on the ingestion and draft routes, by the scan compilation §15
   requires.
@@ -2047,8 +2101,11 @@ design and evidence do not settle the question. Each is marked in place as
     pre-commitment state, and make the commitment its conditional transition
     to `committed`.
 12. **Job states `queued`, `running`, `succeeded`, `failed`; a lapsed
-    `publish` job is claimed again, an `ingest` job is not re-run; entry fails
-    active jobs** (§5.1, §8.2). Alternative: resume jobs after recovery.
+    `publish` job is claimed again; an `ingest` operation is created `running`
+    and owned through its staging claim, is never queued or re-run, and fails
+    with every abandonment of its claim; entry fails active jobs** (§5.1,
+    §8.2). Alternatives: resume jobs after recovery; an `ingest` job with its
+    own job claim beside the staging claim, two fences for one ingestion.
 13. **Recovery mode is per scope** (§12.2): acts that only remove authority or
     record recovery are always accepted; inventory, drafts, ingestion and
     publication are accepted installation-wide, except a publication changing
