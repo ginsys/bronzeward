@@ -467,13 +467,18 @@ metal-mode validation.
 ## 11. Refinement mapping
 
 Each block can be lifted verbatim into its issue. Paths are repository paths; "AP" is
-`docs/spec/acceptance-plan.md`.
+`docs/spec/acceptance-plan.md`. A block's checks are a summary; its **Required verification** line
+is the complete list: every row of AP §7.1 that names the issue, including the items marked
+*check* that no scenario runs. When the block is lifted, those rows are copied under it verbatim,
+and the row count stated in the line must match.
 
 **ginsys/bronzeward#21, runnable foundation.**
 - Contracts: `persistence-api.md` §2, §5, §9, §10, §11; §14 rows for authentication and migration.
 - Acceptance: AP S0 steps 1–5 and its negative controls; AP §2 fixture additions (instances A and B,
   disposable OIDC issuer, automation token tool, OpenBao seal and unseal actions, deployment
   settings).
+- Required verification: the 4 AP §7.1 rows naming #21, among them the in-flight idempotency key
+  and the concurrent rotation and rotation-revocation races (*check*).
 - Checks: concurrent migrate runs with the advisory-lock control; startup refusal on schema or
   checksum mismatch; every token defect `401`, except a revoked or deployment-denied subject,
   `403 identity-revoked` (PA §9.4); each design §13.7 row that role alone decides through
@@ -485,6 +490,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Contracts: `compilation.md` §2, §3, §4, §13; `persistence-api.md` §3.2, §5.1, §6.4;
   `execution-recovery.md` §6.3 (existing-cluster handover).
 - Acceptance: AP S1.
+- Required verification: the 6 AP §7.1 rows naming #22, among them the claim eligibility re-check
+  and two inventory requests for one SMBIOS UUID (*check*).
 - Checks: pre/post digest and resource version unchanged; scan of every surface with its positive
   control on success, each refusal and each pipeline step 0–8 interruption under both staging modes;
   takeover only after lease lapse; orphans listed, none deleted; automation refused on ingestion;
@@ -495,13 +502,15 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 **ginsys/bronzeward#23, edit and publish.**
 - Contracts: `compilation.md` §5–§11; `persistence-api.md` §4, §6, §7.
 - Acceptance: AP S2 steps 1–5 and negative controls.
+- Required verification: the 8 AP §7.1 rows naming #23, among them the compiler process's scans
+  over publications killed at each point before `COMMIT` (*check*).
 - Checks: SR and SP matrices through the compiler's own path (the C §10.1 condition, before relying
   on the machinery); a profile revision selected through the assignment, recorded on the release
   and in provenance; ETag `412` on fragment and profile; `409 stale-input` with the `FOR SHARE`
   control; literal copy and reserved text refused; fidelity check fires on an injected change;
-  immutable rows refuse writes; idempotent replay and `422` on reuse; publication creates no plan or
-  operation; the draft-update ingestion's success, refusal and every-step interruption matrix with
-  scans (C §15).
+  immutable rows refuse writes; idempotent replay and `422` on reuse; publication creates its
+  `publish` operation and no plan or `apply-config` operation; the draft-update ingestion's
+  success, refusal and every-step interruption matrix with scans (C §15).
 - Carries: machinery parity inferred; paired-diff control loose; messages withheld (C §15). Owner
   choice F7 decided: `Desired` at publication.
 
@@ -509,6 +518,7 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Contracts: design §7.6, §7.8 and §15.3 (the decided PoC policy); `persistence-api.md` §3
   (DependencyStatus), §6.3; `compilation.md` §6 step 3, §9. No contract section owns the monitor.
 - Acceptance: AP S2 step 6 and its soft-delete, destroy and partition controls; AP S7 variants.
+- Required verification: the 1 AP §7.1 row naming #24, the refusals of its own clauses.
 - Checks: `retained`, `blocked`, `lost`, `unknown` per RC's evidence; a 404 stays `unknown`; a
   `retained` dependency turning unreadable alerts at once; persistent unknown re-alerts after 15
   minutes; the monitor reads metadata only; publication pinning a non-`retained` version refused;
@@ -519,6 +529,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Contracts: `execution-recovery.md` §2, §3.2 comparisons 1–2, §3.3, §8.1, §8.5;
   `persistence-api.md` §8.1, §10.3–§10.5.
 - Acceptance: AP S3.
+- Required verification: the 7 AP §7.1 rows naming #25, among them identity revocation racing
+  commitment with the lock control and its T5c timeline entries (*check*).
 - Checks: plan binds every ER §2 value; one approval, automation and non-approvers `403`; both
   self-approval marks; assignment change refuses commitment; expiry; plan cancellation before
   commitment and after it with no attempt (ER §9.2); approval revocation before and
@@ -528,9 +540,11 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 
 **ginsys/bronzeward#26, safe apply.**
 - Contracts: `execution-recovery.md` §1, §3.1–§3.5, §4, §5.1, §8; `persistence-api.md` §8.3.
-- Acceptance: AP S4; AP S8 for the timeline, with ginsys/bronzeward#31.
-- Checks: DS rows 001–005, 012–017 and 022 re-run through the implementation's client (ER §3.5
-  condition); digest equals the artifact's after completion; evidence, commitment and attempt
+- Acceptance: AP S4; AP S8 for the timeline, with ginsys/bronzeward#30 and ginsys/bronzeward#31.
+- Required verification: the 8 AP §7.1 rows naming #26, among them machine revisions in commit
+  order under concurrent writers (*check*).
+- Checks: DS rows 001–023 through the implementation with controls 006, 008 and 011 (ER §9.2),
+  which include the ER §3.5 condition's rows 001–005, 012–017 and 022 through its client; digest equals the artifact's after completion; evidence, commitment and attempt
   precede the request; Desired, Applied, Observed served separately; sealed OpenBao, stale
   observation, second plan (scope-index control), frozen scope, a proxied-route plan (F3) and
   `InvalidArgument` each refused.
@@ -541,6 +555,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Contracts: `execution-recovery.md` §6, §8.6; `compilation.md` §2.3 (drift adoption);
   `persistence-api.md` §9.2.
 - Acceptance: AP S5 (ER §9.3 closing run 1).
+- Required verification: the 4 AP §7.1 rows naming #27, among them the drift-adoption ingestion
+  matrix and the adoption read's ordering (*check*).
 - Checks: detection opens a record without freezing; freeze by any listed role, unfreeze by
   `approver` only; sanitized adoption with the E1 scan on success, rejection and interruption;
   adoption record refused on each stale input; revert refused on re-drift and closed `returned` on
@@ -550,6 +566,9 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 **ginsys/bronzeward#28, interrupted execution.**
 - Contracts: `execution-recovery.md` §3.4, §4, §5, §8.2–§8.4; `persistence-api.md` §5.1.
 - Acceptance: AP S6.1 and S6.2 (ER §9.3 closing run 2).
+- Required verification: the 6 AP §7.1 rows naming #28, among them the attempt bound exhausted
+  after a lost response, an out-of-band completion that does not complete an operation, and a
+  takeover that keeps `unresolved` and refuses a terminal operation (*check*).
 - Checks: each ER §5.3 interruption point ends as its table says; stale owner refused in the
   attempt `UPDATE` with the DS row 008 control; lost response held `unresolved` until a
   `recovery-admin` decision after the settle floor; newer plan refused (DS row 011 control); retry
@@ -561,10 +580,13 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Contracts: `execution-recovery.md` §7, §8.7; `persistence-api.md` §12, §13.6;
   `compilation.md` §3.5.
 - Acceptance: AP S7 (ER §9.3 closing run 3), including its Transit-key and older-OpenBao variants.
+- Required verification: the 6 AP §7.1 rows naming #29, among them leaving recovery mode racing an
+  inventory request and a reissue refused for a denied service identity (*check*).
 - Checks: recovery start answers only liveness and entry before entry; entry mints an epoch, marks
   every scope, takes over non-terminal operations, abandons claims; the missed stale instance's
-  attempt, job claim, commitment, takeover and ingestion start each refused by the epoch, with the
-  epoch-term and process-epoch controls (PA §16); restored operation never retried; per-scope
+  attempt refused by the epoch term, and its job claim, takeover, ingestion start and commitment of
+  a new-epoch plan on a released scope by the process-epoch comparison, each with its control
+  (PA §16); restored operation never retried; per-scope
   refusals; exit only when every scope is released; the no-entry restart residual shown.
 - Depends on the §6 item 2 repair (what the recovery start serves).
 - Gap to close first: gap G, what a restoration read must match, with PR19, decided and written
@@ -572,6 +594,7 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 
 **ginsys/bronzeward#30, package and document.**
 - Acceptance: AP S8 step 1's walkthrough; AP §8 and §9 as the documented limits.
+- Required verification: no AP §7.1 row names #30.
 - Checks: a reviewer runs the walkthrough from a fresh checkout and disposable environment,
   including interruption and restoration; limits list the profile and versions, the gaps §10 marks
   beyond the PoC, the interim owner choices, that a mistaken identity revocation is corrected only
@@ -613,7 +636,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
 - ginsys/bronzeward#14: the role-loss question (F5); the ingestion role (F4) was decided on
   ginsys/bronzeward#20.
-- ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text, then removal of
+- ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text with the AP §7.1 rows its Required
+  verification line counts, then removal of
   `status/needs-refinement` once each issue carries it and no open decision it depends on remains.
   ginsys/bronzeward#26 and ginsys/bronzeward#29 keep the label until gap E (the verification
   deadline) and gap G with PR19 (the restoration read and the pre-send identity check) are decided

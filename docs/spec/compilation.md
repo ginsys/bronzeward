@@ -896,10 +896,12 @@ measured through `talosctl machineconfig patch`. Composition through the
 machinery's `configpatcher` is inferred, not measured (E3 §6.2; FR §8 C4). Before
 the compiler is accepted, the SR and SP matrices must be re-run with composition
 through the compiler's own machinery path and reach the same verdicts. If they
-do not, this selection is reopened; the alternative is the pinned `talosctl`
-subprocess, with plaintext passed only through inherited descriptors, never a
-named file or an argument. That channel's exposure is unmeasured too, and it
-would need the same leak scan.
+do not, the compiler uses the pinned `talosctl` subprocess instead, without
+reopening this selection (owner decision, choice §16.24). Plaintext then passes
+only through inherited descriptors, never a named file or an argument. That
+channel's exposure is unmeasured too: before the fallback is accepted, the SR
+and SP matrices are re-run through it and reach the same verdicts, and §15's
+leak scan covers its channel.
 
 The executor's Talos client is not selected here. E3 shows the same RPC
 outcomes through both implementations (E3 §4.3); the choice belongs to
