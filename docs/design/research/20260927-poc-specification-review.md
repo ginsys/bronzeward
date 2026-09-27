@@ -400,9 +400,10 @@ ginsys/bronzeward#31 and is stated in ginsys/bronzeward#30's limits.
 items 1 to 4 are AP S5, S6.2, S7 and S8 (ginsys/bronzeward#27, #28, #29, #26). Plan expiry and
 cancellation, the assignment-change refusal and identity revocation go to ginsys/bronzeward#25;
 observation age, `InvalidArgument` for a validation error and the machinery client to
-ginsys/bronzeward#26; the attempt bound and takeover at start to ginsys/bronzeward#28; comparison 6
-to ginsys/bronzeward#27 and ginsys/bronzeward#29. Beyond the PoC: observation ordering under
-concurrency, other response classes, the two age combinations, a new OpenBao cluster, token expiry
+ginsys/bronzeward#26; the attempt bound and takeover at start to ginsys/bronzeward#28; observation
+ordering under a concurrent accounting transaction, which ER §9.2 requires, to
+ginsys/bronzeward#28; comparison 6 to ginsys/bronzeward#27 and
+ginsys/bronzeward#29. Beyond the PoC: other response classes, the two age combinations, a new OpenBao cluster, token expiry
 across a restore. The two specification gaps (no decommission act for a machine never observed
 again; completion consulting only recorded observations) stay open beyond the PoC, with their
 residuals stated in ER §9.3, unless the owner asks for a rule first.
@@ -516,7 +517,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Checks: each ER §5.3 interruption point ends as its table says; stale owner refused in the
   attempt `UPDATE` with the DS row 008 control; lost response held `unresolved` until a
   `recovery-admin` decision after the settle floor; newer plan refused (DS row 011 control); retry
-  only under ER §5's conditions; the late-landing distribution recorded whichever way it falls.
+  only under ER §5's conditions; observation ordering under a concurrent accounting transaction
+  (ER §4.1, §9.2); the late-landing distribution recorded whichever way it falls.
 - Carries: no bound unless S6.2 produces one. Owner choice F8.
 
 **ginsys/bronzeward#29, restoration.**
@@ -545,7 +547,7 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 
 | Criterion of ginsys/bronzeward#20 | Where | State |
 |---|---|---|
-| 1. Trace properties to evidence and contracts; resolve inconsistencies and required gaps | §4–§6, §10 | Traced. Inconsistencies in §6 and §7 are repaired by the parallel spec change; gaps assigned in §10 |
+| 1. Trace properties to evidence and contracts; resolve inconsistencies and required gaps | §4–§6, §10 | Traced. §6 items 1, 2, 4, 6 and 7 and §7 C, D, F and H–N are repaired by ginsys/bronzeward#56; the rest are disclosed, need no change or are gaps assigned in §10 |
 | 2. E3 disposition and design wording; no full-E3 claim | §8; design §18.1, §18.3, §18.5; `CONTRIBUTING.md` | Recorded here and in the design |
 | 3. Refine every P issue before removing its label | §11 | Text ready; the issues are not yet edited and keep their labels |
 | 4. Approve an integrated acceptance plan | [AP](../../spec/acceptance-plan.md) | Plan landed; approval is the owner's |
@@ -566,7 +568,7 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 
 - ginsys/bronzeward#20: the owner's acceptance (criterion 5), the eight flagged choices (§9), and
   approval of the acceptance plan (criterion 4).
-- The parallel spec repair: §6 items 1–7, filling §7.
+- ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
 - ginsys/bronzeward#14: the ingestion-role and role-loss questions (F4, F5).
 - ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text, then removal of
   `status/needs-refinement` once each issue carries it.
