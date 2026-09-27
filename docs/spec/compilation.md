@@ -1094,7 +1094,7 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Ingestion | Provider write fails part-way | Refused; claim abandoned | Claim row, no payload; unused provider generations |
 | Ingestion | Crash before the payload is written (end of §2.3 step 8) | Transient: abandoned at lease lapse; encrypted: a takeover finds nothing to decrypt and abandons it | Claim row, no payload; unused generations if past step 6 |
 | Ingestion | Crash after the payload is written, before the draft transaction | Transient: abandoned at lease lapse; encrypted: takeover (§3.4) | Claim row with ciphertext (encrypted); unused generations until the draft commits |
-| Ingestion | Crash inside the draft transaction | Claim unreleased with payload; no draft | Claim row with ciphertext (encrypted) |
+| Ingestion | Crash inside the draft transaction | Claim unreleased with payload; the named draft unchanged, none of the transaction's entries or revisions committed | Claim row with ciphertext (encrypted) |
 | Ingestion | Stale owner heartbeat, commit or release | Refused by owner generation | Nothing |
 | Ingestion | Absolute expiry, or recovery-mode entry | Claim abandoned; re-ingest | Claim row, payload cleared |
 | Authoring | Undeclared or unused name, other local tag, tag on a key or sequence, reserved text, bad path | Draft update refused | Nothing |
