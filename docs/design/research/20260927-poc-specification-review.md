@@ -257,7 +257,7 @@ parenthetical calling ER "landed but not yet accepted" was removed as stale.
 
 ## 9. Owner-review choices
 
-All 77 choices the contracts put to the owner: C §16 (26), ER §10 (23), PA §17 (28). The default
+All 78 choices the contracts put to the owner: C §16 (26), ER §10 (24), PA §17 (28). The default
 recommendation is **accept as specified**. FLAG marks a choice where the reviewer recommends the
 owner decide explicitly; each is expanded below the table.
 
@@ -312,6 +312,7 @@ owner decide explicitly; each is expanded below the table.
 | ER10.21 | Recovery mode enforced per scope | accept as specified |
 | ER10.22 | Leaving recovery mode needs every scope released | accept as specified |
 | ER10.23 | An ordinary plan cannot overwrite undetected drift | accept as specified |
+| ER10.24 | Every plan binds `Desired`; commitment refuses once it changed | FLAG F10, decided |
 | PA17.1 | Random application identifiers; `mch` machine ID | accept as specified |
 | PA17.2 | ETags carry a random token beside the revision | accept as specified |
 | PA17.3 | Immutability enforced by database triggers | accept as specified |
@@ -397,6 +398,13 @@ owner decide explicitly; each is expanded below the table.
   Enforcing it would make an urgent revocation wait for a configuration rollout. **Owner decision
   (2026-09-27, on ginsys/bronzeward#56): keep the operator step, not enforced**; the residual stays
   disclosed.
+- **F10: `Desired` binding (ER10.24).** Raised by review after F7: with selection at publication, a
+  plan approved before a later publication still passed every commitment comparison and could
+  apply a release the machine no longer desires; only adopt plans bound `Desired`. The alternative
+  keeps the approved plan valid until commitment or expiry. **Owner decision (2026-09-27): bind
+  `Desired` on every plan**; an `apply-config` plan is created only for the current `Desired`,
+  commitment refuses once it changed (ER §2, §3.2 comparison 2), and AP S3 carries the
+  publication-between-approval-and-commitment control.
 
 **Pairs checked.** Each pair states the same rule: C16.26 and ER10.2 (digest); C16.24 and ER10.8
 (in-process machinery, separate conditions); C16.9, ER §7.2 item 5 and PA §12.2 (earlier-epoch
@@ -405,7 +413,8 @@ claims abandoned); ER10.3 and PA17.11 (operation at commitment); ER10.4 and PA17
 §6 item 4); ER10.17 and PA17.25 (random epoch); ER10.18 and PA17.26 (recovery start and entry; §6
 item 2 on what is served before entry); ER10.21, ER10.22 and PA17.13 (per-scope recovery mode and
 exit); ER10.6 and PA17.19 (identity revocation). C16.7 and ER10.7 apply the same no-timer takeover
-rule to different objects (claims, operations). ER10.23 has no PA counterpart and needs none.
+rule to different objects (claims, operations). ER10.23 has no PA counterpart and needs none;
+ER10.24 builds on PA17.6 (selection at publication) and PA T4/T6 defer to it.
 
 ## 10. Gaps
 
@@ -535,10 +544,12 @@ and the row count stated in the line must match.
 - Contracts: `execution-recovery.md` §2, §3.2 comparisons 1–2, §3.3, §8.1, §8.5;
   `persistence-api.md` §8.1, §10.3–§10.5.
 - Acceptance: AP S3.
-- Required verification: the 7 AP §7.1 rows naming #25, among them identity revocation racing
-  commitment with the lock control and its T5c timeline entries (*check*).
+- Required verification: the 8 AP §7.1 rows naming #25, among them identity revocation racing
+  commitment with the lock control and its T5c timeline entries (*check*), and a publication
+  racing a commitment (*check*, ER choice §10.24).
 - Checks: plan binds every ER §2 value; one approval, automation and non-approvers `403`; both
-  self-approval marks; assignment change refuses commitment; expiry; plan cancellation before
+  self-approval marks; assignment change refuses commitment; a plan for a release that is not
+  `Desired` refused, and a publication after plan creation refuses commitment (F10); expiry; plan cancellation before
   commitment and after it with no attempt (ER §9.2); approval revocation before and
   after commitment with the DS row 003 lock control; identity revocation before and after
   commitment; publication alone dispatches nothing.
@@ -639,7 +650,7 @@ and the row count stated in the line must match.
 ## 14. Hand-off
 
 - ginsys/bronzeward#20: the owner's acceptance (criterion 5), the open flagged choice F5
-  (§9; F1 to F4 and F6 to F9 are decided), gaps E and G, and approval of the acceptance plan
+  (§9; F1 to F4 and F6 to F10 are decided), gaps E and G, and approval of the acceptance plan
   (criterion 4).
 - ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
 - ginsys/bronzeward#14: the role-loss question (F5); the ingestion role (F4) was decided on

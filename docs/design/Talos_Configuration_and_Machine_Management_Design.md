@@ -881,7 +881,7 @@ The implementation must define per-operation safety properties and prove how it 
 
 ### 12.6 Offline semantics
 
-A release becomes the machine's `Desired` when it is published; approval does not select it (persistence contract choice §17.6). Convergent configuration can apply the latest applicable release that `Desired` names only through an **approved** plan, after checking current assignment and state. Commands cannot collapse or replay blindly. A returning machine must not receive a queue of expired reboot/reset/upgrade commands. Replan when assumptions changed; unresolved prior execution also blocks conflicting new work.
+A release becomes the machine's `Desired` when it is published; approval does not select it (persistence contract choice §17.6). Convergent configuration can apply the latest applicable release that `Desired` names only through an **approved** plan, after checking current assignment and state. The plan binds that selection: a later publication invalidates it before dispatch commitment (execution contract choice §10.24). Commands cannot collapse or replay blindly. A returning machine must not receive a queue of expired reboot/reset/upgrade commands. Replan when assumptions changed; unresolved prior execution also blocks conflicting new work.
 
 ### 12.7 Application approval and dispatch boundary
 

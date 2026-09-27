@@ -143,6 +143,10 @@ silently substitutes a newer artifact. The immutable plan binds:
   [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation)
   item 1, inferred);
 - machine identity and assignment revision;
+- the machine's `Desired` release at plan creation. Plan creation refuses an
+  `apply-config` plan, a revert included (§6.4), whose release is not the
+  machine's `Desired`, so only the selected release is ever planned; an adopt
+  plan binds it as §6.3 states **(choice §10.24)**;
 - the machine's **baseline revision**, a per-machine counter advanced by every
   change of `Applied`, whether by a completed operation or by an adoption
   record (§6.3). A machine with no `Applied` has no baseline revision, so no
@@ -184,7 +188,7 @@ execution-time checks against live state in §3, and the timeline records the
 two separately.
 
 The plan is invalid if any bound value changes, including the artifact,
-assignment, baseline revision, operation, mode, route, a parameter value, a
+assignment, `Desired` release, baseline revision, operation, mode, route, a parameter value, a
 precondition, expiry or approval policy. The controller must replan and obtain
 approval again rather than repair the plan in place.
 
@@ -330,7 +334,11 @@ persistence's (see `persistence-api.md`).
    unchanged, with the machine's assignment head read `FOR SHARE`, and the
    machine's baseline revision equals the bound one, so a plan made before an
    adoption or another operation's completion, or for a machine whose baseline
-   was never accepted, cannot commit (DS row 010);
+   was never accepted, cannot commit (DS row 010). The machine's `Desired`
+   release is the bound one, read under the machine row's lock, which a
+   publication's selection also takes (see `persistence-api.md`), so a plan
+   approved before another release was published cannot apply the release the
+   machine no longer desires (choice §10.24; no DS row exercised it);
 3. the evidence recorded under §3.1 was recorded for this plan by this
    controller instance, satisfies the plan's preconditions, is inside its bound
    maximum age or validity window, and no newer observation of the machine
@@ -1666,6 +1674,10 @@ fail:
   digest other than `Applied`'s, and a commitment whose evidence shows an
   undetected out-of-band change refused, with a drift record opened by the
   transaction that records the refusal (§2, §3.2);
+- plan creation refusing an `apply-config` plan whose release is not the
+  machine's `Desired`, a commitment refused when another release was published
+  after plan creation, and a publication racing a commitment waiting for it or
+  preceding it, with the unlocked control (§2, §3.2 comparison 2);
 - drift detection (including no record from a read begun before an `Applied`
   change, none opened or closed by a read that a recorded higher-basis read
   supersedes, and a record opened with a `failed` operation), freeze, adoption record (success, stale observation,
@@ -1868,6 +1880,16 @@ conservative option; those that do not say so. Each is marked in place as
     change is overwritten. Alternative: let a plan expect the running digest
     and rely on the approver's review of the diff against it, which lets an
     unseen out-of-band change be overwritten without that choice.
+24. **Every plan binds the machine's `Desired` release; an `apply-config` plan
+    only the current one, and commitment refuses once it changed** (§2, §3.2).
+    Publication selects `Desired` (persistence contract choice §17.6), so
+    without the binding a plan approved before a later publication could still
+    commit and apply a release the machine no longer desires; adopt plans
+    already worked this way (§6.3). Owner decision, 2026-09-27
+    (ginsys/bronzeward#20). The cost is that every publication covering a
+    machine invalidates its approved, uncommitted plans, which must be planned
+    and approved again. Alternative: bind only the artifact and let the
+    approver's plan stand until it is committed or expires.
 
 ## 11. Traceability
 

@@ -308,6 +308,12 @@ are marked self-approval with exactly these reason sets, since every reason that
 
 **Negative controls.** Automation, and `h-recovery` alone, approving: `403`; a second approval:
 `409`. The worker's assignment changed after planning: commitment refused by comparison 2. A plan
+from S1's import release, which S2 superseded as the worker's `Desired`: `409 conflict` naming the
+S2 release, no plan created. From a restore of the step 4 snapshots, the S2 release planned as in
+step 2, a later release published for the worker, then the plan approved, which does not compare
+`Desired`: commitment refused by comparison 2, since `Desired` changed, and nothing sent; S4's
+commitment of the same plan with no publication between is the control (ER choice §10.24). The
+publication racing the commitment itself is a *check* (§7.1). A plan
 past its expiry: `expired`, no operation. A plan cancelled before commitment: `cancelled`, no
 operation; one cancelled after commitment with no attempt: the operation goes `unresolved`, then
 `cancelled`, and nothing is sent (ER §9.2). An approval revoked before commitment: `revoked`, nothing
@@ -700,6 +706,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | ER §9.2: sending only after the attempt commits; each §3.2 and §3.3 lock with its unlocked control | S4, S3 (DS row 003), S4 negative controls (DS row 011) plus *check* | #25, #26 |
 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing; the bound exhausted after a lost response leaves no further attempt and ends `failed` | S3, S4 negative controls; *check* for the last two | #25, #26, #28 |
 | ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls | #25 |
+| ER §9.2: a plan for a release that is not the machine's `Desired` refused at creation; a commitment refused after a publication that changed `Desired`, with S4's commitment as the control; a publication racing the commitment waits for it or precedes it, with the unlocked control | S3 negative controls plus *check* for the race | #25 |
 | ER §9.2: an `apply-config` operation with no attempt not completed by a completion observation of its artifact applied out of band | *check* | #28 |
 | ER §9.2: assignment change refused while the scope is held; comparison 6 under a freeze and under recovery mode before release | S4, S7 negative controls | #26, #29 |
 | ER §9.2: takeover at start; the §5 precedence; PA §16: a takeover keeps `unresolved` and refuses a terminal operation | S6.1 plus *check* | #28 |
