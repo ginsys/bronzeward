@@ -1277,13 +1277,11 @@ release is not blanket approval for pending mutations.
 | `ready` | accounted, no operation holds the scope, the dependencies above present, a `restoration` observation whose basis (§4.1) follows step 1 | release |
 | released | released in the current epoch | recovery-mode exit, or a new entry |
 
-A machine inventoried after entry has no journal from before the restore, so
-nothing is left to account for: its scope starts accounted and closed, and is
-marked from its `restoration` observation and released like any other, before
-recovery mode can be left (§7.6). It is released only once no scope is still
-pre-restore unaccounted: until step 1's decisions are recorded, a request the
-restore erased may still land elsewhere in its rollout scope, and a dispatch
-on the new machine would exceed the rollout limit.
+A machine inventoried after entry starts pre-restore unaccounted, like every
+scope at entry: the restore may have erased an earlier inventory of the same
+machine together with an attempt sent to it. It takes the §7.3 step 1
+decision after the same settle floor, then is marked and released like any
+other before recovery mode can be left (§7.6).
 
 The dependency set is the one dispatch checks at use time (§3.1), for the
 release a plan would target, not the dependencies of regenerating it
