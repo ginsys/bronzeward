@@ -207,8 +207,8 @@ that E3 passed. The PoC does not upgrade Talos (§18.2 exclusions; AP §8), so t
 deferral removes nothing the PoC needs.
 
 **Design wording reconciled** in the same change: the §18.1 E3 row keeps its definition and adds the
-disposition; §18.3 gains the upgrade-transition item; §18.5 states that the lifecycle phase is not
-accepted, and E3 not complete, until that item passes; §6.5's compatibility paragraph names the
+disposition; §18.3 gains the upgrade-transition item; §18.5 states that neither the lifecycle
+phase nor E3 can be complete before that item passes; §6.5's compatibility paragraph names the
 phase;
 `CONTRIBUTING.md` states the disposition instead of deferring it to this review. The §13.7 item 4
 parenthetical calling ER "landed but not yet accepted" was removed as stale.
