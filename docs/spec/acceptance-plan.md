@@ -214,11 +214,14 @@ scenario runs.
 
 **Steps.**
 
-1. `h-author` drafts a worker fragment with one node-label change, the safe `no-reboot` change S4
-   applies, and a `!bwref` reference to a value extracted in S1.
+1. `h-author` opens a draft (`POST /drafts`), since S1's import draft is published, and keeps its
+   ETag. In it, `h-author` writes a worker fragment with one node-label change, the safe
+   `no-reboot` change S4 applies, and a `!bwref` reference to a value extracted in S1. Each
+   mutation sends the draft's current ETag in `If-Match` and keeps the ETag it returns.
 2. In the same draft, `h-author` creates a worker profile revision listing that fragment revision,
-   and revises the worker's assignment to select the profile.
-3. `h-publisher` publishes; the `publish` operation compiles and validates the draft and succeeds.
+   and revises the worker's assignment to select the profile, with the same ETag handling.
+3. `h-publisher` publishes with the draft's latest ETag; the `publish` operation compiles and
+   validates the draft and succeeds.
 4. `h-author` reads the worker's redacted review data from the release
    (`GET /releases/{id}/machines/{m}/review`); no route previews an unpublished draft.
 5. The release is read back: artifacts, the source, profile and assignment revisions it snapshotted,
@@ -309,8 +312,9 @@ operation; one cancelled after commitment with no attempt: the operation goes `u
 `cancelled`, and nothing is sent (ER §9.2). An approval revoked before commitment: `revoked`, nothing
 sent; a revocation started while a commitment holds the approval waits for it, and the control that
 inserts without the lock does not wait (DS row 003). The approver's identity revoked before
-commitment, and after it with no attempt: the plan cannot commit, or its operation ends
-`cancelled`. Every dependency `retained` and the plan unapproved: nothing dispatched.
+commitment, and after it with no attempt: the plan cannot commit; or its operation goes
+`unresolved` with its scope held, each transition on the timeline, then `cancelled`, and nothing is
+sent (ER §3.3). Every dependency `retained` and the plan unapproved: nothing dispatched.
 
 **Retained evidence.** Plan and approval records, the diff as served, and each case's timeline
 entries.
@@ -630,7 +634,9 @@ separately (§2).
    stays unknown, what was observed, why the scope was held, who decided an accounting and on what, and how it
    ended.
 3. Hold an event stream open past its token's expiry. Then, with a fresh unexpired token for the
-   same subject, revoke the subject and resume the stream with `Last-Event-ID` and that token.
+   same subject, revoke the subject as PA §10.4 requires: the operator adds it to `deniedSubjects`,
+   then `h-recovery` records the identity revocation. Resume the stream with `Last-Event-ID` and
+   that token.
 
 **Clauses exercised.** ER [§4.1](execution-recovery.md#41-timeline-content),
 [§3.5](execution-recovery.md#35-talos-client-and-route) (response text); C
@@ -641,7 +647,9 @@ separately (§2).
 entries are in commit order within the scope. Response text is redacted or withheld, and no served
 timeline holds a synthetic secret. The stream ends no later than the token's `exp`, and the
 resumption with the unexpired token is refused for the revoked subject; the same resumption before
-the revocation succeeds, the control. After S7 the `Bronzeward-Epoch` header differs from the pre-restore one. A
+the revocation succeeds, the control. Because both the deny-list entry and the recorded revocation
+refuse it, a separate *check* in a disposable environment records the revocation without the
+deny-list entry and shows the revocation alone refusing the resumption. After S7 the `Bronzeward-Epoch` header differs from the pre-restore one. A
 second reviewer following the walkthrough reaches the same answers.
 
 **Negative controls.** `h-viewer` mutating anything: `403`. A Talos error whose text embeds
