@@ -901,7 +901,8 @@ reopening this selection (owner decision, choice §16.24). Plaintext then passes
 only through inherited descriptors, never a named file or an argument. That
 channel's exposure is unmeasured too: before the fallback is accepted, the SR
 and SP matrices are re-run through it and reach the same verdicts, and §15's
-leak scan covers its channel.
+leak scan covers its channel. If the fallback fails either, the compiler is
+not accepted and the selection returns to the owner.
 
 The executor's Talos client is not selected here. E3 shows the same RPC
 outcomes through both implementations (E3 §4.3); the choice belongs to
@@ -1292,7 +1293,8 @@ in place as
     plaintext across a process boundary. The deciding reason is inferred.
     Owner decision, 2026-09-27 (ginsys/bronzeward#20): in process; a failed
     re-run selects the subprocess fallback, whose channel §15 scans, without
-    reopening this choice.
+    reopening this choice; only a failure of the fallback too returns it to
+    the owner.
 25. **Compile only the node's running contract minor** (§10.2). v1.12 would
     also be accepted by a v1.13 node; one contract keeps paths and validation
     single.
