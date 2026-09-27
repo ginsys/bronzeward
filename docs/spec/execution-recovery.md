@@ -149,7 +149,13 @@ silently substitutes a newer artifact. The immutable plan binds:
   `apply-config` plan can be made for it before its baseline is accepted; the
   adopt plan that accepts it binds none (§6.3);
 - the expected pre-dispatch configuration digest. This is mandatory for every
-  `apply-config` plan, because the request replaces the whole configuration;
+  `apply-config` plan, because the request replaces the whole configuration.
+  Plan creation refuses a plan that binds no drift record unless this digest
+  equals the digest of `Applied` at the bound baseline revision; a revert
+  expects the drifted digest its drift record names instead (§6.4). Only a
+  revert therefore expects a configuration that `Applied` does not describe,
+  and any other such configuration that dispatch finds is drift (§3.2)
+  **(choice §10.23)**;
 - the open drift record, if the machine has one; such a plan is a revert
   (§6.4);
 - operation `apply-config`, mode `no-reboot`, the transport route (§3.5) and
@@ -331,7 +337,8 @@ persistence's (see `persistence-api.md`).
    contradicts it. The observed configuration digest must equal the bound
    pre-dispatch digest; on a retry, where the evidence is recorded for the
    operation, it may instead equal the bound artifact's digest (DS row 023,
-   `TestEvidenceMayShowArtifactOnlyOnRetry`);
+   `TestEvidenceMayShowArtifactOnlyOnRetry`). A commitment whose evidence
+   shows another digest is refused, and the difference is drift (below);
 4. this operation takes the machine's coordination scope, and no other
    operation on that scope is `committed`, `sending`, `verifying` or
    `unresolved` (on PostgreSQL, a partial unique index; DS row 010, control row
@@ -358,7 +365,15 @@ plan and its §3.1 evidence to it, and makes the committing controller instance
 the operation's owner at generation 1 in the current epoch (§3.4).
 
 If any comparison fails, nothing is committed and nothing is sent; the refusal
-is recorded afterwards in its own transaction (§4.1). Freeze,
+is recorded afterwards in its own transaction (§4.1). When comparison 3 refuses
+a commitment because its evidence reports a configuration digest other than
+the bound pre-dispatch digest, the machine runs a configuration that neither
+`Applied` nor an open drift record accounts for: a plan expects `Applied`'s
+digest, or a revert its drift record's (§2). The transaction that records the refusal therefore also applies
+§6.1 to that evidence observation as to a `drift` observation, under the same
+basis rules: while no operation holds the scope, a digest that differs from
+`Applied` opens a drift record, or is recorded on the one already open
+**(choice §10.23)**. Freeze,
 recovery mode and scope release are durable database facts precisely so that
 they can be compared here; checking them only before the transaction would
 leave a race in which dispatch proceeds while mutation is meant to be paused.
@@ -594,15 +609,18 @@ version, configuration digest, machine-configuration resource version and the
 bound health results. Values matching the bound postconditions establish them
 and yield `completed`; a value that contradicts them, such as another digest or
 a failed bound health check, yields `failed`; an observation that could not
-read a value does neither. Nor does one when an observation of the machine
-with a higher basis (§4.1), of any purpose, reports another configuration
-digest or another result for a bound health check: the machine changed after
+read a value does neither. Nor does one when a recorded observation of the
+machine with a higher basis (§4.1), of any purpose, reports for any bound
+postcondition (the machine identity, the assignment revision, the
+configuration digest or a bound health check) a value that contradicts it or
+differs from the completion observation's: the machine may have changed after
 the completion read began, and a later completion observation decides. Only a
 recorded observation blocks: a higher-basis read that has started but not yet
 recorded its result does not, and its result, recorded after the `Applied`
 change, opens no drift record (§6.1). A digest change that persists is
-detected by the next `drift` observation, not prevented; a late health-check
-contradiction with an unchanged digest reopens nothing (§9.3). The
+detected by the next `drift` observation, not prevented; a late contradiction
+of the identity, the assignment revision or a bound health check with an
+unchanged digest reopens nothing (§9.3). The
 transaction that records `failed` also opens a drift record when the completion
 observation's digest differs from the `Applied` digest, or records the
 observation on the one already open, because releasing the scope makes that
@@ -647,7 +665,7 @@ Required entries:
 | Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), basis, identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read |
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |
-| Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) |
+| Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 to that evidence (§3.2) |
 | Attempt | attempt id, owner token, route, transport and verification deadlines; for a retry, the classification revision it is bound to |
 | Response | attempt id, class (acceptance, gRPC code, transport outcome), redacted text or the withheld notice (§3.5) |
 | Ownership transition | from and to owner, generation, epoch, reason |
@@ -859,9 +877,10 @@ digest while no operation on that machine is `committed`, `sending`,
   that operation's classification (§5).
 
 The controller observes each managed machine periodically (purpose `drift`);
-the interval is open. A mismatch in a `drift` observation, or in a
-`restoration` observation after a restore (§7.3 step 4), opens a **drift
-record** on the machine's
+the interval is open. A mismatch in a `drift` observation, in a
+`restoration` observation after a restore (§7.3 step 4), or in the `evidence`
+observation of a commitment that comparison 3 refused on its digest (§3.2),
+opens a **drift record** on the machine's
 timeline, naming the observation, the `Applied` digest and the observed digest,
 and raises the design §15.3 digest-mismatch alert. So does the completion
 observation that makes an operation `failed`, in the transaction that releases
@@ -878,10 +897,16 @@ operation accounted by decision is linked to it as a possible late landing
 An observation is compared with the `Applied` that held at its basis (§4.1),
 not with a later one. If the machine's baseline revision (§2) changed after
 that basis, the observation opens and closes no drift record, and a later
-observation decides; a `drift` observation likewise opens none if an operation
-held or took the machine scope at or after its basis. A read that began before
-an operation applied a new release therefore cannot report the old digest as
-drift.
+observation decides. It likewise opens and closes none when a recorded
+observation of the machine with a higher basis read the configuration digest:
+the higher-basis one decides. The completion observation that makes an
+operation `failed` is the exception: any such observation read the same digest
+(§4) and, recorded while the operation held the scope, opened nothing. A
+`drift` or `evidence` observation also opens
+none if an operation held or took the machine scope at or after its basis. A
+read that began before an operation applied a new release therefore cannot
+report the old digest as drift, and a read that began before a newer recorded
+one cannot open or close a record against it.
 
 Drift is never an automatic apply trigger, and detection does not freeze the
 scope by itself **(choice §10.12)**. It needs no freeze to stop stale work:
@@ -1022,11 +1047,11 @@ advances `Applied` when it reaches `completed`, which closes the drift record.
 
 | From | To | Condition |
 | --- | --- | --- |
-| none | open | A `drift` or `restoration` observation's digest differs from the `Applied` at its basis, with the scope free (§6.1); or the completion observation that makes an operation `failed` differs from `Applied` (§4). |
-| open | open | Freeze or unfreeze; a further differing observation is recorded on the same record. |
+| none | open | A `drift` or `restoration` observation's digest, or the `evidence` observation's of a commitment refused on its digest (§3.2), differs from the `Applied` at its basis, with the scope free and no recorded higher-basis observation of the digest (§6.1); or the completion observation that makes an operation `failed` differs from `Applied` (§4). |
+| open | open | Freeze or unfreeze; a further differing observation is recorded on the same record, under the same basis rules (§6.1). |
 | open | closed (adopted) | An adoption record (§6.3). |
 | open | closed (reverted) | The revert operation reaches `completed` (§6.4). |
-| open | closed (returned) | A later observation equals the `Applied` at its basis again with no Bronzeward action, such as a manual revert; recorded as such. |
+| open | closed (returned) | A later observation equals the `Applied` at its basis again with no Bronzeward action, such as a manual revert, and no recorded observation with a higher basis read the digest (§6.1); recorded as such. |
 
 A revert that ends `failed`, `rejected` or `cancelled` leaves the record open.
 An operation's own digest mismatch while it holds the scope opens no record,
@@ -1101,14 +1126,17 @@ or attempt transaction, and serves observation, the checks of §7.3, the
 recovery API, the acts §7.5 always allows (approval and identity revocation,
 plan cancellation, freeze) and the installation-wide acts of §7.5 (drafts,
 ingestion, compilation and publication), so that a `blocked` scope's exit through a new
-release (§7.4) exists before any scope is released. After a restore of any of the three backup families, the
-operator first stops, or establishes as stopped, every controller instance
-that ran against the pre-restoration state, before any controller can reach
-the restored database, and records the time (§7.3 step 1). Until entry commits,
-the restored epoch is still current, so such an instance would pass the
-comparisons of §3.2 and §3.3 on restored approvals and ownership: only this
-stop prevents that. It is an operator step that Bronzeward neither enforces
-nor detects, like the restore itself (design §14.6). The operator then starts
+release (§7.4) exists before any scope is released. For a restore of any of
+the three backup families, the operator stops, or establishes as stopped,
+every controller instance before the restore of any family begins, records
+the time (§7.3 step 1), and keeps every instance stopped until recovery-mode
+entry commits; the only controller started meanwhile is the one with recovery
+start, after the restore. Until entry commits, the epoch the instances hold is
+still current, whichever family was restored, so an instance left running
+would pass the comparisons of §3.2 and §3.3 on the approvals and ownership it
+reads: only this stop prevents that. It is an operator step that Bronzeward
+neither enforces nor detects, like the restore itself (design §14.6). After
+the restore, the operator starts
 one controller with recovery start, and `recovery-admin` records recovery-mode entry
 through the API (design §13.7 item 5, §14.6). The start option only keeps the
 gates closed; no server-side command enters recovery mode by itself
@@ -1142,9 +1170,10 @@ epoch, and recovery mode stays in effect until §7.6.
 
 ### 7.3 Procedure
 
-1. **Quiesce.** Every controller instance that ran against the
-   pre-restoration state was stopped, or established as stopped, before the
-   restored database was reachable (§7.2), and the time is recorded. Stopping
+1. **Quiesce.** Every controller instance was stopped, or established as
+   stopped, before the restore of any backup family began, and stayed stopped
+   until entry committed, apart from the one started with recovery start after
+   the restore (§7.2); the time of the stop is recorded. Stopping
    is what prevents a further attempt; after entry, the epoch refuses one from
    any instance that was missed (§7.1). Neither prevents a request already sent from landing. Every
    scope stays pre-restore unaccounted until `recovery-admin` records the §5.2
@@ -1460,8 +1489,8 @@ held by the control plane's proxy; approver P was identity-revoked. The
 database is then restored to T0: S is `sending` again with no response, and r4,
 A, C and P's revocation do not exist.
 
-- **Entry.** Before the restored database is reachable, the operator stops
-  every controller instance; then it starts one in recovery start, and
+- **Entry.** Before the restore begins, the operator stops every controller
+  instance; after it, the operator starts one in recovery start, and
   `recovery-admin` records entry. A new epoch E is issued;
   every scope's gate closes; every restored non-terminal operation is taken
   over into E, so S becomes `unresolved`; every scope is pre-restore
@@ -1564,14 +1593,22 @@ fail:
   approval, an open gate and no definitive rejection, and `failed` otherwise;
 - identity revocation before commitment, after it with no attempt, and after an
   attempt, with a retry refused;
-- observation ordering under a concurrent accounting transaction (§4.1), and
-  a completion or adoption read refused when a higher-basis read contradicts
-  it (§4, §6.3), and, as the residual's evidence, a completion and an
+- observation ordering under a concurrent accounting transaction (§4.1); a
+  completion read that yields neither `completed` nor `failed` when a recorded
+  higher-basis read contradicts a bound postcondition, for each of the
+  identity, the assignment revision, the digest and a bound health check, and
+  an adoption read refused when a higher-basis read contradicts it (§4, §6.3);
+  and, as the residual's evidence, a completion and an
   adoption committed while a contradicting higher-basis read is still
   unrecorded, whose late result opens no drift record while the next `drift`
   observation does;
+- plan creation refusing a plan that binds no drift record and expects a
+  digest other than `Applied`'s, and a commitment whose evidence shows an
+  undetected out-of-band change refused, with a drift record opened by the
+  transaction that records the refusal (§2, §3.2);
 - drift detection (including no record from a read begun before an `Applied`
-  change, and a record opened with a `failed` operation), freeze, adoption record (success, stale observation,
+  change, none opened or closed by a read that a recorded higher-basis read
+  supersedes, and a record opened with a `failed` operation), freeze, adoption record (success, stale observation,
   changed-again machine, revoked approval, changed baseline revision, changed
   `Desired` selection, drift record closed by a revert) and revert (success, re-drift before commitment),
   with E1's leak screen over adoption's backup-visible surfaces;
@@ -1633,10 +1670,12 @@ specification gap: completion and adoption consult recorded observations only
 (§4, §6.3), so a machine change read by a started but unrecorded higher-basis
 observation is neither refused nor recorded as drift; `Applied` names a digest
 the node no longer runs until the next `drift` observation opens a drift
-record, and a late health-only contradiction neither reopens the completed
-operation nor opens a drift record. A later `apply-config` plan that expects the stale digest is
-refused, because its §3.1 evidence reports the running one; a plan approved
-against the running digest may proceed, subject to the §3.3 residual window.
+record, and a late contradiction of the identity, the assignment revision or a
+bound health check alone neither reopens the completed operation nor opens a
+drift record. No later `apply-config` plan overwrites that change unseen:
+with no drift record open, every such plan expects `Applied`'s digest (§2), so
+its commitment is refused when its §3.1 evidence reports the running one, and
+that difference opens a drift record (§3.2).
 Closing it needs a rule that retires an interrupted
 read, so that completion can wait for outstanding reads without waiting
 forever.
@@ -1748,6 +1787,13 @@ conservative option; those that do not say so. Each is marked in place as
 22. **Leaving recovery mode needs every scope released** (§7.6). Alternative:
     leave and freeze the unreleased scopes, which would hand their unfreezing
     to `approver`, outside the recovery role.
+23. **An ordinary plan cannot overwrite undetected drift** (§2, §3.2). A plan
+    that binds no drift record expects `Applied`'s digest, and a commitment
+    whose evidence shows another is refused and opens a drift record, so the
+    operator makes design §12.4's freeze, adopt or revert choice before the
+    change is overwritten. Alternative: let a plan expect the running digest
+    and rely on the approver's review of the diff against it, which lets an
+    unseen out-of-band change be overwritten without that choice.
 
 ## 11. Traceability
 
