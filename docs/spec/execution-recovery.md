@@ -1782,7 +1782,9 @@ conservative option; those that do not say so. Each is marked in place as
    artifact in one process, not as the most conservative option: neither the
    client nor the fallback's descriptor channel is what E4 measured.
    Alternative: the pinned `talosctl` subprocess with `--file`, as E4 ran it,
-   which puts the plaintext artifact in a named file.
+   which puts the plaintext artifact in a named file. Owner decision,
+   2026-09-27 (ginsys/bronzeward#20): in process; a failed DS re-run selects
+   the fallback without reopening this choice.
 9. **The route is bound in the plan; only the target machine's own endpoint
    is allowed in the PoC** (§3.5). Owner decision, 2026-09-27 (ginsys/bronzeward#20):
    it removes the control plane's proxy, through which every observed late

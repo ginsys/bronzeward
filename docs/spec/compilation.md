@@ -1288,6 +1288,9 @@ in place as
 24. **Go machinery in process, conditional on a parity re-run** (§10.1).
     Alternative: pinned `talosctl` subprocess; keeps measured parity, moves
     plaintext across a process boundary. The deciding reason is inferred.
+    Owner decision, 2026-09-27 (ginsys/bronzeward#20): in process; a failed
+    re-run selects the subprocess fallback, whose channel §15 scans, without
+    reopening this choice.
 25. **Compile only the node's running contract minor** (§10.2). v1.12 would
     also be accepted by a v1.13 node; one contract keeps paths and validation
     single.
