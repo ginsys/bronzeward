@@ -226,7 +226,7 @@ that the trigger fires **(choice §17.3)**.
 | DependencyStatus | mutable | last classification per dependency and when first seen `retained` | design §7.6, §7.8 |
 | Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload; for a draft entry route, the principal and idempotency key (§7.2) | compilation §3 |
 | MachineState | mutable, revisioned | Desired, Applied (with source), baseline revision | execution and recovery (Desired, Applied and Observed) |
-| Observation | immutable | purpose, machine revision, identity, assignment evidence, running version, configuration digest, health, or what could not be read | execution and recovery §4.1 |
+| Observation | immutable | purpose, read-start basis, machine revision, identity, assignment evidence, running version, configuration digest, health, or what could not be read | execution and recovery §4.1 |
 | Plan | immutable | the binding, creator and role | execution and recovery (plan binding) |
 | PlanState | mutable, revisioned | the plan's state (§8.1) with its reason, and its operation once committed | execution and recovery §2; §8.1 |
 | Approval | immutable | plan, plan revision, approver, role, epoch, self-approval mark | execution and recovery; §10.5 |
@@ -827,14 +827,16 @@ retries with a new idempotency key:
 | Active operation per machine scope | partial unique index over `committed`, `sending`, `verifying`, `unresolved` | execution and recovery's refusal (DB row 012; DS row 010) |
 | Machine | its SMBIOS UUID, required by `POST /machines`, by unique index across the installation | `409 conflict` naming the existing machine |
 
-The machine key makes one physical machine one record, so one coordination
-scope: two inventory requests for it under different idempotency keys cannot
-both commit. It is design §8.5's detection of a duplicate SMBIOS UUID, never
-a merge. Design §4.4 calls hardware evidence "not an infallible primary key":
-a clone sharing a UUID, or a machine reporting none, cannot be inventoried in
-the PoC. The index cannot catch a record entered with a wrong UUID; refusing
-a node whose observed identity differs from the plan's bound machine identity
-is execution and recovery's.
+The machine key makes one supplied SMBIOS UUID one record, so one
+coordination scope: two inventory requests for it under different idempotency
+keys cannot both commit. It is design §8.5's detection of a duplicate SMBIOS
+UUID, never a merge. Design §4.4 calls hardware evidence "not an infallible
+primary key": a clone sharing a UUID, or a machine reporting none, cannot be
+inventoried in the PoC. The index cannot catch a record entered with a wrong
+UUID. Execution and recovery compares observed identity after a send, not
+before the first one, so refusing a node whose observed identity differs from
+the plan's bound machine identity before any send is an open cross-contract
+requirement (ginsys/bronzeward#20), not a check either contract makes.
 
 ## 8. Asynchronous operations
 
