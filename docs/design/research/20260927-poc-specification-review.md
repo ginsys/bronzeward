@@ -284,7 +284,7 @@ owner decide explicitly; each is expanded below the table.
 | C16.21 | An exact literal copy of a resolved value refuses publication | accept as specified |
 | C16.22 | SP's stand-in format and token syntax | accept as specified |
 | C16.23 | Withhold verbatim messages from boolean-input steps | accept as specified |
-| C16.24 | Go machinery renderer in process, conditional on a parity re-run | FLAG F2 |
+| C16.24 | Go machinery renderer in process, conditional on a parity re-run | FLAG F2, decided |
 | C16.25 | Compile only the node's running contract minor | accept as specified |
 | C16.26 | Unkeyed configuration digest of baselines and artifacts | FLAG F1, decided |
 | ER10.1 | Ignore is not a PoC drift policy | accept as specified; the role question stays open beyond the PoC |
@@ -294,7 +294,7 @@ owner decide explicitly; each is expanded below the table.
 | ER10.5 | Rollout limit fixed at one | accept as specified |
 | ER10.6 | Identity revocation refuses every later attempt, retries included | FLAG F6, decided |
 | ER10.7 | Takeover at start and on request only; no timer | accept as specified |
-| ER10.8 | Machinery Talos client in process, conditional on DS re-runs | FLAG F2 |
+| ER10.8 | Machinery Talos client in process, conditional on DS re-runs | FLAG F2, decided |
 | ER10.9 | Route bound in the plan; the worker's own endpoint only (owner, F3) | FLAG F3, decided |
 | ER10.10 | Retry after full accounting only with attempts, approval and gate | accept as specified |
 | ER10.11 | Accounting by `recovery-admin` after a 30 s settle floor | FLAG F8, decided |
@@ -354,7 +354,9 @@ owner decide explicitly; each is expanded below the table.
   was measured (subprocess `talosctl`), to keep plaintext in one process; the deciding reason is
   inferred. Both are conditional on re-runs (SR/SP matrices through the compiler, DS rows through
   the client), which AP S2 and S4 carry as preconditions. Recommendation: accept, and treat a failed
-  re-run as selecting the subprocess fallback, not as a contract change.
+  re-run as selecting the subprocess fallback, not as a contract change. **Owner decision
+  (2026-09-27): in process**; a failed re-run selects that component's subprocess fallback within
+  its implementation issue, with the fallback's channel scanned (C §15).
 - **F3: both routes allowed (ER10.9).** Chosen for route flexibility. Every late landing DS observed
   came through the control plane's proxy, and PR22 has no bound. The alternative, the worker's own
   endpoint only, has one row of evidence. Recommendation: the worker route only until AP S6.2
@@ -530,7 +532,7 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
   observation, second plan (scope-index control), frozen scope, a proxied-route plan (F3) and
   `InvalidArgument` each refused.
 - Gaps to close first: the pre-send identity check (§10, PR19) and gap E, whether the verification
-  deadline is a convergence window and the ER §4 change that follows. Owner choice F2; F3 decided.
+  deadline is a convergence window and the ER §4 change that follows. Owner choices F2 and F3 decided.
 
 **ginsys/bronzeward#27, drift.**
 - Contracts: `execution-recovery.md` §6, §8.6; `compilation.md` §2.3 (drift adoption);
@@ -602,8 +604,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 
 ## 14. Hand-off
 
-- ginsys/bronzeward#20: the owner's acceptance (criterion 5), the open flagged choices F2, F4 and F5
-  (§9; F1, F3 and F6 to F9 are decided), gaps E and G, and approval of the acceptance plan
+- ginsys/bronzeward#20: the owner's acceptance (criterion 5), the open flagged choices F4 and F5
+  (§9; F1 to F3 and F6 to F9 are decided), gaps E and G, and approval of the acceptance plan
   (criterion 4).
 - ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
 - ginsys/bronzeward#14: the ingestion-role and role-loss questions (F4, F5).
