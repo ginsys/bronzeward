@@ -148,7 +148,7 @@ Status codes:
 Checked where two contracts state the same fact. Paths are under `docs/spec/`, lines at aa58272.
 Items 1, 2, 4, 6 and 7 are repaired by
 [ginsys/bronzeward#56](https://github.com/ginsys/bronzeward/pull/56), which lands before this
-report; item 3 stays a gap (§10); item 5 needs no change.
+report; item 3 stays a gap (§10); item 5 needs no change, and PA's request in it is declined (below).
 
 **Inconsistent or open at aa58272:**
 
@@ -173,7 +173,9 @@ report; item 3 stays a gap (§10); item 5 needs no change.
 5. **"Self-approval undetermined".** `execution-recovery.md:223-225` (ER §2) keeps it as a guard;
    `persistence-api.md:143-146` (PA §1.2 item 9) says it never arises, because every automation
    identity names a responsible human. Consistent in effect; PA asked ER to state that it never
-   arises.
+   arises. Declined: ER already says the record is persistence's and requires a responsible human,
+   and a guard that never fires costs nothing while it keeps a missing record from reading as "not
+   self-approval". No gap follows.
 6. **The generation-path component.** `compilation.md:146-150` (C §2.3 step 6) requires a component
    the database does not issue without naming it; PA §17.8 names it (claim id plus a random value
    id) and says it "Needs a line in compilation §2.3 step 6".
