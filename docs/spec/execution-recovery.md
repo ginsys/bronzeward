@@ -590,7 +590,7 @@ expires first ends in the plan state of that name (§2; DS row 002).
 | `verifying` | `failed` | A completion observation contradicts the postconditions, and every recorded attempt is accounted for. | none |
 | `verifying` | `unresolved` | Postconditions not established before the recorded verification deadline, an attempt is not accounted for, or takeover. | DS row 021 (takeover) |
 | `unresolved` | `completed` | Postconditions later established by a completion observation, at least one attempt recorded, and every recorded attempt accounted for. | DS rows 020, 021; capture 1 row 012 |
-| `unresolved` | `failed` | A completion observation contradicts the postconditions, every recorded attempt is accounted for, and the operation is not classified safe to retry (§5). | DS row 013, on untrue accounting |
+| `unresolved` | `failed` | A completion observation contradicts the postconditions, at least one attempt is recorded, every recorded attempt is accounted for, and the operation is not classified safe to retry (§5). | DS row 013, on untrue accounting |
 | `unresolved` | `rejected` | A delayed definitive pre-mutation rejection is recorded, and with it every recorded attempt has one. An attempt that was accepted, or whose outcome is unknown, rules `rejected` out. | none |
 | `unresolved` | `sending` | Classified safe to retry (§5) and the §3.3 attempt transaction succeeds. | DS rows 012, 014, 015, 019 |
 | `unresolved` | `cancelled` | No attempt is recorded for this operation (after a restore, in the restored journal; §7.3 step 5), and either none can (the approval or its identity is revoked, the approval's epoch is not the current one, the plan expired or is cancelled) or `recovery-admin` resolves it so on a recorded reason. | DS rows 003, 004 |
@@ -791,7 +791,7 @@ this contract adopts it and adds nothing it did not show:
 | --- | --- |
 | Completed | at least one attempt recorded and every attempt accounted for; then a completion observation of the artifact's digest and the other postconditions |
 | Rejected | a recorded `InvalidArgument` response of the validation-error class to every attempt; any other `InvalidArgument`, such as the immediate-mode refusal below, accounts for its attempt and leaves the outcome to a completion observation. E4 showed it before any mutation for a validation error only, with the resource version unchanged ([DS §4.6](../design/research/20260925-dispatch-safety.md#46-a-definitive-rejection-row-022)); no other code or error class is proven pre-mutation |
-| Failed | every attempt accounted for, and a completion observation contradicting a postcondition. The accounting must be true, not merely recorded (DS row 013) |
+| Failed | at least one attempt recorded and every attempt accounted for, and a completion observation contradicting a postcondition. The accounting must be true, not merely recorded (DS row 013) |
 | Safe to retry | every attempt accounted for, or none recorded; no accepted response and no definitive rejection of the Rejected row's class (§5); a completion or recovery observation at the pre-dispatch digest; attempts left, an approval passing comparison 1 and an open scope gate (§5); a new attempt transaction bound to the classification's revision |
 | Unresolved | any attempt with neither a recorded response from the target nor an accounting decision; or no successful completion observation by the verification deadline |
 | Cancelled | after the commitment, with no attempt recorded: a revocation of the approval or of its identity, a cancellation, the plan's expiry, an approval whose epoch is not the current one, or a `recovery-admin` resolution. Before the commitment there is no operation; the plan ends `revoked`, `cancelled` or `expired` (§2) |
@@ -1141,9 +1141,11 @@ and any other act served would be taken on that token's authority (see
 `persistence-api.md`). Once entry has committed, it serves observation, the
 checks of §7.3, the recovery API, the acts §7.5 always allows (approval and
 identity revocation, plan cancellation, freeze) and the installation-wide acts
-of §7.5 (drafts, ingestion, compilation and publication), so that a `blocked`
-scope's exit through a new release (§7.4) exists before any scope is
-released. For a restore of any of the three backup families, the operator
+of §7.5 (drafts, ingestion, compilation and publication). It runs no job
+worker, so a request whose work runs as a job, such as publishing the release
+that clears a `blocked` scope (§7.4), is accepted but completes only after the
+normal restart below, which entry allows before any scope is released. For a
+restore of any of the three backup families, the operator
 stops, or establishes as stopped, every controller instance before the restore
 of any family begins, records the time (§7.3 step 1), and keeps every instance
 stopped until recovery-mode entry commits; the only controller started
