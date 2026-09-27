@@ -1768,7 +1768,9 @@ conservative option; those that do not say so. Each is marked in place as
    Alternative: design §12.3's configurable worker concurrency.
 6. **Identity revocation refuses every later attempt, retries included**
    (§3.3). Design §13.7 item 4 invalidates only approvals no attempt has used;
-   a retry is a new send under the revoked identity's authority. Alternative:
+   a retry is a new send under the revoked identity's authority. Owner
+   decision, 2026-09-27 (ginsys/bronzeward#20), with persistence contract
+   choice §17.19. Alternative:
    let an approval already used by an attempt stay valid for that operation's
    bounded retries, unless the approval itself is revoked.
 7. **Takeover at controller start and on `recovery-admin` request only; no
