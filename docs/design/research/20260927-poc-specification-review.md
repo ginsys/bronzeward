@@ -292,7 +292,7 @@ owner decide explicitly; each is expanded below the table.
 | ER10.3 | Operation created by the dispatch commitment | accept as specified |
 | ER10.4 | Self-approval marked for any contained revision and a token's human | accept as specified |
 | ER10.5 | Rollout limit fixed at one | accept as specified |
-| ER10.6 | Identity revocation refuses every later attempt, retries included | FLAG F6 |
+| ER10.6 | Identity revocation refuses every later attempt, retries included | FLAG F6, decided |
 | ER10.7 | Takeover at start and on request only; no timer | accept as specified |
 | ER10.8 | Machinery Talos client in process, conditional on DS re-runs | FLAG F2 |
 | ER10.9 | Route bound in the plan; the worker's own endpoint only (owner, F3) | FLAG F3, decided |
@@ -328,7 +328,7 @@ owner decide explicitly; each is expanded below the table.
 | PA17.16 | OIDC tokens verified per request, 15-minute maximum | accept as specified |
 | PA17.17 | One automation token per identity, 30/90-day expiry | accept as specified |
 | PA17.18 | Every automation identity names a responsible human | accept as specified |
-| PA17.19 | Identity revocation permanent; deny list survives restore | FLAG F6 |
+| PA17.19 | Identity revocation permanent; deny list survives restore | FLAG F6, decided |
 | PA17.20 | Several qualifying roles: first in the route's order | accept as specified |
 | PA17.21 | Both unsettled self-approval cases marked | accept as specified |
 | PA17.22 | Ingestion and inventory need a human `author` (interim) | FLAG F4 |
@@ -370,6 +370,8 @@ owner decide explicitly; each is expanded below the table.
   contradicting it: revocation is permanent, refuses authentication, and refuses retries of an
   already-used approval. A mistaken revocation locks the person out until given a new identity.
   Recommendation: accept, and have the owner confirm the lockout consequence explicitly.
+  **Owner decision (2026-09-27): accepted, lockout confirmed**; a mistaken revocation is corrected
+  by issuing a new subject, and ginsys/bronzeward#30's limits say so.
 - **F7: Desired at publication (PA17.6).** Design §12.6's "select the latest applicable approved
   release" points to selection at approval. Selecting at publication is what AP S2 tests ("the
   release is `Desired` for the worker, with no plan"). Recommendation: the owner confirms; if
@@ -510,7 +512,7 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
   self-approval marks; assignment change refuses commitment; expiry; approval revocation before and
   after commitment with the DS row 003 lock control; identity revocation before and after
   commitment; publication alone dispatches nothing.
-- Carries: identity revocation unmeasured. Owner choices F5, F6.
+- Carries: identity revocation unmeasured. Owner choice F5; F6 decided (permanent revocation).
 
 **ginsys/bronzeward#26, safe apply.**
 - Contracts: `execution-recovery.md` §1, §3.1–§3.5, §4, §5.1, §8; `persistence-api.md` §8.3.
@@ -556,7 +558,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 - Acceptance: AP S8 step 1's walkthrough; AP §8 and §9 as the documented limits.
 - Checks: a reviewer runs the walkthrough from a fresh checkout and disposable environment,
   including interruption and restoration; limits list the profile and versions, the gaps §10 marks
-  beyond the PoC, the interim owner choices, and that E3 is not complete.
+  beyond the PoC, the interim owner choices, that a mistaken identity revocation is corrected only
+  by a new subject (F6), and that E3 is not complete.
 
 **ginsys/bronzeward#31, E6 acceptance.**
 - Contract: the acceptance plan, `docs/spec/acceptance-plan.md`, as accepted under

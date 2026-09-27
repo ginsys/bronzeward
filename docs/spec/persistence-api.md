@@ -2116,8 +2116,10 @@ design and evidence do not settle the question. Each is marked in place as
    Alternative: an import-base head advanced by the adoption record, which puts
    a persistence write into execution and recovery's transaction.
 6. **Publication selects the release as Desired for its machines** (§6.2).
+   Owner decision, 2026-09-27 (ginsys/bronzeward#20); design §12.6 now says
+   so, and approval gates only the plan that applies the release.
    Alternative: select at plan creation or at approval, towards which design
-   §12.6's "select the latest applicable **approved** release" points.
+   §12.6's earlier "select the latest applicable approved release" pointed.
 7. **No provider or network I/O inside a transaction; fixed lock order; three
    deadlock retries** (§5). Alternative: provider calls inside the
    transaction, holding its locks for the provider's latency, or a pause.
@@ -2184,8 +2186,11 @@ design and evidence do not settle the question. Each is marked in place as
     goes beyond design §13.7 item 4, which states what a revocation
     invalidates, without contradicting it. Because identity providers usually
     keep a subject stable, a mistaken revocation locks that person out until
-    they are given a new identity. Alternative: revocation that only
-    invalidates approvals, as design §13.7 item 4 states it.
+    they are given a new identity. Owner decision, 2026-09-27
+    (ginsys/bronzeward#20): accepted with that lockout; a mistaken revocation
+    is corrected by issuing a new subject, never by un-revoking. Alternative:
+    revocation that only invalidates approvals, as design §13.7 item 4 states
+    it, or a reversible revocation, which needs its own restore rules.
 20. **With several qualifying roles, the act is recorded under the first in
     the route's order** (§10.3). Alternative: the client names its role in a
     header.
