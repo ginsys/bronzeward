@@ -46,7 +46,7 @@ Investigations compare alternatives and identify the decision their evidence ena
 
 Implementation follows finalized contracts and includes meaningful verification of applicable success, rejection, interruption and recovery behavior. Update code and related documentation together. Closure requires every specified acceptance criterion, the required evidence and landed artifacts, assessed by the owner or designated reviewer. An open draft PR or a local passing check alone is not closure evidence.
 
-The [PoC compatibility investigation](https://github.com/ginsys/bronzeward/issues/5) defers Upgrade/LifecycleClient execution testing; full design experiment E3 is not claimed complete. The [specification review](https://github.com/ginsys/bronzeward/issues/20) owns the disposition and related closure criteria.
+The [PoC compatibility investigation](https://github.com/ginsys/bronzeward/issues/5) defers Upgrade/LifecycleClient execution testing; full design experiment E3 is not claimed complete. The [specification review](https://github.com/ginsys/bronzeward/issues/20) disposed of it: the transition tests are deferred to the machine-lifecycle phase as a named acceptance item ([design §18.3](docs/design/Talos_Configuration_and_Machine_Management_Design.md#183-phase-2---machine-lifecycle)), and the [review report](docs/design/research/20260927-poc-specification-review.md#8-e3-disposition) records the disposition. PoC compatibility evidence does not complete E3.
 
 ## Change and review workflow
 
