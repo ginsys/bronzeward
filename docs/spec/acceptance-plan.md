@@ -261,7 +261,8 @@ as design §7.8 sets, and a publication pinning it refused. A repeated request u
 replays; the key reused for another body answers `422`; a `publish` worker killed after `COMMIT`
 leaves one release; a lapsed `publish` job is claimed again and its first worker's completion
 refused. The draft-update ingestion, as S1's matrix runs it for import: success, refusal, and the
-process killed after each pipeline step 0 to 8, each followed by a scan of every persistence
+process killed after each pipeline step that applies to a draft update, 0 to 7 (C §2.3 step 8 is
+for imports and drift adoptions only), each followed by a scan of every persistence
 surface ([C §15](compilation.md#15-verification-and-evidence-limits)).
 
 **Retained evidence.** The release record and artifact metadata, the review data as served, the
