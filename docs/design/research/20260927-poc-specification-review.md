@@ -201,7 +201,7 @@ re-verified against aa58272; the repairs are
 | C | ER §7.2 served drafts, ingestion and publication before entry; PA §12.2 serves only liveness and entry | Fixed: ER §7.2 and choice §10.18 now match PA |
 | D | ER §6.3: the adoption record compared no machine identity | Fixed: the adopt plan binds the identity and requirement 4.4 compares it |
 | E | ER §4: a first contradicting completion read fails the operation before the verification deadline | Gap, owner decision: whether the deadline is a convergence window, and for which postconditions (§10) |
-| F | ER §4: an operation with no attempt could complete after a takeover | Fixed: an `apply-config` operation needs a recorded attempt to complete |
+| F | ER §4: an operation with no attempt could complete after a takeover | Fixed: an `apply-config` operation needs a recorded attempt to complete or fail |
 | G | ER §7.3: any successful restoration read makes a scope `ready` | Gap, owner decision: what the read must match, with PR19 (§10) |
 | H | ER §7.3: a restored operation ends `cancelled` though an attempt may have been sent after the snapshot | Fixed as wording: `cancelled` after a restore refers to the restored journal and is never proof that nothing was sent |
 | I | ER §3.3: `unresolved` and `cancelled` read as simultaneous | Fixed: a sequence |
