@@ -494,7 +494,8 @@ and the row count stated in the line must match.
   and two inventory requests for one SMBIOS UUID (*check*).
 - Checks: pre/post digest and resource version unchanged; scan of every surface with its positive
   control on success, each refusal and each pipeline step 0–8 interruption under both staging modes;
-  takeover only after lease lapse; orphans listed, none deleted; automation refused on ingestion;
+  takeover of a `held` and of a `resumed` claim only after lease lapse; lease extension refused to
+  a non-owner, to an older generation and after lapse; orphans listed, none deleted; automation refused on ingestion;
   executor cannot decrypt the baseline.
 - Carries: pipeline interruption unmeasured; HMAC primitive unexercised; JSON Pointer addressing
   untested (C §15). Owner choice F4 decided: a human `author` ingests.

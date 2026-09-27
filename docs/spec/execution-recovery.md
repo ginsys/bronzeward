@@ -526,7 +526,13 @@ through `talosctl` for the version read, configuration read, no-reboot dry run
 and label-patch apply (E3 §4.3, §6.2). Every E4 dispatch row used `talosctl`
 with `--file <artifact>` (DS §2.1), so the selection holds on a condition: DS
 rows 001–005, 012–017 and 022 are re-run through the machinery client and
-reach the same outcomes before this contract's dispatch is accepted. The
+reach the same outcomes before this contract's dispatch is accepted. They run
+over the worker's own endpoint, the only route allowed (below). DS sent every
+row but 015 through the control plane (DS §2.1), so rows 012–014, whose faults
+held a request there, run as direct-route variants of the same fault and must
+reach row 015's outcome: `unknown` at the transport deadline, the operation
+`unresolved` until accounted (§5.2), then classified from its observation. The
+proxy's own late landings are §9.3 item 2's measurement, not these rows. The
 fallback is the pinned `talosctl` subprocess with the artifact passed through
 an inherited descriptor, never a named file or an argument, as for the
 compiler's fallback. That is not E4's channel either, so the fallback carries
@@ -1620,7 +1626,8 @@ An implementation of this contract must show, each with a control that can
 fail:
 
 - DS's rows 001–023 re-run through the implementation's own controller and
-  Talos client (§3.5), including its controls 006, 008 and 011;
+  Talos client over the worker's own endpoint, rows 012–014 as the §3.5
+  direct-route variants, including its controls 006, 008 and 011;
 - that it sends only after its attempt transaction commits, on every path;
 - each lock of §3.2 and §3.3, with the unlocked control showing the race
   (design §7.7 consequences);
