@@ -148,7 +148,7 @@ Status codes:
 Checked where two contracts state the same fact. Paths are under `docs/spec/`, lines at aa58272.
 Items 1, 2, 4, 6 and 7 are repaired by
 [ginsys/bronzeward#56](https://github.com/ginsys/bronzeward/pull/56), which lands before this
-report; item 3 stays a gap (§10); item 5 needs no change, and PA's request in it is declined (below).
+report; item 3 was a gap (§10), closed by the owner's gap G decision (ER choice §10.26); item 5 needs no change, and PA's request in it is declined (below).
 
 **Inconsistent or open at aa58272:**
 

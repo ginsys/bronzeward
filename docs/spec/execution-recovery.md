@@ -1375,8 +1375,11 @@ case has no exit: a machine that can never be observed again (destroyed or
 permanently unreachable) cannot supply the `restoration`, recovery or
 completion observation that `ready`, the §5.2 decision and a restored
 operation with an attempt need, so its scope keeps the installation in
-recovery mode, and such an operation keeps its rollout slot. The PoC specifies
-no decommission or exclusion act for it; that is a gap (§9.3), and until one
+recovery mode, and such an operation keeps its rollout slot. Nor has a machine
+whose node now reports another identity than its record's: a successful
+`restoration` observation leaves its scope `blocked`, and no repair or release
+clears it (§7.4, choice §10.26). The PoC specifies
+no decommission or exclusion act for either; that is a gap (§9.3), and until one
 exists the scopes outside its rollout scope stay fully usable because they are
 released individually. Leaving
 never reopens a scope that was not checked. Leaving ends the recovery
@@ -1771,9 +1774,11 @@ combinations g1/g2/g1 and g2/g1/g2, a restore onto a new OpenBao cluster and
 token expiry across a restore (KL §6). A specification gap, not an evidence
 one: no act decommissions or excludes a machine that can never be observed
 again, so its scope keeps the installation in recovery mode, and a restored
-operation on it with an attempt keeps its rollout slot (§7.6); the same holds
-for a machine whose node now reports another identity, whose scope stays
-`blocked` (§7.4). A second
+operation on it with an attempt keeps its rollout slot (§7.6). A machine
+whose node now reports another identity likewise keeps the installation in
+recovery mode, its scope `blocked` (§7.4), though a restored operation on it
+with an attempt fails on that contradicting completion observation and
+releases its slot (§4, §5). A second
 specification gap: completion and adoption consult recorded observations only
 (§4, §6.3), so a machine change read by a started but unrecorded higher-basis
 observation is neither refused nor recorded as drift; `Applied` names a digest
