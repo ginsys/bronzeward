@@ -490,9 +490,9 @@ and the row count stated in the line must match.
 
 **ginsys/bronzeward#21, runnable foundation.**
 - Contracts: `persistence-api.md` §2, §5, §9, §10, §11; §14 rows for authentication and migration.
-- Acceptance: AP S0 steps 1–5 and its negative controls; AP §2 fixture additions (instances A and B,
-  disposable OIDC issuer, automation token tool, OpenBao seal and unseal actions, deployment
-  settings).
+- Acceptance: AP S0 steps 1–5 and its negative controls; AP §2 fixture additions (instances A and B
+  as injector targets, the instance-to-node link fault, disposable OIDC issuer, automation token
+  tool, OpenBao seal and unseal actions, deployment settings).
 - Required verification: the 4 AP §7.1 rows naming #21, among them the in-flight idempotency key
   and the concurrent rotation and rotation-revocation races (*check*).
 - Checks: concurrent migrate runs with the advisory-lock control; startup refusal on schema or
