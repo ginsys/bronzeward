@@ -463,8 +463,9 @@ metal-mode validation.
   postconditions (§7 E). An owner decision, then an ER §4 state-machine change;
   ginsys/bronzeward#26 carries the check.
 - **PR13, the dependency monitor.** No contract section owns the classification procedure, alert
-  timing or least-privilege metadata access; design §7.6, §7.8 and §15.3 set the policy.
-  ginsys/bronzeward#24 takes design §7.8 and RC §6.4 as its contract.
+  timing or least-privilege metadata access; design §7.6, §7.8 and §15.3 set the policy, and RC
+  §6.4 is evidence, not a contract. A specification section for the monitor must land before
+  ginsys/bronzeward#24 loses `status/needs-refinement`.
 
 ## 11. Refinement mapping
 
@@ -520,6 +521,8 @@ and the row count stated in the line must match.
 **ginsys/bronzeward#24, retention checks.**
 - Contracts: design §7.6, §7.8 and §15.3 (the decided PoC policy); `persistence-api.md` §3
   (DependencyStatus), §6.3; `compilation.md` §6 step 3, §9. No contract section owns the monitor.
+- Gap to close first: the monitor's specification section (§10, PR13): classification procedure,
+  alert timing and metadata-only access.
 - Acceptance: AP S2 step 6 and its soft-delete, destroy and partition controls; AP S7 variants.
 - Required verification: the 1 AP §7.1 row naming #24, the refusals of its own clauses.
 - Checks: `retained`, `blocked`, `lost`, `unknown` per RC's evidence; a 404 stays `unknown`; a
@@ -646,5 +649,6 @@ and the row count stated in the line must match.
   `status/needs-refinement` once each issue carries it and no open decision it depends on remains.
   ginsys/bronzeward#26 and ginsys/bronzeward#29 keep the label until gap E (the verification
   deadline) and gap G with PR19 (the restoration read and the pre-send identity check) are decided
-  and in their contracts.
+  and in their contracts; ginsys/bronzeward#24 keeps it until the dependency monitor has a
+  specification section (§10, PR13).
 - Later lifecycle work: the upgrade-transition item of design §18.3 (§8).
