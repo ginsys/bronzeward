@@ -214,7 +214,7 @@ that the trigger fires **(choice §17.3)**.
 | Entity | Kind | Holds | Owner of semantics |
 | --- | --- | --- | --- |
 | Cluster | mutable, revisioned | name, endpoint, contract, status | this contract |
-| Machine | mutable, revisioned | `mch` id, hardware evidence, cluster membership, current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
+| Machine | mutable, revisioned | `mch` id, hardware evidence with its SMBIOS UUID (unique, §7.3), cluster membership, current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
 | Profile / ProfileRevision | mutable head / immutable | ordered fragment revision ids | this contract |
@@ -825,6 +825,16 @@ retries with a new idempotency key:
 | Operation | one per plan, by unique index on the plan, created at the commitment (§8.1) | execution and recovery's comparison 0 refuses a second commitment (DS row 009) |
 | Approval | one per plan and epoch, by unique index on `(plan_id, epoch)` (design §13.7 item 3); a revoked approval makes its uncommitted plan `revoked` (§8.1), and only an unexpired plan approved in an earlier epoch is approved again, in the current one (execution and recovery §2) | `409 conflict` |
 | Active operation per machine scope | partial unique index over `committed`, `sending`, `verifying`, `unresolved` | execution and recovery's refusal (DB row 012; DS row 010) |
+| Machine | its SMBIOS UUID, required by `POST /machines`, by unique index across the installation | `409 conflict` naming the existing machine |
+
+The machine key makes one physical machine one record, so one coordination
+scope: two inventory requests for it under different idempotency keys cannot
+both commit. It is design §8.5's detection of a duplicate SMBIOS UUID, never
+a merge. Design §4.4 calls hardware evidence "not an infallible primary key":
+a clone sharing a UUID, or a machine reporting none, cannot be inventoried in
+the PoC. The index cannot catch a record entered with a wrong UUID; refusing
+a node whose observed identity differs from the plan's bound machine identity
+is execution and recovery's.
 
 ## 8. Asynchronous operations
 
@@ -1228,7 +1238,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `queued` or `running` (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `queued` or `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
@@ -1344,8 +1354,15 @@ with it. It:
 - records a responsible human principal for the identity
   **(choice §17.18)**, used by §10.5;
 - sets a mandatory expiry, default 30 days, at most 90 **(choice §17.17)**;
-- rotates by issuing a new token and revoking the old one in the same
-  transaction, so one token is valid at a time;
+- rotates by issuing a new token and revoking the unrevoked one, expired or
+  not, in the same transaction, so one token is valid at a time. The
+  reissue after a restore (§12.3) is such a rotation. Every tool transaction
+  that issues or revokes an identity's token first locks its principal row
+  `FOR UPDATE`, the lock T5c takes, and refuses a revoked identity: two
+  rotations of one identity serialize, the second replacing the first's
+  token, and a rotation racing an identity revocation either precedes it,
+  its token then revoked by T5c, or waits and is refused. A partial unique
+  index on the owner over unrevoked tokens backs the invariant;
 - prints the token once, and writes an act record naming the operator as
   given to the tool.
 
@@ -1928,6 +1945,10 @@ each (design §7.7 consequences):
   the revocation without the lock and does not wait (DS row 003);
 - a lapsed `publish` job claimed again and its first worker's completion
   refused;
+- two concurrent rotations of one service identity, and a rotation racing its
+  identity revocation, leaving at most one valid token and none after the
+  revocation, with a control that drops the principal lock; two concurrent
+  inventory requests for one SMBIOS UUID under different keys, one refused;
 - machine revisions, shared by plan, operation and machine-scope entries,
   allocated in commit order under concurrent writers to one scope, with a
   control that allocates without the lock;
