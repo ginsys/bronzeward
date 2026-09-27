@@ -451,7 +451,8 @@ and so does a cancellation or expiry, which fail the same comparison (no row
 cancelled a plan). After it, the revocation is recorded on the timeline and
 fails comparison 1 of every attempt transaction that has not yet committed, so
 it also permits no retry (DS rows 003 and 004). An operation with no recorded
-attempt then becomes `unresolved` with its scope held, and `cancelled` (§4). An
+attempt then becomes `unresolved`, with its scope held, and then `cancelled`
+(§4). An
 attempt already recorded is sent anyway and runs to its own classification
 (DS row 005); after it, revocation undoes nothing, and only a new approved
 plan, such as a revert (§6.4), or recovery changes the machine (design §13.7
@@ -567,10 +568,10 @@ with a current projection. §4.1 specifies the entries.
 | `committed` | The commitment transaction created the operation; the machine scope and a rollout slot are held. |
 | `sending` | An attempt is recorded; the request is in flight or its outcome is unknown. |
 | `verifying` | The request was accepted; the manager is collecting identity, digest and health evidence. |
-| `completed` | Terminal. Postconditions prove the bound artifact is applied and healthy; `Applied` is updated. For an `adopt` operation: the adoption record is committed (§6.3). |
+| `completed` | Terminal. At least one attempt was recorded, and postconditions prove the bound artifact is applied and healthy; `Applied` is updated. For an `adopt` operation: the adoption record is committed (§6.3). |
 | `rejected` | Terminal. Every recorded attempt has a recorded, definitive Talos response of a class proven to precede any mutation (§5.1). |
 | `failed` | Terminal. At least one attempt was recorded, every attempt is accounted for, and a completion observation contradicts the postconditions, whether a request changed the machine wrongly or no request took effect. `Applied` is not updated. |
-| `cancelled` | Terminal. No attempt was ever recorded. This is never an undo of remote work. |
+| `cancelled` | Terminal. No attempt is recorded for the operation; after a restore, none in the restored journal, which can omit an attempt recorded and sent after the snapshot (§7.3 step 5). This is never an undo of remote work, and never proof that nothing was sent. |
 | `unresolved` | Evidence cannot yet establish a terminal state or safe retry. Scope and slot stay held. |
 
 Before commitment there is no operation: a plan that is revoked, cancelled or
@@ -588,11 +589,11 @@ expires first ends in the plan state of that name (§2; DS row 002).
 | `verifying` | `completed` | Postconditions established by a completion observation, and every recorded attempt accounted for. | DS rows 001, 017 |
 | `verifying` | `failed` | A completion observation contradicts the postconditions, and every recorded attempt is accounted for. | none |
 | `verifying` | `unresolved` | Postconditions not established before the recorded verification deadline, an attempt is not accounted for, or takeover. | DS row 021 (takeover) |
-| `unresolved` | `completed` | Postconditions later established by a completion observation, and every recorded attempt accounted for. | DS rows 020, 021; capture 1 row 012 |
+| `unresolved` | `completed` | Postconditions later established by a completion observation, at least one attempt recorded, and every recorded attempt accounted for. | DS rows 020, 021; capture 1 row 012 |
 | `unresolved` | `failed` | A completion observation contradicts the postconditions, every recorded attempt is accounted for, and the operation is not classified safe to retry (§5). | DS row 013, on untrue accounting |
 | `unresolved` | `rejected` | A delayed definitive pre-mutation rejection is recorded, and with it every recorded attempt has one. An attempt that was accepted, or whose outcome is unknown, rules `rejected` out. | none |
 | `unresolved` | `sending` | Classified safe to retry (§5) and the §3.3 attempt transaction succeeds. | DS rows 012, 014, 015, 019 |
-| `unresolved` | `cancelled` | No attempt transaction ever committed for this operation, and either none can (the approval or its identity is revoked, the approval's epoch is not the current one, the plan expired or is cancelled) or `recovery-admin` resolves it so on a recorded reason. | DS rows 003, 004 |
+| `unresolved` | `cancelled` | No attempt is recorded for this operation (after a restore, in the restored journal; §7.3 step 5), and either none can (the approval or its identity is revoked, the approval's epoch is not the current one, the plan expired or is cancelled) or `recovery-admin` resolves it so on a recorded reason. | DS rows 003, 004 |
 
 No other transition is valid. A takeover of an `unresolved` operation changes
 its owner and leaves its state. Recovery-mode entry takes over every
@@ -651,7 +652,12 @@ differed before the attempt: direct Talos access can apply the same artifact
 independently while the attempt's request is merely held. An operation with an
 unaccounted attempt stays `unresolved` with its scope held, however well the
 machine's state matches, because releasing the scope would let a newer
-operation be overwritten by the late request (DS row 011).
+operation be overwritten by the late request (DS row 011). For the same
+reason an operation with no recorded attempt never completes, even when a
+completion observation shows its artifact: it sent nothing that could have put
+the artifact there. It stays `unresolved` until it ends `cancelled` (the
+`unresolved` → `cancelled` row above), and once the scope is released the
+artifact's digest, if it differs from `Applied`, is drift (§6.1).
 
 ### 4.1 Timeline content
 
@@ -783,7 +789,7 @@ this contract adopts it and adds nothing it did not show:
 
 | Outcome | Evidence required |
 | --- | --- |
-| Completed | every attempt accounted for; then a completion observation of the artifact's digest and the other postconditions |
+| Completed | at least one attempt recorded and every attempt accounted for; then a completion observation of the artifact's digest and the other postconditions |
 | Rejected | a recorded `InvalidArgument` response of the validation-error class to every attempt; any other `InvalidArgument`, such as the immediate-mode refusal below, accounts for its attempt and leaves the outcome to a completion observation. E4 showed it before any mutation for a validation error only, with the resource version unchanged ([DS §4.6](../design/research/20260925-dispatch-safety.md#46-a-definitive-rejection-row-022)); no other code or error class is proven pre-mutation |
 | Failed | every attempt accounted for, and a completion observation contradicting a postcondition. The accounting must be true, not merely recorded (DS row 013) |
 | Safe to retry | every attempt accounted for, or none recorded; no accepted response and no definitive rejection of the Rejected row's class (§5); a completion or recovery observation at the pre-dispatch digest; attempts left, an approval passing comparison 1 and an open scope gate (§5); a new attempt transaction bound to the classification's revision |
@@ -1319,8 +1325,9 @@ An implementation and its reviewer can check these directly:
 3. **`Applied` follows evidence.** `Applied` changes only on entering
    `completed`, to that operation's bound release and digest, or by an adoption
    record, to the baseline's digest. Both need an observation taken for that
-   purpose: after every recorded attempt is accounted for, or after the
-   adoption approval and inside the age it binds.
+   purpose: after at least one attempt is recorded and every recorded attempt
+   is accounted for, or after the adoption approval and inside the age it
+   binds.
 4. **Plans do not change.** Any change to a binding is a new plan that needs a
    new approval.
 5. **Release only on a terminal state.** The machine scope and rollout slot
