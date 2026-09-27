@@ -1696,7 +1696,8 @@ the scope **(choice §17.13)**:
   a machine; a `source: machine` ingestion reads the node, which is the
   observation design §14.6 allows. A machine inventoried after entry gets a
   scope that is accounted and closed, and is then marked and released as
-  execution and recovery §7.4 says. Clearing a scope `blocked` on a lost key
+  execution and recovery §7.4 says, once no scope is still pre-restore
+  unaccounted. Clearing a scope `blocked` on a lost key
   version needs a new publication, followed by re-approval (design §7.7 duty
   4).
 - **Refused with `409 recovery-mode-active` on a scope still pre-restore
