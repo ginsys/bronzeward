@@ -83,7 +83,7 @@ paragraph, the §13.7 policy items, and FR's SP rows (FR §4) where they bear on
 | PR14 | Minimal authenticated API; authorization scoped by capability | §18.2 item 4 and closing; §13.7 items 1–2 | SP30 |
 | PR15 | Plan bound to the exact artifact and assignment; one approval; self-approval recorded | §18.2 item 4; §13.7 item 3 | SP17 |
 | PR16 | Approval and identity revocation reach what §13.7 item 4 states | §13.7 item 4 | SP17 |
-| PR17 | Unique durable intent; ownership loss fenced; A-after-B overwrite prevented | §18.1 E4 | SP15, SP18, SP19 |
+| PR17 | Unique durable intent; ownership loss fenced; A-after-B overwrite prevented at the fence: a stale owner commits and attempts nothing after a newer one | §18.1 E4 | SP15, SP18, SP19 |
 | PR18 | Direct dispatch by the E4 mechanism, verification, separate desired/applied/observed | §18.2 item 5 | SP10, SP21 |
 | PR19 | A node whose observed identity differs from the plan's is refused before any send | §18.2 items 4–5 ("exact ... assignment") | none |
 | PR20 | Drift detected; freeze, sanitized adoption and approved revert | §18.2 item 6 | SP22 |
@@ -127,7 +127,7 @@ Status codes:
 | PR14 | none (G) | PA §9, §10 | S0, S3 | specified-not-evidenced |
 | PR15 | DS (p) | ER §2; PA §8.1, §10.5 | S3 | specified-not-evidenced |
 | PR16 | DS rows 002–005 for approvals (p); identity revocation unmeasured | ER §3.2, §3.3, §8.5; PA §10.4 | S3, S7 | specified-not-evidenced; approval half evidenced |
-| PR17 | DB (P), DS (P, p) | ER §3.2, §3.4; PA §5.1 | S4, S6.1 | evidenced |
+| PR17 | DB (P), DS (P, p) | ER §3.2, §3.4; PA §5.1 | S4, S6.1 | evidenced for the fence, by the P grades; a request already sent can still land after a newer operation, detected as drift, not prevented (§7 A; PR22's gap) |
 | PR18 | DS, E3 (p) | ER §1, §3.5, §4 | S4 | specified-not-evidenced: the machinery client is the ER §3.5 condition |
 | PR19 | none | none: an open point in PA §7.3 | none | gap |
 | PR20 | none (G) | ER §6; C §2.3 | S5 | specified-not-evidenced |
@@ -598,12 +598,14 @@ and the row count stated in the line must match.
 - Checks: a reviewer runs the walkthrough from a fresh checkout and disposable environment,
   including interruption and restoration; limits list the profile and versions, the gaps §10 marks
   beyond the PoC, the interim owner choices, that a mistaken identity revocation is corrected only
-  by a new subject (F6), and that E3 is not complete.
+  by a new subject (F6), that the unkeyed whole-configuration digest is an unassessed guessing
+  oracle for a configuration without generated key material (F1), and that E3 is not complete.
 
 **ginsys/bronzeward#31, E6 acceptance.**
 - Contract: the acceptance plan, `docs/spec/acceptance-plan.md`, as accepted under
   ginsys/bronzeward#20.
-- Checks: one integrated run of S0–S8 from a fresh `bin/up`; negatives and matrices separately;
+- Checks: one integrated run of S0–S5, S7 and S8 from a fresh `bin/up` (AP §2); S6, negatives
+  and matrices separately;
   common evidence per AP §2; the coverage tables of AP §7 and §7.1 answered row by row, each
   required-verification item with a retained result; no production claim.
 
