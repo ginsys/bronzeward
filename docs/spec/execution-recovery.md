@@ -1280,7 +1280,10 @@ release is not blanket approval for pending mutations.
 A machine inventoried after entry has no journal from before the restore, so
 nothing is left to account for: its scope starts accounted and closed, and is
 marked from its `restoration` observation and released like any other, before
-recovery mode can be left (§7.6).
+recovery mode can be left (§7.6). It is released only once no scope is still
+pre-restore unaccounted: until step 1's decisions are recorded, a request the
+restore erased may still land elsewhere in its rollout scope, and a dispatch
+on the new machine would exceed the rollout limit.
 
 The dependency set is the one dispatch checks at use time (§3.1), for the
 release a plan would target, not the dependencies of regenerating it
