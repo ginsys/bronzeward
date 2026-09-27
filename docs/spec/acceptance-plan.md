@@ -107,7 +107,8 @@ closing paragraph.
 [§14](persistence-api.md#14-failure-and-rejection-cases).
 
 **Pass criteria.** One migrate run applies the schema; the other waits, then skips it. Every token
-defect answers `401` and creates no principal row. Each §13.7 row ends as the table says, and each
+defect answers `401`, except a revoked or denied subject, which answers `403 identity-revoked`; none
+creates a principal row. Each §13.7 row ends as the table says, and each
 allowed act is recorded with its identity and role. Step 5 answers `404`: no handler exists.
 
 **Negative controls.** A binary that does not know the newest migration, and a checksum mismatch,
@@ -179,7 +180,10 @@ approvals and adoption records.
 [ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23),
 [ginsys/bronzeward#24](https://github.com/ginsys/bronzeward/issues/24). Design §18.2 items 2 and 3.
 
-**Preconditions.** S1 passed; the worker has `Applied` from its adoption.
+**Preconditions.** S1 passed; the worker has `Applied` from its adoption. The SR and SP matrices
+re-run with composition through the compiler's own machinery path reach the same verdicts
+([C §10.1](compilation.md#101-selection-the-go-machinery-in-process)); otherwise the machinery selection
+is reopened and this scenario does not run.
 
 **Steps.**
 
@@ -378,9 +382,11 @@ for each adoption run; step 5's measurement; the resource version series.
 1. From a fresh approved plan per point of
    [ER §5.3](execution-recovery.md#53-interruption-points), kill A before commitment, after
    commitment before any attempt, after the acceptance before it is recorded, and after a matching
-   observation before completion is recorded.
+   observation before completion is recorded. For one more plan, pause A after commitment and
+   before its attempt instead of killing it: the stale owner.
 2. Start B; it takes over every non-terminal operation A owned.
-3. Restart A with its old token; let it try to record an attempt.
+3. Unpause A; let it try to record its attempt. A restarted instance would not do: it takes over
+   at its start (ER §3.4) and its attempts are then legitimate.
 4. Partition the worker during a send over the worker route, and the control plane during one over
    its route: the response is lost.
 5. `h-recovery` records the accounting decision after the settle floor, with a recovery observation
@@ -441,32 +447,33 @@ state. Per capture: partition timing, the resource version series and the landin
 Closing run: **a restoration run with a missed stale instance**
 ([ER §9.3](execution-recovery.md#93-gaps-carried-and-what-would-close-them) item 3).
 
-**Preconditions.** S4 passed; both machines have `Applied`. Before time *T*, A commits a worker plan
-and is killed before its attempt (S6.1's second point). At *T*: `bin/inject db-snapshot`. After
-*T*: B starts, takes the operation over, classifies it safe to retry on a recovery observation and
-records an attempt whose request is held by pausing the worker; a second worker plan is approved;
-an approval is revoked; an approver's identity is revoked and its subject added to
-`deniedSubjects`; an ingestion claim is taken; then `bin/inject bao-snapshot`.
+**Preconditions.** S4 passed; both machines have `Applied`. Before time *T*, an ingestion claim is
+taken, and A commits a worker plan and is paused before its attempt (S6.1's stale owner). At *T*:
+`bin/inject db-snapshot`. After *T*: B starts, takes the operation over, classifies it safe to retry
+on a recovery observation and records an attempt whose request is held by pausing the worker; a
+second worker plan is approved; an approval is revoked; an approver's identity is revoked and its
+subject added to `deniedSubjects`; then `bin/inject bao-snapshot`.
 
 **Steps.**
 
-1. **Restore.** Stop B and record the time. A, restarted after B's takeover, is paused rather than
-   stopped: it is the missed stale instance, whose owner generation the restore makes current
-   again. Restore the database to *T*.
+1. **Restore.** Stop B and record the time. A stays paused, not stopped: it is the missed stale
+   instance, whose owner generation the restore makes current again. Restore the database to *T*.
 2. **Recovery start.** Start B with the recovery-start flag.
 3. **Entry.** `h-recovery` records entry through the API, naming both backups and their ages; a new
    epoch is minted.
 4. Unpause A; it tries a takeover, a commitment and an attempt.
-5. Pause the control plane, then unpause the worker: the held request may land.
+5. Unpause the worker: the held request may land.
 6. `h-recovery` re-records the identity revocation; the automation token is reissued with the
    server-side tool.
 7. Account every scope with one decision after the settle floor, using the maximum transport
-   deadline for the attempt the restore erased; check dependencies under the recovery identities;
-   take `restoration` observations; reclassify the restored operation; mark the scopes.
+   deadline for the attempt the restore erased, each with its recovery observation; check
+   dependencies under the recovery identities. Then pause the control plane, take `restoration`
+   observations, reclassify the restored operation and mark the scopes.
 8. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
    has committed.
 9. **Release** the worker scope; `h-publisher` and `h-approver` plan and approve a worker change in
-   the new epoch, which applies as S4.
+   the new epoch, which applies as S4. If the held request landed, the change is a revert binding
+   the drift record, as in S5 step 6.
 10. Unpause the control plane; after a successful `restoration` observation, re-mark and release
     its scope.
 11. **Exit** recovery mode.
