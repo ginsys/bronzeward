@@ -451,8 +451,8 @@ Closing run: **a restoration run with a missed stale instance**
 taken, and A commits a worker plan and is paused before its attempt (S6.1's stale owner). At *T*:
 `bin/inject db-snapshot`. After *T*: B starts, takes the operation over, classifies it safe to retry
 on a recovery observation and records an attempt whose request is held by pausing the worker; a
-second worker plan is approved; an approval is revoked; an approver's identity is revoked and its
-subject added to `deniedSubjects`; then `bin/inject bao-snapshot`.
+second worker plan is approved; an approval is revoked; an approver's subject is added to
+`deniedSubjects` and then its identity is revoked; then `bin/inject bao-snapshot`.
 
 **Steps.**
 

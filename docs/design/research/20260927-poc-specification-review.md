@@ -205,7 +205,7 @@ re-verified against aa58272; the repairs are
 | G | ER §7.3: any successful restoration read makes a scope `ready` | Gap, owner decision: what the read must match, with PR19 (§10) |
 | H | ER §7.3: a restored operation ends `cancelled` though an attempt may have been sent after the snapshot | Fixed as wording: `cancelled` after a restore refers to the restored journal and is never proof that nothing was sent |
 | I | ER §3.3: `unresolved` and `cancelled` read as simultaneous | Fixed: a sequence |
-| J | PA: a service identity's token reissued after a restore before its revocation is re-recorded | Fixed: `deniedSubjects` names service identities from the revocation on, and the tool issues no token to a listed identity |
+| J | PA: a service identity's token reissued after a restore before its revocation is re-recorded | Fixed: `deniedSubjects` names service identities too, the operator adds the subject before the revocation is recorded (F9), and the tool issues no token to a listed identity |
 | K | PA T11: leaving recovery mode and inventory both read installation state `FOR SHARE` | Fixed: leaving takes it `FOR UPDATE` |
 | L | PA §8.2, T8, T9: jobs failed without a terminal event | Fixed: every move of a job to a terminal state appends its terminal event |
 | M | PA §7.2: a refused ingestion retried under a new key after rotation ingests again | Fixed as disclosure: the cost is stated in PA §7.1 and §14 |
@@ -217,6 +217,13 @@ The fresh review of the repairs raised one further point: under recovery start n
 (PA §12.2), and ER §7.2 allowed the normal restart only once the first scope was released while
 PA §12.2 allows it once entry has committed, so a publication clearing a `blocked` scope could not
 run. ginsys/bronzeward#56 aligns ER §7.2 with PA: the restart may follow entry.
+
+The reviews of ginsys/bronzeward#56 itself led to further repairs in the same change: an
+`apply-config` operation needs a recorded attempt to fail as well as to complete; the recovery
+start accepts publication, which completes after the normal restart; a cancelled unattempted
+operation's drift opens at the first observation after release, or at scope marking after a
+restore; entry (T9) locks the `publish` and `ingest` operations it fails; and a machine inventoried
+after entry starts pre-restore unaccounted.
 
 ## 8. E3 disposition
 
