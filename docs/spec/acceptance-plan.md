@@ -463,11 +463,13 @@ an approval is revoked; an approver's identity is revoked and its subject added 
 7. Account every scope with one decision after the settle floor, using the maximum transport
    deadline for the attempt the restore erased; check dependencies under the recovery identities;
    take `restoration` observations; reclassify the restored operation; mark the scopes.
-8. **Release** the worker scope; `h-publisher` and `h-approver` plan and approve a worker change in
+8. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
+   has committed.
+9. **Release** the worker scope; `h-publisher` and `h-approver` plan and approve a worker change in
    the new epoch, which applies as S4.
-9. Unpause the control plane; after a successful `restoration` observation, re-mark and release its
-   scope.
-10. **Exit** recovery mode.
+10. Unpause the control plane; after a successful `restoration` observation, re-mark and release
+    its scope.
+11. **Exit** recovery mode.
 
 **Clauses exercised.** ER [§7.1](execution-recovery.md#71-what-a-restore-does-to-the-fences),
 [§7.2](execution-recovery.md#72-entry), [§7.3](execution-recovery.md#73-procedure),
@@ -489,7 +491,7 @@ journal holds no attempt, ends `cancelled`; a landing of the held request is rec
 the scope's marking, not applied over. The revoked approver is refused before and after entry, and
 every pre-restore automation token until reissued. The worker scope is `ready`, is released and
 dispatches under a new-epoch approval while the control-plane scope is `blocked` on its failed
-observation, until step 9 clears it. Exit succeeds only once both scopes are released, and no
+observation, until step 10 clears it. Exit succeeds only once both scopes are released, and no
 restored operation was retried.
 
 **Negative controls.** Plan creation and approval on a pre-restore unaccounted scope, and release
