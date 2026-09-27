@@ -548,12 +548,14 @@ and the row count stated in the line must match.
 - Contracts: `execution-recovery.md` §2, §3.2 comparisons 1–2, §3.3, §8.1, §8.5;
   `persistence-api.md` §8.1, §10.3–§10.5.
 - Acceptance: AP S3.
-- Required verification: the 8 AP §7.1 rows naming #25, among them identity revocation racing
+- Required verification: the 9 AP §7.1 rows naming #25, among them identity revocation racing
   commitment with the lock control and its T5c timeline entries (*check*), and a publication
   racing a commitment (*check*, ER choice §10.24).
 - Checks: plan binds every ER §2 value; one approval, automation and non-approvers `403`; both
   self-approval marks; assignment change refuses commitment; a plan for a release that is not
-  `Desired` refused, and a publication after plan creation refuses commitment (F10); expiry; plan cancellation before
+  `Desired` refused, and a publication after plan creation refuses commitment but not a
+  committed operation's attempt (F10); an approval surviving role loss (F5); expiry; plan
+  cancellation before
   commitment and after it with no attempt (ER §9.2); approval revocation before and
   after commitment with the DS row 003 lock control; identity revocation before and after
   commitment; publication alone dispatches nothing.

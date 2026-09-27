@@ -338,7 +338,8 @@ persistence's (see `persistence-api.md`).
    release is the bound one, read under the machine row's lock, which a
    publication's selection also takes (see `persistence-api.md`), so a plan
    approved before another release was published cannot apply the release the
-   machine no longer desires (choice §10.24; no DS row exercised it);
+   machine no longer desires (choice §10.24; no DS row exercised it). This
+   term is compared at commitment only, not by attempt transactions (§3.3);
 3. the evidence recorded under §3.1 was recorded for this plan by this
    controller instance, satisfies the plan's preconditions, is inside its bound
    maximum age or validity window, and no newer observation of the machine
@@ -412,7 +413,10 @@ Every attempt, the first included, is recorded by an **attempt transaction**
 before its request is sent; the timeline therefore shows the commitment and the
 attempt before any Talos request. The attempt transaction takes the same locks
 as §3.2, repeats its comparisons 1–3 and 6, against newly gathered §3.1
-evidence recorded for the operation when it is a retry, and adds, in the
+evidence recorded for the operation when it is a retry, except comparison 2's
+`Desired` term: a publication after the commitment does not stop the committed
+operation, which applies its bound release and leaves the machine pending
+convergence towards the new one (§1), and adds, in the
 prototype's numbering (DS §2.1):
 
 7. the recording controller is the operation's current owner at the current
@@ -1688,8 +1692,9 @@ fail:
   and a contradicting digest before the deadline: `failed` at once (§4);
 - plan creation refusing an `apply-config` plan whose release is not the
   machine's `Desired`, a commitment refused when another release was published
-  after plan creation, and a publication racing a commitment waiting for it or
-  preceding it, with the unlocked control (§2, §3.2 comparison 2);
+  after plan creation, a publication racing a commitment waiting for it or
+  preceding it, with the unlocked control, and a publication after commitment
+  leaving the operation's attempt admitted (§2, §3.2 comparison 2, §3.3);
 - drift detection (including no record from a read begun before an `Applied`
   change, none opened or closed by a read that a recorded higher-basis read
   supersedes, and a record opened with a `failed` operation), freeze, adoption record (success, stale observation,
@@ -1900,7 +1905,8 @@ conservative option; those that do not say so. Each is marked in place as
     already worked this way (§6.3). Owner decision, 2026-09-27
     (ginsys/bronzeward#20). The cost is that every publication covering a
     machine invalidates its approved, uncommitted plans, which must be planned
-    and approved again. Alternative: bind only the artifact and let the
+    and approved again; a committed operation is not stopped (§3.3).
+    Alternative: bind only the artifact and let the
     approver's plan stand until it is committed or expires.
 25. **A bound health check has a convergence window up to the verification
     deadline; the identity, assignment revision and digest have none** (§4).
