@@ -368,6 +368,12 @@ owner decide explicitly; each is expanded below the table.
 - **F8: settle floor (ER10.11).** Accounting a lost response is a `recovery-admin` decision after at
   least 30 s, a choice not a bound (FR §9 item 3). Recommendation: accept for the PoC; AP S6.2's
   measurement is the input for any change.
+- **F9: deny-list order (PA17.19, ER §7.3 step 2).** The operator adds a revoked subject to
+  `deniedSubjects` before the revocation is recorded; nothing enforces it. A missed entry, then a
+  restore to an earlier backup, then a token reissue before re-recording revives the identity.
+  Enforcing it would make an urgent revocation wait for a configuration rollout. **Owner decision
+  (2026-09-27, on ginsys/bronzeward#56): keep the operator step, not enforced**; the residual stays
+  disclosed.
 
 **Pairs checked.** Each pair states the same rule: C16.26 and ER10.2 (digest); C16.24 and ER10.8
 (in-process machinery, separate conditions); C16.9, ER §7.2 item 5 and PA §12.2 (earlier-epoch
@@ -566,8 +572,8 @@ Each block can be lifted verbatim into its issue. Paths are repository paths; "A
 
 ## 14. Hand-off
 
-- ginsys/bronzeward#20: the owner's acceptance (criterion 5), the eight flagged choices (§9), and
-  approval of the acceptance plan (criterion 4).
+- ginsys/bronzeward#20: the owner's acceptance (criterion 5), the eight open flagged choices F1–F8
+  (§9; F9 is decided), and approval of the acceptance plan (criterion 4).
 - ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
 - ginsys/bronzeward#14: the ingestion-role and role-loss questions (F4, F5).
 - ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text, then removal of
