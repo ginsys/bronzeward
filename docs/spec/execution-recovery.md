@@ -568,7 +568,7 @@ with a current projection. §4.1 specifies the entries.
 | `committed` | The commitment transaction created the operation; the machine scope and a rollout slot are held. |
 | `sending` | An attempt is recorded; the request is in flight or its outcome is unknown. |
 | `verifying` | The request was accepted; the manager is collecting identity, digest and health evidence. |
-| `completed` | Terminal. At least one attempt was recorded, and postconditions prove the bound artifact is applied and healthy; `Applied` is updated. For an `adopt` operation: the adoption record is committed (§6.3). |
+| `completed` | Terminal. For an `apply-config` operation: at least one attempt was recorded, and postconditions prove the bound artifact is applied and healthy; `Applied` is updated. For an `adopt` operation, which has no attempt: the adoption record is committed (§6.3). |
 | `rejected` | Terminal. Every recorded attempt has a recorded, definitive Talos response of a class proven to precede any mutation (§5.1). |
 | `failed` | Terminal. At least one attempt was recorded, every attempt is accounted for, and a completion observation contradicts the postconditions, whether a request changed the machine wrongly or no request took effect. `Applied` is not updated. |
 | `cancelled` | Terminal. No attempt is recorded for the operation; after a restore, none in the restored journal, which can omit an attempt recorded and sent after the snapshot (§7.3 step 5). This is never an undo of remote work, and never proof that nothing was sent. |
@@ -652,11 +652,11 @@ differed before the attempt: direct Talos access can apply the same artifact
 independently while the attempt's request is merely held. An operation with an
 unaccounted attempt stays `unresolved` with its scope held, however well the
 machine's state matches, because releasing the scope would let a newer
-operation be overwritten by the late request (DS row 011). For the same
-reason an operation with no recorded attempt never completes, even when a
-completion observation shows its artifact: it sent nothing that could have put
-the artifact there. It stays `unresolved` until it ends `cancelled` (the
-`unresolved` → `cancelled` row above), and once the scope is released the
+operation be overwritten by the late request (DS row 011). An `apply-config`
+operation with no recorded attempt never completes, even when a completion
+observation shows its artifact: it sent nothing that could have put the
+artifact there. It stays `unresolved` until it is classified safe to retry
+(§5) or ends `cancelled` (the `unresolved` → `cancelled` row above), and once the scope is released the
 artifact's digest, if it differs from `Applied`, is drift (§6.1).
 
 ### 4.1 Timeline content
@@ -1213,8 +1213,9 @@ epoch, and recovery mode stays in effect until §7.6.
    not authenticate again; persistence meets this by refusing every automation
    token whose epoch is not the current one, so every token is reissued with the server-side
    tool, and by a denied-subject list in deployment configuration, which a
-   restore does not rewind: each identity revocation, of a human or a service
-   identity, adds its subject to the list when it is made, and the tool issues
+   restore does not rewind: for each identity revocation, of a human or a
+   service identity, the operator adds its subject to the list when it is made,
+   and the revocation is not complete until then; the tool issues
    no token to a listed identity, so a reissue that precedes the re-recording
    cannot revive a revoked service identity (design §13.7 item 1; see
    `persistence-api.md`).
@@ -1607,6 +1608,8 @@ fail:
 - plan expiry, observation age, a contradicting newer observation and the
   attempt bound, each refusing;
 - plan cancellation before commitment and after it with no attempt;
+- an `apply-config` operation with no recorded attempt not completed by a
+  completion observation that shows its artifact (§4);
 - an assignment change refused while an operation holds the scope;
 - comparison 6 refusing under a freeze and under recovery mode without a
   release;
@@ -1639,8 +1642,9 @@ fail:
   `Desired` selection, drift record closed by a revert) and revert (success, re-drift before commitment),
   with E1's leak screen over adoption's backup-visible surfaces;
 - recovery-mode entry after a database restore to a snapshot older than a
-  takeover, an approval, a revocation and an attempt: a stale instance refused
-  by the epoch, every scope pre-restore unaccounted, pre-entry approvals
+  takeover, an approval, a revocation and an attempt: every request but
+  liveness and entry refused under recovery start before entry (§7.2), a
+  stale instance refused by the epoch, every scope pre-restore unaccounted, pre-entry approvals
   refused, a restored operation not retried, approval refused on a
   pre-restore unaccounted scope, release refused for a scope not `ready`, a
   released scope usable while another is not, and a `blocked` scope cleared by
