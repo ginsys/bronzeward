@@ -594,7 +594,14 @@ version, configuration digest, machine-configuration resource version and the
 bound health results. Values matching the bound postconditions establish them
 and yield `completed`; a value that contradicts them, such as another digest or
 a failed bound health check, yields `failed`; an observation that could not
-read a value does neither. An observation ordered before the last accounting,
+read a value does neither. Nor does one when an observation of the machine
+with a higher basis (§4.1), of any purpose, reports another configuration
+digest or another result for a bound health check: the machine changed after
+the completion read began, and a later completion observation decides. The
+transaction that records `failed` also opens a drift record when the completion
+observation's digest differs from the `Applied` digest, or records the
+observation on the one already open, because releasing the scope makes that
+difference drift (§6.1). An observation ordered before the last accounting,
 including one ordered after the attempt record but before the attempt's
 request settled, or one not tied to this operation, never completes or fails
 it: a stalled executor may send after it, and the apply may change or degrade
@@ -631,7 +638,8 @@ Required entries:
 | Plan | the binding of §2, the plan-time evidence reference, creator and role |
 | Approval | plan revision, approver, role, epoch, self-approval mark (§2) |
 | Revocation, identity revocation, cancellation | what it names, who, role |
-| Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read |
+| Observation started | purpose, and the plan or operation it is taken for, if any; recorded before the remote read, its revision is the observation's basis (below) |
+| Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), basis, identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read |
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |
 | Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) |
@@ -701,7 +709,7 @@ the controller classifies the outcome:
 | Safe to retry | Create a bounded retry within the original plan, expiry and unrevoked approval, admitted only by the §3.3 attempt transaction. |
 | Unresolved | Preserve the assignment and stop dependent or conflicting mutations; observe further or request a specific `recovery-admin` decision. |
 | Rejected | Record the response as proof of non-mutation, release the scope and slot, and require a corrected plan; the unchanged plan is not retried. |
-| Failed | Record the contradicting completion observation, leave `Applied` unchanged, release the scope and slot, and require a corrective plan; any difference between the machine's state and `Applied` is then handled as drift (§6). |
+| Failed | Record the contradicting completion observation, leave `Applied` unchanged, release the scope and slot, and require a corrective plan; if the observed digest differs from `Applied`'s, the same transaction opens a drift record (§4, §6.1), so the corrective plan is a revert or an adoption. |
 | Cancelled | Record what ended it (§5.1) and release the scope and slot; no attempt is recorded, and nothing is undone. |
 
 Completed, safe to retry and unresolved are the design's classifications for
@@ -850,11 +858,13 @@ the interval is open. A mismatch in a `drift` observation, or in a
 `restoration` observation after a restore (§7.3 step 4), opens a **drift
 record** on the machine's
 timeline, naming the observation, the `Applied` digest and the observed digest,
-and raises the design §15.3 digest-mismatch alert. The definition above holds
+and raises the design §15.3 digest-mismatch alert. So does the completion
+observation that makes an operation `failed`, in the transaction that releases
+the scope (§4). The definition above holds
 for a `restoration` observation too: while a restored operation on the scope is
 still `unresolved`, the mismatch is evidence for its classification (§7.3 step
-5), and the drift record opens only once that operation is terminal, at the
-scope's marking (§7.3 step 6). A scope whose restored operation stays
+5), and the drift record opens only once that operation is terminal: with its
+failure, or otherwise at the scope's marking (§7.3 step 6). A scope whose restored operation stays
 `unresolved` is marked `unresolved` and opens no drift record yet. A machine
 has at most one open drift record. A drift whose observed digest equals the artifact of an
 operation accounted by decision is linked to it as a possible late landing
@@ -934,8 +944,9 @@ state is being accepted (design §12.1).
    3. the machine's assignment revision, baseline revision and `Desired`
       release equal the bound ones, and the bound drift record is still open
       (for a handover, the machine still has no `Applied`);
-   4. the machine's latest observation, by revision, was taken after the
-      approval, is no older than the age the plan binds, and shows the
+   4. the machine's recorded observation with the highest basis (§4.1), of any
+      purpose, began its read after the approval, is no older than the age the
+      plan binds, and shows the
       machine's configuration digest equal to the baseline's and its
       assignment revision unchanged; and
    5. no operation holds the machine scope, and the scope gate is open apart
@@ -964,7 +975,8 @@ silently undo the adoption. It advances the baseline revision (§2), so every
 plan made before the adoption, such as an approved revert to the previous
 release, fails comparison 2 and must be planned and approved again. It closes
 the drift record. If a newer observation shows the machine has changed again,
-it is the latest one, requirement 4.4 fails and the machine stays drifted. If a
+it has the highest basis, requirement 4.4 fails and the machine stays drifted,
+even when an older read is recorded after it. If a
 revert closed the drift record first, requirement 4.3 fails, even when a later
 edit restored the adopted bytes. If another release was selected as `Desired`
 after the plan was created, requirement 4.3 fails too: the record would
@@ -1004,15 +1016,15 @@ advances `Applied` when it reaches `completed`, which closes the drift record.
 
 | From | To | Condition |
 | --- | --- | --- |
-| none | open | A `drift` or `restoration` observation's digest differs from the `Applied` at its basis, with the scope free (§6.1). |
+| none | open | A `drift` or `restoration` observation's digest differs from the `Applied` at its basis, with the scope free (§6.1); or the completion observation that makes an operation `failed` differs from `Applied` (§4). |
 | open | open | Freeze or unfreeze; a further differing observation is recorded on the same record. |
 | open | closed (adopted) | An adoption record (§6.3). |
 | open | closed (reverted) | The revert operation reaches `completed` (§6.4). |
 | open | closed (returned) | A later observation equals the `Applied` at its basis again with no Bronzeward action, such as a manual revert; recorded as such. |
 
 A revert that ends `failed`, `rejected` or `cancelled` leaves the record open.
-An operation's own digest mismatch while it holds the scope never opens a
-record (§6.1).
+An operation's own digest mismatch while it holds the scope opens no record,
+except the one that makes it `failed`, as the scope is released (§4).
 
 ## 7. Recovery after management-state restoration
 
@@ -1546,9 +1558,11 @@ fail:
   approval, an open gate and no definitive rejection, and `failed` otherwise;
 - identity revocation before commitment, after it with no attempt, and after an
   attempt, with a retry refused;
-- observation ordering under a concurrent accounting transaction (§4.1);
+- observation ordering under a concurrent accounting transaction (§4.1), and
+  a completion or adoption read refused when a higher-basis read contradicts
+  it (§4, §6.3);
 - drift detection (including no record from a read begun before an `Applied`
-  change), freeze, adoption record (success, stale observation,
+  change, and a record opened with a `failed` operation), freeze, adoption record (success, stale observation,
   changed-again machine, revoked approval, changed baseline revision, changed
   `Desired` selection, drift record closed by a revert) and revert (success, re-drift before commitment),
   with E1's leak screen over adoption's backup-visible surfaces;
