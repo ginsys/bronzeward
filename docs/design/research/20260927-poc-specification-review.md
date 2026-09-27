@@ -129,7 +129,7 @@ Status codes:
 | PR16 | DS rows 002–005 for approvals (p); identity revocation unmeasured | ER §3.2, §3.3, §8.5; PA §10.4 | S3, S7 | specified-not-evidenced; approval half evidenced |
 | PR17 | DB (P), DS (P, p) | ER §3.2, §3.4; PA §5.1 | S4, S6.1 | evidenced for the fence, by the P grades; a request already sent can still land after a newer operation, detected as drift, not prevented (§7 A; PR22's gap) |
 | PR18 | DS, E3 (p) | ER §1, §3.5, §4 | S4 | specified-not-evidenced: the machinery client is the ER §3.5 condition |
-| PR19 | none | none: an open point in PA §7.3 | none | gap |
+| PR19 | none | ER §2, §3.2 comparison 3, §7.4 (choice §10.26); PA §7.3 | S4, S7 | specified-not-evidenced: no investigation read the SMBIOS UUID or membership through Talos |
 | PR20 | none (G) | ER §6; C §2.3 | S5 | specified-not-evidenced |
 | PR21 | DB (P), DS (p) | ER §5 | S6.1 | specified-not-evidenced |
 | PR22 | DS: late landings in three of six partitions (FR §7) | ER §5.2: an operator decision after a settle floor, not a bound | S6.2 | gap |
@@ -139,8 +139,8 @@ Status codes:
 | PR26 | none (G) | none: deferred | none (AP §8) | gap, beyond the PoC (§8) |
 | PR27 | none (G) | AP | the integrated run | specified-not-evidenced |
 
-**27 properties:** evidenced 5 (PR01, PR04, PR09, PR10, PR17), specified-not-evidenced 19, gap 3
-(PR19, PR22, PR26). Every §18.2 item and closing-paragraph requirement has at least one scenario
+**27 properties:** evidenced 5 (PR01, PR04, PR09, PR10, PR17), specified-not-evidenced 20, gap 2
+(PR22, PR26); PR19 was a gap until the owner's gap G decision (§10). Every §18.2 item and closing-paragraph requirement has at least one scenario
 ([AP §7](../../spec/acceptance-plan.md#7-coverage)).
 
 ## 6. Cross-contract consistency
@@ -166,7 +166,8 @@ report; item 3 stays a gap (§10); item 5 needs no change, and PA's request in i
 3. **Pre-send identity check.** `persistence-api.md:869-873` (PA §7.3) records that no contract
    refuses a node whose observed identity differs from the plan's before the first send; in
    `execution-recovery.md:163-167` (ER §2) machine identity is a postcondition, not a precondition,
-   so ER §3.2 comparison 3 does not check it. Property PR19; a gap (§10).
+   so ER §3.2 comparison 3 does not check it. Property PR19; a gap (§10), closed by the owner's
+   gap G decision: ER §2 now binds identity as a precondition (choice §10.26).
 4. **Ingestion role wording.** `execution-recovery.md:953-955` (ER §6.3) gives the ingestion to
    `author`; `persistence-api.md:1431-1436` (PA §10.3) requires `author` held by a human. ER cites
    PA's rule, so the effect agrees; the word "human" is missing.
@@ -204,7 +205,7 @@ re-verified against aa58272; the repairs are
 | D | ER §6.3: the adoption record compared no machine identity | Fixed: the adopt plan binds the identity and requirement 4.4 compares it |
 | E | ER §4: a first contradicting completion read fails the operation before the verification deadline | Fixed by owner decision (2026-09-27): a bound health check has a convergence window up to the verification deadline; identity, assignment revision and digest fail at once (ER §4, choice §10.25) |
 | F | ER §4: an operation with no attempt could complete after a takeover | Fixed: an `apply-config` operation needs a recorded attempt to complete or fail |
-| G | ER §7.3: any successful restoration read makes a scope `ready` | Gap, owner decision: what the read must match, with PR19 (§10) |
+| G | ER §7.3: any successful restoration read makes a scope `ready` | Fixed by owner decision (2026-09-27): the read's SMBIOS UUID and cluster membership must match the machine record, as before every send (PR19); a mismatch leaves the scope `blocked` (ER §3.2, §7.3 step 6, §7.4, choice §10.26) |
 | H | ER §7.3: a restored operation ends `cancelled` though an attempt may have been sent after the snapshot | Fixed as wording: `cancelled` after a restore refers to the restored journal and is never proof that nothing was sent |
 | I | ER §3.3: `unresolved` and `cancelled` read as simultaneous | Fixed: a sequence |
 | J | PA: a service identity's token reissued after a restore before its revocation is re-recorded | Fixed: `deniedSubjects` names service identities too, the operator adds the subject before the revocation is recorded (F9), and the tool issues no token to a listed identity |
@@ -257,7 +258,7 @@ parenthetical calling ER "landed but not yet accepted" was removed as stale.
 
 ## 9. Owner-review choices
 
-All 79 choices the contracts put to the owner: C §16 (26), ER §10 (25), PA §17 (28). The default
+All 80 choices the contracts put to the owner: C §16 (26), ER §10 (26), PA §17 (28). The default
 recommendation is **accept as specified**. FLAG marks a choice where the reviewer recommends the
 owner decide explicitly; each is expanded below the table.
 
@@ -314,6 +315,7 @@ owner decide explicitly; each is expanded below the table.
 | ER10.23 | An ordinary plan cannot overwrite undetected drift | accept as specified |
 | ER10.24 | Every plan binds `Desired`; commitment refuses once it changed | FLAG F10, decided |
 | ER10.25 | Health-check convergence window up to the verification deadline | owner decision on gap E (§7, §10), decided |
+| ER10.26 | Machine identity (SMBIOS UUID, cluster membership) a precondition before any send and before `ready` | owner decision on gap G with PR19 (§7, §10), decided |
 | PA17.1 | Random application identifiers; `mch` machine ID | accept as specified |
 | PA17.2 | ETags carry a random token beside the revision | accept as specified |
 | PA17.3 | Immutability enforced by database triggers | accept as specified |
@@ -464,13 +466,17 @@ to F1. Beyond the PoC: detector precision, digest key rotation, clock skew, gene
 ingestion, kinds not run, tracer limits, embedded formatting, exact-copy leak detection and
 metal-mode validation.
 
-**Found by this review (PR19, PR13), or carried in for an owner decision (§7 E, decided, and G):**
+**Found by this review (PR19, PR13), or carried in for an owner decision (§7 E and G, both
+decided):**
 
-- **PR19, pre-send identity, with G.** Needs ER §2 to bind machine identity as a precondition and
-  ER §3.2 comparison 3 to check it, and the same rule to define what a restoration read must match
-  before a scope is `ready` (§7 G). An owner decision on the identity evidence (hardware identity,
-  assignment evidence, membership) precedes the rule; ginsys/bronzeward#26 and ginsys/bronzeward#29
-  carry the checks once it exists.
+- **PR19, pre-send identity, with G.** ER §2 had machine identity as a postcondition only, so ER
+  §3.2 comparison 3 did not check it, and any successful restoration read made a scope `ready`
+  (§7 G). **Owner decision (2026-09-27):** the node's SMBIOS UUID and cluster membership must
+  match the machine record before any send and before `ready`; a mismatch leaves the scope
+  `blocked` (ER §2, §3.2 comparison 3, §7.3 step 6, §7.4, choice §10.26). Reading either through
+  the Talos API is unevidenced, including what the Docker fixture's nodes report;
+  ginsys/bronzeward#26 and ginsys/bronzeward#29 carry the checks (AP §7.1). A machine whose node
+  now reports another identity stays `blocked`, which joins ER §9.3's decommissioning gap.
 - **E, the verification deadline.** Whether a first contradicting completion read may fail an
   operation before its deadline, or the deadline is a convergence window, and for which
   postconditions (§7 E). **Owner decision (2026-09-27):** a window for a bound health check
@@ -565,17 +571,19 @@ and the row count stated in the line must match.
 **ginsys/bronzeward#26, safe apply.**
 - Contracts: `execution-recovery.md` §1, §3.1–§3.5, §4, §5.1, §8; `persistence-api.md` §8.3.
 - Acceptance: AP S4; AP S8 for the timeline, with ginsys/bronzeward#30 and ginsys/bronzeward#31.
-- Required verification: the 9 AP §7.1 rows naming #26, among them machine revisions in commit
-  order under concurrent writers (*check*) and the health-check convergence window (*check*,
-  gap E).
+- Required verification: the 10 AP §7.1 rows naming #26, among them machine revisions in commit
+  order under concurrent writers (*check*), the health-check convergence window (*check*,
+  gap E) and the pre-send identity comparison (*check*, gap G with PR19).
 - Checks: DS rows 001–023 through the implementation with controls 006, 008 and 011 (ER §9.2),
   which include the ER §3.5 condition's rows 001–005, 012–017 and 022 through its client; digest equals the artifact's after completion; evidence, commitment and attempt
   precede the request; Desired, Applied, Observed served separately; sealed OpenBao, stale
-  observation, second plan (scope-index control), frozen scope, a proxied-route plan (F3) and
-  `InvalidArgument` each refused.
-- Gap to close first: the pre-send identity check (§10, PR19). Gap E decided: a bound health
-  check has a convergence window up to the verification deadline, the other postconditions none
-  (ER §4, choice §10.25). Owner choices F2 and F3 decided.
+  observation, second plan (scope-index control), frozen scope, a proxied-route plan (F3), a node
+  with another identity and `InvalidArgument` each refused.
+- Gap G with PR19 decided: the node's SMBIOS UUID and cluster membership are compared with the
+  machine record before any send (ER §3.2 comparison 3, choice §10.26); reading them through the
+  Talos API, including in the Docker fixture, is unevidenced and this issue shows it. Gap E
+  decided: a bound health check has a convergence window up to the verification deadline, the
+  other postconditions none (ER §4, choice §10.25). Owner choices F2 and F3 decided.
 
 **ginsys/bronzeward#27, drift.**
 - Contracts: `execution-recovery.md` §6, §8.6; `compilation.md` §2.3 (drift adoption);
@@ -607,8 +615,9 @@ and the row count stated in the line must match.
   `compilation.md` §3.5.
 - Acceptance: AP S7, its nominal run (quiesced, in the integrated run) and its closing run with a
   missed stale instance (ER §9.3 item 3), including its Transit-key and older-OpenBao variants.
-- Required verification: the 6 AP §7.1 rows naming #29, among them leaving recovery mode racing an
-  inventory request and a reissue refused for a denied service identity (*check*).
+- Required verification: the 7 AP §7.1 rows naming #29, among them leaving recovery mode racing an
+  inventory request, a reissue refused for a denied service identity, and a scope left `blocked`
+  by a restoration read with another identity (*check*).
 - Checks: recovery start answers only liveness and entry before entry; entry mints an epoch, marks
   every scope, takes over non-terminal operations, abandons claims; the missed stale instance's
   attempt refused by the epoch term, and its job claim, takeover, ingestion start and commitment of
@@ -616,8 +625,9 @@ and the row count stated in the line must match.
   (PA §16); restored operation never retried; per-scope
   refusals; exit only when every scope is released; the no-entry restart residual shown.
 - Depends on the §6 item 2 repair (what the recovery start serves).
-- Gap to close first, still pending: gap G, what a restoration read must match, with PR19; it
-  needs an owner decision, then its rule in ER §7.3 and §7.4, before the label comes off.
+- Gap G decided: a `restoration` read makes a scope `ready` only when its SMBIOS UUID and
+  cluster membership match the machine record, and a mismatch leaves it `blocked` (ER §7.3 step 6,
+  §7.4, choice §10.26).
 
 **ginsys/bronzeward#30, package and document.**
 - Acceptance: AP S8 step 1's walkthrough; AP §8 and §9 as the documented limits.
@@ -632,6 +642,7 @@ and the row count stated in the line must match.
 **ginsys/bronzeward#31, E6 acceptance.**
 - Contract: the acceptance plan, `docs/spec/acceptance-plan.md`, as accepted under
   ginsys/bronzeward#20.
+- Required verification: the 1 AP §7.1 row naming #31, the complete existing-cluster E6 slice.
 - Checks: one integrated run of S0–S5, S7's nominal run and S8 from a fresh `bin/up` (AP §2); S6, negatives
   and matrices separately;
   common evidence per AP §2; the coverage tables of AP §7 and §7.1 answered row by row, each
@@ -660,8 +671,8 @@ and the row count stated in the line must match.
 
 ## 14. Hand-off
 
-- ginsys/bronzeward#20: the owner's acceptance (criterion 5), gap G (gap E is decided), and approval of the
-  acceptance plan (criterion 4); every flagged choice, F1 to F10, is decided (§9).
+- ginsys/bronzeward#20: the owner's acceptance (criterion 5) and approval of the acceptance plan
+  (criterion 4); every flagged choice, F1 to F10, and gaps E and G are decided (§9, §10).
 - ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N; §7 E
   is fixed by this change instead (ER §4, choice §10.25).
 - ginsys/bronzeward#14: a note that the role-loss question (F5) and the ingestion role (F4) were
@@ -669,7 +680,7 @@ and the row count stated in the line must match.
 - ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text with the AP §7.1 rows its Required
   verification line counts, then removal of
   `status/needs-refinement` once each issue carries it and no open decision it depends on remains.
-  ginsys/bronzeward#26 and ginsys/bronzeward#29 keep the label until gap G with PR19 (the
-  restoration read and the pre-send identity check) is decided and in their contracts; ginsys/bronzeward#24 keeps it until the dependency monitor has a
-  specification section (§10, PR13).
+  Gap G with PR19 (the restoration read and the pre-send identity check) is decided and in the
+  contracts of ginsys/bronzeward#26 and ginsys/bronzeward#29; ginsys/bronzeward#24 keeps the
+  label until the dependency monitor has a specification section (§10, PR13).
 - Later lifecycle work: the upgrade-transition item of design §18.3 (§8).
