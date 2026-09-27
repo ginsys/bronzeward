@@ -75,9 +75,11 @@ scanning the database data directory, write-ahead log and dump, OpenBao metadata
 Bronzeward logs, temporary and staging paths and every backup taken, with its positive control
 found.
 
-**Execution.** One integrated run executes the pass paths of S0 to S8 in order from a fresh
-`bin/up`, as [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) requires.
-Negative controls and interruption matrices run separately, each from a fresh `bin/up` or a
+**Execution.** One integrated run executes the pass paths of S0 to S5, S7 and S8 in order from a
+fresh `bin/up`, as [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) requires.
+S6 is an interruption matrix: it kills and partitions instances, so it runs outside the integrated
+run, and #31 takes its results from those runs. Negative controls and interruption matrices run
+separately, each from a fresh `bin/up` or a
 recorded snapshot, so that a refused or killed step leaves no state a later scenario relies on.
 
 ## 3. Foundation
@@ -147,7 +149,7 @@ one synthetic secret outside the Talos schema's secret fields, in `machine.files
    turn (`POST /ingestions` naming that draft, with `If-Match` its current ETag), marking the file
    content's path on the worker, and reads the draft's new ETag after each ingestion succeeds.
 3. Each ingestion's draft transaction commits and releases its claim.
-4. `h-publisher` publishes the import draft, as in S2 steps 4 and 5.
+4. `h-publisher` publishes the import draft, as in S2 steps 3 and 5.
 5. `h-publisher` creates an `adopt` plan per machine, binding no drift record and no baseline
    revision; `h-approver` approves each.
 6. The controller takes an `evidence` observation of each machine, begun after its approval, then
@@ -210,8 +212,9 @@ scenario runs.
    applies, and a `!bwref` reference to a value extracted in S1.
 2. In the same draft, `h-author` creates a worker profile revision listing that fragment revision,
    and revises the worker's assignment to select the profile.
-3. The draft compiles and validates; `h-author` reads the worker's redacted review data.
-4. `h-publisher` publishes; the `publish` operation succeeds.
+3. `h-publisher` publishes; the `publish` operation compiles and validates the draft and succeeds.
+4. `h-author` reads the worker's redacted review data from the release
+   (`GET /releases/{id}/machines/{m}/review`); no route previews an unpublished draft.
 5. The release is read back: artifacts, the source, profile and assignment revisions it snapshotted,
    dependency records, renderer and contract record, configuration digests; `bin/evidence` records
    the worker's resource version.
@@ -430,8 +433,9 @@ for each adoption run; step 5's measurement; the resource version series.
 3. Unpause A; let it try to record its attempt. A restarted instance would not do: it takes over
    at its start (ER §3.4) and its attempts are then legitimate.
 4. Partition the worker during a send over its own endpoint, the only dispatch route (ER §10.9):
-   the response is lost.
-5. `h-recovery` records the accounting decision after the settle floor, with a recovery observation
+   the response is lost. Restart B: it takes the operation over at its start (ER §3.4), so the
+   executor that sent can record no further attempt (ER §5.2 item 1).
+5. After the takeover, `h-recovery` records the accounting decision after the settle floor, with a recovery observation
    and the resource version read at both ends of the settle; a completion observation classifies
    the operation.
 6. While one operation is `unresolved`, try a newer plan for the worker.
@@ -509,14 +513,17 @@ second worker plan is approved; an approval is revoked; an approver's subject is
 2. **Recovery start.** Start B with the recovery-start flag.
 3. **Entry.** `h-recovery` records entry through the API, naming both restored backups, `database`
    and `provider`, with their ages; a new epoch is minted. Entry fails every queued `publish` job
-   (PA §12.2); `h-publisher` then publishes through B, whose recovery start runs no job worker, so
-   the new-epoch `publish` job stays queued.
+   (PA §12.2). Through B, `h-author` opens a draft with a worker change and `h-publisher` publishes
+   it; B's recovery start runs no job worker, so the new-epoch `publish` job stays queued.
+   `h-author` opens a second draft through B and keeps its ETag.
 4. Unpause A: it tries the attempt it was paused before, its job worker tries to claim that
    `publish` job, and its executor tries to commit the approved control-plane plan. Through A,
-   `h-recovery` requests a takeover of the restored operation and `h-author` starts an ingestion.
+   `h-recovery` requests a takeover of the restored operation and `h-author` starts an ingestion
+   into the second draft with its ETag.
 5. Unpause the worker: the held request may land.
 6. `h-recovery` re-records the identity revocation; the automation token is reissued with the
-   server-side tool; `h-author` starts an ingestion through B.
+   server-side tool; `h-author` starts an ingestion into the second draft through B, with the same
+   ETag, which A's refused request left unchanged.
 7. Account every scope with one decision after the settle floor, using the maximum transport
    deadline for the attempt the restore erased, each with its recovery observation; check
    dependencies under the recovery identities. Then pause the control plane, take `restoration`
@@ -643,7 +650,7 @@ support them, and the reviewer's record.
 | Closing paragraph: selected database/provider behaviour (§7.7) | S0 to S8 on the §2 fixture | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30) |
 | Closing paragraph: scoped authorization (§13.7) | S0 step 4, S3 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) |
 | Closing paragraph: usable operation timeline | S8 | [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30), [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
-| §18.1 E6: the existing-cluster vertical slice | the integrated run, S0 to S8 | [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
+| §18.1 E6: the existing-cluster vertical slice | the integrated run (S0 to S5, S7, S8) and S6's interruption runs (§2) | [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 
 ### 7.1 Required verification
 
