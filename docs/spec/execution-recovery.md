@@ -656,8 +656,11 @@ operation be overwritten by the late request (DS row 011). An `apply-config`
 operation with no recorded attempt never completes, even when a completion
 observation shows its artifact: it sent nothing that could have put the
 artifact there. It stays `unresolved` until it is classified safe to retry
-(§5) or ends `cancelled` (the `unresolved` → `cancelled` row above), and once the scope is released the
-artifact's digest, if it differs from `Applied`, is drift (§6.1).
+(§5) or ends `cancelled` (the `unresolved` → `cancelled` row above). An
+observation recorded while the scope was held opens no drift record (§6.1),
+and cancellation does not re-evaluate it: if the artifact's digest differs from
+`Applied`, the first observation after the scope is released opens the drift
+record.
 
 ### 4.1 Timeline content
 
@@ -1219,8 +1222,8 @@ which the recovery start does not run (see `persistence-api.md`).
    token whose epoch is not the current one, so every token is reissued with the server-side
    tool, and by a denied-subject list in deployment configuration, which a
    restore does not rewind: for each identity revocation, of a human or a
-   service identity, the operator adds its subject to the list when it is made,
-   and the revocation is not complete until then; the tool issues
+   service identity, the operator adds its subject to the list before the
+   revocation is recorded, so no failure between the two can lose both; the tool issues
    no token to a listed identity, so a reissue that precedes the re-recording
    cannot revive a revoked service identity (design §13.7 item 1; see
    `persistence-api.md`).
