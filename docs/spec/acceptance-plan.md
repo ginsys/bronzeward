@@ -75,8 +75,8 @@ scanning the database data directory, write-ahead log and dump, OpenBao metadata
 Bronzeward logs, temporary and staging paths and every backup taken, with its positive control
 found.
 
-**Execution.** One integrated run executes the pass paths of S0 to S5, S7 and S8 in order from a
-fresh `bin/up`, as [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) requires.
+**Execution.** One integrated run executes the pass paths of S0 to S5, S7 (its nominal run) and S8
+in order from a fresh `bin/up`, as [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) requires.
 S6 is an interruption matrix: it kills and partitions instances, so it runs outside the integrated
 run, and #31 takes its results from those runs. Negative controls and interruption matrices run
 separately, each from a fresh `bin/up` or a
@@ -537,6 +537,13 @@ second worker plan is approved; an approval is revoked; `h-all`'s subject is add
 `deniedSubjects` and then its identity is revoked, leaving `h-approver` for step 9; then
 `bin/inject bao-snapshot`.
 
+**Two runs.** The **nominal run**, part of the integrated run (§2), follows ER §7.2 and §7.3 step 1:
+at step 1, A is stopped as well as B and established stopped before either restore, and stays
+stopped; step 4, the step 9 partition and A's commitment attempt in step 9 are skipped, and the
+pass criteria and controls about A do not apply. The **closing run** that ER §9.3 item 3 names, with
+a missed stale instance, runs the steps as written, from a fresh `bin/up` outside the integrated
+run: it breaks quiescence on purpose, to show the fences refusing what an operator missed.
+
 **Steps.**
 
 1. **Restore.** Stop B and record the time. A stays paused, not stopped: it is the missed stale
@@ -695,7 +702,7 @@ support them, and the reviewer's record.
 | Closing paragraph: selected database/provider behaviour (§7.7) | S0 to S8 on the §2 fixture | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30) |
 | Closing paragraph: scoped authorization (§13.7) | S0 step 4, S3 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) |
 | Closing paragraph: usable operation timeline | S8 | [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30), [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
-| §18.1 E6: the existing-cluster vertical slice | the integrated run (S0 to S5, S7, S8) and S6's interruption runs (§2) | [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
+| §18.1 E6: the existing-cluster vertical slice | the integrated run (S0 to S5, S7's nominal run, S8) and S6's interruption runs (§2) | [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 
 ### 7.1 Required verification
 

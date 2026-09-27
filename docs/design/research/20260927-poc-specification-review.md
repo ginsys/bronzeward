@@ -605,7 +605,8 @@ and the row count stated in the line must match.
 **ginsys/bronzeward#29, restoration.**
 - Contracts: `execution-recovery.md` §7, §8.7; `persistence-api.md` §12, §13.6;
   `compilation.md` §3.5.
-- Acceptance: AP S7 (ER §9.3 closing run 3), including its Transit-key and older-OpenBao variants.
+- Acceptance: AP S7, its nominal run (quiesced, in the integrated run) and its closing run with a
+  missed stale instance (ER §9.3 item 3), including its Transit-key and older-OpenBao variants.
 - Required verification: the 6 AP §7.1 rows naming #29, among them leaving recovery mode racing an
   inventory request and a reissue refused for a denied service identity (*check*).
 - Checks: recovery start answers only liveness and entry before entry; entry mints an epoch, marks
@@ -615,8 +616,8 @@ and the row count stated in the line must match.
   (PA §16); restored operation never retried; per-scope
   refusals; exit only when every scope is released; the no-entry restart residual shown.
 - Depends on the §6 item 2 repair (what the recovery start serves).
-- Gap to close first: gap G, what a restoration read must match, with PR19, decided and written
-  into ER §7.3.
+- Gap to close first, still pending: gap G, what a restoration read must match, with PR19; it
+  needs an owner decision, then its rule in ER §7.3 and §7.4, before the label comes off.
 
 **ginsys/bronzeward#30, package and document.**
 - Acceptance: AP S8 step 1's walkthrough; AP §8 and §9 as the documented limits.
@@ -631,7 +632,7 @@ and the row count stated in the line must match.
 **ginsys/bronzeward#31, E6 acceptance.**
 - Contract: the acceptance plan, `docs/spec/acceptance-plan.md`, as accepted under
   ginsys/bronzeward#20.
-- Checks: one integrated run of S0–S5, S7 and S8 from a fresh `bin/up` (AP §2); S6, negatives
+- Checks: one integrated run of S0–S5, S7's nominal run and S8 from a fresh `bin/up` (AP §2); S6, negatives
   and matrices separately;
   common evidence per AP §2; the coverage tables of AP §7 and §7.1 answered row by row, each
   required-verification item with a retained result; no production claim.
