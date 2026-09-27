@@ -338,7 +338,8 @@ persistence's (see `persistence-api.md`).
    pre-dispatch digest; on a retry, where the evidence is recorded for the
    operation, it may instead equal the bound artifact's digest (DS row 023,
    `TestEvidenceMayShowArtifactOnlyOnRetry`). A commitment whose evidence
-   shows another digest is refused, and the difference is drift (below);
+   shows another digest is refused, and §6.1 is applied to that evidence
+   (below);
 4. this operation takes the machine's coordination scope, and no other
    operation on that scope is `committed`, `sending`, `verifying` or
    `unresolved` (on PostgreSQL, a partial unique index; DS row 010, control row
@@ -367,13 +368,16 @@ the operation's owner at generation 1 in the current epoch (§3.4).
 If any comparison fails, nothing is committed and nothing is sent; the refusal
 is recorded afterwards in its own transaction (§4.1). When comparison 3 refuses
 a commitment because its evidence reports a configuration digest other than
-the bound pre-dispatch digest, the machine runs a configuration that neither
-`Applied` nor an open drift record accounts for: a plan expects `Applied`'s
-digest, or a revert its drift record's (§2). The transaction that records the refusal therefore also applies
-§6.1 to that evidence observation as to a `drift` observation, under the same
-basis rules: while no operation holds the scope, a digest that differs from
-`Applied` opens a drift record, or is recorded on the one already open
-**(choice §10.23)**. Freeze,
+the bound pre-dispatch digest (a plan expects `Applied`'s digest, a revert
+its drift record's; §2), the transaction that records the refusal also
+applies §6.1 and §6.5 to that evidence observation as to a `drift`
+observation, under the same basis and scope rules. The refusal does not by
+itself establish drift: a digest that differs from `Applied` opens a drift
+record, or is recorded on the one already open; a digest equal to `Applied`
+with a record open closes it as returned (§6.5), which is how a revert
+refused after a manual return ends; and an observation those rules exclude,
+such as one read while another operation held the scope, changes no drift
+record **(choice §10.23)**. Freeze,
 recovery mode and scope release are durable database facts precisely so that
 they can be compared here; checking them only before the transaction would
 leave a race in which dispatch proceeds while mutation is meant to be paused.
@@ -612,9 +616,11 @@ a failed bound health check, yields `failed`; an observation that could not
 read a value does neither. Nor does one when a recorded observation of the
 machine with a higher basis (§4.1), of any purpose, reports for any bound
 postcondition (the machine identity, the assignment revision, the
-configuration digest or a bound health check) a value that contradicts it or
-differs from the completion observation's: the machine may have changed after
-the completion read began, and a later completion observation decides. Only a
+configuration digest or a bound health check) a value that differs from the
+completion observation's: the machine may have changed after the completion
+read began, and a later completion observation decides. A higher-basis read
+that agrees with the completion observation blocks nothing, so repeated reads
+confirming a failed postcondition let the operation fail. Only a
 recorded observation blocks: a higher-basis read that has started but not yet
 recorded its result does not, and its result, recorded after the `Applied`
 change, opens no drift record (§6.1). A digest change that persists is
@@ -665,7 +671,7 @@ Required entries:
 | Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), basis, identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read |
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |
-| Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 to that evidence (§3.2) |
+| Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 and §6.5 to that evidence (§3.2) |
 | Attempt | attempt id, owner token, route, transport and verification deadlines; for a retry, the classification revision it is bound to |
 | Response | attempt id, class (acceptance, gRPC code, transport outcome), redacted text or the withheld notice (§3.5) |
 | Ownership transition | from and to owner, generation, epoch, reason |
@@ -1595,8 +1601,11 @@ fail:
   attempt, with a retry refused;
 - observation ordering under a concurrent accounting transaction (§4.1); a
   completion read that yields neither `completed` nor `failed` when a recorded
-  higher-basis read contradicts a bound postcondition, for each of the
-  identity, the assignment revision, the digest and a bound health check, and
+  higher-basis read differs from it on a bound postcondition, for each of the
+  identity, the assignment revision, the digest and a bound health check, a
+  completion read confirmed by repeated agreeing higher-basis reads that still
+  yields `failed`, a revert refused after a manual return whose refusal closes
+  the drift record as returned (§6.5), and
   an adoption read refused when a higher-basis read contradicts it (§4, §6.3);
   and, as the residual's evidence, a completion and an
   adoption committed while a contradicting higher-basis read is still
