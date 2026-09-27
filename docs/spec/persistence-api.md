@@ -437,10 +437,10 @@ The transactions this contract defines or constrains:
 | T5c | Identity revocation | key lock; installation state `FOR SHARE`; every machine row `FOR UPDATE`, in id order, as T9 (rule 5); principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked; an identity revocation entry (T7) on the timeline of each machine with a plan that identity approved whose plan or operation is not terminal, read under those machine locks (execution and recovery §4.1); idempotency record, act |
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6; a commitment also compares the committing process's epoch with the current one (§5.1) | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
-| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, and its abandonment by the sweep or by a takeover with nothing to decrypt (compilation §3.4, §3.5) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, and an abandonment fails the operation `ingestion-abandoned` (§8.2) |
+| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, and its abandonment by the sweep or by a takeover with nothing to decrypt (compilation §3.4, §3.5) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, and an abandonment fails the operation `ingestion-abandoned` with its terminal event (§8.2) |
 | T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE` | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
-| T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together, only if the serving process's epoch is the current one (§5.1); an abandonment also fails the claim's `ingest` operation `ingestion-abandoned` (§8.2) |
+| T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect. Leaving recovery mode takes installation state `FOR UPDATE` instead, before it checks that every machine scope is released: it waits for an inventory request, which holds that row `FOR SHARE`, and then sees the machine that request inserted | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together, only if the serving process's epoch is the current one (§5.1); an abandonment also fails the claim's `ingest` operation `ingestion-abandoned`, with its terminal event (§8.2) |
 
 T7 allocates every revision in a machine scope, for a plan, an operation or a
 machine-scope fact alike, from one per-machine counter under the machine row's
@@ -773,6 +773,11 @@ already committed. An ingestion whose `ingest` operation is still `running` is
 refused by that operation's natural key (§7.3), which names it;
 once the operation succeeded its draft write moved the draft, and `If-Match`
 refuses the new request, and once it failed the new request is the only one.
+A draft entry that compilation refused after its claim existed committed only
+its claim and the refusal's records (§7.2), so nothing refuses the new
+request: it ingests afresh and, refused again, leaves a second abandoned claim
+whose generations are orphans (§6.4). That is the cost of this path; the
+stored refusal is not replayed under the new key.
 How digests compare across a rotation is open in
 compilation §4.1. An unkeyed digest of a low-entropy
 secret would be an offline guessing oracle
@@ -812,8 +817,10 @@ The draft entry routes are also the one exception to "a refusal commits no
 record", because their ingestion persists a staging claim before T1 that a
 refusal does not undo. Their claim records the principal and the idempotency
 key. A refusal after the claim exists (compilation's `422`) commits the
-idempotency record with the refusal's response, in the transaction that records
-the claim's outcome. A retry therefore replays the refusal and ingests nothing.
+idempotency record with the refusal's response, and the act of §10.5 naming
+the refused request, in the transaction that records the claim's outcome: the
+claim and its provider generations persist, so the audit records who caused
+them. A retry therefore replays the refusal and ingests nothing.
 A retry that finds a claim for its key but no record looks at the claim's
 lease (compilation §3). While the lease is live, the first request may still be
 ingesting, and the retry answers `409 conflict` naming the request in progress;
@@ -951,6 +958,11 @@ without operator action.
 | `running` | A worker holds it under a fence and lease (§5.1); an `ingest` operation, the owner of its staging claim. |
 | `succeeded` | Terminal. `result` names the release or draft produced. |
 | `failed` | Terminal. `error` is a problem document (§9.4). |
+
+Every transaction that moves a `publish` or `ingest` operation to `succeeded`
+or `failed` appends its terminal event (T7) in the same transaction, so the
+event stream (§8.3) shows how it ended. That includes every abandonment below
+and recovery-mode entry (T9), not only the commits of T1 and T3.
 
 A worker whose lease lapses is superseded by the next claim; its late commit
 is refused by the fence. A `publish` job is safe to run again, because its
@@ -1659,9 +1671,9 @@ Entry runs as one transaction (T9). It:
    mode;
 3. marks every staging claim from an earlier epoch `abandoned`, clears its
    payload (compilation §3.5) and fails its `ingest` operation, if one is
-   still `running`, with `ingestion-abandoned` (§8.2);
+   still `running`, with `ingestion-abandoned` and its terminal event (§8.2);
 4. fails every `queued` or `running` `publish` job with
-   `recovery-mode-entered` (§8.2);
+   `recovery-mode-entered` and its terminal event (§8.2);
 5. performs execution and recovery's entry effects: it closes every machine
    scope's gate, takes over every non-terminal operation into the new epoch
    (each in `committed`, `sending` or `verifying` becomes `unresolved`), and
@@ -1924,10 +1936,10 @@ equals neither the restored epoch nor the lost one.
 | Request | Same key while the first is in flight | waits on the key's lock, then replays or executes; on a draft entry route whose first request still holds a live claim, `409 conflict` (§7.2) | one effect |
 | Request | Entry retried with a key whose record predates this recovery start | `409 conflict` naming the stored entry (§12.4) | nothing |
 | Request | Key whose record is from an earlier epoch | `409 conflict` naming the stored request and its epoch (§7.2) | nothing |
-| Request | Keyed fingerprint whose digest-key version the provider can no longer compute under | `422`; under a new key, an ingestion whose operation is still active is `409 conflict` naming it (§7.1, §7.3) | nothing |
+| Request | Keyed fingerprint whose digest-key version the provider can no longer compute under | `422`; under a new key, an ingestion whose operation is still active is `409 conflict` naming it (§7.1, §7.3), and a draft entry that compilation refused after its claim existed ingests afresh (§7.1) | nothing; under the new key, a draft entry refused again leaves another abandoned claim and its orphans |
 | Draft | ETag mismatch | `412` | nothing |
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
-| Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record; orphans if past compilation §2.3 step 6 |
+| Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record and act; orphans if past compilation §2.3 step 6 |
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
 | Publish | Moved head, or a covered machine's import base changed (§4.2) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
@@ -1974,8 +1986,8 @@ under the recovery-start flag before entry, create none.
    than the one the draft or snapshot read.
 9. **Every committed API request has an act and an idempotency record** in
    its own transaction; no refused request has either, except a draft entry
-   route refused after its staging claim exists, which commits the refusal's
-   idempotency record (§7.2). Transactions that serve
+   route refused after its staging claim exists, which commits both for the
+   refusal (§7.2). Transactions that serve
    no request record timeline entries instead.
 10. **No request body, secret value or ciphertext in an idempotency record, an
     act or a problem document.**
@@ -2021,6 +2033,9 @@ each (design §7.7 consequences):
   and of no other machine (T5c);
 - a lapsed `publish` job claimed again and its first worker's completion
   refused;
+- leaving recovery mode racing an inventory request, refused while the new
+  machine's scope is not released, with a control that reads installation
+  state `FOR SHARE` and leaves;
 - two concurrent rotations of one service identity, and a rotation racing its
   identity revocation, leaving at most one valid token and none after the
   revocation, with a control that drops the principal lock; a reissue after a
