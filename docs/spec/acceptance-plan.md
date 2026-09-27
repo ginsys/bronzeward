@@ -281,7 +281,8 @@ after.
    deadlines, maximum attempts, expiry and maximum observation age; `h-viewer` reads its redacted
    whole-configuration diff.
 3. `h-approver` approves it.
-4. From snapshots taken before step 2 (`bin/inject db-snapshot`, `bao-snapshot`): `h-all` authors,
+4. From one restore of snapshots taken before step 2 (`bin/inject db-snapshot`, `bao-snapshot`),
+   running these three cases in order, so the third reuses the first's fragment revision: `h-all` authors,
    publishes, plans and approves a change; as the automation identity's responsible human,
    approves a plan the automation identity created from the S2 release; and, after `h-author`
    drafts an unrelated change and `h-publisher` publishes it as a later release that reuses
@@ -321,8 +322,9 @@ entries.
 
 **Preconditions.** S3's plan `approved`. DS rows 001 to 023, with controls 006, 008 and 011, re-run
 through the implementation's own controller and Talos client over the worker's own endpoint,
-reaching DS's outcomes, with rows 012–014 as direct-route variants reaching row 015's outcome (the
-proxy's late landings are S6.2's): the condition
+reaching DS's outcomes, with rows 012–014 as the direct-route variants of ER §3.5: 012 and 014
+reach row 015's outcome, and 013's accounting at the executor's exit is refused before it succeeds
+after the settle floor (the proxy's late landings are S6.2's): the condition
 of [ER §3.5](execution-recovery.md#35-talos-client-and-route) and the first item of
 [ER §9.2](execution-recovery.md#92-required-verification).
 
@@ -680,7 +682,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | C §15: claim lease extension by its owner only, takeover of `held` and `resumed` claims only after lapse, stale owner, crash inside the draft transaction, provider unreachable | S1 negative controls plus *check* | #22 |
 | C §15: SR and SP matrices through the compiler's path, with import-base references and SP's oracle over Bronzeward's own log and support formats; fidelity check | S2 precondition and negative controls | #23 |
 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | the scenario of each clause's issue, plus *check* for the rest | #21 to #29 |
-| ER §9.2: DS rows 001–023 through the implementation, with controls 006, 008, 011 | S4 precondition | #26 |
+| ER §9.2: DS rows 001–023 through the implementation over the worker's endpoint, with controls 006, 008, 011 and row 013's early accounting refused; if the executor's fallback is taken, the rows through it and the leak scan of its channel | S4 precondition plus *check* for the scan | #26 |
 | ER §9.2: sending only after the attempt commits; each §3.2 and §3.3 lock with its unlocked control | S4, S3 (DS row 003), S4 negative controls (DS row 011) plus *check* | #25, #26 |
 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing; the bound exhausted after a lost response leaves no further attempt and ends `failed` | S3, S4 negative controls; *check* for the last two | #25, #26, #28 |
 | ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls | #25 |
