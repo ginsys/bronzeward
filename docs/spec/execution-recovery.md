@@ -413,11 +413,11 @@ Every attempt, the first included, is recorded by an **attempt transaction**
 before its request is sent; the timeline therefore shows the commitment and the
 attempt before any Talos request. The attempt transaction takes the same locks
 as §3.2, repeats its comparisons 1–3 and 6, against newly gathered §3.1
-evidence recorded for the operation when it is a retry, except comparison 2's
-`Desired` term: a publication after the commitment does not stop the committed
-operation, which applies its bound release and leaves the machine pending
-convergence towards the new one (§1), and adds, in the
-prototype's numbering (DS §2.1):
+evidence recorded for the operation when it is a retry, and adds, in the
+prototype's numbering (DS §2.1), comparisons 7 to 9 below. It does not repeat
+comparison 2's `Desired` term: a publication after the commitment does not stop
+the committed operation, which applies its bound release and leaves the machine
+pending convergence towards the new one (§1). The added comparisons:
 
 7. the recording controller is the operation's current owner at the current
    generation and epoch, and the operation is `committed`, or `unresolved` with
@@ -641,16 +641,8 @@ timeline. It records the machine identity, assignment revision, running Talos
 version, configuration digest, machine-configuration resource version and the
 bound health results. Values matching the bound postconditions establish them
 and yield `completed`; a value that contradicts them, such as another digest,
-yields `failed`; an observation that could not read a value does neither. A
-bound health check has a **convergence window**: a failed health result in a
-completion observation taken before the recorded verification deadline is
-recorded and yields neither, the controller takes further completion
-observations, and the first that establishes every postcondition yields
-`completed`; a completion observation taken at or after the deadline that
-still reports it failed yields `failed` **(choice §10.25)**. The machine
-identity, assignment revision and configuration digest have no window: once
-every attempt is accounted for, no request of the operation can still change
-them. Nor does one when a recorded observation of the
+yields `failed`; an observation that could not read a value does neither.
+Nor does a completion observation yield either when a recorded observation of the
 machine with a higher basis (§4.1), of any purpose, reports for any bound
 postcondition (the machine identity, the assignment revision, the
 configuration digest or a bound health check) a value that differs from the
@@ -663,7 +655,16 @@ recorded its result does not, and its result, recorded after the `Applied`
 change, opens no drift record (§6.1). A digest change that persists is
 detected by the next `drift` observation, not prevented; a late contradiction
 of the identity, the assignment revision or a bound health check with an
-unchanged digest reopens nothing (§9.3). The
+unchanged digest reopens nothing (§9.3).
+
+A bound health check has a **convergence window**: a failed health result in a
+completion observation taken before the recorded verification deadline is
+recorded and yields neither, the controller takes further completion
+observations, and the first that establishes every postcondition yields
+`completed`; a completion observation taken at or after the deadline that still
+reports it failed yields `failed` **(choice §10.25)**. The machine identity,
+assignment revision and configuration digest have no window: once every attempt
+is accounted for, no request of the operation can still change them. The
 transaction that records `failed` also opens a drift record when the completion
 observation's digest differs from the `Applied` digest, or records the
 observation on the one already open, because releasing the scope makes that

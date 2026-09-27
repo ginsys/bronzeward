@@ -292,7 +292,9 @@ after.
    S2 release; `h-all` authors, publishes, plans and approves a change; and, after `h-author`
    drafts an unrelated change and `h-publisher` publishes it as a later release that reuses
    `h-all`'s fragment revision unchanged, `h-all` approves `h-publisher`'s plan for that release.
-   These plans stay out of the integrated run, where the controller could commit them before S4.
+   Each of the two publications starts from a draft opened for it (`POST /drafts`), whose
+   returned ETag every mutation sends in `If-Match` and replaces, as in S2 step 1. These plans
+   stay out of the integrated run, where the controller could commit them before S4.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding),
 [§3.2](execution-recovery.md#32-the-commitment-transaction) comparisons 1 and 2,
@@ -311,7 +313,8 @@ are marked self-approval with exactly these reason sets, since every reason that
 `409`. The worker's assignment changed after planning: commitment refused by comparison 2. A plan
 from S1's import release, which S2 superseded as the worker's `Desired`: `409 conflict` naming the
 S2 release, no plan created. From a restore of the step 4 snapshots, the S2 release planned as in
-step 2, a later release published for the worker, then the plan approved, which does not compare
+step 2, a later release published for the worker from a draft opened for it (as in step 4), then
+the plan approved, which does not compare
 `Desired`: commitment refused by comparison 2, since `Desired` changed, and nothing sent; S4's
 commitment of the same plan with no publication between is the control (ER choice §10.24). The
 publication racing the commitment itself is a *check* (§7.1). A plan
@@ -530,8 +533,9 @@ taken, a worker plan is approved but not committed (the pre-entry plan; ER §1 s
 control-plane `apply-config` plan), and A commits another worker plan and is paused before its attempt (S6.1's stale owner). At *T*:
 `bin/inject db-snapshot`. After *T*: B starts, takes the operation over, classifies it safe to retry
 on a recovery observation and records an attempt whose request is held by pausing the worker; a
-second worker plan is approved; an approval is revoked; an approver's subject is added to
-`deniedSubjects` and then its identity is revoked; then `bin/inject bao-snapshot`.
+second worker plan is approved; an approval is revoked; `h-all`'s subject is added to
+`deniedSubjects` and then its identity is revoked, leaving `h-approver` for step 9; then
+`bin/inject bao-snapshot`.
 
 **Steps.**
 
@@ -557,12 +561,12 @@ second worker plan is approved; an approval is revoked; an approver's subject is
    deadline for the attempt the restore erased, each with its recovery observation; check
    dependencies under the recovery identities. Then pause the control plane, take `restoration`
    observations, reclassify the restored operation and mark the scopes.
-8. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
-   has committed. B's job worker runs the `publish` job queued in step 3; once it has succeeded
-   and changed the worker's `Desired`, `h-recovery` marks the worker scope again against that
-   release (ER §7.3 step 6, §7.4).
-9. **Release** the worker scope; `h-publisher` and `h-approver` plan and approve a worker change in
-   the new epoch. With B paused, A's executor tries to commit that plan; unpause B, which commits
+8. **Release** the worker scope.
+9. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
+   has committed. B's job worker runs the `publish` job queued in step 3, whose worker change T3
+   admits only because the worker scope is released (PA §12.2); it changes the worker's
+   assignment and `Desired`. `h-publisher` and `h-approver` plan and approve, from that release, a
+   worker change in the new epoch. With B paused, A's executor tries to commit that plan; unpause B, which commits
    it and applies it as S4. If the held request landed, the change is a revert binding the drift
    record, as in S5 step 6.
 10. Unpause the control plane; after a successful `restoration` observation, re-mark and release

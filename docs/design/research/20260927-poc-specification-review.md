@@ -464,7 +464,7 @@ to F1. Beyond the PoC: detector precision, digest key rotation, clock skew, gene
 ingestion, kinds not run, tracer limits, embedded formatting, exact-copy leak detection and
 metal-mode validation.
 
-**Found by this review:**
+**Found by this review (PR19, PR13), or carried in and left to the owner (§7 E and G):**
 
 - **PR19, pre-send identity, with G.** Needs ER §2 to bind machine identity as a precondition and
   ER §3.2 comparison 3 to check it, and the same rule to define what a restoration read must match
@@ -640,7 +640,7 @@ and the row count stated in the line must match.
 
 | Criterion of ginsys/bronzeward#20 | Where | State |
 |---|---|---|
-| 1. Trace properties to evidence and contracts; resolve inconsistencies and required gaps | §4–§6, §10 | Traced. §6 items 1, 2, 4, 6 and 7 and §7 C, D, F and H–N are repaired by ginsys/bronzeward#56; the rest are disclosed, need no change or are gaps assigned in §10 |
+| 1. Trace properties to evidence and contracts; resolve inconsistencies and required gaps | §4–§6, §10 | Traced. §6 items 1, 2, 4, 6 and 7 and §7 C, D, F and H–N are repaired by ginsys/bronzeward#56, and §7 E by this change (ER §4, choice §10.25); the rest are disclosed, need no change or are gaps assigned in §10 |
 | 2. E3 disposition and design wording; no full-E3 claim | §8; design §18.1, §18.3, §18.5; `CONTRIBUTING.md` | Recorded here and in the design |
 | 3. Refine every P issue before removing its label | §11 | Text ready; the issues are not yet edited and keep their labels |
 | 4. Approve an integrated acceptance plan | [AP](../../spec/acceptance-plan.md) | Plan landed; approval is the owner's |
@@ -661,7 +661,8 @@ and the row count stated in the line must match.
 
 - ginsys/bronzeward#20: the owner's acceptance (criterion 5), gap G (gap E is decided), and approval of the
   acceptance plan (criterion 4); every flagged choice, F1 to F10, is decided (§9).
-- ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
+- ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N; §7 E
+  is fixed by this change instead (ER §4, choice §10.25).
 - ginsys/bronzeward#14: a note that the role-loss question (F5) and the ingestion role (F4) were
   decided on ginsys/bronzeward#20.
 - ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text with the AP §7.1 rows its Required
