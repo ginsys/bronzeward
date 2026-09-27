@@ -331,7 +331,7 @@ Its effects:
   each is conditional on its own generation;
 - the draft transaction writes the draft, its reference rows and the claim's
   `released` state in one transaction, so a crash inside it leaves the claim
-  unreleased with its payload intact and no draft, which is E1's
+  unreleased with its payload intact and nothing of its draft write committed, which is E1's
   `crashed-in-db-txn` result (E1 4.2), and a successful commit leaves nothing
   to redo;
 - a takeover whose decryption fails, for example with the provider unreachable,

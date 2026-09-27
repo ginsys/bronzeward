@@ -183,7 +183,13 @@ observation.
 - The same under encrypted staging: takeover by a second ingestion principal only after lease lapse;
   the old owner's draft transaction refused; a takeover with nothing to decrypt abandons; with
   OpenBao partitioned the taker keeps the claim `resumed`
-  ([C §3.4](compilation.md#34-takeover-e1-decision-2)). A crash inside the draft transaction: the
+  ([C §3.4](compilation.md#34-takeover-e1-decision-2)). Takeover timing, for both states: a
+  takeover of the `held` claim, and then of that `resumed` claim, each refused while the current
+  owner's lease is live and accepted once it has lapsed, before the absolute expiry.
+- Lease extension ([C §3.3](compilation.md#33-lease-extension-e1-decision-3)): a heartbeat from
+  another ingestion principal, and one from the old owner after a takeover (its older generation),
+  each refused; the owner's own heartbeat after its lease lapsed refused, the claim unchanged; the
+  owner's heartbeat while live extends the lease, the positive control. A crash inside the draft transaction: the
   draft opened in step 2 is unchanged, with the ETag it had before the ingestion; no revision or
   entry the transaction wrote is committed, and the claim stays unreleased.
 - Automation on `POST /ingestions`: `403`. An adoption record whose latest observation is older than
@@ -314,7 +320,9 @@ entries.
 [§12.1](../design/Talos_Configuration_and_Machine_Management_Design.md#121-desired-applied-and-observed-state).
 
 **Preconditions.** S3's plan `approved`. DS rows 001 to 023, with controls 006, 008 and 011, re-run
-through the implementation's own controller and Talos client, reaching DS's outcomes: the condition
+through the implementation's own controller and Talos client over the worker's own endpoint,
+reaching DS's outcomes, with rows 012–014 as direct-route variants reaching row 015's outcome (the
+proxy's late landings are S6.2's): the condition
 of [ER §3.5](execution-recovery.md#35-talos-client-and-route) and the first item of
 [ER §9.2](execution-recovery.md#92-required-verification).
 
@@ -500,7 +508,7 @@ Closing run: **a restoration run with a missed stale instance**
 
 **Preconditions.** S4 passed; both machines have `Applied`. Before time *T*, an ingestion claim is
 taken, a worker plan is approved but not committed (the pre-entry plan; ER §1 supports no
-control-plane plan), and A commits another worker plan and is paused before its attempt (S6.1's stale owner). At *T*:
+control-plane `apply-config` plan), and A commits another worker plan and is paused before its attempt (S6.1's stale owner). At *T*:
 `bin/inject db-snapshot`. After *T*: B starts, takes the operation over, classifies it safe to retry
 on a recovery observation and records an attempt whose request is held by pausing the worker; a
 second worker plan is approved; an approval is revoked; an approver's subject is added to
@@ -669,7 +677,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | --- | --- | --- |
 | C §15: ingestion success, refusal and interruption at each pipeline step, every surface scanned | S1 (import); S5 step 4 plus *check* (drift adoption); S2 negative controls (draft update) | #22, #27, #23 |
 | C §15: the compiler process's surfaces scanned over successful, rejected and interrupted publications, killed at each point before `COMMIT` while plaintext is held | *check* | #23 |
-| C §15: claim lease, takeover, stale owner, crash inside the draft transaction, provider unreachable | S1 negative controls plus *check* | #22 |
+| C §15: claim lease extension by its owner only, takeover of `held` and `resumed` claims only after lapse, stale owner, crash inside the draft transaction, provider unreachable | S1 negative controls plus *check* | #22 |
 | C §15: SR and SP matrices through the compiler's path, with import-base references and SP's oracle over Bronzeward's own log and support formats; fidelity check | S2 precondition and negative controls | #23 |
 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | the scenario of each clause's issue, plus *check* for the rest | #21 to #29 |
 | ER §9.2: DS rows 001–023 through the implementation, with controls 006, 008, 011 | S4 precondition | #26 |
