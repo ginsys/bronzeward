@@ -202,7 +202,7 @@ re-verified against aa58272; the repairs are
 | B | ER §7: a reconnecting executor passes comparison 1 on a restored approval before entry | Addressed as an operator step: ER §7.2 requires every controller stopped until entry commits, which Bronzeward neither enforces nor detects (choice ER §10.18); an enforced fence would be a new mechanism |
 | C | ER §7.2 served drafts, ingestion and publication before entry; PA §12.2 serves only liveness and entry | Fixed: ER §7.2 and choice §10.18 now match PA |
 | D | ER §6.3: the adoption record compared no machine identity | Fixed: the adopt plan binds the identity and requirement 4.4 compares it |
-| E | ER §4: a first contradicting completion read fails the operation before the verification deadline | Gap, owner decision: whether the deadline is a convergence window, and for which postconditions (§10) |
+| E | ER §4: a first contradicting completion read fails the operation before the verification deadline | Fixed by owner decision (2026-09-27): a bound health check has a convergence window up to the verification deadline; identity, assignment revision and digest fail at once (ER §4, choice §10.25) |
 | F | ER §4: an operation with no attempt could complete after a takeover | Fixed: an `apply-config` operation needs a recorded attempt to complete or fail |
 | G | ER §7.3: any successful restoration read makes a scope `ready` | Gap, owner decision: what the read must match, with PR19 (§10) |
 | H | ER §7.3: a restored operation ends `cancelled` though an attempt may have been sent after the snapshot | Fixed as wording: `cancelled` after a restore refers to the restored journal and is never proof that nothing was sent |
@@ -257,7 +257,7 @@ parenthetical calling ER "landed but not yet accepted" was removed as stale.
 
 ## 9. Owner-review choices
 
-All 78 choices the contracts put to the owner: C §16 (26), ER §10 (24), PA §17 (28). The default
+All 79 choices the contracts put to the owner: C §16 (26), ER §10 (25), PA §17 (28). The default
 recommendation is **accept as specified**. FLAG marks a choice where the reviewer recommends the
 owner decide explicitly; each is expanded below the table.
 
@@ -313,6 +313,7 @@ owner decide explicitly; each is expanded below the table.
 | ER10.22 | Leaving recovery mode needs every scope released | accept as specified |
 | ER10.23 | An ordinary plan cannot overwrite undetected drift | accept as specified |
 | ER10.24 | Every plan binds `Desired`; commitment refuses once it changed | FLAG F10, decided |
+| ER10.25 | Health-check convergence window up to the verification deadline | owner decision on gap E (§7, §10) |
 | PA17.1 | Random application identifiers; `mch` machine ID | accept as specified |
 | PA17.2 | ETags carry a random token beside the revision | accept as specified |
 | PA17.3 | Immutability enforced by database triggers | accept as specified |
@@ -472,8 +473,8 @@ metal-mode validation.
   carry the checks once it exists.
 - **E, the verification deadline.** Whether a first contradicting completion read may fail an
   operation before its deadline, or the deadline is a convergence window, and for which
-  postconditions (§7 E). An owner decision, then an ER §4 state-machine change;
-  ginsys/bronzeward#26 carries the check.
+  postconditions (§7 E). **Owner decision (2026-09-27):** a window for a bound health check
+  only, written into ER §4 (choice §10.25); ginsys/bronzeward#26 carries the check (AP §7.1).
 - **PR13, the dependency monitor.** No contract section owns the classification procedure, alert
   timing or least-privilege metadata access; design §7.6, §7.8 and §15.3 set the policy, and RC
   §6.4 is evidence, not a contract. A specification section for the monitor must land before
@@ -562,15 +563,17 @@ and the row count stated in the line must match.
 **ginsys/bronzeward#26, safe apply.**
 - Contracts: `execution-recovery.md` §1, §3.1–§3.5, §4, §5.1, §8; `persistence-api.md` §8.3.
 - Acceptance: AP S4; AP S8 for the timeline, with ginsys/bronzeward#30 and ginsys/bronzeward#31.
-- Required verification: the 8 AP §7.1 rows naming #26, among them machine revisions in commit
-  order under concurrent writers (*check*).
+- Required verification: the 9 AP §7.1 rows naming #26, among them machine revisions in commit
+  order under concurrent writers (*check*) and the health-check convergence window (*check*,
+  gap E).
 - Checks: DS rows 001–023 through the implementation with controls 006, 008 and 011 (ER §9.2),
   which include the ER §3.5 condition's rows 001–005, 012–017 and 022 through its client; digest equals the artifact's after completion; evidence, commitment and attempt
   precede the request; Desired, Applied, Observed served separately; sealed OpenBao, stale
   observation, second plan (scope-index control), frozen scope, a proxied-route plan (F3) and
   `InvalidArgument` each refused.
-- Gaps to close first: the pre-send identity check (§10, PR19) and gap E, whether the verification
-  deadline is a convergence window and the ER §4 change that follows. Owner choices F2 and F3 decided.
+- Gap to close first: the pre-send identity check (§10, PR19). Gap E decided: a bound health
+  check has a convergence window up to the verification deadline, the other postconditions none
+  (ER §4, choice §10.25). Owner choices F2 and F3 decided.
 
 **ginsys/bronzeward#27, drift.**
 - Contracts: `execution-recovery.md` §6, §8.6; `compilation.md` §2.3 (drift adoption);
@@ -654,7 +657,7 @@ and the row count stated in the line must match.
 
 ## 14. Hand-off
 
-- ginsys/bronzeward#20: the owner's acceptance (criterion 5), gaps E and G, and approval of the
+- ginsys/bronzeward#20: the owner's acceptance (criterion 5), gap G (gap E is decided), and approval of the
   acceptance plan (criterion 4); every flagged choice, F1 to F10, is decided (§9).
 - ginsys/bronzeward#56, the spec repair: §6 items 1, 2, 4, 6 and 7, and §7 C, D, F and H–N.
 - ginsys/bronzeward#14: a note that the role-loss question (F5) and the ingestion role (F4) were
@@ -662,8 +665,7 @@ and the row count stated in the line must match.
 - ginsys/bronzeward#21 to ginsys/bronzeward#31: the §11 text with the AP §7.1 rows its Required
   verification line counts, then removal of
   `status/needs-refinement` once each issue carries it and no open decision it depends on remains.
-  ginsys/bronzeward#26 and ginsys/bronzeward#29 keep the label until gap E (the verification
-  deadline) and gap G with PR19 (the restoration read and the pre-send identity check) are decided
-  and in their contracts; ginsys/bronzeward#24 keeps it until the dependency monitor has a
+  ginsys/bronzeward#26 and ginsys/bronzeward#29 keep the label until gap G with PR19 (the
+  restoration read and the pre-send identity check) is decided and in their contracts; ginsys/bronzeward#24 keeps it until the dependency monitor has a
   specification section (§10, PR13).
 - Later lifecycle work: the upgrade-transition item of design §18.3 (§8).
