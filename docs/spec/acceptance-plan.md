@@ -43,8 +43,8 @@ operator reads it (S8).
 `fixtures/versions.env`
 ([Fx §3](../design/research/20260919-investigation-fixtures.md#3-what-was-built)): Talos v1.13.6
 with one control plane and one worker in Docker, PostgreSQL 17 and a single-node OpenBao 2.6.1 with
-KV v2 and Transit. `bin/up` creates it; `bin/inject` kills, pauses and partitions any container,
-snapshots and restores the database and OpenBao, soft-deletes and destroys KV versions and deletes
+KV v2 and Transit. `bin/up` creates it; `bin/inject` kills, pauses and partitions the database,
+OpenBao and either node, snapshots and restores the database and OpenBao under a name, soft-deletes and destroys KV versions and deletes
 Transit keys; `bin/evidence` records digests and scans for synthetic secrets with a positive
 control; `bin/down` removes it. This is design §7.7's selected profile in its single-instance
 topology. Every secret is synthetic, and each is a scan pattern.
@@ -53,7 +53,11 @@ topology. Every secret is synthetic, and each is a scan pattern.
 none changing a pin the Phase-0 evidence was captured against:
 
 - the Bronzeward server built from the commit under test, as controller instance A, and a second
-  instance B for the takeover and restoration scenarios;
+  instance B for the takeover and restoration scenarios, each a container that `bin/inject` kills,
+  pauses and starts like the others;
+- `bin/inject linksplit <instance> <node>` and `linkjoin <instance> <node>`, dropping one
+  instance's traffic to one node's Talos API while its database and OpenBao stay reachable, since
+  `netsplit` detaches the whole container;
 - a disposable OIDC issuer ([PA §10.1](persistence-api.md#101-humans-oidc)) with synthetic humans
   `h-author`, `h-publisher`, `h-approver`, `h-recovery`, `h-viewer`, each holding the role it
   names, and `h-all`, holding `author`, `publisher` and `approver`; group claims mapped to roles in
@@ -285,7 +289,8 @@ after.
    deadlines, maximum attempts, expiry and maximum observation age; `h-viewer` reads its redacted
    whole-configuration diff.
 3. `h-approver` approves it.
-4. From one restore of snapshots taken before step 2 (`bin/inject db-snapshot`, `bao-snapshot`),
+4. From one restore of snapshots taken before step 2 (`bin/inject db-snapshot s3-step4`,
+   `bao-snapshot s3-step4`; restored with `db-restore s3-step4`, `bao-restore s3-step4`),
    running these three cases in order, so each plan is made from the worker's `Desired` at that
    moment (ER §2) and the third reuses the second's fragment revision: as the automation
    identity's responsible human, `h-all` approves a plan the automation identity created from the
@@ -325,10 +330,12 @@ sent; a revocation started while a commitment holds the approval waits for it, a
 inserts without the lock does not wait (DS row 003). The approver's identity revoked before
 commitment, and after it with no attempt: the plan cannot commit; or its operation goes
 `unresolved` with its scope held, each transition on the timeline, then `cancelled`, and nothing is
-sent (ER §3.3). From a restore of the step 4 snapshots, the S2 release planned and approved as in
-steps 2 and 3, then `h-approver`'s `approver` group removed at the issuer: the plan commits and its
-attempt is admitted, while `h-approver`'s next approval, under a token without the role, is `403`
-(PA choice §17.23); the approval-revocation control above, which refuses, is the contrast. Every
+sent (ER §3.3). From a restore of the step 4 snapshots, the S2 release planned as in step 2,
+OpenBao paused (`bin/inject pause openbao`) so that the executor's use-time check (ER §3.1 item 2)
+holds commitment, the plan approved as in step 3, then `h-approver`'s `approver` group removed at
+the issuer and `h-approver`'s next approval, under a fresh token without the role, `403`; with no
+operation yet on the timeline, `bin/inject unpause openbao`: the plan commits and its attempt is
+admitted (PA choice §17.23); the approval-revocation control above, which refuses, is the contrast. Every
 dependency `retained` and the plan unapproved: nothing dispatched.
 
 **Retained evidence.** Plan and approval records, the diff as served, and each case's timeline
@@ -531,15 +538,15 @@ Closing run: **a restoration run with a missed stale instance**
 **Preconditions.** S4 passed; both machines have `Applied`. Before time *T*, an ingestion claim is
 taken, a worker plan is approved but not committed (the pre-entry plan; ER §1 supports no
 control-plane `apply-config` plan), and A commits another worker plan and is paused before its attempt (S6.1's stale owner). At *T*:
-`bin/inject db-snapshot`. After *T*: B starts, takes the operation over, classifies it safe to retry
+`bin/inject db-snapshot s7-t`. After *T*: B starts, takes the operation over, classifies it safe to retry
 on a recovery observation and records an attempt whose request is held by pausing the worker; a
 second worker plan is approved; an approval is revoked; `h-all`'s subject is added to
 `deniedSubjects` and then its identity is revoked, leaving `h-approver` for step 9; then
-`bin/inject bao-snapshot`.
+`bin/inject bao-snapshot s7-provider`.
 
 **Two runs.** The **nominal run**, part of the integrated run (§2), follows ER §7.2 and §7.3 step 1:
 at step 1, A is stopped as well as B and established stopped before either restore, and stays
-stopped; step 4, the step 9 partition and A's commitment attempt in step 9 are skipped, and the
+stopped; step 4, the step 9 link cut and A's commitment attempt in step 9 are skipped, and the
 pass criteria and controls about A do not apply. The **closing run** that ER §9.3 item 3 names, with
 a missed stale instance, runs the steps as written, from a fresh `bin/up` outside the integrated
 run: it breaks quiescence on purpose, to show the fences refusing what an operator missed.
@@ -548,7 +555,8 @@ run: it breaks quiescence on purpose, to show the fences refusing what an operat
 
 1. **Restore.** Stop B and record the time. A stays paused, not stopped: it is the missed stale
    instance, whose owner generation the restore makes current again. Restore the database to *T*
-   and OpenBao to its snapshot (`bin/inject db-restore`, `bao-restore`), paired as PA §12.3 requires:
+   and OpenBao to its snapshot (`bin/inject db-restore s7-t`, `bao-restore s7-provider`), paired as
+   PA §12.3 requires:
    the provider backup no older than the database's.
 2. **Recovery start.** Start B with the recovery-start flag.
 3. **Entry.** `h-recovery` records entry through the API, naming both restored backups, `database`
@@ -565,8 +573,11 @@ run: it breaks quiescence on purpose, to show the fences refusing what an operat
    floor is not a bound (ER §5.2), so a run in which the request has not landed by step 7's
    accounting is repeated, not passed.
 6. `h-recovery` re-records the identity revocation; the automation token is reissued with the
-   server-side tool; `h-author` starts an ingestion into the second draft through B, with the same
-   ETag, which A's refused request left unchanged.
+   server-side tool. Through B, `h-recovery` requests a takeover of the restored operation, which
+   entry's takeover already gave B: it stays `unresolved`, and its generation advances with the new
+   epoch as its owner epoch, issued under the epoch B adopted at entry (PA §5.1). `h-author` starts
+   an ingestion into the second draft through B, with the same ETag, which A's refused request left
+   unchanged.
 7. Account every scope with one decision after the settle floor, using the maximum transport
    deadline for the attempt the restore erased, each with its recovery observation; check
    dependencies under the recovery identities. Then pause the control plane, take `restoration`
@@ -575,11 +586,12 @@ run: it breaks quiescence on purpose, to show the fences refusing what an operat
 9. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
    has committed. B's job worker runs the `publish` job queued in step 3, whose worker change T3
    admits only because the worker scope is released (PA §12.2); it changes the worker's
-   assignment and `Desired`. Partition B from the worker (`bin/inject`), so that B's executor
-   cannot gather the ER §3.1 evidence a commitment needs; through B, `h-publisher` and
-   `h-approver` plan and approve, from that release, a worker change in the new epoch: a revert
-   binding the drift record the held request's landing opened, as in S5 step 6. A's executor
-   tries to commit that plan; heal B's partition, and B commits it and applies it as S4.
+   assignment and `Desired`. Cut B's link to the worker (`bin/inject linksplit B worker`, §2), so
+   that B's executor cannot gather the ER §3.1 evidence a commitment needs while B still serves
+   the API from the database; through B, `h-publisher` and `h-approver` plan and approve, from that
+   release, a worker change in the new epoch: a revert binding the drift record the held request's
+   landing opened, as in S5 step 6. A's executor tries to commit that plan; once A's refusal is on
+   the timeline, `bin/inject linkjoin B worker`, and B commits it and applies it as S4.
 10. Unpause the control plane; after a successful `restoration` observation, re-mark and release
     its scope.
 11. **Exit** recovery mode.
@@ -604,8 +616,8 @@ the owner, generation and epoch; its job
 claim, takeover and ingestion start are refused by the process-epoch comparison (PA §5.1). Its
 commitment of the pre-entry plan is refused, by comparisons 1 and 6 among others. In step 9 its commitment of
 the new-epoch plan on the released scope, which passes every other comparison, is refused by the
-process-epoch comparison. After entry B takes over and starts an ingestion in the new epoch
-(PA §16). The restored operation, whose
+process-epoch comparison. In step 6 B, after its own entry, takes over with the new epoch as the
+owner epoch and starts an ingestion in the new epoch (PA §16). The restored operation, whose
 journal holds no attempt, ends `cancelled`; the held request's landing is recorded as drift at
 the scope's marking, not applied over, and reverted only by the step 9 plan. The revoked approver is refused before and after entry, and
 every pre-restore automation token until reissued. The worker scope is `ready`, is released and
@@ -727,13 +739,13 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing; the bound exhausted after a lost response leaves no further attempt and ends `failed` | S3, S4 negative controls; *check* for the last two | #25, #26, #28 |
 | ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls | #25 |
 | ER §9.2: a plan for a release that is not the machine's `Desired` refused at creation; a commitment refused after a publication that changed `Desired`, with S4's commitment as the control; a publication racing the commitment waits for it or precedes it, with the unlocked control; a publication after commitment leaves the attempt admitted (ER §3.3) | S3 negative controls plus *check* for the race and the attempt | #25 |
-| ER §9.2: a bound health check failing before the verification deadline then passing: `completed`; failing at or after it: `failed`; unreadable at it: `unresolved`; a contradicting digest before it: `failed` at once | *check* | #26 |
+| ER §9.2: a bound health check failing before the verification deadline then passing: `completed`; failing at or after it: `failed`; unreadable at it: `unresolved`; a contradicting digest before it: `failed` at once, the same transaction opening a drift record (ER §4) | *check* | #26 |
 | ER §9.2: an `apply-config` operation with no attempt not completed by a completion observation of its artifact applied out of band | *check* | #28 |
 | ER §9.2: assignment change refused while the scope is held; comparison 6 under a freeze and under recovery mode before release | S4, S7 negative controls | #26, #29 |
 | ER §9.2: takeover at start; the §5 precedence; PA §16: a takeover keeps `unresolved` and refuses a terminal operation | S6.1 plus *check* | #28 |
 | ER §9.2: identity revocation before commitment, after it with no attempt, after an attempt with its retry refused | S3 negative controls; *check* for the last | #25, #28 |
 | ER §9.2: observation ordering, contradicting higher-basis reads, confirmed reads, the late-read residual | *check* | #28, #27 (adoption read) |
-| ER §9.2: plan and commitment refusals on undetected drift; drift detection, freeze, adoption record and revert cases, with the leak screen | S5 and its negative controls | #27 |
+| ER §9.2: plan and commitment refusals on undetected drift; drift detection, freeze, adoption record and revert cases, with the leak screen (a record opened with a `failed` operation is the health-check *check* above) | S5 and its negative controls | #27 |
 | ER §9.2: recovery-mode entry after a restore older than a takeover, an approval, a revocation and an attempt | S7 | #29 |
 | ER §9.2: the complete existing-cluster E6 slice | the integrated run | #31 |
 | PA §16: `FOR SHARE` at publication (DB row 011) | S2 negative controls | #23 |
