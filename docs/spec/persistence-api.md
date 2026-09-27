@@ -1445,12 +1445,11 @@ under a single named role (design §13.7 item 2).
 
 Human-only routes refuse automation even where a role would allow it:
 approval, recovery and identity revocation because automation never holds
-those roles (design §13.7 item 2); and, as an interim position, ingestion
-(with its marks, takeover and abandonment) and inventory creation, which
-require `author` held by a human **(choice §17.22)**. Design §13.7 lists
-"which role performs the privileged ingestion that feeds an adoption" among the
-questions it does not settle, as an owner decision, and names no role for
-inventory records. An adoption plan is a plan: a `publisher` creates it, as
+those roles (design §13.7 item 2); and ingestion (with its marks, takeover and
+abandonment) and inventory creation, which require `author` held by a human
+**(choice §17.22)**. Design §13.7 left "which role performs the privileged
+ingestion that feeds an adoption" to the owner, who decided it on #20, and
+names no role for inventory records. An adoption plan is a plan: a `publisher` creates it, as
 every plan (design §13.7 item 2; owner decision 2a on #14), and an `approver`
 approves it, as design §13.7 item 3 already says.
 
@@ -2196,8 +2195,8 @@ design and evidence do not settle the question. Each is marked in place as
     header.
 21. **Both unsettled self-approval cases are marked, each with its reason**
     (§10.5). Alternative: mark neither, or only (b).
-22. **Interim, until the owner decides the question design §13.7 leaves open
-    ("which role performs the privileged ingestion that feeds an adoption"):
+22. **The owner's answer to the question design §13.7 left open ("which
+    role performs the privileged ingestion that feeds an adoption"):
     ingestion, with its marks, takeover and abandonment, and inventory
     creation need a human `author`; a `publisher` creates adoption plans, as
     every plan, and an `approver` approves them** (§9.2, §10.3). Owner

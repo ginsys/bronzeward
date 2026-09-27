@@ -269,8 +269,8 @@ after.
 3. `h-approver` approves it.
 4. From snapshots taken before step 2 (`bin/inject db-snapshot`, `bao-snapshot`): `h-all` authors,
    publishes, plans and approves a change; approves a plan the automation identity created; and,
-   after `h-author` publishes a later release that reuses `h-all`'s fragment revision unchanged,
-   approves a plan for that release. These plans stay out of the integrated run, where the
+   after `h-author` drafts an unrelated change and `h-publisher` publishes it as a later release
+   that reuses `h-all`'s fragment revision unchanged, approves a plan for that release. These plans stay out of the integrated run, where the
    controller could commit them before S4.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding),
@@ -486,8 +486,7 @@ Closing run: **a restoration run with a missed stale instance**
 
 **Preconditions.** S4 passed; both machines have `Applied`. Before time *T*, an ingestion claim is
 taken, a control-plane plan is approved but not committed, and A commits a worker plan and is
-paused before its attempt (S6.1's stale owner), with a `publish` job queued and unclaimed at the
-pause. At *T*:
+paused before its attempt (S6.1's stale owner). At *T*:
 `bin/inject db-snapshot`. After *T*: B starts, takes the operation over, classifies it safe to retry
 on a recovery observation and records an attempt whose request is held by pausing the worker; a
 second worker plan is approved; an approval is revoked; an approver's subject is added to
@@ -501,8 +500,10 @@ second worker plan is approved; an approval is revoked; an approver's subject is
    the provider backup no older than the database's.
 2. **Recovery start.** Start B with the recovery-start flag.
 3. **Entry.** `h-recovery` records entry through the API, naming both restored backups, `database`
-   and `provider`, with their ages; a new epoch is minted.
-4. Unpause A: it tries the attempt it was paused before, its job worker tries to claim the queued
+   and `provider`, with their ages; a new epoch is minted. Entry fails every queued `publish` job
+   (PA §12.2); `h-publisher` then publishes through B, whose recovery start runs no job worker, so
+   the new-epoch `publish` job stays queued.
+4. Unpause A: it tries the attempt it was paused before, its job worker tries to claim that
    `publish` job, and its executor tries to commit the approved control-plane plan. Through A,
    `h-recovery` requests a takeover of the restored operation and `h-author` starts an ingestion.
 5. Unpause the worker: the held request may land.
@@ -536,8 +537,9 @@ second worker plan is approved; an approval is revoked; an approver's subject is
 **Pass criteria.** Before entry, B answers every request but liveness and entry
 `409 recovery-mode-active` and runs no executor. After entry every scope is pre-restore
 unaccounted, every non-terminal operation is `unresolved` under B, and the ingestion claim is
-abandoned. Each of A's five writes in step 4, the attempt, the job claim, the commitment, the
-takeover and the ingestion start, is refused by the epoch term, and after entry B takes over and
+abandoned. A's attempt, under its pre-entry fence token, is refused by the epoch term; its job
+claim, commitment, takeover and ingestion start are refused by the process-epoch comparison
+(PA §5.1). After entry B takes over and
 starts an ingestion in the new epoch (PA §16). The restored operation, whose
 journal holds no attempt, ends `cancelled`; a landing of the held request is recorded as drift at
 the scope's marking, not applied over. The revoked approver is refused before and after entry, and

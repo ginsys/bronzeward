@@ -963,10 +963,9 @@ state is being accepted (design §12.1).
    interruption leaves no plaintext in drafts, indexes, staging, database
    writes that a base backup, log archive or storage snapshot can capture,
    responses or logs; sanitizing a record afterwards does not satisfy this
-   (design §7.1; E1 §6). Which role performs this ingestion the design leaves
-   open as an owner decision (design §13.7, "Limits and what stays open"); until
-   the owner decides, it is a human `author`'s, as in persistence's interim rule (see
-   `persistence-api.md`) **(choice §10.14)**. Ingestion records the baseline's
+   (design §7.1; E1 §6). This ingestion is a human `author`'s, as the owner
+   decided the question design §13.7 left open (persistence contract choice
+   §17.22) **(choice §10.14)**. Ingestion records the baseline's
    configuration digest (§1) over the same input it encrypts (compilation
    contract §2.3 step 8). An existing-cluster import records it the same way, so
    the handover below compares against the same digest.
@@ -1810,8 +1809,8 @@ conservative option; those that do not say so. Each is marked in place as
     approval, revocation and epoch rules. Alternative: a separate adoption
     approval resource with its own rules.
 14. **`author` performs the ingestion that feeds an adoption** (§6.3).
-    Interim: the design leaves the ingestion role open as an owner decision
-    (design §13.7, "Limits and what stays open"). The adopt plan is a
+    Design §13.7 left the ingestion role to the owner, who has decided it
+    (below). The adopt plan is a
     `publisher`'s like every plan (design §13.7 item 2), and its approval an
     `approver`'s. Owner decision, 2026-09-27 (ginsys/bronzeward#20): final,
     with persistence contract choice §17.22; automation does not ingest.
