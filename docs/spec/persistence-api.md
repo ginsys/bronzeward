@@ -39,9 +39,7 @@ Two sibling contracts share its boundaries: the
 [secret ingress and compilation contract](compilation.md) (abbreviated
 "compilation" below) and the
 [execution and recovery contract](execution-recovery.md) ("execution and
-recovery"). Both are cited by section topic and number. The execution and
-recovery contract is being revised in parallel, so its section numbers may
-change; the topic names the clause.
+recovery"). Both are cited by section topic and number.
 
 Where neither the design nor the evidence decides a question, this contract
 takes the most conservative option and marks it in place as
@@ -2082,9 +2080,6 @@ Evidence gaps this contract carries rather than closes:
   guessability was not assessed (compilation §4.1; execution and recovery's
   configuration digest). Such a digest is only as unguessable as the whole
   configuration it covers.
-- **Cross-contract points still open**: the compilation hand-off of the
-  configuration digests (§1.1 item 2) until its amendment lands, and every
-  item of §1.2 until the execution and recovery contract lands stating it.
 - **Migrations**: no v1 tool, online migration or downgrade was tested (DB
   §6.2); rule 1 of §11 relies on the operator stopping the service.
 - **Isolation**: only read committed was measured; serializable was not
