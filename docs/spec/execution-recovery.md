@@ -968,9 +968,9 @@ state is being accepted (design §12.1).
 3. **Plan and approve.** An adoption is requested as a plan with operation
    `adopt` **(choice §10.13)**, created by a `publisher` like every plan (§2;
    design §13.7 item 2) and approved by an `approver`, as design §13.7 item 3
-   allows, with the self-approval rule. The adopt plan binds the machine, its
-   assignment revision, its baseline revision (none for a machine with no
-   `Applied`), the machine's `Desired` release at plan creation (or none), the
+   allows, with the self-approval rule. The adopt plan binds the machine and
+   its identity (§2), its assignment revision, its baseline revision (none
+   for a machine with no `Applied`), the machine's `Desired` release at plan creation (or none), the
    open drift record (none for a handover), the adopted release, the baseline's
    configuration digest, a maximum observation age, its expiry, the approval
    policy, and the plan revision with its creator. It has the plan states of
@@ -988,7 +988,7 @@ state is being accepted (design §12.1).
       (for a handover, the machine still has no `Applied`);
    4. the machine's recorded observation with the highest basis (§4.1), of any
       purpose, began its read after the approval, is no older than the age the
-      plan binds, and shows the
+      plan binds, and shows the machine identity the plan binds, the
       machine's configuration digest equal to the baseline's and its
       assignment revision unchanged; a started read with no recorded result
       does not count (§9.3); and
@@ -1625,7 +1625,8 @@ fail:
 - drift detection (including no record from a read begun before an `Applied`
   change, none opened or closed by a read that a recorded higher-basis read
   supersedes, and a record opened with a `failed` operation), freeze, adoption record (success, stale observation,
-  changed-again machine, revoked approval, changed baseline revision, changed
+  changed-again machine, another machine identity, revoked approval, changed
+  baseline revision, changed
   `Desired` selection, drift record closed by a revert) and revert (success, re-drift before commitment),
   with E1's leak screen over adoption's backup-visible surfaces;
 - recovery-mode entry after a database restore to a snapshot older than a
