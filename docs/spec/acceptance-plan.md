@@ -286,12 +286,13 @@ after.
    whole-configuration diff.
 3. `h-approver` approves it.
 4. From one restore of snapshots taken before step 2 (`bin/inject db-snapshot`, `bao-snapshot`),
-   running these three cases in order, so the third reuses the first's fragment revision: `h-all` authors,
-   publishes, plans and approves a change; as the automation identity's responsible human,
-   approves a plan the automation identity created from the S2 release; and, after `h-author`
+   running these three cases in order, so each plan is made from the worker's `Desired` at that
+   moment (ER §2) and the third reuses the second's fragment revision: as the automation
+   identity's responsible human, `h-all` approves a plan the automation identity created from the
+   S2 release; `h-all` authors, publishes, plans and approves a change; and, after `h-author`
    drafts an unrelated change and `h-publisher` publishes it as a later release that reuses
-   `h-all`'s fragment revision unchanged, approves `h-publisher`'s plan for that release. These plans stay out of the integrated run, where the
-   controller could commit them before S4.
+   `h-all`'s fragment revision unchanged, `h-all` approves `h-publisher`'s plan for that release.
+   These plans stay out of the integrated run, where the controller could commit them before S4.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding),
 [§3.2](execution-recovery.md#32-the-commitment-transaction) comparisons 1 and 2,
@@ -303,7 +304,7 @@ after.
 **Pass criteria.** The plan binds every value ER §2 lists, its expected pre-dispatch digest equal to
 `Applied`'s. The approval names plan revision, approver, role and epoch; the three step 4 approvals
 are marked self-approval with exactly these reason sets, since every reason that holds is recorded
-(PA §10.5): `created-plan`, `published` and `authored-change`; `owned-automation`; and
+(PA §10.5): `owned-automation`; `created-plan`, `published` and `authored-change`; and
 `authored-reused`. The plan is `approved`, and no operation exists before commitment.
 
 **Negative controls.** Automation, and `h-recovery` alone, approving: `403`; a second approval:
@@ -321,7 +322,11 @@ sent; a revocation started while a commitment holds the approval waits for it, a
 inserts without the lock does not wait (DS row 003). The approver's identity revoked before
 commitment, and after it with no attempt: the plan cannot commit; or its operation goes
 `unresolved` with its scope held, each transition on the timeline, then `cancelled`, and nothing is
-sent (ER §3.3). Every dependency `retained` and the plan unapproved: nothing dispatched.
+sent (ER §3.3). From a restore of the step 4 snapshots, the S2 release planned and approved as in
+steps 2 and 3, then `h-approver`'s `approver` group removed at the issuer: the plan commits and its
+attempt is admitted, while `h-approver`'s next approval, under a token without the role, is `403`
+(PA choice §17.23); the approval-revocation control above, which refuses, is the contrast. Every
+dependency `retained` and the plan unapproved: nothing dispatched.
 
 **Retained evidence.** Plan and approval records, the diff as served, and each case's timeline
 entries.
@@ -706,7 +711,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | ER §9.2: sending only after the attempt commits; each §3.2 and §3.3 lock with its unlocked control | S4, S3 (DS row 003), S4 negative controls (DS row 011) plus *check* | #25, #26 |
 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing; the bound exhausted after a lost response leaves no further attempt and ends `failed` | S3, S4 negative controls; *check* for the last two | #25, #26, #28 |
 | ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls | #25 |
-| ER §9.2: a plan for a release that is not the machine's `Desired` refused at creation; a commitment refused after a publication that changed `Desired`, with S4's commitment as the control; a publication racing the commitment waits for it or precedes it, with the unlocked control | S3 negative controls plus *check* for the race | #25 |
+| ER §9.2: a plan for a release that is not the machine's `Desired` refused at creation; a commitment refused after a publication that changed `Desired`, with S4's commitment as the control; a publication racing the commitment waits for it or precedes it, with the unlocked control; a publication after commitment leaves the attempt admitted (ER §3.3) | S3 negative controls plus *check* for the race and the attempt | #25 |
 | ER §9.2: a bound health check failing before the verification deadline then passing: `completed`; failing at or after it: `failed`; unreadable at it: `unresolved`; a contradicting digest before it: `failed` at once | *check* | #26 |
 | ER §9.2: an `apply-config` operation with no attempt not completed by a completion observation of its artifact applied out of band | *check* | #28 |
 | ER §9.2: assignment change refused while the scope is held; comparison 6 under a freeze and under recovery mode before release | S4, S7 negative controls | #26, #29 |
@@ -723,6 +728,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: the epoch term and process-epoch checks; the recovery-start process in the new epoch; per-scope refusals and the recovery-start refusal | S7 | #29 |
 | PA §16: one idempotency key in flight twice, with the key-lock control | *check* | #21 |
 | PA §16: approval revocation racing commitment (DS row 003) | S3 negative controls | #25 |
+| PA §10.4: an approval surviving its approver's loss of the role, contrasted with its revocation (choice §17.23) | S3 negative controls | #25 |
 | PA §16: identity revocation racing commitment, with the lock control; its timeline entries on exactly the machines it touches (T5c) | *check* | #25 |
 | PA §16: a lapsed `publish` job claimed again | S2 negative controls | #23 |
 | PA §16: leaving recovery mode racing an inventory request, with the `FOR SHARE` control | *check* | #29 |
