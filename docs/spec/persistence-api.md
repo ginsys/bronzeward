@@ -1496,9 +1496,9 @@ rows (§12.3) **(choice §17.19)**.
 **Losing a role** without an identity revocation is not acted on
 **(choice §17.23)**. A human's roles are known only from the token presented
 with a request, so a role removed at the identity provider is not observable
-for approvals already given. Whether it should invalidate them is among the
-questions design §13.7 does not settle, as an owner decision; the available
-remedy is an identity revocation.
+for approvals already given. Whether it should invalidate them was a question
+design §13.7 left to the owner, who decided it for the PoC (choice §17.23);
+the available remedies are revoking the approval or the identity.
 
 Approval revocation is execution and recovery's; this contract records it as
 an immutable row with its act, in a transaction that first locks the approval
@@ -2210,10 +2210,11 @@ design and evidence do not settle the question. Each is marked in place as
     decision, 2026-09-27 (ginsys/bronzeward#20): no longer interim; a human
     `author` ingests and automation does not. Alternatives: `publisher` for
     ingestion; a dedicated ingestion role; automation allowed.
-23. **Interim, until the owner decides the question design §13.7 leaves open
-    (whether losing a role invalidates approvals given under it): losing a
-    role does not invalidate approvals** (§10.4). The alternative needs a
-    directory lookup or a session to observe the loss.
+23. **Losing a role does not invalidate approvals given under it** (§10.4),
+    the question design §13.7 left to the owner. Owner decision, 2026-09-27
+    (ginsys/bronzeward#20): accepted for the PoC, stated as a limit; the
+    operator revokes the approval or the identity when someone loses the role.
+    The alternative needs a directory lookup or a session to observe the loss.
 24. **Migrations by explicit command with the service stopped; startup refuses
     any schema or checksum mismatch; no rewrite of immutable rows; no
     downgrade** (§11). Alternative: migrate at startup.
