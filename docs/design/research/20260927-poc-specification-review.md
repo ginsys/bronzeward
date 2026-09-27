@@ -313,7 +313,7 @@ owner decide explicitly; each is expanded below the table.
 | ER10.22 | Leaving recovery mode needs every scope released | accept as specified |
 | ER10.23 | An ordinary plan cannot overwrite undetected drift | accept as specified |
 | ER10.24 | Every plan binds `Desired`; commitment refuses once it changed | FLAG F10, decided |
-| ER10.25 | Health-check convergence window up to the verification deadline | owner decision on gap E (§7, §10) |
+| ER10.25 | Health-check convergence window up to the verification deadline | owner decision on gap E (§7, §10), decided |
 | PA17.1 | Random application identifiers; `mch` machine ID | accept as specified |
 | PA17.2 | ETags carry a random token beside the revision | accept as specified |
 | PA17.3 | Immutability enforced by database triggers | accept as specified |
@@ -464,7 +464,7 @@ to F1. Beyond the PoC: detector precision, digest key rotation, clock skew, gene
 ingestion, kinds not run, tracer limits, embedded formatting, exact-copy leak detection and
 metal-mode validation.
 
-**Found by this review (PR19, PR13), or carried in and left to the owner (§7 E and G):**
+**Found by this review (PR19, PR13), or carried in for an owner decision (§7 E, decided, and G):**
 
 - **PR19, pre-send identity, with G.** Needs ER §2 to bind machine identity as a precondition and
   ER §3.2 comparison 3 to check it, and the same rule to define what a restoration read must match

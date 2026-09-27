@@ -553,7 +553,10 @@ second worker plan is approved; an approval is revoked; `h-all`'s subject is add
    `publish` job, and its executor tries to commit the approved pre-entry plan. Through A,
    `h-recovery` requests a takeover of the restored operation and `h-author` starts an ingestion
    into the second draft with its ETag.
-5. Unpause the worker: the held request may land.
+5. Unpause the worker and read its configuration digest until it shows the held request's
+   artifact. The closing run must show that landing detected (ER §9.3 item 3), and the settle
+   floor is not a bound (ER §5.2), so a run in which the request has not landed by step 7's
+   accounting is repeated, not passed.
 6. `h-recovery` re-records the identity revocation; the automation token is reissued with the
    server-side tool; `h-author` starts an ingestion into the second draft through B, with the same
    ETag, which A's refused request left unchanged.
@@ -565,10 +568,11 @@ second worker plan is approved; an approval is revoked; `h-all`'s subject is add
 9. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
    has committed. B's job worker runs the `publish` job queued in step 3, whose worker change T3
    admits only because the worker scope is released (PA §12.2); it changes the worker's
-   assignment and `Desired`. `h-publisher` and `h-approver` plan and approve, from that release, a
-   worker change in the new epoch. With B paused, A's executor tries to commit that plan; unpause B, which commits
-   it and applies it as S4. If the held request landed, the change is a revert binding the drift
-   record, as in S5 step 6.
+   assignment and `Desired`. Partition B from the worker (`bin/inject`), so that B's executor
+   cannot gather the ER §3.1 evidence a commitment needs; through B, `h-publisher` and
+   `h-approver` plan and approve, from that release, a worker change in the new epoch: a revert
+   binding the drift record the held request's landing opened, as in S5 step 6. A's executor
+   tries to commit that plan; heal B's partition, and B commits it and applies it as S4.
 10. Unpause the control plane; after a successful `restoration` observation, re-mark and release
     its scope.
 11. **Exit** recovery mode.
@@ -595,8 +599,8 @@ commitment of the pre-entry plan is refused, by comparisons 1 and 6 among others
 the new-epoch plan on the released scope, which passes every other comparison, is refused by the
 process-epoch comparison. After entry B takes over and starts an ingestion in the new epoch
 (PA §16). The restored operation, whose
-journal holds no attempt, ends `cancelled`; a landing of the held request is recorded as drift at
-the scope's marking, not applied over. The revoked approver is refused before and after entry, and
+journal holds no attempt, ends `cancelled`; the held request's landing is recorded as drift at
+the scope's marking, not applied over, and reverted only by the step 9 plan. The revoked approver is refused before and after entry, and
 every pre-restore automation token until reissued. The worker scope is `ready`, is released and
 dispatches under a new-epoch approval while the control-plane scope is `blocked` on its failed
 observation, until step 10 clears it. Exit succeeds only once both scopes are released, and no
