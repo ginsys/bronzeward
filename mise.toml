@@ -111,6 +111,31 @@ go -C experiments/e2-sensitivity-provenance vet ./...
 go -C experiments/e2-sensitivity-provenance test ./...
 """
 
+[tasks.dev-db]
+description = "Start a disposable development PostgreSQL at the fixture's image pin: 127.0.0.1:55433, user bronzeward, no password"
+# Trust auth, bound to loopback, removed on stop (docker stop bw-dev-pg). examples/bronzeward.yaml
+# and mise run go-db default to it. Never a deployment database.
+run = '''
+image=$(sed -n 's/^POSTGRES_IMAGE=//p' fixtures/versions.env)
+# Every path waits for readiness: an existing container may still be initialising, and one just
+# stopped may still be being removed (--rm), so it is started only once it is gone.
+# -h 127.0.0.1: the entrypoint's init server listens on the socket only, so TCP readiness means
+# the real server is up. (No docker --format templates: mise renders run scripts with Tera.)
+for _ in $(seq 30); do
+  if [ -z "$(docker ps -aq --filter 'name=^bw-dev-pg$')" ]; then
+    docker run -d --rm --name bw-dev-pg -e POSTGRES_USER=bronzeward -e POSTGRES_HOST_AUTH_METHOD=trust \
+      -p 127.0.0.1:55433:5432 "$image" >/dev/null || true
+  elif [ -n "$(docker ps -q --filter 'name=^bw-dev-pg$' --filter status=running)" ] &&
+    docker exec bw-dev-pg pg_isready -q -h 127.0.0.1 -U bronzeward; then
+    echo "postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable"
+    exit 0
+  fi
+  sleep 1
+done
+echo "dev-db: bw-dev-pg was not running and ready within 30s (docker ps -a; docker logs bw-dev-pg)" >&2
+exit 1
+'''
+
 [tasks.upstream-sync]
 description = "Check out go-kure/.github into upstream/ (gitignored) at the commit ci.yml pins the action-pin checker to"
 # Single source of truth for the revision: the `check-action-pins@<sha>` pin in ci.yml, so the
