@@ -79,7 +79,7 @@ Link checks cover inline links without titles or spaces in their destinations. T
 The implementation is the root Go module (`cmd/`, `internal/`); the Go version comes from `mise.toml`. Its `go.mod` ignores `experiments/`, whose modules are Phase-0 evidence and are checked separately. From the repository root:
 
 ```sh
-mise run go                                        # format, go.mod tidiness, build, vet and test of every module
+mise run go                                        # format, go.mod tidiness, build, vet and test checks (per module, as mise.toml lists them)
 go run ./cmd/bronzeward serve -config <file>       # the server; <file> holds `listen` and `database.dsn`
 ```
 
