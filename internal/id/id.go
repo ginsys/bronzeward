@@ -38,18 +38,22 @@ const (
 	Act                Prefix = "act"
 )
 
-// All lists every prefix of persistence-api.md §2's table.
-var All = []Prefix{
+// all is persistence-api.md §2's prefix table. It stays unexported so no caller can change what
+// New and Parse accept.
+var all = []Prefix{
 	Cluster, Machine, Fragment, FragmentRevision, Profile, ProfileRevision, Assignment,
 	AssignmentRevision, ImportBase, Draft, Release, Epoch, Request, Plan, Approval, Operation,
 	Attempt, Observation, Principal, Token, Ingestion, Act,
 }
 
+// All returns a copy of every prefix of persistence-api.md §2's table.
+func All() []Prefix { return slices.Clone(all) }
+
 var enc = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
 
 const bodyLen = 26 // ceil(128/5)
 
-// New returns a fresh identifier with prefix p. It panics if p is not in All: such an
+// New returns a fresh identifier with prefix p. It panics if p is not in the table: such an
 // identifier could be stored but never parsed back, and only a programming error produces one.
 func New(p Prefix) string {
 	if !known(p) {
@@ -90,4 +94,4 @@ func MustHave(s string, want Prefix) error {
 	return nil
 }
 
-func known(p Prefix) bool { return slices.Contains(All, p) }
+func known(p Prefix) bool { return slices.Contains(all, p) }
