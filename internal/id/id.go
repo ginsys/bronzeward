@@ -49,8 +49,12 @@ var enc = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(bas
 
 const bodyLen = 26 // ceil(128/5)
 
-// New returns a fresh identifier with prefix p.
+// New returns a fresh identifier with prefix p. It panics if p is not in All: such an
+// identifier could be stored but never parsed back, and only a programming error produces one.
 func New(p Prefix) string {
+	if !known(p) {
+		panic(fmt.Sprintf("id.New: unknown prefix %q", p))
+	}
 	var b [16]byte
 	rand.Read(b[:]) // never returns an error (crypto/rand, Go 1.24+)
 	return string(p) + "_" + enc.EncodeToString(b[:])

@@ -56,6 +56,19 @@ func TestSpecExampleParses(t *testing.T) {
 	}
 }
 
+func TestNewRefusesUnknownPrefix(t *testing.T) {
+	for _, p := range []Prefix{"", "zzz", "REL"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("New(%q) did not panic", p)
+				}
+			}()
+			New(p)
+		}()
+	}
+}
+
 func TestMustHave(t *testing.T) {
 	if err := MustHave(New(Plan), Plan); err != nil {
 		t.Fatal(err)
