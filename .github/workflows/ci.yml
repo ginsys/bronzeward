@@ -77,9 +77,9 @@ jobs:
       - run: mise run test
 
   go:
-    # The Phase-0 experiment modules under experiments/. Each is its own module; `mise run go`
-    # names them one by one rather than relying on a root module, which deliberately does not
-    # exist yet.
+    # The root module (cmd/, internal/) and the Phase-0 experiment modules under experiments/.
+    # The root go.mod ignores ./experiments; `mise run go` names each experiment module one by
+    # one.
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 10
     steps:
