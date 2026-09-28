@@ -102,19 +102,32 @@ closing paragraph.
    the liveness route.
 3. Send a request with no token, then one per token defect of PA §10.1 and §10.2, a missing, empty
    and non-string `sub` included.
-4. From a separate `bin/up` seeded with a draft, a release, a plan and a scope, walk through the API,
-   as the identity each names, the rows of the
+4. From a separate `bin/up`, walk through the API, as the identity each names, every row of the
    [design §13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy)
-   scenario table that role alone decides: every Publish, Plan and Freeze row, the Approve rows but
-   the revoked-identity one, the Revoke rows by role, and the Recover rows that deny by role.
+   scenario table that role alone denies: `h-author` publishes; `h-viewer` edits a draft, then
+   publishes; `h-approver` creates a plan; the automation identity, then `h-recovery`, approves a
+   plan; the automation identity, `h-author` and `h-publisher` each revoke an approval;
+   `h-approver` records an identity revocation; `h-viewer` freezes a scope; `h-author`,
+   `h-publisher` and `h-recovery` each unfreeze one; `h-approver` releases a scope and resolves an
+   `unresolved` operation; the automation identity enters and leaves recovery mode. Then the
+   automation identity calls every route PA §9.2 marks human only. The walk needs no seeded state:
+   the role check runs before any transaction (PA §10.3), so each request names a well-formed
+   identifier whose record need not exist, and it holds whether or not the route's own handler has
+   landed. Last, `h-recovery` records the identity revocation of `h-all`.
 5. Request a dispatch, token-issuing or role-granting path.
 
-The other rows need state S0 does not create, or lie outside the API, and are exercised where it
-exists: the adopted-baseline approval in S1; the revoked-identity approval, revocation before
-commitment and unapproved dispatch in S3; the controller's dispatch and revocation after commitment
-or attempt (DS rows 002 to 005) in S4; resolving an `unresolved` operation in S6.1; entry and scope
-release in S7. The OpenBao administrator's and break-glass rows are outside Bronzeward: break-glass
-is seen as drift in S5, and the provider's acts are S2's and S7's injections.
+Every other row of that table is exercised in the scenario whose issue builds its route, since its
+outcome needs that route's handler, state S0 does not create, or both: the adopted-baseline approval
+in S1; the automation identity's publication in S2; the automation identity's plan, a human
+approver's approval, the self-approval cases, cancellation by each role that may cancel and a
+`publisher`'s refused cancellation of another identity's plan, revocation before commitment by each
+role that may revoke, the revoked-identity approval and unapproved dispatch in S3; the controller's
+dispatch and revocation after commitment or attempt (DS rows 002 to 005) in S4; freezing by each
+role that may freeze and unfreezing in S5; resolving an `unresolved` operation in S6.1; entry and
+scope release in S7. The OpenBao administrator's and break-glass rows are outside Bronzeward:
+break-glass is seen as drift in S5, and the provider's acts are S2's and S7's injections.
+[ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31)'s integrated run covers the
+table as a whole.
 
 **Clauses exercised.** PA [§9.2](persistence-api.md#92-resources-and-routes),
 [§10.1](persistence-api.md#101-humans-oidc),
@@ -125,8 +138,9 @@ is seen as drift in S5, and the provider's acts are S2's and S7's injections.
 
 **Pass criteria.** One migrate run applies the schema; the other waits, then skips it. Every token
 defect answers `401`, except a revoked or denied subject, which answers `403 identity-revoked`; none
-creates a principal row. Each row step 4 walks ends as the table says, and each
-allowed act is recorded with its identity and role. Step 5 answers `404`: no handler exists.
+creates a principal row. Each denial step 4 walks answers `403 forbidden` and writes no act row; the
+identity revocation is recorded with its identity and role
+([PA §10.5](persistence-api.md#105-recording-every-act)). Step 5 answers `404`: no handler exists.
 
 **Negative controls.** A binary that does not know the newest migration, and a checksum mismatch,
 each refuse to start. The advisory-lock control (DB row 026) shows the concurrent-run failure
@@ -232,6 +246,11 @@ scenario runs.
    dependency records, renderer and contract record, configuration digests; `bin/evidence` records
    the worker's resource version.
 6. The dependency monitor classifies the release's dependencies.
+7. From one restore of snapshots taken before step 1 (`bin/inject db-snapshot s2-step1`,
+   `bao-snapshot s2-step1`; restored with `db-restore s2-step1`, `bao-restore s2-step1`), the
+   automation identity repeats steps 1 to 3 as itself, holding `author` and `publisher`
+   (design §13.7's automation Publish row). This step stays out of the integrated run, whose later
+   scenarios plan from step 3's release.
 
 **Clauses exercised.** C [§5.1](compilation.md#51-syntax),
 [§6](compilation.md#6-resolution-order-and-composition), [§7](compilation.md#7-validation-stages),
@@ -254,6 +273,10 @@ is `Desired` for the worker, with no plan and no operation but `publish` created
 completed `adopt` operations, and no change of the worker's resource version. Immutable rows refuse
 `UPDATE` and `DELETE`. Every dependency classifies `retained`
 ([design §7.8](../design/Talos_Configuration_and_Machine_Management_Design.md#78-poc-retention-and-recovery-policy)).
+Step 7's release is published, its edits recorded under `author` and its publication under
+`publisher` (PA [§10.3](persistence-api.md#103-authorization) and
+[§10.5](persistence-api.md#105-recording-every-act)), and no plan and no operation but `publish`
+follows it.
 
 **Negative controls.** Two authors on one ETag, of the fragment and of the profile: the second gets
 `412`, nothing persisted. A fragment or profile head moved by another publication:
@@ -323,10 +346,13 @@ the plan approved, which does not compare
 `Desired`: commitment refused by comparison 2, since `Desired` changed, and nothing sent; S4's
 commitment of the same plan with no publication between is the control (ER choice §10.24). The
 publication racing the commitment itself is a *check* (§7.1). A plan
-past its expiry: `expired`, no operation. A plan cancelled before commitment: `cancelled`, no
-operation; one cancelled after commitment with no attempt: the operation goes `unresolved`, then
-`cancelled`, and nothing is sent (ER §9.2). An approval revoked before commitment: `revoked`, nothing
-sent; a revocation started while a commitment holds the approval waits for it, and the control that
+past its expiry: `expired`, no operation. A plan cancelled before commitment, once each by its
+creator `h-publisher`, by `h-approver` and by `h-recovery`: `cancelled`, no operation, the act
+recorded under the role that permits it; `h-publisher` cancelling a plan the automation identity
+created: `403 forbidden`, the plan unchanged (design §13.7 item 6); one cancelled after commitment
+with no attempt: the operation goes `unresolved`, then `cancelled`, and nothing is sent (ER §9.2).
+An approval revoked before commitment, once by `h-approver` and once by `h-recovery`: `revoked`,
+nothing sent; a revocation started while a commitment holds the approval waits for it, and the control that
 inserts without the lock does not wait (DS row 003). The approver's identity revoked before
 commitment, and after it with no attempt: the plan cannot commit; or its operation goes
 `unresolved` with its scope held, each transition on the timeline, then `cancelled`, and nothing is
@@ -420,6 +446,10 @@ run: **drift freeze, sanitized adoption and approved revert**
 6. **Revert.** Patch the worker out of band again; the next `drift` observation opens a new drift
    record. `h-publisher` creates a revert plan binding that record and its drifted digest; `h-approver` approves it, recorded as approving an
    unseen overwrite, and unfreezes; the revert runs as S4.
+7. From one restore of snapshots taken before step 3 (`bin/inject db-snapshot s5-step3`,
+   `bao-snapshot s5-step3`; restored with `db-restore s5-step3`, `bao-restore s5-step3`),
+   `h-publisher`, `h-approver` and `h-recovery` each freeze the scope, `h-approver` unfreezing it
+   after each (design §13.7's Freeze rows). This step stays out of the integrated run.
 
 **Clauses exercised.** ER [§6.1](execution-recovery.md#61-detection),
 [§6.2](execution-recovery.md#62-freeze), [§6.3](execution-recovery.md#63-adopt),
@@ -436,7 +466,8 @@ and the revert. After step 4, `Applied` is the adopted release with the baseline
 baseline revision has advanced and the record is closed `adopted`; the new secret is found nowhere
 outside OpenBao, on success, rejection and each interruption of the ingestion. After step 6, the
 record is closed `reverted` and the digest is the revert artifact's. Step 5's result is recorded
-whichever way it falls.
+whichever way it falls. Each of step 7's freezes and unfreezes takes effect and is recorded under
+the role that permits it, as step 3's freeze is.
 
 **Negative controls.** An approved ordinary plan while the record is open: refused by comparison 6.
 A plan expecting `Applied`'s digest while the machine runs another: commitment refused on its
@@ -712,7 +743,7 @@ support them, and the reviewer's record.
 | Item 7: interrupted execution | S6 | [ginsys/bronzeward#28](https://github.com/ginsys/bronzeward/issues/28) |
 | Item 7: external restoration through explicit recovery mode | S7 | [ginsys/bronzeward#29](https://github.com/ginsys/bronzeward/issues/29) |
 | Closing paragraph: selected database/provider behaviour (§7.7) | S0 to S8 on the §2 fixture | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30) |
-| Closing paragraph: scoped authorization (§13.7) | S0 step 4, S3 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) |
+| Closing paragraph: scoped authorization (§13.7) | S0 step 4 (every denial by role alone and the human-only refusals), and each other scenario-table row in the scenario S0 names for it: S1, S2 step 7, S3, S4, S5 step 7, S6.1, S7 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22), [ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25), [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#27](https://github.com/ginsys/bronzeward/issues/27), [ginsys/bronzeward#28](https://github.com/ginsys/bronzeward/issues/28), [ginsys/bronzeward#29](https://github.com/ginsys/bronzeward/issues/29) |
 | Closing paragraph: usable operation timeline | S8 | [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30), [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 | §18.1 E6: the existing-cluster vertical slice | the integrated run (S0 to S5, S7's nominal run, S8) and S6's interruption runs (§2) | [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 
