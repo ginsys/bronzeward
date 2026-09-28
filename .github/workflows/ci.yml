@@ -90,6 +90,43 @@ jobs:
           install_args: go
       - run: mise run go
 
+  go-db:
+    # The root module's tests against PostgreSQL, in a service container at the fixture's image
+    # pin (the pin step fails when either moves without the other). BW_REQUIRE_PG turns
+    # a database that never came up into failures, not skipped tests.
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: docker.io/library/postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
+        env:
+          POSTGRES_USER: bronzeward
+          POSTGRES_DB: bronzeward
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U bronzeward -d bronzeward"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    env:
+      BW_TEST_PG_DSN: postgres://bronzeward@localhost:5432/bronzeward?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Service image is the fixture's pin
+        # Compares this file's only `image:` line with versions.env, so either side moving alone fails.
+        run: |
+          pin=$(sed -n 's/^POSTGRES_IMAGE=//p' fixtures/versions.env)
+          images=$(sed -n 's/^ *image: *//p' .github/workflows/ci.yml)
+          if [ -z "$pin" ] || [ "$images" != "$pin" ]; then
+            echo "service image(s) '$images' differ from POSTGRES_IMAGE '$pin'" >&2
+            exit 1
+          fi
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: go
+      - run: mise run go-db
+
   commit-lint:
     # PR commits only: a push to main or a merge-group ref has no PR range to lint.
     if: github.event_name == 'pull_request'
@@ -121,7 +158,7 @@ jobs:
     # Aggregator: fails on any failed or cancelled job. `commit-lint` is skipped by design outside
     # pull requests, so `skipped` counts as success only for that job.
     if: always()
-    needs: [docs, actionlint, test, go, commit-lint, action-pins]
+    needs: [docs, actionlint, test, go, go-db, commit-lint, action-pins]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:
