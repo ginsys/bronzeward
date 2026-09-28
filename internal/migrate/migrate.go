@@ -26,8 +26,9 @@ import (
 //go:embed migrations/*.sql
 var embedded embed.FS
 
-// Migration is one file migrations/NNNN_<name>.sql. Checksum is the hex SHA-256 of the file,
-// recorded when it is applied and compared at every later run and at server start.
+// Migration is one file migrations/NNNN_<name>.sql. Checksum is the hex SHA-256 of the file.
+// Name and Checksum are recorded when it is applied and compared at every later run and at
+// server start.
 type Migration struct {
 	Version  int
 	Name     string
@@ -72,10 +73,10 @@ func load(fsys fs.FS, dir string) ([]Migration, error) {
 	return ms, nil
 }
 
-// Check refuses unless schema_migrations holds exactly ms with matching checksums and the
-// installation is recorded (§11 rule 2). The server calls it before serving; it never migrates.
+// Check refuses unless schema_migrations holds exactly ms with matching names and checksums and
+// the installation is recorded (§11 rule 2). The server calls it before serving; it never migrates.
 func Check(ctx context.Context, db *sql.DB, ms []Migration) error {
-	recorded, err := recordedChecksums(ctx, db)
+	recorded, err := recordedMigrations(ctx, db)
 	if err != nil {
 		var pe *pgconn.PgError
 		if errors.As(err, &pe) && pe.Code == "42P01" { // undefined_table
@@ -85,11 +86,11 @@ func Check(ctx context.Context, db *sql.DB, ms []Migration) error {
 	}
 	var missing, edited, unknown []int
 	for _, m := range ms {
-		sum, ok := recorded[m.Version]
+		r, ok := recorded[m.Version]
 		switch {
 		case !ok:
 			missing = append(missing, m.Version)
-		case sum != m.Checksum:
+		case r.name != m.Name || r.checksum != m.Checksum:
 			edited = append(edited, m.Version)
 		}
 		delete(recorded, m.Version)
@@ -106,7 +107,7 @@ func Check(ctx context.Context, db *sql.DB, ms []Migration) error {
 		problems = append(problems, fmt.Sprintf("migrations %v are applied but unknown to this binary: the schema is newer than this binary", unknown))
 	}
 	if len(edited) > 0 {
-		problems = append(problems, fmt.Sprintf("migrations %v were applied with another checksum: edited after they were applied", edited))
+		problems = append(problems, fmt.Sprintf("migrations %v were applied with another name or checksum: edited after they were applied", edited))
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("schema: %s", strings.Join(problems, "; "))
@@ -125,22 +126,25 @@ func Check(ctx context.Context, db *sql.DB, ms []Migration) error {
 	return nil
 }
 
-func recordedChecksums(ctx context.Context, db *sql.DB) (map[int]string, error) {
-	rows, err := db.QueryContext(ctx, "SELECT version, checksum FROM schema_migrations")
+// recordedRow is one schema_migrations row's identity beyond its version.
+type recordedRow struct{ name, checksum string }
+
+func recordedMigrations(ctx context.Context, db *sql.DB) (map[int]recordedRow, error) {
+	rows, err := db.QueryContext(ctx, "SELECT version, name, checksum FROM schema_migrations")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	recorded := map[int]string{}
+	out := map[int]recordedRow{}
 	for rows.Next() {
 		var v int
-		var sum string
-		if err := rows.Scan(&v, &sum); err != nil {
+		var r recordedRow
+		if err := rows.Scan(&v, &r.name, &r.checksum); err != nil {
 			return nil, err
 		}
-		recorded[v] = sum
+		out[v] = r
 	}
-	return recorded, rows.Err()
+	return out, rows.Err()
 }
 
 // lockKey is the advisory lock every migrate run takes inside each of its transactions (§11,
@@ -165,8 +169,8 @@ var errSkip = errors.New("already applied")
 
 // Apply applies, in order, each migration not yet recorded, each in its own transaction on one
 // connection under the advisory lock, and returns the versions this call applied. It refuses a
-// database holding a migration the binary does not know, or one whose recorded checksum differs.
-// A failure stops at that migration; the ones before it stay applied.
+// database holding a migration the binary does not know, or one whose recorded name or checksum
+// differs. A failure stops at that migration; the ones before it stay applied.
 func Apply(ctx context.Context, db *sql.DB, ms []Migration) ([]int, error) {
 	return apply(ctx, db, ms, options{})
 }
@@ -222,11 +226,12 @@ func apply(ctx context.Context, db *sql.DB, ms []Migration, o options) ([]int, e
 }
 
 func applyOne(ctx context.Context, tx *sql.Tx, m Migration, o options) error {
-	var sum string
-	err := tx.QueryRowContext(ctx, "SELECT checksum FROM schema_migrations WHERE version = $1", m.Version).Scan(&sum)
+	var r recordedRow
+	err := tx.QueryRowContext(ctx, "SELECT name, checksum FROM schema_migrations WHERE version = $1", m.Version).Scan(&r.name, &r.checksum)
 	switch {
-	case err == nil && sum != m.Checksum:
-		return fmt.Errorf("recorded with checksum %s, this binary's is %s: edited after it was applied", sum, m.Checksum)
+	case err == nil && (r.name != m.Name || r.checksum != m.Checksum):
+		return fmt.Errorf("recorded as %s with checksum %s, this binary's is %s with checksum %s: edited after it was applied",
+			r.name, r.checksum, m.Name, m.Checksum)
 	case err == nil:
 		return errSkip
 	case !errors.Is(err, sql.ErrNoRows):

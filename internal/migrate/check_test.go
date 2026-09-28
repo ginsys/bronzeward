@@ -88,3 +88,34 @@ func TestCheckEditedMigration(t *testing.T) {
 	edited[0].Checksum = strings.Repeat("0", 64)
 	wantCheck(t, db, edited, "[1]", "edited")
 }
+
+// A migration file renamed without a content change keeps its version and checksum; the name
+// recorded in schema_migrations still differs from the binary's, so both Check and Apply refuse.
+func TestRenamedMigrationRefused(t *testing.T) {
+	db, ms := installed(t)
+	renamed := append([]Migration(nil), ms...)
+	renamed[0].Name = "renamed"
+	for _, c := range []struct {
+		op    string
+		err   error
+		parts []string
+	}{
+		{"Check", Check(context.Background(), db, renamed), []string{"[1]", "edited"}},
+		{"Apply", applyErr(db, renamed), []string{"migration 1", ms[0].Name, "renamed", "edited"}},
+	} {
+		if c.err == nil {
+			t.Errorf("%s accepted a renamed migration", c.op)
+			continue
+		}
+		for _, p := range c.parts {
+			if !strings.Contains(c.err.Error(), p) {
+				t.Errorf("%s: %v; want it to contain %q", c.op, c.err, p)
+			}
+		}
+	}
+}
+
+func applyErr(db *sql.DB, ms []Migration) error {
+	_, err := Apply(context.Background(), db, ms)
+	return err
+}
