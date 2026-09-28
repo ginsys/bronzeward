@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
@@ -70,8 +72,76 @@ func load(fsys fs.FS, dir string) ([]Migration, error) {
 	return ms, nil
 }
 
-// Check is completed in Task 5.
-func Check(ctx context.Context, db *sql.DB, ms []Migration) error { return errors.New("unimplemented") }
+// Check refuses unless schema_migrations holds exactly ms with matching checksums and the
+// installation is recorded (§11 rule 2). The server calls it before serving; it never migrates.
+func Check(ctx context.Context, db *sql.DB, ms []Migration) error {
+	recorded, err := recordedChecksums(ctx, db)
+	if err != nil {
+		var pe *pgconn.PgError
+		if errors.As(err, &pe) && pe.Code == "42P01" { // undefined_table
+			return errors.New("schema: the database has no schema_migrations table; run bronzeward migrate")
+		}
+		return fmt.Errorf("schema: %w", err)
+	}
+	var missing, edited, unknown []int
+	for _, m := range ms {
+		sum, ok := recorded[m.Version]
+		switch {
+		case !ok:
+			missing = append(missing, m.Version)
+		case sum != m.Checksum:
+			edited = append(edited, m.Version)
+		}
+		delete(recorded, m.Version)
+	}
+	for v := range recorded {
+		unknown = append(unknown, v)
+	}
+	slices.Sort(unknown)
+	var problems []string
+	if len(missing) > 0 {
+		problems = append(problems, fmt.Sprintf("migrations %v are not applied: the schema is older than this binary; run bronzeward migrate", missing))
+	}
+	if len(unknown) > 0 {
+		problems = append(problems, fmt.Sprintf("migrations %v are applied but unknown to this binary: the schema is newer than this binary", unknown))
+	}
+	if len(edited) > 0 {
+		problems = append(problems, fmt.Sprintf("migrations %v were applied with another checksum: edited after they were applied", edited))
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("schema: %s", strings.Join(problems, "; "))
+	}
+	// A migrate run stopped between Apply and Install leaves schema_version behind (§12.1).
+	var version int
+	err = db.QueryRowContext(ctx, "SELECT schema_version FROM installation_state").Scan(&version)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return errors.New("schema: no installation is recorded; run bronzeward migrate")
+	case err != nil:
+		return fmt.Errorf("schema: %w", err)
+	case version != len(ms):
+		return fmt.Errorf("schema: the installation records schema version %d, the migrations reach %d; run bronzeward migrate", version, len(ms))
+	}
+	return nil
+}
+
+func recordedChecksums(ctx context.Context, db *sql.DB) (map[int]string, error) {
+	rows, err := db.QueryContext(ctx, "SELECT version, checksum FROM schema_migrations")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	recorded := map[int]string{}
+	for rows.Next() {
+		var v int
+		var sum string
+		if err := rows.Scan(&v, &sum); err != nil {
+			return nil, err
+		}
+		recorded[v] = sum
+	}
+	return recorded, rows.Err()
+}
 
 // lockKey is the advisory lock every migrate run takes inside each of its transactions (§11,
 // T10), so concurrent runs apply each version once.
