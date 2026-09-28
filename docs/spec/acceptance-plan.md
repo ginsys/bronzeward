@@ -113,8 +113,10 @@ closing paragraph.
    automation identity calls every route PA §9.2 marks human only. The walk needs no seeded state:
    the role check runs before any transaction (PA §10.3), so each request names a well-formed
    identifier whose record need not exist, and it holds whether or not the route's own handler has
-   landed. Last, `h-recovery` records the identity revocation of `h-all`.
-5. Request a dispatch, token-issuing or role-granting path.
+   landed. Last, as PA §10.4 requires, the operator adds `h-all`'s subject to `deniedSubjects`,
+   then `h-recovery` records the identity revocation of `h-all`.
+5. Request a dispatch, token-issuing or role-granting path: the table's rows denying a direct
+   dispatch and a token issued or revoked through the API.
 
 Every other row of that table is exercised in the scenario whose issue builds its route, since its
 outcome needs that route's handler, state S0 does not create, or both: the adopted-baseline approval
@@ -123,11 +125,12 @@ approver's approval, the self-approval cases, cancellation by each role that may
 `publisher`'s refused cancellation of another identity's plan, revocation before commitment by each
 role that may revoke, the revoked-identity approval and unapproved dispatch in S3; the controller's
 dispatch and revocation after commitment or attempt (DS rows 002 to 005) in S4; freezing by each
-role that may freeze and unfreezing in S5; resolving an `unresolved` operation in S6.1; entry and
-scope release in S7. The OpenBao administrator's and break-glass rows are outside Bronzeward:
-break-glass is seen as drift in S5, and the provider's acts are S2's and S7's injections.
-[ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31)'s integrated run covers the
-table as a whole.
+role that may freeze and unfreezing in S5; resolving an `unresolved` operation in S6.1 step 7;
+entry and scope release in S7. The OpenBao administrator's and break-glass rows are outside
+Bronzeward: break-glass is seen as drift in S5, and the provider's acts are S2's and S7's
+injections. Several of these runs are outside the integrated run;
+[ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) confirms the table from the
+integrated run and those runs' retained evidence together (§7.1).
 
 **Clauses exercised.** PA [§9.2](persistence-api.md#92-resources-and-routes),
 [§10.1](persistence-api.md#101-humans-oidc),
@@ -140,7 +143,7 @@ table as a whole.
 defect answers `401`, except a revoked or denied subject, which answers `403 identity-revoked`; none
 creates a principal row. Each denial step 4 walks answers `403 forbidden` and writes no act row; the
 identity revocation is recorded with its identity and role
-([PA §10.5](persistence-api.md#105-recording-every-act)). Step 5 answers `404`: no handler exists.
+([PA §10.5](persistence-api.md#105-recording-every-act)), and `h-all` is refused afterwards. Step 5 answers `404`: no handler exists.
 
 **Negative controls.** A binary that does not know the newest migration, and a checksum mismatch,
 each refuse to start. The advisory-lock control (DB row 026) shows the concurrent-run failure
@@ -509,6 +512,12 @@ for each adoption run; step 5's measurement; the resource version series.
    and the resource version read at both ends of the settle; a completion observation classifies
    the operation.
 6. While one operation is `unresolved`, try a newer plan for the worker.
+7. Once no operation holds the worker's scope, stop B. For one more plan, kill A after commitment
+   and before any attempt, and cut B's link to the worker (`bin/inject linksplit B worker`, §2)
+   before starting B: B takes the operation over, `unresolved` (ER §4), and cannot take the
+   recovery observation that would classify it safe to retry. `h-recovery` resolves it `cancelled`
+   on a recorded reason (`POST /operations/{id}/resolutions`); then
+   `bin/inject linkjoin B worker`.
 
 **Clauses exercised.** ER [§3.4](execution-recovery.md#34-ownership-the-takeover-fence),
 [§4](execution-recovery.md#4-operation-timeline-and-states),
@@ -525,7 +534,9 @@ path marks an operation successful without a completion observation. A's attempt
 takeover is refused inside the attempt `UPDATE`, and A sends nothing. A lost response keeps the
 operation `unresolved` with its scope held until the decision, however well the digest matches, and
 step 6's plan is refused by comparison 4. A retry is admitted only with attempts left, the approval
-passing and the gate open, and never after a newer timeline fact.
+passing and the gate open, and never after a newer timeline fact. Step 7's operation ends
+`cancelled` with no attempt recorded, the resolution recorded with `h-recovery`, its role
+`recovery-admin`, the reason and the evidence relied on (ER §4), and its scope released.
 
 **Negative controls.** Accounting before the settle floor, or by `h-approver`: refused. The fence
 without its owner and generation comparison: the stale owner records an attempt (DS row 008). The
@@ -743,7 +754,7 @@ support them, and the reviewer's record.
 | Item 7: interrupted execution | S6 | [ginsys/bronzeward#28](https://github.com/ginsys/bronzeward/issues/28) |
 | Item 7: external restoration through explicit recovery mode | S7 | [ginsys/bronzeward#29](https://github.com/ginsys/bronzeward/issues/29) |
 | Closing paragraph: selected database/provider behaviour (§7.7) | S0 to S8 on the §2 fixture | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30) |
-| Closing paragraph: scoped authorization (§13.7) | S0 step 4 (every denial by role alone and the human-only refusals), and each other scenario-table row in the scenario S0 names for it: S1, S2 step 7, S3, S4, S5 step 7, S6.1, S7 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22), [ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25), [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#27](https://github.com/ginsys/bronzeward/issues/27), [ginsys/bronzeward#28](https://github.com/ginsys/bronzeward/issues/28), [ginsys/bronzeward#29](https://github.com/ginsys/bronzeward/issues/29) |
+| Closing paragraph: scoped authorization (§13.7) | S0 steps 4 and 5 (every denial by role alone, the human-only refusals and the absent routes), and each other scenario-table row in the scenario S0 names for it: S1, S2 step 7, S3, S4, S5 steps 3 and 7, S6.1 step 7, S7 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22), [ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25), [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#27](https://github.com/ginsys/bronzeward/issues/27), [ginsys/bronzeward#28](https://github.com/ginsys/bronzeward/issues/28), [ginsys/bronzeward#29](https://github.com/ginsys/bronzeward/issues/29) |
 | Closing paragraph: usable operation timeline | S8 | [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30), [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 | §18.1 E6: the existing-cluster vertical slice | the integrated run (S0 to S5, S7's nominal run, S8) and S6's interruption runs (§2) | [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 
@@ -783,7 +794,8 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: `FOR SHARE` at publication (DB row 011) | S2 negative controls | #23 |
 | PA §16: ownership check inside the attempt's `UPDATE` (row 018) | S4 negative controls | #26 |
 | PA §16: claim eligibility re-check (row 020) | *check* | #22 |
-| PA §16: migration advisory lock (row 026); immutability triggers; startup refusal on each schema mismatch; authentication refusals and role checks | S0, S2 pass criteria, plus *check* for startup | #21, #23 |
+| PA §16: migration advisory lock (row 026); immutability triggers; startup refusal on each schema mismatch; authentication refusals; role checks that role alone decides, and the human-only refusals | S0, S2 pass criteria, plus *check* for startup | #21, #23 |
+| PA §16: role checks whose outcome needs the route's handler or state, against the design §13.7 scenarios | S1, S2 step 7, S3, S4, S5 steps 3 and 7, S6.1 step 7, S7 | #22, #23, #25, #26, #27, #28, #29 |
 | PA §16: the epoch term and process-epoch checks; the recovery-start process in the new epoch; per-scope refusals and the recovery-start refusal | S7 | #29 |
 | PA §16: one idempotency key in flight twice, with the key-lock control | *check* | #21 |
 | PA §16: approval revocation racing commitment (DS row 003) | S3 negative controls | #25 |
