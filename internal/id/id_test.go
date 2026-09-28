@@ -7,8 +7,22 @@ import (
 
 var shape = regexp.MustCompile(`^[a-z]+_[a-z2-7]{26}$`)
 
+func TestAllIsACopy(t *testing.T) {
+	a := All()
+	if len(a) != 22 {
+		t.Fatalf("All() has %d prefixes, want 22 (persistence-api.md §2)", len(a))
+	}
+	a[0] = "zzz"
+	if _, err := Parse(New(Cluster)); err != nil {
+		t.Fatalf("mutating All()'s result changed validation: %v", err)
+	}
+	if All()[0] != Cluster {
+		t.Fatalf("mutating All()'s result changed the table: %q", All()[0])
+	}
+}
+
 func TestNewShape(t *testing.T) {
-	for _, p := range All {
+	for _, p := range All() {
 		s := New(p)
 		if !shape.MatchString(s) {
 			t.Fatalf("%s: %q does not match %s", p, s, shape)
