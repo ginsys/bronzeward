@@ -48,7 +48,7 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Addr: cfg.Listen, Handler: server.New(), ReadHeaderTimeout: 10 * time.Second}
+	srv := server.NewHTTP(cfg.Listen)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errc := make(chan error, 1)
