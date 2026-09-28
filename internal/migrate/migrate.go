@@ -17,6 +17,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/ginsys/bronzeward/internal/id"
 )
 
 //go:embed migrations/*.sql
@@ -197,4 +199,50 @@ func inTx(ctx context.Context, conn *sql.Conn, o options, fn func(*sql.Tx) error
 		return err
 	}
 	return tx.Commit()
+}
+
+// ImmutableSQLState is the SQLSTATE an immutable table's trigger raises (0001_foundation.sql).
+const ImmutableSQLState = "BW001"
+
+// Install records the installation once (§12.1): the first run mints its epoch, with that
+// epoch's recovery_epoch row, and every run sets schema_version to the highest applied
+// migration. Run it after Apply; it takes the same lock, so concurrent runs mint one epoch.
+func Install(ctx context.Context, db *sql.DB) (epoch string, created bool, err error) {
+	return install(ctx, db, options{})
+}
+
+func install(ctx context.Context, db *sql.DB, o options) (string, bool, error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("migrate: install: %w", err)
+	}
+	defer conn.Close()
+	var epoch string
+	var created bool
+	err = inTx(ctx, conn, o, func(tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx, "SELECT epoch FROM installation_state FOR UPDATE").Scan(&epoch)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			if o.afterRead != nil {
+				o.afterRead()
+			}
+			epoch, created = id.New(id.Epoch), true
+			if _, err := tx.ExecContext(ctx, "INSERT INTO recovery_epoch (epoch, entered_at) VALUES ($1, now())", epoch); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO installation_state (epoch, schema_version) SELECT $1, max(version) FROM schema_migrations", epoch); err != nil {
+				return err
+			}
+			return nil
+		case err != nil:
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE installation_state SET schema_version = (SELECT max(version) FROM schema_migrations)")
+		return err
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("migrate: install: %w", err)
+	}
+	return epoch, created, nil
 }
