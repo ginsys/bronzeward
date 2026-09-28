@@ -1,0 +1,8 @@
+# Deployment configuration for local development. `mise run dev-db` starts the database this DSN
+# names (loopback, no password); then:
+#   go run ./cmd/bronzeward migrate -config examples/bronzeward.yaml
+#   go run ./cmd/bronzeward serve -config examples/bronzeward.yaml
+# A deployment sets its own listen address and a DSN with credentials.
+listen: 127.0.0.1:8080
+database:
+  dsn: postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable
