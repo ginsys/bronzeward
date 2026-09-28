@@ -56,7 +56,7 @@ The [PoC compatibility investigation](https://github.com/ginsys/bronzeward/issue
 4. Have the owner or designated reviewer assess correctness, scope, safety, evidence and documentation. Record findings and resolve them or explicitly record an accepted disposition.
 5. Complete required evidence before seeking readiness or merge authorization. The owner may merge their own PR after review. Agents require explicit authorization to change PR readiness, merge or change branch protection.
 
-Every PR runs the `CI` workflow (documentation checks, `actionlint`, the Go build, vet, format and test checks, conventional-commit subjects, action pins; aggregated as the `checks` context), a Codex review and an advisory Claude review (`PR Review`). Review threads must be resolved before merge. Merges are rebase-only through the merge queue: after review, the owner runs `gh pr merge --auto` and the queue lands the PR once `checks` and `PR Review` report on the merged result. Do not claim CI success without an actual run result. Review and merge are separate actions.
+Every PR runs the `CI` workflow (documentation checks, `actionlint`, the Go build, vet, format and test checks, `go-db` (the root module's tests against a PostgreSQL service container), conventional-commit subjects, action pins; aggregated as the `checks` context), a Codex review and an advisory Claude review (`PR Review`). Review threads must be resolved before merge. Merges are rebase-only through the merge queue: after review, the owner runs `gh pr merge --auto` and the queue lands the PR once `checks` and `PR Review` report on the merged result. Do not claim CI success without an actual run result. Review and merge are separate actions.
 
 ## Documentation checks
 
@@ -68,7 +68,7 @@ git diff --check
 git diff --cached --check
 ```
 
-With [mise](https://mise.jdx.dev/) installed and `origin/main` fetched, `mise run verify` runs everything the `CI` workflow runs: the documentation check, `actionlint` and `shellcheck`, the commit-lint fixture tests, the whole-tree whitespace check, the conventional-commit check on this branch's commits, the [Go checks](#go-code) and the action-pin check (which clones go-kure/.github into the gitignored `upstream/`).
+With [mise](https://mise.jdx.dev/) installed and `origin/main` fetched, `mise run verify` runs everything the `CI` workflow runs except `go-db`: the documentation check, `actionlint` and `shellcheck`, the commit-lint fixture tests, the whole-tree whitespace check, the conventional-commit check on this branch's commits, the [Go checks](#go-code) and the action-pin check (which clones go-kure/.github into the gitignored `upstream/`). `go-db` needs a database: run `mise run dev-db`, then `mise run go-db`.
 
 The verifier reads repository files as UTF-8 and reports file locations relative to the repository root. It checks root guidance and Markdown under `docs/spec/`: inline relative links and anchors, local equivalents of this repository's `blob/main` document links, balanced fenced blocks and trailing whitespace. It also checks issue-form YAML, field names/types/requiredness, disabled blank issues and the CLAUDE delegation.
 
@@ -79,8 +79,11 @@ Link checks cover inline links without titles or spaces in their destinations. T
 The implementation is the root Go module (`cmd/`, `internal/`); the Go version comes from `mise.toml`. Its `go.mod` ignores `experiments/`, whose modules are Phase-0 evidence and are checked separately. From the repository root:
 
 ```sh
-mise run go                                        # format, go.mod tidiness, build, vet and test checks (per module, as mise.toml lists them)
-go run ./cmd/bronzeward serve -config <file>       # the server; <file> holds `listen` and `database.dsn`
+mise run go                                        # format, go.mod tidiness, build, vet and test checks (per module, as mise.toml lists them); database tests skip
+mise run dev-db                                    # a disposable development PostgreSQL on 127.0.0.1:55433 (docker stop bw-dev-pg removes it)
+mise run go-db                                     # the root module's tests against PostgreSQL (BW_TEST_PG_DSN, else dev-db's); a missing database fails
+go run ./cmd/bronzeward migrate -config examples/bronzeward.yaml   # apply the embedded migrations and record the installation; run with the server stopped
+go run ./cmd/bronzeward serve -config examples/bronzeward.yaml     # the server on 127.0.0.1:8080; try curl -i http://127.0.0.1:8080/livez
 ```
 
-The server does not serve TLS yet, and `GET /livez` is its only route.
+`examples/bronzeward.yaml` is the development configuration, matching `mise run dev-db`. A deployment writes its own. The server refuses to start unless the database holds exactly its migrations (run `migrate` first). It does not serve TLS yet, and `GET /livez` is its only route.

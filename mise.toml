@@ -111,6 +111,16 @@ go -C experiments/e2-sensitivity-provenance vet ./...
 go -C experiments/e2-sensitivity-provenance test ./...
 """
 
+[tasks.go-db]
+description = "Test the root module against PostgreSQL (default: mise run dev-db's); a missing database fails instead of skipping"
+# CI's go-db job points BW_TEST_PG_DSN at its service container. Locally it defaults to
+# mise run dev-db; any PostgreSQL 17 role that may create databases also works.
+run = '''
+: "${BW_TEST_PG_DSN:=postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
+export BW_TEST_PG_DSN
+BW_REQUIRE_PG=1 go test -count=1 ./...
+'''
+
 [tasks.dev-db]
 description = "Start a disposable development PostgreSQL at the fixture's image pin: 127.0.0.1:55433, user bronzeward, no password"
 # Trust auth, bound to loopback, removed on stop (docker stop bw-dev-pg). examples/bronzeward.yaml
@@ -154,5 +164,5 @@ depends = ["upstream-sync"]
 run = "FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@main$' bash upstream/scripts/check-action-pins.sh ."
 
 [tasks.verify]
-description = "Everything ci.yml runs: lint, tests, docs, whitespace, commit subjects, go, action pins"
+description = "Everything ci.yml runs except go-db (it needs a database; mise run go-db): lint, tests, docs, whitespace, commit subjects, go, action pins"
 depends = ["lint", "test", "docs", "whitespace", "commit-lint", "go", "action-pins"]
