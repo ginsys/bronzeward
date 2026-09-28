@@ -56,7 +56,7 @@ The [PoC compatibility investigation](https://github.com/ginsys/bronzeward/issue
 4. Have the owner or designated reviewer assess correctness, scope, safety, evidence and documentation. Record findings and resolve them or explicitly record an accepted disposition.
 5. Complete required evidence before seeking readiness or merge authorization. The owner may merge their own PR after review. Agents require explicit authorization to change PR readiness, merge or change branch protection.
 
-Every PR runs the `CI` workflow (documentation checks, `actionlint`, conventional-commit subjects, action pins; aggregated as the `checks` context), a Codex review and an advisory Claude review (`PR Review`). Review threads must be resolved before merge. Merges are rebase-only through the merge queue: after review, the owner runs `gh pr merge --auto` and the queue lands the PR once `checks` and `PR Review` report on the merged result. Do not claim CI success without an actual run result. Review and merge are separate actions.
+Every PR runs the `CI` workflow (documentation checks, `actionlint`, the Go build, vet, format and test checks, conventional-commit subjects, action pins; aggregated as the `checks` context), a Codex review and an advisory Claude review (`PR Review`). Review threads must be resolved before merge. Merges are rebase-only through the merge queue: after review, the owner runs `gh pr merge --auto` and the queue lands the PR once `checks` and `PR Review` report on the merged result. Do not claim CI success without an actual run result. Review and merge are separate actions.
 
 ## Documentation checks
 
@@ -68,8 +68,19 @@ git diff --check
 git diff --cached --check
 ```
 
-With [mise](https://mise.jdx.dev/) installed and `origin/main` fetched, `mise run verify` runs everything the `CI` workflow runs: the documentation check, `actionlint` and `shellcheck`, the commit-lint fixture tests, the whole-tree whitespace check, the conventional-commit check on this branch's commits, and the action-pin check (which clones go-kure/.github into the gitignored `upstream/`).
+With [mise](https://mise.jdx.dev/) installed and `origin/main` fetched, `mise run verify` runs everything the `CI` workflow runs: the documentation check, `actionlint` and `shellcheck`, the commit-lint fixture tests, the whole-tree whitespace check, the conventional-commit check on this branch's commits, the [Go checks](#go-code) and the action-pin check (which clones go-kure/.github into the gitignored `upstream/`).
 
 The verifier reads repository files as UTF-8 and reports file locations relative to the repository root. It checks root guidance and Markdown under `docs/spec/`: inline relative links and anchors, local equivalents of this repository's `blob/main` document links, balanced fenced blocks and trailing whitespace. It also checks issue-form YAML, field names/types/requiredness, disabled blank issues and the CLAUDE delegation.
 
 Link checks cover inline links without titles or spaces in their destinations. Titled and reference-style links are skipped and need manual review. Trailing whitespace is rejected, including Markdown's two-space hard line breaks; use a paragraph break instead. The verifier does not fetch external links, verify live tracker state, fully lint Markdown or validate design semantics. Review changed external references and the actual diff separately; for a committed PR, also run `git diff --check <base-commit>...HEAD` using its actual base commit.
+
+## Go code
+
+The implementation is the root Go module (`cmd/`, `internal/`); the Go version comes from `mise.toml`. Its `go.mod` ignores `experiments/`, whose modules are Phase-0 evidence and are checked separately. From the repository root:
+
+```sh
+mise run go                                        # format, go.mod tidiness, build, vet and test of every module
+go run ./cmd/bronzeward serve -config <file>       # the server; <file> holds `listen` and `database.dsn`
+```
+
+The server does not serve TLS yet, and `GET /livez` is its only route.
