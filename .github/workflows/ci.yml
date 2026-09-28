@@ -27,7 +27,9 @@ permissions:
 # github.event.pull_request, so it cannot tell a fork's candidate from an own-branch one; routing
 # every candidate to a hosted runner is the only branch-independent rule. The org-level fork-PR
 # approval gate still applies on top. The Claude review job is a separate workflow whose reusable
-# skips forks and merge groups outright (the proxy is in-cluster only).
+# skips forks and merge groups outright (the proxy is in-cluster only). The one exception to this
+# rule is go-db, which always runs GitHub-hosted: its service container needs a Docker daemon, and
+# the in-cluster runners have none.
 
 env:
   # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
@@ -94,7 +96,10 @@ jobs:
     # The root module's tests against PostgreSQL, in a service container at the fixture's image
     # pin (the pin step fails when either moves without the other). BW_REQUIRE_PG turns
     # a database that never came up into failures, not skipped tests.
-    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    # GitHub-hosted for every event: the in-cluster runners have no Docker daemon, so the service
+    # container cannot start there (this job's first run failed initializing it, at
+    # `docker version`). A hosted runner is also the more isolated place for PR code.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
       postgres:
