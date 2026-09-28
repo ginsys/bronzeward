@@ -55,8 +55,9 @@ func loadConfig(name string, args []string) (config.Config, error) {
 	return config.Load(f)
 }
 
-// runMigrate applies the binary's migrations and records the installation (persistence-api.md
-// §11: the only way the schema changes; run it with the service stopped).
+// runMigrate applies the binary's migrations, records the installation, then checks the schema as
+// serve does (persistence-api.md §11: the only way the schema changes; run it with the service
+// stopped).
 func runMigrate(args []string, out io.Writer) error {
 	cfg, err := loadConfig("migrate", args)
 	if err != nil {
@@ -84,10 +85,16 @@ func runMigrate(args []string, out io.Writer) error {
 	if applied == nil {
 		applied = []int{}
 	}
-	fmt.Fprintf(out, "applied %v; the schema is at version %d\n", applied, len(ms))
+	fmt.Fprintf(out, "applied %v\n", applied)
 	if created {
 		fmt.Fprintf(out, "installation epoch %s recorded\n", epoch)
 	}
+	// Apply refuses unknown migrations only in its preflight: one a newer binary commits after
+	// that is seen here, so the schema version is stated only once the server's check passes.
+	if err := migrate.Check(ctx, db, ms); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "the schema is at version %d, exactly this binary's migrations\n", len(ms))
 	return nil
 }
 
