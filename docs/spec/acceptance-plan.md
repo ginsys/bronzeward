@@ -350,7 +350,8 @@ the plan approved, which does not compare
 commitment of the same plan with no publication between is the control (ER choice §10.24). The
 publication racing the commitment itself is a *check* (§7.1). A plan
 past its expiry: `expired`, no operation. A plan cancelled before commitment, once each by its
-creator `h-publisher`, by `h-approver` and by `h-recovery`: `cancelled`, no operation, the act
+creator `h-publisher`, by its creator the automation identity, by `h-approver` and by
+`h-recovery`: `cancelled`, no operation, the act
 recorded under the role that permits it; `h-publisher` cancelling a plan the automation identity
 created: `403 forbidden`, the plan unchanged (design §13.7 item 6); one cancelled after commitment
 with no attempt: the operation goes `unresolved`, then `cancelled`, and nothing is sent (ER §9.2).
@@ -451,8 +452,8 @@ run: **drift freeze, sanitized adoption and approved revert**
    unseen overwrite, and unfreezes; the revert runs as S4.
 7. From one restore of snapshots taken before step 3 (`bin/inject db-snapshot s5-step3`,
    `bao-snapshot s5-step3`; restored with `db-restore s5-step3`, `bao-restore s5-step3`),
-   `h-publisher`, `h-approver` and `h-recovery` each freeze the scope, `h-approver` unfreezing it
-   after each (design §13.7's Freeze rows). This step stays out of the integrated run.
+   `h-publisher`, `h-approver`, `h-recovery` and the automation identity each freeze the scope,
+   `h-approver` unfreezing it after each (design §13.7's Freeze rows). This step stays out of the integrated run.
 
 **Clauses exercised.** ER [§6.1](execution-recovery.md#61-detection),
 [§6.2](execution-recovery.md#62-freeze), [§6.3](execution-recovery.md#63-adopt),
