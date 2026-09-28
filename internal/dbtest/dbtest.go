@@ -1,5 +1,6 @@
-// Package dbtest gives each test its own PostgreSQL database, created from BW_TEST_PG_DSN and
-// dropped when the test ends. Without that variable a test skips, unless BW_REQUIRE_PG=1, when it
+// Package dbtest gives each test its own PostgreSQL database, created from BW_TEST_PG_DSN (a
+// postgres:// URL naming its database in the path, never in a query parameter) and dropped when
+// the test ends. Without that variable a test skips, unless BW_REQUIRE_PG=1, when it
 // fails: CI's go-db job sets both, so a database that never came up cannot pass as skipped tests.
 package dbtest
 
@@ -8,9 +9,12 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"net/url"
 	"os"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/ginsys/bronzeward/internal/database"
 )
@@ -26,24 +30,22 @@ func New(t testing.TB) (*sql.DB, string) {
 	if skip {
 		t.Skip("BW_TEST_PG_DSN unset")
 	}
-	u, err := url.Parse(admin)
-	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
-		t.Fatal("BW_TEST_PG_DSN must be a postgres:// URL")
+	var b [8]byte
+	rand.Read(b[:])
+	name := "bw_test_" + hex.EncodeToString(b[:])
+	dsn, err := testDSN(admin, name)
+	if err != nil {
+		t.Fatal(err)
 	}
 	ctx := context.Background()
 	adb, err := database.Open(ctx, admin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var b [8]byte
-	rand.Read(b[:])
-	name := "bw_test_" + hex.EncodeToString(b[:])
 	if _, err := adb.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
 		adb.Close()
 		t.Fatal(err)
 	}
-	u.Path = "/" + name
-	dsn := u.String()
 	db, err := database.Open(ctx, dsn)
 	// One cleanup, in order: close the pool, drop the database, close the admin pool.
 	t.Cleanup(func() {
@@ -59,6 +61,26 @@ func New(t testing.TB) (*sql.DB, string) {
 		t.Fatal(err)
 	}
 	return db, dsn
+}
+
+// testDSN is admin with its database replaced by name. It refuses a DSN where pgx would connect
+// to another database, as a dbname or database query parameter makes it: the tests would then
+// share that database while cleanup dropped the unused fresh one.
+func testDSN(admin, name string) (string, error) {
+	u, err := url.Parse(admin)
+	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
+		return "", errors.New("BW_TEST_PG_DSN must be a postgres:// URL")
+	}
+	u.Path = "/" + name
+	dsn := u.String()
+	cfg, err := pgconn.ParseConfig(dsn)
+	if err != nil { // withheld, as database.Open does: the parser's message can quote the password
+		return "", errors.New("BW_TEST_PG_DSN does not parse")
+	}
+	if cfg.Database != name {
+		return "", errors.New("BW_TEST_PG_DSN must name its database in the URL path, not in a dbname or database query parameter: each test replaces the path with its own database")
+	}
+	return dsn, nil
 }
 
 func decide(dsn, require string) (skip, fail bool) {

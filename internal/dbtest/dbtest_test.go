@@ -20,6 +20,31 @@ func TestDecide(t *testing.T) {
 	}
 }
 
+// The fresh database goes in the path; a DSN whose query names a database would override it in
+// pgx, so every test would run against that shared database while cleanup dropped the fresh one.
+func TestTestDSN(t *testing.T) {
+	const name = "bw_test_0123456789abcdef"
+	for _, c := range []struct {
+		admin, want string
+	}{
+		{"postgres://u@h:5432/bronzeward?sslmode=disable", "postgres://u@h:5432/" + name + "?sslmode=disable"},
+		{"postgresql://u@h/", "postgresql://u@h/" + name},
+		{"postgres://u@h:5432/?dbname=bronzeward&sslmode=disable", ""},
+		{"postgres://u@h:5432/bronzeward?database=bronzeward", ""},
+		{"postgres://u@h/?sslmode=disable&db%6Eame=bronzeward", ""},
+		{"mysql://u@h/bronzeward", ""},
+		{"host=h dbname=bronzeward", ""},
+	} {
+		got, err := testDSN(c.admin, name)
+		switch {
+		case c.want == "" && err == nil:
+			t.Errorf("testDSN(%q) = %q; want a refusal", c.admin, got)
+		case c.want != "" && (err != nil || got != c.want):
+			t.Errorf("testDSN(%q) = %q, %v; want %q", c.admin, got, err, c.want)
+		}
+	}
+}
+
 func TestNewGivesAnEmptyDatabase(t *testing.T) {
 	db, dsn := New(t)
 	var n int
