@@ -981,9 +981,15 @@ afresh, with the metadata identity, by the
 [dependency monitor's procedure](dependency-monitor.md#3-classification-procedure).
 Anything but `retained` refuses publication, as §6 step 3 refuses a source
 version, and so does a creation time for that version that the first read did
-not give or gave differently. The identity §9 records is that creation time,
-the same in both reads, so a key deleted and recreated around the encryption
-is refused rather than recorded under the new key's identity. Step 4 is
+not give or gave differently. So does a version whose creation time is not in
+a second before the first read's `Date`, or a first read with no readable
+`Date`: OpenBao gives creation times in whole seconds, so a key deleted and
+recreated within one second could reissue an identity, and a version that
+existed in a later second can only be deleted, and its name recreated, in a
+later second still. The identity §9 records is that creation time, the same in
+both reads, so a key deleted and recreated around the encryption is refused
+rather than recorded under the new key's identity. A refusal for a version
+created in the current second clears on a retry a second later. Step 4 is
 persistence's: the compiler hands over, as one unit, only sanitized
 or encrypted values:
 
