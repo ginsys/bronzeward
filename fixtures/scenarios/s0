@@ -34,11 +34,23 @@ result() {
   printf '%s\t%s\t%s\n' "$1" "$2" "$3" | tee -a "$EV/s0.tsv"
   [ "$1" != FAIL ] || failed=$((failed + 1))
 }
-# check <reference> <what> <command...>: PASS when the command succeeds.
-check() {
-  local ref=$1 what=$2
+# ran <reference> <exit> <command...>: the command and its exit status as a line of commands.tsv
+# (acceptance plan §2's common evidence), every token this run holds written as <token>.
+ran() {
+  local ref=$1 rc=$2 cmd s
   shift 2
-  if "$@"; then result PASS "$ref" "$what"; else result FAIL "$ref" "$what"; fi
+  cmd=$(printf '%q ' "$@")
+  for s in "${secrets[@]}"; do cmd=${cmd//"$s"/<token>}; done
+  printf '%s\t%s\t%s\n' "$ref" "$rc" "${cmd% }" >>"$EV/commands.tsv"
+}
+# check <reference> <what> <command...>: PASS when the command succeeds; the command and its exit
+# status go to commands.tsv.
+check() {
+  local ref=$1 what=$2 rc=0
+  shift 2
+  "$@" || rc=$?
+  ran "$ref" "$rc" "$@"
+  if [ "$rc" -eq 0 ]; then result PASS "$ref" "$what"; else result FAIL "$ref" "$what"; fi
 }
 
 # mint <human> [defect]: an access token for the issuer A trusts, from its key, by the oidc binary
@@ -157,15 +169,22 @@ migrate_twice() {
   m2=$!
   wait "$m1" || rc1=$?
   wait "$m2" || rc2=$?
+  ran migrate-1 "$rc1" "$bin/bw" migrate
+  ran migrate-2 "$rc2" "$bin/bw" migrate
   applied=$(cat "$EV/migrate-1.log" "$EV/migrate-2.log" | { grep '^applied ' || true; } | LC_ALL=C sort | tr '\n' '|')
   [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$applied" = 'applied [1 2 3]|applied []|' ]
 }
 
-# logged <name> <command...>: from the repository root, output to $EV/<name>.log.
+# logged <name> <command...>: from the repository root, output to $EV/<name>.log, which starts with
+# the command and ends with its exit status; both go to commands.tsv too.
 logged() {
-  local name=$1
+  local name=$1 rc=0
   shift
-  (cd -- "$FIXTURES/.." && timeout 1800 "$@") >"$EV/$name.log" 2>&1
+  printf '$ %s\n' "$*" >"$EV/$name.log"
+  (cd -- "$FIXTURES/.." && timeout 1800 "$@") >>"$EV/$name.log" 2>&1 || rc=$?
+  printf 'exit %d\n' "$rc" >>"$EV/$name.log"
+  ran "$name" "$rc" "$@"
+  return "$rc"
 }
 # go_controls_ran: the advisory-lock controls, against go-db's database, as go-db runs them: without
 # a database they would skip, and a skip is not a PASS line.
@@ -184,18 +203,20 @@ schema_control() {
   "$bin/inject" db-snapshot "s0-ctl-$n" >/dev/null || { result FAIL 'S0 negative control' "$what: snapshot"; return; }
   if pg psql -U bronzeward -d bronzeward -v ON_ERROR_STOP=1 -Atc "$sql" >/dev/null; then
     "$bin/bw" migrate >"$EV/ctl-$n-migrate.log" 2>&1 || rc=$?
+    ran "ctl-$n-migrate" "$rc" "$bin/bw" migrate
     if [ "$rc" -ne 0 ] && grep --quiet -- "$migrate_says" "$EV/ctl-$n-migrate.log"; then
-      result PASS 'S0 negative control, PA §11' "$what: bw migrate refuses"
+      result PASS 'S0 negative control, PA §11' "$what: bw migrate refuses (exit $rc)"
     else
       result FAIL 'S0 negative control, PA §11' "$what: bw migrate refuses (exit $rc)"
     fi
     rc=0
     "$bin/inject" start A >"$EV/ctl-$n-start.log" 2>&1 || rc=$?
+    ran "ctl-$n-start" "$rc" "$bin/inject" start A
     a_id=$(container_id "$BW_A") || die "A is no longer the container up recorded"
     docker logs "$a_id" >"$EV/ctl-$n-a.log" 2>&1 || true
     running=$(docker inspect --format '{{.State.Running}}' "$a_id") || running=unknown
     if [ "$rc" -ne 0 ] && [ "$running" = false ] && grep --quiet -- "$serve_says" "$EV/ctl-$n-a.log"; then
-      result PASS 'S0 negative control, PA §11' "$what: A does not start, and says why"
+      result PASS 'S0 negative control, PA §11' "$what: A does not start, and says why (start exit $rc)"
     else
       result FAIL 'S0 negative control, PA §11' "$what: A does not start, and says why (start exit $rc, running $running)"
     fi
@@ -206,11 +227,21 @@ schema_control() {
   "$bin/inject" db-restore "s0-ctl-$n" >/dev/null || die "the database could not be put back from s0-ctl-$n; run fixtures/bin/down"
 }
 
+# same_checkout: the working tree is still the commit up built the image from, with no path
+# differing, so the suites below test the bytes the server runs.
+same_checkout() {
+  [ "$(fixtures_git rev-parse HEAD)" = "$(sed -n 's/^commit //p' "$STATE/up-build")" ] &&
+    [ "$(fixtures_git status --porcelain --untracked-files=all | wc -l)" -eq 0 ]
+}
+
 run() {
-  # Step 1: the suites, and the advisory-lock negative control as the Go test (ruling 5).
+  # Step 1: the suites, and the advisory-lock negative control as the Go test (ruling 5), from the
+  # checkout the image was built from, before and after.
+  check 'S0 precondition' 'the checkout is the image commit, unmodified, before the suites' same_checkout
   check 'S0 step 1' 'mise run verify' logged step1-verify mise run verify
   check 'S0 step 1' 'mise run go-db (a missing database fails)' logged step1-go-db mise run go-db
   check 'S0 step 1, negative control' 'advisory lock removed: TestNoLockControl and TestInstallNoLockControl' go_controls_ran
+  check 'S0 precondition' 'the checkout is the image commit, unmodified, after the suites' same_checkout
 
   # Step 2: two migrations at once apply once; A starts on the schema.
   check 'S0 step 2' 'two bw migrate at once: one applies [1 2 3], the other []' migrate_twice
