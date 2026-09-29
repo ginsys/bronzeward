@@ -226,7 +226,8 @@ func (v *Verifier) roles(payload []byte) ([]Role, error) {
 // Discover returns the issuer's key set, found through its discovery document on first use and
 // looked for again after a failure, so the server starts while the issuer is down.
 func Discover(issuer string) KeySet {
-	return &discovered{issuer: issuer, client: &http.Client{Timeout: issuerTimeout}, refetch: keyRefetchInterval}
+	return &discovered{issuer: issuer, client: &http.Client{Timeout: issuerTimeout}, refetch: keyRefetchInterval,
+		discovering: make(chan struct{}, 1)}
 }
 
 const (
@@ -245,8 +246,10 @@ type discovered struct {
 	issuer  string
 	client  *http.Client  // bounds every request to the issuer
 	refetch time.Duration // the least time between successful key set fetches
-	mu      sync.Mutex
-	keys    *oidc.RemoteKeySet
+	// discovering holds a value while one request runs discovery. It is a lock a waiter can give
+	// up on: a request queued behind a slow discovery fails at its own deadline.
+	discovering chan struct{}
+	keys        *oidc.RemoteKeySet
 }
 
 // limitedFetch refuses a key set fetch within every of the last successful one. A failed fetch
@@ -283,8 +286,12 @@ func (d *discovered) VerifySignature(ctx context.Context, raw string) ([]byte, e
 }
 
 func (d *discovered) keySet(ctx context.Context) (*oidc.RemoteKeySet, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	select {
+	case d.discovering <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-d.discovering }()
 	if d.keys != nil {
 		return d.keys, nil
 	}
