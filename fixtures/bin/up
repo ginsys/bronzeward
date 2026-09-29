@@ -294,7 +294,8 @@ docker image pull --quiet "$CURL_IMAGE" >/dev/null || die "could not pull the cl
 # The server under test and the OIDC issuer, built from this checkout into one image of two static
 # binaries and nothing else, imported for this run and never pulled. The build is of the whole
 # repository, which the tree check above does not cover: up-build records the commit, how many
-# paths differ from it and the Go version, so that a bundle can say what ran.
+# paths differ from it and the Go version, and bin/evidence copies it into the bundle. It records
+# no content: S0 fails unless no path differed (acceptance plan S0 preconditions).
 say "building the server image"
 S_IMG=$STATE/image
 mkdir "$S_IMG" "$STATE/issuer" "$STATE/server" "$STATE/server/a" "$STATE/server/b"

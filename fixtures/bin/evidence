@@ -145,6 +145,13 @@ created=$(cat "$STATE/up-manifest" 2>/dev/null) ||
   die "no record in $STATE of how fixtures/ differed at creation, which bin/up writes with the commit; the bundle could not be tied to what ran"
 cp -- "$STATE/up-fixtures-diff.txt" "$out/up-fixtures-diff.txt" ||
   die "cannot copy the record of how fixtures/ differed at creation into the bundle"
+# What the server image was built from: the commit, how many paths of the whole repository differed
+# from it, and the Go version. S0 requires none to differ (acceptance plan S0 preconditions).
+if [ -f "$STATE/up-build" ]; then
+  cp -- "$STATE/up-build" "$out/up-build.txt" || die "cannot copy the record of the server build into the bundle"
+else
+  unavailable "the record of the server build ($STATE/up-build) is absent: an up interrupted before the image leaves none"
+fi
 {
   printf 'captured        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'manifest commit %s%s\n' "$manifest" "$([ -z "$differs" ] || printf ' (fixtures/ differs from it: see fixtures-diff.txt)')"
