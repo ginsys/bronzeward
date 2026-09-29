@@ -58,6 +58,11 @@ func (a *API) answer(w http.ResponseWriter, q *request, rec *record, replayed bo
 		if replayed {
 			w.Header().Set("Idempotent-Replayed", "true")
 		}
-		writeBytes(w, "application/json", rec.status, rec.body)
+		// A stored refusal (§7.2) is a problem document, and so is its replay (§9.4).
+		contentType := "application/json"
+		if rec.status >= http.StatusBadRequest {
+			contentType = "application/problem+json"
+		}
+		writeBytes(w, contentType, rec.status, rec.body)
 	}
 }
