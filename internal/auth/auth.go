@@ -4,11 +4,13 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -265,8 +267,9 @@ type discovered struct {
 	keys        *oidc.RemoteKeySet
 }
 
-// limitedFetch refuses a key set fetch within every of the last successful one. A failed fetch
-// sets no limit, so the key set recovers as soon as the issuer does.
+// limitedFetch refuses a key set fetch within every of the last successful one: a 200 whose body
+// decodes as a key set. A failed fetch sets no limit, so the key set recovers as soon as the
+// issuer does.
 type limitedFetch struct {
 	next  http.RoundTripper
 	every time.Duration
@@ -282,12 +285,26 @@ func (l *limitedFetch) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("key set fetched less than %s ago", l.every)
 	}
 	resp, err := l.next.RoundTrip(r)
-	if err == nil && resp.StatusCode == http.StatusOK {
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return resp, err
+	}
+	// go-oidc decodes the body only after this returns, so decode it here too: a truncated or
+	// malformed answer is a failed fetch.
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	var set struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
+	if json.Unmarshal(body, &set) == nil && set.Keys != nil {
 		l.mu.Lock()
 		l.last = time.Now()
 		l.mu.Unlock()
 	}
-	return resp, err
+	return resp, nil
 }
 
 func (d *discovered) VerifySignature(ctx context.Context, raw string) ([]byte, error) {

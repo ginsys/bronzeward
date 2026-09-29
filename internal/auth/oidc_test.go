@@ -36,6 +36,8 @@ type fixture struct {
 	// a path to the URL it answers with a 302.
 	jwksURI  atomic.Value // string
 	redirect sync.Map     // path → URL
+	// garbleJWKS makes the key set endpoint answer 200 with truncated JSON.
+	garbleJWKS atomic.Bool
 }
 
 // newFixture starts the fixture issuer on a loopback port. The listener comes first, so the
@@ -88,6 +90,11 @@ func newFixture(t *testing.T) *fixture {
 			doc["jwks_uri"] = u
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(doc)
+			return
+		}
+		if r.URL.Path == "/jwks" && f.garbleJWKS.Load() {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"keys":[`))
 			return
 		}
 		if r.URL.Path == "/jwks" {
@@ -300,6 +307,22 @@ func TestKeySetRefetchIsRateLimited(t *testing.T) {
 	}
 	if _, err := v.Authenticate(t.Context(), f.bearer(t, "h-viewer", "")); err != nil {
 		t.Fatalf("a valid token after limited refetches: %v", err)
+	}
+}
+
+// A key set answer that does not decode is a failed fetch: it starts no refetch interval, so
+// the next request fetches again once the issuer answers properly.
+func TestUndecodableKeySetSetsNoLimit(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier() // the production interval, a minute
+	h := f.bearer(t, "h-viewer", "")
+	f.garbleJWKS.Store(true)
+	if _, err := v.Authenticate(t.Context(), h); err == nil {
+		t.Fatal("accepted with an undecodable key set")
+	}
+	f.garbleJWKS.Store(false)
+	if _, err := v.Authenticate(t.Context(), h); err != nil {
+		t.Fatalf("after the key set recovered: %v", err)
 	}
 }
 
