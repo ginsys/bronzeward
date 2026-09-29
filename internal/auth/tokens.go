@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,7 +47,7 @@ type Store struct {
 type storeOptions struct {
 	noPrincipalLock bool                // the control: no FOR UPDATE on the principal row
 	afterRevokeOld  func()              // in an issuing or revoking transaction, after revoking the unrevoked token
-	beforeLock      func()              // in a rotation's transaction, after it began and before the principal lock
+	beforeLock      func()              // in a token tool transaction, after it began and before the principal locks
 	commit          func(*sql.Tx) error // replaces tx.Commit in issuing transactions
 }
 
@@ -108,6 +109,12 @@ func (s *Store) Issue(ctx context.Context, name string, roles []Role, expiry tim
 	}
 	identity := id.New(id.Principal)
 	out, err := s.issuing(ctx, func(tx *sql.Tx) (Issued, error) {
+		if s.o.beforeLock != nil {
+			s.o.beforeLock()
+		}
+		if _, err := s.lockPrincipals(ctx, tx, "", resp, op); err != nil {
+			return Issued{}, err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO principal (id, kind, name, responsible, created_at)
 			VALUES ($1, 'service', $2, $3, now())`, identity, name, resp); err != nil {
 			return Issued{}, err
@@ -145,7 +152,7 @@ func (s *Store) Rotate(ctx context.Context, identity string, roles []Role, expir
 		if s.o.beforeLock != nil {
 			s.o.beforeLock()
 		}
-		revoked, err := s.lockService(ctx, tx, identity)
+		revoked, err := s.lockPrincipals(ctx, tx, identity, op)
 		if err != nil {
 			return Issued{}, err
 		}
@@ -185,7 +192,10 @@ func (s *Store) Revoke(ctx context.Context, identity, operator string) ([]string
 		if err := lockEpoch(ctx, tx); err != nil {
 			return err
 		}
-		if _, err := s.lockService(ctx, tx, identity); err != nil {
+		if s.o.beforeLock != nil {
+			s.o.beforeLock()
+		}
+		if _, err := s.lockPrincipals(ctx, tx, identity, op); err != nil {
 			return err
 		}
 		var err error
@@ -209,6 +219,34 @@ func (s *Store) Revoke(ctx context.Context, identity, operator string) ([]string
 func lockEpoch(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `SELECT 1 FROM installation_state FOR SHARE`)
 	return err
+}
+
+// lockPrincipals locks the principals a tool transaction acts on, in id order (rule 5): the
+// service identity, if service is not empty, FOR UPDATE, and each human FOR SHARE, against
+// identity revocation's FOR UPDATE (T5c). EnsureHuman's check ran before the transaction, so a
+// human is checked again here, under the lock (rule 2). It reports whether service is revoked.
+func (s *Store) lockPrincipals(ctx context.Context, tx *sql.Tx, service string, humans ...string) (revoked bool, err error) {
+	ids := slices.Clone(humans)
+	if service != "" {
+		ids = append(ids, service)
+	}
+	slices.Sort(ids)
+	for _, p := range slices.Compact(ids) {
+		if p == service {
+			if revoked, err = s.lockService(ctx, tx, p); err != nil {
+				return false, err
+			}
+			continue
+		}
+		var r bool
+		if err := tx.QueryRowContext(ctx, `SELECT revoked FROM principal WHERE id = $1 FOR SHARE`, p).Scan(&r); err != nil {
+			return false, err
+		}
+		if r {
+			return false, fmt.Errorf("%w: %s", ErrIdentityRevoked, p)
+		}
+	}
+	return revoked, nil
 }
 
 // lockService locks identity's principal row FOR UPDATE and reports whether it is revoked.

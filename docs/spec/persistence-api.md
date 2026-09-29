@@ -1427,8 +1427,9 @@ with it. It:
   that issues or revokes an identity's token first takes the installation
   state `FOR SHARE`, as T5c does, so recovery-mode entry (T9) cannot change
   the epoch between the token's or act's epoch and the commit (rule 5's
-  order). It then locks the principal row
-  `FOR UPDATE`, the lock T5c takes, and refuses to issue a token to a revoked
+  order). It then locks, in id order, the principal row `FOR UPDATE`, the
+  lock T5c takes, and each human it records `FOR SHARE`, refusing one that
+  is revoked by then; it refuses to issue a token to a revoked
   identity or to one that `deniedSubjects` lists (§10.4): two
   rotations of one identity serialize, the second replacing the first's
   token, and a rotation racing an identity revocation either precedes it,

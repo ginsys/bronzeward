@@ -88,6 +88,48 @@ func TestToolTransactionsHoldTheEpoch(t *testing.T) {
 	}
 }
 
+// A human revoked after the tool's unlocked EnsureHuman check but before its transaction locks
+// anything must still be refused (rule 2, lock what you check): the transaction locks each human
+// it acts on FOR SHARE, against identity revocation's FOR UPDATE (T5c), and rechecks it there.
+func TestToolRechecksHumansUnderTheLock(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	revoke := func(sub string) func() {
+		return func() { mustExec(t, db, `UPDATE principal SET revoked = true WHERE kind = 'human' AND sub = $1`, sub) }
+	}
+	for name, c := range map[string]struct {
+		revoked string
+		run     func(*Store, string) error
+	}{
+		"issue, operator": {"h-operator", func(s *Store, _ string) error {
+			_, err := s.Issue(ctx, "other-op", []Role{Author}, DefaultExpiry, "h-all", "h-operator")
+			return err
+		}},
+		"issue, responsible": {"h-all", func(s *Store, _ string) error {
+			_, err := s.Issue(ctx, "other-resp", []Role{Author}, DefaultExpiry, "h-all", "h-operator")
+			return err
+		}},
+		"rotate": {"h-operator", func(s *Store, identity string) error {
+			_, err := s.Rotate(ctx, identity, nil, DefaultExpiry, "h-operator")
+			return err
+		}},
+		"revoke": {"h-operator", func(s *Store, identity string) error {
+			_, err := s.Revoke(ctx, identity, "h-operator")
+			return err
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mustExec(t, db, `UPDATE principal SET revoked = false WHERE kind = 'human'`)
+			s := storeFor(db)
+			first := issued(t, s, "ci-"+name)
+			s.o.beforeLock = revoke(c.revoked)
+			if err := c.run(s, first.Identity); !errors.Is(err, ErrIdentityRevoked) {
+				t.Fatalf("%s revoked before the lock: %v; want ErrIdentityRevoked", c.revoked, err)
+			}
+		})
+	}
+}
+
 func rotate(t *testing.T, s *Store, identity string) chan error {
 	done := make(chan error, 1)
 	go func() {
