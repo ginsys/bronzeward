@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Run one command of the server image bin/up built, on the fixture's Compose network, against
+# instance A's configuration: bw migrate, bw token issue|rotate|revoke|list ...
+# Usage: bw <bronzeward command> [args]   (-config is appended; never name a path in the container)
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$(dirname "$0")/../lib.sh"
+
+[ $# -ge 1 ] || die "usage: bw <migrate|token ...> [args]"
+[ "$1" != serve ] || die "bw serve is refused: instances A and B are the servers (fixtures/bin/inject start A|B)"
+need docker timeout id
+need_state
+# Shared: two migrations at once are a case the server itself must settle (its advisory lock). An
+# inject or a teardown, which hold the lock alone, is not run under.
+fixture_lock shared
+server_command "$@"
