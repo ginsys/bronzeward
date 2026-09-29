@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,7 +41,12 @@ type fixture struct {
 	redirect sync.Map     // path → URL
 	// jwksBody, when not empty, is the key set endpoint's 200 answer in place of the key set.
 	jwksBody atomic.Value // string
+	// padPath, when set, names a path whose JSON answer carries an extra "pad" member of padSize
+	// bytes: still valid, only large.
+	padPath atomic.Value // string
 }
+
+const padSize = 2 << 20 // past issuerBodyLimit
 
 // newFixture starts the fixture issuer on a loopback port. The listener comes first, so the
 // issuer knows its URL before the server serves anything.
@@ -81,6 +88,19 @@ func newFixture(t *testing.T) *fixture {
 		}
 		if to, ok := f.redirect.Load(r.URL.Path); ok {
 			http.Redirect(w, r, to.(string), http.StatusFound)
+			return
+		}
+		if p, ok := f.padPath.Load().(string); ok && r.URL.Path == p {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+			var doc map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			doc["pad"] = strings.Repeat("x", padSize)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doc)
 			return
 		}
 		if u, ok := f.jwksURI.Load().(string); ok && r.URL.Path == "/.well-known/openid-configuration" {
@@ -335,6 +355,32 @@ func TestUndecodableKeySetSetsNoLimit(t *testing.T) {
 				t.Fatalf("after the key set recovered: %v", err)
 			}
 		})
+	}
+}
+
+// An issuer answer is read into memory, so its size is bounded: an oversized discovery document
+// or key set is a failed request, even when it would otherwise decode.
+func TestOversizedIssuerAnswerIsRefused(t *testing.T) {
+	for _, path := range []string{"/.well-known/openid-configuration", "/jwks"} {
+		t.Run(path, func(t *testing.T) {
+			f := newFixture(t)
+			v := f.verifier()
+			h := f.bearer(t, "h-viewer", "")
+			f.padPath.Store(path)
+			if _, err := v.Authenticate(t.Context(), h); err == nil {
+				t.Fatalf("accepted a %d-byte %s answer", padSize, path)
+			}
+		})
+	}
+}
+
+func TestCappedReaderBoundary(t *testing.T) {
+	for size, ok := range map[int]bool{issuerBodyLimit - 1: true, issuerBodyLimit: true, issuerBodyLimit + 1: false} {
+		body := io.NopCloser(strings.NewReader(strings.Repeat("x", size)))
+		b, err := io.ReadAll(&cappedReader{ReadCloser: body, left: issuerBodyLimit})
+		if (err == nil) != ok || (ok && len(b) != size) {
+			t.Errorf("%d bytes: read %d, %v; want ok=%v", size, len(b), err, ok)
+		}
 	}
 }
 
