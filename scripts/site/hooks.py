@@ -28,7 +28,8 @@ MAIN_DOCUMENT = f'{REPOSITORY}/blob/main/'
 # The destination of an inline link or image, as scripts/verify-docs.py matches it: no title and
 # no spaces. Group 1 is `![text](` or `[text](`, group 2 the destination.
 LINK = re.compile(r'(!?\[[^\]\n]*\]\()([^)\s]+)(?=\))')
-FENCE = re.compile(r'^ {0,3}(`{3,}|~{3,})(.*)$')
+# A fence at any indentation: one nested in a list item sits four or more spaces in.
+FENCE = re.compile(r'^[ \t]*(`{3,}|~{3,})(.*)$')
 # An inline code span: a backtick run, content, the same run again. Like CommonMark's, it may wrap
 # onto the next line but never crosses a blank line.
 CODE_SPAN = re.compile(r'(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n)[\s\S])+?)(?<!`)\1(?!`)')

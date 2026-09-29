@@ -60,6 +60,9 @@ class RewriteTest(unittest.TestCase):
             # A code span never crosses a blank line, so the stray backtick pairs with nothing.
             ('stray `\n\n[g](go.mod) `x`', f'stray `\n\n[g]({go_mod}) `x`'),
             ('```sh\n[g](go.mod)\n```\n[g](go.mod)', f'```sh\n[g](go.mod)\n```\n[g]({go_mod})'),
+            # A fence nested in a list item.
+            ('1. step\n\n        ```sh\n        [g](go.mod)\n        ```\n\n    [g](go.mod)',
+             f'1. step\n\n        ```sh\n        [g](go.mod)\n        ```\n\n    [g]({go_mod})'),
         ]
         for markdown, expected in cases:
             self.assertEqual(hooks._rewrite_markdown(markdown, 'README.md', 'index.md'), expected)
