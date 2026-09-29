@@ -192,6 +192,17 @@ if [ -f "$STATE/up-image" ]; then
     *) die "the recorded server image $image_id is not the one bin/up imported; nothing was removed. Remove it by hand" ;;
   esac
   unset image_rc
+else
+  # An up ended between the import and its record: the image is found under the tag that up gave
+  # it for the recorded run, and held to that run's label like a recorded one.
+  run=$(recorded_run) || die "could not read the recorded run; nothing was removed"
+  if [ -n "$run" ] && image_id=$(docker image inspect --format '{{.Id}}' "${FIXTURE_NAME}-bronzeward:$run" 2>/dev/null); then
+    image_own "$image_id" ||
+      die "the image tagged for this run, $image_id, is not the one bin/up imported; nothing was removed. Remove it by hand"
+  else
+    image_id=
+  fi
+  unset run
 fi
 # Tool containers: what a command ran for a moment from the recorded image or the pinned client
 # image and left behind when it was interrupted. One carrying the label on any other image is

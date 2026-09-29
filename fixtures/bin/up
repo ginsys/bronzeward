@@ -317,6 +317,9 @@ image_id=$(tar -C "$S_IMG" -c bronzeward oidc |
   docker image import --change 'ENTRYPOINT ["/bronzeward"]' --change "LABEL $RUN_LABEL=$BW_RUN_ID" - \
     "${FIXTURE_NAME}-bronzeward:$BW_RUN_ID") || die "could not import the server image"
 [[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || die "docker image import answered '$image_id', not an image ID"
+if [ "${BW_SELFTEST:-}" = 1 ] && [ "${BW_UP_STOP_AFTER:-}" = import ]; then
+  die "stopped after the import, before its record (selftest)"
+fi
 record up-image "$image_id" || die "could not record the server image in $STATE"
 rm -rf -- "$S_IMG"
 # The instances and the issuer run as the caller, who owns the 0600 files they read.

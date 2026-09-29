@@ -127,6 +127,7 @@ case $action in
         [ $# -eq 2 ] || usage
         case $1 in A | B) ;; *) die "a link split is between an instance, A or B, and a Talos node, not '$1'" ;; esac
         split_ip=$(node_ip "$2") || die "a link split is to a Talos node, controlplane or worker, not '$2'"
+        split_instance=$1 split_node=$2
         ;;
       *)
         [ $# -eq 1 ] || usage
@@ -249,6 +250,18 @@ docker_applied() {
   done
   return 1
 }
+# linksplits_record: .state/linksplits after this linksplit or linkjoin, for a start to put back
+# (linksplits_reapply), through a partial name so that no reader finds the list half written. The
+# same line again changes nothing, so finish can complete a record the action did not reach.
+linksplits_record() {
+  {
+    if [ -f "$STATE/linksplits" ]; then
+      grep --invert-match --line-regexp --fixed-strings -- "$split_instance $split_node" "$STATE/linksplits" || [ $? -eq 1 ]
+    fi
+    [ "$action" = linkjoin ] || printf '%s %s\n' "$split_instance" "$split_node"
+  } >"$STATE/linksplits.partial" &&
+    mv --no-target-directory -- "$STATE/linksplits.partial" "$STATE/linksplits"
+}
 finish() {
   local rc=$? left status=failed applied signalled=0 mounted
   # A signal that ends the shell between two commands, or during a builtin, leaves the status of
@@ -333,6 +346,16 @@ finish() {
         if [ "$action" = start ]; then
           status=unknown
           say "fixtures: the action ended (rc=$rc) after the start was sent; the container runs, but was not seen to answer; recorded as unknown"
+        elif [ "$action" = linksplit ] || [ "$action" = linkjoin ]; then
+          # The routes are the ones asked for; done only once the record says so too, or the next
+          # start would undo what the log calls done.
+          if linksplits_record 2>/dev/null; then
+            say "fixtures: the action ended (rc=$rc) after the route was changed; the routes read back are the ones asked for and the record is completed; recorded as done"
+            rc=0
+          else
+            status=unknown
+            say "fixtures: the action ended (rc=$rc) after the route was changed, and $STATE/linksplits could not be completed; recorded as unknown"
+          fi
         else
           say "fixtures: the action ended (rc=$rc) after the Docker request was sent, and the state read back is the one asked for; recorded as done"
           rc=0
@@ -513,8 +536,16 @@ case $action in
         port=$SERVER_A_PORT
         [ "$1" = A ] || port=$SERVER_B_PORT
         instance_live() { timeout "$REQUEST_LIMIT" curl --disable --noproxy '*' --fail --silent -o /dev/null "http://127.0.0.1:$port/livez"; }
-        ready_probe=instance_live
+        # Asked once more by finish after a signal: answering is not enough, the recorded splits
+        # must be back too.
+        ready_instance=$1
+        instance_ready() { instance_live && linksplits_reapply "$ready_instance"; }
+        ready_probe=instance_ready
         wait_for 60 "instance $1" instance_live
+        if [ "${BW_SELFTEST:-}" = 1 ] && [ "${BW_INJECT_STOP_AFTER:-}" = live ]; then
+          kill -s TERM $$ # a signal after the wait, before the re-apply (selftest)
+          sleep 5
+        fi
         # A route lives in the container's network namespace and is gone after a kill: the
         # recorded splits are put back before the start is recorded done.
         linksplits_reapply "$1" || die "instance $1 runs, but its recorded link splits could not all be put back"
@@ -571,19 +602,15 @@ case $action in
       elif [ "$action" = linkjoin ] && [ "$has" -eq 0 ]; then
         route_in "$target_id" del "$split_ip"
       fi
+      if [ "${BW_SELFTEST:-}" = 1 ] && [ "${BW_INJECT_STOP_AFTER:-}" = route ]; then
+        die "stopped after the route, before its record (selftest)"
+      fi
       docker_applied || die "the routes read back from $1 are not the ones asked for"
     else
       [ "$action" = linkjoin ] || die "instance $1 is not running; a link split lives in its network namespace: start it first"
     fi
-    # Recorded after the read-back, for a start to put back (linksplits_reapply), through a partial
-    # name so that no reader finds the list half written.
-    {
-      if [ -f "$STATE/linksplits" ]; then
-        grep --invert-match --line-regexp --fixed-strings -- "$1 $2" "$STATE/linksplits" || [ $? -eq 1 ]
-      fi
-      [ "$action" = linkjoin ] || printf '%s %s\n' "$1" "$2"
-    } >"$STATE/linksplits.partial"
-    mv --no-target-directory -- "$STATE/linksplits.partial" "$STATE/linksplits"
+    # Recorded after the read-back, for a start to put back (linksplits_reapply).
+    linksplits_record
     ;;
   # Through the CLI in the verified container (bao in lib.sh). A request that went out and was not
   # answered may have been applied: flagged as dispatched, as the HTTP requests are.
