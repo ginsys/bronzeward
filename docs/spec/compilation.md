@@ -632,11 +632,15 @@ For each machine:
    (design §7.6), classified afresh by the
    [dependency monitor's procedure](dependency-monitor.md#3-classification-procedure),
    never read from its stored status, and the compiler identity must read it at
-   the point of use. `blocked`, `lost` or `unknown` refuses publication.
+   the point of use. `blocked`, `lost` or `unknown` refuses publication. A KV
+   version's classification also takes its `created_time` from the metadata
+   answer, the identity §9 records.
 4. **Resolve** the import base and each fragment with a tag-preserving parser,
    replacing each tagged node by its typed value (with its encoding) before any
    typed decode, and each identified embedded document as in §5.4. Every tag
-   must resolve; there is no partial result.
+   must resolve; there is no partial result. A KV value read whose
+   `created_time` differs from the one step 3 took refuses publication: the
+   path was deleted and written again between the two reads.
 5. **Compose** the reference-free fragments onto the resolved import base with
    the selected renderer (§10) in the order of step 1, using native
    strategic-merge semantics: last writer wins, and `$patch: delete` removes.
@@ -853,7 +857,10 @@ and version alone ([KL §7](../design/research/20260924-key-loss-restoration.md#
 item 1, inferred): the key's name and the creation time its `keys` map gives for
 that version, as the
 [dependency monitor's classification](dependency-monitor.md#3-classification-procedure)
-reads it (§11). It also carries the renderer and contract record of §10.2.
+reads it (§11). Each pinned KV version is recorded the same way, with the
+`created_time` §6 steps 3 and 4 agreed on: KV metadata deletion restarts a
+path's version numbers, so path and version alone can name a replacement. It
+also carries the renderer and contract record of §10.2.
 
 ## 10. Renderer selection and compatibility limits
 

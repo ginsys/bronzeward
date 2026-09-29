@@ -409,9 +409,10 @@ Rules for every transaction:
    `now()`, never the caller's clock. DB's leases used the client clock and
    left skew untested (DB §7); compilation §3.2 makes the same choice for
    claims. A time that must follow a lock wait, a DependencyStatus row's
-   `recorded_at` (dependency monitor §6.1), is the database's
-   `clock_timestamp()` read after the lock is held, since `now()` is fixed
-   when the transaction began.
+   `recorded_at` (dependency monitor §6.1) and the DependencyMonitor row's
+   progress (dependency monitor §6.3), is the database's `clock_timestamp()`
+   read after the lock is held, since `now()` is fixed when the transaction
+   began.
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation
    state, machine rows by id (each with its MachineState), heads by id, the
    draft, principals by id, approvals by id, plan states by id, then operations
@@ -1072,7 +1073,7 @@ idempotency and conflict behavior.
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments | 200 | any role |
 | `GET /drafts[/{id}]`, `/ingestions/{id}`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
-| `GET /dependencies[/{id}]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
+| `GET /dependencies[/{id}[/releases\|/alerts]]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/takeovers` (a further mark on a staged ingestion; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |

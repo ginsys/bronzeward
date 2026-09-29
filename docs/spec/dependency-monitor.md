@@ -70,7 +70,9 @@ version named by several releases, or by both dependency records of one
 release, is one monitored dependency with one status **(choice §11.2)**. Its
 alerts name every release whose dependency records reference it; §5.2 orders
 a publication against a transition, so no committed release is missing from
-the alert.
+a transition's alert. A `deletion-scheduled` alert is not yet so ordered: a
+release published while a pass records a new schedule for a `retained`
+dependency can be missing from it (§10.2).
 
 Each monitored dependency has a `dep` identifier (PA §2), created when its
 first dependency record is committed. The identifier names the status, not the
@@ -104,6 +106,7 @@ One classification is one provider answer to one request:
 | KV v2 | `destroyed: true` for the version | `lost` | `destroyed` |
 | KV v2 | version below `oldest_version`, when that is above 0 | `lost` | `pruned` |
 | KV v2 | version above `current_version`, or absent from the answer | `unknown` | `insufficient-evidence` |
+| KV v2 | the version's `created_time` missing, or other than the one the dependency record carries (compilation §9) | `unknown` | `identity-mismatch` **(choice §11.13)** |
 | KV v2 | `deletion_time` set, and in the same second as `Date` or with no readable `Date` | `unknown` | `deletion-time-undecidable` |
 | KV v2 | `deletion_time` before `Date` | `blocked` | `soft-deleted` (reversible by undelete) |
 | KV v2 | `deletion_time` after `Date` | `retained` | `deletion-scheduled`, naming the time |
@@ -111,10 +114,11 @@ One classification is one provider answer to one request:
 | Transit | the recorded version is in the key's `keys` map with a creation time other than the one the dependency record carries (compilation §9) | `unknown` | `identity-mismatch` **(choice §11.10)** |
 | Transit | `soft_deleted` anything but `false` | `unknown` | `soft-delete-unobserved` |
 | Transit | `min_available_version`, `min_decryption_version` or `latest_version` missing | `unknown` | `insufficient-evidence` |
+| Transit | version absent from the `keys` map, below `min_available_version`, when that is above 0 | `unknown` | `trimmed-unverified` |
+| Transit | version absent from the `keys` map, below `min_decryption_version` | `unknown` | `below-decryption-floor-unverified` (reversible by lowering it, if the key is the recorded one) |
+| Transit | version absent from the `keys` map | `unknown` | `insufficient-evidence` |
 | Transit | version below `min_available_version`, when that is above 0 | `lost` | `trimmed` |
 | Transit | version below `min_decryption_version` | `blocked` | `below-decryption-floor` (reversible by lowering it) |
-| Transit | version above `latest_version` | `unknown` | `insufficient-evidence` |
-| Transit | version absent from the `keys` map | `unknown` | `insufficient-evidence` |
 | Transit | otherwise | `retained` | none |
 
 A Transit key's identity is its name together with the creation time its
@@ -128,9 +132,25 @@ before the first read's `Date`: creation times are whole seconds, so only a
 version still in its creation second could share it with a key recreated
 later, and a version one second old cannot.
 The `keys` map decides no floor, since it hides trimmed and blocked versions
-alike (RC §3.1). A version absent from it cannot have its identity checked: the
-floor rows classify it `lost` or `blocked` when one applies, and otherwise it
-is `unknown`, never `retained` on an unchecked identity.
+alike (RC §3.1). A version absent from it cannot have its identity checked, so
+it is `unknown` whatever the floors say: a replacement key's floor says
+nothing of the recorded key, and lowering it restores none of that key's
+ciphertext. The reason names the floor the version is below, if any, so an
+operator who knows the key is the recorded one can act on it. While the `keys`
+map hides every version below a floor, Transit gives neither `lost` nor
+`blocked`; a loss still alerts at once as a `regression` (§6.2). The `lost`
+and `blocked` rows apply only to a version the map lists with its recorded
+identity.
+
+A KV version's identity is its path and version together with the version's
+`created_time` **(choice §11.13)**. Deleting a path's metadata and writing it
+again restarts its version numbers, so a replacement can answer for the
+recorded path and version with no deletion time. Publication's classification
+takes the `created_time` from its own answer, its value read must give the
+same one, and compilation §9 records it (compilation §6 steps 3 and 4); every
+later classification compares it. The destroyed and pruned rows come first:
+KV metadata deletion removes every version, so the recorded version is gone
+whichever path answers.
 
 A 404 is `unknown` and never `lost`. OpenBao answers a deleted Transit key, a
 KV path whose metadata was deleted and a name that never existed alike, with no
@@ -155,8 +175,10 @@ compilation §1 and with nothing else. Its policy grants `read` on
 `secret/metadata/*` and `transit/keys/*` and no other capability
 **(choice §11.9)**: no `list`, no `secret/data/*`, no Transit encrypt,
 decrypt, rewrap or key configuration. It is a credential of its own, not
-shared with the ingestion, compiler or executor identities, and the process
-that runs the monitor holds no provider credential beside it.
+shared with the ingestion, compiler or executor identities, and the monitor
+uses no other. Whether the monitor shares a process with components that hold
+those identities is a deployment choice, as for every role of the trusted
+controller (design §5, figure 2).
 
 Holding no data read, the monitor cannot read a value, so nothing it logs,
 stores or serves can carry one. RC row 057 showed the metadata token refused
@@ -199,7 +221,7 @@ time publication began that version's classification refuses the publication,
 as compilation §6 step 3 refuses a version. The comparison takes the time the
 class was recorded, not the time its request began, since a request that began
 before publication's own can observe a change after it. The monitor reads a
-dependency's referencing releases after taking its row lock (§6.1 step 4). A
+dependency's referencing releases after taking its row lock (§6.1 step 5). A
 transition and a publication naming the same version are therefore ordered:
 either the publication sees the transition and is refused, or the transition's
 alert names the release. A refusal can be conservative, for a transition
@@ -220,32 +242,34 @@ Every server instance runs the monitor, in recovery mode as outside it
 **(choice §11.7)**. A process started with the recovery-start flag runs
 neither passes nor the watchdog (§6.3) until its recovery-mode entry has
 committed (PA §12.2), so nothing is recorded in the restored epoch before entry
-fences it. A pass classifies every monitored dependency once. For each, it:
+fences it. A pass classifies every monitored dependency once. For each, on one
+database session held from step 1 to step 5, it:
 
-1. reads the database time as `observed_from`;
-2. sends the request of §3, with a request timeout of 10 seconds;
-3. classifies the answer;
-4. in one transaction, locks the DependencyStatus row `FOR UPDATE`. If the
-   row's `observed_from` is later than this one's, another instance recorded a
-   classification whose request began later: this one is discarded. A request
-   that began first may still have reached the provider last, so when the
-   discarded class differs from the recorded one, the pass repeats steps 1 to
-   4 for that dependency at once, and again each time a repeat is discarded
-   with a class other than the recorded one. Each repeat's request begins
-   after the classification that displaced the last, so a change a discarded
-   answer saw is recorded and alerted on this pass, not the next, however many
-   instances overlap. A repeat is discarded only when another instance recorded
-   between its steps 1 and 4, so the repeats end once the instances stop
-   overlapping. Otherwise it records the class
-   with `clock_timestamp()` read after the row lock is held as `recorded_at`,
-   not the transaction's `now()`: that is fixed when the transaction began,
-   before any wait for the lock, and would date a transition before a
-   publication that began during the wait. It then reads the releases that
-   reference the dependency. Either way, it then locks the DependencyMonitor
+1. takes a session-level advisory lock on the dependency with
+   `pg_try_advisory_lock`. If another instance holds it, that instance is
+   classifying the dependency, and this pass skips it. The session runs with
+   an idle-session timeout of 30 seconds, so the server ends a session whose
+   process stopped and releases its lock;
+2. reads the database time as `observed_from`;
+3. sends the request of §3, with a request timeout of 10 seconds, holding no
+   transaction (PA §5 rule 1);
+4. classifies the answer;
+5. in one transaction, locks the DependencyStatus row `FOR UPDATE` and records
+   the class with `clock_timestamp()` read after the row lock is held as
+   `recorded_at`, not the transaction's `now()`: that is fixed when the
+   transaction began, before any wait for the lock, and would date a
+   transition before a publication that began during the wait. It then reads
+   the releases that reference the dependency, locks the DependencyMonitor
    row, inserts the alerts of §6.2 a recorded change calls for, naming those
    releases, and records its progress (§6.3). An alert's recording sequence is
    allocated under that lock, which is held to commit, so sequences commit in
-   order (§7.1).
+   order (§7.1). It commits, then releases the advisory lock.
+
+The advisory lock serializes steps 2 to 5 per dependency across instances, so
+classifications are recorded in the order their answers were observed, and an
+older answer never overwrites a newer one **(choice §11.7)**. Step 5 runs on the
+session that holds the lock: a session the server ended cannot record, and a
+process that reconnects has lost the lock and starts again from step 1.
 
 A pass starts 60 seconds after the previous one started, or at once if the
 previous one took longer **(choice §11.4)**. "At once" in design §7.8 means
@@ -254,11 +278,11 @@ pass's duration after it happened. Because an alert is raised only in the
 transaction that records its transition under the row lock, two instances
 raise one alert per transition, not two.
 
-The interval, the request timeout, the persistent-unknown interval (15
-minutes, design §7.8), the stall bound, the watchdog's statement timeout
-(§6.3) and the logger's idle timeout and batch bound (§7.1) are fixed PoC values, held as
-named constants in one place so that a later version can make them
-configurable.
+The interval, the request timeout, the idle-session timeout, the
+persistent-unknown interval (15 minutes, design §7.8), the stall bound, the
+timeouts of a DependencyMonitor lock holder (§6.3) and the logger's batch
+bound (§7.1) are fixed PoC values, held as named constants in one place so
+that a later version can make them configurable.
 
 ### 6.2 Alert kinds
 
@@ -286,20 +310,31 @@ and one pass (§10.2).
 
 ### 6.3 Silence is not health
 
-Each step 4 of §6.1, recorded or discarded, and each completed pass record
-the database time as the monitor's progress on the DependencyMonitor row, and
-a completed pass records its completion time. A pass slowed by request
-timeouts, as during a partition, still progresses. When there has been no
-progress for three intervals, the instance that notices raises one
-`monitor-stalled` alert, recorded under that row's lock, and raises it again
-after each further three intervals without progress **(choice §11.8)**.
+Each step 5 of §6.1 and each completed pass record the monitor's progress on
+the DependencyMonitor row, and a completed pass records its completion time.
+Progress is `clock_timestamp()` read after the row lock is held, not the
+transaction's `now()`, which a wait for the lock would leave behind, and it
+never moves back: a transaction that began before another recorded keeps the
+later time. A pass slowed by request timeouts, as during a partition, still
+progresses. When there has been no progress for three intervals, the instance
+that notices raises one `monitor-stalled` alert, recorded under that row's
+lock, and raises it again after each further three intervals without progress
+**(choice §11.8)**.
 
 The noticing is not a pass's: a hung pass would never notice. Each instance
 runs a watchdog on a schedule of its own, once per interval, independent of
-its passes and with a database statement timeout of 10 seconds. It locks the
-DependencyMonitor row, compares the last progress with the database time and
-raises `monitor-stalled` when due. A watchdog records no progress, so a
-watchdog alone never keeps the monitor from being stalled.
+its passes. It reads the DependencyMonitor row with a plain read, which waits
+for no lock, and compares the last progress and the last `monitor-stalled`
+with the database time. Only when an alert is due does it lock the row, check
+again under the lock and insert the alert. A watchdog records no progress, so
+a watchdog alone never keeps the monitor from being stalled.
+
+A lock holder that hangs cannot hold the DependencyMonitor row for long:
+every transaction that locks it, a pass's, a watchdog's and a logger's
+(§7.1), runs with a statement timeout and an idle-in-transaction timeout of 10
+seconds, so the server ends a stuck holder's transaction and releases the
+lock. A watchdog whose own lock wait times out tries again on its next run,
+which then finds the lock free.
 
 The read routes (§7.2) serve the last completed pass's time, and mark a served
 class `stale` when its own `observed_from` is more than three intervals before
@@ -315,7 +350,7 @@ metrics endpoint and push delivery are not part of the PoC.
 
 ### 7.1 The log line and the record
 
-The transaction of §6.1 step 4 inserts the DependencyAlert row; the row is the
+The transaction of §6.1 step 5 inserts the DependencyAlert row; the row is the
 record. After it commits, after a watchdog's `monitor-stalled` alert commits
 (§6.3), since the passes may be the thing that hangs, and at the start of
 every pass, the instance logs the alerts not yet logged. A log write can
@@ -359,7 +394,9 @@ Added to PA §9.2, any role, paginated as PA §9.1 sets:
 | Route | Result |
 | --- | --- |
 | `GET /dependencies`, optionally `?class=<class>` | each monitored dependency with its class, reason, first-seen-`retained` time, `unknown_since`, the time of its latest recorded classification and `stale`; the collection carries the last completed pass's time |
-| `GET /dependencies/{id}` | one, with the releases referencing it and its alerts |
+| `GET /dependencies/{id}` | one, with the fields of the collection's items; its releases and alerts are the two routes below, which grow without bound |
+| `GET /dependencies/{id}/releases` | the releases referencing it, in release order |
+| `GET /dependencies/{id}/alerts` | its alerts, in recording order |
 | `GET /dependency-alerts` | every alert in recording order |
 
 They serve provider paths, key names and versions, which are reference names
@@ -419,7 +456,8 @@ fail:
 2. **Against the fixture's OpenBao**, through the monitor: `retained`; a KV
    version soft-deleted (`blocked`), undeleted (`retained`), destroyed
    (`lost`); pruned past `max_versions` (`lost`); a Transit version below the
-   decryption floor (`blocked`) and trimmed (`lost`); a deleted Transit key
+   decryption floor and trimmed (`unknown`, each reason naming its floor, since
+   the `keys` map hides both); a deleted Transit key
    and deleted KV metadata (404, `unknown`); OpenBao sealed (503), partitioned
    and paused (`unknown`). Each alert as §6.2 sets and no other.
 3. **A retained dependency turning unreadable alerts at once**: a 404 after
@@ -431,9 +469,9 @@ fail:
    be shortened by a test-only setting. Control: without the last-alert check,
    `persistent` repeats on every pass.
 5. **Metadata only**: the metadata identity is refused a `secret/data/*` read
-   and a Transit decrypt of a dependency it classified `retained`, and the
-   monitor's process holds no other provider credential. Control: the same
-   reads with a token that has them succeed.
+   and a Transit decrypt of a dependency it classified `retained`, and every
+   provider request the monitor sends carries the metadata identity's token.
+   Control: the same reads with a token that has them succeed.
 6. **One alert per transition across instances**: two instances observing one
    transition raise one alert. Control: without the row lock, two.
 7. **Silence**: passes stopped by an injected hang on every instance raise
@@ -441,7 +479,13 @@ fail:
    routes serve `stale`. Control: a pass slowed past three intervals by
    request timeouts raises nothing, and measuring from completed passes
    instead of progress raises it there; running the stall check inside the
-   pass loop raises nothing under the hang.
+   pass loop raises nothing under the hang. A pass hung while it holds the
+   DependencyMonitor row lock has its transaction ended within 10 seconds, and
+   the watchdog raises `monitor-stalled`; control: without the lock holder's
+   timeouts, every watchdog run times out on the lock and nothing is raised. A
+   step 5 that waits for the DependencyMonitor lock records progress no
+   earlier than the grant, and never earlier than progress already recorded;
+   control: recording `now()`, it records the time its transaction began.
 8. **Publication refused** for a pinned version or an encryption dependency
    that is `blocked`, `lost` or `unknown` (compilation §6 step 3, §11), and
    **no dispatch admitted by a retained class** (execution and recovery §3.1).
@@ -455,7 +499,15 @@ fail:
    check, a key deleted and recreated within its creation second is recorded,
    and its lost version later classifies `retained`. A version within every
    floor but absent from the `keys` map classifies `unknown`; control:
-   without that row, it classifies `retained`.
+   without that row, it classifies `retained`. A recreated key whose floors
+   are above the recorded version, which its `keys` map omits, classifies
+   `unknown` naming the floor; control: with the floor rows before the
+   absent rows, it classifies `blocked` or `lost`. A KV path whose metadata
+   was deleted and written again to the recorded version classifies
+   `identity-mismatch`, and a path rewritten between publication's
+   classification and its value read refuses the publication; controls:
+   comparing path and version alone classifies it `retained` and records the
+   replacement.
 10. **A publication racing a transition**: a publication naming a monitored
     version while the monitor records its change from `retained` is refused,
     or is named by the alert, in three orders: the row exists; two
@@ -488,13 +540,22 @@ fail:
     no classification, alert or progress before its entry commits, and runs
     passes after it. Control: starting the monitor with the process records a
     status change in the restored epoch before entry.
-14. **Overlapping monitors**: an instance whose request began first but
-    reached the provider after another instance recorded `retained` sees the
-    loss, and the loss is recorded and alerted on that pass. With three
-    instances, a repeat displaced by a third instance's older-class record
-    repeats again and records the loss on that pass. Controls: without the
-    repeat of §6.1 step 4, or with a single repeat, the loss stays unrecorded
-    until the next pass.
+14. **Overlapping monitors**: two instances classify one dependency while the
+    provider loses it; one holds `retained` from before the loss and pauses
+    before recording, the other asks after the loss. The status ends `lost`,
+    with one `lost` alert. With the first paused past the idle-session
+    timeout, its session is ended and its record refused, and the second
+    records `lost`. Controls: without the advisory lock, the older `retained`
+    overwrites `lost` and the next pass raises a second `lost` alert;
+    recording on a new session after the first ended, the same.
+15. **A database restore** (§9): with alert A recorded before a backup and
+    logged after it, and alert B recorded after it, the restored database
+    holds A and not B, and the next logger writes A's line again under A's
+    `dal` identifier and never writes B's. A new alert after the restore gets
+    a `dal` identifier neither had, and is logged even when its recording
+    sequence is the one B had. Controls: keeping the last logged sequence
+    outside the database leaves A unlogged again and skips that new alert;
+    giving a line an identifier of its own writes A's repeat under a new one.
 
 Items 2, 3 and 8's publication refusal are acceptance-plan S2's negative
 controls and S7's variants; the rest run as *checks*
@@ -514,8 +575,15 @@ controls and S7's variants; the rest run as *checks*
   creation time and `Date` coming from one clock that does not step back,
   which holds on the single node measured; on several nodes, or after a
   provider clock step, a recreation within a second could still reissue an
-  identity. A version hidden below the decryption floor has its identity
-  unchecked (§3).
+  identity. A version the `keys` map hides below a floor has its identity
+  unchecked, so Transit gives `unknown` for it, never `lost` or `blocked`
+  (§3).
+- **The KV identity** rests on the `created_time` KV metadata gives each
+  version; no report deleted a path's metadata and wrote it again, so a
+  replacement sharing its original's `created_time` was not ruled out.
+- **A deletion schedule racing a publication** (§2, §6.2): a
+  `deletion-scheduled` alert can omit a release published while it is
+  recorded; ordering it against publication is tracked in ginsys/bronzeward#24.
 - **Read-only policy.** RC's metadata token also held `list`; this contract
   drops it, since the procedure never lists, and item 5 of §10.1 is the first
   evidence that `read` alone suffices.
@@ -528,9 +596,10 @@ controls and S7's variants; the rest run as *checks*
 ## 11. Choices for owner review
 
 Each is marked in place as **(choice §11.n)**. Owner decision, 2026-09-29
-(ginsys/bronzeward#67): choices 1 to 11 stand as written. Choice 12, and
-choice 8's measure by progress and its independent watchdog, answer that pull
-request's review and await the owner's review.
+(ginsys/bronzeward#67): choices 1 to 11 stand as written, with choice 7's
+per-dependency advisory lock and choice 8's measure by progress and
+lock-free watchdog read decided the same day in that pull request's review.
+Choices 12 and 13 answer that review and await the owner's review.
 
 1. **A document of its own** rather than a section of the persistence and API
    contract, whose section numbers the acceptance plan cites. Alternative: a
@@ -549,12 +618,18 @@ request's review and await the owner's review.
    minutes** (§6.2). Alternative: repeat every alert while its condition
    holds.
 7. **Every instance runs the monitor**, deduplicated by the status row lock
-   (§6.1). Alternative: one elected instance, which needs a lease and its
-   failover.
-8. **`monitor-stalled` after three intervals without progress** (§6.3).
-   Alternatives: one interval, alerting on a single slow classification; or
-   three intervals without a completed pass, which alerts on a pass merely
-   slowed by timeouts.
+   and serialized per dependency by a session advisory lock held from the
+   request's start to its record (§6.1). Alternatives: one elected instance,
+   which needs a lease and its failover; or ordering records by when the
+   request began, which lets an answer observed before a change overwrite
+   one observed after it.
+8. **`monitor-stalled` after three intervals without progress** (§6.3),
+   noticed by a watchdog that reads without a lock, with every
+   DependencyMonitor lock holder bounded by server timeouts. Alternatives:
+   one interval, alerting on a single slow classification; three intervals
+   without a completed pass, which alerts on a pass merely slowed by
+   timeouts; or stall state on a row of its own, which the logger's ordering
+   by the DependencyMonitor lock (§7.1) cannot then cover.
 9. **The metadata identity holds `read` only**, no `list` (§4). Alternative:
    RC's policy with `list`, which the procedure never uses.
 10. **A Transit identity mismatch is `unknown`**, alerted as a regression if
@@ -567,6 +642,12 @@ request's review and await the owner's review.
     `keys` map (§3). Alternatives: name and version alone, which cannot tell
     a recreated key; or leave the identity unfixed, which leaves the
     `identity-mismatch` row unimplementable.
+13. **The KV identity is the version's `created_time`** (§3), recorded at
+    publication and compared by every classification. Alternatives: path and
+    version alone, trusting the deployment's restriction on metadata
+    deletion, which classifies a replacement `retained`; or every KV version
+    `unknown` once its metadata could have been rewritten, which no answer
+    can rule out.
 
 ## 12. Traceability
 
@@ -574,7 +655,7 @@ request's review and await the owner's review.
 | --- | --- | --- |
 | §2 monitored dependencies | §7.5, §7.8 item 1 | compilation §9 |
 | §3 classification | §7.6 | [RC §3.1](../design/research/20260924-retention-metadata-classification.md#31-rules-classifier-rows), RC §5.6, RC §6.1, RC §6.2, RC §6.4; KL §7 item 1 |
-| §4 metadata identity | §7.6, §13.2 | RC §6.3 row 057; [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) |
+| §4 metadata identity | §5, §7.6, §13.2 | RC §6.3 row 057; [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) |
 | §5 state, seeding | §7.6, §7.8 | RC §8 item 1 |
 | §6 passes, alerts | §7.8 item 3, §15.3 | RC §6.2 row 043; RC §6.4 |
 | §7 delivery | §15.3 | none: owner decision |
