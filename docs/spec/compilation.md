@@ -999,7 +999,12 @@ or encrypted values:
   digest of its plaintext
   ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)),
   the redacted review data, the provenance records (§8.2) and both dependency
-  records with the encryption dependency (§9).
+  records with the encryption dependency (§9);
+- per pinned version and encryption dependency: the classification step 3 and
+  §11 made, as the dependency monitor seeds it
+  ([dependency monitor §5.2](dependency-monitor.md#52-seeding-at-publication)):
+  class, reason, the scheduled deletion time if any, and the database time the
+  classification's request began.
 
 The persistence contract commits them atomically and rejects stale inputs
 ([ginsys/bronzeward#18](https://github.com/ginsys/bronzeward/issues/18)). A
