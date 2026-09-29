@@ -105,6 +105,7 @@ go run ./cmd/bronzeward token list -config examples/bronzeward.yaml      # rotat
 go run ./fixtures/oidc keygen -out <file>                                # the fixture issuer's key: a synthetic secret, never committed
 go run ./fixtures/oidc serve -key <file> -issuer http://127.0.0.1:5556  # the issuer examples/bronzeward.yaml names
 go run ./fixtures/oidc mint -key <file> -issuer http://127.0.0.1:5556 -human h-author [-defect expired]
+curl -s -H "Authorization: Bearer $(go run ./fixtures/oidc mint -key <file> -issuer http://127.0.0.1:5556 -human h-viewer)" http://127.0.0.1:8080/api/v1/acts
 ```
 
-`examples/bronzeward.yaml` is the development configuration, matching `mise run dev-db`. A deployment writes its own. The server refuses to start unless the database holds exactly its migrations (run `migrate` first). It does not serve TLS yet, and `GET /livez` is its only route. It authenticates nothing yet; `internal/auth` is exercised by `mise run go-db`.
+`examples/bronzeward.yaml` is the development configuration, matching `mise run dev-db`. A deployment writes its own. The server refuses to start unless the database holds exactly its migrations (run `migrate` first). It does not serve TLS yet. Every request but `GET /livez` authenticates. `GET /api/v1/acts` and `POST /api/v1/identity-revocations` are served. Every other route of the API contract is routed and role-checked, and answers `501 not-implemented` until the issue that owns it lands. `internal/auth` and `internal/api` are exercised by `mise run go-db`.
