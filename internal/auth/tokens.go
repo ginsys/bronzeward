@@ -46,6 +46,7 @@ type Store struct {
 type storeOptions struct {
 	noPrincipalLock bool   // the control: no FOR UPDATE on the principal row
 	afterRevokeOld  func() // in an issuing transaction, after revoking the unrevoked token
+	beforeLock      func() // in a rotation's transaction, after it began and before the principal lock
 }
 
 func NewStore(db *sql.DB, a config.Auth) *Store {
@@ -109,6 +110,9 @@ func (s *Store) Rotate(ctx context.Context, identity string, roles []Role, expir
 	}
 	var out Issued
 	err = inTx(ctx, s.db, func(tx *sql.Tx) error {
+		if s.o.beforeLock != nil {
+			s.o.beforeLock()
+		}
 		revoked, err := s.lockService(ctx, tx, identity)
 		if err != nil {
 			return err
@@ -119,8 +123,9 @@ func (s *Store) Rotate(ctx context.Context, identity string, roles []Role, expir
 		grant := roles
 		if grant == nil {
 			var r string
+			// The last issued token's grant: seq, not issued_at, orders tokens by replacement.
 			if err := tx.QueryRowContext(ctx, `SELECT array_to_string(roles, ',') FROM automation_token
-				WHERE owner = $1 ORDER BY issued_at DESC, id LIMIT 1`, identity).Scan(&r); err != nil {
+				WHERE owner = $1 ORDER BY seq DESC LIMIT 1`, identity).Scan(&r); err != nil {
 				return err
 			}
 			grant = ParseRoles(r)
@@ -281,7 +286,7 @@ type Listed struct {
 	TokenRevoked                           *time.Time
 }
 
-// List returns every token of every service identity, oldest first per identity.
+// List returns every token of every service identity, in issuance order per identity.
 func (s *Store) List(ctx context.Context) ([]Listed, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.name, r.sub, p.revoked, t.id, array_to_string(t.roles, ','),
 			t.issued_at, t.expires_at, t.epoch = i.epoch, t.expires_at <= now(), t.revoked_at
@@ -290,7 +295,7 @@ func (s *Store) List(ctx context.Context) ([]Listed, error) {
 		JOIN automation_token t ON t.owner = p.id
 		CROSS JOIN installation_state i
 		WHERE p.kind = 'service'
-		ORDER BY p.name, t.issued_at, t.id`)
+		ORDER BY p.name, t.seq`)
 	if err != nil {
 		return nil, err
 	}

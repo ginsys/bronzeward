@@ -34,7 +34,10 @@ ALTER TABLE recovery_epoch ADD FOREIGN KEY (entered_by) REFERENCES principal (id
 -- so a DST change cannot make the bound differ from the tool's.
 CREATE TABLE automation_token (
   id            text PRIMARY KEY CHECK (id ~ '^tok_[a-z2-7]{26}$'),
-  owner         text NOT NULL REFERENCES principal (id),
+  -- Issuance order. Tokens are inserted under the principal lock, so seq follows the order in
+  -- which an identity's tokens replaced each other; issued_at (a transaction's start) need not.
+  seq           bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
+  owner        text NOT NULL REFERENCES principal (id),
   secret_sha256 bytea NOT NULL CHECK (length(secret_sha256) = 32),
   roles         text[] NOT NULL CHECK (cardinality(roles) > 0
                   AND roles <@ ARRAY['viewer', 'author', 'publisher']::text[]),
