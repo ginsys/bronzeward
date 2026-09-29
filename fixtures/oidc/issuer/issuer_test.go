@@ -150,8 +150,12 @@ func TestKeyFile(t *testing.T) {
 	if err := WriteKey(p, key); err == nil {
 		t.Fatal("WriteKey overwrote an existing file")
 	}
-	if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("mode %v, %v", fi.Mode(), err)
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v, want 0600", fi.Mode())
 	}
 	got, err := ReadKey(p)
 	if err != nil || got.KeyID != key.KeyID || got.IsPublic() {
