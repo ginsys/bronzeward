@@ -31,6 +31,7 @@ type Issued struct {
 	TokenID  string
 	Token    string
 	Expires  time.Time
+	act      string // the act recording the issue
 }
 
 // Store is the token tool's database side: the only way to issue, rotate, list or revoke
@@ -48,42 +49,59 @@ type storeOptions struct {
 	noPrincipalLock bool                // the control: no FOR UPDATE on the principal row
 	afterRevokeOld  func()              // in an issuing or revoking transaction, after revoking the unrevoked token
 	beforeLock      func()              // in a token tool transaction, after it began and before the principal locks
-	commit          func(*sql.Tx) error // replaces tx.Commit in issuing transactions
+	commit          func(*sql.Tx) error // replaces tx.Commit in token tool transactions
 }
 
-// issuing runs fn, which issues a token, in a transaction. An error from COMMIT leaves the
-// outcome to the server, and is resolved by reading (persistence-api.md §5 rule 6): the token's
-// id was generated before the transaction, so its row says whether it committed. Assuming
-// failure would lose the only copy of a committed token's secret, after a rotation had revoked
-// the one it replaced.
-func (s *Store) issuing(ctx context.Context, fn func(*sql.Tx) (Issued, error)) (Issued, error) {
-	commit := (*sql.Tx).Commit
-	if s.o.commit != nil {
-		commit = s.o.commit
-	}
-	var out Issued
+// inToolTx runs fn in a token tool transaction, after taking the installation state lock
+// (lockEpoch); fn returns the id of the act it recorded, if any. An error from COMMIT leaves the
+// outcome to the server and is resolved by reading (persistence-api.md §5 rule 6): the act is
+// written in the same transaction, so its row says whether the transaction committed.
+func (s *Store) inToolTx(ctx context.Context, fn func(*sql.Tx) (act string, err error)) error {
+	var act string
 	err := inTxCommit(ctx, s.db, func(tx *sql.Tx) error {
 		if err := lockEpoch(ctx, tx); err != nil {
 			return err
 		}
 		var err error
-		out, err = fn(tx)
+		act, err = fn(tx)
 		return err
-	}, commit)
-	if err == nil || !errors.Is(err, errCommit) {
-		return out, err
+	}, s.commitFn())
+	if !errors.Is(err, errCommit) || act == "" {
+		return err
 	}
 	// The request's own context may be what ended the commit.
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	var n int
-	if rerr := s.db.QueryRowContext(rctx, `SELECT count(*) FROM automation_token WHERE id = $1`, out.TokenID).Scan(&n); rerr != nil {
-		return Issued{}, fmt.Errorf("%w; whether token %s committed is unknown (%v): see token list", err, out.TokenID, rerr)
+	if rerr := s.db.QueryRowContext(rctx, `SELECT count(*) FROM act WHERE id = $1`, act).Scan(&n); rerr != nil {
+		return fmt.Errorf("%w; whether act %s committed is unknown (%v): see token list", err, act, rerr)
 	}
 	if n == 0 {
+		return err
+	}
+	return nil
+}
+
+// issuing runs fn, which issues a token, in a tool transaction. Resolving a lost COMMIT reply
+// matters most here: assuming failure would lose the only copy of a committed token's secret,
+// after a rotation had revoked the one it replaced.
+func (s *Store) issuing(ctx context.Context, fn func(*sql.Tx) (Issued, error)) (Issued, error) {
+	var out Issued
+	if err := s.inToolTx(ctx, func(tx *sql.Tx) (string, error) {
+		var err error
+		out, err = fn(tx)
+		return out.act, err
+	}); err != nil {
 		return Issued{}, err
 	}
 	return out, nil
+}
+
+func (s *Store) commitFn() func(*sql.Tx) error {
+	if s.o.commit != nil {
+		return s.o.commit
+	}
+	return (*sql.Tx).Commit
 }
 
 func NewStore(db *sql.DB, a config.Auth) *Store {
@@ -188,19 +206,16 @@ func (s *Store) Revoke(ctx context.Context, identity, operator string) ([]string
 		return nil, fmt.Errorf("token: operator: %w", err)
 	}
 	var revoked []string
-	err = inTx(ctx, s.db, func(tx *sql.Tx) error {
-		if err := lockEpoch(ctx, tx); err != nil {
-			return err
-		}
+	err = s.inToolTx(ctx, func(tx *sql.Tx) (string, error) {
 		if s.o.beforeLock != nil {
 			s.o.beforeLock()
 		}
 		if _, err := s.lockPrincipals(ctx, tx, identity, op); err != nil {
-			return err
+			return "", err
 		}
 		var err error
 		if revoked, err = revokeTokens(ctx, tx, identity); err != nil || len(revoked) == 0 {
-			return err
+			return "", err
 		}
 		if s.o.afterRevokeOld != nil {
 			s.o.afterRevokeOld()
@@ -288,10 +303,11 @@ func (s *Store) issue(ctx context.Context, tx *sql.Tx, identity string, roles []
 		tok, identity, sum[:], joinRoles(roles), expiry.Microseconds()).Scan(&expires); err != nil {
 		return Issued{}, err
 	}
-	if err := recordToolAct(ctx, tx, operator, action, append([]string{identity, tok}, old...)); err != nil {
+	act, err := recordToolAct(ctx, tx, operator, action, append([]string{identity, tok}, old...))
+	if err != nil {
 		return Issued{}, err
 	}
-	return Issued{Identity: identity, TokenID: tok, Expires: expires,
+	return Issued{Identity: identity, TokenID: tok, Expires: expires, act: act,
 		Token: tokenPrefix + tok + "." + base64.RawURLEncoding.EncodeToString(secret[:])}, nil
 }
 
@@ -314,11 +330,15 @@ func revokeTokens(ctx context.Context, tx *sql.Tx, identity string) ([]string, e
 }
 
 // recordToolAct writes the act of a token command: the operator, no API role (§10.2, §10.5).
-func recordToolAct(ctx context.Context, tx *sql.Tx, operator, action string, subjects []string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO act (id, principal, principal_kind, via, action, subjects, epoch, at)
+// It returns the act's id.
+func recordToolAct(ctx context.Context, tx *sql.Tx, operator, action string, subjects []string) (string, error) {
+	act := id.New(id.Act)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO act (id, principal, principal_kind, via, action, subjects, epoch, at)
 		SELECT $1, $2, 'human', 'tool', $3, string_to_array($4, ','), epoch, now() FROM installation_state`,
-		id.New(id.Act), operator, action, strings.Join(subjects, ","))
-	return err
+		act, operator, action, strings.Join(subjects, ",")); err != nil {
+		return "", err
+	}
+	return act, nil
 }
 
 // checkGrant refuses a role outside viewer, author and publisher, a repeat, no role, or a bad
