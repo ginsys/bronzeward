@@ -163,7 +163,7 @@ cp -- "$STATE/up-fixtures-diff.txt" "$out/up-fixtures-diff.txt" ||
   printf 'postgres        %s\n' "$(reported pg psql -U bronzeward -d bronzeward -Atc 'show server_version')"
   printf 'sops            %s\n' "$(reported "$CACHE/sops" --version --disable-version-check)"
   printf 'age             %s\n' "$(reported "$CACHE/age" --version)"
-  for c in "$PG" "$BAO" "$CP" "$WORKER"; do
+  for c in "$PG" "$BAO" "$CP" "$WORKER" "$BW_A" "$BW_B" "$ISSUER"; do
     if id=$(container_id "$c" 2>/dev/null); then
       # shellcheck disable=SC2016  # $name is a Go template variable, not a shell one
       printf 'image          %s %s\n' "$c" "$(reported docker inspect --format '{{.Config.Image}} -> {{.Image}} running={{.State.Running}} paused={{.State.Paused}} networks=[{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}]' "$id")"
@@ -174,7 +174,7 @@ cp -- "$STATE/up-fixtures-diff.txt" "$out/up-fixtures-diff.txt" ||
 } >"$out/versions.txt"
 
 # Logs survive a kill, so they are read from stopped containers too.
-for c in "$PG" "$BAO" "$CP" "$WORKER"; do
+for c in "$PG" "$BAO" "$CP" "$WORKER" "$BW_A" "$BW_B" "$ISSUER"; do
   { id=$(container_id "$c" 2>/dev/null) && docker logs "$id" >"$out/logs/$c.log" 2>&1; } || unavailable "logs of $c"
 done
 unset id
