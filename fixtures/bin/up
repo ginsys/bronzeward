@@ -291,26 +291,36 @@ fetch_tools
 # not there.
 docker image pull --quiet "$CURL_IMAGE" >/dev/null || die "could not pull the client image $CURL_IMAGE"
 
-# The server under test and the OIDC issuer, built from this checkout into one image of two static
-# binaries and nothing else, imported for this run and never pulled. The build is of the whole
-# repository, which the tree check above does not cover: up-build records the commit, how many
-# paths differ from it and the Go version, and bin/evidence copies it into the bundle. It records
-# no content: S0 fails unless no path differed (acceptance plan S0 preconditions).
+# The server under test and the OIDC issuer, built into one image of two static binaries and
+# nothing else, imported for this run and never pulled. They are built from the commit, exported
+# with git archive, not from the checkout: an edit or a checkout during the build cannot reach
+# them, so the recorded commit is the source that ran. Only with the Go version mise.toml pins,
+# the one every other build and check uses. up-build records the commit, how many paths of the
+# checkout differ from it and the Go version, and bin/evidence copies it into the bundle. It
+# records no content: S0 fails unless no path differed (acceptance plan S0 preconditions).
 say "building the server image"
-S_IMG=$STATE/image
-mkdir "$S_IMG" "$STATE/issuer" "$STATE/server" "$STATE/server/a" "$STATE/server/b"
-for binary in bronzeward:./cmd/bronzeward oidc:./fixtures/oidc; do
-  (cd -- "$FIXTURES/.." && CGO_ENABLED=0 timeout 600 go build -trimpath -o "$S_IMG/${binary%%:*}" "${binary#*:}") ||
-    die "could not build ${binary#*:}"
-done
-unset binary
+build_pin=$(sed -n 's/^go = "\([^"]*\)"$/\1/p' -- "$FIXTURES/../mise.toml") || die "cannot read the Go version mise.toml pins"
+build_go=$(go env GOVERSION) || die "cannot read the Go version the server image would be built with"
+[ -n "$build_pin" ] && [ "$build_go" = "go$build_pin" ] ||
+  die "go on PATH is $build_go, but mise.toml pins go ${build_pin:-(none)}: run bin/up under mise (mise exec -- fixtures/bin/up)"
 build_commit=$(fixtures_git rev-parse HEAD) || die "cannot read the commit the server image is built from"
 build_differs=$(fixtures_git status --porcelain --untracked-files=all | wc -l) || die "cannot ask git how the checkout differs from $build_commit"
-build_go=$(go env GOVERSION) || die "cannot read the Go version the server image is built with"
+S_IMG=$STATE/image
+S_SRC=$STATE/source
+mkdir "$S_IMG" "$S_SRC" "$STATE/issuer" "$STATE/server" "$STATE/server/a" "$STATE/server/b"
+# From the repository root: run in fixtures/, git archive exports only that directory.
+fixtures_git -C .. archive --format=tar "$build_commit" | tar -x -C "$S_SRC" -f - ||
+  die "could not export $build_commit to build the server image from"
+for binary in bronzeward:./cmd/bronzeward oidc:./fixtures/oidc; do
+  (cd -- "$S_SRC" && CGO_ENABLED=0 GOFLAGS=-mod=readonly timeout 600 go build -trimpath -buildvcs=false \
+    -o "$S_IMG/${binary%%:*}" "${binary#*:}") || die "could not build ${binary#*:} from $build_commit"
+done
+unset binary
+rm -rf -- "$S_SRC"
 record up-build "commit $build_commit
 differing-paths $build_differs
 go $build_go" || die "could not record the server build in $STATE"
-unset build_commit build_differs build_go
+unset build_pin build_commit build_differs build_go S_SRC
 "$S_IMG/oidc" keygen -out "$STATE/issuer/key.json" || die "could not generate the issuer's signing key"
 # By ID from here on: a re-tag between the import and Compose cannot substitute another image. The
 # ID is recorded before anything uses it, so that down removes the image whatever fails after.

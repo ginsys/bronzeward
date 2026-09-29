@@ -289,6 +289,8 @@ run() {
     [ "$tok" = "$all" ] || who='automation'
     check 'S0 step 5' "$who: POST /api/v1/dispatch is 404" answers 404 not-found POST /api/v1/dispatch "$tok" '{}' s0-step5-dispatch-key
     check 'S0 step 5' "$who: POST /api/v1/tokens is 404" answers 404 not-found POST /api/v1/tokens "$tok" '{}' s0-step5-tokens-key00
+    check 'S0 step 5' "$who: DELETE /api/v1/tokens/<id> is 404" \
+      answers 404 not-found DELETE "/api/v1/tokens/tok_$zero" "$tok" '' s0-step5-revoke-key00
     check 'S0 step 5' "$who: PUT /api/v1/principals/<idn>/roles is 404" \
       answers 404 not-found PUT "/api/v1/principals/$robot_id/roles" "$tok" '{}' s0-step5-roles-key000
   done
@@ -338,14 +340,20 @@ walk() {
   done
   t[automation]=$robot
   principals=$(count_principals) || die "cannot count principals"
+  # The roles each identity holds: the fixture issuer's groups (fixtures/oidc/issuer Humans) as
+  # examples/bronzeward.yaml maps them, and the automation token bin/seed issues.
+  declare -A held=([h-author]=author [h-publisher]=publisher [h-approver]=approver [h-recovery]=recovery-admin
+    [h-viewer]=viewer [h-all]='author,publisher,approver' [automation]='author,publisher')
   # The rows design §13.7 says role alone denies, then automation on every human-only route (16).
-  printf 'who\tmethod\tpath\tstatus\tproblem\n' >"$EV/walk.tsv"
+  # Each row keeps the roles held, and the qualifying roles and human-only flag the refusal names.
+  printf 'who\troles\tmethod\tpath\tstatus\tproblem\tqualifying\thuman-only\n' >"$EV/walk.tsv"
   while read -r who method pattern; do
     rows=$((rows + 1))
     check 'S0 step 4' "$who $method $pattern: 403 forbidden" \
       answers 403 forbidden "$method" "$(fill "$pattern")" "${t[$who]}" '{}' s0-walk-key-000000
-    printf '%s\t%s\t%s\t%s\t%s\n' "$who" "$method" "$pattern" "$last_status" \
-      "$(jq -r '.type // "-"' "$EV/last.body" 2>/dev/null || echo -)" >>"$EV/walk.tsv"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$who" "${held[$who]}" "$method" "$pattern" "$last_status" \
+      "$(jq -r '[.type // "-", (.roles // [] | join(",")), (.humanOnly // false | tostring)] | join("\t")' \
+        "$EV/last.body" 2>/dev/null || printf -- '-\t-\t-')" >>"$EV/walk.tsv"
   done <<'EOF'
 h-author POST /drafts/{id}/publications
 h-viewer PUT /drafts/{id}/fragments/{name}
@@ -438,14 +446,24 @@ if bundle=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   else
     result FAIL 'S0 evidence' "the leak scan reports fixture secrets: $bundle/leak-scan.txt"
   fi
+  # bin/evidence captures what it can and names the rest in unavailable.txt: a surface never
+  # captured was never scanned, so S0's evidence is complete only without that file.
+  if [ -e "$bundle/unavailable.txt" ]; then
+    result FAIL 'S0 evidence' "the bundle is incomplete: $bundle/unavailable.txt names what was not captured"
+  else
+    result PASS 'S0 evidence' 'the bundle is complete: bin/evidence captured every source'
+  fi
   # The tokens this run minted and issued, searched in the bundle and the run directory. The
-  # control is in the same search: a file outside .state holding the last of them, which must be
-  # the one file it lists.
-  local_ctl=$(mktemp)
+  # control is in the same search: a file holding the last of them, which must be the one file it
+  # lists. It is under .state, which down removes whatever interrupts this, and outside the
+  # bundle and the run directory, which it must not reach.
+  local_ctl=$STATE/s0-token-control
+  trap 'rm -f -- "$local_ctl"' EXIT
   printf 'x %s x\n' "${secrets[-1]:-}" >"$local_ctl"
   hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
     "$EV" "$bundle" "$local_ctl") || hits=
   rm -f -- "$local_ctl"
+  trap - EXIT
   if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
     result PASS 'S0 evidence' "none of the ${#secrets[@]} tokens this run minted or issued is in the bundle or the run directory (control found)"
   else
