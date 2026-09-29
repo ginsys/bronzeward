@@ -32,6 +32,7 @@ type fixture struct {
 	held           chan struct{}
 	stop           chan struct{} // closed at cleanup, releasing any held request
 	jwksHits       atomic.Int32  // requests the key set endpoint answered
+	discoveryHits  atomic.Int32  // requests for the discovery document, answered or not
 	// jwksURI, when set, replaces the jwks_uri the discovery document advertises; redirect maps
 	// a path to the URL it answers with a 302.
 	jwksURI  atomic.Value // string
@@ -59,6 +60,9 @@ func newFixture(t *testing.T) *fixture {
 	h := f.iss.Handler()
 	f.stop, f.held = make(chan struct{}), make(chan struct{}, 16)
 	srv := &httptest.Server{Listener: l, Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			f.discoveryHits.Add(1)
+		}
 		if f.down.Load() {
 			http.Error(w, "down", http.StatusServiceUnavailable)
 			return
@@ -414,14 +418,62 @@ func TestDiscoveryWaitHonoursTheDeadline(t *testing.T) {
 
 func TestIssuerDownThenUp(t *testing.T) {
 	f := newFixture(t)
-	v := f.verifier()
+	d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+	d.retry = 100 * time.Millisecond
+	v := NewVerifier(f.cfg, f.db, d)
 	h := f.bearer(t, "h-viewer", "")
 	f.down.Store(true)
 	if _, err := v.Authenticate(t.Context(), h); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("issuer down: %v; want ErrUnavailable", err)
 	}
 	f.down.Store(false)
+	time.Sleep(150 * time.Millisecond)
 	if _, err := v.Authenticate(t.Context(), h); err != nil {
 		t.Fatalf("issuer back: %v", err)
+	}
+}
+
+// A failed discovery is not repeated for every request: until the retry interval has passed,
+// requests get the failure without asking the issuer again. After it, discovery runs again.
+func TestFailedDiscoveryIsNotRepeated(t *testing.T) {
+	f := newFixture(t)
+	d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+	d.retry = 300 * time.Millisecond
+	v := NewVerifier(f.cfg, f.db, d)
+	h := f.bearer(t, "h-viewer", "")
+	f.down.Store(true)
+	for range 5 {
+		if _, err := v.Authenticate(t.Context(), h); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("issuer down: %v; want ErrUnavailable", err)
+		}
+	}
+	if n := f.discoveryHits.Load(); n != 1 {
+		t.Fatalf("%d discovery requests within the retry interval; want 1", n)
+	}
+	f.down.Store(false)
+	time.Sleep(400 * time.Millisecond)
+	if _, err := v.Authenticate(t.Context(), h); err != nil {
+		t.Fatalf("issuer back after the retry interval: %v", err)
+	}
+	if n := f.discoveryHits.Load(); n != 2 {
+		t.Fatalf("%d discovery requests after the retry interval; want 2", n)
+	}
+}
+
+// A discovery the request itself gave up on says nothing about the issuer, so it is not kept as
+// a failure: the next request discovers at once.
+func TestAbandonedDiscoveryIsNotKept(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier() // the production retry interval
+	h := f.bearer(t, "h-viewer", "")
+	f.stallDiscovery.Store(true)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := v.Authenticate(ctx, h); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("stalled discovery: %v; want ErrUnavailable", err)
+	}
+	f.stallDiscovery.Store(false)
+	if _, err := v.Authenticate(t.Context(), h); err != nil {
+		t.Fatalf("after an abandoned discovery: %v", err)
 	}
 }
