@@ -3,11 +3,13 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,6 +32,10 @@ type fixture struct {
 	held           chan struct{}
 	stop           chan struct{} // closed at cleanup, releasing any held request
 	jwksHits       atomic.Int32  // requests the key set endpoint answered
+	// jwksURI, when set, replaces the jwks_uri the discovery document advertises; redirect maps
+	// a path to the URL it answers with a 302.
+	jwksURI  atomic.Value // string
+	redirect sync.Map     // path → URL
 }
 
 // newFixture starts the fixture issuer on a loopback port. The listener comes first, so the
@@ -65,6 +71,23 @@ func newFixture(t *testing.T) *fixture {
 			case <-r.Context().Done():
 			case <-f.stop:
 			}
+			return
+		}
+		if to, ok := f.redirect.Load(r.URL.Path); ok {
+			http.Redirect(w, r, to.(string), http.StatusFound)
+			return
+		}
+		if u, ok := f.jwksURI.Load().(string); ok && r.URL.Path == "/.well-known/openid-configuration" {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+			var doc map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			doc["jwks_uri"] = u
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doc)
 			return
 		}
 		if r.URL.Path == "/jwks" {
@@ -277,6 +300,51 @@ func TestKeySetRefetchIsRateLimited(t *testing.T) {
 	}
 	if _, err := v.Authenticate(t.Context(), f.bearer(t, "h-viewer", "")); err != nil {
 		t.Fatalf("a valid token after limited refetches: %v", err)
+	}
+}
+
+// offLoopback fails, and records, every request to a host that is not a loopback IP.
+type offLoopback struct {
+	mu   sync.Mutex
+	urls []string
+}
+
+func (o *offLoopback) RoundTrip(r *http.Request) (*http.Response, error) {
+	if ip := net.ParseIP(r.URL.Hostname()); ip == nil || !ip.IsLoopback() {
+		o.mu.Lock()
+		o.urls = append(o.urls, r.URL.String())
+		o.mu.Unlock()
+		return nil, errors.New("request off loopback")
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// Discovery and keys come over https or from this host only: neither the advertised jwks_uri
+// nor a redirect may move a fetch onto plain http elsewhere, where an on-path attacker could
+// serve a signing key.
+func TestIssuerFetchesStayOnAuthenticatedTransport(t *testing.T) {
+	for name, set := range map[string]func(*fixture){
+		"advertised jwks_uri": func(f *fixture) { f.jwksURI.Store("http://keys.example.test/jwks") },
+		"key set redirect":    func(f *fixture) { f.redirect.Store("/jwks", "http://keys.example.test/jwks") },
+		"discovery redirect": func(f *fixture) {
+			f.redirect.Store("/.well-known/openid-configuration", "http://idp.example.test/.well-known/openid-configuration")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			set(f)
+			d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+			o := &offLoopback{}
+			d.client.Transport = o
+			if _, err := NewVerifier(f.cfg, f.db, d).Authenticate(t.Context(), f.bearer(t, "h-viewer", "")); err == nil {
+				t.Fatal("token accepted")
+			}
+			o.mu.Lock()
+			defer o.mu.Unlock()
+			if len(o.urls) > 0 {
+				t.Fatalf("fetched over plain http off this host: %v", o.urls)
+			}
+		})
 	}
 }
 
