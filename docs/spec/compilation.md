@@ -629,8 +629,10 @@ For each machine:
    the source superset; resolving early necessarily reads all of it (SR §6.2,
    §6.4).
 3. **Check dependencies**: every pinned secret version must classify `retained`
-   (design §7.6), and the compiler identity must read it at the point of use.
-   `blocked`, `lost` or `unknown` refuses publication.
+   (design §7.6), classified afresh by the
+   [dependency monitor's procedure](dependency-monitor.md#3-classification-procedure),
+   never read from its stored status, and the compiler identity must read it at
+   the point of use. `blocked`, `lost` or `unknown` refuses publication.
 4. **Resolve** the import base and each fragment with a tag-preserving parser,
    replacing each tagged node by its typed value (with its encoding) before any
    typed decode, and each identified embedded document as in §5.4. Every tag

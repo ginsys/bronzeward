@@ -179,6 +179,7 @@ rel_fgqvcvz3ck7h7234ljgdbzsj6m
 | `ibr` | import base revision | `idn` | principal (human or service identity) |
 | `drf` | draft | `tok` | automation token |
 | `rel` | release | `ing` | ingestion claim |
+| `dep` | monitored dependency ([dependency monitor §2](dependency-monitor.md#2-what-is-monitored)) | `dal` | dependency alert |
 | `ep` | recovery epoch | `act` | act record |
 | `req` | API request | | |
 
@@ -223,7 +224,8 @@ that the trigger fires **(choice §17.3)**.
 | Draft | mutable, revisioned | change set: entries and their base head revisions | this contract |
 | Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1); the release covers one cluster and a set of its machines | compilation §11; this contract |
 | Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity | compilation §9 |
-| DependencyStatus | mutable | last classification per dependency and when first seen `retained` | design §7.6, §7.8 |
+| DependencyStatus | mutable | last classification per provider object version and when first seen `retained` | design §7.6, §7.8; [dependency monitor §5](dependency-monitor.md#5-state) |
+| DependencyAlert | immutable | every alert the dependency monitor raises | [dependency monitor §6.2](dependency-monitor.md#62-alert-kinds) |
 | Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload; for a draft entry route, the principal and idempotency key (§7.2) | compilation §3 |
 | MachineState | mutable, revisioned | Desired, Applied (with source), baseline revision | execution and recovery (Desired, Applied and Observed) |
 | Observation | immutable | purpose, read-start basis, machine revision, identity, assignment evidence, running version, configuration digest, health, or what could not be read | execution and recovery §4.1 |
@@ -608,6 +610,9 @@ INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
                                      -- configuration digest, review data
 INSERT INTO release_source ...;      -- every revision and head revision used
 INSERT INTO dependency ...;          -- both records and the encryption dependency
+INSERT INTO dependency_status ... ON CONFLICT DO NOTHING;
+                                     -- `retained`, per provider object version
+                                     -- without a row (dependency monitor §5.2)
 UPDATE <head> SET head_revision_id = ..., head_revision = head_revision + 1,
                   etag_token = ...
  WHERE id = ... AND head_revision = $base;
@@ -1056,6 +1061,7 @@ idempotency and conflict behavior.
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments | 200 | any role |
 | `GET /drafts[/{id}]`, `/ingestions/{id}`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
+| `GET /dependencies[/{id}]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/takeovers` (a further mark on a staged ingestion; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
@@ -1747,6 +1753,7 @@ For a database restored to a backup taken at time *T*:
 | Automation tokens | earlier epoch | refused; reissued with the tool **(choice §17.27)** |
 | Tokens revoked after *T* | valid again in the rows | refused anyway: earlier epoch |
 | `DependencyStatus` | as at *T* | a dependency recorded `retained` and now answering 404 alerts at once as a regression (§6.3) |
+| `DependencyAlert` after *T* | absent | their log lines remain ([dependency monitor §9](dependency-monitor.md#9-restored-state)) |
 
 The automation-token rule costs a reissue of every service identity's token
 after each restore. It is the only way this contract finds to refuse a token

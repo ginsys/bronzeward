@@ -8,6 +8,7 @@ This directory reserves the location for detailed contracts produced during [02 
 | [`docs/spec/persistence-api.md`](persistence-api.md) | [Persistence and API contracts](https://github.com/ginsys/bronzeward/issues/18) |
 | [`docs/spec/execution-recovery.md`](execution-recovery.md) | [Execution and recovery](https://github.com/ginsys/bronzeward/issues/19) |
 | [`docs/spec/acceptance-plan.md`](acceptance-plan.md) | [Review and finalize the PoC specification](https://github.com/ginsys/bronzeward/issues/20) |
+| [`docs/spec/dependency-monitor.md`](dependency-monitor.md) | [Implement dependency retention checks](https://github.com/ginsys/bronzeward/issues/24), the monitor section the specification review required before implementation |
 
 Add links here when those files land. Keep detailed contracts in these artifacts, with links to the [current design](../design/Talos_Configuration_and_Machine_Management_Design.md), experimental evidence and relevant profile/policy decisions. Accepted design changes also update the design; the specification does not silently override it. If a contract needs subdivision, update this index and its issue's deliverables together.
 
