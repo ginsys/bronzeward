@@ -347,6 +347,7 @@ func commitStillInFlight(t *testing.T, control bool) {
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- e.do(e.api, post(tok, key, `{}`)) }()
 	tx := <-handoff
+	t.Cleanup(func() { _ = tx.Rollback() }) // every path ends it, a t.Fatal included
 	if control {
 		wantProblem(t, <-done, http.StatusServiceUnavailable, "dependency-unavailable")
 		return

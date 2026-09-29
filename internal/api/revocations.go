@@ -111,6 +111,8 @@ func revokeIdentity(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 			return result{}, refuse(http.StatusNotFound, "not-found", "no identity "+p)
 		case err != nil:
 			return result{}, err
+		case already && p == q.principal.ID: // a human revoking itself, revoked meanwhile (rule 2)
+			return result{}, refuse(http.StatusForbidden, "identity-revoked", "")
 		case already:
 			return result{}, refuse(http.StatusConflict, "conflict", "the identity is already revoked; a revocation is permanent").with("identity", p)
 		}
