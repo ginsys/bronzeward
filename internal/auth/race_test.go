@@ -35,6 +35,44 @@ func rotate(t *testing.T, s *Store, identity string) chan error {
 	return done
 }
 
+// A rotation that began before another but took the lock after it replaces that one's token, so
+// its grant is the current one although its issued_at (the transaction's start) is the earlier.
+// A later rotation without -roles inherits that grant, not the replaced token's.
+func TestRotationInheritsTheLastIssuedGrant(t *testing.T) {
+	db := migrated(t)
+	is := issued(t, storeFor(db), "ci")
+	started, release, first := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	a := storeFor(db)
+	a.o.beforeLock = func() { close(started); <-release }
+	go func() {
+		_, err := a.Rotate(t.Context(), is.Identity, []Role{Viewer}, DefaultExpiry, "h-operator")
+		first <- err
+	}()
+	<-started
+	if _, err := storeFor(db).Rotate(t.Context(), is.Identity, []Role{Publisher}, DefaultExpiry, "h-operator"); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, db, `SELECT count(*) FROM automation_token t WHERE owner = $1 AND revoked_at IS NULL
+		AND issued_at < (SELECT max(issued_at) FROM automation_token WHERE owner = $1)`, is.Identity); n != 1 {
+		t.Fatal("the race did not happen: the current token is not the earlier-stamped one")
+	}
+	if _, err := storeFor(db).Rotate(t.Context(), is.Identity, nil, DefaultExpiry, "h-operator"); err != nil {
+		t.Fatal(err)
+	}
+	var roles string
+	if err := db.QueryRow(`SELECT array_to_string(roles, ',') FROM automation_token
+		WHERE owner = $1 AND revoked_at IS NULL`, is.Identity).Scan(&roles); err != nil {
+		t.Fatal(err)
+	}
+	if roles != "viewer" {
+		t.Fatalf("rotation without -roles granted %q; want viewer, the grant of the token it replaced", roles)
+	}
+}
+
 // §10.2, §16: two rotations of one identity serialize on the principal lock; the second replaces
 // the first's token.
 func TestConcurrentRotationsSerialize(t *testing.T) {
