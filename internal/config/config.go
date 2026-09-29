@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"time"
 
@@ -83,10 +84,14 @@ func (a *Auth) validate() error {
 	if o.Issuer == "" {
 		return errors.New("config: auth.oidc.issuer is required")
 	}
-	// http is accepted for the fixture's issuer; a deployment's is https.
 	u, err := url.Parse(o.Issuer)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("config: auth.oidc.issuer %q is not an http(s) URL without query or fragment", o.Issuer)
+	}
+	// Discovery and key fetches trust whatever the issuer URL answers. Plain http is for the
+	// fixture issuer on this host only: elsewhere an on-path attacker could serve both.
+	if u.Scheme == "http" && !loopback(u.Hostname()) {
+		return fmt.Errorf("config: auth.oidc.issuer %q uses http on a host that is not loopback; use https", o.Issuer)
 	}
 	if o.Audience == "" {
 		return errors.New("config: auth.oidc.audience is required")
@@ -116,4 +121,12 @@ func (a *Auth) validate() error {
 		}
 	}
 	return nil
+}
+
+func loopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
