@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -156,5 +157,52 @@ func TestListActsEpochChangeAfterRouting(t *testing.T) {
 	c := newEnv(t, options{})
 	if rec := c.do(c.api, call{method: "GET", path: prefix + "/acts", token: c.robot}); rec.Code != http.StatusOK {
 		t.Fatalf("control: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// lockProbe records, when the response starts, whether a recovery-mode entry could take the
+// installation state FOR UPDATE: a slow client must not hold it (§5 rule 1).
+type lockProbe struct {
+	*httptest.ResponseRecorder
+	t    *testing.T
+	db   *sql.DB
+	held error
+}
+
+func (p *lockProbe) WriteHeader(code int) {
+	tx, err := p.db.Begin()
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, p.held = tx.Exec(`SELECT 1 FROM installation_state FOR UPDATE NOWAIT`)
+	p.ResponseRecorder.WriteHeader(code)
+}
+
+// GET /acts ends its transaction before it writes the response, a problem included.
+func TestListActsWritesAfterTransaction(t *testing.T) {
+	e := newEnv(t, options{})
+	for _, query := range []string{"", "?cursor=garbage"} {
+		p := &lockProbe{ResponseRecorder: httptest.NewRecorder(), t: t, db: e.db}
+		r := httptest.NewRequest("GET", prefix+"/acts"+query, nil)
+		r.Header.Set("Authorization", "Bearer "+e.human("h-viewer"))
+		e.api.ServeHTTP(p, r)
+		if p.Code == 0 || p.held != nil {
+			t.Fatalf("%q: status %d; the installation state was still locked while writing: %v", query, p.Code, p.held)
+		}
+	}
+	// Control: the probe sees a lock that is held.
+	tx, err := e.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`SELECT 1 FROM installation_state FOR SHARE`); err != nil {
+		t.Fatal(err)
+	}
+	p := &lockProbe{ResponseRecorder: httptest.NewRecorder(), t: t, db: e.db}
+	p.WriteHeader(http.StatusOK)
+	if p.held == nil {
+		t.Fatal("control: the probe took FOR UPDATE past a held FOR SHARE")
 	}
 }
