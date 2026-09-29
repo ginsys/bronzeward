@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"regexp"
 	"strings"
@@ -60,6 +61,26 @@ func TestTokenCommand(t *testing.T) {
 		if err := runToken(args, io.Discard, io.Discard); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+// The token is its only copy: a write that fails after the transaction committed must not look
+// like success, and the error must say the token exists so the operator rotates it.
+func TestTokenCommandUnprintedTokenFails(t *testing.T) {
+	_, dsn := dbtest.New(t)
+	cfg := configFile(t, dsn)
+	if err := runMigrate([]string{"-config", cfg}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var errb bytes.Buffer
+	err := runToken([]string{"issue", "-config", cfg, "-name", "ci", "-roles", "author",
+		"-responsible", "h-all", "-operator", "h-operator"}, failingWriter{}, &errb)
+	if err == nil || !strings.Contains(err.Error(), "rotate") || !identity.MatchString(err.Error()) {
+		t.Fatalf("issue with a failing stdout: %v; want an error naming the identity and rotate", err)
 	}
 }
 
