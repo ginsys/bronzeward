@@ -61,7 +61,7 @@ func routes() []*route {
 		rs = append(rs, g("/"+kind+"s"), g("/"+kind+"s/{id}"), g("/"+kind+"s/{id}/revisions"), g("/"+kind+"-revisions/{id}"))
 	}
 	acts := g("/acts")
-	acts.read = nil // listActs lands in Task 7
+	acts.read = listActs
 	rs = append(rs,
 		g("/drafts"), g("/drafts/{id}"), g("/ingestions/{id}"), g("/releases"), g("/releases/{id}"),
 		g("/releases/{id}/machines/{m}/review"),
