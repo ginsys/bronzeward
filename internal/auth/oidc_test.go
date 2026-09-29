@@ -22,6 +22,9 @@ type fixture struct {
 	iss  *issuer.Issuer
 	cfg  config.Auth
 	down atomic.Bool // the issuer answers 503 while set
+	// stallJWKS makes the key set endpoint hold requests until the client gives up.
+	stallJWKS atomic.Bool
+	stop      chan struct{} // closed at cleanup, releasing any held request
 }
 
 // newFixture starts the fixture issuer on a loopback port. The listener comes first, so the
@@ -41,15 +44,24 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	h := f.iss.Handler()
+	f.stop = make(chan struct{})
 	srv := &httptest.Server{Listener: l, Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if f.down.Load() {
 			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Path == "/jwks" && f.stallJWKS.Load() {
+			select {
+			case <-r.Context().Done():
+			case <-f.stop:
+			}
 			return
 		}
 		h.ServeHTTP(w, r)
 	})}}
 	srv.Start()
 	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(f.stop) }) // runs first: Close waits for held requests
 	f.cfg = testAuth(f.iss.URL)
 	return f
 }
@@ -197,6 +209,28 @@ func TestTimeChecksUseDatabaseClock(t *testing.T) {
 	}
 	if _, err := f.verifier().Authenticate(t.Context(), h); err != nil {
 		t.Fatalf("the database's own clock: %v", err)
+	}
+}
+
+// A key set fetch the issuer never answers must end, so a later request fetches again instead of
+// waiting on the stalled one until the server restarts.
+func TestStalledKeySetFetchRecovers(t *testing.T) {
+	f := newFixture(t)
+	d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+	d.client = &http.Client{Timeout: 200 * time.Millisecond}
+	v := NewVerifier(f.cfg, f.db, d)
+	h := f.bearer(t, "h-viewer", "")
+	f.stallJWKS.Store(true)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if _, err := v.Authenticate(ctx, h); err == nil {
+		t.Fatal("authenticated while the key set endpoint stalls")
+	}
+	f.stallJWKS.Store(false)
+	ctx, cancel = context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if _, err := v.Authenticate(ctx, h); err != nil {
+		t.Fatalf("key set endpoint answering again: %v", err)
 	}
 }
 
