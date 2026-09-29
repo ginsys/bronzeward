@@ -98,8 +98,3 @@ func routes() []*route {
 	)
 	return rs
 }
-
-// identityRevocations is replaced by T5c's route in Task 6.
-func identityRevocations() *route {
-	return &route{method: http.MethodPost, pattern: "/identity-revocations", roles: []auth.Role{auth.RecoveryAdmin}, humanOnly: true}
-}
