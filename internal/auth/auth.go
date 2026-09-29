@@ -226,19 +226,52 @@ func (v *Verifier) roles(payload []byte) ([]Role, error) {
 // Discover returns the issuer's key set, found through its discovery document on first use and
 // looked for again after a failure, so the server starts while the issuer is down.
 func Discover(issuer string) KeySet {
-	return &discovered{issuer: issuer, client: &http.Client{Timeout: issuerTimeout}}
+	return &discovered{issuer: issuer, client: &http.Client{Timeout: issuerTimeout}, refetch: keyRefetchInterval}
 }
 
-// issuerTimeout bounds each request to the issuer. go-oidc fetches keys in the background with
-// no cancellation, sharing one fetch between waiters: an unbounded fetch the issuer never
-// answers would refuse every token until a restart.
-const issuerTimeout = 10 * time.Second
+const (
+	// issuerTimeout bounds each request to the issuer. go-oidc fetches keys in the background
+	// with no cancellation, sharing one fetch between waiters: an unbounded fetch the issuer
+	// never answers would refuse every token until a restart.
+	issuerTimeout = 10 * time.Second
+	// keyRefetchInterval is the least time between successful key set fetches. go-oidc fetches
+	// again for every token whose signature the cached keys do not verify, so without it any
+	// caller could make each request a fetch from the issuer. A token signed with a key the
+	// issuer published since the last fetch is refused until the interval has passed.
+	keyRefetchInterval = time.Minute
+)
 
 type discovered struct {
-	issuer string
-	client *http.Client // bounds every request to the issuer
-	mu     sync.Mutex
-	keys   *oidc.RemoteKeySet
+	issuer  string
+	client  *http.Client  // bounds every request to the issuer
+	refetch time.Duration // the least time between successful key set fetches
+	mu      sync.Mutex
+	keys    *oidc.RemoteKeySet
+}
+
+// limitedFetch refuses a key set fetch within every of the last successful one. A failed fetch
+// sets no limit, so the key set recovers as soon as the issuer does.
+type limitedFetch struct {
+	next  http.RoundTripper
+	every time.Duration
+	mu    sync.Mutex
+	last  time.Time
+}
+
+func (l *limitedFetch) RoundTrip(r *http.Request) (*http.Response, error) {
+	l.mu.Lock()
+	limited := !l.last.IsZero() && time.Since(l.last) < l.every
+	l.mu.Unlock()
+	if limited {
+		return nil, fmt.Errorf("key set fetched less than %s ago", l.every)
+	}
+	resp, err := l.next.RoundTrip(r)
+	if err == nil && resp.StatusCode == http.StatusOK {
+		l.mu.Lock()
+		l.last = time.Now()
+		l.mu.Unlock()
+	}
+	return resp, err
 }
 
 func (d *discovered) VerifySignature(ctx context.Context, raw string) ([]byte, error) {
@@ -268,6 +301,11 @@ func (d *discovered) keySet(ctx context.Context) (*oidc.RemoteKeySet, error) {
 	if doc.JWKS == "" {
 		return nil, errors.New("the discovery document names no jwks_uri")
 	}
-	d.keys = oidc.NewRemoteKeySet(oidc.ClientContext(context.Background(), d.client), doc.JWKS)
+	next := d.client.Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	fetch := &http.Client{Timeout: d.client.Timeout, Transport: &limitedFetch{next: next, every: d.refetch}}
+	d.keys = oidc.NewRemoteKeySet(oidc.ClientContext(context.Background(), fetch), doc.JWKS)
 	return d.keys, nil
 }

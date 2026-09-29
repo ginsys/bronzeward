@@ -25,6 +25,7 @@ type fixture struct {
 	// stallJWKS makes the key set endpoint hold requests until the client gives up.
 	stallJWKS atomic.Bool
 	stop      chan struct{} // closed at cleanup, releasing any held request
+	jwksHits  atomic.Int32  // requests the key set endpoint answered
 }
 
 // newFixture starts the fixture issuer on a loopback port. The listener comes first, so the
@@ -56,6 +57,9 @@ func newFixture(t *testing.T) *fixture {
 			case <-f.stop:
 			}
 			return
+		}
+		if r.URL.Path == "/jwks" {
+			f.jwksHits.Add(1)
 		}
 		h.ServeHTTP(w, r)
 	})}}
@@ -231,6 +235,39 @@ func TestStalledKeySetFetchRecovers(t *testing.T) {
 	defer cancel()
 	if _, err := v.Authenticate(ctx, h); err != nil {
 		t.Fatalf("key set endpoint answering again: %v", err)
+	}
+}
+
+// A token whose signature fails against the cached keys makes go-oidc fetch the key set again.
+// Unauthenticated callers must not turn every request into a fetch from the issuer: after a
+// successful fetch, the next waits out the refetch interval.
+func TestKeySetRefetchIsRateLimited(t *testing.T) {
+	f := newFixture(t)
+	d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+	d.refetch = 300 * time.Millisecond
+	v := NewVerifier(f.cfg, f.db, d)
+	if _, err := v.Authenticate(t.Context(), f.bearer(t, "h-viewer", "")); err != nil {
+		t.Fatal(err)
+	}
+	bad := func() {
+		t.Helper()
+		for _, defect := range []string{"unknown-kid", "wrong-key", "bad-signature"} {
+			if _, err := v.Authenticate(t.Context(), f.bearer(t, "h-viewer", defect)); !errors.Is(err, ErrUnauthenticated) {
+				t.Fatalf("%s: %v; want ErrUnauthenticated", defect, err)
+			}
+		}
+	}
+	bad()
+	if n := f.jwksHits.Load(); n != 1 {
+		t.Fatalf("%d key set fetches within the refetch interval; want 1", n)
+	}
+	time.Sleep(400 * time.Millisecond)
+	bad()
+	if n := f.jwksHits.Load(); n != 2 {
+		t.Fatalf("%d key set fetches after the interval; want 2", n)
+	}
+	if _, err := v.Authenticate(t.Context(), f.bearer(t, "h-viewer", "")); err != nil {
+		t.Fatalf("a valid token after limited refetches: %v", err)
 	}
 }
 
