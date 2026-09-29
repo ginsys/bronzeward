@@ -1,4 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>go-kure/.github//renovate/shared"]
+  "extends": ["github>go-kure/.github//renovate/shared"],
+  "packageRules": [
+    {
+      "description": "MkDocs 2.0 removes the plugin and hook system the documentation site (mkdocs.yml, scripts/site/hooks.py) relies on; moving off 1.x is a migration, not a bump.",
+      "matchManagers": ["pip_requirements"],
+      "matchPackageNames": ["mkdocs"],
+      "allowedVersions": "<2"
+    }
+  ]
 }

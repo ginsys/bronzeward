@@ -1,3 +1,8 @@
 # go-kure/.github checkout made by `mise run upstream-sync` for the action-pin checker.
 # Anchored: unanchored, the pattern would hide a directory of that name anywhere in the tree.
 /upstream/
+
+# The documentation site: mkdocs build output and the virtualenv `mise run site` installs into.
+/site/
+/.venv-site/
+__pycache__/

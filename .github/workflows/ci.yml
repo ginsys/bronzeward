@@ -54,6 +54,21 @@ jobs:
       - name: Whitespace errors (whole tree)
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
 
+  site:
+    # The documentation site's strict build: a broken page link or anchor fails here, before
+    # pages.yml publishes from main.
+    runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
+    timeout-minutes: 10
+    env:
+      NO_MKDOCS_2_WARNING: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet --disable-pip-version-check -r requirements-site.txt
+      - run: mkdocs build --strict
+
   actionlint:
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 5
@@ -163,7 +178,7 @@ jobs:
     # Aggregator: fails on any failed or cancelled job. `commit-lint` is skipped by design outside
     # pull requests, so `skipped` counts as success only for that job.
     if: always()
-    needs: [docs, actionlint, test, go, go-db, commit-lint, action-pins]
+    needs: [docs, site, actionlint, test, go, go-db, commit-lint, action-pins]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:
