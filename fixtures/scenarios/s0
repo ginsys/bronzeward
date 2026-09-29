@@ -22,6 +22,12 @@ image_own "$image_id" || die "the recorded server image is not this run's; run f
 EV=$STATE/evidence/s0-$s0_mode-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p -- "$EV"
 failed=0
+# secrets: every token this run mints or issues. None is a scan pattern of bin/evidence, which knows
+# only the fixture's own; the end of the run looks for each of them in the evidence it kept.
+secrets=()
+keep_secret() { [ -z "$1" ] || secrets+=("$1"); }
+# count_principals: how many principal rows the database holds.
+count_principals() { pg psql -U bronzeward -d bronzeward -Atc 'select count(*) from principal'; }
 
 # result PASS|FAIL|SKIP <reference> <what>. No line carries a token or a response value.
 result() {
@@ -102,7 +108,7 @@ restart_a() { "$bin/inject" kill A >/dev/null && "$bin/inject" start A >/dev/nul
 # issue <name> [token flags]: a new automation identity; its token in $issued_token, its idn in
 # $issued. Globals, not stdout: a command substitution would run it in a subshell, and the identity
 # would never reach the caller.
-issued='' issued_token=''
+issued='' issued_token='' issued_n=0
 issue() {
   local name=$1 err tok
   shift
@@ -115,6 +121,8 @@ issue() {
   issued=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$err")
   rm -f -- "$err"
   issued_token=$tok
+  keep_secret "$tok"
+  issued_n=$((issued_n + 1))
   [ -n "$issued" ] && [ -n "$tok" ]
 }
 
@@ -193,6 +201,10 @@ run() {
   robot=$(cat -- "$STATE/automation-token")
   robot_id=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$STATE/automation-identity")
   viewer=$(mint h-viewer) || die "cannot mint a viewer token"
+  keep_secret "$viewer"
+  # Refused credentials write nothing: the only rows step 3 adds are the identities it issues.
+  local before after
+  before=$(count_principals) || die "cannot count principals"
   check 'S0 step 3' 'OIDC token of h-viewer accepted (control)' answers 200 - GET /api/v1/acts "$viewer"
   check 'S0 step 3' 'automation token accepted (control)' answers 200 - GET /api/v1/acts "$robot"
   check 'S0 step 3' 'no credential: 401' answers 401 unauthenticated GET /api/v1/acts ''
@@ -202,6 +214,7 @@ run() {
   [ "$(wc -l <<<"$defects")" -ge 19 ] || die "the issuer lists fewer defects than the 19 of persistence-api.md §10.1 and Bronzeward's rules"
   for d in $defects; do
     if tok=$(mint h-viewer "$d"); then
+      keep_secret "$tok"
       check 'S0 step 3' "OIDC token, defect $d: 401" answers 401 unauthenticated GET /api/v1/acts "$tok"
     else
       result FAIL 'S0 step 3' "OIDC token, defect $d: could not be minted"
@@ -213,6 +226,7 @@ run() {
   check 'S0 step 3' 'automation token, wrong secret: 401' \
     answers 401 unauthenticated GET /api/v1/acts "${robot%%.*}.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
   if issue ci-s0-rot && old=$issued_token && new=$("$bin/bw" token rotate -identity "$issued" -operator h-all 2>>"$EV/token-rotate.log") && [ -n "$new" ]; then
+    keep_secret "$new"
     check 'S0 step 3' 'automation token, rotated out: 401' answers 401 unauthenticated GET /api/v1/acts "$old"
     check 'S0 step 3' 'automation token, its replacement: 200 (control)' answers 200 - GET /api/v1/acts "$new"
   else
@@ -239,6 +253,9 @@ run() {
   else
     result FAIL 'S0 step 3' 'automation token, denied: issue failed'
   fi
+  after=$(count_principals) || die "cannot count principals"
+  check 'S0 step 3' "refused credentials wrote no principal row ($before, then $after with $issued_n identities issued)" \
+    test "$after" -eq $((before + issued_n))
   result SKIP 'S0 step 3, ruling 4' 'automation token from an earlier epoch: no route enters recovery mode before ginsys/bronzeward#29; internal/auth TestAutomationExpiredRevokedEarlierEpoch covers the refusal'
 
   # Step 5: no route dispatches, issues tokens or grants roles.
@@ -294,9 +311,10 @@ walk() {
   declare -A t
   for h in h-author h-publisher h-approver h-recovery h-viewer h-all; do
     t[$h]=$(mint "$h") || die "cannot mint a token for $h"
+    keep_secret "${t[$h]}"
   done
   t[automation]=$robot
-  principals=$(pg psql -U bronzeward -d bronzeward -Atc 'select count(*) from principal') || die "cannot count principals"
+  principals=$(count_principals) || die "cannot count principals"
   # The rows design §13.7 says role alone denies, then automation on every human-only route (16).
   printf 'who\tmethod\tpath\tstatus\tproblem\n' >"$EV/walk.tsv"
   while read -r who method pattern; do
@@ -344,7 +362,7 @@ EOF
   check 'S0 step 4' "the walk has 34 rows (18 by role, 16 human-only)" test "$rows" -eq 34
   local acts after
   acts=$(pg psql -U bronzeward -d bronzeward -Atc "select count(*) from act where via = 'api'") || die "cannot count acts"
-  after=$(pg psql -U bronzeward -d bronzeward -Atc 'select count(*) from principal') || die "cannot count principals"
+  after=$(count_principals) || die "cannot count principals"
   check 'S0 step 4' "denied requests wrote no act ($acts) and no principal row ($principals, then $after)" \
     test "$acts" = 0 -a "$after" = "$principals"
 
@@ -355,21 +373,57 @@ EOF
     answers_with '.deniedSubjectsListed == true' 201 - POST /api/v1/identity-revocations "${t[h-recovery]}" \
     '{"iss":"http://issuer:5556","sub":"h-all","reason":"S0 step 4"}' s0-walk-revoke-h-all
   cp -- "$EV/last.body" "$EV/revocation.json"
+  # The revocation is recorded, by h-recovery under recovery-admin, with its act.
+  local recorded
+  recorded=$(pg psql -U bronzeward -d bronzeward -Atc "select count(*) from identity_revocation r
+    join principal t on t.id = r.identity and t.sub = 'h-all' and t.revoked
+    join principal b on b.id = r.revoked_by and b.sub = 'h-recovery'
+    join act a on a.id = r.act and a.principal = b.id and a.role = 'recovery-admin' and a.action = 'identity.revoke'
+      and a.via = 'api' and a.subjects = array[t.id]
+    where r.role = 'recovery-admin'") || die "cannot read the identity revocation"
+  check 'S0 step 4, PA §10.4' 'the revocation of h-all is recorded, by h-recovery as recovery-admin, with its act' test "$recorded" = 1
   check 'S0 step 4' 'h-all after its revocation: 403 identity-revoked' answers 403 identity-revoked GET /api/v1/acts "${t[h-all]}"
+  # deniedSubjects refuses h-all before the database is asked (internal/auth): with the list
+  # emptied, the refusal is the recorded revocation's alone.
+  set_denied '[]'
+  restart_a || die "A did not come back with deniedSubjects emptied"
+  check 'S0 step 4, PA §10.4' 'h-all, deniedSubjects emptied: still 403 identity-revoked, from the recorded revocation' \
+    answers 403 identity-revoked GET /api/v1/acts "${t[h-all]}"
+  check 'S0 step 4' 'h-viewer, deniedSubjects emptied: 200 (control)' answers 200 - GET /api/v1/acts "${t[h-viewer]}"
 }
 
 "$s0_mode"
 rm -f -- "$EV/last.body"
 # The evidence directory is scanned: no token or key of this run may have reached it.
+# bin/evidence exits 0 on a leak and reports it: what it says is read from a file outside .state,
+# where nothing is scanned or kept.
 bundle=
-if bundle=$("$bin/evidence" "$EV"); then
-  if grep --quiet --fixed-strings -- "$EV/" "$bundle/leak-scan.txt"; then
-    result FAIL 'S0 evidence' "the leak scan names a file of the run directory: $bundle/leak-scan.txt"
+ev_log=$(mktemp)
+if bundle=$("$bin/evidence" "$EV" 2>"$ev_log"); then
+  cat -- "$ev_log" >&2
+  if grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$ev_log"; then
+    result PASS 'S0 evidence' 'bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret'
   else
-    result PASS 'S0 evidence' 'bin/evidence scanned the run directory; no leak in it'
+    result FAIL 'S0 evidence' "the leak scan reports fixture secrets: $bundle/leak-scan.txt"
+  fi
+  # The tokens this run minted and issued, searched in the bundle and the run directory. The
+  # control is in the same search: a file outside .state holding the last of them, which must be
+  # the one file it lists.
+  local_ctl=$(mktemp)
+  printf 'x %s x\n' "${secrets[-1]:-}" >"$local_ctl"
+  hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
+    "$EV" "$bundle" "$local_ctl") || hits=
+  rm -f -- "$local_ctl"
+  if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
+    result PASS 'S0 evidence' "none of the ${#secrets[@]} tokens this run minted or issued is in the bundle or the run directory (control found)"
+  else
+    printf 's0: files holding a token of this run: %s\n' "${hits:-none, not even the control}" >&2
+    result FAIL 'S0 evidence' "the tokens this run minted or issued: ${#secrets[@]} searched, the listing is not the control alone"
   fi
 else
+  cat -- "$ev_log" >&2
   result FAIL 'S0 evidence' 'bin/evidence failed'
 fi
+rm -f -- "$ev_log"
 say "s0 $s0_mode: $failed failed; evidence in $EV, bundle ${bundle:-none}"
 [ "$failed" -eq 0 ]
