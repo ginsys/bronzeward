@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"errors"
 	"net/http"
 )
 
@@ -22,18 +21,26 @@ type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// lookup reads the record of q's principal and key, if there is one.
+// lookup reads the record of q's principal and key, if there is one, with the installation state
+// FOR SHARE: a recovery-mode entry commits before the statement reads or after it, so the record's
+// epoch is judged against the epoch it sets on q, and a service token is rechecked against it.
 func lookup(ctx context.Context, db querier, q *request) (*record, error) {
 	var rec record
-	err := db.QueryRowContext(ctx, `SELECT r.fingerprint, r.epoch = s.epoch, r.epoch, r.request_id, r.status, r.location, r.etag, r.body
-		FROM idempotency_record r CROSS JOIN installation_state s WHERE r.principal = $1 AND r.key = $2`,
-		q.principal.ID, q.key).Scan(&rec.fingerprint, &rec.current, &rec.epoch, &rec.requestID, &rec.status, &rec.location, &rec.etag, &rec.body)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+	var rid sql.NullString
+	var cur sql.NullBool
+	err := db.QueryRowContext(ctx, `SELECT s.epoch, s.recovery_mode, r.fingerprint, r.epoch = s.epoch, coalesce(r.epoch, ''), r.request_id, coalesce(r.status, 0), r.location, r.etag, r.body
+		FROM installation_state s LEFT JOIN idempotency_record r ON r.principal = $1 AND r.key = $2 FOR SHARE OF s`,
+		q.principal.ID, q.key).Scan(&q.epoch, &q.recovery, &rec.fingerprint, &cur, &rec.epoch, &rid, &rec.status, &rec.location, &rec.etag, &rec.body)
 	if err != nil {
 		return nil, err
 	}
+	if ref := staleToken(q); ref != nil {
+		return nil, ref
+	}
+	if !rid.Valid {
+		return nil, nil
+	}
+	rec.current, rec.requestID = cur.Bool, rid.String
 	return &rec, nil
 }
 

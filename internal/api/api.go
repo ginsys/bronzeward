@@ -101,6 +101,10 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, q, refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database could not be read; nothing was committed"))
 		return
 	}
+	if ref := staleToken(q); ref != nil {
+		a.problem(w, q, ref)
+		return
+	}
 	setEpoch(w, q)
 	// ServeMux would answer an unclean path with a redirect, skipping the problem document, its
 	// log line and the route's role check: no route answers one.
@@ -121,6 +125,15 @@ func cleanPath(p string) string {
 		c += "/"
 	}
 	return c
+}
+
+// staleToken refuses a service principal whose token is from an epoch other than q's (§10.2): an
+// entry can commit between the token's verification and a later read of the installation state.
+func staleToken(q *request) *refusal {
+	if q.principal.Kind == auth.Service && q.principal.Epoch != q.epoch {
+		return refuse(http.StatusUnauthorized, "unauthenticated", "")
+	}
+	return nil
 }
 
 func authRefusal(err error) *refusal {

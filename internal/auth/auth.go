@@ -73,6 +73,7 @@ type Principal struct {
 	Issuer  string // human only
 	Subject string // human only
 	TokenID string // service only
+	Epoch   string // service only: the epoch its token was issued in, rechecked under later reads (§10.2)
 	Roles   []Role
 	Expiry  time.Time // the credential's end: an event stream ends no later (§8.3)
 }
