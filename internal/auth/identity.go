@@ -20,20 +20,35 @@ func EnsureHuman(ctx context.Context, db *sql.DB, d Denied, iss, sub string) (st
 	if d.Human(iss, sub) {
 		return "", fmt.Errorf("%w: %s is in deniedSubjects", ErrIdentityRevoked, sub)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO principal (id, kind, iss, sub, created_at)
-		VALUES ($1, 'human', $2, $3, now()) ON CONFLICT (iss, sub) DO NOTHING`, id.New(id.Principal), iss, sub); err != nil {
+	idn, err := RecordHuman(ctx, db, iss, sub)
+	if err != nil {
 		return "", err
 	}
-	var idn string
 	var revoked bool
-	if err := db.QueryRowContext(ctx, `SELECT id, revoked FROM principal WHERE kind = 'human' AND iss = $1 AND sub = $2`,
-		iss, sub).Scan(&idn, &revoked); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT revoked FROM principal WHERE id = $1`, idn).Scan(&revoked); err != nil {
 		return "", err
 	}
 	if revoked {
 		return "", fmt.Errorf("%w: %s", ErrIdentityRevoked, idn)
 	}
 	return idn, nil
+}
+
+// RecordHuman returns the principal of the human (iss, sub), inserting it in its own short
+// transaction if it has none (§10), with no deniedSubjects or revocation check: identity
+// revocation (T5c) names subjects the operator has already listed (§10.4). Every other caller
+// uses EnsureHuman.
+func RecordHuman(ctx context.Context, db *sql.DB, iss, sub string) (string, error) {
+	if sub == "" {
+		return "", errors.New("a human needs a subject")
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO principal (id, kind, iss, sub, created_at)
+		VALUES ($1, 'human', $2, $3, now()) ON CONFLICT (iss, sub) DO NOTHING`, id.New(id.Principal), iss, sub); err != nil {
+		return "", err
+	}
+	var idn string
+	err := db.QueryRowContext(ctx, `SELECT id FROM principal WHERE kind = 'human' AND iss = $1 AND sub = $2`, iss, sub).Scan(&idn)
+	return idn, err
 }
 
 // RevokeIdentity marks identity revoked and revokes its unrevoked token, in tx, after locking the
