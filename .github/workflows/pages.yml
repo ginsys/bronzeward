@@ -24,6 +24,9 @@ jobs:
     # main only, so the org's in-cluster runner (ci.yml's rule for own-branch code).
     runs-on: autops-kube-ginsys
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: read   # configure-pages reads the repository's Pages configuration
     env:
       NO_MKDOCS_2_WARNING: "true"
     steps:
