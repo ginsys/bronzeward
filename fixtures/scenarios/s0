@@ -26,6 +26,10 @@ failed=0
 # only the fixture's own; the end of the run looks for each of them in the evidence it kept.
 secrets=()
 keep_secret() { [ -z "$1" ] || secrets+=("$1"); }
+# redacted: credentials commands.tsv must not show that bin/evidence already scans for, such as the
+# automation token bin/seed issues, with its secret half, which the refused variants still carry.
+redacted=()
+redact_automation_token() { redacted+=("$1" "${1##*.}"); }
 # count_principals: how many principal rows the database holds.
 count_principals() { pg psql -U bronzeward -d bronzeward -Atc 'select count(*) from principal'; }
 
@@ -40,7 +44,7 @@ ran() {
   local ref=$1 rc=$2 cmd s
   shift 2
   cmd=$(printf '%q ' "$@")
-  for s in "${secrets[@]}"; do cmd=${cmd//"$s"/<token>}; done
+  for s in "${secrets[@]}" "${redacted[@]}"; do cmd=${cmd//"$s"/<token>}; done
   printf '%s\t%s\t%s\n' "$ref" "$rc" "${cmd% }" >>"$EV/commands.tsv"
 }
 # check <reference> <what> <command...>: PASS when the command succeeds; the command and its exit
@@ -252,6 +256,7 @@ run() {
   "$bin/seed" >/dev/null || die "bin/seed failed"
   local robot robot_id viewer d tok old new
   robot=$(cat -- "$STATE/automation-token")
+  redact_automation_token "$robot"
   robot_id=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$STATE/automation-identity")
   viewer=$(mint h-viewer) || die "cannot mint a viewer token"
   keep_secret "$viewer"
@@ -364,6 +369,7 @@ walk() {
   "$bin/seed" >/dev/null || die "bin/seed failed"
   local robot h who method pattern tok code principals rows=0
   robot=$(cat -- "$STATE/automation-token")
+  redact_automation_token "$robot"
   declare -A t
   for h in h-author h-publisher h-approver h-recovery h-viewer h-all; do
     t[$h]=$(mint "$h") || die "cannot mint a token for $h"
