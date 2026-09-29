@@ -114,6 +114,7 @@ One classification is one provider answer to one request:
 | Transit | version below `min_available_version`, when that is above 0 | `lost` | `trimmed` |
 | Transit | version below `min_decryption_version` | `blocked` | `below-decryption-floor` (reversible by lowering it) |
 | Transit | version above `latest_version` | `unknown` | `insufficient-evidence` |
+| Transit | version absent from the `keys` map | `unknown` | `insufficient-evidence` |
 | Transit | otherwise | `retained` | none |
 
 A Transit key's identity is its name together with the creation time its
@@ -127,8 +128,9 @@ before the first read's `Date`: creation times are whole seconds, so only a
 version still in its creation second could share it with a key recreated
 later, and a version one second old cannot.
 The `keys` map decides no floor, since it hides trimmed and blocked versions
-alike (RC §3.1); a version absent from it has its identity unchecked, and the
-floor rows classify it.
+alike (RC §3.1). A version absent from it cannot have its identity checked: the
+floor rows classify it `lost` or `blocked` when one applies, and otherwise it
+is `unknown`, never `retained` on an unchecked identity.
 
 A 404 is `unknown` and never `lost`. OpenBao answers a deleted Transit key, a
 KV path whose metadata was deleted and a name that never existed alike, with no
@@ -228,9 +230,13 @@ fences it. A pass classifies every monitored dependency once. For each, it:
    classification whose request began later: this one is discarded. A request
    that began first may still have reached the provider last, so when the
    discarded class differs from the recorded one, the pass repeats steps 1 to
-   4 for that dependency once, at once; its new request begins after the
-   recorded one, so a change the discarded answer saw is recorded and alerted
-   on this pass, not the next. Otherwise it records the class
+   4 for that dependency at once, and again each time a repeat is discarded
+   with a class other than the recorded one. Each repeat's request begins
+   after the classification that displaced the last, so a change a discarded
+   answer saw is recorded and alerted on this pass, not the next, however many
+   instances overlap. A repeat is discarded only when another instance recorded
+   between its steps 1 and 4, so the repeats end once the instances stop
+   overlapping. Otherwise it records the class
    with the transaction's time as `recorded_at` and reads the releases that
    reference the dependency. Either way, it then locks the DependencyMonitor
    row, inserts the alerts of §6.2 a recorded change calls for, naming those
@@ -444,7 +450,9 @@ fail:
    key's ciphertext. A version created in the second of the first read's
    `Date` is refused and recorded one second later. Control: without that
    check, a key deleted and recreated within its creation second is recorded,
-   and its lost version later classifies `retained`.
+   and its lost version later classifies `retained`. A version within every
+   floor but absent from the `keys` map classifies `unknown`; control:
+   without that row, it classifies `retained`.
 10. **A publication racing a transition**: a publication naming a monitored
     version while the monitor records its change from `retained` is refused,
     or is named by the alert, in three orders: the row exists; two
@@ -476,8 +484,11 @@ fail:
     status change in the restored epoch before entry.
 14. **Overlapping monitors**: an instance whose request began first but
     reached the provider after another instance recorded `retained` sees the
-    loss, and the loss is recorded and alerted on that pass. Control: without
-    the repeat of §6.1 step 4, the loss stays unrecorded until the next pass.
+    loss, and the loss is recorded and alerted on that pass. With three
+    instances, a repeat displaced by a third instance's older-class record
+    repeats again and records the loss on that pass. Controls: without the
+    repeat of §6.1 step 4, or with a single repeat, the loss stays unrecorded
+    until the next pass.
 
 Items 2, 3 and 8's publication refusal are acceptance-plan S2's negative
 controls and S7's variants; the rest run as *checks*
