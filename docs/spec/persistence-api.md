@@ -1057,8 +1057,11 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
 - **Redaction**: responses carry sanitized sources, reference names and
   compilation's redacted review data; never a secret value, ciphertext or
   baseline (design §11.1).
-- Every response carries `Bronzeward-Epoch` with the current epoch identity,
-  and `Bronzeward-Recovery-Mode: true` while recovery mode is in effect.
+- Every response to an authenticated request carries `Bronzeward-Epoch` with
+  the current epoch identity, and `Bronzeward-Recovery-Mode: true` while
+  recovery mode is in effect. A `401`, a `403 identity-revoked` and the
+  liveness probe carry neither: they answer a caller who has not
+  authenticated, and the epoch is data (§10).
 
 ### 9.2 Resources and routes
 
@@ -1291,6 +1294,31 @@ Bronzeward-Epoch: ep_53wiltmcac6xxdggvgg7zcoh5y
 Bronzeward-Recovery-Mode: true
 ```
 
+Recording an identity revocation (§10.4) by `recovery-admin`, naming a subject
+of the configured issuer that never signed in; the operator listed it in
+`deniedSubjects` first:
+
+```http
+POST /api/v1/identity-revocations
+Idempotency-Key: 3f1d7c52-8a64-4e0b-b2c9-6e5a1f0d8b47
+
+{"iss": "https://idp.example", "sub": "h-all", "reason": "left the team"}
+
+HTTP/1.1 201 Created
+Bronzeward-Epoch: ep_bqeknkmarvikuy7ofil2okekgi
+
+{"identity": "idn_gq5mhfqgf6rkwdkelynnhahifa",
+ "revokedBy": "idn_vrvke5r5apullj3n5t3dhiwbpm", "role": "recovery-admin",
+ "reason": "left the team", "act": "act_e6akeffm47l5knthcpqf4ot6yi",
+ "epoch": "ep_bqeknkmarvikuy7ofil2okekgi", "at": "2026-09-29T10:00:00Z",
+ "deniedSubjectsListed": true,
+ "note": "A database restore can remove this revocation. ..."}
+```
+
+The identity is named by `identity` (an `idn` identifier) or by `iss` and
+`sub`, never both; `reason` is required. A second revocation of one identity is
+`409 conflict`: a revocation is permanent.
+
 ### 9.4 Errors
 
 Errors are `application/problem+json` (RFC 9457) **(choice §17.14)**. `type`
@@ -1327,7 +1355,9 @@ value; `instance` is the request's identifier, also written to the server log.
 | 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13) |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
 | 428 | `precondition-required`, `idempotency-key-required` | `If-Match` or `Idempotency-Key` missing |
-| 503 | `dependency-unavailable` | the provider is sealed or unreachable; nothing was committed |
+| 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
+| 501 | `not-implemented` | a §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
+| 503 | `dependency-unavailable` | the provider is sealed or unreachable, or authentication could not reach the identity provider or the database; nothing was committed |
 | 503 | `transient-conflict` | deadlock retries exhausted (§5) |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing was committed |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
@@ -1362,6 +1392,9 @@ that held a qualifying role, and grants nothing (§14). A
 configuration before the insert, so a denied subject gets no row. An identity
 revocation (T5c) naming an `(iss, sub)` that has never signed in creates the
 row the same way, then locks it, so a revocation can precede a first sign-in.
+That insert skips the `deniedSubjects` check: §10.4 has the operator list a
+subject before revoking it, so the check would leave such a subject
+unrecordable. The row it creates is revoked by the same request.
 A service identity's row is created by the command-line tool with its token
 (§10.2). No human or automation principal
 has an OpenBao identity (design §13.7 item 1, derived).
@@ -1481,6 +1514,11 @@ ingestion that feeds an adoption" to the owner, who decided it on #20, and
 names no role for inventory records. An adoption plan is a plan: a `publisher` creates it, as
 every plan (design §13.7 item 2; owner decision 2a on #14), and an `approver`
 approves it, as design §13.7 item 3 already says.
+
+A plan's cancellation is checked before any transaction against `publisher`,
+`approver` and `recovery-admin`, since every plan's creator is a `publisher`
+(choice §17.22). Whether a `publisher` created the plan is the handler's
+check, inside its transaction.
 
 Drift **Ignore** is outside PoC scope (execution and recovery, supported
 values) and has no route.
