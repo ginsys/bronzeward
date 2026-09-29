@@ -4,9 +4,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
@@ -60,6 +62,51 @@ func TestListActsPages(t *testing.T) {
 	}
 	if p := acts(t, e, e.robot, ""); len(p.Items) != 5 || p.Next != "" { // any role reads acts
 		t.Fatalf("robot: %d acts, next %q", len(p.Items), p.Next)
+	}
+}
+
+// A reader paging GET /acts never passes an act that commits later: acts become visible in seq
+// order, because each act-writing transaction holds the act-order lock from its act to its end.
+func TestActsVisibleInOrder(t *testing.T) { actsVisibleInOrder(t, false) }
+
+// Control: without the lock a later act commits first, a cursor passes it, and the earlier act
+// that commits afterwards is never listed.
+func TestActsVisibleInOrderNoActOrderControl(t *testing.T) { actsVisibleInOrder(t, true) }
+
+func actsVisibleInOrder(t *testing.T, control bool) {
+	hook, held, release := holdFirst()
+	e := newEnv(t, options{extra: []*route{testRoute(nil)}, afterEffect: hook, noActOrder: control})
+	t.Cleanup(release)
+	author, viewer := e.human("h-author"), e.human("h-viewer")
+	e.recordHuman("h-author")
+	a, b := make(chan *httptest.ResponseRecorder, 1), make(chan *httptest.ResponseRecorder, 1)
+	go func() { a <- e.do(e.api, post(author, "k-first-0123456789", `{}`)) }()
+	<-held // the first request's act is written, uncommitted
+	go func() { b <- e.do(e.api, post(e.robot, "k-second-012345678", `{}`)) }()
+	if control {
+		if rb := <-b; rb.Code != http.StatusCreated {
+			t.Fatalf("second: %d %s", rb.Code, rb.Body)
+		}
+	} else {
+		dbtest.WaitForLockWait(t, e.db) // the second waits for the first to end
+	}
+	seen := acts(t, e, viewer, "?limit=500").Items
+	release()
+	if ra := <-a; ra.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", ra.Code, ra.Body)
+	}
+	if !control {
+		if rb := <-b; rb.Code != http.StatusCreated {
+			t.Fatalf("second: %d %s", rb.Code, rb.Body)
+		}
+	}
+	rest := acts(t, e, viewer, "?limit=500&cursor="+url.QueryEscape(makeCursor(epoch(t, e.db), seen[len(seen)-1].ID))).Items
+	got, want := len(seen)+len(rest), count(t, e.db, "SELECT count(*) FROM act")
+	switch {
+	case control && got == want:
+		t.Fatal("control: paging listed every act; the interleaving did not happen")
+	case !control && got != want:
+		t.Fatalf("paging listed %d of %d acts: an act committed behind the cursor", got, want)
 	}
 }
 
