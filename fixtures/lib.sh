@@ -38,11 +38,14 @@ unset TAR_OPTIONS GZIP
 # there. Checked here, before anything under it is read: every command loads this file first.
 # The same holds one level down for the directories the commands write into: through a symlinked
 # evidence or backups directory, dumps and snapshots would land where teardown does not reach.
+# And for the server and issuer configuration directories, which hold the database password and
+# the issuer's signing key, and the build directory the image is made from.
 # And for .cache: through a link, downloads would land elsewhere and `down --purge` would remove
 # the link alone while reporting the cache gone. And for the Talos state directory, which holds
 # the cluster's client credentials and goes with .state at teardown: through a link, the removal
 # would take the link and leave them.
-for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence" "$STATE/talos" "$CACHE"; do
+for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence" "$STATE/talos" "$STATE/server" "$STATE/server/a" \
+  "$STATE/server/b" "$STATE/issuer" "$STATE/image" "$CACHE"; do
   if [ -L "$managed" ]; then
     printf 'fixtures: %s is a symlink; the fixture never creates one. Remove the link and run again\n' "$managed" >&2
     exit 1
@@ -62,7 +65,8 @@ versions_env=$(cat -- "$FIXTURES/versions.env") || {
 # every command and recorded nowhere, since the record is the file's bytes.
 versions_keys=(TALOS_VERSION TALOSCTL_URL TALOSCTL_SHA256 TALOS_IMAGE KUBERNETES_VERSION OPENBAO_IMAGE
   CURL_IMAGE POSTGRES_IMAGE SOPS_VERSION SOPS_URL SOPS_SHA256 AGE_VERSION AGE_URL AGE_SHA256 AGE_BINARY_SHA256
-  AGE_KEYGEN_SHA256 FIXTURE_NAME TALOS_SUBNET TALOS_CONTROLPLANE_IP TALOS_WORKER_IP POSTGRES_PORT OPENBAO_PORT)
+  AGE_KEYGEN_SHA256 FIXTURE_NAME TALOS_SUBNET TALOS_CONTROLPLANE_IP TALOS_WORKER_IP POSTGRES_PORT OPENBAO_PORT
+  SERVER_A_PORT SERVER_B_PORT)
 unset -v "${versions_keys[@]}"
 # Parsed, never sourced: sourced, a value that is an expansion (`$RANDOM`, `${X:-58200}`) would
 # be evaluated, and the same bytes could give another value at another command, with the record
@@ -193,6 +197,14 @@ PG=$FIXTURE_NAME-postgres
 BAO=$FIXTURE_NAME-openbao
 CP=$FIXTURE_NAME-controlplane-1
 WORKER=$FIXTURE_NAME-worker-1
+# The server under test, two instances of the image bin/up builds, and the OIDC issuer they trust.
+BW_A=$FIXTURE_NAME-bronzeward-a
+BW_B=$FIXTURE_NAME-bronzeward-b
+ISSUER=$FIXTURE_NAME-issuer
+# On the containers a command runs for a moment from the recorded image or the pinned client image
+# (a token minted, a route or a port tried from inside a namespace): bin/down removes one left
+# behind by an interrupted command, and only on one of those two images.
+TOOL_LABEL=bronzeward.fixture.tool=$FIXTURE_NAME
 
 say() { printf '%s\n' "$*" >&2; }
 die() {
@@ -259,7 +271,8 @@ need_state() {
 # a fixture name or label may act on.
 state_files_own() {
   local file
-  for file in lock bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env up-compose.yaml; do
+  for file in lock bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env up-compose.yaml \
+    up-image up-build linksplits automation-token automation-identity server/a/config.yaml server/b/config.yaml issuer/key.json; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -310,7 +323,7 @@ containers_own() {
   local name answer
   # shellcheck disable=SC2034  # read by bin/inject
   verified_container_ids=()
-  for name in "$PG" "$BAO"; do
+  for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$ISSUER"; do
     if ! answer=$(docker inspect --type container --format \
       '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
       "$name" 2>&1); then
@@ -378,7 +391,12 @@ compose_inputs() {
 # compose.yaml, and every ownership check and teardown probe selects by that name's label. The
 # project directory stays the checkout, so that a path in the file resolves as it always did.
 compose() {
-  local compose_file compose_env
+  local compose_file compose_env variable
+  # Exported by bin/up, never in a file: unset, Compose would interpolate an empty string with a
+  # warning only, and create a service on no image, as root, or with a bind mount at the root.
+  for variable in BW_RUN_ID BW_IMAGE BW_UID BW_GID BW_STATE; do
+    [ -n "${!variable:-}" ] || die "compose needs $variable, which bin/up exports; not run"
+  done
   compose_inputs
   docker compose --project-name "$FIXTURE_NAME" --project-directory "$FIXTURES" \
     --file "$compose_file" \
@@ -616,7 +634,8 @@ compose_volume_names() {
   compose_inputs
   # Into a variable first: a failed `config` inside a `for` word list would be an empty list and
   # a clean exit, and an empty list is not what compose.yaml declares.
-  keys=$(BW_POSTGRES_PASSWORD=${BW_POSTGRES_PASSWORD:-unused} docker compose --project-name "$FIXTURE_NAME" \
+  keys=$(BW_POSTGRES_PASSWORD=${BW_POSTGRES_PASSWORD:-unused} BW_RUN_ID=${BW_RUN_ID:-unused} BW_IMAGE=${BW_IMAGE:-unused} \
+    BW_UID=${BW_UID:-0} BW_GID=${BW_GID:-0} BW_STATE=${BW_STATE:-$STATE} docker compose --project-name "$FIXTURE_NAME" \
     --project-directory "$FIXTURES" --file "$compose_file" --env-file "$compose_env" \
     config --volumes) || return 1
   [ -n "$keys" ] || return 1
@@ -726,6 +745,42 @@ pg_client() {
   [ -n "$address" ] || return 1
   PGPASSWORD=$BW_POSTGRES_PASSWORD PGOPTIONS=$(pg_options) timeout "$PG_LIMIT" docker run --rm --network "container:$id" \
     --env PGPASSWORD --env PGOPTIONS "$POSTGRES_IMAGE" psql --host="$address" --username=bronzeward --dbname=bronzeward "$@"
+}
+
+# recorded_run: the run bin/up labelled what it made with, from the volume record it publishes
+# before anything else is made (the image included). Nothing when there is no record.
+recorded_run() {
+  [ -f "$STATE/down-compose-volumes" ] || return 0
+  awk 'NR == 1 {print $2}' "$STATE/down-compose-volumes"
+}
+# image_own <id>: the image bin/up recorded is still the one it imported: it carries this run's
+# label and its tag. An image ID names content, and any image can be given the label; the tag,
+# which names the run, is what bin/up gave it. Fails, with a word, otherwise; "no such image" is
+# status 2, for down to tell an image already gone from one it must not remove.
+image_own() {
+  local run answer
+  run=$(recorded_run) || return 1
+  [ -n "$run" ] || { say "fixtures: no run is recorded for the image $1; not acted on"; return 1; }
+  if ! answer=$(docker image inspect --format \
+    "{{index .Config.Labels \"$RUN_LABEL\"}}{{range .RepoTags}} {{.}}{{end}}" "$1" 2>&1); then
+    case $answer in
+      *[Nn]o\ such\ image*) return 2 ;;
+      *) say "fixtures: could not inspect the image $1: $answer"; return 1 ;;
+    esac
+  fi
+  [ "${answer%% *}" = "$run" ] && [[ " ${answer#* } " == *" ${FIXTURE_NAME}-bronzeward:$run "* ]] || {
+    say "fixtures: the image $1 does not carry this run's label and tag; it is not the one bin/up imported"
+    return 1
+  }
+}
+
+# issuer_answers: the issuer's discovery document, asked from inside the network namespace of the
+# container verified under the name, so that the answer is that container's.
+issuer_answers() {
+  local id
+  id=$(container_id "$ISSUER") || return 1
+  timeout "$REQUEST_LIMIT" docker run --rm --pull never --network "container:$id" --label "$TOOL_LABEL" \
+    "$CURL_IMAGE" --fail --silent http://localhost:5556/.well-known/openid-configuration
 }
 
 # claim_take [attempt]: fails when any checkout on this daemon already holds the claim. The image
@@ -861,7 +916,10 @@ container() {
     openbao) printf '%s\n' "$BAO" ;;
     controlplane) printf '%s\n' "$CP" ;;
     worker) printf '%s\n' "$WORKER" ;;
-    *) die "unknown target '$1' (postgres, openbao, controlplane, worker)" ;;
+    A) printf '%s\n' "$BW_A" ;;
+    B) printf '%s\n' "$BW_B" ;;
+    issuer) printf '%s\n' "$ISSUER" ;;
+    *) die "unknown target '$1' (postgres, openbao, controlplane, worker, A, B, issuer)" ;;
   esac
 }
 
@@ -910,7 +968,7 @@ fetch_tools() {
 # Each source is read on its own and a source that cannot be read fails the whole list: a jq that
 # stops halfway through bao-init.json would otherwise leave a list that is short and looks whole.
 scan_patterns() {
-  local talos_client_key kube_client_key bao_keys metadata_token talos_secrets
+  local talos_client_key kube_client_key bao_keys metadata_token talos_secrets issuer_key automation_token=
   talos_client_key=$(awk '$1 == "key:" {print $2}' "$TALOSCONFIG") || return 1
   kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG") || return 1
   [ -n "$talos_client_key" ] || die "no client key found in $TALOSCONFIG; it would go unscanned"
@@ -920,7 +978,15 @@ scan_patterns() {
   metadata_token=$(awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env") || return 1
   talos_secrets=$(awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \
     "$STATE/talos-secrets.yaml") || return 1
-  printf '%s\n' 'BWSYNTH-' "$talos_client_key" "$kube_client_key" "$bao_keys" "$metadata_token" "$talos_secrets" |
+  # The issuer's private key: the JWK's d (issuer.WriteKey writes a P-256 key as go-jose marshals it).
+  issuer_key=$(jq -er .d "$STATE/issuer/key.json") || return 1
+  # The automation token bin/seed issues, once it has.
+  if [ -e "$STATE/automation-token" ]; then
+    automation_token=$(cat -- "$STATE/automation-token") || return 1
+    [ -n "$automation_token" ] || die "$STATE/automation-token is empty; it would go unscanned"
+  fi
+  printf '%s\n' 'BWSYNTH-' "$talos_client_key" "$kube_client_key" "$bao_keys" "$metadata_token" "$talos_secrets" \
+    "$issuer_key" "$automation_token" |
     awk 'length($0) >= 8' | sort -u
 }
 

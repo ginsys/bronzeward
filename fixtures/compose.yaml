@@ -49,6 +49,52 @@ services:
     volumes:
       - openbao-data:/openbao/file
 
+  # The server under test: two instances of one image bin/up builds and imports for this run
+  # (never pulled), named by its ID in BW_IMAGE. Created, not started, by bin/up: S0 begins from an
+  # empty schema, and bin/inject start A|B brings each up. The configuration directory is
+  # bind-mounted, not copied, so an edit to deniedSubjects is seen after a kill and a start. Plain
+  # http: TLS is terminated in front of the server in a deployment (persistence-api.md §9.1).
+  # BW_IMAGE, BW_UID, BW_GID and BW_STATE are exported by bin/up, never in a file, like BW_RUN_ID.
+  bronzeward-a:
+    image: ${BW_IMAGE}
+    pull_policy: never
+    container_name: ${FIXTURE_NAME}-bronzeward-a
+    labels:
+      bronzeward.fixture.run: ${BW_RUN_ID}
+    user: "${BW_UID}:${BW_GID}"
+    command: ["serve", "-config", "/etc/bronzeward/config.yaml"]
+    ports:
+      - "127.0.0.1:${SERVER_A_PORT}:8080"
+    volumes:
+      - ${BW_STATE}/server/a:/etc/bronzeward:ro
+
+  bronzeward-b:
+    image: ${BW_IMAGE}
+    pull_policy: never
+    container_name: ${FIXTURE_NAME}-bronzeward-b
+    labels:
+      bronzeward.fixture.run: ${BW_RUN_ID}
+    user: "${BW_UID}:${BW_GID}"
+    command: ["serve", "-config", "/etc/bronzeward/config.yaml"]
+    ports:
+      - "127.0.0.1:${SERVER_B_PORT}:8080"
+    volumes:
+      - ${BW_STATE}/server/b:/etc/bronzeward:ro
+
+  # The disposable OIDC issuer, reached by A and B as http://issuer:5556, a host their
+  # configuration lists in plainHTTPHosts. Not published: tokens are minted offline from its key.
+  issuer:
+    image: ${BW_IMAGE}
+    pull_policy: never
+    container_name: ${FIXTURE_NAME}-issuer
+    labels:
+      bronzeward.fixture.run: ${BW_RUN_ID}
+    user: "${BW_UID}:${BW_GID}"
+    entrypoint: ["/oidc"]
+    command: ["serve", "-key", "/etc/oidc/key.json", "-issuer", "http://issuer:5556", "-listen", "0.0.0.0:5556"]
+    volumes:
+      - ${BW_STATE}/issuer:/etc/oidc:ro
+
 volumes:
   postgres-data:
   openbao-data:

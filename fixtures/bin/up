@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-need docker curl jq tar sha256sum install awk timeout mktemp git find comm
+need docker curl jq tar sha256sum install awk timeout mktemp git find comm go id
 docker compose version >/dev/null || die "missing prerequisite: docker compose v2"
 [ "$(uname -sm)" = "Linux x86_64" ] || die "pinned CLI assets are linux/amd64 only"
 [ ! -e "$STATE" ] || die "$STATE exists: run fixtures/bin/down first"
@@ -163,6 +163,9 @@ if ! printf '%s\n' "$compose_yaml" >"$STATE/up-compose.yaml.partial" ||
   die "could not record compose.yaml in $STATE"
 fi
 unset compose_yaml
+# The server configuration template likewise, read once here: the instances' configuration is
+# rendered from this reading, after the fetch, and held below to the file the tree check sees.
+server_template=$(cat -- "$FIXTURES/server.yaml.in") || die "cannot read $FIXTURES/server.yaml.in"
 recovery='run fixtures/bin/down to remove what was created'
 unset daemon_id
 mkdir "$STATE/data" "$STATE/backups"
@@ -182,6 +185,8 @@ cmp --silent -- "$STATE/up-compose.yaml" "$FIXTURES/compose.yaml" ||
   die "compose.yaml changed while fixtures/ was being inventoried; run again"
 printf '%s\n' "$versions_env" | cmp --silent -- - "$FIXTURES/versions.env" ||
   die "versions.env changed while fixtures/ was being inventoried; run again"
+printf '%s\n' "$server_template" | cmp --silent -- - "$FIXTURES/server.yaml.in" ||
+  die "server.yaml.in changed while fixtures/ was being inventoried; run again"
 printf '%s\n' "$manifest" >"$STATE/up-manifest"
 unset manifest differs
 # The named volumes compose.yaml declares are made here, first of all, with a label that names this
@@ -286,15 +291,61 @@ fetch_tools
 # not there.
 docker image pull --quiet "$CURL_IMAGE" >/dev/null || die "could not pull the client image $CURL_IMAGE"
 
-say "starting postgres and openbao"
+# The server under test and the OIDC issuer, built from this checkout into one image of two static
+# binaries and nothing else, imported for this run and never pulled. The build is of the whole
+# repository, which the tree check above does not cover: up-build records the commit, how many
+# paths differ from it and the Go version, so that a bundle can say what ran.
+say "building the server image"
+S_IMG=$STATE/image
+mkdir "$S_IMG" "$STATE/issuer" "$STATE/server" "$STATE/server/a" "$STATE/server/b"
+for binary in bronzeward:./cmd/bronzeward oidc:./fixtures/oidc; do
+  (cd -- "$FIXTURES/.." && CGO_ENABLED=0 timeout 600 go build -trimpath -o "$S_IMG/${binary%%:*}" "${binary#*:}") ||
+    die "could not build ${binary#*:}"
+done
+unset binary
+build_commit=$(fixtures_git rev-parse HEAD) || die "cannot read the commit the server image is built from"
+build_differs=$(fixtures_git status --porcelain --untracked-files=all | wc -l) || die "cannot ask git how the checkout differs from $build_commit"
+build_go=$(go env GOVERSION) || die "cannot read the Go version the server image is built with"
+record up-build "commit $build_commit
+differing-paths $build_differs
+go $build_go" || die "could not record the server build in $STATE"
+unset build_commit build_differs build_go
+"$S_IMG/oidc" keygen -out "$STATE/issuer/key.json" || die "could not generate the issuer's signing key"
+# By ID from here on: a re-tag between the import and Compose cannot substitute another image. The
+# ID is recorded before anything uses it, so that down removes the image whatever fails after.
+image_id=$(tar -C "$S_IMG" -c bronzeward oidc |
+  docker image import --change 'ENTRYPOINT ["/bronzeward"]' --change "LABEL $RUN_LABEL=$BW_RUN_ID" - \
+    "${FIXTURE_NAME}-bronzeward:$BW_RUN_ID") || die "could not import the server image"
+[[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || die "docker image import answered '$image_id', not an image ID"
+record up-image "$image_id" || die "could not record the server image in $STATE"
+rm -rf -- "$S_IMG"
+# The instances and the issuer run as the caller, who owns the 0600 files they read.
+BW_UID=$(id -u) || die "cannot read the caller's user ID"
+BW_GID=$(id -g) || die "cannot read the caller's group ID"
+export BW_IMAGE=$image_id BW_UID BW_GID BW_STATE=$STATE
+unset image_id S_IMG
+if [ "${BW_SELFTEST:-}" = 1 ] && [ "${BW_UP_STOP_AFTER:-}" = image ]; then
+  die "stopped after the image (selftest)"
+fi
+# Each instance's configuration, rendered in the shell: sed would carry the password on its command
+# line, readable by any local user.
+dsn="postgres://bronzeward:${BW_POSTGRES_PASSWORD}@postgres:5432/bronzeward?sslmode=disable"
+for instance in a b; do
+  printf '%s\n' "${server_template//@DSN@/$dsn}" >"$STATE/server/$instance/config.yaml" ||
+    die "could not write the configuration of instance $instance"
+done
+unset dsn instance server_template
+
+say "starting postgres, openbao and the issuer; creating instances A and B"
 compose up --detach --quiet-pull --wait postgres
-compose up --detach --quiet-pull openbao
+compose up --detach --quiet-pull openbao issuer
+compose create bronzeward-a bronzeward-b
 # The Compose containers carry the project's labels, which any container can be given under the
 # fixed names once the real one is gone by hand. Recorded by ID under each name, as the Talos
 # nodes are below: containers_own (lib.sh) holds the name to the ID before inject or evidence act
 # on it, and bin/down holds every labelled container to the record before removing any. This run
 # acts on them by these IDs too (bao and pg in lib.sh take the ID the name was verified under).
-for name in "$PG" "$BAO"; do
+for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$ISSUER"; do
   # The one Compose made, told by its labels, as containers_own tells it: the name and the project
   # labels alone could be a replacement's, made under the fixed name once the real one was gone
   # between compose up and this look, since any container can carry them; this run's own value,
@@ -350,6 +401,7 @@ compose_network_id=$(attached_network Compose com.docker.compose.project "$FIXTU
 printf '%s\n' "$compose_network_id" >"$STATE/down-compose-networks.partial"
 mv --no-target-directory -- "$STATE/down-compose-networks.partial" "$STATE/down-compose-networks"
 unset compose_network_id
+wait_for 60 "the issuer" issuer_answers
 
 bao_answers() {
   local rc=0
@@ -435,7 +487,14 @@ network_id=$(attached_network Talos talos.cluster.name "$FIXTURE_NAME" \
   "${verified_container_ids[$CP]}" "${verified_container_ids[$WORKER]}") || exit 1
 printf '%s\n' "$network_id" >"$STATE/down-node-networks.partial"
 mv --no-target-directory -- "$STATE/down-node-networks.partial" "$STATE/down-node-networks"
-unset network_id
+# Instances A and B reach the Talos nodes on the cluster's network, the one just recorded, by its
+# ID and each by the ID verified under its name. Connected while created: each takes an address
+# when it starts.
+for name in "$BW_A" "$BW_B"; do
+  docker network connect "$network_id" "${verified_container_ids[$name]}" ||
+    die "could not connect $name to the Talos network"
+done
+unset network_id name
 rm -- "$STATE/down-node-volumes-incomplete" || die "could not clear the unrecorded-cluster marker in $STATE"
 # Every record is published: a plain down now holds what it finds to them.
 recovery='run fixtures/bin/down to remove what was created'
@@ -460,13 +519,19 @@ control_content >"$STATE/data/canary-control.txt"
 # Each asked by the ID recorded under its name: by name, a replacement made meanwhile would
 # answer for one that stopped. Running and not paused: a paused container is still running, with
 # every process in it frozen.
-for c in "$PG" "$BAO" "$CP" "$WORKER"; do
+for c in "$PG" "$BAO" "$ISSUER" "$CP" "$WORKER"; do
   id=$(container_id "$c") || die "$c was not recorded under its name; the fixture is not known to be up"
   case $(docker inspect --type container --format '{{.State.Running}} {{.State.Paused}}' "$id") in
     'true false') ;;
     'true true') die "$c was paused while the fixture was starting" ;;
     *) die "$c stopped while the fixture was starting (see 'Known limits' in fixtures/README.md)" ;;
   esac
+done
+# A and B are created and never started: S0 starts them.
+for c in "$BW_A" "$BW_B"; do
+  id=$(container_id "$c") || die "$c was not recorded under its name; the fixture is not known to be up"
+  [ "$(docker inspect --type container --format '{{.State.Status}}' "$id")" = created ] ||
+    die "$c is no longer created-and-not-started; something started or removed it while the fixture was starting"
 done
 unset c id
 # Running is not usable. Several minutes of Talos creation have passed since both services were
@@ -492,4 +557,6 @@ fixture is up
   talos         controlplane $TALOS_CONTROLPLANE_IP, worker $TALOS_WORKER_IP
                 TALOSCONFIG=$TALOSCONFIG
   local stores  $STATE/data (SQLite files, age/SOPS stores)
+  bronzeward    A http://127.0.0.1:$SERVER_A_PORT, B http://127.0.0.1:$SERVER_B_PORT (created, not started:
+                fixtures/bin/inject start A|B); issuer http://issuer:5556 on the Compose network only
 EOF
