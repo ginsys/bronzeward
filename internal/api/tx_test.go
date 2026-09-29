@@ -372,3 +372,18 @@ func TestCommitUnknownNotCommitted(t *testing.T) {
 		t.Fatalf("acts %d, records %d", acts, records)
 	}
 }
+
+// A COMMIT the server answered with a rejection, such as a deferred foreign key, is a
+// definitive rollback: 500 internal-error, not a database outage. TestCommitUnknownNotCommitted
+// is its control: a lost reply stays 503.
+func TestCommitRejected(t *testing.T) {
+	rejected := func(tx *sql.Tx) error {
+		_ = tx.Rollback()
+		return &pgconn.PgError{Code: "23503", Message: "deferred foreign key violated at COMMIT (test)"}
+	}
+	e := newEnv(t, options{extra: []*route{testRoute(nil)}, commit: rejected})
+	wantProblem(t, e.do(e.api, post(e.human("h-author"), key, `{}`)), http.StatusInternalServerError, "internal-error")
+	if acts, records := rows(t, e); acts != 0 || records != 0 {
+		t.Fatalf("acts %d, records %d", acts, records)
+	}
+}

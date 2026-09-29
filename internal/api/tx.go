@@ -196,6 +196,13 @@ func (a *API) lockKey(ctx context.Context, tx *sql.Tx, q *request) error {
 // client lost the reply, so the read waits on the key lock, which that transaction holds until
 // it ends; a wait past the bound leaves the outcome unknown.
 func (a *API) resolveCommit(q *request, rec *record, cerr error) (*record, bool, error) {
+	// A server answer that is not a connection loss is a definitive rollback, a deferred
+	// constraint's violation for one: nothing to read back, and not a database outage. A
+	// deadlock stays retryable (run).
+	var pe *pgconn.PgError
+	if errors.As(cerr, &pe) && !connLost(cerr) {
+		return nil, false, cerr
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(q.r.Context()), 10*time.Second)
 	defer cancel()
 	var n int
