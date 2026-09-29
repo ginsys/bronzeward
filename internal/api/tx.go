@@ -3,9 +3,12 @@ package api
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -100,6 +103,19 @@ func (a *API) run(ctx context.Context, q *request) (rec *record, fresh bool, err
 			return nil, false, fmt.Errorf("%w: %w", errTransient, err)
 		}
 	}
+}
+
+// connLost reports the database connection lost or refused (§9.4's dependency-unavailable): a
+// connection-exception class, an administrator's or the server's shutdown, a broken or closed
+// connection, a timeout. A COMMIT it interrupts is resolved by resolveCommit before this is asked.
+func connLost(err error) bool {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		return strings.HasPrefix(pe.Code, "08") || pe.Code == "57P01" || pe.Code == "57P02" || pe.Code == "57P03"
+	}
+	var ne net.Error
+	return errors.Is(err, driver.ErrBadConn) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		pgconn.Timeout(err) || errors.As(err, &ne)
 }
 
 func isDeadlock(err error) bool {
@@ -211,7 +227,7 @@ func (a *API) resolveCommit(q *request, rec *record, cerr error) (*record, bool,
 
 // fail answers an error from a mutating request and logs its cause under the request id.
 func (a *API) fail(w http.ResponseWriter, q *request, err error) {
-	a.o.logf("%s %s %s: %v", q.id, q.r.Method, q.r.URL.Path, err)
+	a.o.logf("%s %s %s: %v", q.id, q.r.Method, q.r.URL.EscapedPath(), err)
 	var ref *refusal
 	switch {
 	case errors.As(err, &ref):
@@ -219,7 +235,7 @@ func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the request deadlocked on every attempt; nothing was committed")
 	case errors.Is(err, errUnknownOutcome):
 		ref = refuse(http.StatusInternalServerError, "internal-error", "the outcome is unknown; retrying with the same Idempotency-Key answers it")
-	case errors.Is(err, errUnavailable):
+	case errors.Is(err, errUnavailable), connLost(err):
 		ref = refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database failed; nothing was committed")
 	default:
 		ref = refuse(http.StatusInternalServerError, "internal-error", "nothing was committed")

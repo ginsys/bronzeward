@@ -9,8 +9,10 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	pathpkg "path" // the tests declare path
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
@@ -89,7 +91,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q := &request{id: id.New(id.Request), r: r}
 	p, err := a.authn.Authenticate(r.Context(), r.Header.Get("Authorization"))
 	if err != nil {
-		a.o.logf("%s %s %s: %v", q.id, r.Method, r.URL.Path, err)
+		a.o.logf("%s %s %s: %v", q.id, r.Method, r.URL.EscapedPath(), err)
 		a.problem(w, q, authRefusal(err))
 		return
 	}
@@ -100,7 +102,25 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setEpoch(w, q)
+	// ServeMux would answer an unclean path with a redirect, skipping the problem document, its
+	// log line and the route's role check: no route answers one.
+	if p := r.URL.Path; p != cleanPath(p) {
+		a.problem(w, q, refuse(http.StatusNotFound, "not-found", "the path is not in clean form"))
+		return
+	}
 	a.mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, q)))
+}
+
+// cleanPath is ServeMux's: p with no empty, "." or ".." element, keeping a trailing slash.
+func cleanPath(p string) string {
+	if p == "" || p[0] != '/' {
+		p = "/" + p
+	}
+	c := pathpkg.Clean(p)
+	if strings.HasSuffix(p, "/") && c != "/" {
+		c += "/"
+	}
+	return c
 }
 
 func authRefusal(err error) *refusal {

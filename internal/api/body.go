@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/gowebpki/jcs"
@@ -50,11 +51,36 @@ func decodeBody(r *http.Request, in input) ([]byte, error) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errNotObject
 	}
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, errNotObject
+	}
+	if holdsNUL(v) {
+		return nil, errors.New("a string holds U+0000, which cannot be stored")
+	}
 	canon, err := jcs.Transform(b)
 	if err != nil {
 		return nil, errNotObject
 	}
 	return canon, nil
+}
+
+// holdsNUL reports a string, or a member name, anywhere in v that holds U+0000: PostgreSQL text
+// cannot store it, and the request would fail inside its transaction instead of here.
+func holdsNUL(v any) bool {
+	switch v := v.(type) {
+	case string:
+		return strings.ContainsRune(v, 0)
+	case []any:
+		return slices.ContainsFunc(v, holdsNUL)
+	case map[string]any:
+		for k, e := range v {
+			if strings.ContainsRune(k, 0) || holdsNUL(e) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // exactMembers refuses a top-level member whose name is not exactly one of in's JSON field
