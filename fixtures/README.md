@@ -44,6 +44,29 @@ cp -r "$(ls -d fixtures/.state/evidence/* | tail -1)" /somewhere/outside/.state 
 fixtures/bin/down
 ```
 
+## OIDC issuer
+
+[`oidc/`](oidc/) is a disposable OIDC issuer for Bronzeward's authentication tests
+(persistence-api.md §10.1). It serves a discovery document and a JWKS for one synthetic ES256
+key, and it mints access tokens for synthetic humans: valid ones, or ones carrying a single named
+defect. It is not an identity provider. It has no login, no clients and no refresh.
+
+```sh
+go run ./fixtures/oidc keygen -out fixtures/.state/oidc-key.json
+go run ./fixtures/oidc serve -key fixtures/.state/oidc-key.json -issuer http://127.0.0.1:5556
+go run ./fixtures/oidc mint -key fixtures/.state/oidc-key.json -issuer http://127.0.0.1:5556 -human h-author [-defect expired]
+go run ./fixtures/oidc defects   # every defect mint can put in a token
+```
+
+- **Humans.** Each synthetic human's subject is its name, and its groups are the ones
+  `examples/bronzeward.yaml` maps to roles. The list is `issuer.Humans` in
+  [`oidc/issuer/issuer.go`](oidc/issuer/issuer.go).
+- **Key file.** The key file holds the private key. It is a synthetic secret: keep it under the
+  gitignored `.state/` and never commit it.
+- **Not started by `bin/up`.** Nothing starts the issuer yet; run `serve` by hand.
+- **Tested against this issuer only.** Bronzeward's verifier is tested against this issuer alone.
+  No identity-provider product's interoperability is claimed.
+
 ## Versions
 
 [`versions.env`](versions.env) is the single manifest: image index digests, CLI release URLs with

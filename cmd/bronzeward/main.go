@@ -21,7 +21,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: bronzeward serve|migrate -config <file>")
+		fmt.Fprintln(os.Stderr, "usage: bronzeward serve|migrate|token ...")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -33,6 +33,11 @@ func main() {
 	case "migrate":
 		if err := runMigrate(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "bronzeward migrate:", err)
+			os.Exit(1)
+		}
+	case "token":
+		if err := runToken(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "bronzeward token:", err)
 			os.Exit(1)
 		}
 	default:
@@ -47,7 +52,11 @@ func loadConfig(name string, args []string) (config.Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return config.Config{}, err
 	}
-	f, err := os.Open(*path)
+	return readConfig(*path)
+}
+
+func readConfig(path string) (config.Config, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return config.Config{}, err
 	}
