@@ -10,15 +10,23 @@ usage() {
   cat >&2 <<'EOF'
 usage: inject <action> [args]
 
-  targets: postgres | openbao | controlplane | worker
+  targets: postgres | openbao | controlplane | worker | A | B | issuer
 
   kill <target>                 SIGKILL the container (crash, no shutdown hooks)
   start <target>                start it again and wait until it answers; openbao comes back
-                                sealed and is unsealed
+                                sealed and is unsealed; A and B get their recorded link splits back
   pause <target>                freeze every process (hung peer, connections stay open)
   unpause <target>
-  netsplit <target>             detach from its network (unreachable, process keeps running)
+  netsplit <target>             detach from its network (unreachable, process keeps running);
+                                not A, B or issuer: no scenario netsplits an instance
   netjoin <target>              reattach: a Talos node on its fixed address, a service under its name
+
+  linksplit <A|B> <controlplane|worker>   cut one instance from one Talos node (a blackhole
+                                          route in the instance; kept across its kill and start)
+  linkjoin <A|B> <controlplane|worker>    remove that route
+
+  seal openbao                  seal OpenBao: every request refused until unsealed
+  unseal openbao                unseal it and wait for an active node
 
   db-snapshot <name>            pg_dump of the bronzeward database to .state/backups
   db-restore <name>             drop the database and restore that dump
@@ -113,14 +121,30 @@ bao_refused() {
 # Resolve the target in an assignment: `die` inside a command substitution only ends the subshell,
 # and as a bare argument that failure would be lost.
 case $action in
-  kill | start | pause | unpause | netsplit | netjoin)
-    [ $# -eq 1 ] || usage
+  kill | start | pause | unpause | netsplit | netjoin | linksplit | linkjoin)
+    case $action in
+      linksplit | linkjoin)
+        [ $# -eq 2 ] || usage
+        case $1 in A | B) ;; *) die "a link split is between an instance, A or B, and a Talos node, not '$1'" ;; esac
+        split_ip=$(node_ip "$2") || die "a link split is to a Talos node, controlplane or worker, not '$2'"
+        ;;
+      *)
+        [ $# -eq 1 ] || usage
+        case $action:$1 in
+          netsplit:A | netsplit:B | netsplit:issuer | netjoin:A | netjoin:B | netjoin:issuer)
+            die "no scenario netsplits an instance; use linksplit" ;;
+        esac
+        ;;
+    esac
     target=$(container "$1")
     # Acted on by the ID need_state verified under that name (containers_own in lib.sh), not by
     # the name: a container removed and the name taken by another between the check and the
     # action would otherwise be the one killed, paused or moved. An ID names one container ever.
     target_id=${verified_container_ids[$target]:-}
     [ -n "$target_id" ] || die "no container named $target exists; nothing to act on"
+    ;;
+  seal | unseal)
+    [ $# -eq 1 ] && [ "$1" = openbao ] || usage
     ;;
   db-snapshot | db-restore | bao-snapshot | bao-restore | store-snapshot | store-restore)
     [ $# -eq 1 ] || usage
@@ -183,7 +207,8 @@ ready_probe=
 # docker_expect: the state the Docker request in flight asks for, set before the request: "<field>
 # <value>" for a container state field, "network out" for no membership of the network held under
 # network_id, "network ip <address>" for membership at that address and "network alias <name>" for
-# membership under that alias. Membership alone is not the state a netjoin asks for: a container attached at
+# membership under that alias, "route blackhole <address>" and "route none <address>" for a link
+# split in place or not. Membership alone is not the state a netjoin asks for: a container attached at
 # another address, or without its alias, is a member the connect refuses, and the node is not
 # where its address promises.
 docker_expect=
@@ -204,6 +229,15 @@ docker_applied() {
           out) [ "$got" != out ] || return 0 ;;
           ip\ *) [[ $got != "in ${want#ip }" && $got != "in ${want#ip } "* ]] || return 0 ;;
           alias\ *) [[ $got != in\ * || " ${got#in * } " != *" ${want#alias } "* ]] || return 0 ;;
+        esac
+        ;;
+      route)
+        # "blackhole <ip>" for a split in place, "none <ip>" for none, read in the namespace.
+        local has=0
+        route_has "$target_id" "${want#* }" || has=$?
+        case $has:${want%% *} in
+          0:blackhole | 1:none) return 0 ;;
+          2:*) return 2 ;;
         esac
         ;;
       *)
@@ -419,6 +453,14 @@ restore_source() {
   [ ! -L "$1" ] && [ -f "$1" ] && [ "$(stat --format=%h -- "$1" 2>/dev/null)" = 1 ] ||
     die "$2 is not the regular file a snapshot published, or has a second name; nothing was restored"
 }
+# bao_sealed: bao status exits 2 on a sealed node, 0 on an unsealed one. bao_active: a request
+# that needs an active, unsealed node.
+bao_sealed() {
+  local rc=0
+  bao status >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 2 ]
+}
+bao_active() { bao token lookup; }
 
 case $action in
   # Each Docker mutation is flagged from its request until the action completes, the flag never
@@ -451,12 +493,6 @@ case $action in
         wait_for 60 "postgres" pg_answers
         ;;
       openbao)
-        bao_sealed() {
-          local rc=0
-          bao status >/dev/null 2>&1 || rc=$?
-          [ "$rc" -eq 2 ]
-        }
-        bao_active() { bao token lookup; }
         ready_probe=bao_active
         wait_for 60 "a sealed OpenBao" bao_sealed
         bao_unseal
@@ -470,6 +506,22 @@ case $action in
         talos_answers() { talosctl_timed "$REQUEST_LIMIT" -e "$node" -n "$node" version --short; }
         ready_probe=talos_answers
         wait_for 180 "the Talos API on $node" talos_answers
+        ;;
+      # Asked on the published port, as a client would: /livez is the one route that needs no
+      # token. --disable: the caller's curlrc is not read.
+      A | B)
+        port=$SERVER_A_PORT
+        [ "$1" = A ] || port=$SERVER_B_PORT
+        instance_live() { timeout "$REQUEST_LIMIT" curl --disable --noproxy '*' --fail --silent -o /dev/null "http://127.0.0.1:$port/livez"; }
+        ready_probe=instance_live
+        wait_for 60 "instance $1" instance_live
+        # A route lives in the container's network namespace and is gone after a kill: the
+        # recorded splits are put back before the start is recorded done.
+        linksplits_reapply "$1" || die "instance $1 runs, but its recorded link splits could not all be put back"
+        ;;
+      issuer)
+        ready_probe=issuer_answers
+        wait_for 60 "the issuer" issuer_answers
         ;;
     esac
     ;;
@@ -500,6 +552,54 @@ case $action in
       worker) docker network connect --ip "$TALOS_WORKER_IP" "$network_id" "$target_id" ;;
       *) docker network connect --alias "$1" "$network_id" "$target_id" ;;
     esac
+    ;;
+  linksplit | linkjoin)
+    # A split lives in the running instance's namespace. A stopped instance has none: a split is
+    # refused there, and a join only drops the record, so that the next start does not put it back.
+    running=$(docker inspect --type container --format '{{.State.Running}}' "$target_id") || die "cannot inspect $target"
+    if [ "$running" = true ]; then
+      docker_expect="route blackhole $split_ip"
+      [ "$action" = linksplit ] || docker_expect="route none $split_ip"
+      has=0
+      route_has "$target_id" "$split_ip" || has=$?
+      [ "$has" -ne 2 ] || die "cannot read the routes of $1; nothing was changed"
+      docker_dispatched=1
+      # ip refuses to add a route that is there or delete one that is not: a split already in
+      # place, or a join with none, sends nothing and is read back like any other.
+      if [ "$action" = linksplit ] && [ "$has" -eq 1 ]; then
+        route_in "$target_id" add "$split_ip"
+      elif [ "$action" = linkjoin ] && [ "$has" -eq 0 ]; then
+        route_in "$target_id" del "$split_ip"
+      fi
+      docker_applied || die "the routes read back from $1 are not the ones asked for"
+    else
+      [ "$action" = linkjoin ] || die "instance $1 is not running; a link split lives in its network namespace: start it first"
+    fi
+    # Recorded after the read-back, for a start to put back (linksplits_reapply), through a partial
+    # name so that no reader finds the list half written.
+    {
+      if [ -f "$STATE/linksplits" ]; then
+        grep --invert-match --line-regexp --fixed-strings -- "$1 $2" "$STATE/linksplits" || [ $? -eq 1 ]
+      fi
+      [ "$action" = linkjoin ] || printf '%s %s\n' "$1" "$2"
+    } >"$STATE/linksplits.partial"
+    mv --no-target-directory -- "$STATE/linksplits.partial" "$STATE/linksplits"
+    ;;
+  # Through the CLI in the verified container (bao in lib.sh). A request that went out and was not
+  # answered may have been applied: flagged as dispatched, as the HTTP requests are.
+  seal)
+    bao_dispatched=1
+    bao operator seal >/dev/null
+    bao_answered=1
+    bao_dispatched=0
+    wait_for 30 "a sealed OpenBao" bao_sealed
+    ;;
+  unseal)
+    bao_dispatched=1
+    bao_unseal || die "OpenBao did not report itself unsealed"
+    bao_answered=1
+    bao_dispatched=0
+    wait_for 60 "an active OpenBao node" bao_active
     ;;
   db-snapshot)
     [ $# -eq 1 ] || usage

@@ -799,6 +799,51 @@ server_command() {
     --label "$TOOL_LABEL" -v "$STATE/server/a:/etc/bronzeward:ro" "$image_id" "$@" -config /etc/bronzeward/config.yaml
 }
 
+# node_ip <controlplane|worker>: the Talos node's fixed address.
+node_ip() {
+  case $1 in
+    controlplane) printf '%s\n' "$TALOS_CONTROLPLANE_IP" ;;
+    worker) printf '%s\n' "$TALOS_WORKER_IP" ;;
+    *) return 1 ;;
+  esac
+}
+# route_in <container id> <add|del> <ip>: a blackhole route to <ip> inside the container's network
+# namespace, by a one-off curl-image container that joins it (the instance image has no ip). The
+# route is the namespace's, and dies with it: a killed instance comes back without it.
+route_in() {
+  timeout "$REQUEST_LIMIT" docker run --rm --pull never --network "container:$1" --cap-add NET_ADMIN --user 0 \
+    --label "$TOOL_LABEL" --entrypoint ip "$CURL_IMAGE" route "$2" blackhole "$3/32"
+}
+# route_has <container id> <ip>: 0 when the namespace holds a blackhole route to <ip>, 1 when it
+# does not, 2 when it cannot be read (the container stopped, gone or not answering). Read from
+# `ip route`: busybox ignores `ip route show type blackhole` and lists every route.
+route_has() {
+  local routes line
+  routes=$(timeout "$REQUEST_LIMIT" docker run --rm --pull never --network "container:$1" \
+    --label "$TOOL_LABEL" --entrypoint ip "$CURL_IMAGE" route) || return 2
+  while IFS= read -r line; do
+    [[ $line =~ ^blackhole\ ${2//./\\.}(/32)?(\ |$) ]] && return 0
+  done <<<"$routes"
+  return 1
+}
+# linksplits_reapply <A|B>: every split .state/linksplits records for the instance, put back in its
+# namespace and read back. Run by a start: the routes died with the namespace the kill ended. Fails
+# on the first split it cannot put back; the start is then not done.
+linksplits_reapply() {
+  local id instance node ip has
+  [ -f "$STATE/linksplits" ] || return 0
+  id=$(container_id "$(container "$1")") || return 1
+  while read -r instance node; do
+    [ "$instance" = "$1" ] || continue
+    ip=$(node_ip "$node") || { say "fixtures: $STATE/linksplits names an unknown node '$node'"; return 1; }
+    has=0
+    route_has "$id" "$ip" || has=$?
+    [ "$has" -ne 2 ] || { say "fixtures: cannot read the routes of $1"; return 1; }
+    [ "$has" -eq 0 ] || route_in "$id" add "$ip" || { say "fixtures: cannot put back the split $1 $node"; return 1; }
+    route_has "$id" "$ip" || { say "fixtures: the split $1 $node is not in place after it was put back"; return 1; }
+  done <"$STATE/linksplits"
+}
+
 # claim_take [attempt]: fails when any checkout on this daemon already holds the claim. The image
 # declares a data volume, and Docker would make an anonymous, unlabelled one for the claim although
 # it never starts; removed outside claim_drop without --volumes, it would outlive every record. A
