@@ -84,6 +84,11 @@ mise run dev-db                                    # a disposable development Po
 mise run go-db                                     # the root module's tests against PostgreSQL (BW_TEST_PG_DSN, else dev-db's); a missing database fails
 go run ./cmd/bronzeward migrate -config examples/bronzeward.yaml   # apply the embedded migrations and record the installation; run with the server stopped
 go run ./cmd/bronzeward serve -config examples/bronzeward.yaml     # the server on 127.0.0.1:8080; try curl -i http://127.0.0.1:8080/livez
+go run ./cmd/bronzeward token issue -config examples/bronzeward.yaml -name ci -roles author,publisher -responsible h-all -operator h-all   # prints the token once
+go run ./cmd/bronzeward token list -config examples/bronzeward.yaml      # rotate and revoke: see go run ./cmd/bronzeward token
+go run ./fixtures/oidc keygen -out <file>                                # the fixture issuer's key: a synthetic secret, never committed
+go run ./fixtures/oidc serve -key <file> -issuer http://127.0.0.1:5556  # the issuer examples/bronzeward.yaml names
+go run ./fixtures/oidc mint -key <file> -issuer http://127.0.0.1:5556 -human h-author [-defect expired]
 ```
 
-`examples/bronzeward.yaml` is the development configuration, matching `mise run dev-db`. A deployment writes its own. The server refuses to start unless the database holds exactly its migrations (run `migrate` first). It does not serve TLS yet, and `GET /livez` is its only route.
+`examples/bronzeward.yaml` is the development configuration, matching `mise run dev-db`. A deployment writes its own. The server refuses to start unless the database holds exactly its migrations (run `migrate` first). It does not serve TLS yet, and `GET /livez` is its only route. It authenticates nothing yet; `internal/auth` is exercised by `mise run go-db`.
