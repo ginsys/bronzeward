@@ -24,7 +24,7 @@ func start(t *testing.T, srv *http.Server) string {
 }
 
 func TestNewHTTPSettings(t *testing.T) {
-	srv := NewHTTP("127.0.0.1:0")
+	srv := NewHTTP("127.0.0.1:0", New(nil))
 	if srv.ReadHeaderTimeout <= 0 || srv.ReadTimeout <= 0 || srv.IdleTimeout <= 0 {
 		t.Fatalf("unbounded read: header=%v read=%v idle=%v", srv.ReadHeaderTimeout, srv.ReadTimeout, srv.IdleTimeout)
 	}
@@ -35,7 +35,7 @@ func TestNewHTTPSettings(t *testing.T) {
 
 // `OPTIONS *` must reach the mux, which refuses it, instead of net/http's handler answering 200.
 func TestOptionsStarIsNotAnswered(t *testing.T) {
-	addr := start(t, NewHTTP(""))
+	addr := start(t, NewHTTP("", New(nil)))
 	c, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestOptionsStarIsNotAnswered(t *testing.T) {
 // A request that declares a body and never sends it must not hold the connection open: the
 // server closes it once ReadTimeout (shortened here) expires while draining the unread body.
 func TestStalledBodyIsDropped(t *testing.T) {
-	srv := NewHTTP("")
+	srv := NewHTTP("", New(nil))
 	srv.ReadTimeout = 300 * time.Millisecond
 	addr := start(t, srv)
 	c, err := net.Dial("tcp", addr)
