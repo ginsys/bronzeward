@@ -43,6 +43,7 @@ type options struct {
 	noRevokerCheck bool                             // T5c's revoking-human lock control
 	noActOrder     bool                             // the act-order lock control (GET /acts)
 	afterEffect    func()                           // runs in the transaction, after the effect, act and record
+	beforeRead     func()                           // runs when a read route starts, after routing
 	beforeCommit   func(attempt int) error          // fails an attempt before COMMIT
 	commit         func(*sql.Tx) error              // replaces (*sql.Tx).Commit
 }
