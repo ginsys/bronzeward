@@ -8,17 +8,20 @@ import (
 )
 
 // New serves liveness without authentication and hands every other request to api, which
-// authenticates it first (persistence-api.md §10). A nil api answers 404 (tests).
+// authenticates it first (persistence-api.md §10). A nil api answers 404 (tests). No ServeMux
+// sits in front of api: it would answer an unclean path with a redirect and `OPTIONS *` with
+// its own 400, both before authentication.
 func New(api http.Handler) http.Handler {
 	if api == nil {
 		api = http.NotFoundHandler()
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/livez" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		api.ServeHTTP(w, r)
 	})
-	mux.Handle("/", api)
-	return mux
 }
 
 // NewHTTP returns the server for addr, serving h.
@@ -27,7 +30,7 @@ func New(api http.Handler) http.Handler {
 // body and never sends one holds its connection while net/http drains it after the response.
 // IdleTimeout bounds kept-alive connections. WriteTimeout stays unset: the event stream
 // (persistence-api.md §8.3) writes for longer than any fixed bound. The general OPTIONS handler
-// is disabled so `OPTIONS *` reaches the mux instead of being answered 200 without authentication.
+// is disabled so `OPTIONS *` reaches the handler instead of being answered 200 without authentication.
 func NewHTTP(addr string, h http.Handler) *http.Server {
 	return &http.Server{
 		Addr:                         addr,
