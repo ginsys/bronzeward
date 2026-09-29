@@ -974,11 +974,16 @@ Design: [§7.4](../design/Talos_Configuration_and_Machine_Management_Design.md#7
 §6 performs design §7.4 steps 1 and 2. Step 3 is the compiler's: derive the
 redacted review data (§8) and encrypt every full artifact under the artifact
 key with the compiler identity, which can encrypt but not decrypt (PC §2).
-The key version each encryption used is then classified, with the metadata
-identity, by the
-[dependency monitor's procedure](dependency-monitor.md#3-classification-procedure),
-whose answer also gives the identity §9 records. Anything but `retained`
-refuses publication, as §6 step 3 refuses a source version. Step 4 is
+Before encrypting, the compiler reads the artifact key's metadata with the
+metadata identity and keeps the creation time its `keys` map gives each
+version. After encrypting, it classifies the key version each encryption used
+afresh, with the metadata identity, by the
+[dependency monitor's procedure](dependency-monitor.md#3-classification-procedure).
+Anything but `retained` refuses publication, as §6 step 3 refuses a source
+version, and so does a creation time for that version that the first read did
+not give or gave differently. The identity §9 records is that creation time,
+the same in both reads, so a key deleted and recreated around the encryption
+is refused rather than recorded under the new key's identity. Step 4 is
 persistence's: the compiler hands over, as one unit, only sanitized
 or encrypted values:
 

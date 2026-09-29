@@ -120,7 +120,9 @@ A Transit key's identity is its name together with the creation time its
 `keys` map gives for the recorded version **(choice §11.12)**: a key deleted
 and recreated under the same name gives its versions new creation times
 ([KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation)
-item 1, inferred). Publication records it from its own classification (§5.2).
+item 1, inferred). Publication records it from two reads bracketing the
+encryption (compilation §11), so a key recreated between them is refused, not
+recorded.
 The `keys` map decides no floor, since it hides trimmed and blocked versions
 alike (RC §3.1); a version absent from it has its identity unchecked, and the
 floor rows classify it.
@@ -163,8 +165,8 @@ Three tables, all in PA §3:
 
 | Entity | Kind | Holds |
 | --- | --- | --- |
-| DependencyStatus | mutable, row-locked | `dep` identifier; provider object and version; class and reason; when it was first recorded `retained`; since when it has been `unknown`, if it is; when its last `persistent` alert was raised; the scheduled deletion time last warned; the database time the latest recorded classification's request began (`observed_from`); the answer's `Date`, if any |
-| DependencyAlert | immutable | `dal` identifier; recording sequence; the `dep` identifier; kind (§6.2); class and reason; provider object and version; the releases referencing it; `observed_from` and `Date`; epoch; time recorded. A `monitor-stalled` alert concerns no dependency: its `dep` identifier, provider object, version, class, reason, releases, `observed_from` and `Date` are empty |
+| DependencyStatus | mutable, row-locked | `dep` identifier; provider object and version; class and reason; when it was first recorded `retained`; since when it has been `unknown`, if it is; when its last `persistent` alert was raised; the scheduled deletion time last observed and the one last warned; the database time the latest recorded classification's request began (`observed_from`) and the database time it was recorded (`recorded_at`); the answer's `Date`, if any |
+| DependencyAlert | immutable | `dal` identifier; recording sequence, allocated under the DependencyMonitor row lock (§6.1); the `dep` identifier; kind (§6.2); class and reason; provider object and version; the releases referencing it; `observed_from` and `Date`; epoch; time recorded. A `monitor-stalled` alert concerns no dependency: its `dep` identifier, provider object, version, class, reason, releases, `observed_from` and `Date` are empty |
 | DependencyMonitor | mutable singleton, row-locked | the monitor's last progress (§6.3); its last completed pass; when it last raised `monitor-stalled`; the recording sequence of the last alert logged (§7.1) |
 
 A DependencyStatus row is updated only under its row lock, in a transaction
@@ -175,22 +177,29 @@ then the transaction records the answer.
 
 Publication's commit transaction (PA §6.2, T3) inserts a DependencyStatus row
 for each provider object version its dependency records name that has none,
-with class `retained`, first seen `retained` at the time publication began
-that version's classification, and `observed_from` equal to that time
-**(choice §11.3)**. A version that already has a row keeps it. Publication
-classifies every pinned version (compilation §6 step 3) and, once the artifact
-is encrypted, its encryption dependency (compilation §11), recording the
-Transit identity of §3 from that answer. It refuses every version that is not
-`retained`, so every seeded row is `retained`.
+in provider object and version order, with class `retained`, the reason and
+scheduled deletion time publication's own classification gave, first seen
+`retained` at the time publication began that version's classification, and
+`observed_from` equal to that time **(choice §11.3)**. A version that already
+has a row keeps it. Publication classifies every pinned version (compilation §6
+step 3) and its encryption dependency (compilation §11), recording the Transit
+identity of §3 from reads bracketing the encryption. It refuses every version
+that is not `retained`, so every seeded row is `retained`. A seeded scheduled
+deletion is warned by the next pass (§6.2).
 
-Before its inserts, T3 locks the existing DependencyStatus rows of the versions
-it names `FOR SHARE`, in `dep` order. A row whose class is not `retained` and
-whose `observed_from` is later than the time publication began that version's
-classification refuses the publication, as compilation §6 step 3 refuses a
-version. The monitor reads a dependency's referencing releases after taking its
-row lock (§6.1 step 4). A transition and a publication naming the same version
-are therefore ordered: either the publication sees the transition and is
-refused, or the transition's alert names the release.
+After its inserts, T3 locks the DependencyStatus row of every version it names
+`FOR SHARE`, in `dep` order, rows a concurrent publication inserted included. A
+row whose class is not `retained` and whose `recorded_at` is later than the
+time publication began that version's classification refuses the publication,
+as compilation §6 step 3 refuses a version. The comparison takes the time the
+class was recorded, not the time its request began, since a request that began
+before publication's own can observe a change after it. The monitor reads a
+dependency's referencing releases after taking its row lock (§6.1 step 4). A
+transition and a publication naming the same version are therefore ordered:
+either the publication sees the transition and is refused, or the transition's
+alert names the release. A refusal can be conservative, for a transition
+observed before publication's own request but recorded after it began; the
+retried publication classifies afresh.
 
 Without this seed, a dependency lost between publication and the monitor's
 first pass would be a dependency never seen `retained`, alerted after 15
@@ -203,8 +212,10 @@ Design: §7.8 item 3, §15.3. Evidence: RC §6.2 row 043, RC §6.4.
 ### 6.1 Passes
 
 Every server instance runs the monitor, in recovery mode as outside it
-**(choice §11.7)**. A pass classifies every monitored dependency once. For
-each, it:
+**(choice §11.7)**. A process started with the recovery-start flag runs
+neither passes nor the watchdog (§6.3) until its recovery-mode entry has
+committed (PA §12.2), so nothing is recorded in the restored epoch before entry
+fences it. A pass classifies every monitored dependency once. For each, it:
 
 1. reads the database time as `observed_from`;
 2. sends the request of §3, with a request timeout of 10 seconds;
@@ -212,10 +223,12 @@ each, it:
 4. in one transaction, locks the DependencyStatus row `FOR UPDATE`. If the
    row's `observed_from` is later than this one's, another instance recorded a
    newer classification: this one is discarded. Otherwise it records the class
-   and raises, in the same transaction, the alerts of §6.2 the change calls
-   for, naming the releases that reference the dependency as read after the
-   lock. Either way, it then locks the DependencyMonitor row and records its
-   progress (§6.3).
+   with the transaction's time as `recorded_at` and reads the releases that
+   reference the dependency. Either way, it then locks the DependencyMonitor
+   row, inserts the alerts of §6.2 a recorded change calls for, naming those
+   releases, and records its progress (§6.3). An alert's recording sequence is
+   allocated under that lock, which is held to commit, so sequences commit in
+   order (§7.1).
 
 A pass starts 60 seconds after the previous one started, or at once if the
 previous one took longer **(choice §11.4)**. "At once" in design §7.8 means
@@ -225,7 +238,8 @@ transaction that records its transition under the row lock, two instances
 raise one alert per transition, not two.
 
 The interval, the request timeout, the persistent-unknown interval (15
-minutes, design §7.8) and the stall bound (§6.3) are fixed PoC values, held as
+minutes, design §7.8), the stall bound and the watchdog's statement timeout
+(§6.3) are fixed PoC values, held as
 named constants in one place so that a later version can make them
 configurable.
 
@@ -246,6 +260,13 @@ leaves `unknown`. A dependency leaving `blocked`, `lost` or `unknown` for
 metadata check (design §15.3) shows as `unknown` with its reason, and alerts
 through `regression` and `persistent`.
 
+`deletion-scheduled` is raised by the pass that records a schedule while its
+time is still ahead. A deletion that takes effect before a pass records it,
+one only publication saw included (its seeded row carries the schedule for the
+read routes, §5.2), is first recorded as `blocked`, which alerts at once. The
+warning is therefore not guaranteed for a schedule shorter than one interval
+and one pass (§10.2).
+
 ### 6.3 Silence is not health
 
 Each step 4 of §6.1, recorded or discarded, and each completed pass record
@@ -255,6 +276,13 @@ timeouts, as during a partition, still progresses. When there has been no
 progress for three intervals, the instance that notices raises one
 `monitor-stalled` alert, recorded under that row's lock, and raises it again
 after each further three intervals without progress **(choice §11.8)**.
+
+The noticing is not a pass's: a hung pass would never notice. Each instance
+runs a watchdog on a schedule of its own, once per interval, independent of
+its passes and with a database statement timeout of 10 seconds. It locks the
+DependencyMonitor row, compares the last progress with the database time and
+raises `monitor-stalled` when due. A watchdog records no progress, so a
+watchdog alone never keeps the monitor from being stalled.
 
 The read routes (§7.2) serve the last completed pass's time, and mark a served
 class `stale` when its own `observed_from` is more than three intervals before
@@ -278,6 +306,12 @@ above the row's last logged one. Each line has the stable event name
 `dependency-alert` and the row's fields: the `dal` and `dep` identifiers,
 kind, class, reason, provider object and version, and the referencing
 releases. The same transaction then advances the last logged sequence.
+
+Every alert is inserted under the same row lock, held to its commit (§6.1,
+§6.3), and the alerts are read by a statement after the lock is taken. So when
+the logger reads, every alert with a sequence already allocated has committed
+or rolled back: the cursor never passes a sequence that commits later. A
+rolled-back allocation leaves a gap that nothing fills.
 
 A process that dies after an alert commits but before its line leaves the
 alert above the last logged sequence, and the next instance to log writes it.
@@ -367,26 +401,42 @@ fail:
    reads with a token that has them succeed.
 6. **One alert per transition across instances**: two instances observing one
    transition raise one alert. Control: without the row lock, two.
-7. **Silence**: passes stopped by an injected hang raise `monitor-stalled`
-   after three intervals, and the routes serve `stale`. Control: a pass
-   slowed past three intervals by request timeouts raises nothing, and
-   measuring from completed passes instead of progress raises it there.
+7. **Silence**: passes stopped by an injected hang on every instance raise
+   `monitor-stalled` after three intervals, through the watchdog, and the
+   routes serve `stale`. Control: a pass slowed past three intervals by
+   request timeouts raises nothing, and measuring from completed passes
+   instead of progress raises it there; running the stall check inside the
+   pass loop raises nothing under the hang.
 8. **Publication refused** for a pinned version or an encryption dependency
    that is `blocked`, `lost` or `unknown` (compilation §6 step 3, §11), and
    **no dispatch admitted by a retained class** (execution and recovery §3.1).
 9. **A recreated Transit key** under the same name classifies
-   `identity-mismatch`. Control: comparing the name and version alone
-   classifies it `retained`.
+   `identity-mismatch`, and a key recreated between publication's encryption
+   and its second read refuses the publication. Controls: comparing the name
+   and version alone classifies it `retained`; taking the identity from the
+   read after encryption alone records the new key's identity for the old
+   key's ciphertext.
 10. **A publication racing a transition**: a publication naming a monitored
     version while the monitor records its change from `retained` is refused,
-    or is named by the alert. Control: without T3's `FOR SHARE` lock, the
-    release commits and the alert omits it.
+    or is named by the alert, in three orders: the row exists; two
+    publications are the first to name the version; the monitor's request
+    began before publication's and observed the change after it. Controls:
+    without T3's `FOR SHARE` lock, or locking before its insert, or comparing
+    `observed_from` instead of `recorded_at`, the release commits and the
+    alert omits it.
 11. **The log after a crash**: a process stopped between an alert's commit
-    and its log line has the line written by the next instance to log.
-    Control: without the last logged sequence, the line is never written.
+    and its log line has the line written by the next instance to log, and an
+    alert whose transaction commits after a later-started one's is logged.
+    Controls: without the last logged sequence, the line is never written;
+    allocating the sequence before the DependencyMonitor row lock skips the
+    later-committing alert.
 12. **Stale per dependency**: a seeded status whose `observed_from` is older
     than three intervals is served `stale` while passes complete. Control:
     deriving `stale` from the last completed pass serves it as current.
+13. **Recovery start**: a process started with the recovery-start flag records
+    no classification, alert or progress before its entry commits, and runs
+    passes after it. Control: starting the monitor with the process records a
+    status change in the restored epoch before entry.
 
 Items 2, 3 and 8's publication refusal are acceptance-plan S2's negative
 controls and S7's variants; the rest run as *checks*
@@ -408,6 +458,8 @@ controls and S7's variants; the rest run as *checks*
 - **Read-only policy.** RC's metadata token also held `list`; this contract
   drops it, since the procedure never lists, and item 5 of §10.1 is the first
   evidence that `read` alone suffices.
+- **A short deletion schedule** can reach `blocked` without a
+  `deletion-scheduled` warning (§6.2); `blocked` still alerts at once.
 - **No interval is measured.** 60 seconds, 10 seconds, 15 minutes and three
   intervals are choices; the evidence shows only that a partition, a pause and
   a seal look alike from the client (RC §6.4).
@@ -416,8 +468,8 @@ controls and S7's variants; the rest run as *checks*
 
 Each is marked in place as **(choice §11.n)**. Owner decision, 2026-09-29
 (ginsys/bronzeward#67): choices 1 to 11 stand as written. Choice 12, and
-choice 8's measure by progress, answer that pull request's review and await
-the owner's review.
+choice 8's measure by progress and its independent watchdog, answer that pull
+request's review and await the owner's review.
 
 1. **A document of its own** rather than a section of the persistence and API
    contract, whose section numbers the acceptance plan cites. Alternative: a

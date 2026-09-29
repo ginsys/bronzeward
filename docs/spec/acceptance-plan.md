@@ -802,7 +802,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: the epoch term and process-epoch checks; the recovery-start process in the new epoch; per-scope refusals and the recovery-start refusal | S7 | #29 |
 | PA §16: one idempotency key in flight twice, with the key-lock control | *check* | #21 |
 | DM §10.1 items 2, 3 and 8's publication refusal: fixture classifications, their alerts and the refused publication | S2 step 6 and negative controls; S7 variants | #24 |
-| DM §10.1 items 1, 4 to 7, 8's dispatch half and 9 to 12: every classification rule, persistent unknown, metadata-only access, one alert per transition, silence, Transit identity, publication against a transition, logging after a crash, per-dependency staleness | *check* | #24 |
+| DM §10.1 items 1, 4 to 7, 8's dispatch half and 9 to 13: every classification rule, persistent unknown, metadata-only access, one alert per transition, silence, Transit identity, publication against a transition, logging after a crash, per-dependency staleness, recovery start | *check* | #24 |
 | PA §16: approval revocation racing commitment (DS row 003) | S3 negative controls | #25 |
 | PA §10.4: an approval surviving its approver's loss of the role, contrasted with its revocation (choice §17.23) | S3 negative controls | #25 |
 | PA §16: identity revocation racing commitment, with the lock control; its timeline entries on exactly the machines it touches (T5c) | *check* | #25 |
