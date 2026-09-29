@@ -36,8 +36,8 @@ type fixture struct {
 	// a path to the URL it answers with a 302.
 	jwksURI  atomic.Value // string
 	redirect sync.Map     // path → URL
-	// garbleJWKS makes the key set endpoint answer 200 with truncated JSON.
-	garbleJWKS atomic.Bool
+	// jwksBody, when not empty, is the key set endpoint's 200 answer in place of the key set.
+	jwksBody atomic.Value // string
 }
 
 // newFixture starts the fixture issuer on a loopback port. The listener comes first, so the
@@ -92,9 +92,9 @@ func newFixture(t *testing.T) *fixture {
 			_ = json.NewEncoder(w).Encode(doc)
 			return
 		}
-		if r.URL.Path == "/jwks" && f.garbleJWKS.Load() {
+		if b, _ := f.jwksBody.Load().(string); r.URL.Path == "/jwks" && b != "" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"keys":[`))
+			_, _ = w.Write([]byte(b))
 			return
 		}
 		if r.URL.Path == "/jwks" {
@@ -310,19 +310,27 @@ func TestKeySetRefetchIsRateLimited(t *testing.T) {
 	}
 }
 
-// A key set answer that does not decode is a failed fetch: it starts no refetch interval, so
-// the next request fetches again once the issuer answers properly.
+// A key set answer go-oidc rejects is a failed fetch: it starts no refetch interval, so the next
+// request fetches again once the issuer answers properly.
 func TestUndecodableKeySetSetsNoLimit(t *testing.T) {
-	f := newFixture(t)
-	v := f.verifier() // the production interval, a minute
-	h := f.bearer(t, "h-viewer", "")
-	f.garbleJWKS.Store(true)
-	if _, err := v.Authenticate(t.Context(), h); err == nil {
-		t.Fatal("accepted with an undecodable key set")
-	}
-	f.garbleJWKS.Store(false)
-	if _, err := v.Authenticate(t.Context(), h); err != nil {
-		t.Fatalf("after the key set recovered: %v", err)
+	for name, body := range map[string]string{
+		"truncated":          `{"keys":[`,
+		"empty key":          `{"keys":[{}]}`,
+		"broken RSA modulus": `{"keys":[{"kty":"RSA","alg":"RS256","kid":"k","n":"!","e":"AQAB"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			v := f.verifier() // the production interval, a minute
+			h := f.bearer(t, "h-viewer", "")
+			f.jwksBody.Store(body)
+			if _, err := v.Authenticate(t.Context(), h); err == nil {
+				t.Fatal("accepted with an undecodable key set")
+			}
+			f.jwksBody.Store("")
+			if _, err := v.Authenticate(t.Context(), h); err != nil {
+				t.Fatalf("after the key set recovered: %v", err)
+			}
+		})
 	}
 }
 
