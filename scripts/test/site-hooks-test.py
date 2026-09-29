@@ -68,5 +68,16 @@ class RewriteTest(unittest.TestCase):
                          '![f](' + GITHUB + 'raw/main/fixtures/oidc/issuer/issuer.go)')
 
 
+class AnchorTest(unittest.TestCase):
+    def test_repeated_headings_get_github_suffixes(self):
+        import markdown
+        from pymdownx.slugs import slugify
+
+        page = markdown.Markdown(extensions=['toc'], extension_configs={'toc': {'slugify': slugify(case='lower')}})
+        page.convert('## Confirmed decision\n\n## Confirmed decision\n\n## Confirmed decision\n\n## 18.2 Phase 1 - A')
+        self.assertEqual([entry['id'] for entry in page.toc_tokens],
+                         ['confirmed-decision', 'confirmed-decision-1', 'confirmed-decision-2', '182-phase-1---a'])
+
+
 if __name__ == '__main__':
     unittest.main()

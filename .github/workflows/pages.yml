@@ -21,7 +21,9 @@ permissions:
 
 jobs:
   build:
-    # main only, so the org's in-cluster runner (ci.yml's rule for own-branch code).
+    # A manual dispatch from any other ref would publish that ref over the reviewed site. main
+    # only, hence also the org's in-cluster runner (ci.yml's rule for own-branch code).
+    if: github.ref == 'refs/heads/main'
     runs-on: autops-kube-ginsys
     timeout-minutes: 10
     permissions:
