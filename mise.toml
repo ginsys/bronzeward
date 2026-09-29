@@ -47,13 +47,13 @@ scripts/ci/commit-lint.sh "$base" HEAD
 
 [tasks.go]
 description = "Build, vet, format-check and test the root module and the Phase-0 experiment modules"
-# The root module (cmd/, internal/) comes first. Its go.mod carries `ignore ./experiments`, so
+# The root module (cmd/, internal/, fixtures/oidc) comes first. Its go.mod carries `ignore ./experiments`, so
 # the root `./...` never sweeps disposable evidence code into the implementation: the nested
 # go.mod files alone do not suffice, since experiments/e3-talos-compatibility/machinery/src has
 # none. Each experiment is its own module, checked with `go -C <dir>`, one line per module.
 # `mod tidy -diff` fails instead of rewriting, so CI reports a stale go.mod rather than hiding it.
 run = """
-gofmt -l cmd internal | { ! grep . ; }
+gofmt -l cmd internal fixtures/oidc | { ! grep . ; }
 go mod verify
 go mod tidy -diff
 go build -o /dev/null ./...
