@@ -1234,6 +1234,26 @@ for flag in assume-unchanged skip-worktree; do
   undefer
   [ "$flagged" = $((before + 1)) ] || fail "checkout_differs counts $flagged with the root README.md $flag, $before without"
 done
+# An untracked Go file at the root that an excludes file outside the repository hides: status
+# omits it and the suites would compile it, so it counts. One inside a dot directory, which the go
+# command ignores, does not. Both are removed before anything can fail.
+printf '/selftest-hidden.go\n/.selftest-hidden/\n' >"$STATE/selftest-excludes"
+hide() { GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.excludesFile GIT_CONFIG_VALUE_0="$STATE/selftest-excludes" "$@"; }
+before=$(hide checkout_differs) || fail "checkout_differs failed under the selftest's excludes file"
+defer rm -f -- "$FIXTURES/../selftest-hidden.go" "$FIXTURES/../.selftest-hidden/hidden.go"
+defer rmdir --ignore-fail-on-non-empty -- "$FIXTURES/../.selftest-hidden"
+mkdir "$FIXTURES/../.selftest-hidden"
+printf 'package main\n' >"$FIXTURES/../selftest-hidden.go"
+printf 'package main\n' >"$FIXTURES/../.selftest-hidden/hidden.go"
+flagged=$(hide checkout_differs) || flagged=failed
+rm -f -- "$FIXTURES/../selftest-hidden.go" "$FIXTURES/../.selftest-hidden/hidden.go" # before anything can fail
+rmdir -- "$FIXTURES/../.selftest-hidden"
+undefer
+undefer
+rm -f -- "$STATE/selftest-excludes"
+[ "$flagged" = $((before + 1)) ] ||
+  fail "checkout_differs counts $flagged with a hidden Go file at the root and one in a dot directory, $before without"
+unset -f hide
 unset before flag flagged
 # The record of how fixtures/ differed at creation gone: its absence must not read as "the tree
 # was the commit's". Put back before anything can fail.
@@ -1667,6 +1687,18 @@ grep --quiet --fixed-strings "$bundle/backups/pg-selftest.dump.sql" "$bundle/lea
 [ -d "$bundle/postgres-data/pg_wal" ] || fail "evidence did not copy the PostgreSQL data directory"
 grep --quiet --fixed-strings "$bundle/postgres-data/" "$bundle/leak-scan.txt" || fail "leak scan missed the canary in what PostgreSQL wrote to disk"
 ! grep --quiet --fixed-strings "$bundle/logs/" "$bundle/leak-scan.txt" || fail "a container log contains synthetic secret material"
+# The viewer token the start check minted is no scan pattern, so every bundle this run captured is
+# searched for it on its own. A control file outside the bundles holds it, and must be the one hit.
+printf '%s\n' "$viewer" >"$STATE/selftest-viewer-control"
+rc=0
+hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "$viewer") -- \
+  "$STATE/evidence" "$STATE/selftest-viewer-control") || rc=$?
+rm -f -- "$STATE/selftest-viewer-control" # before anything can fail
+[ "$rc" -le 1 ] || fail "cannot search the evidence bundles for the minted viewer token (grep exit $rc)"
+[ "$hits" = "$STATE/selftest-viewer-control" ] ||
+  fail "the minted viewer token is in an evidence bundle, or the search missed its control: ${hits:-no file}"
+unset viewer hits
+ok "the viewer token the selftest minted is in no evidence bundle, and the search finds its control"
 ok "evidence bundle complete under a silent diff helper, folded case, hidden untracked files, a trusted stat cache, a replacement ref for the commit, an executable bit taken under core.fileMode=false and a regular file where the index has a symlink under core.symlinks=false, and names the creating commit and both nodes' tags, refuses a stand-in for the cached talosctl before running it, an earlier bundle's marker that is a dangling symlink, a symlink, an empty directory, a clean filter, a skipped file, a staged gitlink and a nested repository in the tree, a linked backup and a missing creation record, withholds a hidden file's name and a closed directory's; leak scan finds the planted canary and token, walks the live store once under two spellings and once under a symlinked parent, holds a sibling's control copy to its archive's digest and one named with a backslash, leaves a running capture's bundle alone, nothing in the logs"
 
 if [ "$keep" != --keep ]; then

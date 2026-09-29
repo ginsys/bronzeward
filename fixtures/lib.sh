@@ -436,13 +436,20 @@ fixtures_git() {
 # checkout_differs: how many paths of the whole checkout may differ from HEAD. These are the
 # changed and untracked paths git status lists, plus the tracked files git is told to skip
 # (assume-unchanged, a lowercase ls-files -v tag, or skip-worktree, S): a modification there is in
-# no status. A failing listing fails, not counts zero.
+# no status. And the untracked files .git/info/exclude or core.excludesFile hides, which the
+# tracked .gitignore files do not: status omits them too, and the suites run in this tree would
+# read them. Those inside a dot directory are left out, as the go command ignores them (go help
+# packages) and other worktrees live there. A failing listing fails, not counts zero.
 checkout_differs() {
-  local changed flagged
+  local changed flagged ignored declared hidden
   changed=$(fixtures_git status --porcelain --untracked-files=all) || return 1
   flagged=$(fixtures_git ls-files -v -- ':/') || return 1
   flagged=$(grep -E '^([a-z]|S) ' <<<"$flagged" || [ $? -eq 1 ]) || return 1
-  printf '%s\n' "$changed" "$flagged" | grep -c . || [ $? -eq 1 ]
+  ignored=$(fixtures_git ls-files --full-name --others --ignored --exclude-standard -- ':/') || return 1
+  declared=$(fixtures_git ls-files --full-name --others --ignored --exclude-per-directory=.gitignore -- ':/') || return 1
+  hidden=$(LC_ALL=C comm -23 <(LC_ALL=C sort <<<"$ignored") <(LC_ALL=C sort <<<"$declared")) || return 1
+  hidden=$(grep -Ev '(^|/)\.[^/]*/' <<<"$hidden" || [ $? -eq 1 ]) || return 1
+  printf '%s\n' "$changed" "$flagged" "$hidden" | grep -c . || [ $? -eq 1 ]
 }
 
 # fixtures_manifest_diff <status> <commit>: how fixtures/ differs from the commit, as bin/up
