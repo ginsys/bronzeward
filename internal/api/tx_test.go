@@ -75,6 +75,24 @@ func TestReplay(t *testing.T) {
 	}
 }
 
+// §7.2: a stored refusal (a draft entry refused after ingestion) is a problem document, and its
+// replay is one too.
+func TestStoredRefusalReplaysAsProblem(t *testing.T) {
+	refused := func(_ context.Context, _ *API, _ *sql.Tx, q *request) (result, error) {
+		return result{status: http.StatusConflict, subjects: []string{q.principal.ID}, body: map[string]any{
+			"type": "urn:bronzeward:problem:conflict", "title": titles["conflict"], "status": http.StatusConflict, "instance": q.id}}, nil
+	}
+	e := newEnv(t, options{extra: []*route{testRoute(refused)}})
+	tok := e.human("h-author")
+	first := e.do(e.api, post(tok, key, `{"note":"a"}`))
+	wantProblem(t, first, http.StatusConflict, "conflict")
+	second := e.do(e.api, post(tok, key, `{"note":"a"}`))
+	wantProblem(t, second, http.StatusConflict, "conflict")
+	if second.Header().Get("Idempotent-Replayed") != "true" || !bytes.Equal(first.Body.Bytes(), second.Body.Bytes()) {
+		t.Fatalf("replay: %v %s; first %s", second.Header(), second.Body, first.Body)
+	}
+}
+
 func TestKeyReusedForAnotherRequest(t *testing.T) {
 	e := newEnv(t, options{extra: []*route{testRoute(nil)}})
 	tok := e.human("h-author")
