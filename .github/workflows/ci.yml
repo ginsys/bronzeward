@@ -67,6 +67,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install --quiet --disable-pip-version-check -r requirements-site.txt
+      - run: python3 scripts/test/site-hooks-test.py
       - run: mkdocs build --strict
 
   actionlint:

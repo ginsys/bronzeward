@@ -39,12 +39,15 @@ run = """
 """
 
 [tasks.site]
-description = "Build the documentation site into site/ with --strict, as ci.yml's site job does"
+description = "Run the link-rewrite tests, then build the documentation site into site/ with --strict, as ci.yml's site job does"
 depends = ["site:install"]
 # NO_MKDOCS_2_WARNING: mkdocs-material's MkDocs 2.0 banner, printed on every run (see
 # requirements-site.txt for why the site stays on 1.x).
 env = { NO_MKDOCS_2_WARNING = "true" }
-run = ".venv-site/bin/mkdocs build --strict"
+run = """
+.venv-site/bin/python scripts/test/site-hooks-test.py
+.venv-site/bin/mkdocs build --strict
+"""
 
 [tasks."site:serve"]
 description = "Serve the documentation site at http://127.0.0.1:8000 with live reload"
