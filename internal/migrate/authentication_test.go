@@ -39,6 +39,7 @@ func TestAuthenticationConstraints(t *testing.T) {
 		{"human with a responsible", `INSERT INTO principal (id, kind, iss, sub, responsible, created_at) VALUES ($1, 'human', 'https://idp.test', 'bob', $2, now())`, []any{id.New(id.Principal), human}, "23514"},
 		{"service without responsible", `INSERT INTO principal (id, kind, name, created_at) VALUES ($1, 'service', 'x', now())`, []any{id.New(id.Principal)}, "23514"},
 		{"second row for one subject", `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'alice', now())`, []any{id.New(id.Principal)}, "23505"},
+		{"service responsible for a service", `INSERT INTO principal (id, kind, name, responsible, created_at) VALUES ($1, 'service', 'x', $2, now())`, []any{id.New(id.Principal), service}, "23503"},
 		{"second service of one name", `INSERT INTO principal (id, kind, name, responsible, created_at) VALUES ($1, 'service', 'ci', $2, now())`, []any{id.New(id.Principal), human}, "23505"},
 		{"approver token", insertToken, []any{id.New(id.Token), service, "{approver}", "30 days"}, "23514"},
 		{"recovery-admin token", insertToken, []any{id.New(id.Token), service, "{author,recovery-admin}", "30 days"}, "23514"},
