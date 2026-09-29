@@ -1764,7 +1764,7 @@ For a database restored to a backup taken at time *T*:
 | Tokens revoked after *T* | valid again in the rows | refused anyway: earlier epoch |
 | `DependencyStatus` | as at *T* | a dependency recorded `retained` and now answering 404 alerts at once as a regression (§6.3) |
 | `DependencyAlert` after *T* | absent | their log lines remain ([dependency monitor §9](dependency-monitor.md#9-restored-state)) |
-| `DependencyMonitor` | as at *T* | nothing logged twice: the alerts after *T* are absent |
+| `DependencyMonitor` | as at *T* | an alert recorded before *T* and logged after it is logged again, told apart by its `dal` (at-least-once delivery); the alerts after *T* are absent |
 
 The automation-token rule costs a reissue of every service identity's token
 after each restore. It is the only way this contract finds to refuse a token

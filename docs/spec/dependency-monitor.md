@@ -122,7 +122,10 @@ and recreated under the same name gives its versions new creation times
 ([KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation)
 item 1, inferred). Publication records it from two reads bracketing the
 encryption (compilation §11), so a key recreated between them is refused, not
-recorded.
+recorded. It also refuses a version whose creation time is not in a second
+before the first read's `Date`: creation times are whole seconds, so only a
+version still in its creation second could share it with a key recreated
+later, and a version one second old cannot.
 The `keys` map decides no floor, since it hides trimmed and blocked versions
 alike (RC §3.1); a version absent from it has its identity unchecked, and the
 floor rows classify it.
@@ -238,8 +241,8 @@ transaction that records its transition under the row lock, two instances
 raise one alert per transition, not two.
 
 The interval, the request timeout, the persistent-unknown interval (15
-minutes, design §7.8), the stall bound and the watchdog's statement timeout
-(§6.3) are fixed PoC values, held as
+minutes, design §7.8), the stall bound, the watchdog's statement timeout
+(§6.3) and the logger's idle timeout (§7.1) are fixed PoC values, held as
 named constants in one place so that a later version can make them
 configurable.
 
@@ -300,18 +303,30 @@ metrics endpoint and push delivery are not part of the PoC.
 
 The transaction of §6.1 step 4 inserts the DependencyAlert row; the row is the
 record. After it commits, and at the start of every pass, the instance logs
-the alerts not yet logged. In one transaction, it locks the DependencyMonitor
-row and writes, in recording order, one log line per alert whose sequence is
-above the row's last logged one. Each line has the stable event name
-`dependency-alert` and the row's fields: the `dal` and `dep` identifiers,
-kind, class, reason, provider object and version, and the referencing
-releases. The same transaction then advances the last logged sequence.
+the alerts not yet logged. A log write can block, so no lock a pass or the
+watchdog needs is held across it:
 
-Every alert is inserted under the same row lock, held to its commit (§6.1,
-§6.3), and the alerts are read by a statement after the lock is taken. So when
-the logger reads, every alert with a sequence already allocated has committed
-or rolled back: the cursor never passes a sequence that commits later. A
-rolled-back allocation leaves a gap that nothing fills.
+1. The logger's transaction takes a transaction-level advisory lock that only
+   loggers take, and runs with an idle-in-transaction timeout of 10 seconds.
+   An instance that finds the lock held logs nothing this time. The
+   transaction reads the last logged sequence.
+2. A separate short transaction locks the DependencyMonitor row `FOR SHARE`,
+   reads the alerts above that sequence in recording order, and commits.
+3. With no DependencyMonitor lock held, the logger writes one log line per
+   alert read. Each line has the stable event name `dependency-alert` and the
+   row's fields: the `dal` and `dep` identifiers, kind, class, reason,
+   provider object and version, and the referencing releases.
+4. The logger's transaction advances the last logged sequence to the last
+   alert written and commits.
+
+Every alert is inserted under the DependencyMonitor row lock, held to its
+commit (§6.1, §6.3), and step 2 reads the alerts by a statement after its
+`FOR SHARE` lock is granted, which waits for every such holder. So when the
+logger reads, every alert with a sequence already allocated has committed or
+rolled back: the cursor never passes a sequence that commits later. A
+rolled-back allocation leaves a gap that nothing fills. A logger paused or
+blocked in step 3 delays only other loggers, and only until its timeout ends
+its transaction; its lines are then written again.
 
 A process that dies after an alert commits but before its line leaves the
 alert above the last logged sequence, and the next instance to log writes it.
@@ -360,8 +375,10 @@ For a database restored to a backup taken at time *T* (PA §12.3):
 - DependencyStatus is as at *T*. A dependency recorded `retained` that now
   answers 404 raises `regression` on the first pass (PA §6.3, §13.3).
 - DependencyAlert rows after *T* are absent. Their log lines remain.
-- The DependencyMonitor row is as at *T*; the first pass logs nothing twice,
-  since the alerts after *T* are gone.
+- The DependencyMonitor row is as at *T*, so an alert recorded before *T* and
+  logged after it is logged again: delivery stays at least once, and a
+  consumer tells the repeat by its `dal` identifier (§7.1). Alerts recorded
+  after *T* are gone and are not logged again.
 - `dep` and `dal` identifiers issued after *T* are absent and never reissued
   (PA §2).
 
@@ -415,7 +432,10 @@ fail:
    and its second read refuses the publication. Controls: comparing the name
    and version alone classifies it `retained`; taking the identity from the
    read after encryption alone records the new key's identity for the old
-   key's ciphertext.
+   key's ciphertext. A version created in the second of the first read's
+   `Date` is refused and recorded one second later. Control: without that
+   check, a key deleted and recreated within its creation second is recorded,
+   and its lost version later classifies `retained`.
 10. **A publication racing a transition**: a publication naming a monitored
     version while the monitor records its change from `retained` is refused,
     or is named by the alert, in three orders: the row exists; two
@@ -429,7 +449,10 @@ fail:
     alert whose transaction commits after a later-started one's is logged.
     Controls: without the last logged sequence, the line is never written;
     allocating the sequence before the DependencyMonitor row lock skips the
-    later-committing alert.
+    later-committing alert. A logger paused in its log write delays no pass
+    and no watchdog, and its lines are written again after its timeout.
+    Control: holding the DependencyMonitor row lock across the write stalls
+    the passes, and the watchdog records no `monitor-stalled`.
 12. **Stale per dependency**: a seeded status whose `observed_from` is older
     than three intervals is served `stale` while passes complete. Control:
     deriving `stale` from the last completed pass serves it as current.
@@ -452,9 +475,12 @@ controls and S7's variants; the rest run as *checks*
   checks. Clock skew between hosts was not produced.
 - **The Transit identity** rests on KL's inference (KL §7 item 1): no report
   captured the `keys` map's creation times, and a key recreated under the same
-  name was not classified. A key recreated within the same second as the lost
-  version gives the same identity, and a version hidden below the decryption
-  floor has its identity unchecked (§3).
+  name was not classified. Publication's one-second rule (§3) rests on the
+  creation time and `Date` coming from one clock that does not step back,
+  which holds on the single node measured; on several nodes, or after a
+  provider clock step, a recreation within a second could still reissue an
+  identity. A version hidden below the decryption floor has its identity
+  unchecked (§3).
 - **Read-only policy.** RC's metadata token also held `list`; this contract
   drops it, since the procedure never lists, and item 5 of §10.1 is the first
   evidence that `read` alone suffices.
