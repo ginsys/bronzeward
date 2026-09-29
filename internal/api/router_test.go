@@ -109,7 +109,12 @@ func TestProblemCodesAreSpecified(t *testing.T) {
 func TestUnauthenticated(t *testing.T) {
 	e := newEnv(t, options{})
 	before := count(t, e.db, "SELECT count(*) FROM principal")
-	tokens := map[string]string{"none": "", "garbage": "not-a-token", "automation, wrong secret": e.robot[:len(e.robot)-2] + "AA"}
+	// The last character replaced by another, so the secret always differs.
+	last := "A"
+	if strings.HasSuffix(e.robot, "A") {
+		last = "B"
+	}
+	tokens := map[string]string{"none": "", "garbage": "not-a-token", "automation, wrong secret": e.robot[:len(e.robot)-1] + last}
 	for _, d := range issuer.Defects {
 		tok, err := e.iss.Mint("h-recovery", d, time.Now())
 		if err != nil {
