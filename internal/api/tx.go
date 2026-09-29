@@ -114,10 +114,8 @@ func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, er
 	}
 	defer func() { _ = tx.Rollback() }() // a no-op once committed
 	// §7.2: the key's lock is the first statement (rule 5's order), then the lookup again under it.
-	if !a.o.noKeyLock {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, q.principal.ID+"/"+q.key); err != nil {
-			return nil, false, err
-		}
+	if err := a.lockKey(ctx, tx, q); err != nil {
+		return nil, false, err
 	}
 	if rec, err := lookup(ctx, tx, q); err != nil || rec != nil {
 		return rec, false, err
@@ -166,14 +164,35 @@ func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, er
 	return rec, true, nil
 }
 
+// lockKey takes the lock of q's principal and key for tx's lifetime (§7.2).
+func (a *API) lockKey(ctx context.Context, tx *sql.Tx, q *request) error {
+	if a.o.noKeyLock {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, q.principal.ID+"/"+q.key)
+	return err
+}
+
 // resolveCommit settles a failed COMMIT by reading back (§5 rule 6): the record carries this
-// request's id only if the transaction committed.
+// request's id only if the transaction committed. The server may still be committing after the
+// client lost the reply, so the read waits on the key lock, which that transaction holds until
+// it ends; a wait past the bound leaves the outcome unknown.
 func (a *API) resolveCommit(q *request, rec *record, cerr error) (*record, bool, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(q.r.Context()), 10*time.Second)
 	defer cancel()
 	var n int
-	err := a.db.QueryRowContext(ctx, `SELECT count(*) FROM idempotency_record WHERE principal = $1 AND key = $2 AND request_id = $3`,
-		q.principal.ID, q.key, q.id).Scan(&n)
+	err := func() error {
+		tx, err := a.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := a.lockKey(ctx, tx, q); err != nil {
+			return err
+		}
+		return tx.QueryRowContext(ctx, `SELECT count(*) FROM idempotency_record WHERE principal = $1 AND key = $2 AND request_id = $3`,
+			q.principal.ID, q.key, q.id).Scan(&n)
+	}()
 	switch {
 	case err != nil:
 		return nil, false, fmt.Errorf("%w: commit: %v; read back: %v", errUnknownOutcome, cerr, err)
