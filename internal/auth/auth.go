@@ -296,15 +296,48 @@ func (l *limitedFetch) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(body))
-	var set struct {
-		Keys []json.RawMessage `json:"keys"`
-	}
-	if json.Unmarshal(body, &set) == nil && set.Keys != nil {
+	if keySetDecodes(body) {
 		l.mu.Lock()
 		l.last = time.Now()
 		l.mu.Unlock()
 	}
 	return resp, nil
+}
+
+// keySetDecodes reports whether go-oidc accepts body as a key set, by its own steps (v3.21.0
+// jwks.go:244-300): it skips a key whose alg it does not support or whose type go-jose does not
+// know, and fails the whole set on any other key that does not decode.
+func keySetDecodes(body []byte) bool {
+	var set struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
+	if json.Unmarshal(body, &set) != nil {
+		return false
+	}
+	for _, k := range set.Keys {
+		var meta struct {
+			Alg string `json:"alg"`
+		}
+		if json.Unmarshal(k, &meta) != nil {
+			return false
+		}
+		if meta.Alg != "" && !oidcAlgs[meta.Alg] {
+			continue
+		}
+		var jwk jose.JSONWebKey
+		if err := json.Unmarshal(k, &jwk); err != nil && !errors.Is(err, jose.ErrUnsupportedKeyType) {
+			return false
+		}
+	}
+	return true
+}
+
+// oidcAlgs are the algorithms go-oidc's key set supports (v3.21.0 jose.go allAlgs).
+var oidcAlgs = map[string]bool{
+	oidc.RS256: true, oidc.RS384: true, oidc.RS512: true,
+	oidc.ES256: true, oidc.ES384: true, oidc.ES512: true,
+	oidc.PS256: true, oidc.PS384: true, oidc.PS512: true,
+	oidc.EdDSA: true,
 }
 
 func (d *discovered) VerifySignature(ctx context.Context, raw string) ([]byte, error) {
