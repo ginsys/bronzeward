@@ -7,15 +7,15 @@ changes nothing on disk:
 - on_page_markdown rewrites each page's link destinations for where the page is served. A link
   to a file the site publishes (anything under docs/, or a mounted source) becomes a relative
   site link, anchor kept, so `mkdocs build --strict` validates it. Any other repository file
-  (code, evidence, a directory) becomes its GitHub URL on main. Links in fenced code blocks and
-  external URLs are left alone.
+  (code, evidence, a directory) becomes its GitHub URL on main. Links in fenced code blocks or
+  inline code spans and external URLs are left alone.
 """
 
 import glob
 import posixpath
 import re
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import yaml
 from mkdocs.exceptions import PluginError
@@ -28,6 +28,9 @@ MAIN_DOCUMENT = f'{REPOSITORY}/blob/main/'
 # no spaces. Group 1 is `![text](` or `[text](`, group 2 the destination.
 LINK = re.compile(r'(!?\[[^\]\n]*\]\()([^)\s]+)(?=\))')
 FENCE = re.compile(r'^ {0,3}(`{3,}|~{3,})(.*)$')
+# An inline code span: a backtick run, content, the same run again. Like CommonMark's, it may wrap
+# onto the next line but never crosses a blank line.
+CODE_SPAN = re.compile(r'(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n)[\s\S])+?)(?<!`)\1(?!`)')
 
 # Repository path -> site path (relative to docs/) for the mounted files, and the reverse.
 _mounted = {}
@@ -101,18 +104,30 @@ def _rewrite(destination, source, page):
     # A query (`?plain=1`) asks for GitHub's view of the file, so it never becomes a site link.
     target = None if parts.query else _site_path(path)
     if target is not None:
-        return posixpath.relpath(target, posixpath.dirname(page) or '.') + fragment
+        return quote(posixpath.relpath(target, posixpath.dirname(page) or '.')) + fragment
     if absolute or not (ROOT / path).exists():
         return destination  # a missing file: left for the strict build to report
     kind = 'tree' if (ROOT / path).is_dir() else 'blob'
     query = f'?{parts.query}' if parts.query else ''
-    return f'{REPOSITORY}/{kind}/main/{path}{query}{fragment}'
+    return f'{REPOSITORY}/{kind}/main/{quote(path)}{query}{fragment}'
 
 
 def on_page_markdown(markdown, page, config, files):
     served = page.file.src_uri
     source = _sources.get(served, f'docs/{served}')
     page.edit_url = f'{REPOSITORY}/edit/main/{source}'
+    return _rewrite_markdown(markdown, source, served)
+
+
+def _blank(text):
+    """`text` with every character but newlines replaced, so offsets and line breaks hold."""
+    return re.sub(r'[^\n]', 'x', text)
+
+
+def _rewrite_markdown(markdown, source, served):
+    # Code blocks and code spans show link syntax literally. Blank them in a copy to find the links
+    # outside them (including links whose text is a code span), then splice each rewritten
+    # destination into the original at the same offsets.
     lines = []
     fence = None
     for line in markdown.split('\n'):
@@ -123,10 +138,16 @@ def on_page_markdown(markdown, page, config, files):
                 fence = run
             elif run[0] == fence[0] and len(run) >= len(fence) and not suffix.strip():
                 fence = None
-        elif fence is None:
-            line = LINK.sub(lambda match: match.group(1) + _destination(match, source, served), line)
-        lines.append(line)
-    return '\n'.join(lines)
+        lines.append(_blank(line) if marker or fence is not None else line)
+    masked = CODE_SPAN.sub(lambda span: span.group(1) + _blank(span.group(2)) + span.group(1), '\n'.join(lines))
+    pieces = []
+    last = 0
+    for match in LINK.finditer(masked):
+        start, end = match.span(2)
+        pieces += [markdown[last:start], _destination(match, source, served)]
+        last = end
+    pieces.append(markdown[last:])
+    return ''.join(pieces)
 
 
 def _destination(match, source, served):

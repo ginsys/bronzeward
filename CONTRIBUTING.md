@@ -87,7 +87,7 @@ Write documentation for GitHub, as before; the site needs no edits of its own:
 
 - Navigation follows the directory tree, so a new page under `docs/` appears without configuration. Page titles come from each file's first heading.
 - `docs-map.yaml` also publishes Markdown from outside `docs/` (this file, the README as the home page, every experiment README and the fixtures README). A new experiment README is picked up by its glob.
-- `scripts/site/hooks.py` points links at the published copy: a link to a file under `docs/` or to a mounted file, relative or through `blob/main`, becomes a site link, and any other repository file (code, evidence, a directory) becomes its GitHub URL on `main`. Anchors keep GitHub's form.
+- `scripts/site/hooks.py` points links at the published copy: a link to a file under `docs/` or to a mounted file, relative or through `blob/main`, becomes a site link, and any other repository file (code, evidence, a directory) becomes its GitHub URL on `main`. Links in code blocks and inline code are left as written. Anchors keep GitHub's form. `scripts/test/site-hooks-test.py` covers the rewriting and runs before each build.
 - The build runs with `--strict`: a link to a missing page or anchor fails it, and the CI `site` job reports that on the PR.
 
 ## Go code
