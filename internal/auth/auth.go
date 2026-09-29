@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -224,10 +225,18 @@ func (v *Verifier) roles(payload []byte) ([]Role, error) {
 
 // Discover returns the issuer's key set, found through its discovery document on first use and
 // looked for again after a failure, so the server starts while the issuer is down.
-func Discover(issuer string) KeySet { return &discovered{issuer: issuer} }
+func Discover(issuer string) KeySet {
+	return &discovered{issuer: issuer, client: &http.Client{Timeout: issuerTimeout}}
+}
+
+// issuerTimeout bounds each request to the issuer. go-oidc fetches keys in the background with
+// no cancellation, sharing one fetch between waiters: an unbounded fetch the issuer never
+// answers would refuse every token until a restart.
+const issuerTimeout = 10 * time.Second
 
 type discovered struct {
 	issuer string
+	client *http.Client // bounds every request to the issuer
 	mu     sync.Mutex
 	keys   *oidc.RemoteKeySet
 }
@@ -246,7 +255,7 @@ func (d *discovered) keySet(ctx context.Context) (*oidc.RemoteKeySet, error) {
 	if d.keys != nil {
 		return d.keys, nil
 	}
-	p, err := oidc.NewProvider(ctx, d.issuer) // refuses a document whose issuer differs
+	p, err := oidc.NewProvider(oidc.ClientContext(ctx, d.client), d.issuer) // refuses a document whose issuer differs
 	if err != nil {
 		return nil, err
 	}
@@ -259,6 +268,6 @@ func (d *discovered) keySet(ctx context.Context) (*oidc.RemoteKeySet, error) {
 	if doc.JWKS == "" {
 		return nil, errors.New("the discovery document names no jwks_uri")
 	}
-	d.keys = oidc.NewRemoteKeySet(context.Background(), doc.JWKS)
+	d.keys = oidc.NewRemoteKeySet(oidc.ClientContext(context.Background(), d.client), doc.JWKS)
 	return d.keys, nil
 }
