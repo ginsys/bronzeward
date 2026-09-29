@@ -39,7 +39,7 @@ type options struct {
 	extra          []*route                         // routes beyond §9.2
 	noKeyLock      bool                             // the key-lock control (§7.2, §16)
 	noRevokerCheck bool                             // T5c's revoking-human lock control
-	afterEffect    func()                           // runs in the transaction, after the effect
+	afterEffect    func()                           // runs in the transaction, after the effect, act and record
 	beforeCommit   func(attempt int) error          // fails an attempt before COMMIT
 	commit         func(*sql.Tx) error              // replaces (*sql.Tx).Commit
 }
@@ -58,9 +58,6 @@ type request struct {
 	fingerprint  []byte
 	actID        string // the act of the transaction attempt in progress
 }
-
-// input is a mutating route's body; Task 5 gives it its decoder.
-type input interface{ check(*API) error }
 
 type ctxKey struct{}
 

@@ -1,6 +1,204 @@
 package api
 
-import "net/http"
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
 
-// mutate is replaced in Task 5; no route has an effect before Task 6.
-func (a *API) mutate(w http.ResponseWriter, q *request) {}
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/ginsys/bronzeward/internal/auth"
+	"github.com/ginsys/bronzeward/internal/id"
+)
+
+// maxAttempts is the first try and three retries after a deadlock (§5 rule 5).
+const maxAttempts = 4
+
+var (
+	errTransient      = errors.New("deadlock retries exhausted")
+	errUnavailable    = errors.New("database unavailable; nothing committed")
+	errUnknownOutcome = errors.New("commit outcome unknown")
+)
+
+// mutate runs a mutating request past the checks that need no transaction, then in one.
+func (a *API) mutate(w http.ResponseWriter, q *request) {
+	ctx := q.r.Context()
+	q.input = q.route.input()
+	canon, err := decodeBody(q.r, q.input)
+	if err == nil {
+		err = q.input.check(a)
+	}
+	if err != nil {
+		writeProblem(w, q.id, refuse(http.StatusBadRequest, "invalid-request", err.Error()))
+		return
+	}
+	q.fingerprint = fingerprint(q, canon)
+	if ref := a.admit(ctx, q); ref != nil {
+		writeProblem(w, q.id, ref)
+		return
+	}
+	// §7.2: before running anything, look the key up.
+	rec, err := lookup(ctx, a.db, q)
+	if err != nil {
+		a.fail(w, q, fmt.Errorf("%w: %w", errUnavailable, err))
+		return
+	}
+	if rec != nil {
+		answer(w, q, rec, true)
+		return
+	}
+	if q.route.prepare != nil {
+		if err := q.route.prepare(ctx, a, q); err != nil {
+			a.fail(w, q, err)
+			return
+		}
+	}
+	rec, fresh, err := a.run(ctx, q)
+	if err != nil {
+		a.fail(w, q, err)
+		return
+	}
+	if fresh {
+		setEpoch(w, q) // the epoch the transaction committed in
+	}
+	answer(w, q, rec, !fresh)
+}
+
+// admit creates a human's principal row on its first admitted mutating request, in its own short
+// transaction (§10). A denied or revoked subject gets 403 and no row.
+func (a *API) admit(ctx context.Context, q *request) *refusal {
+	if q.principal.ID != "" {
+		return nil
+	}
+	idn, err := auth.EnsureHuman(ctx, a.db, a.denied, q.principal.Issuer, q.principal.Subject)
+	switch {
+	case errors.Is(err, auth.ErrIdentityRevoked):
+		return refuse(http.StatusForbidden, "identity-revoked", "")
+	case err != nil:
+		a.o.logf("%s: first-use principal: %v", q.id, err)
+		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database could not be written; nothing was committed")
+	}
+	q.principal.ID = idn
+	return nil
+}
+
+// run is the request's transaction, retried whole after a deadlock (§5 rule 5). fresh reports a
+// record this request committed; otherwise rec is one found under the key lock.
+func (a *API) run(ctx context.Context, q *request) (rec *record, fresh bool, err error) {
+	for n := 1; ; n++ {
+		rec, fresh, err = a.attempt(ctx, q, n)
+		if !isDeadlock(err) {
+			return rec, fresh, err
+		}
+		a.o.logf("%s: attempt %d deadlocked: %v", q.id, n, err)
+		if n == maxAttempts {
+			return nil, false, fmt.Errorf("%w: %w", errTransient, err)
+		}
+	}
+}
+
+func isDeadlock(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "40P01"
+}
+
+func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, error) {
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: %w", errUnavailable, err)
+	}
+	defer func() { _ = tx.Rollback() }() // a no-op once committed
+	// §7.2: the key's lock is the first statement (rule 5's order), then the lookup again under it.
+	if !a.o.noKeyLock {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, q.principal.ID+"/"+q.key); err != nil {
+			return nil, false, err
+		}
+	}
+	if rec, err := lookup(ctx, tx, q); err != nil || rec != nil {
+		return rec, false, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&q.epoch); err != nil {
+		return nil, false, err
+	}
+	q.actID = id.New(id.Act)
+	res, err := q.route.effect(ctx, a, tx, q)
+	if err != nil {
+		return nil, false, err
+	}
+	body, err := json.Marshal(res.body)
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO act (id, principal, principal_kind, via, role, action, subjects, idempotency_key, request_id, epoch, at)
+		VALUES ($1, $2, $3, 'api', $4, $5, string_to_array($6, ','), $7, $8, $9, now())`,
+		q.actID, q.principal.ID, string(q.principal.Kind), string(q.role), q.route.action, strings.Join(res.subjects, ","),
+		q.key, q.id, q.epoch); err != nil {
+		return nil, false, err
+	}
+	rec := &record{fingerprint: q.fingerprint, current: true, epoch: q.epoch, requestID: q.id, status: res.status,
+		location: sql.NullString{String: res.location, Valid: res.location != ""},
+		etag:     sql.NullString{String: res.etag, Valid: res.etag != ""}, body: body}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_record (principal, key, fingerprint, request_id, epoch, status, location, etag, body, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())`,
+		q.principal.ID, q.key, rec.fingerprint, q.id, q.epoch, rec.status, rec.location, rec.etag, rec.body); err != nil {
+		return nil, false, err
+	}
+	if a.o.afterEffect != nil {
+		a.o.afterEffect()
+	}
+	if a.o.beforeCommit != nil {
+		if err := a.o.beforeCommit(n); err != nil {
+			return nil, false, err
+		}
+	}
+	commit := (*sql.Tx).Commit
+	if a.o.commit != nil {
+		commit = a.o.commit
+	}
+	if err := commit(tx); err != nil {
+		return a.resolveCommit(q, rec, err)
+	}
+	return rec, true, nil
+}
+
+// resolveCommit settles a failed COMMIT by reading back (§5 rule 6): the record carries this
+// request's id only if the transaction committed.
+func (a *API) resolveCommit(q *request, rec *record, cerr error) (*record, bool, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(q.r.Context()), 10*time.Second)
+	defer cancel()
+	var n int
+	err := a.db.QueryRowContext(ctx, `SELECT count(*) FROM idempotency_record WHERE principal = $1 AND key = $2 AND request_id = $3`,
+		q.principal.ID, q.key, q.id).Scan(&n)
+	switch {
+	case err != nil:
+		return nil, false, fmt.Errorf("%w: commit: %v; read back: %v", errUnknownOutcome, cerr, err)
+	case n == 1:
+		a.o.logf("%s: commit reported %v, but the record is there: committed", q.id, cerr)
+		return rec, true, nil
+	default:
+		return nil, false, fmt.Errorf("%w: commit: %w", errUnavailable, cerr)
+	}
+}
+
+// fail answers an error from a mutating request and logs its cause under the request id.
+func (a *API) fail(w http.ResponseWriter, q *request, err error) {
+	a.o.logf("%s %s %s: %v", q.id, q.r.Method, q.r.URL.Path, err)
+	var ref *refusal
+	switch {
+	case errors.As(err, &ref):
+	case errors.Is(err, errTransient):
+		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the request deadlocked on every attempt; nothing was committed")
+	case errors.Is(err, errUnknownOutcome):
+		ref = refuse(http.StatusInternalServerError, "internal-error", "the outcome is unknown; retrying with the same Idempotency-Key answers it")
+	case errors.Is(err, errUnavailable):
+		ref = refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database failed; nothing was committed")
+	default:
+		ref = refuse(http.StatusInternalServerError, "internal-error", "nothing was committed")
+	}
+	writeProblem(w, q.id, ref)
+}
