@@ -237,7 +237,10 @@ fences it. A pass classifies every monitored dependency once. For each, it:
    instances overlap. A repeat is discarded only when another instance recorded
    between its steps 1 and 4, so the repeats end once the instances stop
    overlapping. Otherwise it records the class
-   with the transaction's time as `recorded_at` and reads the releases that
+   with `clock_timestamp()` read after the row lock is held as `recorded_at`,
+   not the transaction's `now()`: that is fixed when the transaction began,
+   before any wait for the lock, and would date a transition before a
+   publication that began during the wait. It then reads the releases that
    reference the dependency. Either way, it then locks the DependencyMonitor
    row, inserts the alerts of §6.2 a recorded change calls for, naming those
    releases, and records its progress (§6.3). An alert's recording sequence is
@@ -460,7 +463,10 @@ fail:
     began before publication's and observed the change after it. Controls:
     without T3's `FOR SHARE` lock, or locking before its insert, or comparing
     `observed_from` instead of `recorded_at`, the release commits and the
-    alert omits it.
+    alert omits it. A fourth order: the monitor's transaction begins, waits
+    for the row lock while publication begins its classification, then
+    records the change; publication is refused. Control: taking
+    `recorded_at` from `now()`, the release commits and the alert omits it.
 11. **The log after a crash**: a process stopped between an alert's commit
     and its log line has the line written by the next instance to log, and an
     alert whose transaction commits after a later-started one's is logged.

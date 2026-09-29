@@ -408,7 +408,10 @@ Rules for every transaction:
 4. **Server clock.** Leases, expiries and recorded times use the database's
    `now()`, never the caller's clock. DB's leases used the client clock and
    left skew untested (DB §7); compilation §3.2 makes the same choice for
-   claims.
+   claims. A time that must follow a lock wait, a DependencyStatus row's
+   `recorded_at` (dependency monitor §6.1), is the database's
+   `clock_timestamp()` read after the lock is held, since `now()` is fixed
+   when the transaction began.
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation
    state, machine rows by id (each with its MachineState), heads by id, the
    draft, principals by id, approvals by id, plan states by id, then operations
