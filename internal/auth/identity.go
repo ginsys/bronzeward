@@ -58,6 +58,13 @@ func RevokeIdentity(ctx context.Context, tx *sql.Tx, identity string) (already b
 }
 
 func inTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
+	return inTxCommit(ctx, db, fn, (*sql.Tx).Commit)
+}
+
+// errCommit marks an error from COMMIT: the transaction may have committed all the same.
+var errCommit = errors.New("commit")
+
+func inTxCommit(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error, commit func(*sql.Tx) error) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -66,5 +73,8 @@ func inTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 		_ = tx.Rollback()
 		return err
 	}
-	return tx.Commit()
+	if err := commit(tx); err != nil {
+		return fmt.Errorf("%w: %w", errCommit, err)
+	}
+	return nil
 }

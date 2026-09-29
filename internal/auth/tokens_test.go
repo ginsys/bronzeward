@@ -136,6 +136,44 @@ func TestRotateReplacesAndKeepsRoles(t *testing.T) {
 	}
 }
 
+// A COMMIT whose reply is lost leaves the outcome to the server (persistence-api.md §5 rule 6).
+// The token is read back by its id: a committed issue or rotation still hands over the only copy
+// of its secret, and one that did not commit is still an error.
+func TestCommitUnknownIsResolvedByReading(t *testing.T) {
+	db := migrated(t)
+	s := storeFor(db)
+	first := issued(t, s, "ci")
+	lost := errors.New("connection reset after COMMIT was sent")
+	s.o.commit = func(tx *sql.Tx) error {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return lost
+	}
+	second, err := s.Rotate(t.Context(), first.Identity, nil, DefaultExpiry, "h-operator")
+	if err != nil || !tokenShape.MatchString(second.Token) {
+		t.Fatalf("committed rotation, reply lost: %q, %v", second.Token, err)
+	}
+	if is, err := s.Issue(t.Context(), "deploy", []Role{Author}, DefaultExpiry, "h-all", "h-operator"); err != nil || !tokenShape.MatchString(is.Token) {
+		t.Fatalf("committed issue, reply lost: %q, %v", is.Token, err)
+	}
+	s.o.commit = func(tx *sql.Tx) error {
+		if err := tx.Rollback(); err != nil {
+			return err
+		}
+		return lost
+	}
+	if _, err := s.Rotate(t.Context(), first.Identity, nil, DefaultExpiry, "h-operator"); !errors.Is(err, lost) {
+		t.Fatalf("rotation that did not commit: %v; want the commit error", err)
+	}
+	if _, err := s.Issue(t.Context(), "other", []Role{Author}, DefaultExpiry, "h-all", "h-operator"); !errors.Is(err, lost) {
+		t.Fatalf("issue that did not commit: %v; want the commit error", err)
+	}
+	if n := count(t, db, "SELECT count(*) FROM automation_token WHERE id = $1 AND revoked_at IS NULL", second.TokenID); n != 1 {
+		t.Fatal("the rotation that did not commit revoked the current token")
+	}
+}
+
 func TestRevokeKeepsTheIdentity(t *testing.T) {
 	db := migrated(t)
 	s := storeFor(db)

@@ -44,9 +44,42 @@ type Store struct {
 
 // storeOptions are test hooks and the lock control; the zero value is production behaviour.
 type storeOptions struct {
-	noPrincipalLock bool   // the control: no FOR UPDATE on the principal row
-	afterRevokeOld  func() // in an issuing transaction, after revoking the unrevoked token
-	beforeLock      func() // in a rotation's transaction, after it began and before the principal lock
+	noPrincipalLock bool                // the control: no FOR UPDATE on the principal row
+	afterRevokeOld  func()              // in an issuing transaction, after revoking the unrevoked token
+	beforeLock      func()              // in a rotation's transaction, after it began and before the principal lock
+	commit          func(*sql.Tx) error // replaces tx.Commit in issuing transactions
+}
+
+// issuing runs fn, which issues a token, in a transaction. An error from COMMIT leaves the
+// outcome to the server, and is resolved by reading (persistence-api.md §5 rule 6): the token's
+// id was generated before the transaction, so its row says whether it committed. Assuming
+// failure would lose the only copy of a committed token's secret, after a rotation had revoked
+// the one it replaced.
+func (s *Store) issuing(ctx context.Context, fn func(*sql.Tx) (Issued, error)) (Issued, error) {
+	commit := (*sql.Tx).Commit
+	if s.o.commit != nil {
+		commit = s.o.commit
+	}
+	var out Issued
+	err := inTxCommit(ctx, s.db, func(tx *sql.Tx) error {
+		var err error
+		out, err = fn(tx)
+		return err
+	}, commit)
+	if err == nil || !errors.Is(err, errCommit) {
+		return out, err
+	}
+	// The request's own context may be what ended the commit.
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	var n int
+	if rerr := s.db.QueryRowContext(rctx, `SELECT count(*) FROM automation_token WHERE id = $1`, out.TokenID).Scan(&n); rerr != nil {
+		return Issued{}, fmt.Errorf("%w; whether token %s committed is unknown (%v): see token list", err, out.TokenID, rerr)
+	}
+	if n == 0 {
+		return Issued{}, err
+	}
+	return out, nil
 }
 
 func NewStore(db *sql.DB, a config.Auth) *Store {
@@ -71,15 +104,12 @@ func (s *Store) Issue(ctx context.Context, name string, roles []Role, expiry tim
 		return Issued{}, fmt.Errorf("token: operator: %w", err)
 	}
 	identity := id.New(id.Principal)
-	var out Issued
-	err = inTx(ctx, s.db, func(tx *sql.Tx) error {
+	out, err := s.issuing(ctx, func(tx *sql.Tx) (Issued, error) {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO principal (id, kind, name, responsible, created_at)
 			VALUES ($1, 'service', $2, $3, now())`, identity, name, resp); err != nil {
-			return err
+			return Issued{}, err
 		}
-		var err error
-		out, err = s.issue(ctx, tx, identity, roles, expiry, op, "token.issue")
-		return err
+		return s.issue(ctx, tx, identity, roles, expiry, op, "token.issue")
 	})
 	if err != nil {
 		return Issued{}, fmt.Errorf("token: issue: %w", err)
@@ -108,17 +138,16 @@ func (s *Store) Rotate(ctx context.Context, identity string, roles []Role, expir
 	if err != nil {
 		return Issued{}, fmt.Errorf("token: operator: %w", err)
 	}
-	var out Issued
-	err = inTx(ctx, s.db, func(tx *sql.Tx) error {
+	out, err := s.issuing(ctx, func(tx *sql.Tx) (Issued, error) {
 		if s.o.beforeLock != nil {
 			s.o.beforeLock()
 		}
 		revoked, err := s.lockService(ctx, tx, identity)
 		if err != nil {
-			return err
+			return Issued{}, err
 		}
 		if revoked {
-			return fmt.Errorf("%w: %s", ErrIdentityRevoked, identity)
+			return Issued{}, fmt.Errorf("%w: %s", ErrIdentityRevoked, identity)
 		}
 		grant := roles
 		if grant == nil {
@@ -126,12 +155,11 @@ func (s *Store) Rotate(ctx context.Context, identity string, roles []Role, expir
 			// The last issued token's grant: seq, not issued_at, orders tokens by replacement.
 			if err := tx.QueryRowContext(ctx, `SELECT array_to_string(roles, ',') FROM automation_token
 				WHERE owner = $1 ORDER BY seq DESC LIMIT 1`, identity).Scan(&r); err != nil {
-				return err
+				return Issued{}, err
 			}
 			grant = ParseRoles(r)
 		}
-		out, err = s.issue(ctx, tx, identity, grant, expiry, op, "token.rotate")
-		return err
+		return s.issue(ctx, tx, identity, grant, expiry, op, "token.rotate")
 	})
 	if err != nil {
 		return Issued{}, fmt.Errorf("token: rotate: %w", err)
