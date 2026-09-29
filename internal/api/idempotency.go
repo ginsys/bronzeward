@@ -64,7 +64,7 @@ func (a *API) answer(w http.ResponseWriter, q *request, rec *record, replayed bo
 		if rec.status >= http.StatusBadRequest {
 			contentType = "application/problem+json"
 			a.o.logf("%s %s %s: %d, the stored problem of %s (replayed: %t)",
-				q.id, q.r.Method, q.r.URL.Path, rec.status, rec.requestID, replayed)
+				q.id, q.r.Method, q.r.URL.EscapedPath(), rec.status, rec.requestID, replayed)
 		}
 		writeBytes(w, contentType, rec.status, rec.body)
 	}

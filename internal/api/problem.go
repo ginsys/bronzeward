@@ -51,7 +51,7 @@ func (r *refusal) with(name string, v any) *refusal {
 // identity-revoked carry no epoch headers, whichever check found them: a revocation can be found
 // inside the transaction, after the headers were set (§9.1).
 func (a *API) problem(w http.ResponseWriter, q *request, ref *refusal) {
-	a.o.logf("%s %s %s: %d %s: %s", q.id, q.r.Method, q.r.URL.Path, ref.status, ref.code, ref.detail)
+	a.o.logf("%s %s %s: %d %s: %s", q.id, q.r.Method, q.r.URL.EscapedPath(), ref.status, ref.code, ref.detail)
 	if ref.status == http.StatusUnauthorized || ref.code == "identity-revoked" {
 		w.Header().Del("Bronzeward-Epoch")
 		w.Header().Del("Bronzeward-Recovery-Mode")
