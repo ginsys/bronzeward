@@ -361,7 +361,8 @@ controls and S7's variants; the rest run as *checks*
 
 ## 11. Choices for owner review
 
-Each is marked in place as **(choice §11.n)**.
+Each is marked in place as **(choice §11.n)**. Owner decision, 2026-09-29
+(ginsys/bronzeward#67): every choice below stands as written.
 
 1. **A document of its own** rather than a section of the persistence and API
    contract, whose section numbers the acceptance plan cites. Alternative: a
