@@ -108,4 +108,16 @@ go run ./fixtures/oidc mint -key <file> -issuer http://127.0.0.1:5556 -human h-a
 curl -s -H "Authorization: Bearer $(go run ./fixtures/oidc mint -key <file> -issuer http://127.0.0.1:5556 -human h-viewer)" http://127.0.0.1:8080/api/v1/acts
 ```
 
-`examples/bronzeward.yaml` is the development configuration, matching `mise run dev-db`. A deployment writes its own. The server refuses to start unless the database holds exactly its migrations (run `migrate` first). It does not serve TLS yet. Every request but `GET /livez` authenticates. `GET /api/v1/acts` and `POST /api/v1/identity-revocations` are served. Every other route of the API contract is routed and role-checked, and answers `501 not-implemented` until the issue that owns it lands. `internal/auth` and `internal/api` are exercised by `mise run go-db`.
+`examples/bronzeward.yaml` is the development configuration, matching `mise run dev-db`. A deployment writes its own. The server refuses to start unless the database holds exactly its migrations (run `migrate` first). It listens on plain http: clients reach the API over HTTPS terminated in front of the server, and the hop behind that is the deployment's choice ([persistence-api.md §9.1](docs/spec/persistence-api.md#91-conventions)). Every request but `GET /livez` authenticates. `GET /api/v1/acts` and `POST /api/v1/identity-revocations` are served. Every other route of the API contract is routed and role-checked, and answers `501 not-implemented` until the issue that owns it lands. `internal/auth` and `internal/api` are exercised by `mise run go-db`.
+
+## Running S0 locally
+
+Acceptance-plan scenario S0 runs against the [fixtures](fixtures/README.md), which need Docker, not CI's runner. Each mode starts from a fresh fixture:
+
+```sh
+mise run dev-db                               # go-db's database, for S0 step 1
+fixtures/bin/up && fixtures/scenarios/s0 run  && fixtures/bin/down   # steps 1, 2, 3, 5 and the schema negative controls
+fixtures/bin/up && fixtures/scenarios/s0 walk && fixtures/bin/down   # step 4's denied walk and the identity revocation
+```
+
+Each run writes its checks to `fixtures/.state/evidence/s0-<mode>-<utc>/s0.tsv`, with the logs they read, and scans that directory for synthetic secrets. `down` deletes `.state`: copy the directory out first to keep it.
