@@ -71,6 +71,16 @@ func TestLoadAuth(t *testing.T) {
 	}
 }
 
+// Plain http reaches only this host: the fixture issuer. Anything else would let an on-path
+// attacker serve the discovery document and signing key.
+func TestLoadAcceptsLoopbackHTTPIssuer(t *testing.T) {
+	for _, iss := range []string{"http://127.0.0.1:5556", "http://[::1]:5556", "http://localhost:5556"} {
+		if _, err := Load(strings.NewReader(base + "auth:\n  oidc:\n    issuer: " + iss + "\n    audience: bronzeward\n")); err != nil {
+			t.Errorf("%s: %v", iss, err)
+		}
+	}
+}
+
 func TestLoadRefusesAuth(t *testing.T) {
 	oidc := func(extra string) string {
 		return base + "auth:\n  oidc:\n    issuer: https://idp.example.test\n    audience: bronzeward\n" + extra
@@ -80,6 +90,8 @@ func TestLoadRefusesAuth(t *testing.T) {
 		"no issuer":          base + "auth:\n  oidc:\n    audience: bronzeward\n",
 		"relative issuer":    base + "auth:\n  oidc:\n    issuer: idp.example.test\n    audience: bronzeward\n",
 		"issuer with query":  base + "auth:\n  oidc:\n    issuer: https://idp.example.test/?x=1\n    audience: bronzeward\n",
+		"plain http issuer":  base + "auth:\n  oidc:\n    issuer: http://idp.example.test\n    audience: bronzeward\n",
+		"http, loopback-ish": base + "auth:\n  oidc:\n    issuer: http://127.0.0.1.example.test\n    audience: bronzeward\n",
 		"no audience":        base + "auth:\n  oidc:\n    issuer: https://idp.example.test\n",
 		"unknown oidc field": oidc("    clientSecret: x\n"),
 		"integer lifetime":   oidc("    maxTokenLifetime: 900\n"),
