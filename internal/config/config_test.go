@@ -25,16 +25,18 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// Each input is valid but for its one defect, and the refusal must name that defect: an input
+// that fails for another reason would pass with the check under test removed.
 func TestLoadRefuses(t *testing.T) {
-	for name, in := range map[string]string{
-		"unknown field": "listen: :1\ndatabase: {dsn: x}\nlisten_addr: :2\n" + authBlock,
-		"no listen":     "database: {dsn: x}\n" + authBlock,
-		"no dsn":        "listen: :1\n" + authBlock,
-		"empty":         "",
-		"two documents": "listen: :1\ndatabase: {dsn: x}\n" + authBlock + "---\nlisten: :2\n",
+	for name, c := range map[string]struct{ in, want string }{
+		"unknown field": {"listen: :1\ndatabase: {dsn: x}\nlisten_addr: :2\n" + execBlock + authBlock, "field listen_addr not found"},
+		"no listen":     {"database: {dsn: x}\n" + execBlock + authBlock, "listen is required"},
+		"no dsn":        {"listen: :1\n" + execBlock + authBlock, "database.dsn is required"},
+		"empty":         {"", "EOF"},
+		"two documents": {"listen: :1\ndatabase: {dsn: x}\n" + execBlock + authBlock + "---\nlisten: :2\n", "more than one YAML document"},
 	} {
-		if _, err := Load(strings.NewReader(in)); err == nil {
-			t.Errorf("%s: accepted", name)
+		if _, err := Load(strings.NewReader(c.in)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v; want an error naming %q", name, err, c.want)
 		}
 	}
 }
