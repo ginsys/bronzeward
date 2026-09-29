@@ -174,6 +174,37 @@ func TestCommitUnknownIsResolvedByReading(t *testing.T) {
 	}
 }
 
+// A revocation whose COMMIT reply is lost is resolved by reading its act back (§5 rule 6): the
+// operator learns whether it landed, where a retry could only say no token is left to revoke.
+func TestRevokeCommitUnknownIsResolvedByReading(t *testing.T) {
+	db := migrated(t)
+	s := storeFor(db)
+	a, b := issued(t, s, "a"), issued(t, s, "b")
+	lost := errors.New("connection reset after COMMIT was sent")
+	s.o.commit = func(tx *sql.Tx) error {
+		if err := tx.Rollback(); err != nil {
+			return err
+		}
+		return lost
+	}
+	if _, err := s.Revoke(t.Context(), a.Identity, "h-operator"); !errors.Is(err, lost) {
+		t.Fatalf("revocation that did not commit: %v; want the commit error", err)
+	}
+	if unrevoked(t, db, a.Identity) != 1 {
+		t.Fatal("the revocation that did not commit revoked the token")
+	}
+	s.o.commit = func(tx *sql.Tx) error {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return lost
+	}
+	revoked, err := s.Revoke(t.Context(), b.Identity, "h-operator")
+	if err != nil || len(revoked) != 1 || revoked[0] != b.TokenID {
+		t.Fatalf("committed revocation, reply lost: %v, %v; want [%s]", revoked, err, b.TokenID)
+	}
+}
+
 func TestRevokeKeepsTheIdentity(t *testing.T) {
 	db := migrated(t)
 	s := storeFor(db)
