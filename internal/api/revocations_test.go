@@ -142,6 +142,48 @@ func revokerRevokedMeanwhile(t *testing.T, control bool) {
 	}
 }
 
+// Rule 2 when the revoking human names itself: revoked meanwhile, it is 403 identity-revoked with
+// no epoch, not 409 conflict. Control: revoking itself while unrevoked commits.
+func TestSelfRevokerRevokedMeanwhile(t *testing.T) {
+	e := newEnv(t, options{})
+	e.recordHuman("h-recovery")
+	var revoker string
+	if err := e.db.QueryRow("SELECT id FROM principal WHERE sub = 'h-recovery'").Scan(&revoker); err != nil {
+		t.Fatal(err)
+	}
+	tok := e.human("h-recovery")
+	body := `{"identity":"` + revoker + `","reason":"x"}`
+	tx, err := e.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("UPDATE principal SET revoked = true WHERE id = $1", revoker); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- revoke(e, tok, key, body) }()
+	dbtest.WaitForLockWait(t, e.db)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	rec := <-done
+	wantProblem(t, rec, http.StatusForbidden, "identity-revoked")
+	if rec.Header().Get("Bronzeward-Epoch") != "" {
+		t.Fatalf("a revoked identity was told the epoch: %v", rec.Header())
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM identity_revocation"); n != 0 {
+		t.Fatal("a revoked identity recorded a revocation")
+	}
+
+	c := newEnv(t, options{})
+	c.recordHuman("h-recovery")
+	if err := c.db.QueryRow("SELECT id FROM principal WHERE sub = 'h-recovery'").Scan(&revoker); err != nil {
+		t.Fatal(err)
+	}
+	revocationOf(t, revoke(c, c.human("h-recovery"), key, `{"identity":"`+revoker+`","reason":"x"}`))
+}
+
 // §7.2 on T5c: a same-key duplicate in flight replays the first revocation.
 func TestRevocationSameKeyInFlight(t *testing.T) {
 	hook, held, release := holdFirst()
