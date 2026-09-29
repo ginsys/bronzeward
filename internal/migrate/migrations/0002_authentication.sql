@@ -40,7 +40,9 @@ CREATE TABLE automation_token (
   -- Issuance order. Tokens are inserted under the principal lock, so seq follows the order in
   -- which an identity's tokens replaced each other; issued_at (a transaction's start) need not.
   seq           bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
-  owner        text NOT NULL REFERENCES principal (id),
+  owner         text NOT NULL,
+  -- Only a service identity holds a token: the key below names its kind.
+  owner_kind    text NOT NULL GENERATED ALWAYS AS ('service') STORED,
   secret_sha256 bytea NOT NULL CHECK (length(secret_sha256) = 32),
   roles         text[] NOT NULL CHECK (cardinality(roles) > 0
                   AND roles <@ ARRAY['viewer', 'author', 'publisher']::text[]),
@@ -50,7 +52,8 @@ CREATE TABLE automation_token (
                   AND expires_at <= issued_at + interval '2160 hours'),
   -- No CHECK against issued_at: now() is the transaction's start, and a revocation that began
   -- before a rotation it then waited on writes a revoked_at earlier than that token's issued_at.
-  revoked_at    timestamptz
+  revoked_at    timestamptz,
+  FOREIGN KEY (owner, owner_kind) REFERENCES principal (id, kind)
 );
 -- One valid token per identity: at most one unrevoked, expired or not. It backs the principal
 -- row lock every issuing transaction takes (§10.2).
