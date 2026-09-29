@@ -329,9 +329,24 @@ func revokeTokens(ctx context.Context, tx *sql.Tx, identity string) ([]string, e
 	return ids, rows.Err()
 }
 
+// actOrderKey is the act-order lock's key: the two-int4 advisory key space, apart from the
+// bigint space of the idempotency-key locks (§7.2).
+const actOrderKey = 0x62776163 // "bwac"
+
+// LockActOrder takes the act-order lock for tx's lifetime (§5 rule 5, last). Every transaction
+// that writes an act takes it just before the act, so a later act never commits before an
+// earlier one and a reader paging acts by seq never passes one that commits after it (§10.5).
+func LockActOrder(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1, 0)`, actOrderKey)
+	return err
+}
+
 // recordToolAct writes the act of a token command: the operator, no API role (§10.2, §10.5).
 // It returns the act's id.
 func recordToolAct(ctx context.Context, tx *sql.Tx, operator, action string, subjects []string) (string, error) {
+	if err := LockActOrder(ctx, tx); err != nil {
+		return "", err
+	}
 	act := id.New(id.Act)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO act (id, principal, principal_kind, via, action, subjects, epoch, at)
 		SELECT $1, $2, 'human', 'tool', $3, string_to_array($4, ','), epoch, now() FROM installation_state`,

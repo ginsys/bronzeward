@@ -416,7 +416,10 @@ Rules for every transaction:
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation
    state, machine rows by id (each with its MachineState), heads by id, the
    draft, principals by id, approvals by id, plan states by id, then operations
-   by id. A read of an immutable row needs no lock and may come first, for
+   by id. The act-order lock comes last, just before the act is written, and is
+   held to the end of the transaction, so acts become visible in recording
+   order and a `GET /acts` cursor never passes an act that commits later
+   (§10.5). A read of an immutable row needs no lock and may come first, for
    example the plan binding that names the machine to lock. A detected
    deadlock aborts the transaction, which is retried whole, at most three
    times, then fails `503 transient-conflict` **(choice §17.7)**.
@@ -1577,7 +1580,9 @@ transaction: act id, principal, principal kind, role exercised, action, subject
 identifiers, idempotency key, request id, epoch and server time (design §13.6,
 §13.7 item 2). The operation timeline references the acts that touched it. Act
 rows are readable by any role (design §13.7 item 2, `viewer`'s audit read) and
-are never deleted.
+are never deleted. Every transaction that writes an act, the token tool's
+included, takes the act-order lock just before it (rule 5), so acts become
+visible in recording order.
 
 An approval carries a **self-approval mark**, computed in the approval's
 transaction. It is marked when any reason holds, and every reason that holds
@@ -2036,8 +2041,11 @@ equals neither the restored epoch nor the lost one.
 
 "Nothing" is apart from a human's Principal row, which a first admitted
 mutating request creates before its transaction and a refusal inside that
-transaction leaves (§10). The `401`, `403` and `428` rows, and the refusals
-under the recovery-start flag before entry, create none.
+transaction leaves (§10), and apart from the row an identity revocation
+creates for a subject that never signed in, which a refusal inside its
+transaction leaves too; neither row grants anything. The `401`, `403` and
+`428` rows, and the refusals under the recovery-start flag before entry,
+create none.
 
 ## 15. Invariants
 
