@@ -4,35 +4,28 @@ The markdown is written for GitHub, and scripts/verify-docs.py checks it that wa
 changes nothing on disk:
 
 - on_files publishes the files docs-map.yaml names, from outside docs/, as extra pages.
-- on_page_markdown rewrites each page's link destinations for where the page is served. A link
-  to a file the site publishes (anything under docs/, or a mounted source) becomes a relative
-  site link, anchor kept, so `mkdocs build --strict` validates it. Any other repository file
-  (code, evidence, a directory) becomes its GitHub URL on main. Links in fenced code blocks or
-  inline code spans and external URLs are left alone.
+- A Markdown tree processor rewrites each page's link and image destinations for where the page
+  is served. A link to a file the site publishes (anything under docs/, or a mounted source)
+  becomes a relative site link, anchor kept, so `mkdocs build --strict` validates it. Any other
+  repository file (code, evidence, a directory) becomes its GitHub URL on main. External URLs
+  are left alone, and so is link syntax in code: it never becomes a link element.
 """
 
 import glob
 import posixpath
-import re
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
 import markdown.extensions.toc
 import yaml
+from markdown.extensions import Extension
+from markdown.treeprocessors import Treeprocessor
 from mkdocs.exceptions import PluginError
 from mkdocs.structure.files import File
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 REPOSITORY = 'https://github.com/ginsys/bronzeward'
 MAIN_DOCUMENT = f'{REPOSITORY}/blob/main/'
-# The destination of an inline link or image, as scripts/verify-docs.py matches it: no title and
-# no spaces. Group 1 is `![text](` or `[text](`, group 2 the destination.
-LINK = re.compile(r'(!?\[[^\]\n]*\]\()([^)\s]+)(?=\))')
-# A fence at any indentation: one nested in a list item sits four or more spaces in.
-FENCE = re.compile(r'^[ \t]*(`{3,}|~{3,})(.*)$')
-# An inline code span: a backtick run, content, the same run again. Like CommonMark's, it may wrap
-# onto the next line but never crosses a blank line.
-CODE_SPAN = re.compile(r'(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n)[\s\S])+?)(?<!`)\1(?!`)')
 
 
 def _github_unique(id, ids):
@@ -55,6 +48,8 @@ markdown.extensions.toc.unique = _github_unique
 # Repository path -> site path (relative to docs/) for the mounted files, and the reverse.
 _mounted = {}
 _sources = {}
+# The page being rendered: its repository path and its site path.
+_page = {}
 
 
 def _mounts():
@@ -77,18 +72,6 @@ def _mounts():
     return result
 
 
-def on_files(files, config):
-    _mounted.clear()
-    _mounted.update(_mounts())
-    _sources.clear()
-    _sources.update({target: source for source, target in _mounted.items()})
-    for source, target in _mounted.items():
-        if files.get_file_from_path(target) is not None:
-            raise PluginError(f'docs-map.yaml: target {target} already exists under docs/')
-        files.append(File.generated(config, target, content=(ROOT / source).read_text(encoding='utf-8')))
-    return files
-
-
 def _site_path(path):
     """The site path serving repository path `path`, or None when the site does not publish it."""
     if (ROOT / path).is_dir():
@@ -104,7 +87,7 @@ def _site_path(path):
     return None
 
 
-def _rewrite(destination, source, page):
+def _rewrite(destination, source, page, image=False):
     """The destination for a link written in repository file `source`, served as site page `page`."""
     if destination.startswith(MAIN_DOCUMENT):
         parts = urlsplit(destination[len(MAIN_DOCUMENT):])
@@ -127,52 +110,52 @@ def _rewrite(destination, source, page):
         return quote(posixpath.relpath(target, posixpath.dirname(page) or '.')) + fragment
     if absolute or not (ROOT / path).exists():
         return destination  # a missing file: left for the strict build to report
-    kind = 'tree' if (ROOT / path).is_dir() else 'blob'
+    # A blob page is HTML; an image outside the site needs the raw file.
+    kind = 'tree' if (ROOT / path).is_dir() else 'raw' if image else 'blob'
     query = f'?{parts.query}' if parts.query else ''
     return f'{REPOSITORY}/{kind}/main/{quote(path)}{query}{fragment}'
 
 
-def on_page_markdown(markdown, page, config, files):
+class _Links(Treeprocessor):
+    def run(self, root):
+        if not _page:
+            return
+        for element in root.iter('a'):
+            if element.get('href'):
+                element.set('href', _rewrite(element.get('href'), _page['source'], _page['served']))
+        for element in root.iter('img'):
+            if element.get('src'):
+                element.set('src', _rewrite(element.get('src'), _page['source'], _page['served'], image=True))
+
+
+class LinkExtension(Extension):
+    def extendMarkdown(self, md):
+        # After the inline patterns (20) have made the link elements, before MkDocs resolves and
+        # validates relative links (its `relpath` processor, 0).
+        md.treeprocessors.register(_Links(md), 'bronzeward_links', 2)
+
+
+def on_config(config):
+    config.markdown_extensions.append(LinkExtension())
+    return config
+
+
+def on_files(files, config):
+    _mounted.clear()
+    _mounted.update(_mounts())
+    _sources.clear()
+    _sources.update({target: source for source, target in _mounted.items()})
+    for source, target in _mounted.items():
+        if files.get_file_from_path(target) is not None:
+            raise PluginError(f'docs-map.yaml: target {target} already exists under docs/')
+        files.append(File.generated(config, target, content=(ROOT / source).read_text(encoding='utf-8')))
+    return files
+
+
+def on_page_markdown(text, page, config, files):
+    # MkDocs renders the page right after this event, so the tree processor reads it from _page.
     served = page.file.src_uri
     source = _sources.get(served, f'docs/{served}')
+    _page.update(source=source, served=served)
     page.edit_url = f'{REPOSITORY}/edit/main/{source}'
-    return _rewrite_markdown(markdown, source, served)
-
-
-def _blank(text):
-    """`text` with every character but newlines replaced, so offsets and line breaks hold."""
-    return re.sub(r'[^\n]', 'x', text)
-
-
-def _rewrite_markdown(markdown, source, served):
-    # Code blocks and code spans show link syntax literally. Blank them in a copy to find the links
-    # outside them (including links whose text is a code span), then splice each rewritten
-    # destination into the original at the same offsets.
-    lines = []
-    fence = None
-    for line in markdown.split('\n'):
-        marker = FENCE.match(line)
-        if marker:
-            run, suffix = marker.groups()
-            if fence is None:
-                fence = run
-            elif run[0] == fence[0] and len(run) >= len(fence) and not suffix.strip():
-                fence = None
-        lines.append(_blank(line) if marker or fence is not None else line)
-    masked = CODE_SPAN.sub(lambda span: span.group(1) + _blank(span.group(2)) + span.group(1), '\n'.join(lines))
-    pieces = []
-    last = 0
-    for match in LINK.finditer(masked):
-        start, end = match.span(2)
-        pieces += [markdown[last:start], _destination(match, source, served)]
-        last = end
-    pieces.append(markdown[last:])
-    return ''.join(pieces)
-
-
-def _destination(match, source, served):
-    destination = _rewrite(match.group(2), source, served)
-    # A blob page is HTML; an image outside the site needs the raw file.
-    if match.group(1).startswith('!') and destination.startswith(f'{REPOSITORY}/blob/'):
-        return destination.replace('/blob/', '/raw/', 1)
-    return destination
+    return text
