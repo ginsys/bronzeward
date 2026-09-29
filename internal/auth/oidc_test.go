@@ -24,8 +24,12 @@ type fixture struct {
 	down atomic.Bool // the issuer answers 503 while set
 	// stallJWKS makes the key set endpoint hold requests until the client gives up.
 	stallJWKS atomic.Bool
-	stop      chan struct{} // closed at cleanup, releasing any held request
-	jwksHits  atomic.Int32  // requests the key set endpoint answered
+	// stallDiscovery holds discovery requests the same way; held receives one value per request
+	// held.
+	stallDiscovery atomic.Bool
+	held           chan struct{}
+	stop           chan struct{} // closed at cleanup, releasing any held request
+	jwksHits       atomic.Int32  // requests the key set endpoint answered
 }
 
 // newFixture starts the fixture issuer on a loopback port. The listener comes first, so the
@@ -45,13 +49,18 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	h := f.iss.Handler()
-	f.stop = make(chan struct{})
+	f.stop, f.held = make(chan struct{}), make(chan struct{}, 16)
 	srv := &httptest.Server{Listener: l, Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if f.down.Load() {
 			http.Error(w, "down", http.StatusServiceUnavailable)
 			return
 		}
-		if r.URL.Path == "/jwks" && f.stallJWKS.Load() {
+		if (r.URL.Path == "/jwks" && f.stallJWKS.Load()) ||
+			(r.URL.Path == "/.well-known/openid-configuration" && f.stallDiscovery.Load()) {
+			select {
+			case f.held <- struct{}{}:
+			default:
+			}
 			select {
 			case <-r.Context().Done():
 			case <-f.stop:
@@ -268,6 +277,39 @@ func TestKeySetRefetchIsRateLimited(t *testing.T) {
 	}
 	if _, err := v.Authenticate(t.Context(), f.bearer(t, "h-viewer", "")); err != nil {
 		t.Fatalf("a valid token after limited refetches: %v", err)
+	}
+}
+
+// While one request waits on a slow discovery, another must give up at its own deadline rather
+// than queue behind it.
+func TestDiscoveryWaitHonoursTheDeadline(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier()
+	h := f.bearer(t, "h-viewer", "")
+	f.stallDiscovery.Store(true)
+	first := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		_, err := v.Authenticate(ctx, h)
+		first <- err
+	}()
+	select {
+	case <-f.held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first request never reached discovery")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := v.Authenticate(ctx, h); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("second request: %v; want ErrUnavailable", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("second request returned after %s, past its 200ms deadline", d)
+	}
+	if err := <-first; !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("first request: %v; want ErrUnavailable", err)
 	}
 }
 
