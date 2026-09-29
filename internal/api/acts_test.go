@@ -131,3 +131,30 @@ func TestListActsRefusals(t *testing.T) {
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/acts?cursor=" + url.QueryEscape(old), token: tok}),
 		http.StatusBadRequest, "cursor-invalid")
 }
+
+// §10.2 on a read: a recovery-mode entry committing between routing and the listing refuses an
+// earlier epoch's service token, and a human's listing carries the new epoch. Control: with no
+// entry in between, the service token lists acts.
+func TestListActsEpochChangeAfterRouting(t *testing.T) {
+	e := newEnv(t, options{})
+	var entered string
+	e.api = e.build(options{beforeRead: func() {
+		if entered == "" {
+			entered = newEpoch(t, e.db)
+		}
+	}})
+	rec := e.do(e.api, call{method: "GET", path: prefix + "/acts", token: e.robot})
+	wantProblem(t, rec, http.StatusUnauthorized, "unauthenticated")
+	if rec.Header().Get("Bronzeward-Epoch") != "" {
+		t.Fatalf("a stale token was told the epoch: %v", rec.Header())
+	}
+	rec = e.do(e.api, call{method: "GET", path: prefix + "/acts", token: e.human("h-viewer")})
+	if rec.Code != http.StatusOK || rec.Header().Get("Bronzeward-Epoch") != entered {
+		t.Fatalf("human: %d %v; want 200 with epoch %s", rec.Code, rec.Header(), entered)
+	}
+
+	c := newEnv(t, options{})
+	if rec := c.do(c.api, call{method: "GET", path: prefix + "/acts", token: c.robot}); rec.Code != http.StatusOK {
+		t.Fatalf("control: %d %s", rec.Code, rec.Body)
+	}
+}

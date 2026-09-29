@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -32,6 +33,27 @@ const defaultLimit, maxLimit = 50, 500
 
 // listActs is GET /acts: every act in recording order, paginated (§9.1).
 func listActs(a *API, w http.ResponseWriter, q *request) {
+	if a.o.beforeRead != nil {
+		a.o.beforeRead()
+	}
+	// The listing holds the installation state FOR SHARE: an entry committed since routing
+	// refuses an earlier epoch's service token here, and the epoch answered is the one it read.
+	ctx := q.r.Context()
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		a.fail(w, q, fmt.Errorf("%w: %w", errUnavailable, err))
+		return
+	}
+	defer func() { _ = tx.Rollback() }() // it writes nothing
+	if err := tx.QueryRowContext(ctx, `SELECT epoch, recovery_mode FROM installation_state FOR SHARE`).Scan(&q.epoch, &q.recovery); err != nil {
+		a.fail(w, q, err)
+		return
+	}
+	if ref := staleToken(q); ref != nil {
+		a.problem(w, q, ref)
+		return
+	}
+	setEpoch(w, q)
 	limit, afterAct, ref := page(q)
 	if ref != nil {
 		a.problem(w, q, ref)
@@ -40,7 +62,7 @@ func listActs(a *API, w http.ResponseWriter, q *request) {
 	// seq orders acts but never leaves the database (§2): the cursor names the last act listed.
 	var after int64
 	if afterAct != "" {
-		err := a.db.QueryRowContext(q.r.Context(), `SELECT seq FROM act WHERE id = $1`, afterAct).Scan(&after)
+		err := tx.QueryRowContext(ctx, `SELECT seq FROM act WHERE id = $1`, afterAct).Scan(&after)
 		if errors.Is(err, sql.ErrNoRows) {
 			a.problem(w, q, refuse(http.StatusBadRequest, "cursor-invalid", ""))
 			return
@@ -50,7 +72,7 @@ func listActs(a *API, w http.ResponseWriter, q *request) {
 			return
 		}
 	}
-	rows, err := a.db.QueryContext(q.r.Context(), `SELECT id, principal, principal_kind, via, role, action,
+	rows, err := tx.QueryContext(ctx, `SELECT id, principal, principal_kind, via, role, action,
 			array_to_string(subjects, ','), idempotency_key, request_id, epoch, at
 		FROM act WHERE seq > $1 ORDER BY seq LIMIT $2`, after, limit+1)
 	if err != nil {
