@@ -691,6 +691,153 @@ grep --quiet ' done netjoin worker$' <(tail -n 1 "$STATE/injections.log") ||
   fail "injections.log does not record the second netjoin of the joined worker as done"
 ok "netsplit / netjoin worker returns on the same address, and only on the recorded network; attached elsewhere it is failed, joined again it is done"
 
+# The server under test: instances A and B of the image up built, and the issuer they trust. A and
+# B are created, not started (S0 begins from an empty schema); the issuer runs.
+for c in "$FIXTURE_NAME-bronzeward-a" "$FIXTURE_NAME-bronzeward-b" "$FIXTURE_NAME-issuer"; do
+  container_id "$c" >/dev/null || fail "$c was not verified after up"
+done
+up_image=$(cat "$STATE/up-image") || fail "up recorded no image"
+for c in "$BW_A" "$BW_B" "$ISSUER"; do
+  [ "$(docker inspect --format '{{.Image}}' "$(container_id "$c")")" = "$up_image" ] || fail "$c does not run the image up recorded"
+done
+for c in "$BW_A" "$BW_B"; do
+  [ "$(docker inspect --format '{{.State.Status}}' "$(container_id "$c")")" = created ] || fail "$c is not created-and-not-started after up"
+done
+[ "$(docker inspect --format '{{.State.Running}}' "$(container_id "$ISSUER")")" = true ] || fail "the issuer is not running after up"
+ok "instances A and B are created and the issuer runs, all three on the image up recorded"
+
+# mint <human>: an access token for the issuer A and B trust, from its key, by the oidc binary of
+# the image up built. Minted offline: the issuer is not published.
+mint() {
+  timeout "$REQUEST_LIMIT" docker run --rm --pull never --network none --user "$(id -u):$(id -g)" \
+    --label "bronzeward.fixture.tool=$FIXTURE_NAME" -v "$STATE/issuer:/etc/oidc:ro" --entrypoint /oidc \
+    "$up_image" mint -key /etc/oidc/key.json -issuer http://issuer:5556 -human "$1"
+}
+# http_status <port> <path> [token]: the status of a GET to an instance's published port, 000 when
+# nothing answers. The token goes over stdin: a command line is readable by any local user.
+http_status() {
+  printf 'Authorization: Bearer %s\n' "${3:-}" |
+    curl --noproxy '*' --silent --max-time 10 --output /dev/null --write-out '%{http_code}' --header @- \
+      "http://127.0.0.1:$1$2" || true
+}
+# a_reaches <ip>: whether A's network namespace connects to the Talos API on <ip>.
+a_reaches() {
+  local id
+  id=$(container_id "$BW_A") || return 1
+  timeout "$REQUEST_LIMIT" docker run --rm --pull never --network "container:$id" \
+    --label "bronzeward.fixture.tool=$FIXTURE_NAME" --entrypoint nc "$CURL_IMAGE" -z -w 2 "$1" 50000 >/dev/null 2>&1
+}
+
+# Two migrations at once: one applies every migration, the other finds nothing left to apply
+# (the advisory lock, persistence-api.md §11). Then the automation identity, whose token is a
+# secret the scan must know.
+"$here/bw" migrate >"$STATE/selftest-migrate-1.out" 2>&1 &
+m1=$!
+"$here/bw" migrate >"$STATE/selftest-migrate-2.out" 2>&1 &
+m2=$!
+rc1=0 rc2=0
+wait "$m1" || rc1=$?
+wait "$m2" || rc2=$?
+migrated=$(cat "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out" | grep '^applied ' | sort | tr '\n' '|')
+rm "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out"
+[ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] || fail "concurrent bw migrate failed (exit $rc1 and $rc2)"
+[ "$migrated" = 'applied [1 2 3]|applied []|' ] || fail "concurrent bw migrate: $migrated; want one to apply [1 2 3] and one []"
+"$here/seed" >/dev/null
+[ "$(stat --format=%a "$STATE/automation-token")" = 600 ] || fail "seed left the automation token readable by others"
+grep --quiet --line-regexp --fixed-strings --file="$STATE/automation-token" "$STATE/scan-patterns.txt" ||
+  fail "the automation token is not in the scan patterns"
+ok "two bw migrate at once apply once; seed writes the automation token 0600 and scans for it"
+
+# A serves once started, reaches the issuer by its service name as a listed plain-http host, and
+# goes when killed; B pauses and unpauses.
+"$here/inject" start A
+[ "$(http_status "$SERVER_A_PORT" /livez)" = 204 ] || fail "A does not answer /livez after start"
+viewer=$(mint h-viewer) || fail "cannot mint a viewer token"
+[ "$(http_status "$SERVER_A_PORT" /api/v1/acts "$viewer")" = 200 ] || fail "A refused a viewer token: it cannot reach the issuer"
+"$here/inject" kill A
+[ "$(http_status "$SERVER_A_PORT" /livez)" = 000 ] || fail "A still answers after kill"
+"$here/inject" start A
+[ "$(http_status "$SERVER_A_PORT" /livez)" = 204 ] || fail "A does not answer /livez after its restart"
+"$here/inject" start B
+[ "$(http_status "$SERVER_B_PORT" /livez)" = 204 ] || fail "B does not answer /livez after start"
+"$here/inject" pause B
+[ "$(docker inspect --format '{{.State.Paused}}' "$(container_id "$BW_B")")" = true ] || fail "B is not paused"
+"$here/inject" unpause B
+[ "$(docker inspect --format '{{.State.Paused}}' "$(container_id "$BW_B")")" = false ] || fail "B is still paused"
+ok "start / kill A, token verified against the issuer by service name; start, pause / unpause B"
+
+# A link split between an instance and one node: the instance loses that node alone, and stays
+# split across its own kill and start (the route dies with its network namespace and is put back).
+a_reaches "$TALOS_WORKER_IP" || fail "A does not reach the worker before the split"
+defer "$here/inject" linkjoin A worker
+"$here/inject" linksplit A worker
+! a_reaches "$TALOS_WORKER_IP" || fail "A still reaches the worker after linksplit"
+a_reaches "$TALOS_CONTROLPLANE_IP" || fail "linksplit A worker cut A from the control plane too"
+grep --quiet --line-regexp 'A worker' "$STATE/linksplits" || fail "linksplit A worker is not recorded"
+"$here/inject" kill A
+"$here/inject" start A
+! a_reaches "$TALOS_WORKER_IP" || fail "A reaches the worker after kill and start: the split was not put back"
+"$here/inject" linkjoin A worker
+undefer
+a_reaches "$TALOS_WORKER_IP" || fail "A does not reach the worker after linkjoin"
+[ ! -s "$STATE/linksplits" ] || fail "linkjoin left a recorded split"
+ok "linksplit / linkjoin A worker: the worker alone is cut, the split survives kill and start, and is joined again"
+
+# Sealed, OpenBao refuses every request until unsealed (bao status: 2 sealed, 0 unsealed).
+defer "$here/inject" unseal openbao
+"$here/inject" seal openbao
+rc=0
+bao status >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "bao status after seal: exit $rc, want 2 (sealed)"
+"$here/inject" unseal openbao
+undefer
+rc=0
+bao status >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 0 ] || fail "bao status after unseal: exit $rc, want 0"
+ok "seal / unseal openbao"
+
+# No scenario netsplits an instance, and a link split is between an instance and a node: both
+# refused, nothing recorded and nothing changed.
+records=$(wc -l <"$STATE/injections.log")
+! "$here/inject" netsplit A >/dev/null 2>&1 || fail "inject netsplit A was accepted"
+! "$here/inject" linksplit postgres worker >/dev/null 2>&1 || fail "inject linksplit postgres worker was accepted"
+[ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
+[ "$(http_status "$SERVER_A_PORT" /livez)" = 204 ] || fail "a refused injection stopped A"
+a_reaches "$TALOS_WORKER_IP" || fail "a refused injection cut A from the worker"
+ok "netsplit of an instance and linksplit of a non-instance are refused and change nothing"
+
+# A replaced instance: the name A taken by another container carrying the Compose labels, which
+# are only names. inject, bw and down go by the ID up recorded and refuse it.
+defer docker rename "$BW_A-selftest-aside" "$BW_A"
+docker rename "$BW_A" "$BW_A-selftest-aside" >/dev/null
+defer drop_stranger "$BW_A"
+impostor_id=$(docker create --quiet --name "$BW_A" --label "$test_label" --label "com.docker.compose.project=$FIXTURE_NAME" \
+  --label com.docker.compose.service=bronzeward-a --network none "$POSTGRES_IMAGE" true) || fail "cannot create a container for the test"
+records=$(wc -l <"$STATE/injections.log")
+acted=
+"$here/inject" kill A >/dev/null 2>&1 && acted="$acted inject"
+"$here/bw" migrate >/dev/null 2>&1 && acted="$acted bw"
+"$here/down" >/dev/null 2>&1 && acted="$acted down"
+docker rm --force --volumes "$impostor_id" >/dev/null
+undefer
+docker rename "$BW_A-selftest-aside" "$BW_A" >/dev/null # before anything can fail
+undefer
+[ -z "$acted" ] || fail "acted on a container that only bears A's name:$acted"
+[ "$(wc -l <"$STATE/injections.log")" -eq "$records" ] || fail "inject recorded an action it refused"
+[ "$(http_status "$SERVER_A_PORT" /livez)" = 204 ] || fail "A does not answer after its name was given back"
+ok "inject, bw and down refuse a container that only bears A's name"
+
+# The automation token written where a scenario keeps its run: the scan names the file.
+planted=$STATE/evidence/selftest-run
+defer rm -rf -- "$planted"
+mkdir "$planted"
+cat "$STATE/automation-token" >"$planted/token.txt"
+bundle=$("$here/evidence" "$planted" 2>/dev/null) || fail "evidence aborted with a token planted in a run directory"
+rm -r -- "$planted"
+undefer
+grep --quiet --fixed-strings "$planted/token.txt" "$bundle/leak-scan.txt" || fail "the leak scan missed the automation token in a run directory"
+ok "the leak scan finds the automation token in a scenario's run directory"
+
 # Evidence: the scan must see the canary that was deliberately written to the database, and a
 # secret the fixture did not choose itself.
 ! "$here/evidence" "$STATE/no-such-path" >/dev/null 2>&1 || fail "evidence accepted a scan path that does not exist"
@@ -1842,6 +1989,10 @@ if [ "$keep" != --keep ]; then
   # not appended onto.
   printf '%s' "$(cat "$STATE/down-node-volumes")" >"$STATE/down-node-volumes"
   "$here/down" || fail "down reported leftovers"
+  # The server image up imported for the run, and the tool containers run from it or the curl
+  # image: none left.
+  [ -z "$(docker image ls --quiet "${FIXTURE_NAME}-bronzeward")" ] || fail "down left the server image"
+  [ -z "$(docker ps --all --quiet --filter "label=bronzeward.fixture.tool=$FIXTURE_NAME")" ] || fail "down left a tool container"
   # With the fixture gone, a volume under a Compose name without the label is someone's data that
   # the teardown would remove: down refuses, whatever else is there.
   test_volume "${FIXTURE_NAME}_openbao-data"
@@ -1888,5 +2039,17 @@ if [ "$keep" != --keep ]; then
   rm -f -- "$STATE"
   [ ! -e "$FIXTURES/.selftest-no-such-dir" ] || fail "a command wrote through the symlinked state directory"
   ok "a symlinked state directory is refused by up, evidence and down"
+  # An up interrupted right after it imported the server image: down removes the image and
+  # everything else up made, and leaves no state.
+  went=0
+  BW_SELFTEST=1 BW_UP_STOP_AFTER=image "$here/up" >/dev/null 2>&1 && went=1
+  [ "$went" -eq 0 ] || fail "up did not stop after the image under BW_UP_STOP_AFTER=image"
+  [ -n "$(docker image ls --quiet "${FIXTURE_NAME}-bronzeward")" ] || fail "the interrupted up imported no image; the case tests nothing"
+  "$here/down" || fail "down refused what an up interrupted after the image left"
+  [ -z "$(docker image ls --quiet "${FIXTURE_NAME}-bronzeward")" ] || fail "down left the image of an interrupted up"
+  [ -z "$(docker ps --all --quiet --filter "label=$RUN_LABEL")" ] || fail "down left a container of an interrupted up"
+  [ -z "$(docker network ls --quiet --filter "label=$RUN_LABEL")" ] || fail "down left a network of an interrupted up"
+  [ ! -e "$STATE" ] || fail "down left the state of an interrupted up"
+  ok "down removes what an up interrupted after the image import left: the image, and no container, network or state"
 fi
 say "selftest PASSED: $passed checks"
