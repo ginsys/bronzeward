@@ -128,7 +128,7 @@ func serve(args []string) error {
 	if err := migrate.Check(startCtx, db, ms); err != nil {
 		return err
 	}
-	srv := server.NewHTTP(cfg.Listen)
+	srv := server.NewHTTP(cfg.Listen, server.New(nil))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {

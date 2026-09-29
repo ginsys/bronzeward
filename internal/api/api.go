@@ -1,0 +1,195 @@
+// Package api serves /api/v1 (persistence-api.md §9): it authenticates every request (§10),
+// checks each route's roles and the human-only rule (§10.3), records idempotency (§7) and acts
+// (§10.5), and answers problem documents (§9.4).
+package api
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"log"
+	"net/http"
+	"regexp"
+	"slices"
+
+	"github.com/ginsys/bronzeward/internal/auth"
+	"github.com/ginsys/bronzeward/internal/config"
+	"github.com/ginsys/bronzeward/internal/id"
+)
+
+const prefix = "/api/v1"
+
+// Authenticator is what the API needs of *auth.Verifier.
+type Authenticator interface {
+	Authenticate(ctx context.Context, authorization string) (auth.Principal, error)
+}
+
+type API struct {
+	db     *sql.DB
+	authn  Authenticator
+	denied auth.Denied
+	issuer string
+	mux    *http.ServeMux
+	o      options
+}
+
+// options are nil or false in production; tests set them.
+type options struct {
+	logf           func(format string, args ...any) // the server log; log.Printf by default
+	extra          []*route                         // routes beyond §9.2
+	noKeyLock      bool                             // the key-lock control (§7.2, §16)
+	noRevokerCheck bool                             // T5c's revoking-human lock control
+	afterEffect    func()                           // runs in the transaction, after the effect
+	beforeCommit   func(attempt int) error          // fails an attempt before COMMIT
+	commit         func(*sql.Tx) error              // replaces (*sql.Tx).Commit
+}
+
+// request is one API request as it passes the checks.
+type request struct {
+	id           string // req_ identifier: the problem instance, the act's request id
+	r            *http.Request
+	route        *route
+	principal    auth.Principal
+	role         auth.Role // the first qualifying role (choice §17.20)
+	epoch        string
+	recovery     bool
+	key, ifMatch string
+	input        input
+	fingerprint  []byte
+	actID        string // the act of the transaction attempt in progress
+}
+
+// input is a mutating route's body; Task 5 gives it its decoder.
+type input interface{ check(*API) error }
+
+type ctxKey struct{}
+
+func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*request) }
+
+// New returns the /api/v1 handler.
+func New(db *sql.DB, a Authenticator, cfg config.Auth) http.Handler {
+	return newAPI(db, a, cfg, options{})
+}
+
+func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, o options) *API {
+	if o.logf == nil {
+		o.logf = log.Printf
+	}
+	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, mux: http.NewServeMux(), o: o}
+	for _, rt := range append(routes(), o.extra...) {
+		api.mux.Handle(rt.method+" "+prefix+rt.pattern, api.handle(rt))
+	}
+	api.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeProblem(w, requestOf(r).id, refuse(http.StatusNotFound, "not-found", "no route"))
+	})
+	return api
+}
+
+// ServeHTTP authenticates first, then reads the installation state for the epoch headers, then
+// routes (§10: every request authenticates, an unknown path included).
+func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	q := &request{id: id.New(id.Request), r: r}
+	p, err := a.authn.Authenticate(r.Context(), r.Header.Get("Authorization"))
+	if err != nil {
+		a.o.logf("%s %s %s: %v", q.id, r.Method, r.URL.Path, err)
+		writeProblem(w, q.id, authRefusal(err))
+		return
+	}
+	q.principal = p
+	if err := a.db.QueryRowContext(r.Context(), `SELECT epoch, recovery_mode FROM installation_state`).Scan(&q.epoch, &q.recovery); err != nil {
+		a.o.logf("%s: installation state: %v", q.id, err)
+		writeProblem(w, q.id, refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database could not be read; nothing was committed"))
+		return
+	}
+	setEpoch(w, q)
+	a.mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, q)))
+}
+
+func authRefusal(err error) *refusal {
+	switch {
+	case errors.Is(err, auth.ErrIdentityRevoked):
+		return refuse(http.StatusForbidden, "identity-revoked", "")
+	case errors.Is(err, auth.ErrUnavailable):
+		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "authentication could not reach the identity provider or the database; nothing was committed")
+	default:
+		return refuse(http.StatusUnauthorized, "unauthenticated", "")
+	}
+}
+
+// setEpoch writes §9.1's headers, for responses to authenticated requests only.
+func setEpoch(w http.ResponseWriter, q *request) {
+	w.Header().Set("Bronzeward-Epoch", q.epoch)
+	if q.recovery {
+		w.Header().Set("Bronzeward-Recovery-Mode", "true")
+	} else {
+		w.Header().Del("Bronzeward-Recovery-Mode")
+	}
+}
+
+func (a *API) handle(rt *route) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := requestOf(r)
+		q.r, q.route = r, rt
+		if ref := authorize(q); ref != nil {
+			writeProblem(w, q.id, ref)
+			return
+		}
+		if rt.mutating() {
+			if ref := preconditions(q); ref != nil {
+				writeProblem(w, q.id, ref)
+				return
+			}
+		}
+		switch {
+		case rt.effect != nil:
+			a.mutate(w, q)
+		case rt.read != nil:
+			rt.read(a, w, q)
+		default:
+			writeProblem(w, q.id, refuse(http.StatusNotImplemented, "not-implemented",
+				rt.method+" "+prefix+rt.pattern+" is routed and role-checked; its handler lands with the issue that owns it"))
+		}
+	}
+}
+
+// authorize is §10.3's check before any transaction. It records the act's role: the first
+// qualifying one in the route's listed order (choice §17.20).
+func authorize(q *request) *refusal {
+	rt := q.route
+	if rt.humanOnly && q.principal.Kind != auth.Human {
+		return refuse(http.StatusForbidden, "forbidden", "this route is for humans only").with("roles", rt.roles).with("humanOnly", true)
+	}
+	for _, want := range rt.roles {
+		if slices.Contains(q.principal.Roles, want) {
+			q.role = want
+			return nil
+		}
+	}
+	return refuse(http.StatusForbidden, "forbidden", "no role of this credential qualifies").with("roles", rt.roles)
+}
+
+var keyShape = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
+
+// preconditions checks a mutating request's headers (§7.1, §9.2); none needs a transaction.
+func preconditions(q *request) *refusal {
+	h := q.r.Header
+	switch keys := h.Values("Idempotency-Key"); {
+	case len(keys) == 0 || (len(keys) == 1 && keys[0] == ""):
+		return refuse(http.StatusPreconditionRequired, "idempotency-key-required", "")
+	case len(keys) > 1 || !keyShape.MatchString(keys[0]):
+		return refuse(http.StatusBadRequest, "invalid-request", "Idempotency-Key must be one header of 16 to 128 characters of [A-Za-z0-9_-]")
+	default:
+		q.key = keys[0]
+	}
+	if q.route.ifMatch {
+		switch ms := h.Values("If-Match"); {
+		case len(ms) == 0 || (len(ms) == 1 && ms[0] == ""):
+			return refuse(http.StatusPreconditionRequired, "precondition-required", "")
+		case len(ms) > 1:
+			return refuse(http.StatusBadRequest, "invalid-request", "If-Match must be one header")
+		default:
+			q.ifMatch = ms[0]
+		}
+	}
+	return nil
+}

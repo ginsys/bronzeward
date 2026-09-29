@@ -7,14 +7,14 @@ import (
 )
 
 func TestLiveness(t *testing.T) {
-	h := New()
+	h := New(nil)
 	for _, c := range []struct {
 		method, path string
 		want         int
 	}{
 		{"GET", "/livez", http.StatusNoContent},
 		{"HEAD", "/livez", http.StatusNoContent},
-		{"POST", "/livez", http.StatusMethodNotAllowed},
+		{"POST", "/livez", http.StatusNotFound}, // reaches the API handler, nil here
 		{"GET", "/api/v1/dispatch", http.StatusNotFound},
 		{"GET", "/", http.StatusNotFound},
 	} {
@@ -23,7 +23,7 @@ func TestLiveness(t *testing.T) {
 		if rec.Code != c.want {
 			t.Errorf("%s %s = %d, want %d", c.method, c.path, rec.Code, c.want)
 		}
-		if c.want == http.StatusNoContent && rec.Body.Len() != 0 { // 405 carries http.Error's text
+		if c.want == http.StatusNoContent && rec.Body.Len() != 0 { // 404 carries http.Error's text
 			t.Errorf("%s /livez returned data", c.method)
 		}
 	}
