@@ -261,7 +261,41 @@ const (
 	// behind one timed-out attempt after another. Tokens are refused for up to this long after
 	// the issuer recovers.
 	discoveryRetryInterval = 5 * time.Second
+	// issuerBodyLimit bounds the discovery document and key set, which are read into memory:
+	// the timeout bounds how long an answer takes, not how large it is.
+	issuerBodyLimit = 1 << 20
 )
+
+// boundedBody fails the read of a response body longer than limit bytes.
+type boundedBody struct {
+	next  http.RoundTripper
+	limit int64
+}
+
+func (b *boundedBody) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := b.next.RoundTrip(r)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body = &cappedReader{ReadCloser: resp.Body, left: b.limit}
+	return resp, nil
+}
+
+type cappedReader struct {
+	io.ReadCloser
+	left int64 // bytes still allowed
+}
+
+func (c *cappedReader) Read(p []byte) (int, error) {
+	if int64(len(p)) > c.left+1 {
+		p = p[:c.left+1] // one byte past the limit shows the body is longer
+	}
+	n, err := c.ReadCloser.Read(p)
+	if c.left -= int64(n); c.left < 0 {
+		return 0, fmt.Errorf("issuer answer longer than %d bytes", issuerBodyLimit)
+	}
+	return n, err
+}
 
 type discovered struct {
 	issuer  string
@@ -382,7 +416,14 @@ func (d *discovered) keySet(ctx context.Context) (*oidc.RemoteKeySet, error) {
 
 // discover reads the issuer's discovery document and returns its key set.
 func (d *discovered) discover(ctx context.Context) (*oidc.RemoteKeySet, error) {
-	p, err := oidc.NewProvider(oidc.ClientContext(ctx, d.client), d.issuer) // refuses a document whose issuer differs
+	next := d.client.Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	next = &boundedBody{next: next, limit: issuerBodyLimit}
+	client := *d.client
+	client.Transport = next
+	p, err := oidc.NewProvider(oidc.ClientContext(ctx, &client), d.issuer) // refuses a document whose issuer differs
 	if err != nil {
 		return nil, err
 	}
@@ -398,10 +439,6 @@ func (d *discovered) discover(ctx context.Context) (*oidc.RemoteKeySet, error) {
 	// The keys decide whose tokens verify, so they need the same transport as the issuer.
 	if u, err := url.Parse(doc.JWKS); err != nil || u.Host == "" || !config.SecureTransport(u) {
 		return nil, fmt.Errorf("the discovery document's jwks_uri %q is not https and not this host", doc.JWKS)
-	}
-	next := d.client.Transport
-	if next == nil {
-		next = http.DefaultTransport
 	}
 	fetch := &http.Client{Timeout: d.client.Timeout, CheckRedirect: d.client.CheckRedirect,
 		Transport: &limitedFetch{next: next, every: d.refetch}}
