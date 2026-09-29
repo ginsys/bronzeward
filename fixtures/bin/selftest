@@ -783,6 +783,36 @@ a_reaches "$TALOS_WORKER_IP" || fail "A does not reach the worker after linkjoin
 [ ! -s "$STATE/linksplits" ] || fail "linkjoin left a recorded split"
 ok "linksplit / linkjoin A worker: the worker alone is cut, the split survives kill and start, and is joined again"
 
+# Interrupted between the route and its record, and a start between its wait and the re-apply
+# (BW_INJECT_STOP_AFTER, honoured under BW_SELFTEST=1 only): an action the log records as done is
+# one the record and the namespace both hold, so that the next start puts back what the log says.
+defer "$here/inject" linkjoin A worker
+# Any exit status: finish records a change it reads back as done. What must show is that the hook
+# fired and that finish, not the action, completed the record.
+out=$(BW_SELFTEST=1 BW_INJECT_STOP_AFTER=route "$here/inject" linksplit A worker 2>&1) || true
+[[ $out == *'stopped after the route, before its record (selftest)'* && $out == *'the record is completed; recorded as done'* ]] ||
+  fail "a linksplit stopped after its route was not completed by finish: $(tail -n 2 <<<"$out")"
+grep --quiet ' done linksplit A worker$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "a linksplit interrupted after its route is not recorded done: $(tail -n 1 "$STATE/injections.log")"
+grep --quiet --line-regexp 'A worker' "$STATE/linksplits" || fail "a linksplit recorded done is not in $STATE/linksplits"
+"$here/inject" kill A
+out=$(BW_SELFTEST=1 BW_INJECT_STOP_AFTER=live "$here/inject" start A 2>&1) || true
+[[ $out == *'ended by a signal, and the service answers; recorded as done'* ]] ||
+  fail "a start of A signalled after its wait was not settled by finish: $(tail -n 2 <<<"$out")"
+grep --quiet ' done start A$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "a start of A interrupted after its wait is not recorded done: $(tail -n 1 "$STATE/injections.log")"
+! a_reaches "$TALOS_WORKER_IP" || fail "a start recorded done left A reaching the worker: the recorded split was not put back"
+out=$(BW_SELFTEST=1 BW_INJECT_STOP_AFTER=route "$here/inject" linkjoin A worker 2>&1) || true
+[[ $out == *'stopped after the route, before its record (selftest)'* && $out == *'the record is completed; recorded as done'* ]] ||
+  fail "a linkjoin stopped after its route was not completed by finish: $(tail -n 2 <<<"$out")"
+unset out
+undefer
+grep --quiet ' done linkjoin A worker$' <(tail -n 1 "$STATE/injections.log") ||
+  fail "a linkjoin interrupted after its route is not recorded done: $(tail -n 1 "$STATE/injections.log")"
+[ ! -s "$STATE/linksplits" ] || fail "a linkjoin recorded done left its split in $STATE/linksplits"
+a_reaches "$TALOS_WORKER_IP" || fail "A does not reach the worker after the interrupted linkjoin"
+ok "linksplit, start and linkjoin of A interrupted after the change: recorded done, and the record and the routes agree"
+
 # Sealed, OpenBao refuses every request until unsealed (bao status: 2 sealed, 0 unsealed).
 defer "$here/inject" unseal openbao
 "$here/inject" seal openbao
@@ -2043,6 +2073,17 @@ if [ "$keep" != --keep ]; then
   rm -f -- "$STATE"
   [ ! -e "$FIXTURES/.selftest-no-such-dir" ] || fail "a command wrote through the symlinked state directory"
   ok "a symlinked state directory is refused by up, evidence and down"
+  # An up interrupted between the image import and its record: down finds the image by this run's
+  # tag and label, and removes it.
+  went=0
+  BW_SELFTEST=1 BW_UP_STOP_AFTER=import "$here/up" >/dev/null 2>&1 && went=1
+  [ "$went" -eq 0 ] || fail "up did not stop after the import under BW_UP_STOP_AFTER=import"
+  [ -n "$(docker image ls --quiet "${FIXTURE_NAME}-bronzeward")" ] || fail "the interrupted up imported no image; the case tests nothing"
+  [ ! -e "$STATE/up-image" ] || fail "up recorded the image before the stop; the case tests nothing"
+  "$here/down" || fail "down refused what an up interrupted before recording its image left"
+  [ -z "$(docker image ls --quiet "${FIXTURE_NAME}-bronzeward")" ] || fail "down left the unrecorded image of an interrupted up"
+  [ ! -e "$STATE" ] || fail "down left the state of an up interrupted before recording its image"
+  ok "down removes the image of an up interrupted between the import and its record"
   # An up interrupted right after it imported the server image: down removes the image and
   # everything else up made, and leaves no state.
   went=0
