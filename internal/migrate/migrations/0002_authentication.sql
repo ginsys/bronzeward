@@ -11,10 +11,13 @@ CREATE TABLE principal (
   iss         text,
   sub         text,
   name        text,
-  responsible text REFERENCES principal (id),
+  responsible text,
+  -- The responsible principal must be a human: the key below names its kind, as act's does.
+  responsible_kind text GENERATED ALWAYS AS (CASE WHEN responsible IS NOT NULL THEN 'human' END) STORED,
   created_at  timestamptz NOT NULL,
   revoked     boolean NOT NULL DEFAULT false,
   UNIQUE (id, kind),
+  FOREIGN KEY (responsible, responsible_kind) REFERENCES principal (id, kind),
   -- IS NOT NULL is spelled out: a CHECK passes when its expression is NULL.
   CHECK ((kind = 'human' AND iss IS NOT NULL AND sub IS NOT NULL AND iss <> '' AND sub <> ''
           AND name IS NULL AND responsible IS NULL)
