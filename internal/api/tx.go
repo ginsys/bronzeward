@@ -52,6 +52,7 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 		return
 	}
 	if rec != nil {
+		setEpoch(w, q) // the epoch the replay was decided in
 		a.answer(w, q, rec, true)
 		return
 	}
@@ -66,9 +67,7 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 		a.fail(w, q, err)
 		return
 	}
-	if fresh {
-		setEpoch(w, q) // the epoch the transaction committed in
-	}
+	setEpoch(w, q) // the epoch the transaction committed or found the record in
 	a.answer(w, q, rec, !fresh)
 }
 
@@ -129,15 +128,13 @@ func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, er
 		return nil, false, fmt.Errorf("%w: %w", errUnavailable, err)
 	}
 	defer func() { _ = tx.Rollback() }() // a no-op once committed
-	// §7.2: the key's lock is the first statement (rule 5's order), then the lookup again under it.
+	// §7.2: the key's lock is the first statement (rule 5's order), then the lookup again under it,
+	// which takes the installation state FOR SHARE for the rest of the transaction.
 	if err := a.lockKey(ctx, tx, q); err != nil {
 		return nil, false, err
 	}
 	if rec, err := lookup(ctx, tx, q); err != nil || rec != nil {
 		return rec, false, err
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&q.epoch); err != nil {
-		return nil, false, err
 	}
 	q.actID = id.New(id.Act)
 	res, err := q.route.effect(ctx, a, tx, q)
