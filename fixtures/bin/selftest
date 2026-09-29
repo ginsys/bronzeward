@@ -837,6 +837,10 @@ rm -r -- "$planted"
 undefer
 grep --quiet --fixed-strings "$planted/token.txt" "$bundle/leak-scan.txt" || fail "the leak scan missed the automation token in a run directory"
 ok "the leak scan finds the automation token in a scenario's run directory"
+# The cases below copy and restore the database, which PostgreSQL refuses while another session
+# is on it: A and B, connected since their start, are stopped.
+"$here/inject" kill A
+"$here/inject" kill B
 
 # Evidence: the scan must see the canary that was deliberately written to the database, and a
 # secret the fixture did not choose itself.
