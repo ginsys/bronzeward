@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/dbtest"
 )
 
@@ -61,6 +62,13 @@ func TestTokenCommand(t *testing.T) {
 		if err := runToken(args, io.Discard, io.Discard); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// A denied identity's current token is refused (§10.4), so list must not call it valid.
+func TestTokenStateDenied(t *testing.T) {
+	if s := tokenState(auth.Listed{IdentityDenied: true, CurrentEpoch: true}); s != "identity-denied" {
+		t.Fatalf("state of a denied identity's current token: %q", s)
 	}
 }
 
