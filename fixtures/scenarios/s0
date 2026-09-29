@@ -198,10 +198,13 @@ logged() {
   return "$rc"
 }
 # go_controls_ran: the advisory-lock controls, against go-db's database, as go-db runs them: without
-# a database they would skip, and a skip is not a PASS line.
+# a database they would skip, and a skip is not a PASS line. The DSN reaches the test through the
+# environment, never the command line, so that a password in it is in no retained file.
 go_controls_ran() {
-  logged advisory-lock-control env "BW_TEST_PG_DSN=${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}" \
-    BW_REQUIRE_PG=1 mise exec -- go test -count=1 -run 'TestNoLockControl|TestInstallNoLockControl' -v ./internal/migrate/ &&
+  (
+    export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
+    logged advisory-lock-control env BW_REQUIRE_PG=1 mise exec -- go test -count=1 -run 'TestNoLockControl|TestInstallNoLockControl' -v ./internal/migrate/
+  ) &&
     grep --quiet -- '--- PASS: TestNoLockControl' "$EV/advisory-lock-control.log" &&
     grep --quiet -- '--- PASS: TestInstallNoLockControl' "$EV/advisory-lock-control.log"
 }
@@ -247,9 +250,18 @@ same_checkout() {
   [ "$(fixtures_git rev-parse HEAD)" = "$(sed -n 's/^commit //p' "$STATE/up-build")" ] && [ "$n" -eq 0 ]
 }
 
+# go_env_clean: no Go setting, from the environment or go env -w, selects or skips tests or changes
+# what they build: GOFLAGS=-run=^$ alone makes every suite exit 0 having run nothing.
+go_env_clean() {
+  local v
+  v=$(cd -- "$FIXTURES/.." && mise exec -- go env GOFLAGS GOEXPERIMENT GOWORK) || return 1
+  [ -z "$(printf '%s' "$v" | tr -d '\n')" ]
+}
+
 run() {
   # Step 1: the suites, and the advisory-lock negative control as the Go test (ruling 5), from the
   # checkout the image was built from, before and after.
+  check 'S0 precondition' 'GOFLAGS, GOEXPERIMENT and GOWORK are unset, so the suites run every test on the default build' go_env_clean
   check 'S0 precondition' 'the checkout is the image commit, unmodified, before the suites' same_checkout
   check 'S0 step 1' 'mise run verify' logged step1-verify mise run verify
   check 'S0 step 1' 'mise run go-db (a missing database fails)' logged step1-go-db mise run go-db
