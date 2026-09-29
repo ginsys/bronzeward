@@ -77,7 +77,7 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, o options) *API {
 		api.mux.Handle(rt.method+" "+prefix+rt.pattern, api.handle(rt))
 	}
 	api.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		writeProblem(w, requestOf(r).id, refuse(http.StatusNotFound, "not-found", "no route"))
+		api.problem(w, requestOf(r), refuse(http.StatusNotFound, "not-found", "no route"))
 	})
 	return api
 }
@@ -89,13 +89,13 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p, err := a.authn.Authenticate(r.Context(), r.Header.Get("Authorization"))
 	if err != nil {
 		a.o.logf("%s %s %s: %v", q.id, r.Method, r.URL.Path, err)
-		writeProblem(w, q.id, authRefusal(err))
+		a.problem(w, q, authRefusal(err))
 		return
 	}
 	q.principal = p
 	if err := a.db.QueryRowContext(r.Context(), `SELECT epoch, recovery_mode FROM installation_state`).Scan(&q.epoch, &q.recovery); err != nil {
 		a.o.logf("%s: installation state: %v", q.id, err)
-		writeProblem(w, q.id, refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database could not be read; nothing was committed"))
+		a.problem(w, q, refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database could not be read; nothing was committed"))
 		return
 	}
 	setEpoch(w, q)
@@ -128,12 +128,12 @@ func (a *API) handle(rt *route) http.HandlerFunc {
 		q := requestOf(r)
 		q.r, q.route = r, rt
 		if ref := authorize(q); ref != nil {
-			writeProblem(w, q.id, ref)
+			a.problem(w, q, ref)
 			return
 		}
 		if rt.mutating() {
 			if ref := preconditions(q); ref != nil {
-				writeProblem(w, q.id, ref)
+				a.problem(w, q, ref)
 				return
 			}
 		}
@@ -143,7 +143,7 @@ func (a *API) handle(rt *route) http.HandlerFunc {
 		case rt.read != nil:
 			rt.read(a, w, q)
 		default:
-			writeProblem(w, q.id, refuse(http.StatusNotImplemented, "not-implemented",
+			a.problem(w, q, refuse(http.StatusNotImplemented, "not-implemented",
 				rt.method+" "+prefix+rt.pattern+" is routed and role-checked; its handler lands with the issue that owns it"))
 		}
 	}

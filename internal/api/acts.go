@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -31,12 +32,25 @@ const defaultLimit, maxLimit = 50, 500
 
 // listActs is GET /acts: every act in recording order, paginated (§9.1).
 func listActs(a *API, w http.ResponseWriter, q *request) {
-	limit, after, ref := page(q)
+	limit, afterAct, ref := page(q)
 	if ref != nil {
-		writeProblem(w, q.id, ref)
+		a.problem(w, q, ref)
 		return
 	}
-	rows, err := a.db.QueryContext(q.r.Context(), `SELECT id, seq, principal, principal_kind, via, role, action,
+	// seq orders acts but never leaves the database (§2): the cursor names the last act listed.
+	var after int64
+	if afterAct != "" {
+		err := a.db.QueryRowContext(q.r.Context(), `SELECT seq FROM act WHERE id = $1`, afterAct).Scan(&after)
+		if errors.Is(err, sql.ErrNoRows) {
+			a.problem(w, q, refuse(http.StatusBadRequest, "cursor-invalid", ""))
+			return
+		}
+		if err != nil {
+			a.fail(w, q, err)
+			return
+		}
+	}
+	rows, err := a.db.QueryContext(q.r.Context(), `SELECT id, principal, principal_kind, via, role, action,
 			array_to_string(subjects, ','), idempotency_key, request_id, epoch, at
 		FROM act WHERE seq > $1 ORDER BY seq LIMIT $2`, after, limit+1)
 	if err != nil {
@@ -48,12 +62,10 @@ func listActs(a *API, w http.ResponseWriter, q *request) {
 		Items []actItem `json:"items"`
 		Next  string    `json:"next,omitempty"`
 	}{Items: []actItem{}}
-	var seqs []int64
 	for rows.Next() {
 		var it actItem
-		var seq int64
 		var subjects string
-		if err := rows.Scan(&it.ID, &seq, &it.Principal, &it.PrincipalKind, &it.Via, &it.Role, &it.Action,
+		if err := rows.Scan(&it.ID, &it.Principal, &it.PrincipalKind, &it.Via, &it.Role, &it.Action,
 			&subjects, &it.IdempotencyKey, &it.RequestID, &it.Epoch, &it.At); err != nil {
 			a.fail(w, q, err)
 			return
@@ -62,7 +74,7 @@ func listActs(a *API, w http.ResponseWriter, q *request) {
 		if subjects != "" {
 			it.Subjects = strings.Split(subjects, ",")
 		}
-		out.Items, seqs = append(out.Items, it), append(seqs, seq)
+		out.Items = append(out.Items, it)
 	}
 	if err := rows.Err(); err != nil {
 		a.fail(w, q, err)
@@ -70,58 +82,55 @@ func listActs(a *API, w http.ResponseWriter, q *request) {
 	}
 	if len(out.Items) > limit {
 		out.Items = out.Items[:limit]
-		out.Next = makeCursor(q.epoch, seqs[limit-1])
+		out.Next = makeCursor(q.epoch, out.Items[limit-1].ID)
 	}
 	writeJSON(w, "application/json", http.StatusOK, out)
 }
 
 // page reads limit and cursor, refusing anything else (§9.1: unknown fields are refused).
-func page(q *request) (limit int, after int64, ref *refusal) {
+func page(q *request) (limit int, afterAct string, ref *refusal) {
 	vals, err := url.ParseQuery(q.r.URL.RawQuery)
 	if err != nil {
-		return 0, 0, refuse(http.StatusBadRequest, "invalid-request", "the query does not parse")
+		return 0, "", refuse(http.StatusBadRequest, "invalid-request", "the query does not parse")
 	}
 	for k, v := range vals {
 		if (k != "limit" && k != "cursor") || len(v) != 1 {
-			return 0, 0, refuse(http.StatusBadRequest, "invalid-request", "the query takes at most one limit and one cursor")
+			return 0, "", refuse(http.StatusBadRequest, "invalid-request", "the query takes at most one limit and one cursor")
 		}
 	}
 	limit = defaultLimit
 	if vals.Has("limit") {
 		n, err := strconv.Atoi(vals.Get("limit"))
 		if err != nil || n < 1 || n > maxLimit {
-			return 0, 0, refuse(http.StatusBadRequest, "invalid-request", "limit must be 1 to 500")
+			return 0, "", refuse(http.StatusBadRequest, "invalid-request", "limit must be 1 to 500")
 		}
 		limit = n
 	}
 	if vals.Has("cursor") {
-		ep, seq, err := parseCursor(vals.Get("cursor"))
+		ep, act, err := parseCursor(vals.Get("cursor"))
 		if err != nil || ep != q.epoch {
-			return 0, 0, refuse(http.StatusBadRequest, "cursor-invalid", "")
+			return 0, "", refuse(http.StatusBadRequest, "cursor-invalid", "")
 		}
-		after = seq
+		afterAct = act
 	}
-	return limit, after, nil
+	return limit, afterAct, nil
 }
 
-// A cursor is opaque to clients: the epoch it was issued in and the last act's seq (§9.1). It is
-// not signed: every act is readable by any role, so a forged position discloses nothing.
-func makeCursor(epoch string, seq int64) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(epoch + "." + strconv.FormatInt(seq, 10)))
+// A cursor is opaque to clients: the epoch it was issued in and the last act listed (§9.1), never
+// the act's seq (§2). It is not signed: every act is readable by any role, so a forged position
+// discloses nothing.
+func makeCursor(epoch, act string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(epoch + "." + act))
 }
 
-func parseCursor(c string) (string, int64, error) {
+func parseCursor(c string) (epoch, act string, err error) {
 	b, err := base64.RawURLEncoding.DecodeString(c)
 	if err != nil {
-		return "", 0, err
+		return "", "", err
 	}
-	ep, s, ok := strings.Cut(string(b), ".")
-	if !ok || id.MustHave(ep, id.Epoch) != nil {
-		return "", 0, errors.New("not a cursor")
+	epoch, act, ok := strings.Cut(string(b), ".")
+	if !ok || id.MustHave(epoch, id.Epoch) != nil || id.MustHave(act, id.Act) != nil {
+		return "", "", errors.New("not a cursor")
 	}
-	seq, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || seq < 1 {
-		return "", 0, errors.New("not a cursor")
-	}
-	return ep, seq, nil
+	return epoch, act, nil
 }

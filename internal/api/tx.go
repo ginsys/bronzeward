@@ -34,12 +34,12 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 		err = q.input.check(a)
 	}
 	if err != nil {
-		writeProblem(w, q.id, refuse(http.StatusBadRequest, "invalid-request", err.Error()))
+		a.problem(w, q, refuse(http.StatusBadRequest, "invalid-request", err.Error()))
 		return
 	}
 	q.fingerprint = fingerprint(q, canon)
 	if ref := a.admit(ctx, q); ref != nil {
-		writeProblem(w, q.id, ref)
+		a.problem(w, q, ref)
 		return
 	}
 	// §7.2: before running anything, look the key up.
@@ -49,7 +49,7 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 		return
 	}
 	if rec != nil {
-		answer(w, q, rec, true)
+		a.answer(w, q, rec, true)
 		return
 	}
 	if q.route.prepare != nil {
@@ -66,7 +66,7 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 	if fresh {
 		setEpoch(w, q) // the epoch the transaction committed in
 	}
-	answer(w, q, rec, !fresh)
+	a.answer(w, q, rec, !fresh)
 }
 
 // admit creates a human's principal row on its first admitted mutating request, in its own short
@@ -200,5 +200,5 @@ func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 	default:
 		ref = refuse(http.StatusInternalServerError, "internal-error", "nothing was committed")
 	}
-	writeProblem(w, q.id, ref)
+	a.problem(w, q, ref)
 }

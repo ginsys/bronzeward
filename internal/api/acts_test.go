@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -48,6 +49,10 @@ func TestListActsPages(t *testing.T) {
 			}
 			break
 		}
+		// §2: an internal sequence key never appears in a cursor; the cursor names the last act.
+		if b, err := base64.RawURLEncoding.DecodeString(p.Next); err != nil || string(b) != epoch(t, e.db)+"."+p.Items[len(p.Items)-1].ID {
+			t.Fatalf("cursor %q decodes to %q; want the epoch and the last act's id", p.Next, b)
+		}
 		q = "?limit=2&cursor=" + url.QueryEscape(p.Next)
 	}
 	if all[0].Action != "token.issue" || all[0].Via != "tool" || all[0].Role != nil || len(all[0].Subjects) != 2 {
@@ -64,12 +69,17 @@ func TestListActsRefusals(t *testing.T) {
 	for _, q := range []string{"?limit=0", "?limit=501", "?limit=x", "?limit=1&limit=2", "?order=desc", "?limit=%zz"} {
 		wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/acts" + q, token: tok}), http.StatusBadRequest, "invalid-request")
 	}
-	for _, c := range []string{"garbage", makeCursor(id.New(id.Epoch), 1), makeCursor(epoch(t, e.db), 0)} {
+	var first string // the token tool's issue act
+	if err := e.db.QueryRow("SELECT id FROM act ORDER BY seq LIMIT 1").Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []string{"garbage", makeCursor(id.New(id.Epoch), first), makeCursor(epoch(t, e.db), "act_1"),
+		makeCursor(epoch(t, e.db), id.New(id.Act))} { // the last names no act
 		wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/acts?cursor=" + url.QueryEscape(c), token: tok}),
 			http.StatusBadRequest, "cursor-invalid")
 	}
 	// A cursor from the epoch before an entry is refused after it (§9.1).
-	old := makeCursor(epoch(t, e.db), 1)
+	old := makeCursor(epoch(t, e.db), first)
 	newEpoch(t, e.db)
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/acts?cursor=" + url.QueryEscape(old), token: tok}),
 		http.StatusBadRequest, "cursor-invalid")
