@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -133,7 +134,7 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
-func (f *fixture) verifier() *Verifier { return NewVerifier(f.cfg, f.db, Discover(f.cfg.OIDC.Issuer)) }
+func (f *fixture) verifier() *Verifier { return NewVerifier(f.cfg, f.db, Discover(f.cfg.OIDC)) }
 
 func (f *fixture) bearer(t *testing.T, human, defect string) string {
 	t.Helper()
@@ -283,7 +284,7 @@ func TestTimeChecksUseDatabaseClock(t *testing.T) {
 // waiting on the stalled one until the server restarts.
 func TestStalledKeySetFetchRecovers(t *testing.T) {
 	f := newFixture(t)
-	d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+	d := Discover(f.cfg.OIDC).(*discovered)
 	d.client = &http.Client{Timeout: 200 * time.Millisecond}
 	v := NewVerifier(f.cfg, f.db, d)
 	h := f.bearer(t, "h-viewer", "")
@@ -306,7 +307,7 @@ func TestStalledKeySetFetchRecovers(t *testing.T) {
 // successful fetch, the next waits out the refetch interval.
 func TestKeySetRefetchIsRateLimited(t *testing.T) {
 	f := newFixture(t)
-	d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+	d := Discover(f.cfg.OIDC).(*discovered)
 	d.refetch = 300 * time.Millisecond
 	v := NewVerifier(f.cfg, f.db, d)
 	if _, err := v.Authenticate(t.Context(), f.bearer(t, "h-viewer", "")); err != nil {
@@ -414,7 +415,7 @@ func TestIssuerFetchesStayOnAuthenticatedTransport(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
 			set(f)
-			d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+			d := Discover(f.cfg.OIDC).(*discovered)
 			o := &offLoopback{}
 			d.client.Transport = o
 			if _, err := NewVerifier(f.cfg, f.db, d).Authenticate(t.Context(), f.bearer(t, "h-viewer", "")); err == nil {
@@ -426,6 +427,73 @@ func TestIssuerFetchesStayOnAuthenticatedTransport(t *testing.T) {
 				t.Fatalf("fetched over plain http off this host: %v", o.urls)
 			}
 		})
+	}
+}
+
+// namedHosts sends a request for a host in names to addr, as a cluster's DNS would, and records
+// every host asked for.
+type namedHosts struct {
+	addr  string
+	names []string
+	mu    sync.Mutex
+	asked []string
+}
+
+func (n *namedHosts) RoundTrip(r *http.Request) (*http.Response, error) {
+	n.mu.Lock()
+	n.asked = append(n.asked, r.URL.Hostname())
+	n.mu.Unlock()
+	if slices.Contains(n.names, r.URL.Hostname()) {
+		r = r.Clone(r.Context())
+		r.URL.Host = n.addr
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// persistence-api.md §10.1: listing a host for plain http lists that host alone. The key set a
+// listed issuer advertises, or redirects to, on another plain-http host is refused and never
+// fetched; the control lists that host too, and the same token verifies.
+func TestPlainHTTPHostsDoNotExtendToKeySet(t *testing.T) {
+	for name, set := range map[string]func(f *fixture, keys string){
+		"advertised jwks_uri": func(f *fixture, keys string) { f.jwksURI.Store(keys) },
+		"key set redirect":    func(f *fixture, keys string) { f.redirect.Store("/jwks", keys) },
+	} {
+		for _, listed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s, keys host listed %v", name, listed), func(t *testing.T) {
+				f := newFixture(t)
+				// The key host serves the issuer's own key set, without the fixture's redirects.
+				keys := httptest.NewServer(f.iss.Handler())
+				t.Cleanup(keys.Close)
+				addr := strings.TrimPrefix(keys.URL, "http://")
+				_, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					t.Fatal(err)
+				}
+				set(f, "http://keys.cluster.test:"+port+"/jwks")
+				f.cfg.OIDC.PlainHTTPHosts = []string{"idp.cluster.test"}
+				if listed {
+					f.cfg.OIDC.PlainHTTPHosts = append(f.cfg.OIDC.PlainHTTPHosts, "keys.cluster.test")
+				}
+				d := Discover(f.cfg.OIDC).(*discovered)
+				n := &namedHosts{addr: addr, names: []string{"keys.cluster.test"}}
+				d.client.Transport = n
+				_, err = NewVerifier(f.cfg, f.db, d).Authenticate(t.Context(), f.bearer(t, "h-viewer", ""))
+				n.mu.Lock()
+				defer n.mu.Unlock()
+				if listed {
+					if err != nil {
+						t.Fatalf("control: %v", err)
+					}
+					return
+				}
+				if err == nil {
+					t.Fatal("token accepted with keys from an unlisted plain-http host")
+				}
+				if slices.Contains(n.asked, "keys.cluster.test") {
+					t.Fatalf("the unlisted host was asked: %v", n.asked)
+				}
+			})
+		}
 	}
 }
 
@@ -464,7 +532,7 @@ func TestDiscoveryWaitHonoursTheDeadline(t *testing.T) {
 
 func TestIssuerDownThenUp(t *testing.T) {
 	f := newFixture(t)
-	d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+	d := Discover(f.cfg.OIDC).(*discovered)
 	d.retry = 100 * time.Millisecond
 	v := NewVerifier(f.cfg, f.db, d)
 	h := f.bearer(t, "h-viewer", "")
@@ -483,7 +551,7 @@ func TestIssuerDownThenUp(t *testing.T) {
 // requests get the failure without asking the issuer again. After it, discovery runs again.
 func TestFailedDiscoveryIsNotRepeated(t *testing.T) {
 	f := newFixture(t)
-	d := Discover(f.cfg.OIDC.Issuer).(*discovered)
+	d := Discover(f.cfg.OIDC).(*discovered)
 	d.retry = 300 * time.Millisecond
 	v := NewVerifier(f.cfg, f.db, d)
 	h := f.bearer(t, "h-viewer", "")

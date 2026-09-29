@@ -1047,8 +1047,11 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
 
 ### 9.1 Conventions
 
-- JSON over HTTPS, under `/api/v1`. Unknown request fields are refused
-  **(choice §17.14)**.
+- JSON under `/api/v1`, reached by clients over HTTPS. TLS may terminate in
+  front of the server (an ingress or API gateway); the hop behind it is the
+  deployment's choice: plain http on a network it protects, TLS per service,
+  or encryption by the network layer. The PoC server listens on plain http.
+  Unknown request fields are refused **(choice §17.14)**.
 - **Deprecation policy** **(choice §17.14)**: within `v1`, fields and routes
   are added, never removed or changed in meaning. A route due for removal
   answers with a `Deprecation` header for at least one minor release first. A
@@ -1441,6 +1444,14 @@ auth:
     recovery-admin: [bw-recovery]
   deniedSubjects: []    # §10.4
 ```
+
+The server reaches the identity provider over https, over plain http to its
+own host, or over plain http to a host the deployment lists in
+`auth.oidc.plainHTTPHosts` (bare host names, compared exactly). The rule holds
+for the issuer URL, for the key set URL its discovery document advertises and
+for every redirect: the keys fetched decide whose tokens verify, so listing a
+host states that the network to it is protected. A discovery document or
+redirect naming an unlisted plain-http host is refused.
 
 A human's roles are those the token's groups map to, evaluated per request.
 This answers how an identity-provider change reaches Bronzeward (design §13.7,

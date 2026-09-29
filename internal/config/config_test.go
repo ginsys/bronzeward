@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ import (
 const authBlock = "auth:\n  oidc:\n    issuer: https://idp.example.test/realms/ops\n    audience: bronzeward\n"
 
 func TestLoad(t *testing.T) {
-	c, err := Load(strings.NewReader("listen: 127.0.0.1:8443\ndatabase:\n  dsn: postgres://bw@localhost/bw\n" + authBlock))
+	c, err := Load(strings.NewReader("listen: 127.0.0.1:8443\ndatabase:\n  dsn: postgres://bw@localhost/bw\n" + execBlock + authBlock))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +39,10 @@ func TestLoadRefuses(t *testing.T) {
 	}
 }
 
-const base = "listen: :1\ndatabase: {dsn: x}\n"
+// execBlock is the smallest valid execution block (execution-recovery.md §5.2).
+const execBlock = "execution: {maxTransportDeadline: 5m}\n"
+
+const base = "listen: :1\ndatabase: {dsn: x}\n" + execBlock
 
 func TestLoadAuth(t *testing.T) {
 	c, err := Load(strings.NewReader(base + `auth:
@@ -101,6 +105,77 @@ func TestLoadRefusesAuth(t *testing.T) {
 		"iss without sub":    oidc("  deniedSubjects:\n    - {iss: https://idp.example.test}\n"),
 		"empty entry":        oidc("  deniedSubjects:\n    - {}\n"),
 		"not an idn":         oidc("  deniedSubjects:\n    - {identity: tok_fgqvcvz3ck7h7234ljgdbzsj6m}\n"),
+	} {
+		if _, err := Load(strings.NewReader(in)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// plainHTTPHosts is the admin's list of hosts reached over plain http on a network the deployment
+// protects (persistence-api.md §10.1): exactly those, by name, and nothing a listed name merely
+// begins or ends with.
+func TestPlainHTTPHosts(t *testing.T) {
+	c, err := Load(strings.NewReader(base + "auth:\n  oidc:\n    issuer: http://dex.auth.svc:5556\n    plainHTTPHosts: [dex.auth.svc]\n    audience: bronzeward\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for raw, want := range map[string]bool{
+		"http://dex.auth.svc:5556/keys":   true,
+		"http://DEX.auth.svc/keys":        true,
+		"https://anything.example/keys":   true,
+		"http://127.0.0.1:9/keys":         true,
+		"http://dex.auth.svc.evil/keys":   false,
+		"http://x.dex.auth.svc/keys":      false,
+		"http://other.auth.svc:5556/keys": false,
+		"ftp://dex.auth.svc/keys":         false,
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Auth.OIDC.Transport(u); got != want {
+			t.Errorf("%s: %v, want %v", raw, got, want)
+		}
+	}
+}
+
+func TestPlainHTTPHostsRefusals(t *testing.T) {
+	for name, hosts := range map[string]string{
+		"empty entry": `[""]`,
+		"with scheme": `["http://dex"]`,
+		"with port":   `["dex:5556"]`,
+		"with path":   `["dex/x"]`,
+		"with space":  `["dex auth"]`,
+	} {
+		in := base + "auth:\n  oidc:\n    issuer: http://127.0.0.1:5556\n    plainHTTPHosts: " + hosts + "\n    audience: bronzeward\n"
+		if _, err := Load(strings.NewReader(in)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// Unlisted, the PR 3 refusal stands.
+	in := base + "auth:\n  oidc:\n    issuer: http://dex.auth.svc:5556\n    plainHTTPHosts: [other.auth.svc]\n    audience: bronzeward\n"
+	if _, err := Load(strings.NewReader(in)); err == nil {
+		t.Fatal("an unlisted plain-http issuer was accepted")
+	}
+}
+
+// execution-recovery.md §5.2: the settle floor defaults to, and may not go under, 30s; the
+// maximum transport deadline has no default.
+func TestExecution(t *testing.T) {
+	c, err := Load(strings.NewReader(base + authBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Execution.SettleFloor != 30*time.Second || c.Execution.MaxTransportDeadline != 5*time.Minute {
+		t.Fatalf("%+v", c.Execution)
+	}
+	noExec := strings.Replace(base, execBlock, "", 1)
+	for name, in := range map[string]string{
+		"settle floor under 30s": noExec + "execution: {settleFloor: 29s, maxTransportDeadline: 5m}\n" + authBlock,
+		"deadline negative":      noExec + "execution: {maxTransportDeadline: -1s}\n" + authBlock,
+		"deadline missing":       noExec + "execution: {settleFloor: 30s}\n" + authBlock,
+		"no execution block":     noExec + authBlock,
 	} {
 		if _, err := Load(strings.NewReader(in)); err == nil {
 			t.Errorf("%s: accepted", name)

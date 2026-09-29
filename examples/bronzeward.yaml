@@ -14,6 +14,10 @@ auth:
     audience: bronzeward
     groupsClaim: groups
     maxTokenLifetime: 15m
+    # Hosts reached over plain http on a network the deployment protects, by exact name; loopback
+    # needs no entry. A Kubernetes deployment with TLS terminated at its ingress might list the
+    # issuer's service name here.
+    # plainHTTPHosts: []
   roles:
     viewer: [bw-viewers]
     author: [bw-authors]
@@ -21,3 +25,7 @@ auth:
     approver: [bw-approvers]
     recovery-admin: [bw-recovery]
   deniedSubjects: []
+# Execution timing (execution-recovery.md §5.2). maxTransportDeadline has no default: the longest
+# a machine-facing call may take, which the deployment knows. settleFloor defaults to 30s.
+execution:
+  maxTransportDeadline: 5m

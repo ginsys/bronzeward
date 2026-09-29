@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 // The committed example must stay loadable: a field Load starts requiring fails here until the
@@ -22,5 +23,8 @@ func TestExampleLoads(t *testing.T) {
 	}
 	if c.Auth.OIDC.Issuer != "http://127.0.0.1:5556" || c.Auth.OIDC.Audience != "bronzeward" {
 		t.Fatalf("example's issuer drifted from the documented local issuer: %+v", c.Auth.OIDC)
+	}
+	if c.Execution.SettleFloor != 30*time.Second || c.Execution.MaxTransportDeadline != 5*time.Minute {
+		t.Fatalf("example's execution settings: %+v", c.Execution)
 	}
 }

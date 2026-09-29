@@ -230,16 +230,18 @@ func (v *Verifier) roles(payload []byte) ([]Role, error) {
 // Discover returns the issuer's key set, found through its discovery document on first use and
 // looked for again once discoveryRetryInterval has passed after a failure, so the server starts
 // while the issuer is down.
-func Discover(issuer string) KeySet {
-	return &discovered{issuer: issuer, client: &http.Client{Timeout: issuerTimeout, CheckRedirect: secureRedirect},
-		refetch: keyRefetchInterval, retry: discoveryRetryInterval, discovering: make(chan struct{}, 1)}
+func Discover(o config.OIDC) KeySet {
+	d := &discovered{issuer: o.Issuer, oidc: o, refetch: keyRefetchInterval, retry: discoveryRetryInterval,
+		discovering: make(chan struct{}, 1)}
+	d.client = &http.Client{Timeout: issuerTimeout, CheckRedirect: d.secureRedirect}
+	return d
 }
 
-// secureRedirect refuses a redirect that leaves authenticated transport, where an on-path
-// attacker could answer in the issuer's place.
-func secureRedirect(r *http.Request, via []*http.Request) error {
-	if !config.SecureTransport(r.URL) {
-		return fmt.Errorf("refusing a redirect to %s: not https and not this host", r.URL.Redacted())
+// secureRedirect refuses a redirect that leaves the transport config.OIDC.Transport permits,
+// where an on-path attacker could answer in the issuer's place.
+func (d *discovered) secureRedirect(r *http.Request, via []*http.Request) error {
+	if !d.oidc.Transport(r.URL) {
+		return fmt.Errorf("refusing a redirect to %s: not https, not this host and not in auth.oidc.plainHTTPHosts", r.URL.Redacted())
 	}
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
@@ -300,6 +302,7 @@ func (c *cappedReader) Read(p []byte) (int, error) {
 
 type discovered struct {
 	issuer  string
+	oidc    config.OIDC   // its Transport decides which URLs discovery may reach
 	client  *http.Client  // bounds every request to the issuer
 	refetch time.Duration // the least time between successful key set fetches
 	retry   time.Duration // how long a failed discovery is answered without asking the issuer
@@ -438,8 +441,8 @@ func (d *discovered) discover(ctx context.Context) (*oidc.RemoteKeySet, error) {
 		return nil, errors.New("the discovery document names no jwks_uri")
 	}
 	// The keys decide whose tokens verify, so they need the same transport as the issuer.
-	if u, err := url.Parse(doc.JWKS); err != nil || u.Host == "" || !config.SecureTransport(u) {
-		return nil, fmt.Errorf("the discovery document's jwks_uri %q is not https and not this host", doc.JWKS)
+	if u, err := url.Parse(doc.JWKS); err != nil || u.Host == "" || !d.oidc.Transport(u) {
+		return nil, fmt.Errorf("the discovery document's jwks_uri %q is not https, not this host and not in auth.oidc.plainHTTPHosts", doc.JWKS)
 	}
 	fetch := &http.Client{Timeout: d.client.Timeout, CheckRedirect: d.client.CheckRedirect,
 		Transport: &limitedFetch{next: next, every: d.refetch}}

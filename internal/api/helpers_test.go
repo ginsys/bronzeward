@@ -67,7 +67,7 @@ func (e *env) build(o options) *API {
 	if o.logf == nil {
 		o.logf = e.logf
 	}
-	return newAPI(e.db, auth.NewVerifier(e.cfg, e.db, auth.Discover(e.cfg.OIDC.Issuer)), e.cfg, o)
+	return newAPI(e.db, auth.NewVerifier(e.cfg, e.db, auth.Discover(e.cfg.OIDC)), e.cfg, o)
 }
 
 func (e *env) logf(format string, args ...any) {
