@@ -746,7 +746,9 @@ rm "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out"
 [ "$(stat --format=%a "$STATE/automation-token")" = 600 ] || fail "seed left the automation token readable by others"
 grep --quiet --line-regexp --fixed-strings --file="$STATE/automation-token" "$STATE/scan-patterns.txt" ||
   fail "the automation token is not in the scan patterns"
-ok "two bw migrate at once apply once; seed writes the automation token 0600 and scans for it"
+grep --quiet --line-regexp --fixed-strings -- "$(sed 's/.*\.//' "$STATE/automation-token")" "$STATE/scan-patterns.txt" ||
+  fail "the automation token's secret half is not in the scan patterns"
+ok "two bw migrate at once apply once; seed writes the automation token 0600 and scans for it and its secret half"
 
 # A serves once started, reaches the issuer by its service name as a listed plain-http host, and
 # goes when killed; B pauses and unpauses.
@@ -1221,6 +1223,18 @@ undefer
 [ "$went" -eq 0 ] || fail "evidence captured while git was told to assume a tracked file under fixtures/ unchanged"
 grep --quiet 'told to skip' "$STATE/selftest-evidence.err" ||
   fail "evidence failed on the assume-unchanged file for another reason: $(tail -n 1 "$STATE/selftest-evidence.err")"
+# The same outside fixtures/, where the server's source is: bin/up's differing paths and S0's
+# unmodified-checkout check count a file git is told to skip, either way.
+before=$(checkout_differs) || fail "checkout_differs failed on the checkout"
+for flag in assume-unchanged skip-worktree; do
+  defer git -C "$FIXTURES/.." update-index "--no-$flag" README.md
+  git -C "$FIXTURES/.." update-index "--$flag" README.md
+  flagged=$(checkout_differs) || flagged=failed
+  git -C "$FIXTURES/.." update-index "--no-$flag" README.md # before anything can fail
+  undefer
+  [ "$flagged" = $((before + 1)) ] || fail "checkout_differs counts $flagged with the root README.md $flag, $before without"
+done
+unset before flag flagged
 # The record of how fixtures/ differed at creation gone: its absence must not read as "the tree
 # was the commit's". Put back before anything can fail.
 defer mv --no-target-directory -- "$STATE/selftest-creation-diff-aside" "$STATE/up-fixtures-diff.txt"
