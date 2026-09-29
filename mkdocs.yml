@@ -1,0 +1,92 @@
+# The documentation site: https://ginsys.github.io/bronzeward/, built from main by
+# .github/workflows/pages.yml and checked on every PR by ci.yml's `site` job. The markdown stays
+# written for GitHub; scripts/site/hooks.py mounts the pages that live outside docs/ (docs-map.yaml)
+# and points repository links at site pages or GitHub. See "Documentation site" in CONTRIBUTING.md.
+site_name: Bronzeward
+site_url: https://ginsys.github.io/bronzeward/
+site_description: >-
+  Design, specification and feasibility evidence for Bronzeward, a proposed self-hosted Talos
+  configuration and machine management platform.
+repo_url: https://github.com/ginsys/bronzeward
+repo_name: ginsys/bronzeward
+# The hook replaces this with the real source path for mounted pages.
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+# No nav: MkDocs derives it from the tree, so a new research report or experiment needs no edit
+# here (the dated file names sort chronologically).
+
+hooks:
+  - scripts/site/hooks.py
+
+# `mkdocs serve` rebuilds on changes to the mounted sources too.
+watch:
+  - README.md
+  - CONTRIBUTING.md
+  - docs-map.yaml
+  - experiments
+  - fixtures/README.md
+  - scripts/site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+    - content.action.view
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      # GitHub's anchors: lower case, punctuation dropped, each space a hyphen (never collapsed),
+      # so `#182-phase-1---configuration-control-...` resolves on the site as it does on GitHub.
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+# There is no 'error' level: `mkdocs build --strict` (mise run site, CI) turns every warning into
+# a failure, so a broken page link or anchor fails the build.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn

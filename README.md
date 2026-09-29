@@ -4,6 +4,8 @@ Bronzeward is a proposed self-hosted Talos configuration and machine management 
 
 The project is at the feasibility and specification stage. The [current design](docs/design/Talos_Configuration_and_Machine_Management_Design.md) describes intended behavior; it is not evidence of implemented guarantees or passing experiments. The [historical discussion](docs/design/research/20260906-design-discussion-and-peer-review.md) preserves context, and the [design transition review](docs/design/Design_Review_v0.4_to_v0.5.md) records the reconciliation.
 
+The design, specification, research reports and experiment READMEs are also published as a browsable site at <https://ginsys.github.io/bronzeward/>, rebuilt from `main` (see [Documentation site](CONTRIBUTING.md#documentation-site)).
+
 Tracking ends at a working configuration-control proof of concept using one database/provider profile selected after investigation:
 
 1. [01 - Feasibility evidence](https://github.com/ginsys/bronzeward/milestone/1): reproducible experiments and reviewed findings.

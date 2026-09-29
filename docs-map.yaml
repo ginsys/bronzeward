@@ -1,0 +1,15 @@
+# Markdown outside docs/ that the site also publishes, read by scripts/site/hooks.py. Files stay
+# where they are and GitHub renders them as before; the site serves a copy at `target`
+# (relative to docs/) with its links rewritten for the new location.
+#
+# `source` is a repository path. `glob` mounts every match; `{dir}` in its target is the name of
+# the matched file's directory.
+mounts:
+  - source: README.md
+    target: index.md
+  - source: CONTRIBUTING.md
+    target: contributing.md
+  - glob: experiments/*/README.md
+    target: experiments/{dir}.md
+  - source: fixtures/README.md
+    target: experiments/fixtures.md

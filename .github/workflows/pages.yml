@@ -1,0 +1,53 @@
+name: Pages
+
+# Publishes the documentation site (mkdocs.yml) from main to https://ginsys.github.io/bronzeward/.
+# The repository's Pages source must be "GitHub Actions"; configure-pages fails with that message
+# otherwise. ci.yml's `site` job runs the same strict build on every PR and merge-queue candidate,
+# so what reaches main has already built. No `paths:` filter: the site also mounts READMEs from
+# across the tree (docs-map.yaml).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deployment at a time; a newer push waits rather than cancelling one mid-deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # main only, so the org's in-cluster runner (ci.yml's rule for own-branch code).
+    runs-on: autops-kube-ginsys
+    timeout-minutes: 10
+    env:
+      NO_MKDOCS_2_WARNING: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet --disable-pip-version-check -r requirements-site.txt
+      - run: mkdocs build --strict
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: autops-kube-ginsys
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

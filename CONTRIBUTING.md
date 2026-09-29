@@ -56,7 +56,7 @@ The [PoC compatibility investigation](https://github.com/ginsys/bronzeward/issue
 4. Have the owner or designated reviewer assess correctness, scope, safety, evidence and documentation. Record findings and resolve them or explicitly record an accepted disposition.
 5. Complete required evidence before seeking readiness or merge authorization. The owner may merge their own PR after review. Agents require explicit authorization to change PR readiness, merge or change branch protection.
 
-Every PR runs the `CI` workflow (documentation checks, `actionlint`, the Go build, vet, format and test checks, `go-db` (the root module's tests against a PostgreSQL service container), conventional-commit subjects, action pins; aggregated as the `checks` context), a Codex review and an advisory Claude review (`PR Review`). Review threads must be resolved before merge. Merges are rebase-only through the merge queue: after review, the owner runs `gh pr merge --auto` and the queue lands the PR once `checks` and `PR Review` report on the merged result. Do not claim CI success without an actual run result. Review and merge are separate actions.
+Every PR runs the `CI` workflow (documentation checks, the [documentation site](#documentation-site) build, `actionlint`, the Go build, vet, format and test checks, `go-db` (the root module's tests against a PostgreSQL service container), conventional-commit subjects, action pins; aggregated as the `checks` context), a Codex review and an advisory Claude review (`PR Review`). Review threads must be resolved before merge. Merges are rebase-only through the merge queue: after review, the owner runs `gh pr merge --auto` and the queue lands the PR once `checks` and `PR Review` report on the merged result. Do not claim CI success without an actual run result. Review and merge are separate actions.
 
 ## Documentation checks
 
@@ -68,11 +68,27 @@ git diff --check
 git diff --cached --check
 ```
 
-With [mise](https://mise.jdx.dev/) installed and `origin/main` fetched, `mise run verify` runs everything the `CI` workflow runs except `go-db`: the documentation check, `actionlint` and `shellcheck`, the commit-lint fixture tests, the whole-tree whitespace check, the conventional-commit check on this branch's commits, the [Go checks](#go-code) and the action-pin check (which clones go-kure/.github into the gitignored `upstream/`). `go-db` needs a database: run `mise run dev-db`, then `mise run go-db`.
+With [mise](https://mise.jdx.dev/) installed and `origin/main` fetched, `mise run verify` runs everything the `CI` workflow runs except `go-db`: the documentation check, the documentation site build, `actionlint` and `shellcheck`, the commit-lint fixture tests, the whole-tree whitespace check, the conventional-commit check on this branch's commits, the [Go checks](#go-code) and the action-pin check (which clones go-kure/.github into the gitignored `upstream/`). `go-db` needs a database: run `mise run dev-db`, then `mise run go-db`.
 
 The verifier reads repository files as UTF-8 and reports file locations relative to the repository root. It checks root guidance and Markdown under `docs/spec/`: inline relative links and anchors, local equivalents of this repository's `blob/main` document links, balanced fenced blocks and trailing whitespace. It also checks issue-form YAML, field names/types/requiredness, disabled blank issues and the CLAUDE delegation.
 
 Link checks cover inline links without titles or spaces in their destinations. Titled and reference-style links are skipped and need manual review. Trailing whitespace is rejected, including Markdown's two-space hard line breaks; use a paragraph break instead. The verifier does not fetch external links, verify live tracker state, fully lint Markdown or validate design semantics. Review changed external references and the actual diff separately; for a committed PR, also run `git diff --check <base-commit>...HEAD` using its actual base commit.
+
+## Documentation site
+
+The documentation is published at <https://ginsys.github.io/bronzeward/>, rebuilt from `main` by the `Pages` workflow on every push. It is a [MkDocs Material](https://squidfunk.github.io/mkdocs-material/) site over `docs/`, configured in `mkdocs.yml` with the toolchain pinned in `requirements-site.txt`. With mise and Python 3.10 or newer (the tasks install the toolchain into the gitignored `.venv-site/`):
+
+```sh
+mise run site        # strict build into site/, as CI runs it
+mise run site:serve  # live preview at http://127.0.0.1:8000
+```
+
+Write documentation for GitHub, as before; the site needs no edits of its own:
+
+- Navigation follows the directory tree, so a new page under `docs/` appears without configuration. Page titles come from each file's first heading.
+- `docs-map.yaml` also publishes Markdown from outside `docs/` (this file, the README as the home page, every experiment README and the fixtures README). A new experiment README is picked up by its glob.
+- `scripts/site/hooks.py` points links at the published copy: a link to a file under `docs/` or to a mounted file, relative or through `blob/main`, becomes a site link, and any other repository file (code, evidence, a directory) becomes its GitHub URL on `main`. Anchors keep GitHub's form.
+- The build runs with `--strict`: a link to a missing page or anchor fails it, and the CI `site` job reports that on the PR.
 
 ## Go code
 
