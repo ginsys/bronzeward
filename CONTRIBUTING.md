@@ -120,4 +120,4 @@ fixtures/bin/up && fixtures/scenarios/s0 run  && fixtures/bin/down   # steps 1, 
 fixtures/bin/up && fixtures/scenarios/s0 walk && fixtures/bin/down   # step 4's denied walk and the identity revocation
 ```
 
-Each run writes its checks to `fixtures/.state/evidence/s0-<mode>-<utc>/s0.tsv`, with the logs they read, and scans that directory for synthetic secrets. `down` deletes `.state`: copy the directory out first to keep it.
+Each run writes its checks to `fixtures/.state/evidence/s0-<mode>-<utc>/s0.tsv`, the commands they ran with their exit statuses to `commands.tsv`, with the logs they read, and scans that directory for synthetic secrets. `down` deletes `.state`: copy the directory out first to keep it.
