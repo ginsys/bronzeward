@@ -850,7 +850,10 @@ source secrets; regenerating needs every reproduction dependency
 The artifact record also carries its encryption dependency, the Transit key by
 an identity the provider cannot reissue together with its version, not by name
 and version alone ([KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation)
-item 1, inferred), and the renderer and contract record of §10.2.
+item 1, inferred): the key's name and the creation time its `keys` map gives for
+that version, as the
+[dependency monitor's classification](dependency-monitor.md#3-classification-procedure)
+reads it (§11). It also carries the renderer and contract record of §10.2.
 
 ## 10. Renderer selection and compatibility limits
 
@@ -971,7 +974,12 @@ Design: [§7.4](../design/Talos_Configuration_and_Machine_Management_Design.md#7
 §6 performs design §7.4 steps 1 and 2. Step 3 is the compiler's: derive the
 redacted review data (§8) and encrypt every full artifact under the artifact
 key with the compiler identity, which can encrypt but not decrypt (PC §2).
-Step 4 is persistence's: the compiler hands over, as one unit, only sanitized
+The key version each encryption used is then classified, with the metadata
+identity, by the
+[dependency monitor's procedure](dependency-monitor.md#3-classification-procedure),
+whose answer also gives the identity §9 records. Anything but `retained`
+refuses publication, as §6 step 3 refuses a source version. Step 4 is
+persistence's: the compiler hands over, as one unit, only sanitized
 or encrypted values:
 
 - release metadata: the import base, source and assignment revisions, the

@@ -50,8 +50,9 @@ the alerts of design §7.8 item 3 and serves both through the API. It takes:
 
 It gives:
 
-- to compilation §6 step 3, the classification procedure of §3, which
-  publication runs afresh for each pinned version;
+- to compilation §6 step 3 and §11, the classification procedure of §3, which
+  publication runs afresh for each pinned version and for its encryption
+  dependency;
 - to PA §9.2, three read routes (§7.2);
 - to execution and recovery, nothing it may rely on for authority (§8).
 
@@ -67,7 +68,9 @@ A **monitored dependency** is one provider object version: a KV path with a
 version, or a Transit key identity with a version. One provider object
 version named by several releases, or by both dependency records of one
 release, is one monitored dependency with one status **(choice §11.2)**. Its
-alerts name every release whose dependency records reference it.
+alerts name every release whose dependency records reference it; §5.2 orders
+a publication against a transition, so no committed release is missing from
+the alert.
 
 Each monitored dependency has a `dep` identifier (PA §2), created when its
 first dependency record is committed. The identifier names the status, not the
@@ -101,11 +104,11 @@ One classification is one provider answer to one request:
 | KV v2 | `destroyed: true` for the version | `lost` | `destroyed` |
 | KV v2 | version below `oldest_version`, when that is above 0 | `lost` | `pruned` |
 | KV v2 | version above `current_version`, or absent from the answer | `unknown` | `insufficient-evidence` |
-| KV v2 | `deletion_time` in the same second as `Date`, or no readable `Date` | `unknown` | `deletion-time-undecidable` |
+| KV v2 | `deletion_time` set, and in the same second as `Date` or with no readable `Date` | `unknown` | `deletion-time-undecidable` |
 | KV v2 | `deletion_time` before `Date` | `blocked` | `soft-deleted` (reversible by undelete) |
 | KV v2 | `deletion_time` after `Date` | `retained` | `deletion-scheduled`, naming the time |
 | KV v2 | no `deletion_time` | `retained` | none |
-| Transit | the key's identity differs from the one the dependency record carries (compilation §9) | `unknown` | `identity-mismatch` **(choice §11.10)** |
+| Transit | the recorded version is in the key's `keys` map with a creation time other than the one the dependency record carries (compilation §9) | `unknown` | `identity-mismatch` **(choice §11.10)** |
 | Transit | `soft_deleted` anything but `false` | `unknown` | `soft-delete-unobserved` |
 | Transit | `min_available_version`, `min_decryption_version` or `latest_version` missing | `unknown` | `insufficient-evidence` |
 | Transit | version below `min_available_version`, when that is above 0 | `lost` | `trimmed` |
@@ -113,8 +116,14 @@ One classification is one provider answer to one request:
 | Transit | version above `latest_version` | `unknown` | `insufficient-evidence` |
 | Transit | otherwise | `retained` | none |
 
-Transit's `keys` map is not used for any class: it hides trimmed and blocked
-versions alike (RC §3.1).
+A Transit key's identity is its name together with the creation time its
+`keys` map gives for the recorded version **(choice §11.12)**: a key deleted
+and recreated under the same name gives its versions new creation times
+([KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation)
+item 1, inferred). Publication records it from its own classification (§5.2).
+The `keys` map decides no floor, since it hides trimmed and blocked versions
+alike (RC §3.1); a version absent from it has its identity unchecked, and the
+floor rows classify it.
 
 A 404 is `unknown` and never `lost`. OpenBao answers a deleted Transit key, a
 KV path whose metadata was deleted and a name that never existed alike, with no
@@ -150,12 +159,13 @@ stores or serves can carry one. RC row 057 showed the metadata token refused
 
 ### 5.1 Records
 
-Two tables, both in PA §3:
+Three tables, all in PA §3:
 
 | Entity | Kind | Holds |
 | --- | --- | --- |
 | DependencyStatus | mutable, row-locked | `dep` identifier; provider object and version; class and reason; when it was first recorded `retained`; since when it has been `unknown`, if it is; when its last `persistent` alert was raised; the scheduled deletion time last warned; the database time the latest recorded classification's request began (`observed_from`); the answer's `Date`, if any |
-| DependencyAlert | immutable | `dal` identifier; the `dep` identifier; kind (§6.2); class and reason; provider object and version; the releases referencing it; `observed_from` and `Date`; epoch; time recorded |
+| DependencyAlert | immutable | `dal` identifier; recording sequence; the `dep` identifier; kind (§6.2); class and reason; provider object and version; the releases referencing it; `observed_from` and `Date`; epoch; time recorded. A `monitor-stalled` alert concerns no dependency: its `dep` identifier, provider object, version, class, reason, releases, `observed_from` and `Date` are empty |
+| DependencyMonitor | mutable singleton, row-locked | the monitor's last progress (§6.3); its last completed pass; when it last raised `monitor-stalled`; the recording sequence of the last alert logged (§7.1) |
 
 A DependencyStatus row is updated only under its row lock, in a transaction
 that holds no provider request (PA §5 rule 1): the provider is asked first,
@@ -165,11 +175,22 @@ then the transaction records the answer.
 
 Publication's commit transaction (PA §6.2, T3) inserts a DependencyStatus row
 for each provider object version its dependency records name that has none,
-with class `retained`, first seen `retained` at the time compilation §6 step 3
-began that version's classification, and `observed_from` equal to that time
-**(choice §11.3)**. A version that already has a row keeps it. Compilation
-refuses every version that is not `retained` (compilation §6 step 3), so every
-seeded row is `retained`.
+with class `retained`, first seen `retained` at the time publication began
+that version's classification, and `observed_from` equal to that time
+**(choice §11.3)**. A version that already has a row keeps it. Publication
+classifies every pinned version (compilation §6 step 3) and, once the artifact
+is encrypted, its encryption dependency (compilation §11), recording the
+Transit identity of §3 from that answer. It refuses every version that is not
+`retained`, so every seeded row is `retained`.
+
+Before its inserts, T3 locks the existing DependencyStatus rows of the versions
+it names `FOR SHARE`, in `dep` order. A row whose class is not `retained` and
+whose `observed_from` is later than the time publication began that version's
+classification refuses the publication, as compilation §6 step 3 refuses a
+version. The monitor reads a dependency's referencing releases after taking its
+row lock (§6.1 step 4). A transition and a publication naming the same version
+are therefore ordered: either the publication sees the transition and is
+refused, or the transition's alert names the release.
 
 Without this seed, a dependency lost between publication and the monitor's
 first pass would be a dependency never seen `retained`, alerted after 15
@@ -192,7 +213,9 @@ each, it:
    row's `observed_from` is later than this one's, another instance recorded a
    newer classification: this one is discarded. Otherwise it records the class
    and raises, in the same transaction, the alerts of §6.2 the change calls
-   for.
+   for, naming the releases that reference the dependency as read after the
+   lock. Either way, it then locks the DependencyMonitor row and records its
+   progress (§6.3).
 
 A pass starts 60 seconds after the previous one started, or at once if the
 previous one took longer **(choice §11.4)**. "At once" in design §7.8 means
@@ -212,10 +235,10 @@ configurable.
 | --- | --- | --- |
 | any class to `lost` | `lost` | at once, once per entry into `lost` |
 | any class to `blocked` | `blocked` | at once, once per entry into `blocked`; the alert states that the block is reversible and how (reason, §3) |
-| `retained` to `unknown` | `regression` | at once; the alert states that a 404 may be a deletion or a restore older than the database (PA §6.3) |
+| `retained` or `blocked` to `unknown` | `regression` | at once; the alert states that a 404 may be a deletion or a restore older than the database (PA §6.3) |
 | `unknown` for 15 minutes since `unknown_since`, including a dependency never recorded `retained` | `persistent` | at 15 minutes, then every 15 minutes while it stays `unknown` **(choice §11.6)** |
 | `retained` with a scheduled deletion time not yet warned | `deletion-scheduled` | at once, once per distinct scheduled time |
-| no completed pass for three intervals | `monitor-stalled` | §6.3 |
+| no progress for three intervals | `monitor-stalled` | §6.3 |
 
 `unknown_since` is set when the class becomes `unknown` and cleared when it
 leaves `unknown`. A dependency leaving `blocked`, `lost` or `unknown` for
@@ -225,14 +248,19 @@ through `regression` and `persistent`.
 
 ### 6.3 Silence is not health
 
-Every completed pass records its completion time. When no pass has completed
-for three intervals, the instance that notices raises one `monitor-stalled`
-alert, recorded in the same way under the lock of a singleton row, and raises
-it again after each further three intervals without a completed pass
-**(choice §11.8)**. The read routes (§7.2) serve the last completed pass's
-time and mark every served class `stale` beyond three intervals, so a reader
-never takes an old classification for a current one (design §15.3). A server
-that is down raises nothing: its liveness probe is the deployment's to watch.
+Each step 4 of §6.1, recorded or discarded, and each completed pass record
+the database time as the monitor's progress on the DependencyMonitor row, and
+a completed pass records its completion time. A pass slowed by request
+timeouts, as during a partition, still progresses. When there has been no
+progress for three intervals, the instance that notices raises one
+`monitor-stalled` alert, recorded under that row's lock, and raises it again
+after each further three intervals without progress **(choice §11.8)**.
+
+The read routes (§7.2) serve the last completed pass's time, and mark a served
+class `stale` when its own `observed_from` is more than three intervals before
+the database's time, so a reader never takes an old classification for a
+current one (design §15.3), a seeded one included. A server that is down
+raises nothing: its liveness probe is the deployment's to watch.
 
 ## 7. Delivery
 
@@ -242,13 +270,20 @@ metrics endpoint and push delivery are not part of the PoC.
 
 ### 7.1 The log line and the record
 
-The transaction of §6.1 step 4 inserts the DependencyAlert row. After it
-commits, the instance writes one log line with the stable event name
+The transaction of §6.1 step 4 inserts the DependencyAlert row; the row is the
+record. After it commits, and at the start of every pass, the instance logs
+the alerts not yet logged. In one transaction, it locks the DependencyMonitor
+row and writes, in recording order, one log line per alert whose sequence is
+above the row's last logged one. Each line has the stable event name
 `dependency-alert` and the row's fields: the `dal` and `dep` identifiers,
 kind, class, reason, provider object and version, and the referencing
-releases. A process that dies between the commit and the log line leaves the
-row, which is the record; the log line is how an operator's log alerting
-learns of it. Neither carries a value (§4).
+releases. The same transaction then advances the last logged sequence.
+
+A process that dies after an alert commits but before its line leaves the
+alert above the last logged sequence, and the next instance to log writes it.
+A process that dies after writing lines but before advancing writes them
+again: delivery is at least once, and the `dal` identifier tells a repeat.
+Neither the line nor the row carries a value (§4).
 
 ### 7.2 Read routes
 
@@ -291,6 +326,8 @@ For a database restored to a backup taken at time *T* (PA §12.3):
 - DependencyStatus is as at *T*. A dependency recorded `retained` that now
   answers 404 raises `regression` on the first pass (PA §6.3, §13.3).
 - DependencyAlert rows after *T* are absent. Their log lines remain.
+- The DependencyMonitor row is as at *T*; the first pass logs nothing twice,
+  since the alerts after *T* are gone.
 - `dep` and `dal` identifiers issued after *T* are absent and never reissued
   (PA §2).
 
@@ -332,10 +369,24 @@ fail:
    transition raise one alert. Control: without the row lock, two.
 7. **Silence**: passes stopped by an injected hang raise `monitor-stalled`
    after three intervals, and the routes serve `stale`. Control: a pass
-   completing within the bound raises nothing.
-8. **Publication refused** for a pinned version that is `blocked`, `lost` or
-   `unknown` (compilation §6 step 3), and **no dispatch admitted by a retained
-   class** (execution and recovery §3.1).
+   slowed past three intervals by request timeouts raises nothing, and
+   measuring from completed passes instead of progress raises it there.
+8. **Publication refused** for a pinned version or an encryption dependency
+   that is `blocked`, `lost` or `unknown` (compilation §6 step 3, §11), and
+   **no dispatch admitted by a retained class** (execution and recovery §3.1).
+9. **A recreated Transit key** under the same name classifies
+   `identity-mismatch`. Control: comparing the name and version alone
+   classifies it `retained`.
+10. **A publication racing a transition**: a publication naming a monitored
+    version while the monitor records its change from `retained` is refused,
+    or is named by the alert. Control: without T3's `FOR SHARE` lock, the
+    release commits and the alert omits it.
+11. **The log after a crash**: a process stopped between an alert's commit
+    and its log line has the line written by the next instance to log.
+    Control: without the last logged sequence, the line is never written.
+12. **Stale per dependency**: a seeded status whose `observed_from` is older
+    than three intervals is served `stale` while passes complete. Control:
+    deriving `stale` from the last completed pass serves it as current.
 
 Items 2, 3 and 8's publication refusal are acceptance-plan S2's negative
 controls and S7's variants; the rest run as *checks*
@@ -349,9 +400,11 @@ controls and S7's variants; the rest run as *checks*
   because its reversibility was never observed.
 - **The same-second window** was not captured; its row rests on RC's rule
   checks. Clock skew between hosts was not produced.
-- **A recreated Transit key** under the same name was not produced, and the
-  field of the Transit answer that carries the identity compilation §9 records
-  is compilation §9's to fix (KL §7 item 1, inferred).
+- **The Transit identity** rests on KL's inference (KL §7 item 1): no report
+  captured the `keys` map's creation times, and a key recreated under the same
+  name was not classified. A key recreated within the same second as the lost
+  version gives the same identity, and a version hidden below the decryption
+  floor has its identity unchecked (§3).
 - **Read-only policy.** RC's metadata token also held `list`; this contract
   drops it, since the procedure never lists, and item 5 of §10.1 is the first
   evidence that `read` alone suffices.
@@ -362,7 +415,9 @@ controls and S7's variants; the rest run as *checks*
 ## 11. Choices for owner review
 
 Each is marked in place as **(choice §11.n)**. Owner decision, 2026-09-29
-(ginsys/bronzeward#67): every choice below stands as written.
+(ginsys/bronzeward#67): choices 1 to 11 stand as written. Choice 12, and
+choice 8's measure by progress, answer that pull request's review and await
+the owner's review.
 
 1. **A document of its own** rather than a section of the persistence and API
    contract, whose section numbers the acceptance plan cites. Alternative: a
@@ -383,8 +438,10 @@ Each is marked in place as **(choice §11.n)**. Owner decision, 2026-09-29
 7. **Every instance runs the monitor**, deduplicated by the status row lock
    (§6.1). Alternative: one elected instance, which needs a lease and its
    failover.
-8. **`monitor-stalled` after three intervals** (§6.3). Alternative: one
-   interval, alerting on a single slow pass.
+8. **`monitor-stalled` after three intervals without progress** (§6.3).
+   Alternatives: one interval, alerting on a single slow classification; or
+   three intervals without a completed pass, which alerts on a pass merely
+   slowed by timeouts.
 9. **The metadata identity holds `read` only**, no `list` (§4). Alternative:
    RC's policy with `list`, which the procedure never uses.
 10. **A Transit identity mismatch is `unknown`**, alerted as a regression if
@@ -393,13 +450,17 @@ Each is marked in place as **(choice §11.n)**. Owner decision, 2026-09-29
 11. **Publication classifies afresh** rather than reading the status (§8).
     Alternative: trust a status younger than one interval, saving a request
     per pinned version but admitting a version lost since the last pass.
+12. **The Transit identity is the version's creation time** from the key's
+    `keys` map (§3). Alternatives: name and version alone, which cannot tell
+    a recreated key; or leave the identity unfixed, which leaves the
+    `identity-mismatch` row unimplementable.
 
 ## 12. Traceability
 
 | Clause | Design | Evidence |
 | --- | --- | --- |
 | §2 monitored dependencies | §7.5, §7.8 item 1 | compilation §9 |
-| §3 classification | §7.6 | [RC §3.1](../design/research/20260924-retention-metadata-classification.md#31-rules-classifier-rows), RC §5.6, RC §6.1, RC §6.2, RC §6.4 |
+| §3 classification | §7.6 | [RC §3.1](../design/research/20260924-retention-metadata-classification.md#31-rules-classifier-rows), RC §5.6, RC §6.1, RC §6.2, RC §6.4; KL §7 item 1 |
 | §4 metadata identity | §7.6, §13.2 | RC §6.3 row 057; [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) |
 | §5 state, seeding | §7.6, §7.8 | RC §8 item 1 |
 | §6 passes, alerts | §7.8 item 3, §15.3 | RC §6.2 row 043; RC §6.4 |

@@ -226,6 +226,7 @@ that the trigger fires **(choice §17.3)**.
 | Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity | compilation §9 |
 | DependencyStatus | mutable | last classification per provider object version and when first seen `retained` | design §7.6, §7.8; [dependency monitor §5](dependency-monitor.md#5-state) |
 | DependencyAlert | immutable | every alert the dependency monitor raises | [dependency monitor §6.2](dependency-monitor.md#62-alert-kinds) |
+| DependencyMonitor | mutable singleton | the monitor's progress, last completed pass, last stall alert and last logged alert | [dependency monitor §5.1](dependency-monitor.md#51-records) |
 | Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload; for a draft entry route, the principal and idempotency key (§7.2) | compilation §3 |
 | MachineState | mutable, revisioned | Desired, Applied (with source), baseline revision | execution and recovery (Desired, Applied and Observed) |
 | Observation | immutable | purpose, read-start basis, machine revision, identity, assignment evidence, running version, configuration digest, health, or what could not be read | execution and recovery §4.1 |
@@ -605,6 +606,11 @@ SELECT id, digest FROM release
   -- for each machine whose assignment head is in $changed:
   --   no operation on its scope is committed, sending, verifying or unresolved;
   --   in recovery mode, its scope released in the current epoch
+SELECT class, observed_from FROM dependency_status
+ WHERE (provider_object, version) IN ($named) ORDER BY id FOR SHARE;
+  -- a class other than `retained` observed after publication began that
+  -- version's classification refuses the publication, as compilation §6
+  -- step 3 does (dependency monitor §5.2)
 INSERT INTO release ...;             -- unique (draft_id, draft_revision)
 INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
                                      -- configuration digest, review data
@@ -1754,6 +1760,7 @@ For a database restored to a backup taken at time *T*:
 | Tokens revoked after *T* | valid again in the rows | refused anyway: earlier epoch |
 | `DependencyStatus` | as at *T* | a dependency recorded `retained` and now answering 404 alerts at once as a regression (§6.3) |
 | `DependencyAlert` after *T* | absent | their log lines remain ([dependency monitor §9](dependency-monitor.md#9-restored-state)) |
+| `DependencyMonitor` | as at *T* | nothing logged twice: the alerts after *T* are absent |
 
 The automation-token rule costs a reissue of every service identity's token
 after each restore. It is the only way this contract finds to refuse a token
