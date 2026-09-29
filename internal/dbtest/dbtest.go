@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -61,6 +62,24 @@ func New(t testing.TB) (*sql.DB, string) {
 		t.Fatal(err)
 	}
 	return db, dsn
+}
+
+// WaitForLockWait polls until some session of this database waits on a lock.
+func WaitForLockWait(t testing.TB, db *sql.DB) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("no session started waiting on a lock within 10s")
 }
 
 // testDSN is admin with its database replaced by name. It refuses a DSN where pgx would connect

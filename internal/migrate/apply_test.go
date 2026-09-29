@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -61,24 +60,6 @@ func tableExists(t *testing.T, db *sql.DB, name string) bool {
 		t.Fatal(err)
 	}
 	return ok
-}
-
-// waitForLockWait polls until some session of this database waits on a lock.
-func waitForLockWait(t *testing.T, db *sql.DB) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		var n int
-		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		if n > 0 {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("no session started waiting on a lock within 10s")
 }
 
 func sqlState(err error) string {
@@ -169,7 +150,7 @@ func TestSecondRunWaitsThenSkips(t *testing.T) {
 		secondGot, err = Apply(ctx, db, synthetic(1))
 		second <- err
 	}()
-	waitForLockWait(t, db)
+	dbtest.WaitForLockWait(t, db)
 	close(release)
 	if err := <-second; err != nil {
 		t.Fatalf("second run: %v", err)
@@ -197,7 +178,7 @@ func TestNoLockControl(t *testing.T) {
 		_, err := apply(ctx, db, synthetic(1), options{noLock: true})
 		second <- err
 	}()
-	waitForLockWait(t, db)
+	dbtest.WaitForLockWait(t, db)
 	close(release)
 	err := <-second
 	if code := sqlState(err); code != "23505" && code != "42P07" {
