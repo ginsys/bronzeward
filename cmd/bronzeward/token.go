@@ -97,7 +97,10 @@ func runToken(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(stdout, is.Token)
+		// The printed token is its only copy, and the transaction has committed.
+		if _, err := fmt.Fprintln(stdout, is.Token); err != nil {
+			return fmt.Errorf("identity %s: token %s was issued but not printed (%w); rotate it to get a usable one", is.Identity, is.TokenID, err)
+		}
 		fmt.Fprintf(stderr, "identity %s: token %s expires %s; it is shown once, above\n",
 			is.Identity, is.TokenID, is.Expires.UTC().Format(time.RFC3339))
 		return nil
