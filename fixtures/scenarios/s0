@@ -1,0 +1,375 @@
+#!/usr/bin/env bash
+# Acceptance plan S0 end to end against the fixture. `run`: steps 1, 2, 3 and 5 and the schema
+# negative controls; `walk`: step 4's denied walk and the identity revocation it ends with. Each
+# check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s0.tsv in
+# the evidence directory and to stdout; the directory is then scanned by bin/evidence. Exit 1 on
+# any FAIL.
+# Usage: scenarios/s0 run|walk   (each on a fresh fixtures/bin/up; run needs mise run go-db's database)
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+s0_mode=${1:-}
+case $s0_mode in run | walk) ;; *) die "usage: scenarios/s0 run|walk" ;; esac
+need docker curl jq timeout id sleep
+need_state
+# No fixture lock of its own: bw, seed, inject and evidence each take the one they need.
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+EV=$STATE/evidence/s0-$s0_mode-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV"
+failed=0
+
+# result PASS|FAIL|SKIP <reference> <what>. No line carries a token or a response value.
+result() {
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3" | tee -a "$EV/s0.tsv"
+  [ "$1" != FAIL ] || failed=$((failed + 1))
+}
+# check <reference> <what> <command...>: PASS when the command succeeds.
+check() {
+  local ref=$1 what=$2
+  shift 2
+  if "$@"; then result PASS "$ref" "$what"; else result FAIL "$ref" "$what"; fi
+}
+
+# mint <human> [defect]: an access token for the issuer A trusts, from its key, by the oidc binary
+# of the image up built. Minted offline: the issuer is not published.
+oidc() {
+  timeout "$REQUEST_LIMIT" docker run --rm --pull never --network none --user "$(id -u):$(id -g)" \
+    --label "$TOOL_LABEL" -v "$STATE/issuer:/etc/oidc:ro" --entrypoint /oidc "$image_id" "$@"
+}
+mint() {
+  local defect=()
+  [ -z "${2:-}" ] || defect=(-defect "$2")
+  oidc mint -key /etc/oidc/key.json -issuer http://issuer:5556 -human "$1" "${defect[@]}"
+}
+
+# call <method> <path> <token> [body] [idempotency key]: the status of a request to A on its
+# published port, 000 when nothing answers; the response body is left in $EV/last.body. The token
+# goes over stdin: a command line is readable by any local user.
+call() {
+  local method=$1 path=$2 token=$3 body=${4:-} key=${5:-} args=()
+  [ -z "$body" ] || args+=(--header 'Content-Type: application/json' --data-binary "$body")
+  [ -z "$key" ] || args+=(--header "Idempotency-Key: $key")
+  { [ -z "$token" ] || printf 'Authorization: Bearer %s\n' "$token"; } |
+    command curl --disable --noproxy '*' --silent --max-time 10 --output "$EV/last.body" --write-out '%{http_code}' \
+      --header @- --request "$method" "${args[@]}" "http://127.0.0.1:$SERVER_A_PORT$path" || true
+}
+# answers <status> <problem code or -> <call args...>: the request gets that status and, unless
+# -, a problem document of that code. Says what it got otherwise.
+last_status=
+answers() {
+  local want=$1 code=$2 got
+  shift 2
+  got=$(call "$@")
+  last_status=$got
+  if [ "$got" != "$want" ]; then
+    say "s0: $1 $2: $got, want $want"
+    return 1
+  fi
+  [ "$code" = - ] || jq -e --arg t "urn:bronzeward:problem:$code" '.type == $t' "$EV/last.body" >/dev/null || {
+    say "s0: $1 $2: $got without the problem $code"
+    return 1
+  }
+}
+# answers_with <jq filter> <status> <problem code or -> <call args...>: as answers, and the body
+# also satisfies the filter.
+answers_with() {
+  local filter=$1
+  shift
+  answers "$@" || return 1
+  jq -e "$filter" "$EV/last.body" >/dev/null || {
+    say "s0: $3 $4: the body does not satisfy $filter"
+    return 1
+  }
+}
+
+# set_denied <YAML flow sequence>: A's deniedSubjects, through a partial name. The configuration
+# directory is bind-mounted: A reads it at its next start.
+set_denied() {
+  local cfg=$STATE/server/a/config.yaml line
+  while IFS= read -r line; do
+    if [[ $line == '  deniedSubjects:'* ]]; then printf '  deniedSubjects: %s\n' "$1"; else printf '%s\n' "$line"; fi
+  done <"$cfg" >"$cfg.partial"
+  grep --quiet --line-regexp --fixed-strings -- "  deniedSubjects: $1" "$cfg.partial" || die "no deniedSubjects line in $cfg"
+  mv --no-target-directory -- "$cfg.partial" "$cfg"
+}
+restart_a() { "$bin/inject" kill A >/dev/null && "$bin/inject" start A >/dev/null; }
+
+# issue <name> [token flags]: a new automation identity; its token in $issued_token, its idn in
+# $issued. Globals, not stdout: a command substitution would run it in a subshell, and the identity
+# would never reach the caller.
+issued='' issued_token=''
+issue() {
+  local name=$1 err tok
+  shift
+  err=$(mktemp "$STATE/s0-issue.XXXXXX")
+  if ! tok=$("$bin/bw" token issue -name "$name" -roles author -responsible h-all -operator h-all "$@" 2>"$err"); then
+    say "s0: bw token issue $name: $(tail -n 1 "$err")"
+    rm -f -- "$err"
+    return 1
+  fi
+  issued=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$err")
+  rm -f -- "$err"
+  issued_token=$tok
+  [ -n "$issued" ] && [ -n "$tok" ]
+}
+
+# migrate_twice: two bw migrate at once; one applies every migration and one finds none left.
+migrate_twice() {
+  local rc1=0 rc2=0 m1 m2 applied
+  "$bin/bw" migrate >"$EV/migrate-1.log" 2>&1 &
+  m1=$!
+  "$bin/bw" migrate >"$EV/migrate-2.log" 2>&1 &
+  m2=$!
+  wait "$m1" || rc1=$?
+  wait "$m2" || rc2=$?
+  applied=$(cat "$EV/migrate-1.log" "$EV/migrate-2.log" | { grep '^applied ' || true; } | LC_ALL=C sort | tr '\n' '|')
+  [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$applied" = 'applied [1 2 3]|applied []|' ]
+}
+
+# logged <name> <command...>: from the repository root, output to $EV/<name>.log.
+logged() {
+  local name=$1
+  shift
+  (cd -- "$FIXTURES/.." && timeout 1800 "$@") >"$EV/$name.log" 2>&1
+}
+# go_controls_ran: the advisory-lock controls, against go-db's database, as go-db runs them: without
+# a database they would skip, and a skip is not a PASS line.
+go_controls_ran() {
+  logged advisory-lock-control env "BW_TEST_PG_DSN=${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}" \
+    BW_REQUIRE_PG=1 mise exec -- go test -count=1 -run 'TestNoLockControl|TestInstallNoLockControl' -v ./internal/migrate/ &&
+    grep --quiet -- '--- PASS: TestNoLockControl' "$EV/advisory-lock-control.log" &&
+    grep --quiet -- '--- PASS: TestInstallNoLockControl' "$EV/advisory-lock-control.log"
+}
+
+# schema_control <n> <what> <SQL> <migrate refusal> <serve refusal>: with A stopped, the database
+# changed by SQL between a snapshot and its restore: bw migrate refuses naming the change, A's
+# start fails and A's own log names it. Put back from the snapshot, whatever the checks found.
+schema_control() {
+  local n=$1 what=$2 sql=$3 migrate_says=$4 serve_says=$5 rc=0 a_id running
+  "$bin/inject" db-snapshot "s0-ctl-$n" >/dev/null || { result FAIL 'S0 negative control' "$what: snapshot"; return; }
+  if pg psql -U bronzeward -d bronzeward -v ON_ERROR_STOP=1 -Atc "$sql" >/dev/null; then
+    "$bin/bw" migrate >"$EV/ctl-$n-migrate.log" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ] && grep --quiet -- "$migrate_says" "$EV/ctl-$n-migrate.log"; then
+      result PASS 'S0 negative control, PA §11' "$what: bw migrate refuses"
+    else
+      result FAIL 'S0 negative control, PA §11' "$what: bw migrate refuses (exit $rc)"
+    fi
+    rc=0
+    "$bin/inject" start A >"$EV/ctl-$n-start.log" 2>&1 || rc=$?
+    a_id=$(container_id "$BW_A") || die "A is no longer the container up recorded"
+    docker logs "$a_id" >"$EV/ctl-$n-a.log" 2>&1 || true
+    running=$(docker inspect --format '{{.State.Running}}' "$a_id") || running=unknown
+    if [ "$rc" -ne 0 ] && [ "$running" = false ] && grep --quiet -- "$serve_says" "$EV/ctl-$n-a.log"; then
+      result PASS 'S0 negative control, PA §11' "$what: A does not start, and says why"
+    else
+      result FAIL 'S0 negative control, PA §11' "$what: A does not start, and says why (start exit $rc, running $running)"
+    fi
+    [ "$running" = false ] || "$bin/inject" kill A >/dev/null
+  else
+    result FAIL 'S0 negative control' "$what: the change could not be made"
+  fi
+  "$bin/inject" db-restore "s0-ctl-$n" >/dev/null || die "the database could not be put back from s0-ctl-$n; run fixtures/bin/down"
+}
+
+run() {
+  # Step 1: the suites, and the advisory-lock negative control as the Go test (ruling 5).
+  check 'S0 step 1' 'mise run verify' logged step1-verify mise run verify
+  check 'S0 step 1' 'mise run go-db (a missing database fails)' logged step1-go-db mise run go-db
+  check 'S0 step 1, negative control' 'advisory lock removed: TestNoLockControl and TestInstallNoLockControl' go_controls_ran
+
+  # Step 2: two migrations at once apply once; A starts on the schema.
+  check 'S0 step 2' 'two bw migrate at once: one applies [1 2 3], the other []' migrate_twice
+  check 'S0 step 2' 'inject start A' "$bin/inject" start A
+  check 'S0 step 2' 'A answers /livez' answers 204 - GET /livez ''
+
+  # Step 3: authentication.
+  "$bin/seed" >/dev/null || die "bin/seed failed"
+  local robot robot_id viewer d tok old new
+  robot=$(cat -- "$STATE/automation-token")
+  robot_id=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$STATE/automation-identity")
+  viewer=$(mint h-viewer) || die "cannot mint a viewer token"
+  check 'S0 step 3' 'OIDC token of h-viewer accepted (control)' answers 200 - GET /api/v1/acts "$viewer"
+  check 'S0 step 3' 'automation token accepted (control)' answers 200 - GET /api/v1/acts "$robot"
+  check 'S0 step 3' 'no credential: 401' answers 401 unauthenticated GET /api/v1/acts ''
+  # Read first and counted: a listing that failed would otherwise run no defect at all and pass.
+  local defects
+  defects=$(oidc defects) || die "cannot list the issuer's token defects"
+  [ "$(wc -l <<<"$defects")" -ge 19 ] || die "the issuer lists fewer defects than the 19 of persistence-api.md §10.1 and Bronzeward's rules"
+  for d in $defects; do
+    if tok=$(mint h-viewer "$d"); then
+      check 'S0 step 3' "OIDC token, defect $d: 401" answers 401 unauthenticated GET /api/v1/acts "$tok"
+    else
+      result FAIL 'S0 step 3' "OIDC token, defect $d: could not be minted"
+    fi
+  done
+  check 'S0 step 3' 'automation token, malformed: 401' answers 401 unauthenticated GET /api/v1/acts 'bwt_malformed'
+  check 'S0 step 3' 'automation token, unknown token id: 401' \
+    answers 401 unauthenticated GET /api/v1/acts "bwt_tok_aaaaaaaaaaaaaaaaaaaaaaaaaa.${robot##*.}"
+  check 'S0 step 3' 'automation token, wrong secret: 401' \
+    answers 401 unauthenticated GET /api/v1/acts "${robot%%.*}.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  if issue ci-s0-rot && old=$issued_token && new=$("$bin/bw" token rotate -identity "$issued" -operator h-all 2>>"$EV/token-rotate.log") && [ -n "$new" ]; then
+    check 'S0 step 3' 'automation token, rotated out: 401' answers 401 unauthenticated GET /api/v1/acts "$old"
+    check 'S0 step 3' 'automation token, its replacement: 200 (control)' answers 200 - GET /api/v1/acts "$new"
+  else
+    result FAIL 'S0 step 3' 'automation token, rotated out: issue or rotate failed'
+  fi
+  # checkExpiry accepts any positive lifetime; 2s, then 3s later.
+  if issue ci-s0-exp -expires 2s; then
+    tok=$issued_token
+    sleep 3
+    check 'S0 step 3' 'automation token, expired: 401' answers 401 unauthenticated GET /api/v1/acts "$tok"
+  else
+    result FAIL 'S0 step 3' 'automation token, expired: issue failed'
+  fi
+  if issue ci-s0-denied; then
+    tok=$issued_token
+    check 'S0 step 3' 'automation token, before deniedSubjects lists it: 200 (control)' answers 200 - GET /api/v1/acts "$tok"
+    set_denied "[{identity: $issued}]"
+    restart_a || die "A did not come back with its identity in deniedSubjects"
+    check 'S0 step 3' 'automation token, listed in deniedSubjects: 403 identity-revoked' \
+      answers 403 identity-revoked GET /api/v1/acts "$tok"
+    set_denied '[]'
+    restart_a || die "A did not come back with deniedSubjects emptied"
+    check 'S0 step 3' 'automation token, deniedSubjects emptied again: 200' answers 200 - GET /api/v1/acts "$tok"
+  else
+    result FAIL 'S0 step 3' 'automation token, denied: issue failed'
+  fi
+  result SKIP 'S0 step 3, ruling 4' 'automation token from an earlier epoch: no route enters recovery mode before ginsys/bronzeward#29; internal/auth TestAutomationExpiredRevokedEarlierEpoch covers the refusal'
+
+  # Step 5: no route dispatches, issues tokens or grants roles.
+  local all
+  all=$(mint h-all) || die "cannot mint an h-all token"
+  for tok in "$all" "$robot"; do
+    who='h-all'
+    [ "$tok" = "$all" ] || who='automation'
+    check 'S0 step 5' "$who: POST /api/v1/dispatch is 404" answers 404 not-found POST /api/v1/dispatch "$tok" '{}' s0-step5-dispatch-key
+    check 'S0 step 5' "$who: POST /api/v1/tokens is 404" answers 404 not-found POST /api/v1/tokens "$tok" '{}' s0-step5-tokens-key00
+    check 'S0 step 5' "$who: PUT /api/v1/principals/<idn>/roles is 404" \
+      answers 404 not-found PUT "/api/v1/principals/$robot_id/roles" "$tok" '{}' s0-step5-roles-key000
+  done
+
+  # Negative controls: a schema version the binary does not know, and an applied migration's
+  # checksum changed (the immutability trigger held off for the one statement).
+  "$bin/inject" kill A >/dev/null
+  schema_control 1 'unknown schema version 4' \
+    "INSERT INTO schema_migrations VALUES (4, 'unknown', 'x', now())" \
+    'migrations \[4\] this binary does not know' 'migrations \[4\] are applied but unknown'
+  schema_control 2 'checksum of migration 1 changed' \
+    "SET session_replication_role = replica; UPDATE schema_migrations SET checksum = 'x' WHERE version = 1" \
+    'migration 1 (.*edited after it was applied' 'migrations \[1\] were applied with another name or checksum'
+  check 'S0 negative control' 'restored: A starts again' "$bin/inject" start A
+  check 'S0 negative control, PA §10.3' 'restored: automation on a human-only route is 403 forbidden, humanOnly' \
+    answers_with '.humanOnly == true' 403 forbidden POST /api/v1/clusters "$robot" '{}' s0-ctl-cluster-key00
+}
+
+# Well-formed identifiers whose records need not exist (all-zero bits are well formed).
+zero=aaaaaaaaaaaaaaaaaaaaaaaaaa
+fill() {
+  local p=$1 id=drf_$zero
+  case $p in
+    /plans/*) id=pln_$zero ;;
+    /approvals/*) id=apr_$zero ;;
+    /machines/*) id=mch_$zero ;;
+    /operations/*) id=op_$zero ;;
+    /ingestions/*) id=ing_$zero ;;
+  esac
+  p=${p//\{id\}/$id}
+  p=${p//\{name\}/base}
+  p=${p//\{machine\}/mch_$zero}
+  p=${p//\{attempt\}/att_$zero}
+  printf '/api/v1%s\n' "$p"
+}
+
+walk() {
+  check 'S0 step 4' 'bw migrate' "$bin/bw" migrate
+  check 'S0 step 4' 'inject start A' "$bin/inject" start A
+  "$bin/seed" >/dev/null || die "bin/seed failed"
+  local robot h who method pattern tok code principals rows=0
+  robot=$(cat -- "$STATE/automation-token")
+  declare -A t
+  for h in h-author h-publisher h-approver h-recovery h-viewer h-all; do
+    t[$h]=$(mint "$h") || die "cannot mint a token for $h"
+  done
+  t[automation]=$robot
+  principals=$(pg psql -U bronzeward -d bronzeward -Atc 'select count(*) from principal') || die "cannot count principals"
+  # The rows design §13.7 says role alone denies, then automation on every human-only route (16).
+  printf 'who\tmethod\tpath\tstatus\tproblem\n' >"$EV/walk.tsv"
+  while read -r who method pattern; do
+    rows=$((rows + 1))
+    check 'S0 step 4' "$who $method $pattern: 403 forbidden" \
+      answers 403 forbidden "$method" "$(fill "$pattern")" "${t[$who]}" '{}' s0-walk-key-000000
+    printf '%s\t%s\t%s\t%s\t%s\n' "$who" "$method" "$pattern" "$last_status" \
+      "$(jq -r '.type // "-"' "$EV/last.body" 2>/dev/null || echo -)" >>"$EV/walk.tsv"
+  done <<'EOF'
+h-author POST /drafts/{id}/publications
+h-viewer PUT /drafts/{id}/fragments/{name}
+h-viewer POST /drafts/{id}/publications
+h-approver POST /plans
+automation POST /plans/{id}/approvals
+h-recovery POST /plans/{id}/approvals
+automation POST /approvals/{id}/revocations
+h-author POST /approvals/{id}/revocations
+h-publisher POST /approvals/{id}/revocations
+h-approver POST /identity-revocations
+h-viewer POST /machines/{id}/freezes
+h-author POST /machines/{id}/unfreezes
+h-publisher POST /machines/{id}/unfreezes
+h-recovery POST /machines/{id}/unfreezes
+h-approver POST /recovery/scopes/{machine}/releases
+h-approver POST /operations/{id}/resolutions
+automation POST /recovery/entries
+automation POST /recovery/exits
+automation POST /ingestions
+automation POST /ingestions/{id}/marks
+automation POST /ingestions/{id}/takeovers
+automation POST /ingestions/{id}/abandonments
+automation POST /clusters
+automation POST /machines
+automation POST /plans/{id}/approvals
+automation POST /recovery/entries
+automation POST /recovery/exits
+automation POST /recovery/scopes/{machine}/marks
+automation POST /recovery/scopes/{machine}/releases
+automation POST /recovery/accountings
+automation POST /operations/{id}/attempts/{attempt}/accountings
+automation POST /operations/{id}/takeovers
+automation POST /operations/{id}/resolutions
+automation POST /identity-revocations
+EOF
+  check 'S0 step 4' "the walk has 34 rows (18 by role, 16 human-only)" test "$rows" -eq 34
+  local acts after
+  acts=$(pg psql -U bronzeward -d bronzeward -Atc "select count(*) from act where via = 'api'") || die "cannot count acts"
+  after=$(pg psql -U bronzeward -d bronzeward -Atc 'select count(*) from principal') || die "cannot count principals"
+  check 'S0 step 4' "denied requests wrote no act ($acts) and no principal row ($principals, then $after)" \
+    test "$acts" = 0 -a "$after" = "$principals"
+
+  # PA §10.4's order: the operator lists h-all, then h-recovery records its revocation.
+  set_denied '[{iss: "http://issuer:5556", sub: h-all}]'
+  restart_a || die "A did not come back with h-all in deniedSubjects"
+  check 'S0 step 4, PA §10.4' 'h-recovery revokes h-all, listed in deniedSubjects: 201, deniedSubjectsListed' \
+    answers_with '.deniedSubjectsListed == true' 201 - POST /api/v1/identity-revocations "${t[h-recovery]}" \
+    '{"iss":"http://issuer:5556","sub":"h-all","reason":"S0 step 4"}' s0-walk-revoke-h-all
+  cp -- "$EV/last.body" "$EV/revocation.json"
+  check 'S0 step 4' 'h-all after its revocation: 403 identity-revoked' answers 403 identity-revoked GET /api/v1/acts "${t[h-all]}"
+}
+
+"$s0_mode"
+rm -f -- "$EV/last.body"
+# The evidence directory is scanned: no token or key of this run may have reached it.
+bundle=
+if bundle=$("$bin/evidence" "$EV"); then
+  if grep --quiet --fixed-strings -- "$EV/" "$bundle/leak-scan.txt"; then
+    result FAIL 'S0 evidence' "the leak scan names a file of the run directory: $bundle/leak-scan.txt"
+  else
+    result PASS 'S0 evidence' 'bin/evidence scanned the run directory; no leak in it'
+  fi
+else
+  result FAIL 'S0 evidence' 'bin/evidence failed'
+fi
+say "s0 $s0_mode: $failed failed; evidence in $EV, bundle ${bundle:-none}"
+[ "$failed" -eq 0 ]
