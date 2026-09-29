@@ -129,6 +129,9 @@ func (v *Verifier) Authenticate(ctx context.Context, authorization string) (Prin
 	if !ok || !strings.EqualFold(scheme, "Bearer") || raw == "" || strings.ContainsAny(raw, " \t\r\n") {
 		return Principal{}, fmt.Errorf("%w: no bearer token", ErrUnauthenticated)
 	}
+	if strings.HasPrefix(raw, tokenPrefix) {
+		return v.automation(ctx, raw)
+	}
 	return v.human(ctx, raw)
 }
 
