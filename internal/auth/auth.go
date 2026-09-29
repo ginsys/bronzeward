@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -226,8 +227,20 @@ func (v *Verifier) roles(payload []byte) ([]Role, error) {
 // Discover returns the issuer's key set, found through its discovery document on first use and
 // looked for again after a failure, so the server starts while the issuer is down.
 func Discover(issuer string) KeySet {
-	return &discovered{issuer: issuer, client: &http.Client{Timeout: issuerTimeout}, refetch: keyRefetchInterval,
-		discovering: make(chan struct{}, 1)}
+	return &discovered{issuer: issuer, client: &http.Client{Timeout: issuerTimeout, CheckRedirect: secureRedirect},
+		refetch: keyRefetchInterval, discovering: make(chan struct{}, 1)}
+}
+
+// secureRedirect refuses a redirect that leaves authenticated transport, where an on-path
+// attacker could answer in the issuer's place.
+func secureRedirect(r *http.Request, via []*http.Request) error {
+	if !config.SecureTransport(r.URL) {
+		return fmt.Errorf("refusing a redirect to %s: not https and not this host", r.URL.Redacted())
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
 }
 
 const (
@@ -308,11 +321,16 @@ func (d *discovered) keySet(ctx context.Context) (*oidc.RemoteKeySet, error) {
 	if doc.JWKS == "" {
 		return nil, errors.New("the discovery document names no jwks_uri")
 	}
+	// The keys decide whose tokens verify, so they need the same transport as the issuer.
+	if u, err := url.Parse(doc.JWKS); err != nil || u.Host == "" || !config.SecureTransport(u) {
+		return nil, fmt.Errorf("the discovery document's jwks_uri %q is not https and not this host", doc.JWKS)
+	}
 	next := d.client.Transport
 	if next == nil {
 		next = http.DefaultTransport
 	}
-	fetch := &http.Client{Timeout: d.client.Timeout, Transport: &limitedFetch{next: next, every: d.refetch}}
+	fetch := &http.Client{Timeout: d.client.Timeout, CheckRedirect: d.client.CheckRedirect,
+		Transport: &limitedFetch{next: next, every: d.refetch}}
 	d.keys = oidc.NewRemoteKeySet(oidc.ClientContext(context.Background(), fetch), doc.JWKS)
 	return d.keys, nil
 }

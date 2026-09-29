@@ -90,7 +90,7 @@ func (a *Auth) validate() error {
 	}
 	// Discovery and key fetches trust whatever the issuer URL answers. Plain http is for the
 	// fixture issuer on this host only: elsewhere an on-path attacker could serve both.
-	if u.Scheme == "http" && !loopback(u.Hostname()) {
+	if !SecureTransport(u) {
 		return fmt.Errorf("config: auth.oidc.issuer %q uses http on a host that is not loopback; use https", o.Issuer)
 	}
 	if o.Audience == "" {
@@ -121,6 +121,12 @@ func (a *Auth) validate() error {
 		}
 	}
 	return nil
+}
+
+// SecureTransport reports whether a request to u is authenticated: https, or plain http to
+// this host. The issuer URL, the key set URL it advertises and every redirect must pass.
+func SecureTransport(u *url.URL) bool {
+	return u.Scheme == "https" || (u.Scheme == "http" && loopback(u.Hostname()))
 }
 
 func loopback(host string) bool {
