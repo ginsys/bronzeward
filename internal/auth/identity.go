@@ -11,7 +11,8 @@ import (
 
 // EnsureHuman returns the principal of the human (iss, sub), inserting it in its own short
 // transaction if it has none (persistence-api.md §10). Of two concurrent callers, one inserts and
-// the other reads the committed row. A subject that deniedSubjects lists gets no row.
+// the other reads the committed row. A subject that deniedSubjects lists gets no row, and a
+// revoked one is refused (§10.4).
 func EnsureHuman(ctx context.Context, db *sql.DB, d Denied, iss, sub string) (string, error) {
 	if sub == "" {
 		return "", errors.New("a human needs a subject")
@@ -24,8 +25,15 @@ func EnsureHuman(ctx context.Context, db *sql.DB, d Denied, iss, sub string) (st
 		return "", err
 	}
 	var idn string
-	err := db.QueryRowContext(ctx, `SELECT id FROM principal WHERE kind = 'human' AND iss = $1 AND sub = $2`, iss, sub).Scan(&idn)
-	return idn, err
+	var revoked bool
+	if err := db.QueryRowContext(ctx, `SELECT id, revoked FROM principal WHERE kind = 'human' AND iss = $1 AND sub = $2`,
+		iss, sub).Scan(&idn, &revoked); err != nil {
+		return "", err
+	}
+	if revoked {
+		return "", fmt.Errorf("%w: %s", ErrIdentityRevoked, idn)
+	}
+	return idn, nil
 }
 
 // RevokeIdentity marks identity revoked and revokes its unrevoked token, in tx, after locking the

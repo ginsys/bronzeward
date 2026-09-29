@@ -186,6 +186,30 @@ func TestRotateRefusesARevokedIdentity(t *testing.T) {
 	}
 }
 
+// §10.4: a revoked human is refused as the tool's operator and as a new identity's responsible
+// human, as deniedSubjects' humans are.
+func TestToolRefusesARevokedHuman(t *testing.T) {
+	db := migrated(t)
+	s := storeFor(db)
+	is := issued(t, s, "ci")
+	h, err := EnsureHuman(t.Context(), db, Denied{}, testIssuerURL, "h-gone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := revokeIdentity(t, db, h); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Issue(t.Context(), "x", []Role{Author}, DefaultExpiry, "h-gone", "h-operator"); !errors.Is(err, ErrIdentityRevoked) {
+		t.Errorf("issue with a revoked responsible human: %v", err)
+	}
+	if _, err := s.Rotate(t.Context(), is.Identity, nil, DefaultExpiry, "h-gone"); !errors.Is(err, ErrIdentityRevoked) {
+		t.Errorf("rotate by a revoked operator: %v", err)
+	}
+	if _, err := s.Revoke(t.Context(), is.Identity, "h-gone"); !errors.Is(err, ErrIdentityRevoked) {
+		t.Errorf("revoke by a revoked operator: %v", err)
+	}
+}
+
 // §10: of two concurrent first uses, one inserts and the other reads the committed row.
 func TestEnsureHumanConcurrent(t *testing.T) {
 	db := migrated(t)
@@ -220,6 +244,12 @@ func TestList(t *testing.T) {
 	if l.Identity != is.Identity || l.Name != "ci" || l.Responsible != "h-all" || l.TokenID != is.TokenID ||
 		!l.CurrentEpoch || l.Expired || l.IdentityRevoked || l.TokenRevoked != nil || len(l.Roles) != 2 {
 		t.Fatalf("listed %+v", l)
+	}
+	// §10.4: an identity deniedSubjects lists is refused whatever its row says; list says so.
+	cfg := testAuth(testIssuerURL)
+	cfg.DeniedSubjects = []config.DeniedSubject{{Identity: is.Identity}}
+	if ls, err = NewStore(db, cfg).List(t.Context()); err != nil || len(ls) != 1 || !ls[0].IdentityDenied {
+		t.Fatalf("list with the identity denied: %+v, %v", ls, err)
 	}
 }
 

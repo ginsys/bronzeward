@@ -281,6 +281,7 @@ func joinRoles(rs []Role) string {
 type Listed struct {
 	Identity, Name, Responsible, TokenID   string
 	IdentityRevoked, CurrentEpoch, Expired bool
+	IdentityDenied                         bool // deniedSubjects lists it (§10.4)
 	Roles                                  []Role
 	Issued, Expires                        time.Time
 	TokenRevoked                           *time.Time
@@ -310,6 +311,7 @@ func (s *Store) List(ctx context.Context) ([]Listed, error) {
 			return nil, err
 		}
 		l.Roles = ParseRoles(roles)
+		l.IdentityDenied = s.denied.Service(l.Identity)
 		if revokedAt.Valid {
 			l.TokenRevoked = &revokedAt.Time
 		}

@@ -144,6 +144,8 @@ func tokenState(l auth.Listed) string {
 	switch {
 	case l.IdentityRevoked:
 		return "identity-revoked"
+	case l.IdentityDenied:
+		return "identity-denied"
 	case l.TokenRevoked != nil:
 		return "revoked"
 	case !l.CurrentEpoch:
