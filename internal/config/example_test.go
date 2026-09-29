@@ -20,4 +20,7 @@ func TestExampleLoads(t *testing.T) {
 	if c.Listen != "127.0.0.1:8080" || c.Database.DSN != "postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable" {
 		t.Fatalf("example drifted from mise run dev-db: %+v", c)
 	}
+	if c.Auth.OIDC.Issuer != "http://127.0.0.1:5556" || c.Auth.OIDC.Audience != "bronzeward" {
+		t.Fatalf("example's issuer drifted from the documented local issuer: %+v", c.Auth.OIDC)
+	}
 }

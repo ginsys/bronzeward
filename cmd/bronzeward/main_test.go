@@ -19,7 +19,7 @@ import (
 func configFile(t *testing.T, dsn string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "bronzeward.yaml")
-	body := "listen: 127.0.0.1:0\ndatabase:\n  dsn: " + dsn + "\n"
+	body := "listen: 127.0.0.1:0\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: https://idp.test\n    audience: bronzeward\n"
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
