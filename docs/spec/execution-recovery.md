@@ -299,7 +299,8 @@ version it names at or above the decryption floor, an executor credential the
 provider recognises and an unsealed provider; losing a source secret version
 blocks regeneration, not application (design §7.8, "Guarantees kept apart";
 [KL §5.2](../design/research/20260924-key-loss-restoration.md#52-criterion-2-applying-is-not-regenerating-and-ciphertext-is-not-executability)).
-A `retained` monitor verdict is not this check (design §7.6). A sealed OpenBao
+A `retained` monitor verdict is not this check (design §7.6;
+[dependency monitor §8](dependency-monitor.md#8-what-a-classification-is-not)). A sealed OpenBao
 fails it, and nothing is dispatched until the operator unseals (design §7.8
 item 4).
 

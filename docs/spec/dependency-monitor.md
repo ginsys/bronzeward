@@ -1,0 +1,407 @@
+# Dependency monitor contract
+
+This document specifies how the first milestone classifies the secret and key
+versions its releases depend on, when it alerts on them and what the
+classification may never be used for, as required by
+[Implement dependency retention checks](https://github.com/ginsys/bronzeward/issues/24).
+It refines the [current design](../design/Talos_Configuration_and_Machine_Management_Design.md)
+§7.6, §7.8 item 3 and §15.3 for the PoC profile, one OpenBao node with KV v2
+and Transit as the provider
+([design §7.7](../design/Talos_Configuration_and_Machine_Management_Design.md#77-poc-deployment-profile)).
+The [specification review](https://github.com/ginsys/bronzeward/issues/20)
+found that no contract owned the monitor: the design set its policy and the
+retention run supplied evidence, but no section fixed the classification
+procedure, the alert timing or the metadata-only access. This is that
+section. It is a PoC contract, not evidence that any mechanism here has been
+built.
+
+The evidence it rests on, abbreviated below:
+
+| Short name | Report |
+| --- | --- |
+| RC | [Retention and metadata classification](../design/research/20260924-retention-metadata-classification.md) |
+| PC | [Provider capability comparison](../design/research/20260924-provider-capability-comparison.md) |
+| KL | [Key loss and restoration](../design/research/20260924-key-loss-restoration.md) |
+
+Three sibling contracts share its boundaries: the
+[persistence and API contract](persistence-api.md) ("PA"), the
+[secret ingress and compilation contract](compilation.md) ("compilation") and
+the [execution and recovery contract](execution-recovery.md) ("execution and
+recovery"). Where neither the design nor the evidence decides a question, this
+contract takes the most conservative option and marks it in place as
+**(choice §11.n)**; §11 lists each with its alternative for owner review.
+
+## 1. Scope and interfaces
+
+Design: [§7.6](../design/Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks),
+[§7.8](../design/Talos_Configuration_and_Machine_Management_Design.md#78-poc-retention-and-recovery-policy),
+[§15.3](../design/Talos_Configuration_and_Machine_Management_Design.md#153-metrics-and-alerts).
+
+The monitor classifies every dependency of every release as `retained`,
+`blocked`, `lost` or `unknown` (design §7.6), records the latest class, raises
+the alerts of design §7.8 item 3 and serves both through the API. It takes:
+
+- from compilation §9, the dependency records of each release: its effective
+  and reproduction dependencies (KV versions) and its encryption dependency
+  (a Transit key by its identity, with the version);
+- from PA §6.2, the commit transaction (T3) that records them, which also
+  seeds their status (§5.2);
+- from compilation §1, the metadata identity (§4).
+
+It gives:
+
+- to compilation §6 step 3, the classification procedure of §3, which
+  publication runs afresh for each pinned version;
+- to PA §9.2, three read routes (§7.2);
+- to execution and recovery, nothing it may rely on for authority (§8).
+
+The PoC deletes no dependency record (design §7.8 item 1), so the set the
+monitor watches only grows. Local stores are out of scope: they are not the
+selected profile, and RC found they give only `retained` and `unknown`
+([RC §8](../design/research/20260924-retention-metadata-classification.md#8-recommendation)
+item 2).
+
+## 2. What is monitored
+
+A **monitored dependency** is one provider object version: a KV path with a
+version, or a Transit key identity with a version. One provider object
+version named by several releases, or by both dependency records of one
+release, is one monitored dependency with one status **(choice §11.2)**. Its
+alerts name every release whose dependency records reference it.
+
+Each monitored dependency has a `dep` identifier (PA §2), created when its
+first dependency record is committed. The identifier names the status, not the
+provider object: after a database restore (§9) an identifier issued after the
+backup is absent and is never reissued.
+
+## 3. Classification procedure
+
+Design: §7.6. Evidence: [RC §3.1](../design/research/20260924-retention-metadata-classification.md#31-rules-classifier-rows),
+[RC §6.1, §6.2](../design/research/20260924-retention-metadata-classification.md#62-criterion-2-nothing-uncertain-becomes-lost).
+
+One classification is one provider answer to one request:
+
+1. **Ask by name.** One `GET` per monitored dependency: `secret/metadata/<path>`
+   for a KV version, `transit/keys/<name>` for a Transit key. Never a `LIST`;
+   a listing without the entry is never evidence (RC §6.2, "Missing
+   listings").
+2. **Take the provider's time.** A KV deletion time is compared with the
+   answer's `Date` header, never with the monitor's clock
+   ([RC §5.6](../design/research/20260924-retention-metadata-classification.md#56-a-deletion-time-compared-with-the-clients-clock)).
+   The header has whole seconds.
+3. **Apply the rules.** The first row that matches decides:
+
+| Provider | Answer | Class | Reason |
+| --- | --- | --- | --- |
+| any | the recorded version is not a positive integer | `unknown` | `malformed` |
+| any | HTTP 403 | `unknown` | `denied` |
+| any | HTTP 404 | `unknown` | `absent` |
+| any | HTTP 503 | `unknown` | `unavailable` |
+| any | no connection, no answer within the request timeout (§6.1), an answer that does not parse, any other status | `unknown` | `unreachable` or `unreadable` |
+| KV v2 | `destroyed: true` for the version | `lost` | `destroyed` |
+| KV v2 | version below `oldest_version`, when that is above 0 | `lost` | `pruned` |
+| KV v2 | version above `current_version`, or absent from the answer | `unknown` | `insufficient-evidence` |
+| KV v2 | `deletion_time` in the same second as `Date`, or no readable `Date` | `unknown` | `deletion-time-undecidable` |
+| KV v2 | `deletion_time` before `Date` | `blocked` | `soft-deleted` (reversible by undelete) |
+| KV v2 | `deletion_time` after `Date` | `retained` | `deletion-scheduled`, naming the time |
+| KV v2 | no `deletion_time` | `retained` | none |
+| Transit | the key's identity differs from the one the dependency record carries (compilation §9) | `unknown` | `identity-mismatch` **(choice §11.10)** |
+| Transit | `soft_deleted` anything but `false` | `unknown` | `soft-delete-unobserved` |
+| Transit | `min_available_version`, `min_decryption_version` or `latest_version` missing | `unknown` | `insufficient-evidence` |
+| Transit | version below `min_available_version`, when that is above 0 | `lost` | `trimmed` |
+| Transit | version below `min_decryption_version` | `blocked` | `below-decryption-floor` (reversible by lowering it) |
+| Transit | version above `latest_version` | `unknown` | `insufficient-evidence` |
+| Transit | otherwise | `retained` | none |
+
+Transit's `keys` map is not used for any class: it hides trimmed and blocked
+versions alike (RC §3.1).
+
+A 404 is `unknown` and never `lost`. OpenBao answers a deleted Transit key, a
+KV path whose metadata was deleted and a name that never existed alike, with no
+tombstone
+([RC §6.4](../design/research/20260924-retention-metadata-classification.md#64-criterion-4-provider-limits-and-the-alert-policy-the-evidence-supports)).
+Only the change from `retained` shows such a loss (§6). No timeout, repetition
+or age turns `unknown` into `lost` (design §7.6), and nothing but a provider
+answer changes a class.
+
+The procedure is a pure function of the recorded dependency and the answer's
+status, headers and body. The monitor (§6) and compilation §6 step 3 call the
+same function.
+
+## 4. The metadata identity
+
+Design: §7.6, [§13.2](../design/Talos_Configuration_and_Machine_Management_Design.md#132-provider-access-separation).
+Evidence: [RC §6.3](../design/research/20260924-retention-metadata-classification.md#63-criterion-3-a-retained-verdict-grants-nothing)
+row 057; PC §4.1.
+
+The monitor authenticates to OpenBao with the metadata identity of
+compilation §1 and with nothing else. Its policy grants `read` on
+`secret/metadata/*` and `transit/keys/*` and no other capability
+**(choice §11.9)**: no `list`, no `secret/data/*`, no Transit encrypt,
+decrypt, rewrap or key configuration. It is a credential of its own, not
+shared with the ingestion, compiler or executor identities, and the process
+that runs the monitor holds no provider credential beside it.
+
+Holding no data read, the monitor cannot read a value, so nothing it logs,
+stores or serves can carry one. RC row 057 showed the metadata token refused
+(HTTP 403) on the value it had just classified.
+
+## 5. State
+
+### 5.1 Records
+
+Two tables, both in PA §3:
+
+| Entity | Kind | Holds |
+| --- | --- | --- |
+| DependencyStatus | mutable, row-locked | `dep` identifier; provider object and version; class and reason; when it was first recorded `retained`; since when it has been `unknown`, if it is; when its last `persistent` alert was raised; the scheduled deletion time last warned; the database time the latest recorded classification's request began (`observed_from`); the answer's `Date`, if any |
+| DependencyAlert | immutable | `dal` identifier; the `dep` identifier; kind (§6.2); class and reason; provider object and version; the releases referencing it; `observed_from` and `Date`; epoch; time recorded |
+
+A DependencyStatus row is updated only under its row lock, in a transaction
+that holds no provider request (PA §5 rule 1): the provider is asked first,
+then the transaction records the answer.
+
+### 5.2 Seeding at publication
+
+Publication's commit transaction (PA §6.2, T3) inserts a DependencyStatus row
+for each provider object version its dependency records name that has none,
+with class `retained`, first seen `retained` at the time compilation §6 step 3
+began that version's classification, and `observed_from` equal to that time
+**(choice §11.3)**. A version that already has a row keeps it. Compilation
+refuses every version that is not `retained` (compilation §6 step 3), so every
+seeded row is `retained`.
+
+Without this seed, a dependency lost between publication and the monitor's
+first pass would be a dependency never seen `retained`, alerted after 15
+minutes instead of at once as a regression.
+
+## 6. Passes and alerts
+
+Design: §7.8 item 3, §15.3. Evidence: RC §6.2 row 043, RC §6.4.
+
+### 6.1 Passes
+
+Every server instance runs the monitor, in recovery mode as outside it
+**(choice §11.7)**. A pass classifies every monitored dependency once. For
+each, it:
+
+1. reads the database time as `observed_from`;
+2. sends the request of §3, with a request timeout of 10 seconds;
+3. classifies the answer;
+4. in one transaction, locks the DependencyStatus row `FOR UPDATE`. If the
+   row's `observed_from` is later than this one's, another instance recorded a
+   newer classification: this one is discarded. Otherwise it records the class
+   and raises, in the same transaction, the alerts of §6.2 the change calls
+   for.
+
+A pass starts 60 seconds after the previous one started, or at once if the
+previous one took longer **(choice §11.4)**. "At once" in design §7.8 means
+on the first pass that observes the change, so at most one interval and one
+pass's duration after it happened. Because an alert is raised only in the
+transaction that records its transition under the row lock, two instances
+raise one alert per transition, not two.
+
+The interval, the request timeout, the persistent-unknown interval (15
+minutes, design §7.8) and the stall bound (§6.3) are fixed PoC values, held as
+named constants in one place so that a later version can make them
+configurable.
+
+### 6.2 Alert kinds
+
+| Transition or state | Kind | When |
+| --- | --- | --- |
+| any class to `lost` | `lost` | at once, once per entry into `lost` |
+| any class to `blocked` | `blocked` | at once, once per entry into `blocked`; the alert states that the block is reversible and how (reason, §3) |
+| `retained` to `unknown` | `regression` | at once; the alert states that a 404 may be a deletion or a restore older than the database (PA §6.3) |
+| `unknown` for 15 minutes since `unknown_since`, including a dependency never recorded `retained` | `persistent` | at 15 minutes, then every 15 minutes while it stays `unknown` **(choice §11.6)** |
+| `retained` with a scheduled deletion time not yet warned | `deletion-scheduled` | at once, once per distinct scheduled time |
+| no completed pass for three intervals | `monitor-stalled` | §6.3 |
+
+`unknown_since` is set when the class becomes `unknown` and cleared when it
+leaves `unknown`. A dependency leaving `blocked`, `lost` or `unknown` for
+`retained` raises no alert; its new class is served (§7.2). A failing provider
+metadata check (design §15.3) shows as `unknown` with its reason, and alerts
+through `regression` and `persistent`.
+
+### 6.3 Silence is not health
+
+Every completed pass records its completion time. When no pass has completed
+for three intervals, the instance that notices raises one `monitor-stalled`
+alert, recorded in the same way under the lock of a singleton row, and raises
+it again after each further three intervals without a completed pass
+**(choice §11.8)**. The read routes (§7.2) serve the last completed pass's
+time and mark every served class `stale` beyond three intervals, so a reader
+never takes an old classification for a current one (design §15.3). A server
+that is down raises nothing: its liveness probe is the deployment's to watch.
+
+## 7. Delivery
+
+**Owner decision (2026-09-29):** each alert is a structured log line and a
+DependencyAlert row, and the status and alerts are served by read routes. A
+metrics endpoint and push delivery are not part of the PoC.
+
+### 7.1 The log line and the record
+
+The transaction of §6.1 step 4 inserts the DependencyAlert row. After it
+commits, the instance writes one log line with the stable event name
+`dependency-alert` and the row's fields: the `dal` and `dep` identifiers,
+kind, class, reason, provider object and version, and the referencing
+releases. A process that dies between the commit and the log line leaves the
+row, which is the record; the log line is how an operator's log alerting
+learns of it. Neither carries a value (§4).
+
+### 7.2 Read routes
+
+Added to PA §9.2, any role, paginated as PA §9.1 sets:
+
+| Route | Result |
+| --- | --- |
+| `GET /dependencies`, optionally `?class=<class>` | each monitored dependency with its class, reason, first-seen-`retained` time, `unknown_since`, the time of its latest recorded classification and `stale`; the collection carries the last completed pass's time |
+| `GET /dependencies/{id}` | one, with the releases referencing it and its alerts |
+| `GET /dependency-alerts` | every alert in recording order |
+
+They serve provider paths, key names and versions, which are reference names
+(PA §9.1, "Redaction"), never a value or ciphertext.
+
+## 8. What a classification is not
+
+Design: §7.6 ("retention and authority are separate checks"). Evidence:
+RC §6.3.
+
+- **Not publication's check.** Compilation §6 step 3 classifies each pinned
+  version afresh with the procedure of §3 and never reads DependencyStatus,
+  which can be a pass behind **(choice §11.11)**. A version that is not
+  `retained` refuses publication.
+- **Not authority.** A `retained` class admits no dispatch, approves nothing
+  and stands in for no read or decrypt. Execution's use-time check, the
+  executor decrypting the artifact at the point of use, stays execution and
+  recovery §3.1; a retained dependency with the executor's access revoked is
+  still refused there (RC rows 063, 064).
+- **Not a deletion.** The monitor writes no provider object and changes no
+  class but by a provider answer. Restricting Transit key deletion and KV
+  metadata deletion, and setting KV `max_versions` wherever a path is
+  overwritten, stay deployment requirements
+  ([RC §9](../design/research/20260924-retention-metadata-classification.md#9-hand-off);
+  design §7.8 item 1).
+
+## 9. Restored state
+
+For a database restored to a backup taken at time *T* (PA §12.3):
+
+- DependencyStatus is as at *T*. A dependency recorded `retained` that now
+  answers 404 raises `regression` on the first pass (PA §6.3, §13.3).
+- DependencyAlert rows after *T* are absent. Their log lines remain.
+- `dep` and `dal` identifiers issued after *T* are absent and never reissued
+  (PA §2).
+
+For a provider restored to a snapshot older than the database, the generations
+created after the snapshot answer 404 and raise `regression` at once, and a
+publication pinning them is refused (PA §13.3).
+
+## 10. Verification and evidence limits
+
+### 10.1 Required verification
+
+An implementation of this contract must show, each with a control that can
+fail:
+
+1. **Every row of §3's table** on synthetic answers, through the
+   implementation's classifier, including the same-second and no-`Date` rows,
+   a set `soft_deleted` and each missing floor. Control: comparing the
+   deletion time with the monitor's clock instead of `Date` misclassifies the
+   same-second row.
+2. **Against the fixture's OpenBao**, through the monitor: `retained`; a KV
+   version soft-deleted (`blocked`), undeleted (`retained`), destroyed
+   (`lost`); pruned past `max_versions` (`lost`); a Transit version below the
+   decryption floor (`blocked`) and trimmed (`lost`); a deleted Transit key
+   and deleted KV metadata (404, `unknown`); OpenBao sealed (503), partitioned
+   and paused (`unknown`). Each alert as §6.2 sets and no other.
+3. **A retained dependency turning unreadable alerts at once**: a 404 after
+   `retained` raises `regression` on the next pass. Control: without the seed
+   of §5.2, a dependency lost before the first pass raises nothing until
+   `persistent`.
+4. **Persistent unknown**: `persistent` at 15 minutes and every 15 minutes
+   after, never before, with the class `unknown` throughout. The intervals may
+   be shortened by a test-only setting. Control: without the last-alert check,
+   `persistent` repeats on every pass.
+5. **Metadata only**: the metadata identity is refused a `secret/data/*` read
+   and a Transit decrypt of a dependency it classified `retained`, and the
+   monitor's process holds no other provider credential. Control: the same
+   reads with a token that has them succeed.
+6. **One alert per transition across instances**: two instances observing one
+   transition raise one alert. Control: without the row lock, two.
+7. **Silence**: passes stopped by an injected hang raise `monitor-stalled`
+   after three intervals, and the routes serve `stale`. Control: a pass
+   completing within the bound raises nothing.
+8. **Publication refused** for a pinned version that is `blocked`, `lost` or
+   `unknown` (compilation §6 step 3), and **no dispatch admitted by a retained
+   class** (execution and recovery §3.1).
+
+Items 2, 3 and 8's publication refusal are acceptance-plan S2's negative
+controls and S7's variants; the rest run as *checks*
+([acceptance plan §7.1](acceptance-plan.md#71-required-verification)).
+
+### 10.2 Evidence limits
+
+- **One OpenBao topology**, single node and one unseal share; HTTP 503 was
+  seen only as "sealed" ([RC §7](../design/research/20260924-retention-metadata-classification.md#7-limits)).
+- **Transit `soft_deleted`** was false throughout RC; a set flag is `unknown`
+  because its reversibility was never observed.
+- **The same-second window** was not captured; its row rests on RC's rule
+  checks. Clock skew between hosts was not produced.
+- **A recreated Transit key** under the same name was not produced, and the
+  field of the Transit answer that carries the identity compilation §9 records
+  is compilation §9's to fix (KL §7 item 1, inferred).
+- **Read-only policy.** RC's metadata token also held `list`; this contract
+  drops it, since the procedure never lists, and item 5 of §10.1 is the first
+  evidence that `read` alone suffices.
+- **No interval is measured.** 60 seconds, 10 seconds, 15 minutes and three
+  intervals are choices; the evidence shows only that a partition, a pause and
+  a seal look alike from the client (RC §6.4).
+
+## 11. Choices for owner review
+
+Each is marked in place as **(choice §11.n)**.
+
+1. **A document of its own** rather than a section of the persistence and API
+   contract, whose section numbers the acceptance plan cites. Alternative: a
+   new section there, renumbering §15 onwards.
+2. **One status per provider object version**, shared by every release that
+   names it (§2). Alternative: one per dependency record, which alerts once
+   per release for one event.
+3. **Publication seeds the status as `retained`** (§5.2). Alternative: leave
+   the first classification to the monitor, delaying the alert for a loss
+   before its first pass to `persistent`.
+4. **A pass every 60 seconds, 10 seconds per request** (§6.1). Alternatives:
+   a shorter interval, costing provider load per dependency; a longer one,
+   delaying "at once".
+5. **Delivery**: not a choice; the owner decided it (§7).
+6. **`blocked` and `lost` alert once per entry; `persistent` repeats every 15
+   minutes** (§6.2). Alternative: repeat every alert while its condition
+   holds.
+7. **Every instance runs the monitor**, deduplicated by the status row lock
+   (§6.1). Alternative: one elected instance, which needs a lease and its
+   failover.
+8. **`monitor-stalled` after three intervals** (§6.3). Alternative: one
+   interval, alerting on a single slow pass.
+9. **The metadata identity holds `read` only**, no `list` (§4). Alternative:
+   RC's policy with `list`, which the procedure never uses.
+10. **A Transit identity mismatch is `unknown`**, alerted as a regression if
+    the dependency was `retained` (§3). Alternative: `lost`, which the
+    evidence does not support.
+11. **Publication classifies afresh** rather than reading the status (§8).
+    Alternative: trust a status younger than one interval, saving a request
+    per pinned version but admitting a version lost since the last pass.
+
+## 12. Traceability
+
+| Clause | Design | Evidence |
+| --- | --- | --- |
+| §2 monitored dependencies | §7.5, §7.8 item 1 | compilation §9 |
+| §3 classification | §7.6 | [RC §3.1](../design/research/20260924-retention-metadata-classification.md#31-rules-classifier-rows), RC §5.6, RC §6.1, RC §6.2, RC §6.4 |
+| §4 metadata identity | §7.6, §13.2 | RC §6.3 row 057; [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) |
+| §5 state, seeding | §7.6, §7.8 | RC §8 item 1 |
+| §6 passes, alerts | §7.8 item 3, §15.3 | RC §6.2 row 043; RC §6.4 |
+| §7 delivery | §15.3 | none: owner decision |
+| §8 not authority | §7.6 | RC §6.3 rows 056–064 |
+| §9 restored state | §7.7, §7.8 | [KL §3.2](../design/research/20260924-key-loss-restoration.md#32-what-each-case-showed) cases G, H; PC §4 row 083 |

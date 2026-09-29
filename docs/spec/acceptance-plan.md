@@ -11,8 +11,9 @@ must be refused and what is kept. It is a plan: nothing here has been executed, 
 is a pass on the fixture within its limits (§9), never a production claim.
 
 Contracts are cited by short name: **C** is the [compilation contract](compilation.md), **PA** the
-[persistence and API contract](persistence-api.md) and **ER** the
-[execution and recovery contract](execution-recovery.md). Research reports keep the keys of the
+[persistence and API contract](persistence-api.md), **ER** the
+[execution and recovery contract](execution-recovery.md) and **DM** the
+[dependency monitor contract](dependency-monitor.md). Research reports keep the keys of the
 [feasibility evidence review §3](../design/research/20260925-feasibility-evidence-review.md#3-sources)
 (DB, DS, E1, E3, Fx, KL).
 
@@ -763,8 +764,9 @@ support them, and the reviewer's record.
 
 Each contract ends with a list of checks an implementation must show, each with a control that can
 fail: [C §15](compilation.md#15-verification-and-evidence-limits),
-[ER §9.2](execution-recovery.md#92-required-verification) and
-[PA §16](persistence-api.md#16-verification-and-evidence-limits). **Every item of those lists is
+[ER §9.2](execution-recovery.md#92-required-verification),
+[PA §16](persistence-api.md#16-verification-and-evidence-limits) and
+[DM §10.1](dependency-monitor.md#101-required-verification). **Every item of those lists is
 part of this plan.** The scenarios above carry the items on the integrated path; an item marked
 *check* runs separately, from a fresh `bin/up` or a recorded snapshot (§2), under the issue named,
 with its control and the retained evidence of §2. An issue is not complete while an item mapped to
@@ -799,6 +801,8 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: role checks whose outcome needs the route's handler or state, against the design §13.7 scenarios | S1, S2 step 7, S3, S4, S5 steps 3 and 7, S6.1 step 7, S7 | #22, #23, #25, #26, #27, #28, #29 |
 | PA §16: the epoch term and process-epoch checks; the recovery-start process in the new epoch; per-scope refusals and the recovery-start refusal | S7 | #29 |
 | PA §16: one idempotency key in flight twice, with the key-lock control | *check* | #21 |
+| DM §10.1 items 2, 3 and 8's publication refusal: fixture classifications, their alerts and the refused publication | S2 step 6 and negative controls; S7 variants | #24 |
+| DM §10.1 items 1, 4 to 7 and 8's dispatch half: every classification rule, persistent unknown, metadata-only access, one alert per transition, silence | *check* | #24 |
 | PA §16: approval revocation racing commitment (DS row 003) | S3 negative controls | #25 |
 | PA §10.4: an approval surviving its approver's loss of the role, contrasted with its revocation (choice §17.23) | S3 negative controls | #25 |
 | PA §16: identity revocation racing commitment, with the lock control; its timeline entries on exactly the machines it touches (T5c) | *check* | #25 |
