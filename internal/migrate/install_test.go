@@ -115,7 +115,19 @@ func TestImmutableTablesRefuse(t *testing.T) {
 	if _, _, err := Install(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
+	// A row trigger fires only on existing rows: give act one.
+	h := id.New(id.Principal)
+	if _, err := db.Exec(`INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'op', now())`, h); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO act (id, principal, principal_kind, via, action, subjects, epoch, at)
+		SELECT $1, $2, 'human', 'tool', 'test', '{}', epoch, now() FROM installation_state`, id.New(id.Act), h); err != nil {
+		t.Fatal(err)
+	}
 	for _, stmt := range []string{
+		"UPDATE act SET action = action",
+		"DELETE FROM act",
+		"TRUNCATE act",
 		"UPDATE schema_migrations SET name = name",
 		"DELETE FROM schema_migrations",
 		"TRUNCATE schema_migrations",
@@ -155,8 +167,8 @@ func TestImmutableTriggerControl(t *testing.T) {
 // migration's table fails this test until its author decides which it is.
 func TestEveryTableClassified(t *testing.T) {
 	db, _ := migrated(t)
-	immutable := []string{"recovery_epoch", "schema_migrations"}
-	mutable := []string{"installation_state"}
+	immutable := []string{"act", "recovery_epoch", "schema_migrations"}
+	mutable := []string{"automation_token", "installation_state", "principal"}
 	rows, err := db.Query("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
 	if err != nil {
 		t.Fatal(err)
