@@ -295,6 +295,39 @@ func TestCommitUnknownCommitted(t *testing.T) {
 	}
 }
 
+// §5 rule 6: when the client loses the COMMIT's reply, the server may still be committing. The
+// read-back waits on the key lock, which that transaction holds until it ends, and so answers
+// the request's own response once it commits.
+func TestCommitUnknownStillCommitting(t *testing.T) { commitStillInFlight(t, false) }
+
+// Control: without the key lock the read-back answers "nothing was committed" while the
+// transaction is still open and can still commit.
+func TestCommitUnknownStillCommittingNoKeyLockControl(t *testing.T) { commitStillInFlight(t, true) }
+
+func commitStillInFlight(t *testing.T, control bool) {
+	handoff := make(chan *sql.Tx, 1)
+	inFlight := func(tx *sql.Tx) error { // the test ends the transaction, not the request
+		handoff <- tx
+		return errors.New("connection reset while COMMIT was in flight (test)")
+	}
+	e := newEnv(t, options{extra: []*route{testRoute(nil)}, commit: inFlight, noKeyLock: control})
+	tok := e.human("h-author")
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- e.do(e.api, post(tok, key, `{}`)) }()
+	tx := <-handoff
+	if control {
+		wantProblem(t, <-done, http.StatusServiceUnavailable, "dependency-unavailable")
+		return
+	}
+	dbtest.WaitForLockWait(t, e.db)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if rec := <-done; rec.Code != http.StatusCreated || rec.Header().Get("Idempotent-Replayed") != "" {
+		t.Fatalf("%d %v %s; want the request's own 201", rec.Code, rec.Header(), rec.Body)
+	}
+}
+
 func TestCommitUnknownNotCommitted(t *testing.T) {
 	lost := func(tx *sql.Tx) error {
 		_ = tx.Rollback()
