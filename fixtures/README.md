@@ -348,6 +348,9 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   `bin/evidence` captures (a restore, a dump, a prototype) can put a secret into a file after the
   scan read it, or into a file the listing never saw. Quiesce the experiment's writers before
   capturing; the bundle's `captured` line in `versions.txt` says when the scan ran.
+- Instances A and B reach PostgreSQL by its service name, `postgres`, on the Compose network, not
+  by the container ID `up` recorded. Every other command names the fixture's containers by
+  recorded ID; the server's DSN is resolved by Docker's DNS when it connects.
 - Talos node volumes are anonymous. `bin/up` records their names in `.state/` once the cluster
   exists, and `bin/down` removes those and any still attached to fixture containers. If
   `talosctl cluster create` fails before a container exists, its empty volumes cannot be told apart

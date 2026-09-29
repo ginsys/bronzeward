@@ -1,0 +1,23 @@
+# The configuration of fixture instances A and B, rendered by bin/up into .state/server/{a,b}/
+# with @DSN@ replaced (mode 0600). The DSN reaches PostgreSQL by its service name on the Compose
+# network; the password in it is this run's synthetic one, a leak-scan pattern.
+listen: 0.0.0.0:8080
+database:
+  dsn: @DSN@
+auth:
+  oidc:
+    issuer: http://issuer:5556
+    plainHTTPHosts: [issuer]
+    audience: bronzeward
+    groupsClaim: groups
+    maxTokenLifetime: 15m
+  roles: # the fixture issuer's groups (fixtures/oidc/issuer, Humans)
+    viewer: [bw-viewers]
+    author: [bw-authors]
+    publisher: [bw-publishers]
+    approver: [bw-approvers]
+    recovery-admin: [bw-recovery]
+  deniedSubjects: []
+execution:
+  settleFloor: 30s
+  maxTransportDeadline: 5m

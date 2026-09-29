@@ -175,6 +175,39 @@ for compose_volume in $compose_volumes; do
 done
 unset compose_volume compose_volume_record identity
 
+# The server image bin/up imported, by the ID it recorded, held to this run's label and tag: an ID
+# names content, and a record rewritten under .state would otherwise have down remove any image.
+# One already gone passes. Without the record there is nothing to hold an image to, and the probe
+# below reports one left under the fixture's repository name.
+image_id=
+if [ -f "$STATE/up-image" ]; then
+  image_id=$(cat -- "$STATE/up-image") || die "could not read the recorded server image; nothing was removed"
+  [[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die "the recorded server image '$image_id' is not an image ID; the record was not written by the fixture. Nothing was removed"
+  image_rc=0
+  image_own "$image_id" || image_rc=$?
+  case $image_rc in
+    0) ;;
+    2) image_id= ;;
+    *) die "the recorded server image $image_id is not the one bin/up imported; nothing was removed. Remove it by hand" ;;
+  esac
+  unset image_rc
+fi
+# Tool containers: what a command ran for a moment from the recorded image or the pinned client
+# image and left behind when it was interrupted. One carrying the label on any other image is
+# someone's, and stops the teardown.
+curl_image_id=$(docker image inspect --format '{{.Id}}' "$CURL_IMAGE" 2>/dev/null) || curl_image_id=
+tool_containers=$(docker ps --all --quiet --no-trunc --filter "label=$TOOL_LABEL") ||
+  die "could not list the fixture's tool containers; nothing was removed"
+for id in $tool_containers; do
+  tool_image=$(docker inspect --type container --format '{{.Image}}' "$id") ||
+    die "could not inspect the tool container $id; nothing was removed"
+  if [ -z "$tool_image" ] || { [ "$tool_image" != "$image_id" ] && [ "$tool_image" != "$curl_image_id" ]; }; then
+    die "the container $id carries this fixture's tool label but runs $tool_image, neither the recorded server image nor the pinned client image; nothing was removed. Remove it by hand"
+  fi
+done
+unset curl_image_id tool_image
+
 # Talos node volumes are anonymous and unlabelled, so collect their names while the containers
 # still exist. After a create that failed before the container existed they cannot be attributed:
 # see "Known limits" in fixtures/README.md. Of the containers recorded_only held above, not of a
@@ -283,6 +316,10 @@ unset labels
 # declares, each held above to the project label and the recorded run. A volume has no ID, so the
 # name is all there is to remove it by, as it was to check it: the one-name rule (see "Known
 # limits" in fixtures/README.md). Each removal's status is not what decides: the probes below are.
+for id in $tool_containers; do
+  docker rm --force --volumes "$id" >/dev/null 2>&1
+done
+unset tool_containers
 for id in $compose_containers; do
   docker rm --force --volumes "$id" >/dev/null 2>&1
 done
@@ -309,6 +346,8 @@ unset talos_containers talos_networks
 for volume in "${node_volumes[@]}"; do
   docker volume rm "$volume" >/dev/null 2>&1
 done
+# The image last: a container still made from it keeps it.
+[ -z "$image_id" ] || docker image rm "$image_id" >/dev/null 2>&1
 
 # A query that fails lists nothing, which reads exactly like "nothing left". Keep the two apart.
 left=
@@ -342,6 +381,21 @@ probe container docker ps --all --filter "label=$compose_label" --format '{{.Nam
 probe network docker network ls --filter "label=$talos_label" --format '{{.Name}}'
 probe network docker network ls --filter "label=$compose_label" --format '{{.Name}}'
 probe volume docker volume ls --filter "label=$compose_label" --format '{{.Name}}'
+probe container docker ps --all --filter "label=$TOOL_LABEL" --format '{{.Names}}'
+probe image docker image ls --filter "reference=${FIXTURE_NAME}-bronzeward" --format '{{.Repository}}:{{.Tag}}'
+# image_left <id>: the ID, if an image of it still exists (under any tag, or none).
+image_left() {
+  local out
+  if out=$(docker image inspect --format '{{.Id}}' "$1" 2>&1); then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  case $out in
+    *[Nn]o\ such\ image*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+[ -z "$image_id" ] || probe image image_left "$image_id"
 # exact <kind> <name>: the name, if a container, network or volume of exactly that name exists.
 # Docker documents its name filter as matching part of a name too (observed to take an anchored
 # regular expression, which the documentation does not promise), so the listing is held to the
@@ -361,7 +415,7 @@ exact() {
 # and the two networks (Compose names its default network after the project; the Talos
 # provisioner names its network after the cluster), then the node volumes and the declared
 # Compose volumes.
-for name in "$PG" "$BAO" "$CP" "$WORKER"; do
+for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$ISSUER" "$CP" "$WORKER"; do
   probe container exact container "$name"
 done
 for name in "${FIXTURE_NAME}_default" "$FIXTURE_NAME"; do
