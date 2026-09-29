@@ -45,7 +45,7 @@ type Store struct {
 // storeOptions are test hooks and the lock control; the zero value is production behaviour.
 type storeOptions struct {
 	noPrincipalLock bool                // the control: no FOR UPDATE on the principal row
-	afterRevokeOld  func()              // in an issuing transaction, after revoking the unrevoked token
+	afterRevokeOld  func()              // in an issuing or revoking transaction, after revoking the unrevoked token
 	beforeLock      func()              // in a rotation's transaction, after it began and before the principal lock
 	commit          func(*sql.Tx) error // replaces tx.Commit in issuing transactions
 }
@@ -62,6 +62,9 @@ func (s *Store) issuing(ctx context.Context, fn func(*sql.Tx) (Issued, error)) (
 	}
 	var out Issued
 	err := inTxCommit(ctx, s.db, func(tx *sql.Tx) error {
+		if err := lockEpoch(ctx, tx); err != nil {
+			return err
+		}
 		var err error
 		out, err = fn(tx)
 		return err
@@ -179,6 +182,9 @@ func (s *Store) Revoke(ctx context.Context, identity, operator string) ([]string
 	}
 	var revoked []string
 	err = inTx(ctx, s.db, func(tx *sql.Tx) error {
+		if err := lockEpoch(ctx, tx); err != nil {
+			return err
+		}
 		if _, err := s.lockService(ctx, tx, identity); err != nil {
 			return err
 		}
@@ -186,12 +192,23 @@ func (s *Store) Revoke(ctx context.Context, identity, operator string) ([]string
 		if revoked, err = revokeTokens(ctx, tx, identity); err != nil || len(revoked) == 0 {
 			return err
 		}
+		if s.o.afterRevokeOld != nil {
+			s.o.afterRevokeOld()
+		}
 		return recordToolAct(ctx, tx, op, "token.revoke", append([]string{identity}, revoked...))
 	})
 	if err != nil {
 		return nil, fmt.Errorf("token: revoke: %w", err)
 	}
 	return revoked, nil
+}
+
+// lockEpoch takes the installation state FOR SHARE, first in every token tool transaction
+// (persistence-api.md §5 rule 5's order). Recovery-mode entry takes it FOR UPDATE (T9), so it
+// cannot commit a new epoch between a token's or act's epoch read and the commit.
+func lockEpoch(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `SELECT 1 FROM installation_state FOR SHARE`)
+	return err
 }
 
 // lockService locks identity's principal row FOR UPDATE and reports whether it is revoked.

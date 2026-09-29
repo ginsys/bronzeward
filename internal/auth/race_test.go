@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -24,6 +26,66 @@ func rotateHeld(t *testing.T, s *Store, identity string) (release chan struct{},
 		t.Fatalf("rotation ended before its hook: %v", err)
 	}
 	return release, done
+}
+
+// entryLock takes recovery-mode entry's lock (T9), waiting at most 200ms.
+func entryLock(t *testing.T, db *sql.DB) error {
+	t.Helper()
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`SET LOCAL lock_timeout = '200ms'`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(`SELECT 1 FROM installation_state FOR UPDATE`)
+	return err
+}
+
+// Recovery-mode entry takes the installation state FOR UPDATE (T9). Every token tool transaction
+// holds it FOR SHARE from its start, before the principal lock (rule 5's order), to its commit:
+// entry cannot commit a new epoch between a token's epoch read and its commit, nor between the
+// token's epoch and its act's.
+func TestToolTransactionsHoldTheEpoch(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	for name, run := range map[string]func(*Store, string) error{
+		"issue": func(s *Store, _ string) error {
+			_, err := s.Issue(ctx, "other", []Role{Author}, DefaultExpiry, "h-all", "h-operator")
+			return err
+		},
+		"rotate": func(s *Store, identity string) error {
+			_, err := s.Rotate(ctx, identity, nil, DefaultExpiry, "h-operator")
+			return err
+		},
+		"revoke": func(s *Store, identity string) error {
+			_, err := s.Revoke(ctx, identity, "h-operator")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := storeFor(db)
+			first := issued(t, s, "ci-"+name)
+			held, release := make(chan struct{}), make(chan struct{})
+			s.o.afterRevokeOld = func() { close(held); <-release }
+			done := make(chan error, 1)
+			go func() { done <- run(s, first.Identity) }()
+			select {
+			case <-held:
+			case err := <-done:
+				t.Fatalf("ended before its hook: %v", err)
+			}
+			entry := entryLock(t, db)
+			close(release)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if sqlState(entry) != "55P03" {
+				t.Fatalf("recovery entry's lock during a token transaction: %v; want lock_not_available (55P03)", entry)
+			}
+		})
+	}
 }
 
 func rotate(t *testing.T, s *Store, identity string) chan error {

@@ -1424,7 +1424,10 @@ with it. It:
 - rotates by issuing a new token and revoking the unrevoked one, expired or
   not, in the same transaction, so one token is valid at a time. The
   reissue after a restore (§12.3) is such a rotation. Every tool transaction
-  that issues or revokes an identity's token first locks its principal row
+  that issues or revokes an identity's token first takes the installation
+  state `FOR SHARE`, as T5c does, so recovery-mode entry (T9) cannot change
+  the epoch between the token's or act's epoch and the commit (rule 5's
+  order). It then locks the principal row
   `FOR UPDATE`, the lock T5c takes, and refuses to issue a token to a revoked
   identity or to one that `deniedSubjects` lists (§10.4): two
   rotations of one identity serialize, the second replacing the first's
