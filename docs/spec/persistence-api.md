@@ -606,19 +606,21 @@ SELECT id, digest FROM release
   -- for each machine whose assignment head is in $changed:
   --   no operation on its scope is committed, sending, verifying or unresolved;
   --   in recovery mode, its scope released in the current epoch
-SELECT class, observed_from FROM dependency_status
+INSERT INTO dependency_status ... ON CONFLICT DO NOTHING;
+                                     -- `retained`, per provider object version
+                                     -- without a row, in (provider_object,
+                                     -- version) order (dependency monitor §5.2)
+SELECT class, recorded_at FROM dependency_status
  WHERE (provider_object, version) IN ($named) ORDER BY id FOR SHARE;
-  -- a class other than `retained` observed after publication began that
-  -- version's classification refuses the publication, as compilation §6
-  -- step 3 does (dependency monitor §5.2)
+  -- every named row, a concurrent publication's included: a class other
+  -- than `retained` recorded after publication began that version's
+  -- classification refuses the publication, as compilation §6 step 3 does
+  -- (dependency monitor §5.2)
 INSERT INTO release ...;             -- unique (draft_id, draft_revision)
 INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
                                      -- configuration digest, review data
 INSERT INTO release_source ...;      -- every revision and head revision used
 INSERT INTO dependency ...;          -- both records and the encryption dependency
-INSERT INTO dependency_status ... ON CONFLICT DO NOTHING;
-                                     -- `retained`, per provider object version
-                                     -- without a row (dependency monitor §5.2)
 UPDATE <head> SET head_revision_id = ..., head_revision = head_revision + 1,
                   etag_token = ...
  WHERE id = ... AND head_revision = $base;
@@ -1656,7 +1658,9 @@ startup", and design §13.7 item 5 and §14.6 give entering it to
   current one.
 - After a restore, the operator starts the service with a server-side
   **recovery-start flag**. The flag is process state, not database state. Under
-  it the process runs no executor and no job worker, attempts no commitment or
+  it the process runs no executor and no job worker, runs no dependency monitor
+  pass or watchdog until entry has committed
+  ([dependency monitor §6.1](dependency-monitor.md#61-passes)), attempts no commitment or
   attempt transaction, and until entry has committed serves the liveness probe
   and `POST /recovery/entries` only. Every other request, reads, the other
   recovery routes and observation included, is refused with
