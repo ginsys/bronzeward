@@ -227,10 +227,11 @@ func (v *Verifier) roles(payload []byte) ([]Role, error) {
 }
 
 // Discover returns the issuer's key set, found through its discovery document on first use and
-// looked for again after a failure, so the server starts while the issuer is down.
+// looked for again once discoveryRetryInterval has passed after a failure, so the server starts
+// while the issuer is down.
 func Discover(issuer string) KeySet {
 	return &discovered{issuer: issuer, client: &http.Client{Timeout: issuerTimeout, CheckRedirect: secureRedirect},
-		refetch: keyRefetchInterval, discovering: make(chan struct{}, 1)}
+		refetch: keyRefetchInterval, retry: discoveryRetryInterval, discovering: make(chan struct{}, 1)}
 }
 
 // secureRedirect refuses a redirect that leaves authenticated transport, where an on-path
@@ -255,16 +256,24 @@ const (
 	// caller could make each request a fetch from the issuer. A token signed with a key the
 	// issuer published since the last fetch is refused until the interval has passed.
 	keyRefetchInterval = time.Minute
+	// discoveryRetryInterval is how long a failed discovery is answered without asking the issuer
+	// again, so requests are not forwarded to an issuer that is down at request rate, nor queued
+	// behind one timed-out attempt after another. Tokens are refused for up to this long after
+	// the issuer recovers.
+	discoveryRetryInterval = 5 * time.Second
 )
 
 type discovered struct {
 	issuer  string
 	client  *http.Client  // bounds every request to the issuer
 	refetch time.Duration // the least time between successful key set fetches
+	retry   time.Duration // how long a failed discovery is answered without asking the issuer
 	// discovering holds a value while one request runs discovery. It is a lock a waiter can give
 	// up on: a request queued behind a slow discovery fails at its own deadline.
 	discovering chan struct{}
 	keys        *oidc.RemoteKeySet
+	failed      error // the last discovery failure, answered until failedAt + retry
+	failedAt    time.Time
 }
 
 // limitedFetch refuses a key set fetch within every of the last successful one: a 200 whose body
@@ -358,6 +367,21 @@ func (d *discovered) keySet(ctx context.Context) (*oidc.RemoteKeySet, error) {
 	if d.keys != nil {
 		return d.keys, nil
 	}
+	if d.failed != nil && time.Since(d.failedAt) < d.retry {
+		return nil, fmt.Errorf("%w (discovery is tried again %s after a failure)", d.failed, d.retry)
+	}
+	keys, err := d.discover(ctx)
+	switch {
+	case err == nil:
+		d.keys, d.failed = keys, nil
+	case ctx.Err() == nil: // a request that gave up says nothing about the issuer
+		d.failed, d.failedAt = err, time.Now()
+	}
+	return keys, err
+}
+
+// discover reads the issuer's discovery document and returns its key set.
+func (d *discovered) discover(ctx context.Context) (*oidc.RemoteKeySet, error) {
 	p, err := oidc.NewProvider(oidc.ClientContext(ctx, d.client), d.issuer) // refuses a document whose issuer differs
 	if err != nil {
 		return nil, err
@@ -381,6 +405,5 @@ func (d *discovered) keySet(ctx context.Context) (*oidc.RemoteKeySet, error) {
 	}
 	fetch := &http.Client{Timeout: d.client.Timeout, CheckRedirect: d.client.CheckRedirect,
 		Transport: &limitedFetch{next: next, every: d.refetch}}
-	d.keys = oidc.NewRemoteKeySet(oidc.ClientContext(context.Background(), fetch), doc.JWKS)
-	return d.keys, nil
+	return oidc.NewRemoteKeySet(oidc.ClientContext(context.Background(), fetch), doc.JWKS), nil
 }
