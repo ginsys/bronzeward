@@ -225,7 +225,12 @@ fences it. A pass classifies every monitored dependency once. For each, it:
 3. classifies the answer;
 4. in one transaction, locks the DependencyStatus row `FOR UPDATE`. If the
    row's `observed_from` is later than this one's, another instance recorded a
-   newer classification: this one is discarded. Otherwise it records the class
+   classification whose request began later: this one is discarded. A request
+   that began first may still have reached the provider last, so when the
+   discarded class differs from the recorded one, the pass repeats steps 1 to
+   4 for that dependency once, at once; its new request begins after the
+   recorded one, so a change the discarded answer saw is recorded and alerted
+   on this pass, not the next. Otherwise it records the class
    with the transaction's time as `recorded_at` and reads the releases that
    reference the dependency. Either way, it then locks the DependencyMonitor
    row, inserts the alerts of §6.2 a recorded change calls for, naming those
@@ -242,7 +247,7 @@ raise one alert per transition, not two.
 
 The interval, the request timeout, the persistent-unknown interval (15
 minutes, design §7.8), the stall bound, the watchdog's statement timeout
-(§6.3) and the logger's idle timeout (§7.1) are fixed PoC values, held as
+(§6.3) and the logger's idle timeout and batch bound (§7.1) are fixed PoC values, held as
 named constants in one place so that a later version can make them
 configurable.
 
@@ -302,22 +307,26 @@ metrics endpoint and push delivery are not part of the PoC.
 ### 7.1 The log line and the record
 
 The transaction of §6.1 step 4 inserts the DependencyAlert row; the row is the
-record. After it commits, and at the start of every pass, the instance logs
-the alerts not yet logged. A log write can block, so no lock a pass or the
-watchdog needs is held across it:
+record. After it commits, after a watchdog's `monitor-stalled` alert commits
+(§6.3), since the passes may be the thing that hangs, and at the start of
+every pass, the instance logs the alerts not yet logged. A log write can
+block, so no lock a pass or the watchdog needs is held across it:
 
 1. The logger's transaction takes a transaction-level advisory lock that only
    loggers take, and runs with an idle-in-transaction timeout of 10 seconds.
    An instance that finds the lock held logs nothing this time. The
    transaction reads the last logged sequence.
 2. A separate short transaction locks the DependencyMonitor row `FOR SHARE`,
-   reads the alerts above that sequence in recording order, and commits.
+   reads at most 100 alerts above that sequence in recording order, and
+   commits.
 3. With no DependencyMonitor lock held, the logger writes one log line per
    alert read. Each line has the stable event name `dependency-alert` and the
    row's fields: the `dal` and `dep` identifiers, kind, class, reason,
    provider object and version, and the referencing releases.
 4. The logger's transaction advances the last logged sequence to the last
-   alert written and commits.
+   alert written and commits. While step 2 found 100, the logger repeats
+   from step 1, so a backlog advances one bounded batch at a time and a batch
+   that outlives the timeout repeats only itself.
 
 Every alert is inserted under the DependencyMonitor row lock, held to its
 commit (§6.1, §6.3), and step 2 reads the alerts by a statement after its
@@ -452,7 +461,12 @@ fail:
     later-committing alert. A logger paused in its log write delays no pass
     and no watchdog, and its lines are written again after its timeout.
     Control: holding the DependencyMonitor row lock across the write stalls
-    the passes, and the watchdog records no `monitor-stalled`.
+    the passes, and the watchdog records no `monitor-stalled`. With every
+    pass hung, the watchdog's `monitor-stalled` alert is logged; control:
+    logging only after a pass leaves it unlogged. A backlog of 250 alerts
+    with a log sink slowed so that 250 writes outlast the timeout and 100 do
+    not is logged in three batches; control: without the batch bound, the
+    cursor never moves.
 12. **Stale per dependency**: a seeded status whose `observed_from` is older
     than three intervals is served `stale` while passes complete. Control:
     deriving `stale` from the last completed pass serves it as current.
@@ -460,6 +474,10 @@ fail:
     no classification, alert or progress before its entry commits, and runs
     passes after it. Control: starting the monitor with the process records a
     status change in the restored epoch before entry.
+14. **Overlapping monitors**: an instance whose request began first but
+    reached the provider after another instance recorded `retained` sees the
+    loss, and the loss is recorded and alerted on that pass. Control: without
+    the repeat of §6.1 step 4, the loss stays unrecorded until the next pass.
 
 Items 2, 3 and 8's publication refusal are acceptance-plan S2's negative
 controls and S7's variants; the rest run as *checks*
