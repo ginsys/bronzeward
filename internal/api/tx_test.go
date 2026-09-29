@@ -91,6 +91,20 @@ func TestStoredRefusalReplaysAsProblem(t *testing.T) {
 	if second.Header().Get("Idempotent-Replayed") != "true" || !bytes.Equal(first.Body.Bytes(), second.Body.Bytes()) {
 		t.Fatalf("replay: %v %s; first %s", second.Header(), second.Body, first.Body)
 	}
+	// §9.4: the log carries the problem's instance, for the first answer and the replay alike.
+	_, doc := problem(t, first)
+	instance, _ := doc["instance"].(string)
+	e.mu.Lock()
+	n := 0
+	for _, l := range e.logs {
+		if strings.Contains(l, instance) && strings.Contains(l, "409") {
+			n++
+		}
+	}
+	e.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("%d log lines name the stored problem's instance %s; want 2", n, instance)
+	}
 }
 
 func TestKeyReusedForAnotherRequest(t *testing.T) {
