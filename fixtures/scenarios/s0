@@ -20,7 +20,7 @@ umask 077
 image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
 image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
 EV=$STATE/evidence/s0-$s0_mode-$(date -u +%Y%m%dT%H%M%SZ)
-mkdir -p -- "$EV"
+mkdir -p -- "$EV" "$EV/http"
 failed=0
 # secrets: every token this run mints or issues. None is a scan pattern of bin/evidence, which knows
 # only the fixture's own; the end of the run looks for each of them in the evidence it kept.
@@ -54,15 +54,36 @@ mint() {
 }
 
 # call <method> <path> <token> [body] [idempotency key]: the status of a request to A on its
-# published port, 000 when nothing answers; the response body is left in $EV/last.body. The token
-# goes over stdin: a command line is readable by any local user.
+# published port, 000 when nothing answers; the response headers and body are left in
+# $EV/last.headers and $EV/last.body, both emptied first. The token goes over stdin: a command line
+# is readable by any local user.
 call() {
   local method=$1 path=$2 token=$3 body=${4:-} key=${5:-} args=()
+  : >"$EV/last.headers"
+  : >"$EV/last.body"
   [ -z "$body" ] || args+=(--header 'Content-Type: application/json' --data-binary "$body")
   [ -z "$key" ] || args+=(--header "Idempotency-Key: $key")
   { [ -z "$token" ] || printf 'Authorization: Bearer %s\n' "$token"; } |
-    command curl --disable --noproxy '*' --silent --max-time 10 --output "$EV/last.body" --write-out '%{http_code}' \
+    command curl --disable --noproxy '*' --silent --max-time 10 --output "$EV/last.body" \
+      --dump-header "$EV/last.headers" --write-out '%{http_code}' \
       --header @- --request "$method" "${args[@]}" "http://127.0.0.1:$SERVER_A_PORT$path" || true
+}
+# transcript <status> <call args...>: the request and its response into $EV/http/<n>.txt, in call
+# order, the token withheld (acceptance plan §2). The request bodies are the script's own literals.
+http_n=0
+transcript() {
+  local status=$1 method=$2 path=$3 token=$4 body=${5:-} key=${6:-}
+  http_n=$((http_n + 1))
+  {
+    printf '> %s %s\n' "$method" "$path"
+    if [ -n "$token" ]; then printf '> Authorization: Bearer <withheld>\n'; else printf '> (no Authorization)\n'; fi
+    [ -z "$key" ] || printf '> Idempotency-Key: %s\n' "$key"
+    [ -z "$body" ] || printf '> Content-Type: application/json\n>\n%s\n' "$body"
+    printf '< status %s\n' "$status"
+    tr -d '\r' <"$EV/last.headers"
+    cat -- "$EV/last.body"
+    printf '\n'
+  } >"$(printf '%s/http/%04d.txt' "$EV" "$http_n")"
 }
 # answers <status> <problem code or -> <call args...>: the request gets that status and, unless
 # -, a problem document of that code. Says what it got otherwise.
@@ -72,6 +93,7 @@ answers() {
   shift 2
   got=$(call "$@")
   last_status=$got
+  transcript "$got" "$@"
   if [ "$got" != "$want" ]; then
     say "s0: $1 $2: $got, want $want"
     return 1
@@ -261,6 +283,7 @@ run() {
   # Step 5: no route dispatches, issues tokens or grants roles.
   local all
   all=$(mint h-all) || die "cannot mint an h-all token"
+  keep_secret "$all"
   for tok in "$all" "$robot"; do
     who='h-all'
     [ "$tok" = "$all" ] || who='automation'
@@ -392,8 +415,17 @@ EOF
   check 'S0 step 4' 'h-viewer, deniedSubjects emptied: 200 (control)' answers 200 - GET /api/v1/acts "${t[h-viewer]}"
 }
 
+# Acceptance plan S0's precondition, a clean checkout: the image up built is the commit up-build
+# names only if no path differed from it. A FAIL, not a refusal: the run still exercises the rest.
+build_differs=$(sed -n 's/^differing-paths //p' "$STATE/up-build" 2>/dev/null) || build_differs=
+if [ "$build_differs" = 0 ]; then
+  result PASS 'S0 precondition' "the server image was built from a clean checkout of $(sed -n 's/^commit //p' "$STATE/up-build")"
+else
+  result FAIL 'S0 precondition' "the server image was not built from a clean checkout (differing paths: ${build_differs:-unrecorded}); run fixtures/bin/down, commit or clean, then up"
+fi
+
 "$s0_mode"
-rm -f -- "$EV/last.body"
+rm -f -- "$EV/last.body" "$EV/last.headers"
 # The evidence directory is scanned: no token or key of this run may have reached it.
 # bin/evidence exits 0 on a leak and reports it: what it says is read from a file outside .state,
 # where nothing is scanned or kept.
