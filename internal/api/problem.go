@@ -47,8 +47,19 @@ func (r *refusal) with(name string, v any) *refusal {
 	return r
 }
 
-// writeProblem answers application/problem+json; instance is the request's identifier, which
-// the server log carries too.
+// problem answers ref and writes its instance to the server log (§9.4). A 401 and a 403
+// identity-revoked carry no epoch headers, whichever check found them: a revocation can be found
+// inside the transaction, after the headers were set (§9.1).
+func (a *API) problem(w http.ResponseWriter, q *request, ref *refusal) {
+	a.o.logf("%s %s %s: %d %s: %s", q.id, q.r.Method, q.r.URL.Path, ref.status, ref.code, ref.detail)
+	if ref.status == http.StatusUnauthorized || ref.code == "identity-revoked" {
+		w.Header().Del("Bronzeward-Epoch")
+		w.Header().Del("Bronzeward-Recovery-Mode")
+	}
+	writeProblem(w, q.id, ref)
+}
+
+// writeProblem answers application/problem+json; instance is the request's identifier.
 func writeProblem(w http.ResponseWriter, instance string, r *refusal) {
 	doc := map[string]any{
 		"type":     "urn:bronzeward:problem:" + r.code,

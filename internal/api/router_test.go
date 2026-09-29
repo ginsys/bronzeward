@@ -225,6 +225,29 @@ func TestNotImplemented(t *testing.T) {
 	}
 }
 
+// §9.4: a problem's instance is also written to the server log, whichever check refused.
+func TestEveryProblemIsLogged(t *testing.T) {
+	e := newEnv(t, options{extra: []*route{testRoute(nil)}})
+	author, viewer := e.human("h-author"), e.human("h-viewer")
+	e.do(e.api, post(author, key, `{"note":"a"}`))
+	for name, c := range map[string]call{
+		"401":        {method: "GET", path: prefix + "/acts"},
+		"403 role":   {method: "POST", path: prefix + "/drafts", token: viewer, key: key, body: `{}`},
+		"404":        {method: "GET", path: prefix + "/nowhere", token: viewer},
+		"428":        {method: "POST", path: prefix + "/plans", token: e.human("h-publisher")},
+		"400 body":   post(author, "k-other-0123456789", `{"note":1}`),
+		"501":        {method: "GET", path: prefix + "/clusters", token: viewer},
+		"422 reused": post(author, key, `{"note":"b"}`),
+		"400 cursor": {method: "GET", path: prefix + "/acts?cursor=x", token: viewer},
+	} {
+		rec := e.do(e.api, c)
+		_, doc := problem(t, rec)
+		if !e.logged(doc["instance"].(string)) {
+			t.Errorf("%s: instance %v is not in the server log", name, doc["instance"])
+		}
+	}
+}
+
 // §9.1: the epoch and the recovery-mode flag on every authenticated response.
 func TestEpochHeaders(t *testing.T) {
 	e := newEnv(t, options{})

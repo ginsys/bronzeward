@@ -130,7 +130,13 @@ func revokerRevokedMeanwhile(t *testing.T, control bool) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	wantProblem(t, <-done, http.StatusForbidden, "identity-revoked")
+	rec := <-done
+	wantProblem(t, rec, http.StatusForbidden, "identity-revoked")
+	// §9.1: a 403 identity-revoked carries no epoch, even when the revocation is found in the
+	// transaction, after the headers were set.
+	if rec.Header().Get("Bronzeward-Epoch") != "" || rec.Header().Get("Bronzeward-Recovery-Mode") != "" {
+		t.Fatalf("a revoked identity was told the epoch: %v", rec.Header())
+	}
 	if n := count(t, e.db, "SELECT count(*) FROM identity_revocation"); n != 0 {
 		t.Fatal("a revoked identity recorded a revocation")
 	}

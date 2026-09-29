@@ -40,13 +40,13 @@ func lookup(ctx context.Context, db querier, q *request) (*record, error) {
 // answer is §7.2's table for a key with a record: an earlier epoch's record is 409, another
 // request's 422, and the same request's is its stored response, marked replayed unless this
 // request committed it.
-func answer(w http.ResponseWriter, q *request, rec *record, replayed bool) {
+func (a *API) answer(w http.ResponseWriter, q *request, rec *record, replayed bool) {
 	switch {
 	case !rec.current:
-		writeProblem(w, q.id, refuse(http.StatusConflict, "conflict", "the key's record is from an earlier recovery epoch; retry under a new key").
+		a.problem(w, q, refuse(http.StatusConflict, "conflict", "the key's record is from an earlier recovery epoch; retry under a new key").
 			with("request", rec.requestID).with("epoch", rec.epoch))
 	case !bytes.Equal(rec.fingerprint, q.fingerprint):
-		writeProblem(w, q.id, refuse(http.StatusUnprocessableEntity, "idempotency-key-reused", "the key was used for another request").
+		a.problem(w, q, refuse(http.StatusUnprocessableEntity, "idempotency-key-reused", "the key was used for another request").
 			with("request", rec.requestID))
 	default:
 		if rec.location.Valid {
