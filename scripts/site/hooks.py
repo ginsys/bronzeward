@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
+import markdown.extensions.toc
 import yaml
 from mkdocs.exceptions import PluginError
 from mkdocs.structure.files import File
@@ -31,6 +32,24 @@ FENCE = re.compile(r'^ {0,3}(`{3,}|~{3,})(.*)$')
 # An inline code span: a backtick run, content, the same run again. Like CommonMark's, it may wrap
 # onto the next line but never crosses a blank line.
 CODE_SPAN = re.compile(r'(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n)[\s\S])+?)(?<!`)\1(?!`)')
+
+
+def _github_unique(id, ids):
+    """GitHub's anchor for a repeated heading: `x`, then `x-1`, `x-2`, ..."""
+    candidate = id
+    suffix = 0
+    while candidate in ids or not candidate:
+        suffix += 1
+        candidate = f'{id}-{suffix}'
+    ids.add(candidate)
+    return candidate
+
+
+# mkdocs.yml's slugify gives each heading GitHub's anchor, but the toc extension then makes repeats
+# unique its own way (`x_1`), which it offers no option to change. Its tree processor looks
+# `unique` up in its module on every heading, so replacing it there gives repeats GitHub's
+# anchors too, and the strict build validates links against those.
+markdown.extensions.toc.unique = _github_unique
 
 # Repository path -> site path (relative to docs/) for the mounted files, and the reverse.
 _mounted = {}
