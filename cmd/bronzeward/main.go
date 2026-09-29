@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/api"
+	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/database"
 	"github.com/ginsys/bronzeward/internal/migrate"
@@ -128,7 +130,9 @@ func serve(args []string) error {
 	if err := migrate.Check(startCtx, db, ms); err != nil {
 		return err
 	}
-	srv := server.NewHTTP(cfg.Listen, server.New(nil))
+	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
+	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC.Issuer))
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(db, verifier, cfg.Auth)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {
