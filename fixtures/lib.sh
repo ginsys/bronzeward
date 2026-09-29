@@ -783,6 +783,22 @@ issuer_answers() {
     "$CURL_IMAGE" --fail --silent http://localhost:5556/.well-known/openid-configuration
 }
 
+# server_command <bronzeward args>: one command of the server image bin/up built and recorded, on
+# the Compose network by the ID bin/up recorded, with instance A's configuration. By ID, not by
+# name: a network made under the name since would carry this run's password to whatever answers
+# as postgres there. -config is appended, so no caller names a path inside the container. The
+# caller holds the fixture lock.
+server_command() {
+  local image_id network_id
+  image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+  [[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || die "$STATE/up-image does not hold an image ID"
+  image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+  network_id=$(cat -- "$STATE/down-compose-networks") || die "no Compose network is recorded in $STATE"
+  [ -n "$network_id" ] || die "$STATE/down-compose-networks is empty"
+  timeout 600 docker run --rm --pull never --network "$network_id" --user "$(id -u):$(id -g)" \
+    --label "$TOOL_LABEL" -v "$STATE/server/a:/etc/bronzeward:ro" "$image_id" "$@" -config /etc/bronzeward/config.yaml
+}
+
 # claim_take [attempt]: fails when any checkout on this daemon already holds the claim. The image
 # declares a data volume, and Docker would make an anonymous, unlabelled one for the claim although
 # it never starts; removed outside claim_drop without --volumes, it would outlive every record. A

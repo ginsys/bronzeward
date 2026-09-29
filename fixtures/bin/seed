@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Seed what a scenario needs beyond an empty schema: the automation identity of the acceptance
+# plan (AP §2), author and publisher, h-all responsible. Its token goes to .state/automation-token
+# (0600) and into the leak-scan patterns; the identity line to .state/automation-identity.
+# Usage: seed   (after bw migrate; once per run)
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$(dirname "$0")/../lib.sh"
+
+need docker timeout id jq awk sort
+need_state
+# Alone: an evidence capture under it would compare the scan patterns with a list half rewritten.
+fixture_lock exclusive
+umask 077
+token=$STATE/automation-token
+[ ! -e "$token" ] || die "$token exists: this run is seeded already (the token tool never shows a token twice)"
+rm -f -- "$token.partial" "$STATE/automation-identity.partial" "$STATE/scan-patterns.txt.partial"
+# The token is printed once, on stdout, and nowhere else: straight into the file.
+if ! server_command token issue -name ci -roles author,publisher -responsible h-all -operator h-all \
+  >"$token.partial" 2>"$STATE/automation-identity.partial"; then
+  cat -- "$STATE/automation-identity.partial" >&2 || true
+  rm -f -- "$token.partial" "$STATE/automation-identity.partial"
+  die "bw token issue failed; nothing was seeded"
+fi
+[ -s "$token.partial" ] || die "bw token issue printed no token"
+mv --no-target-directory -- "$STATE/automation-identity.partial" "$STATE/automation-identity"
+mv --no-target-directory -- "$token.partial" "$token"
+# The list bin/evidence rebuilds now holds the token; written the same way, in place of the old.
+scan_patterns >"$STATE/scan-patterns.txt.partial" ||
+  die "the token was issued, but the leak-scan patterns could not be rebuilt with it; evidence refuses until they are: run fixtures/bin/down, then up"
+mv --no-target-directory -- "$STATE/scan-patterns.txt.partial" "$STATE/scan-patterns.txt"
+say "seeded: $(cat -- "$STATE/automation-identity")"
