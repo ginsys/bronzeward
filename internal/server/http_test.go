@@ -29,11 +29,11 @@ func TestNewHTTPSettings(t *testing.T) {
 		t.Fatalf("unbounded read: header=%v read=%v idle=%v", srv.ReadHeaderTimeout, srv.ReadTimeout, srv.IdleTimeout)
 	}
 	if !srv.DisableGeneralOptionsHandler {
-		t.Fatal("net/http's general OPTIONS handler answers `OPTIONS *` without reaching the mux")
+		t.Fatal("net/http's general OPTIONS handler answers `OPTIONS *` without reaching the handler")
 	}
 }
 
-// `OPTIONS *` must reach the mux, which refuses it, instead of net/http's handler answering 200.
+// `OPTIONS *` must reach the handler, which refuses it, instead of net/http's handler answering 200.
 func TestOptionsStarIsNotAnswered(t *testing.T) {
 	addr := start(t, NewHTTP("", New(nil)))
 	c, err := net.Dial("tcp", addr)
