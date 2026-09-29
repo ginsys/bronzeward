@@ -433,6 +433,18 @@ fixtures_git() {
     -c core.symlinks=true "$@"
 }
 
+# checkout_differs: how many paths of the whole checkout may differ from HEAD. These are the
+# changed and untracked paths git status lists, plus the tracked files git is told to skip
+# (assume-unchanged, a lowercase ls-files -v tag, or skip-worktree, S): a modification there is in
+# no status. A failing listing fails, not counts zero.
+checkout_differs() {
+  local changed flagged
+  changed=$(fixtures_git status --porcelain --untracked-files=all) || return 1
+  flagged=$(fixtures_git ls-files -v -- ':/') || return 1
+  flagged=$(grep -E '^([a-z]|S) ' <<<"$flagged" || [ $? -eq 1 ]) || return 1
+  printf '%s\n' "$changed" "$flagged" | grep -c . || [ $? -eq 1 ]
+}
+
 # fixtures_manifest_diff <status> <commit>: how fixtures/ differs from the commit, as bin/up
 # records it at creation and bin/evidence at capture: the status given, the diff of the tracked
 # files against the commit named, not HEAD, which a checkout meanwhile would have moved, and the
@@ -1029,7 +1041,7 @@ fetch_tools() {
 # Each source is read on its own and a source that cannot be read fails the whole list: a jq that
 # stops halfway through bao-init.json would otherwise leave a list that is short and looks whole.
 scan_patterns() {
-  local talos_client_key kube_client_key bao_keys metadata_token talos_secrets issuer_key automation_token=
+  local talos_client_key kube_client_key bao_keys metadata_token talos_secrets issuer_key automation_token='' automation_secret=''
   talos_client_key=$(awk '$1 == "key:" {print $2}' "$TALOSCONFIG") || return 1
   kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG") || return 1
   [ -n "$talos_client_key" ] || die "no client key found in $TALOSCONFIG; it would go unscanned"
@@ -1041,13 +1053,15 @@ scan_patterns() {
     "$STATE/talos-secrets.yaml") || return 1
   # The issuer's private key: the JWK's d (issuer.WriteKey writes a P-256 key as go-jose marshals it).
   issuer_key=$(jq -er .d "$STATE/issuer/key.json") || return 1
-  # The automation token bin/seed issues, once it has.
+  # The automation token bin/seed issues, once it has, and its secret half on its own: the token id
+  # is in the database dump, so the half alone rebuilds the credential.
   if [ -e "$STATE/automation-token" ]; then
     automation_token=$(cat -- "$STATE/automation-token") || return 1
     [ -n "$automation_token" ] || die "$STATE/automation-token is empty; it would go unscanned"
+    automation_secret=${automation_token##*.}
   fi
   printf '%s\n' 'BWSYNTH-' "$talos_client_key" "$kube_client_key" "$bao_keys" "$metadata_token" "$talos_secrets" \
-    "$issuer_key" "$automation_token" |
+    "$issuer_key" "$automation_token" "$automation_secret" |
     awk 'length($0) >= 8' | sort -u
 }
 

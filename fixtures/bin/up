@@ -304,7 +304,7 @@ build_go=$(go env GOVERSION) || die "cannot read the Go version the server image
 [ -n "$build_pin" ] && [ "$build_go" = "go$build_pin" ] ||
   die "go on PATH is $build_go, but mise.toml pins go ${build_pin:-(none)}: run bin/up under mise (mise exec -- fixtures/bin/up)"
 build_commit=$(fixtures_git rev-parse HEAD) || die "cannot read the commit the server image is built from"
-build_differs=$(fixtures_git status --porcelain --untracked-files=all | wc -l) || die "cannot ask git how the checkout differs from $build_commit"
+build_differs=$(checkout_differs) || die "cannot ask git how the checkout differs from $build_commit"
 S_IMG=$STATE/image
 S_SRC=$STATE/source
 mkdir "$S_IMG" "$S_SRC" "$STATE/issuer" "$STATE/server" "$STATE/server/a" "$STATE/server/b"
