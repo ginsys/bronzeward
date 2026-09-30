@@ -7,6 +7,7 @@ import (
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -67,6 +68,9 @@ type clusterInput struct {
 var (
 	contractShape = regexp.MustCompile(`^v[0-9]{1,4}\.[0-9]{1,4}$`)
 	endpointShape = regexp.MustCompile(`^https://[^/?#@\s\x00-\x1f\x7f]+$`)
+	// hostShape is a DNS name (an IPv4 address included): dot-separated labels of letters, digits
+	// and inner hyphens, each at most 63 bytes.
+	hostShape = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 )
 
 func (in *clusterInput) check(*API) error {
@@ -88,9 +92,21 @@ func validEndpoint(s string) bool {
 	if len(s) > 512 || !endpointShape.MatchString(s) {
 		return false
 	}
-	// url.Parse refuses a port that is not decimal; the range is checked here.
+	// url.Parse refuses a port that is not decimal. The authority itself is checked here: a DNS
+	// name or a bracketed IPv6 address without a zone, then a port in range if there is a colon,
+	// and nothing else, so that it rebuilds to exactly what was given.
 	u, err := url.Parse(s)
-	if err != nil || u.Hostname() == "" || len(u.Hostname()) > 253 {
+	if err != nil {
+		return false
+	}
+	h := u.Hostname()
+	authority := h
+	if strings.HasPrefix(u.Host, "[") {
+		if !strings.Contains(h, ":") || net.ParseIP(h) == nil {
+			return false
+		}
+		authority = "[" + h + "]"
+	} else if len(h) > 253 || !hostShape.MatchString(h) {
 		return false
 	}
 	if p := u.Port(); p != "" {
@@ -98,8 +114,9 @@ func validEndpoint(s string) bool {
 		if err != nil || n < 1 || n > 65535 {
 			return false
 		}
+		authority += ":" + p
 	}
-	return true
+	return u.Host == authority
 }
 
 type clusterBody struct {
