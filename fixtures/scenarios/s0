@@ -501,11 +501,11 @@ else
   result FAIL 'S0 precondition' "the server image was not built from a clean checkout (differing paths: ${build_differs:-unrecorded}); run fixtures/bin/down, commit or clean, then up"
 fi
 
-# The checkout is the image commit, unmodified, before and after either mode: this script, seed,
-# inject and evidence run from it, so a change during the run is a FAIL, not a captured diff.
+# The checkout is the image commit, unmodified, before either mode and after its evidence: this
+# script, seed, inject and evidence run from it, so a change during the run is a FAIL, not a
+# captured diff.
 check 'S0 precondition' 'the checkout is the image commit, unmodified, before the scenario' same_checkout
 "$s0_mode"
-check 'S0 precondition' 'the checkout is the image commit, unmodified, after the scenario' same_checkout
 rm -f -- "$EV/last.body" "$EV/last.headers"
 # The evidence directory is scanned: no token or key of this run may have reached it.
 # bin/evidence exits 0 on a leak and reports it: what it says is read from a file outside .state,
@@ -556,5 +556,6 @@ else
   result FAIL 'S0 evidence' 'bin/evidence failed'
 fi
 rm -f -- "$ev_log"
+check 'S0 precondition' 'the checkout is the image commit, unmodified, after the scenario and its evidence' same_checkout
 say "s0 $s0_mode: $failed failed; evidence in $EV, bundle ${bundle:-none}"
 [ "$failed" -eq 0 ]
