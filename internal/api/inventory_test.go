@@ -15,8 +15,13 @@ import (
 
 const uuidA = "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b"
 
-func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
+// decode is rec's JSON body, failing the test unless rec answered status with a JSON resource: a
+// problem document decodes too, into a value whose members are all absent.
+func decode[T any](t *testing.T, rec *httptest.ResponseRecorder, status int) T {
 	t.Helper()
+	if rec.Code != status || rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("%d %s %s; want %d with a JSON resource", rec.Code, rec.Header().Get("Content-Type"), rec.Body, status)
+	}
 	var v T
 	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
 		t.Fatalf("%d %s: %v", rec.Code, rec.Body, err)
@@ -32,7 +37,7 @@ func (e *env) createCluster(h http.Handler, tok, k string) string {
 	if rec.Code != http.StatusCreated {
 		e.t.Fatalf("POST /clusters: %d %s", rec.Code, rec.Body)
 	}
-	return decode[clusterBody](e.t, rec).ID
+	return decode[clusterBody](e.t, rec, http.StatusCreated).ID
 }
 
 func machineCall(tok, k, cluster, uuid string) call {
@@ -64,7 +69,7 @@ func TestInventoryIsHumanOnly(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("human author: %d %s", rec.Code, rec.Body)
 	}
-	m := decode[machineBody](t, rec)
+	m := decode[machineBody](t, rec, http.StatusCreated)
 	if rec.Header().Get("Location") != prefix+"/machines/"+m.ID || m.Cluster != cl || m.Hardware.SMBIOSUUID != uuidA ||
 		m.ScopeState != "normal" || m.Frozen || m.Applied != nil || m.Desired != nil {
 		t.Fatalf("machine %+v, Location %s", m, rec.Header().Get("Location"))
@@ -87,7 +92,7 @@ func TestSMBIOSUUIDIsOneMachine(t *testing.T) {
 	if first.Code != http.StatusCreated {
 		t.Fatalf("first: %d %s", first.Code, first.Body)
 	}
-	existing := decode[machineBody](t, first).ID
+	existing := decode[machineBody](t, first, http.StatusCreated).ID
 	for _, c := range []call{
 		machineCall(author, "k-second-012345678", cl, uuidA),
 		machineCall(e.human("h-all"), "k-third-0123456789", cl, strings.ToUpper(uuidA)),
@@ -105,7 +110,7 @@ func TestSMBIOSUUIDIsOneMachine(t *testing.T) {
 	}
 	// The first key still replays its machine.
 	replay := e.do(e.api, machineCall(author, "k-first-0123456789", cl, uuidA))
-	if replay.Code != http.StatusCreated || replay.Header().Get("Idempotent-Replayed") != "true" || decode[machineBody](t, replay).ID != existing {
+	if replay.Code != http.StatusCreated || replay.Header().Get("Idempotent-Replayed") != "true" || decode[machineBody](t, replay, http.StatusCreated).ID != existing {
 		t.Fatalf("replay: %d %v %s", replay.Code, replay.Header(), replay.Body)
 	}
 }
@@ -166,7 +171,7 @@ func TestSMBIOSUUIDConcurrent(t *testing.T) {
 			continue
 		}
 		doc := wantProblem(t, <-b, http.StatusConflict, "conflict")
-		if doc["machine"] != decode[machineBody](t, ra).ID {
+		if doc["machine"] != decode[machineBody](t, ra, http.StatusCreated).ID {
 			t.Fatalf("409 names %v; want the first's machine", doc["machine"])
 		}
 		if n := count(t, e.db, "SELECT count(*) FROM machine"); n != 1 {
@@ -230,7 +235,7 @@ func TestInventoryInRecoveryMode(t *testing.T) {
 	newEpoch(t, e.db)
 	mustExec(t, e.db, "UPDATE installation_state SET recovery_mode = true")
 	rec := e.do(e.api, machineCall(author, key, cl, uuidA))
-	if rec.Code != http.StatusCreated || decode[machineBody](t, rec).ScopeState != "pre-restore-unaccounted" {
+	if decode[machineBody](t, rec, http.StatusCreated).ScopeState != "pre-restore-unaccounted" {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 }
@@ -250,13 +255,13 @@ func TestCreateDraft(t *testing.T) {
 		if rec.Code != http.StatusCreated || !etagShape.MatchString(rec.Header().Get("ETag")) {
 			t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body)
 		}
-		d := decode[draftBody](t, rec)
+		d := decode[draftBody](t, rec, http.StatusCreated)
 		if rec.Header().Get("Location") != prefix+"/drafts/"+d.ID || d.Cluster != cl || d.Title != "registry mirror" ||
 			d.State != "open" || d.Revision != 1 || d.Entries == nil || len(d.Entries) != 0 {
 			t.Fatalf("draft %+v", d)
 		}
 		got := e.do(e.api, call{method: "GET", path: prefix + "/drafts/" + d.ID, token: e.human("h-viewer")})
-		if got.Code != http.StatusOK || got.Header().Get("ETag") != rec.Header().Get("ETag") || decode[draftBody](t, got).ID != d.ID {
+		if got.Header().Get("ETag") != rec.Header().Get("ETag") || decode[draftBody](t, got, http.StatusOK).ID != d.ID {
 			t.Fatalf("GET: %d %v %s", got.Code, got.Header(), got.Body)
 		}
 	}
@@ -276,15 +281,12 @@ func TestDraftReadsLockTheDraft(t *testing.T) {
 		author, viewer := e.human("h-author"), e.human("h-viewer")
 		cl := e.createCluster(e.api, author, "k-cluster-0123456789")
 		d := decode[draftBody](t, e.do(e.api, call{method: "POST", path: prefix + "/drafts", token: author, key: key,
-			body: `{"cluster":"` + cl + `","title":"import"}`}))
+			body: `{"cluster":"` + cl + `","title":"import"}`}), http.StatusCreated)
 		api := e.build(options{noDraftLock: control})
 		for i, path := range []string{"/drafts/" + d.ID, "/drafts"} {
 			uuid := []string{uuidA, "1c6b7d2f-3a4e-4f6a-9b0c-1d2e3f4a5b6c"}[i]
 			rec := e.do(e.api, machineCall(author, "k-machine-"+strconv.Itoa(i)+"-0123456789", cl, uuid))
-			if rec.Code != http.StatusCreated {
-				t.Fatalf("POST /machines: %d %s", rec.Code, rec.Body)
-			}
-			m, ibr := decode[machineBody](t, rec).ID, id.New(id.ImportBase)
+			m, ibr := decode[machineBody](t, rec, http.StatusCreated).ID, id.New(id.ImportBase)
 			mustExec(t, e.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
 				baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'k:1', $3, now())`,
 				ibr, m, make([]byte, 32))
@@ -333,16 +335,13 @@ func TestDraftReadsLockTheDraft(t *testing.T) {
 				rec = <-got
 				want, wantETag = before+1, etag(before+1, tok)
 			}
-			if rec.Code != http.StatusOK {
-				t.Fatalf("control %t, GET %s: %d %s", control, path, rec.Code, rec.Body)
-			}
 			var b draftBody
 			if i == 0 {
-				b = decode[draftBody](t, rec)
+				b = decode[draftBody](t, rec, http.StatusOK)
 				if !control && rec.Header().Get("ETag") != wantETag {
 					t.Errorf("GET %s: ETag %s; want %s", path, rec.Header().Get("ETag"), wantETag)
 				}
-			} else if pg := decode[listPage[draftBody]](t, rec); len(pg.Items) == 1 {
+			} else if pg := decode[listPage[draftBody]](t, rec, http.StatusOK); len(pg.Items) == 1 {
 				b = pg.Items[0]
 			}
 			// Before the draft transaction every entry is of a machine already listed; after it, one more.
@@ -370,10 +369,10 @@ func TestInventoryReads(t *testing.T) {
 			p += "&cursor=" + next
 		}
 		rec := e.do(e.api, call{method: "GET", path: p, token: viewer})
-		if rec.Code != http.StatusOK || rec.Header().Get("Bronzeward-Epoch") == "" {
-			t.Fatalf("%d %s", rec.Code, rec.Body)
+		pg := decode[listPage[clusterBody]](t, rec, http.StatusOK)
+		if rec.Header().Get("Bronzeward-Epoch") == "" {
+			t.Fatalf("no epoch: %v", rec.Header())
 		}
-		pg := decode[listPage[clusterBody]](t, rec)
 		for _, c := range pg.Items {
 			seen = append(seen, c.ID)
 		}
@@ -386,22 +385,23 @@ func TestInventoryReads(t *testing.T) {
 	}
 	for _, c := range clusters {
 		rec := e.do(e.api, call{method: "GET", path: prefix + "/clusters/" + c, token: viewer})
-		if b := decode[clusterBody](t, rec); rec.Code != http.StatusOK || b.ID != c || b.Endpoint != "https://cp.example.test:6443" || b.Contract != "v1.13" {
+		if b := decode[clusterBody](t, rec, http.StatusOK); b.ID != c || b.Endpoint != "https://cp.example.test:6443" || b.Contract != "v1.13" {
 			t.Fatalf("GET cluster: %d %s", rec.Code, rec.Body)
 		}
 	}
-	m := decode[machineBody](t, e.do(e.api, machineCall(author, key, clusters[0], uuidA)))
+	m := decode[machineBody](t, e.do(e.api, machineCall(author, key, clusters[0], uuidA)), http.StatusCreated)
 	rec := e.do(e.api, call{method: "GET", path: prefix + "/machines/" + m.ID, token: viewer})
-	if got := decode[machineBody](t, rec); rec.Code != http.StatusOK || got.Hardware.Serial == nil || *got.Hardware.Serial != "SN-1" || got.Cluster != clusters[0] {
+	if got := decode[machineBody](t, rec, http.StatusOK); got.Hardware.Serial == nil || *got.Hardware.Serial != "SN-1" || got.Cluster != clusters[0] {
 		t.Fatalf("GET machine: %d %s", rec.Code, rec.Body)
 	}
-	if pg := decode[listPage[machineBody]](t, e.do(e.api, call{method: "GET", path: prefix + "/machines", token: viewer})); len(pg.Items) != 1 || pg.Items[0].ID != m.ID {
+	if pg := decode[listPage[machineBody]](t, e.do(e.api, call{method: "GET", path: prefix + "/machines", token: viewer}), http.StatusOK); len(pg.Items) != 1 || pg.Items[0].ID != m.ID {
 		t.Fatalf("machines %+v", pg)
 	}
-	if pg := decode[listPage[draftBody]](t, e.do(e.api, call{method: "GET", path: prefix + "/drafts", token: viewer})); len(pg.Items) != 0 {
-		t.Fatalf("drafts %+v", pg)
+	// No draft yet: a present, empty items array (§9.1), not an absent or null one.
+	if pg := decode[listPage[draftBody]](t, e.do(e.api, call{method: "GET", path: prefix + "/drafts", token: viewer}), http.StatusOK); pg.Items == nil || len(pg.Items) != 0 {
+		t.Fatalf("drafts %+v; want an empty items array", pg)
 	}
-	old := decode[listPage[clusterBody]](t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?limit=1", token: viewer})).Next
+	old := decode[listPage[clusterBody]](t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?limit=1", token: viewer}), http.StatusOK).Next
 	newEpoch(t, e.db)
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?cursor=" + old, token: viewer}), http.StatusBadRequest, "cursor-invalid")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?limit=0", token: viewer}), http.StatusBadRequest, "invalid-request")
@@ -419,7 +419,7 @@ func TestGetOperation(t *testing.T) {
 	author := e.human("h-author")
 	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
 	d := decode[draftBody](t, e.do(e.api, call{method: "POST", path: prefix + "/drafts", token: author, key: key,
-		body: `{"cluster":"` + cl + `","title":"import"}`}))
+		body: `{"cluster":"` + cl + `","title":"import"}`}), http.StatusCreated)
 	var human string
 	if err := e.db.QueryRow("SELECT id FROM principal WHERE sub = 'h-author'").Scan(&human); err != nil {
 		t.Fatal(err)
@@ -434,13 +434,7 @@ func TestGetOperation(t *testing.T) {
 		SELECT $1, 'ingest', 'running', epoch, 'run/1/start', 1, epoch, now() + interval '1 minute', 2, $2, 1, $3, $4, 'human',
 		'author', now() FROM installation_state`, opID, d.ID, claim, human)
 	rec := e.do(e.api, call{method: "GET", path: prefix + "/operations/" + opID, token: e.human("h-viewer")})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
+	got := decode[map[string]any](t, rec, http.StatusOK)
 	subject, _ := got["subject"].(map[string]any)
 	by, _ := got["createdBy"].(map[string]any)
 	if got["id"] != opID || got["kind"] != "ingest" || got["state"] != "running" || got["epoch"] != epoch(t, e.db) ||
