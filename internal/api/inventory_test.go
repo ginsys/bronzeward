@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -261,6 +262,94 @@ func TestCreateDraft(t *testing.T) {
 	}
 	if n := count(t, e.db, "SELECT count(*) FROM act WHERE action = 'draft.create'"); n != 2 {
 		t.Fatalf("%d draft acts", n)
+	}
+}
+
+// §4.1, §5 rules 2 and 3: a draft read takes the draft rows FOR SHARE before it reads their entries
+// in a second statement. A draft transaction holding the draft FOR UPDATE, as T1 does, therefore
+// cannot commit between the two and pair revision N's ETag with revision N+1's entries: the read
+// waits for it and answers the committed revision whole. The control, without the lock, answers
+// while that transaction is still open, so the wait is the lock's.
+func TestDraftReadsLockTheDraft(t *testing.T) {
+	for _, control := range []bool{false, true} {
+		e := newEnv(t, options{})
+		author, viewer := e.human("h-author"), e.human("h-viewer")
+		cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+		d := decode[draftBody](t, e.do(e.api, call{method: "POST", path: prefix + "/drafts", token: author, key: key,
+			body: `{"cluster":"` + cl + `","title":"import"}`}))
+		api := e.build(options{noDraftLock: control})
+		for i, path := range []string{"/drafts/" + d.ID, "/drafts"} {
+			uuid := []string{uuidA, "1c6b7d2f-3a4e-4f6a-9b0c-1d2e3f4a5b6c"}[i]
+			rec := e.do(e.api, machineCall(author, "k-machine-"+strconv.Itoa(i)+"-0123456789", cl, uuid))
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("POST /machines: %d %s", rec.Code, rec.Body)
+			}
+			m, ibr := decode[machineBody](t, rec).ID, id.New(id.ImportBase)
+			mustExec(t, e.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
+				baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'k:1', $3, now())`,
+				ibr, m, make([]byte, 32))
+			var before int
+			if err := e.db.QueryRow("SELECT revision FROM draft WHERE id = $1", d.ID).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			// The draft transaction: the draft FOR UPDATE, an entry, the next revision and token.
+			tx, err := e.db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = tx.Rollback() })
+			tok := etagToken()
+			for _, s := range []struct {
+				q    string
+				args []any
+			}{
+				{"SELECT 1 FROM draft WHERE id = $1 FOR UPDATE", []any{d.ID}},
+				{"INSERT INTO draft_entry (draft, cluster, kind, machine, import_base_revision) VALUES ($1, $2, 'import-base', $3, $4)",
+					[]any{d.ID, cl, m, ibr}},
+				{"UPDATE draft SET revision = revision + 1, etag_token = $2 WHERE id = $1", []any{d.ID, tok}},
+			} {
+				if _, err := tx.Exec(s.q, s.args...); err != nil {
+					t.Fatalf("%s: %v", s.q, err)
+				}
+			}
+			got := make(chan *httptest.ResponseRecorder, 1)
+			go func() { got <- e.do(api, call{method: "GET", path: prefix + path, token: viewer}) }()
+			want, wantETag := before, ""
+			if control {
+				rec = <-got // answered with the transaction open
+				if err := tx.Rollback(); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				dbtest.WaitForLockWait(t, e.db)
+				select {
+				case rec := <-got:
+					t.Fatalf("GET %s answered while the draft transaction held the draft: %d %s", path, rec.Code, rec.Body)
+				default:
+				}
+				if err := tx.Commit(); err != nil {
+					t.Fatal(err)
+				}
+				rec = <-got
+				want, wantETag = before+1, etag(before+1, tok)
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("control %t, GET %s: %d %s", control, path, rec.Code, rec.Body)
+			}
+			var b draftBody
+			if i == 0 {
+				b = decode[draftBody](t, rec)
+				if !control && rec.Header().Get("ETag") != wantETag {
+					t.Errorf("GET %s: ETag %s; want %s", path, rec.Header().Get("ETag"), wantETag)
+				}
+			} else if pg := decode[listPage[draftBody]](t, rec); len(pg.Items) == 1 {
+				b = pg.Items[0]
+			}
+			// Before the draft transaction every entry is of a machine already listed; after it, one more.
+			if b.ID != d.ID || b.Revision != want || len(b.Entries) != want-1 {
+				t.Fatalf("control %t, GET %s: %s; want revision %d with %d entries", control, path, rec.Body, want, want-1)
+			}
+		}
 	}
 }
 

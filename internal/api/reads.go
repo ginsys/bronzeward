@@ -159,6 +159,18 @@ type draftRow struct {
 
 const selectDraft = `SELECT id, cluster, title, state, revision, etag_token FROM draft`
 
+// draftLock is the clause a draft read takes its draft rows with. The entries are read by a second
+// statement, and under read committed (§5 rule 3) a draft transaction could commit between the
+// two, pairing revision N's ETag with revision N+1's entries. Every write of a draft's entries
+// holds the draft FOR UPDATE (T1), so FOR SHARE waits for one in progress and holds off the next
+// until the read ends (rule 2); the draft comes after the installation state (rule 5).
+func draftLock(a *API) string {
+	if a.o.noDraftLock {
+		return ""
+	}
+	return " FOR SHARE"
+}
+
 func scanDraft(r interface{ Scan(...any) error }) (draftRow, error) {
 	var d draftRow
 	err := r.Scan(&d.ID, &d.Cluster, &d.Title, &d.State, &d.Revision, &d.token)
@@ -202,7 +214,7 @@ func listDrafts(a *API, w http.ResponseWriter, q *request) {
 		}
 		out := listPage[*draftBody]{Items: []*draftBody{}}
 		err := func() error {
-			rows, err := tx.QueryContext(ctx, selectDraft+` WHERE id > $1 ORDER BY id LIMIT $2`, after, limit+1)
+			rows, err := tx.QueryContext(ctx, selectDraft+` WHERE id > $1 ORDER BY id LIMIT $2`+draftLock(a), after, limit+1)
 			if err != nil {
 				return err
 			}
@@ -227,13 +239,15 @@ func listDrafts(a *API, w http.ResponseWriter, q *request) {
 	})
 }
 
-var getDraft = item(id.Draft, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
-	d, err := scanDraft(tx.QueryRowContext(ctx, selectDraft+` WHERE id = $1`, v))
-	if err != nil {
-		return "", nil, err
-	}
-	return etag(d.Revision, d.token), &d.draftBody, withEntries(ctx, tx, []*draftBody{&d.draftBody})
-})
+func getDraft(a *API, w http.ResponseWriter, q *request) {
+	item(id.Draft, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
+		d, err := scanDraft(tx.QueryRowContext(ctx, selectDraft+` WHERE id = $1`+draftLock(a), v))
+		if err != nil {
+			return "", nil, err
+		}
+		return etag(d.Revision, d.token), &d.draftBody, withEntries(ctx, tx, []*draftBody{&d.draftBody})
+	})(a, w, q)
+}
 
 type operationSubject struct {
 	Draft         string `json:"draft"`
