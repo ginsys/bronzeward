@@ -85,8 +85,9 @@ type revocationBody struct {
 // revokeIdentity is T5c (§5, §10.4), after the key lock and the installation state. Principals
 // are locked in id order (rule 5): the identity FOR UPDATE by auth.RevokeIdentity, and the
 // revoking human FOR SHARE, refused if revoked by then (rule 2). T5c's machine locks and timeline
-// entries join here with the plan table and the machine timeline (ginsys/bronzeward#27): the
-// entries go on the machines with a plan the identity approved, and neither table exists yet.
+// entries join here with the plans and the machine timeline: the entries go on the machines with
+// a plan the identity approved, and neither table exists yet. Acceptance plan §7.1 assigns their
+// check to ginsys/bronzeward#25.
 func revokeIdentity(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*revocationInput)
 	ids := []string{in.target, q.principal.ID}
