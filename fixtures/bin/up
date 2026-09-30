@@ -311,6 +311,12 @@ mkdir "$S_IMG" "$S_SRC" "$STATE/issuer" "$STATE/server" "$STATE/server/a" "$STAT
 # From the repository root: run in fixtures/, git archive exports only that directory.
 fixtures_git -C .. archive --format=tar "$build_commit" | tar -x -C "$S_SRC" -f - ||
   die "could not export $build_commit to build the server image from"
+# GOFLAGS is set below; GOEXPERIMENT or GOWORK, from the environment or go env -w, would change
+# what is built while up-build still records only the commit and the Go version.
+build_env=$(cd -- "$S_SRC" && go env GOEXPERIMENT GOWORK) || die "cannot read the Go settings the server image would be built with"
+[ -z "$(printf '%s' "$build_env" | tr -d '\n')" ] ||
+  die "GOEXPERIMENT or GOWORK is set (go env GOEXPERIMENT GOWORK); the server image is built on the default configuration only: unset it"
+unset build_env
 for binary in bronzeward:./cmd/bronzeward oidc:./fixtures/oidc; do
   (cd -- "$S_SRC" && CGO_ENABLED=0 GOFLAGS=-mod=readonly timeout 600 go build -trimpath -buildvcs=false \
     -o "$S_IMG/${binary%%:*}" "${binary#*:}") || die "could not build ${binary#*:} from $build_commit"

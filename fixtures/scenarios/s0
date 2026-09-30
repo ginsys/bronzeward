@@ -242,8 +242,8 @@ schema_control() {
 }
 
 # same_checkout: the working tree is still the commit up built the image from, with no path
-# differing and none git is told to skip (checkout_differs), so the suites below test the bytes
-# the server runs.
+# differing and none git is told to skip (checkout_differs), so the suites test the bytes the
+# server runs and the scenario's scripts are that commit's.
 same_checkout() {
   local n
   n=$(checkout_differs) || return 1
@@ -251,18 +251,21 @@ same_checkout() {
 }
 
 # go_env_clean: no Go setting, from the environment or go env -w, selects or skips tests or changes
-# what they build: GOFLAGS=-run=^$ alone makes every suite exit 0 having run nothing.
+# what they build: GOFLAGS=-run=^$ alone makes every suite exit 0 having run nothing. And the
+# suites' Go is the one up-build records for the image: GOTOOLCHAIN can switch it.
 go_env_clean() {
-  local v
-  v=$(cd -- "$FIXTURES/.." && mise exec -- go env GOFLAGS GOEXPERIMENT GOWORK) || return 1
-  [ -z "$(printf '%s' "$v" | tr -d '\n')" ]
+  local out v
+  out=$(cd -- "$FIXTURES/.." && mise exec -- go env GOFLAGS GOEXPERIMENT GOWORK GOVERSION) || return 1
+  mapfile -t v <<<"$out"
+  [ "${#v[@]}" -eq 4 ] && [ -z "${v[0]}${v[1]}${v[2]}" ] && [ -n "${v[3]}" ] &&
+    [ "${v[3]}" = "$(sed -n 's/^go //p' "$STATE/up-build")" ]
 }
 
 run() {
   # Step 1: the suites, and the advisory-lock negative control as the Go test (ruling 5), from the
-  # checkout the image was built from, before and after.
-  check 'S0 precondition' 'GOFLAGS, GOEXPERIMENT and GOWORK are unset, so the suites run every test on the default build' go_env_clean
-  check 'S0 precondition' 'the checkout is the image commit, unmodified, before the suites' same_checkout
+  # checkout the image was built from (checked before the scenario and after it) and again after
+  # the suites.
+  check 'S0 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the suites run every test on the server's build" go_env_clean
   check 'S0 step 1' 'mise run verify' logged step1-verify mise run verify
   check 'S0 step 1' 'mise run go-db (a missing database fails)' logged step1-go-db mise run go-db
   check 'S0 step 1, negative control' 'advisory lock removed: TestNoLockControl and TestInstallNoLockControl' go_controls_ran
@@ -388,7 +391,7 @@ walk() {
   check 'S0 step 4' 'bw migrate' "$bin/bw" migrate
   check 'S0 step 4' 'inject start A' "$bin/inject" start A
   "$bin/seed" >/dev/null || die "bin/seed failed"
-  local robot h who method pattern tok code principals rows=0
+  local robot h who method pattern kind tok code principals rows=0 human_rows=0
   robot=$(cat -- "$STATE/automation-token")
   redact_automation_token "$robot"
   declare -A t
@@ -405,10 +408,18 @@ walk() {
   # The rows design §13.7 says role alone denies, then automation on every human-only route (16).
   # Each row keeps the roles held, and the qualifying roles and human-only flag the refusal names.
   printf 'who\troles\tmethod\tpath\tstatus\tproblem\tqualifying\thuman-only\n' >"$EV/walk.tsv"
-  while read -r who method pattern; do
+  # A human-only row must be refused by the human-only rule, not merely for a role automation
+  # lacks: the refusal says humanOnly (PA §10.3).
+  while read -r who method pattern kind; do
     rows=$((rows + 1))
-    check 'S0 step 4' "$who $method $pattern: 403 forbidden" \
-      answers 403 forbidden "$method" "$(fill "$pattern")" "${t[$who]}" '{}' s0-walk-key-000000
+    if [ "$kind" = human-only ]; then
+      human_rows=$((human_rows + 1))
+      check 'S0 step 4' "$who $method $pattern: 403 forbidden, humanOnly" \
+        answers_with '.humanOnly == true' 403 forbidden "$method" "$(fill "$pattern")" "${t[$who]}" '{}' s0-walk-key-000000
+    else
+      check 'S0 step 4' "$who $method $pattern: 403 forbidden" \
+        answers 403 forbidden "$method" "$(fill "$pattern")" "${t[$who]}" '{}' s0-walk-key-000000
+    fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$who" "${held[$who]}" "$method" "$pattern" "$last_status" \
       "$(jq -r '[.type // "-", (.roles // [] | join(",")), (.humanOnly // false | tostring)] | join("\t")' \
         "$EV/last.body" 2>/dev/null || printf -- '-\t-\t-')" >>"$EV/walk.tsv"
@@ -431,24 +442,24 @@ h-approver POST /recovery/scopes/{machine}/releases
 h-approver POST /operations/{id}/resolutions
 automation POST /recovery/entries
 automation POST /recovery/exits
-automation POST /ingestions
-automation POST /ingestions/{id}/marks
-automation POST /ingestions/{id}/takeovers
-automation POST /ingestions/{id}/abandonments
-automation POST /clusters
-automation POST /machines
-automation POST /plans/{id}/approvals
-automation POST /recovery/entries
-automation POST /recovery/exits
-automation POST /recovery/scopes/{machine}/marks
-automation POST /recovery/scopes/{machine}/releases
-automation POST /recovery/accountings
-automation POST /operations/{id}/attempts/{attempt}/accountings
-automation POST /operations/{id}/takeovers
-automation POST /operations/{id}/resolutions
-automation POST /identity-revocations
+automation POST /ingestions human-only
+automation POST /ingestions/{id}/marks human-only
+automation POST /ingestions/{id}/takeovers human-only
+automation POST /ingestions/{id}/abandonments human-only
+automation POST /clusters human-only
+automation POST /machines human-only
+automation POST /plans/{id}/approvals human-only
+automation POST /recovery/entries human-only
+automation POST /recovery/exits human-only
+automation POST /recovery/scopes/{machine}/marks human-only
+automation POST /recovery/scopes/{machine}/releases human-only
+automation POST /recovery/accountings human-only
+automation POST /operations/{id}/attempts/{attempt}/accountings human-only
+automation POST /operations/{id}/takeovers human-only
+automation POST /operations/{id}/resolutions human-only
+automation POST /identity-revocations human-only
 EOF
-  check 'S0 step 4' "the walk has 34 rows (18 by role, 16 human-only)" test "$rows" -eq 34
+  check 'S0 step 4' "the walk has 34 rows (18 by role, 16 human-only)" test "$rows" -eq 34 -a "$human_rows" -eq 16
   local acts after
   acts=$(pg psql -U bronzeward -d bronzeward -Atc "select count(*) from act where via = 'api'") || die "cannot count acts"
   after=$(count_principals) || die "cannot count principals"
@@ -490,7 +501,11 @@ else
   result FAIL 'S0 precondition' "the server image was not built from a clean checkout (differing paths: ${build_differs:-unrecorded}); run fixtures/bin/down, commit or clean, then up"
 fi
 
+# The checkout is the image commit, unmodified, before and after either mode: this script, seed,
+# inject and evidence run from it, so a change during the run is a FAIL, not a captured diff.
+check 'S0 precondition' 'the checkout is the image commit, unmodified, before the scenario' same_checkout
 "$s0_mode"
+check 'S0 precondition' 'the checkout is the image commit, unmodified, after the scenario' same_checkout
 rm -f -- "$EV/last.body" "$EV/last.headers"
 # The evidence directory is scanned: no token or key of this run may have reached it.
 # bin/evidence exits 0 on a leak and reports it: what it says is read from a file outside .state,
