@@ -42,6 +42,7 @@ type options struct {
 	noKeyLock      bool                             // the key-lock control (§7.2, §16)
 	noRevokerCheck bool                             // T5c's revoking-human lock control
 	noActOrder     bool                             // the act-order lock control (GET /acts)
+	noDraftLock    bool                             // the draft read-lock control (GET /drafts)
 	afterEffect    func()                           // runs in the transaction, after the effect, act and record
 	beforeRead     func()                           // runs when a read route starts, after routing
 	beforeCommit   func(attempt int) error          // fails an attempt before COMMIT
