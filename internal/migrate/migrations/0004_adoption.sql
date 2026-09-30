@@ -178,7 +178,7 @@ CREATE TABLE operation (
          END),
   CHECK ((owner IS NULL) = (owner_epoch IS NULL) AND (owner IS NULL OR owner_gen >= 1)),
   CHECK (state <> 'running' OR (owner IS NOT NULL AND lease_until IS NOT NULL)),
-  CHECK ((kind IN ('publish', 'ingest')) = (draft IS NOT NULL AND draft_revision IS NOT NULL)),
+  CHECK ((draft IS NULL) = (draft_revision IS NULL) AND (kind IN ('publish', 'ingest')) = (draft IS NOT NULL)),
   CHECK ((kind = 'ingest') = (ingestion IS NOT NULL)),
   CHECK ((created_by IS NULL) = (created_by_kind IS NULL) AND (created_by IS NULL) = (created_role IS NULL)),
   CHECK (kind NOT IN ('publish', 'ingest') OR created_by IS NOT NULL),

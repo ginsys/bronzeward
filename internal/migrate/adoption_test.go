@@ -127,6 +127,8 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"queued ingest", insertOperation, []any{op(), "ingest", "queued", nil, 0, a.draft, 2, claim2, a.human, nil, nil}, "23514"},
 		{"publish in an execution state", insertOperation, []any{op(), "publish", "sending", "o", 1, a.draft, 2, nil, a.human, nil, nil}, "23514"},
 		{"adopt not completed", insertOperation, []any{op(), "adopt", "committed", "o", 1, nil, nil, nil, nil, nil, nil}, "23514"},
+		{"adopt with a draft revision and no draft", insertOperation, []any{op(), "adopt", "completed", nil, 0, nil, 1, nil, nil, nil, nil}, "23514"},
+		{"adopt with a draft and no revision", insertOperation, []any{op(), "adopt", "completed", nil, 0, a.draft, nil, nil, nil, nil, nil}, "23514"},
 		{"ingest with no claim", insertOperation, []any{op(), "ingest", "running", "o", 1, a.draft, 2, nil, a.human, nil, nil}, "23514"},
 		{"publish with a claim", insertOperation, []any{op(), "publish", "running", "o", 1, a.draft, 2, claim2, a.human, nil, nil}, "23514"},
 		{"ingest with no draft revision", insertOperation, []any{op(), "ingest", "running", "o", 1, a.draft, nil, claim2, a.human, nil, nil}, "23514"},
@@ -152,6 +154,7 @@ func TestAdoptionConstraints(t *testing.T) {
 	mustExec(t, db, insertOperation, op(), "ingest", "running", "o", 1, a.draft, 2, claim2, a.human, nil, nil)
 	mustExec(t, db, insertOperation, op(), "publish", "queued", nil, 0, a.draft, 1, nil, a.human, nil, nil)
 	mustExec(t, db, insertOperation, op(), "ingest", "failed", nil, 0, a.draft, 1, claim3, a.human, nil, `{"type":"urn:bronzeward:problem:x"}`)
+	mustExec(t, db, insertOperation, op(), "adopt", "completed", nil, 0, nil, nil, nil, nil, nil, nil)
 	mustExec(t, db, "UPDATE staging_claim SET state = 'released' WHERE id = $1", a.claim)
 	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "held", []byte{1}, a.human, "k0123456789abcdef")
 	// The baseline revision is a counter (execution and recovery §2): an adoption record sets
