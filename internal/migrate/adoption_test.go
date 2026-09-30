@@ -76,9 +76,10 @@ func TestAdoptionConstraints(t *testing.T) {
 	db, _ := installed(t)
 	a := adoptionRows(t, db)
 	uuid := "2d7c8e3a-4b5f-4a7b-8c1d-2e3f4a5b6c7d"
-	claim2, claim3 := id.New(id.Ingestion), id.New(id.Ingestion)
-	mustExec(t, db, insertClaim, claim2, "transient", "held", nil, nil, nil)
-	mustExec(t, db, insertClaim, claim3, "transient", "held", nil, nil, nil)
+	claim2, claim3, claim4, claim5 := id.New(id.Ingestion), id.New(id.Ingestion), id.New(id.Ingestion), id.New(id.Ingestion)
+	for _, c := range []string{claim2, claim3, claim4, claim5} {
+		mustExec(t, db, insertClaim, c, "transient", "held", nil, nil, nil)
+	}
 	op := func() string { return id.New(id.Operation) }
 	for _, c := range []struct {
 		name, q string
@@ -136,6 +137,9 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"running job with no owner", insertOperation, []any{op(), "publish", "running", nil, 0, a.draft, 2, nil, a.human, nil, nil}, "23514"},
 		{"succeeded job with no result", insertOperation, []any{op(), "publish", "succeeded", nil, 0, a.draft, 2, nil, a.human, nil, nil}, "23514"},
 		{"failed job with no error", insertOperation, []any{op(), "ingest", "failed", nil, 0, a.draft, 2, claim2, a.human, nil, nil}, "23514"},
+		{"succeeded job with a JSON null result", insertOperation, []any{op(), "publish", "succeeded", nil, 0, a.draft, 2, nil, a.human, "null", nil}, "23514"},
+		{"failed job with a JSON null error", insertOperation, []any{op(), "ingest", "failed", nil, 0, a.draft, 2, claim4, a.human, nil, "null"}, "23514"},
+		{"failed job with an array error", insertOperation, []any{op(), "ingest", "failed", nil, 0, a.draft, 2, claim5, a.human, nil, "[]"}, "23514"},
 		{"second operation of a claim", insertOperation, []any{op(), "ingest", "succeeded", nil, 0, a.draft, 2, a.claim, a.human, `{"draft":"x"}`, nil}, "23505"},
 		{"second running ingest of a draft revision", insertOperation, []any{op(), "ingest", "running", "o", 1, a.draft, 1, claim2, a.human, nil, nil}, "23505"},
 		{"event 0", insertEvent, []any{a.ingest, 0, `{}`}, "23514"},
