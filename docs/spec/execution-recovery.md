@@ -138,10 +138,11 @@ silently substitutes a newer artifact. The immutable plan binds:
   configuration digest (§1);
 - the release's renderer and contract record, its secret and encryption
   dependency records, and the artifact's Transit key by an identity the
-  provider cannot reissue, together with its version, not by name and version
-  alone (compilation contract §9, §10.2;
+  provider does not reissue on the supported topology, together with its
+  version, not by name and version alone (compilation contract §9, §10.2;
   [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation)
-  item 1, inferred);
+  item 1, inferred; residual risk accepted in design
+  [§7.7](../design/Talos_Configuration_and_Machine_Management_Design.md#77-poc-deployment-profile));
 - machine identity and assignment revision. The **machine identity** is the
   machine record's SMBIOS UUID and the cluster it records the machine as a
   member of (see `persistence-api.md`); it is a precondition as well as a

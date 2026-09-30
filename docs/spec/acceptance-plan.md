@@ -267,8 +267,8 @@ scenario runs.
 [§13.1](persistence-api.md#131-concurrent-edits), [§13.4](persistence-api.md#134-repeated-requests);
 ER [§1](execution-recovery.md#1-supported-operation-and-state-values).
 
-**Pass criteria.** The artifact is Transit ciphertext under a key identity the provider cannot
-reissue; dependency records name exact versions; the renderer is the one the precondition's re-run
+**Pass criteria.** The artifact is Transit ciphertext under a key identity the provider does not
+reissue on the supported topology (design §7.7); dependency records name exact versions; the renderer is the one the precondition's re-run
 selected, the pinned machinery or the pinned `talosctl` subprocess (C §10.1), at the node's
 running contract minor. The review data shows the label change and redacts every resolved value and
 every value whose provenance is sensitive. The release records the profile and assignment revisions
