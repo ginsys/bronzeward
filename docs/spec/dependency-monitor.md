@@ -601,7 +601,8 @@ per-dependency advisory lock and choice 8's measure by progress and
 lock-free watchdog read decided the same day in that pull request's review.
 Choices 12 and 13, which answer that review, were accepted as written on
 2026-09-30; the inferences they rest on (§10.2) become evidence through item 9
-of §10.1.
+of §10.1. Choice 12's residual risk, an identity reissued after a provider
+clock step or on several provider nodes, is accepted for the PoC in design §7.7.
 
 1. **A document of its own** rather than a section of the persistence and API
    contract, whose section numbers the acceptance plan cites. Alternative: a
