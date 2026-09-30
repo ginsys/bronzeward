@@ -70,8 +70,10 @@ CREATE TABLE import_base_reference (
 CALL make_immutable('import_base_reference');
 
 -- A machine's Desired, Applied (release, verified configuration digest and source) and baseline
--- revision (§3; execution and recovery, Desired, Applied and Observed). The release table
--- arrives with publication, so the release identifiers carry no foreign key yet.
+-- revision (§3; execution and recovery, Desired, Applied and Observed). The baseline revision is
+-- a per-machine counter that every change of Applied advances, by a completed operation or an
+-- adoption record, and a machine with no Applied has none (execution and recovery §2). The
+-- release table arrives with publication, so the release identifiers carry no foreign key yet.
 CREATE TABLE machine_state (
   machine           text PRIMARY KEY REFERENCES machine (id),
   revision          integer NOT NULL DEFAULT 1 CHECK (revision >= 1),
@@ -79,10 +81,10 @@ CREATE TABLE machine_state (
   applied_release   text CHECK (applied_release ~ '^rel_[a-z2-7]{26}$'),
   applied_digest    bytea CHECK (length(applied_digest) = 32),
   applied_source    text CHECK (applied_source IN ('operation', 'adoption')),
-  baseline_revision text,
-  FOREIGN KEY (baseline_revision, machine) REFERENCES import_base_revision (id, machine),
+  baseline_revision integer CHECK (baseline_revision >= 1),
   CHECK ((applied_release IS NULL) = (applied_digest IS NULL)
-     AND (applied_release IS NULL) = (applied_source IS NULL))
+     AND (applied_release IS NULL) = (applied_source IS NULL)
+     AND (applied_release IS NULL) = (baseline_revision IS NULL))
 );
 
 -- A draft (§3.1): one cluster's change set, revisioned, with the random token of its ETag

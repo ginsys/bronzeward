@@ -16,8 +16,8 @@ const (
 	insertCluster = `INSERT INTO cluster (id, name, endpoint, contract, created_at) VALUES ($1, $2, $3, $4, now())`
 	insertMachine = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, created_at)
 		VALUES ($1, $2, $3, $4, $5, now())`
-	insertMachineState = `INSERT INTO machine_state (machine, applied_release, applied_digest, applied_source)
-		VALUES ($1, $2, $3, $4)`
+	insertMachineState = `INSERT INTO machine_state (machine, applied_release, applied_digest, applied_source, baseline_revision)
+		VALUES ($1, $2, $3, $4, $5)`
 	insertImportBase = `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
 		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now())`
 	insertReference = `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
@@ -54,7 +54,7 @@ func adoptionRows(t *testing.T, db *sql.DB) adoption {
 	mustExec(t, db, insertCluster, a.other, "lab", "https://lab.example.test:6443", "v1.13")
 	mustExec(t, db, insertMachine, a.machine, a.cluster, "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b", "SN-1", "normal")
 	mustExec(t, db, insertMachine, a.otherMachine, a.other, "1c6b7d2f-3a4e-4f6a-9b0c-1d2e3f4a5b6c", nil, "normal")
-	mustExec(t, db, insertMachineState, a.machine, nil, nil, nil)
+	mustExec(t, db, insertMachineState, a.machine, nil, nil, nil, nil)
 	mustExec(t, db, insertImportBase, a.ibr, a.machine, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2))
 	mustExec(t, db, insertImportBase, a.otherIBR, a.otherMachine, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2))
 	mustExec(t, db, insertReference, a.ibr, "registry/example-pass", "string", 1, nil, generation(a.cluster, a.claim))
@@ -95,9 +95,12 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"nil SMBIOS UUID", insertMachine, []any{id.New(id.Machine), a.cluster, "00000000-0000-0000-0000-000000000000", nil, "normal"}, "23514"},
 		{"all-ones SMBIOS UUID", insertMachine, []any{id.New(id.Machine), a.cluster, "ffffffff-ffff-ffff-ffff-ffffffffffff", nil, "normal"}, "23514"},
 		{"unknown scope state", insertMachine, []any{id.New(id.Machine), a.cluster, uuid, nil, "frozen"}, "23514"},
-		{"second machine state", insertMachineState, []any{a.machine, nil, nil, nil}, "23505"},
-		{"applied without its digest", insertMachineState, []any{a.otherMachine, id.New(id.Release), nil, "operation"}, "23514"},
-		{"applied from an unknown source", insertMachineState, []any{a.otherMachine, id.New(id.Release), digest(3), "restore"}, "23514"},
+		{"second machine state", insertMachineState, []any{a.machine, nil, nil, nil, nil}, "23505"},
+		{"applied without its digest", insertMachineState, []any{a.otherMachine, id.New(id.Release), nil, "operation", 1}, "23514"},
+		{"applied from an unknown source", insertMachineState, []any{a.otherMachine, id.New(id.Release), digest(3), "restore", 1}, "23514"},
+		{"applied without a baseline revision", insertMachineState, []any{a.otherMachine, id.New(id.Release), digest(3), "adoption", nil}, "23514"},
+		{"baseline revision without Applied", insertMachineState, []any{a.otherMachine, nil, nil, nil, 1}, "23514"},
+		{"baseline revision 0", insertMachineState, []any{a.otherMachine, id.New(id.Release), digest(3), "adoption", 0}, "23514"},
 		{"31-byte configuration digest", insertImportBase, []any{id.New(id.ImportBase), a.machine, "x", []byte{1}, digest(1), "k:1", digest(2)[:31]}, "23514"},
 		{"import base with no key identity", insertImportBase, []any{id.New(id.ImportBase), a.machine, "x", []byte{1}, digest(1), "", digest(2)}, "23514"},
 		{"import base of no machine", insertImportBase, []any{id.New(id.ImportBase), id.New(id.Machine), "x", []byte{1}, digest(1), "k:1", digest(2)}, "23503"},
@@ -151,6 +154,15 @@ func TestAdoptionConstraints(t *testing.T) {
 	mustExec(t, db, insertOperation, op(), "ingest", "failed", nil, 0, a.draft, 1, claim3, a.human, nil, `{"type":"urn:bronzeward:problem:x"}`)
 	mustExec(t, db, "UPDATE staging_claim SET state = 'released' WHERE id = $1", a.claim)
 	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "held", []byte{1}, a.human, "k0123456789abcdef")
+	// The baseline revision is a counter (execution and recovery §2): an adoption record sets
+	// Applied at baseline revision 1, and a completed operation's new Applied advances it to 2,
+	// though no import base revision is named by either.
+	mustExec(t, db, insertMachineState, a.otherMachine, id.New(id.Release), digest(3), "adoption", 1)
+	mustExec(t, db, `UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'operation',
+		baseline_revision = baseline_revision + 1 WHERE machine = $1`, a.otherMachine, id.New(id.Release), digest(4))
+	if n := count(t, db, "machine_state WHERE baseline_revision = 2"); n != 1 {
+		t.Fatalf("%d machine states at baseline revision 2; want the advanced one", n)
+	}
 }
 
 // Choice §17.3: each immutable 0004 table's trigger fires on UPDATE, DELETE and TRUNCATE.
