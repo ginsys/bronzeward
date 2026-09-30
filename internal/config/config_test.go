@@ -144,11 +144,15 @@ func TestPlainHTTPHosts(t *testing.T) {
 
 func TestPlainHTTPHostsRefusals(t *testing.T) {
 	for name, hosts := range map[string]string{
-		"empty entry": `[""]`,
-		"with scheme": `["http://dex"]`,
-		"with port":   `["dex:5556"]`,
-		"with path":   `["dex/x"]`,
-		"with space":  `["dex auth"]`,
+		"empty entry":                  `[""]`,
+		"with scheme":                  `["http://dex"]`,
+		"with port":                    `["dex:5556"]`,
+		"with path":                    `["dex/x"]`,
+		"with space":                   `["dex auth"]`,
+		"empty label":                  `["dex..svc"]`,
+		"label starting with a hyphen": `["dex.-svc"]`,
+		"label ending with a hyphen":   `["dex-.svc"]`,
+		"label over 63 characters":     `["` + strings.Repeat("a", 64) + `.svc"]`,
 	} {
 		in := base + "auth:\n  oidc:\n    issuer: http://127.0.0.1:5556\n    plainHTTPHosts: " + hosts + "\n    audience: bronzeward\n"
 		if _, err := Load(strings.NewReader(in)); err == nil {
