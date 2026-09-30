@@ -171,9 +171,11 @@ issue() {
   [ -n "$issued" ] && [ -n "$tok" ]
 }
 
-# migrate_twice: two bw migrate at once; one applies every migration and one finds none left.
+# migrate_twice: two bw migrate at once; one applies every migration the image embeds and one finds
+# none left.
 migrate_twice() {
-  local rc1=0 rc2=0 m1 m2 applied
+  local rc1=0 rc2=0 m1 m2 applied every
+  every=$(image_migrations) || return 1
   "$bin/bw" migrate >"$EV/migrate-1.log" 2>&1 &
   m1=$!
   "$bin/bw" migrate >"$EV/migrate-2.log" 2>&1 &
@@ -183,7 +185,7 @@ migrate_twice() {
   ran migrate-1 "$rc1" "$bin/bw" migrate
   ran migrate-2 "$rc2" "$bin/bw" migrate
   applied=$(cat "$EV/migrate-1.log" "$EV/migrate-2.log" | { grep '^applied ' || true; } | LC_ALL=C sort | tr '\n' '|')
-  [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$applied" = 'applied [1 2 3]|applied []|' ]
+  [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$applied" = "applied [$every]|applied []|" ]
 }
 
 # logged <name> <command...>: from the repository root, output to $EV/<name>.log, which starts with
@@ -272,7 +274,7 @@ run() {
   check 'S0 precondition' 'the checkout is the image commit, unmodified, after the suites' same_checkout
 
   # Step 2: two migrations at once apply once; A starts on the schema.
-  check 'S0 step 2' 'two bw migrate at once: one applies [1 2 3], the other []' migrate_twice
+  check 'S0 step 2' 'two bw migrate at once: one applies every migration of the image, the other []' migrate_twice
   check 'S0 step 2' 'inject start A' "$bin/inject" start A
   check 'S0 step 2' 'A answers /livez' answers 204 - GET /livez ''
 

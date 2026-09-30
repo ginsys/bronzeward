@@ -796,6 +796,24 @@ image_own() {
   }
 }
 
+# image_migrations: the versions of the migrations the server image embeds, in order and separated
+# by spaces, as bw migrate lists those a fresh database applies: the files under
+# internal/migrate/migrations at the commit up-build records, which bin/up built the image from.
+# Fails, with a word, when there is no such record or listing.
+image_migrations() {
+  local commit names name versions=()
+  commit=$(sed -n 's/^commit //p' "$STATE/up-build" 2>/dev/null) && [ -n "$commit" ] ||
+    { say "fixtures: no server build is recorded in $STATE/up-build"; return 1; }
+  names=$(fixtures_git ls-tree --full-tree --name-only "$commit" -- internal/migrate/migrations/) ||
+    { say "fixtures: cannot list the migrations of $commit"; return 1; }
+  while IFS= read -r name; do
+    name=${name##*/}
+    [[ $name =~ ^([0-9]{4})_.+\.sql$ ]] && versions+=("$((10#${BASH_REMATCH[1]}))")
+  done <<<"$names"
+  [ "${#versions[@]}" -gt 0 ] || { say "fixtures: $commit holds no migrations"; return 1; }
+  printf '%s\n' "${versions[*]}"
+}
+
 # issuer_answers: the issuer's discovery document, asked from inside the network namespace of the
 # container verified under the name, so that the answer is that container's.
 issuer_answers() {

@@ -257,8 +257,13 @@ func TestEmbeddedApplyTwiceAndUpgrade(t *testing.T) {
 	if _, _, err := Install(ctx, fresh); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := Apply(ctx, fresh, ms); err != nil || !slices.Equal(got, []int{4}) {
-		t.Fatalf("upgrade: %v, %v", got, err)
+	// Every migration from 0004 on, so the check stays true as later migrations are added.
+	var want []int
+	for _, m := range ms[3:] {
+		want = append(want, m.Version)
+	}
+	if got, err := Apply(ctx, fresh, ms); err != nil || want[0] != 4 || !slices.Equal(got, want) {
+		t.Fatalf("upgrade: %v, %v; want %v", got, err, want)
 	}
 	if _, _, err := Install(ctx, fresh); err != nil {
 		t.Fatal(err)
