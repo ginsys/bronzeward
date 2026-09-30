@@ -183,7 +183,10 @@ CREATE TABLE operation (
   CHECK ((created_by IS NULL) = (created_by_kind IS NULL) AND (created_by IS NULL) = (created_role IS NULL)),
   CHECK (kind NOT IN ('publish', 'ingest') OR created_by IS NOT NULL),
   CHECK (kind NOT IN ('publish', 'ingest')
-      OR ((result IS NOT NULL) = (state = 'succeeded') AND (error IS NOT NULL) = (state = 'failed')))
+      OR ((result IS NOT NULL) = (state = 'succeeded') AND (error IS NOT NULL) = (state = 'failed'))),
+  -- An outcome is a JSON object (a result, a problem document), never JSON null, which is not SQL
+  -- NULL and would pass the check above with nothing to answer.
+  CHECK ((result IS NULL OR jsonb_typeof(result) = 'object') AND (error IS NULL OR jsonb_typeof(error) = 'object'))
 );
 -- §7.3: at most one running ingest per draft revision it binds. The publish key is its own
 -- index, over kind = 'publish' only, created with the publication route.
