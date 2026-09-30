@@ -121,7 +121,7 @@ func (a *Auth) validate() error {
 		return fmt.Errorf("config: auth.oidc.issuer %q is not an http(s) URL without query or fragment", o.Issuer)
 	}
 	for i, h := range o.PlainHTTPHosts {
-		if !hostName.MatchString(h) {
+		if len(h) > 253 || !hostName.MatchString(h) {
 			return fmt.Errorf("config: auth.oidc.plainHTTPHosts[%d] %q is not a bare host name", i, h)
 		}
 	}
@@ -161,7 +161,8 @@ func (a *Auth) validate() error {
 }
 
 // hostName is a DNS name: dot-separated labels of letters, digits and inner hyphens, each 1 to 63
-// characters (RFC 1123 §2.1), so a mistyped entry fails at load rather than at discovery.
+// characters (RFC 1123 §2.1), at most 253 in all, so a mistyped entry fails at load rather than
+// at discovery.
 var hostName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 
 // Transport reports whether o permits a request to u: https, or plain http to this host or to a
