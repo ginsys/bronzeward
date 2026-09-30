@@ -438,17 +438,20 @@ fixtures_git() {
 # (assume-unchanged, a lowercase ls-files -v tag, or skip-worktree, S): a modification there is in
 # no status. And the untracked files .git/info/exclude or core.excludesFile hides, which the
 # tracked .gitignore files do not: status omits them too, and the suites run in this tree would
-# read them. Those inside a dot directory are left out, as the go command ignores them (go help
-# packages) and other worktrees live there. A failing listing fails, not counts zero.
+# read them. And an ignored .gitignore: the tracked ones are not ignored, so it is untracked and
+# can hide itself and what it names, which the second listing would then count as declared. Those
+# inside a dot directory are left out, as the go command ignores them (go help packages) and other
+# worktrees live there. A failing listing fails, not counts zero.
 checkout_differs() {
-  local changed flagged ignored declared hidden
+  local changed flagged ignored declared hidden ignores
   changed=$(fixtures_git status --porcelain --untracked-files=all) || return 1
   flagged=$(fixtures_git ls-files -v -- ':/') || return 1
   flagged=$(grep -E '^([a-z]|S) ' <<<"$flagged" || [ $? -eq 1 ]) || return 1
   ignored=$(fixtures_git ls-files --full-name --others --ignored --exclude-standard -- ':/') || return 1
   declared=$(fixtures_git ls-files --full-name --others --ignored --exclude-per-directory=.gitignore -- ':/') || return 1
   hidden=$(LC_ALL=C comm -23 <(LC_ALL=C sort <<<"$ignored") <(LC_ALL=C sort <<<"$declared")) || return 1
-  hidden=$(grep -Ev '(^|/)\.[^/]*/' <<<"$hidden" || [ $? -eq 1 ]) || return 1
+  ignores=$(grep -E '(^|/)\.gitignore$' <<<"$ignored" || [ $? -eq 1 ]) || return 1
+  hidden=$(printf '%s\n' "$hidden" "$ignores" | grep -Ev '(^|/)\.[^/]*/' | LC_ALL=C sort -u || [ $? -eq 1 ]) || return 1
   printf '%s\n' "$changed" "$flagged" "$hidden" | grep -c . || [ $? -eq 1 ]
 }
 
@@ -1049,6 +1052,7 @@ fetch_tools() {
 # stops halfway through bao-init.json would otherwise leave a list that is short and looks whole.
 scan_patterns() {
   local talos_client_key kube_client_key bao_keys metadata_token talos_secrets issuer_key automation_token='' automation_secret=''
+  local partial_token='' partial_secret=''
   talos_client_key=$(awk '$1 == "key:" {print $2}' "$TALOSCONFIG") || return 1
   kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG") || return 1
   [ -n "$talos_client_key" ] || die "no client key found in $TALOSCONFIG; it would go unscanned"
@@ -1061,14 +1065,19 @@ scan_patterns() {
   # The issuer's private key: the JWK's d (issuer.WriteKey writes a P-256 key as go-jose marshals it).
   issuer_key=$(jq -er .d "$STATE/issuer/key.json") || return 1
   # The automation token bin/seed issues, once it has, and its secret half on its own: the token id
-  # is in the database dump, so the half alone rebuilds the credential.
+  # is in the database dump, so the half alone rebuilds the credential. Also one a seed interrupted
+  # before its rename left in the .partial file: the database holds it, so it is a live credential.
   if [ -e "$STATE/automation-token" ]; then
     automation_token=$(cat -- "$STATE/automation-token") || return 1
     [ -n "$automation_token" ] || die "$STATE/automation-token is empty; it would go unscanned"
     automation_secret=${automation_token##*.}
   fi
+  if [ -s "$STATE/automation-token.partial" ]; then
+    partial_token=$(cat -- "$STATE/automation-token.partial") || return 1
+    partial_secret=${partial_token##*.}
+  fi
   printf '%s\n' 'BWSYNTH-' "$talos_client_key" "$kube_client_key" "$bao_keys" "$metadata_token" "$talos_secrets" \
-    "$issuer_key" "$automation_token" "$automation_secret" |
+    "$issuer_key" "$automation_token" "$automation_secret" "$partial_token" "$partial_secret" |
     awk 'length($0) >= 8' | sort -u
 }
 

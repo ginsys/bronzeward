@@ -14,7 +14,11 @@ fixture_lock exclusive
 umask 077
 token=$STATE/automation-token
 [ ! -e "$token" ] || die "$token exists: this run is seeded already (the token tool never shows a token twice)"
-rm -f -- "$token.partial" "$STATE/automation-identity.partial" "$STATE/scan-patterns.txt.partial"
+# A seed interrupted after bw token issue: the database may hold that token, and the .partial file
+# is the scan's only copy of it (scan_patterns), so it is kept and this run refused.
+[ ! -e "$token.partial" ] ||
+  die "$token.partial exists: an earlier seed was interrupted and may have issued a token. Run fixtures/bin/down, then up"
+rm -f -- "$STATE/automation-identity.partial" "$STATE/scan-patterns.txt.partial"
 # The token is printed once, on stdout, and nowhere else: straight into the file.
 if ! server_command token issue -name ci -roles author,publisher -responsible h-all -operator h-all \
   >"$token.partial" 2>"$STATE/automation-identity.partial"; then

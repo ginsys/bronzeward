@@ -742,6 +742,24 @@ migrated=$(cat "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out" |
 rm "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out"
 [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] || fail "concurrent bw migrate failed (exit $rc1 and $rc2)"
 [ "$migrated" = 'applied [1 2 3]|applied []|' ] || fail "concurrent bw migrate: $migrated; want one to apply [1 2 3] and one []"
+# A seed interrupted after bw token issue leaves the token in the .partial file: the scan knows it
+# and its secret half, and seed refuses rather than issue another. Removed before anything can fail.
+defer rm -f -- "$STATE/automation-token.partial"
+printf 'bwt_selftestpartialid.SELFTESTPARTIALSECRET\n' >"$STATE/automation-token.partial"
+partial_patterns=$(scan_patterns) || partial_patterns=failed
+seeded=0
+"$here/seed" >/dev/null 2>&1 || seeded=$?
+rm -f -- "$STATE/automation-token.partial"
+undefer
+for want in 'bwt_selftestpartialid.SELFTESTPARTIALSECRET' 'SELFTESTPARTIALSECRET'; do
+  grep --quiet --line-regexp --fixed-strings -- "$want" <<<"$partial_patterns" ||
+    fail "an interrupted seed's token or its secret half is not in the scan patterns"
+done
+if [ "$seeded" -eq 0 ] || [ -e "$STATE/automation-token" ]; then
+  fail "seed ran over an interrupted seed's token"
+fi
+unset want
+unset partial_patterns seeded
 "$here/seed" >/dev/null
 [ "$(stat --format=%a "$STATE/automation-token")" = 600 ] || fail "seed left the automation token readable by others"
 grep --quiet --line-regexp --fixed-strings --file="$STATE/automation-token" "$STATE/scan-patterns.txt" ||
@@ -1253,6 +1271,17 @@ undefer
 rm -f -- "$STATE/selftest-excludes"
 [ "$flagged" = $((before + 1)) ] ||
   fail "checkout_differs counts $flagged with a hidden Go file at the root and one in a dot directory, $before without"
+# An untracked .gitignore that hides itself and a Go file beside it: status shows neither, and the
+# tracked .gitignore files do not declare them. It counts. Both removed before anything can fail.
+before=$(checkout_differs) || fail "checkout_differs failed on the checkout"
+defer rm -f -- "$FIXTURES/../internal/auth/.gitignore" "$FIXTURES/../internal/auth/selftest_hidden_test.go"
+printf '*\n' >"$FIXTURES/../internal/auth/.gitignore"
+printf 'package auth\n' >"$FIXTURES/../internal/auth/selftest_hidden_test.go"
+flagged=$(checkout_differs) || flagged=failed
+rm -f -- "$FIXTURES/../internal/auth/.gitignore" "$FIXTURES/../internal/auth/selftest_hidden_test.go" # before anything can fail
+undefer
+[ "$flagged" -gt "$before" ] 2>/dev/null ||
+  fail "checkout_differs counts $flagged with an untracked .gitignore hiding itself and a Go file, $before without"
 unset -f hide
 unset before flag flagged
 # The record of how fixtures/ differed at creation gone: its absence must not read as "the tree
