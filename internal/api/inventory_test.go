@@ -237,6 +237,10 @@ func TestInventoryRefusals(t *testing.T) {
 		"hardware member":     {"/machines", `{"cluster":"` + cl + `","hardware":{"smbiosUuid":"` + uuidA + `"}}`, 400, "invalid-request"},
 		"draft of no cluster": {"/drafts", `{"cluster":"` + id.New(id.Cluster) + `","title":"` + marker + `"}`, 404, "not-found"},
 		"blank title":         {"/drafts", `{"cluster":"` + cl + `","title":""}`, 400, "invalid-request"},
+		// A mutating route takes no query (§9.1), and the fingerprint does not cover one.
+		"cluster with a query": {"/clusters?dryRun=" + marker, `{"name":"x","endpoint":"https://a.test","contract":"v1.13"}`, 400, "invalid-request"},
+		"machine with a query": {"/machines?x=" + marker, `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `"}`, 400, "invalid-request"},
+		"draft with a query":   {"/drafts?x=" + marker, `{"cluster":"` + cl + `","title":"t"}`, 400, "invalid-request"},
 	} {
 		rec := e.do(e.api, call{method: "POST", path: prefix + c.path, token: author, key: "k-refused-" + strings.ReplaceAll(name, " ", "-") + "-0123456", body: c.body})
 		wantProblem(t, rec, c.status, c.code)

@@ -31,6 +31,12 @@ var (
 // mutate runs a mutating request past the checks that need no transaction, then in one.
 func (a *API) mutate(w http.ResponseWriter, q *request) {
 	ctx := q.r.Context()
+	// No mutating route takes a query (§9.1: unknown fields are refused), and the fingerprint
+	// does not cover one, so a query is refused before anything else.
+	if q.r.URL.RawQuery != "" {
+		a.problem(w, q, refuse(http.StatusBadRequest, "invalid-request", "a mutating request takes no query"))
+		return
+	}
 	q.input = q.route.input()
 	canon, err := decodeBody(q.r, q.input)
 	if err == nil {
