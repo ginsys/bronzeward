@@ -153,17 +153,37 @@ func TestPlainHTTPHostsRefusals(t *testing.T) {
 		"label starting with a hyphen": `["dex.-svc"]`,
 		"label ending with a hyphen":   `["dex-.svc"]`,
 		"label over 63 characters":     `["` + strings.Repeat("a", 64) + `.svc"]`,
+		"name over 253 characters":     `["` + longName(254) + `"]`,
 	} {
 		in := base + "auth:\n  oidc:\n    issuer: http://127.0.0.1:5556\n    plainHTTPHosts: " + hosts + "\n    audience: bronzeward\n"
 		if _, err := Load(strings.NewReader(in)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
+	// A name of exactly 253 characters is a DNS name (control for the length refusal).
+	in := base + "auth:\n  oidc:\n    issuer: http://127.0.0.1:5556\n    plainHTTPHosts: [" + longName(253) + "]\n    audience: bronzeward\n"
+	if _, err := Load(strings.NewReader(in)); err != nil {
+		t.Errorf("a 253-character name: %v", err)
+	}
 	// Unlisted, the PR 3 refusal stands.
-	in := base + "auth:\n  oidc:\n    issuer: http://dex.auth.svc:5556\n    plainHTTPHosts: [other.auth.svc]\n    audience: bronzeward\n"
+	in = base + "auth:\n  oidc:\n    issuer: http://dex.auth.svc:5556\n    plainHTTPHosts: [other.auth.svc]\n    audience: bronzeward\n"
 	if _, err := Load(strings.NewReader(in)); err == nil {
 		t.Fatal("an unlisted plain-http issuer was accepted")
 	}
+}
+
+// longName is a host name of n characters made of valid labels of at most 63 characters.
+func longName(n int) string {
+	var labels []string
+	for n > 0 {
+		l := min(63, n)
+		if n-l == 1 { // a remainder of one character leaves no room for its dot
+			l--
+		}
+		labels = append(labels, strings.Repeat("a", l))
+		n -= l + 1
+	}
+	return strings.Join(labels, ".")
 }
 
 // execution-recovery.md §5.2: the settle floor defaults to, and may not go under, 30s; the
