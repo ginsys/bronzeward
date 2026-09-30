@@ -53,25 +53,28 @@ func routes() []*route {
 	const post, put, del = http.MethodPost, http.MethodPut, http.MethodDelete
 	author, publisher, approver, recovery := auth.Author, auth.Publisher, auth.Approver, auth.RecoveryAdmin
 
+	read := func(rt *route, fn readFunc) *route { rt.read = fn; return rt }
+
 	rs := []*route{
-		g("/clusters"), g("/clusters/{id}"), g("/machines"), g("/machines/{id}"),
+		read(g("/clusters"), listClusters), read(g("/clusters/{id}"), getCluster),
+		read(g("/machines"), listMachines), read(g("/machines/{id}"), getMachine),
 		g("/machines/{id}/observations"), g("/machines/{id}/timeline"),
 	}
 	for _, kind := range []string{"fragment", "profile", "assignment"} {
 		rs = append(rs, g("/"+kind+"s"), g("/"+kind+"s/{id}"), g("/"+kind+"s/{id}/revisions"), g("/"+kind+"-revisions/{id}"))
 	}
-	acts := g("/acts")
-	acts.read = listActs
 	rs = append(rs,
-		g("/drafts"), g("/drafts/{id}"), g("/ingestions/{id}"), g("/releases"), g("/releases/{id}"),
+		read(g("/drafts"), listDrafts), read(g("/drafts/{id}"), getDraft),
+		g("/ingestions/{id}"), g("/releases"), g("/releases/{id}"),
 		g("/releases/{id}/machines/{m}/review"),
-		g("/plans"), g("/plans/{id}"), g("/approvals/{id}"), g("/operations"), g("/operations/{id}"),
-		g("/operations/{id}/events"), acts, g("/recovery"),
+		g("/plans"), g("/plans/{id}"), g("/approvals/{id}"), g("/operations"), read(g("/operations/{id}"), getOperation),
+		g("/operations/{id}/events"), read(g("/acts"), listActs), g("/recovery"),
 		ifm(human(m(post, "/ingestions", author))),
 		human(m(post, "/ingestions/{id}/marks", author)), human(m(post, "/ingestions/{id}/takeovers", author)),
 		human(m(post, "/ingestions/{id}/abandonments", author)),
-		human(m(post, "/clusters", author)), human(m(post, "/machines", author)),
-		m(post, "/drafts", author),
+		clusterCreation().on(human(m(post, "/clusters", author))),
+		machineInventory().on(human(m(post, "/machines", author))),
+		draftCreation().on(m(post, "/drafts", author)),
 	)
 	for _, part := range []string{"/fragments/{name}", "/profiles/{name}", "/assignments/{machine}"} {
 		rs = append(rs, ifm(m(put, "/drafts/{id}"+part, author)), ifm(m(del, "/drafts/{id}"+part, author)))

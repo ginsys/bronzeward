@@ -68,7 +68,7 @@ func readActs(a *API, q *request) (actsPage, error) {
 	if ref := staleToken(q); ref != nil {
 		return out, ref
 	}
-	limit, afterAct, ref := page(q)
+	limit, afterAct, ref := page(q, id.Act)
 	if ref != nil {
 		return out, ref
 	}
@@ -113,8 +113,9 @@ func readActs(a *API, q *request) (actsPage, error) {
 	return out, nil
 }
 
-// page reads limit and cursor, refusing anything else (§9.1: unknown fields are refused).
-func page(q *request) (limit int, afterAct string, ref *refusal) {
+// page reads limit and cursor, refusing anything else (§9.1: unknown fields are refused). The
+// cursor names the last item listed, an identifier of p.
+func page(q *request, p id.Prefix) (limit int, after string, ref *refusal) {
 	vals, err := url.ParseQuery(q.r.URL.RawQuery)
 	if err != nil {
 		return 0, "", refuse(http.StatusBadRequest, "invalid-request", "the query does not parse")
@@ -133,30 +134,30 @@ func page(q *request) (limit int, afterAct string, ref *refusal) {
 		limit = n
 	}
 	if vals.Has("cursor") {
-		ep, act, err := parseCursor(vals.Get("cursor"))
+		ep, last, err := parseCursor(vals.Get("cursor"), p)
 		if err != nil || ep != q.epoch {
 			return 0, "", refuse(http.StatusBadRequest, "cursor-invalid", "")
 		}
-		afterAct = act
+		after = last
 	}
-	return limit, afterAct, nil
+	return limit, after, nil
 }
 
-// A cursor is opaque to clients: the epoch it was issued in and the last act listed (§9.1), never
-// the act's seq (§2). It is not signed: every act is readable by any role, so a forged position
-// discloses nothing.
-func makeCursor(epoch, act string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(epoch + "." + act))
+// A cursor is opaque to clients: the epoch it was issued in and the last item listed (§9.1),
+// never an act's seq (§2). It is not signed: every listed item is readable by any role, so a
+// forged position discloses nothing.
+func makeCursor(epoch, last string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(epoch + "." + last))
 }
 
-func parseCursor(c string) (epoch, act string, err error) {
+func parseCursor(c string, p id.Prefix) (epoch, last string, err error) {
 	b, err := base64.RawURLEncoding.DecodeString(c)
 	if err != nil {
 		return "", "", err
 	}
-	epoch, act, ok := strings.Cut(string(b), ".")
-	if !ok || id.MustHave(epoch, id.Epoch) != nil || id.MustHave(act, id.Act) != nil {
+	epoch, last, ok := strings.Cut(string(b), ".")
+	if !ok || id.MustHave(epoch, id.Epoch) != nil || id.MustHave(last, p) != nil {
 		return "", "", errors.New("not a cursor")
 	}
-	return epoch, act, nil
+	return epoch, last, nil
 }

@@ -1,0 +1,367 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/ginsys/bronzeward/internal/dbtest"
+	"github.com/ginsys/bronzeward/internal/id"
+)
+
+const uuidA = "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b"
+
+func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
+	t.Helper()
+	var v T
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
+		t.Fatalf("%d %s: %v", rec.Code, rec.Body, err)
+	}
+	return v
+}
+
+// createCluster records a cluster as tok and returns its identifier.
+func (e *env) createCluster(h http.Handler, tok, k string) string {
+	e.t.Helper()
+	rec := e.do(h, call{method: "POST", path: prefix + "/clusters", token: tok, key: k,
+		body: `{"name":"office","endpoint":"https://cp.example.test:6443","contract":"v1.13"}`})
+	if rec.Code != http.StatusCreated {
+		e.t.Fatalf("POST /clusters: %d %s", rec.Code, rec.Body)
+	}
+	return decode[clusterBody](e.t, rec).ID
+}
+
+func machineCall(tok, k, cluster, uuid string) call {
+	return call{method: "POST", path: prefix + "/machines", token: tok, key: k,
+		body: `{"cluster":"` + cluster + `","smbiosUuid":"` + uuid + `","serial":"SN-1"}`}
+}
+
+// §10.3, §9.2: inventory is author, human only. Automation is refused whatever its roles, a
+// human without author by role, and neither refusal writes an act; a human author succeeds.
+func TestInventoryIsHumanOnly(t *testing.T) {
+	e := newEnv(t, options{})
+	author := e.human("h-author")
+	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+	for _, c := range []call{
+		{method: "POST", path: prefix + "/clusters", token: e.robot, key: key,
+			body: `{"name":"office","endpoint":"https://cp.example.test:6443","contract":"v1.13"}`},
+		machineCall(e.robot, key, cl, uuidA),
+	} {
+		doc := wantProblem(t, e.do(e.api, c), http.StatusForbidden, "forbidden")
+		if doc["humanOnly"] != true {
+			t.Errorf("%s: %v; want humanOnly", c.path, doc)
+		}
+	}
+	wantProblem(t, e.do(e.api, machineCall(e.human("h-viewer"), key, cl, uuidA)), http.StatusForbidden, "forbidden")
+	if n := count(t, e.db, "SELECT count(*) FROM act WHERE via = 'api'"); n != 1 {
+		t.Fatalf("%d acts; want only the cluster's", n)
+	}
+	rec := e.do(e.api, machineCall(author, key, cl, uuidA))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("human author: %d %s", rec.Code, rec.Body)
+	}
+	m := decode[machineBody](t, rec)
+	if rec.Header().Get("Location") != prefix+"/machines/"+m.ID || m.Cluster != cl || m.Hardware.SMBIOSUUID != uuidA ||
+		m.ScopeState != "normal" || m.Frozen || m.Applied != nil || m.Desired != nil {
+		t.Fatalf("machine %+v, Location %s", m, rec.Header().Get("Location"))
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM act WHERE action = 'machine.inventory' AND role = 'author' AND $1 = ANY (subjects)", m.ID); n != 1 {
+		t.Fatalf("%d inventory acts naming the machine", n)
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM machine_state WHERE machine = $1", m.ID); n != 1 {
+		t.Fatalf("%d MachineState rows", n)
+	}
+}
+
+// §7.3: two inventory requests for one SMBIOS UUID under different idempotency keys, by one human
+// or two, commit one machine; the others are 409 conflict naming it, and commit nothing.
+func TestSMBIOSUUIDIsOneMachine(t *testing.T) {
+	e := newEnv(t, options{})
+	author := e.human("h-author")
+	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+	first := e.do(e.api, machineCall(author, "k-first-0123456789", cl, uuidA))
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", first.Code, first.Body)
+	}
+	existing := decode[machineBody](t, first).ID
+	for _, c := range []call{
+		machineCall(author, "k-second-012345678", cl, uuidA),
+		machineCall(e.human("h-all"), "k-third-0123456789", cl, strings.ToUpper(uuidA)),
+	} {
+		doc := wantProblem(t, e.do(e.api, c), http.StatusConflict, "conflict")
+		if doc["machine"] != existing {
+			t.Errorf("409 names %v; want %s", doc["machine"], existing)
+		}
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM machine"); n != 1 {
+		t.Fatalf("%d machines", n)
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM act WHERE action = 'machine.inventory'"); n != 1 {
+		t.Fatalf("%d inventory acts", n)
+	}
+	// The first key still replays its machine.
+	replay := e.do(e.api, machineCall(author, "k-first-0123456789", cl, uuidA))
+	if replay.Code != http.StatusCreated || replay.Header().Get("Idempotent-Replayed") != "true" || decode[machineBody](t, replay).ID != existing {
+		t.Fatalf("replay: %d %v %s", replay.Code, replay.Header(), replay.Body)
+	}
+}
+
+// The control of the test above: without the unique index, the second request commits a second
+// machine, so it is the index that refuses it.
+func TestSMBIOSUUIDControl(t *testing.T) {
+	e := newEnv(t, options{})
+	author := e.human("h-author")
+	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+	mustExec(t, e.db, "DROP INDEX machine_smbios_uuid")
+	for _, k := range []string{"k-first-0123456789", "k-second-012345678"} {
+		if rec := e.do(e.api, machineCall(author, k, cl, uuidA)); rec.Code != http.StatusCreated {
+			t.Fatalf("%s without the index: %d %s", k, rec.Code, rec.Body)
+		}
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM machine"); n != 2 {
+		t.Fatalf("%d machines without the index; want 2", n)
+	}
+}
+
+// §7.3, §16: the same race with both transactions open. The second waits on the first's
+// uncommitted machine, then answers 409 naming it; without the index both commit.
+func TestSMBIOSUUIDConcurrent(t *testing.T) {
+	for _, control := range []bool{false, true} {
+		e := newEnv(t, options{})
+		author := e.human("h-author")
+		cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+		if control {
+			mustExec(t, e.db, "DROP INDEX machine_smbios_uuid")
+		}
+		hook, held, release := holdFirst()
+		t.Cleanup(release)
+		// The control drops the act-order lock too: the held first request holds it (§5 rule 5), so
+		// the second could not commit while the first is held.
+		api := e.build(options{afterEffect: hook, noActOrder: control})
+		a, b := make(chan *httptest.ResponseRecorder, 1), make(chan *httptest.ResponseRecorder, 1)
+		go func() { a <- e.do(api, machineCall(author, "k-first-0123456789", cl, uuidA)) }()
+		<-held
+		go func() { b <- e.do(api, machineCall(author, "k-second-012345678", cl, uuidA)) }()
+		if !control {
+			dbtest.WaitForLockWait(t, e.db)
+		} else {
+			// Nothing to wait on: the second commits while the first is held.
+			if rec := <-b; rec.Code != http.StatusCreated {
+				t.Fatalf("control, second: %d %s", rec.Code, rec.Body)
+			}
+		}
+		release()
+		ra := <-a
+		if ra.Code != http.StatusCreated {
+			t.Fatalf("control %t, first: %d %s", control, ra.Code, ra.Body)
+		}
+		if control {
+			if n := count(t, e.db, "SELECT count(*) FROM machine"); n != 2 {
+				t.Fatalf("control: %d machines; want 2", n)
+			}
+			continue
+		}
+		doc := wantProblem(t, <-b, http.StatusConflict, "conflict")
+		if doc["machine"] != decode[machineBody](t, ra).ID {
+			t.Fatalf("409 names %v; want the first's machine", doc["machine"])
+		}
+		if n := count(t, e.db, "SELECT count(*) FROM machine"); n != 1 {
+			t.Fatalf("%d machines", n)
+		}
+	}
+}
+
+// §9.1, §9.4: inventory bodies are checked before any transaction, and neither the answer nor the
+// log repeats a submitted value.
+func TestInventoryRefusals(t *testing.T) {
+	e := newEnv(t, options{})
+	author := e.human("h-author")
+	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+	const marker = "zq-marker-7f3a"
+	for name, c := range map[string]struct {
+		path, body string
+		status     int
+		code       string
+	}{
+		"plain http":          {"/clusters", `{"name":"x","endpoint":"http://` + marker + `.test","contract":"v1.13"}`, 400, "invalid-request"},
+		"endpoint with path":  {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test/api","contract":"v1.13"}`, 400, "invalid-request"},
+		"endpoint with user":  {"/clusters", `{"name":"x","endpoint":"https://u@` + marker + `.test","contract":"v1.13"}`, 400, "invalid-request"},
+		"contract patch":      {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13.6-` + marker + `"}`, 400, "invalid-request"},
+		"blank name":          {"/clusters", `{"name":"  ","endpoint":"https://a.test","contract":"v1.13"}`, 400, "invalid-request"},
+		"name missing":        {"/clusters", `{"endpoint":"https://a.test","contract":"v1.13"}`, 400, "invalid-request"},
+		"malformed UUID":      {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + marker + `"}`, 400, "invalid-request"},
+		"nil UUID":            {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"00000000-0000-0000-0000-000000000000"}`, 400, "invalid-request"},
+		"all-ones UUID":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"}`, 400, "invalid-request"},
+		"no UUID":             {"/machines", `{"cluster":"` + cl + `","serial":"` + marker + `"}`, 400, "invalid-request"},
+		"blank serial":        {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","serial":" "}`, 400, "invalid-request"},
+		"cluster of a draft":  {"/machines", `{"cluster":"` + drf + `","smbiosUuid":"` + uuidA + `"}`, 400, "invalid-request"},
+		"unknown cluster":     {"/machines", `{"cluster":"` + id.New(id.Cluster) + `","smbiosUuid":"` + uuidA + `","serial":"` + marker + `"}`, 404, "not-found"},
+		"hardware member":     {"/machines", `{"cluster":"` + cl + `","hardware":{"smbiosUuid":"` + uuidA + `"}}`, 400, "invalid-request"},
+		"draft of no cluster": {"/drafts", `{"cluster":"` + id.New(id.Cluster) + `","title":"` + marker + `"}`, 404, "not-found"},
+		"blank title":         {"/drafts", `{"cluster":"` + cl + `","title":""}`, 400, "invalid-request"},
+	} {
+		rec := e.do(e.api, call{method: "POST", path: prefix + c.path, token: author, key: "k-refused-" + strings.ReplaceAll(name, " ", "-") + "-0123456", body: c.body})
+		wantProblem(t, rec, c.status, c.code)
+		if strings.Contains(rec.Body.String(), marker) {
+			t.Errorf("%s: the answer repeats the submitted value: %s", name, rec.Body)
+		}
+	}
+	if e.logged(marker) {
+		t.Fatal("the server log holds a submitted value")
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM machine"); n != 0 {
+		t.Fatalf("%d machines from refused requests", n)
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM act WHERE via = 'api'"); n != 1 {
+		t.Fatalf("%d acts; want only the cluster's", n)
+	}
+}
+
+// PA §12.2, execution and recovery §7.4: a machine inventoried while recovery mode is in effect
+// starts pre-restore unaccounted.
+func TestInventoryInRecoveryMode(t *testing.T) {
+	e := newEnv(t, options{})
+	author := e.human("h-author")
+	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+	newEpoch(t, e.db)
+	mustExec(t, e.db, "UPDATE installation_state SET recovery_mode = true")
+	rec := e.do(e.api, machineCall(author, key, cl, uuidA))
+	if rec.Code != http.StatusCreated || decode[machineBody](t, rec).ScopeState != "pre-restore-unaccounted" {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+var etagShape = regexp.MustCompile(`^"1-[a-z2-7]{26}"$`)
+
+// §9.2, §9.3: POST /drafts is author, automation included; it answers 201 with the draft's ETag,
+// which GET /drafts/{id} repeats.
+func TestCreateDraft(t *testing.T) {
+	e := newEnv(t, options{})
+	cl := e.createCluster(e.api, e.human("h-author"), "k-cluster-0123456789")
+	body := `{"cluster":"` + cl + `","title":"registry mirror"}`
+	wantProblem(t, e.do(e.api, call{method: "POST", path: prefix + "/drafts", token: e.human("h-viewer"), key: key, body: body}),
+		http.StatusForbidden, "forbidden")
+	for _, tok := range []string{e.human("h-author"), e.robot} {
+		rec := e.do(e.api, call{method: "POST", path: prefix + "/drafts", token: tok, key: key, body: body})
+		if rec.Code != http.StatusCreated || !etagShape.MatchString(rec.Header().Get("ETag")) {
+			t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body)
+		}
+		d := decode[draftBody](t, rec)
+		if rec.Header().Get("Location") != prefix+"/drafts/"+d.ID || d.Cluster != cl || d.Title != "registry mirror" ||
+			d.State != "open" || d.Revision != 1 || d.Entries == nil || len(d.Entries) != 0 {
+			t.Fatalf("draft %+v", d)
+		}
+		got := e.do(e.api, call{method: "GET", path: prefix + "/drafts/" + d.ID, token: e.human("h-viewer")})
+		if got.Code != http.StatusOK || got.Header().Get("ETag") != rec.Header().Get("ETag") || decode[draftBody](t, got).ID != d.ID {
+			t.Fatalf("GET: %d %v %s", got.Code, got.Header(), got.Body)
+		}
+	}
+	if n := count(t, e.db, "SELECT count(*) FROM act WHERE action = 'draft.create'"); n != 2 {
+		t.Fatalf("%d draft acts", n)
+	}
+}
+
+// §9.1: the collections page by limit and cursor, a cursor from another epoch is refused, and an
+// item that is not there, or an identifier of another entity, is 404.
+func TestInventoryReads(t *testing.T) {
+	e := newEnv(t, options{})
+	author, viewer := e.human("h-author"), e.human("h-viewer")
+	var clusters []string
+	for _, k := range []string{"k-cluster-a-012345678", "k-cluster-b-012345678", "k-cluster-c-012345678"} {
+		clusters = append(clusters, e.createCluster(e.api, author, k))
+	}
+	var seen []string
+	next := ""
+	for range 4 {
+		p := prefix + "/clusters?limit=2"
+		if next != "" {
+			p += "&cursor=" + next
+		}
+		rec := e.do(e.api, call{method: "GET", path: p, token: viewer})
+		if rec.Code != http.StatusOK || rec.Header().Get("Bronzeward-Epoch") == "" {
+			t.Fatalf("%d %s", rec.Code, rec.Body)
+		}
+		pg := decode[listPage[clusterBody]](t, rec)
+		for _, c := range pg.Items {
+			seen = append(seen, c.ID)
+		}
+		if next = pg.Next; next == "" {
+			break
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("listed %v; want the 3 clusters", seen)
+	}
+	for _, c := range clusters {
+		rec := e.do(e.api, call{method: "GET", path: prefix + "/clusters/" + c, token: viewer})
+		if b := decode[clusterBody](t, rec); rec.Code != http.StatusOK || b.ID != c || b.Endpoint != "https://cp.example.test:6443" || b.Contract != "v1.13" {
+			t.Fatalf("GET cluster: %d %s", rec.Code, rec.Body)
+		}
+	}
+	m := decode[machineBody](t, e.do(e.api, machineCall(author, key, clusters[0], uuidA)))
+	rec := e.do(e.api, call{method: "GET", path: prefix + "/machines/" + m.ID, token: viewer})
+	if got := decode[machineBody](t, rec); rec.Code != http.StatusOK || got.Hardware.Serial == nil || *got.Hardware.Serial != "SN-1" || got.Cluster != clusters[0] {
+		t.Fatalf("GET machine: %d %s", rec.Code, rec.Body)
+	}
+	if pg := decode[listPage[machineBody]](t, e.do(e.api, call{method: "GET", path: prefix + "/machines", token: viewer})); len(pg.Items) != 1 || pg.Items[0].ID != m.ID {
+		t.Fatalf("machines %+v", pg)
+	}
+	if pg := decode[listPage[draftBody]](t, e.do(e.api, call{method: "GET", path: prefix + "/drafts", token: viewer})); len(pg.Items) != 0 {
+		t.Fatalf("drafts %+v", pg)
+	}
+	old := decode[listPage[clusterBody]](t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?limit=1", token: viewer})).Next
+	newEpoch(t, e.db)
+	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?cursor=" + old, token: viewer}), http.StatusBadRequest, "cursor-invalid")
+	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?limit=0", token: viewer}), http.StatusBadRequest, "invalid-request")
+	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/machines?cluster=" + clusters[0], token: viewer}), http.StatusBadRequest, "invalid-request")
+	for _, p := range []string{"/clusters/" + id.New(id.Cluster), "/clusters/" + m.ID, "/machines/" + id.New(id.Machine),
+		"/drafts/" + id.New(id.Draft), "/drafts/x", "/operations/" + id.New(id.Operation)} {
+		wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + p, token: viewer}), http.StatusNotFound, "not-found")
+	}
+}
+
+// §8.3: GET /operations/{id} answers the operation resource. No route of this change creates one,
+// so the test inserts the ingest operation POST /ingestions will create.
+func TestGetOperation(t *testing.T) {
+	e := newEnv(t, options{})
+	author := e.human("h-author")
+	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+	d := decode[draftBody](t, e.do(e.api, call{method: "POST", path: prefix + "/drafts", token: author, key: key,
+		body: `{"cluster":"` + cl + `","title":"import"}`}))
+	var human string
+	if err := e.db.QueryRow("SELECT id FROM principal WHERE sub = 'h-author'").Scan(&human); err != nil {
+		t.Fatal(err)
+	}
+	claim, opID := id.New(id.Ingestion), id.New(id.Operation)
+	mustExec(t, e.db, `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until, expires_at,
+		principal, idempotency_key, created_at)
+		SELECT $1, 'transient', 'held', 'run/1/start', 1, epoch, now() + interval '1 minute', now() + interval '1 hour',
+		$2, 'k-ingest-0123456789', now() FROM installation_state`, claim, human)
+	mustExec(t, e.db, `INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, lease_until, last_event,
+		draft, draft_revision, ingestion, created_by, created_by_kind, created_role, created_at)
+		SELECT $1, 'ingest', 'running', epoch, 'run/1/start', 1, epoch, now() + interval '1 minute', 2, $2, 1, $3, $4, 'human',
+		'author', now() FROM installation_state`, opID, d.ID, claim, human)
+	rec := e.do(e.api, call{method: "GET", path: prefix + "/operations/" + opID, token: e.human("h-viewer")})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	subject, _ := got["subject"].(map[string]any)
+	by, _ := got["createdBy"].(map[string]any)
+	if got["id"] != opID || got["kind"] != "ingest" || got["state"] != "running" || got["epoch"] != epoch(t, e.db) ||
+		got["lastEvent"] != float64(2) || subject["draft"] != d.ID || subject["draftRevision"] != float64(1) ||
+		by["principal"] != human || by["role"] != "author" || got["result"] != nil || got["error"] != nil || got["createdAt"] == nil {
+		t.Fatalf("operation %s", rec.Body)
+	}
+	for _, k := range []string{"result", "error"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("%s is absent; §8.3 shows it null", k)
+		}
+	}
+}
