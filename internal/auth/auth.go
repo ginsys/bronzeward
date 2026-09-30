@@ -232,9 +232,22 @@ func (v *Verifier) roles(payload []byte) ([]Role, error) {
 // while the issuer is down.
 func Discover(o config.OIDC) KeySet {
 	d := &discovered{issuer: o.Issuer, oidc: o, refetch: keyRefetchInterval, retry: discoveryRetryInterval,
-		discovering: make(chan struct{}, 1)}
-	d.client = &http.Client{Timeout: issuerTimeout, CheckRedirect: d.secureRedirect}
+		discovering: make(chan struct{}, 1), proxy: http.ProxyFromEnvironment}
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = d.proxyFor
+	d.client = &http.Client{Timeout: issuerTimeout, CheckRedirect: d.secureRedirect, Transport: t}
 	return d
+}
+
+// proxyFor chooses the proxy for a request to the issuer. A plain-http request goes direct:
+// config.OIDC.Transport admits it only to this host or a listed host whose network path the
+// operator trusts, and a proxy on that path could answer with its own key (§10.1). An https
+// request keeps the ambient proxy, which only tunnels its TLS.
+func (d *discovered) proxyFor(r *http.Request) (*url.URL, error) {
+	if r.URL.Scheme == "http" {
+		return nil, nil
+	}
+	return d.proxy(r)
 }
 
 // secureRedirect refuses a redirect that leaves the transport config.OIDC.Transport permits,
@@ -302,10 +315,11 @@ func (c *cappedReader) Read(p []byte) (int, error) {
 
 type discovered struct {
 	issuer  string
-	oidc    config.OIDC   // its Transport decides which URLs discovery may reach
-	client  *http.Client  // bounds every request to the issuer
-	refetch time.Duration // the least time between successful key set fetches
-	retry   time.Duration // how long a failed discovery is answered without asking the issuer
+	oidc    config.OIDC                           // its Transport decides which URLs discovery may reach
+	client  *http.Client                          // bounds every request to the issuer
+	proxy   func(*http.Request) (*url.URL, error) // the ambient proxy: http.ProxyFromEnvironment
+	refetch time.Duration                         // the least time between successful key set fetches
+	retry   time.Duration                         // how long a failed discovery is answered without asking the issuer
 	// discovering holds a value while one request runs discovery. It is a lock a waiter can give
 	// up on: a request queued behind a slow discovery fails at its own deadline.
 	discovering chan struct{}
