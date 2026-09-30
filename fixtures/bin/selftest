@@ -741,7 +741,9 @@ wait "$m2" || rc2=$?
 migrated=$(cat "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out" | { grep '^applied ' || true; } | LC_ALL=C sort | tr '\n' '|')
 rm "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out"
 [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] || fail "concurrent bw migrate failed (exit $rc1 and $rc2)"
-[ "$migrated" = 'applied [1 2 3]|applied []|' ] || fail "concurrent bw migrate: $migrated; want one to apply [1 2 3] and one []"
+every=$(image_migrations) || fail "cannot list the migrations the server image embeds"
+[ "$migrated" = "applied [$every]|applied []|" ] || fail "concurrent bw migrate: $migrated; want one to apply [$every] and one []"
+unset every
 # A seed interrupted after bw token issue leaves the token in the .partial file: the scan knows it
 # and its secret half, and seed refuses rather than issue another. Removed before anything can fail.
 defer rm -f -- "$STATE/automation-token.partial"
