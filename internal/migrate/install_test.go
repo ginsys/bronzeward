@@ -167,8 +167,10 @@ func TestImmutableTriggerControl(t *testing.T) {
 // migration's table fails this test until its author decides which it is.
 func TestEveryTableClassified(t *testing.T) {
 	db, _ := migrated(t)
-	immutable := []string{"act", "identity_revocation", "idempotency_record", "recovery_epoch", "schema_migrations"}
-	mutable := []string{"automation_token", "installation_state", "principal"}
+	immutable := []string{"act", "identity_revocation", "idempotency_record", "import_base_reference", "import_base_revision",
+		"operation_event", "recovery_epoch", "schema_migrations"}
+	mutable := []string{"automation_token", "cluster", "draft", "draft_entry", "installation_state", "machine", "machine_state",
+		"operation", "principal", "staging_claim"}
 	rows, err := db.Query("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
 	if err != nil {
 		t.Fatal(err)
