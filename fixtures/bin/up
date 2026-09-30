@@ -345,7 +345,7 @@ fi
 # line, readable by any local user.
 dsn="postgres://bronzeward:${BW_POSTGRES_PASSWORD}@postgres:5432/bronzeward?sslmode=disable"
 for instance in a b; do
-  printf '%s\n' "${server_template//@DSN@/$dsn}" >"$STATE/server/$instance/config.yaml" ||
+  printf '%s\n' "${server_template//@DSN@/"$dsn"}" >"$STATE/server/$instance/config.yaml" ||
     die "could not write the configuration of instance $instance"
 done
 unset dsn instance server_template
