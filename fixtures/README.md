@@ -369,6 +369,12 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
 - S0 step 3's automation token from an earlier recovery epoch is not driven end to end: no route
   enters recovery mode before ginsys/bronzeward#29. `scenarios/s0` records it as `SKIP`; the Go test
   `TestAutomationExpiredRevokedEarlierEpoch` in `internal/auth` covers the refusal.
+- S0 `run` tests the working tree, and its checkout checks ask git whether that tree is the image
+  commit. They catch edits, untracked and ignored files and git's skip bits, not a git
+  configuration set up to misreport the tree: a clean filter or `text`, `eol`, `ident` or
+  `working-tree-encoding` attribute from `.git/info/attributes` or `core.attributesFile` can let
+  the suites test bytes the commit does not hold. Whoever runs S0 controls that configuration.
+  ginsys/bronzeward#68 runs the suites from a clean clone of the commit instead.
 - Talos node volumes are anonymous. `bin/up` records their names in `.state/` once the cluster
   exists, and `bin/down` removes those and any still attached to fixture containers. If
   `talosctl cluster create` fails before a container exists, its empty volumes cannot be told apart
