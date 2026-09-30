@@ -71,8 +71,9 @@ Out of scope, owned elsewhere:
 - operating, backing up and restoring the database and OpenBao: the operator
   ([design §7.7](../design/Talos_Configuration_and_Machine_Management_Design.md#77-poc-deployment-profile)
   duties 1–6; [§14.2](../design/Talos_Configuration_and_Machine_Management_Design.md#142-operator-owned-database-and-vault-services));
-- the adoption workflow ([ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22))
-  and the edit and publication user flow
+- the adoption workflow ([ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22)
+  for the import, [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) for the
+  handover) and the edit and publication user flow
   ([ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23)).
 
 Bronzeward owns the schema, migrations and connection and transaction behavior

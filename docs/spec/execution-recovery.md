@@ -1087,7 +1087,9 @@ is no `Applied` to differ from; the adopt plan is the handover authorization,
 binds no drift record and no baseline revision, and compares the baseline
 digest recorded by import (step 1); requirements 4.1 to 4.5 apply otherwise
 unchanged. The rest of
-that workflow belongs to the
+that handover, from publishing the import draft to recording the adoption,
+belongs to the [approval work](https://github.com/ginsys/bronzeward/issues/25);
+the import that precedes it belongs to the
 [adoption work](https://github.com/ginsys/bronzeward/issues/22).
 
 ### 6.4 Revert
