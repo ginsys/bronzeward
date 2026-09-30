@@ -356,11 +356,12 @@ run() {
   done
 
   # Negative controls: a schema version the binary does not know, and an applied migration's
-  # checksum changed (the immutability trigger held off for the one statement).
+  # checksum changed (the immutability trigger held off for the one statement). Version 999 stays
+  # unknown as migrations are added.
   "$bin/inject" kill A >/dev/null
-  schema_control 1 'unknown schema version 4' \
-    "INSERT INTO schema_migrations VALUES (4, 'unknown', 'x', now())" \
-    'migrations \[4\] this binary does not know' 'migrations \[4\] are applied but unknown'
+  schema_control 1 'unknown schema version 999' \
+    "INSERT INTO schema_migrations VALUES (999, 'unknown', 'x', now())" \
+    'migrations \[999\] this binary does not know' 'migrations \[999\] are applied but unknown'
   schema_control 2 'checksum of migration 1 changed' \
     "SET session_replication_role = replica; UPDATE schema_migrations SET checksum = 'x' WHERE version = 1" \
     'migration 1 (.*edited after it was applied' 'migrations \[1\] were applied with another name or checksum'
