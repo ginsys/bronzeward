@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -494,6 +495,35 @@ func TestPlainHTTPHostsDoNotExtendToKeySet(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// persistence-api.md §10.1: a plain-http issuer is trusted for its network path, so an ambient
+// proxy (HTTP_PROXY without the host in NO_PROXY) must not carry its discovery or key set, where
+// the proxy could answer with its own key. The control: an https request still takes the proxy.
+func TestPlainHTTPIssuerBypassesAmbientProxy(t *testing.T) {
+	f := newFixture(t)
+	var hits atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		http.Error(w, "proxied", http.StatusBadGateway)
+	}))
+	t.Cleanup(proxy.Close)
+	proxyURL, err := url.Parse(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Discover(f.cfg.OIDC).(*discovered)
+	d.proxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+	if _, err := NewVerifier(f.cfg, f.db, d).Authenticate(t.Context(), f.bearer(t, "h-viewer", "")); err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("the proxy carried %d plain-http requests to the issuer", n)
+	}
+	r := httptest.NewRequest(http.MethodGet, "https://idp.example.test/.well-known/openid-configuration", nil)
+	if got, err := d.client.Transport.(*http.Transport).Proxy(r); err != nil || got != proxyURL {
+		t.Fatalf("an https request's proxy = %v, %v; want the ambient proxy", got, err)
 	}
 }
 

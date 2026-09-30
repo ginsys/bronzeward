@@ -1451,7 +1451,10 @@ own host, or over plain http to a host the deployment lists in
 for the issuer URL, for the key set URL its discovery document advertises and
 for every redirect: the keys fetched decide whose tokens verify, so listing a
 host states that the network to it is protected. A discovery document or
-redirect naming an unlisted plain-http host is refused.
+redirect naming an unlisted plain-http host is refused. A plain-http request
+goes directly to its host, never through a proxy the environment names
+(`HTTP_PROXY`), which would sit on that protected path; an https request may
+use one, since the proxy only tunnels its TLS.
 
 A human's roles are those the token's groups map to, evaluated per request.
 This answers how an identity-provider change reaches Bronzeward (design §13.7,
