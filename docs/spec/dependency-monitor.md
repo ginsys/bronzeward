@@ -599,7 +599,9 @@ Each is marked in place as **(choice §11.n)**. Owner decision, 2026-09-29
 (ginsys/bronzeward#67): choices 1 to 11 stand as written, with choice 7's
 per-dependency advisory lock and choice 8's measure by progress and
 lock-free watchdog read decided the same day in that pull request's review.
-Choices 12 and 13 answer that review and await the owner's review.
+Choices 12 and 13, which answer that review, were accepted as written on
+2026-09-30; the inferences they rest on (§10.2) become evidence through item 9
+of §10.1.
 
 1. **A document of its own** rather than a section of the persistence and API
    contract, whose section numbers the acceptance plan cites. Alternative: a
