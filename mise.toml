@@ -189,6 +189,7 @@ depends = ["upstream-sync"]
 # gitignored, so a local edit there would run unseen by anything that inspects this checkout.
 run = """
 sha=$(grep -oE 'check-action-pins@[0-9a-f]{40}' .github/workflows/ci.yml | head -1 | cut -d@ -f2)
+[ -n "$sha" ] || { echo "action-pins: no 40-char check-action-pins pin in .github/workflows/ci.yml" >&2; exit 1; }
 checker=$(git --no-replace-objects -C upstream show "$sha:scripts/check-action-pins.sh") || exit 1
 FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@main$' bash -c "$checker" check-action-pins .
 """
