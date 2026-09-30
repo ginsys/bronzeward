@@ -160,7 +160,9 @@ func (a *Auth) validate() error {
 	return nil
 }
 
-var hostName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
+// hostName is a DNS name: dot-separated labels of letters, digits and inner hyphens, each 1 to 63
+// characters (RFC 1123 §2.1), so a mistyped entry fails at load rather than at discovery.
+var hostName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 
 // Transport reports whether o permits a request to u: https, or plain http to this host or to a
 // host in PlainHTTPHosts, by exact name. The issuer URL, the key set URL it advertises and every
