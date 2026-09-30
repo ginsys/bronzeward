@@ -852,12 +852,15 @@ source secrets; regenerating needs every reproduction dependency
 ([KL §5.2](../design/research/20260924-key-loss-restoration.md#52-criterion-2-applying-is-not-regenerating-and-ciphertext-is-not-executability)).
 
 The artifact record also carries its encryption dependency, the Transit key by
-an identity the provider cannot reissue together with its version, not by name
+an identity the provider does not reissue together with its version, not by name
 and version alone ([KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation)
 item 1, inferred): the key's name and the creation time its `keys` map gives for
 that version, as the
 [dependency monitor's classification](dependency-monitor.md#3-classification-procedure)
-reads it (§11). Each pinned KV version is recorded the same way, with the
+reads it (§11). The provider does not reissue that creation time on the
+supported topology, one node whose clock does not step back; the residual risk
+of a backwards clock step or several provider nodes is accepted for the PoC in
+[design §7.7](../design/Talos_Configuration_and_Machine_Management_Design.md#77-poc-deployment-profile). Each pinned KV version is recorded the same way, with the
 `created_time` §6 steps 3 and 4 agreed on: KV metadata deletion restarts a
 path's version numbers, so path and version alone can name a replacement. It
 also carries the renderer and contract record of §10.2.
