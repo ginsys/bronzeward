@@ -89,12 +89,16 @@ func listed[T any](p id.Prefix, query string, scan func(*sql.Rows) (T, string, e
 	}
 }
 
-// item answers one entity p named by the route's {id}. get returns sql.ErrNoRows for an
-// identifier the database does not hold; that, and an identifier of another entity, is 404.
+// item answers one entity p named by the route's {id}. It takes no query (§9.1: unknown fields
+// are refused). get returns sql.ErrNoRows for an identifier the database does not hold; that, and
+// an identifier of another entity, is 404.
 func item(p id.Prefix, get func(ctx context.Context, tx *sql.Tx, id string) (etag string, body any, err error)) readFunc {
 	return func(a *API, w http.ResponseWriter, q *request) {
 		v := q.r.PathValue("id")
 		readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
+			if q.r.URL.RawQuery != "" {
+				return "", nil, refuse(http.StatusBadRequest, "invalid-request", "an item read takes no query")
+			}
 			if id.MustHave(v, p) != nil {
 				return "", nil, refuse(http.StatusNotFound, "not-found", "no such resource")
 			}

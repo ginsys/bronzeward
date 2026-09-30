@@ -40,6 +40,33 @@ func (e *env) createCluster(h http.Handler, tok, k string) string {
 	return decode[clusterBody](e.t, rec, http.StatusCreated).ID
 }
 
+// validEndpoint takes https://<host>[:<port>] and nothing else: the controls beside the refusals
+// show that a name, an IPv4 address and a bracketed IPv6 address, each with or without a port, pass.
+func TestValidEndpoint(t *testing.T) {
+	for s, want := range map[string]bool{
+		"https://cp.example.test":        true,
+		"https://cp.example.test:6443":   true,
+		"https://10.0.0.1:6443":          true,
+		"https://[fd00::1]:6443":         true,
+		"https://[fd00::1]":              true,
+		"https://cp.example.test::6443":  false,
+		"https://cp.example.test:":       false,
+		"https://cp.example.test:0":      false,
+		"https://cp.example.test:65536":  false,
+		"https://cp..example.test:6443":  false,
+		"https://-cp.example.test:6443":  false,
+		"https://cp_1.example.test:6443": false,
+		"https://[cp.example.test]:6443": false,
+		"https://[fd00::1%25eth0]:6443":  false,
+		"https://fd00::1:6443":           false,
+		"https://:6443":                  false,
+	} {
+		if got := validEndpoint(s); got != want {
+			t.Errorf("validEndpoint(%q) = %v; want %v", s, got, want)
+		}
+	}
+}
+
 func machineCall(tok, k, cluster, uuid string) call {
 	return call{method: "POST", path: prefix + "/machines", token: tok, key: k,
 		body: `{"cluster":"` + cluster + `","smbiosUuid":"` + uuid + `","serial":"SN-1"}`}
@@ -195,6 +222,8 @@ func TestInventoryRefusals(t *testing.T) {
 		"plain http":          {"/clusters", `{"name":"x","endpoint":"http://` + marker + `.test","contract":"v1.13"}`, 400, "invalid-request"},
 		"endpoint with path":  {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test/api","contract":"v1.13"}`, 400, "invalid-request"},
 		"endpoint with user":  {"/clusters", `{"name":"x","endpoint":"https://u@` + marker + `.test","contract":"v1.13"}`, 400, "invalid-request"},
+		"doubled port colon":  {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test::6443","contract":"v1.13"}`, 400, "invalid-request"},
+		"empty port":          {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test:","contract":"v1.13"}`, 400, "invalid-request"},
 		"contract patch":      {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13.6-` + marker + `"}`, 400, "invalid-request"},
 		"blank name":          {"/clusters", `{"name":"  ","endpoint":"https://a.test","contract":"v1.13"}`, 400, "invalid-request"},
 		"name missing":        {"/clusters", `{"endpoint":"https://a.test","contract":"v1.13"}`, 400, "invalid-request"},
@@ -406,6 +435,11 @@ func TestInventoryReads(t *testing.T) {
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?cursor=" + old, token: viewer}), http.StatusBadRequest, "cursor-invalid")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/clusters?limit=0", token: viewer}), http.StatusBadRequest, "invalid-request")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/machines?cluster=" + clusters[0], token: viewer}), http.StatusBadRequest, "invalid-request")
+	// An item read takes no query at all (§9.1: unknown fields are refused), before any lookup.
+	for _, p := range []string{"/clusters/" + clusters[0] + "?x=1", "/machines/" + m.ID + "?limit=1",
+		"/drafts/" + id.New(id.Draft) + "?x", "/operations/" + id.New(id.Operation) + "?x=1"} {
+		wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + p, token: viewer}), http.StatusBadRequest, "invalid-request")
+	}
 	for _, p := range []string{"/clusters/" + id.New(id.Cluster), "/clusters/" + m.ID, "/machines/" + id.New(id.Machine),
 		"/drafts/" + id.New(id.Draft), "/drafts/x", "/operations/" + id.New(id.Operation)} {
 		wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + p, token: viewer}), http.StatusNotFound, "not-found")
