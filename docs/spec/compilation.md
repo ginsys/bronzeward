@@ -54,7 +54,9 @@ and approval policy
 ([ginsys/bronzeward#14](https://github.com/ginsys/bronzeward/issues/14)), which
 owns the concrete provider policies; retention windows beyond
 [design §7.8](../design/Talos_Configuration_and_Machine_Management_Design.md#78-poc-retention-and-recovery-policy);
-the adoption workflow ([ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22));
+the adoption workflow ([ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22)
+for the import, [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) for the
+handover);
 and the edit and publication user flow
 ([ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23)).
 
