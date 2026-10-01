@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -71,6 +72,10 @@ func TestReadRefusesOverLimit(t *testing.T) {
 	}
 	if _, err := Read(strings.NewReader(""), 10); !errors.Is(err, ErrEmptyInput) {
 		t.Fatalf("an empty input: %v", err)
+	}
+	// The largest limit must not overflow the one-byte probe past it.
+	if u, err := Read(strings.NewReader("a: b\n"), math.MaxInt64); err != nil || u.Size() != 5 {
+		t.Fatalf("an input under the largest limit: %v", err)
 	}
 }
 
