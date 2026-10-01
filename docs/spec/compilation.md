@@ -158,7 +158,9 @@ second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/passw
    and DB infers that a provider object named after such an identifier could
    then match a different object issued after the restore
    ([DB §9](../design/research/20260924-database-semantics.md#9-hand-off));
-   with `cas=0`, such a collision is refused rather than overwritten.
+   with `cas=0`, such a collision is refused rather than overwritten. The
+   generation's data is the value with its kind, `{"kind": …, "value": …}`
+   **(choice §16.28)**.
 7. **Construct** the sanitized value. Only now may it reach staging (§3) or the
    draft transaction.
 8. For import and drift adoption, **encrypt the exact input** as the baseline
@@ -383,8 +385,11 @@ is an offline guessing oracle held in exactly the database and backups that
 oracle; a per-run salt also removes it but breaks the cross-run comparison the
 baseline check relies on
 ([E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits),
-§8 item 7). Which provider primitive computes the HMAC, and how digests are
-compared across a rotation of its key, is not evidenced and is open (§15).
+§8 item 7). The HMAC is OpenBao Transit `hmac` with `sha2-256`, under a
+dedicated digest key that only ingestion identities may use **(choice
+§16.27)**. The record names that key and the key version Transit reports, as
+`transit/<key>@v<N>`. How digests are compared across a rotation of the key is
+undesigned, and the PoC never rotates it (§15).
 
 This covers digests of individual secret values. Whole-configuration digests
 used to compare observed and applied state
@@ -465,8 +470,8 @@ logical secret" and resolves "to an exact version"):
   beyond those constraints. The cost is churn: re-adopting an unchanged
   configuration yields new names, so diffs and dependency records change for
   secrets that did not. Deduplicating by keyed digest (§4.1) is the
-  alternative, deferred until the digest mechanism is evidenced
-  **(choice §16.13)**.
+  alternative, deferred while comparing digests across a rotation of the
+  digest key is undesigned **(choice §16.13)**.
 - **Versions.** The declaration (§5.2) names the exact version. The compiler
   never selects a latest version; a different version is a new fragment
   revision, reviewed as a source change **(choice §16.14)**. In the PoC every
@@ -516,7 +521,8 @@ embedded:
 
 - `kind` is one of `string`, `integer`, `boolean` or `mapping` (a mapping of
   those scalar kinds) **(choice §16.16)**. It must equal the kind stored in the
-  pinned secret version; a mismatch refuses compilation and nothing is coerced.
+  pinned secret version (its `kind`, **choice §16.28**); a mismatch refuses
+  compilation and nothing is coerced.
 - `version` is the exact version the reference resolves to (§5.1).
 - `encoding` is optional and comes from a closed enum **(choice §16.17)**. The
   PoC enum has one member, `base64`, which places the standard base64 encoding of a `string`
@@ -1209,8 +1215,13 @@ Evidence gaps this contract carries rather than closes:
   fail and ran on control-plane bases only; disk-encryption, installer and disk
   configuration were absent from the environment; the list's precision was not
   measured (§2.4; SP §4.4, §8; E1 §7).
-- **Keyed-digest mechanism**: no provider HMAC primitive was exercised, and
-  comparison across its key rotation is undesigned (§4.1).
+- **Keyed-digest mechanism**: the primitive is chosen (§4.1, choice §16.27).
+  Its determinism, its keying (a digest is not the input's SHA-256) and its
+  restriction to ingestion identities were exercised against OpenBao 2.6.1 in
+  dev mode, in memory, not against the fixture's Raft node. Comparison across a
+  rotation of the key is undesigned. A digest key deleted and recreated under
+  the same name is not handled either: its digests stop matching, so a
+  comparison fails rather than passes.
 - **Whole-configuration digests**: the unkeyed baseline and artifact
   configuration digests are only as unguessable as the whole configuration;
   that was not assessed (§4.1).
@@ -1218,8 +1229,12 @@ Evidence gaps this contract carries rather than closes:
   principals raced, and no clock was skewed (E1 §7). Lease, expiry and
   heartbeat values are open (§3.2).
 - **Identities**: PC measured the `publisher` create-only policy and the
-  compiler and executor policies, not staging-key, baseline-key or HMAC use
-  (§1).
+  compiler and executor policies (§1). The implementation's policy tests also
+  exercise staging-key, baseline-key and HMAC use under the fixture's
+  policies, each refusal beside a control with the refused grant added, against
+  OpenBao 2.6.1 in dev mode. There, a `cas=0` create on an existing generation
+  is refused to ingestion by its policy (403) before check-and-set is reached,
+  and by check-and-set alone (400) to an identity that may also update.
 - **Addressing**: the JSON Pointer scheme (§2.2) is untested.
 - **Ingestion input**: only configurations read back from a node were
   ingested; a generated configuration before Talos normalizes it was not (E1 §7).
@@ -1297,8 +1312,9 @@ in place as
 12. **Every secret scoped to one cluster; no library-wide secrets** (§5.1).
     Alternative: library-wide scope for cross-cluster fragments.
 13. **A new name for every extracted value, even an unchanged one** (§5.1).
-    Alternative: deduplicate by keyed digest; avoids churn, but rests on the
-    unevidenced digest mechanism.
+    Alternative: deduplicate by keyed digest; avoids churn, but rests on
+    digest comparison, which is undesigned across a rotation of the digest key
+    (§4.1).
 14. **Declarations name the exact version; no latest-version selection**
     (§5.1, §5.2). Alternative: pin the latest `retained` version at
     publication.
@@ -1351,6 +1367,22 @@ in place as
     Alternative: a keyed digest under the §4.1 key for these too, at the cost
     of a provider call per observation (execution and recovery choice
     §10.2).
+27. **Keyed digests by Transit `hmac` (`sha2-256`) under a dedicated digest
+    key that only ingestion identities may use, recorded as
+    `transit/<key>@v<N>`** (§4.1). Alternatives: an in-process HMAC under a
+    key read from KV, which brings the key into process memory and needs a
+    secret read by ingestion; an HMAC under the staging key, which leaves the
+    digest without a key of its own. The record could also carry the key
+    version's creation time (design §7.7's key identity), at the cost of a
+    metadata read per digest. Owner decision, 2026-09-30
+    (ginsys/bronzeward#22).
+28. **A generation's data is `{"kind": …, "value": …}`** (§2.3 step 6, §5.2):
+    `kind` is one of §5.2's kinds and `value` the JSON value of that kind, an
+    integer as a JSON number and a mapping as an object of scalars, so the
+    compiler compares the stored kind with the declaration. Alternative: E1's
+    `{"value": "<string>"}`, with the kind only in the declaration, which
+    leaves §5.2's comparison nothing to compare. Owner decision, 2026-10-01
+    (ginsys/bronzeward#22).
 
 ## 17. Traceability
 
@@ -1364,7 +1396,7 @@ in place as
 | §3.1 staging modes | §7.1 | E1 4.2, §6, §8 item 3; E1 5.16 |
 | §3.2–§3.4 claims, lease, takeover | §7.1 | E1 4.2, 5.15, 5.16, 5.20, §7; [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions), [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) row 021 |
 | §3.5 restoration | §14.6 | DB §4.7; [execution and recovery §7](execution-recovery.md#7-recovery-after-management-state-restoration) |
-| §4.1 keyed digests | §7.1 | E1 §7, §8 item 7 |
+| §4.1 keyed digests | §7.1 | E1 §7, §8 item 7; choice §16.27 |
 | §2.3 step 8, §4.1, §11 whole-configuration digests | §7.1, §12.1 | none: choice §16.26; [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values) |
 | §4.2 guard | §7.1, §6.9 | [E1 5.18](../design/research/20260922-secret-ingress-extraction-before-persistence.md#518-the-fourth-review-and-the-fixes-made-after-the-evidence), [E1 5.19](../design/research/20260922-secret-ingress-extraction-before-persistence.md#519-advisory-rounds-five-to-eighteen-the-prototype-hardened-the-evidence-unchanged) |
 | §5.1 scope, naming, versions | §6.9, §13.2 | none: choices §16.12 to §16.14 |
