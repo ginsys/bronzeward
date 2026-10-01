@@ -25,15 +25,32 @@ const (
 // Value is a generation's content: its kind and the JSON value of that kind. A generation's KV v2
 // data is {"kind": <Kind>, "value": <JSON>} (compilation.md choice §16.28); a reader decodes an
 // integer as a JSON number with UseNumber. NewValue builds a checked one, and CreateGeneration
-// checks again whatever it is given. A Value renders as a placeholder under every fmt verb.
-type Value struct {
-	Kind Kind
-	JSON json.RawMessage
+// checks again whatever it is given. A Value renders as a placeholder under every fmt verb and
+// refuses to marshal. Like Token, it holds its content behind a pointer: a struct holding a Value
+// in an unexported field is printed by reflection, which no method can intercept, and then shows
+// the pointer.
+type Value struct{ p *value }
+
+type value struct {
+	kind Kind
+	json json.RawMessage
+}
+
+// Kind is the value's kind.
+func (v Value) Kind() Kind {
+	if v.p == nil {
+		return ""
+	}
+	return v.p.kind
 }
 
 const valueText = "[provider value]"
 
-func (Value) Format(f fmt.State, _ rune) { io.WriteString(f, valueText) }
+var errValueRender = errors.New("provider: a value is not marshalled")
+
+func (Value) Format(f fmt.State, _ rune)   { io.WriteString(f, valueText) }
+func (Value) MarshalJSON() ([]byte, error) { return nil, errValueRender }
+func (Value) MarshalText() ([]byte, error) { return nil, errValueRender }
 
 // NewValue checks v against k and encodes it: a Go string, an integer type or an integer
 // json.Number, a bool, or a map[string]string / map[string]any of those. Floats, nil, lists,
@@ -72,7 +89,7 @@ func NewValue(k Kind, v any) (Value, error) {
 	if err != nil {
 		return Value{}, errors.New("provider: the value could not be encoded")
 	}
-	val := Value{Kind: k, JSON: b}
+	val := Value{&value{kind: k, json: b}}
 	if err := val.check(); err != nil {
 		return Value{}, err
 	}
@@ -121,19 +138,22 @@ func integerNumber(s string) bool {
 // check holds v's JSON to its kind: exactly one value, valid UTF-8, no float, null, list, nested
 // mapping or repeated mapping member. Errors never quote the value.
 func (v Value) check() error {
-	if !utf8.Valid(v.JSON) {
+	if v.p == nil {
+		return errors.New("provider: a value made by NewValue is required")
+	}
+	if !utf8.Valid(v.p.json) {
 		return errors.New("provider: the value is not valid UTF-8")
 	}
-	dec := json.NewDecoder(bytes.NewReader(v.JSON))
+	dec := json.NewDecoder(bytes.NewReader(v.p.json))
 	dec.UseNumber()
 	tok, err := dec.Token()
 	if err != nil {
 		return errors.New("provider: the value is not JSON")
 	}
-	switch v.Kind {
+	switch v.p.kind {
 	case KindString, KindInteger, KindBoolean:
-		if scalarJSONKind(tok) != v.Kind {
-			return fmt.Errorf("provider: the value is not of kind %q", v.Kind)
+		if scalarJSONKind(tok) != v.p.kind {
+			return fmt.Errorf("provider: the value is not of kind %q", v.p.kind)
 		}
 	case KindMapping:
 		if tok != json.Delim('{') {

@@ -8,12 +8,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 func TestCreateGenerationSendsCASZero(t *testing.T) {
@@ -71,19 +74,21 @@ func TestCreateGenerationRefusesUnchecked(t *testing.T) {
 	i, rec := standIn(t, testKeys, func(w http.ResponseWriter, _ *http.Request) {
 		respond(t, w, 200, data(map[string]any{"version": 1}))
 	})
+	raw := func(k Kind, s string) Value { return Value{&value{kind: k, json: json.RawMessage(s)}} }
 	for name, c := range map[string]struct {
 		p GenerationPath
 		v Value
 	}{
 		"zero path":        {GenerationPath{}, mustValue(t, KindString, "x")},
-		"kind mismatch":    {newPath(t), Value{Kind: KindInteger, JSON: json.RawMessage(`"x"`)}},
-		"unknown kind":     {newPath(t), Value{Kind: "list", JSON: json.RawMessage(`[1]`)}},
-		"invalid UTF-8":    {newPath(t), Value{Kind: KindString, JSON: json.RawMessage("\"a\xffb\"")}},
-		"trailing data":    {newPath(t), Value{Kind: KindString, JSON: json.RawMessage(`"a" "b"`)}},
-		"nested mapping":   {newPath(t), Value{Kind: KindMapping, JSON: json.RawMessage(`{"a":{"b":1}}`)}},
-		"float":            {newPath(t), Value{Kind: KindInteger, JSON: json.RawMessage(`1.5`)}},
-		"null":             {newPath(t), Value{Kind: KindString, JSON: json.RawMessage(`null`)}},
-		"duplicate member": {newPath(t), Value{Kind: KindMapping, JSON: json.RawMessage(`{"a":1,"a":2}`)}},
+		"zero value":       {newPath(t), Value{}},
+		"kind mismatch":    {newPath(t), raw(KindInteger, `"x"`)},
+		"unknown kind":     {newPath(t), raw("list", `[1]`)},
+		"invalid UTF-8":    {newPath(t), raw(KindString, "\"a\xffb\"")},
+		"trailing data":    {newPath(t), raw(KindString, `"a" "b"`)},
+		"nested mapping":   {newPath(t), raw(KindMapping, `{"a":{"b":1}}`)},
+		"float":            {newPath(t), raw(KindInteger, `1.5`)},
+		"null":             {newPath(t), raw(KindString, `null`)},
+		"duplicate member": {newPath(t), raw(KindMapping, `{"a":1,"a":2}`)},
 	} {
 		if _, err := i.CreateGeneration(t.Context(), c.p, c.v); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -116,8 +121,8 @@ func TestNewValueKinds(t *testing.T) {
 			t.Errorf("NewValue(%s, %T): %v", c.k, c.v, err)
 			continue
 		}
-		if got.Kind != c.k || string(got.JSON) != c.want {
-			t.Errorf("NewValue(%s, %T) = %s %s, want %s", c.k, c.v, got.Kind, got.JSON, c.want)
+		if got.Kind() != c.k || string(got.p.json) != c.want {
+			t.Errorf("NewValue(%s, %T) = %s %s, want %s", c.k, c.v, got.Kind(), got.p.json, c.want)
 		}
 	}
 	for _, c := range []struct {
@@ -143,22 +148,59 @@ func TestNewValueKinds(t *testing.T) {
 		{"unknown kind", "list", "a"},
 	} {
 		if got, err := NewValue(c.k, c.v); err == nil {
-			t.Errorf("%s: NewValue accepted it as %s", c.name, got.JSON)
+			t.Errorf("%s: NewValue accepted it as %s", c.name, got.p.json)
 		} else if strings.Contains(err.Error(), "a\xffb") {
 			t.Errorf("%s: the error quotes the value: %v", c.name, err)
 		}
 	}
 }
 
+// TestValueDoesNotRender covers the generic sinks a caller can hand a Value to: fmt (where a
+// containing struct's unexported field is printed by reflection, which no method intercepts),
+// encoding/json, YAML and both slog handlers. A Token held the same way is checked alongside.
 func TestValueDoesNotRender(t *testing.T) {
 	v := mustValue(t, KindString, plaintext)
-	for _, f := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x"} {
-		if s := fmt.Sprintf(f, v); strings.Contains(s, "PROVIDER-PLAINTEXT") || strings.Contains(s, "50524f") {
-			t.Errorf("%s of a Value renders it: %s", f, s)
+	tok := Token{p: new(plaintext)}
+	type nested struct {
+		v   Value
+		tok Token
+	}
+	type exported struct {
+		V   Value
+		Tok Token
+	}
+	outputs := map[string]string{}
+	for _, x := range []any{v, &v, tok, nested{v, tok}, exported{v, tok}, []Value{v}, map[string]Value{"k": v}} {
+		for _, f := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%d"} {
+			outputs[fmt.Sprintf("%s of %T", f, x)] = fmt.Sprintf(f, x)
+		}
+		if b, err := json.Marshal(x); err == nil {
+			outputs[fmt.Sprintf("json of %T", x)] = string(b)
+		}
+		if b, err := yaml.Marshal(x); err == nil {
+			outputs[fmt.Sprintf("yaml of %T", x)] = string(b)
+		}
+		for name, h := range map[string]func(*bytes.Buffer) slog.Handler{
+			"slog text": func(b *bytes.Buffer) slog.Handler { return slog.NewTextHandler(b, nil) },
+			"slog json": func(b *bytes.Buffer) slog.Handler { return slog.NewJSONHandler(b, nil) },
+		} {
+			var b bytes.Buffer
+			slog.New(h(&b)).Info("value", "v", x)
+			outputs[fmt.Sprintf("%s of %T", name, x)] = b.String()
+		}
+	}
+	for what, out := range outputs {
+		if strings.Contains(out, "PROVIDER-PLAINTEXT") || strings.Contains(out, "50524f") || strings.Contains(out, "UFJPVklE") {
+			t.Errorf("%s renders the value: %s", what, out)
+		}
+	}
+	for _, m := range []func() ([]byte, error){v.MarshalJSON, v.MarshalText} {
+		if b, err := m(); err == nil || b != nil {
+			t.Errorf("a marshaller succeeded: %q", b)
 		}
 	}
 	// Control: the value is there to leak.
-	if !strings.Contains(string(v.JSON), "PROVIDER-PLAINTEXT") {
+	if !strings.Contains(string(v.p.json), "PROVIDER-PLAINTEXT") || v.Kind() != KindString {
 		t.Fatal("the value does not hold the plaintext; this test proves nothing")
 	}
 }
@@ -208,6 +250,13 @@ func TestEncryptParsesCiphertext(t *testing.T) {
 		`{"data":{"ciphertext":"vault:v1:"}}`:      false,
 		`{"data":{"ciphertext":"vault:v01:YWJj"}}`: false,
 		`{"data":{"ciphertext":""}}`:               false,
+		// The payload is Transit's canonical base64; anything else cannot be decrypted later.
+		`{"data":{"ciphertext":"vault:v1:!!!not-base64!!!"}}`: false,
+		`{"data":{"ciphertext":"vault:v1:YWJ"}}`:              false,
+		`{"data":{"ciphertext":"vault:v1:YWI="}}`:             true,
+		`{"data":{"ciphertext":"vault:v1:YWJ="}}`:             false,
+		`{"data":{"ciphertext":"vault:v1:YW\nJj"}}`:           false,
+		`{"data":{"ciphertext":"vault:v1:YWJj:YWJj"}}`:        false,
 	} {
 		i, _ := standIn(t, testKeys, func(w http.ResponseWriter, _ *http.Request) {
 			w.Write([]byte(body))
@@ -227,7 +276,7 @@ func TestEncryptParsesCiphertext(t *testing.T) {
 
 // E1's two cases: an absent plaintext field, and one that is not base64.
 func TestDecryptStagingRefusesMissingOrBadPlaintext(t *testing.T) {
-	for _, body := range []string{`{"data":{}}`, `{"data":{"plaintext":null}}`, `{"data":{"plaintext":"not base64!!"}}`} {
+	for _, body := range []string{`{"data":{}}`, `{"data":{"plaintext":null}}`, `{"data":{"plaintext":"not base64!!"}}`, `{"data":{"plaintext":"YWJ="}}`} {
 		i, _ := standIn(t, testKeys, func(w http.ResponseWriter, _ *http.Request) {
 			w.Write([]byte(body))
 		})
@@ -244,8 +293,10 @@ func TestDecryptStagingRefusesMissingOrBadPlaintext(t *testing.T) {
 	}
 	// A ciphertext that is not Transit's is refused before it is sent.
 	i, rec := standIn(t, testKeys, func(w http.ResponseWriter, _ *http.Request) {})
-	if _, err := i.DecryptStaging(t.Context(), "not-a-ciphertext"); err == nil || len(rec.all()) != 0 {
-		t.Errorf("a malformed ciphertext: %v, %d request(s)", err, len(rec.all()))
+	for _, ct := range []Ciphertext{"not-a-ciphertext", "vault:v1:!!!not-base64!!!"} {
+		if _, err := i.DecryptStaging(t.Context(), ct); err == nil || len(rec.all()) != 0 {
+			t.Errorf("%s: %v, %d request(s)", ct, err, len(rec.all()))
+		}
 	}
 }
 
@@ -337,6 +388,7 @@ func TestDigestParse(t *testing.T) {
 		"leading zero":      {"vault:v03:" + b64, 0},
 		"signed":            {"vault:v+3:" + b64, 0},
 		"not base64":        {"vault:v3:!!", 0},
+		"a newline":         {"vault:v3:" + b64[:8] + "\n" + b64[8:], 0},
 		"not the requested": {"vault:v3:" + b64, 2},
 		"empty":             {"", 0},
 	} {

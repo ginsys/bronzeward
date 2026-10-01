@@ -74,7 +74,7 @@ func (i *Ingestion) CreateGeneration(ctx context.Context, p GenerationPath, v Va
 	body, err := json.Marshal(struct {
 		Options options `json:"options"`
 		Data    data    `json:"data"`
-	}{options{CAS: 0}, data{v.Kind, v.JSON}})
+	}{options{CAS: 0}, data{v.p.kind, v.p.json}})
 	if err != nil {
 		return Generation{}, errors.New("provider: the generation could not be encoded")
 	}
@@ -100,13 +100,26 @@ func (i *Ingestion) CreateGeneration(ctx context.Context, p GenerationPath, v Va
 // Ciphertext is a Transit ciphertext, "vault:v<N>:<base64>".
 type Ciphertext string
 
-// KeyVersion is N, the key version that encrypted c.
+// KeyVersion is N, the key version that encrypted c. A c whose payload is not nonempty canonical
+// base64 is refused: Transit could not decrypt it.
 func (c Ciphertext) KeyVersion() (int, error) {
 	n, rest, err := versioned(string(c))
 	if err != nil || rest == "" {
-		return 0, errors.New(`provider: not a Transit ciphertext ("vault:v<N>:…")`)
+		return 0, errors.New(`provider: not a Transit ciphertext ("vault:v<N>:<base64>")`)
+	}
+	if _, err := strictBase64(rest); err != nil {
+		return 0, errors.New(`provider: not a Transit ciphertext ("vault:v<N>:<base64>")`)
 	}
 	return n, nil
+}
+
+// strictBase64 decodes padded standard base64, as OpenBao encodes, refusing non-canonical padding
+// bits and the line breaks the decoder would otherwise skip.
+func strictBase64(s string) ([]byte, error) {
+	if strings.ContainsAny(s, "\r\n") {
+		return nil, errors.New("a line break in base64")
+	}
+	return base64.StdEncoding.Strict().DecodeString(s)
 }
 
 // versioned splits "vault:v<N>:<rest>", N a positive integer without sign or leading zero.
@@ -163,7 +176,7 @@ func (i *Ingestion) encrypt(ctx context.Context, key string, plaintext []byte) (
 	}
 	ct := Ciphertext(*out.Data.Ciphertext)
 	if _, err := ct.KeyVersion(); err != nil {
-		return "", r.bad("the ciphertext is not vault:v<N>:…")
+		return "", r.bad("the ciphertext is not vault:v<N>:<base64>")
 	}
 	return ct, nil
 }
@@ -197,7 +210,7 @@ func (i *Ingestion) DecryptStaging(ctx context.Context, ct Ciphertext) ([]byte, 
 	if out.Data == nil || out.Data.Plaintext == nil {
 		return nil, r.bad("no plaintext")
 	}
-	plain, err := base64.StdEncoding.DecodeString(*out.Data.Plaintext)
+	plain, err := strictBase64(*out.Data.Plaintext)
 	if err != nil {
 		return nil, r.bad("the plaintext is not base64")
 	}
@@ -256,7 +269,7 @@ func (i *Ingestion) Digest(ctx context.Context, input []byte, version int) (Dige
 	if version > 0 && n != version {
 		return Digest{}, r.bad("the hmac is under another key version than the one requested")
 	}
-	sum, err := base64.StdEncoding.Strict().DecodeString(rest)
+	sum, err := strictBase64(rest)
 	if err != nil || len(sum) != 32 {
 		return Digest{}, r.bad("the hmac is not 32 bytes of base64")
 	}
