@@ -37,7 +37,9 @@ const maxTokenFile = 64 << 10
 // a symlink, with no group or other permission bit, holding one token of printable ASCII and at
 // most one trailing newline. Errors name the path and never the content.
 func ReadTokenFile(path string) (Token, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	// O_NONBLOCK keeps the open of a FIFO with no writer from waiting for one, so the
+	// regular-file check below refuses it; a regular file ignores the flag.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return Token{}, fmt.Errorf("provider: token file: %w", err)
 	}
