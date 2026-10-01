@@ -33,12 +33,35 @@ func parseStream(b []byte) ([]*yaml.Node, error) {
 		if err != nil {
 			return nil, parseRefusal(err)
 		}
+		if line := cyclicAlias(&n, map[*yaml.Node]bool{}); line != 0 {
+			return nil, refuse(RuleParse, fmt.Sprintf("line %d", line))
+		}
 		docs = append(docs, &n)
 	}
 	if len(docs) == 0 {
 		return nil, refuse(RuleParse, "the stream holds no document")
 	}
 	return docs, nil
+}
+
+// cyclicAlias is the line of an alias that names a node containing it, or 0. The decoder accepts
+// one, but the graph is infinite: anything that follows aliases would not end. An alias can name
+// only an anchor already seen, so a cycle needs an alias to a node still open above it.
+func cyclicAlias(n *yaml.Node, open map[*yaml.Node]bool) int {
+	if n.Kind == yaml.AliasNode {
+		if open[n.Alias] {
+			return n.Line
+		}
+		return 0
+	}
+	open[n] = true
+	defer delete(open, n)
+	for _, c := range n.Content {
+		if line := cyclicAlias(c, open); line != 0 {
+			return line
+		}
+	}
+	return 0
 }
 
 var yamlLine = regexp.MustCompile(`\bline ([0-9]+)\b`)

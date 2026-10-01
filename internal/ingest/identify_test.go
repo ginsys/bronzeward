@@ -237,6 +237,7 @@ func TestIdentifyMarksAndKinds(t *testing.T) {
   kubelet:
     extraArgs:
       x: "1"
+      y: -0
 cluster:
   controlPlane:
     localAPIServerPort: 6443
@@ -252,8 +253,9 @@ cluster:
 		{mark: "doc[0]/cluster/controlPlane/localAPIServerPort", kind: provider.KindInteger, value: int64(6443)},
 		{mark: "doc[0]/machine/nodeLabels", kind: provider.KindMapping, value: map[string]any{"example.test/role": secretText}},
 		{mark: "doc[0]/machine/certSANs", rule: RuleMarkKind},
-		{mark: "doc[0]/machine/install/disk", rule: RuleMarkKind},  // 0x1F would come back as 31
-		{mark: "doc[0]/machine/install/image", rule: RuleMarkKind}, // True would come back as true
+		{mark: "doc[0]/machine/install/disk", rule: RuleMarkKind},        // 0x1F would come back as 31
+		{mark: "doc[0]/machine/install/image", rule: RuleMarkKind},       // True would come back as true
+		{mark: "doc[0]/machine/kubelet/extraArgs/y", rule: RuleMarkKind}, // -0 would come back as 0
 		{mark: "doc[0]/machine/kubelet", rule: RuleMarkKind},
 		{mark: "doc[0]/machine/nope", rule: RuleMarkUnaddressed},
 		{mark: "doc[1]/machine", rule: RuleMarkUnaddressed},

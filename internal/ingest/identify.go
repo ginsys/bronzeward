@@ -122,21 +122,33 @@ func schemaPointers(doc *yaml.Node, i int) ([]schemaPointer, error) {
 	return out, nil
 }
 
-// withoutReferences is a deep copy of n with every !bwref node replaced by a null.
+// withoutReferences is a deep copy of n with every !bwref node replaced by a null that keeps its
+// anchor, so its aliases still resolve. Each node is copied once and an alias points at its
+// target's copy, as in the input.
 func withoutReferences(n *yaml.Node) *yaml.Node {
+	return copyWithoutReferences(n, map[*yaml.Node]*yaml.Node{})
+}
+
+func copyWithoutReferences(n *yaml.Node, copies map[*yaml.Node]*yaml.Node) *yaml.Node {
 	if n == nil {
 		return nil
 	}
+	if c, ok := copies[n]; ok {
+		return c
+	}
 	if n.Tag == refTag {
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
+		c := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null", Anchor: n.Anchor}
+		copies[n] = c
+		return c
 	}
 	c := *n
+	copies[n] = &c
 	c.Content = make([]*yaml.Node, len(n.Content))
 	for i, ch := range n.Content {
-		c.Content[i] = withoutReferences(ch)
+		c.Content[i] = copyWithoutReferences(ch, copies)
 	}
 	if n.Alias != nil {
-		c.Alias = withoutReferences(n.Alias)
+		c.Alias = copyWithoutReferences(n.Alias, copies)
 	}
 	return &c
 }
@@ -222,4 +234,4 @@ func scalarValue(n *yaml.Node) (provider.Kind, any, error) {
 	return "", nil, bad
 }
 
-var canonicalInteger = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
+var canonicalInteger = regexp.MustCompile(`^(0|-?[1-9][0-9]*)$`)

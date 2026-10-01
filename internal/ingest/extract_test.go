@@ -1,8 +1,10 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
@@ -189,5 +191,54 @@ func TestCommitFailureAndOnce(t *testing.T) {
 	var zero *Candidate
 	if _, err := zero.Commit(context.Background(), nil); err == nil {
 		t.Fatal("a nil candidate committed")
+	}
+}
+
+// TestCommitErrorQuotesNothing: the create callback's message can hold anything; Commit's error
+// names the reference and keeps the cause reachable through errors.Is, but never renders it.
+func TestCommitErrorQuotesNothing(t *testing.T) {
+	c, err := Extract(request(t, "machine:\n  token: "+secretText+"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.New("provider refused")
+	_, err = c.Commit(context.Background(), func(context.Context, string, provider.Value) error {
+		return fmt.Errorf("%w: writing %s", cause, secretText)
+	})
+	if !errors.Is(err, cause) {
+		t.Fatalf("the cause is not reachable: %v", err)
+	}
+	var ce *CreateError
+	if !errors.As(err, &ce) || !mintedName.MatchString(ce.Name) {
+		t.Fatalf("not a CreateError naming the reference: %v", err)
+	}
+	for _, text := range []string{err.Error(), fmt.Sprintf("%v", err), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err), fmt.Sprintf("%s", err)} {
+		if strings.Contains(text, secretText) {
+			t.Errorf("the error renders the callback's message: %s", text)
+		}
+	}
+}
+
+// TestReingestAliasedOutput: a sanitized stream whose reference is anchored and aliased is valid
+// input again; re-ingesting it with its declarations extracts nothing new.
+func TestReingestAliasedOutput(t *testing.T) {
+	c, err := Extract(request(t, "machine:\n  token: &t "+secretText+"\ncluster:\n  token: *t\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, calls := commitAll(t, c)
+	if len(calls) != 1 {
+		t.Fatalf("%d creates", len(calls))
+	}
+	u, err := Read(bytes.NewReader(s.Documents()), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := Extract(Request{Input: u, Declarations: s.Declarations()})
+	if err != nil {
+		t.Fatalf("re-ingesting the sanitized stream: %v", err)
+	}
+	if _, calls := commitAll(t, again); len(calls) != 0 {
+		t.Fatalf("re-ingestion created %d values", len(calls))
 	}
 }

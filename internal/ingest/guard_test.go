@@ -88,7 +88,7 @@ func TestGuardSkipsThisRunsReferences(t *testing.T) {
 
 func TestRedactRefusal(t *testing.T) {
 	exs := []extraction{{plain: secretText}, {plain: map[string]any{"k": labelSecret}}}
-	err := redactRefusal(refuse(RuleReservedText, "doc[0]/a/x-"+secretText+"/b", "doc[1]/"+labelSecret, "not a path "+secretText, "doc[0]/plain"), exs)
+	err := redactRefusal(refuse(RuleReservedText, "doc[0]/a/x-"+secretText+"/b", "doc[1]/"+labelSecret, "not a path "+secretText, "doc[0]/plain"), searchTexts(extractedScalars(exs)))
 	var r *Refusal
 	if !errors.As(err, &r) || r.Rule != RuleReservedText {
 		t.Fatalf("%v", err)
@@ -97,7 +97,7 @@ func TestRedactRefusal(t *testing.T) {
 	if !slices.Equal(r.Paths, want) {
 		t.Errorf("paths %v", r.Paths)
 	}
-	if other := errors.New("other"); redactRefusal(other, exs) != other {
+	if other := errors.New("other"); redactRefusal(other, nil) != other {
 		t.Error("a non-refusal changed")
 	}
 }
@@ -107,5 +107,43 @@ func TestExtractRefusesReservedText(t *testing.T) {
 	var r *Refusal
 	if !errors.As(err, &r) || r.Rule != RuleReservedText {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// TestGuardNamesAndEmbeddedText: copies the per-node walk does not reach as scalars — anchor and
+// alias names, a declared embedded document's whole text and its document comments — are refused,
+// each with a control showing the unguarded candidate holds the copy.
+func TestGuardNamesAndEmbeddedText(t *testing.T) {
+	embeddedDecl := Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}
+	for _, tc := range []struct {
+		name, text, path string
+		decl             Declarations
+	}{
+		{name: "anchor and alias named by the value",
+			text: "machine:\n  token: &" + secretText + " " + secretText + "\ncluster:\n  token: *" + secretText + "\n",
+			path: "doc[0]/cluster/token"},
+		{name: "embedded text copied whole",
+			text: "machine:\n  token: \"password: " + secretText + "\"\n" + manifestStream("password: "+secretText+"\n"),
+			path: manifestPath, decl: embeddedDecl},
+		{name: "embedded document comment",
+			text: "machine:\n  token: " + secretText + "\n" + manifestStream("kind: Secret\n# "+secretText+"\n"),
+			path: manifestPath, decl: embeddedDecl},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := request(t, tc.text)
+			req.Declarations = tc.decl
+			_, err := Extract(req)
+			var r *Refusal
+			if !errors.As(err, &r) || r.Rule != RuleGuardSubstring || !slices.Contains(r.Paths, tc.path) {
+				t.Fatalf("got %v, want a %s refusal at %s", err, RuleGuardSubstring, tc.path)
+			}
+			if strings.Contains(fmt.Sprintf("%v %+v %#v", err, err, r), secretText) {
+				t.Errorf("the refusal quotes the input: %v", err)
+			}
+			control, err := extract(req, false)
+			if err != nil || !strings.Contains(string(control.docs), secretText) {
+				t.Fatalf("control: %v", err)
+			}
+		})
 	}
 }

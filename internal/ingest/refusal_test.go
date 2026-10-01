@@ -47,7 +47,7 @@ func TestRefusalSweep(t *testing.T) {
 	decl := func(name string, r Reference) Declarations {
 		return Declarations{References: map[string]Reference{name: r}}
 	}
-	for _, tc := range []struct {
+	cases := []struct {
 		rule   Rule
 		text   string
 		marks  []string
@@ -64,6 +64,9 @@ func TestRefusalSweep(t *testing.T) {
 		{rule: RuleGuardSubstring, text: "machine:\n  token: " + s + "\n  nodeLabels:\n    k-" + s + ": x\n"},
 		{rule: RuleReservedText, text: "machine:\n  nodeLabels:\n    k: \"!bwref " + s + "\"\n"},
 		{rule: RuleLocalTag, text: "machine:\n  token: !secret " + s + "\n"},
+		{rule: RuleLocalTag, text: "machine:\n  token: " + s + "\n  nodeLabels:\n    " + s + ": !unknown x\n"},
+		{rule: RuleLocalTag, text: "machine:\n  nodeLabels:\n    a: " + s + "\n    " + s + ": !unknown x\n", marks: []string{"doc[0]/machine/nodeLabels/a"}},
+		{rule: RuleMarkUnaddressed, text: "machine:\n  token: " + s + "\n", marks: []string{"doc[0]/machine/nodeLabels/" + s}},
 		{rule: RuleTagPlacement, text: "machine:\n  certSANs: !bwref [" + s + "]\n", decl: decl("s-x", str(provider.KindString))},
 		{rule: RuleUndeclaredName, text: "machine:\n  token: !bwref s-x\n  type: " + s + "\n"},
 		{rule: RuleUnusedName, text: "machine:\n  token: " + s + "\n", decl: decl("s-x", str(provider.KindString))},
@@ -71,7 +74,10 @@ func TestRefusalSweep(t *testing.T) {
 		{rule: RuleBadDeclaration, text: "machine:\n  token: !bwref s-x\n  type: " + s + "\n", decl: decl("s-x", Reference{Kind: "list", Version: 1})},
 		{rule: RuleEmbedded, text: "machine:\n  nodeLabels:\n    k: " + s + "\n",
 			decl: Declarations{Embedded: []Embedded{{Path: "doc[0]/machine/nodeLabels", Format: "yaml"}}}},
-	} {
+	}
+	covered := map[Rule]bool{}
+	for _, tc := range cases {
+		covered[tc.rule] = true
 		t.Run(string(tc.rule), func(t *testing.T) {
 			secret := tc.secret
 			if secret == "" {
@@ -95,12 +101,6 @@ func TestRefusalSweep(t *testing.T) {
 		})
 	}
 	t.Run("every rule has a case", func(t *testing.T) {
-		covered := map[Rule]bool{
-			RuleParse: true, RuleSchemaUnloadable: true, RuleSchemaIndirect: true, RuleMarkUnaddressed: true,
-			RuleMarkKind: true, RuleBadPath: true, RuleGuardValue: true, RuleGuardSubstring: true,
-			RuleReservedText: true, RuleLocalTag: true, RuleTagPlacement: true, RuleUndeclaredName: true,
-			RuleUnusedName: true, RuleBadName: true, RuleBadDeclaration: true, RuleEmbedded: true,
-		}
 		rules := declaredRules(t)
 		if len(rules) == 0 {
 			t.Fatal("control: no Rule constants read from refusal.go")

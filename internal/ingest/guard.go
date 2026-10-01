@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"errors"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -48,11 +49,22 @@ func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) erro
 		if containsAny(n.HeadComment+"\n"+n.LineComment+"\n"+n.FootComment, texts) {
 			hit(&within, p)
 		}
+		// Anchor and alias names are persisted text too.
+		if containsAny(n.Anchor, texts) || n.Kind == yaml.AliasNode && containsAny(n.Value, texts) {
+			hit(&within, p)
+		}
 		if n.Kind != yaml.ScalarNode {
 			return nil
 		}
 		if format, ok := embedded[p.String()]; ok && !key && p.Format == "" {
 			if inner, err := embeddedDocument(n); err == nil {
+				// The whole text first, without this run's references: a copy can span
+				// nodes, or sit in a comment the parsed document drops.
+				if equalsAny(n, values) {
+					hit(&equal, p)
+				} else if containsAny(withoutMinted(n.Value, minted), texts) {
+					hit(&within, p)
+				}
 				return walkEmbedded(inner, p, format, check)
 			}
 		}
@@ -159,6 +171,15 @@ func equalsAny(n *yaml.Node, values []any) bool {
 	return false
 }
 
+// withoutMinted is an embedded document's text with this run's references removed, so that only
+// the text around them is searched.
+func withoutMinted(s string, minted map[string]bool) string {
+	for _, name := range slices.Sorted(maps.Keys(minted)) {
+		s = strings.ReplaceAll(s, refTag+" "+name, "")
+	}
+	return s
+}
+
 func containsAny(s string, texts []string) bool {
 	for _, t := range texts {
 		if strings.Contains(s, t) {
@@ -168,13 +189,13 @@ func containsAny(s string, texts []string) bool {
 	return false
 }
 
-// redactRefusal re-renders a refusal's paths through redactPath; other errors pass unchanged.
-func redactRefusal(err error, exs []extraction) error {
+// redactRefusal re-renders a refusal's paths through redactPath against texts; other errors pass
+// unchanged.
+func redactRefusal(err error, texts []string) error {
 	var r *Refusal
 	if !errors.As(err, &r) {
 		return err
 	}
-	texts := searchTexts(extractedScalars(exs))
 	out := &Refusal{Rule: r.Rule}
 	for _, s := range r.Paths {
 		if p, perr := ParsePath(s); perr == nil {
