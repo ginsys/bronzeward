@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"go.yaml.in/yaml/v3"
 
@@ -56,9 +57,16 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 		return nil, err
 	}
 	// A refusal path can run through a key that holds a value being extracted, before or after
-	// substitution: every refusal is redacted against those values, as far as they can be found.
-	known := knownSecrets(docs, req.Marks)
-	defer func() { err = redactRefusal(err, known) }()
+	// substitution: every refusal is redacted against those values. When the machinery cannot
+	// load a document its secret fields are unknown, and a refusal names documents only.
+	known, complete := knownSecrets(docs, req.Marks)
+	defer func() {
+		if complete {
+			err = redactRefusal(err, known)
+		} else {
+			err = documentsOnly(err)
+		}
+	}()
 	if err := validate(docs, req.Declarations); err != nil {
 		return nil, err
 	}
@@ -133,13 +141,41 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 
 // knownSecrets is the text of every value the request would extract that can be found before
 // extraction: each value the machinery redacts, and every scalar under each mark, outer or inside
-// an embedded document that parses. Failures are skipped here; identification reports them.
-func knownSecrets(docs []*yaml.Node, marks []Path) []string {
+// an embedded document that parses, aliases followed. complete is false when the machinery could
+// not load a document: its secret fields are then unknown. Other failures are skipped here;
+// identification reports them.
+func knownSecrets(docs []*yaml.Node, marks []Path) (texts []string, complete bool) {
 	var values []any
+	complete = true
 	for i, d := range docs {
-		pointers, _ := schemaPointers(d, i)
+		pointers, err := schemaPointers(d, i)
+		if err != nil {
+			complete = false
+		}
 		for _, sp := range pointers {
 			values = append(values, sp.value)
+		}
+	}
+	seen := map[*yaml.Node]bool{}
+	var collect func(n *yaml.Node)
+	collect = func(n *yaml.Node) {
+		if n = deref(n); n == nil || seen[n] {
+			return
+		}
+		seen[n] = true
+		switch n.Kind {
+		case yaml.ScalarNode:
+			if n.Tag != refTag {
+				values = append(values, n.Value)
+			}
+		case yaml.MappingNode:
+			for i := 1; i < len(n.Content); i += 2 {
+				collect(n.Content[i])
+			}
+		case yaml.SequenceNode:
+			for _, c := range n.Content {
+				collect(c)
+			}
 		}
 	}
 	for _, m := range marks {
@@ -154,14 +190,9 @@ func knownSecrets(docs []*yaml.Node, marks []Path) []string {
 		if !ok {
 			continue
 		}
-		_ = walkNode(deref(n), Path{}, false, nil, func(s *yaml.Node, _ Path, key bool, _ *yaml.Node) error {
-			if s = deref(s); !key && s != nil && s.Kind == yaml.ScalarNode && s.Tag != refTag {
-				values = append(values, s.Value)
-			}
-			return nil
-		})
+		collect(n)
 	}
-	return searchTexts(values)
+	return searchTexts(values), complete
 }
 
 // embeddedDoc is an identified embedded document with marks inside it: the outer string scalar
@@ -283,19 +314,30 @@ func encodeStream(docs []*yaml.Node) ([]byte, error) {
 // CreateError is a create callback's failure for one reference. It names the reference and keeps
 // the cause for errors.Is and errors.As, but never renders it: the callback's message is the
 // caller's text and can hold the value it was writing.
+// The cause sits behind a function, not in an error field, so that reflection over a CreateError
+// (any fmt verb without a method, or an enclosing error's unexported field) shows an address.
 type CreateError struct {
-	Name string
-	err  error
+	Name  string
+	cause func() error
+}
+
+func newCreateError(name string, err error) *CreateError {
+	return &CreateError{Name: name, cause: func() error { return err }}
 }
 
 func (e *CreateError) Error() string {
 	return fmt.Sprintf("ingest: creating the generation of %s failed", e.Name)
 }
 
-// GoString keeps %#v from printing the cause.
-func (e *CreateError) GoString() string { return e.Error() }
+// Format prints the message for every verb.
+func (e *CreateError) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, e.Error()) }
 
-func (e *CreateError) Unwrap() error { return e.err }
+func (e *CreateError) Unwrap() error {
+	if e.cause == nil {
+		return nil
+	}
+	return e.cause()
+}
 
 // Commit performs compilation.md §2.3 step 6 through create, once per extracted value in order,
 // then constructs the sanitized value (step 7). A failed create returns a CreateError and no
@@ -310,7 +352,7 @@ func (c *Candidate) Commit(ctx context.Context, create func(ctx context.Context,
 	c.committed = true
 	for _, v := range c.values {
 		if err := create(ctx, v.name, v.value); err != nil {
-			return Sanitized{}, &CreateError{Name: v.name, err: err}
+			return Sanitized{}, newCreateError(v.name, err)
 		}
 	}
 	return newSanitized(c.docs, c.decl), nil

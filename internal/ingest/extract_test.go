@@ -3,6 +3,7 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
@@ -212,9 +213,15 @@ func TestCommitErrorQuotesNothing(t *testing.T) {
 	if !errors.As(err, &ce) || !mintedName.MatchString(ce.Name) {
 		t.Fatalf("not a CreateError naming the reference: %v", err)
 	}
-	for _, text := range []string{err.Error(), fmt.Sprintf("%v", err), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err), fmt.Sprintf("%s", err)} {
-		if strings.Contains(text, secretText) {
-			t.Errorf("the error renders the callback's message: %s", text)
+	for _, e := range []error{err, errors.Join(err), fmt.Errorf("caller: %w", err)} {
+		if !errors.Is(e, cause) {
+			t.Errorf("the cause is not reachable through %T", e)
+		}
+		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d", "%f", "%t", "%p"} {
+			text := fmt.Sprintf(verb, e)
+			if strings.Contains(text, secretText) || strings.Contains(strings.ToLower(text), hex.EncodeToString([]byte(secretText))) {
+				t.Errorf("%s of %T renders the callback's message: %s", verb, e, text)
+			}
 		}
 	}
 }

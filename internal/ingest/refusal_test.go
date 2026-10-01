@@ -67,6 +67,11 @@ func TestRefusalSweep(t *testing.T) {
 		{rule: RuleLocalTag, text: "machine:\n  token: " + s + "\n  nodeLabels:\n    " + s + ": !unknown x\n"},
 		{rule: RuleLocalTag, text: "machine:\n  nodeLabels:\n    a: " + s + "\n    " + s + ": !unknown x\n", marks: []string{"doc[0]/machine/nodeLabels/a"}},
 		{rule: RuleMarkUnaddressed, text: "machine:\n  token: " + s + "\n", marks: []string{"doc[0]/machine/nodeLabels/" + s}},
+		// The machinery cannot load the document, so its secret fields are unknown.
+		{rule: RuleLocalTag, text: "machine:\n  token: " + s + "\n  type: []\n  nodeLabels:\n    " + s + ": !unknown x\n"},
+		// The marked value is reached through an alias to a mapping.
+		{rule: RuleLocalTag, text: manifestStream("source: &a {password: " + s + "}\ntarget: {nested: *a}\n" + s + ": !unknown x\n"),
+			marks: []string{manifestPath + "|yaml/target"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
 		{rule: RuleTagPlacement, text: "machine:\n  certSANs: !bwref [" + s + "]\n", decl: decl("s-x", str(provider.KindString))},
 		{rule: RuleUndeclaredName, text: "machine:\n  token: !bwref s-x\n  type: " + s + "\n"},
 		{rule: RuleUnusedName, text: "machine:\n  token: " + s + "\n", decl: decl("s-x", str(provider.KindString))},
