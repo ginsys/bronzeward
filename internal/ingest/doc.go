@@ -36,7 +36,8 @@
 //     scalar, which no pointer token names.
 //   - A target that is a member of a marked mapping, reached only through it, is extracted as
 //     part of the mapping. A member that aliases a target, or a target also reached elsewhere,
-//     refuses the mapping as mark-kind.
+//     refuses the mapping as mark-kind. So does a key or member that carries an anchor:
+//     substitution drops it, and an alias of it would name an earlier anchor of the same name.
 //   - Every target is stored as a reference, which a later ingestion loads as a null. A
 //     document the machinery cannot load with its targets as nulls (a mark on its kind) refuses
 //     the input as schema-unloadable: it could never be ingested again.

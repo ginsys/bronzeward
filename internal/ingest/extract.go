@@ -280,7 +280,9 @@ func plainStyle(n *yaml.Node) {
 // coalesce drops each target that is a member value of a mapping target and is reached only
 // through it: the mapping's extraction carries its value, which substituting it first would
 // turn into a reference the mapping cannot hold. A member that aliases a target, or a target
-// that is also reached outside the mapping, cannot be carried and refuses the mapping.
+// that is also reached outside the mapping, cannot be carried and refuses the mapping. An alias
+// that reaches a member from outside needs an anchor on it, which identification has already
+// refused (valueOf).
 func coalesce(ts []*target) ([]*target, error) {
 	byNode := map[*yaml.Node]*target{}
 	for _, t := range ts {
