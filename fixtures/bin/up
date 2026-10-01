@@ -466,11 +466,12 @@ for policy in "${!policies[@]}"; do
     die "could not write the OpenBao policy $policy"
 done
 unset policies policy key
-# One ingestion token per instance, under bw-ingestion alone, written whole beside the instance's
-# configuration (mktemp in the directory, then a rename): an instance never reads a cut token.
+# One ingestion token per instance, under bw-ingestion alone (no default policy, as the live policy
+# tests issue theirs), written whole beside the instance's configuration (mktemp in the
+# directory, then a rename): an instance never reads a cut token.
 for instance in a b; do
   # Assigned first: a command substitution that is only a printf argument cannot fail the script.
-  ingestion_token=$(bao token create -policy=bw-ingestion -format=json | jq -er .auth.client_token) ||
+  ingestion_token=$(bao token create -policy=bw-ingestion -no-default-policy -format=json | jq -er .auth.client_token) ||
     die "could not create instance $instance's OpenBao ingestion token"
   token_file=$(mktemp "$STATE/server/$instance/openbao-ingestion.token.XXXXXX") ||
     die "could not write instance $instance's OpenBao ingestion token"
