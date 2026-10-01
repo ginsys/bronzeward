@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/ginsys/bronzeward/internal/talos"
 )
@@ -24,7 +25,8 @@ func Read(r io.Reader, max int64) (Unresolved, error) {
 	if max <= 0 {
 		return Unresolved{}, errors.New("ingest: a positive input limit is required")
 	}
-	b, err := io.ReadAll(io.LimitReader(r, max+1))
+	// One byte past the limit shows an input over it; the largest limit has no byte past it.
+	b, err := io.ReadAll(io.LimitReader(r, max+min(1, math.MaxInt64-max)))
 	if err != nil {
 		return Unresolved{}, errors.New("ingest: the input could not be read")
 	}

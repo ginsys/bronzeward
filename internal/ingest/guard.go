@@ -77,7 +77,10 @@ func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) erro
 		}
 		return nil
 	}
-	_ = walkStream(docs, check)
+	// check returns no error today; a walk that stopped early would leave nodes unchecked.
+	if err := walkStream(docs, check); err != nil {
+		return err
+	}
 	if len(equal) > 0 {
 		return refuse(RuleGuardValue, equal...)
 	}
