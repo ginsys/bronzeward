@@ -29,3 +29,13 @@ auth:
 # a machine-facing call may take, which the deployment knows. settleFloor defaults to 30s.
 execution:
   maxTransportDeadline: 5m
+# The secret provider (compilation.md §4.1) and the Talos reader, both optional and not yet read
+# by the server. The key names are the fixture's; the token file holds ingestion's static
+# OpenBao token, mode 0600, never renewed. `mise run dev-bao` starts a dev-mode OpenBao on
+# loopback for tests, without these keys or a token file.
+# provider:
+#   address: http://127.0.0.1:58201
+#   keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest}
+#   ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
+# talos:
+#   talosconfig: /etc/bronzeward/talosconfig

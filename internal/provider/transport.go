@@ -29,7 +29,10 @@ type client struct {
 	http  *http.Client
 }
 
-func newClient(addr string, tok Token) (*client, error) {
+// ParseAddress parses an OpenBao address: an http or https URL, scheme://host[:port] with at most a
+// trailing '/'. The errors never quote it: userinfo may hold a password. Which hosts may use plain
+// http is the caller's policy (config's plainHTTPHosts).
+func ParseAddress(addr string) (*url.URL, error) {
 	u, err := url.Parse(addr)
 	switch {
 	case addr == "" || err != nil:
@@ -37,10 +40,17 @@ func newClient(addr string, tok Token) (*client, error) {
 	case u.Scheme != "http" && u.Scheme != "https":
 		return nil, errors.New("provider: the address must be an http or https URL")
 	case u.User != nil:
-		// Not quoted: the userinfo may hold a password.
 		return nil, errors.New("provider: the address must not carry userinfo")
 	case u.Host == "" || u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/"):
 		return nil, errors.New("provider: the address must be scheme://host[:port], without a path, query or fragment")
+	}
+	return u, nil
+}
+
+func newClient(addr string, tok Token) (*client, error) {
+	u, err := ParseAddress(addr)
+	if err != nil {
+		return nil, err
 	}
 	if tok.value() == "" {
 		return nil, errors.New("provider: no token")
