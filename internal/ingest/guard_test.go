@@ -102,6 +102,32 @@ func TestRedactRefusal(t *testing.T) {
 	}
 }
 
+// TestSameScalar: redaction's equality is the guard's: same boolean, or same number across
+// integer, hexadecimal and float spellings, without truncating fractions or wrapping signs.
+func TestSameScalar(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"0x4cb2f", "314159", true},
+		{"3.14159e5", "314159", true},
+		{"314159.0", "314159", true},
+		{"314159.5", "314159", false},
+		{"TRUE", "true", true},
+		{"1", "true", false},
+		{"18446744073709551615", "18446744073709551615", true},
+		{"18446744073709551615", "-1", false},
+		{"-1", "18446744073709551615", false},
+		{"0", "-0", true},
+		{"abc", "abc", false},
+	}
+	for _, tc := range cases {
+		if got := sameScalar(tc.a, tc.b); got != tc.want {
+			t.Errorf("sameScalar(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
 func TestExtractRefusesReservedText(t *testing.T) {
 	_, err := Extract(request(t, "machine:\n  nodeLabels:\n    k: \"!bwref x\"\n"))
 	var r *Refusal
