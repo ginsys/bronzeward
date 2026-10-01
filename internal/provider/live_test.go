@@ -31,6 +31,9 @@ const (
 	decryptArtifact  = `path "transit/decrypt/bw-artifact" { capabilities = ["update"] }`
 	readTransitKeys  = `path "transit/keys/*" { capabilities = ["read"] }`
 	transitDigestEnc = `path "transit/encrypt/bw-digest" { capabilities = ["update"] }`
+	transitDigestDec = `path "transit/decrypt/bw-digest" { capabilities = ["update"] }`
+	decryptStaging   = `path "transit/decrypt/bw-staging" { capabilities = ["update"] }`
+	hmacDigestAlgo   = `path "transit/hmac/bw-digest/sha2-256" { capabilities = ["update"] }`
 )
 
 func live(t *testing.T) *baotest.Bao {
@@ -39,7 +42,8 @@ func live(t *testing.T) *baotest.Bao {
 	for name, hcl := range map[string]string{
 		"gen-create-update": genCreateUpdate, "gen-read": genRead, "decrypt-baseline": decryptBaseline,
 		"hmac-digest": hmacDigest, "encrypt-artifact": encryptArtifact, "decrypt-artifact": decryptArtifact,
-		"read-transit-keys": readTransitKeys, "encrypt-digest": transitDigestEnc,
+		"read-transit-keys": readTransitKeys, "encrypt-digest": transitDigestEnc, "decrypt-digest": transitDigestDec,
+		"decrypt-staging": decryptStaging, "hmac-digest-algorithm": hmacDigestAlgo,
 	} {
 		b.Policy(name, hcl)
 	}
@@ -172,6 +176,17 @@ func mustDeny(t *testing.T, what string, err error) {
 	t.Logf("refused: %s", what)
 }
 
+// deniedWithout asserts that call is refused as a token holding policies, and succeeds as one
+// holding policies plus grant: the refusal is grant's absence, not a broken path or key.
+func deniedWithout(t *testing.T, b *baotest.Bao, what string, policies []string, grant string, call func(tok string) error) {
+	t.Helper()
+	mustDeny(t, what, call(b.Token(policies...)))
+	if err := call(b.Token(append(policies, grant)...)); err != nil {
+		t.Fatalf("mechanism removed: %s with %s added: %v", what, grant, err)
+	}
+	t.Logf("mechanism removed: %s succeeds with %s added", what, grant)
+}
+
 // A replace of an existing generation is refused to ingestion; CAS alone refuses even the
 // administrator; without the policy's create-only grant the same path is replaced.
 func TestLiveReplaceRefused(t *testing.T) {
@@ -196,6 +211,11 @@ func TestLiveReplaceRefused(t *testing.T) {
 	default:
 		t.Fatalf("ingestion replaced or failed otherwise: %v", err)
 	}
+	// The ACL alone: the same cas=0 create with the policy plus update reaches check-and-set.
+	if _, err := ingestionAs(t, b, b.Token("bw-ingestion", "gen-create-update")).CreateGeneration(ctx, p, mustValue(t, KindString, "replacement")); !errors.Is(err, ErrExists) {
+		t.Fatalf("ingestion's policy plus update, cas=0: %v, want ErrExists", err)
+	}
+	t.Logf("mechanism removed: with update added, ingestion's cas=0 create is refused by CAS (ErrExists) instead")
 
 	// CAS on its own: the administrator's cas=0 create on the same path.
 	if _, err := ingestionAs(t, b, b.Admin()).CreateGeneration(ctx, p, mustValue(t, KindString, "admin-cas0")); !errors.Is(err, ErrExists) {
@@ -252,19 +272,22 @@ func TestLiveExecutorCannotDecryptBaseline(t *testing.T) {
 	}
 	t.Logf("mechanism removed: the executor policy plus decrypt on bw-baseline decrypted it")
 
-	_, err = decrypt(t, b, ing, "bw-baseline", ct)
-	mustDeny(t, "ingestion decrypting a baseline", err)
-	_, err = decrypt(t, b, comp, "bw-baseline", ct)
-	mustDeny(t, "the compiler decrypting a baseline", err)
-
 	stg, err := i.EncryptStaging(ctx, []byte("envelope"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = decrypt(t, b, exec, "bw-staging", stg)
-	mustDeny(t, "the executor decrypting a staged envelope", err)
-	_, err = decrypt(t, b, comp, "bw-staging", stg)
-	mustDeny(t, "the compiler decrypting a staged envelope", err)
+	for _, c := range []struct{ what, policy, key, grant string }{
+		{"ingestion decrypting a baseline", "bw-ingestion", "bw-baseline", "decrypt-baseline"},
+		{"the compiler decrypting a baseline", "bw-compiler", "bw-baseline", "decrypt-baseline"},
+		{"the executor decrypting a staged envelope", "bw-executor", "bw-staging", "decrypt-staging"},
+		{"the compiler decrypting a staged envelope", "bw-compiler", "bw-staging", "decrypt-staging"},
+	} {
+		in := map[string]Ciphertext{"bw-baseline": ct, "bw-staging": stg}[c.key]
+		deniedWithout(t, b, c.what, []string{c.policy}, c.grant, func(tok string) error {
+			_, err := decrypt(t, b, tok, c.key, in)
+			return err
+		})
+	}
 }
 
 func TestLiveIngestionCannotReadSecret(t *testing.T) {
@@ -326,23 +349,27 @@ func TestLiveDigestKeyIngestionOnly(t *testing.T) {
 		"answered vault:v%d:<32 bytes> on a %s key; equal for equal input, unequal for other input, not sha256(input); KeyRef %s",
 		d1.Version, key.Data.Type, d1.KeyRef())
 
-	for name, tok := range map[string]string{
-		"the compiler": b.Token("bw-compiler"), "the executor": b.Token("bw-executor"),
-		"the fixture metadata policy": b.Token("bw-metadata-only"),
-	} {
-		_, err := hmacAs(t, b, tok, "/v1/transit/hmac/bw-digest", x)
-		mustDeny(t, name+" computing an HMAC with bw-digest", err)
+	hmacOn := func(path string) func(string) error {
+		return func(tok string) error { _, err := hmacAs(t, b, tok, path, x); return err }
 	}
-	_, err = hmacAs(t, b, ing, "/v1/transit/hmac/bw-digest/sha2-256", x)
-	mustDeny(t, "ingestion's HMAC on the algorithm-suffixed path", err)
-	_, err = encrypt(t, b, ing, "bw-digest", x)
-	mustDeny(t, "ingestion encrypting with bw-digest", err)
+	for name, policy := range map[string]string{
+		"the compiler": "bw-compiler", "the executor": "bw-executor", "the fixture metadata policy": "bw-metadata-only",
+	} {
+		deniedWithout(t, b, name+" computing an HMAC with bw-digest", []string{policy}, "hmac-digest", hmacOn("/v1/transit/hmac/bw-digest"))
+	}
+	deniedWithout(t, b, "ingestion's HMAC on the algorithm-suffixed path", []string{"bw-ingestion"}, "hmac-digest-algorithm", hmacOn("/v1/transit/hmac/bw-digest/sha2-256"))
+	deniedWithout(t, b, "ingestion encrypting with bw-digest", []string{"bw-ingestion"}, "encrypt-digest", func(tok string) error {
+		_, err := encrypt(t, b, tok, "bw-digest", x)
+		return err
+	})
 	ct, err := encrypt(t, b, b.Token("encrypt-digest"), "bw-digest", x)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = decrypt(t, b, ing, "bw-digest", ct)
-	mustDeny(t, "ingestion decrypting with bw-digest", err)
+	deniedWithout(t, b, "ingestion decrypting with bw-digest", []string{"bw-ingestion"}, "decrypt-digest", func(tok string) error {
+		_, err := decrypt(t, b, tok, "bw-digest", ct)
+		return err
+	})
 
 	sum, err := hmacAs(t, b, b.Token("bw-compiler", "hmac-digest"), "/v1/transit/hmac/bw-digest", x)
 	if err != nil || !bytes.Equal(sum, d1.Sum[:]) {
@@ -387,6 +414,8 @@ func TestLiveIngestionCannotDecryptArtifact(t *testing.T) {
 		t.Fatalf("mechanism removed: ingestion plus decrypt on bw-artifact: %v", err)
 	}
 	t.Logf("mechanism removed: the ingestion policy plus decrypt on bw-artifact decrypted it")
-	_, err = encrypt(t, b, ing, "bw-artifact", []byte("x"))
-	mustDeny(t, "ingestion encrypting with the artifact key", err)
+	deniedWithout(t, b, "ingestion encrypting with the artifact key", []string{"bw-ingestion"}, "encrypt-artifact", func(tok string) error {
+		_, err := encrypt(t, b, tok, "bw-artifact", []byte("x"))
+		return err
+	})
 }
