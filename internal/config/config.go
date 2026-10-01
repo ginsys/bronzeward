@@ -34,7 +34,8 @@ type Config struct {
 type Provider struct {
 	Address string `yaml:"address"`
 	// PlainHTTPHosts are hosts reached over plain http, by exact name, as for auth.oidc: loopback
-	// needs no entry.
+	// needs no entry. A plain-http request goes directly to its host, never through a proxy the
+	// environment names.
 	PlainHTTPHosts []string     `yaml:"plainHTTPHosts"`
 	Keys           ProviderKeys `yaml:"keys"`
 	// IngestionTokenFile holds ingestion's static token: a regular file of mode 0600 or tighter,
