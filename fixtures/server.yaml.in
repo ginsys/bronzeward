@@ -21,3 +21,10 @@ auth:
 execution:
   settleFloor: 30s
   maxTransportDeadline: 5m
+# The fixture's OpenBao, by its service name, and the keys and ingestion token bin/up made for
+# this instance (openbao-ingestion.token sits beside this file, mode 0600, one per instance).
+provider:
+  address: http://openbao:8200
+  plainHTTPHosts: [openbao]
+  keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest}
+  ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
