@@ -19,6 +19,7 @@ type Rule string
 const (
 	RuleParse            Rule = "parse"             // the stream does not parse
 	RuleSchemaUnloadable Rule = "schema-unloadable" // the machinery cannot load a document
+	RuleSchemaIndirect   Rule = "schema-indirect"   // a secret field the machinery finds is not one plain input node
 	RuleMarkUnaddressed  Rule = "mark-unaddressed"  // a mark addresses no node
 	RuleMarkKind         Rule = "mark-kind"         // an identified node is not a string, integer, boolean or mapping of those
 	RuleBadPath          Rule = "bad-path"          // a path does not parse or names an undeclared embedded document

@@ -1,0 +1,225 @@
+package ingest
+
+import (
+	"fmt"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
+	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
+	"go.yaml.in/yaml/v3"
+
+	"github.com/ginsys/bronzeward/internal/provider"
+)
+
+// target is one input node to extract and every path that names it: an anchored node reached
+// through aliases is one target (extracted once, referenced wherever it appears).
+type target struct {
+	node  *yaml.Node
+	paths []Path
+}
+
+// identify lists the nodes to extract (compilation.md §2.3 step 3): every field the pinned
+// machinery's RedactSecrets changes, document by document, and every mark. Nodes already tagged
+// !bwref are excluded. A mark addressing no node refuses the input, as does a document the
+// machinery cannot load or a secret field it finds that is not one plain input node.
+func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
+	var out []*target
+	byNode := map[*yaml.Node]*target{}
+	add := func(n *yaml.Node, p Path) {
+		if n.Tag == refTag {
+			return
+		}
+		if t, ok := byNode[n]; ok {
+			t.paths = append(t.paths, p)
+			return
+		}
+		t := &target{node: n, paths: []Path{p}}
+		byNode[n] = t
+		out = append(out, t)
+	}
+	for i := range docs {
+		pointers, err := schemaPointers(docs[i], i)
+		if err != nil {
+			return nil, err
+		}
+		for _, sp := range pointers {
+			n, ok := resolve(docs, i, sp.pointer)
+			// The input node must be the leaf the machinery encoded, as written: a merge key,
+			// a multi-line or !!binary base64 or any other indirection would leave the secret
+			// where substitution cannot reach it.
+			if !ok || n.Kind != yaml.ScalarNode || n.Value != sp.value {
+				return nil, refuse(RuleSchemaIndirect, fmt.Sprintf("doc[%d]", i))
+			}
+			add(n, Path{Doc: i, Pointer: sp.pointer})
+		}
+	}
+	for _, m := range marks {
+		if m.Format != "" {
+			return nil, refuse(RuleBadPath, m.String())
+		}
+		n, ok := resolve(docs, m.Doc, m.Pointer)
+		if !ok {
+			return nil, refuse(RuleMarkUnaddressed, m.String())
+		}
+		add(n, m)
+	}
+	for _, t := range out {
+		if _, _, err := valueOf(t.node); err != nil {
+			return nil, refuse(RuleMarkKind, t.paths[0].String())
+		}
+	}
+	return out, nil
+}
+
+// schemaPointer is a leaf the machinery redacts and its unredacted encoded value.
+type schemaPointer struct {
+	pointer []string
+	value   string
+}
+
+// schemaPointers loads one document on its own with the pinned machinery and returns the leaves
+// whose encoding RedactSecrets changes, in pointer order. !bwref nodes are loaded as nulls (the
+// machinery redacts only non-empty fields). Machinery errors are dropped: they can quote input.
+func schemaPointers(doc *yaml.Node, i int) ([]schemaPointer, error) {
+	unloadable := refuse(RuleSchemaUnloadable, fmt.Sprintf("doc[%d]", i))
+	top := root(doc)
+	if top == nil || top.Kind == yaml.ScalarNode && top.Tag == "!!null" {
+		return nil, nil
+	}
+	text, err := yaml.Marshal(withoutReferences(top))
+	if err != nil {
+		return nil, unloadable
+	}
+	p, err := configloader.NewFromBytes(text)
+	if err != nil || len(p.Documents()) != 1 {
+		return nil, unloadable
+	}
+	opt := encoder.WithComments(encoder.CommentsDisabled)
+	raw, err := p.EncodeBytes(opt)
+	if err != nil {
+		return nil, unloadable
+	}
+	red, err := p.RedactSecrets("bronzeward-redacted-" + provider.NewValueID()).EncodeBytes(opt)
+	if err != nil {
+		return nil, unloadable
+	}
+	a, errA := parseStream(raw)
+	b, errB := parseStream(red)
+	if errA != nil || errB != nil || len(a) != 1 || len(b) != 1 {
+		return nil, unloadable
+	}
+	ra, rb := scalarLeaves(a[0]), scalarLeaves(b[0])
+	var out []schemaPointer
+	for k, v := range ra {
+		if w, ok := rb[k]; !ok || w != v {
+			out = append(out, schemaPointer{pointer: splitKey(k), value: v})
+		}
+	}
+	slices.SortFunc(out, func(x, y schemaPointer) int { return slices.Compare(x.pointer, y.pointer) })
+	return out, nil
+}
+
+// withoutReferences is a deep copy of n with every !bwref node replaced by a null.
+func withoutReferences(n *yaml.Node) *yaml.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Tag == refTag {
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
+	}
+	c := *n
+	c.Content = make([]*yaml.Node, len(n.Content))
+	for i, ch := range n.Content {
+		c.Content[i] = withoutReferences(ch)
+	}
+	if n.Alias != nil {
+		c.Alias = withoutReferences(n.Alias)
+	}
+	return &c
+}
+
+// scalarLeaves maps every scalar value's pointer (tokens joined by NUL, which no YAML key the
+// machinery writes holds) to its value.
+func scalarLeaves(doc *yaml.Node) map[string]string {
+	out := map[string]string{}
+	_ = walkStream([]*yaml.Node{doc}, func(n *yaml.Node, p Path, key bool, _ *yaml.Node) error {
+		if !key && n.Kind == yaml.ScalarNode {
+			out[strings.Join(p.Pointer, "\x00")] = n.Value
+		}
+		return nil
+	})
+	return out
+}
+
+func splitKey(k string) []string {
+	if k == "" {
+		return nil
+	}
+	return strings.Split(k, "\x00")
+}
+
+// valueOf is a node's value and kind (rulings in the package doc): a !!str, !!int or !!bool
+// scalar, or a mapping of string keys to those. Anything else (null, float, sequence, nested
+// mapping, a reference, another tag, a repeated key) has no kind. Errors never quote the node.
+func valueOf(n *yaml.Node) (provider.Kind, any, error) {
+	n = deref(n)
+	if n == nil {
+		return "", nil, refuse(RuleMarkKind)
+	}
+	if n.Kind == yaml.MappingNode {
+		m := map[string]any{}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := deref(n.Content[i]), n.Content[i+1]
+			if k == nil || k.Kind != yaml.ScalarNode || k.Tag != "!!str" {
+				return "", nil, refuse(RuleMarkKind)
+			}
+			if _, dup := m[k.Value]; dup {
+				return "", nil, refuse(RuleMarkKind)
+			}
+			_, member, err := scalarValue(deref(v))
+			if err != nil {
+				return "", nil, err
+			}
+			m[k.Value] = member
+		}
+		return provider.KindMapping, m, nil
+	}
+	return scalarValue(n)
+}
+
+func scalarValue(n *yaml.Node) (provider.Kind, any, error) {
+	bad := refuse(RuleMarkKind)
+	if n == nil || n.Kind != yaml.ScalarNode {
+		return "", nil, bad
+	}
+	switch n.Tag {
+	case "!!str":
+		return provider.KindString, n.Value, nil
+	case "!!bool":
+		// Only the canonical spellings: a reference renders true or false, so True or TRUE
+		// would not come back as written.
+		switch n.Value {
+		case "true":
+			return provider.KindBoolean, true, nil
+		case "false":
+			return provider.KindBoolean, false, nil
+		}
+	case "!!int":
+		// Only canonical decimal: 0x1F or 0o17 would render back as 31 or 15.
+		if !canonicalInteger.MatchString(n.Value) {
+			return "", nil, bad
+		}
+		if i, err := strconv.ParseInt(n.Value, 10, 64); err == nil {
+			return provider.KindInteger, i, nil
+		}
+		if u, err := strconv.ParseUint(n.Value, 10, 64); err == nil {
+			return provider.KindInteger, u, nil
+		}
+	}
+	return "", nil, bad
+}
+
+var canonicalInteger = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
