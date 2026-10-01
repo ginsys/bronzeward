@@ -46,7 +46,11 @@ type extraction struct {
 // Extract runs compilation.md §2.3 steps 2-5 on a request: parse, check the input as authored,
 // identify, substitute and guard. It writes nothing; Commit performs step 6 and constructs the
 // sanitized value (step 7).
-func Extract(req Request) (*Candidate, error) {
+func Extract(req Request) (*Candidate, error) { return extract(req, true) }
+
+// extract is Extract; guarded is false only in tests, to build the control candidates that
+// show a guard refusal is the guard's.
+func extract(req Request, guarded bool) (*Candidate, error) {
 	docs, err := parse(req.Input)
 	if err != nil {
 		return nil, err
@@ -77,14 +81,19 @@ func Extract(req Request) (*Candidate, error) {
 	if err != nil {
 		return nil, errors.New("ingest: the sanitized stream does not parse back")
 	}
+	if guarded {
+		if err := guard(back, exs); err != nil {
+			return nil, err
+		}
+	}
 	if err := validate(back, decl); err != nil {
-		return nil, err
+		return nil, redactRefusal(err, exs)
 	}
 	c := &Candidate{docs: out, decl: decl}
 	for _, ex := range exs {
 		v, err := provider.NewValue(ex.kind, ex.plain)
 		if err != nil {
-			return nil, refuse(RuleMarkKind, ex.paths[0].String())
+			return nil, redactRefusal(refuse(RuleMarkKind, ex.paths[0].String()), exs)
 		}
 		c.values = append(c.values, namedValue{ex.name, v})
 	}
