@@ -1,17 +1,24 @@
 package talos
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -222,19 +229,26 @@ func machineryViolations(t *testing.T, name string, src []byte) []string {
 		return true
 	})
 
-	// Identifiers bound from client.New's result.
+	// Identifiers bound from client.New's result. client.New appears only as the one call of an
+	// assignment to a plain variable, whose every use the next walk checks: an alias of the
+	// constructor, a var declaration, or a call returned or passed on would hand the client out
+	// unchecked.
 	bound := map[*ast.Object]bool{}
 	ast.Inspect(f, func(n ast.Node) bool {
-		a, ok := n.(*ast.AssignStmt)
-		if !ok || len(a.Rhs) != 1 {
+		s, ok := n.(*ast.SelectorExpr)
+		if !ok || !isPkgSel(s, local, machineryClient, "New") {
 			return true
 		}
-		if c, ok := a.Rhs[0].(*ast.CallExpr); ok && isPkgSel(c.Fun, local, machineryClient, "New") {
-			if id, ok := a.Lhs[0].(*ast.Ident); ok && id.Obj != nil {
-				bound[id.Obj] = true
-			} else {
-				flag(a, "client.New's result is not bound to a plain variable")
-			}
+		call, _ := parents[s].(*ast.CallExpr)
+		a, _ := parents[call].(*ast.AssignStmt)
+		if call == nil || call.Fun != s || a == nil || len(a.Rhs) != 1 {
+			flag(s, "client.New is used other than as `c, err := client.New(…)`")
+			return true
+		}
+		if id, ok := a.Lhs[0].(*ast.Ident); ok && id.Obj != nil {
+			bound[id.Obj] = true
+		} else {
+			flag(a, "client.New's result is not bound to a plain variable")
 		}
 		return true
 	})
@@ -338,11 +352,155 @@ func isStateGetByID(fun ast.Expr, local map[string]string) bool {
 	return isPkgSel(fun, local, cosiSafe, "StateGetByID")
 }
 
+// The type-checked guards follow a method to its declaration, whatever spelling reaches it: an
+// aliased constructor or type, an embedding, a helper in another file, a value returned by another
+// package. They read type information from export data: `go list -export -deps -test` compiles
+// the module and its dependencies, as `go test` does, and names each package's export file. A value
+// converted to an interface and asserted elsewhere is dynamic dispatch, which no static check
+// follows; the syntactic checks above, and Config's refusal to render, stay the guard there.
+
+type listedPackage struct {
+	ImportPath, Dir, Export, ForTest   string
+	GoFiles, TestGoFiles, XTestGoFiles []string
+}
+
+var listed struct {
+	once sync.Once
+	pkgs []listedPackage
+	err  error
+}
+
+// goList lists the source roots' packages and every dependency, with export data.
+func goList(t *testing.T) []listedPackage {
+	t.Helper()
+	root := moduleRoot(t)
+	listed.once.Do(func() {
+		args := []string{"list", "-export", "-deps", "-test", "-json"}
+		for _, r := range sourceRoots {
+			args = append(args, "./"+r+"/...")
+		}
+		cmd := exec.Command("go", args...)
+		cmd.Dir = root
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil {
+			listed.err = fmt.Errorf("go list: %v\n%s", err, stderr.Bytes())
+			return
+		}
+		for dec := json.NewDecoder(bytes.NewReader(out)); dec.More(); {
+			var p listedPackage
+			if listed.err = dec.Decode(&p); listed.err != nil {
+				return
+			}
+			listed.pkgs = append(listed.pkgs, p)
+		}
+	})
+	if listed.err != nil {
+		t.Fatal(listed.err)
+	}
+	return listed.pkgs
+}
+
+// typeCheck checks one package's source, reading its imports from export data; under maps an
+// import path to another listed entry (an external test imports the package as compiled for its
+// tests), and given supplies packages checked from synthetic source.
+func typeCheck(t *testing.T, fset *token.FileSet, path string, files []*ast.File, under map[string]string, given map[string]*types.Package) (*types.Package, *types.Info) {
+	t.Helper()
+	exports := map[string]string{}
+	for _, p := range goList(t) {
+		exports[p.ImportPath] = p.Export
+	}
+	gc := importer.ForCompiler(fset, "gc", func(path string) (io.ReadCloser, error) {
+		if v, ok := under[path]; ok {
+			path = v
+		}
+		if exports[path] == "" {
+			return nil, fmt.Errorf("no export data for %s", path)
+		}
+		return os.Open(exports[path])
+	})
+	conf := types.Config{Importer: importerFunc(func(path string) (*types.Package, error) {
+		if p, ok := given[path]; ok {
+			return p, nil
+		}
+		return gc.Import(path)
+	})}
+	info := &types.Info{Selections: map[*ast.SelectorExpr]*types.Selection{}}
+	pkg, err := conf.Check(path, fset, files, info)
+	if err != nil {
+		t.Fatalf("type-checking %s: %v", path, err)
+	}
+	return pkg, info
+}
+
+type importerFunc func(string) (*types.Package, error)
+
+func (f importerFunc) Import(path string) (*types.Package, error) { return f(path) }
+
+func parseSources(t *testing.T, fset *token.FileSet, srcs map[string][]byte) []*ast.File {
+	t.Helper()
+	var files []*ast.File
+	for name, src := range srcs {
+		f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, f)
+	}
+	return files
+}
+
+// memberAllowlist are, per package, the only fields and methods of its types this package may
+// select: of the machinery client, those of clientMembers; of COSI's state, none (COSI only
+// reaches safe.StateGetByID).
+var memberAllowlist = map[string][]string{
+	machineryClient: clientMembers,
+	"github.com/cosi-project/runtime/pkg/state": nil,
+}
+
+// typedMachineryViolations reports every selection of a machinery client or COSI state member
+// outside memberAllowlist, by the member's declaration.
+func typedMachineryViolations(t *testing.T, srcs map[string][]byte) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	_, info := typeCheck(t, fset, thisPackage, parseSources(t, fset, srcs), nil, nil)
+	var out []string
+	for sel, s := range info.Selections {
+		obj := s.Obj()
+		if obj.Pkg() == nil {
+			continue
+		}
+		if allowed, ok := memberAllowlist[obj.Pkg().Path()]; ok && !slices.Contains(allowed, obj.Name()) {
+			out = append(out, fmt.Sprintf("%s: %s member %s is not allowlisted", fset.Position(sel.Sel.Pos()), obj.Pkg().Path(), obj.Name()))
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 func TestMachineryCallsAllowlisted(t *testing.T) {
 	for name, src := range parsePackage(t) {
 		for _, v := range machineryViolations(t, name, src) {
 			t.Error(v)
 		}
+	}
+	for _, v := range typedMachineryViolations(t, parsePackage(t)) {
+		t.Error(v)
+	}
+	// Typed controls: each type-checks, and reaches a member outside the allowlist by a spelling
+	// the syntactic checks do not resolve.
+	typedHead := "package talos\nimport (\n\t\"context\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n)\nvar _ = context.Background\n"
+	for name, body := range map[string]string{
+		"constructor aliased": "func f(ctx context.Context) { mk := client.New; c, _ := mk(ctx); c.RebootWithResponse(ctx) }\n",
+		"client embedded":     "type wrap struct{ *client.Client }\nfunc (w wrap) f(ctx context.Context) { w.Kubeconfig(ctx) }\n",
+		"helper in a file":    "func get(ctx context.Context) *client.Client { c, _ := client.New(ctx); return c }\nfunc f(ctx context.Context) { get(ctx).EtcdStatus(ctx) }\n",
+	} {
+		got := typedMachineryViolations(t, map[string][]byte{"control.go": []byte(typedHead + body)})
+		if len(got) != 1 {
+			t.Errorf("typed control %s: %q, want one violation", name, got)
+		}
+		t.Logf("typed control %s: %q", name, got)
 	}
 	head := "package talos\nimport (\n\t\"context\"\n\t\"github.com/cosi-project/runtime/pkg/safe\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n\tcfgres \"github.com/siderolabs/talos/pkg/machinery/resources/config\"\n)\n" +
 		"var _ = context.Background\nvar _ = safe.StateGetByID[*cfgres.MachineConfig]\ntype reader struct{ api *client.Client }\n"
@@ -364,6 +522,9 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 		"client.New elsewhere":  {"type other struct{ api any }\nfunc f(ctx context.Context) any { c, _ := client.New(ctx); return other{api: c} }\n", []string{"stored other than in reader's api field"}},
 		"client.New sub-client": {"func f(ctx context.Context) { c, _ := client.New(ctx); _ = c.MachineClient }\n", []string{"MachineClient is denied", "used as c.MachineClient"}},
 		"client type elsewhere": {"var other *client.Client\n", []string{"client.Client used other than"}},
+		"constructor aliased":   {"func f(ctx context.Context) { mk := client.New; c, _ := mk(ctx); c.RebootWithResponse(ctx) }\n", []string{"client.New is used other than"}},
+		"client.New in a var":   {"var c, _ = client.New(nil)\n", []string{"client.New is used other than"}},
+		"client.New passed on":  {"func f(ctx context.Context) any { return must(client.New(ctx)) }\nfunc must(a any, _ error) any { return a }\n", []string{"client.New is used other than"}},
 		"unlisted import":       {"", nil},
 	}
 	for name, c := range controls {
@@ -482,44 +643,87 @@ func TestMachineryImportedOnlyHere(t *testing.T) {
 	t.Logf("control: internal/ingest/x.go importing the machinery client is flagged")
 }
 
-// bytesViolations flags, in a file outside internal/talos and internal/ingest that imports this
-// package, every selector named Bytes. Without type information the guard cannot tell a Config's
-// Bytes from another type's, so it refuses them all in such files; none exists today.
-func bytesViolations(t *testing.T, rel string, src []byte) []string {
-	t.Helper()
-	if strings.HasPrefix(rel, "internal/talos/") || strings.HasPrefix(rel, "internal/ingest/") {
-		return nil
-	}
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, rel, src, parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.ContainsFunc(f.Imports, func(im *ast.ImportSpec) bool { return im.Path.Value == strconv.Quote(thisPackage) }) {
-		return nil
+const modulePath = "github.com/ginsys/bronzeward"
+
+// bytesViolations reports every reference to this package's Bytes method (Config.Bytes) — a call,
+// a method value or a method expression, by any spelling of the receiver — in the package at
+// path, unless it is this package or internal/ingest.
+func bytesViolations(fset *token.FileSet, path string, info *types.Info) []string {
+	for _, ok := range []string{thisPackage, modulePath + "/internal/ingest"} {
+		if path == ok || strings.HasPrefix(path, ok+"/") {
+			return nil
+		}
 	}
 	var out []string
-	ast.Inspect(f, func(n ast.Node) bool {
-		if s, ok := n.(*ast.SelectorExpr); ok && s.Sel.Name == "Bytes" {
-			out = append(out, fset.Position(s.Pos()).String()+": .Bytes in a file importing internal/talos")
+	for sel, s := range info.Selections {
+		if f, ok := s.Obj().(*types.Func); ok && f.Pkg() != nil && f.Pkg().Path() == thisPackage && f.Name() == "Bytes" {
+			out = append(out, fmt.Sprintf("%s: Config.Bytes in %s", fset.Position(sel.Sel.Pos()), path))
 		}
-		return true
-	})
+	}
 	return out
 }
 
 func TestConfigBytesCallers(t *testing.T) {
-	walkGo(t, moduleRoot(t), func(rel string, src []byte) {
-		for _, v := range bytesViolations(t, rel, src) {
-			t.Error(v)
+	pkgs := goList(t)
+	n := 0
+	for _, p := range pkgs {
+		if p.ForTest != "" || !strings.HasPrefix(p.ImportPath, modulePath+"/") || strings.ContainsAny(p.ImportPath, " ") || strings.HasSuffix(p.ImportPath, ".test") {
+			continue
 		}
-	})
-	control := []byte("package api\nimport \"github.com/ginsys/bronzeward/internal/talos\"\nfunc f(c talos.Config) []byte { return c.Bytes() }\n")
-	if got := bytesViolations(t, "internal/api/x.go", control); len(got) != 1 {
-		t.Fatalf("control not flagged: %q", got)
+		n++
+		for path, names := range map[string][]string{p.ImportPath: append(slices.Clone(p.GoFiles), p.TestGoFiles...), p.ImportPath + "_test": p.XTestGoFiles} {
+			if len(names) == 0 {
+				continue
+			}
+			srcs := map[string][]byte{}
+			for _, name := range names {
+				src, err := os.ReadFile(filepath.Join(p.Dir, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				srcs[filepath.Join(p.Dir, name)] = src
+			}
+			fset := token.NewFileSet()
+			under := map[string]string{p.ImportPath: p.ImportPath + " [" + p.ImportPath + ".test]"}
+			if path == p.ImportPath {
+				under = nil
+			}
+			_, info := typeCheck(t, fset, path, parseSources(t, fset, srcs), under, nil)
+			for _, v := range bytesViolations(fset, p.ImportPath, info) {
+				t.Error(v)
+			}
+		}
 	}
-	if got := bytesViolations(t, "internal/ingest/x.go", control); len(got) != 0 {
-		t.Fatalf("internal/ingest flagged: %q", got)
+	if n < 10 {
+		t.Fatalf("checked %d of the module's packages: is the listing rooted at the module?", n)
 	}
-	t.Logf("control: internal/api/x.go calling Config.Bytes is flagged; internal/ingest is not")
+
+	// Controls: each type-checks and reaches Config.Bytes without naming it in a file that imports
+	// this package, or in a package that imports it at all.
+	imp := "import \"" + thisPackage + "\"\n"
+	check := func(path string, given map[string]*types.Package, srcs ...string) ([]string, *types.Package) {
+		files := map[string][]byte{}
+		for i, s := range srcs {
+			files[fmt.Sprintf("control%d.go", i)] = []byte(s)
+		}
+		fset := token.NewFileSet()
+		pkg, info := typeCheck(t, fset, path, parseSources(t, fset, files), nil, given)
+		return bytesViolations(fset, path, info), pkg
+	}
+	api, ingest, holder := modulePath+"/internal/api", modulePath+"/internal/ingest", modulePath+"/internal/holder"
+	alias := []string{"package api\n" + imp + "type observed = talos.Config\n", "package api\nfunc leak(c observed) []byte { return c.Bytes() }\n"}
+	if got, _ := check(api, nil, alias...); len(got) != 1 {
+		t.Errorf("control: an alias in another file: %q", got)
+	}
+	if got, _ := check(api, nil, "package api\n"+imp+"var leak = talos.Config.Bytes\n"); len(got) != 1 {
+		t.Errorf("control: a method expression: %q", got)
+	}
+	_, hp := check(holder, nil, "package holder\n"+imp+"type Holder struct{ talos.Config }\nfunc Get() Holder { return Holder{} }\n")
+	if got, _ := check(api, map[string]*types.Package{holder: hp}, "package api\nimport \""+holder+"\"\nfunc leak() []byte { return holder.Get().Bytes() }\n"); len(got) != 1 {
+		t.Errorf("control: an embedding from a package that does not import talos: %q", got)
+	}
+	if got, _ := check(ingest, nil, strings.ReplaceAll(alias[0], "package api", "package ingest"), strings.ReplaceAll(alias[1], "package api", "package ingest")); len(got) != 0 {
+		t.Errorf("internal/ingest flagged: %q", got)
+	}
+	t.Logf("checked %d packages; controls: an alias in another file, a method expression and an embedded Config from another package are flagged; internal/ingest is not", n)
 }
