@@ -112,8 +112,8 @@ func (r *reader) Version(ctx context.Context) (string, error) {
 
 func (r *reader) Close() error { return r.api.Close() }
 
-// Config is a machine configuration as read, with its secrets: it is the unresolved input
-// ingestion sanitizes, a stand-in until that type exists. It does not render: every fmt verb
+// Config is a machine configuration as read, with its secrets; ingest.FromTalos turns it into the
+// unresolved input ingestion sanitizes. It does not render: every fmt verb
 // prints a placeholder and the marshallers fail. The bytes sit behind a pointer so that printing
 // a struct that holds a Config in an unexported field shows an address, not the bytes. Bytes is
 // the one way out, and guard_test.go limits its callers to this package and internal/ingest.
