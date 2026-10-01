@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 const fileToken = "s.file-token-value-BWSYNTH"
@@ -84,5 +86,32 @@ func TestTokenFileModes(t *testing.T) {
 	_, err = ReadTokenFile(writeToken(t, fileToken+" x", 0o600))
 	if err == nil || strings.Contains(err.Error(), "file-token") {
 		t.Errorf("error %v", err)
+	}
+}
+
+// A FIFO with no writer is refused as not a regular file, instead of blocking the open until a
+// writer connects.
+func TestTokenFileFIFORefusedWithoutBlocking(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := ReadTokenFile(path)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Fatalf("a FIFO: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		// Connect a writer so the blocked open returns and the temporary directory can be removed.
+		if w, err := os.OpenFile(path, os.O_WRONLY, 0); err == nil {
+			w.Close()
+		}
+		<-done
+		t.Fatal("ReadTokenFile blocked opening a FIFO with no writer")
 	}
 }
