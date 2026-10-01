@@ -60,13 +60,13 @@ func walkNode(n *yaml.Node, p Path, key bool, parent *yaml.Node, fn visit) error
 	return nil
 }
 
-// keyToken is the pointer token of a mapping key; a key that is not a scalar has no pointer
-// token, and its value is named by a placeholder no pointer can produce.
+// keyToken is the pointer token of a mapping key. Parsing refuses a key that is not a scalar, so
+// every key the walk meets has one.
 func keyToken(k *yaml.Node) string {
-	if k = deref(k); k != nil && k.Kind == yaml.ScalarNode {
+	if k = deref(k); k != nil {
 		return k.Value
 	}
-	return "<complex key>"
+	return ""
 }
 
 // child is p extended by one token, inside the embedded document when p is in one.

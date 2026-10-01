@@ -104,6 +104,25 @@ func TestParseRefusesDuplicateKeys(t *testing.T) {
 	}
 }
 
+// TestParseRefusesNonScalarKeys: a pointer token names a scalar key, so a mapping or sequence
+// key would leave its value without a path of its own. A scalar key spelled like a placeholder
+// is an ordinary key.
+func TestParseRefusesNonScalarKeys(t *testing.T) {
+	for _, in := range []string{
+		"? [a, b]\n: 1\n",
+		"? {a: 1}\n: 2\n",
+		"a: {[b]: 1}\n",
+		"? &k [a]\n: 1\n",
+	} {
+		if _, err := parseStream([]byte(in)); !isRule(err, RuleParse) {
+			t.Errorf("%q: %v, want a %s refusal", in, err, RuleParse)
+		}
+	}
+	if _, err := parseStream([]byte("a:\n  <complex key>: 1\n  b: 2\n")); err != nil {
+		t.Errorf("a scalar key: %v", err)
+	}
+}
+
 func isRule(err error, rule Rule) bool {
 	var r *Refusal
 	return errors.As(err, &r) && r.Rule == rule

@@ -78,6 +78,28 @@ func TestGuard(t *testing.T) {
 	}
 }
 
+// TestGuardChecksMarkedMappingKeys: a marked mapping's keys are part of the extracted value, so
+// a copy of one elsewhere is a guard hit like a copy of a member value.
+func TestGuardChecksMarkedMappingKeys(t *testing.T) {
+	const key = "label-key-5d0a"
+	text := "machine:\n  token: " + secretText + "\n  nodeLabels:\n    " + key + ": harmless\n  nodeAnnotations:\n    x: " + key + "\n    y: in-" + key + "\n    " + key + ": z\n"
+	_, err := Extract(request(t, text, "doc[0]/machine/nodeLabels"))
+	var r *Refusal
+	if !errors.As(err, &r) || r.Rule != RuleGuardValue || !slices.Contains(r.Paths, "doc[0]/machine/nodeAnnotations/x") {
+		t.Fatalf("got %v, want a %s refusal at doc[0]/machine/nodeAnnotations/x", err, RuleGuardValue)
+	}
+	if strings.Contains(err.Error(), key) {
+		t.Errorf("the refusal quotes the key: %v", err)
+	}
+	control, err := extract(request(t, text, "doc[0]/machine/nodeLabels"), false)
+	if err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if !strings.Contains(string(control.docs), key) {
+		t.Errorf("control: the unguarded candidate does not hold the key:\n%s", control.docs)
+	}
+}
+
 // TestGuardSkipsThisRunsReferences: the substring search skips the content of this run's
 // !bwref nodes (compilation.md §4.2), so a value found only inside a minted name passes.
 func TestGuardSkipsThisRunsReferences(t *testing.T) {

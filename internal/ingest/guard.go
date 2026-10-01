@@ -90,14 +90,15 @@ func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) erro
 	return nil
 }
 
-// extractedScalars is every extracted scalar value: each scalar extraction, and each member of
-// an extracted mapping (its keys are not values).
+// extractedScalars is every extracted scalar value: each scalar extraction, and each key and
+// member of an extracted mapping. The keys are stored in the provider with the members, so a
+// copy of one elsewhere persists part of the extracted value.
 func extractedScalars(exs []extraction) []any {
 	var out []any
 	for _, ex := range exs {
 		if m, ok := ex.plain.(map[string]any); ok {
 			for _, k := range sortedKeys(m) {
-				out = append(out, m[k])
+				out = append(out, k, m[k])
 			}
 			continue
 		}

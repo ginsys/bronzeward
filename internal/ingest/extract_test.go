@@ -140,7 +140,8 @@ func TestExtractAliasOnce(t *testing.T) {
 }
 
 func TestExtractKinds(t *testing.T) {
-	text := "machine:\n  install:\n    wipe: true\n  nodeLabels:\n    a: x\n    b: \"2\"\ncluster:\n  controlPlane:\n    localAPIServerPort: 6443\n"
+	// The mapping's keys are guarded like its members, so they must not occur elsewhere.
+	text := "machine:\n  install:\n    wipe: true\n  nodeLabels:\n    lbl-1: x\n    lbl-2: \"2\"\ncluster:\n  controlPlane:\n    localAPIServerPort: 6443\n"
 	c, err := Extract(request(t, text, "doc[0]/machine/install/wipe", "doc[0]/machine/nodeLabels", "doc[0]/cluster/controlPlane/localAPIServerPort"))
 	if err != nil {
 		t.Fatal(err)
@@ -217,12 +218,63 @@ func TestCommitErrorQuotesNothing(t *testing.T) {
 		if !errors.Is(e, cause) {
 			t.Errorf("the cause is not reachable through %T", e)
 		}
+		// A reporter that walks the chain renders every error in it.
+		for _, link := range chain(e) {
+			if strings.Contains(link.Error(), secretText) {
+				t.Errorf("the chain of %T hands out the callback's error: %s", e, link)
+			}
+		}
 		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d", "%f", "%t", "%p"} {
 			text := fmt.Sprintf(verb, e)
 			if strings.Contains(text, secretText) || strings.Contains(strings.ToLower(text), hex.EncodeToString([]byte(secretText))) {
 				t.Errorf("%s of %T renders the callback's message: %s", verb, e, text)
 			}
 		}
+	}
+}
+
+// chain is e and every error its Unwrap methods return, depth first.
+func chain(e error) []error {
+	out := []error{e}
+	switch u := e.(type) {
+	case interface{ Unwrap() error }:
+		if next := u.Unwrap(); next != nil {
+			out = append(out, chain(next)...)
+		}
+	case interface{ Unwrap() []error }:
+		for _, next := range u.Unwrap() {
+			out = append(out, chain(next)...)
+		}
+	}
+	return out
+}
+
+// TestExtractCoalescesNestedTargets: a target inside a marked mapping is extracted as part of
+// that mapping, once, whether the schema identifies it or a second mark names it. A member that
+// is an alias of a target outside the mapping is refused, since the mapping cannot carry it.
+func TestExtractCoalescesNestedTargets(t *testing.T) {
+	const auth = "doc[0]/machine/registries/config/reg.test/auth"
+	text := "machine:\n  token: " + secretText + "\n  registries:\n    config:\n      reg.test:\n        auth:\n          username: user-91be\n          password: " + labelSecret + "\n"
+	for _, marks := range [][]string{{auth}, {auth, auth + "/password"}, {auth + "/password", auth}} {
+		c, err := Extract(request(t, text, marks...))
+		if err != nil {
+			t.Fatalf("%v: %v", marks, err)
+		}
+		s, calls := commitAll(t, c)
+		var kinds []provider.Kind
+		for _, cl := range calls {
+			kinds = append(kinds, cl.kind)
+		}
+		if len(calls) != 2 || !reflect.DeepEqual(kinds, []provider.Kind{provider.KindString, provider.KindMapping}) {
+			t.Errorf("%v: created %v, want the token then the auth mapping", marks, calls)
+		}
+		if docs := string(s.Documents()); strings.Contains(docs, labelSecret) || strings.Contains(docs, "user-91be") {
+			t.Errorf("%v: the sanitized stream holds the mapping:\n%s", marks, docs)
+		}
+	}
+	aliased := "machine:\n  token: &t " + secretText + "\n  nodeLabels:\n    a: *t\n    b: x\n"
+	if _, err := Extract(request(t, aliased, "doc[0]/machine/nodeLabels")); !isRule(err, RuleMarkKind) {
+		t.Errorf("a member aliasing another target: %v, want a %s refusal", err, RuleMarkKind)
 	}
 }
 
