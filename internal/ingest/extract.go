@@ -142,8 +142,9 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 // knownSecrets is the text of every value the request would extract that can be found before
 // extraction: each value the machinery redacts, and every scalar under each mark, outer or inside
 // an embedded document that parses, aliases followed. complete is false when the machinery could
-// not load a document: its secret fields are then unknown. Other failures are skipped here;
-// identification reports them.
+// not load a document, or a value it redacts is not the text of the input scalar at its path
+// (schema-indirect): the input's own spelling of the secret is then unknown. Other failures are
+// skipped here; identification reports them.
 func knownSecrets(docs []*yaml.Node, marks []Path) (texts []string, complete bool) {
 	var values []any
 	complete = true
@@ -154,6 +155,10 @@ func knownSecrets(docs []*yaml.Node, marks []Path) (texts []string, complete boo
 		}
 		for _, sp := range pointers {
 			values = append(values, sp.value)
+			n, ok := resolve(docs, i, sp.pointer)
+			if !ok || n.Kind != yaml.ScalarNode || n.Value != scalarText(sp.value) {
+				complete = false
+			}
 		}
 	}
 	seen := map[*yaml.Node]bool{}

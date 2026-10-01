@@ -69,6 +69,15 @@ func TestRefusalSweep(t *testing.T) {
 		{rule: RuleMarkUnaddressed, text: "machine:\n  token: " + s + "\n", marks: []string{"doc[0]/machine/nodeLabels/" + s}},
 		// The machinery cannot load the document, so its secret fields are unknown.
 		{rule: RuleLocalTag, text: "machine:\n  token: " + s + "\n  type: []\n  nodeLabels:\n    " + s + ": !unknown x\n"},
+		// The machinery's value is the decoded form of the input text.
+		{rule: RuleLocalTag, text: "cluster:\n  secretboxEncryptionSecret: !!binary " + b64Secret + "\nmachine:\n  nodeLabels:\n    " + b64Secret + ": !unknown x\n", secret: b64Secret},
+		// The key holding the value is escaped in the path, and the path does not parse back.
+		{rule: RuleLocalTag, text: "machine:\n  token: " + s + "/x\n  nodeLabels:\n    " + s + "/x|y: !unknown x\n"},
+		// A key equal to the value as a parsed integer or boolean, spelled differently.
+		{rule: RuleGuardValue, text: manifestStream("secret: 314159\n0x4cb2f: x\n"), secret: "0x4cb2f",
+			marks: []string{manifestPath + "|yaml/secret"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
+		{rule: RuleGuardValue, text: manifestStream("secret: true\nTRUE: x\n"), secret: "TRUE",
+			marks: []string{manifestPath + "|yaml/secret"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
 		// The marked value is reached through an alias to a mapping.
 		{rule: RuleLocalTag, text: manifestStream("source: &a {password: " + s + "}\ntarget: {nested: *a}\n" + s + ": !unknown x\n"),
 			marks: []string{manifestPath + "|yaml/target"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
