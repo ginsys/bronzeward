@@ -27,6 +27,7 @@ type client struct {
 	base  string // scheme://host[:port], no path
 	token Token
 	http  *http.Client
+	proxy func(*http.Request) (*url.URL, error) // the ambient proxy: http.ProxyFromEnvironment
 }
 
 // ParseAddress parses an OpenBao address: an http or https URL, scheme://host[:port] with at most a
@@ -55,17 +56,31 @@ func newClient(addr string, tok Token) (*client, error) {
 	if tok.value() == "" {
 		return nil, errors.New("provider: no token")
 	}
-	return &client{
-		base:  u.Scheme + "://" + u.Host,
-		token: tok,
-		http: &http.Client{
-			Timeout: requestTimeout,
-			// Never follow a redirect: Go keeps a custom header such as X-Vault-Token on a
-			// redirect, and a 307 or 308 replays the body, which for a create or an encrypt is
-			// the plaintext. A 3xx is an unclassified status.
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
-	}, nil
+	c := &client{base: u.Scheme + "://" + u.Host, token: tok, proxy: http.ProxyFromEnvironment}
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = c.proxyFor
+	c.http = &http.Client{
+		Timeout:   requestTimeout,
+		Transport: t,
+		// Never follow a redirect: Go keeps a custom header such as X-Vault-Token on a
+		// redirect, and a 307 or 308 replays the body, which for a create or an encrypt is
+		// the plaintext. A 3xx is an unclassified status.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	return c, nil
+}
+
+// proxyFor chooses the proxy for a request to the provider. A plain-http request goes direct:
+// configuration admits plain http only to loopback or a host in provider.plainHTTPHosts, whose
+// network path the operator states is protected, and a proxy the environment names (HTTP_PROXY
+// without the host in NO_PROXY) would sit on that path and receive the token and the plaintext.
+// An https request keeps the ambient proxy, which only tunnels its TLS, as the identity provider's
+// requests do (persistence-api.md §10.1).
+func (c *client) proxyFor(r *http.Request) (*url.URL, error) {
+	if r.URL.Scheme == "http" {
+		return nil, nil
+	}
+	return c.proxy(r)
 }
 
 // response is a 2xx response, read in full under the cap.

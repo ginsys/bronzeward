@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -239,6 +240,54 @@ func TestRedirectsNotFollowed(t *testing.T) {
 	}
 	if n := elsewhere.Load(); n != 0 {
 		t.Errorf("a redirect was followed %d time(s), replaying the token and the body", n)
+	}
+}
+
+// A proxy the environment names (HTTP_PROXY without the host in NO_PROXY) must not carry a
+// plain-http request: configuration admits plain http only to a host whose network path the
+// operator protects, and the proxy would receive the token and the plaintext. The ambient proxy is
+// injected rather than set with t.Setenv: net/http reads the environment once per process and never
+// proxies a loopback host, so an httptest server could not show the difference. The transport
+// check catches a client that falls back to http.DefaultTransport, which the injected proxy would
+// not reach. The control: an https request still takes the proxy, which only tunnels its TLS.
+func TestPlainHTTPBypassesAmbientProxy(t *testing.T) {
+	var proxied atomic.Int64
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		proxied.Add(1)
+		http.Error(w, "proxied", http.StatusBadGateway)
+	}))
+	t.Cleanup(proxy.Close)
+	proxyURL, err := url.Parse(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i, rec := standIn(t, testKeys, func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, 200, data(map[string]any{"ciphertext": "vault:v1:YWJj"}))
+	})
+	i.c.proxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+	if _, err := i.EncryptBaseline(t.Context(), []byte(plaintext)); err != nil {
+		t.Fatalf("EncryptBaseline: %v", err)
+	}
+	if n := proxied.Load(); n != 0 {
+		t.Fatalf("the proxy carried %d plain-http request(s), with the token and the plaintext", n)
+	}
+	if got := rec.last(); got.token != testToken || !strings.Contains(string(got.body), base64.StdEncoding.EncodeToString([]byte(plaintext))) {
+		t.Fatal("the configured server did not receive the token and the plaintext directly")
+	}
+	tr, ok := i.c.http.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("the client's transport is %T; http.DefaultTransport takes the ambient proxy", i.c.http.Transport)
+	}
+	for _, c := range []struct {
+		url  string
+		want *url.URL
+	}{
+		{"http://openbao:8200/v1/transit/encrypt/k-baseline", nil},
+		{"https://bao.example.test:8200/v1/transit/encrypt/k-baseline", proxyURL},
+	} {
+		if got, err := tr.Proxy(httptest.NewRequest(http.MethodPost, c.url, nil)); err != nil || got != c.want {
+			t.Errorf("%s: proxy = %v, %v; want %v", c.url, got, err, c.want)
+		}
 	}
 }
 
