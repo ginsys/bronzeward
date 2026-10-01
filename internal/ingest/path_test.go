@@ -24,6 +24,9 @@ func TestParsePathRoundTrip(t *testing.T) {
 		{"doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/password", 0,
 			[]string{"cluster", "inlineManifests", "0", "contents"}, "yaml", []string{"stringData", "password"}},
 		{"doc[0]/a|json", 0, []string{"a"}, "json", nil},
+		// The first "|" ends the outer pointer; RFC 6901 lets an inner token hold one.
+		{"doc[0]/a|yaml/foo|bar", 0, []string{"a"}, "yaml", []string{"foo|bar"}},
+		{"doc[0]/a|yaml/b|yaml/c", 0, []string{"a"}, "yaml", []string{"b|yaml", "c"}},
 	} {
 		p, err := ParsePath(tc.in)
 		if err != nil {
@@ -42,7 +45,7 @@ func TestParsePathRoundTrip(t *testing.T) {
 func TestParsePathRefusals(t *testing.T) {
 	for _, in := range []string{
 		"", "/machine", "machine/ca", "doc[]", "doc[01]/a", "doc[-1]", "doc[a]", "doc[0", "doc[0]x",
-		"doc[1000001]", "doc[0]/a~2", "doc[0]/a~", "doc[0]/a|toml/b", "doc[0]/a|yaml/b|yaml/c",
+		"doc[1000001]", "doc[0]/a~2", "doc[0]/a~", "doc[0]/a|toml/b",
 		"doc[0]/a|yaml|json", "doc[0]/a|yamlx", "doc[0]|yaml/a",
 	} {
 		_, err := ParsePath(in)

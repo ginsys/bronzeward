@@ -149,7 +149,7 @@ func knownSecrets(docs []*yaml.Node, marks []Path) (texts []string, complete boo
 	var values []any
 	complete = true
 	for i, d := range docs {
-		pointers, err := schemaPointers(d, i)
+		pointers, err := schemaPointers(d, i, nil)
 		if err != nil {
 			complete = false
 		}

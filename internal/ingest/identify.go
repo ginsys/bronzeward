@@ -41,7 +41,7 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 		out = append(out, t)
 	}
 	for i := range docs {
-		pointers, err := schemaPointers(docs[i], i)
+		pointers, err := schemaPointers(docs[i], i, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -71,6 +71,24 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 			return nil, refuse(RuleMarkKind, t.paths[0].String())
 		}
 	}
+	// Each target is stored as a reference, which a later ingestion loads as a null: a document
+	// that does not load that way (a mark on its kind) could never be ingested again.
+	stored := map[*yaml.Node]bool{}
+	var withTargets []int
+	for _, t := range out {
+		stored[t.node] = true
+		for _, p := range t.paths {
+			if !slices.Contains(withTargets, p.Doc) {
+				withTargets = append(withTargets, p.Doc)
+			}
+		}
+	}
+	slices.Sort(withTargets)
+	for _, i := range withTargets {
+		if _, err := schemaPointers(docs[i], i, stored); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 
@@ -81,15 +99,16 @@ type schemaPointer struct {
 }
 
 // schemaPointers loads one document on its own with the pinned machinery and returns the leaves
-// whose encoding RedactSecrets changes, in pointer order. !bwref nodes are loaded as nulls (the
-// machinery redacts only non-empty fields). Machinery errors are dropped: they can quote input.
-func schemaPointers(doc *yaml.Node, i int) ([]schemaPointer, error) {
+// whose encoding RedactSecrets changes, in pointer order. !bwref nodes, and the nodes in nulled,
+// are loaded as nulls (the machinery redacts only non-empty fields). Machinery errors are
+// dropped: they can quote input.
+func schemaPointers(doc *yaml.Node, i int, nulled map[*yaml.Node]bool) ([]schemaPointer, error) {
 	unloadable := refuse(RuleSchemaUnloadable, fmt.Sprintf("doc[%d]", i))
 	top := root(doc)
 	if top == nil || top.Kind == yaml.ScalarNode && top.Tag == "!!null" {
 		return nil, nil
 	}
-	text, err := yaml.Marshal(withoutReferences(top))
+	text, err := yaml.Marshal(copyWithoutReferences(top, map[*yaml.Node]*yaml.Node{}, nulled))
 	if err != nil {
 		return nil, unloadable
 	}
@@ -122,21 +141,17 @@ func schemaPointers(doc *yaml.Node, i int) ([]schemaPointer, error) {
 	return out, nil
 }
 
-// withoutReferences is a deep copy of n with every !bwref node replaced by a null that keeps its
-// anchor, so its aliases still resolve. Each node is copied once and an alias points at its
-// target's copy, as in the input.
-func withoutReferences(n *yaml.Node) *yaml.Node {
-	return copyWithoutReferences(n, map[*yaml.Node]*yaml.Node{})
-}
-
-func copyWithoutReferences(n *yaml.Node, copies map[*yaml.Node]*yaml.Node) *yaml.Node {
+// copyWithoutReferences is a deep copy of n with every !bwref node, and every node in nulled,
+// replaced by a null that keeps its anchor, so its aliases still resolve. Each node is copied
+// once and an alias points at its target's copy, as in the input.
+func copyWithoutReferences(n *yaml.Node, copies map[*yaml.Node]*yaml.Node, nulled map[*yaml.Node]bool) *yaml.Node {
 	if n == nil {
 		return nil
 	}
 	if c, ok := copies[n]; ok {
 		return c
 	}
-	if n.Tag == refTag {
+	if n.Tag == refTag || nulled[n] {
 		c := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null", Anchor: n.Anchor}
 		copies[n] = c
 		return c
@@ -145,10 +160,10 @@ func copyWithoutReferences(n *yaml.Node, copies map[*yaml.Node]*yaml.Node) *yaml
 	copies[n] = &c
 	c.Content = make([]*yaml.Node, len(n.Content))
 	for i, ch := range n.Content {
-		c.Content[i] = copyWithoutReferences(ch, copies)
+		c.Content[i] = copyWithoutReferences(ch, copies, nulled)
 	}
 	if n.Alias != nil {
-		c.Alias = copyWithoutReferences(n.Alias, copies)
+		c.Alias = copyWithoutReferences(n.Alias, copies, nulled)
 	}
 	return &c
 }
