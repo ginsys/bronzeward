@@ -73,9 +73,21 @@ func transitPath(op, key string) (string, error) {
 // load by the same rule NewIngestion applies.
 func CheckKeyName(key string) error { return keySegment(key) }
 
+// maxKeyRef is the bound of import_base_revision.baseline_digest_key (0004_adoption.sql), where a
+// Digest's KeyRef, "transit/<key>@v<N>", is stored. maxKeyName leaves room for any version Digest
+// accepts (strconv.Atoi: at most 19 digits), so a key that NewIngestion and configuration accept
+// never yields a reference the column refuses after the provider writes have been made.
+const (
+	maxKeyRef  = 256
+	maxKeyName = maxKeyRef - len("transit/@v") - len("9223372036854775807")
+)
+
 func keySegment(key string) error {
 	if key == "" || key == "." || key == ".." {
 		return fmt.Errorf("provider: transit key name %q is empty, \".\" or \"..\"", key)
+	}
+	if len(key) > maxKeyName {
+		return fmt.Errorf("provider: a transit key name is %d bytes; at most %d fit a %d-byte key reference \"transit/<key>@v<N>\"", len(key), maxKeyName, maxKeyRef)
 	}
 	if i := strings.IndexFunc(key, func(r rune) bool {
 		return r == '/' || r == '#' || r == '?' || r == '%' || r == '\\' || unicode.IsSpace(r) || unicode.IsControl(r)

@@ -257,6 +257,7 @@ func TestProviderBlock(t *testing.T) {
 		"key with slash":    {strings.Replace(providerBlock, "bw-digest", "a/b", 1), "provider.keys.digest"},
 		"key dot-dot":       {strings.Replace(providerBlock, "bw-digest", `".."`, 1), "provider.keys.digest"},
 		"key with percent":  {strings.Replace(providerBlock, "bw-digest", `"a%2F"`, 1), "provider.keys.digest"},
+		"key too long":      {strings.Replace(providerBlock, "bw-digest", strings.Repeat("k", 228), 1), "provider.keys.digest"},
 		"shared key":        {strings.Replace(providerBlock, "bw-digest", "bw-staging", 1), "distinct"},
 		"no token file":     {strings.Replace(providerBlock, "  ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "", 1), "provider.ingestionTokenFile is required"},
 		"unknown field":     {providerBlock + "  token: x\n", "field token not found"},
