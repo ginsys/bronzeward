@@ -4,7 +4,8 @@
 # check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s0.tsv in
 # the evidence directory and to stdout; the directory is then scanned by bin/evidence. Exit 1 on
 # any FAIL.
-# Usage: scenarios/s0 run|walk   (each on a fresh fixtures/bin/up; run needs mise run go-db's database)
+# Usage: scenarios/s0 run|walk   (each on a fresh fixtures/bin/up; run needs mise run go-db's
+# database and OpenBao: mise run dev-db, mise run dev-bao)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -13,7 +14,7 @@ bin=$here/../bin
 
 s0_mode=${1:-}
 case $s0_mode in run | walk) ;; *) die "usage: scenarios/s0 run|walk" ;; esac
-need docker curl jq timeout id sleep
+need docker curl jq timeout id sleep git env
 need_state
 # No fixture lock of its own: bw, seed, inject and evidence each take the one they need.
 umask 077
@@ -188,13 +189,35 @@ migrate_twice() {
   [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$applied" = "applied [$every]|applied []|" ]
 }
 
-# logged <name> <command...>: from the repository root, output to $EV/<name>.log, which starts with
-# the command and ends with its exit status; both go to commands.tsv too.
+# Step 1's suites run in a clone of the image commit (image_clone), not in this checkout: nothing
+# here, edited, untracked, ignored or misreported by git's configuration, reaches the bytes they
+# test (ginsys/bronzeward#68). Under .state, which down removes; removed again after step 1.
+clone_dir=$STATE/s0-clone
+clone_src=$clone_dir/src
+clone_head=
+# in_clone <command...>: in the clone, isolated_run: only the caller's variables the suites need
+# (locations, locale, Go, BW_TEST_*, proxies), git's configuration, attributes, hooks and templates
+# off for every git the suites run, and no mise configuration but the clone's (tasks_in_clone checks
+# the tasks resolve in the clone).
+in_clone() {
+  isolated_run "$clone_src" "$@"
+}
+# tasks_in_clone: verify's and go-db's tasks, and every task they depend on, are the clone's own,
+# defined there and run there: logs that name the clone's HEAD would otherwise attribute another
+# tree's results to it.
+tasks_in_clone() {
+  local listing outside
+  listing=$(in_clone mise tasks ls --json --hidden) || return 1
+  outside=$(tasks_outside "$clone_src" verify go-db <<<"$listing") || return 1
+  [ -z "$outside" ] || { say "tasks not the clone's own: $outside"; return 1; }
+}
+# logged <name> <command...>: in the clone, output to $EV/<name>.log, which starts with the
+# command and the clone's HEAD and ends with its exit status; both go to commands.tsv too.
 logged() {
   local name=$1 rc=0
   shift
-  printf '$ %s\n' "$*" >"$EV/$name.log"
-  (cd -- "$FIXTURES/.." && timeout 1800 "$@") >>"$EV/$name.log" 2>&1 || rc=$?
+  printf '$ %s\n# in a clone of the image commit, HEAD %s\n' "$*" "$clone_head" >"$EV/$name.log"
+  in_clone timeout 1800 "$@" >>"$EV/$name.log" 2>&1 || rc=$?
   printf 'exit %d\n' "$rc" >>"$EV/$name.log"
   ran "$name" "$rc" "$@"
   return "$rc"
@@ -244,8 +267,8 @@ schema_control() {
 }
 
 # same_checkout: the working tree is still the commit up built the image from, with no path
-# differing and none git is told to skip (checkout_differs), so the suites test the bytes the
-# server runs and the scenario's scripts are that commit's.
+# differing and none git is told to skip (checkout_differs), so the scenario's scripts are that
+# commit's. It reports on this checkout only: step 1's suites run in the clone.
 same_checkout() {
   local n
   n=$(checkout_differs) || return 1
@@ -257,21 +280,34 @@ same_checkout() {
 # suites' Go is the one up-build records for the image: GOTOOLCHAIN can switch it.
 go_env_clean() {
   local out v
-  out=$(cd -- "$FIXTURES/.." && mise exec -- go env GOFLAGS GOEXPERIMENT GOWORK GOVERSION) || return 1
+  out=$(in_clone mise exec -- go env GOFLAGS GOEXPERIMENT GOWORK GOVERSION) || return 1
   mapfile -t v <<<"$out"
   [ "${#v[@]}" -eq 4 ] && [ -z "${v[0]}${v[1]}${v[2]}" ] && [ -n "${v[3]}" ] &&
     [ "${v[3]}" = "$(sed -n 's/^go //p' "$STATE/up-build")" ]
 }
 
 run() {
-  # Step 1: the suites, and the advisory-lock negative control as the Go test (ruling 5), from the
-  # checkout the image was built from (checked before the scenario and after it) and again after
-  # the suites.
-  check 'S0 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the suites run every test on the server's build" go_env_clean
-  check 'S0 step 1' 'mise run verify' logged step1-verify mise run verify
-  check 'S0 step 1' 'mise run go-db (a missing database fails)' logged step1-go-db mise run go-db
-  check 'S0 step 1, negative control' 'advisory lock removed: TestNoLockControl and TestInstallNoLockControl' go_controls_ran
-  check 'S0 precondition' 'the checkout is the image commit, unmodified, after the suites' same_checkout
+  # Step 1: the suites, and the advisory-lock negative control as the Go test (ruling 5), in a
+  # clone of the commit the image was built from. Without the clone they do not run: the
+  # checkout's results would not be the commit's.
+  local rc=0
+  rm -rf -- "$clone_dir"
+  mkdir -- "$clone_dir"
+  image_clone "$clone_src" >"$EV/step1-clone.log" 2>&1 || rc=$?
+  ran step1-clone "$rc" image_clone "$clone_src"
+  if [ "$rc" -eq 0 ]; then
+    clone_head=$(sed -n 's/^clone .* HEAD \([0-9a-f]*\)$/\1/p' "$EV/step1-clone.log")
+    result PASS 'S0 step 1' "the suites run in a clone of the image commit, made with no git configuration but its own (HEAD $clone_head)"
+    check 'S0 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the suites run every test on the server's build" go_env_clean
+    check 'S0 precondition' "verify's and go-db's tasks, with those they depend on, are defined in the clone and run there" tasks_in_clone
+    check 'S0 step 1' 'mise run verify' logged step1-verify mise run verify
+    check 'S0 step 1' 'mise run go-db (a missing database fails)' logged step1-go-db mise run go-db
+    check 'S0 step 1, negative control' 'advisory lock removed: TestNoLockControl and TestInstallNoLockControl' go_controls_ran
+  else
+    result FAIL 'S0 step 1' "no clone of the image commit (exit $rc, step1-clone.log): the suites did not run"
+  fi
+  rm -rf -- "$clone_dir"
+  check 'S0 precondition' 'the checkout is the image commit, unmodified, after step 1' same_checkout
 
   # Step 2: two migrations at once apply once; A starts on the schema.
   check 'S0 step 2' 'two bw migrate at once: one applies every migration of the image, the other []' migrate_twice

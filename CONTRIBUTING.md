@@ -116,9 +116,9 @@ curl -s -H "Authorization: Bearer $(go run ./fixtures/oidc mint -key <file> -iss
 Acceptance-plan scenario S0 runs against the [fixtures](fixtures/README.md), which need Docker, not CI's runner. Each mode starts from a fresh fixture:
 
 ```sh
-mise run dev-db                               # go-db's database, for S0 step 1
+mise run dev-db && mise run dev-bao           # go-db's database and OpenBao, for S0 step 1
 fixtures/bin/up && fixtures/scenarios/s0 run  && fixtures/bin/down   # steps 1, 2, 3, 5 and the schema negative controls
 fixtures/bin/up && fixtures/scenarios/s0 walk && fixtures/bin/down   # step 4's denied walk and the identity revocation
 ```
 
-Each run writes its checks to `fixtures/.state/evidence/s0-<mode>-<utc>/s0.tsv`, the commands they ran with their exit statuses to `commands.tsv`, with the logs they read, and scans that directory for synthetic secrets. `down` deletes `.state`: copy the directory out first to keep it.
+Step 1's suites run in a fresh clone of the commit the server image was built from, made with no git configuration but the clone's own and run with only the environment variables they need (locations, locale, Go, `BW_TEST_*`, proxies), with git's default attributes files, hooks, templates and mise's global and system configuration off, so nothing in the working tree or your git or mise configuration, and no other variable of yours, reaches what they test; it needs network access for `upstream-sync` and the site's Python packages. Each run writes its checks to `fixtures/.state/evidence/s0-<mode>-<utc>/s0.tsv`, the commands they ran with their exit statuses to `commands.tsv`, with the logs they read, and scans that directory for synthetic secrets. `down` deletes `.state`: copy the directory out first to keep it.

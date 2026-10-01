@@ -456,6 +456,87 @@ checkout_differs() {
   printf '%s\n' "$changed" "$flagged" "$hidden" | grep -c . || [ $? -eq 1 ]
 }
 
+# git_isolated: the environment clean_git and isolated_run give git. Its global and system
+# configuration and the system attributes file are not read, and the defaults that apply with no
+# configuration at all are overridden: no attributes or excludes file under $XDG_CONFIG_HOME or
+# $HOME, no hooks, no replacement refs, and no template, so a repository git creates gets no hook
+# or info/ file either.
+git_isolated=(GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ATTR_NOSYSTEM=1 GIT_NO_REPLACE_OBJECTS=1
+  GIT_TEMPLATE_DIR= GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=core.attributesFile GIT_CONFIG_VALUE_0=/dev/null
+  GIT_CONFIG_KEY_1=core.excludesFile GIT_CONFIG_VALUE_1=/dev/null GIT_CONFIG_KEY_2=core.hooksPath
+  GIT_CONFIG_VALUE_2=/dev/null)
+
+# clean_git <args...>: git with no configuration but the repository's own (git_isolated). The
+# caller's environment is dropped (env -i), which takes the repository selection and any other
+# GIT_* setting with it: no attributes, excludes file, filter, hook, template directory or
+# replacement ref of the operator's reaches what it reads or writes.
+clean_git() {
+  env -i PATH="$PATH" HOME="$HOME" "${git_isolated[@]}" git --no-replace-objects "$@"
+}
+
+# isolated_run <dir> <command...>: the command in <dir>, a clone image_clone made, with only the
+# caller's variables it needs: where things are (PATH, HOME, TMPDIR, the XDG and mise data, cache
+# and state directories), the locale, Go's settings (go_env_clean checks the ones that select or
+# skip tests), the suites' BW_TEST_* services, and the proxy and CA settings upstream-sync and the
+# site's packages fetch through. Every other variable is dropped, so none can select the
+# repository, configuration or shell the suites run with (GIT_*, MISE_*, BASH_ENV, exported
+# functions, SHELLCHECK_OPTS, ...). git is as git_isolated sets it for every git the command runs
+# (S0 step 1's commit-lint, whitespace and upstream-sync); mise trusts <dir>'s mise.toml and reads
+# no configuration but what <dir> holds: none above <dir>'s parent, and not the operator's global
+# or system one, whose [env], env._.source or [settings] could change what a task runs. A global or
+# system config file of /dev/null also keeps out the conf.d and mise.toml beside it (the selftest
+# shows it for the global one; the system one, under /etc, it cannot plant). Whether the tasks then
+# resolve in <dir> is tasks_outside's to check.
+isolated_run() {
+  local dir=$1 v inherit=()
+  shift
+  for v in $(compgen -e); do
+    case $v in
+      PATH | HOME | USER | LOGNAME | LANG | LANGUAGE | LC_* | TERM | TMPDIR | GO* | BW_TEST_* | \
+        HTTP_PROXY | HTTPS_PROXY | NO_PROXY | http_proxy | https_proxy | no_proxy | SSL_CERT_FILE | SSL_CERT_DIR | \
+        XDG_DATA_HOME | XDG_CACHE_HOME | XDG_STATE_HOME | MISE_DATA_DIR | MISE_CACHE_DIR | MISE_STATE_DIR)
+        inherit+=("$v=${!v}") ;;
+    esac
+  done
+  (cd -- "$dir" && exec env -i "${inherit[@]}" "${git_isolated[@]}" MISE_TRUSTED_CONFIG_PATHS="$dir" \
+    MISE_CEILING_PATHS="${dir%/*}" MISE_GLOBAL_CONFIG_FILE=/dev/null MISE_SYSTEM_CONFIG_FILE=/dev/null "$@")
+}
+
+# tasks_outside <dir> <task...>: of the tasks named and every task they depend on, those that
+# mise tasks ls --json (on stdin) does not define in a file under <dir> to run in <dir>, or not at
+# all, one per line. Nothing printed: the tasks are <dir>'s own.
+tasks_outside() {
+  local dir=$1
+  shift
+  jq -r --arg root "$dir/" '(map({(.name): .}) | add) as $t
+    | def deps: ., ($t[.].depends[]? | deps);
+    [$ARGS.positional[] | deps] | unique[] as $n | $t[$n]
+    | select(. == null or (.source | startswith($root) | not) or ((.dir + "/") | startswith($root) | not))
+    | "\($n) (\(.source // "undefined"))"' --args "$@"
+}
+
+# image_clone <dir>: the commit up-build records, alone in a fresh clone of this checkout at <dir>,
+# made by clean_git with no template (no hook, no info/exclude), for S0 step 1's suites to run in
+# (ginsys/bronzeward#68). The clone copies the objects and the refs, not the checkout's index, skip
+# bits, untracked or ignored files, or its .git/info/attributes and info/exclude, so the files it
+# checks out are the commit's bytes whatever this checkout or git's configuration says of them.
+# origin/main is copied from this checkout's, when it has one, so that commit-lint's range in the
+# clone is the one it has here. Prints the clone's HEAD; fails unless it is the recorded commit.
+image_clone() {
+  local commit top head
+  commit=$(sed -n 's/^commit //p' "$STATE/up-build" 2>/dev/null) && [ -n "$commit" ] ||
+    { say "fixtures: no server build is recorded in $STATE/up-build"; return 1; }
+  top=$(fixtures_git rev-parse --show-toplevel) || return 1
+  clean_git clone --quiet --no-checkout --no-hardlinks --template= -- "$top" "$1" || return 1
+  if fixtures_git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
+    clean_git -C "$1" fetch --quiet --no-tags -- "$top" '+refs/remotes/origin/main:refs/remotes/origin/main' || return 1
+  fi
+  clean_git -C "$1" -c advice.detachedHead=false checkout --quiet --detach "$commit" || return 1
+  head=$(clean_git -C "$1" rev-parse HEAD) || return 1
+  printf 'clone %s HEAD %s\n' "$1" "$head"
+  [ "$head" = "$commit" ]
+}
+
 # fixtures_manifest_diff <status> <commit>: how fixtures/ differs from the commit, as bin/up
 # records it at creation and bin/evidence at capture: the status given, the diff of the tracked
 # files against the commit named, not HEAD, which a checkout meanwhile would have moved, and the
