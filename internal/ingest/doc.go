@@ -18,8 +18,10 @@
 //   - A refusal names its rule and the paths involved. A path token that holds a value the
 //     request extracts (a mapping key can be the secret) is shown as <redacted>, for refusals
 //     made before substitution too: the values are those the machinery redacts and those under
-//     each mark that resolves. Parser errors keep only a line. A create callback's error is
-//     returned as a CreateError that names the reference and does not render the cause.
+//     each mark that resolves, aliases followed. When the machinery cannot load a document those
+//     values are not all known, and a refusal names documents only. Parser errors keep only a
+//     line. A create callback's error is returned as a CreateError that names the reference and
+//     holds the cause where no fmt verb or reflection reaches it.
 //   - An alias inside the node it names is refused as a parse failure: the graph is infinite.
 //   - A field the machinery redacts must be one plain input scalar whose text is the value the
 //     machinery encodes. A secret reached through a merge key, folded over lines or tagged

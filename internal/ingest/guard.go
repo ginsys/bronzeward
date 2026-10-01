@@ -209,6 +209,27 @@ func redactRefusal(err error, texts []string) error {
 	return out
 }
 
+// documentsOnly re-renders a refusal's paths as their documents alone, for when the values to
+// redact are not all known; anything that is not a path is shown as <redacted>. Other errors pass
+// unchanged.
+func documentsOnly(err error) error {
+	var r *Refusal
+	if !errors.As(err, &r) {
+		return err
+	}
+	out := &Refusal{Rule: r.Rule}
+	for _, s := range r.Paths {
+		d := redacted
+		if p, perr := ParsePath(s); perr == nil {
+			d = Path{Doc: p.Doc}.String()
+		}
+		if !slices.Contains(out.Paths, d) {
+			out.Paths = append(out.Paths, d)
+		}
+	}
+	return out
+}
+
 // redactPath renders p with every token that holds an extracted value replaced by <redacted>.
 func redactPath(p Path, texts []string) string {
 	q := Path{Doc: p.Doc, Format: p.Format, Pointer: slices.Clone(p.Pointer), Inner: slices.Clone(p.Inner)}
