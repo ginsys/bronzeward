@@ -12,6 +12,7 @@ import (
 	"go/types"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -402,15 +403,21 @@ func goList(t *testing.T) []listedPackage {
 	return listed.pkgs
 }
 
-// typeCheck checks one package's source, reading its imports from export data; under maps an
-// import path to another listed entry (an external test imports the package as compiled for its
-// tests), and given supplies packages checked from synthetic source.
-func typeCheck(t *testing.T, fset *token.FileSet, path string, files []*ast.File, under map[string]string, given map[string]*types.Package) (*types.Package, *types.Info) {
+// listedExports maps each listed entry's import path to its export file.
+func listedExports(t *testing.T) map[string]string {
 	t.Helper()
 	exports := map[string]string{}
 	for _, p := range goList(t) {
 		exports[p.ImportPath] = p.Export
 	}
+	return exports
+}
+
+// typeCheck checks one package's source, reading its imports from the export files named in
+// exports; under maps an import path to another entry (an external test imports the package as
+// compiled for its tests), and given supplies packages checked from synthetic source.
+func typeCheck(t *testing.T, fset *token.FileSet, path string, files []*ast.File, exports, under map[string]string, given map[string]*types.Package) (*types.Package, *types.Info) {
+	t.Helper()
 	gc := importer.ForCompiler(fset, "gc", func(path string) (io.ReadCloser, error) {
 		if v, ok := under[path]; ok {
 			path = v
@@ -464,7 +471,7 @@ var memberAllowlist = map[string][]string{
 func typedMachineryViolations(t *testing.T, srcs map[string][]byte) []string {
 	t.Helper()
 	fset := token.NewFileSet()
-	_, info := typeCheck(t, fset, thisPackage, parseSources(t, fset, srcs), nil, nil)
+	_, info := typeCheck(t, fset, thisPackage, parseSources(t, fset, srcs), listedExports(t), nil, nil)
 	var out []string
 	for sel, s := range info.Selections {
 		obj := s.Obj()
@@ -663,39 +670,74 @@ func bytesViolations(fset *token.FileSet, path string, info *types.Info) []strin
 	return out
 }
 
+// packageViolations type-checks a listed package, with its in-package tests, and its external test
+// package, reading imports from exports, and reports their references to Config.Bytes. The
+// external test imports the `p [p.test]` variant when the listing has one (go list -test makes it
+// for a package with in-package tests, and for a main package even without them); otherwise it
+// imports p as built.
+func packageViolations(t *testing.T, exports map[string]string, p listedPackage) []string {
+	t.Helper()
+	var out []string
+	for path, names := range map[string][]string{p.ImportPath: append(slices.Clone(p.GoFiles), p.TestGoFiles...), p.ImportPath + "_test": p.XTestGoFiles} {
+		if len(names) == 0 {
+			continue
+		}
+		srcs := map[string][]byte{}
+		for _, name := range names {
+			src, err := os.ReadFile(filepath.Join(p.Dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			srcs[filepath.Join(p.Dir, name)] = src
+		}
+		fset := token.NewFileSet()
+		var under map[string]string
+		if variant := p.ImportPath + " [" + p.ImportPath + ".test]"; path != p.ImportPath && exports[variant] != "" {
+			under = map[string]string{p.ImportPath: variant}
+		}
+		_, info := typeCheck(t, fset, path, parseSources(t, fset, srcs), exports, under, nil)
+		out = append(out, bytesViolations(fset, p.ImportPath, info)...)
+	}
+	return out
+}
+
 func TestConfigBytesCallers(t *testing.T) {
 	pkgs := goList(t)
+	exports := listedExports(t)
 	n := 0
 	for _, p := range pkgs {
 		if p.ForTest != "" || !strings.HasPrefix(p.ImportPath, modulePath+"/") || strings.ContainsAny(p.ImportPath, " ") || strings.HasSuffix(p.ImportPath, ".test") {
 			continue
 		}
 		n++
-		for path, names := range map[string][]string{p.ImportPath: append(slices.Clone(p.GoFiles), p.TestGoFiles...), p.ImportPath + "_test": p.XTestGoFiles} {
-			if len(names) == 0 {
-				continue
-			}
-			srcs := map[string][]byte{}
-			for _, name := range names {
-				src, err := os.ReadFile(filepath.Join(p.Dir, name))
-				if err != nil {
-					t.Fatal(err)
-				}
-				srcs[filepath.Join(p.Dir, name)] = src
-			}
-			fset := token.NewFileSet()
-			under := map[string]string{p.ImportPath: p.ImportPath + " [" + p.ImportPath + ".test]"}
-			if path == p.ImportPath {
-				under = nil
-			}
-			_, info := typeCheck(t, fset, path, parseSources(t, fset, srcs), under, nil)
-			for _, v := range bytesViolations(fset, p.ImportPath, info) {
-				t.Error(v)
-			}
+		for _, v := range packageViolations(t, exports, p) {
+			t.Error(v)
 		}
 	}
 	if n < 10 {
 		t.Fatalf("checked %d of the module's packages: is the listing rooted at the module?", n)
+	}
+
+	// Controls: an external test package of internal/api, from synthetic source. With the listing's
+	// `api [api.test]` entry it imports that variant, which alone has the in-package tests'
+	// TestReplay; with the entry taken out, as for a package whose tests are all external, it
+	// imports api as built. Each still has its Config.Bytes call flagged.
+	api := modulePath + "/internal/api"
+	xtest := func(src string) listedPackage {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return listedPackage{ImportPath: api, Dir: dir, XTestGoFiles: []string{"x_test.go"}}
+	}
+	leak := "package api_test\nimport (\n\t\"" + api + "\"\n\t\"" + thisPackage + "\"\n)\nfunc leak(c talos.Config) []byte { return c.Bytes() }\n"
+	if got := packageViolations(t, exports, xtest(leak+"var _ = api.TestReplay\n")); len(got) != 1 {
+		t.Errorf("control: an external test using an in-package test's name: %q", got)
+	}
+	external := maps.Clone(exports)
+	delete(external, api+" ["+api+".test]")
+	if got := packageViolations(t, external, xtest(leak+"var _ = api.New\n")); len(got) != 1 {
+		t.Errorf("control: an external test of a package without in-package tests: %q", got)
 	}
 
 	// Controls: each type-checks and reaches Config.Bytes without naming it in a file that imports
@@ -707,10 +749,10 @@ func TestConfigBytesCallers(t *testing.T) {
 			files[fmt.Sprintf("control%d.go", i)] = []byte(s)
 		}
 		fset := token.NewFileSet()
-		pkg, info := typeCheck(t, fset, path, parseSources(t, fset, files), nil, given)
+		pkg, info := typeCheck(t, fset, path, parseSources(t, fset, files), exports, nil, given)
 		return bytesViolations(fset, path, info), pkg
 	}
-	api, ingest, holder := modulePath+"/internal/api", modulePath+"/internal/ingest", modulePath+"/internal/holder"
+	ingest, holder := modulePath+"/internal/ingest", modulePath+"/internal/holder"
 	alias := []string{"package api\n" + imp + "type observed = talos.Config\n", "package api\nfunc leak(c observed) []byte { return c.Bytes() }\n"}
 	if got, _ := check(api, nil, alias...); len(got) != 1 {
 		t.Errorf("control: an alias in another file: %q", got)
@@ -725,5 +767,5 @@ func TestConfigBytesCallers(t *testing.T) {
 	if got, _ := check(ingest, nil, strings.ReplaceAll(alias[0], "package api", "package ingest"), strings.ReplaceAll(alias[1], "package api", "package ingest")); len(got) != 0 {
 		t.Errorf("internal/ingest flagged: %q", got)
 	}
-	t.Logf("checked %d packages; controls: an alias in another file, a method expression and an embedded Config from another package are flagged; internal/ingest is not", n)
+	t.Logf("checked %d packages; controls: an external test with and without in-package tests, an alias in another file, a method expression and an embedded Config from another package are flagged; internal/ingest is not", n)
 }
