@@ -16,8 +16,10 @@ const redacted = "<redacted>"
 // every scalar, keys and references included; substring search over every scalar except this
 // run's references. It also searches every comment, which §4.2 does not name: a comment is
 // persisted with the stream and no other check reads it. The refusal names the matching paths
-// and the rule; any path token holding an extracted value is shown as <redacted>.
-func guard(docs []*yaml.Node, exs []extraction) error {
+// and the rule; any path token holding an extracted value is shown as <redacted>. An identified
+// embedded document is checked as its parsed nodes, as validate checks it, so this run's
+// references inside it are skipped like those outside.
+func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) error {
 	values := extractedScalars(exs)
 	texts := searchTexts(values)
 	if len(texts) == 0 {
@@ -38,7 +40,8 @@ func guard(docs []*yaml.Node, exs []extraction) error {
 			hit(&within, Path{Doc: i})
 		}
 	}
-	_ = walkStream(docs, func(n *yaml.Node, p Path, key bool, _ *yaml.Node) error {
+	var check visit
+	check = func(n *yaml.Node, p Path, key bool, _ *yaml.Node) error {
 		if key && n.Kind == yaml.ScalarNode {
 			p = p.child(n.Value)
 		}
@@ -48,6 +51,11 @@ func guard(docs []*yaml.Node, exs []extraction) error {
 		if n.Kind != yaml.ScalarNode {
 			return nil
 		}
+		if format, ok := embedded[p.String()]; ok && !key && p.Format == "" {
+			if inner, err := embeddedDocument(n); err == nil {
+				return walkEmbedded(inner, p, format, check)
+			}
+		}
 		switch {
 		case equalsAny(n, values):
 			hit(&equal, p)
@@ -56,7 +64,8 @@ func guard(docs []*yaml.Node, exs []extraction) error {
 			hit(&within, p)
 		}
 		return nil
-	})
+	}
+	_ = walkStream(docs, check)
 	if len(equal) > 0 {
 		return refuse(RuleGuardValue, equal...)
 	}

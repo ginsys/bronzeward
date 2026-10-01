@@ -58,13 +58,40 @@ func extract(req Request, guarded bool) (*Candidate, error) {
 	if err := validate(docs, req.Declarations); err != nil {
 		return nil, err
 	}
-	targets, err := identify(docs, req.Marks)
+	declared, err := checkDeclarations(req.Declarations)
 	if err != nil {
 		return nil, err
 	}
-	exs, err := substitute(targets, req.Declarations.References)
+	var outerMarks, innerMarks []Path
+	for _, m := range req.Marks {
+		if m.Format == "" {
+			outerMarks = append(outerMarks, m)
+		} else {
+			innerMarks = append(innerMarks, m)
+		}
+	}
+	targets, err := identify(docs, outerMarks)
 	if err != nil {
 		return nil, err
+	}
+	inner, embedded, err := identifyEmbedded(docs, innerMarks, declared, targets)
+	if err != nil {
+		return nil, err
+	}
+	exs, err := substitute(append(targets, inner...), req.Declarations.References)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range embedded {
+		plainStyle(e.doc)
+		text, err := encodeStream([]*yaml.Node{e.doc})
+		if err != nil {
+			return nil, err
+		}
+		*e.outer = yaml.Node{
+			Kind: yaml.ScalarNode, Tag: "!!str", Value: string(text), Style: yaml.LiteralStyle, Anchor: e.outer.Anchor,
+			HeadComment: e.outer.HeadComment, LineComment: e.outer.LineComment, FootComment: e.outer.FootComment,
+		}
 	}
 	decl := req.Declarations.clone()
 	if decl.References == nil {
@@ -82,7 +109,7 @@ func extract(req Request, guarded bool) (*Candidate, error) {
 		return nil, errors.New("ingest: the sanitized stream does not parse back")
 	}
 	if guarded {
-		if err := guard(back, exs); err != nil {
+		if err := guard(back, exs, declared); err != nil {
 			return nil, err
 		}
 	}
@@ -98,6 +125,81 @@ func extract(req Request, guarded bool) (*Candidate, error) {
 		c.values = append(c.values, namedValue{ex.name, v})
 	}
 	return c, nil
+}
+
+// embeddedDoc is an identified embedded document with marks inside it: the outer string scalar
+// that holds it and its parsed document, which substitution changes and extract writes back.
+type embeddedDoc struct {
+	outer, doc *yaml.Node
+}
+
+// identifyEmbedded resolves marks inside identified embedded documents (compilation.md §2.2,
+// §5.4). The outer path must be declared in embedded with the mark's format; an embedded
+// document is parsed once however many marks it holds. Its outer scalar must not itself be
+// extracted: it cannot be both a reference and the document holding one.
+func identifyEmbedded(docs []*yaml.Node, marks []Path, declared map[string]string, outer []*target) ([]*target, []embeddedDoc, error) {
+	extracted := map[*yaml.Node]bool{}
+	for _, t := range outer {
+		extracted[t.node] = true
+	}
+	parsed := map[string]*embeddedDoc{}
+	var order []string
+	var out []*target
+	byNode := map[*yaml.Node]*target{}
+	for _, m := range marks {
+		holder := Path{Doc: m.Doc, Pointer: m.Pointer}
+		key := holder.String()
+		if format, ok := declared[key]; !ok || format != m.Format {
+			return nil, nil, refuse(RuleBadPath, m.String())
+		}
+		e, ok := parsed[key]
+		if !ok {
+			n, found := resolve(docs, m.Doc, m.Pointer)
+			if !found || extracted[n] {
+				return nil, nil, refuse(RuleEmbedded, key)
+			}
+			doc, err := embeddedDocument(n)
+			if err != nil {
+				return nil, nil, refuse(RuleEmbedded, key)
+			}
+			e = &embeddedDoc{outer: n, doc: doc}
+			parsed[key] = e
+			order = append(order, key)
+		}
+		n, found := resolveIn(root(e.doc), m.Inner)
+		if !found {
+			return nil, nil, refuse(RuleMarkUnaddressed, m.String())
+		}
+		if n.Tag == refTag {
+			continue
+		}
+		if t, dup := byNode[n]; dup {
+			t.paths = append(t.paths, m)
+			continue
+		}
+		if _, _, err := valueOf(n); err != nil {
+			return nil, nil, refuse(RuleMarkKind, m.String())
+		}
+		t := &target{node: n, paths: []Path{m}}
+		byNode[n] = t
+		out = append(out, t)
+	}
+	var docsOut []embeddedDoc
+	for _, k := range order {
+		docsOut = append(docsOut, *parsed[k])
+	}
+	return out, docsOut, nil
+}
+
+// plainStyle drops the author's styles and comments from an embedded document before it is
+// re-serialized (compilation.md §5.4: formatting, comments and quoting are not preserved; an
+// identified JSON document is written back as block YAML).
+func plainStyle(n *yaml.Node) {
+	n.Style = 0
+	n.HeadComment, n.LineComment, n.FootComment = "", "", ""
+	for _, c := range n.Content {
+		plainStyle(c)
+	}
 }
 
 // substitute replaces each target node in place by a reference under a newly minted name
