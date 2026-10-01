@@ -2,13 +2,27 @@ package talos
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/cosi-project/runtime/pkg/resource"
+	"github.com/cosi-project/runtime/pkg/state"
+	"github.com/siderolabs/talos/pkg/machinery/api/machine"
+	"github.com/siderolabs/talos/pkg/machinery/client"
+	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	"go.yaml.in/yaml/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const secret = "machine:\n  token: SECRET-abc123.def456\n"
@@ -97,5 +111,72 @@ func TestDialRefuses(t *testing.T) {
 			r.Close()
 			t.Errorf("%s: dialled", name)
 		}
+	}
+}
+
+// failingState is a COSI state whose Get fails with err; nothing else of it is called.
+type failingState struct {
+	state.State
+	err error
+}
+
+func (s failingState) Get(context.Context, resource.Pointer, ...state.GetOption) (resource.Resource, error) {
+	return nil, s.err
+}
+
+// failingMachine is a machine service whose Version fails with err.
+type failingMachine struct {
+	machine.MachineServiceClient
+	err error
+}
+
+func (m failingMachine) Version(context.Context, *emptypb.Empty, ...grpc.CallOption) (*machine.VersionResponse, error) {
+	return nil, m.err
+}
+
+// TestErrorsDoNotQuoteUpstream: machinery decodes the configuration before it returns it, and a
+// decoder error quotes the rejected YAML, i.e. the configuration's secrets; a talosconfig parse
+// error quotes the file, which holds the client key. This package's errors keep neither, and keep
+// the gRPC code and a context error.
+func TestErrorsDoNotQuoteUpstream(t *testing.T) {
+	const mark = "UPSTRM" // short: the YAML decoder quotes 7 characters of a value, then "..."
+	_, decodeErr := configloader.NewFromBytes([]byte("version: v1alpha1\nmachine:\n  unknownField: " + mark + "\n"))
+	tc := filepath.Join(t.TempDir(), "talosconfig")
+	if err := os.WriteFile(tc, []byte("context: a\ncontexts:\n  a:\n    endpoints: "+mark+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, openErr := clientconfig.Open(tc)
+	for what, err := range map[string]error{"decode": decodeErr, "talosconfig": openErr} {
+		if err == nil || !strings.Contains(err.Error(), mark) {
+			t.Fatalf("control: machinery's %s error does not quote its input, so this test proves nothing: %v", what, err)
+		}
+	}
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	for name, c := range map[string]struct {
+		ctx  context.Context
+		err  error
+		code codes.Code
+	}{
+		"decode":   {t.Context(), decodeErr, codes.Unknown},
+		"denied":   {t.Context(), status.Error(codes.PermissionDenied, mark), codes.PermissionDenied},
+		"canceled": {canceled, fmt.Errorf("%s: %w", mark, context.Canceled), codes.Unknown},
+	} {
+		r := &reader{api: &client.Client{COSI: failingState{err: c.err}, MachineClient: failingMachine{err: c.err}}, node: "n"}
+		_, mcErr := r.MachineConfig(c.ctx)
+		_, vErr := r.Version(c.ctx)
+		for op, err := range map[string]error{"MachineConfig": mcErr, "Version": vErr} {
+			switch {
+			case err == nil || strings.Contains(err.Error(), mark):
+				t.Errorf("%s %s: %v", name, op, err)
+			case status.Code(err) != c.code:
+				t.Errorf("%s %s: code %s, want %s", name, op, status.Code(err), c.code)
+			case (c.ctx.Err() != nil) != errors.Is(err, context.Canceled):
+				t.Errorf("%s %s: errors.Is(context.Canceled) is wrong: %v", name, op, err)
+			}
+		}
+	}
+	if _, err := Dial(t.Context(), tc, Target{Endpoint: "10.55.0.2", Node: "10.55.0.3"}); err == nil || strings.Contains(err.Error(), mark) {
+		t.Errorf("Dial: %v", err)
 	}
 }

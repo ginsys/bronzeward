@@ -15,6 +15,8 @@ import (
 	"github.com/cosi-project/runtime/pkg/safe"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 	cfgres "github.com/siderolabs/talos/pkg/machinery/resources/config"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Target is the Talos API endpoint a request goes through and the node it is about; they differ
@@ -41,7 +43,8 @@ func Dial(ctx context.Context, talosconfigPath string, t Target) (Reader, error)
 	}
 	c, err := client.New(ctx, client.WithConfigFromFile(talosconfigPath), client.WithEndpoints(t.Endpoint))
 	if err != nil {
-		return nil, fmt.Errorf("talos: %w", err)
+		// The machinery's text can quote the talosconfig, which holds the client key.
+		return nil, fmt.Errorf("talos: no client from the talosconfig %s", talosconfigPath)
 	}
 	return &reader{api: c, node: t.Node}, nil
 }
@@ -51,14 +54,39 @@ type reader struct {
 	node string
 }
 
+// requestError is a failed node request in this package's own words. The machinery's error text
+// is not kept: it decodes the configuration before returning it, and a decoder error quotes the
+// rejected YAML, i.e. the configuration's secrets. The gRPC code (status.Code) and a context error
+// (errors.Is) are kept.
+type requestError struct {
+	what string
+	code codes.Code
+	ctx  error
+}
+
+func newRequestError(ctx context.Context, what string, err error) error {
+	return &requestError{what: what, code: status.Code(err), ctx: ctx.Err()}
+}
+
+func (e *requestError) Error() string {
+	s := "talos: " + e.what + ": " + e.code.String()
+	if e.ctx != nil {
+		s += ": " + e.ctx.Error()
+	}
+	return s
+}
+
+func (e *requestError) GRPCStatus() *status.Status { return status.New(e.code, e.code.String()) }
+func (e *requestError) Unwrap() error              { return e.ctx }
+
 func (r *reader) MachineConfig(ctx context.Context) (Config, error) {
 	mc, err := safe.StateGetByID[*cfgres.MachineConfig](client.WithNode(ctx, r.node), r.api.COSI, cfgres.ActiveID)
 	if err != nil {
-		return Config{}, fmt.Errorf("talos: reading the machine configuration: %w", err)
+		return Config{}, newRequestError(ctx, "reading the machine configuration", err)
 	}
 	b, err := mc.Provider().Bytes()
 	if err != nil {
-		return Config{}, fmt.Errorf("talos: encoding the machine configuration: %w", err)
+		return Config{}, errors.New("talos: the machine configuration could not be encoded")
 	}
 	return newConfig(b, mc.Metadata().Version().String()), nil
 }
@@ -66,14 +94,14 @@ func (r *reader) MachineConfig(ctx context.Context) (Config, error) {
 func (r *reader) Version(ctx context.Context) (string, error) {
 	resp, err := r.api.Version(client.WithNode(ctx, r.node))
 	if err != nil {
-		return "", fmt.Errorf("talos: version: %w", err)
+		return "", newRequestError(ctx, "version", err)
 	}
 	msgs := resp.GetMessages()
 	if len(msgs) != 1 {
 		return "", fmt.Errorf("talos: version: %d answers for one node", len(msgs))
 	}
-	if e := msgs[0].GetMetadata().GetError(); e != "" {
-		return "", fmt.Errorf("talos: version: the node answered an error: %s", e)
+	if msgs[0].GetMetadata().GetError() != "" {
+		return "", errors.New("talos: version: the node answered an error")
 	}
 	tag := msgs[0].GetVersion().GetTag()
 	if tag == "" {

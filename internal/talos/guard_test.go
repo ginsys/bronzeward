@@ -133,6 +133,7 @@ var surface = []string{
 	"Reader", "Reader.Close", "Reader.MachineConfig", "Reader.Version",
 	"Target", "Target.Endpoint", "Target.Node",
 	"reader.Close", "reader.MachineConfig", "reader.Version",
+	"requestError.Error", "requestError.GRPCStatus", "requestError.Unwrap",
 }
 
 func TestExportedSurface(t *testing.T) {
