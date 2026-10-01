@@ -1233,8 +1233,9 @@ Evidence gaps this contract carries rather than closes:
   exercise staging-key, baseline-key and HMAC use under the fixture's
   policies, each refusal beside a control with the refused grant added, against
   OpenBao 2.6.1 in dev mode. There, a `cas=0` create on an existing generation
-  is refused to ingestion by its policy (403) before check-and-set is reached,
-  and by check-and-set alone (400) to an identity that may also update.
+  is refused to ingestion by its policy (403) before check-and-set is reached:
+  with `update` added to that policy, the same request is refused by
+  check-and-set (400) instead.
 - **Addressing**: the JSON Pointer scheme (§2.2) is untested.
 - **Ingestion input**: only configurations read back from a node were
   ingested; a generated configuration before Talos normalizes it was not (E1 §7).
