@@ -76,6 +76,25 @@ go run ./fixtures/oidc defects   # every defect mint can put in a token
 - **Tested against this issuer only.** Bronzeward's verifier is tested against this issuer alone.
   No identity-provider product's interoperability is claimed.
 
+## OpenBao keys and policies
+
+`bin/up` enables KV v2 at `secret/` and Transit, and creates four Transit keys: `bw-artifact`,
+which the compiler encrypts artifacts under and the executor decrypts, and ingestion's
+`bw-baseline`, `bw-staging` and `bw-digest` (compilation §2.3, §3.1, §4.1). The role policies are
+the files in [`openbao/policies`](openbao/policies):
+
+- `bw-ingestion`: creates generations under `secret/data/gen/`, without read or update; encrypts
+  under the baseline key; encrypts and decrypts under the staging key; computes an HMAC on the
+  digest key's exact path.
+- `bw-compiler`: reads generations; encrypts under the artifact key.
+- `bw-executor`: decrypts under the artifact key.
+- `bw-metadata-only`: the classification experiment's identity, which reads no value.
+
+`bin/up` writes them from those files, which `mise run go-db` also writes into a dev-mode OpenBao
+for the policy tests (`internal/provider`), so the fixture and the tests hold the same policies.
+Only ingestion has tokens here, one per instance, without OpenBao's default policy; compiler and
+executor tokens come with those components.
+
 ## Versions
 
 [`versions.env`](versions.env) is the single manifest: image index digests, CLI release URLs with
@@ -96,6 +115,10 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
   and `bin/selftest` reads the file a child `up` wrote the same way as every other command. A
   value the caller's shell holds under one of those names is never used.
 - `bao-init.json`: the single OpenBao unseal key, in base64 and in hex, and the root token.
+- `server/a/openbao-ingestion.token`, `server/b/openbao-ingestion.token`: each instance's OpenBao
+  token, under `bw-ingestion` alone, beside its `config.yaml` and read by it as
+  `/etc/bronzeward/openbao-ingestion.token` (see [OpenBao keys and policies](#openbao-keys-and-policies)).
+  A missing one fails the scan-pattern list.
 - `talos-secrets.yaml`, `controlplane.yaml`, `talosconfig`, `kubeconfig`: the cluster's own
   generated secrets bundle and client configs.
 - `scan-patterns.txt`: every one of the above as a fixed string, the client private keys in
@@ -219,7 +242,7 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 removal of `.state` would take a link and leave the cluster's credentials at the far end. The files `bin/up` generates
 (`lock`, `secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
-node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env` and `up-compose.yaml`) must each be
+node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env`, `up-compose.yaml` and the instances' `openbao-ingestion.token`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
