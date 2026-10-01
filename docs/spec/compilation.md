@@ -565,7 +565,9 @@ authoring error.
   mapping, is extracted as part of it: one reference, not a reference inside a
   reference. Marking a registry's whole `auth` mapping, whose password the
   schema also identifies, is the case. A member that aliases a target, or a
-  target also reached outside the mapping, refuses the input.
+  target also reached outside the mapping, refuses the input. So does a mapping
+  target whose key or member carries an anchor: the reference drops it, and an
+  alias of it would then name an earlier anchor of the same name, or none.
 - References replace complete parsed values. There is no interpolation, and
   arbitrary text is referenced whole (design §6.9).
 - No local tag other than `!bwref` is accepted in a fragment: its behaviour

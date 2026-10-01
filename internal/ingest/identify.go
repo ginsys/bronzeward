@@ -190,7 +190,8 @@ func splitKey(k string) []string {
 
 // valueOf is a node's value and kind (rulings in the package doc): a !!str, !!int or !!bool
 // scalar, or a mapping of string keys to those. Anything else (null, float, sequence, nested
-// mapping, a reference, another tag, a repeated key) has no kind. Errors never quote the node.
+// mapping, a reference, another tag, a repeated key, an anchored key or member) has no kind.
+// Errors never quote the node.
 func valueOf(n *yaml.Node) (provider.Kind, any, error) {
 	n = deref(n)
 	if n == nil {
@@ -199,6 +200,11 @@ func valueOf(n *yaml.Node) (provider.Kind, any, error) {
 	if n.Kind == yaml.MappingNode {
 		m := map[string]any{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
+			// Substitution drops a member's anchor, so an alias of it elsewhere would name an
+			// earlier anchor of the same name, or none.
+			if n.Content[i].Anchor != "" || n.Content[i+1].Anchor != "" {
+				return "", nil, refuse(RuleMarkKind)
+			}
 			k, v := deref(n.Content[i]), n.Content[i+1]
 			if k == nil || k.Kind != yaml.ScalarNode || k.Tag != "!!str" {
 				return "", nil, refuse(RuleMarkKind)

@@ -278,6 +278,35 @@ func TestExtractCoalescesNestedTargets(t *testing.T) {
 	}
 }
 
+// TestExtractRefusesAnchoredMember: substituting a mapping drops its members' anchors, and an
+// alias of one elsewhere would then name an earlier anchor of the same name, or none. A mapping
+// target whose key or member carries an anchor refuses, however it is marked.
+func TestExtractRefusesAnchoredMember(t *testing.T) {
+	const annotations = "doc[0]/machine/nodeAnnotations"
+	rebind := "machine:\n  nodeLabels:\n    public-key: &v public-value\n  nodeAnnotations:\n    private-key: &v private-value\n  certSANs: [*v]\n"
+	for _, marks := range [][]string{{annotations}, {annotations, annotations + "/private-key"}, {annotations + "/private-key", annotations}} {
+		if _, err := Extract(request(t, rebind, marks...)); !isRule(err, RuleMarkKind) {
+			t.Errorf("%v: %v, want a %s refusal", marks, err, RuleMarkKind)
+		}
+	}
+	// The machinery refuses this stream before identification, so the key case is checked on the
+	// mapping's kind directly.
+	docs, err := parseStream([]byte("a:\n  &k private-key: private-value\nb:\n  *k : x\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, _ := resolve(docs, 0, []string{"a"})
+	if _, _, err := valueOf(n); !isRule(err, RuleMarkKind) {
+		t.Errorf("an anchored key: %v, want a %s refusal", err, RuleMarkKind)
+	}
+	manifest := "kind: Secret\nstringData:\n  a: &v value-one-77\n  b: value-two-77\nmetadata:\n  name: *v\n"
+	req := request(t, "machine:\n  token: "+secretText+"\n"+manifestStream(manifest), manifestPath+"|yaml/stringData")
+	req.Declarations.Embedded = []Embedded{{Path: manifestPath, Format: "yaml"}}
+	if _, err := Extract(req); !isRule(err, RuleMarkKind) {
+		t.Errorf("inside an embedded document: %v, want a %s refusal", err, RuleMarkKind)
+	}
+}
+
 // TestReingestAliasedOutput: a sanitized stream whose reference is anchored and aliased is valid
 // input again; re-ingesting it with its declarations extracts nothing new.
 func TestReingestAliasedOutput(t *testing.T) {
