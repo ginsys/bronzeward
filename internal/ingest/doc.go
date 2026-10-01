@@ -27,11 +27,16 @@
 //     only. A string that does not parse as a path is shown only if it is a reference name
 //     holding no value.
 //     Parser errors keep only a line. A create callback's error is returned as a CreateError
-//     that names the reference and holds the cause where no fmt verb or reflection reaches it.
+//     that names the reference and answers errors.Is for the cause, but holds it where no fmt
+//     verb, reflection or Unwrap reaches it; errors.As cannot reach it either.
 //   - An alias inside the node it names is refused as a parse failure: the graph is infinite. So
 //     is a mapping key whose text an earlier key of the same mapping holds (1 and "1" included,
 //     as a pointer token matches either): a path through it would name two nodes, and
-//     extracting one would leave the other value in the stream.
+//     extracting one would leave the other value in the stream. So is a key that is not a
+//     scalar, which no pointer token names.
+//   - A target that is a member of a marked mapping, reached only through it, is extracted as
+//     part of the mapping. A member that aliases a target, or a target also reached elsewhere,
+//     refuses the mapping as mark-kind.
 //   - Every target is stored as a reference, which a later ingestion loads as a null. A
 //     document the machinery cannot load with its targets as nulls (a mark on its kind) refuses
 //     the input as schema-unloadable: it could never be ingested again.
@@ -45,8 +50,8 @@
 //   - The guard also searches every comment and every anchor and alias name, which §4.2 does
 //     not name: they are persisted with the stream and no other check reads them. A declared
 //     embedded document is searched both as its whole text, without this run's references, and
-//     node by node. The members of an extracted mapping are guard values, its keys are not; an
-//     empty value is not searched for, since it matches everything.
+//     node by node. The keys and members of an extracted mapping are guard values, as the
+//     provider stores both; an empty value is not searched for, since it matches everything.
 //   - Marks inside an identified embedded document are resolved in its parsed form; the document
 //     is then written back as block YAML with two-space indentation, without the author's styles
 //     or comments, whether it was declared yaml or json (§5.4).

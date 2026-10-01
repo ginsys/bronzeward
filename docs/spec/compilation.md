@@ -131,7 +131,8 @@ inner token can.
 1. **Read** into the unresolved type (§2.1).
 2. **Parse** every document of the stream. A parse failure refuses the input;
    the refusal quotes no input text. A mapping that holds a key twice is a
-   parse failure, as YAML forbids it, so a path never names two nodes.
+   parse failure, as YAML forbids it, so a path never names two nodes. So is a
+   mapping key that is not a scalar, which no path token can name.
 3. **Identify** the values to extract: every field the pinned Talos machinery
    marks secret (the `pkg/machinery` `RedactSecrets` field list, SP §2), and
    every path the operator marks in the request. A mark that addresses no node
@@ -412,7 +413,9 @@ plans, dispatches or observes can compute them.
 ### 4.2 The guard (E1 decision 4)
 
 Before a sanitized value is constructed, the candidate document is parsed back
-and checked twice against every value extracted in this run:
+and checked twice against every value extracted in this run. An extracted
+mapping contributes its keys as well as its members, since the provider stores
+both:
 
 1. **Value comparison.** Every scalar in every document, mapping keys and
    unaddressable subtrees included, is compared as a parsed value. This catches
@@ -558,6 +561,11 @@ authoring error.
   `cluster/extraManifests[1]` (SP §3.1, §4.2).
 - Not on a mapping key, and not on a sequence as a whole: a list as a reference
   target was not run (SR §8), so the PoC refuses it.
+- A target that is a member of a marked mapping, reached only through that
+  mapping, is extracted as part of it: one reference, not a reference inside a
+  reference. Marking a registry's whole `auth` mapping, whose password the
+  schema also identifies, is the case. A member that aliases a target, or a
+  target also reached outside the mapping, refuses the input.
 - References replace complete parsed values. There is no interpolation, and
   arbitrary text is referenced whole (design §6.9).
 - No local tag other than `!bwref` is accepted in a fragment: its behaviour

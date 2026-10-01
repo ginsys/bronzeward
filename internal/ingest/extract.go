@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"go.yaml.in/yaml/v3"
 
@@ -90,7 +91,11 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	if err != nil {
 		return nil, err
 	}
-	exs, err := substitute(append(targets, inner...), req.Declarations.References)
+	all, err := coalesce(append(targets, inner...))
+	if err != nil {
+		return nil, err
+	}
+	exs, err := substitute(all, req.Declarations.References)
 	if err != nil {
 		return nil, err
 	}
@@ -140,11 +145,11 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 }
 
 // knownSecrets is the text of every value the request would extract that can be found before
-// extraction: each value the machinery redacts, and every scalar under each mark, outer or inside
-// an embedded document that parses, aliases followed. complete is false when the machinery could
-// not load a document, or a value it redacts is not the text of the input scalar at its path
-// (schema-indirect): the input's own spelling of the secret is then unknown. Other failures are
-// skipped here; identification reports them.
+// extraction: each value the machinery redacts, and every scalar under each mark (keys included),
+// outer or inside an embedded document that parses, aliases followed. complete is false when the
+// machinery could not load a document, or a value it redacts is not the text of the input scalar
+// at its path (schema-indirect): the input's own spelling of the secret is then unknown. Other
+// failures are skipped here; identification reports them.
 func knownSecrets(docs []*yaml.Node, marks []Path) (texts []string, complete bool) {
 	var values []any
 	complete = true
@@ -173,11 +178,8 @@ func knownSecrets(docs []*yaml.Node, marks []Path) (texts []string, complete boo
 			if n.Tag != refTag {
 				values = append(values, n.Value)
 			}
-		case yaml.MappingNode:
-			for i := 1; i < len(n.Content); i += 2 {
-				collect(n.Content[i])
-			}
-		case yaml.SequenceNode:
+		case yaml.MappingNode, yaml.SequenceNode:
+			// A marked mapping's keys are extracted with its members.
 			for _, c := range n.Content {
 				collect(c)
 			}
@@ -275,6 +277,55 @@ func plainStyle(n *yaml.Node) {
 	}
 }
 
+// coalesce drops each target that is a member value of a mapping target and is reached only
+// through it: the mapping's extraction carries its value, which substituting it first would
+// turn into a reference the mapping cannot hold. A member that aliases a target, or a target
+// that is also reached outside the mapping, cannot be carried and refuses the mapping.
+func coalesce(ts []*target) ([]*target, error) {
+	byNode := map[*yaml.Node]*target{}
+	for _, t := range ts {
+		byNode[t.node] = t
+	}
+	inside := map[*target]bool{}
+	for _, p := range ts {
+		if p.node.Kind != yaml.MappingNode {
+			continue
+		}
+		for i := 1; i < len(p.node.Content); i += 2 {
+			m := p.node.Content[i]
+			c := byNode[deref(m)]
+			if c == nil {
+				continue
+			}
+			if m.Kind == yaml.AliasNode || !reachedOnlyThrough(c.paths, p.paths) {
+				return nil, refuse(RuleMarkKind, p.paths[0].String())
+			}
+			inside[c] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(ts), func(t *target) bool { return inside[t] }), nil
+}
+
+// reachedOnlyThrough reports whether every path in cs lies strictly below a path in ps.
+func reachedOnlyThrough(cs, ps []Path) bool {
+	for _, c := range cs {
+		if !slices.ContainsFunc(ps, func(p Path) bool { return below(c, p) }) {
+			return false
+		}
+	}
+	return true
+}
+
+func below(c, p Path) bool {
+	if c.Doc != p.Doc || c.Format != p.Format {
+		return false
+	}
+	if c.Format == "" {
+		return len(c.Pointer) > len(p.Pointer) && slices.Equal(c.Pointer[:len(p.Pointer)], p.Pointer)
+	}
+	return slices.Equal(c.Pointer, p.Pointer) && len(c.Inner) > len(p.Inner) && slices.Equal(c.Inner[:len(p.Inner)], p.Inner)
+}
+
 // substitute replaces each target node in place by a reference under a newly minted name
 // (compilation.md §5.1: "s-" and a random identifier, never derived from the value). The node
 // keeps its anchor and comments, so every alias of it yields the reference.
@@ -316,9 +367,11 @@ func encodeStream(docs []*yaml.Node) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// CreateError is a create callback's failure for one reference. It names the reference and keeps
-// the cause for errors.Is and errors.As, but never renders it: the callback's message is the
-// caller's text and can hold the value it was writing.
+// CreateError is a create callback's failure for one reference. It names the reference and
+// answers errors.Is for the cause, but never renders or returns it: the callback's message is
+// the caller's text and can hold the value it was writing, and a reporter that walks a chain
+// through Unwrap renders every error it reaches. errors.As cannot reach the cause for the same
+// reason: it would hand the caller the error itself.
 // The cause sits behind a function, not in an error field, so that reflection over a CreateError
 // (any fmt verb without a method, or an enclosing error's unexported field) shows an address.
 type CreateError struct {
@@ -337,11 +390,9 @@ func (e *CreateError) Error() string {
 // Format prints the message for every verb.
 func (e *CreateError) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, e.Error()) }
 
-func (e *CreateError) Unwrap() error {
-	if e.cause == nil {
-		return nil
-	}
-	return e.cause()
+// Is reports whether the cause's chain holds target.
+func (e *CreateError) Is(target error) bool {
+	return e.cause != nil && errors.Is(e.cause(), target)
 }
 
 // Commit performs compilation.md §2.3 step 6 through create, once per extracted value in order,
