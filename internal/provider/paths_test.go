@@ -1,8 +1,10 @@
 package provider
 
 import (
+	"math"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -92,6 +94,47 @@ func TestTransitPathRefusesSlash(t *testing.T) {
 	for _, name := range []string{"", "k#x", "k?x", "k%2F", "k x", "a/b", "../sys", ".", "..", "k\\x", "k\x00"} {
 		if got, err := transitPath("encrypt", name); err == nil {
 			t.Errorf("transitPath accepted %q as %q", name, got)
+		}
+	}
+}
+
+// A digest's key reference is stored in import_base_revision.baseline_digest_key, whose bound is
+// read from the migration rather than copied. A key name that fits makes a reference that fits at
+// the largest version Digest accepts; one byte more is refused before any provider call, so no
+// generation is created for an ingestion whose record the column would then refuse.
+func TestKeyNameFitsTheKeyReference(t *testing.T) {
+	b, err := os.ReadFile("../migrate/migrations/0004_adoption.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`octet_length\(baseline_digest_key\) <= (\d+)`).FindStringSubmatch(string(b))
+	if m == nil {
+		t.Fatal("no baseline_digest_key bound in 0004_adoption.sql")
+	}
+	limit, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	fits := strings.Repeat("k", maxKeyName)
+	if err := CheckKeyName(fits); err != nil {
+		t.Fatalf("a %d-byte key name was refused: %v", len(fits), err)
+	}
+	if ref := (Digest{Key: fits, Version: math.MaxInt}).KeyRef(); len(ref) != limit {
+		t.Fatalf("the longest key name at the largest version makes a %d-byte reference; the column holds %d", len(ref), limit)
+	}
+	keys := testKeys
+	keys.Digest = fits
+	if _, err := NewIngestion("http://127.0.0.1:8200", tokenOf(testToken), keys); err != nil {
+		t.Fatalf("NewIngestion refused a %d-byte digest key: %v", len(fits), err)
+	}
+	// One byte over, in ASCII and with a two-byte character: the column counts bytes, not runes.
+	for _, over := range []string{fits + "k", strings.Repeat("k", maxKeyName-1) + "é"} {
+		if err := CheckKeyName(over); err == nil {
+			t.Errorf("a %d-byte key name was accepted", len(over))
+		}
+		keys.Digest = over
+		if _, err := NewIngestion("http://127.0.0.1:8200", tokenOf(testToken), keys); err == nil {
+			t.Errorf("NewIngestion accepted a %d-byte digest key", len(over))
 		}
 	}
 }

@@ -388,8 +388,11 @@ baseline check relies on
 §8 item 7). The HMAC is OpenBao Transit `hmac` with `sha2-256`, under a
 dedicated digest key that only ingestion identities may use **(choice
 §16.27)**. The record names that key and the key version Transit reports, as
-`transit/<key>@v<N>`. How digests are compared across a rotation of the key is
-undesigned, and the PoC never rotates it (§15).
+`transit/<key>@v<N>`, at most 256 bytes; configuration refuses a key name over
+227 bytes, so the reference fits at any version of up to 19 digits and no
+provider write precedes a record that could not be stored. How digests are
+compared across a rotation of the key is undesigned, and the PoC never rotates
+it (§15).
 
 This covers digests of individual secret values. Whole-configuration digests
 used to compare observed and applied state
