@@ -166,6 +166,13 @@ unset compose_yaml
 # The server configuration template likewise, read once here: the instances' configuration is
 # rendered from this reading, after the fetch, and held below to the file the tree check sees.
 server_template=$(cat -- "$FIXTURES/server.yaml.in") || die "cannot read $FIXTURES/server.yaml.in"
+# The OpenBao policies too, the files internal/baotest also writes (fixtures/openbao/policies):
+# read once here, written to OpenBao from this reading, held below to the files the tree check sees.
+declare -A policies
+for policy in bw-ingestion bw-compiler bw-executor bw-metadata-only; do
+  policies[$policy]=$(cat -- "$FIXTURES/openbao/policies/$policy.hcl") ||
+    die "cannot read $FIXTURES/openbao/policies/$policy.hcl"
+done
 recovery='run fixtures/bin/down to remove what was created'
 unset daemon_id
 mkdir "$STATE/data" "$STATE/backups"
@@ -187,6 +194,10 @@ printf '%s\n' "$versions_env" | cmp --silent -- - "$FIXTURES/versions.env" ||
   die "versions.env changed while fixtures/ was being inventoried; run again"
 printf '%s\n' "$server_template" | cmp --silent -- - "$FIXTURES/server.yaml.in" ||
   die "server.yaml.in changed while fixtures/ was being inventoried; run again"
+for policy in "${!policies[@]}"; do
+  printf '%s\n' "${policies[$policy]}" | cmp --silent -- - "$FIXTURES/openbao/policies/$policy.hcl" ||
+    die "openbao/policies/$policy.hcl changed while fixtures/ was being inventoried; run again"
+done
 printf '%s\n' "$manifest" >"$STATE/up-manifest"
 unset manifest differs
 # The named volumes compose.yaml declares are made here, first of all, with a label that names this
@@ -440,16 +451,36 @@ wait_for 60 "an active OpenBao node" bao token lookup
 
 bao secrets enable -path=secret -version=2 kv >/dev/null
 bao secrets enable transit >/dev/null
-bao write -force transit/keys/bw-artifact >/dev/null
+# bw-artifact is the compiler's and the executor's; the other three are ingestion's
+# (compilation.md §4.1): baseline encryption, the staging envelope and the keyed digest.
+for key in bw-artifact bw-baseline bw-staging bw-digest; do
+  bao write -force "transit/keys/$key" >/dev/null || die "could not create the Transit key $key"
+done
 # The canary over stdin, not on the CLI's command line: it is what the leak scan looks for.
 printf '%s' "$BW_CANARY" | bao_stdin kv put secret/fixture/inline value=- >/dev/null
 
-# A metadata-only identity: the classification experiment must not be able to read values.
-bao_id=$(container_id "$BAO") || die "the OpenBao container was not recorded above"
-BAO_TOKEN=$BW_BAO_ROOT_TOKEN timeout "$REQUEST_LIMIT" docker exec -i -e BAO_TOKEN "$bao_id" bao policy write bw-metadata-only - >/dev/null <<'POLICY'
-path "secret/metadata/*" { capabilities = ["read", "list"] }
-path "transit/keys/*"    { capabilities = ["read", "list"] }
-POLICY
+# The role policies from the files read above. bw-metadata-only is the metadata-only identity: the
+# classification experiment must not be able to read values.
+for policy in "${!policies[@]}"; do
+  printf '%s\n' "${policies[$policy]}" | bao_stdin policy write "$policy" - >/dev/null ||
+    die "could not write the OpenBao policy $policy"
+done
+unset policies policy key
+# One ingestion token per instance, under bw-ingestion alone, written whole beside the instance's
+# configuration (mktemp in the directory, then a rename): an instance never reads a cut token.
+for instance in a b; do
+  # Assigned first: a command substitution that is only a printf argument cannot fail the script.
+  ingestion_token=$(bao token create -policy=bw-ingestion -format=json | jq -er .auth.client_token) ||
+    die "could not create instance $instance's OpenBao ingestion token"
+  token_file=$(mktemp "$STATE/server/$instance/openbao-ingestion.token.XXXXXX") ||
+    die "could not write instance $instance's OpenBao ingestion token"
+  if ! printf '%s\n' "$ingestion_token" >"$token_file" ||
+    ! mv --no-target-directory -- "$token_file" "$STATE/server/$instance/openbao-ingestion.token"; then
+    rm -f -- "$token_file"
+    die "could not write instance $instance's OpenBao ingestion token"
+  fi
+done
+unset ingestion_token token_file instance
 # Assigned first: a command substitution that is only a printf argument cannot fail the script.
 metadata_token=$(bao token create -policy=bw-metadata-only -format=json | jq -er .auth.client_token) ||
   die "could not create the metadata-only OpenBao token"

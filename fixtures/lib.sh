@@ -272,7 +272,8 @@ need_state() {
 state_files_own() {
   local file
   for file in lock bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env up-compose.yaml \
-    up-image up-build linksplits automation-token automation-identity server/a/config.yaml server/b/config.yaml issuer/key.json; do
+    up-image up-build linksplits automation-token automation-identity server/a/config.yaml server/b/config.yaml \
+    server/a/openbao-ingestion.token server/b/openbao-ingestion.token issuer/key.json; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -1069,7 +1070,7 @@ fetch_tools() {
 # Each source is read on its own and a source that cannot be read fails the whole list: a jq that
 # stops halfway through bao-init.json would otherwise leave a list that is short and looks whole.
 scan_patterns() {
-  local talos_client_key kube_client_key bao_keys metadata_token talos_secrets issuer_key automation_token='' automation_secret=''
+  local talos_client_key kube_client_key bao_keys metadata_token ingestion_tokens talos_secrets issuer_key automation_token='' automation_secret=''
   local partial_token='' partial_secret=''
   talos_client_key=$(awk '$1 == "key:" {print $2}' "$TALOSCONFIG") || return 1
   kube_client_key=$(awk '$1 == "client-key-data:" {print $2}' "$KUBECONFIG") || return 1
@@ -1078,6 +1079,12 @@ scan_patterns() {
   # Both encodings of the unseal key: they share no substring, and either is the credential.
   bao_keys=$(jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json") || return 1
   metadata_token=$(awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env") || return 1
+  # The instances' OpenBao ingestion tokens: a missing file fails the list, since bin/up writes both
+  # before the list is first made.
+  ingestion_tokens=$(cat -- "$STATE/server/a/openbao-ingestion.token" "$STATE/server/b/openbao-ingestion.token") || return 1
+  if [ "$(wc -l <<<"$ingestion_tokens")" -ne 2 ] || grep --quiet --line-regexp '' <<<"$ingestion_tokens"; then
+    die "the instances' OpenBao ingestion tokens are not one line each; they would go unscanned"
+  fi
   talos_secrets=$(awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \
     "$STATE/talos-secrets.yaml") || return 1
   # The issuer's private key: the JWK's d (issuer.WriteKey writes a P-256 key as go-jose marshals it).
@@ -1094,7 +1101,7 @@ scan_patterns() {
     partial_token=$(cat -- "$STATE/automation-token.partial") || return 1
     partial_secret=${partial_token##*.}
   fi
-  printf '%s\n' 'BWSYNTH-' "$talos_client_key" "$kube_client_key" "$bao_keys" "$metadata_token" "$talos_secrets" \
+  printf '%s\n' 'BWSYNTH-' "$talos_client_key" "$kube_client_key" "$bao_keys" "$metadata_token" "$ingestion_tokens" "$talos_secrets" \
     "$issuer_key" "$automation_token" "$automation_secret" "$partial_token" "$partial_secret" |
     awk 'length($0) >= 8' | sort -u
 }
