@@ -368,6 +368,13 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
 - Talos runs as containers. Configuration RPCs and `apply-config --mode=no-reboot` work; reboot,
   upgrade, reset, disk and installer behavior do not exist here. This matches the scope of the PoC
   path and the deferred Upgrade/LifecycleClient tests, and nothing more.
+- Reading a node's machine configuration needs the `os:admin` Talos role. Measured on this fixture
+  (`internal/talos` `TestLiveRoleProbe`, Talos v1.13.6): talosconfigs for `os:reader` and
+  `os:operator` read the version but are refused the `MachineConfig` resource (`PermissionDenied`).
+  The only bound on what an ingestion read can do with that credential is `internal/talos`'s
+  read-only interface, which its guard tests hold to an allowlist of machinery calls.
+- Instances reach OpenBao over plain http on the Compose network (`plainHTTPHosts: [openbao]`):
+  Transit plaintext and the ingestion tokens cross it unencrypted. Both are synthetic.
 - Kubernetes images pulled inside the Talos nodes are pinned by version, not by digest.
 - The PostgreSQL tag floats under a fixed digest. The exact server version is in each evidence
   bundle.
