@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ginsys/bronzeward/internal/dbtest"
@@ -35,20 +36,22 @@ const (
 		CASE WHEN $4::text IS NULL THEN NULL ELSE now() + interval '1 minute' END,
 		$6, $7, $8, $9, CASE WHEN $9::text IS NULL THEN NULL ELSE 'human' END,
 		CASE WHEN $9::text IS NULL THEN NULL ELSE 'author' END, now(), $10::jsonb, $11::jsonb FROM installation_state`
-	insertEvent = `INSERT INTO operation_event (operation, number, epoch, entry, at)
-		SELECT $1, $2, epoch, $3::jsonb, now() FROM installation_state`
+	// The event names its operation's kind (0005), which the key on (operation, kind) checks.
+	insertEvent = `INSERT INTO operation_event (operation, number, epoch, entry, at, kind)
+		SELECT $1, $2, epoch, $3::jsonb, now(), $4 FROM installation_state`
 )
 
 // adoption holds one of each 0004 row, inserted by adoptionRows.
 type adoption struct {
-	human, cluster, other, machine, otherMachine, ibr, otherIBR, draft, draft2, claim, ingest string
+	human, cluster, other, machine, otherMachine, ibr, otherIBR, draft, draft2, claim, ingest, applyConfig, adopt string
 }
 
 func adoptionRows(t *testing.T, db *sql.DB) adoption {
 	t.Helper()
 	a := adoption{human: id.New(id.Principal), cluster: id.New(id.Cluster), other: id.New(id.Cluster),
 		machine: id.New(id.Machine), otherMachine: id.New(id.Machine), ibr: id.New(id.ImportBase), otherIBR: id.New(id.ImportBase),
-		draft: id.New(id.Draft), draft2: id.New(id.Draft), claim: id.New(id.Ingestion), ingest: id.New(id.Operation)}
+		draft: id.New(id.Draft), draft2: id.New(id.Draft), claim: id.New(id.Ingestion), ingest: id.New(id.Operation),
+		applyConfig: id.New(id.Operation), adopt: id.New(id.Operation)}
 	mustExec(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'alice', now())`, a.human)
 	mustExec(t, db, insertCluster, a.cluster, "office", "https://cp.example.test:6443", "v1.13")
 	mustExec(t, db, insertCluster, a.other, "lab", "https://lab.example.test:6443", "v1.13")
@@ -63,7 +66,9 @@ func adoptionRows(t *testing.T, db *sql.DB) adoption {
 	mustExec(t, db, insertEntry, a.draft, a.cluster, "import-base", a.machine, a.ibr)
 	mustExec(t, db, insertClaim, a.claim, "transient", "held", nil, a.human, "k0123456789abcdef")
 	mustExec(t, db, insertOperation, a.ingest, "ingest", "running", "run-1/4242/start-1", 1, a.draft, 1, a.claim, a.human, nil, nil)
-	mustExec(t, db, insertEvent, a.ingest, 1, `{"type":"started"}`)
+	mustExec(t, db, insertEvent, a.ingest, 1, `{"type":"started"}`, "ingest")
+	mustExec(t, db, insertOperation, a.applyConfig, "apply-config", "committed", "run-1/4242/start-1", 1, nil, nil, nil, nil, nil, nil)
+	mustExec(t, db, insertOperation, a.adopt, "adopt", "completed", nil, 0, nil, nil, nil, nil, nil, nil)
 	return a
 }
 
@@ -147,11 +152,24 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"failed job with an array error", insertOperation, []any{op(), "ingest", "failed", nil, 0, a.draft, 2, claim5, a.human, nil, "[]"}, "23514"},
 		{"second operation of a claim", insertOperation, []any{op(), "ingest", "succeeded", nil, 0, a.draft, 2, a.claim, a.human, `{"draft":"x"}`, nil}, "23505"},
 		{"second running ingest of a draft revision", insertOperation, []any{op(), "ingest", "running", "o", 1, a.draft, 1, claim2, a.human, nil, nil}, "23505"},
-		{"event 0", insertEvent, []any{a.ingest, 0, `{}`}, "23514"},
-		{"second event 1", insertEvent, []any{a.ingest, 1, `{}`}, "23505"},
-		{"event of no operation", insertEvent, []any{op(), 1, `{}`}, "23503"},
-		{"event with a JSON null entry", insertEvent, []any{a.ingest, 2, "null"}, "23514"},
-		{"event with an array entry", insertEvent, []any{a.ingest, 3, "[]"}, "23514"},
+		{"event 0", insertEvent, []any{a.ingest, 0, `{}`, "ingest"}, "23514"},
+		{"second event 1", insertEvent, []any{a.ingest, 1, `{}`, "ingest"}, "23505"},
+		{"event of no operation", insertEvent, []any{op(), 1, `{}`, "ingest"}, "23503"},
+		{"event with a JSON null entry", insertEvent, []any{a.ingest, 2, "null", "ingest"}, "23514"},
+		{"event with an array entry", insertEvent, []any{a.ingest, 3, "[]", "ingest"}, "23514"},
+		// 0005, issue ginsys/bronzeward#71: execution and recovery §3.2 commits an apply-config
+		// operation owned, and §3.4's takeover fence compares that owner, in every state up to a
+		// terminal one.
+		{"committed apply-config with no owner", insertOperation, []any{op(), "apply-config", "committed", nil, 0, nil, nil, nil, nil, nil, nil}, "23514"},
+		{"sending apply-config with no owner", insertOperation, []any{op(), "apply-config", "sending", nil, 0, nil, nil, nil, nil, nil, nil}, "23514"},
+		{"verifying apply-config with no owner", insertOperation, []any{op(), "apply-config", "verifying", nil, 0, nil, nil, nil, nil, nil, nil}, "23514"},
+		{"unresolved apply-config with no owner", insertOperation, []any{op(), "apply-config", "unresolved", nil, 0, nil, nil, nil, nil, nil, nil}, "23514"},
+		// PA §3 TimelineEvent: apply-config and adopt operations are on the machine timeline, so
+		// operation_event holds a publish or ingest operation's entries only, under its true kind.
+		{"event of an apply-config operation", insertEvent, []any{a.applyConfig, 1, `{}`, "apply-config"}, "23514"},
+		{"event of an adopt operation", insertEvent, []any{a.adopt, 1, `{}`, "adopt"}, "23514"},
+		{"apply-config event named an ingest", insertEvent, []any{a.applyConfig, 2, `{}`, "ingest"}, "23503"},
+		{"ingest event named a publish", insertEvent, []any{a.ingest, 2, `{}`, "publish"}, "23503"},
 		{"record naming no operation", `INSERT INTO idempotency_record (principal, key, fingerprint, request_id, epoch, status, body, operation_id, created_at)
 			SELECT $1, 'k0123456789abcdeY', $2, $3, epoch, 202, '{}', $4, now() FROM installation_state`,
 			[]any{a.human, digest(4), id.New(id.Request), op()}, "23503"},
@@ -163,7 +181,14 @@ func TestAdoptionConstraints(t *testing.T) {
 	// Positive controls beside the refusals: a running ingest of another revision, a publish of
 	// the same revision, and a live claim for the key once the first is released.
 	mustExec(t, db, insertOperation, op(), "ingest", "running", "o", 1, a.draft, 2, claim2, a.human, nil, nil)
-	mustExec(t, db, insertOperation, op(), "publish", "queued", nil, 0, a.draft, 1, nil, a.human, nil, nil)
+	publish := op()
+	mustExec(t, db, insertOperation, publish, "publish", "queued", nil, 0, a.draft, 1, nil, a.human, nil, nil)
+	mustExec(t, db, insertEvent, publish, 1, `{"type":"queued"}`, "publish")
+	// Owned apply-config operations in each fenced state commit; the fence ends at a terminal state.
+	for _, state := range []string{"sending", "verifying", "unresolved"} {
+		mustExec(t, db, insertOperation, op(), "apply-config", state, "run-1/4242/start-1", 2, nil, nil, nil, nil, nil, nil)
+	}
+	mustExec(t, db, insertOperation, op(), "apply-config", "failed", nil, 0, nil, nil, nil, nil, nil, nil)
 	mustExec(t, db, insertOperation, op(), "ingest", "failed", nil, 0, a.draft, 1, claim3, a.human, nil, `{"type":"urn:bronzeward:problem:x"}`)
 	mustExec(t, db, insertOperation, op(), "adopt", "completed", nil, 0, nil, nil, nil, nil, nil, nil)
 	mustExec(t, db, "UPDATE staging_claim SET state = 'released' WHERE id = $1", a.claim)
@@ -178,6 +203,77 @@ func TestAdoptionConstraints(t *testing.T) {
 		baseline_revision = baseline_revision + 1 WHERE machine = $1`, a.otherMachine, id.New(id.Release), digest(4))
 	if n := count(t, db, "machine_state WHERE baseline_revision = 2"); n != 1 {
 		t.Fatalf("%d machine states at baseline revision 2; want the advanced one", n)
+	}
+}
+
+// The control for 0005: with each of its constraints dropped, the row TestAdoptionConstraints
+// expects that constraint to refuse commits, so it is that constraint, not another, that refuses.
+func TestOperationFenceControl(t *testing.T) {
+	db, _ := installed(t)
+	a := adoptionRows(t, db)
+	for _, c := range []struct {
+		drop, q string
+		args    []any
+	}{
+		{"ALTER TABLE operation DROP CONSTRAINT operation_apply_config_owned", insertOperation,
+			[]any{id.New(id.Operation), "apply-config", "sending", nil, 0, nil, nil, nil, nil, nil, nil}},
+		{"ALTER TABLE operation_event DROP CONSTRAINT operation_event_job_kind", insertEvent,
+			[]any{a.applyConfig, 1, `{}`, "apply-config"}},
+		{"ALTER TABLE operation_event DROP CONSTRAINT operation_event_operation_kind", insertEvent,
+			[]any{a.ingest, 2, `{}`, "publish"}},
+	} {
+		func() {
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			if _, err := tx.Exec(c.drop); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(c.q, c.args...); err != nil {
+				t.Errorf("after %s: %v; want it to commit", c.drop, err)
+			}
+		}()
+	}
+}
+
+// 0005 refuses an installation whose operation_event already holds rows, which carry no kind to
+// check, and leaves it at 0004; the control upgrades the same installation without the row.
+func TestOperationFenceRefusesKindlessEvents(t *testing.T) {
+	ctx := context.Background()
+	ms, err := Embedded()
+	if err != nil || len(ms) < 5 || ms[3].Version != 4 {
+		t.Fatalf("embedded migrations: %v; want 0004 then 0005", err)
+	}
+	for _, withEvent := range []bool{true, false} {
+		db, _ := dbtest.New(t)
+		if _, err := Apply(ctx, db, ms[:4]); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Install(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+		adopt := id.New(id.Operation)
+		mustExec(t, db, `INSERT INTO operation (id, kind, state, epoch, created_at)
+			SELECT $1, 'adopt', 'completed', epoch, now() FROM installation_state`, adopt)
+		if withEvent {
+			mustExec(t, db, `INSERT INTO operation_event (operation, number, epoch, entry, at)
+				SELECT $1, 1, epoch, '{}', now() FROM installation_state`, adopt)
+		}
+		got, err := Apply(ctx, db, ms)
+		var top int
+		if err := db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&top); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		// The message, not only the failure: without the guard, the NOT NULL column would still fail
+		// on the row, with an error naming neither the cause nor the remedy.
+		case withEvent && (err == nil || !strings.Contains(err.Error(), "operation_event holds rows") || len(got) != 0 || top != 4):
+			t.Errorf("with an event: applied %v, %v, at %d; want 0005 refused and the installation at 0004", got, err, top)
+		case !withEvent && (err != nil || top < 5):
+			t.Errorf("without an event: applied %v, %v, at %d; want the upgrade to apply", got, err, top)
+		}
 	}
 }
 
