@@ -99,10 +99,17 @@ func validate(docs []*yaml.Node, d Declarations) error {
 	var check visit
 	check = func(n *yaml.Node, p Path, key bool, parent *yaml.Node) error {
 		if n.Kind == yaml.AliasNode {
+			// The anchored node was checked where it stands; an alias puts it in another
+			// position, which must be allowed too.
+			if t := deref(n); key && t != nil && t.Tag == refTag {
+				return refuse(RuleTagPlacement, p.String())
+			}
 			return nil
 		}
 		if n.Tag == refTag {
-			if key || n.Kind != yaml.ScalarNode {
+			// Only a mapping value or a list element: never a key, a collection, or a whole
+			// document (which has no parent).
+			if key || n.Kind != yaml.ScalarNode || parent == nil {
 				return refuse(RuleTagPlacement, p.String())
 			}
 			if !validName(n.Value) {

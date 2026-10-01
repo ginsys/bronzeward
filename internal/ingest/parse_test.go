@@ -60,3 +60,22 @@ func TestParseRefusesEmptyStream(t *testing.T) {
 		}
 	}
 }
+
+// TestParseRefusesCyclicAlias: an alias inside the node it names makes an infinite graph; it is
+// refused at parse, in the outer stream and in an identified embedded document.
+func TestParseRefusesCyclicAlias(t *testing.T) {
+	req := request(t, "machine: &m\n  nodeLabels: *m\n")
+	if _, err := Extract(req); !isRule(err, RuleParse) {
+		t.Fatalf("outer stream: %v", err)
+	}
+	req = request(t, "machine:\n  token: "+secretText+"\n"+manifestStream("a: &m\n  b: *m\n"))
+	req.Declarations.Embedded = []Embedded{{Path: manifestPath, Format: "yaml"}}
+	if _, err := Extract(req); !isRule(err, RuleEmbedded) {
+		t.Fatalf("embedded document: %v", err)
+	}
+}
+
+func isRule(err error, rule Rule) bool {
+	var r *Refusal
+	return errors.As(err, &r) && r.Rule == rule
+}

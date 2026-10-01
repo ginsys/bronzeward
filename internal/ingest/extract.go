@@ -50,11 +50,15 @@ func Extract(req Request) (*Candidate, error) { return extract(req, true) }
 
 // extract is Extract; guarded is false only in tests, to build the control candidates that
 // show a guard refusal is the guard's.
-func extract(req Request, guarded bool) (*Candidate, error) {
+func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	docs, err := parse(req.Input)
 	if err != nil {
 		return nil, err
 	}
+	// A refusal path can run through a key that holds a value being extracted, before or after
+	// substitution: every refusal is redacted against those values, as far as they can be found.
+	known := knownSecrets(docs, req.Marks)
+	defer func() { err = redactRefusal(err, known) }()
 	if err := validate(docs, req.Declarations); err != nil {
 		return nil, err
 	}
@@ -114,17 +118,50 @@ func extract(req Request, guarded bool) (*Candidate, error) {
 		}
 	}
 	if err := validate(back, decl); err != nil {
-		return nil, redactRefusal(err, exs)
+		return nil, err
 	}
 	c := &Candidate{docs: out, decl: decl}
 	for _, ex := range exs {
 		v, err := provider.NewValue(ex.kind, ex.plain)
 		if err != nil {
-			return nil, redactRefusal(refuse(RuleMarkKind, ex.paths[0].String()), exs)
+			return nil, refuse(RuleMarkKind, ex.paths[0].String())
 		}
 		c.values = append(c.values, namedValue{ex.name, v})
 	}
 	return c, nil
+}
+
+// knownSecrets is the text of every value the request would extract that can be found before
+// extraction: each value the machinery redacts, and every scalar under each mark, outer or inside
+// an embedded document that parses. Failures are skipped here; identification reports them.
+func knownSecrets(docs []*yaml.Node, marks []Path) []string {
+	var values []any
+	for i, d := range docs {
+		pointers, _ := schemaPointers(d, i)
+		for _, sp := range pointers {
+			values = append(values, sp.value)
+		}
+	}
+	for _, m := range marks {
+		n, ok := resolve(docs, m.Doc, m.Pointer)
+		if ok && m.Format != "" {
+			inner, err := embeddedDocument(n)
+			if err != nil {
+				continue
+			}
+			n, ok = resolveIn(root(inner), m.Inner)
+		}
+		if !ok {
+			continue
+		}
+		_ = walkNode(deref(n), Path{}, false, nil, func(s *yaml.Node, _ Path, key bool, _ *yaml.Node) error {
+			if s = deref(s); !key && s != nil && s.Kind == yaml.ScalarNode && s.Tag != refTag {
+				values = append(values, s.Value)
+			}
+			return nil
+		})
+	}
+	return searchTexts(values)
 }
 
 // embeddedDoc is an identified embedded document with marks inside it: the outer string scalar
@@ -243,8 +280,25 @@ func encodeStream(docs []*yaml.Node) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// CreateError is a create callback's failure for one reference. It names the reference and keeps
+// the cause for errors.Is and errors.As, but never renders it: the callback's message is the
+// caller's text and can hold the value it was writing.
+type CreateError struct {
+	Name string
+	err  error
+}
+
+func (e *CreateError) Error() string {
+	return fmt.Sprintf("ingest: creating the generation of %s failed", e.Name)
+}
+
+// GoString keeps %#v from printing the cause.
+func (e *CreateError) GoString() string { return e.Error() }
+
+func (e *CreateError) Unwrap() error { return e.err }
+
 // Commit performs compilation.md §2.3 step 6 through create, once per extracted value in order,
-// then constructs the sanitized value (step 7). A failed create returns its error and no
+// then constructs the sanitized value (step 7). A failed create returns a CreateError and no
 // sanitized value; a candidate commits at most once, failed or not.
 func (c *Candidate) Commit(ctx context.Context, create func(ctx context.Context, name string, v provider.Value) error) (Sanitized, error) {
 	if c == nil || len(c.docs) == 0 || create == nil {
@@ -256,7 +310,7 @@ func (c *Candidate) Commit(ctx context.Context, create func(ctx context.Context,
 	c.committed = true
 	for _, v := range c.values {
 		if err := create(ctx, v.name, v.value); err != nil {
-			return Sanitized{}, fmt.Errorf("ingest: creating the generation of %s: %w", v.name, err)
+			return Sanitized{}, &CreateError{Name: v.name, err: err}
 		}
 	}
 	return newSanitized(c.docs, c.decl), nil
