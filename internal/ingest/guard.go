@@ -139,9 +139,11 @@ func searchTexts(values []any) []string {
 	return out
 }
 
-// equalsAny compares a scalar with the extracted values as parsed values: its text, or for an
-// integer or boolean scalar its decoded value.
+// equalsAny compares a scalar with the extracted values as parsed values: its text, or for a
+// number or boolean scalar its decoded value (sameValue). A string value is compared as the
+// plain scalar its text reads as, so "314159" and 314159 are one secret, as redaction treats them.
 func equalsAny(n *yaml.Node, values []any) bool {
+	nv, typed := decodedScalar(n)
 	for _, v := range values {
 		s := scalarText(v)
 		if s == "" {
@@ -150,25 +152,95 @@ func equalsAny(n *yaml.Node, values []any) bool {
 		if n.Value == s {
 			return true
 		}
-		switch x := v.(type) {
-		case int64:
-			var i int64
-			if n.Tag == "!!int" && n.Decode(&i) == nil && i == x {
-				return true
-			}
-		case uint64:
-			var u uint64
-			if n.Tag == "!!int" && n.Decode(&u) == nil && u == x {
-				return true
-			}
-		case bool:
-			var b bool
-			if n.Tag == "!!bool" && n.Decode(&b) == nil && b == x {
-				return true
-			}
+		if str, ok := v.(string); ok {
+			v, _ = decodedScalar(&yaml.Node{Kind: yaml.ScalarNode, Value: str})
+		}
+		if typed && sameValue(nv, v) {
+			return true
 		}
 	}
 	return false
+}
+
+// decodedScalar is a scalar's decoded value when it is an integer (int64 or uint64), a float
+// (float64) or a boolean.
+func decodedScalar(n *yaml.Node) (any, bool) {
+	if n.Kind != yaml.ScalarNode {
+		return nil, false
+	}
+	switch n.ShortTag() {
+	case "!!int":
+		var i int64
+		if n.Decode(&i) == nil {
+			return i, true
+		}
+		var u uint64
+		if n.Decode(&u) == nil {
+			return u, true
+		}
+	case "!!float":
+		var f float64
+		if n.Decode(&f) == nil {
+			return f, true
+		}
+	case "!!bool":
+		var b bool
+		if n.Decode(&b) == nil {
+			return b, true
+		}
+	}
+	return nil, false
+}
+
+// sameValue reports whether two decoded scalars are the same boolean or the same number.
+// Integers compare exactly; a float equals an integer it rounds to, which over-matches beyond
+// 2^53 rather than missing a spelling.
+func sameValue(a, b any) bool {
+	if x, ok := a.(bool); ok {
+		y, ok := b.(bool)
+		return ok && x == y
+	}
+	fa, ia, ua, oka := number(a)
+	fb, ib, ub, okb := number(b)
+	if !oka || !okb {
+		return false
+	}
+	if fa != nil || fb != nil {
+		return toFloat(fa, ia, ua) == toFloat(fb, ib, ub)
+	}
+	switch {
+	case ia != nil && ib != nil:
+		return *ia == *ib
+	case ua != nil && ub != nil:
+		return *ua == *ub
+	case ia != nil:
+		return *ia >= 0 && uint64(*ia) == *ub
+	default:
+		return *ib >= 0 && uint64(*ib) == *ua
+	}
+}
+
+// number splits a decoded numeric scalar by kind; ok is false for anything else.
+func number(v any) (f *float64, i *int64, u *uint64, ok bool) {
+	switch x := v.(type) {
+	case float64:
+		return &x, nil, nil, true
+	case int64:
+		return nil, &x, nil, true
+	case uint64:
+		return nil, nil, &x, true
+	}
+	return nil, nil, nil, false
+}
+
+func toFloat(f *float64, i *int64, u *uint64) float64 {
+	switch {
+	case f != nil:
+		return *f
+	case i != nil:
+		return float64(*i)
+	}
+	return float64(*u)
 }
 
 // withoutMinted is an embedded document's text with this run's references removed, so that only
@@ -232,6 +304,9 @@ func documentsOnly(err error) error {
 }
 
 // redactPath renders p with every token that holds an extracted value replaced by <redacted>.
+// A path string can parse with its tokens split differently from the keys that produced it (a
+// key ending in |yaml), so the rendering is checked whole as well: if it, unescaped, still holds
+// a value, only the document is named.
 func redactPath(p Path, texts []string) string {
 	q := Path{Doc: p.Doc, Format: p.Format, Pointer: slices.Clone(p.Pointer), Inner: slices.Clone(p.Inner)}
 	for _, tokens := range [][]string{q.Pointer, q.Inner} {
@@ -241,12 +316,33 @@ func redactPath(p Path, texts []string) string {
 			}
 		}
 	}
-	return q.String()
+	if s := q.String(); !renderingHolds(s, texts) {
+		return s
+	}
+	if d := (Path{Doc: p.Doc}).String(); !renderingHolds(d, texts) {
+		return d
+	}
+	return redacted
+}
+
+// renderingHolds reports whether a rendered path holds a value: as written, unescaped, or in any
+// piece between separators.
+func renderingHolds(s string, texts []string) bool {
+	plain := strings.NewReplacer("~1", "/", "~0", "~").Replace(s)
+	if containsAny(s, texts) || containsAny(plain, texts) {
+		return true
+	}
+	for _, piece := range strings.FieldsFunc(plain, func(r rune) bool { return r == '/' || r == '|' }) {
+		if holdsAny(piece, texts) {
+			return true
+		}
+	}
+	return false
 }
 
 // holdsAny reports whether s contains one of texts, or as a plain scalar decodes to the same
-// integer or boolean as one of them: the guard's equality (equalsAny) treats 0x4cb2f as 314159
-// and TRUE as true, so a key spelled either way discloses the value.
+// number or boolean as one of them: the guard's equality (equalsAny) treats 0x4cb2f and
+// 3.14159e5 as 314159 and TRUE as true, so a key spelled any of those ways discloses the value.
 func holdsAny(s string, texts []string) bool {
 	if containsAny(s, texts) {
 		return true
@@ -259,18 +355,10 @@ func holdsAny(s string, texts []string) bool {
 	return false
 }
 
-// sameScalar reports whether a and b, read as plain YAML scalars, are the same integer or
-// boolean.
+// sameScalar reports whether a and b, read as plain YAML scalars, are the same number or
+// boolean, as the guard compares them.
 func sameScalar(a, b string) bool {
-	na := &yaml.Node{Kind: yaml.ScalarNode, Value: a}
-	nb := &yaml.Node{Kind: yaml.ScalarNode, Value: b}
-	tag := na.ShortTag()
-	if tag != nb.ShortTag() || tag != "!!int" && tag != "!!bool" {
-		return false
-	}
-	var va, vb any
-	if na.Decode(&va) != nil || nb.Decode(&vb) != nil {
-		return false
-	}
-	return va == vb
+	va, oka := decodedScalar(&yaml.Node{Kind: yaml.ScalarNode, Value: a})
+	vb, okb := decodedScalar(&yaml.Node{Kind: yaml.ScalarNode, Value: b})
+	return oka && okb && sameValue(va, vb)
 }

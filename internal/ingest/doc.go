@@ -19,10 +19,13 @@
 //     request extracts (a mapping key can be the secret) is shown as <redacted>, for refusals
 //     made before substitution too: the values are those the machinery redacts and those under
 //     each mark that resolves, aliases followed. A token is also redacted when it reads as the
-//     same integer or boolean as one of them, as the guard compares. When the machinery cannot
-//     load a document, or a value it redacts is not the text of its input scalar, the input's
-//     spelling of those values is not known, and a refusal names documents only. A string that
-//     does not parse as a path is shown only if it is a reference name holding no value.
+//     same number or boolean as one of them (0x4cb2f, 3.14159e5 and 314159 are one number), as
+//     the guard compares. A rendered path that still holds a value, unescaped or split
+//     differently from its keys (a key ending in |yaml), names its document only. When the
+//     machinery cannot load a document, or a value it redacts is not the text of its input
+//     scalar, the input's spelling of those values is not known, and a refusal names documents
+//     only. A string that does not parse as a path is shown only if it is a reference name
+//     holding no value.
 //     Parser errors keep only a line. A create callback's error is returned as a CreateError
 //     that names the reference and holds the cause where no fmt verb or reflection reaches it.
 //   - An alias inside the node it names is refused as a parse failure: the graph is infinite.
