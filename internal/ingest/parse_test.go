@@ -75,6 +75,35 @@ func TestParseRefusesCyclicAlias(t *testing.T) {
 	}
 }
 
+// TestParseRefusesDuplicateKeys: a pointer through a mapping that holds a key twice names two
+// nodes; extracting the first would leave the other value in the stream, unextracted and unequal
+// to what the guard compares. YAML forbids duplicate keys, so they are refused at parse, keys
+// compared by their text as a pointer token matches them. The refusal quotes no key.
+func TestParseRefusesDuplicateKeys(t *testing.T) {
+	for _, in := range []string{
+		"a: 1\na: 2\n",
+		"a:\n  " + secretText + ": 1\n  '" + secretText + "': 2\n",
+		"a: [{b: 1, b: 2}]\n",
+		"1: x\n\"1\": y\n",
+		"? &k " + secretText + "\n: 1\n? *k\n: 2\n",
+	} {
+		_, err := parseStream([]byte(in))
+		if !isRule(err, RuleParse) {
+			t.Errorf("%q: %v, want a %s refusal", in, err, RuleParse)
+			continue
+		}
+		if strings.Contains(err.Error(), secretText) {
+			t.Errorf("the refusal quotes the input: %v", err)
+		}
+	}
+	manifest := "kind: Secret\nstringData:\n  password: one\n  password: " + secretText + "\n"
+	req := request(t, "machine:\n  token: "+secretText+"x\n"+manifestStream(manifest), manifestPath+"|yaml/stringData/password")
+	req.Declarations.Embedded = []Embedded{{Path: manifestPath, Format: "yaml"}}
+	if _, err := Extract(req); !isRule(err, RuleEmbedded) {
+		t.Errorf("embedded document: %v, want a %s refusal", err, RuleEmbedded)
+	}
+}
+
 func isRule(err error, rule Rule) bool {
 	var r *Refusal
 	return errors.As(err, &r) && r.Rule == rule

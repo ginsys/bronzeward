@@ -62,6 +62,20 @@ func TestExtractInsideEmbeddedYAML(t *testing.T) {
 	}
 }
 
+// TestExtractInsideEmbeddedKeyWithBar: an embedded document's key may hold "|"; the mark's inner
+// pointer addresses it.
+func TestExtractInsideEmbeddedKeyWithBar(t *testing.T) {
+	manifest := "kind: Secret\nstringData:\n  a|b: " + secretText + "\n"
+	c, err := Extract(embeddedRequest(t, manifestStream(manifest), "yaml", manifestPath+"|yaml/stringData/a|b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, calls := commitAll(t, c)
+	if out := string(s.Documents()); strings.Contains(out, secretText) || len(calls) != 1 {
+		t.Fatalf("%d creates; output:\n%s", len(calls), out)
+	}
+}
+
 func TestExtractInsideEmbeddedJSONWritesYAML(t *testing.T) {
 	text := "cluster:\n  inlineManifests:\n    - name: m\n      contents: '{\"kind\": \"Secret\", \"stringData\": {\"password\": \"" + secretText + "\"}}'\n"
 	c, err := Extract(embeddedRequest(t, text, "json", manifestPath+"|json/stringData/password"))

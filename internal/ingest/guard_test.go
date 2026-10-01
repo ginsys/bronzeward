@@ -35,6 +35,10 @@ func TestGuard(t *testing.T) {
 			nil, RuleGuardSubstring, "doc[0]/cluster/inlineManifests/0/contents"},
 		{"inside a comment", "machine:\n  token: " + s + "\n  # the token is " + s + "\n  type: worker\n",
 			nil, RuleGuardSubstring, "doc[0]/machine/type"},
+		// The decoder gives a "---" line comment to the first node; the encoder would drop a
+		// document node's own line comment.
+		{"inside a document marker comment", "--- # the token is " + s + "\nmachine:\n  token: " + s + "\n",
+			nil, RuleGuardSubstring, "doc[0]/machine"},
 		{"equal to a reference already present", "machine:\n  token: !bwref s-abc\n  nodeLabels:\n    x: s-abc\n",
 			[]string{"doc[0]/machine/nodeLabels/x"}, RuleGuardValue, "doc[0]/machine/token"},
 	} {

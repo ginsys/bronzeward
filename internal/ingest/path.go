@@ -72,13 +72,13 @@ func decimal(s string) bool {
 }
 
 // pointerTokens splits an RFC 6901 pointer: "" is the whole document, and every token is
-// unescaped (~1 is "/", ~0 is "~"; any other "~" is malformed). A "|" can only separate the
-// embedded part, so a token holding one is refused.
+// unescaped (~1 is "/", ~0 is "~"; any other "~" is malformed). The first "|" of a path ends its
+// outer pointer, so only an inner token can hold one.
 func pointerTokens(s string) ([]string, bool) {
 	if s == "" {
 		return nil, true
 	}
-	if s[0] != '/' || strings.Contains(s, "|") {
+	if s[0] != '/' {
 		return nil, false
 	}
 	parts := strings.Split(s[1:], "/")

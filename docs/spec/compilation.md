@@ -121,6 +121,8 @@ E1 §8 item 5); this escaping scheme is chosen here and is untested
 
 A path inside an identified embedded document (§5.4) appends `|<format>` and a
 second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/password`.
+The first `|` ends the outer pointer, so an outer token cannot hold `|`; an
+inner token can.
 
 ### 2.3 Pipeline
 
@@ -128,7 +130,8 @@ second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/passw
    payload, before the input is read.
 1. **Read** into the unresolved type (§2.1).
 2. **Parse** every document of the stream. A parse failure refuses the input;
-   the refusal quotes no input text.
+   the refusal quotes no input text. A mapping that holds a key twice is a
+   parse failure, as YAML forbids it, so a path never names two nodes.
 3. **Identify** the values to extract: every field the pinned Talos machinery
    marks secret (the `pkg/machinery` `RedactSecrets` field list, SP §2), and
    every path the operator marks in the request. A mark that addresses no node
@@ -140,6 +143,9 @@ second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/passw
    sanitized document, or a further mark on a staged one (§3), mints no second
    name for it. Its content is a reference name, not a value, so it adds
    nothing to the extracted values the guard (§4.2) searches for.
+   Identification reads such a node as a null, so a document whose identified
+   nodes the machinery cannot load as nulls (a mark on a document's `kind`)
+   refuses the input: once stored, it could not be ingested again.
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
    candidate sanitized document. Names are minted as §5.1 states.

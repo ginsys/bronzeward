@@ -286,6 +286,24 @@ cluster:
 	}
 }
 
+// TestIdentifyRefusesMarkTheStoredFormCannotLoad: a later ingestion loads a stored reference as
+// a null, so a mark on a field the machinery needs to load the document would store a document
+// no later ingestion accepts. It is refused now, before any provider write, naming the document.
+func TestIdentifyRefusesMarkTheStoredFormCannotLoad(t *testing.T) {
+	text := "apiVersion: v1alpha1\nkind: HostnameConfig\nhostname: " + secretText + "\n"
+	for _, mark := range []string{"doc[0]/kind", "doc[0]/apiVersion"} {
+		_, err := identifyText(t, text, mark)
+		if !isRule(err, RuleSchemaUnloadable) {
+			t.Errorf("%s: %v, want a %s refusal", mark, err, RuleSchemaUnloadable)
+		} else if strings.Contains(err.Error(), secretText) {
+			t.Errorf("%s: the refusal quotes the input: %v", mark, err)
+		}
+	}
+	if _, err := identifyText(t, text, "doc[0]/hostname"); err != nil {
+		t.Errorf("doc[0]/hostname: %v", err)
+	}
+}
+
 // TestIdentifySchemaRefusals: a document the machinery cannot load, or a secret it finds that
 // has no node of its own in the input, refuses the input; the refusal names the document only.
 func TestIdentifySchemaRefusals(t *testing.T) {

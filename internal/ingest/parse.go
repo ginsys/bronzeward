@@ -36,6 +36,9 @@ func parseStream(b []byte) ([]*yaml.Node, error) {
 		if line := cyclicAlias(&n, map[*yaml.Node]bool{}); line != 0 {
 			return nil, refuse(RuleParse, fmt.Sprintf("line %d", line))
 		}
+		if line := duplicateKey(&n); line != 0 {
+			return nil, refuse(RuleParse, fmt.Sprintf("line %d", line))
+		}
 		docs = append(docs, &n)
 	}
 	if len(docs) == 0 {
@@ -58,6 +61,35 @@ func cyclicAlias(n *yaml.Node, open map[*yaml.Node]bool) int {
 	defer delete(open, n)
 	for _, c := range n.Content {
 		if line := cyclicAlias(c, open); line != 0 {
+			return line
+		}
+	}
+	return 0
+}
+
+// duplicateKey is the line of a mapping key whose text an earlier key of the same mapping holds,
+// or 0. YAML forbids duplicate keys but the decoder accepts them into nodes, and a pointer token
+// matches a key by its text: a path through such a mapping would name more than one node.
+// Aliases are not followed; the node they name is checked where it is written.
+func duplicateKey(n *yaml.Node) int {
+	if n.Kind == yaml.MappingNode {
+		seen := map[string]bool{}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := deref(n.Content[i])
+			if k == nil || k.Kind != yaml.ScalarNode {
+				continue
+			}
+			if seen[k.Value] {
+				return n.Content[i].Line
+			}
+			seen[k.Value] = true
+		}
+	}
+	if n.Kind == yaml.AliasNode {
+		return 0
+	}
+	for _, c := range n.Content {
+		if line := duplicateKey(c); line != 0 {
 			return line
 		}
 	}

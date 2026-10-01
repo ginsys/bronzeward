@@ -28,7 +28,13 @@
 //     holding no value.
 //     Parser errors keep only a line. A create callback's error is returned as a CreateError
 //     that names the reference and holds the cause where no fmt verb or reflection reaches it.
-//   - An alias inside the node it names is refused as a parse failure: the graph is infinite.
+//   - An alias inside the node it names is refused as a parse failure: the graph is infinite. So
+//     is a mapping key whose text an earlier key of the same mapping holds (1 and "1" included,
+//     as a pointer token matches either): a path through it would name two nodes, and
+//     extracting one would leave the other value in the stream.
+//   - Every target is stored as a reference, which a later ingestion loads as a null. A
+//     document the machinery cannot load with its targets as nulls (a mark on its kind) refuses
+//     the input as schema-unloadable: it could never be ingested again.
 //   - A field the machinery redacts must be one plain input scalar whose text is the value the
 //     machinery encodes. A secret reached through a merge key, folded over lines or tagged
 //     !!binary refuses the input (schema-indirect) rather than staying unextracted.
