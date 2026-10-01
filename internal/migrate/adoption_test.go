@@ -110,6 +110,10 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"reference kind float", insertReference, []any{a.ibr, "registry/other", "float", 1, nil, generation(a.cluster, a.claim)}, "23514"},
 		{"reference version 0", insertReference, []any{a.ibr, "registry/other", "string", 0, nil, generation(a.cluster, a.claim)}, "23514"},
 		{"reference encoding hex", insertReference, []any{a.ibr, "registry/other", "string", 1, "hex", generation(a.cluster, a.claim)}, "23514"},
+		// base64 places a string secret's bytes (compilation §5.2); it modifies no other kind.
+		{"base64 integer reference", insertReference, []any{a.ibr, "registry/b64-integer", "integer", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
+		{"base64 boolean reference", insertReference, []any{a.ibr, "registry/b64-boolean", "boolean", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
+		{"base64 mapping reference", insertReference, []any{a.ibr, "registry/b64-mapping", "mapping", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
 		{"generation path of another shape", insertReference, []any{a.ibr, "registry/other", "string", 1, nil, "secret/registry"}, "23514"},
 		{"second declaration of a name", insertReference, []any{a.ibr, "registry/example-pass", "string", 1, nil, generation(a.cluster, a.claim)}, "23505"},
 		{"draft state merged", insertDraft, []any{id.New(id.Draft), a.cluster, "x", "merged", "m3oxmlfh6phr7aigshdydcb4ji"}, "23514"},
@@ -121,6 +125,7 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"second import base entry for a machine", insertEntry, []any{a.draft, a.cluster, "import-base", a.machine, a.ibr}, "23505"},
 		{"claim state pending", insertClaim, []any{id.New(id.Ingestion), "transient", "pending", nil, nil, nil}, "23514"},
 		{"transient claim with a payload", insertClaim, []any{id.New(id.Ingestion), "transient", "held", []byte{1}, nil, nil}, "23514"},
+		{"resumed transient claim", insertClaim, []any{id.New(id.Ingestion), "transient", "resumed", nil, nil, nil}, "23514"},
 		{"released claim with a payload", insertClaim, []any{id.New(id.Ingestion), "encrypted", "released", []byte{1}, nil, nil}, "23514"},
 		{"claim with a key and no principal", insertClaim, []any{id.New(id.Ingestion), "transient", "held", nil, nil, "k0123456789abcdeX"}, "23514"},
 		{"second live claim for a key", insertClaim, []any{id.New(id.Ingestion), "encrypted", "held", []byte{1}, a.human, "k0123456789abcdef"}, "23505"},
@@ -145,6 +150,8 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"event 0", insertEvent, []any{a.ingest, 0, `{}`}, "23514"},
 		{"second event 1", insertEvent, []any{a.ingest, 1, `{}`}, "23505"},
 		{"event of no operation", insertEvent, []any{op(), 1, `{}`}, "23503"},
+		{"event with a JSON null entry", insertEvent, []any{a.ingest, 2, "null"}, "23514"},
+		{"event with an array entry", insertEvent, []any{a.ingest, 3, "[]"}, "23514"},
 		{"record naming no operation", `INSERT INTO idempotency_record (principal, key, fingerprint, request_id, epoch, status, body, operation_id, created_at)
 			SELECT $1, 'k0123456789abcdeY', $2, $3, epoch, 202, '{}', $4, now() FROM installation_state`,
 			[]any{a.human, digest(4), id.New(id.Request), op()}, "23503"},
@@ -161,6 +168,8 @@ func TestAdoptionConstraints(t *testing.T) {
 	mustExec(t, db, insertOperation, op(), "adopt", "completed", nil, 0, nil, nil, nil, nil, nil, nil)
 	mustExec(t, db, "UPDATE staging_claim SET state = 'released' WHERE id = $1", a.claim)
 	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "held", []byte{1}, a.human, "k0123456789abcdef")
+	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "resumed", []byte{1}, nil, nil)
+	mustExec(t, db, insertReference, a.ibr, "pki/extra-ca", "string", 1, "base64", generation(a.cluster, a.claim))
 	// The baseline revision is a counter (execution and recovery §2): an adoption record sets
 	// Applied at baseline revision 1, and a completed operation's new Applied advances it to 2,
 	// though no import base revision is named by either.
