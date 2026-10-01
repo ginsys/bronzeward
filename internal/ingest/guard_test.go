@@ -119,6 +119,7 @@ func TestSameScalar(t *testing.T) {
 		{"18446744073709551615", "-1", false},
 		{"-1", "18446744073709551615", false},
 		{"0", "-0", true},
+		{"0x20000000000001", "9007199254740992", true}, // equal when the key was tagged !!float
 		{"abc", "abc", false},
 	}
 	for _, tc := range cases {

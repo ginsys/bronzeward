@@ -355,10 +355,29 @@ func holdsAny(s string, texts []string) bool {
 	return false
 }
 
-// sameScalar reports whether a and b, read as plain YAML scalars, are the same number or
-// boolean, as the guard compares them.
+// sameScalar reports whether a and b can be the same number or boolean, as the guard compares
+// them. A path token has lost the tag its key carried, so each text is read plain and under
+// every explicit tag it decodes with (!!float 0x20000000000001 rounds to 2^53, which its plain
+// reading does not): redaction then matches at least whatever the guard matched.
 func sameScalar(a, b string) bool {
-	va, oka := decodedScalar(&yaml.Node{Kind: yaml.ScalarNode, Value: a})
-	vb, okb := decodedScalar(&yaml.Node{Kind: yaml.ScalarNode, Value: b})
-	return oka && okb && sameValue(va, vb)
+	for _, va := range readings(a) {
+		for _, vb := range readings(b) {
+			if sameValue(va, vb) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// readings is every decoded value s has as a plain scalar or under an explicit !!int, !!float
+// or !!bool tag.
+func readings(s string) []any {
+	var out []any
+	for _, tag := range []string{"", "!!int", "!!float", "!!bool"} {
+		if v, ok := decodedScalar(&yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: s}); ok {
+			out = append(out, v)
+		}
+	}
+	return out
 }

@@ -81,6 +81,11 @@ func TestRefusalSweep(t *testing.T) {
 			marks: []string{manifestPath + "|yaml/secret"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
 		{rule: RuleGuardValue, text: manifestStream("secret: 314159\n!!float 0x4cb2f: x\n"), secret: "0x4cb2f",
 			marks: []string{manifestPath + "|yaml/secret"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
+		// The key's explicit tag makes it equal to the value; its text alone reads as another number.
+		{rule: RuleGuardValue, text: manifestStream("secret: 9007199254740992\n!!float 0x20000000000001: x\n"), secret: "0x20000000000001",
+			marks: []string{manifestPath + "|yaml/secret"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
+		{rule: RuleLocalTag, text: manifestStream("secret: 9007199254740992\n!!float 0x20000000000001: !unknown x\n"), secret: "0x20000000000001",
+			marks: []string{manifestPath + "|yaml/secret"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
 		{rule: RuleGuardValue, text: manifestStream("secret: \"314159\"\n0x4cb2f: x\n"), secret: "0x4cb2f",
 			marks: []string{manifestPath + "|yaml/secret"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
 		// A key equal to the value as a parsed integer or boolean, spelled differently.
