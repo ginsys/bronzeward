@@ -1286,6 +1286,134 @@ undefer
   fail "checkout_differs counts $flagged with an untracked .gitignore hiding itself and a Go file, $before without"
 unset -f hide
 unset before flag flagged
+# S0 step 1's clone (image_clone) under a git configuration set up to misreport the checkout: a
+# filter, given to README.md by core.attributesFile, that rewrites it on checkout, and an untracked
+# Go file at the root that core.excludesFile hides from status. The controls show both at work on
+# an ordinary clone and status; the clone the suites run in has every tracked file's committed
+# bytes and nothing else. All of it removed before anything can fail.
+clone_cfg=$STATE/selftest-clone.gitconfig
+printf 'README.md filter=selftest\n' >"$STATE/selftest-attributes"
+printf '/selftest-hidden.go\n' >"$STATE/selftest-excludes"
+printf '[core]\n\tattributesFile = %s\n\texcludesFile = %s\n[filter "selftest"]\n\tsmudge = sed 1s/^/planted/\n\tclean = cat\n' \
+  "$STATE/selftest-attributes" "$STATE/selftest-excludes" >"$clone_cfg"
+defer rm -rf -- "$FIXTURES/../selftest-hidden.go" "$STATE/selftest-clone" "$STATE/selftest-clone-control" \
+  "$STATE/selftest-clone-home" "$STATE/selftest-home" "$STATE/selftest-template"
+printf 'package main\n' >"$FIXTURES/../selftest-hidden.go"
+# Settings that need no configuration at all: an attributes file where git looks by default, under
+# $HOME, and a template whose post-checkout hook plants a file in a repository git creates.
+mkdir -p -- "$STATE/selftest-home/.config/git" "$STATE/selftest-template/hooks"
+printf '* text eol=crlf\n' >"$STATE/selftest-home/.config/git/attributes"
+printf '#!/bin/sh\n: >selftest-planted\n' >"$STATE/selftest-template/hooks/post-checkout"
+chmod +x -- "$STATE/selftest-template/hooks/post-checkout"
+hidden_seen=$(GIT_CONFIG_GLOBAL=$clone_cfg fixtures_git -C .. status --porcelain --untracked-files=all -- selftest-hidden.go) ||
+  hidden_seen=failed
+control_head=failed
+GIT_CONFIG_GLOBAL=$clone_cfg git clone --quiet -- "$FIXTURES/.." "$STATE/selftest-clone-control" 2>/dev/null &&
+  control_head=$(head -c 7 -- "$STATE/selftest-clone-control/README.md")
+cloned=0
+GIT_CONFIG_GLOBAL=$clone_cfg image_clone "$STATE/selftest-clone" >/dev/null 2>"$STATE/selftest-clone.err" && cloned=1
+# Each tracked regular file's blob id against its bytes hashed with no filter, in ls-tree's order;
+# and what the clone holds besides, ignored files included.
+want=failed
+got=
+if listing=$(clean_git -C "$STATE/selftest-clone" ls-tree -r HEAD); then
+  want=$(sed -n 's/^100[0-7]* blob \([0-9a-f]*\)\t.*/\1/p' <<<"$listing")
+  got=$(cd -- "$STATE/selftest-clone" && sed -n 's/^100[0-7]* blob [0-9a-f]*\t//p' <<<"$listing" |
+    clean_git hash-object --no-filters --stdin-paths) || got=failed
+fi
+extra=$(clean_git -C "$STATE/selftest-clone" status --porcelain --untracked-files=all --ignored) || extra=failed
+# The default attributes file: an ordinary checkout of README.md ends its lines in CRLF under it;
+# image_clone's does not (the blob comparison above, for one file).
+home_control=failed
+home_got=failed
+env -u XDG_CONFIG_HOME HOME="$STATE/selftest-home" GIT_CONFIG_GLOBAL=/dev/null \
+  git clone --quiet -- "$FIXTURES/.." "$STATE/selftest-home/control" 2>/dev/null &&
+  home_control=$(grep -c $'\r$' -- "$STATE/selftest-home/control/README.md" || [ $? -eq 1 ])
+if (unset XDG_CONFIG_HOME && HOME=$STATE/selftest-home image_clone "$STATE/selftest-clone-home") >/dev/null 2>&1; then
+  home_got=$(clean_git -C "$STATE/selftest-clone-home" ls-tree HEAD README.md | sed -n 's/^100[0-7]* blob \([0-9a-f]*\)\t.*/\1/p')
+  [ "$home_got" = "$(cd -- "$STATE/selftest-clone-home" && clean_git hash-object --no-filters README.md)" ] && home_got=same
+fi
+# A repository a suite creates in the clone (upstream-sync's): a template from the environment
+# installs its hook into an ordinary clone; under isolated_run nothing is installed or run.
+template_control=no
+GIT_TEMPLATE_DIR="$STATE/selftest-template" git clone --quiet -- "$STATE/selftest-clone-home" \
+  "$STATE/selftest-clone-home/control" 2>/dev/null && [ -e "$STATE/selftest-clone-home/control/selftest-planted" ] &&
+  template_control=planted
+template_got=failed
+GIT_TEMPLATE_DIR="$STATE/selftest-template" isolated_run "$STATE/selftest-clone-home" \
+  git clone --quiet -- . sub 2>/dev/null && template_got=$(find "$STATE/selftest-clone-home/sub" -name selftest-planted | wc -l)
+# mise told to read this checkout's mise.toml instead of the clone's: the tasks are this checkout's
+# without isolated_run, the clone's with it. Each control runs only mise in the clone, which none of
+# them trusts as a whole: what parses its output (jq may be a mise shim) runs here.
+mise_control=$( (cd -- "$STATE/selftest-clone-home" &&
+  MISE_OVERRIDE_CONFIG_FILENAMES="$FIXTURES/../mise.toml" MISE_TRUSTED_CONFIG_PATHS="$FIXTURES/.." \
+    mise tasks ls --json --hidden 2>/dev/null) | tasks_outside "$STATE/selftest-clone-home" verify go-db) || mise_control=failed
+mise_got=$(MISE_OVERRIDE_CONFIG_FILENAMES="$FIXTURES/../mise.toml" isolated_run "$STATE/selftest-clone-home" \
+  mise tasks ls --json --hidden 2>/dev/null | tasks_outside "$STATE/selftest-clone-home" verify go-db) || mise_got=failed
+# mise's global configuration where it looks by default, $HOME/.config/mise's config.toml and
+# conf.d: its [env] (and env._.source, which runs a script) reaches the tasks without isolated_run,
+# not with it. mise's data directory stays the caller's, where its tools are installed.
+mkdir -p -- "$STATE/selftest-home/.config/mise/conf.d"
+printf '[env]\nBW_SELFTEST_MISE = "global"\n' >"$STATE/selftest-home/.config/mise/config.toml"
+printf '[env]\nBW_SELFTEST_MISE_D = "conf.d"\n' >"$STATE/selftest-home/.config/mise/conf.d/selftest.toml"
+global_env='[.BW_SELFTEST_MISE, .BW_SELFTEST_MISE_D] | map(. // "") | join(",")'
+global_data=${XDG_DATA_HOME:-$HOME/.local/share}
+global_control=$( (cd -- "$STATE/selftest-clone-home" && env -u XDG_CONFIG_HOME -u MISE_CONFIG_DIR -u MISE_GLOBAL_CONFIG_FILE \
+  HOME="$STATE/selftest-home" XDG_DATA_HOME="$global_data" MISE_TRUSTED_CONFIG_PATHS="$STATE/selftest-clone-home" \
+  MISE_CEILING_PATHS="$STATE" mise env --json 2>/dev/null) | jq -r "$global_env") || global_control=failed
+global_got=$(HOME="$STATE/selftest-home" XDG_DATA_HOME="$global_data" isolated_run "$STATE/selftest-clone-home" \
+  mise env --json 2>/dev/null | jq -r "$global_env") || global_got=failed
+# Tasks skipped by name and as dependencies: a dry run of verify lists fewer tasks under those
+# settings without isolated_run, and with it the same tasks as with no setting at all.
+dry_tasks() { sed -n 's/^\[\([^]]*\)\] \$ .*/\1/p' | sort | tr '\n' ' '; }
+skip_base=$(isolated_run "$STATE/selftest-clone-home" mise run --dry-run verify 2>&1 | dry_tasks)
+skip_control=$( (cd -- "$STATE/selftest-clone-home" && MISE_TRUSTED_CONFIG_PATHS="$STATE/selftest-clone-home" \
+  MISE_TASK_SKIP=go MISE_TASK_SKIP_DEPENDS=true mise run --dry-run verify 2>&1) | dry_tasks)
+skip_got=$(MISE_TASK_SKIP=go MISE_TASK_SKIP_DEPENDS=true isolated_run "$STATE/selftest-clone-home" \
+  mise run --dry-run verify 2>&1 | dry_tasks)
+unset -f dry_tasks
+# The shell a task's script runs in: mise's inline shell set to true, or a BASH_ENV that exits,
+# makes the test task exit 0 without running its tests; under isolated_run it runs them. The task
+# is run, not listed: neither changes what a dry run shows.
+printf 'exit 0\n' >"$STATE/selftest-home/bashenv"
+ran_tests() { grep -Ec -- '^(\[test\] )?commit-lint-test: [0-9]+ passed, 0 failed$' || [ $? -eq 1 ]; }
+shell_control=$( (cd -- "$STATE/selftest-clone-home" && MISE_TRUSTED_CONFIG_PATHS="$STATE/selftest-clone-home" \
+  MISE_UNIX_DEFAULT_INLINE_SHELL_ARGS=true mise run test 2>&1) | ran_tests)
+bashenv_control=$( (cd -- "$STATE/selftest-clone-home" && MISE_TRUSTED_CONFIG_PATHS="$STATE/selftest-clone-home" \
+  BASH_ENV="$STATE/selftest-home/bashenv" mise run test 2>&1) | ran_tests)
+shell_got=$(MISE_UNIX_DEFAULT_INLINE_SHELL_ARGS=true BASH_ENV="$STATE/selftest-home/bashenv" \
+  isolated_run "$STATE/selftest-clone-home" mise run test 2>&1 | ran_tests)
+unset -f ran_tests
+rm -rf -- "$FIXTURES/../selftest-hidden.go" "$STATE/selftest-clone" "$STATE/selftest-clone-control" \
+  "$STATE/selftest-clone-home" "$STATE/selftest-home" "$STATE/selftest-template" # before anything can fail
+undefer
+rm -f -- "$clone_cfg" "$STATE/selftest-attributes" "$STATE/selftest-excludes"
+[ "$home_control" -ge 1 ] 2>/dev/null || fail "control: a checkout under \$HOME/.config/git/attributes did not end README.md's lines in CRLF ($home_control)"
+[ "$home_got" = same ] || fail "image_clone's README.md is not the commit's bytes under \$HOME/.config/git/attributes ($home_got)"
+[ "$template_control" = planted ] || fail "control: an ordinary clone did not run GIT_TEMPLATE_DIR's post-checkout hook"
+[ "$template_got" = 0 ] || fail "a clone made under isolated_run ran GIT_TEMPLATE_DIR's hook, or failed ($template_got)"
+[ -n "$mise_control" ] && [ "$mise_control" != failed ] ||
+  fail "control: MISE_OVERRIDE_CONFIG_FILENAMES did not make the tasks this checkout's ($mise_control)"
+[ -z "$mise_got" ] || fail "under isolated_run the tasks are not the clone's: $mise_got"
+[ "$global_control" = global,conf.d ] ||
+  fail "control: mise's global config.toml and conf.d did not set the tasks' environment ($global_control)"
+[ "$global_got" = , ] || fail "under isolated_run mise's global configuration reaches the tasks ($global_got)"
+[[ " $skip_base " == *" go "* ]] || fail "a dry run of verify in the clone does not list go: $skip_base"
+[ "$skip_control" != "$skip_base" ] || fail "control: MISE_TASK_SKIP and MISE_TASK_SKIP_DEPENDS skipped nothing"
+[ "$skip_got" = "$skip_base" ] || fail "under isolated_run tasks are skipped: verify runs $skip_got, not $skip_base"
+[ "$shell_control" = 0 ] || fail "control: mise's inline shell set to true did not stop the test task's tests ($shell_control)"
+[ "$bashenv_control" = 0 ] || fail "control: a BASH_ENV that exits did not stop the test task's tests ($bashenv_control)"
+[ "$shell_got" = 1 ] || fail "under isolated_run the test task did not run its tests with the caller's shell settings ($shell_got)"
+[ -z "$hidden_seen" ] || fail "control: status saw the root Go file the selftest's excludes file hides ($hidden_seen)"
+[ "$control_head" = planted ] || fail "control: an ordinary clone under the selftest's configuration did not run its filter (README.md starts '$control_head')"
+[ "$cloned" -eq 1 ] || fail "image_clone failed under the selftest's configuration: $(tail -n 1 "$STATE/selftest-clone.err")"
+[ -n "$want" ] && [ "$want" != failed ] && [ "$got" = "$want" ] ||
+  fail "the clone S0 step 1 runs in does not hold the commit's bytes under a filter from core.attributesFile"
+[ -z "$extra" ] || fail "the clone S0 step 1 runs in holds what the commit does not: $extra"
+rm -f -- "$STATE/selftest-clone.err"
+ok "S0 step 1's clone holds the image commit's bytes alone, under a filter, an excludes file and a default attributes file; what runs in it gets no template hook, no mise configuration but its own, no skipped task and no shell setting of the caller's"
+unset clone_cfg hidden_seen control_head cloned listing want got extra home_control home_got template_control template_got \
+  mise_control mise_got global_env global_data global_control global_got skip_base skip_control skip_got shell_control bashenv_control shell_got
 # The record of how fixtures/ differed at creation gone: its absence must not read as "the tree
 # was the commit's". Put back before anything can fail.
 defer mv --no-target-directory -- "$STATE/selftest-creation-diff-aside" "$STATE/up-fixtures-diff.txt"
