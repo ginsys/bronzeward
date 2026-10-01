@@ -54,8 +54,8 @@ type listPage[T any] struct {
 }
 
 // listed answers a collection of entity p in identifier order. query selects the page: its $1 is
-// the last identifier listed (” for the first page), $2 the row limit, and it orders by the
-// identifier; scan returns one row's item and identifier.
+// the last identifier listed (the empty string for the first page), $2 the row limit, and it
+// orders by the identifier; scan returns one row's item and identifier.
 func listed[T any](p id.Prefix, query string, scan func(*sql.Rows) (T, string, error)) readFunc {
 	return func(a *API, w http.ResponseWriter, q *request) {
 		readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
