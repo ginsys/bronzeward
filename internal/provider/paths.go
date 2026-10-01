@@ -69,6 +69,10 @@ func transitPath(op, key string) (string, error) {
 	return "/v1/transit/" + op + "/" + key, nil
 }
 
+// CheckKeyName applies transitPath's rule to a configured key name, so configuration is refused at
+// load by the same rule NewIngestion applies.
+func CheckKeyName(key string) error { return keySegment(key) }
+
 func keySegment(key string) error {
 	if key == "" || key == "." || key == ".." {
 		return fmt.Errorf("provider: transit key name %q is empty, \".\" or \"..\"", key)

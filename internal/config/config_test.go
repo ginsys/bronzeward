@@ -208,3 +208,81 @@ func TestExecution(t *testing.T) {
 		}
 	}
 }
+
+// providerBlock is the smallest valid provider block; each refusal below changes one thing.
+const providerBlock = `provider:
+  address: https://bao.example.test:8200
+  keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest}
+  ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
+`
+
+func TestProviderBlock(t *testing.T) {
+	c, err := Load(strings.NewReader(base + authBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Provider != nil || c.Talos != nil {
+		t.Fatalf("absent blocks are not nil: %+v %+v", c.Provider, c.Talos)
+	}
+	c, err = Load(strings.NewReader(base + authBlock + providerBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.Provider
+	if p == nil || p.Address != "https://bao.example.test:8200" || p.Keys.Baseline != "bw-baseline" ||
+		p.Keys.Staging != "bw-staging" || p.Keys.Digest != "bw-digest" || p.IngestionTokenFile != "/etc/bronzeward/openbao-ingestion.token" {
+		t.Fatalf("%+v", p)
+	}
+	for name, in := range map[string]string{
+		"loopback http":  strings.Replace(providerBlock, "https://bao.example.test:8200", "http://127.0.0.1:58200", 1),
+		"listed http":    strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1) + "  plainHTTPHosts: [openbao]\n",
+		"trailing slash": strings.Replace(providerBlock, "8200", "8200/", 1),
+	} {
+		if _, err := Load(strings.NewReader(base + authBlock + in)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, c := range map[string]struct{ block, want string }{
+		"no address":        {strings.Replace(providerBlock, "  address: https://bao.example.test:8200\n", "", 1), "provider.address is required"},
+		"unlisted http":     {strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1), "neither loopback nor in provider.plainHTTPHosts"},
+		"other host listed": {strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1) + "  plainHTTPHosts: [issuer]\n", "neither loopback nor in provider.plainHTTPHosts"},
+		"bad listed host":   {providerBlock + "  plainHTTPHosts: [\"open bao\"]\n", "not a bare host name"},
+		"no scheme":         {strings.Replace(providerBlock, "https://", "", 1), "provider.address"},
+		"path":              {strings.Replace(providerBlock, ":8200", ":8200/v1", 1), "provider.address"},
+		"query":             {strings.Replace(providerBlock, ":8200", ":8200?x=1", 1), "provider.address"},
+		"userinfo":          {strings.Replace(providerBlock, "https://", "https://root:hunter2@", 1), "userinfo"},
+		"no baseline key":   {strings.Replace(providerBlock, "baseline: bw-baseline, ", "", 1), "provider.keys.baseline is required"},
+		"no staging key":    {strings.Replace(providerBlock, "staging: bw-staging, ", "", 1), "provider.keys.staging is required"},
+		"no digest key":     {strings.Replace(providerBlock, ", digest: bw-digest", "", 1), "provider.keys.digest is required"},
+		"key with slash":    {strings.Replace(providerBlock, "bw-digest", "a/b", 1), "provider.keys.digest"},
+		"key dot-dot":       {strings.Replace(providerBlock, "bw-digest", `".."`, 1), "provider.keys.digest"},
+		"key with percent":  {strings.Replace(providerBlock, "bw-digest", `"a%2F"`, 1), "provider.keys.digest"},
+		"shared key":        {strings.Replace(providerBlock, "bw-digest", "bw-staging", 1), "distinct"},
+		"no token file":     {strings.Replace(providerBlock, "  ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "", 1), "provider.ingestionTokenFile is required"},
+		"unknown field":     {providerBlock + "  token: x\n", "field token not found"},
+		"unknown key":       {strings.Replace(providerBlock, "digest: bw-digest", "digest: bw-digest, artifact: bw-artifact", 1), "field artifact not found"},
+	} {
+		_, err := Load(strings.NewReader(base + authBlock + c.block))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v; want an error naming %q", name, err, c.want)
+		}
+		if err != nil && strings.Contains(err.Error(), "hunter2") {
+			t.Errorf("%s: the error quotes the password: %v", name, err)
+		}
+	}
+}
+
+func TestTalosBlock(t *testing.T) {
+	c, err := Load(strings.NewReader(base + authBlock + "talos: {talosconfig: /etc/bronzeward/talosconfig}\n"))
+	if err != nil || c.Talos == nil || c.Talos.Talosconfig != "/etc/bronzeward/talosconfig" {
+		t.Fatalf("%+v, %v", c.Talos, err)
+	}
+	for name, c := range map[string]struct{ in, want string }{
+		"empty block":   {"talos: {}\n", "talos.talosconfig is required"},
+		"unknown field": {"talos: {talosconfig: x, endpoints: [a]}\n", "field endpoints not found"},
+	} {
+		if _, err := Load(strings.NewReader(base + authBlock + c.in)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v; want an error naming %q", name, err, c.want)
+		}
+	}
+}

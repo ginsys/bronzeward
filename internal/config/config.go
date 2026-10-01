@@ -15,6 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/provider"
 )
 
 type Config struct {
@@ -22,6 +23,35 @@ type Config struct {
 	Database  Database  `yaml:"database"`
 	Auth      Auth      `yaml:"auth"`
 	Execution Execution `yaml:"execution"`
+	// Provider and Talos are optional: nil when absent, validated when present. Nothing in the
+	// server reads them yet; they configure internal/provider and internal/talos.
+	Provider *Provider `yaml:"provider"`
+	Talos    *Talos    `yaml:"talos"`
+}
+
+// Provider is the OpenBao the server stores generations and encrypts under (compilation.md §4.1,
+// §16.27, §16.28).
+type Provider struct {
+	Address string `yaml:"address"`
+	// PlainHTTPHosts are hosts reached over plain http, by exact name, as for auth.oidc: loopback
+	// needs no entry.
+	PlainHTTPHosts []string     `yaml:"plainHTTPHosts"`
+	Keys           ProviderKeys `yaml:"keys"`
+	// IngestionTokenFile holds ingestion's static token: a regular file of mode 0600 or tighter,
+	// read at use, one trailing newline trimmed, never renewed.
+	IngestionTokenFile string `yaml:"ingestionTokenFile"`
+}
+
+// ProviderKeys names the three Transit keys ingestion uses, each its own.
+type ProviderKeys struct {
+	Baseline string `yaml:"baseline"`
+	Staging  string `yaml:"staging"`
+	Digest   string `yaml:"digest"`
+}
+
+// Talos names the talosconfig the server reads machine configuration with.
+type Talos struct {
+	Talosconfig string `yaml:"talosconfig"`
 }
 
 type Database struct {
@@ -108,7 +138,52 @@ func Load(r io.Reader) (Config, error) {
 	if err := c.Execution.validate(); err != nil {
 		return Config{}, err
 	}
+	if c.Provider != nil {
+		if err := c.Provider.validate(); err != nil {
+			return Config{}, err
+		}
+	}
+	if c.Talos != nil && c.Talos.Talosconfig == "" {
+		return Config{}, errors.New("config: talos.talosconfig is required")
+	}
 	return c, nil
+}
+
+func (p *Provider) validate() error {
+	if p.Address == "" {
+		return errors.New("config: provider.address is required")
+	}
+	u, err := provider.ParseAddress(p.Address)
+	if err != nil {
+		// Not quoted, nor is the parser's text: the address may carry a password.
+		return fmt.Errorf("config: provider.address: %w", err)
+	}
+	if err := checkHosts("provider.plainHTTPHosts", p.PlainHTTPHosts); err != nil {
+		return err
+	}
+	if !transport(u, p.PlainHTTPHosts) {
+		return errors.New("config: provider.address uses http on a host that is neither loopback nor in provider.plainHTTPHosts; use https or list the host")
+	}
+	keys := []struct{ field, name string }{
+		{"baseline", p.Keys.Baseline}, {"staging", p.Keys.Staging}, {"digest", p.Keys.Digest},
+	}
+	for i, k := range keys {
+		if k.name == "" {
+			return fmt.Errorf("config: provider.keys.%s is required", k.field)
+		}
+		if err := provider.CheckKeyName(k.name); err != nil {
+			return fmt.Errorf("config: provider.keys.%s: %w", k.field, err)
+		}
+		for _, o := range keys[:i] {
+			if o.name == k.name {
+				return fmt.Errorf("config: provider.keys.%s and provider.keys.%s name the same key; the three must be distinct", o.field, k.field)
+			}
+		}
+	}
+	if p.IngestionTokenFile == "" {
+		return errors.New("config: provider.ingestionTokenFile is required")
+	}
+	return nil
 }
 
 func (a *Auth) validate() error {
@@ -120,10 +195,8 @@ func (a *Auth) validate() error {
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("config: auth.oidc.issuer %q is not an http(s) URL without query or fragment", o.Issuer)
 	}
-	for i, h := range o.PlainHTTPHosts {
-		if len(h) > 253 || !hostName.MatchString(h) {
-			return fmt.Errorf("config: auth.oidc.plainHTTPHosts[%d] %q is not a bare host name", i, h)
-		}
+	if err := checkHosts("auth.oidc.plainHTTPHosts", o.PlainHTTPHosts); err != nil {
+		return err
 	}
 	// Discovery and key fetches trust whatever the issuer URL answers. Plain http is for this
 	// host and the hosts the admin lists: elsewhere an on-path attacker could serve both.
@@ -168,15 +241,29 @@ var hostName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(
 // Transport reports whether o permits a request to u: https, or plain http to this host or to a
 // host in PlainHTTPHosts, by exact name. The issuer URL, the key set URL it advertises and every
 // redirect must pass (persistence-api.md §10.1).
-func (o OIDC) Transport(u *url.URL) bool {
+func (o OIDC) Transport(u *url.URL) bool { return transport(u, o.PlainHTTPHosts) }
+
+// transport is the plain-http rule auth.oidc and provider share: https, or http to this host or to
+// a listed host by exact name.
+func transport(u *url.URL, plainHTTPHosts []string) bool {
 	switch u.Scheme {
 	case "https":
 		return true
 	case "http":
 		h := u.Hostname()
-		return loopback(h) || slices.ContainsFunc(o.PlainHTTPHosts, func(p string) bool { return strings.EqualFold(p, h) })
+		return loopback(h) || slices.ContainsFunc(plainHTTPHosts, func(p string) bool { return strings.EqualFold(p, h) })
 	}
 	return false
+}
+
+// checkHosts refuses a plainHTTPHosts entry that is not a bare DNS name.
+func checkHosts(field string, hosts []string) error {
+	for i, h := range hosts {
+		if len(h) > 253 || !hostName.MatchString(h) {
+			return fmt.Errorf("config: %s[%d] %q is not a bare host name", field, i, h)
+		}
+	}
+	return nil
 }
 
 func loopback(host string) bool {
