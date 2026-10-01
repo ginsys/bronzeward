@@ -99,7 +99,8 @@ jobs:
     # The root go.mod ignores ./experiments; `mise run go` names each experiment module one by
     # one.
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
-    timeout-minutes: 10
+    # Building the Talos machinery dependency and the experiment modules took about 9.5 minutes.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
