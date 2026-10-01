@@ -136,13 +136,16 @@ go -C experiments/e2-sensitivity-provenance test ./...
 """
 
 [tasks.go-db]
-description = "Test the root module against PostgreSQL (default: mise run dev-db's); a missing database fails instead of skipping"
-# CI's go-db job points BW_TEST_PG_DSN at its service container. Locally it defaults to
-# mise run dev-db; any PostgreSQL 17 role that may create databases also works.
+description = "Test the root module against PostgreSQL and OpenBao (default: mise run dev-db's and dev-bao's); a missing service fails instead of skipping"
+# CI's go-db job points BW_TEST_PG_DSN and BW_TEST_BAO_* at its service containers. Locally they
+# default to mise run dev-db and mise run dev-bao; any PostgreSQL 17 role that may create
+# databases, and any OpenBao root token on a disposable server, also work.
 run = '''
 : "${BW_TEST_PG_DSN:=postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
-export BW_TEST_PG_DSN
-BW_REQUIRE_PG=1 go test -count=1 ./...
+: "${BW_TEST_BAO_ADDR:=http://127.0.0.1:58201}"
+: "${BW_TEST_BAO_TOKEN:=bw-dev-root-token}"
+export BW_TEST_PG_DSN BW_TEST_BAO_ADDR BW_TEST_BAO_TOKEN
+BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 go test -count=1 ./...
 '''
 
 [tasks.dev-db]
@@ -167,6 +170,30 @@ for _ in $(seq 30); do
   sleep 1
 done
 echo "dev-db: bw-dev-pg was not running and ready within 30s (docker ps -a; docker logs bw-dev-pg)" >&2
+exit 1
+'''
+
+[tasks.dev-bao]
+description = "Start a disposable development OpenBao at the fixture's image pin: dev mode, in memory, http://127.0.0.1:58201, root token bw-dev-root-token"
+# The image's default command is `server -dev`: unsealed, KV v2 at secret/, nothing persisted, and
+# removed on stop (docker stop bw-dev-bao). The root token is a fixed, synthetic value, bound to
+# loopback like dev-db's trust auth; mise run go-db defaults to it. Never a deployment provider,
+# and not the fixture's Raft server.
+run = '''
+image=$(sed -n 's/^OPENBAO_IMAGE=//p' fixtures/versions.env)
+# As dev-db: every path waits for readiness, and a container being removed is waited out.
+for _ in $(seq 30); do
+  if [ -z "$(docker ps -aq --filter 'name=^bw-dev-bao$')" ]; then
+    docker run -d --rm --name bw-dev-bao -e BAO_DEV_ROOT_TOKEN_ID=bw-dev-root-token \
+      -e BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200 -p 127.0.0.1:58201:8200 "$image" >/dev/null || true
+  elif [ -n "$(docker ps -q --filter 'name=^bw-dev-bao$' --filter status=running)" ] &&
+    docker exec bw-dev-bao bao status -address=http://127.0.0.1:8200 >/dev/null 2>&1; then
+    echo "http://127.0.0.1:58201"
+    exit 0
+  fi
+  sleep 1
+done
+echo "dev-bao: bw-dev-bao was not running and unsealed within 30s (docker ps -a; docker logs bw-dev-bao)" >&2
 exit 1
 '''
 

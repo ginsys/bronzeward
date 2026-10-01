@@ -109,9 +109,11 @@ jobs:
       - run: mise run go
 
   go-db:
-    # The root module's tests against PostgreSQL, in a service container at the fixture's image
-    # pin (the pin step fails when either moves without the other). BW_REQUIRE_PG turns
-    # a database that never came up into failures, not skipped tests.
+    # The root module's tests against PostgreSQL and OpenBao, in service containers at the
+    # fixture's image pins (the pin step fails when either side moves without the other).
+    # BW_REQUIRE_PG and BW_REQUIRE_BAO (set by mise run go-db) turn a service that never came up
+    # into failures, not skipped tests. OpenBao runs the image's default command, `server -dev`:
+    # in memory, unsealed, with a synthetic root token, as mise run dev-bao does.
     # GitHub-hosted for every event: the in-cluster runners have no Docker daemon, so the service
     # container cannot start there (this job's first run failed initializing it, at
     # `docker version`). A hosted runner is also the more isolated place for PR code.
@@ -129,17 +131,39 @@ jobs:
         options: >-
           --health-cmd "pg_isready -h 127.0.0.1 -U bronzeward -d bronzeward"
           --health-interval 2s --health-timeout 2s --health-retries 30
+      openbao:
+        image: ghcr.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0
+        env:
+          BAO_DEV_ROOT_TOKEN_ID: bw-dev-root-token
+          BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+        ports:
+          - 8200:8200
+        options: >-
+          --health-cmd "bao status -address=http://127.0.0.1:8200"
+          --health-interval 2s --health-timeout 2s --health-retries 30
     env:
       BW_TEST_PG_DSN: postgres://bronzeward@localhost:5432/bronzeward?sslmode=disable
+      BW_TEST_BAO_ADDR: http://localhost:8200
+      BW_TEST_BAO_TOKEN: bw-dev-root-token
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Service image is the fixture's pin
-        # Compares this file's only `image:` line with versions.env, so either side moving alone fails.
+      - name: Service images are the fixture's pins
+        # Each service's `image:` line against its versions.env pin, and no other `image:` line in
+        # this file, so either side moving alone fails.
         run: |
-          pin=$(sed -n 's/^POSTGRES_IMAGE=//p' fixtures/versions.env)
-          images=$(sed -n 's/^ *image: *//p' .github/workflows/ci.yml)
-          if [ -z "$pin" ] || [ "$images" != "$pin" ]; then
-            echo "service image(s) '$images' differ from POSTGRES_IMAGE '$pin'" >&2
+          check() { # <service> <versions.env name>
+            pin=$(sed -n "s/^$2=//p" fixtures/versions.env)
+            image=$(sed -n "/^      $1:\$/,/^ *image:/s/^ *image: *//p" .github/workflows/ci.yml)
+            if [ -z "$pin" ] || [ "$image" != "$pin" ]; then
+              echo "service $1's image '$image' differs from $2 '$pin'" >&2
+              return 1
+            fi
+          }
+          check postgres POSTGRES_IMAGE
+          check openbao OPENBAO_IMAGE
+          count=$(grep -c '^ *image:' .github/workflows/ci.yml)
+          if [ "$count" -ne 2 ]; then
+            echo "$count image: lines, want the two services' only" >&2
             exit 1
           fi
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
