@@ -65,7 +65,9 @@ CREATE TABLE import_base_reference (
   version    integer NOT NULL CHECK (version >= 1),
   encoding   text CHECK (encoding = 'base64'),
   generation text NOT NULL CHECK (generation ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$'),
-  PRIMARY KEY (revision, name)
+  PRIMARY KEY (revision, name),
+  -- base64 places a string secret's UTF-8 bytes (compilation §5.2); no other kind takes it.
+  CHECK (encoding IS NULL OR kind = 'string')
 );
 CALL make_immutable('import_base_reference');
 
@@ -135,6 +137,8 @@ CREATE TABLE staging_claim (
   idempotency_key text CHECK (idempotency_key ~ '^[A-Za-z0-9_-]{16,128}$'),
   created_at      timestamptz NOT NULL,
   CHECK (payload IS NULL OR (mode = 'encrypted' AND state IN ('held', 'resumed'))),
+  -- Only an encrypted claim can be taken over (§3.2, §3.4): transient staging has no recovery owner.
+  CHECK (state <> 'resumed' OR mode = 'encrypted'),
   CHECK ((principal IS NULL) = (idempotency_key IS NULL))
 );
 CREATE UNIQUE INDEX staging_claim_live_key ON staging_claim (principal, idempotency_key)
@@ -199,7 +203,8 @@ CREATE TABLE operation_event (
   operation text NOT NULL REFERENCES operation (id),
   number    integer NOT NULL CHECK (number >= 1),
   epoch     text NOT NULL REFERENCES recovery_epoch (epoch),
-  entry     jsonb NOT NULL,
+  -- A JSON object: JSON null is not SQL NULL, and an immutable event cannot be corrected later.
+  entry     jsonb NOT NULL CHECK (jsonb_typeof(entry) = 'object'),
   at        timestamptz NOT NULL,
   PRIMARY KEY (operation, number)
 );
