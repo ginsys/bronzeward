@@ -190,7 +190,8 @@ func containsAny(s string, texts []string) bool {
 }
 
 // redactRefusal re-renders a refusal's paths through redactPath against texts; other errors pass
-// unchanged.
+// unchanged. A string that is not a path is kept only when it is a reference name holding no
+// value: its escaping is unknown, so a value inside it may not read as itself.
 func redactRefusal(err error, texts []string) error {
 	var r *Refusal
 	if !errors.As(err, &r) {
@@ -200,10 +201,10 @@ func redactRefusal(err error, texts []string) error {
 	for _, s := range r.Paths {
 		if p, perr := ParsePath(s); perr == nil {
 			out.Paths = append(out.Paths, redactPath(p, texts))
-		} else if containsAny(s, texts) {
-			out.Paths = append(out.Paths, redacted)
-		} else {
+		} else if validName(s) && !holdsAny(s, texts) {
 			out.Paths = append(out.Paths, s)
+		} else {
+			out.Paths = append(out.Paths, redacted)
 		}
 	}
 	return out
@@ -235,10 +236,41 @@ func redactPath(p Path, texts []string) string {
 	q := Path{Doc: p.Doc, Format: p.Format, Pointer: slices.Clone(p.Pointer), Inner: slices.Clone(p.Inner)}
 	for _, tokens := range [][]string{q.Pointer, q.Inner} {
 		for i, tok := range tokens {
-			if containsAny(tok, texts) {
+			if holdsAny(tok, texts) {
 				tokens[i] = redacted
 			}
 		}
 	}
 	return q.String()
+}
+
+// holdsAny reports whether s contains one of texts, or as a plain scalar decodes to the same
+// integer or boolean as one of them: the guard's equality (equalsAny) treats 0x4cb2f as 314159
+// and TRUE as true, so a key spelled either way discloses the value.
+func holdsAny(s string, texts []string) bool {
+	if containsAny(s, texts) {
+		return true
+	}
+	for _, t := range texts {
+		if sameScalar(s, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameScalar reports whether a and b, read as plain YAML scalars, are the same integer or
+// boolean.
+func sameScalar(a, b string) bool {
+	na := &yaml.Node{Kind: yaml.ScalarNode, Value: a}
+	nb := &yaml.Node{Kind: yaml.ScalarNode, Value: b}
+	tag := na.ShortTag()
+	if tag != nb.ShortTag() || tag != "!!int" && tag != "!!bool" {
+		return false
+	}
+	var va, vb any
+	if na.Decode(&va) != nil || nb.Decode(&vb) != nil {
+		return false
+	}
+	return va == vb
 }
