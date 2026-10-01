@@ -20,7 +20,7 @@
 //     made before substitution too: the values are those the machinery redacts and those under
 //     each mark that resolves, aliases followed. A token is also redacted when it reads as the
 //     same number or boolean as one of them (0x4cb2f, 3.14159e5 and 314159 are one number), as
-//     the guard compares. A rendered path that still holds a value, unescaped or split
+//     the guard compares; a token has lost its key's tag, so it is read under every scalar tag. A rendered path that still holds a value, unescaped or split
 //     differently from its keys (a key ending in |yaml), names its document only. When the
 //     machinery cannot load a document, or a value it redacts is not the text of its input
 //     scalar, the input's spelling of those values is not known, and a refusal names documents
