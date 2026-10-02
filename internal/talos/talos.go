@@ -19,6 +19,7 @@ import (
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
 	cfgres "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -41,15 +42,10 @@ func Dial(ctx context.Context, talosconfig []byte, endpoint string) (Reader, err
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := clientconfig.FromBytes(talosconfig)
+	creds, err := currentCredentials(talosconfig)
 	if err != nil {
-		return nil, errors.New("talos: the talosconfig is not a talosconfig document")
+		return nil, err
 	}
-	cur := cfg.Contexts[cfg.Context]
-	if cur == nil || cur.CA == "" || cur.Crt == "" || cur.Key == "" {
-		return nil, errors.New("talos: the talosconfig's current context has no certificate authority, certificate and key")
-	}
-	creds := &clientconfig.Context{CA: cur.CA, Crt: cur.Crt, Key: cur.Key}
 	c, err := client.New(ctx, client.WithConfigContext(creds), client.WithEndpoints(ep))
 	if err != nil {
 		return nil, errors.New("talos: the talosconfig's certificate authority, certificate or key is unusable")
@@ -57,8 +53,45 @@ func Dial(ctx context.Context, talosconfig []byte, endpoint string) (Reader, err
 	return &reader{api: c}, nil
 }
 
+// currentCredentials is the certificate authority, certificate and key of the talosconfig's current
+// context, and nothing else from it. The machinery's parser panics on some malformed documents (it
+// dereferences a null context while upgrading one: machinery v1.13.6, client/config/config.go:81);
+// a credential read from the provider is input, so a panic is that document's refusal, its value
+// dropped unread.
+func currentCredentials(talosconfig []byte) (creds *clientconfig.Context, err error) {
+	notTalosconfig := errors.New("talos: the talosconfig is not a talosconfig document")
+	defer func() {
+		if recover() != nil {
+			creds, err = nil, notTalosconfig
+		}
+	}()
+	cfg, err := clientconfig.FromBytes(talosconfig)
+	if err != nil {
+		return nil, notTalosconfig
+	}
+	cur := cfg.Contexts[cfg.Context]
+	if cur == nil || cur.CA == "" || cur.Crt == "" || cur.Key == "" {
+		return nil, errors.New("talos: the talosconfig's current context has no certificate authority, certificate and key")
+	}
+	return &clientconfig.Context{CA: cur.CA, Crt: cur.Crt, Key: cur.Key}, nil
+}
+
 type reader struct {
 	api *client.Client
+}
+
+// direct is ctx without node routing metadata. apid forwards a request carrying node or nodes to
+// the nodes named there; the request must be answered by the node at the dialled endpoint
+// (persistence-api §3.3), whatever the caller's context holds. Other metadata is kept.
+func direct(ctx context.Context) context.Context {
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		return ctx
+	}
+	md = md.Copy()
+	md.Delete("node")
+	md.Delete("nodes")
+	return metadata.NewOutgoingContext(ctx, md)
 }
 
 // requestError is a failed node request in this package's own words. The machinery's error text
@@ -87,7 +120,7 @@ func (e *requestError) GRPCStatus() *status.Status { return status.New(e.code, e
 func (e *requestError) Unwrap() error              { return e.ctx }
 
 func (r *reader) MachineConfig(ctx context.Context) (Config, error) {
-	mc, err := safe.StateGetByID[*cfgres.MachineConfig](ctx, r.api.COSI, cfgres.ActiveID)
+	mc, err := safe.StateGetByID[*cfgres.MachineConfig](direct(ctx), r.api.COSI, cfgres.ActiveID)
 	if err != nil {
 		return Config{}, newRequestError(ctx, "reading the machine configuration", err)
 	}
@@ -99,7 +132,7 @@ func (r *reader) MachineConfig(ctx context.Context) (Config, error) {
 }
 
 func (r *reader) Version(ctx context.Context) (string, error) {
-	resp, err := r.api.Version(ctx)
+	resp, err := r.api.Version(direct(ctx))
 	if err != nil {
 		return "", newRequestError(ctx, "version", err)
 	}

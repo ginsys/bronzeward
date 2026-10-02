@@ -21,8 +21,10 @@ import (
 
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -106,11 +108,22 @@ type standIn struct {
 }
 
 func (s *standIn) Version(ctx context.Context, _ *emptypb.Empty) (*machine.VersionResponse, error) {
+	s.record(ctx)
+	return &machine.VersionResponse{Messages: []*machine.Version{{Version: &machine.VersionInfo{Tag: "v1.13.6"}}}}, nil
+}
+
+// unknown records a request for any other service (the COSI state MachineConfig reads) and
+// answers Unimplemented.
+func (s *standIn) unknown(_ any, stream grpc.ServerStream) error {
+	s.record(stream.Context())
+	return status.Error(codes.Unimplemented, "stand-in")
+}
+
+func (s *standIn) record(ctx context.Context) {
 	md, _ := metadata.FromIncomingContext(ctx)
 	s.mu.Lock()
 	s.metadata = append(s.metadata, md)
 	s.mu.Unlock()
-	return &machine.VersionResponse{Messages: []*machine.Version{{Version: &machine.VersionInfo{Tag: "v1.13.6"}}}}, nil
 }
 
 func (s *standIn) seen() []metadata.MD {
@@ -126,10 +139,10 @@ func serve(t *testing.T, p pki) (string, *standIn) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s := &standIn{}
 	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{p.server}, ClientCAs: p.pool, ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS12,
-	})))
-	s := &standIn{}
+	})), grpc.UnknownServiceHandler(s.unknown))
 	machine.RegisterMachineServiceServer(srv, s)
 	go srv.Serve(l) //nolint:errcheck // ends with Stop
 	t.Cleanup(srv.Stop)
@@ -184,6 +197,36 @@ func TestDialUsesOnlyTheChosenEndpoint(t *testing.T) {
 	}
 	if seen := s.seen(); len(seen) != 2 || !hasRouting(seen[1]) {
 		t.Fatalf("control: node metadata not seen: %v", seen)
+	}
+}
+
+// TestRequestsDropRouting (PA §3.3): a caller's context carrying node or nodes metadata does not
+// make a request routable; both of Reader's requests reach the endpoint without it.
+func TestRequestsDropRouting(t *testing.T) {
+	p := newPKI(t)
+	ep, s := serve(t, p)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	r, err := Dial(ctx, p.talosconfig("", "", ""), ep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	routed := metadata.AppendToOutgoingContext(ctx, "node", "192.0.2.2", "nodes", "192.0.2.3", "x-kept", "1")
+	if _, err := r.Version(routed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.MachineConfig(routed); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("MachineConfig: %v; want the stand-in's Unimplemented", err)
+	}
+	seen := s.seen()
+	if len(seen) != 2 {
+		t.Fatalf("%d requests reached the stand-in; want 2", len(seen))
+	}
+	for i, md := range seen {
+		if hasRouting(md) || len(md.Get("x-kept")) != 1 {
+			t.Errorf("request %d: metadata %v; want no node or nodes, other keys kept", i, md)
+		}
 	}
 }
 
@@ -275,6 +318,9 @@ func TestDialRefuses(t *testing.T) {
 		"undecodable ca":       {[]byte(strings.Replace(string(good), "ca: ", "ca: "+mark+"-", 1)), "10.55.0.3:50000"},
 		"ca without a cert":    {[]byte(strings.Replace(string(good), base64.StdEncoding.EncodeToString(p.caPEM), base64.StdEncoding.EncodeToString([]byte(mark)), 1)), "10.55.0.3:50000"},
 		"secret in the config": {[]byte("context: a\ncontexts:\n  a:\n    crt: " + mark + "\n    key: " + mark + "\n    ca: x\n"), "10.55.0.3:50000"},
+		// The machinery's parser dereferences a null context while upgrading the document.
+		"null current context": {[]byte("context: a\ncontexts:\n  a: null\n"), "10.55.0.3:50000"},
+		"null other context":   {[]byte(string(good) + "  b: null\n"), "10.55.0.3:50000"},
 	} {
 		r, err := Dial(t.Context(), c.tc, c.endpoint)
 		if err == nil {
