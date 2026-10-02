@@ -133,7 +133,7 @@ func TestOwnerFenceMatrix(t *testing.T) {
 			return Heartbeat(ctx, db, o, c, timers.Lease)
 		},
 		"StorePayload": func(ctx context.Context, db *sql.DB, o Owner, c Claim) error {
-			return StorePayload(ctx, db, o, c, []byte("ct"), sum)
+			return inTx(ctx, db, func(tx *sql.Tx) error { return StorePayload(ctx, tx, o, c, []byte("ct"), sum) })
 		},
 		"Release": func(ctx context.Context, db *sql.DB, o Owner, c Claim) error {
 			return inTx(ctx, db, func(tx *sql.Tx) error { return Release(ctx, tx, o, c) })
@@ -265,12 +265,12 @@ func TestPayload(t *testing.T) {
 	f := setup(t)
 	sum := sha256.Sum256([]byte("envelope"))
 	o, c := f.create(t, "transient")
-	if err := StorePayload(t.Context(), f.db, o, c, []byte("ct"), sum); err == nil {
+	if err := inTx(t.Context(), f.db, func(tx *sql.Tx) error { return StorePayload(t.Context(), tx, o, c, []byte("ct"), sum) }); err == nil {
 		t.Fatal("a transient claim took a payload")
 	}
 	// The statement itself fences the mode, not only the caller's Claim value.
 	c.Mode = "encrypted"
-	if err := StorePayload(t.Context(), f.db, o, c, []byte("ct"), sum); err == nil || f.row(t, c.ID).payload != nil {
+	if err := inTx(t.Context(), f.db, func(tx *sql.Tx) error { return StorePayload(t.Context(), tx, o, c, []byte("ct"), sum) }); err == nil || f.row(t, c.ID).payload != nil {
 		t.Fatalf("a transient claim took a payload under a claimed mode: %v", err)
 	}
 	for _, end := range []struct {
@@ -278,7 +278,7 @@ func TestPayload(t *testing.T) {
 		fn    func(context.Context, *sql.Tx, Owner, Claim) error
 	}{{"released", Release}, {"abandoned", Abandon}} {
 		o, c := f.create(t, "encrypted")
-		if err := StorePayload(t.Context(), f.db, o, c, []byte("ct"), sum); err != nil {
+		if err := inTx(t.Context(), f.db, func(tx *sql.Tx) error { return StorePayload(t.Context(), tx, o, c, []byte("ct"), sum) }); err != nil {
 			t.Fatal(err)
 		}
 		if r := f.row(t, c.ID); string(r.payload) != "ct" || [32]byte(r.digest) != sum {
