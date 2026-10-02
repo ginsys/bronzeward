@@ -1,7 +1,8 @@
 // Package staging holds a staging claim's statements (compilation.md §3): its creation, the
 // owner's heartbeat, the encrypted payload, release and abandonment. Every statement after
-// creation is one conditional UPDATE whose predicate is the owner fence (persistence-api.md
-// §5.1): no read decides a write, and a read after a refused write only names the reason.
+// creation locks the claim's row, then is one conditional UPDATE whose predicate is the owner
+// fence (persistence-api.md §5.1): no read decides a write, and a read after a refused write only
+// names the reason.
 package staging
 
 import (
@@ -37,12 +38,27 @@ var (
 )
 
 // fence is the owner predicate every statement after creation carries, over $1 claim, $2 owner,
-// $3 owner generation and $4 owner epoch. Its epoch read holds the installation state FOR SHARE
-// to the end of the transaction (§5.1), taken before the claim's lock: recovery-mode entry
-// cannot commit a new epoch while the statement waits for the claim or its transaction commits.
+// $3 owner generation and $4 owner epoch, after lock. It compares the deadlines with the current
+// time, not the transaction's start (compilation §3.5): a claim that lapsed while its transaction
+// ran is no longer this owner's.
 const fence = `id = $1 AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4
 	AND $4 = (SELECT epoch FROM installation_state FOR SHARE)
-	AND state IN ('held', 'resumed') AND lease_until > now() AND expires_at > now()`
+	AND state IN ('held', 'resumed') AND lease_until > clock_timestamp() AND expires_at > clock_timestamp()`
+
+// lock takes the installation state FOR SHARE, then the claim's row FOR UPDATE, in the caller's
+// transaction and the order every claim transaction takes them. The installation state is held
+// to the end of the transaction (persistence-api §5.1): recovery-mode entry cannot commit a new
+// epoch while the statement waits for the claim or its transaction commits. The fence runs after
+// any wait for the claim: an UPDATE evaluates its predicate before it waits for a row and does not
+// evaluate it again when the holder ends without changing the row, so a deadline that passed in
+// the wait would go unseen.
+func lock(ctx context.Context, tx *sql.Tx, claim string) error {
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM installation_state FOR SHARE`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `SELECT 1 FROM staging_claim WHERE id = $1 FOR UPDATE`, claim)
+	return err
+}
 
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -78,15 +94,23 @@ func Create(ctx context.Context, tx *sql.Tx, o Owner, t Timers, c Claim, princip
 	return nil
 }
 
-// Heartbeat extends the claim's lease to now() + lease, never past its absolute expiry, and its
-// running ingest operation's lease with it.
+// Heartbeat extends the claim's lease to a lease from when it holds the claim, never past its
+// absolute expiry, and its running ingest operation's lease with it, in a transaction of its own.
 func Heartbeat(ctx context.Context, db *sql.DB, o Owner, c Claim, lease time.Duration) error {
 	if lease <= 0 {
 		return errors.New("staging: the lease must be positive")
 	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("staging: heartbeat: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // a no-op once committed
+	if err := lock(ctx, tx, c.ID); err != nil {
+		return fmt.Errorf("staging: heartbeat: %w", err)
+	}
 	var n int
-	err := db.QueryRowContext(ctx, `WITH c AS (
-		UPDATE staging_claim SET lease_until = least(now() + $5::bigint * interval '1 microsecond', expires_at)
+	err = tx.QueryRowContext(ctx, `WITH c AS (
+		UPDATE staging_claim SET lease_until = least(clock_timestamp() + $5::bigint * interval '1 microsecond', expires_at)
 		WHERE `+fence+` RETURNING id, lease_until),
 	op AS (
 		UPDATE operation SET lease_until = c.lease_until FROM c
@@ -95,22 +119,31 @@ func Heartbeat(ctx context.Context, db *sql.DB, o Owner, c Claim, lease time.Dur
 	if err != nil {
 		return fmt.Errorf("staging: heartbeat: %w", err)
 	}
-	return refused(ctx, db, o, n)
+	if err := refused(ctx, tx, o, n); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("staging: heartbeat: %w", err)
+	}
+	return nil
 }
 
 // StorePayload writes an encrypted claim's envelope ciphertext and its plaintext's SHA-256
 // (compilation §3: after step 8). A transient claim never holds one: the schema refuses it
-// whatever mode the caller's Claim names. db is a *sql.DB or the caller's *sql.Tx.
-func StorePayload(ctx context.Context, db execer, o Owner, c Claim, ct []byte, sum [32]byte) error {
+// whatever mode the caller's Claim names. It runs in the caller's transaction.
+func StorePayload(ctx context.Context, tx *sql.Tx, o Owner, c Claim, ct []byte, sum [32]byte) error {
 	if c.Mode != "encrypted" || len(ct) == 0 {
 		return errors.New("staging: only an encrypted claim holds a payload, and it is not empty")
 	}
-	res, err := db.ExecContext(ctx, `UPDATE staging_claim SET payload = $5, payload_digest = $6
+	if err := lock(ctx, tx, c.ID); err != nil {
+		return fmt.Errorf("staging: store the payload: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE staging_claim SET payload = $5, payload_digest = $6
 		WHERE `+fence, c.ID, o.ID, c.Gen, o.Epoch, ct, sum[:])
 	if err != nil {
 		return fmt.Errorf("staging: store the payload: %w", err)
 	}
-	return affected(ctx, db, o, res)
+	return affected(ctx, tx, o, res)
 }
 
 // Release ends the claim released, in the caller's draft transaction (T1's claim half).
@@ -125,6 +158,9 @@ func Abandon(ctx context.Context, tx *sql.Tx, o Owner, c Claim) error {
 
 // end moves the claim to state and clears its payload with its digest (compilation §3).
 func end(ctx context.Context, tx *sql.Tx, o Owner, c Claim, state string) error {
+	if err := lock(ctx, tx, c.ID); err != nil {
+		return fmt.Errorf("staging: %s: %w", state, err)
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE staging_claim SET state = $5, payload = NULL, payload_digest = NULL
 		WHERE `+fence, c.ID, o.ID, c.Gen, o.Epoch, state)
 	if err != nil {

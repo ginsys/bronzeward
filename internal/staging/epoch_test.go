@@ -31,7 +31,7 @@ func waitBlocked(t *testing.T, db *sql.DB) {
 	for range 200 {
 		var n int
 		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'
-			AND query LIKE '%UPDATE staging_claim%' AND pid <> pg_backend_pid()`).Scan(&n); err != nil {
+			AND query LIKE '%staging_claim%' AND pid <> pg_backend_pid()`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		if n > 0 {

@@ -564,8 +564,9 @@ Rules for every transaction:
    `now()`, never the caller's clock. DB's leases used the client clock and
    left skew untested (DB §7); compilation §3.2 makes the same choice for
    claims. A time that must follow a lock wait, a DependencyStatus row's
-   `recorded_at` (dependency monitor §6.1) and the DependencyMonitor row's
-   progress (dependency monitor §6.3), is the database's `clock_timestamp()`
+   `recorded_at` (dependency monitor §6.1), the DependencyMonitor row's
+   progress (dependency monitor §6.3) and a staging claim's lease and expiry
+   checks (compilation §3.5), is the database's `clock_timestamp()`
    read after the lock is held, since `now()` is fixed when the transaction
    began.
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation

@@ -387,6 +387,28 @@ and clears the payload, at startup and periodically. A late sweep therefore
 delays only the clearing of ciphertext, never a refusal. The sweep interval is
 open.
 
+Every comparison with a claim's lease or absolute expiry, and a heartbeat's new
+lease, uses the database's current time, `clock_timestamp()`, not the
+transaction's start `now()`
+([persistence and API §5](persistence-api.md#5-transaction-boundaries) rule 4).
+An owner transition takes the claim's row lock before it evaluates its
+conditional `UPDATE`: PostgreSQL evaluates an `UPDATE`'s predicate before it
+waits for a row and does not evaluate it again when the holder ends without
+changing the row, so a deadline that passed during that wait would go unseen.
+A heartbeat or release that waited for the claim until past its lease or
+expiry is therefore refused, and a heartbeat extends the lease from the time it
+holds the claim. A transaction that began before a lapse reads the claim
+`abandoned` once the lapse has passed.
+
+A draft transaction (T1) is not checked again at `COMMIT` **(choice §16.30)**.
+Its release passes the owner check while it holds the claim's row lock, and
+holds that lock to its end: no sweep, takeover or abandonment can act on the
+claim meanwhile, so the release is ordered at the instant it was checked, when
+the claim was live. A T1 still running when the expiry passes commits a claim
+that was released in time. If it rolls back instead, the claim is due and
+abandoned as any other. Until it ends, a read that does not wait for the lock
+already reports the claim `abandoned`; the commit then shows it `released`.
+
 A restore rewinds claim rows and fence generations with the rest of the
 database (DB §4.7). A claim created before the current recovery epoch
 ([execution and recovery §7](execution-recovery.md#7-recovery-after-management-state-restoration))
@@ -1430,6 +1452,12 @@ in place as
     talosconfig file in the server's configuration, outside the provider;
     a separate reader identity handing the credential to both, which adds a
     process boundary without narrowing the `os:admin` the credential carries.
+30. **A draft transaction's release is checked against the claim's deadlines
+    once, under the claim's row lock, not again at `COMMIT`** (§3.5). The
+    lock orders the release before any abandonment. Alternative: a deferred
+    check at `COMMIT` (a deferred constraint trigger comparing the expiry with
+    `clock_timestamp()`), which would roll back an import whose claim was live
+    when released, over a gap in which no other transaction could act on it.
 
 ## 17. Traceability
 

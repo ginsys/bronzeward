@@ -120,12 +120,16 @@ func TestSweepMatrix(t *testing.T) {
 		WHERE id = $1`, transientExpired.ID)
 	o, encryptedLapsed := f.create(t, "encrypted")
 	sum := sha256.Sum256([]byte("envelope"))
-	if err := StorePayload(t.Context(), f.db, o, encryptedLapsed, []byte("vault:v1:sealed"), sum); err != nil {
+	if err := inTx(t.Context(), f.db, func(tx *sql.Tx) error {
+		return StorePayload(t.Context(), tx, o, encryptedLapsed, []byte("vault:v1:sealed"), sum)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	exec(t, f.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, encryptedLapsed.ID)
 	o, encryptedExpired := f.create(t, "encrypted")
-	if err := StorePayload(t.Context(), f.db, o, encryptedExpired, []byte("vault:v1:sealed"), sum); err != nil {
+	if err := inTx(t.Context(), f.db, func(tx *sql.Tx) error {
+		return StorePayload(t.Context(), tx, o, encryptedExpired, []byte("vault:v1:sealed"), sum)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	// The started event an earlier step wrote: the terminal one is numbered after it.
