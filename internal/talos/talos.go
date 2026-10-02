@@ -1,7 +1,7 @@
 // Package talos reads a node's machine configuration and Talos version through the Talos Go
 // machinery, in process: a talosctl subprocess would put the configuration on a pipe. The
 // machinery client can also apply, reset, reboot and upgrade; this package exposes none of that.
-// Its surface is Reader's three methods, and guard_test.go holds the package's source to an
+// Its surface is Reader's four methods, and guard_test.go holds the package's source to an
 // allowlist of machinery calls so that a mutating call cannot be added unnoticed.
 //
 // The caller supplies the cluster's talosconfig, as read from the provider, and the machine's
@@ -15,9 +15,12 @@ import (
 	"fmt"
 
 	"github.com/cosi-project/runtime/pkg/safe"
+	"github.com/cosi-project/runtime/pkg/state"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
+	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
 	cfgres "github.com/siderolabs/talos/pkg/machinery/resources/config"
+	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -29,7 +32,17 @@ type Reader interface {
 	MachineConfig(ctx context.Context) (Config, error)
 	// Version is the node's Talos tag.
 	Version(ctx context.Context) (string, error)
+	// Identity is what the node reports about itself, for the identity check (persistence-api
+	// §3.3).
+	Identity(ctx context.Context) (Identity, error)
 	Close() error
+}
+
+// Identity is a node's report of itself, each value as Talos prints it, unnormalised: the SMBIOS
+// UUID ("" when the node reports none: no SystemInformation resource, or an empty UUID in one), the
+// Talos node ID and the Talos cluster ID.
+type Identity struct {
+	SMBIOSUUID, NodeID, ClusterID string
 }
 
 // Dial makes a Reader for the node at endpoint (ParseEndpoint's grammar) from a talosconfig's
@@ -97,7 +110,8 @@ func direct(ctx context.Context) context.Context {
 // requestError is a failed node request in this package's own words. The machinery's error text
 // is not kept: it decodes the configuration before returning it, and a decoder error quotes the
 // rejected YAML, i.e. the configuration's secrets. The gRPC code (status.Code) and a context error
-// (errors.Is) are kept.
+// (errors.Is) are kept. COSI's client answers a missing resource with its own not-found error, which
+// hides the gRPC status, so that one is kept as NotFound.
 type requestError struct {
 	what string
 	code codes.Code
@@ -105,7 +119,11 @@ type requestError struct {
 }
 
 func newRequestError(ctx context.Context, what string, err error) error {
-	return &requestError{what: what, code: status.Code(err), ctx: ctx.Err()}
+	code := status.Code(err)
+	if state.IsNotFoundError(err) {
+		code = codes.NotFound
+	}
+	return &requestError{what: what, code: code, ctx: ctx.Err()}
 }
 
 func (e *requestError) Error() string {
@@ -148,6 +166,30 @@ func (r *reader) Version(ctx context.Context) (string, error) {
 		return "", errors.New("talos: version: no tag")
 	}
 	return tag, nil
+}
+
+// Identity reads the node's SystemInformation, Identity and Info resources, in that order. Only the
+// SystemInformation resource may be missing: a node without SMBIOS (a container node) has none,
+// while every node has a node identity and cluster information, so their absence is a failure.
+func (r *reader) Identity(ctx context.Context) (Identity, error) {
+	var id Identity
+	si, err := safe.StateGetByID[*hardware.SystemInformation](direct(ctx), r.api.COSI, hardware.SystemInformationID)
+	switch {
+	case err == nil:
+		id.SMBIOSUUID = si.TypedSpec().UUID
+	case !state.IsNotFoundError(err):
+		return Identity{}, newRequestError(ctx, "reading the system information", err)
+	}
+	ni, err := safe.StateGetByID[*cluster.Identity](direct(ctx), r.api.COSI, cluster.LocalIdentity)
+	if err != nil {
+		return Identity{}, newRequestError(ctx, "reading the node identity", err)
+	}
+	ci, err := safe.StateGetByID[*cluster.Info](direct(ctx), r.api.COSI, cluster.InfoID)
+	if err != nil {
+		return Identity{}, newRequestError(ctx, "reading the cluster information", err)
+	}
+	id.NodeID, id.ClusterID = ni.TypedSpec().NodeID, ci.TypedSpec().ClusterID
+	return id, nil
 }
 
 func (r *reader) Close() error { return r.api.Close() }

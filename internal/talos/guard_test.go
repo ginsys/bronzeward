@@ -33,6 +33,9 @@ const (
 	machineryConfig = "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	clientConfig    = "github.com/siderolabs/talos/pkg/machinery/client/config"
 	cosiSafe        = "github.com/cosi-project/runtime/pkg/safe"
+	cosiState       = "github.com/cosi-project/runtime/pkg/state"
+	machineryHW     = "github.com/siderolabs/talos/pkg/machinery/resources/hardware"
+	machineryCl     = "github.com/siderolabs/talos/pkg/machinery/resources/cluster"
 	thisPackage     = "github.com/ginsys/bronzeward/internal/talos"
 )
 
@@ -138,9 +141,10 @@ func exportedSurface(t *testing.T, files map[string][]byte) []string {
 var surface = []string{
 	"Config", "Config.Bytes", "Config.Format", "Config.GoString", "Config.MarshalJSON",
 	"Config.MarshalText", "Config.MarshalYAML", "Config.ResourceVersion", "Config.String",
-	"ConfigurationDigest", "Dial", "ParseEndpoint",
-	"Reader", "Reader.Close", "Reader.MachineConfig", "Reader.Version",
-	"reader.Close", "reader.MachineConfig", "reader.Version",
+	"ConfigurationDigest", "Dial", "Identity", "Identity.ClusterID", "Identity.NodeID", "Identity.SMBIOSUUID",
+	"ParseEndpoint",
+	"Reader", "Reader.Close", "Reader.Identity", "Reader.MachineConfig", "Reader.Version",
+	"reader.Close", "reader.Identity", "reader.MachineConfig", "reader.Version",
 	"requestError.Error", "requestError.GRPCStatus", "requestError.Unwrap",
 }
 
@@ -181,6 +185,9 @@ var allowedSelectors = map[string][]string{
 	machineryConfig: {"ActiveID", "MachineConfig"},
 	clientConfig:    {"Context", "FromBytes"},
 	cosiSafe:        {"StateGetByID"},
+	cosiState:       {"IsNotFoundError"},
+	machineryHW:     {"SystemInformation", "SystemInformationID"},
+	machineryCl:     {"Identity", "Info", "InfoID", "LocalIdentity"},
 }
 
 // clientMembers are the only members of the stored client (the `api` field) this package uses.
