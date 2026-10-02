@@ -23,10 +23,10 @@ type Config struct {
 	Database  Database  `yaml:"database"`
 	Auth      Auth      `yaml:"auth"`
 	Execution Execution `yaml:"execution"`
-	// Provider and Talos are optional: nil when absent, validated when present. Nothing in the
-	// server reads them yet; they configure internal/provider and internal/talos.
+	// Provider is optional: nil when absent, validated when present. Nothing in the server reads
+	// it yet; it configures internal/provider. There is no Talos block: each cluster's
+	// talosconfig is read from the provider at use (persistence-api §3.3).
 	Provider *Provider `yaml:"provider"`
-	Talos    *Talos    `yaml:"talos"`
 }
 
 // Provider is the OpenBao the server stores generations and encrypts under (compilation.md §4.1,
@@ -48,11 +48,6 @@ type ProviderKeys struct {
 	Baseline string `yaml:"baseline"`
 	Staging  string `yaml:"staging"`
 	Digest   string `yaml:"digest"`
-}
-
-// Talos names the talosconfig the server reads machine configuration with.
-type Talos struct {
-	Talosconfig string `yaml:"talosconfig"`
 }
 
 type Database struct {
@@ -143,9 +138,6 @@ func Load(r io.Reader) (Config, error) {
 		if err := c.Provider.validate(); err != nil {
 			return Config{}, err
 		}
-	}
-	if c.Talos != nil && c.Talos.Talosconfig == "" {
-		return Config{}, errors.New("config: talos.talosconfig is required")
 	}
 	return c, nil
 }
