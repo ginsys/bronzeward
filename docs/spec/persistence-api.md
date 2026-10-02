@@ -324,7 +324,7 @@ They are held apart **(choice §17.29)**.
 
 - **The endpoint is per machine, in the database.** `POST /machines` requires
   `talosEndpoint`: a DNS name or an IP literal (an IPv6 literal in brackets),
-  with an optional port, `50000` when absent; no scheme, path, user part or
+  with an optional port from 1 to 65535, `50000` when absent; no scheme, path, user part or
   whitespace, at most 255 octets. The endpoint is only dialled: every request
   to the node goes to it and carries no `node` or `nodes` routing metadata,
   so the node dialled answers for itself and no apid forwards it (execution
@@ -335,8 +335,12 @@ They are held apart **(choice §17.29)**.
   binds the endpoint current at its creation as its route.
   `POST /machines/{id}/talos-endpoints` replaces it (an address change, or one
   entered wrongly at inventory, which the SMBIOS UUID index would otherwise
-  leave unrecoverable): it records a MachineEndpointChange and its act
-  (§10.5) in one transaction, and changes no existing plan, whose route stays
+  leave unrecoverable): under the machine row `FOR UPDATE` (T11), it records a
+  MachineEndpointChange, an endpoint-change entry on the machine's timeline
+  holding the previous and new endpoint, who and role (execution and recovery
+  §4.1, read through `GET /machines/{id}/timeline`), and its act (§10.5) in one
+  transaction. An endpoint outside that grammar is a malformed body,
+  `400 invalid-request`, on either route, with nothing committed. It changes no existing plan, whose route stays
   the one it bound. Like inventory, it is accepted installation-wide in
   recovery mode (§12.2): it changes nothing on a machine, and a restored
   endpoint may be the one that no longer answers.
@@ -378,9 +382,12 @@ They are held apart **(choice §17.29)**.
   ingestion reads the node's SMBIOS UUID and cluster membership on the same
   connection and compares both with the machine record, the identity execution
   and recovery's choice §10.26 defines. A different or absent UUID, or a node
-  of another cluster (a machine moved between clusters, or another cluster's
-  talosconfig written at this cluster's path), fails the ingestion with
-  `409 machine-identity-mismatch`, as below, and nothing read is kept.
+  that accepts this credential but reports another cluster's membership
+  (possible only where clusters share a Talos certificate authority), fails the
+  ingestion with `409 machine-identity-mismatch`, as below, and nothing read
+  is kept. A node behind another certificate authority, or another cluster's
+  talosconfig written at this cluster's path, fails the mutual TLS handshake
+  before any read: a credential Talos refuses, below.
   Dispatch has execution and recovery's own comparison (its §3.2
   comparison 3). Reading either through the Talos API is unevidenced, as that
   choice states, and a node swapped between the identity read and the
@@ -1445,7 +1452,7 @@ value; `instance` is the request's identifier, also written to the server log.
 
 | Status | Code | When |
 | --- | --- | --- |
-| 400 | `invalid-request`, `cursor-invalid` | malformed body, unknown field, bad cursor |
+| 400 | `invalid-request`, `cursor-invalid` | malformed body (a Talos endpoint outside §3.3's grammar included), unknown field, bad cursor |
 | 401 | `unauthenticated` | no credential, or one that fails §10's token checks (a revoked or denied subject is `403 identity-revoked`); with `WWW-Authenticate: Bearer error="invalid_token"` |
 | 403 | `forbidden` | no qualifying role; the body names the roles that would qualify |
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
@@ -2259,25 +2266,35 @@ each (design §7.7 consequences):
 - Talos access (§3.3): the ingestion and executor identities each reading
   `secret/data/access/talos/<cluster id>`, and the compiler, metadata and
   normal API identities refused it, with a control that grants the compiler
-  the read and must then succeed; the ingestion identity refused every
-  `secret/data/gen/*` read and every write under `secret/data/access/`; a
+  the read and must then succeed; the ingestion and executor identities each
+  refused write, list and delete on the access path, with a control that
+  grants one of them `update` and must then succeed; the ingestion identity
+  refused every `secret/data/gen/*` read; a
   `source: machine` ingestion against a node whose SMBIOS UUID differs, and
   one whose cluster membership differs, each failing
   `machine-identity-mismatch` with nothing kept; each cause §3.3 lists for
-  `talos-access-unavailable` (an absent secret, the ingestion identity's read
+  `talos-access-unavailable` (an absent secret, the reading identity's read
   denied, OpenBao sealed and partitioned, a malformed talosconfig carrying a
-  synthetic client key, a well-formed credential Talos refuses, an endpoint
-  that does not answer) failing with it, each leaving the
-  claim `abandoned` and the operation `failed` with its terminal event, no
-  generation, and no part of the talosconfig in the problem, the logs or the
+  synthetic client key, a well-formed credential Talos refuses, another
+  cluster's talosconfig at this cluster's path, an endpoint that does not
+  answer), through both readers: for an ingestion, failing with it, the
+  claim `abandoned` and the operation `failed` with its terminal event and no
+  generation; for dispatch, a failed use-time check, with no operation
+  committed and no request sent to the node; for each, no part of the
+  talosconfig in the problem, the timeline, the logs or the
   scan, with a control that passes the parser's or client's error text through
-  and must then be caught; the version identity recorded as path, version and
+  and must then be caught; `POST /machines` and the replacement route each
+  refusing `invalid-request` with nothing committed for an endpoint with a
+  scheme, a path, a user part, whitespace, an unbracketed IPv6 literal, a port
+  out of range and 256 octets, against a 255-octet control accepted; the
+  endpoint change read back from the machine's timeline with both endpoints;
+  the version identity recorded as path, version and
   `created_time`, with a control that deletes the path's metadata and rewrites
   it, whose new version the record must tell apart; reads of the fixture's worker by its own endpoint with no
   `node` metadata, under an explicit port, the default port and a DNS name;
   an endpoint replacement from A to B after a plan was created, the plan
-  still bound to A, a plan created afterwards bound to B, and the change and
-  its act both present or both absent, with a control that resolves the
+  still bound to A, a plan created afterwards bound to B, and the change, its
+  timeline entry and its act all present or all absent, with a control that resolves the
   route from the machine record at dispatch and must then fail; the same
   replacement accepted in recovery mode on a scope still pre-restore
   unaccounted; and the

@@ -737,12 +737,13 @@ Required entries:
 | Accounting | attempt id, basis (a response, or a §5.2 decision with its recorded facts), decider and role |
 | Classification | the outcome of §5 and the entries relied on, by revision |
 | `Applied` change | from, to, digest, source (operation or adoption record) |
+| Endpoint change | previous and new Talos endpoint, who, role ([persistence and API §3.3](persistence-api.md#33-talos-access)) |
 
 Plan entries, from creation to commitment or a terminal plan state (§2), and
 machine-scope facts are recorded on the machine's timeline beside its
 operations' entries: drift records and their resolution, freezes and unfreezes,
 adoption records, recovery-mode entry, scope states and scope release (§6,
-§7).
+§7), and Talos endpoint changes.
 
 **Ordering.** Every entry's revision, for a plan, an operation or a
 machine-scope fact alike, is allocated from one per-machine counter under the
