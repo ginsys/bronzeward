@@ -94,8 +94,8 @@ func Heartbeat(ctx context.Context, db *sql.DB, o Owner, c Claim, lease time.Dur
 
 // StorePayload writes an encrypted claim's envelope ciphertext and its plaintext's SHA-256
 // (compilation §3: after step 8). A transient claim never holds one: the schema refuses it
-// whatever mode the caller's Claim names.
-func StorePayload(ctx context.Context, db *sql.DB, o Owner, c Claim, ct []byte, sum [32]byte) error {
+// whatever mode the caller's Claim names. db is a *sql.DB or the caller's *sql.Tx.
+func StorePayload(ctx context.Context, db execer, o Owner, c Claim, ct []byte, sum [32]byte) error {
 	if c.Mode != "encrypted" || len(ct) == 0 {
 		return errors.New("staging: only an encrypted claim holds a payload, and it is not empty")
 	}

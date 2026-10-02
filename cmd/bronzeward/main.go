@@ -151,7 +151,8 @@ func serve(args []string) error {
 	}
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(db, verifier, cfg.Auth, ing, cfg.Ingestion, epoch)))
+	// The ingest runners stop with the signal; a claim left held lapses with its lease.
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, ing, cfg.Ingestion, epoch)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {
