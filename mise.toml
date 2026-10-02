@@ -235,7 +235,7 @@ depends = ["dev-db", "dev-bao", "build"]
 # when the server exits; the containers stay up for mise run go-db.
 run = '''
 for port in 8080 5556; do
-  if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$port/"; then
+  if curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$port/"; then
     echo "dev: 127.0.0.1:$port already answers (another mise run dev, perhaps in another worktree); stop it first" >&2
     exit 1
   fi
@@ -245,8 +245,9 @@ mkdir -p .dev
 bin/bronzeward migrate -config examples/bronzeward.yaml
 bin/oidc-fixture serve -key .dev/oidc.key -issuer http://127.0.0.1:5556 &
 issuer=$!
-trap 'kill "$issuer" 2>/dev/null || true' EXIT
-if ! curl -sf -o /dev/null --retry 10 --retry-connrefused --retry-delay 1 \
+# Waited for, so 5556 is free once the task returns.
+trap 'kill "$issuer" 2>/dev/null || true; wait "$issuer" 2>/dev/null || true' EXIT
+if ! curl -sf --noproxy '*' -o /dev/null --retry 10 --retry-connrefused --retry-delay 1 \
   http://127.0.0.1:5556/.well-known/openid-configuration || ! kill -0 "$issuer" 2>/dev/null; then
   echo "dev: the fixture issuer did not come up on 127.0.0.1:5556 (see its error above)" >&2
   exit 1
