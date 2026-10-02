@@ -339,7 +339,7 @@ func TestMachineAccessUnavailable(t *testing.T) {
 			me.setAccess([]byte(bad))
 			return []string{"not-base64-"}
 		}, "talosconfig", "cluster", true},
-		"a credential Talos refuses": {func(_ *testing.T, me *machineEnv) []string {
+		"a credential Talos refuses": {func(t *testing.T, me *machineEnv) []string {
 			other := talostest.NewPKI(t)
 			me.setAccess(other.Talosconfig("", "", ""))
 			return []string{base64.StdEncoding.EncodeToString(other.KeyPEM)}
@@ -413,5 +413,29 @@ func TestMachineAccessEventFencedByTheClaim(t *testing.T) {
 	}
 	if calls, _ := me.f.paths(); calls != 0 {
 		t.Fatalf("%d generation creates", calls)
+	}
+}
+
+// A dial that fails because the run was cancelled (a shutdown) stops the run without an outcome:
+// the claim stays held for its next owner, not abandoned as talos-access-unavailable.
+func TestMachineDialCancelledStops(t *testing.T) {
+	me := newMachineEnv(t)
+	op, j := me.startJob(t, map[string]any{"source": "machine", "document": nil})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cancelling := func(ctx context.Context, _ []byte, _ string) (talos.Reader, error) {
+		cancel()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	me.build(options{dial: cancelling}).runIngest(ctx, j)
+	if r := readOp(t, me.db, op); r.state != "running" || r.error != nil {
+		t.Fatalf("operation %+v", r)
+	}
+	if evs := events(t, me.db, op); !slices.Equal(eventTypes(evs), []string{"started", "talos-access"}) {
+		t.Fatalf("events %v", evs)
+	}
+	if st, _, _ := claimRow(t, me.db, j.claim.ID); st != "held" {
+		t.Fatalf("claim %s", st)
 	}
 }

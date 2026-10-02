@@ -184,20 +184,29 @@ func (versionServer) Version(context.Context, *emptypb.Empty) (*machine.VersionR
 	return &machine.VersionResponse{Messages: []*machine.Version{{Version: &machine.VersionInfo{Tag: "v1.13.6"}}}}, nil
 }
 
-// failing is the node's state, a Get of a type set to fail answering that code.
+// failing is the node's state, a Get or List of a type set to fail answering that code.
 type failing struct{ n *Node }
 
-func (f failing) Get(ctx context.Context, p resource.Pointer, opts ...state.GetOption) (resource.Resource, error) {
+func (f failing) failure(typ resource.Type) error {
 	f.n.mu.Lock()
-	c, ok := f.n.failures[p.Type()]
-	f.n.mu.Unlock()
-	if ok {
-		return nil, status.Error(c, "stand-in")
+	defer f.n.mu.Unlock()
+	if c, ok := f.n.failures[typ]; ok {
+		return status.Error(c, "stand-in")
+	}
+	return nil
+}
+
+func (f failing) Get(ctx context.Context, p resource.Pointer, opts ...state.GetOption) (resource.Resource, error) {
+	if err := f.failure(p.Type()); err != nil {
+		return nil, err
 	}
 	return f.n.st.Get(ctx, p, opts...)
 }
 
 func (f failing) List(ctx context.Context, k resource.Kind, opts ...state.ListOption) (resource.List, error) {
+	if err := f.failure(k.Type()); err != nil {
+		return resource.List{}, err
+	}
 	return f.n.st.List(ctx, k, opts...)
 }
 
