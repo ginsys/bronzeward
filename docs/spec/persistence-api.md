@@ -323,9 +323,12 @@ Reading a node needs two things: where to reach it and a credential it accepts.
 They are held apart **(choice §17.29)**.
 
 - **The endpoint is per machine, in the database.** `POST /machines` requires
-  `talosEndpoint`: a DNS name or an IP literal (an IPv6 literal in brackets),
-  with an optional port from 1 to 65535, `50000` when absent; no scheme, path, user part or
-  whitespace, at most 255 octets. The endpoint is only dialled: every request
+  `talosEndpoint`: an IP literal (an IPv6 literal in brackets), with an
+  optional port from 1 to 65535, `50000` when absent; no DNS name, scheme,
+  path, user part or whitespace. A name is refused because it can resolve to
+  another node between the observation that checks the node's identity and the
+  attempt that sends the request, each on its own connection, and a node
+  dialled without `node` metadata answers for itself. The endpoint is only dialled: every request
   to the node goes to it and carries no `node` or `nodes` routing metadata,
   so the node dialled answers for itself and no apid forwards it (execution
   and recovery §3.5, choice §10.9 there). Talos compares `node` metadata with
@@ -360,7 +363,12 @@ They are held apart **(choice §17.29)**.
   are refused `409 conflict`, naming the missing endpoint, with nothing
   committed, until the replacement route sets one; that change records no
   previous endpoint. A `source: document` ingestion dials nothing and is
-  not refused.
+  not refused. A `drift` or `restoration` observation of such a machine dials
+  nothing and records the missing endpoint as its cause (execution and
+  recovery §4.1): no drift is opened, and a failed `restoration` observation
+  leaves the scope `blocked` until a later one succeeds (execution and
+  recovery §7.4), which the replacement route, accepted in recovery mode,
+  makes possible.
 - **The credential is per cluster, in the provider.** Talos authorizes a client
   certificate signed by the cluster's own certificate authority, so one
   credential reaches every node of the cluster (design §13.1, "cluster-specific
@@ -369,7 +377,10 @@ They are held apart **(choice §17.29)**.
   secret `secret/data/access/talos/<cluster id>`, data
   `{"talosconfig": "<document>"}`. Its path is derived from the cluster's id
   and no request names it, so no request can point a read at another secret.
-  The operator writes it with the provider's own tooling (`bao kv put`) under
+  The operator writes it with the provider's own tooling,
+  `bao kv put -mount=secret access/talos/<cluster id> talosconfig=@<file>`
+  (the CLI takes the logical path and adds KV v2's `data/` itself; policies
+  name the API path `secret/data/access/talos/*`), under
   an administrative identity, before the cluster's first `source: machine`
   ingestion; rotating it is writing a new version. No Bronzeward identity
   writes, lists or deletes it, and no route accepts it: the normal API never
@@ -398,9 +409,14 @@ They are held apart **(choice §17.29)**.
   reset; Talos cannot express a read-only grant for it. The bound on what
   ingestion does with it is the application's read-only Talos client, whose
   source is held to an allowlist of machinery calls by test.
+- **What is used.** Only the talosconfig's certificate authority, client
+  certificate and key. Its contexts' `endpoints` and `nodes` are ignored: the
+  client dials only the endpoint chosen above (the machine's, or the plan's
+  route) and sends no `node` metadata, whatever the document names.
 - **What is kept.** The value lives only in the memory of the process that read
   it, for one connection. It is never stored in the database, logged, returned
-  or quoted in an error (compilation §13).
+  or quoted in an error (compilation §13), and never written to a file:
+  neither reader passes it to a client as a file path.
 - **Identity before use.** Before using a configuration read for ingestion, the
   ingestion reads the node's SMBIOS UUID and cluster membership on the same
   connection and compares both with the machine record, the identity execution
@@ -2328,8 +2344,8 @@ each (design §7.7 consequences):
   scan, with a control that passes the parser's or client's error text through
   and must then be caught; `POST /machines` and the replacement route each
   refusing `invalid-request` with nothing committed for an endpoint with a
-  scheme, a path, a user part, whitespace, an unbracketed IPv6 literal, a port
-  out of range and 256 octets, against a 255-octet control accepted; the
+  scheme, a path, a user part, whitespace, a DNS name, an unbracketed IPv6 literal, a port
+  out of range, against IPv4 and bracketed IPv6 controls accepted; the
   endpoint change read back from the machine's timeline with both endpoints;
   a database holding machine rows migrated from the previous schema, each row
   left without an endpoint, its `source: machine` ingestion start and plan
@@ -2344,7 +2360,7 @@ each (design §7.7 consequences):
   version and dialled endpoint read back from its `ingest` operation's events
   after a success and after a failure following the read (a malformed
   talosconfig, a refused credential, an identity mismatch); reads of the fixture's worker by its own endpoint with no
-  `node` metadata, under an explicit port, the default port and a DNS name;
+  `node` metadata, under an explicit port and the default port;
   an endpoint replacement from A to B after a plan was created, the plan
   still bound to A, its evidence and completion observations dialling A and
   recording it, with a control that dials the machine's current endpoint and
@@ -2352,9 +2368,15 @@ each (design §7.7 consequences):
   timeline entry and its act all present or all absent, with a control that resolves the
   route from the machine record at dispatch and must then fail; the same
   replacement accepted in recovery mode on a scope still pre-restore
-  unaccounted; and the
-  talosconfig's client key in compilation §15's scan of the database, logs and
-  responses, with a positive control.
+  unaccounted; a talosconfig whose contexts' `endpoints` and `nodes` name the
+  fixture's other node, every read still reaching the endpoint chosen with no
+  `node` metadata; a `drift` and a `restoration` observation of a migrated
+  machine without an endpoint dialling nothing and recording that cause, the
+  scope left `blocked` until the replacement route sets one and a later
+  observation succeeds; and the
+  talosconfig's client key in compilation §15's scan of the database, logs,
+  responses and temporary files, over successful, refused and interrupted
+  ingestions, executor observations and dispatches, with a positive control.
 
 Evidence gaps this contract carries rather than closes:
 

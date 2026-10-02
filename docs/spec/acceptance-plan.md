@@ -169,8 +169,9 @@ one synthetic secret outside the Talos schema's secret fields, in `machine.files
 1. `h-author` records the cluster and both machines (`POST /clusters`, `POST /machines`), each
    machine with its own Talos endpoint.
 2. The fixture, acting as the operator, writes the `os:admin` talosconfig `bin/up` generated to the
-   cluster's Talos access path, `secret/data/access/talos/<cluster id>`, under the OpenBao
-   administrator ([PA §3.3](persistence-api.md#33-talos-access)). `bin/up` has loaded the
+   cluster's Talos access path, API path `secret/data/access/talos/<cluster id>`, under the OpenBao
+   administrator with `bao kv put -mount=secret access/talos/<cluster id>`, the CLI adding KV v2's
+   `data/` ([PA §3.3](persistence-api.md#33-talos-access)). `bin/up` has loaded the
    ingestion and executor policies, each granting `read` on `secret/data/access/talos/*` and
    nothing else there.
 3. `h-author` opens the import draft (`POST /drafts`) and keeps its ETag. It imports each node in
@@ -837,10 +838,10 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: a reissue after a restore refused for a service identity `deniedSubjects` lists | *check* | #29 |
 | PA §16: two inventory requests for one SMBIOS UUID under different keys, one refused | *check* | #22 |
 | PA §16 Talos access, ingestion: the read grants with the compiler control, the write, list and delete refusals on the access path for both reading identities with the `update` control, the ingestion identity's `gen/*` refusal, both identity mismatches, every `talos-access-unavailable` cause with the error-text control, the version identity with the metadata-rewrite control, the access version and dialled endpoint on the `ingest` operation's events after a success and after a failure following the read, direct reads without `node` metadata, the client key in the scan | S1 negative controls plus *check* | #22 |
-| PA §16 Talos access, executor: its read at dispatch, recorded as path, version and `created_time`; every `talos-access-unavailable` cause failing the use-time check or the fresh observation with no operation committed and no mutation request sent, with the error-text control | S4 plus *check* | #26 |
-| PA §16 Talos access, observations: each observation purpose recording the access version it read, and a failed access read recorded with its cause and no node values, with the stale-credential control | S4, S5, S7 plus *check* | #26, #27, #29 |
+| PA §16 Talos access, executor: its read at dispatch, recorded as path, version and `created_time`; every `talos-access-unavailable` cause failing the use-time check or the fresh observation with no operation committed and no mutation request sent, with the error-text control; the client key absent from temporary files over successful, refused and interrupted observations and dispatches; the talosconfig's own `endpoints` and `nodes` ignored | S4 plus *check* | #26 |
+| PA §16 Talos access, observations: each observation purpose recording the access version it read, and a failed access read recorded with its cause and no node values, with the stale-credential control; a drift and a restoration observation of a machine without an endpoint dialling nothing, the scope left `blocked` until one is set | S4, S5, S7 plus *check* | #26, #27, #29 |
 | PA §16 Talos access, upgrade: machine rows migrated without an endpoint refused for `source: machine` ingestion and plan creation until the replacement route sets one, `source: document` ingestion accepted, while recovery entry, freeze and unfreeze still update them; inserts without an endpoint and updates clearing one refused | *check* | #22 |
-| PA §16 Talos access, endpoint: the grammar refusals on both routes with the 255-octet control; a replacement after plan creation leaving that plan bound to the old endpoint and binding later plans to the new one, that plan's observations dialling and recording the old endpoint with the current-endpoint control, change, timeline entry and act atomic, with the dispatch-time-resolution control; the change read back from the machine's timeline; the replacement accepted in recovery mode | *check* | #22, #25, #29 |
+| PA §16 Talos access, endpoint: the grammar refusals on both routes, a DNS name among them, with the IPv4 and IPv6 controls; a replacement after plan creation leaving that plan bound to the old endpoint and binding later plans to the new one, that plan's observations dialling and recording the old endpoint with the current-endpoint control, change, timeline entry and act atomic, with the dispatch-time-resolution control; the change read back from the machine's timeline; the replacement accepted in recovery mode | *check* | #22, #25, #29 |
 | PA §16: machine revisions allocated in commit order under concurrent writers, with the unlocked control | *check* | #26 |
 | PA §16: an event stream ended by its token's `exp`, resumption refused after revocation | S8 step 3 | #26 |
 | PA §16: no request body in the data directory, write-ahead log or backups | S1, S2 scans | #22, #23 |
