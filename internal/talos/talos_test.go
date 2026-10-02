@@ -159,3 +159,25 @@ func TestErrorsDoNotQuoteUpstream(t *testing.T) {
 		t.Errorf("Dial: %v", err)
 	}
 }
+
+// ER §1: the configuration digest is SHA-256 over the configuration with its trailing newlines
+// replaced by exactly one; it leaves its argument as it was.
+func TestConfigurationDigest(t *testing.T) {
+	one := ConfigurationDigest([]byte("a: 1\n"))
+	for _, s := range []string{"a: 1", "a: 1\n\n\n"} {
+		if ConfigurationDigest([]byte(s)) != one {
+			t.Errorf("%q digests differently from one trailing newline", s)
+		}
+	}
+	for _, s := range []string{"a: 1 \n", "\na: 1\n", "a: 2\n"} {
+		if ConfigurationDigest([]byte(s)) == one {
+			t.Errorf("%q digests like %q", s, "a: 1\n")
+		}
+	}
+	b := make([]byte, 4, 8)
+	copy(b, "a: 1")
+	ConfigurationDigest(b)
+	if b[:5][4] != 0 {
+		t.Fatal("the digest wrote into its argument's spare capacity")
+	}
+}

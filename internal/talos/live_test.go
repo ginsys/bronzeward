@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -45,10 +44,9 @@ func liveTarget(t *testing.T) ([]byte, string) {
 	return b, ep
 }
 
-// digest is execution-recovery.md §1's configuration digest: SHA-256 over the read-back with its
-// trailing newlines replaced by one.
+// digest is the configuration digest in hex, for comparison and the log.
 func digest(b []byte) string {
-	sum := sha256.Sum256(append(bytes.TrimRight(b, "\n"), '\n'))
+	sum := ConfigurationDigest(b)
 	return hex.EncodeToString(sum[:])
 }
 

@@ -84,3 +84,35 @@ func TestZeroUnresolvedRefused(t *testing.T) {
 		t.Fatal("the zero Unresolved parsed")
 	}
 }
+
+// UnmarshalJSON takes the request body's document member: one JSON string of at most MaxDocument
+// bytes, decoded exactly. Every refusal is one fixed error that names no part of the input.
+func TestUnmarshalJSON(t *testing.T) {
+	var u Unresolved
+	in := "machine:\n  token: " + secretText + "\n"
+	raw, _ := json.Marshal(in)
+	if err := json.Unmarshal(raw, &u); err != nil || !bytes.Equal(u.bytes(), []byte(in)) {
+		t.Fatalf("a JSON string: %v, %d bytes", err, u.Size())
+	}
+	at := `"` + strings.Repeat("a", MaxDocument) + `"`
+	if err := json.Unmarshal([]byte(at), &u); err != nil || u.Size() != MaxDocument {
+		t.Fatalf("a document at the limit: %v", err)
+	}
+	for name, b := range map[string]string{
+		"an object":                `{"x":"` + secretText + `"}`,
+		"an unterminated string":   `"` + secretText,
+		"a number":                 `12` + secretText,
+		"null":                     `null`,
+		"an empty string":          `""`,
+		"over the limit":           `"` + strings.Repeat("a", MaxDocument+1) + `"`,
+		"invalid UTF-8":            "\"" + secretText + "\xff\"",
+		"a lone surrogate escape":  `"` + secretText + `\udc00"`,
+		"an escape over the limit": `"` + strings.Repeat(`a`, MaxDocument+1) + `"`,
+	} {
+		var u Unresolved
+		err := json.Unmarshal([]byte(b), &u)
+		if err == nil || strings.Contains(err.Error(), secretText) || u.Size() != 0 {
+			t.Errorf("%s: %v, %d bytes kept", name, err, u.Size())
+		}
+	}
+}
