@@ -85,9 +85,11 @@ the files in [`openbao/policies`](openbao/policies):
 
 - `bw-ingestion`: creates generations under `secret/data/gen/`, without read or update; encrypts
   under the baseline key; encrypts and decrypts under the staging key; computes an HMAC on the
-  digest key's exact path.
+  digest key's exact path; reads each cluster's Talos access credential under
+  `secret/data/access/talos/`, without write, list or delete (persistence-api §3.3).
 - `bw-compiler`: reads generations; encrypts under the artifact key.
-- `bw-executor`: decrypts under the artifact key.
+- `bw-executor`: decrypts under the artifact key; reads each cluster's Talos access credential, as
+  ingestion does.
 - `bw-metadata-only`: the classification experiment's identity, which reads no value.
 
 `bin/up` writes them from those files, which `mise run go-db` also writes into a dev-mode OpenBao
