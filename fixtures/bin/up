@@ -362,10 +362,11 @@ fi
 # line, readable by any local user.
 dsn="postgres://bronzeward:${BW_POSTGRES_PASSWORD}@postgres:5432/bronzeward?sslmode=disable"
 for instance in a b; do
-  printf '%s\n' "${server_template//@DSN@/"$dsn"}" >"$STATE/server/$instance/config.yaml" ||
+  rendered=${server_template//@DSN@/"$dsn"}
+  printf '%s\n' "${rendered//@INSTANCE@/"$instance"}" >"$STATE/server/$instance/config.yaml" ||
     die "could not write the configuration of instance $instance"
 done
-unset dsn instance server_template
+unset dsn instance rendered server_template
 
 say "starting postgres, openbao and the issuer; creating instances A and B"
 compose up --detach --quiet-pull --wait postgres

@@ -28,3 +28,11 @@ provider:
   plainHTTPHosts: [openbao]
   keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest}
   ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
+# The staging claims' timers (compilation.md §3.2: only heartbeat < lease < absolute expiry is
+# required) and this instance's name, which starts its claims' owner identity.
+ingestion:
+  instance: @INSTANCE@
+  heartbeat: 5s
+  lease: 15s
+  absoluteExpiry: 10m
+  sweep: 15s

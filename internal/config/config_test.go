@@ -224,7 +224,7 @@ func TestProviderBlock(t *testing.T) {
 	if c.Provider != nil {
 		t.Fatalf("an absent block is not nil: %+v", c.Provider)
 	}
-	c, err = Load(strings.NewReader(base + authBlock + providerBlock))
+	c, err = Load(strings.NewReader(base + authBlock + providerBlock + ingestionBlock))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestProviderBlock(t *testing.T) {
 		"listed http":    strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1) + "  plainHTTPHosts: [openbao]\n",
 		"trailing slash": strings.Replace(providerBlock, "8200", "8200/", 1),
 	} {
-		if _, err := Load(strings.NewReader(base + authBlock + in)); err != nil {
+		if _, err := Load(strings.NewReader(base + authBlock + in + ingestionBlock)); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -269,6 +269,48 @@ func TestProviderBlock(t *testing.T) {
 		}
 		if err != nil && strings.Contains(err.Error(), "hunter2") {
 			t.Errorf("%s: the error quotes the password: %v", name, err)
+		}
+	}
+}
+
+// ingestionBlock is the smallest valid ingestion block: the fixture's timers (compilation.md §3.2
+// leaves the values open and requires only heartbeat < lease < absolute expiry).
+const ingestionBlock = `ingestion:
+  instance: a
+  heartbeat: 5s
+  lease: 15s
+  absoluteExpiry: 10m
+  sweep: 15s
+`
+
+func TestIngestionBlock(t *testing.T) {
+	c, err := Load(strings.NewReader(base + authBlock + providerBlock + ingestionBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := c.Ingestion
+	if i == nil || i.Instance != "a" || i.Heartbeat != 5*time.Second || i.Lease != 15*time.Second ||
+		i.AbsoluteExpiry != 10*time.Minute || i.Sweep != 15*time.Second {
+		t.Fatalf("%+v", i)
+	}
+	for name, c := range map[string]struct{ in, want string }{
+		"provider without ingestion": {base + authBlock + providerBlock, "ingestion is required with provider"},
+		"ingestion without provider": {base + authBlock + ingestionBlock, "ingestion needs provider"},
+		"heartbeat equals lease":     {strings.Replace(ingestionBlock, "heartbeat: 5s", "heartbeat: 15s", 1), "heartbeat must be shorter than ingestion.lease"},
+		"lease equals expiry":        {strings.Replace(ingestionBlock, "lease: 15s", "lease: 10m", 1), "lease must be shorter than ingestion.absoluteExpiry"},
+		"no heartbeat":               {strings.Replace(ingestionBlock, "  heartbeat: 5s\n", "", 1), "ingestion.heartbeat must be positive"},
+		"negative heartbeat":         {strings.Replace(ingestionBlock, "heartbeat: 5s", "heartbeat: -1s", 1), "ingestion.heartbeat must be positive"},
+		"no sweep":                   {strings.Replace(ingestionBlock, "  sweep: 15s\n", "", 1), "ingestion.sweep must be positive"},
+		"no instance":                {strings.Replace(ingestionBlock, "  instance: a\n", "", 1), "ingestion.instance"},
+		"instance with slash":        {strings.Replace(ingestionBlock, "instance: a", "instance: a/b", 1), "ingestion.instance"},
+		"instance upper case":        {strings.Replace(ingestionBlock, "instance: a", "instance: A", 1), "ingestion.instance"},
+	} {
+		in := c.in
+		if strings.HasPrefix(in, "ingestion:") {
+			in = base + authBlock + providerBlock + in
+		}
+		if _, err := Load(strings.NewReader(in)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v; want an error naming %q", name, err, c.want)
 		}
 	}
 }
