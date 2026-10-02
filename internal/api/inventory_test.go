@@ -499,11 +499,12 @@ func TestGetOperation(t *testing.T) {
 	if err := e.db.QueryRow("SELECT id FROM principal WHERE sub = 'h-author'").Scan(&human); err != nil {
 		t.Fatal(err)
 	}
+	m := decode[machineBody](t, e.do(e.api, machineCall(author, "k-machine-0123456789", cl, uuidA)), http.StatusCreated)
 	claim, opID := id.New(id.Ingestion), id.New(id.Operation)
 	mustExec(t, e.db, `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until, expires_at,
-		principal, idempotency_key, created_at)
+		principal, idempotency_key, cluster, machine, kind, created_at)
 		SELECT $1, 'transient', 'held', 'run/1/start', 1, epoch, now() + interval '1 minute', now() + interval '1 hour',
-		$2, 'k-ingest-0123456789', now() FROM installation_state`, claim, human)
+		$2, 'k-ingest-0123456789', $3, $4, 'import', now() FROM installation_state`, claim, human, cl, m.ID)
 	mustExec(t, e.db, `INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, lease_until, last_event,
 		draft, draft_revision, ingestion, created_by, created_by_kind, created_role, created_at)
 		SELECT $1, 'ingest', 'running', epoch, 'run/1/start', 1, epoch, now() + interval '1 minute', 2, $2, 1, $3, $4, 'human',
