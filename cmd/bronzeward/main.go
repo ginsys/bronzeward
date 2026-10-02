@@ -114,12 +114,17 @@ func runMigrate(args []string, out io.Writer) error {
 }
 
 func serve(args []string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return serveContext(ctx, args)
+}
+
+// serveContext is serve until ctx ends.
+func serveContext(ctx context.Context, args []string) error {
 	cfg, err := loadConfig("serve", args)
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	db, err := database.Open(startCtx, cfg.Database.DSN)
@@ -152,10 +157,14 @@ func serve(args []string) error {
 		}
 		ing = c
 	}
+	// Every server sweeps, ingestion configured or not: another instance on the same database
+	// may have left claims behind.
+	every := fallbackSweep
 	if cfg.Ingestion != nil {
-		if err := startSweep(startCtx, ctx, db, cfg.Ingestion.Sweep, log.Printf); err != nil {
-			return err
-		}
+		every = cfg.Ingestion.Sweep
+	}
+	if err := startSweep(startCtx, ctx, db, every, log.Printf); err != nil {
+		return err
 	}
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
@@ -178,6 +187,10 @@ func serve(args []string) error {
 		return nil
 	}
 }
+
+// fallbackSweep is the sweep interval of a server without an ingestion block, which names its
+// own. The interval is open (compilation §3.5).
+var fallbackSweep = time.Minute
 
 // startSweep writes the due staging claims abandoned before the server serves, then every
 // interval until life ends (compilation §3.5). Every read already treats a due claim as
