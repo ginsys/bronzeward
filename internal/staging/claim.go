@@ -37,9 +37,11 @@ var (
 )
 
 // fence is the owner predicate every statement after creation carries, over $1 claim, $2 owner,
-// $3 owner generation and $4 owner epoch.
+// $3 owner generation and $4 owner epoch. Its epoch read holds the installation state FOR SHARE
+// to the end of the transaction (§5.1), taken before the claim's lock: recovery-mode entry
+// cannot commit a new epoch while the statement waits for the claim or its transaction commits.
 const fence = `id = $1 AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4
-	AND $4 = (SELECT epoch FROM installation_state)
+	AND $4 = (SELECT epoch FROM installation_state FOR SHARE)
 	AND state IN ('held', 'resumed') AND lease_until > now() AND expires_at > now()`
 
 type execer interface {

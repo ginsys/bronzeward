@@ -210,6 +210,17 @@ func (a *API) commitImport(ctx context.Context, j job, imp imported) (*refusal, 
 				with("draft", j.draft)
 			return errRefused
 		}
+		// The draft's lock holds off a new publication (T2); one already active refuses the import.
+		var pub string
+		switch err := tx.QueryRowContext(ctx, `SELECT id FROM operation WHERE draft = $1 AND kind = 'publish'
+			AND state IN ('queued', 'running') ORDER BY id LIMIT 1`, j.draft).Scan(&pub); {
+		case err == nil:
+			ref = refuse(http.StatusConflict, "conflict", "a publication of the draft is active; the claim is abandoned").
+				with("draft", j.draft).with("operation", pub)
+			return errRefused
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
 		ibr := id.New(id.ImportBase)
 		b := imp.baseline
 		if _, err := tx.ExecContext(ctx, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext,

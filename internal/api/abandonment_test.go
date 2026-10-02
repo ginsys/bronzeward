@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/staging"
 )
 
 func getIngestionCall(tok, claim string) call {
@@ -82,11 +83,23 @@ func TestAbandonmentRoute(t *testing.T) {
 	ie.wantFailed(t, op, j.claim.ID, http.StatusConflict, "ingestion-abandoned")
 	wantProblem(t, ie.do(ie.api, abandonCall(author, "k-abandon-again-0123", j.claim.ID)), http.StatusConflict, "conflict")
 
+	// A transient claim past its lease has ended as read (compilation §3.5): the abandonment
+	// refuses it and leaves the row for the sweep.
 	op2, j2 := ie.startJob(t, nil)
 	mustExec(t, ie.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, j2.claim.ID)
-	rec = ie.do(ie.api, abandonCall(author, "k-abandon-lapsed-012", j2.claim.ID))
-	ie.wantIngestion(t, decode[map[string]any](t, rec, http.StatusOK), j2, op2, "abandoned")
-	ie.wantFailed(t, op2, j2.claim.ID, http.StatusConflict, "ingestion-abandoned")
+	wantProblem(t, ie.do(ie.api, abandonCall(author, "k-abandon-lapsed-012", j2.claim.ID)), http.StatusConflict, "conflict")
+	if st, _, _ := claimRow(t, ie.db, j2.claim.ID); st != "held" || readOp(t, ie.db, op2).state != "running" {
+		t.Fatalf("lapsed transient claim %s, operation %s", st, readOp(t, ie.db, op2).state)
+	}
+	if n, err := staging.Sweep(t.Context(), ie.db); err != nil || n != 1 {
+		t.Fatalf("sweep %d, %v", n, err)
+	}
+	// An encrypted claim past its lease but not its expiry is live, for a takeover.
+	op3, j3 := ie.startJob(t, map[string]any{"staging": "encrypted"})
+	mustExec(t, ie.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, j3.claim.ID)
+	rec = ie.do(ie.api, abandonCall(author, "k-abandon-lapsed-enc", j3.claim.ID))
+	ie.wantIngestion(t, decode[map[string]any](t, rec, http.StatusOK), j3, op3, "abandoned")
+	ie.wantFailed(t, op3, j3.claim.ID, http.StatusConflict, "ingestion-abandoned")
 	if n := count(t, ie.db, `SELECT count(*) FROM act WHERE action = 'ingestion.abandon'`); n != 2 {
 		t.Fatalf("%d abandonment acts", n)
 	}
