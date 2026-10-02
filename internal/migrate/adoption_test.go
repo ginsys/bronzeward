@@ -27,10 +27,13 @@ const (
 	insertDraft = `INSERT INTO draft (id, cluster, title, state, revision, etag_token, created_at)
 		VALUES ($1, $2, $3, $4, 1, $5, now())`
 	insertEntry = `INSERT INTO draft_entry (draft, cluster, kind, machine, import_base_revision) VALUES ($1, $2, $3, $4, $5)`
+	// A claim's subject (0007) is not what these rows test: each imports the first machine by id,
+	// and a payload carries its digest. TestStagingSubject tests the subject columns.
 	insertClaim = `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until, expires_at,
-		payload, principal, idempotency_key, created_at)
+		payload, payload_digest, principal, idempotency_key, cluster, machine, kind, created_at)
 		SELECT $1, $2, $3, 'run-1/4242/start-1', 1, epoch, now() + interval '1 minute', now() + interval '1 hour',
-		$4, $5, $6, now() FROM installation_state`
+		$4, sha256($4::bytea), $5, $6, m.cluster, m.id, 'import', now()
+		FROM installation_state, (SELECT id, cluster FROM machine ORDER BY id LIMIT 1) m`
 	insertOperation = `INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, lease_until,
 		draft, draft_revision, ingestion, created_by, created_by_kind, created_role, created_at, result, error)
 		SELECT $1, $2, $3, epoch, $4, $5, CASE WHEN $4::text IS NULL THEN NULL ELSE epoch END,
