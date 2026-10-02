@@ -590,7 +590,7 @@ The transactions this contract defines or constrains:
 
 | # | Transaction | Locks and checks | Writes |
 | --- | --- | --- | --- |
-| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed`, with its terminal event (§8.2). Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
+| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed` and a draft no longer `open` fails it `409 conflict`, each with its terminal event, in the owner-checked transaction that abandons its claim once the draft transaction has rolled back (§8.2). An import of a machine already in the draft replaces its draft entry. Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
 | T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active `publish` one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
 | T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published and, for an `apply-config` plan, the machine's `Desired` (execution and recovery choice §10.24); execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
@@ -599,7 +599,7 @@ The transactions this contract defines or constrains:
 | T5c | Identity revocation | key lock; installation state `FOR SHARE`; every machine row `FOR UPDATE`, in id order, as T9 (rule 5); principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked; an identity revocation entry (T7) on the timeline of each machine with a plan that identity approved whose plan or operation is not terminal, read under those machine locks (execution and recovery §4.1); idempotency record, act |
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6; a commitment also compares the committing process's epoch with the current one (§5.1) | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
-| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, and its abandonment by the sweep or by a takeover with nothing to decrypt (compilation §3.4, §3.5) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a job's completion, also its state and terminal event (§8.2); for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, and an abandonment fails the operation `ingestion-abandoned` with its terminal event (§8.2) |
+| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, and its abandonment by the sweep, by a takeover with nothing to decrypt (compilation §3.4, §3.5) or by its owner after a refusal, under the owner check (compilation §2.3) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a job's completion, also its state and terminal event (§8.2); for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, and an abandonment fails the operation `ingestion-abandoned` with its terminal event (§8.2) |
 | T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE`; the row of each `publish` or `ingest` operation it fails `FOR UPDATE` (T7), in rule 5's order | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
 | T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect. Leaving recovery mode takes installation state `FOR UPDATE` instead, before it checks that every machine scope is released: it waits for an inventory request, which holds that row `FOR SHARE`, and then sees the machine that request inserted | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together, only if the serving process's epoch is the current one (§5.1); an abandonment also fails the claim's `ingest` operation `ingestion-abandoned`, with its terminal event (§8.2) |
@@ -1197,6 +1197,15 @@ are on the machine's timeline (`GET /machines/{id}/timeline`). Polling the
 resource is always supported (design §11.1). WebSocket is not offered in the
 PoC **(choice §17.14)**.
 
+An `ingest` operation's events are `{"type": "started"}`, written with the
+operation; `{"type": "staged"}` once an encrypted claim's envelope is stored;
+and one terminal event, `{"type": "succeeded", "importBaseRevision": "<ibr
+identifier>"}` or `{"type": "failed", "code": "<problem code>"}`. No event
+carries input text. The operation resource shows its stored row: an operation
+whose claim a read already treats as abandoned (compilation §3.5) stays
+`running` here until the sweep writes it, at most one sweep interval later.
+`GET /ingestions/{id}` reports the claim's state as read.
+
 ## 9. API
 
 Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11-northbound-web-api),
@@ -1408,6 +1417,21 @@ If-Match: "7-shw6tpirbqvgj3qjuv2hicf6vm"
 HTTP/1.1 202 Accepted
 Location: /api/v1/operations/op_f6hekztxvswfhzqoe2wbyqnbtq
 
+{"operation": "op_f6hekztxvswfhzqoe2wbyqnbtq",
+ "ingestion": "ing_4ycffhy7bf4o2w6pz5b4r75hmu"}
+
+GET /api/v1/ingestions/ing_4ycffhy7bf4o2w6pz5b4r75hmu
+
+HTTP/1.1 200 OK
+
+{"id": "ing_4ycffhy7bf4o2w6pz5b4r75hmu", "kind": "import",
+ "mode": "transient", "state": "held",
+ "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+ "draft": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "operation": "op_f6hekztxvswfhzqoe2wbyqnbtq", "ownerGeneration": 1,
+ "leaseUntil": "2026-09-26T09:20:15Z", "expiresAt": "2026-09-26T09:30:00Z",
+ "createdAt": "2026-09-26T09:20:00Z"}
+
 GET /api/v1/releases/rel_fgqvcvz3ck7h7234ljgdbzsj6m
 
 HTTP/1.1 200 OK
@@ -1437,7 +1461,13 @@ HTTP/1.1 200 OK
 
 `source` is `machine` to read the configuration from the node, at the
 machine's Talos endpoint with its cluster's Talos access (§3.3), or `document`
-with the text in a `document` field. `scopeState` is `normal`, or one of
+with the text in a `document` field. The ingestion resource is its staging
+claim as a read treats it (compilation §3.5): `state` is `abandoned` once the
+claim is past its absolute expiry, or a transient one past its lease, whether
+or not the sweep has written it. It never carries the owner string, the
+payload or its digest. `POST /ingestions/{id}/abandonments` takes `{}` and
+answers 200 with the resource; a claim already `released` or `abandoned` is
+`409 conflict`. `scopeState` is `normal`, or one of
 execution and recovery's recovery scope states while recovery mode is in
 effect.
 

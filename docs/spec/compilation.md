@@ -141,7 +141,10 @@ inner token can.
 ### 2.3 Pipeline
 
 0. **Claim.** The claim row (§3.2) is created in state `held`, with no
-   payload, before the input is read.
+   payload, before the input is read. With `source: document` the request
+   body carries the input: it is decoded into the unresolved type and
+   fingerprinted in memory first (persistence-api §7.1), and nothing of it is
+   extracted or stored before the claim exists.
 1. **Read** into the unresolved type (§2.1).
 2. **Parse** every document of the stream. A parse failure refuses the input;
    the refusal quotes no input text. A mapping that holds a key twice is a
@@ -278,7 +281,8 @@ must survive its process follow E1's recommendation **(choice §16.5)**.
 The staging key is separate from the artifact key **(choice §16.5)**, and only
 ingestion identities can decrypt it, so the executor, which can decrypt
 artifacts, cannot read staged changes. A resume decrypts the envelope, refuses
-a payload that is not a complete envelope, checks its digest, and only then
+a payload that is not a complete envelope, checks its digest (the SHA-256 of
+the envelope's plaintext, stored beside the payload and cleared with it), and only then
 constructs the sanitized value through the ingestion package, as E1's resume
 path did (E1 §3).
 It cannot re-run the guard: the extracted values are in the provider, and the
@@ -308,7 +312,9 @@ is shorter than the lease and the lease shorter than the absolute expiry.
 
 Owner identity: for transient staging, the run identity, process id and
 process start token, as in E1; for encrypted staging, the ingestion principal
-and its instance. An owner's own transition (lease extension, the draft
+and its instance. In both modes the owner string is
+`<instance>/<process id>/<start token>`, its instance named by the deployment's
+configuration. An owner's own transition (lease extension, the draft
 transaction's release) checks owner and owner generation, and a takeover checks
 the generation it read, each in the same conditional `UPDATE` that makes the
 change. That is the shape DB §4.4 measured: a check followed by a separate
