@@ -22,6 +22,17 @@ func Fingerprint(ctx context.Context, h HMAC, material []byte, u Unresolved, ver
 	if len(doc) == 0 {
 		return provider.Digest{}, ErrEmptyInput
 	}
+	return fingerprint(ctx, h, material, doc, version)
+}
+
+// FingerprintRequest is the fingerprint of a request on a keyed route whose body carries no
+// document (a source machine ingestion): HMAC over material followed by a zero length, which no
+// request with a document, never empty, encodes.
+func FingerprintRequest(ctx context.Context, h HMAC, material []byte, version int) (provider.Digest, error) {
+	return fingerprint(ctx, h, material, nil, version)
+}
+
+func fingerprint(ctx context.Context, h HMAC, material, doc []byte, version int) (provider.Digest, error) {
 	in := make([]byte, 0, len(material)+8+len(doc))
 	in = append(in, material...)
 	in = binary.BigEndian.AppendUint64(in, uint64(len(doc)))

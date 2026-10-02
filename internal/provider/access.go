@@ -42,6 +42,13 @@ type TalosAccess struct {
 	b *[]byte
 }
 
+// NewTalosAccess is a TalosAccess holding a copy of talosconfig at v, for a caller that stands in
+// for the provider (a test of ingestion). It reads nothing.
+func NewTalosAccess(v TalosAccessVersion, talosconfig []byte) TalosAccess {
+	b := append([]byte(nil), talosconfig...)
+	return TalosAccess{v: v, b: &b}
+}
+
 // Version is the identity of the version read.
 func (a TalosAccess) Version() TalosAccessVersion { return a.v }
 

@@ -45,9 +45,7 @@ func (in *ingestionInput) check(*API) error {
 		return errors.New("kind drift-adoption is not served yet")
 	case in.Kind != "import":
 		return errors.New("kind must be import")
-	case in.Source == "machine":
-		return errors.New("source machine is not served yet")
-	case in.Source != "document":
+	case in.Source != "machine" && in.Source != "document":
 		return errors.New("source must be machine or document")
 	case in.Staging != "transient" && in.Staging != "encrypted":
 		return errors.New("staging must be transient or encrypted")
@@ -55,8 +53,10 @@ func (in *ingestionInput) check(*API) error {
 		return errors.New("machine must be an mch identifier")
 	case id.MustHave(in.Draft, id.Draft) != nil:
 		return errors.New("draft must be a drf identifier")
-	case in.Document.Size() == 0:
+	case in.Source == "document" && in.Document.Size() == 0:
 		return errors.New("document is required with source document")
+	case in.Source == "machine" && in.Document.Size() != 0:
+		return errors.New("document is not accepted with source machine")
 	case len(in.Declarations.References) > 0:
 		return errors.New("declarations.references is not served yet")
 	case len(in.Marks) > maxMarks:
@@ -75,8 +75,13 @@ func (in *ingestionInput) check(*API) error {
 
 func (in *ingestionInput) document() ingest.Unresolved { return in.Document }
 
+// withoutDocument: a source machine request carries no document; its fingerprint is still keyed
+// (§7.1), over the request alone.
+func (in *ingestionInput) withoutDocument() bool { return in.Source == "machine" }
+
 // job is one ingestion as the runner takes it from T11: the claim at its generation, the
-// operation, the draft revision it binds and the request's input, held in memory only.
+// operation, the draft revision it binds and the request's input, held in memory only. A source
+// machine job has no input yet: the runner reads it from node, the machine as T11 read it.
 type job struct {
 	claim    staging.Claim
 	op       string
@@ -85,22 +90,36 @@ type job struct {
 	marks    []ingest.Path
 	decl     ingest.Declarations
 	input    ingest.Unresolved
+	node     *node
+}
+
+// node is a machine's Talos endpoint and the identity its node must report (§3.3): its identity
+// key, exactly one of SMBIOS UUID and Talos node ID, and its cluster's Talos cluster ID.
+type node struct {
+	endpoint                      string
+	smbiosUUID, nodeID, clusterID string
 }
 
 func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*ingestionInput)
-	if a.d.owner.ID == "" {
+	if a.d.owner.ID == "" || a.d.ing == nil {
 		return result{}, refuse(http.StatusServiceUnavailable, "dependency-unavailable", "ingestion is not configured; nothing was committed")
 	}
 	// Rule 5: machine rows before the draft. A machine's cluster never changes, and the claim's
-	// key on (machine, cluster) holds the row.
+	// key on (machine, cluster) holds the row. A source machine job takes the endpoint and the
+	// identity as read here (§3.3).
 	var machineCluster string
-	switch err := tx.QueryRowContext(ctx, `SELECT cluster FROM machine WHERE id = $1`, in.Machine).Scan(&machineCluster); {
+	var nd node
+	var uuid, nodeID sql.NullString
+	switch err := tx.QueryRowContext(ctx, `SELECT m.cluster, m.talos_endpoint, m.smbios_uuid, m.talos_node_id, c.talos_cluster_id
+		FROM machine m JOIN cluster c ON c.id = m.cluster WHERE m.id = $1`, in.Machine).
+		Scan(&machineCluster, &nd.endpoint, &uuid, &nodeID, &nd.clusterID); {
 	case errors.Is(err, sql.ErrNoRows):
 		return result{}, refuse(http.StatusNotFound, "not-found", "no such machine").with("machine", in.Machine)
 	case err != nil:
 		return result{}, err
 	}
+	nd.smbiosUUID, nd.nodeID = uuid.String, nodeID.String
 	var cluster, state, token string
 	var rev int
 	switch err := tx.QueryRowContext(ctx, `SELECT cluster, state, revision, etag_token FROM draft WHERE id = $1 FOR UPDATE`,
@@ -159,6 +178,9 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 		return result{}, err
 	}
 	j := job{claim: c, op: op, draft: in.Draft, draftRev: rev, marks: in.marks, decl: in.Declarations, input: in.Document}
+	if in.Source == "machine" {
+		j.node = &nd
+	}
 	return result{status: http.StatusAccepted, location: prefix + "/operations/" + op,
 		body: map[string]string{"operation": op, "ingestion": c.ID}, subjects: []string{op, c.ID, in.Draft, in.Machine},
 		operation: op, afterCommit: func() { a.startRunner(j) }}, nil

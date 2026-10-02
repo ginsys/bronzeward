@@ -17,12 +17,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
+	"github.com/ginsys/bronzeward/internal/talos"
 )
 
 const prefix = "/api/v1"
@@ -38,6 +40,7 @@ type Ingester interface {
 	CreateGeneration(ctx context.Context, p provider.GenerationPath, v provider.Value) (provider.Generation, error)
 	EncryptBaseline(ctx context.Context, plaintext []byte) (provider.Ciphertext, error)
 	EncryptStaging(ctx context.Context, envelope []byte) (provider.Ciphertext, error)
+	TalosAccess(ctx context.Context, cluster string) (provider.TalosAccess, error)
 }
 
 type API struct {
@@ -63,20 +66,23 @@ type deps struct {
 
 // options are nil or false in production; tests set them.
 type options struct {
-	logf           func(format string, args ...any) // the server log; log.Printf by default
-	extra          []*route                         // routes beyond §9.2
-	noKeyLock      bool                             // the key-lock control (§7.2, §16)
-	noRevokerCheck bool                             // T5c's revoking-human lock control
-	noActOrder     bool                             // the act-order lock control (GET /acts)
-	noDraftLock    bool                             // the draft read-lock control (GET /drafts)
-	noEpochTerm    bool                             // the epoch-term control at ingestion start (§5.1, §16)
-	afterEffect    func()                           // runs in the transaction, after the effect, act and record
-	beforeRead     func()                           // runs when a read route starts, after routing
-	beforeCommit   func(attempt int) error          // fails an attempt before COMMIT
-	commit         func(*sql.Tx) error              // replaces (*sql.Tx).Commit
-	onRunner       func(job)                        // takes each job instead of the runner
-	afterStage     func()                           // runs when a job is staged, before T1
-	beforeT1       func()                           // runs before T1 begins
+	logf           func(format string, args ...any)                                                     // the server log; log.Printf by default
+	extra          []*route                                                                             // routes beyond §9.2
+	noKeyLock      bool                                                                                 // the key-lock control (§7.2, §16)
+	noRevokerCheck bool                                                                                 // T5c's revoking-human lock control
+	noActOrder     bool                                                                                 // the act-order lock control (GET /acts)
+	noDraftLock    bool                                                                                 // the draft read-lock control (GET /drafts)
+	noEpochTerm    bool                                                                                 // the epoch-term control at ingestion start (§5.1, §16)
+	afterEffect    func()                                                                               // runs in the transaction, after the effect, act and record
+	beforeRead     func()                                                                               // runs when a read route starts, after routing
+	beforeCommit   func(attempt int) error                                                              // fails an attempt before COMMIT
+	commit         func(*sql.Tx) error                                                                  // replaces (*sql.Tx).Commit
+	onRunner       func(job)                                                                            // takes each job instead of the runner
+	afterStage     func()                                                                               // runs when a job is staged, before T1
+	beforeT1       func()                                                                               // runs before T1 begins
+	dial           func(ctx context.Context, talosconfig []byte, endpoint string) (talos.Reader, error) // talos.Dial by default
+	nodeTimeout    time.Duration                                                                        // bounds each node request; nodeTimeout by default
+	quoteErrors    bool                                                                                 // the pass-through control (§16): a node read's failure logs its error text
 }
 
 // request is one API request as it passes the checks.
@@ -115,6 +121,12 @@ func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ing
 func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *API {
 	if o.logf == nil {
 		o.logf = log.Printf
+	}
+	if o.dial == nil {
+		o.dial = talos.Dial
+	}
+	if o.nodeTimeout == 0 {
+		o.nodeTimeout = nodeTimeout
 	}
 	if d.life == nil {
 		d.life = context.Background()

@@ -100,7 +100,13 @@ func (a *API) keyedFingerprint(ctx context.Context, q *request, version int) *re
 		a.o.logf("%s: route %s %s is keyed, but its input carries no document", q.id, q.route.method, q.route.pattern)
 		return refuse(http.StatusInternalServerError, "internal-error", "nothing was committed")
 	}
-	d, err := ingest.Fingerprint(ctx, a.d.ing.Digest, q.material, in.document(), version)
+	var d provider.Digest
+	var err error
+	if n, ok := in.(interface{ withoutDocument() bool }); ok && n.withoutDocument() {
+		d, err = ingest.FingerprintRequest(ctx, a.d.ing.Digest, q.material, version)
+	} else {
+		d, err = ingest.Fingerprint(ctx, a.d.ing.Digest, q.material, in.document(), version)
+	}
 	switch {
 	case errors.Is(err, ingest.ErrEmptyInput):
 		return refuse(http.StatusBadRequest, "invalid-request", "the document is empty")
