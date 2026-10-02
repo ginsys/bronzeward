@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base32"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -62,9 +63,10 @@ func text(member, v string, max int) error {
 func isControl(r rune) bool { return r < 0x20 || (r >= 0x7f && r < 0xa0) }
 
 type clusterInput struct {
-	Name     string `json:"name"`
-	Endpoint string `json:"endpoint"`
-	Contract string `json:"contract"`
+	Name           string `json:"name"`
+	Endpoint       string `json:"endpoint"`
+	Contract       string `json:"contract"`
+	TalosClusterID string `json:"talosClusterId"`
 }
 
 var (
@@ -85,8 +87,23 @@ func (in *clusterInput) check(*API) error {
 	if !contractShape.MatchString(in.Contract) {
 		return errors.New("contract must be a Talos contract minor, as v1.13")
 	}
+	if !validClusterID(in.TalosClusterID) {
+		return errors.New("talosClusterId must be the cluster ID `talosctl get info` prints: 32 bytes in standard base64 (persistence-api.md §7.3)")
+	}
 	return nil
 }
+
+// validClusterID takes a Talos cluster ID in its one canonical spelling: the standard, padded
+// base64 encoding of 32 bytes. Decoding alone would also take nonzero padding bits and the line
+// breaks the decoder skips, so the decoded bytes must encode back to exactly what was given.
+func validClusterID(s string) bool {
+	b, err := base64.StdEncoding.DecodeString(s)
+	return err == nil && len(b) == 32 && base64.StdEncoding.EncodeToString(b) == s
+}
+
+// nodeIDShape is a Talos node ID as `talosctl get identity` prints it: opaque printable ASCII
+// without spaces, compared byte for byte and never normalised (persistence-api.md §7.3).
+var nodeIDShape = regexp.MustCompile(`^[!-~]{1,128}$`)
 
 // validEndpoint accepts the cluster's Kubernetes API endpoint as https://host[:port] only; the
 // database's check is the same shape.
@@ -122,25 +139,42 @@ func validEndpoint(s string) bool {
 }
 
 type clusterBody struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Endpoint string `json:"endpoint"`
-	Contract string `json:"contract"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Endpoint       string `json:"endpoint"`
+	Contract       string `json:"contract"`
+	TalosClusterID string `json:"talosClusterId"`
 }
 
+// createCluster records a cluster. The Talos cluster ID's unique index is §7.3's cluster key, met
+// as the SMBIOS UUID's is in inventoryMachine: a second cluster from one secrets bundle is refused
+// naming the first.
 func createCluster(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*clusterInput)
-	b := clusterBody{ID: id.New(id.Cluster), Name: in.Name, Endpoint: in.Endpoint, Contract: in.Contract}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO cluster (id, name, endpoint, contract, created_at) VALUES ($1, $2, $3, $4, now())`,
-		b.ID, b.Name, b.Endpoint, b.Contract); err != nil {
+	b := clusterBody{ID: id.New(id.Cluster), Name: in.Name, Endpoint: in.Endpoint, Contract: in.Contract, TalosClusterID: in.TalosClusterID}
+	var inserted string
+	err := tx.QueryRowContext(ctx, `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, now()) ON CONFLICT DO NOTHING RETURNING id`,
+		b.ID, b.Name, b.Endpoint, b.Contract, b.TalosClusterID).Scan(&inserted)
+	if errors.Is(err, sql.ErrNoRows) {
+		var existing string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM cluster WHERE talos_cluster_id = $1`, b.TalosClusterID).Scan(&existing); err != nil {
+			return result{}, err
+		}
+		return result{}, refuse(http.StatusConflict, "conflict", "a cluster with this Talos cluster ID is already recorded").with("cluster", existing)
+	}
+	if err != nil {
 		return result{}, err
 	}
 	return result{status: http.StatusCreated, location: prefix + "/clusters/" + b.ID, body: b, subjects: []string{b.ID}}, nil
 }
 
+// machineInput carries exactly one identity key (persistence-api.md §7.3): the SMBIOS UUID when the
+// machine reports one, otherwise its Talos node ID. Absent and null are the same.
 type machineInput struct {
 	Cluster       string  `json:"cluster"`
-	SMBIOSUUID    string  `json:"smbiosUuid"`
+	SMBIOSUUID    *string `json:"smbiosUuid"`
+	TalosNodeID   *string `json:"talosNodeId"`
 	Serial        *string `json:"serial"`
 	TalosEndpoint string  `json:"talosEndpoint"`
 }
@@ -151,15 +185,18 @@ func (in *machineInput) check(*API) error {
 	if id.MustHave(in.Cluster, id.Cluster) != nil {
 		return errors.New("cluster must be a cl identifier")
 	}
-	in.SMBIOSUUID = strings.ToLower(in.SMBIOSUUID)
-	switch in.SMBIOSUUID {
-	case "":
-		return errors.New("smbiosUuid is required (persistence-api.md §7.3)")
-	case "00000000-0000-0000-0000-000000000000", "ffffffff-ffff-ffff-ffff-ffffffffffff":
-		return errors.New("smbiosUuid is SMBIOS's value for no UUID; such a machine cannot be inventoried (persistence-api.md §7.3)")
-	}
-	if !uuidShape.MatchString(in.SMBIOSUUID) {
-		return errors.New("smbiosUuid must be a UUID in its 8-4-4-4-12 hexadecimal form")
+	switch {
+	case (in.SMBIOSUUID == nil) == (in.TalosNodeID == nil):
+		return errors.New("exactly one of smbiosUuid and talosNodeId is required (persistence-api.md §7.3)")
+	case in.SMBIOSUUID != nil:
+		// SMBIOS's nil and all-ones values are accepted as a UUID: each is recorded once (§7.3).
+		u := strings.ToLower(*in.SMBIOSUUID)
+		if !uuidShape.MatchString(u) {
+			return errors.New("smbiosUuid must be a UUID in its 8-4-4-4-12 hexadecimal form")
+		}
+		in.SMBIOSUUID = &u
+	case !nodeIDShape.MatchString(*in.TalosNodeID):
+		return errors.New("talosNodeId must be the node ID `talosctl get identity` prints: 1 to 128 printable ASCII characters without spaces")
 	}
 	if in.Serial != nil {
 		if err := text("serial", *in.Serial, 128); err != nil {
@@ -187,9 +224,11 @@ func talosEndpoint(s string) (string, error) {
 	return ep, nil
 }
 
+// hardware holds the machine's identity key, exactly one of the two non-null, and its serial.
 type hardware struct {
-	SMBIOSUUID string  `json:"smbiosUuid"`
-	Serial     *string `json:"serial"`
+	SMBIOSUUID  *string `json:"smbiosUuid"`
+	TalosNodeID *string `json:"talosNodeId"`
+	Serial      *string `json:"serial"`
 }
 
 type applied struct {
@@ -210,9 +249,10 @@ type machineBody struct {
 	OpenDrift     *struct{} `json:"openDrift"`
 }
 
-// inventoryMachine records a machine with its MachineState. The SMBIOS UUID's unique index is §7.3's
-// natural key: a concurrent request for the same UUID waits on this one's uncommitted row, and
-// whichever inserts second finds the committed machine and is refused naming it. A machine
+// inventoryMachine records a machine with its MachineState. The unique indexes on the SMBIOS UUID and
+// the Talos node ID are §7.3's natural keys: a concurrent request for the same key waits on this
+// one's uncommitted row, and whichever inserts second finds the committed machine and is refused
+// naming it. A machine
 // inventoried in recovery mode starts pre-restore unaccounted (§12.2; execution and recovery §7.4),
 // read from the installation state this transaction holds FOR SHARE.
 func inventoryMachine(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
@@ -220,22 +260,25 @@ func inventoryMachine(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 	if err := clusterExists(ctx, tx, in.Cluster); err != nil {
 		return result{}, err
 	}
-	b := machineBody{ID: id.New(id.Machine), Cluster: in.Cluster, Hardware: hardware{SMBIOSUUID: in.SMBIOSUUID, Serial: in.Serial},
+	b := machineBody{ID: id.New(id.Machine), Cluster: in.Cluster,
+		Hardware:      hardware{SMBIOSUUID: in.SMBIOSUUID, TalosNodeID: in.TalosNodeID, Serial: in.Serial},
 		TalosEndpoint: in.TalosEndpoint, ScopeState: "normal"}
 	if q.recovery {
 		b.ScopeState = "pre-restore-unaccounted"
 	}
-	// No conflict target: the SMBIOS UUID's index is the only one a fresh identifier can meet.
+	// No conflict target: the two identity keys' indexes are the only ones a fresh identifier can
+	// meet, and the request carries exactly one key.
 	var inserted string
-	err := tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, now()) ON CONFLICT DO NOTHING RETURNING id`,
-		b.ID, b.Cluster, b.Hardware.SMBIOSUUID, b.Hardware.Serial, b.ScopeState, b.TalosEndpoint).Scan(&inserted)
+	err := tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, smbios_uuid, talos_node_id, serial, scope_state, talos_endpoint, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now()) ON CONFLICT DO NOTHING RETURNING id`,
+		b.ID, b.Cluster, b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID, b.Hardware.Serial, b.ScopeState, b.TalosEndpoint).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
 		var existing string
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE smbios_uuid = $1`, b.Hardware.SMBIOSUUID).Scan(&existing); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE smbios_uuid = $1 OR talos_node_id = $2`,
+			b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID).Scan(&existing); err != nil {
 			return result{}, err
 		}
-		return result{}, refuse(http.StatusConflict, "conflict", "a machine with this SMBIOS UUID is already inventoried").with("machine", existing)
+		return result{}, refuse(http.StatusConflict, "conflict", "a machine with this identity key is already inventoried").with("machine", existing)
 	}
 	if err != nil {
 		return result{}, err

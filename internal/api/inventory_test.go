@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -30,11 +32,22 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder, status int) T {
 	return v
 }
 
+// talosClusterID is a Talos cluster ID of the shape `talosctl get info` prints, distinct per seed.
+func talosClusterID(seed string) string {
+	s := sha256.Sum256([]byte(seed))
+	return base64.StdEncoding.EncodeToString(s[:])
+}
+
+// clusterCall records a cluster as tok, its Talos cluster ID derived from k.
+func clusterCall(tok, k string) call {
+	return call{method: "POST", path: prefix + "/clusters", token: tok, key: k,
+		body: `{"name":"office","endpoint":"https://cp.example.test:6443","contract":"v1.13","talosClusterId":"` + talosClusterID(k) + `"}`}
+}
+
 // createCluster records a cluster as tok and returns its identifier.
 func (e *env) createCluster(h http.Handler, tok, k string) string {
 	e.t.Helper()
-	rec := e.do(h, call{method: "POST", path: prefix + "/clusters", token: tok, key: k,
-		body: `{"name":"office","endpoint":"https://cp.example.test:6443","contract":"v1.13"}`})
+	rec := e.do(h, clusterCall(tok, k))
 	if rec.Code != http.StatusCreated {
 		e.t.Fatalf("POST /clusters: %d %s", rec.Code, rec.Body)
 	}
@@ -73,6 +86,15 @@ func machineCall(tok, k, cluster, uuid string) call {
 		body: `{"cluster":"` + cluster + `","smbiosUuid":"` + uuid + `","serial":"SN-1","talosEndpoint":"10.55.0.3"}`}
 }
 
+// nodeA is a Talos node ID as `talosctl get identity` prints it.
+const nodeA = "7x1SuC8Ege5BGXdAfTEff5iQnlWZLfv9h1LGMxA2pYkC"
+
+// nodeMachineCall inventories a machine that reports no SMBIOS UUID, by its Talos node ID.
+func nodeMachineCall(tok, k, cluster, node string) call {
+	return call{method: "POST", path: prefix + "/machines", token: tok, key: k,
+		body: `{"cluster":"` + cluster + `","talosNodeId":"` + node + `","talosEndpoint":"10.55.0.4"}`}
+}
+
 // PA §3.3: POST /machines takes an IPv4 or bracketed IPv6 literal with an optional port and stores
 // it as host:port, the port 50000 when absent; GET answers the stored form.
 func TestInventoryTalosEndpoint(t *testing.T) {
@@ -106,8 +128,7 @@ func TestInventoryIsHumanOnly(t *testing.T) {
 	author := e.human("h-author")
 	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
 	for _, c := range []call{
-		{method: "POST", path: prefix + "/clusters", token: e.robot, key: key,
-			body: `{"name":"office","endpoint":"https://cp.example.test:6443","contract":"v1.13"}`},
+		clusterCall(e.robot, key),
 		machineCall(e.robot, key, cl, uuidA),
 	} {
 		doc := wantProblem(t, e.do(e.api, c), http.StatusForbidden, "forbidden")
@@ -124,8 +145,8 @@ func TestInventoryIsHumanOnly(t *testing.T) {
 		t.Fatalf("human author: %d %s", rec.Code, rec.Body)
 	}
 	m := decode[machineBody](t, rec, http.StatusCreated)
-	if rec.Header().Get("Location") != prefix+"/machines/"+m.ID || m.Cluster != cl || m.Hardware.SMBIOSUUID != uuidA ||
-		m.ScopeState != "normal" || m.Frozen || m.Applied != nil || m.Desired != nil {
+	if rec.Header().Get("Location") != prefix+"/machines/"+m.ID || m.Cluster != cl || m.Hardware.SMBIOSUUID == nil ||
+		*m.Hardware.SMBIOSUUID != uuidA || m.Hardware.TalosNodeID != nil || m.ScopeState != "normal" || m.Frozen || m.Applied != nil || m.Desired != nil {
 		t.Fatalf("machine %+v, Location %s", m, rec.Header().Get("Location"))
 	}
 	if n := count(t, e.db, "SELECT count(*) FROM act WHERE action = 'machine.inventory' AND role = 'author' AND $1 = ANY (subjects)", m.ID); n != 1 {
@@ -186,50 +207,97 @@ func TestSMBIOSUUIDControl(t *testing.T) {
 	}
 }
 
-// §7.3, §16: the same race with both transactions open. The second waits on the first's
-// uncommitted machine, then answers 409 naming it; without the index both commit.
-func TestSMBIOSUUIDConcurrent(t *testing.T) {
-	for _, control := range []bool{false, true} {
-		e := newEnv(t, options{})
-		author := e.human("h-author")
-		cl := e.createCluster(e.api, author, "k-cluster-0123456789")
-		if control {
-			mustExec(t, e.db, "DROP INDEX machine_smbios_uuid")
-		}
-		hook, held, release := holdFirst()
-		t.Cleanup(release)
-		// The control drops the act-order lock too: the held first request holds it (§5 rule 5), so
-		// the second could not commit while the first is held.
-		api := e.build(options{afterEffect: hook, noActOrder: control})
-		a, b := make(chan *httptest.ResponseRecorder, 1), make(chan *httptest.ResponseRecorder, 1)
-		go func() { a <- e.do(api, machineCall(author, "k-first-0123456789", cl, uuidA)) }()
-		<-held
-		go func() { b <- e.do(api, machineCall(author, "k-second-012345678", cl, uuidA)) }()
-		if !control {
-			dbtest.WaitForLockWait(t, e.db)
-		} else {
-			// Nothing to wait on: the second commits while the first is held.
-			if rec := <-b; rec.Code != http.StatusCreated {
-				t.Fatalf("control, second: %d %s", rec.Code, rec.Body)
+// §7.3, §16: the same race with both transactions open, for each identity key: one SMBIOS UUID,
+// one Talos node ID, one Talos cluster ID. The second waits on the first's uncommitted row, then
+// answers 409 naming it; without the key's index both commit.
+func TestIdentityKeyConcurrent(t *testing.T) {
+	for _, k := range []struct {
+		name, index, table, member string
+		mk                         func(tok, k, cl string) call
+	}{
+		{"SMBIOS UUID", "machine_smbios_uuid", "machine", "machine", func(tok, k, cl string) call { return machineCall(tok, k, cl, uuidA) }},
+		{"Talos node ID", "machine_talos_node_id", "machine", "machine", func(tok, k, cl string) call { return nodeMachineCall(tok, k, cl, nodeA) }},
+		{"Talos cluster ID", "cluster_talos_cluster_id", "cluster", "cluster", func(tok, k, _ string) call {
+			c := clusterCall(tok, "k-cluster-shared-0123") // one Talos cluster ID under two keys
+			c.key = k
+			return c
+		}},
+	} {
+		for _, control := range []bool{false, true} {
+			e := newEnv(t, options{})
+			author := e.human("h-author")
+			cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+			before := count(t, e.db, "SELECT count(*) FROM "+k.table)
+			if control {
+				mustExec(t, e.db, "DROP INDEX "+k.index)
+			}
+			hook, held, release := holdFirst()
+			t.Cleanup(release)
+			// The control drops the act-order lock too: the held first request holds it (§5 rule 5), so
+			// the second could not commit while the first is held.
+			api := e.build(options{afterEffect: hook, noActOrder: control})
+			first, second := k.mk(author, "k-first-0123456789", cl), k.mk(author, "k-second-012345678", cl)
+			a, b := make(chan *httptest.ResponseRecorder, 1), make(chan *httptest.ResponseRecorder, 1)
+			go func() { a <- e.do(api, first) }()
+			<-held
+			go func() { b <- e.do(api, second) }()
+			if !control {
+				dbtest.WaitForLockWait(t, e.db)
+			} else if rec := <-b; rec.Code != http.StatusCreated { // nothing to wait on: it commits while the first is held
+				t.Fatalf("%s control, second: %d %s", k.name, rec.Code, rec.Body)
+			}
+			release()
+			ra := <-a
+			if ra.Code != http.StatusCreated {
+				t.Fatalf("%s control %t, first: %d %s", k.name, control, ra.Code, ra.Body)
+			}
+			n := count(t, e.db, "SELECT count(*) FROM "+k.table) - before
+			if control {
+				if n != 2 {
+					t.Fatalf("%s control: %d new rows; want 2", k.name, n)
+				}
+				continue
+			}
+			doc := wantProblem(t, <-b, http.StatusConflict, "conflict")
+			if doc[k.member] != decode[struct{ ID string }](t, ra, http.StatusCreated).ID {
+				t.Fatalf("%s: 409 names %v; want the first's %s", k.name, doc[k.member], k.member)
+			}
+			if n != 1 {
+				t.Fatalf("%s: %d new rows", k.name, n)
 			}
 		}
-		release()
-		ra := <-a
-		if ra.Code != http.StatusCreated {
-			t.Fatalf("control %t, first: %d %s", control, ra.Code, ra.Body)
+	}
+}
+
+// §7.3: a machine that reports no SMBIOS UUID is inventoried by its Talos node ID, answered with
+// talosNodeId and a null smbiosUuid; SMBIOS's nil and all-ones values are accepted as a UUID, each
+// once; and a cluster answers its Talos cluster ID.
+func TestInventoryIdentityKeys(t *testing.T) {
+	e := newEnv(t, options{})
+	author, viewer := e.human("h-author"), e.human("h-viewer")
+	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+	if got := decode[clusterBody](t, e.do(e.api, call{method: "GET", path: prefix + "/clusters/" + cl, token: viewer}), http.StatusOK); got.TalosClusterID != talosClusterID("k-cluster-0123456789") {
+		t.Fatalf("cluster talosClusterId %q", got.TalosClusterID)
+	}
+	m := decode[machineBody](t, e.do(e.api, nodeMachineCall(author, "k-node-0123456789ab", cl, nodeA)), http.StatusCreated)
+	rec := e.do(e.api, call{method: "GET", path: prefix + "/machines/" + m.ID, token: viewer})
+	var raw struct {
+		Hardware map[string]any `json:"hardware"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil || raw.Hardware["talosNodeId"] != nodeA {
+		t.Fatalf("GET node-ID machine: %v %s", err, rec.Body)
+	}
+	if v, ok := raw.Hardware["smbiosUuid"]; !ok || v != nil {
+		t.Fatalf("smbiosUuid %v (present %t); want null", v, ok)
+	}
+	for i, u := range []string{"00000000-0000-0000-0000-000000000000", "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"} {
+		got := decode[machineBody](t, e.do(e.api, machineCall(author, "k-nil-"+strconv.Itoa(i)+"-0123456789", cl, u)), http.StatusCreated)
+		if got.Hardware.SMBIOSUUID == nil || *got.Hardware.SMBIOSUUID != strings.ToLower(u) {
+			t.Fatalf("%s: %+v", u, got.Hardware)
 		}
-		if control {
-			if n := count(t, e.db, "SELECT count(*) FROM machine"); n != 2 {
-				t.Fatalf("control: %d machines; want 2", n)
-			}
-			continue
-		}
-		doc := wantProblem(t, <-b, http.StatusConflict, "conflict")
-		if doc["machine"] != decode[machineBody](t, ra, http.StatusCreated).ID {
-			t.Fatalf("409 names %v; want the first's machine", doc["machine"])
-		}
-		if n := count(t, e.db, "SELECT count(*) FROM machine"); n != 1 {
-			t.Fatalf("%d machines", n)
+		doc := wantProblem(t, e.do(e.api, machineCall(author, "k-nil-again-"+strconv.Itoa(i)+"-012345", cl, u)), http.StatusConflict, "conflict")
+		if doc["machine"] != got.ID {
+			t.Fatalf("second %s names %v; want %s", u, doc["machine"], got.ID)
 		}
 	}
 }
@@ -241,40 +309,59 @@ func TestInventoryRefusals(t *testing.T) {
 	author := e.human("h-author")
 	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
 	const marker = "zq-marker-7f3a"
+	tc := `,"talosClusterId":"` + talosClusterID("k-refused") + `"`
+	short := base64.StdEncoding.EncodeToString(make([]byte, 31))
+	// A Talos cluster ID decoding to 32 bytes in a spelling other than the canonical one: nonzero
+	// padding bits, and a line break the decoder skips.
+	loose, broken := talosClusterID("x")[:42]+"B=", talosClusterID("x")[:20]+`\n`+talosClusterID("x")[20:]
+	m := func(members string) string {
+		return `{"cluster":"` + cl + `",` + members + `,"talosEndpoint":"10.55.0.3"}`
+	}
 	for name, c := range map[string]struct {
 		path, body string
 		status     int
 		code       string
 	}{
-		"plain http":            {"/clusters", `{"name":"x","endpoint":"http://` + marker + `.test","contract":"v1.13"}`, 400, "invalid-request"},
-		"endpoint with path":    {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test/api","contract":"v1.13"}`, 400, "invalid-request"},
-		"endpoint with user":    {"/clusters", `{"name":"x","endpoint":"https://u@` + marker + `.test","contract":"v1.13"}`, 400, "invalid-request"},
-		"doubled port colon":    {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test::6443","contract":"v1.13"}`, 400, "invalid-request"},
-		"empty port":            {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test:","contract":"v1.13"}`, 400, "invalid-request"},
-		"contract patch":        {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13.6-` + marker + `"}`, 400, "invalid-request"},
-		"blank name":            {"/clusters", `{"name":"  ","endpoint":"https://a.test","contract":"v1.13"}`, 400, "invalid-request"},
-		"name missing":          {"/clusters", `{"endpoint":"https://a.test","contract":"v1.13"}`, 400, "invalid-request"},
-		"no talos endpoint":     {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `"}`, 400, "invalid-request"},
-		"DNS talos endpoint":    {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"` + marker + `.test"}`, 400, "invalid-request"},
-		"endpoint scheme":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"https://10.55.0.3"}`, 400, "invalid-request"},
-		"endpoint path":         {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3:50000/` + marker + `"}`, 400, "invalid-request"},
-		"endpoint user part":    {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"` + marker + `@10.55.0.3"}`, 400, "invalid-request"},
-		"endpoint whitespace":   {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":" 10.55.0.3"}`, 400, "invalid-request"},
-		"bare IPv6 endpoint":    {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"fd00::3"}`, 400, "invalid-request"},
-		"endpoint port 65536":   {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3:65536"}`, 400, "invalid-request"},
-		"endpoint not a string": {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":["10.55.0.3"]}`, 400, "invalid-request"},
-		"malformed UUID":        {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + marker + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
-		"nil UUID":              {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"00000000-0000-0000-0000-000000000000","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
-		"all-ones UUID":         {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
-		"no UUID":               {"/machines", `{"cluster":"` + cl + `","serial":"` + marker + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
-		"blank serial":          {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","serial":" ","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
-		"cluster of a draft":    {"/machines", `{"cluster":"` + drf + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
-		"unknown cluster":       {"/machines", `{"cluster":"` + id.New(id.Cluster) + `","smbiosUuid":"` + uuidA + `","serial":"` + marker + `","talosEndpoint":"10.55.0.3"}`, 404, "not-found"},
-		"hardware member":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","hardware":{"smbiosUuid":"` + uuidA + `"},"talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
-		"draft of no cluster":   {"/drafts", `{"cluster":"` + id.New(id.Cluster) + `","title":"` + marker + `"}`, 404, "not-found"},
-		"blank title":           {"/drafts", `{"cluster":"` + cl + `","title":""}`, 400, "invalid-request"},
+		"plain http":               {"/clusters", `{"name":"x","endpoint":"http://` + marker + `.test","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
+		"endpoint with path":       {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test/api","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
+		"endpoint with user":       {"/clusters", `{"name":"x","endpoint":"https://u@` + marker + `.test","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
+		"doubled port colon":       {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test::6443","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
+		"empty port":               {"/clusters", `{"name":"x","endpoint":"https://` + marker + `.test:","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
+		"contract patch":           {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13.6-` + marker + `"` + tc + `}`, 400, "invalid-request"},
+		"blank name":               {"/clusters", `{"name":"  ","endpoint":"https://a.test","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
+		"name missing":             {"/clusters", `{"endpoint":"https://a.test","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
+		"no talos endpoint":        {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `"}`, 400, "invalid-request"},
+		"DNS talos endpoint":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"` + marker + `.test"}`, 400, "invalid-request"},
+		"endpoint scheme":          {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"https://10.55.0.3"}`, 400, "invalid-request"},
+		"endpoint path":            {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3:50000/` + marker + `"}`, 400, "invalid-request"},
+		"endpoint user part":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"` + marker + `@10.55.0.3"}`, 400, "invalid-request"},
+		"endpoint whitespace":      {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":" 10.55.0.3"}`, 400, "invalid-request"},
+		"bare IPv6 endpoint":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"fd00::3"}`, 400, "invalid-request"},
+		"endpoint port 65536":      {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3:65536"}`, 400, "invalid-request"},
+		"endpoint not a string":    {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":["10.55.0.3"]}`, 400, "invalid-request"},
+		"malformed UUID":           {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + marker + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"no identity key":          {"/machines", m(`"serial":"` + marker + `"`), 400, "invalid-request"},
+		"both identity keys":       {"/machines", m(`"smbiosUuid":"` + uuidA + `","talosNodeId":"` + marker + `"`), 400, "invalid-request"},
+		"both keys null":           {"/machines", m(`"smbiosUuid":null,"talosNodeId":null`), 400, "invalid-request"},
+		"empty node ID":            {"/machines", m(`"talosNodeId":""`), 400, "invalid-request"},
+		"node ID with a space":     {"/machines", m(`"talosNodeId":"node ` + marker + `"`), 400, "invalid-request"},
+		"node ID of 129 bytes":     {"/machines", m(`"talosNodeId":"` + marker + strings.Repeat("a", 129-len(marker)) + `"`), 400, "invalid-request"},
+		"non-ASCII node ID":        {"/machines", m(`"talosNodeId":"` + marker + `é"`), 400, "invalid-request"},
+		"node ID not a string":     {"/machines", m(`"talosNodeId":7`), 400, "invalid-request"},
+		"no Talos cluster ID":      {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13"}`, 400, "invalid-request"},
+		"malformed cluster ID":     {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13","talosClusterId":"` + marker + `"}`, 400, "invalid-request"},
+		"cluster ID of 31 bytes":   {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13","talosClusterId":"` + short + `"}`, 400, "invalid-request"},
+		"unpadded cluster ID":      {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13","talosClusterId":"` + strings.TrimSuffix(talosClusterID("x"), "=") + `"}`, 400, "invalid-request"},
+		"non-canonical cluster ID": {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13","talosClusterId":"` + loose + `"}`, 400, "invalid-request"},
+		"cluster ID with a break":  {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13","talosClusterId":"` + broken + `"}`, 400, "invalid-request"},
+		"blank serial":             {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","serial":" ","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"cluster of a draft":       {"/machines", `{"cluster":"` + drf + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"unknown cluster":          {"/machines", `{"cluster":"` + id.New(id.Cluster) + `","smbiosUuid":"` + uuidA + `","serial":"` + marker + `","talosEndpoint":"10.55.0.3"}`, 404, "not-found"},
+		"hardware member":          {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","hardware":{"smbiosUuid":"` + uuidA + `"},"talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"draft of no cluster":      {"/drafts", `{"cluster":"` + id.New(id.Cluster) + `","title":"` + marker + `"}`, 404, "not-found"},
+		"blank title":              {"/drafts", `{"cluster":"` + cl + `","title":""}`, 400, "invalid-request"},
 		// A mutating route takes no query (§9.1), and the fingerprint does not cover one.
-		"cluster with a query": {"/clusters?dryRun=" + marker, `{"name":"x","endpoint":"https://a.test","contract":"v1.13"}`, 400, "invalid-request"},
+		"cluster with a query": {"/clusters?dryRun=" + marker, `{"name":"x","endpoint":"https://a.test","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
 		"machine with a query": {"/machines?x=" + marker, `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
 		"draft with a query":   {"/drafts?x=" + marker, `{"cluster":"` + cl + `","title":"t"}`, 400, "invalid-request"},
 	} {
