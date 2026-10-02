@@ -178,12 +178,13 @@ func TestLiveRoleProbe(t *testing.T) {
 			t.Errorf("%s: Version error %v, MachineConfig error %v; want the version and PermissionDenied", role, verr, merr)
 		}
 	}
+	// The control, on the raw os:admin results: the same assertion with the os:admin configuration
+	// in the os:reader slot must fail, so a pass above is the role's refusal, not the probe's.
 	verr, merr := probe(configs["os:admin"])
+	if refused(verr, merr) {
+		t.Fatalf("control: the os:admin configuration passed as refused (MachineConfig %v); the assertion cannot fail", merr)
+	}
 	if verr != nil || merr != nil {
 		t.Fatalf("os:admin cannot read (Version %v, MachineConfig %v): the probe is broken", verr, merr)
-	}
-	// The control: the os:admin configuration in the os:reader slot fails the assertion.
-	if refused(verr, merr) {
-		t.Fatal("control: the os:admin configuration passed as refused; the assertion cannot fail")
 	}
 }
