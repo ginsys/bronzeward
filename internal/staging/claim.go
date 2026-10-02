@@ -146,6 +146,21 @@ func StorePayload(ctx context.Context, tx *sql.Tx, o Owner, c Claim, ct []byte, 
 	return affected(ctx, tx, o, res)
 }
 
+// Hold confirms the claim is still this owner's, in the caller's transaction, and keeps it
+// locked to the transaction's end without changing it: a statement the owner commits beside it
+// (an operation event) is fenced as a claim statement is.
+func Hold(ctx context.Context, tx *sql.Tx, o Owner, c Claim) error {
+	if err := lock(ctx, tx, c.ID); err != nil {
+		return fmt.Errorf("staging: hold: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE staging_claim SET lease_until = lease_until
+		WHERE `+fence, c.ID, o.ID, c.Gen, o.Epoch)
+	if err != nil {
+		return fmt.Errorf("staging: hold: %w", err)
+	}
+	return affected(ctx, tx, o, res)
+}
+
 // Release ends the claim released, in the caller's draft transaction (T1's claim half).
 func Release(ctx context.Context, tx *sql.Tx, o Owner, c Claim) error {
 	return end(ctx, tx, o, c, "released")

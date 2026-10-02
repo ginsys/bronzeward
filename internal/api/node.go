@@ -14,6 +14,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
 
@@ -47,6 +48,9 @@ func (a *API) readNode(ctx context.Context, j job) (ingest.Unresolved, *refusal,
 	}
 	v := acc.Version()
 	if err := a.inTx(ctx, func(tx *sql.Tx) error {
+		if err := staging.Hold(ctx, tx, a.d.owner, j.claim); err != nil {
+			return err
+		}
 		return a.event(ctx, tx, j, map[string]any{"type": "talos-access", "path": v.Path, "version": v.Version,
 			"createdTime": v.CreatedTime.UTC().Format(time.RFC3339Nano), "endpoint": n.endpoint})
 	}); err != nil {
