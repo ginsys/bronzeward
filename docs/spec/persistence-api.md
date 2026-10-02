@@ -346,7 +346,11 @@ They are held apart **(choice §17.29)**.
   endpoint may be the one that no longer answers. A machine inventoried before
   the endpoint existed, in a database migrated from an earlier schema, has
   none: the migration adds the column null for existing rows (§11 rule 4) and
-  invents no address. Ingestion start and plan creation naming such a machine
+  invents no address. The requirement binds inserts only, by a
+  `BEFORE INSERT` trigger, with a `BEFORE UPDATE` trigger refusing to clear an
+  endpoint once set: a table `CHECK`, even `NOT VALID`, is enforced on every
+  later update in PostgreSQL, so a legacy row would refuse recovery entry's
+  scope projection (T9), a freeze or an unfreeze. Ingestion start and plan creation naming such a machine
   are refused `409 conflict`, naming the missing endpoint, with nothing
   committed, until the replacement route sets one; that change records no
   previous endpoint.
@@ -417,7 +421,9 @@ They are held apart **(choice §17.29)**.
   configuration, or a sealed or silent provider) fails the use-time check
   (execution and recovery §3.1 item 2), and a node-side cause (a credential
   Talos refuses, or a silent endpoint) fails the fresh observation (item 1);
-  either way nothing is committed or dispatched. A restore of the provider
+  either way no operation is committed and nothing is dispatched, and the
+  timeline keeps the evidence: the observation-started entry and the failed
+  observation or use-time check (execution and recovery §4.1). A restore of the provider
   to an older snapshot can bring back a superseded credential; if Talos no
   longer accepts it, reads fail the same way until the operator writes a
   current one.
@@ -1644,7 +1650,8 @@ Human-only routes refuse automation even where a role would allow it:
 approval, recovery and identity revocation because automation never holds
 those roles (design §13.7 item 2); and ingestion (with its marks, takeover and
 abandonment) and inventory creation, which require `author` held by a human
-**(choice §17.22)**. Design §13.7 left "which role performs the privileged
+**(choice §17.22)**, and the replacement of a machine's Talos endpoint, which
+corrects inventory and follows the same rule (§3.3). Design §13.7 left "which role performs the privileged
 ingestion that feeds an adoption" to the owner, who decided it on #20, and
 names no role for inventory records. An adoption plan is a plan: a `publisher` creates it, as
 every plan (design §13.7 item 2; owner decision 2a on #14), and an `approver`
@@ -1769,8 +1776,9 @@ Rules **(choice §17.24)**:
 4. A migration never rewrites existing rows of an immutable table. It may add
    tables, columns with constant defaults, indexes and constraints. A
    required value that existing rows cannot have, such as a machine's Talos
-   endpoint (§3.3), is added null for them, a constraint requires it of new
-   rows, and the contract defines what a row without it refuses.
+   endpoint (§3.3), is added null for them, an insert-time trigger requires it
+   of new rows (a table constraint would also bind updates of the existing
+   rows), and the contract defines what a row without it refuses.
 5. There is no downgrade. Undoing a migration means restoring a database
    backup, which is a restore (§12).
 
@@ -2312,8 +2320,10 @@ each (design §7.7 consequences):
   endpoint change read back from the machine's timeline with both endpoints;
   a database holding machine rows migrated from the previous schema, each row
   left without an endpoint, its ingestion start and plan creation refused
-  `conflict` with nothing committed, then set by the replacement route with no
-  previous endpoint recorded, after which both proceed;
+  `conflict` with nothing committed, while recovery entry and a freeze and
+  unfreeze of it succeed, an insert without an endpoint and an update clearing
+  one each refused, then set by the replacement route with no previous
+  endpoint recorded, after which both proceed;
   the version identity recorded as path, version and
   `created_time`, with a control that deletes the path's metadata and rewrites
   it, whose new version the record must tell apart; reads of the fixture's worker by its own endpoint with no
