@@ -15,6 +15,13 @@ import (
 // dueClaim inserts a transient claim whose lease has lapsed, with its running ingest operation.
 func dueClaim(t *testing.T, db *sql.DB, human, cluster, machine string) string {
 	t.Helper()
+	return insertClaim(t, db, human, cluster, machine, true)
+}
+
+// insertClaim inserts a transient claim with its running ingest operation; lapsed sets its lease
+// in the past, so the claim is due.
+func insertClaim(t *testing.T, db *sql.DB, human, cluster, machine string, lapsed bool) string {
+	t.Helper()
 	var epoch string
 	if err := db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
 		t.Fatal(err)
@@ -41,8 +48,10 @@ func dueClaim(t *testing.T, db *sql.DB, human, cluster, machine string) string {
 		FROM staging_claim WHERE id = $3`, id.New(id.Operation), draft, c.ID, human); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(`UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, c.ID); err != nil {
-		t.Fatal(err)
+	if lapsed {
+		if _, err := tx.Exec(`UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, c.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
@@ -59,10 +68,17 @@ func claimState(t *testing.T, db *sql.DB, claim string) string {
 	return s
 }
 
-// compilation §3.5: the sweep writes due claims abandoned before the server serves, and then
-// periodically until the server stops.
-func TestStartSweep(t *testing.T) {
-	db, _ := dbtest.New(t)
+// sweepFixture is a migrated, installed database with one human, cluster and machine.
+func sweepFixture(t *testing.T) (db *sql.DB, human, cluster, machine string) {
+	t.Helper()
+	db, _, human, cluster, machine = sweepFixtureDSN(t)
+	return db, human, cluster, machine
+}
+
+// sweepFixtureDSN is sweepFixture with the database's DSN.
+func sweepFixtureDSN(t *testing.T) (db *sql.DB, dsn, human, cluster, machine string) {
+	t.Helper()
+	db, dsn = dbtest.New(t)
 	ms, err := migrate.Embedded()
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +89,7 @@ func TestStartSweep(t *testing.T) {
 	if _, _, err := migrate.Install(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
-	human, cluster, machine := id.New(id.Principal), id.New(id.Cluster), id.New(id.Machine)
+	human, cluster, machine = id.New(id.Principal), id.New(id.Cluster), id.New(id.Machine)
 	for _, s := range []struct {
 		q    string
 		args []any
@@ -88,6 +104,13 @@ func TestStartSweep(t *testing.T) {
 			t.Fatalf("%s: %v", s.q, err)
 		}
 	}
+	return db, dsn, human, cluster, machine
+}
+
+// compilation §3.5: the sweep writes due claims abandoned before the server serves, and then
+// periodically until the server stops.
+func TestStartSweep(t *testing.T) {
+	db, human, cluster, machine := sweepFixture(t)
 	first := dueClaim(t, db, human, cluster, machine)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -105,4 +128,40 @@ func TestStartSweep(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// waitAbandoned waits until claim's stored state is abandoned.
+func waitAbandoned(t *testing.T, db *sql.DB, claim, what string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for claimState(t, db, claim) != "abandoned" {
+		if time.Now().After(deadline) {
+			t.Fatalf("no sweep abandoned %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A server without an ingestion block creates no claims, but another instance on the same
+// database may and then stop, so this one sweeps too: at startup and then every fallbackSweep
+// (compilation §3.5).
+func TestServeSweepsWithoutIngestion(t *testing.T) {
+	db, dsn, human, cluster, machine := sweepFixtureDSN(t)
+	before := dueClaim(t, db, human, cluster, machine)
+	old := fallbackSweep
+	fallbackSweep = 20 * time.Millisecond
+	t.Cleanup(func() { fallbackSweep = old })
+	cfg := configFile(t, dsn) // before the goroutine: its t.Fatal must not leave errc unsent
+	ctx, cancel := context.WithCancel(t.Context())
+	errc := make(chan error, 1)
+	go func() { errc <- serveContext(ctx, []string{"-config", cfg}) }()
+	defer func() {
+		cancel()
+		if err := <-errc; err != nil {
+			t.Errorf("serve: %v", err)
+		}
+	}()
+	waitAbandoned(t, db, before, "the claim due at startup")
+	after := dueClaim(t, db, human, cluster, machine)
+	waitAbandoned(t, db, after, "the claim another instance left after startup")
 }

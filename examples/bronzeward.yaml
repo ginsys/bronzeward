@@ -42,7 +42,8 @@ execution:
 # Required with provider, refused without it: the staging claims' timers (compilation.md §3.2
 # requires only heartbeat < lease < absoluteExpiry; the values are open) and this instance's
 # name, which starts the owner identity of its claims. The server writes due claims abandoned
-# once at startup and then every sweep interval (compilation.md §3.5).
+# once at startup and then every sweep interval (compilation.md §3.5); without this block it
+# still sweeps, every minute, for claims another instance left behind.
 # ingestion:
 #   instance: a
 #   heartbeat: 5s
