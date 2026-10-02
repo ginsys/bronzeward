@@ -142,6 +142,8 @@ func (c *client) do(ctx context.Context, method, path string, body []byte, creat
 			return nil, &requestError{method: method, path: path, status: s, kind: ErrProtocol, detail: "the response exceeds 4 MiB"}
 		}
 		return &response{method: method, path: path, status: s, body: payload}, nil
+	case s == http.StatusNotFound && method == http.MethodGet:
+		return nil, &requestError{method: method, path: path, status: s, kind: ErrAbsent}
 	case s == http.StatusForbidden:
 		return nil, &requestError{method: method, path: path, status: s, kind: ErrDenied}
 	case s == http.StatusBadRequest && create && casRefused(payload):

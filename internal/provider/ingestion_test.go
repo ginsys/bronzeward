@@ -317,10 +317,10 @@ func (withBaselineDecrypt) DecryptBaseline(context.Context, Ciphertext) ([]byte,
 	return nil, nil
 }
 
-// The role type has exactly ingestion's five operations: no baseline or artifact decryption and
-// no KV read exist in code, whatever the policy would allow.
+// The role type has exactly ingestion's six operations: no baseline or artifact decryption and no
+// KV read other than the Talos access credential exist in code, whatever the policy would allow.
 func TestIngestionMethodSet(t *testing.T) {
-	want := []string{"CreateGeneration", "DecryptStaging", "Digest", "EncryptBaseline", "EncryptStaging"}
+	want := []string{"CreateGeneration", "DecryptStaging", "Digest", "EncryptBaseline", "EncryptStaging", "TalosAccess"}
 	if got := methodNames(reflect.TypeFor[*Ingestion]()); !slices.Equal(got, want) {
 		t.Fatalf("*Ingestion exports %q, want exactly %q", got, want)
 	}
