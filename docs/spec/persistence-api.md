@@ -217,7 +217,7 @@ that the trigger fires **(choice §17.3)**.
 | --- | --- | --- | --- |
 | Cluster | mutable, revisioned | name, endpoint, contract, status | this contract |
 | Machine | mutable, revisioned | `mch` id, hardware evidence with its SMBIOS UUID (unique, §7.3), cluster membership, Talos endpoint (§3.3), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
-| MachineEndpointChange | immutable | a machine's previous and new Talos endpoint, who changed it, role, epoch, time (§3.3) | this contract |
+| MachineEndpointChange | immutable | a machine's previous Talos endpoint (none for a machine migrated without one) and new one, who changed it, role, epoch, time (§3.3) | this contract |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
 | Profile / ProfileRevision | mutable head / immutable | ordered fragment revision ids | this contract |
@@ -343,7 +343,13 @@ They are held apart **(choice §17.29)**.
   `400 invalid-request`, on either route, with nothing committed. It changes no existing plan, whose route stays
   the one it bound. Like inventory, it is accepted installation-wide in
   recovery mode (§12.2): it changes nothing on a machine, and a restored
-  endpoint may be the one that no longer answers.
+  endpoint may be the one that no longer answers. A machine inventoried before
+  the endpoint existed, in a database migrated from an earlier schema, has
+  none: the migration adds the column null for existing rows (§11 rule 4) and
+  invents no address. Ingestion start and plan creation naming such a machine
+  are refused `409 conflict`, naming the missing endpoint, with nothing
+  committed, until the replacement route sets one; that change records no
+  previous endpoint.
 - **The credential is per cluster, in the provider.** Talos authorizes a client
   certificate signed by the cluster's own certificate authority, so one
   credential reaches every node of the cluster (design §13.1, "cluster-specific
@@ -1461,7 +1467,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); an ingestion start or plan creation naming a machine with no Talos endpoint (§3.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose SMBIOS UUID or cluster membership is not the machine record's, or that reported none (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
@@ -1472,7 +1478,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
 | 501 | `not-implemented` | a §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
 | 503 | `dependency-unavailable` | the provider is sealed or unreachable, or authentication could not reach the identity provider or the database; nothing was committed. Not at a Talos access read, which is `talos-access-unavailable` |
-| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or of a failed use-time check at dispatch: the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1) |
+| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1) |
 | 503 | `transient-conflict` | deadlock retries exhausted (§5) |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing was committed |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
@@ -1758,7 +1764,10 @@ Rules **(choice §17.24)**:
    versions.
 3. A migration touches no provider and dispatches nothing.
 4. A migration never rewrites existing rows of an immutable table. It may add
-   tables, columns with constant defaults, indexes and constraints.
+   tables, columns with constant defaults, indexes and constraints. A
+   required value that existing rows cannot have, such as a machine's Talos
+   endpoint (§3.3), is added null for them, a constraint requires it of new
+   rows, and the contract defines what a row without it refuses.
 5. There is no downgrade. Undoing a migration means restoring a database
    backup, which is a restore (§12).
 
@@ -2283,8 +2292,14 @@ each (design §7.7 consequences):
   at this cluster's path, an endpoint that does not
   answer), through both readers: for an ingestion, failing with it, the
   claim `abandoned` and the operation `failed` with its terminal event and no
-  generation; for dispatch, a failed use-time check, with no operation
-  committed and no request sent to the node; for each, no part of the
+  generation; for dispatch, the provider-side causes failing the use-time
+  check (execution and recovery §3.1 item 2) and a refused credential or a
+  silent endpoint failing the fresh observation (item 1), with no operation
+  committed and no mutation request sent; every observation purpose
+  (`evidence`, `completion`, `recovery`, `drift`, `restoration`) recording
+  the access version it read, and on a failed access read none of the node's
+  values and its cause, with a control that reuses a credential read before a
+  rotation and must then be told apart by its version; for each, no part of the
   talosconfig in the problem, the timeline, the logs or the
   scan, with a control that passes the parser's or client's error text through
   and must then be caught; `POST /machines` and the replacement route each
@@ -2292,6 +2307,10 @@ each (design §7.7 consequences):
   scheme, a path, a user part, whitespace, an unbracketed IPv6 literal, a port
   out of range and 256 octets, against a 255-octet control accepted; the
   endpoint change read back from the machine's timeline with both endpoints;
+  a database holding machine rows migrated from the previous schema, each row
+  left without an endpoint, its ingestion start and plan creation refused
+  `conflict` with nothing committed, then set by the replacement route with no
+  previous endpoint recorded, after which both proceed;
   the version identity recorded as path, version and
   `created_time`, with a control that deletes the path's metadata and rewrites
   it, whose new version the record must tell apart; reads of the fixture's worker by its own endpoint with no

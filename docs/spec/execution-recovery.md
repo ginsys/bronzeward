@@ -727,7 +727,7 @@ Required entries:
 | Approval | plan revision, approver, role, epoch, self-approval mark (§2) |
 | Revocation, identity revocation, cancellation | what it names, who, role |
 | Observation started | purpose, and the plan or operation it is taken for, if any; recorded before the remote read, its revision is the observation's basis (below) |
-| Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), basis, identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read |
+| Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), basis, the Talos access version it read (path, version, `created_time`; [persistence and API §3.3](persistence-api.md#33-talos-access)), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read and why: a failed access read or connection reads none, and records its `talos-access-unavailable` cause |
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |
 | Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 and §6.5 to that evidence (§3.2) |
