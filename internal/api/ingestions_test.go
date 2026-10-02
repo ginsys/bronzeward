@@ -28,6 +28,9 @@ type ingestEnv struct {
 	etag                    string
 	mu                      sync.Mutex
 	jobs                    []job
+	captured                options  // the API's options: o with onRunner recording each job
+	n                       int      // the keys startJob used
+	bodies                  []string // the response bodies startJob saw
 }
 
 var testTimers = config.Ingestion{Instance: "a", Heartbeat: 5 * time.Second, Lease: 15 * time.Second,
@@ -35,15 +38,32 @@ var testTimers = config.Ingestion{Instance: "a", Heartbeat: 5 * time.Second, Lea
 
 func newIngestEnv(t *testing.T, o options) *ingestEnv {
 	t.Helper()
-	ie := &ingestEnv{f: &fakeIngester{latest: 1}}
+	ie := setupIngestEnv(t)
 	o.onRunner = func(j job) {
 		ie.mu.Lock()
 		defer ie.mu.Unlock()
 		ie.jobs = append(ie.jobs, j)
 	}
+	ie.captured = o
+	ie.api = ie.build(o)
+	return ie
+}
+
+// newRunningIngestEnv is newIngestEnv whose jobs the server's runner takes, as serve's does.
+func newRunningIngestEnv(t *testing.T, o options) *ingestEnv {
+	t.Helper()
+	ie := setupIngestEnv(t)
+	ie.api = ie.build(o)
+	return ie
+}
+
+func setupIngestEnv(t *testing.T) *ingestEnv {
+	t.Helper()
+	ie := &ingestEnv{f: &fakeIngester{latest: 1}}
 	// The fixture is set up without the test's options; the process epoch is the one the
-	// installation had when the API was built.
-	ie.env = newEnvWith(t, deps{ing: ie.f, timers: testTimers}, options{})
+	// installation had when the API was built. The runners end before the database closes.
+	ie.env = newEnvWith(t, deps{ing: ie.f, timers: testTimers, runs: &sync.WaitGroup{}}, options{})
+	t.Cleanup(ie.d.runs.Wait)
 	ie.d.owner = staging.Owner{ID: "a/1/" + rand.Text(), Epoch: epoch(t, ie.db)}
 	author := ie.human("h-author")
 	ie.cluster = ie.createCluster(ie.api, author, "k-cluster-0123456789")
@@ -55,7 +75,6 @@ func newIngestEnv(t *testing.T, o options) *ingestEnv {
 	rec := ie.do(ie.api, call{method: "POST", path: prefix + "/drafts", token: author, key: "k-draft-0123456789ab",
 		body: `{"cluster":"` + ie.cluster + `","title":"import"}`})
 	ie.draft, ie.etag = decode[draftBody](t, rec, http.StatusCreated).ID, rec.Header().Get("ETag")
-	ie.api = ie.build(o)
 	return ie
 }
 
@@ -177,6 +196,8 @@ func TestIngestionStartRefusals(t *testing.T) {
 		{"drift kind", ie.body(map[string]any{"kind": "drift-adoption"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"staging mode", ie.body(map[string]any{"staging": "disk"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"bad mark", ie.body(map[string]any{"marks": []string{"~"}}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"declared references", ie.body(map[string]any{"declarations": map[string]any{"references": map[string]any{
+			"s-a": map[string]any{"kind": "string", "version": 1}}}}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"no document", ie.body(map[string]any{"document": nil}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"machine id", ie.body(map[string]any{"machine": "m-1"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"no if-match", ie.body(nil), "", author, http.StatusPreconditionRequired, "precondition-required"},

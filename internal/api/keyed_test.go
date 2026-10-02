@@ -31,6 +31,10 @@ type fakeIngester struct {
 	err      error
 	errAt    map[int]error
 	versions []int
+	onCreate func(ctx context.Context, n int) error
+	calls    int
+	created  []string
+	envelope []byte
 }
 
 func (f *fakeIngester) Digest(_ context.Context, in []byte, v int) (provider.Digest, error) {
@@ -57,16 +61,46 @@ func (f *fakeIngester) asked() []int {
 	return append([]int(nil), f.versions...)
 }
 
-var errFakeUnused = errors.New("not used by this test")
+// CreateGeneration records each path it creates. onCreate, when set, runs before the n-th create
+// (from 1) without the lock held and fails it by returning an error.
+func (f *fakeIngester) CreateGeneration(ctx context.Context, p provider.GenerationPath, _ provider.Value) (provider.Generation, error) {
+	f.mu.Lock()
+	f.calls++
+	n, hook := f.calls, f.onCreate
+	f.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx, n); err != nil {
+			return provider.Generation{}, err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.created = append(f.created, p.String())
+	return provider.Generation{Path: p, Version: 1}, nil
+}
 
-func (*fakeIngester) CreateGeneration(context.Context, provider.GenerationPath, provider.Value) (provider.Generation, error) {
-	return provider.Generation{}, errFakeUnused
+func (f *fakeIngester) paths() (calls int, created []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls, append([]string(nil), f.created...)
 }
-func (*fakeIngester) EncryptBaseline(context.Context, []byte) (provider.Ciphertext, error) {
-	return "", errFakeUnused
+
+// fakeCiphertext stands for a transit ciphertext; it is derived from the plaintext and holds none.
+func fakeCiphertext(key string, plaintext []byte) provider.Ciphertext {
+	sum := sha256.Sum256(plaintext)
+	return provider.Ciphertext("vault:v1:" + key + ":" + fmt.Sprintf("%x", sum))
 }
-func (*fakeIngester) EncryptStaging(context.Context, []byte) (provider.Ciphertext, error) {
-	return "", errFakeUnused
+
+func (f *fakeIngester) EncryptBaseline(_ context.Context, plaintext []byte) (provider.Ciphertext, error) {
+	return fakeCiphertext("baseline", plaintext), nil
+}
+
+// EncryptStaging records the last envelope it encrypted.
+func (f *fakeIngester) EncryptStaging(_ context.Context, envelope []byte) (provider.Ciphertext, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.envelope = append([]byte(nil), envelope...)
+	return fakeCiphertext("staging", envelope), nil
 }
 
 // docInput is a body carrying unextracted input in its document member.

@@ -55,6 +55,8 @@ func (in *ingestionInput) check(*API) error {
 		return errors.New("draft must be a drf identifier")
 	case in.Document.Size() == 0:
 		return errors.New("document is required with source document")
+	case len(in.Declarations.References) > 0:
+		return errors.New("declarations.references is not served yet")
 	case len(in.Marks) > maxMarks:
 		return fmt.Errorf("at most %d marks", maxMarks)
 	}
@@ -145,11 +147,4 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	return result{status: http.StatusAccepted, location: prefix + "/operations/" + op,
 		body: map[string]string{"operation": op, "ingestion": c.ID}, subjects: []string{op, c.ID, in.Draft, in.Machine},
 		operation: op, afterCommit: func() { a.startRunner(j) }}, nil
-}
-
-// startRunner hands j to the runner, after T11's COMMIT and outside any transaction.
-func (a *API) startRunner(j job) {
-	if a.o.onRunner != nil {
-		a.o.onRunner(j)
-	}
 }

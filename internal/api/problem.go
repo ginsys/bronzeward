@@ -64,6 +64,14 @@ func (a *API) problem(w http.ResponseWriter, q *request, ref *refusal) {
 
 // writeProblem answers application/problem+json; instance is the request's identifier.
 func writeProblem(w http.ResponseWriter, instance string, r *refusal) {
+	if r.status == http.StatusUnauthorized {
+		w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+	}
+	writeJSON(w, "application/problem+json", r.status, problemDoc(instance, r))
+}
+
+// problemDoc is r's problem document (RFC 9457): a response's, or a failed operation's error.
+func problemDoc(instance string, r *refusal) map[string]any {
 	doc := map[string]any{
 		"type":     "urn:bronzeward:problem:" + r.code,
 		"title":    titles[r.code],
@@ -76,10 +84,7 @@ func writeProblem(w http.ResponseWriter, instance string, r *refusal) {
 	for k, v := range r.extra {
 		doc[k] = v
 	}
-	if r.status == http.StatusUnauthorized {
-		w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
-	}
-	writeJSON(w, "application/problem+json", r.status, doc)
+	return doc
 }
 
 func writeJSON(w http.ResponseWriter, contentType string, status int, v any) {

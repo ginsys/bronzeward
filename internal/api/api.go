@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
@@ -51,11 +52,13 @@ type API struct {
 
 // deps are what ingestion needs: the provider client, the claim timers and this process as the
 // owner of the claims it creates. With no provider configured, ing is nil and the ingestion
-// routes answer 503.
+// routes answer 503. The runners live for life, the server's lifetime, and runs counts them.
 type deps struct {
 	ing    Ingester
 	timers config.Ingestion
 	owner  staging.Owner
+	life   context.Context
+	runs   *sync.WaitGroup
 }
 
 // options are nil or false in production; tests set them.
@@ -70,7 +73,9 @@ type options struct {
 	beforeRead     func()                           // runs when a read route starts, after routing
 	beforeCommit   func(attempt int) error          // fails an attempt before COMMIT
 	commit         func(*sql.Tx) error              // replaces (*sql.Tx).Commit
-	onRunner       func(job)                        // sees each job handed to the runner
+	onRunner       func(job)                        // takes each job instead of the runner
+	afterStage     func()                           // runs when a job is staged, before T1
+	beforeT1       func()                           // runs before T1 begins
 }
 
 // request is one API request as it passes the checks.
@@ -95,9 +100,10 @@ type ctxKey struct{}
 func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*request) }
 
 // New returns the /api/v1 handler. ing and ic are nil without a provider. epoch is the one this
-// process read at its start: it owns claims under it, and under no later one (§5.1).
-func New(db *sql.DB, a Authenticator, cfg config.Auth, ing Ingester, ic *config.Ingestion, epoch string) http.Handler {
-	d := deps{ing: ing}
+// process read at its start: it owns claims under it, and under no later one (§5.1). The ingest
+// runners stop when life ends.
+func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ing Ingester, ic *config.Ingestion, epoch string) http.Handler {
+	d := deps{ing: ing, life: life}
 	if ic != nil {
 		d.timers = *ic
 		d.owner = staging.Owner{ID: ic.Instance + "/" + strconv.Itoa(os.Getpid()) + "/" + rand.Text(), Epoch: epoch}
@@ -108,6 +114,12 @@ func New(db *sql.DB, a Authenticator, cfg config.Auth, ing Ingester, ic *config.
 func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *API {
 	if o.logf == nil {
 		o.logf = log.Printf
+	}
+	if d.life == nil {
+		d.life = context.Background()
+	}
+	if d.runs == nil {
+		d.runs = &sync.WaitGroup{}
 	}
 	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, mux: http.NewServeMux(), d: d, o: o}
 	for _, rt := range append(routes(), o.extra...) {
