@@ -234,9 +234,13 @@ depends = ["dev-db", "dev-bao", "build"]
 # does not reach it), must answer its discovery document before the server starts, and is stopped
 # when the server exits; the containers stay up for mise run go-db.
 run = '''
+# A port is free only when the connection is refused (curl exit 7); a listener that accepts and
+# never answers counts as taken.
 for port in 8080 5556; do
-  if curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$port/"; then
-    echo "dev: 127.0.0.1:$port already answers (another mise run dev, perhaps in another worktree); stop it first" >&2
+  rc=0
+  curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$port/" || rc=$?
+  if [ "$rc" -ne 7 ]; then
+    echo "dev: 127.0.0.1:$port is in use (another mise run dev, perhaps in another worktree); stop it first" >&2
     exit 1
   fi
 done
@@ -247,7 +251,7 @@ bin/oidc-fixture serve -key .dev/oidc.key -issuer http://127.0.0.1:5556 &
 issuer=$!
 # Waited for, so 5556 is free once the task returns.
 trap 'kill "$issuer" 2>/dev/null || true; wait "$issuer" 2>/dev/null || true' EXIT
-if ! curl -sf --noproxy '*' -o /dev/null --retry 10 --retry-connrefused --retry-delay 1 \
+if ! curl -sf --noproxy '*' -o /dev/null --max-time 2 --retry 10 --retry-connrefused --retry-delay 1 \
   http://127.0.0.1:5556/.well-known/openid-configuration || ! kill -0 "$issuer" 2>/dev/null; then
   echo "dev: the fixture issuer did not come up on 127.0.0.1:5556 (see its error above)" >&2
   exit 1
