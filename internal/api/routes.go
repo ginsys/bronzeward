@@ -74,6 +74,7 @@ func routes() []*route {
 		human(m(post, "/ingestions/{id}/abandonments", author)),
 		clusterCreation().on(human(m(post, "/clusters", author))),
 		machineInventory().on(human(m(post, "/machines", author))),
+		endpointReplacement().on(human(m(post, "/machines/{id}/talos-endpoints", author))),
 		draftCreation().on(m(post, "/drafts", author)),
 	)
 	for _, part := range []string{"/fragments/{name}", "/profiles/{name}", "/assignments/{machine}"} {
