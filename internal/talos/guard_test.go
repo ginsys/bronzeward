@@ -137,7 +137,7 @@ func exportedSurface(t *testing.T, files map[string][]byte) []string {
 var surface = []string{
 	"Config", "Config.Bytes", "Config.Format", "Config.GoString", "Config.MarshalJSON",
 	"Config.MarshalText", "Config.MarshalYAML", "Config.ResourceVersion", "Config.String",
-	"Dial",
+	"Dial", "ParseEndpoint",
 	"Reader", "Reader.Close", "Reader.MachineConfig", "Reader.Version",
 	"Target", "Target.Endpoint", "Target.Node",
 	"reader.Close", "reader.MachineConfig", "reader.Version",
