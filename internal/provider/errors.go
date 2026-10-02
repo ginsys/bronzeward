@@ -14,6 +14,9 @@ var (
 	// ErrExists is KV v2's check-and-set refusal of a cas=0 create: the path already holds a
 	// version.
 	ErrExists = errors.New("the generation already exists")
+	// ErrAbsent is a read's 404: the path holds no live version (never written, deleted, or
+	// destroyed).
+	ErrAbsent = errors.New("no secret at the path")
 	// ErrUnavailable is a sealed, overloaded or unreachable provider, or a request whose
 	// answer was lost. For a write the outcome is unknown: it may have landed.
 	ErrUnavailable = errors.New("provider unavailable or the outcome unknown")

@@ -1,8 +1,9 @@
 // Package provider is Bronzeward's OpenBao client. It exposes one role type, Ingestion, with
-// exactly the operations compilation.md §1 gives the ingestion identity: create-only secret
-// generations, encryption under the baseline key, encryption and decryption under the staging
-// key, and HMAC under the digest key. It has no secret read, no baseline or artifact decryption
-// and no other provider call, whatever a token's policy would allow (TestIngestionMethodSet).
+// exactly the operations compilation.md §1 and persistence-api.md §3.3 give the ingestion
+// identity: create-only secret generations, encryption under the baseline key, encryption and
+// decryption under the staging key, HMAC under the digest key, and a read of a cluster's Talos
+// access credential. It reads no other secret, has no baseline or artifact decryption and no
+// other provider call, whatever a token's policy would allow (TestIngestionMethodSet).
 //
 // No error from this package carries a request or response body, server error text or a
 // transport error's text; see requestError. A provider error on CreateGeneration, typed or not,
