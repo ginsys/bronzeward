@@ -9,24 +9,26 @@ import (
 
 // titles holds every problem code this package answers (persistence-api.md §9.4), with its title.
 var titles = map[string]string{
-	"invalid-request":          "The request is malformed",
-	"cursor-invalid":           "The cursor is not valid here",
-	"unauthenticated":          "No valid credential",
-	"forbidden":                "No qualifying role",
-	"identity-revoked":         "The identity is revoked",
-	"not-found":                "No such resource or route",
-	"conflict":                 "The resource refuses the act in its current state",
-	"ingestion-abandoned":      staging.AbandonedTitle,
-	"idempotency-key-reused":   "The idempotency key was used for another request",
-	"idempotency-key-required": "An Idempotency-Key header is required",
-	"precondition-required":    "An If-Match header is required",
-	"precondition-failed":      "The If-Match header does not match",
-	"validation-failed":        "Compilation refused the input",
-	"epoch-superseded":         "The server started before the current recovery epoch",
-	"internal-error":           "The server failed",
-	"not-implemented":          "This route's handler has not landed yet",
-	"transient-conflict":       "The request kept conflicting with others",
-	"dependency-unavailable":   "A dependency is unavailable",
+	"invalid-request":           "The request is malformed",
+	"cursor-invalid":            "The cursor is not valid here",
+	"unauthenticated":           "No valid credential",
+	"forbidden":                 "No qualifying role",
+	"identity-revoked":          "The identity is revoked",
+	"not-found":                 "No such resource or route",
+	"conflict":                  "The resource refuses the act in its current state",
+	"ingestion-abandoned":       staging.AbandonedTitle,
+	"idempotency-key-reused":    "The idempotency key was used for another request",
+	"idempotency-key-required":  "An Idempotency-Key header is required",
+	"precondition-required":     "An If-Match header is required",
+	"precondition-failed":       "The If-Match header does not match",
+	"validation-failed":         "Compilation refused the input",
+	"epoch-superseded":          "The server started before the current recovery epoch",
+	"internal-error":            "The server failed",
+	"not-implemented":           "This route's handler has not landed yet",
+	"transient-conflict":        "The request kept conflicting with others",
+	"dependency-unavailable":    "A dependency is unavailable",
+	"machine-identity-mismatch": "The node read is not the recorded machine",
+	"talos-access-unavailable":  "The machine could not be read through its cluster's Talos access",
 }
 
 // refusal is a request refused with a problem document. Nothing the refused request did inside
@@ -36,6 +38,7 @@ type refusal struct {
 	code   string
 	detail string
 	extra  map[string]any
+	cause  string // a failed node read's cause, for its terminal event only; never in the document
 }
 
 func refuse(status int, code, detail string) *refusal {

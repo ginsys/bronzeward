@@ -61,7 +61,15 @@ func (a *API) runIngest(ctx context.Context, j job) {
 		cancel()
 		beat.Wait()
 	}()
-	imp, ref, err := a.stage(ctx, j)
+	var imp imported
+	var ref *refusal
+	var err error
+	if j.node != nil {
+		j.input, ref, err = a.readNode(ctx, j)
+	}
+	if ref == nil && err == nil {
+		imp, ref, err = a.stage(ctx, j)
+	}
 	j.input = ingest.Unresolved{} // step 8 was the last to read it
 	switch {
 	case ctx.Err() != nil:
@@ -264,12 +272,18 @@ func (a *API) commitImport(ctx context.Context, j job, imp imported) (*refusal, 
 // and the operation failed with ref and its terminal event, fenced. A claim no longer this
 // owner's is someone else's to end; nothing is written.
 func (a *API) abandon(ctx context.Context, j job, ref *refusal) {
-	a.o.logf("ingestion %s: operation %s fails %d %s", j.claim.ID, j.op, ref.status, ref.code)
+	entry := map[string]any{"type": "failed", "code": ref.code}
+	if ref.cause != "" {
+		a.o.logf("ingestion %s: operation %s fails %d %s (%s)", j.claim.ID, j.op, ref.status, ref.code, ref.cause)
+		entry["cause"] = ref.cause
+	} else {
+		a.o.logf("ingestion %s: operation %s fails %d %s", j.claim.ID, j.op, ref.status, ref.code)
+	}
 	if err := a.inTx(ctx, func(tx *sql.Tx) error {
 		if err := staging.Abandon(ctx, tx, a.d.owner, j.claim); err != nil {
 			return err
 		}
-		return a.finish(ctx, tx, j, "failed", nil, problemDoc(j.op, ref), map[string]any{"type": "failed", "code": ref.code})
+		return a.finish(ctx, tx, j, "failed", nil, problemDoc(j.op, ref), entry)
 	}); err != nil {
 		a.o.logf("ingestion %s: the abandonment was not recorded: %v", j.claim.ID, err)
 	}

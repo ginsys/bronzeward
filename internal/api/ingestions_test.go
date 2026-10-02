@@ -193,7 +193,7 @@ func TestIngestionStartRefusals(t *testing.T) {
 		code                       string
 	}{
 		{"automation", ie.body(nil), ie.etag, ie.robot, http.StatusForbidden, "forbidden"},
-		{"machine source", ie.body(map[string]any{"source": "machine", "document": nil}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"document with source machine", ie.body(map[string]any{"source": "machine"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"drift kind", ie.body(map[string]any{"kind": "drift-adoption"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"staging mode", ie.body(map[string]any{"staging": "disk"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"bad mark", ie.body(map[string]any{"marks": []string{"~"}}), ie.etag, author, http.StatusBadRequest, "invalid-request"},

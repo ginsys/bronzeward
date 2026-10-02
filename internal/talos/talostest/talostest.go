@@ -44,6 +44,15 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+// The resource types a node serves, for Fail, so that a test outside package talos names them
+// without importing the machinery.
+const (
+	SystemInformationType = hardware.SystemInformationType
+	IdentityType          = cluster.IdentityType
+	InfoType              = cluster.InfoType
+	MachineConfigType     = cfgres.MachineConfigType
+)
+
 // PKI is a certificate authority with a server certificate for 127.0.0.1 and a client certificate
 // in the os:admin role, as a Talos cluster's CA signs both apid's certificate and a talosconfig's.
 type PKI struct {
