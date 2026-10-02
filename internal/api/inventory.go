@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/talos"
 )
 
 // Inventory (POST /clusters, POST /machines) and draft creation are T11 (§5): the key lock, the
@@ -137,9 +138,10 @@ func createCluster(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result,
 }
 
 type machineInput struct {
-	Cluster    string  `json:"cluster"`
-	SMBIOSUUID string  `json:"smbiosUuid"`
-	Serial     *string `json:"serial"`
+	Cluster       string  `json:"cluster"`
+	SMBIOSUUID    string  `json:"smbiosUuid"`
+	Serial        *string `json:"serial"`
+	TalosEndpoint string  `json:"talosEndpoint"`
 }
 
 var uuidShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -159,9 +161,29 @@ func (in *machineInput) check(*API) error {
 		return errors.New("smbiosUuid must be a UUID in its 8-4-4-4-12 hexadecimal form")
 	}
 	if in.Serial != nil {
-		return text("serial", *in.Serial, 128)
+		if err := text("serial", *in.Serial, 128); err != nil {
+			return err
+		}
 	}
+	ep, err := talosEndpoint(in.TalosEndpoint)
+	if err != nil {
+		return err
+	}
+	in.TalosEndpoint = ep
 	return nil
+}
+
+// talosEndpoint checks a machine's Talos endpoint and returns its stored form, host:port
+// (persistence-api.md §3.3). The error never quotes the value.
+func talosEndpoint(s string) (string, error) {
+	if s == "" {
+		return "", errors.New("talosEndpoint is required (persistence-api.md §3.3)")
+	}
+	ep, err := talos.ParseEndpoint(s)
+	if err != nil {
+		return "", errors.New("talosEndpoint must be an IP literal (an IPv6 literal in brackets) with an optional port from 1 to 65535")
+	}
+	return ep, nil
 }
 
 type hardware struct {
@@ -176,14 +198,15 @@ type applied struct {
 
 // machineBody is §9.3's machine resource. openDrift stays null until drift records exist.
 type machineBody struct {
-	ID         string    `json:"id"`
-	Cluster    string    `json:"cluster"`
-	Hardware   hardware  `json:"hardware"`
-	Desired    *string   `json:"desired"`
-	Applied    *applied  `json:"applied"`
-	Frozen     bool      `json:"frozen"`
-	ScopeState string    `json:"scopeState"`
-	OpenDrift  *struct{} `json:"openDrift"`
+	ID            string    `json:"id"`
+	Cluster       string    `json:"cluster"`
+	Hardware      hardware  `json:"hardware"`
+	TalosEndpoint string    `json:"talosEndpoint"`
+	Desired       *string   `json:"desired"`
+	Applied       *applied  `json:"applied"`
+	Frozen        bool      `json:"frozen"`
+	ScopeState    string    `json:"scopeState"`
+	OpenDrift     *struct{} `json:"openDrift"`
 }
 
 // inventoryMachine records a machine with its MachineState. The SMBIOS UUID's unique index is §7.3's
@@ -196,15 +219,16 @@ func inventoryMachine(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 	if err := clusterExists(ctx, tx, in.Cluster); err != nil {
 		return result{}, err
 	}
-	b := machineBody{ID: id.New(id.Machine), Cluster: in.Cluster, Hardware: hardware{SMBIOSUUID: in.SMBIOSUUID, Serial: in.Serial}, ScopeState: "normal"}
+	b := machineBody{ID: id.New(id.Machine), Cluster: in.Cluster, Hardware: hardware{SMBIOSUUID: in.SMBIOSUUID, Serial: in.Serial},
+		TalosEndpoint: in.TalosEndpoint, ScopeState: "normal"}
 	if q.recovery {
 		b.ScopeState = "pre-restore-unaccounted"
 	}
 	// No conflict target: the SMBIOS UUID's index is the only one a fresh identifier can meet.
 	var inserted string
-	err := tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, created_at)
-		VALUES ($1, $2, $3, $4, $5, now()) ON CONFLICT DO NOTHING RETURNING id`,
-		b.ID, b.Cluster, b.Hardware.SMBIOSUUID, b.Hardware.Serial, b.ScopeState).Scan(&inserted)
+	err := tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, now()) ON CONFLICT DO NOTHING RETURNING id`,
+		b.ID, b.Cluster, b.Hardware.SMBIOSUUID, b.Hardware.Serial, b.ScopeState, b.TalosEndpoint).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
 		var existing string
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE smbios_uuid = $1`, b.Hardware.SMBIOSUUID).Scan(&existing); err != nil {

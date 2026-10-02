@@ -168,7 +168,7 @@ func TestImmutableTriggerControl(t *testing.T) {
 func TestEveryTableClassified(t *testing.T) {
 	db, _ := migrated(t)
 	immutable := []string{"act", "identity_revocation", "idempotency_record", "import_base_reference", "import_base_revision",
-		"operation_event", "recovery_epoch", "schema_migrations"}
+		"machine_endpoint_change", "machine_event", "operation_event", "recovery_epoch", "schema_migrations"}
 	mutable := []string{"automation_token", "cluster", "draft", "draft_entry", "installation_state", "machine", "machine_state",
 		"operation", "principal", "staging_claim"}
 	rows, err := db.Query("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
