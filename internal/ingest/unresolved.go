@@ -1,10 +1,13 @@
 package ingest
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/internal/talos"
 )
@@ -46,6 +49,30 @@ func FromTalos(c talos.Config) Unresolved {
 		return Unresolved{}
 	}
 	return Unresolved{b: &b}
+}
+
+// MaxDocument is the largest document a request body carries, in bytes as decoded.
+const MaxDocument = 512 << 10
+
+var errDocument = errors.New("ingest: the document must be a non-empty JSON string of valid UTF-8 within the size limit")
+
+// UnmarshalJSON takes a request body's document member: one JSON string, at most MaxDocument
+// bytes decoded. encoding/json replaces invalid UTF-8 and a lone surrogate escape with U+FFFD,
+// which would make the input differ from what was sent, so both are refused, as is a document
+// holding U+FFFD at all. Every refusal is errDocument, which quotes nothing; the decoder's own
+// error is never wrapped.
+func (u *Unresolved) UnmarshalJSON(b []byte) error {
+	*u = Unresolved{}
+	var s string
+	if !utf8.Valid(b) || len(b) == 0 || b[0] != '"' || json.Unmarshal(b, &s) != nil {
+		return errDocument
+	}
+	if len(s) == 0 || len(s) > MaxDocument || strings.ContainsRune(s, utf8.RuneError) {
+		return errDocument
+	}
+	d := []byte(s)
+	u.b = &d
+	return nil
 }
 
 // Size is the input's length in bytes.
