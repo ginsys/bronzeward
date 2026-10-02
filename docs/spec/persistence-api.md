@@ -413,8 +413,11 @@ They are held apart **(choice §17.29)**.
   (§8.2). No generation, draft revision or read value is written. The
   ingestion is not retried in place, as no `ingest` operation is (§8.2): once
   the cause is repaired, the operator starts a new one. For
-  dispatch it is a failed use-time check (execution and recovery §3.1
-  item 2). A restore of the provider
+  dispatch, a provider-side cause (an absent, unreadable or malformed
+  configuration, or a sealed or silent provider) fails the use-time check
+  (execution and recovery §3.1 item 2), and a node-side cause (a credential
+  Talos refuses, or a silent endpoint) fails the fresh observation (item 1);
+  either way nothing is committed or dispatched. A restore of the provider
   to an older snapshot can bring back a superseded credential; if Talos no
   longer accepts it, reads fail the same way until the operator writes a
   current one.
