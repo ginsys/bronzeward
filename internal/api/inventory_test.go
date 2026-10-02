@@ -270,7 +270,7 @@ func TestInventoryRefusals(t *testing.T) {
 		"blank serial":          {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","serial":" ","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
 		"cluster of a draft":    {"/machines", `{"cluster":"` + drf + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
 		"unknown cluster":       {"/machines", `{"cluster":"` + id.New(id.Cluster) + `","smbiosUuid":"` + uuidA + `","serial":"` + marker + `","talosEndpoint":"10.55.0.3"}`, 404, "not-found"},
-		"hardware member":       {"/machines", `{"cluster":"` + cl + `","hardware":{"smbiosUuid":"` + uuidA + `"},"talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"hardware member":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","hardware":{"smbiosUuid":"` + uuidA + `"},"talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
 		"draft of no cluster":   {"/drafts", `{"cluster":"` + id.New(id.Cluster) + `","title":"` + marker + `"}`, 404, "not-found"},
 		"blank title":           {"/drafts", `{"cluster":"` + cl + `","title":""}`, 400, "invalid-request"},
 		// A mutating route takes no query (§9.1), and the fingerprint does not cover one.
