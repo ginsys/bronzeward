@@ -67,9 +67,9 @@ func TestGetIngestionEffectiveState(t *testing.T) {
 	wantProblem(t, ie.do(ie.api, getIngestionCall(viewer, "ing_nope")), http.StatusNotFound, "not-found")
 }
 
-// PA §9.2, T11, §8.2: an operator abandons a live claim, or one a read already treats as
-// abandoned: the claim is abandoned with no payload and its running operation fails
-// ingestion-abandoned with its terminal event, 200 with the resource. An ended claim refuses 409.
+// PA §9.2, T11, §8.2: an operator abandons a claim live as read: the claim is abandoned with no
+// payload and its running operation fails ingestion-abandoned with its terminal event, 200 with
+// the resource. A claim that has ended, stored or as read (compilation §3.5), refuses 409.
 // The route is for human authors only.
 func TestAbandonmentRoute(t *testing.T) {
 	ie := newIngestEnv(t, options{})
