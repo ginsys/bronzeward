@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/ginsys/bronzeward/internal/baotest"
+	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
@@ -373,6 +374,33 @@ func TestT1ClosedDraftAbandons(t *testing.T) {
 	}}, j)
 	ie.draftUnchanged(t, before)
 	ie.wantFailed(t, op, j.claim.ID, http.StatusConflict, "conflict")
+}
+
+// T1 refuses a draft with a publish operation queued or running for it (persistence-api.md §5
+// T1): the import would advance the revision the publication bound.
+func TestT1ActivePublicationAbandons(t *testing.T) {
+	for _, state := range []string{"queued", "running"} {
+		t.Run(state, func(t *testing.T) {
+			ie := newIngestEnv(t, options{})
+			op, j := ie.startJob(t, nil)
+			before := ie.currentETag(t)
+			pub := id.New(id.Operation)
+			ie.runWith(t, options{beforeT1: func() {
+				owner := "NULL::text, 0, NULL::text, NULL::timestamptz"
+				if state == "running" {
+					owner = "'b/1/x', 1, epoch, now() + interval '1 minute'"
+				}
+				mustExec(t, ie.db, `INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, lease_until,
+					draft, draft_revision, created_by, created_by_kind, created_role, created_at)
+					SELECT $1, 'publish', $2, epoch, `+owner+`, draft, draft_revision, created_by, created_by_kind, 'publisher', now()
+					FROM operation WHERE id = $3`, pub, state, op)
+			}}, j)
+			ie.draftUnchanged(t, before)
+			if e := ie.wantFailed(t, op, j.claim.ID, http.StatusConflict, "conflict"); e["operation"] != pub {
+				t.Fatalf("error %v names no publication %s", e, pub)
+			}
+		})
+	}
 }
 
 // Spec gap 12: a second import of the machine replaces its draft entry.

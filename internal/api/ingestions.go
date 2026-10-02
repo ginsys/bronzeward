@@ -210,8 +210,10 @@ func abandonIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (resu
 		return result{}, notFound
 	}
 	var live bool
-	switch err := tx.QueryRowContext(ctx, `SELECT state IN ('held', 'resumed') FROM staging_claim WHERE id = $1 FOR UPDATE`,
-		claim).Scan(&live); {
+	// The state as read (compilation §3.5): a claim a read treats as abandoned has ended, and the
+	// sweep writes it.
+	switch err := tx.QueryRowContext(ctx, `SELECT `+staging.EffectiveStateSQL+` IN ('held', 'resumed') FROM staging_claim
+		WHERE id = $1 FOR UPDATE`, claim).Scan(&live); {
 	case errors.Is(err, sql.ErrNoRows):
 		return result{}, notFound
 	case err != nil:
