@@ -1,0 +1,269 @@
+package api
+
+import (
+	"crypto/rand"
+	"database/sql"
+	"encoding/json"
+	"maps"
+	"net/http"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/ginsys/bronzeward/internal/config"
+	"github.com/ginsys/bronzeward/internal/staging"
+)
+
+// ingestEnv is an env serving ingestion with a fake provider, over a cluster with one machine and
+// an open draft, and a second cluster with a machine of its own. jobs records each job handed to
+// the runner.
+type ingestEnv struct {
+	*env
+	f                       *fakeIngester
+	cluster, machine, draft string
+	otherMachine            string
+	etag                    string
+	mu                      sync.Mutex
+	jobs                    []job
+}
+
+var testTimers = config.Ingestion{Instance: "a", Heartbeat: 5 * time.Second, Lease: 15 * time.Second,
+	AbsoluteExpiry: 10 * time.Minute, Sweep: 15 * time.Second}
+
+func newIngestEnv(t *testing.T, o options) *ingestEnv {
+	t.Helper()
+	ie := &ingestEnv{f: &fakeIngester{latest: 1}}
+	o.onRunner = func(j job) {
+		ie.mu.Lock()
+		defer ie.mu.Unlock()
+		ie.jobs = append(ie.jobs, j)
+	}
+	// The fixture is set up without the test's options; the process epoch is the one the
+	// installation had when the API was built.
+	ie.env = newEnvWith(t, deps{ing: ie.f, timers: testTimers}, options{})
+	ie.d.owner = staging.Owner{ID: "a/1/" + rand.Text(), Epoch: epoch(t, ie.db)}
+	author := ie.human("h-author")
+	ie.cluster = ie.createCluster(ie.api, author, "k-cluster-0123456789")
+	ie.machine = decode[machineBody](t, ie.do(ie.api, machineCall(author, "k-machine-0123456789", ie.cluster, uuidA)), http.StatusCreated).ID
+	other := decode[clusterBody](t, ie.do(ie.api, call{method: "POST", path: prefix + "/clusters", token: author, key: "k-cluster-other-0123",
+		body: `{"name":"lab","endpoint":"https://cp.lab.example.test:6443","contract":"v1.13"}`}), http.StatusCreated).ID
+	ie.otherMachine = decode[machineBody](t, ie.do(ie.api, machineCall(author, "k-machine-other-0123", other,
+		"1c6b7d2f-3a4e-4f60-9bac-1d2e3f4a5b6c")), http.StatusCreated).ID
+	rec := ie.do(ie.api, call{method: "POST", path: prefix + "/drafts", token: author, key: "k-draft-0123456789ab",
+		body: `{"cluster":"` + ie.cluster + `","title":"import"}`})
+	ie.draft, ie.etag = decode[draftBody](t, rec, http.StatusCreated).ID, rec.Header().Get("ETag")
+	ie.api = ie.build(o)
+	return ie
+}
+
+func (ie *ingestEnv) runs() []job {
+	ie.mu.Lock()
+	defer ie.mu.Unlock()
+	return append([]job(nil), ie.jobs...)
+}
+
+// body is an ingestion request of ie's machine and draft, with over replacing or removing (nil)
+// members.
+func (ie *ingestEnv) body(over map[string]any) string {
+	m := map[string]any{"kind": "import", "machine": ie.machine, "draft": ie.draft, "source": "document",
+		"staging": "transient", "marks": []string{}, "document": "machine:\n  token: bw-synthetic-1\n"}
+	maps.Copy(m, over)
+	for k, v := range m {
+		if v == nil {
+			delete(m, k)
+		}
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		ie.t.Fatal(err)
+	}
+	return string(b)
+}
+
+func ingestCall(tok, k, ifMatch, body string) call {
+	return call{method: "POST", path: prefix + "/ingestions", token: tok, key: k, ifMatch: ifMatch, body: body}
+}
+
+func (ie *ingestEnv) rowCounts(t *testing.T) (claims, ops int) {
+	t.Helper()
+	return count(t, ie.db, "SELECT count(*) FROM staging_claim"), count(t, ie.db, "SELECT count(*) FROM operation")
+}
+
+// PA §8, T11: the start answers 202 at the operation, and commits the claim held at generation 1
+// and its ingest operation running under the same owner, lease and epoch, with event 1, the act
+// and the record naming the operation. Only then is the job handed to the runner; a replay hands
+// over nothing.
+func TestIngestionStart(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	author := ie.human("h-author")
+	rec := ie.do(ie.api, ingestCall(author, key, ie.etag, ie.body(nil)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	loc := rec.Header().Get("Location")
+	op, ok := strings.CutPrefix(loc, prefix+"/operations/")
+	if !ok {
+		t.Fatalf("Location %q", loc)
+	}
+	var claim, mode, state, owner, oEpoch, cl, mch string
+	var gen int64
+	var lease, expires time.Time
+	if err := ie.db.QueryRow(`SELECT id, mode, state, owner, owner_gen, owner_epoch, cluster, machine, lease_until, expires_at
+		FROM staging_claim`).Scan(&claim, &mode, &state, &owner, &gen, &oEpoch, &cl, &mch, &lease, &expires); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "transient" || state != "held" || gen != 1 || owner != ie.d.owner.ID || oEpoch != ie.d.owner.Epoch ||
+		cl != ie.cluster || mch != ie.machine {
+		t.Fatalf("claim %s %s %s gen %d owner %s epoch %s cluster %s machine %s", claim, mode, state, gen, owner, oEpoch, cl, mch)
+	}
+	if d := expires.Sub(lease); d != testTimers.AbsoluteExpiry-testTimers.Lease {
+		t.Fatalf("expiry - lease = %v", d)
+	}
+	var kind, opState, opOwner, opOEpoch, opEpoch, draft, ing string
+	var opGen int64
+	var draftRev, last int
+	var opLease time.Time
+	if err := ie.db.QueryRow(`SELECT kind, state, owner, owner_gen, owner_epoch, epoch, lease_until, draft, draft_revision,
+		ingestion, last_event FROM operation WHERE id = $1`, op).Scan(&kind, &opState, &opOwner, &opGen, &opOEpoch, &opEpoch,
+		&opLease, &draft, &draftRev, &ing, &last); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "ingest" || opState != "running" || opOwner != owner || opGen != 1 || opOEpoch != oEpoch || opEpoch != oEpoch ||
+		!opLease.Equal(lease) || draft != ie.draft || draftRev != 1 || ing != claim || last != 1 {
+		t.Fatalf("operation %s %s owner %s gen %d epoch %s/%s lease %v/%v draft %s@%d ingestion %s last %d",
+			kind, opState, opOwner, opGen, opOEpoch, opEpoch, opLease, lease, draft, draftRev, ing, last)
+	}
+	var entry, evKind string
+	if err := ie.db.QueryRow(`SELECT entry::text, kind FROM operation_event WHERE operation = $1 AND number = 1`, op).Scan(&entry, &evKind); err != nil {
+		t.Fatal(err)
+	}
+	if entry != `{"type": "started"}` || evKind != "ingest" {
+		t.Fatalf("event 1 %s %s", entry, evKind)
+	}
+	var recOp string
+	if err := ie.db.QueryRow(`SELECT operation_id FROM idempotency_record WHERE key = $1`, key).Scan(&recOp); err != nil || recOp != op {
+		t.Fatalf("record operation %q, %v", recOp, err)
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM act WHERE action = 'ingestion.start' AND $1 = ANY (subjects) AND $2 = ANY (subjects)`, op, claim); n != 1 {
+		t.Fatalf("%d acts naming the operation and the claim", n)
+	}
+	if js := ie.runs(); len(js) != 1 || js[0].claim.ID != claim || js[0].claim.Gen != 1 || js[0].op != op || js[0].draftRev != 1 ||
+		js[0].input.Size() == 0 {
+		t.Fatalf("jobs %+v", js)
+	}
+	again := ie.do(ie.api, ingestCall(author, key, ie.etag, ie.body(nil)))
+	if again.Code != http.StatusAccepted || again.Header().Get("Location") != loc || again.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("replay: %d %v %s", again.Code, again.Header(), again.Body)
+	}
+	if claims, ops := ie.rowCounts(t); claims != 1 || ops != 1 || len(ie.runs()) != 1 {
+		t.Fatalf("after the replay: %d claims, %d operations, %d jobs", claims, ops, len(ie.runs()))
+	}
+}
+
+// The refusals before and inside T11 write no claim and no operation, and start nothing.
+func TestIngestionStartRefusals(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	author := ie.human("h-author")
+	for i, tc := range []struct {
+		name, body, ifMatch, token string
+		status                     int
+		code                       string
+	}{
+		{"automation", ie.body(nil), ie.etag, ie.robot, http.StatusForbidden, "forbidden"},
+		{"machine source", ie.body(map[string]any{"source": "machine", "document": nil}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"drift kind", ie.body(map[string]any{"kind": "drift-adoption"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"staging mode", ie.body(map[string]any{"staging": "disk"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"bad mark", ie.body(map[string]any{"marks": []string{"~"}}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"no document", ie.body(map[string]any{"document": nil}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"machine id", ie.body(map[string]any{"machine": "m-1"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"no if-match", ie.body(nil), "", author, http.StatusPreconditionRequired, "precondition-required"},
+		{"stale draft", ie.body(nil), `"9-aaaaaaaaaaaaaaaaaaaaaaaaaa"`, author, http.StatusPreconditionFailed, "precondition-failed"},
+		{"unknown draft", ie.body(map[string]any{"draft": "drf_aaaaaaaaaaaaaaaaaaaaaaaaaa"}), ie.etag, author, http.StatusNotFound, "not-found"},
+		{"unknown machine", ie.body(map[string]any{"machine": "mch_aaaaaaaaaaaaaaaaaaaaaaaaaa"}), ie.etag, author, http.StatusNotFound, "not-found"},
+		{"other cluster machine", ie.body(map[string]any{"machine": ie.otherMachine}), ie.etag, author, http.StatusUnprocessableEntity, "validation-failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			k := "k-refusal-" + strings.Repeat("0", 6) + string(rune('a'+i))
+			wantProblem(t, ie.do(ie.api, ingestCall(tc.token, k, tc.ifMatch, tc.body)), tc.status, tc.code)
+			if claims, ops := ie.rowCounts(t); claims != 0 || ops != 0 || len(ie.runs()) != 0 {
+				t.Fatalf("%d claims, %d operations, %d jobs", claims, ops, len(ie.runs()))
+			}
+		})
+	}
+}
+
+// A discarded draft takes no import, whatever its ETag; a server with a provider but no ingestion
+// owner starts nothing.
+func TestIngestionStartClosedDraftAndNoOwner(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	mustExec(t, ie.db, `UPDATE draft SET state = 'discarded' WHERE id = $1`, ie.draft)
+	wantProblem(t, ie.do(ie.api, ingestCall(ie.human("h-author"), key, ie.etag, ie.body(nil))), http.StatusConflict, "conflict")
+	mustExec(t, ie.db, `UPDATE draft SET state = 'open' WHERE id = $1`, ie.draft)
+	ie.d.owner = staging.Owner{}
+	ie.api = ie.build(options{})
+	wantProblem(t, ie.do(ie.api, ingestCall(ie.human("h-author"), "k-no-owner-0123456789", ie.etag, ie.body(nil))),
+		http.StatusServiceUnavailable, "dependency-unavailable")
+	if claims, ops := ie.rowCounts(t); claims != 0 || ops != 0 {
+		t.Fatalf("%d claims, %d operations", claims, ops)
+	}
+}
+
+// PA §7.3: a second start of the same draft revision under another key is refused 409 while the
+// first's operation is running, and the refusal names it.
+func TestIngestionNaturalKey(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	author := ie.human("h-author")
+	rec := ie.do(ie.api, ingestCall(author, key, ie.etag, ie.body(nil)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	op := strings.TrimPrefix(rec.Header().Get("Location"), prefix+"/operations/")
+	doc := wantProblem(t, ie.do(ie.api, ingestCall(author, "k-second-0123456789", ie.etag, ie.body(nil))), http.StatusConflict, "conflict")
+	if doc["operation"] != op {
+		t.Fatalf("the refusal names %v; want %s", doc["operation"], op)
+	}
+	if claims, ops := ie.rowCounts(t); claims != 1 || ops != 1 {
+		t.Fatalf("%d claims, %d operations", claims, ops)
+	}
+}
+
+// PA §5.1: a process whose epoch is no longer current issues no ownership: 503, nothing written.
+func TestIngestionStartEpochSuperseded(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	newEpoch(t, ie.db)
+	wantProblem(t, ie.do(ie.api, ingestCall(ie.human("h-author"), key, ie.etag, ie.body(nil))), http.StatusServiceUnavailable, "epoch-superseded")
+	if claims, ops := ie.rowCounts(t); claims != 0 || ops != 0 || len(ie.runs()) != 0 {
+		t.Fatalf("%d claims, %d operations, %d jobs", claims, ops, len(ie.runs()))
+	}
+}
+
+// T11 writes the claim and its operation together: a COMMIT refused leaves neither, no record,
+// and starts no job.
+func TestIngestionStartWritesTogether(t *testing.T) {
+	ie := newIngestEnv(t, options{commit: func(tx *sql.Tx) error {
+		_ = tx.Rollback()
+		return &pgconn.PgError{Code: "23503", Message: "deferred foreign key violated at COMMIT (test)"}
+	}})
+	rec := ie.do(ie.api, ingestCall(ie.human("h-author"), key, ie.etag, ie.body(nil)))
+	if rec.Code < http.StatusInternalServerError {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if claims, ops := ie.rowCounts(t); claims != 0 || ops != 0 || len(ie.runs()) != 0 ||
+		count(t, ie.db, "SELECT count(*) FROM idempotency_record WHERE key = $1", key) != 0 {
+		t.Fatalf("%d claims, %d operations, %d jobs", claims, ops, len(ie.runs()))
+	}
+}
+
+// C §2.3: a document that is not a string is refused without echoing what it held.
+func TestDecodeErrorNoEcho(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	canary := "bw-canary-" + rand.Text()
+	rec := ie.do(ie.api, ingestCall(ie.human("h-author"), key, ie.etag, ie.body(map[string]any{"document": map[string]string{"token": canary}})))
+	wantProblem(t, rec, http.StatusBadRequest, "invalid-request")
+	if strings.Contains(rec.Body.String(), canary) || ie.logged(canary) {
+		t.Fatal("the refusal echoed the document")
+	}
+}

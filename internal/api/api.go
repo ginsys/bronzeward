@@ -70,6 +70,7 @@ type options struct {
 	beforeRead     func()                           // runs when a read route starts, after routing
 	beforeCommit   func(attempt int) error          // fails an attempt before COMMIT
 	commit         func(*sql.Tx) error              // replaces (*sql.Tx).Commit
+	onRunner       func(job)                        // sees each job handed to the runner
 }
 
 // request is one API request as it passes the checks.
