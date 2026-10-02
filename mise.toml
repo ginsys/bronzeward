@@ -150,7 +150,7 @@ BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 go test -count=1 ./...
 
 [tasks.dev-db]
 description = "Start a disposable development PostgreSQL at the fixture's image pin: 127.0.0.1:55433, user bronzeward, no password"
-# Trust auth, bound to loopback, removed on stop (docker stop bw-dev-pg). examples/bronzeward.yaml
+# Trust auth, bound to loopback, removed on stop (mise run dev-down). examples/bronzeward.yaml
 # and mise run go-db default to it. Never a deployment database.
 run = '''
 image=$(sed -n 's/^POSTGRES_IMAGE=//p' fixtures/versions.env)
@@ -176,7 +176,7 @@ exit 1
 [tasks.dev-bao]
 description = "Start a disposable development OpenBao at the fixture's image pin: dev mode, in memory, http://127.0.0.1:58201, root token bw-dev-root-token"
 # The image's default command is `server -dev`: unsealed, KV v2 at secret/, nothing persisted, and
-# removed on stop (docker stop bw-dev-bao). The root token is a fixed, synthetic value, bound to
+# removed on stop (mise run dev-down). The root token is a fixed, synthetic value, bound to
 # loopback like dev-db's trust auth; mise run go-db defaults to it. Never a deployment provider,
 # and not the fixture's Raft server.
 run = '''
@@ -195,6 +195,52 @@ for _ in $(seq 30); do
 done
 echo "dev-bao: bw-dev-bao was not running and unsealed within 30s (docker ps -a; docker logs bw-dev-bao)" >&2
 exit 1
+'''
+
+[tasks.dev-down]
+description = "Stop dev-db's and dev-bao's containers, which removes them and their data"
+# Both run with --rm, so stopping is removing. Returns once they are gone, so their ports are free
+# for the next mise run dev-db or dev-bao. They are shared by every worktree on this host.
+run = '''
+for c in bw-dev-pg bw-dev-bao; do
+  if [ -n "$(docker ps -q --filter "name=^$c\$")" ]; then
+    docker stop "$c" >/dev/null
+  fi
+  for _ in $(seq 30); do
+    [ -n "$(docker ps -aq --filter "name=^$c\$")" ] || continue 2
+    sleep 1
+  done
+  echo "dev-down: $c was still present after 30s (docker ps -a; docker rm -f $c)" >&2
+  exit 1
+done
+'''
+
+[tasks.build]
+description = "Build the server into bin/bronzeward and the fixture OIDC issuer into bin/oidc-fixture (bin/ is gitignored)"
+run = """
+go build -o bin/bronzeward ./cmd/bronzeward
+go build -o bin/oidc-fixture ./fixtures/oidc
+"""
+
+[tasks.dev]
+description = "Run the server on 127.0.0.1:8080 against dev-db and dev-bao, with the fixture OIDC issuer on 127.0.0.1:5556, until Ctrl-C; mise run dev-down removes the containers"
+depends = ["dev-db", "dev-bao", "build"]
+# examples/bronzeward.yaml's issuer, with a synthetic key generated once into .dev/ (gitignored).
+# migrate skips what is already applied, so it runs on every start. The issuer runs in the
+# background (where Ctrl-C does not reach it) and is stopped when the server exits; the containers
+# stay up for mise run go-db.
+run = '''
+mkdir -p .dev
+[ -f .dev/oidc.key ] || bin/oidc-fixture keygen -out .dev/oidc.key
+bin/bronzeward migrate -config examples/bronzeward.yaml
+bin/oidc-fixture serve -key .dev/oidc.key -issuer http://127.0.0.1:5556 &
+issuer=$!
+trap 'kill "$issuer" 2>/dev/null || true' EXIT
+# Ctrl-C is how this task ends: exit 0 once the server has shut down, not as killed by a signal.
+trap 'exit 0' INT TERM
+echo 'dev: curl -i http://127.0.0.1:8080/livez' >&2
+echo 'dev: curl -s -H "Authorization: Bearer $(bin/oidc-fixture mint -key .dev/oidc.key -issuer http://127.0.0.1:5556 -human h-viewer)" http://127.0.0.1:8080/api/v1/acts' >&2
+bin/bronzeward serve -config examples/bronzeward.yaml
 '''
 
 [tasks.upstream-sync]

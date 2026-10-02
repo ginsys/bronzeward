@@ -1,5 +1,6 @@
-# Deployment configuration for local development. `mise run dev-db` starts the database this DSN
-# names (loopback, no password); then:
+# Deployment configuration for local development. `mise run dev` starts the database this DSN
+# names (loopback, no password) and the issuer below, migrates and serves; by hand, after
+# `mise run dev-db`:
 #   go run ./cmd/bronzeward migrate -config examples/bronzeward.yaml
 #   go run ./cmd/bronzeward serve -config examples/bronzeward.yaml
 # A deployment sets its own listen address and a DSN with credentials.
