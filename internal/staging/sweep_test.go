@@ -1,9 +1,12 @@
 package staging
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -190,6 +193,49 @@ func TestSweepLosesToHeartbeat(t *testing.T) {
 	f.wantUntouched(t, extended.ID, "held")
 	if r := f.row(t, released.ID); r.state != "released" {
 		t.Errorf("released claim %s", r.state)
+	}
+}
+
+// A claim whose abandonment fails does not hold back the others: the scan lists it first, the
+// sweep reports its error and still abandons the claims after it.
+func TestSweepContinuesPastAFailure(t *testing.T) {
+	f := setup(t)
+	_, stuck := f.create(t, "transient")
+	_, next := f.create(t, "transient")
+	exec(t, f.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second', expires_at = now() + interval '5 minutes'
+		WHERE id = $1`, stuck.ID)
+	exec(t, f.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, next.ID)
+	// An event the operation's last_event does not count: the terminal event's number is taken.
+	exec(t, f.db, `INSERT INTO operation_event (operation, number, epoch, kind, entry, at)
+		SELECT id, 1, epoch, 'ingest', '{"type":"started"}', now() FROM operation WHERE ingestion = $1`, stuck.ID)
+	n, err := Sweep(t.Context(), f.db)
+	if err == nil || !strings.Contains(err.Error(), stuck.ID) {
+		t.Fatalf("sweep error %v, want one naming %s", err, stuck.ID)
+	}
+	if n != 1 {
+		t.Errorf("swept %d, want 1", n)
+	}
+	f.wantAbandoned(t, next.ID, 0)
+	if r := f.row(t, stuck.ID); r.state != "held" {
+		t.Errorf("the failed claim is %s, its transaction rolled back", r.state)
+	}
+}
+
+// A sweep cancelled after its scan stops there, and reports the cancellation once, not once per
+// claim it did not reach.
+func TestSweepStopsWhenCancelled(t *testing.T) {
+	f := setup(t)
+	for range 3 {
+		_, c := f.create(t, "transient")
+		exec(t, f.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, c.ID)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	n, err := sweep(ctx, f.db, cancel)
+	if n != 0 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("swept %d, %v; want 0 and the cancellation", n, err)
+	}
+	if j, ok := err.(interface{ Unwrap() []error }); ok && len(j.Unwrap()) != 1 {
+		t.Errorf("%d errors, want the cancellation once: %v", len(j.Unwrap()), err)
 	}
 }
 

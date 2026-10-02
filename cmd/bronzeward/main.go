@@ -163,9 +163,7 @@ func serveContext(ctx context.Context, args []string) error {
 	if cfg.Ingestion != nil {
 		every = cfg.Ingestion.Sweep
 	}
-	if err := startSweep(startCtx, ctx, db, every, log.Printf); err != nil {
-		return err
-	}
+	startSweep(startCtx, ctx, db, every, log.Printf)
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners stop with the signal; a claim left held lapses with its lease.
@@ -194,11 +192,12 @@ var fallbackSweep = time.Minute
 
 // startSweep writes the due staging claims abandoned before the server serves, then every
 // interval until life ends (compilation §3.5). Every read already treats a due claim as
-// abandoned, so a late or failed periodic sweep delays only the clearing of its ciphertext.
-func startSweep(start, life context.Context, db *sql.DB, every time.Duration, logf func(string, ...any)) error {
+// abandoned, so a late or failed sweep, at startup too, delays only the clearing of its
+// ciphertext: its error is logged and the server starts.
+func startSweep(start, life context.Context, db *sql.DB, every time.Duration, logf func(string, ...any)) {
 	n, err := staging.Sweep(start, db)
 	if err != nil {
-		return err
+		logf("%v", err)
 	}
 	logSwept(logf, n)
 	go func() {
@@ -217,7 +216,6 @@ func startSweep(start, life context.Context, db *sql.DB, every time.Duration, lo
 			}
 		}
 	}()
-	return nil
 }
 
 func logSwept(logf func(string, ...any), n int) {
