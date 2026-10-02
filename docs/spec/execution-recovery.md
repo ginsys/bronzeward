@@ -292,8 +292,9 @@ instance (the operation does not exist yet; §2):
 2. a use-time check, with its time, of the dependencies dispatch itself needs,
    under the executor identity: decryption of the bound artifact under the
    bound key identity and version, and the operation credentials for the
-   target: its cluster's Talos access configuration, read at its latest
-   version, whose path, version and `created_time` the evidence records,
+   target: its cluster's Talos access configuration, read once at its latest
+   version before item 1's observation, which uses it as every attempt does,
+   whose path, version and `created_time` the evidence records,
    never the value
    ([persistence and API §3.3](persistence-api.md#33-talos-access)).
 
