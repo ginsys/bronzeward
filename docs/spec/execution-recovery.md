@@ -275,9 +275,10 @@ letting through the failure it exists to prevent
 
 Before touching any protected resource, the controller checks that the plan is
 currently approved, unrevoked and unexpired and that the scope gate is open
-(comparisons 1 and 6 of §3.2). Artifact decryption and operation credentials
-are gated by that application check; a plan whose approval was revoked while it
-was queued has neither read. The check is not atomic with what follows, which
+(comparisons 1 and 6 of §3.2). Artifact decryption and the client that sends
+mutating requests are gated by that application check; a plan whose approval
+was revoked while it was queued gets neither. Observations, this one included,
+use the read-only observation client (§3.5), which needs no approval. The check is not atomic with what follows, which
 is why §3.2 repeats it.
 
 The controller then gathers and durably records, on the machine's timeline
@@ -566,6 +567,14 @@ the same condition: the same rows re-run through it, and compilation §15's
 leak scan applied to its descriptor channel over successful, rejected and
 interrupted dispatches. If either fails there too, dispatch is not accepted and
 the selection returns to the owner.
+
+Both clients are built from the cluster's one talosconfig, which carries
+`os:admin` ([persistence and API §3.3](persistence-api.md#33-talos-access)). Every observation (§4.1), whether
+taken for a plan or not, goes through an **observation client** whose source
+is held to an allowlist of read calls by test, as ingestion's is; `drift`,
+`restoration` and `recovery` observations have no plan and need no approval.
+Only dispatch uses the client that sends a mutating request, and only after
+§3.1's approval check (design §13.1; owner decision, 2 October 2026).
 
 The plan binds the **route**, and in the PoC the only route allowed is the
 target machine's own endpoint, the Talos endpoint on its machine record at the
