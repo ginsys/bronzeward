@@ -1736,7 +1736,9 @@ fail:
 - a commitment and a retry's attempt each refused, with nothing sent, when the
   §3.1 evidence shows an SMBIOS UUID other than the bound one, none for a
   machine recorded by SMBIOS UUID, one for a machine recorded by Talos node
-  ID, another Talos node ID for such a machine, or another Talos cluster ID;
+  ID, another Talos node ID for such a machine, or another Talos cluster ID,
+  with the control that a machine recorded by SMBIOS UUID whose node shows a
+  matching UUID and cluster ID but another node ID is admitted;
   each SMBIOS case against a stubbed Talos response, since the fixture's nodes
   report none; and a scope left `blocked`, not `ready`, by a `restoration`
   observation showing another identity, then marked `ready` after a matching
