@@ -84,3 +84,55 @@ func TestOwnerStatementsHoldTheEpoch(t *testing.T) {
 		})
 	}
 }
+
+// The sweep holds the installation state FOR SHARE from before the claim's lock to its commit, so
+// its terminal event carries the epoch that is current when it commits (persistence-api §8: an
+// event id is `<epoch>:<number>`).
+func TestSweepHoldsTheEpoch(t *testing.T) {
+	f := setup(t)
+	_, c := f.create(t, "transient")
+	exec(t, f.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, c.ID)
+	holder, err := f.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback()
+	if _, err := holder.Exec(`SELECT 1 FROM staging_claim WHERE id = $1 FOR UPDATE`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		n   int
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		n, err := Sweep(context.Background(), f.db)
+		done <- result{n, err}
+	}()
+	waitBlocked(t, f.db)
+	var pg *pgconn.PgError
+	if err := entryLock(t, f.db); !errors.As(err, &pg) || pg.Code != "55P03" {
+		t.Fatalf("recovery-mode entry while the sweep waited: %v, want a lock timeout", err)
+	}
+	if err := holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-done; r.err != nil || r.n != 1 {
+		t.Fatalf("sweep %d, %v", r.n, r.err)
+	}
+	f.wantAbandoned(t, c.ID, 0)
+	if err := entryLock(t, f.db); err != nil {
+		t.Fatalf("recovery-mode entry after the sweep committed: %v", err)
+	}
+}
+
+// A refused owner statement whose epoch read fails reports that failure, not a fence refusal.
+func TestRefusedReportsTheEpochRead(t *testing.T) {
+	f := setup(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	err := refused(ctx, f.db, Owner{ID: "a/1/x", Epoch: currentEpoch(t, f.db)}, 0)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrFenced) || errors.Is(err, ErrEpochSuperseded) {
+		t.Fatalf("refused with a failed epoch read: %v", err)
+	}
+}

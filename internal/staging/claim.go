@@ -68,7 +68,11 @@ func Create(ctx context.Context, tx *sql.Tx, o Owner, t Timers, c Claim, princip
 	if err != nil {
 		return fmt.Errorf("staging: create the claim: %w", err)
 	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("staging: create the claim: %w", err)
+	}
+	if n != 1 {
 		return ErrEpochSuperseded
 	}
 	return nil
@@ -144,7 +148,10 @@ func refused(ctx context.Context, q execer, o Owner, n int) error {
 		return nil
 	}
 	var current string
-	if err := q.QueryRowContext(ctx, `SELECT epoch FROM installation_state`).Scan(&current); err == nil && current != o.Epoch {
+	if err := q.QueryRowContext(ctx, `SELECT epoch FROM installation_state`).Scan(&current); err != nil {
+		return fmt.Errorf("staging: read the epoch of a refused statement: %w", err)
+	}
+	if current != o.Epoch {
 		return ErrEpochSuperseded
 	}
 	return ErrFenced

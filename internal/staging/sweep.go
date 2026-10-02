@@ -70,14 +70,19 @@ func candidates(ctx context.Context, db *sql.DB) ([]string, error) {
 }
 
 // abandonDue abandons claim if it is still due when its row is locked: a claim released, taken
-// over or extended since the scan is left as it is. The claim is written before its operation, in
-// the order every claim transaction takes them.
+// over or extended since the scan is left as it is. It takes the installation state FOR SHARE,
+// then the claim, then its operation, in the order every claim transaction takes them, so its
+// terminal event carries the epoch still current when it commits.
 func abandonDue(ctx context.Context, db *sql.DB, claim string) (bool, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("staging: sweep: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // a no-op once committed
+	var epoch string
+	if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&epoch); err != nil {
+		return false, fmt.Errorf("staging: sweep %s: %w", claim, err)
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE staging_claim SET state = 'abandoned', payload = NULL, payload_digest = NULL
 		WHERE id = $1 AND `+due, claim)
 	if err != nil {
@@ -99,8 +104,8 @@ func abandonDue(ctx context.Context, db *sql.DB, claim string) (bool, error) {
 		return false, fmt.Errorf("staging: sweep %s: fail its operation: %w", claim, err)
 	default:
 		if _, err := tx.ExecContext(ctx, `INSERT INTO operation_event (operation, number, epoch, kind, entry, at)
-			SELECT $1, $2, epoch, 'ingest', '{"type":"failed","code":"ingestion-abandoned"}', now() FROM installation_state`,
-			op, number); err != nil {
+			VALUES ($1, $2, $3, 'ingest', '{"type":"failed","code":"ingestion-abandoned"}', now())`,
+			op, number, epoch); err != nil {
 			return false, fmt.Errorf("staging: sweep %s: the terminal event: %w", claim, err)
 		}
 	}
