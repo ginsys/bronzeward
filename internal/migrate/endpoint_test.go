@@ -181,7 +181,7 @@ func TestEndpointMigrationRefusesMachines(t *testing.T) {
 		}
 		if withMachine {
 			cl := id.New(id.Cluster)
-			mustExec(t, db, insertCluster, cl, "office", "https://cp.example.test:6443", "v1.13")
+			mustExec(t, db, insertClusterNoID, cl)
 			mustExec(t, db, insertMachineNoEndpoint, id.New(id.Machine), cl, "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b")
 		}
 		got, err := Apply(ctx, db, ms)

@@ -111,11 +111,11 @@ func item(p id.Prefix, get func(ctx context.Context, tx *sql.Tx, id string) (eta
 	}
 }
 
-const selectCluster = `SELECT id, name, endpoint, contract FROM cluster`
+const selectCluster = `SELECT id, name, endpoint, contract, talos_cluster_id FROM cluster`
 
 func scanCluster(r interface{ Scan(...any) error }) (clusterBody, error) {
 	var b clusterBody
-	err := r.Scan(&b.ID, &b.Name, &b.Endpoint, &b.Contract)
+	err := r.Scan(&b.ID, &b.Name, &b.Endpoint, &b.Contract, &b.TalosClusterID)
 	return b, err
 }
 
@@ -130,14 +130,14 @@ var (
 	})
 )
 
-const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.serial, m.talos_endpoint, m.frozen, m.scope_state, s.desired,
+const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.talos_node_id, m.serial, m.talos_endpoint, m.frozen, m.scope_state, s.desired,
 		s.applied_release, s.applied_source
 	FROM machine m JOIN machine_state s ON s.machine = m.id`
 
 func scanMachine(r interface{ Scan(...any) error }) (machineBody, error) {
 	var b machineBody
 	var rel, source sql.NullString
-	err := r.Scan(&b.ID, &b.Cluster, &b.Hardware.SMBIOSUUID, &b.Hardware.Serial, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source)
+	err := r.Scan(&b.ID, &b.Cluster, &b.Hardware.SMBIOSUUID, &b.Hardware.TalosNodeID, &b.Hardware.Serial, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source)
 	if rel.Valid {
 		b.Applied = &applied{Release: rel.String, Source: source.String}
 	}

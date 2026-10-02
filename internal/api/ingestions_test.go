@@ -70,7 +70,7 @@ func setupIngestEnv(t *testing.T) *ingestEnv {
 	ie.cluster = ie.createCluster(ie.api, author, "k-cluster-0123456789")
 	ie.machine = decode[machineBody](t, ie.do(ie.api, machineCall(author, "k-machine-0123456789", ie.cluster, uuidA)), http.StatusCreated).ID
 	other := decode[clusterBody](t, ie.do(ie.api, call{method: "POST", path: prefix + "/clusters", token: author, key: "k-cluster-other-0123",
-		body: `{"name":"lab","endpoint":"https://cp.lab.example.test:6443","contract":"v1.13"}`}), http.StatusCreated).ID
+		body: `{"name":"lab","endpoint":"https://cp.lab.example.test:6443","contract":"v1.13","talosClusterId":"` + talosClusterID("lab") + `"}`}), http.StatusCreated).ID
 	ie.otherMachine = decode[machineBody](t, ie.do(ie.api, machineCall(author, "k-machine-other-0123", other,
 		"1c6b7d2f-3a4e-4f60-9bac-1d2e3f4a5b6c")), http.StatusCreated).ID
 	rec := ie.do(ie.api, call{method: "POST", path: prefix + "/drafts", token: author, key: "k-draft-0123456789ab",

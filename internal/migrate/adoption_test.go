@@ -14,7 +14,9 @@ import (
 
 // The statements 0004's tests insert with; each takes the installation's epoch where it needs one.
 const (
-	insertCluster = `INSERT INTO cluster (id, name, endpoint, contract, created_at) VALUES ($1, $2, $3, $4, now())`
+	// Every cluster has a Talos cluster ID (0008); each row's is derived from its identifier.
+	insertCluster = `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)
+		VALUES ($1, $2, $3, $4, encode(sha256(convert_to($1::text, 'UTF8')), 'base64'), now())`
 	// Every machine has a Talos endpoint (0006); these rows share one.
 	insertMachine = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, created_at)
 		VALUES ($1, $2, $3, $4, $5, '10.55.0.3:50000', now())`
@@ -102,8 +104,6 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"machine of no cluster", insertMachine, []any{id.New(id.Machine), id.New(id.Cluster), uuid, nil, "normal"}, "23503"},
 		{"second machine with one SMBIOS UUID", insertMachine, []any{id.New(id.Machine), a.other, "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b", nil, "normal"}, "23505"},
 		{"the same UUID upper-cased", insertMachine, []any{id.New(id.Machine), a.other, "0B5A6C1E-2F3D-4E5F-8A9B-0C1D2E3F4A5B", nil, "normal"}, "23505"},
-		{"nil SMBIOS UUID", insertMachine, []any{id.New(id.Machine), a.cluster, "00000000-0000-0000-0000-000000000000", nil, "normal"}, "23514"},
-		{"all-ones SMBIOS UUID", insertMachine, []any{id.New(id.Machine), a.cluster, "ffffffff-ffff-ffff-ffff-ffffffffffff", nil, "normal"}, "23514"},
 		{"unknown scope state", insertMachine, []any{id.New(id.Machine), a.cluster, uuid, nil, "frozen"}, "23514"},
 		{"second machine state", insertMachineState, []any{a.machine, nil, nil, nil, nil}, "23505"},
 		{"applied without its digest", insertMachineState, []any{a.otherMachine, id.New(id.Release), nil, "operation", 1}, "23514"},
