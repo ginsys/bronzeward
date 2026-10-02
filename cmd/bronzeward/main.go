@@ -18,6 +18,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/database"
 	"github.com/ginsys/bronzeward/internal/migrate"
+	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/server"
 )
 
@@ -130,9 +131,27 @@ func serve(args []string) error {
 	if err := migrate.Check(startCtx, db, ms); err != nil {
 		return err
 	}
+	// The epoch this process starts in: it issues ownership under it only (persistence-api §5.1).
+	var epoch string
+	if err := db.QueryRowContext(startCtx, `SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
+		return fmt.Errorf("installation state: %w", err)
+	}
+	var ing api.Ingester // nil without a provider: the ingestion routes answer 503
+	if cfg.Provider != nil {
+		tok, err := provider.ReadTokenFile(cfg.Provider.IngestionTokenFile)
+		if err != nil {
+			return err
+		}
+		k := cfg.Provider.Keys
+		c, err := provider.NewIngestion(cfg.Provider.Address, tok, provider.Keys{Baseline: k.Baseline, Staging: k.Staging, Digest: k.Digest})
+		if err != nil {
+			return err
+		}
+		ing = c
+	}
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(db, verifier, cfg.Auth)))
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(db, verifier, cfg.Auth, ing, cfg.Ingestion, epoch)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {

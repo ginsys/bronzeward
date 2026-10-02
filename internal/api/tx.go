@@ -17,6 +17,9 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/ingest"
+	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/staging"
 )
 
 // maxAttempts is the first try and three retries after a deadlock (§5 rule 5).
@@ -38,7 +41,7 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 		return
 	}
 	q.input = q.route.input()
-	canon, err := decodeBody(q.r, q.input)
+	canon, err := decodeBody(q.r, q.input, q.route.keyed)
 	if err == nil {
 		err = q.input.check(a)
 	}
@@ -46,7 +49,13 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 		a.problem(w, q, refuse(http.StatusBadRequest, "invalid-request", err.Error()))
 		return
 	}
-	q.fingerprint = fingerprint(q, canon)
+	q.material = material(q, canon)
+	if q.route.keyed == "" {
+		q.fingerprint = fingerprint(q, canon)
+	} else if ref := a.keyedFingerprint(ctx, q, 0); ref != nil {
+		a.problem(w, q, ref)
+		return
+	}
 	if ref := a.admit(ctx, q); ref != nil {
 		a.problem(w, q, ref)
 		return
@@ -75,6 +84,35 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 	}
 	setEpoch(w, q) // the epoch the transaction committed or found the record in
 	a.answer(w, q, rec, !fresh)
+	if fresh && rec.afterCommit != nil {
+		rec.afterCommit()
+	}
+}
+
+// keyedFingerprint sets q's fingerprint and its key reference from the provider's HMAC (§7.1),
+// under version, or the latest for 0. The provider being unreachable is 503: nothing ran.
+func (a *API) keyedFingerprint(ctx context.Context, q *request, version int) *refusal {
+	if a.d.ing == nil {
+		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "no provider is configured; nothing was committed")
+	}
+	in, ok := q.input.(documentInput)
+	if !ok {
+		a.o.logf("%s: route %s %s is keyed, but its input carries no document", q.id, q.route.method, q.route.pattern)
+		return refuse(http.StatusInternalServerError, "internal-error", "nothing was committed")
+	}
+	d, err := ingest.Fingerprint(ctx, a.d.ing.Digest, q.material, in.document(), version)
+	switch {
+	case errors.Is(err, ingest.ErrEmptyInput):
+		return refuse(http.StatusBadRequest, "invalid-request", "the document is empty")
+	case errors.Is(err, provider.ErrUnavailable):
+		a.o.logf("%s: fingerprint: %v", q.id, err)
+		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the provider could not compute the request's fingerprint; nothing was committed")
+	case err != nil:
+		a.o.logf("%s: fingerprint: %v", q.id, err)
+		return refuse(http.StatusInternalServerError, "internal-error", "nothing was committed")
+	}
+	q.fingerprint, q.fpKey = d.Sum[:], d.KeyRef()
+	return nil
 }
 
 // admit creates a human's principal row on its first admitted mutating request, in its own short
@@ -162,12 +200,14 @@ func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, er
 		q.key, q.id, q.epoch); err != nil {
 		return nil, false, err
 	}
-	rec := &record{fingerprint: q.fingerprint, current: true, epoch: q.epoch, requestID: q.id, status: res.status,
+	rec := &record{fingerprint: q.fingerprint, fpKey: q.fpKey, current: true, epoch: q.epoch, requestID: q.id, status: res.status,
 		location: sql.NullString{String: res.location, Valid: res.location != ""},
-		etag:     sql.NullString{String: res.etag, Valid: res.etag != ""}, body: body}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_record (principal, key, fingerprint, request_id, epoch, status, location, etag, body, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())`,
-		q.principal.ID, q.key, rec.fingerprint, q.id, q.epoch, rec.status, rec.location, rec.etag, rec.body); err != nil {
+		etag:     sql.NullString{String: res.etag, Valid: res.etag != ""}, body: body,
+		afterCommit: res.afterCommit}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO idempotency_record (principal, key, fingerprint, fingerprint_key, request_id, epoch, status, location, etag, body, operation_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())`,
+		q.principal.ID, q.key, rec.fingerprint, rec.fpKey, q.id, q.epoch, rec.status, rec.location, rec.etag, rec.body,
+		sql.NullString{String: res.operation, Valid: res.operation != ""}); err != nil {
 		return nil, false, err
 	}
 	if a.o.afterEffect != nil {
@@ -241,6 +281,8 @@ func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 	var ref *refusal
 	switch {
 	case errors.As(err, &ref):
+	case errors.Is(err, staging.ErrEpochSuperseded):
+		ref = refuse(http.StatusServiceUnavailable, "epoch-superseded", "this server started before the current recovery epoch and may issue no ownership; nothing was committed")
 	case errors.Is(err, errTransient):
 		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the request deadlocked on every attempt; nothing was committed")
 	case errors.Is(err, errUnknownOutcome):

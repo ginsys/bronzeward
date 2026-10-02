@@ -52,7 +52,7 @@ func TestServiceTokenEpochRecheckedAtRouting(t *testing.T) {
 	old := epoch(t, e.db)
 	newEpoch(t, e.db)
 	a := newAPI(e.db, stubAuthn{p: auth.Principal{Kind: auth.Service, ID: e.robotID, Epoch: old,
-		Roles: []auth.Role{auth.Author, auth.Publisher}}}, e.cfg, options{logf: e.logf})
+		Roles: []auth.Role{auth.Author, auth.Publisher}}}, e.cfg, deps{}, options{logf: e.logf})
 	rec := e.do(a, call{method: "GET", path: prefix + "/acts", token: "x"})
 	wantProblem(t, rec, http.StatusUnauthorized, "unauthenticated")
 	if rec.Header().Get("Bronzeward-Epoch") != "" {
@@ -60,7 +60,7 @@ func TestServiceTokenEpochRecheckedAtRouting(t *testing.T) {
 	}
 	// Control: the same principal in the current epoch is served.
 	a = newAPI(e.db, stubAuthn{p: auth.Principal{Kind: auth.Service, ID: e.robotID, Epoch: epoch(t, e.db),
-		Roles: []auth.Role{auth.Author, auth.Publisher}}}, e.cfg, options{logf: e.logf})
+		Roles: []auth.Role{auth.Author, auth.Publisher}}}, e.cfg, deps{}, options{logf: e.logf})
 	if rec := e.do(a, call{method: "GET", path: prefix + "/acts", token: "x"}); rec.Code != http.StatusOK {
 		t.Fatalf("current epoch: %d %s", rec.Code, rec.Body)
 	}
