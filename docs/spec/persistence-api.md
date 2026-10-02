@@ -442,9 +442,10 @@ They are held apart **(choice §17.29)**.
   talosconfig reaches this cluster's node and reads it; the identity check
   then passes, since the node is the recorded one, and the ingestion succeeds.
   Dispatch has execution and recovery's own comparison (its §3.2
-  comparison 3). Reading either through the Talos API is unevidenced, as that
-  choice states, and a node swapped between the identity read and the
-  configuration read is the residual it states.
+  comparison 3). The values were read with `talosctl`, not yet through the
+  application's read-only client, as that choice states, and a node swapped
+  between the identity read and the configuration read is the residual it
+  states.
 - **Failure.** An absent secret, one this identity cannot read, a provider
   that is sealed or does not answer, a document that is not a usable
   talosconfig, a credential Talos refuses, or an endpoint that does not answer
@@ -2386,9 +2387,12 @@ each (design §7.7 consequences):
   `source: machine` ingestion failing `machine-identity-mismatch` with nothing
   kept against a node whose SMBIOS UUID differs, reports none for a machine
   recorded by one, or reports one for a machine recorded by node ID; whose
-  node ID differs; whose Talos cluster ID differs; and whose identity read
-  fails; each SMBIOS case against a stubbed Talos response, since the
-  fixture's nodes report none (execution and recovery choice §10.26); each cause §3.3 lists for
+  node ID differs, for a machine recorded by node ID; whose Talos cluster ID
+  differs; and whose identity read fails; with the control that a machine
+  recorded by SMBIOS UUID whose node reports a matching UUID and cluster ID
+  but another node ID is accepted; each SMBIOS case against a stubbed Talos
+  response, since the fixture's nodes report none (execution and recovery
+  choice §10.26); each cause §3.3 lists for
   `talos-access-unavailable` (an absent secret, the reading identity's read
   denied, OpenBao sealed and partitioned, a malformed talosconfig carrying a
   synthetic client key, a well-formed credential Talos refuses, another
