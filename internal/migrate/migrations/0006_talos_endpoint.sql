@@ -35,14 +35,15 @@ CALL make_immutable('machine_event');
 
 -- A replaced endpoint (§3.3): the previous and new endpoint and the act that replaced it, which
 -- holds who, role, epoch and time (§10.5). It is exactly one endpoint-change entry on the
--- machine's timeline, keyed by that entry's revision, so the record and the entry cannot part.
+-- machine's timeline, keyed by that entry's revision, so the record and the entry cannot part. The
+-- act is written after the effect in the same transaction, so its reference is checked at commit.
 CREATE TABLE machine_endpoint_change (
   machine           text NOT NULL,
   revision          bigint NOT NULL,
   kind              text NOT NULL DEFAULT 'endpoint-change' CHECK (kind = 'endpoint-change'),
   previous_endpoint talos_endpoint NOT NULL,
   new_endpoint      talos_endpoint NOT NULL,
-  act               text NOT NULL UNIQUE REFERENCES act (id),
+  act               text NOT NULL UNIQUE REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
   CONSTRAINT machine_endpoint_change_pkey PRIMARY KEY (machine, revision),
   CONSTRAINT machine_endpoint_change_entry FOREIGN KEY (machine, revision, kind)
     REFERENCES machine_event (machine, revision, kind),

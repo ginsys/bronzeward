@@ -444,7 +444,7 @@ walk() {
   # examples/bronzeward.yaml maps them, and the automation token bin/seed issues.
   declare -A held=([h-author]=author [h-publisher]=publisher [h-approver]=approver [h-recovery]=recovery-admin
     [h-viewer]=viewer [h-all]='author,publisher,approver' [automation]='author,publisher')
-  # The rows design §13.7 says role alone denies, then automation on every human-only route (16).
+  # The rows design §13.7 says role alone denies, then automation on every human-only route (17).
   # Each row keeps the roles held, and the qualifying roles and human-only flag the refusal names.
   printf 'who\troles\tmethod\tpath\tstatus\tproblem\tqualifying\thuman-only\n' >"$EV/walk.tsv"
   # A human-only row must be refused by the human-only rule, not merely for a role automation
@@ -487,6 +487,7 @@ automation POST /ingestions/{id}/takeovers human-only
 automation POST /ingestions/{id}/abandonments human-only
 automation POST /clusters human-only
 automation POST /machines human-only
+automation POST /machines/{id}/talos-endpoints human-only
 automation POST /plans/{id}/approvals human-only
 automation POST /recovery/entries human-only
 automation POST /recovery/exits human-only
@@ -498,7 +499,7 @@ automation POST /operations/{id}/takeovers human-only
 automation POST /operations/{id}/resolutions human-only
 automation POST /identity-revocations human-only
 EOF
-  check 'S0 step 4' "the walk has 34 rows (18 by role, 16 human-only)" test "$rows" -eq 34 -a "$human_rows" -eq 16
+  check 'S0 step 4' "the walk has 35 rows (18 by role, 17 human-only)" test "$rows" -eq 35 -a "$human_rows" -eq 17
   local acts after
   acts=$(pg psql -U bronzeward -d bronzeward -Atc "select count(*) from act where via = 'api'") || die "cannot count acts"
   after=$(count_principals) || die "cannot count principals"
