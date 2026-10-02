@@ -380,11 +380,13 @@ They are held apart **(choice §17.29)**.
   other bytes, which is why compilation §9 and dependency monitor choice §11.13
   identify a KV version by its `created_time` too. A dispatch reads it once,
   before its evidence observation: that observation, the use-time check's
-  record and every attempt of the operation use that one version, so a
+  record and the attempt made on that evidence use that one version, so a
   rotation between them cannot change the credential the request carries,
   and a credential Talos refuses fails the observation before anything is
-  committed. A retry's newly gathered evidence (execution and recovery §3.3)
-  reads it again, and its attempt uses that version. An ingestion records it,
+  committed. A retry gathers new evidence (execution and recovery §3.3),
+  which reads it again, and the retry's attempt uses that new version: each
+  version binds one evidence observation and the attempt made on it, so a
+  rotation before a retry is picked up by that retry. An ingestion records it,
   with the endpoint dialled, as an event of its `ingest` operation (T7, read
   through `GET /operations/{id}/events`), committed once the read returns a
   version and before the node is dialled, so it is kept whether the
@@ -417,9 +419,11 @@ They are held apart **(choice §17.29)**.
   client dials only the endpoint chosen above (the machine's, or the plan's
   route) and sends no `node` metadata, whatever the document names.
 - **What is kept.** The value lives only in the memory of the process that read
-  it, for the use it was read for: an ingestion, a plan-less observation, or a
-  dispatch from its evidence observation through its last attempt, discarded
-  when that use ends or is abandoned; a retry reads afresh (above). It is never stored in the database, logged, returned
+  it, for the use it was read for: an ingestion; one observation outside a
+  dispatch's evidence-and-attempt pair (`drift`, `restoration`, `recovery`
+  or `completion`, which may follow the last attempt); or an evidence
+  observation and the attempt made on it. It is discarded when that use ends
+  or is abandoned; a retry reads afresh (above). It is never stored in the database, logged, returned
   or quoted in an error (compilation §13), and never written to a file:
   neither reader passes it to a client as a file path.
 - **Identity before use.** Before using a configuration read for ingestion, the
@@ -1811,8 +1815,8 @@ Rules **(choice §17.24)**:
    tables, columns with constant defaults, indexes and constraints.
 5. There is no downgrade. Undoing a migration means restoring a database
    backup, which is a restore (§12).
-6. Until a first release, a migration need not upgrade an earlier database.
-   One adding a required value that existing rows cannot have, such as a
+6. Until a first release, a migration need not upgrade an earlier database,
+   and rule 4's limit on what it may add does not bind it. One adding a required value that existing rows cannot have, such as a
    machine's Talos endpoint (§3.3), adds it `NOT NULL` and fails on a
    database holding such rows; the operator recreates the database.
 
@@ -2370,7 +2374,9 @@ each (design §7.7 consequences):
   fixture's other node, every read still reaching the endpoint chosen with no
   `node` metadata; a rotation between a dispatch's evidence observation
   and its attempt, the attempt still using the version the observation used,
-  with a control that reads the latest version at send and must then fail;
+  with a control that reads the latest version at send and must then fail,
+  and a rotation before a retry, the retry's evidence and attempt both using
+  the new version;
   `TestLiveRoleProbe` asserting `PermissionDenied` for `os:reader` and
   `os:operator` on `MachineConfig`, with a control that probes the `os:admin`
   configuration in the `os:reader` slot and must then fail; the executor's observation client held to its read
