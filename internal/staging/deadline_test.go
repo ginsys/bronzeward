@@ -8,13 +8,14 @@ import (
 	"time"
 )
 
-// lapseWhileLocked holds c's row lock while its lease and expiry are set to lapse in 500ms,
-// starts run, waits until run is blocked on the lock, keeps holding it until both deadlines have
-// passed, then lets run proceed without changing the row, and returns run's result.
+// lapseWhileLocked holds c's row lock while its lease and expiry are set to lapse in a second,
+// starts run, waits until run is blocked on the lock, checks that run's transaction started
+// before both deadlines, keeps holding the lock until the database clock has passed them, then
+// lets run proceed without changing the row, and returns run's result.
 func (f fixture) lapseWhileLocked(t *testing.T, c Claim, run func(context.Context) error) error {
 	t.Helper()
-	exec(t, f.db, `UPDATE staging_claim SET lease_until = now() + interval '500 milliseconds',
-		expires_at = now() + interval '500 milliseconds' WHERE id = $1`, c.ID)
+	exec(t, f.db, `UPDATE staging_claim SET lease_until = now() + interval '1 second',
+		expires_at = now() + interval '1 second' WHERE id = $1`, c.ID)
 	holder, err := f.db.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -25,12 +26,38 @@ func (f fixture) lapseWhileLocked(t *testing.T, c Claim, run func(context.Contex
 	}
 	done := make(chan error, 1)
 	go func() { done <- run(context.Background()) }()
-	waitBlocked(t, f.db)
-	time.Sleep(time.Second)
+	pid := waitBlocked(t, f.db)
+	// The statement's transaction began while the claim was live: its now() would pass the fence.
+	var live bool
+	if err := f.db.QueryRow(`SELECT a.xact_start < c.lease_until AND a.xact_start < c.expires_at
+		FROM pg_stat_activity a, staging_claim c WHERE a.pid = $1 AND c.id = $2`, pid, c.ID).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if !live {
+		t.Fatal("the statement started after the claim lapsed: the test exercises no lock wait across the lapse")
+	}
+	f.waitLapsed(t, c.ID) // the expiry is the same instant
 	if err := holder.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 	return <-done
+}
+
+// waitLapsed waits until the database clock has passed the claim's lease.
+func (f fixture) waitLapsed(t *testing.T, claim string) {
+	t.Helper()
+	for range 300 {
+		var lapsed bool
+		if err := f.db.QueryRow(`SELECT clock_timestamp() > lease_until FROM staging_claim WHERE id = $1`,
+			claim).Scan(&lapsed); err != nil {
+			t.Fatal(err)
+		}
+		if lapsed {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the claim never lapsed")
 }
 
 // Compilation §3.5: an owner statement that starts before its claim's lease and expiry pass but
@@ -100,19 +127,26 @@ func TestHeartbeatExtendsFromTheLockTime(t *testing.T) {
 	go func() { done <- Heartbeat(context.Background(), f.db, o, c, 2*time.Second) }()
 	waitBlocked(t, f.db)
 	time.Sleep(time.Second)
+	// The heartbeat holds the claim no earlier than this instant, a second after it started.
+	var released string
+	if err := holder.QueryRow(`SELECT clock_timestamp()::text`).Scan(&released); err != nil {
+		t.Fatal(err)
+	}
 	if err := holder.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	var left float64
-	if err := f.db.QueryRow(`SELECT extract(epoch FROM lease_until - clock_timestamp()) FROM staging_claim WHERE id = $1`,
-		c.ID).Scan(&left); err != nil {
+	var full bool
+	var short float64
+	if err := f.db.QueryRow(`SELECT lease_until >= $2::timestamptz + interval '2 seconds',
+		extract(epoch FROM $2::timestamptz + interval '2 seconds' - lease_until) FROM staging_claim WHERE id = $1`,
+		c.ID, released).Scan(&full, &short); err != nil {
 		t.Fatal(err)
 	}
-	if left < 1.5 {
-		t.Fatalf("the lease runs %.2fs after the heartbeat, want about 2s from the lock", left)
+	if !full {
+		t.Fatalf("the lease ends %.3fs before a full lease from the lock", short)
 	}
 }
 
@@ -129,10 +163,15 @@ func TestDueAtTheStatementTime(t *testing.T) {
 	}
 	defer tx.Rollback()
 	var epoch string
-	if err := tx.QueryRow(`SELECT epoch FROM installation_state FOR SHARE`).Scan(&epoch); err != nil {
+	var live bool
+	if err := tx.QueryRow(`SELECT epoch, now() < (SELECT lease_until FROM staging_claim WHERE id = $1)
+		FROM installation_state FOR SHARE`, c.ID).Scan(&epoch, &live); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(time.Second)
+	if !live {
+		t.Fatal("the transaction started after the lapse: the test exercises no transaction older than it")
+	}
+	f.waitLapsed(t, c.ID)
 	var state string
 	if err := tx.QueryRow(`SELECT `+EffectiveStateSQL+` FROM staging_claim WHERE id = $1`, c.ID).Scan(&state); err != nil {
 		t.Fatal(err)

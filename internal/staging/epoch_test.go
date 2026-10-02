@@ -25,21 +25,24 @@ func entryLock(t *testing.T, db *sql.DB) error {
 	return err
 }
 
-// waitBlocked waits until a statement on staging_claim waits for a lock.
-func waitBlocked(t *testing.T, db *sql.DB) {
+// waitBlocked waits until a statement on staging_claim in this test's database is blocked by
+// another backend, and returns the blocked backend's pid.
+func waitBlocked(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	for range 200 {
-		var n int
-		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'
-			AND query LIKE '%staging_claim%' AND pid <> pg_backend_pid()`).Scan(&n); err != nil {
+		var pid int
+		switch err := db.QueryRow(`SELECT pid FROM pg_stat_activity WHERE datname = current_database()
+			AND wait_event_type = 'Lock' AND cardinality(pg_blocking_pids(pid)) > 0
+			AND query LIKE '%staging_claim%' AND pid <> pg_backend_pid() LIMIT 1`).Scan(&pid); {
+		case err == nil:
+			return pid
+		case !errors.Is(err, sql.ErrNoRows):
 			t.Fatal(err)
-		}
-		if n > 0 {
-			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("the owner statement never waited for the claim lock")
+	return 0
 }
 
 // An owner statement holds the installation state FOR SHARE from its epoch check to its end
