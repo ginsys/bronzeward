@@ -69,11 +69,25 @@ to that work:
 
 | Identity | Needs | Must not have | What PC measured |
 | --- | --- | --- | --- |
-| Ingestion | create-only secret generations; HMAC with the digest key (§4.1); encrypt and decrypt with the staging key (§3); encrypt with the baseline key (§2.3) | secret reads; artifact and baseline decryption; machine operation | `publisher`: `create` on `secret/data/gen/*` only, and a refused replace ([PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities), [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) rows 001, 002). Staging-key, baseline-key and HMAC use were not measured. |
-| Compiler | read the pinned secret versions; encrypt with the artifact key | artifact, baseline or staging decryption; secret creation; machine operation | `compiler`: `read` on `secret/data/*`, encrypt on the artifact key, decrypt refused (PC §4.1 rows 004, 038, 040) |
-| Executor | decrypt artifacts, gated by approval | secret reads; staging and baseline decryption | `executor`: decrypt only, secret read refused (PC §4.1 rows 039, 005); [execution and recovery §3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
+| Ingestion | create-only secret generations; HMAC with the digest key (§4.1); encrypt and decrypt with the staging key (§3); encrypt with the baseline key (§2.3); read the cluster's Talos access configuration, for a `source: machine` ingestion (below) | every other secret read; artifact and baseline decryption; machine operation | `publisher`: `create` on `secret/data/gen/*` only, and a refused replace ([PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities), [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) rows 001, 002). Staging-key, baseline-key and HMAC use were not measured. |
+| Compiler | read the pinned secret versions; encrypt with the artifact key | artifact, baseline or staging decryption; secret creation; the Talos access configuration; machine operation | `compiler`: `read` on `secret/data/*`, encrypt on the artifact key, decrypt refused (PC §4.1 rows 004, 038, 040) |
+| Executor | decrypt artifacts, gated by approval; read the cluster's Talos access configuration (below) | every other secret read; staging and baseline decryption | `executor`: decrypt only, secret read refused (PC §4.1 rows 039, 005); [execution and recovery §3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
 | Metadata | [design §7.6](../design/Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks) classification | any value | `metadata`: KV metadata and Transit key state, no data (PC §4.1) |
 | Normal API | metadata and workflow | any secret value, any plaintext input | not measured; design §13.1 |
+
+The Talos access configuration is the one management credential these
+identities read: each cluster's talosconfig at
+`secret/data/access/talos/<cluster id>`, written by the operator, never by
+Bronzeward ([persistence and API §3.3](persistence-api.md#33-talos-access))
+**(choice §16.29)**. Its path is disjoint from `secret/data/gen/*`, so the
+ingestion identity still never reads a secret it creates (choice §16.1). The
+compiler's grant PC measured, `read` on `secret/data/*`, would cover it; the
+compiler's grant is `read` on `secret/data/gen/*`, as the fixture's compiler
+policy already has it (`fixtures/openbao/policies/bw-compiler.hcl`). No read grant on
+the path was measured; persistence and API §16 requires each. The Talos
+certificate it holds carries `os:admin`, the only role that reads a machine
+configuration, so the "no machine operation" above is the application's own
+bound, a read-only Talos client, not one the provider or Talos enforces.
 
 Ingestion and compilation run in protected processing: a process that holds
 plaintext only in memory, writes no temporary file, and does not log input,
@@ -1403,6 +1417,13 @@ in place as
     `{"value": "<string>"}`, with the kind only in the declaration, which
     leaves §5.2's comparison nothing to compare. Owner decision, 2026-10-01
     (ginsys/bronzeward#22).
+29. **The ingestion and executor identities read each cluster's Talos access
+    configuration from the provider, at a path disjoint from the secret
+    generations** (§1; [persistence and API choice §17.29](persistence-api.md#17-choices-for-owner-review)).
+    Owner decision, 2026-10-02 (ginsys/bronzeward#22). Alternatives: a
+    talosconfig file in the server's configuration, outside the provider;
+    a separate reader identity handing the credential to both, which adds a
+    process boundary without narrowing the `os:admin` the credential carries.
 
 ## 17. Traceability
 
