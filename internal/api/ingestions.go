@@ -191,9 +191,9 @@ var getIngestion = item(id.Ingestion, func(ctx context.Context, tx *sql.Tx, v st
 })
 
 // POST /ingestions/{id}/abandonments is an operator's abandonment (§9.2, compilation §3.2), T11:
-// a claim that is live, or that a read already treats as abandoned, is written abandoned with its
-// payload cleared, and its running ingest operation fails ingestion-abandoned with its terminal
-// event (§8.2). It is not owner-fenced: a runner still holding the claim is refused at its next
+// a claim live as read is written abandoned with its payload cleared, and its running ingest
+// operation fails ingestion-abandoned with its terminal event (§8.2). A claim a read already
+// treats as abandoned has ended: it refuses 409 and is left for the sweep (compilation §3.5). It is not owner-fenced: a runner still holding the claim is refused at its next
 // statement. The claim is locked before its operation, as every claim transaction takes them.
 func ingestionAbandonment() effectRoute {
 	return effectRoute{action: "ingestion.abandon", input: func() input { return &abandonInput{} }, effect: abandonIngestion}

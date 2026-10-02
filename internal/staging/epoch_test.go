@@ -3,8 +3,11 @@ package staging
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // entryLock takes recovery-mode entry's lock (T9), waiting at most 200ms.
@@ -65,14 +68,18 @@ func TestOwnerStatementsHoldTheEpoch(t *testing.T) {
 			done := make(chan error, 1)
 			go func() { done <- run(context.Background(), f.db, o, c) }()
 			waitBlocked(t, f.db)
-			if err := entryLock(t, f.db); err == nil {
-				t.Fatal("recovery-mode entry took the installation state while an owner statement waited")
+			var pg *pgconn.PgError
+			if err := entryLock(t, f.db); !errors.As(err, &pg) || pg.Code != "55P03" {
+				t.Fatalf("recovery-mode entry while an owner statement waited: %v, want a lock timeout", err)
 			}
 			if err := holder.Rollback(); err != nil {
 				t.Fatal(err)
 			}
 			if err := <-done; err != nil {
 				t.Fatalf("the owner statement under the still-current epoch: %v", err)
+			}
+			if err := entryLock(t, f.db); err != nil {
+				t.Fatalf("recovery-mode entry after the owner statement ended: %v", err)
 			}
 		})
 	}
