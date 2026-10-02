@@ -215,8 +215,8 @@ that the trigger fires **(choice §17.3)**.
 
 | Entity | Kind | Holds | Owner of semantics |
 | --- | --- | --- | --- |
-| Cluster | mutable, revisioned | name, endpoint, contract, status | this contract |
-| Machine | mutable, revisioned | `mch` id, hardware evidence with its SMBIOS UUID (unique, §7.3), cluster membership, Talos endpoint (§3.3), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
+| Cluster | mutable, revisioned | name, endpoint, Talos cluster ID (unique, §7.3), contract, status | this contract |
+| Machine | mutable, revisioned | `mch` id, identity key: its SMBIOS UUID or, for a machine that reports none, its Talos node ID, fixed at inventory (unique, §7.3), hardware evidence, cluster membership, Talos endpoint (§3.3), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
 | MachineEndpointChange | immutable | a machine's previous Talos endpoint and new one, who changed it, role, epoch, time (§3.3) | this contract |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
@@ -342,7 +342,7 @@ They are held apart **(choice §17.29)**.
   observation taken for no plan, and a `source: machine` ingestion, dial the
   current endpoint; each records the endpoint it dialled.
   `POST /machines/{id}/talos-endpoints` replaces it (an address change, or one
-  entered wrongly at inventory, which the SMBIOS UUID index would otherwise
+  entered wrongly at inventory, which the identity key's index would otherwise
   leave unrecoverable): under the machine row `FOR UPDATE` (T11), it records a
   MachineEndpointChange, an endpoint-change entry on the machine's timeline
   holding the previous and new endpoint, who and role (execution and recovery
@@ -427,13 +427,15 @@ They are held apart **(choice §17.29)**.
   or quoted in an error (compilation §13), and never written to a file:
   neither reader passes it to a client as a file path.
 - **Identity before use.** Before using a configuration read for ingestion, the
-  ingestion reads the node's SMBIOS UUID and cluster membership on the same
-  connection and compares both with the machine record, the identity execution
-  and recovery's choice §10.26 defines. A different or absent UUID, or a node
-  that accepts this credential but reports another cluster's membership
-  (possible only where clusters share a Talos certificate authority), fails the
-  ingestion with `409 machine-identity-mismatch`, as below, and nothing read
-  is kept. A node behind another certificate authority, or another cluster's
+  ingestion reads the node's SMBIOS UUID, Talos node ID and Talos cluster ID
+  on the same connection and compares them with the machine record (§7.3) and
+  its cluster's record, the identity execution and recovery's choice §10.26
+  defines. For a machine recorded by SMBIOS UUID, a different or absent UUID;
+  for one recorded by Talos node ID, a different node ID or any reported
+  SMBIOS UUID; for either, an identity read that fails, or a node that accepts
+  this credential but reports another Talos cluster ID (possible only where
+  clusters share a Talos certificate authority): each fails the ingestion with
+  `409 machine-identity-mismatch`, as below, and nothing read is kept. A node behind another certificate authority, or another cluster's
   talosconfig under another certificate authority written at this cluster's
   path, fails the mutual TLS handshake before any read: a credential Talos
   refuses, below. Under a shared certificate authority, another cluster's
@@ -1041,25 +1043,37 @@ retries with a new idempotency key:
 | Approval | one per plan and epoch, by unique index on `(plan_id, epoch)` (design §13.7 item 3); a revoked approval makes its uncommitted plan `revoked` (§8.1), and only an unexpired plan approved in an earlier epoch is approved again, in the current one (execution and recovery §2) | `409 conflict` |
 | Active operation per machine scope | partial unique index over `committed`, `sending`, `verifying`, `unresolved` | execution and recovery's refusal (DB row 012; DS row 010) |
 | Active operation per rollout scope | at the PoC rollout limit of one, a partial unique index on the rollout scope over `committed`, `sending`, `verifying`, `unresolved` (execution and recovery §3.2, comparison 5); not evidenced there | execution and recovery's refusal |
-| Machine | its SMBIOS UUID, required by `POST /machines`, by unique index across the installation | `409 conflict` naming the existing machine |
+| Machine | its identity key: `smbiosUuid` or `talosNodeId`, exactly one of which `POST /machines` requires, each by its own unique index across the installation | `409 conflict` naming the existing machine |
+| Cluster | its `talosClusterId`, required by `POST /clusters`, by unique index across the installation | `409 conflict` naming the existing cluster |
 
 The publish and ingest indexes are separate, each over its own kind, so a
 `publish` and an `ingest` operation bound to one draft revision never collide,
 and T2 returns only a `publish` operation as the existing one.
 
-The machine key makes one supplied SMBIOS UUID one record, so one
-coordination scope: two inventory requests for it under different idempotency
-keys cannot both commit. It is design §8.5's detection of a duplicate SMBIOS
-UUID, never a merge. Design §4.4 calls hardware evidence "not an infallible
-primary key": a clone sharing a UUID, or a machine reporting none, cannot be
-inventoried in the PoC. The index cannot catch a record entered with a wrong
-UUID at inventory; execution and recovery refuses it at dispatch instead.
-There, the node's observed SMBIOS UUID and cluster membership must match this
-record before any send (its §3.2 comparison 3) and before a scope is `ready`
-after a restore (its §7.4), so a dispatch whose evidence read shows a node
-that is not the recorded machine, or a record entered with a wrong UUID, is
-refused before it sends. A node swapped between that read and the send is a
-residual its choice §10.26 states.
+The machine key is fixed at inventory and never changes: the operator supplies
+the machine's SMBIOS UUID when it reports one (`talosctl get
+systeminformation`), and otherwise its Talos node ID (`talosctl get
+identity`); a body with both, or neither, is `400 invalid-request`
+(execution and recovery's choice §10.26). The key makes one supplied value
+one record, so one coordination scope: two inventory requests for it under
+different idempotency keys cannot both commit. It is design §8.5's detection
+of a duplicate SMBIOS UUID, never a merge. Design §4.4 calls hardware evidence
+"not an infallible primary key": a clone sharing a UUID, or a machine
+reporting SMBIOS's nil or all-ones value, cannot be inventoried in the PoC.
+A Talos node ID is an opaque string accepted as Talos prints it (44
+alphanumeric characters on the nodes read for choice §10.26); it is compared
+byte for byte, never normalised. The
+cluster key is the Talos cluster ID the operator reads from one of its nodes
+(`talosctl get info`), the standard base64 encoding of 32 bytes, also
+compared byte for byte. The indexes cannot catch a record entered with a
+wrong value, or under the node-ID key for a machine that reports a UUID;
+execution and recovery refuses either at dispatch instead. There, the node's
+observed identity must match this record and its cluster's before any send
+(its §3.2 comparison 3) and before a scope is `ready` after a restore (its
+§7.4), so a dispatch whose evidence read shows a node that is not the recorded
+machine, or a record entered with a wrong value, is refused before it sends.
+A node swapped between that read and the send is a residual its choice §10.26
+states.
 
 ## 8. Asynchronous operations
 
@@ -1457,7 +1471,7 @@ HTTP/1.1 200 OK
 
 {"id": "mch_tqhcznunhyle4hnxru5hkt35uq",
  "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
- "hardware": {"smbiosUuid": "...", "serial": "..."},
+ "hardware": {"smbiosUuid": "...", "talosNodeId": null, "serial": "..."},
  "talosEndpoint": "10.55.0.3:50000",
  "desired": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
  "applied": {"release": "rel_uxpkmwd6ckxmj4z75j7y2mcxb4", "source": "operation"},
@@ -1549,8 +1563,8 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
-| 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose SMBIOS UUID or cluster membership is not the machine record's, or that reported none (§3.3); its claim is abandoned and nothing read is kept |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID or Talos node ID already recorded, naming its machine, or for a Talos cluster ID already recorded, naming its cluster (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
+| 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose identity key or Talos cluster ID is not the machine record's, whose identity read failed, or whose SMBIOS UUID is absent for a machine recorded by one or present for a machine recorded by node ID (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
@@ -2341,7 +2355,9 @@ each (design §7.7 consequences):
   revocation, with a control that drops the principal lock; a reissue after a
   restore refused for a service identity that `deniedSubjects` lists although
   the restored database lost its revocation; two concurrent
-  inventory requests for one SMBIOS UUID under different keys, one refused;
+  inventory requests for one SMBIOS UUID under different keys, one refused,
+  and the same for one Talos node ID and for one Talos cluster ID; an
+  inventory body with both `smbiosUuid` and `talosNodeId`, or neither, refused;
 - machine revisions, shared by plan, operation and machine-scope entries,
   allocated in commit order under concurrent writers to one scope, with a
   control that allocates without the lock;
@@ -2367,9 +2383,12 @@ each (design §7.7 consequences):
   refused write, list and delete on the access path, with a control that
   grants one of them `update` and must then succeed; the ingestion identity
   refused every `secret/data/gen/*` read; a
-  `source: machine` ingestion against a node whose SMBIOS UUID differs, and
-  one whose cluster membership differs, each failing
-  `machine-identity-mismatch` with nothing kept; each cause §3.3 lists for
+  `source: machine` ingestion failing `machine-identity-mismatch` with nothing
+  kept against a node whose SMBIOS UUID differs, reports none for a machine
+  recorded by one, or reports one for a machine recorded by node ID; whose
+  node ID differs; whose Talos cluster ID differs; and whose identity read
+  fails; each SMBIOS case against a stubbed Talos response, since the
+  fixture's nodes report none (execution and recovery choice §10.26); each cause §3.3 lists for
   `talos-access-unavailable` (an absent secret, the reading identity's read
   denied, OpenBao sealed and partitioned, a malformed talosconfig carrying a
   synthetic client key, a well-formed credential Talos refuses, another

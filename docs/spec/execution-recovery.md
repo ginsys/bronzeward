@@ -144,9 +144,11 @@ silently substitutes a newer artifact. The immutable plan binds:
   item 1, inferred; residual risk accepted in design
   [§7.7](../design/Talos_Configuration_and_Machine_Management_Design.md#77-poc-deployment-profile));
 - machine identity and assignment revision. The **machine identity** is the
-  machine record's SMBIOS UUID and the cluster it records the machine as a
-  member of (see `persistence-api.md`); it is a precondition as well as a
-  postcondition (below, §3.2 comparison 3) **(choice §10.26)**;
+  machine record's identity key, its SMBIOS UUID or, for a machine inventoried
+  without one, its Talos node ID, together with the Talos cluster ID of the
+  cluster it records the machine as a member of (see `persistence-api.md`); it
+  is a precondition as well as a postcondition (below, §3.2 comparison 3)
+  **(choice §10.26)**;
 - the machine's `Desired` release at plan creation. Plan creation refuses an
   `apply-config` plan, a revert included (§6.4), whose release is not the
   machine's `Desired`, so only the selected release is ever planned; an adopt
@@ -354,9 +356,11 @@ persistence's (see `persistence-api.md`).
 3. the evidence recorded under §3.1 was recorded for this plan by this
    controller instance, satisfies the plan's preconditions, is inside its bound
    maximum age or validity window, and no newer observation of the machine
-   contradicts it. The observed SMBIOS UUID must equal the bound one and the
-   node must report membership of the bound cluster, so a node reached at the
-   target's address that is not the planned machine is refused before any send
+   contradicts it. The observed identity must match the bound one under the
+   machine's identity key: the bound SMBIOS UUID, or, for a machine recorded
+   by Talos node ID, that node ID and no SMBIOS UUID; and the node's Talos
+   cluster ID must equal the bound cluster's. A node reached at the target's
+   address that is not the planned machine is thus refused before any send
    **(choice §10.26)**. The observed configuration digest must equal the bound
    pre-dispatch digest; on a retry, where the evidence is recorded for the
    operation, it may instead equal the bound artifact's digest (DS row 023,
@@ -1300,9 +1304,9 @@ which the recovery start does not run (see `persistence-api.md`).
    `create`, and a key recreated under a lost key's name is not a recovery
    path (KL §5.3, §5.4). Applying a retained artifact and regenerating a
    release need different dependencies (design §7.8, §14.4).
-4. **Observe** machine identity, assignment, running version, configuration
-   digest, health and cluster membership for reachable targets, after step 1
-   (purpose `restoration`).
+4. **Observe** machine identity (its SMBIOS UUID, Talos node ID and Talos
+   cluster ID), assignment, running version, configuration digest and health
+   for reachable targets, after step 1 (purpose `restoration`).
 5. **Reclassify** restored pending operations under §5, never replaying a
    journal entry because it is pending. A restored operation never retries:
    its approval's epoch is not the current one (§5). One with no attempt ends
@@ -1318,8 +1322,9 @@ which the recovery start does not run (see `persistence-api.md`).
    accounts for but no response shows rejected.
 6. **Mark** each scope `ready`, `blocked` or `unresolved`, recording the
    missing dependency or evidence (§7.4). A `restoration` observation marks a
-   scope `ready` only when its SMBIOS UUID and cluster membership match the
-   machine record, the identity every plan binds (§2); one that shows another
+   scope `ready` only when the identity it shows matches the machine record
+   as comparison 3 of §3.2 requires, the identity every plan binds (§2); one
+   that shows another
    identity leaves the scope `blocked` on that mismatch **(choice §10.26)**.
    An observed digest that the restored `Applied` does not explain is drift (§6), not grounds for an apply, even when
    it matches a restored release's artifact (§7.1 item 3).
@@ -1338,8 +1343,8 @@ release is not blanket approval for pending mutations.
 | --- | --- | --- |
 | pre-restore unaccounted | set at entry; a request sent before the restore may still land | the step 1 accounting decision, to one of the next three |
 | `unresolved` | a restored operation on the scope is `unresolved` | its resolution under §4 and §5, then re-marking |
-| `blocked` | the `restoration` observation failed or showed an SMBIOS UUID or cluster membership other than the machine record's, or a dependency to apply the machine's `Desired` release is missing: its release record, its artifact's key version at or above the decryption floor and decryptable by the executor identity, or the executor's operation credentials (§3.1 item 2) | a later successful `restoration` observation whose identity matches, for a failed or mismatched one; the dependency restored or repaired, or a newly published release selected as `Desired` whose dependencies are present; then re-marking |
-| `ready` | accounted, no operation holds the scope, the dependencies above present, a `restoration` observation whose basis (§4.1) follows step 1 and whose SMBIOS UUID and cluster membership match the machine record (choice §10.26) | release |
+| `blocked` | the `restoration` observation failed or showed a machine identity other than the machine record's (choice §10.26), or a dependency to apply the machine's `Desired` release is missing: its release record, its artifact's key version at or above the decryption floor and decryptable by the executor identity, or the executor's operation credentials (§3.1 item 2) | a later successful `restoration` observation whose identity matches, for a failed or mismatched one; the dependency restored or repaired, or a newly published release selected as `Desired` whose dependencies are present; then re-marking |
+| `ready` | accounted, no operation holds the scope, the dependencies above present, a `restoration` observation whose basis (§4.1) follows step 1 and whose machine identity matches the machine record (choice §10.26) | release |
 | released | released in the current epoch | recovery-mode exit, or a new entry |
 
 A machine inventoried after entry starts pre-restore unaccounted, like every
@@ -1729,10 +1734,13 @@ fail:
   preceding it, with the unlocked control, and a publication after commitment
   leaving the operation's attempt admitted (§2, §3.2 comparison 2, §3.3);
 - a commitment and a retry's attempt each refused, with nothing sent, when the
-  §3.1 evidence shows an SMBIOS UUID other than the bound one or no membership
-  of the bound cluster; and a scope left `blocked`, not `ready`, by a
-  `restoration` observation showing another identity, then marked `ready`
-  after a matching one (§3.2 comparison 3, §7.4, choice §10.26);
+  §3.1 evidence shows an SMBIOS UUID other than the bound one, none for a
+  machine recorded by SMBIOS UUID, one for a machine recorded by Talos node
+  ID, another Talos node ID for such a machine, or another Talos cluster ID;
+  each SMBIOS case against a stubbed Talos response, since the fixture's nodes
+  report none; and a scope left `blocked`, not `ready`, by a `restoration`
+  observation showing another identity, then marked `ready` after a matching
+  one (§3.2 comparison 3, §7.4, choice §10.26);
 - drift detection (including no record from a read begun before an `Applied`
   change, none opened or closed by a read that a recorded higher-basis read
   supersedes, and a record opened with a `failed` operation), freeze, adoption record (success, stale observation,
@@ -1960,23 +1968,55 @@ conservative option; those that do not say so. Each is marked in place as
     unevidenced. Alternatives: fail on the first contradiction of any
     postcondition, as the prior text did; or a window for every postcondition,
     which only delays outcomes already known.
-26. **Machine identity is a precondition: the node's SMBIOS UUID and cluster
-    membership must match the machine record before any send and before a
+26. **Machine identity is a precondition: the node's identity key and Talos
+    cluster ID must match the machine record before any send and before a
     scope is `ready`** (§2, §3.2 comparison 3, §7.3 step 6, §7.4). As a
     postcondition only, a route that reaches another node, for instance after
     address reuse, would configure it and detect the mismatch afterwards, and
     any successful `restoration` read would make a scope `ready` whichever
-    node answered. The UUID is the key the machine record is already
-    inventoried under (see `persistence-api.md`). Owner decision, 2026-09-27
-    (ginsys/bronzeward#20). No investigation read the SMBIOS UUID or the
-    cluster membership through the Talos API, nor what a Talos node in the
-    Docker fixture reports, so the comparison is unevidenced; a fixture whose
-    nodes report none, or the same one, cannot run S1's inventory or this
-    check. Residuals: a node swapped between the evidence read and the send,
-    and clones sharing a UUID, which the PoC cannot inventory. Alternatives: a
-    Bronzeward-issued per-machine marker written into the configuration, which
-    is stronger against clones but a new mechanism with no evidence; or
-    disclosure only.
+    node answered. Owner decision, 2026-09-27 (ginsys/bronzeward#20), for the
+    precondition; the identity it compares, owner decision, 2 October 2026
+    (ginsys/bronzeward#22):
+    - **The identity key is fixed at inventory, per machine.** It is the
+      machine's SMBIOS UUID when the machine reports one, and otherwise its
+      Talos node ID (see `persistence-api.md`). There is no fallback at read
+      time: a machine recorded by SMBIOS UUID whose node reports none, or
+      whose identity read fails, is refused, never compared by node ID, so a
+      failing read cannot weaken the check; and a machine recorded by node ID
+      whose node reports an SMBIOS UUID is refused as well, so a machine that
+      reports one is held to it.
+    - **The cluster is compared by its Talos cluster ID**, the value the
+      cluster record holds (see `persistence-api.md`), against the node's
+      `Infos.cluster.talos.dev` resource. Talos describes it as the cluster's
+      globally unique identifier, distinct from the shared `cluster.secret`
+      (machinery v1.13.6, `config/types/v1alpha1/v1alpha1_types.go`).
+    - **What each reports.** The node ID is Talos's `Identities.cluster.talos.dev`
+      value, random, kept across reboots and reset on a wipe (machinery
+      v1.13.6, `resources/cluster/identity.go`); the SMBIOS UUID is the
+      `systeminformation` resource. On the Docker fixture (Talos v1.13.6,
+      platform `container`) `talosctl get systeminformation` returns no
+      resource on either node, `get identity` a distinct node ID per node, and
+      `get info` one cluster ID on both. On one bare-metal node of the
+      operator's office cluster (Talos v1.13.8) all three are present. Each
+      was read with `talosctl` under `os:admin`, 2 October 2026, not yet
+      through the application's read-only client, which #22 and #26 show.
+    - **Limits.** The fixture exercises only the node-ID key; the SMBIOS-UUID
+      key is checked against a stubbed Talos response until a scenario runs on
+      hardware. A wipe gives a node-ID machine a new node ID, so it is refused
+      until it is inventoried again; the PoC excludes reset and reuse. SMBIOS's
+      nil and all-ones values count as a reported UUID, so a machine reporting
+      one cannot be inventoried under either key, nor can clones sharing a
+      UUID. Two clusters generated from one Talos secrets bundle share a
+      cluster ID and a certificate authority, so the cluster comparison cannot
+      tell them apart; the machine key still does. A node swapped between the
+      evidence read and the send stays a residual.
+    - **Alternatives.** The SMBIOS UUID only, which the fixture cannot report,
+      leaving S1's inventory and this check unrunnable there; the node ID
+      only, which is readable everywhere but drops the hardware key a reinstall
+      keeps; a fixture on the QEMU provisioner, which needs root and KVM; a
+      Bronzeward-issued per-machine marker written into the configuration,
+      stronger against clones but a new mechanism with no evidence; or
+      disclosure only.
 
 ## 11. Traceability
 
