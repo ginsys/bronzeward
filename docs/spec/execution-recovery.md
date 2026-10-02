@@ -1991,8 +1991,11 @@ conservative option; those that do not say so. Each is marked in place as
       whose node reports an SMBIOS UUID is refused as well, so a machine that
       reports one is held to it. A node reports none when its
       `systeminformation` read succeeds and returns no resource, as on the
-      fixture; a transport, authorization or any other error is a failed
-      read, and refuses whichever key the machine is recorded by.
+      fixture; an error any identity read returns on a connection the node
+      has accepted is a failed read, and refuses whichever key the machine is
+      recorded by. A credential the node refuses, or an endpoint that does not
+      answer, fails before any read, as the access failure
+      `persistence-api.md` defines.
     - **The cluster is compared by its Talos cluster ID**, the value the
       cluster record holds (see `persistence-api.md`), against the node's
       `Infos.cluster.talos.dev` resource. Talos describes it as the cluster's
@@ -2015,8 +2018,9 @@ conservative option; those that do not say so. Each is marked in place as
       nil and all-ones values count as a reported UUID: the first machine
       reporting one is inventoried under it, and a second machine reporting
       the same value, like a clone sharing a UUID, cannot be inventoried under
-      either key, and reached at the first's endpoint would pass its
-      comparison. Two
+      it; recorded under its node ID instead, it is refused at every
+      comparison, since its node reports a UUID; and reached at the first's
+      endpoint it would pass the first's comparison. Two
       clusters generated from one Talos secrets bundle share a cluster ID and
       a certificate authority, so only the first can be recorded; the second
       is refused at inventory. A node swapped between the

@@ -432,8 +432,11 @@ They are held apart **(choice §17.29)**.
   its cluster's record, the identity execution and recovery's choice §10.26
   defines. For a machine recorded by SMBIOS UUID, a different or absent UUID;
   for one recorded by Talos node ID, a different node ID or any reported
-  SMBIOS UUID; for either, an identity read that fails (an error; a `systeminformation` read
-  that succeeds with no resource is a node reporting none), or a node that accepts
+  SMBIOS UUID; for either, an identity read that fails (an error one of the three reads
+  returns on a connection the node accepted; a credential the node refuses or
+  an endpoint that does not answer is the failure below, and a
+  `systeminformation` read that succeeds with no resource is a node reporting
+  none), or a node that accepts
   this credential but reports another Talos cluster ID (possible only where
   clusters share a Talos certificate authority): each fails the ingestion with
   `409 machine-identity-mismatch`, as below, and nothing read is kept. A node behind another certificate authority, or another cluster's
@@ -1062,7 +1065,9 @@ different idempotency keys cannot both commit. It is design §8.5's detection
 of a duplicate SMBIOS UUID, never a merge. Design §4.4 calls hardware evidence
 "not an infallible primary key": SMBIOS's nil and all-ones values are
 accepted as a UUID, so a second machine reporting the value of one already
-recorded, like a clone sharing a UUID, cannot be inventoried in the PoC.
+recorded, like a clone sharing a UUID, cannot be inventoried under it;
+recorded under its node ID instead, it is refused at every comparison below,
+since its node reports a UUID, so it cannot be used in the PoC.
 A Talos node ID is an opaque string accepted as Talos prints it (44
 alphanumeric characters on the nodes read for choice §10.26); it is compared
 byte for byte, never normalised. The
