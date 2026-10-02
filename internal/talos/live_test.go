@@ -15,6 +15,8 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -140,6 +142,7 @@ func TestLiveRoleProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer admin.Close()
+	configs := map[string][]byte{}
 	for _, role := range []string{"os:reader", "os:operator", "os:admin"} {
 		resp, err := admin.GenerateClientConfiguration(ctx, &machine.GenerateClientConfigurationRequest{
 			Roles:  []string{role},
@@ -152,16 +155,35 @@ func TestLiveRoleProbe(t *testing.T) {
 		if len(msgs) != 1 || len(msgs[0].GetTalosconfig()) == 0 {
 			t.Fatalf("%s: %d answers", role, len(msgs))
 		}
-		r, err := Dial(ctx, msgs[0].GetTalosconfig(), ep)
+		configs[role] = msgs[0].GetTalosconfig()
+	}
+	// probe reads the version and the machine configuration with a talosconfig.
+	probe := func(tc []byte) (verr, merr error) {
+		r, err := Dial(ctx, tc, ep)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, verr := r.Version(ctx)
-		_, merr := r.MachineConfig(ctx)
-		r.Close()
+		defer r.Close()
+		_, verr = r.Version(ctx)
+		_, merr = r.MachineConfig(ctx)
+		return verr, merr
+	}
+	// PA §3.3, §16: a reader or operator reads the version but is refused the MachineConfig
+	// resource with PermissionDenied, so the credential must be os:admin.
+	refused := func(verr, merr error) bool { return verr == nil && status.Code(merr) == codes.PermissionDenied }
+	for _, role := range []string{"os:reader", "os:operator"} {
+		verr, merr := probe(configs[role])
 		t.Logf("role probe %s: Version error=%v; MachineConfig error=%v", role, verr, merr)
-		if role == "os:admin" && (verr != nil || merr != nil) {
-			t.Fatal("os:admin cannot read: the probe is broken")
+		if !refused(verr, merr) {
+			t.Errorf("%s: Version error %v, MachineConfig error %v; want the version and PermissionDenied", role, verr, merr)
 		}
+	}
+	verr, merr := probe(configs["os:admin"])
+	if verr != nil || merr != nil {
+		t.Fatalf("os:admin cannot read (Version %v, MachineConfig %v): the probe is broken", verr, merr)
+	}
+	// The control: the os:admin configuration in the os:reader slot fails the assertion.
+	if refused(verr, merr) {
+		t.Fatal("control: the os:admin configuration passed as refused; the assertion cannot fail")
 	}
 }
