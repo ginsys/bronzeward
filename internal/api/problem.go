@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/ginsys/bronzeward/internal/staging"
 )
 
 // titles holds every problem code this package answers (persistence-api.md §9.4), with its title.
@@ -14,6 +16,7 @@ var titles = map[string]string{
 	"identity-revoked":         "The identity is revoked",
 	"not-found":                "No such resource or route",
 	"conflict":                 "The resource refuses the act in its current state",
+	"ingestion-abandoned":      staging.AbandonedTitle,
 	"idempotency-key-reused":   "The idempotency key was used for another request",
 	"idempotency-key-required": "An Idempotency-Key header is required",
 	"precondition-required":    "An If-Match header is required",

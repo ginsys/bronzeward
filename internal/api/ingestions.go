@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/ingest"
@@ -127,7 +128,11 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	}
 	c := staging.Claim{ID: id.New(id.Ingestion), Mode: in.Staging, Cluster: cluster, Machine: in.Machine, Gen: 1}
 	timers := staging.Timers{Lease: a.d.timers.Lease, AbsoluteExpiry: a.d.timers.AbsoluteExpiry}
-	if err := staging.Create(ctx, tx, a.d.owner, timers, c, q.principal.ID, q.key); err != nil {
+	owner := a.d.owner
+	if a.o.noEpochTerm { // the control: the process takes the current epoch as its own, so the term always holds
+		owner.Epoch = q.epoch
+	}
+	if err := staging.Create(ctx, tx, owner, timers, c, q.principal.ID, q.key); err != nil {
 		return result{}, err
 	}
 	// The operation is the claim's, one to one: its owner, generation, epoch and lease (§5.1).
@@ -147,4 +152,98 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	return result{status: http.StatusAccepted, location: prefix + "/operations/" + op,
 		body: map[string]string{"operation": op, "ingestion": c.ID}, subjects: []string{op, c.ID, in.Draft, in.Machine},
 		operation: op, afterCommit: func() { a.startRunner(j) }}, nil
+}
+
+// ingestionBody is the ingestion resource (§9.2): its staging claim as every read treats it
+// (compilation §3.5) and its ingest operation. The owner string, the payload and its digest are
+// never answered.
+type ingestionBody struct {
+	ID              string    `json:"id"`
+	Kind            string    `json:"kind"`
+	Mode            string    `json:"mode"`
+	State           string    `json:"state"`
+	Machine         string    `json:"machine"`
+	Draft           string    `json:"draft"`
+	Operation       string    `json:"operation"`
+	OwnerGeneration int64     `json:"ownerGeneration"`
+	LeaseUntil      time.Time `json:"leaseUntil"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+const selectIngestion = `SELECT c.id, c.kind, c.mode, c.state, c.machine, o.draft, o.id, c.owner_gen, c.lease_until, c.expires_at,
+		c.created_at
+	FROM (SELECT id, kind, mode, ` + staging.EffectiveStateSQL + ` AS state, machine, owner_gen, lease_until, expires_at, created_at
+		FROM staging_claim) c
+	JOIN operation o ON o.ingestion = c.id
+	WHERE c.id = $1`
+
+func readIngestion(ctx context.Context, tx *sql.Tx, claim string) (ingestionBody, error) {
+	var b ingestionBody
+	err := tx.QueryRowContext(ctx, selectIngestion, claim).Scan(&b.ID, &b.Kind, &b.Mode, &b.State, &b.Machine, &b.Draft, &b.Operation,
+		&b.OwnerGeneration, &b.LeaseUntil, &b.ExpiresAt, &b.CreatedAt)
+	return b, err
+}
+
+var getIngestion = item(id.Ingestion, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
+	b, err := readIngestion(ctx, tx, v)
+	return "", b, err
+})
+
+// POST /ingestions/{id}/abandonments is an operator's abandonment (§9.2, compilation §3.2), T11:
+// a claim that is live, or that a read already treats as abandoned, is written abandoned with its
+// payload cleared, and its running ingest operation fails ingestion-abandoned with its terminal
+// event (§8.2). It is not owner-fenced: a runner still holding the claim is refused at its next
+// statement. The claim is locked before its operation, as every claim transaction takes them.
+func ingestionAbandonment() effectRoute {
+	return effectRoute{action: "ingestion.abandon", input: func() input { return &abandonInput{} }, effect: abandonIngestion}
+}
+
+type abandonInput struct{}
+
+func (*abandonInput) check(*API) error { return nil }
+
+func abandonIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
+	claim := q.r.PathValue("id")
+	notFound := refuse(http.StatusNotFound, "not-found", "no such ingestion")
+	if id.MustHave(claim, id.Ingestion) != nil {
+		return result{}, notFound
+	}
+	var live bool
+	switch err := tx.QueryRowContext(ctx, `SELECT state IN ('held', 'resumed') FROM staging_claim WHERE id = $1 FOR UPDATE`,
+		claim).Scan(&live); {
+	case errors.Is(err, sql.ErrNoRows):
+		return result{}, notFound
+	case err != nil:
+		return result{}, err
+	case !live:
+		return result{}, refuse(http.StatusConflict, "conflict", "the ingestion has ended").with("ingestion", claim)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE staging_claim SET state = 'abandoned', payload = NULL, payload_digest = NULL
+		WHERE id = $1`, claim); err != nil {
+		return result{}, err
+	}
+	var op string
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM operation WHERE ingestion = $1 AND state = 'running' FOR UPDATE`,
+		claim).Scan(&op); {
+	case errors.Is(err, sql.ErrNoRows): // its operation has ended already: the claim alone is written
+	case err != nil:
+		return result{}, err
+	default:
+		doc := jsonOrNull(problemDoc(op, refuse(http.StatusConflict, "ingestion-abandoned", "an operator abandoned the ingestion")))
+		var n int
+		if err := tx.QueryRowContext(ctx, `UPDATE operation SET state = 'failed', error = $2::jsonb, owner = NULL, owner_epoch = NULL,
+			lease_until = NULL, last_event = last_event + 1 WHERE id = $1 RETURNING last_event`, op, doc).Scan(&n); err != nil {
+			return result{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO operation_event (operation, number, epoch, kind, entry, at)
+			VALUES ($1, $2, $3, 'ingest', '{"type": "failed", "code": "ingestion-abandoned"}', now())`, op, n, q.epoch); err != nil {
+			return result{}, err
+		}
+	}
+	b, err := readIngestion(ctx, tx, claim)
+	if err != nil {
+		return result{}, err
+	}
+	return result{status: http.StatusOK, body: b, subjects: []string{claim, b.Operation, b.Draft, b.Machine}}, nil
 }
