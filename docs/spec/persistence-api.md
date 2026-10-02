@@ -417,7 +417,9 @@ They are held apart **(choice §17.29)**.
   client dials only the endpoint chosen above (the machine's, or the plan's
   route) and sends no `node` metadata, whatever the document names.
 - **What is kept.** The value lives only in the memory of the process that read
-  it, for one connection. It is never stored in the database, logged, returned
+  it, for the use it was read for: an ingestion, a plan-less observation, or a
+  dispatch from its evidence observation through its last attempt, discarded
+  when that use ends or is abandoned; a retry reads afresh (above). It is never stored in the database, logged, returned
   or quoted in an error (compilation §13), and never written to a file:
   neither reader passes it to a client as a file path.
 - **Identity before use.** Before using a configuration read for ingestion, the
