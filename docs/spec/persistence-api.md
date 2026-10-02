@@ -408,7 +408,15 @@ They are held apart **(choice §17.29)**.
   the `MachineConfig` resource). The same certificate can apply, reboot and
   reset; Talos cannot express a read-only grant for it. The bound on what
   ingestion does with it is the application's read-only Talos client, whose
-  source is held to an allowlist of machinery calls by test.
+  source is held to an allowlist of machinery calls by test. The executor
+  holds two clients built from it: every observation, with or without a plan
+  (`drift`, `restoration` and `recovery` have none), goes through the same
+  read-only client, so it needs no approved plan; the client that sends a
+  mutating request is used only by dispatch, after execution and recovery
+  §3.1's approval check, which also gates artifact decryption (design §13.1,
+  owner decision 2 October 2026). The provider cannot tell these uses apart:
+  the executor identity's read grant holds at any time, and the bound is the
+  application's, as for ingestion.
 - **What is used.** Only the talosconfig's certificate authority, client
   certificate and key. Its contexts' `endpoints` and `nodes` are ignored: the
   client dials only the endpoint chosen above (the machine's, or the plan's
@@ -2373,7 +2381,10 @@ each (design §7.7 consequences):
   `node` metadata; a `drift` and a `restoration` observation of a migrated
   machine without an endpoint dialling nothing and recording that cause, the
   scope left `blocked` until the replacement route sets one and a later
-  observation succeeds; and the
+  observation succeeds; the executor's observation client held to its read
+  allowlist by test, with a control that adds a mutating call and must then
+  fail, a `drift` observation succeeding with no plan, and the mutating
+  client refused for a plan whose approval was revoked; and the
   talosconfig's client key in compilation §15's scan of the database, logs,
   responses and temporary files, over successful, refused and interrupted
   ingestions, executor observations and dispatches, with a positive control.
@@ -2562,6 +2573,11 @@ design and evidence do not settle the question. Each is marked in place as
     backups; a credential stored per machine, which Talos does not have (one
     cluster authority signs for every node); a route accepting the
     talosconfig, which would carry a secret through the normal API.
+    Executor observations, which may have no plan, use a read-only client
+    and need no approval; only decryption and mutating requests do (§3.3;
+    owner decision, 2026-10-02). Alternatives: a separate observer identity,
+    holding the same mutation-capable credential; observations under the
+    ingestion identity, which can write secret generations.
 
 ## 18. Traceability
 

@@ -902,7 +902,7 @@ Direct emergency Talos access remains independent of this application policy and
 | Human/API client        | Authenticates to management API (§13.7); never receives broad OpenBao access.                |
 | API/UI                  | Manages metadata and workflow; cannot decrypt all compiled configs by default.               |
 | Compiler/publisher      | Can read selected secret generations and encrypt artifacts; cannot operate machines.         |
-| Executor                | Application checks approval before using scoped artifact decryption and Talos/Kubernetes credentials.                  |
+| Executor                | Application checks approval before artifact decryption and before any mutating Talos or Kubernetes request; observations read through a read-only Talos client (§13.2). |
 | Transport headend/relay | Moves traffic and enforces peer identity; should not become desired-state authority.         |
 | Maintenance machine     | Not mutually authenticated on direct insecure API; must be quarantined and network-isolated. |
 | Configured node         | Uses Talos mTLS and cluster-specific credentials.                                            |
@@ -915,11 +915,11 @@ OpenBao supports Kubernetes service-account and certificate authentication; use 
 |---|---|
 | Normal API/UI | Metadata and workflow access; no general secret browsing. |
 | Privileged ingestion/compiler | Protected ingestion, selected secret versions, artifact encryption; no machine-operation authority in this role. |
-| Executor | Scoped artifact decryption and operation-specific credentials, gated by application approval checks. |
+| Executor | Scoped artifact decryption and operation-specific credentials; decryption and mutating requests gated by application approval checks, observations by a read-only client. |
 | Dependency monitor | Sufficient metadata for §7.6 classifications, without secret-value access. |
 | Rotation/recovery tooling | Explicitly scoped creation or recovery capabilities; no implicit rollout approval. |
 
-Talos access credentials are per cluster and provider-held: each cluster's talosconfig is an operator-written secret that ingestion and the executor read at use, at a path apart from the secret generations ([persistence and API §3.3](../spec/persistence-api.md#33-talos-access); owner decision, 2 October 2026). Reading a machine configuration needs the `os:admin` Talos role, so ingestion's lack of machine-operation authority is enforced by its read-only Talos client, not by Talos or the provider.
+Talos access credentials are per cluster and provider-held: each cluster's talosconfig is an operator-written secret that ingestion and the executor read at use, at a path apart from the secret generations ([persistence and API §3.3](../spec/persistence-api.md#33-talos-access); owner decision, 2 October 2026). Reading a machine configuration needs the `os:admin` Talos role, so ingestion's lack of machine-operation authority is enforced by its read-only Talos client, not by Talos or the provider. The executor's observations (drift, restoration, recovery, and those taken for a plan) need the same credential without an approved plan to check; they use a read-only Talos client held to the same kind of allowlist, and the approval check gates artifact decryption and every mutating request (owner decision, 2 October 2026). The provider cannot tell the two uses apart; a separate observer identity was rejected because it would hold the same mutation-capable credential and change nothing the read-only client does not.
 
 OpenBao policies constrain paths and operations but do not know which database plan is approved. Encryption contexts are not a substitute for that application check. The controller's trust and deployment boundary must be explicit; naming separate roles does not prove isolation within one process.
 
