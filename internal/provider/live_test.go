@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/ginsys/bronzeward/internal/baotest"
+	"github.com/ginsys/bronzeward/internal/id"
 )
 
 // The live tests run the committed policy files against a real OpenBao (mise run dev-bao, CI's
@@ -34,6 +35,8 @@ const (
 	transitDigestDec = `path "transit/decrypt/bw-digest" { capabilities = ["update"] }`
 	decryptStaging   = `path "transit/decrypt/bw-staging" { capabilities = ["update"] }`
 	hmacDigestAlgo   = `path "transit/hmac/bw-digest/sha2-256" { capabilities = ["update"] }`
+	accessRead       = `path "secret/data/access/talos/*" { capabilities = ["read"] }`
+	accessUpdate     = `path "secret/data/access/talos/*" { capabilities = ["update"] }`
 )
 
 func live(t *testing.T) *baotest.Bao {
@@ -44,6 +47,7 @@ func live(t *testing.T) *baotest.Bao {
 		"hmac-digest": hmacDigest, "encrypt-artifact": encryptArtifact, "decrypt-artifact": decryptArtifact,
 		"read-transit-keys": readTransitKeys, "encrypt-digest": transitDigestEnc, "decrypt-digest": transitDigestDec,
 		"decrypt-staging": decryptStaging, "hmac-digest-algorithm": hmacDigestAlgo,
+		"access-read": accessRead, "access-update": accessUpdate,
 	} {
 		b.Policy(name, hcl)
 	}
@@ -418,4 +422,58 @@ func TestLiveIngestionCannotDecryptArtifact(t *testing.T) {
 		_, err := encrypt(t, b, tok, "bw-artifact", []byte("x"))
 		return err
 	})
+}
+
+// Talos access (persistence-api.md §3.3, §16): the operator writes a cluster's talosconfig at
+// access/talos/<cluster>; the ingestion and executor identities read it and nothing else may.
+// Neither reader may write, list or delete it.
+func TestLiveTalosAccess(t *testing.T) {
+	b := live(t)
+	cl := id.New(id.Cluster)
+	p, err := TalosAccessPath(cl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataPath := "/v1/secret/data/" + p
+	tc := "context: a\ncontexts:\n  a:\n    key: synthetic-" + NewValueID() + "\n"
+	status, body, err := b.Do(b.Admin(), http.MethodPost, dataPath, map[string]any{"data": map[string]string{"talosconfig": tc}})
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("the operator's write: status %d, %v: %s", status, err, body)
+	}
+
+	a, err := ingestionAs(t, b, b.Token("bw-ingestion")).TalosAccess(t.Context(), cl)
+	if err != nil {
+		t.Fatalf("ingestion's read: %v", err)
+	}
+	if v := a.Version(); string(a.Talosconfig()) != tc || v.Path != p || v.Version != 1 || v.CreatedTime.IsZero() {
+		t.Fatalf("ingestion read version %+v", v)
+	}
+	t.Logf("ingestion read version %d of %s", a.Version().Version, p)
+	if _, err := raw(t, b, b.Token("bw-executor"), http.MethodGet, dataPath, nil); err != nil {
+		t.Fatalf("the executor's read: %v", err)
+	}
+	t.Logf("the executor read it")
+
+	read := func(tok string) error { _, err := raw(t, b, tok, http.MethodGet, dataPath, nil); return err }
+	deniedWithout(t, b, "the compiler reading the Talos access", []string{"bw-compiler"}, "access-read", read)
+	mustDeny(t, "the fixture metadata identity reading the Talos access", read(b.Token("bw-metadata-only")))
+
+	for _, reader := range []string{"bw-ingestion", "bw-executor"} {
+		tok := b.Token(reader)
+		_, err := raw(t, b, tok, http.MethodPost, dataPath, map[string]any{"data": map[string]string{"talosconfig": "replaced"}})
+		mustDeny(t, reader+" writing the Talos access", err)
+		_, err = raw(t, b, tok, "LIST", "/v1/secret/metadata/access/talos", nil)
+		mustDeny(t, reader+" listing the Talos access paths", err)
+		_, err = raw(t, b, tok, http.MethodDelete, dataPath, nil)
+		mustDeny(t, reader+" deleting the Talos access", err)
+	}
+	if _, err := raw(t, b, b.Token("bw-ingestion", "access-update"), http.MethodPost, dataPath, map[string]any{"data": map[string]string{"talosconfig": tc}}); err != nil {
+		t.Fatalf("mechanism removed: ingestion plus update on the access path: %v", err)
+	}
+	t.Logf("mechanism removed: the ingestion policy plus update on access/talos/* wrote version 2")
+
+	if _, err := ingestionAs(t, b, b.Token("bw-ingestion")).TalosAccess(t.Context(), id.New(id.Cluster)); !errors.Is(err, ErrAbsent) {
+		t.Fatalf("another cluster's unwritten path: %v, want ErrAbsent", err)
+	}
+	t.Logf("an unwritten cluster's path is ErrAbsent")
 }
