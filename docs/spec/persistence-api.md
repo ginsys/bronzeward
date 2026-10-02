@@ -216,7 +216,8 @@ that the trigger fires **(choice §17.3)**.
 | Entity | Kind | Holds | Owner of semantics |
 | --- | --- | --- | --- |
 | Cluster | mutable, revisioned | name, endpoint, contract, status | this contract |
-| Machine | mutable, revisioned | `mch` id, hardware evidence with its SMBIOS UUID (unique, §7.3), cluster membership, current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
+| Machine | mutable, revisioned | `mch` id, hardware evidence with its SMBIOS UUID (unique, §7.3), cluster membership, Talos endpoint (§3.3), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
+| MachineEndpointChange | immutable | a machine's previous and new Talos endpoint, who changed it, role, epoch, time (§3.3) | this contract |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
 | Profile / ProfileRevision | mutable head / immutable | ordered fragment revision ids | this contract |
@@ -311,6 +312,71 @@ release, and any plan made before the record fails the baseline comparison
 afterwards (execution and recovery, comparison 2). A publication compiled on
 the old base but committing after the record is refused `409 stale-input`
 (§4.2).
+
+### 3.3 Talos access
+
+Design: [§7.1](../design/Talos_Configuration_and_Machine_Management_Design.md#71-responsibility-split-and-secret-ingress),
+[§13.1](../design/Talos_Configuration_and_Machine_Management_Design.md#131-trust-boundaries),
+[§13.2](../design/Talos_Configuration_and_Machine_Management_Design.md#132-provider-access-separation).
+
+Reading a node needs two things: where to reach it and a credential it accepts.
+They are held apart **(choice §17.29)**.
+
+- **The endpoint is per machine, in the database.** `POST /machines` requires
+  `talosEndpoint`: a DNS name or an IP literal (an IPv6 literal in brackets),
+  with an optional port, `50000` when absent; no scheme, path, user part or
+  whitespace, at most 255 octets. Every read of the node goes directly to it,
+  as endpoint and as target node, never through another node's proxy
+  (execution and recovery §3.5, choice §10.9 there). A plan binds the
+  endpoint current at its creation as its route.
+  `POST /machines/{id}/talos-endpoints` replaces it (an address change, or one
+  entered wrongly at inventory, which the SMBIOS UUID index would otherwise
+  leave unrecoverable): it records a MachineEndpointChange and its act
+  (§10.5), and changes no existing plan, whose route stays the one it bound.
+- **The credential is per cluster, in the provider.** Talos authorizes a client
+  certificate signed by the cluster's own certificate authority, so one
+  credential reaches every node of the cluster (design §13.1, "cluster-specific
+  credentials"); a per-machine credential would be the same one copied. Each
+  cluster's Talos client configuration (a `talosconfig` document) is the KV v2
+  secret `secret/data/access/talos/<cluster id>`, data
+  `{"talosconfig": "<document>"}`. Its path is derived from the cluster's id
+  and no request names it, so no request can point a read at another secret.
+  The operator writes it with the provider's own tooling (`bao kv put`) under
+  an administrative identity, before the cluster's first `source: machine`
+  ingestion; rotating it is writing a new version. No Bronzeward identity
+  writes, lists or deletes it, and no route accepts it: the normal API never
+  carries a secret value (compilation §1).
+- **Who reads it.** The ingestion identity, for a `source: machine` ingestion,
+  and the executor identity, for its observations and dispatch (execution and
+  recovery §3.1 item 2), each read its latest version at use and record that
+  version, never the value. The path is disjoint from the secret generations
+  under `secret/data/gen/*`, so the ingestion identity still never reads what
+  it creates (compilation §1, choice §16.1 there). The compiler, the
+  dependency monitor and the normal API cannot read it.
+- **What it can do.** Reading a node's machine configuration needs the
+  `os:admin` Talos role, measured on the fixture (`internal/talos`
+  `TestLiveRoleProbe`, Talos v1.13.6: `os:reader` and `os:operator` are refused
+  the `MachineConfig` resource). The same certificate can apply, reboot and
+  reset; Talos cannot express a read-only grant for it. The bound on what
+  ingestion does with it is the application's read-only Talos client, whose
+  source is held to an allowlist of machinery calls by test.
+- **What is kept.** The value lives only in the memory of the process that read
+  it, for one connection. It is never stored in the database, logged, returned
+  or quoted in an error (compilation §13).
+- **Identity before use.** Before using a configuration read for ingestion, the
+  ingestion reads the node's SMBIOS UUID on the same connection and compares
+  it with the machine record; a different or absent UUID fails the `ingest`
+  operation with `409 machine-identity-mismatch` and nothing read is kept.
+  Dispatch has execution and recovery's own comparison (its §3.2
+  comparison 3). A node swapped between the identity read and the
+  configuration read is the residual its choice §10.26 states.
+- **Failure.** An absent secret, one this identity cannot read, a document
+  that is not a usable talosconfig, or an endpoint that does not answer fails
+  the operation with `503 talos-access-unavailable`, naming the cluster or
+  machine and never a value; nothing is committed. A restore of the provider
+  to an older snapshot can bring back a superseded credential; if Talos no
+  longer accepts it, reads fail the same way until the operator writes a
+  current one.
 
 ## 4. Revisions and optimistic concurrency
 
@@ -1087,7 +1153,8 @@ idempotency and conflict behavior.
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/takeovers` (a further mark on a staged ingestion; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
-| `POST /clusters`, `POST /machines` (inventory for an existing cluster) | 201 | `author`, human only (§10.3) |
+| `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
+| `POST /machines/{id}/talos-endpoints` (replace a machine's Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
@@ -1272,12 +1339,14 @@ HTTP/1.1 200 OK
 {"id": "mch_tqhcznunhyle4hnxru5hkt35uq",
  "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
  "hardware": {"smbiosUuid": "...", "serial": "..."},
+ "talosEndpoint": "10.55.0.3:50000",
  "desired": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
  "applied": {"release": "rel_uxpkmwd6ckxmj4z75j7y2mcxb4", "source": "operation"},
  "frozen": false, "scopeState": "normal", "openDrift": null}
 ```
 
-`source` is `machine` to read the configuration from the node, or `document`
+`source` is `machine` to read the configuration from the node, at the
+machine's Talos endpoint with its cluster's Talos access (§3.3), or `document`
 with the text in a `document` field. `scopeState` is `normal`, or one of
 execution and recovery's recovery scope states while recovery mode is in
 effect.
@@ -1356,6 +1425,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
 | 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
+| 409 | `machine-identity-mismatch` | a `source: machine` ingestion read a node whose SMBIOS UUID is not the machine record's, or none (§3.3); nothing read is kept |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
@@ -1365,6 +1435,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
 | 501 | `not-implemented` | a §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
 | 503 | `dependency-unavailable` | the provider is sealed or unreachable, or authentication could not reach the identity provider or the database; nothing was committed |
+| 503 | `talos-access-unavailable` | a node read could not start: the cluster's Talos access configuration is absent, unreadable by the identity or not a usable talosconfig, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; nothing was committed |
 | 503 | `transient-conflict` | deadlock retries exhausted (§5) |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing was committed |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
@@ -2156,7 +2227,17 @@ each (design §7.7 consequences):
   meanwhile (§8.3);
 - that no request body reaches the database's data directory, write-ahead log
   or backups on the ingestion and draft routes, by the scan compilation §15
-  requires.
+  requires;
+- Talos access (§3.3): the ingestion and executor identities each reading
+  `secret/data/access/talos/<cluster id>`, and the compiler, metadata and
+  normal API identities refused it, with a control that grants the compiler
+  the read and must then succeed; the ingestion identity refused every
+  `secret/data/gen/*` read and every write under `secret/data/access/`; a
+  `source: machine` ingestion against a node whose SMBIOS UUID differs failing
+  `machine-identity-mismatch` with nothing kept; an absent secret and an
+  unreachable endpoint failing `talos-access-unavailable`; and the
+  talosconfig's client key in compilation §15's scan of the database, logs and
+  responses, with a positive control.
 
 Evidence gaps this contract carries rather than closes:
 
@@ -2330,6 +2411,18 @@ design and evidence do not settle the question. Each is marked in place as
     another only at that cluster's next publication, reviewed in its plan's
     diff. Alternatives: a library change in a draft of its own; a publication
     that covers every cluster using the changed fragment.
+29. **Talos access: the endpoint per machine in the database, the credential
+    per cluster in the provider at a path derived from the cluster's id,
+    written by the operator and read at use by the ingestion and executor
+    identities** (§3.3). Owner decision, 2026-10-02 (ginsys/bronzeward#22):
+    the secret provider holds management credentials (design §7.1), so the
+    credential gets the provider's versions, audit and backup pairing, and
+    each cluster's credential stays its own. Alternatives: one
+    deployment-wide talosconfig file named in the server's configuration,
+    which keeps a credential for every cluster outside the provider and its
+    backups; a credential stored per machine, which Talos does not have (one
+    cluster authority signs for every node); a route accepting the
+    talosconfig, which would carry a secret through the normal API.
 
 ## 18. Traceability
 
@@ -2338,6 +2431,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
 | §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28 |
+| §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.13.6); the provider read grant on `secret/data/access/talos/*` not measured (choice §17.29) |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
 | §5 transactions | §7.2, §7.4 | DB §4.2 rows 059, 061; [DB §6.3](../design/research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs); [DB §7](../design/research/20260924-database-semantics.md#7-limits); [DS §7](../design/research/20260925-dispatch-safety.md#7-limits) |

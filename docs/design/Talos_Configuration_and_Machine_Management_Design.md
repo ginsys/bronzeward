@@ -919,6 +919,8 @@ OpenBao supports Kubernetes service-account and certificate authentication; use 
 | Dependency monitor | Sufficient metadata for §7.6 classifications, without secret-value access. |
 | Rotation/recovery tooling | Explicitly scoped creation or recovery capabilities; no implicit rollout approval. |
 
+Talos access credentials are per cluster and provider-held: each cluster's talosconfig is an operator-written secret that ingestion and the executor read at use, at a path apart from the secret generations ([persistence and API §3.3](../spec/persistence-api.md#33-talos-access); owner decision, 2 October 2026). Reading a machine configuration needs the `os:admin` Talos role, so ingestion's lack of machine-operation authority is enforced by its read-only Talos client, not by Talos or the provider.
+
 OpenBao policies constrain paths and operations but do not know which database plan is approved. Encryption contexts are not a substitute for that application check. The controller's trust and deployment boundary must be explicit; naming separate roles does not prove isolation within one process.
 
 These are component identities inside the controller. The application roles that humans and automation hold are §13.7's and are distinct from them: the `publisher` application role grants no provider access of its own.

@@ -291,7 +291,9 @@ instance (the operation does not exist yet; §2):
 2. a use-time check, with its time, of the dependencies dispatch itself needs,
    under the executor identity: decryption of the bound artifact under the
    bound key identity and version, and the operation credentials for the
-   target.
+   target: its cluster's Talos access configuration, read at its latest
+   version, which the evidence records, never the value
+   ([persistence and API §3.3](persistence-api.md#33-talos-access)).
 
 Item 2 is deliberately narrow. The executor holds scoped artifact decryption
 and operation credentials, not compiler-level secret access (compilation
@@ -565,7 +567,8 @@ interrupted dispatches. If either fails there too, dispatch is not accepted and
 the selection returns to the owner.
 
 The plan binds the **route**, and in the PoC the only route allowed is the
-target machine's own endpoint; a plan naming the control plane's endpoint with
+target machine's own endpoint, the Talos endpoint on its machine record at the
+plan's creation ([persistence and API §3.3](persistence-api.md#33-talos-access)); a plan naming the control plane's endpoint with
 the worker as target node is refused at plan creation **(choice §10.9)**. E4
 exercised both (DS §2.1, row 015), and every late landing came through the
 control plane's proxy; the one row sent to the worker's endpoint did not land
