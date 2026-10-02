@@ -166,12 +166,18 @@ one synthetic secret outside the Talos schema's secret fields, in `machine.files
 
 **Steps.**
 
-1. `h-author` records the cluster and both machines (`POST /clusters`, `POST /machines`).
-2. `h-author` opens the import draft (`POST /drafts`) and keeps its ETag. It imports each node in
+1. `h-author` records the cluster and both machines (`POST /clusters`, `POST /machines`), each
+   machine with its own Talos endpoint.
+2. The fixture, acting as the operator, writes the `os:admin` talosconfig `bin/up` generated to the
+   cluster's Talos access path, `secret/data/access/talos/<cluster id>`, under the OpenBao
+   administrator ([PA §3.3](persistence-api.md#33-talos-access)). `bin/up` has loaded the
+   ingestion and executor policies, each granting `read` on `secret/data/access/talos/*` and
+   nothing else there.
+3. `h-author` opens the import draft (`POST /drafts`) and keeps its ETag. It imports each node in
    turn (`POST /ingestions` naming that draft, with `If-Match` its current ETag), marking the file
    content's path on the worker, and reads the draft's new ETag after each ingestion succeeds.
-3. Each ingestion's draft transaction commits and releases its claim.
-4. `bin/evidence` records the post-state and scans.
+4. Each ingestion's draft transaction commits and releases its claim.
+5. `bin/evidence` records the post-state and scans.
 
 The handover that follows the import, publishing the import draft and adopting each machine so that
 `Applied` holds its baseline, is S3's handover part
@@ -180,7 +186,7 @@ The handover that follows the import, publishing the import draft and adopting e
 **Clauses exercised.** C [§2.3](compilation.md#23-pipeline), [§3.1](compilation.md#31-two-modes),
 [§3.2](compilation.md#32-claim-states-and-timers), [§4.2](compilation.md#42-the-guard-e1-decision-4),
 [§13](compilation.md#13-failure-and-rejection-cases); PA [§3.2](persistence-api.md#32-the-import-base),
-[§5.1](persistence-api.md#51-fences-and-claims), [§6.4](persistence-api.md#64-orphans),
+[§3.3](persistence-api.md#33-talos-access), [§5.1](persistence-api.md#51-fences-and-claims), [§6.4](persistence-api.md#64-orphans),
 [§13.2](persistence-api.md#132-provider-write-succeeded-database-commit-failed).
 
 **Pass criteria.** Neither node's digest nor resource version changed, and no Talos mutation
@@ -207,8 +213,11 @@ configuration digest, equal to the pre-state; the executor identity's decryption
   another ingestion principal, and one from the old owner after a takeover (its older generation),
   each refused; the owner's own heartbeat after its lease lapsed refused, the claim unchanged; the
   owner's heartbeat while live extends the lease, the positive control. A crash inside the draft transaction: the
-  draft opened in step 2 is unchanged, with the ETag it had before the ingestion; no revision or
+  draft opened in step 3 is unchanged, with the ETag it had before the ingestion; no revision or
   entry the transaction wrote is committed, and the claim stays unreleased.
+- Talos access ([PA §3.3](persistence-api.md#33-talos-access)): each cause of
+  `talos-access-unavailable` and a node of the wrong identity, as PA §16 lists them, each ending the
+  ingestion with its claim abandoned and nothing read kept.
 - Automation on `POST /ingestions`: `403`.
 
 **Retained evidence.** Pre- and post-state digests and resource versions; one scan bundle per
@@ -827,6 +836,9 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: concurrent rotations of one service identity, and rotation racing its revocation, with the principal-lock control | *check* | #21 |
 | PA §16: a reissue after a restore refused for a service identity `deniedSubjects` lists | *check* | #29 |
 | PA §16: two inventory requests for one SMBIOS UUID under different keys, one refused | *check* | #22 |
+| PA §16 Talos access, ingestion: the read grants with the compiler control, the ingestion identity's refusals under `gen/*` and `access/`, both identity mismatches, every `talos-access-unavailable` cause with the error-text control, the version identity with the metadata-rewrite control, direct reads without `node` metadata, the client key in the scan | S1 negative controls plus *check* | #22 |
+| PA §16 Talos access, executor: its read at dispatch, recorded as path, version and `created_time` | S4 plus *check* | #26 |
+| PA §16 Talos access, endpoint: a replacement after plan creation leaving that plan bound to the old endpoint and binding later plans to the new one, change and act atomic, with the dispatch-time-resolution control; the replacement accepted in recovery mode | *check* | #22, #25, #29 |
 | PA §16: machine revisions allocated in commit order under concurrent writers, with the unlocked control | *check* | #26 |
 | PA §16: an event stream ended by its token's `exp`, resumption refused after revocation | S8 step 3 | #26 |
 | PA §16: no request body in the data directory, write-ahead log or backups | S1, S2 scans | #22, #23 |
