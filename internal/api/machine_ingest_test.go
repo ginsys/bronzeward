@@ -393,3 +393,25 @@ func TestMachineAccessErrorTextControl(t *testing.T) {
 		})
 	}
 }
+
+// §5.1: the access event commits under the claim's full fence, so a run whose claim lapsed (its
+// lease, here, before the heartbeat noticed) records nothing and never dials the node: the
+// operation keeps only its start, and the claim stays for the sweep.
+func TestMachineAccessEventFencedByTheClaim(t *testing.T) {
+	me := newMachineEnv(t)
+	op, j := me.startJob(t, map[string]any{"source": "machine", "document": nil})
+	mustExec(t, me.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, j.claim.ID)
+	me.runWith(t, options{}, j)
+	if evs := events(t, me.db, op); !slices.Equal(eventTypes(evs), []string{"started"}) {
+		t.Fatalf("events %v", evs)
+	}
+	if seen := me.node.Seen(); len(seen) != 0 {
+		t.Fatalf("%d node requests after the claim lapsed", len(seen))
+	}
+	if st, _, _ := claimRow(t, me.db, j.claim.ID); st != "held" {
+		t.Fatalf("claim %s", st)
+	}
+	if calls, _ := me.f.paths(); calls != 0 {
+		t.Fatalf("%d generation creates", calls)
+	}
+}

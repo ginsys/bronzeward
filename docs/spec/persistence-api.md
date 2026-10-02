@@ -433,8 +433,9 @@ They are held apart **(choice §17.29)**.
   defines. For a machine recorded by SMBIOS UUID, a different or absent UUID;
   for one recorded by Talos node ID, a different node ID or any reported
   SMBIOS UUID; for either, an identity read that fails (an error one of the three reads
-  returns on a connection the node accepted; a credential the node refuses or
-  an endpoint that does not answer is the failure below, and a
+  returns other than gRPC `Unavailable` or `DeadlineExceeded`; those are how a
+  credential the node refuses and an endpoint that does not answer surface, so
+  either code is the failure below whichever side ended the request, and a
   `systeminformation` read that succeeds with no resource is a node reporting
   none), or a node that accepts
   this credential but reports another Talos cluster ID (possible only where
