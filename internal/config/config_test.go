@@ -221,8 +221,8 @@ func TestProviderBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Provider != nil || c.Talos != nil {
-		t.Fatalf("absent blocks are not nil: %+v %+v", c.Provider, c.Talos)
+	if c.Provider != nil {
+		t.Fatalf("an absent block is not nil: %+v", c.Provider)
 	}
 	c, err = Load(strings.NewReader(base + authBlock + providerBlock))
 	if err != nil {
@@ -273,17 +273,10 @@ func TestProviderBlock(t *testing.T) {
 	}
 }
 
-func TestTalosBlock(t *testing.T) {
-	c, err := Load(strings.NewReader(base + authBlock + "talos: {talosconfig: /etc/bronzeward/talosconfig}\n"))
-	if err != nil || c.Talos == nil || c.Talos.Talosconfig != "/etc/bronzeward/talosconfig" {
-		t.Fatalf("%+v, %v", c.Talos, err)
-	}
-	for name, c := range map[string]struct{ in, want string }{
-		"empty block":   {"talos: {}\n", "talos.talosconfig is required"},
-		"unknown field": {"talos: {talosconfig: x, endpoints: [a]}\n", "field endpoints not found"},
-	} {
-		if _, err := Load(strings.NewReader(base + authBlock + c.in)); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: %v; want an error naming %q", name, err, c.want)
-		}
+// TestNoTalosBlock: the Talos credential is per cluster and read from the provider at use
+// (persistence-api §3.3), so a deployment-wide talosconfig file is refused, not ignored.
+func TestNoTalosBlock(t *testing.T) {
+	if _, err := Load(strings.NewReader(base + authBlock + "talos: {talosconfig: /etc/bronzeward/talosconfig}\n")); err == nil || !strings.Contains(err.Error(), "field talos not found") {
+		t.Fatalf("a talos block: %v", err)
 	}
 }
