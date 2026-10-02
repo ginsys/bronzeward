@@ -202,12 +202,14 @@ description = "Stop dev-db's and dev-bao's containers, which removes them and th
 # Both run with --rm, so stopping is removing. Returns once they are gone, so their ports are free
 # for the next mise run dev-db or dev-bao. They are shared by every worktree on this host.
 run = '''
+# Each query is assigned before it is tested, so a docker failure (no daemon, no permission) fails
+# the task under errexit instead of reading as an absent container.
 for c in bw-dev-pg bw-dev-bao; do
-  if [ -n "$(docker ps -q --filter "name=^$c\$")" ]; then
-    docker stop "$c" >/dev/null
-  fi
+  running=$(docker ps -q --filter "name=^$c\$")
+  [ -z "$running" ] || docker stop "$c" >/dev/null
   for _ in $(seq 30); do
-    [ -n "$(docker ps -aq --filter "name=^$c\$")" ] || continue 2
+    present=$(docker ps -aq --filter "name=^$c\$")
+    [ -n "$present" ] || continue 2
     sleep 1
   done
   echo "dev-down: $c was still present after 30s (docker ps -a; docker rm -f $c)" >&2
@@ -226,16 +228,29 @@ go build -o bin/oidc-fixture ./fixtures/oidc
 description = "Run the server on 127.0.0.1:8080 against dev-db and dev-bao, with the fixture OIDC issuer on 127.0.0.1:5556, until Ctrl-C; mise run dev-down removes the containers"
 depends = ["dev-db", "dev-bao", "build"]
 # examples/bronzeward.yaml's issuer, with a synthetic key generated once into .dev/ (gitignored).
-# migrate skips what is already applied, so it runs on every start. The issuer runs in the
-# background (where Ctrl-C does not reach it) and is stopped when the server exits; the containers
-# stay up for mise run go-db.
+# migrate skips what is already applied, so it runs on every start, but only while no server
+# answers on 8080: the containers are shared by every worktree, and the schema changes only with
+# the service stopped (persistence-api.md §11). The issuer runs in the background (where Ctrl-C
+# does not reach it), must answer its discovery document before the server starts, and is stopped
+# when the server exits; the containers stay up for mise run go-db.
 run = '''
+for port in 8080 5556; do
+  if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$port/"; then
+    echo "dev: 127.0.0.1:$port already answers (another mise run dev, perhaps in another worktree); stop it first" >&2
+    exit 1
+  fi
+done
 mkdir -p .dev
 [ -f .dev/oidc.key ] || bin/oidc-fixture keygen -out .dev/oidc.key
 bin/bronzeward migrate -config examples/bronzeward.yaml
 bin/oidc-fixture serve -key .dev/oidc.key -issuer http://127.0.0.1:5556 &
 issuer=$!
 trap 'kill "$issuer" 2>/dev/null || true' EXIT
+if ! curl -sf -o /dev/null --retry 10 --retry-connrefused --retry-delay 1 \
+  http://127.0.0.1:5556/.well-known/openid-configuration || ! kill -0 "$issuer" 2>/dev/null; then
+  echo "dev: the fixture issuer did not come up on 127.0.0.1:5556 (see its error above)" >&2
+  exit 1
+fi
 # Ctrl-C is how this task ends: exit 0 once the server has shut down, not as killed by a signal.
 trap 'exit 0' INT TERM
 echo 'dev: curl -i http://127.0.0.1:8080/livez' >&2
