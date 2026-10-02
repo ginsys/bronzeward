@@ -3,10 +3,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,6 +22,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/migrate"
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/server"
+	"github.com/ginsys/bronzeward/internal/staging"
 )
 
 func main() {
@@ -149,6 +152,11 @@ func serve(args []string) error {
 		}
 		ing = c
 	}
+	if cfg.Ingestion != nil {
+		if err := startSweep(startCtx, ctx, db, cfg.Ingestion.Sweep, log.Printf); err != nil {
+			return err
+		}
+	}
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners stop with the signal; a claim left held lapses with its lease.
@@ -168,5 +176,39 @@ func serve(args []string) error {
 			return err
 		}
 		return nil
+	}
+}
+
+// startSweep writes the due staging claims abandoned before the server serves, then every
+// interval until life ends (compilation §3.5). Every read already treats a due claim as
+// abandoned, so a late or failed periodic sweep delays only the clearing of its ciphertext.
+func startSweep(start, life context.Context, db *sql.DB, every time.Duration, logf func(string, ...any)) error {
+	n, err := staging.Sweep(start, db)
+	if err != nil {
+		return err
+	}
+	logSwept(logf, n)
+	go func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-life.Done():
+				return
+			case <-t.C:
+				n, err := staging.Sweep(life, db)
+				if err != nil && life.Err() == nil {
+					logf("%v", err)
+				}
+				logSwept(logf, n)
+			}
+		}
+	}()
+	return nil
+}
+
+func logSwept(logf func(string, ...any), n int) {
+	if n > 0 {
+		logf("staging: the sweep abandoned %d claims", n)
 	}
 }
