@@ -130,14 +130,14 @@ var (
 	})
 )
 
-const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.serial, m.frozen, m.scope_state, s.desired,
+const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.serial, m.talos_endpoint, m.frozen, m.scope_state, s.desired,
 		s.applied_release, s.applied_source
 	FROM machine m JOIN machine_state s ON s.machine = m.id`
 
 func scanMachine(r interface{ Scan(...any) error }) (machineBody, error) {
 	var b machineBody
 	var rel, source sql.NullString
-	err := r.Scan(&b.ID, &b.Cluster, &b.Hardware.SMBIOSUUID, &b.Hardware.Serial, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source)
+	err := r.Scan(&b.ID, &b.Cluster, &b.Hardware.SMBIOSUUID, &b.Hardware.Serial, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source)
 	if rel.Valid {
 		b.Applied = &applied{Release: rel.String, Source: source.String}
 	}

@@ -15,8 +15,9 @@ import (
 // The statements 0004's tests insert with; each takes the installation's epoch where it needs one.
 const (
 	insertCluster = `INSERT INTO cluster (id, name, endpoint, contract, created_at) VALUES ($1, $2, $3, $4, now())`
-	insertMachine = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, created_at)
-		VALUES ($1, $2, $3, $4, $5, now())`
+	// Every machine has a Talos endpoint (0006); these rows share one.
+	insertMachine = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, created_at)
+		VALUES ($1, $2, $3, $4, $5, '10.55.0.3:50000', now())`
 	insertMachineState = `INSERT INTO machine_state (machine, applied_release, applied_digest, applied_source, baseline_revision)
 		VALUES ($1, $2, $3, $4, $5)`
 	insertImportBase = `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
