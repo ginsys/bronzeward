@@ -1,11 +1,14 @@
 package ingest
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/ginsys/bronzeward/internal/provider"
 )
 
 // Staged is an encrypted staging claim's envelope (compilation.md §3): the sanitized document,
@@ -71,4 +74,64 @@ func (s Staged) Seal() (plaintext []byte, sum [32]byte, err error) {
 		return nil, sum, errors.New("ingest: the envelope could not be encoded")
 	}
 	return b, sha256.Sum256(b), nil
+}
+
+// errEnvelope refuses a staged payload that is not a complete envelope. Its text names no part
+// of the payload.
+var errEnvelope = errors.New("ingest: the staged payload is not a complete envelope")
+
+// Open is a resume's half of Seal (compilation §3.1): it checks plaintext against sum, the
+// digest stored beside the payload, refuses anything but a complete version-1 envelope, checks
+// the sanitized stream as authored, and only then constructs the sanitized value. It cannot run
+// the guard: the extracted values are in the provider. Every declared name must have the
+// generation the draft transaction records for it, and every generation a declared name.
+func Open(plaintext []byte, sum [32]byte) (Staged, error) {
+	if sha256.Sum256(plaintext) != sum {
+		return Staged{}, errors.New("ingest: the staged payload does not match its digest")
+	}
+	var e envelope
+	dec := json.NewDecoder(bytes.NewReader(plaintext))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&e); err != nil || dec.More() {
+		return Staged{}, errEnvelope
+	}
+	if e.Version != 1 || e.Documents == "" || e.Baseline.Ciphertext == "" || e.Baseline.DigestKey == "" {
+		return Staged{}, errEnvelope
+	}
+	digest, err1 := digest32(e.Baseline.Digest)
+	conf, err2 := digest32(e.Baseline.Configuration)
+	if err1 != nil || err2 != nil {
+		return Staged{}, errEnvelope
+	}
+	docs, err := parseStream([]byte(e.Documents))
+	if err != nil {
+		return Staged{}, errEnvelope
+	}
+	if err := validate(docs, e.Declarations); err != nil {
+		return Staged{}, errEnvelope
+	}
+	if len(e.Generations) != len(e.Declarations.References) {
+		return Staged{}, errEnvelope
+	}
+	for name, path := range e.Generations {
+		if _, ok := e.Declarations.References[name]; !ok || path == "" {
+			return Staged{}, errEnvelope
+		}
+	}
+	return Staged{
+		Sanitized:   newSanitized([]byte(e.Documents), e.Declarations),
+		Generations: e.Generations,
+		Baseline: Baseline{Ciphertext: provider.Ciphertext(e.Baseline.Ciphertext), Digest: digest,
+			DigestKey: e.Baseline.DigestKey, Configuration: conf},
+	}, nil
+}
+
+func digest32(s string) ([32]byte, error) {
+	var d [32]byte
+	b, err := hex.DecodeString(s)
+	if err != nil || len(b) != len(d) {
+		return d, errEnvelope
+	}
+	copy(d[:], b)
+	return d, nil
 }
