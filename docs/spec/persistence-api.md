@@ -386,8 +386,11 @@ They are held apart **(choice §17.29)**.
   (possible only where clusters share a Talos certificate authority), fails the
   ingestion with `409 machine-identity-mismatch`, as below, and nothing read
   is kept. A node behind another certificate authority, or another cluster's
-  talosconfig written at this cluster's path, fails the mutual TLS handshake
-  before any read: a credential Talos refuses, below.
+  talosconfig under another certificate authority written at this cluster's
+  path, fails the mutual TLS handshake before any read: a credential Talos
+  refuses, below. Under a shared certificate authority, another cluster's
+  talosconfig reaches this cluster's node and reads it; the identity check
+  then passes, since the node is the recorded one, and the ingestion succeeds.
   Dispatch has execution and recovery's own comparison (its §3.2
   comparison 3). Reading either through the Talos API is unevidenced, as that
   choice states, and a node swapped between the identity read and the
@@ -2276,7 +2279,8 @@ each (design §7.7 consequences):
   `talos-access-unavailable` (an absent secret, the reading identity's read
   denied, OpenBao sealed and partitioned, a malformed talosconfig carrying a
   synthetic client key, a well-formed credential Talos refuses, another
-  cluster's talosconfig at this cluster's path, an endpoint that does not
+  cluster's talosconfig under a certificate authority the node does not trust
+  at this cluster's path, an endpoint that does not
   answer), through both readers: for an ingestion, failing with it, the
   claim `abandoned` and the operation `failed` with its terminal event and no
   generation; for dispatch, a failed use-time check, with no operation
