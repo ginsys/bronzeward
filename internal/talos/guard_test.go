@@ -31,6 +31,7 @@ import (
 const (
 	machineryClient = "github.com/siderolabs/talos/pkg/machinery/client"
 	machineryConfig = "github.com/siderolabs/talos/pkg/machinery/resources/config"
+	clientConfig    = "github.com/siderolabs/talos/pkg/machinery/client/config"
 	cosiSafe        = "github.com/cosi-project/runtime/pkg/safe"
 	thisPackage     = "github.com/ginsys/bronzeward/internal/talos"
 )
@@ -139,7 +140,6 @@ var surface = []string{
 	"Config.MarshalText", "Config.MarshalYAML", "Config.ResourceVersion", "Config.String",
 	"Dial", "ParseEndpoint",
 	"Reader", "Reader.Close", "Reader.MachineConfig", "Reader.Version",
-	"Target", "Target.Endpoint", "Target.Node",
 	"reader.Close", "reader.MachineConfig", "reader.Version",
 	"requestError.Error", "requestError.GRPCStatus", "requestError.Unwrap",
 }
@@ -172,10 +172,14 @@ var denied = []string{
 	"AddFinalizer", "RemoveFinalizer",
 }
 
-// allowedSelectors are, per imported package, the only names this package may use from it.
+// allowedSelectors are, per imported package, the only names this package may use from it. The
+// client is built from a talosconfig's bytes and one endpoint: no option that reads a file
+// (WithConfigFromFile, WithDefaultConfig) or sends node metadata (WithNode, WithNodes) is listed
+// (persistence-api §3.3).
 var allowedSelectors = map[string][]string{
-	machineryClient: {"Client", "New", "WithConfigFromFile", "WithEndpoints", "WithNode"},
+	machineryClient: {"Client", "New", "WithConfigContext", "WithEndpoints"},
 	machineryConfig: {"ActiveID", "MachineConfig"},
+	clientConfig:    {"Context", "FromBytes"},
 	cosiSafe:        {"StateGetByID"},
 }
 
@@ -525,6 +529,8 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 		"client behind any":     {"func (r *reader) f() any { return r.api }\n", []string{"the api field is used bare"}},
 		"other safe call":       {"func (r *reader) f() { safe.StateList[*cfgres.MachineConfig](nil, nil, nil) }\n", []string{"safe.StateList is not allowlisted"}},
 		"other client option":   {"var _ = client.WithDefaultConfig\n", []string{"client.WithDefaultConfig is not allowlisted"}},
+		"talosconfig path":      {"var _ = client.WithConfigFromFile\n", []string{"client.WithConfigFromFile is not allowlisted"}},
+		"node metadata":         {"func f(ctx context.Context) { _ = client.WithNode(ctx, \"n\"); _ = client.WithNodes(ctx, \"n\") }\n", []string{"client.WithNode is not allowlisted", "client.WithNodes is not allowlisted"}},
 		"client.New escapes":    {"func f(ctx context.Context) any { c, _ := client.New(ctx); return c }\n", []string{"escapes"}},
 		"client.New elsewhere":  {"type other struct{ api any }\nfunc f(ctx context.Context) any { c, _ := client.New(ctx); return other{api: c} }\n", []string{"stored other than in reader's api field"}},
 		"client.New sub-client": {"func f(ctx context.Context) { c, _ := client.New(ctx); _ = c.MachineClient }\n", []string{"MachineClient is denied", "used as c.MachineClient"}},

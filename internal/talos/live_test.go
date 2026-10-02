@@ -14,27 +14,33 @@ import (
 
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/client"
+	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-// The live tests read the fixture's node (fixtures/bin/up), by hand:
+// The live tests read the fixture's worker (fixtures/bin/up) directly at its own endpoint, by hand:
 //
-//	BW_TEST_TALOSCONFIG=fixtures/.state/talosconfig BW_TEST_TALOS_ENDPOINT=10.55.0.2 \
-//	BW_TEST_TALOS_NODE=10.55.0.3 go test -count=1 -v -run Live ./internal/talos
+//	BW_TEST_TALOSCONFIG=fixtures/.state/talosconfig BW_TEST_TALOS_ENDPOINT=10.55.0.3 \
+//	go test -count=1 -v -run Live ./internal/talos
 //
-// They skip without those three variables; CI has no fixture.
+// They skip without those two variables; CI has no fixture. The test reads the talosconfig file
+// and passes its bytes, as the provider read hands them over; the package never reads a path.
 
-func liveTarget(t *testing.T) (string, Target) {
+func liveTarget(t *testing.T) ([]byte, string) {
 	t.Helper()
-	tc, ep, node := os.Getenv("BW_TEST_TALOSCONFIG"), os.Getenv("BW_TEST_TALOS_ENDPOINT"), os.Getenv("BW_TEST_TALOS_NODE")
-	if tc == "" || ep == "" || node == "" {
-		t.Skip("BW_TEST_TALOSCONFIG, BW_TEST_TALOS_ENDPOINT and BW_TEST_TALOS_NODE unset")
+	tc, ep := os.Getenv("BW_TEST_TALOSCONFIG"), os.Getenv("BW_TEST_TALOS_ENDPOINT")
+	if tc == "" || ep == "" {
+		t.Skip("BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset")
 	}
 	if !filepath.IsAbs(tc) {
 		// Relative to the module root, as the command above names it.
 		tc = filepath.Join(moduleRoot(t), tc)
 	}
-	return tc, Target{Endpoint: ep, Node: node}
+	b, err := os.ReadFile(tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b, ep
 }
 
 // digest is execution-recovery.md §1's configuration digest: SHA-256 over the read-back with its
@@ -62,10 +68,10 @@ func pinnedTalosVersion(t *testing.T) string {
 }
 
 func TestLiveRead(t *testing.T) {
-	tc, target := liveTarget(t)
+	tc, ep := liveTarget(t)
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	r, err := Dial(ctx, tc, target)
+	r, err := Dial(ctx, tc, ep)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +100,7 @@ func TestLiveRead(t *testing.T) {
 	if digest(a.Bytes()) != digest(b.Bytes()) {
 		t.Fatal("digest unstable")
 	}
-	t.Logf("node %s: Talos %s, resource version %s, %d bytes, digest %s", target.Node, v, a.ResourceVersion(), len(a.Bytes()), digest(a.Bytes()))
+	t.Logf("node %s: Talos %s, resource version %s, %d bytes, digest %s", ep, v, a.ResourceVersion(), len(a.Bytes()), digest(a.Bytes()))
 }
 
 func TestLiveUnreachable(t *testing.T) {
@@ -103,7 +109,7 @@ func TestLiveUnreachable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	start := time.Now()
-	r, err := Dial(ctx, tc, Target{Endpoint: "192.0.2.1", Node: "192.0.2.1"})
+	r, err := Dial(ctx, tc, "192.0.2.1")
 	if err == nil {
 		defer r.Close()
 		_, err = r.MachineConfig(ctx)
@@ -122,17 +128,20 @@ func TestLiveUnreachable(t *testing.T) {
 // and os:operator, generated through the fixture's os:admin config, each try MachineConfig. It
 // reports; it asserts only that os:admin reads.
 func TestLiveRoleProbe(t *testing.T) {
-	tc, target := liveTarget(t)
+	tc, ep := liveTarget(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	admin, err := client.New(ctx, client.WithConfigFromFile(tc), client.WithEndpoints(target.Endpoint))
+	cfg, err := clientconfig.FromBytes(tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := client.New(ctx, client.WithConfig(cfg), client.WithEndpoints(ep))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer admin.Close()
-	dir := t.TempDir()
 	for _, role := range []string{"os:reader", "os:operator", "os:admin"} {
-		resp, err := admin.GenerateClientConfiguration(client.WithNode(ctx, target.Endpoint), &machine.GenerateClientConfigurationRequest{
+		resp, err := admin.GenerateClientConfiguration(ctx, &machine.GenerateClientConfigurationRequest{
 			Roles:  []string{role},
 			CrtTtl: durationpb.New(10 * time.Minute),
 		})
@@ -143,11 +152,7 @@ func TestLiveRoleProbe(t *testing.T) {
 		if len(msgs) != 1 || len(msgs[0].GetTalosconfig()) == 0 {
 			t.Fatalf("%s: %d answers", role, len(msgs))
 		}
-		path := filepath.Join(dir, strings.ReplaceAll(role, ":", "-"))
-		if err := os.WriteFile(path, msgs[0].GetTalosconfig(), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		r, err := Dial(ctx, path, target)
+		r, err := Dial(ctx, msgs[0].GetTalosconfig(), ep)
 		if err != nil {
 			t.Fatal(err)
 		}

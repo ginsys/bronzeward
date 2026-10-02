@@ -4,7 +4,9 @@
 // Its surface is Reader's three methods, and guard_test.go holds the package's source to an
 // allowlist of machinery calls so that a mutating call cannot be added unnoticed.
 //
-// Where a machine's address and credential come from is not decided (the caller supplies both).
+// The caller supplies the cluster's talosconfig, as read from the provider, and the machine's
+// endpoint (persistence-api §3.3). The client dials that endpoint only and sends no node metadata,
+// so the request is about the node that answers it, whatever the talosconfig names.
 package talos
 
 import (
@@ -14,17 +16,11 @@ import (
 
 	"github.com/cosi-project/runtime/pkg/safe"
 	"github.com/siderolabs/talos/pkg/machinery/client"
+	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
 	cfgres "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
-
-// Target is the Talos API endpoint a request goes through and the node it is about; they differ
-// when one node's apid proxies for another.
-type Target struct {
-	Endpoint string
-	Node     string
-}
 
 // Reader reads one node. It holds no call that changes the node.
 type Reader interface {
@@ -35,23 +31,34 @@ type Reader interface {
 	Close() error
 }
 
-// Dial makes a Reader from the talosconfig file at talosconfigPath, through t's endpoint to t's
-// node. It reads the file but makes no request; a request's deadline is its context's.
-func Dial(ctx context.Context, talosconfigPath string, t Target) (Reader, error) {
-	if talosconfigPath == "" || t.Endpoint == "" || t.Node == "" {
-		return nil, errors.New("talos: a talosconfig path, an endpoint and a node are required")
-	}
-	c, err := client.New(ctx, client.WithConfigFromFile(talosconfigPath), client.WithEndpoints(t.Endpoint))
+// Dial makes a Reader for the node at endpoint (ParseEndpoint's grammar) from a talosconfig's
+// bytes. Only the current context's certificate authority, client certificate and key are used:
+// its endpoints, nodes and auth block are not, and nothing is read from or written to disk. It
+// makes no request; a request's deadline is its context's. Its errors never quote the talosconfig,
+// which holds the client key.
+func Dial(ctx context.Context, talosconfig []byte, endpoint string) (Reader, error) {
+	ep, err := ParseEndpoint(endpoint)
 	if err != nil {
-		// The machinery's text can quote the talosconfig, which holds the client key.
-		return nil, fmt.Errorf("talos: no client from the talosconfig %s", talosconfigPath)
+		return nil, err
 	}
-	return &reader{api: c, node: t.Node}, nil
+	cfg, err := clientconfig.FromBytes(talosconfig)
+	if err != nil {
+		return nil, errors.New("talos: the talosconfig is not a talosconfig document")
+	}
+	cur := cfg.Contexts[cfg.Context]
+	if cur == nil || cur.CA == "" || cur.Crt == "" || cur.Key == "" {
+		return nil, errors.New("talos: the talosconfig's current context has no certificate authority, certificate and key")
+	}
+	creds := &clientconfig.Context{CA: cur.CA, Crt: cur.Crt, Key: cur.Key}
+	c, err := client.New(ctx, client.WithConfigContext(creds), client.WithEndpoints(ep))
+	if err != nil {
+		return nil, errors.New("talos: the talosconfig's certificate authority, certificate or key is unusable")
+	}
+	return &reader{api: c}, nil
 }
 
 type reader struct {
-	api  *client.Client
-	node string
+	api *client.Client
 }
 
 // requestError is a failed node request in this package's own words. The machinery's error text
@@ -80,7 +87,7 @@ func (e *requestError) GRPCStatus() *status.Status { return status.New(e.code, e
 func (e *requestError) Unwrap() error              { return e.ctx }
 
 func (r *reader) MachineConfig(ctx context.Context) (Config, error) {
-	mc, err := safe.StateGetByID[*cfgres.MachineConfig](client.WithNode(ctx, r.node), r.api.COSI, cfgres.ActiveID)
+	mc, err := safe.StateGetByID[*cfgres.MachineConfig](ctx, r.api.COSI, cfgres.ActiveID)
 	if err != nil {
 		return Config{}, newRequestError(ctx, "reading the machine configuration", err)
 	}
@@ -92,7 +99,7 @@ func (r *reader) MachineConfig(ctx context.Context) (Config, error) {
 }
 
 func (r *reader) Version(ctx context.Context) (string, error) {
-	resp, err := r.api.Version(client.WithNode(ctx, r.node))
+	resp, err := r.api.Version(ctx)
 	if err != nil {
 		return "", newRequestError(ctx, "version", err)
 	}

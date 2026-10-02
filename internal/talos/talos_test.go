@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -98,22 +96,6 @@ func TestConfigBytesIsACopy(t *testing.T) {
 	}
 }
 
-func TestDialRefuses(t *testing.T) {
-	for name, c := range map[string]struct {
-		path string
-		t    Target
-	}{
-		"no talosconfig": {"", Target{Endpoint: "10.55.0.2", Node: "10.55.0.3"}},
-		"no endpoint":    {"talosconfig", Target{Node: "10.55.0.3"}},
-		"no node":        {"talosconfig", Target{Endpoint: "10.55.0.2"}},
-	} {
-		if r, err := Dial(t.Context(), c.path, c.t); err == nil {
-			r.Close()
-			t.Errorf("%s: dialled", name)
-		}
-	}
-}
-
 // failingState is a COSI state whose Get fails with err; nothing else of it is called.
 type failingState struct {
 	state.State
@@ -141,11 +123,8 @@ func (m failingMachine) Version(context.Context, *emptypb.Empty, ...grpc.CallOpt
 func TestErrorsDoNotQuoteUpstream(t *testing.T) {
 	const mark = "UPSTRM" // short: the YAML decoder quotes 7 characters of a value, then "..."
 	_, decodeErr := configloader.NewFromBytes([]byte("version: v1alpha1\nmachine:\n  unknownField: " + mark + "\n"))
-	tc := filepath.Join(t.TempDir(), "talosconfig")
-	if err := os.WriteFile(tc, []byte("context: a\ncontexts:\n  a:\n    endpoints: "+mark+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, openErr := clientconfig.Open(tc)
+	tc := []byte("context: a\ncontexts:\n  a:\n    endpoints: " + mark + "\n")
+	_, openErr := clientconfig.FromBytes(tc)
 	for what, err := range map[string]error{"decode": decodeErr, "talosconfig": openErr} {
 		if err == nil || !strings.Contains(err.Error(), mark) {
 			t.Fatalf("control: machinery's %s error does not quote its input, so this test proves nothing: %v", what, err)
@@ -162,7 +141,7 @@ func TestErrorsDoNotQuoteUpstream(t *testing.T) {
 		"denied":   {t.Context(), status.Error(codes.PermissionDenied, mark), codes.PermissionDenied},
 		"canceled": {canceled, fmt.Errorf("%s: %w", mark, context.Canceled), codes.Unknown},
 	} {
-		r := &reader{api: &client.Client{COSI: failingState{err: c.err}, MachineClient: failingMachine{err: c.err}}, node: "n"}
+		r := &reader{api: &client.Client{COSI: failingState{err: c.err}, MachineClient: failingMachine{err: c.err}}}
 		_, mcErr := r.MachineConfig(c.ctx)
 		_, vErr := r.Version(c.ctx)
 		for op, err := range map[string]error{"MachineConfig": mcErr, "Version": vErr} {
@@ -176,7 +155,7 @@ func TestErrorsDoNotQuoteUpstream(t *testing.T) {
 			}
 		}
 	}
-	if _, err := Dial(t.Context(), tc, Target{Endpoint: "10.55.0.2", Node: "10.55.0.3"}); err == nil || strings.Contains(err.Error(), mark) {
+	if _, err := Dial(t.Context(), tc, "10.55.0.2"); err == nil || strings.Contains(err.Error(), mark) {
 		t.Errorf("Dial: %v", err)
 	}
 }
