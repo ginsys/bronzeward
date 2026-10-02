@@ -59,15 +59,16 @@ var errDocument = errors.New("ingest: the document must be a non-empty JSON stri
 // UnmarshalJSON takes a request body's document member: one JSON string, at most MaxDocument
 // bytes decoded. encoding/json replaces invalid UTF-8 and a lone surrogate escape with U+FFFD,
 // which would make the input differ from what was sent, so both are refused, as is a document
-// holding U+FFFD at all. Every refusal is errDocument, which quotes nothing; the decoder's own
-// error is never wrapped.
+// holding U+FFFD at all. U+0000 is refused here too: PostgreSQL text cannot hold it, and the API
+// layer checks only the body's other members. Every refusal is errDocument, which quotes nothing;
+// the decoder's own error is never wrapped.
 func (u *Unresolved) UnmarshalJSON(b []byte) error {
 	*u = Unresolved{}
 	var s string
 	if !utf8.Valid(b) || len(b) == 0 || b[0] != '"' || json.Unmarshal(b, &s) != nil {
 		return errDocument
 	}
-	if len(s) == 0 || len(s) > MaxDocument || strings.ContainsRune(s, utf8.RuneError) {
+	if len(s) == 0 || len(s) > MaxDocument || strings.ContainsRune(s, utf8.RuneError) || strings.ContainsRune(s, 0) {
 		return errDocument
 	}
 	d := []byte(s)

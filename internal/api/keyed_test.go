@@ -256,6 +256,13 @@ func TestDecodeBodyOmits(t *testing.T) {
 	if err != nil || string(canon) != `{"note":"a"}` || in.Document.Size() == 0 {
 		t.Fatalf("canon %s, err %v, document %d bytes", canon, err, in.Document.Size())
 	}
+	// The document is left to its own type (compilation §2.1); the other members are still
+	// checked for U+0000 here.
+	r = httptest.NewRequest("POST", "/", strings.NewReader(`{"note":"a\u0000","document":"a: 1\n"}`))
+	r.Header.Set("Content-Type", "application/json")
+	if _, err := decodeBody(r, &docInput{}, "document"); err == nil || !strings.Contains(err.Error(), "U+0000") {
+		t.Fatalf("U+0000 in another member: %v", err)
+	}
 }
 
 // An effect whose claim creation found a later epoch than the process's own answers 503.

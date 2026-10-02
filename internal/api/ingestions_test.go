@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -248,6 +249,79 @@ func TestIngestionNaturalKey(t *testing.T) {
 	}
 	if claims, ops := ie.rowCounts(t); claims != 1 || ops != 1 {
 		t.Fatalf("%d claims, %d operations", claims, ops)
+	}
+}
+
+// Compilation §3.5: a claim a read treats as abandoned refuses nothing, sweep or no sweep. A start
+// meeting the running operation of a due claim writes that claim abandoned and fails its
+// operation, then starts; an encrypted claim whose lease lapsed is not due and still refuses.
+func TestIngestionNaturalKeyAfterLapse(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	author := ie.human("h-author")
+	start := func(k, mode string) *httptest.ResponseRecorder {
+		return ie.do(ie.api, ingestCall(author, k, ie.etag, ie.body(map[string]any{"staging": mode})))
+	}
+	rec := start(key, "encrypted")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	first := strings.TrimPrefix(rec.Header().Get("Location"), prefix+"/operations/")
+	lapse := `UPDATE staging_claim SET lease_until = now() - interval '1 second'`
+	if _, err := ie.db.Exec(lapse); err != nil {
+		t.Fatal(err)
+	}
+	wantProblem(t, start("k-second-0123456789", "transient"), http.StatusConflict, "conflict") // control: not due
+	if _, err := ie.db.Exec(`UPDATE staging_claim SET mode = 'transient'`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := start("k-third-01234567890", "transient"); rec.Code != http.StatusAccepted {
+		t.Fatalf("a due claim's operation refused a start: %d %s", rec.Code, rec.Body)
+	}
+	var state, code string
+	var payload sql.NullString
+	var events int
+	if err := ie.db.QueryRow(`SELECT o.state, o.error->>'type', c.payload::text,
+		(SELECT count(*) FROM operation_event e WHERE e.operation = o.id AND e.entry->>'code' = 'ingestion-abandoned')
+		FROM operation o JOIN staging_claim c ON c.id = o.ingestion WHERE o.id = $1 AND c.state = 'abandoned'`, first).
+		Scan(&state, &code, &payload, &events); err != nil {
+		t.Fatalf("the due claim is not written abandoned: %v", err)
+	}
+	if state != "failed" || code != "urn:bronzeward:problem:ingestion-abandoned" || payload.Valid || events != 1 {
+		t.Fatalf("operation %s %s, payload kept %t, %d terminal events", state, code, payload.Valid, events)
+	}
+	if claims, ops := ie.rowCounts(t); claims != 2 || ops != 2 {
+		t.Fatalf("%d claims, %d operations", claims, ops)
+	}
+}
+
+// T1 locks its claim before the draft a start holds, so a start never waits for a due claim's
+// row: one another transaction holds is refused 409 at once, not deadlocked.
+func TestIngestionStartSkipsAHeldClaim(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	author := ie.human("h-author")
+	if rec := ie.do(ie.api, ingestCall(author, key, ie.etag, ie.body(nil))); rec.Code != http.StatusAccepted {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if _, err := ie.db.Exec(`UPDATE staging_claim SET lease_until = now() - interval '1 second'`); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := ie.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback() }()
+	if _, err := holder.Exec(`SELECT 1 FROM staging_claim FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- ie.do(ie.api, ingestCall(author, "k-second-0123456789", ie.etag, ie.body(nil))) }()
+	select {
+	case rec := <-done:
+		wantProblem(t, rec, http.StatusConflict, "conflict")
+	case <-time.After(5 * time.Second):
+		_ = holder.Rollback()
+		<-done
+		t.Fatal("the start waited for a claim another transaction holds")
 	}
 }
 

@@ -602,7 +602,7 @@ The transactions this contract defines or constrains:
 | T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, and its abandonment by the sweep, by a takeover with nothing to decrypt (compilation §3.4, §3.5) or by its owner after a refusal, under the owner check (compilation §2.3) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a job's completion, also its state and terminal event (§8.2); for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, and an abandonment fails the operation with its terminal event (§8.2): `ingestion-abandoned` from the sweep or a takeover, the refusal's own problem from its owner |
 | T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE`; the row of each `publish` or `ingest` operation it fails `FOR UPDATE` (T7), in rule 5's order | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
-| T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect. Leaving recovery mode takes installation state `FOR UPDATE` instead, before it checks that every machine scope is released: it waits for an inventory request, which holds that row `FOR SHARE`, and then sees the machine that request inserted | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together, only if the serving process's epoch is the current one (§5.1); an abandonment also fails the claim's `ingest` operation `ingestion-abandoned`, with its terminal event (§8.2) |
+| T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect. Leaving recovery mode takes installation state `FOR UPDATE` instead, before it checks that every machine scope is released: it waits for an inventory request, which holds that row `FOR SHARE`, and then sees the machine that request inserted | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together, only if the serving process's epoch is the current one (§5.1), after writing abandoned a due claim whose operation holds its draft revision's natural key (§7.3, compilation §3.5); an abandonment also fails the claim's `ingest` operation `ingestion-abandoned`, with its terminal event (§8.2) |
 
 T7 allocates every revision in a machine scope, for a plan, an operation or a
 machine-scope fact alike, from one per-machine counter under the machine row's
@@ -1150,8 +1150,9 @@ its input was held in memory or in staging, and compilation's claim rules
 decide between takeover and abandonment (compilation §3.4, §3.5). Every
 transaction that writes a staging claim `abandoned` fails that claim's
 `ingest` operation, if one is still `running`, with `ingestion-abandoned` in
-the same transaction: the operator's abandonment (T11), the sweep that writes
-a lapsed transient claim or an expired one abandoned and a takeover with
+the same transaction: the operator's abandonment (T11), an ingestion start
+whose draft revision's running operation has a claim that is due (T11), the
+sweep that writes a lapsed transient claim or an expired one abandoned and a takeover with
 nothing to decrypt (T8; compilation §3.4, §3.5), and recovery-mode entry (T9)
 **(choice §17.12)**. An owner that refuses its own ingestion (compilation
 §2.3), a failed node read of a `source: machine` ingestion (§3.3) among them,
@@ -1205,7 +1206,9 @@ identifier>"}` or `{"type": "failed", "code": "<problem code>"}`. No event
 carries input text. The operation resource shows its stored row: an operation
 whose claim a read already treats as abandoned (compilation §3.5) stays
 `running` here until a sweep writes it: the next periodic sweep, or a later
-one if that sweep fails or waits for a lock.
+one if that sweep fails or waits for a lock. An ingestion start of the same
+draft revision writes it first (T11), so the natural key (§7.3) never refuses
+on a claim already treated as abandoned.
 `GET /ingestions/{id}` reports the claim's state as read.
 
 ## 9. API
@@ -1548,7 +1551,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
 | 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose SMBIOS UUID or cluster membership is not the machine record's, or that reported none (§3.3); its claim is abandoned and nothing read is kept |
-| 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
+| 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |

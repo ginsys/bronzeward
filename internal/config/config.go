@@ -54,6 +54,10 @@ func (i *Ingestion) validate() error {
 		if d.v <= 0 {
 			return fmt.Errorf("config: ingestion.%s must be positive", d.field)
 		}
+		// The database keeps microseconds, so a finer timer would lose the order checked below.
+		if d.v%time.Microsecond != 0 {
+			return fmt.Errorf("config: ingestion.%s must be a whole number of microseconds", d.field)
+		}
 	}
 	if i.Heartbeat >= i.Lease {
 		return errors.New("config: ingestion.heartbeat must be shorter than ingestion.lease")

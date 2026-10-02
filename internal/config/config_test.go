@@ -301,9 +301,12 @@ func TestIngestionBlock(t *testing.T) {
 		"no heartbeat":               {strings.Replace(ingestionBlock, "  heartbeat: 5s\n", "", 1), "ingestion.heartbeat must be positive"},
 		"negative heartbeat":         {strings.Replace(ingestionBlock, "heartbeat: 5s", "heartbeat: -1s", 1), "ingestion.heartbeat must be positive"},
 		"no sweep":                   {strings.Replace(ingestionBlock, "  sweep: 15s\n", "", 1), "ingestion.sweep must be positive"},
-		"no instance":                {strings.Replace(ingestionBlock, "  instance: a\n", "", 1), "ingestion.instance"},
-		"instance with slash":        {strings.Replace(ingestionBlock, "instance: a", "instance: a/b", 1), "ingestion.instance"},
-		"instance upper case":        {strings.Replace(ingestionBlock, "instance: a", "instance: A", 1), "ingestion.instance"},
+		// The database keeps microseconds: 1500ns and 1900ns would both store as 1µs.
+		"sub-microsecond lease":  {strings.Replace(strings.Replace(ingestionBlock, "heartbeat: 5s", "heartbeat: 1us", 1), "lease: 15s", "lease: 1500ns", 1), "ingestion.lease must be a whole number of microseconds"},
+		"sub-microsecond expiry": {strings.Replace(ingestionBlock, "absoluteExpiry: 10m", "absoluteExpiry: 10m500ns", 1), "ingestion.absoluteExpiry must be a whole number of microseconds"},
+		"no instance":            {strings.Replace(ingestionBlock, "  instance: a\n", "", 1), "ingestion.instance"},
+		"instance with slash":    {strings.Replace(ingestionBlock, "instance: a", "instance: a/b", 1), "ingestion.instance"},
+		"instance upper case":    {strings.Replace(ingestionBlock, "instance: a", "instance: A", 1), "ingestion.instance"},
 	} {
 		in := c.in
 		if strings.HasPrefix(in, "ingestion:") {
