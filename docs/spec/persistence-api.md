@@ -432,7 +432,8 @@ They are held apart **(choice §17.29)**.
   its cluster's record, the identity execution and recovery's choice §10.26
   defines. For a machine recorded by SMBIOS UUID, a different or absent UUID;
   for one recorded by Talos node ID, a different node ID or any reported
-  SMBIOS UUID; for either, an identity read that fails, or a node that accepts
+  SMBIOS UUID; for either, an identity read that fails (an error; a `systeminformation` read
+  that succeeds with no resource is a node reporting none), or a node that accepts
   this credential but reports another Talos cluster ID (possible only where
   clusters share a Talos certificate authority): each fails the ingestion with
   `409 machine-identity-mismatch`, as below, and nothing read is kept. A node behind another certificate authority, or another cluster's
@@ -1059,14 +1060,16 @@ identity`); a body with both, or neither, is `400 invalid-request`
 one record, so one coordination scope: two inventory requests for it under
 different idempotency keys cannot both commit. It is design §8.5's detection
 of a duplicate SMBIOS UUID, never a merge. Design §4.4 calls hardware evidence
-"not an infallible primary key": a clone sharing a UUID, or a machine
-reporting SMBIOS's nil or all-ones value, cannot be inventoried in the PoC.
+"not an infallible primary key": SMBIOS's nil and all-ones values are
+accepted as a UUID, so a second machine reporting the value of one already
+recorded, like a clone sharing a UUID, cannot be inventoried in the PoC.
 A Talos node ID is an opaque string accepted as Talos prints it (44
 alphanumeric characters on the nodes read for choice §10.26); it is compared
 byte for byte, never normalised. The
 cluster key is the Talos cluster ID the operator reads from one of its nodes
 (`talosctl get info`), the standard base64 encoding of 32 bytes, also
-compared byte for byte. The indexes cannot catch a record entered with a
+compared byte for byte; a second cluster generated from the same Talos
+secrets bundle shares it and is refused `409 conflict`. The indexes cannot catch a record entered with a
 wrong value, or under the node-ID key for a machine that reports a UUID;
 execution and recovery refuses either at dispatch instead. There, the node's
 observed identity must match this record and its cluster's before any send
@@ -2388,9 +2391,12 @@ each (design §7.7 consequences):
   kept against a node whose SMBIOS UUID differs, reports none for a machine
   recorded by one, or reports one for a machine recorded by node ID; whose
   node ID differs, for a machine recorded by node ID; whose Talos cluster ID
-  differs; and whose identity read fails; with the control that a machine
-  recorded by SMBIOS UUID whose node reports a matching UUID and cluster ID
-  but another node ID is accepted; each SMBIOS case against a stubbed Talos
+  differs; and whose identity read fails, a failed `systeminformation` read
+  for a machine recorded by node ID included; with the controls that a
+  machine recorded by node ID whose `systeminformation` read returns no
+  resource is accepted, and that a machine recorded by SMBIOS UUID whose node
+  reports a matching UUID and cluster ID but another node ID is accepted;
+  each SMBIOS case against a stubbed Talos
   response, since the fixture's nodes report none (execution and recovery
   choice §10.26); each cause §3.3 lists for
   `talos-access-unavailable` (an absent secret, the reading identity's read

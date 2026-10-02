@@ -1736,9 +1736,12 @@ fail:
 - a commitment and a retry's attempt each refused, with nothing sent, when the
   §3.1 evidence shows an SMBIOS UUID other than the bound one, none for a
   machine recorded by SMBIOS UUID, one for a machine recorded by Talos node
-  ID, another Talos node ID for such a machine, or another Talos cluster ID,
-  with the control that a machine recorded by SMBIOS UUID whose node shows a
-  matching UUID and cluster ID but another node ID is admitted;
+  ID, another Talos node ID for such a machine or another Talos cluster ID,
+  or when its identity read fails, a failed `systeminformation` read
+  included; with the controls that a machine recorded by node ID whose
+  `systeminformation` read returns no resource is admitted, and that a
+  machine recorded by SMBIOS UUID whose node shows a matching UUID and
+  cluster ID but another node ID is admitted;
   each SMBIOS case against a stubbed Talos response, since the fixture's nodes
   report none; and a scope left `blocked`, not `ready`, by a `restoration`
   observation showing another identity, then marked `ready` after a matching
@@ -1986,7 +1989,10 @@ conservative option; those that do not say so. Each is marked in place as
       whose identity read fails, is refused, never compared by node ID, so a
       failing read cannot weaken the check; and a machine recorded by node ID
       whose node reports an SMBIOS UUID is refused as well, so a machine that
-      reports one is held to it.
+      reports one is held to it. A node reports none when its
+      `systeminformation` read succeeds and returns no resource, as on the
+      fixture; a transport, authorization or any other error is a failed
+      read, and refuses whichever key the machine is recorded by.
     - **The cluster is compared by its Talos cluster ID**, the value the
       cluster record holds (see `persistence-api.md`), against the node's
       `Infos.cluster.talos.dev` resource. Talos describes it as the cluster's
@@ -2006,11 +2012,14 @@ conservative option; those that do not say so. Each is marked in place as
       key is checked against a stubbed Talos response until a scenario runs on
       hardware. A wipe gives a node-ID machine a new node ID, so it is refused
       until it is inventoried again; the PoC excludes reset and reuse. SMBIOS's
-      nil and all-ones values count as a reported UUID, so a machine reporting
-      one cannot be inventoried under either key, nor can clones sharing a
-      UUID. Two clusters generated from one Talos secrets bundle share a
-      cluster ID and a certificate authority, so the cluster comparison cannot
-      tell them apart; the machine key still does. A node swapped between the
+      nil and all-ones values count as a reported UUID: the first machine
+      reporting one is inventoried under it, and a second machine reporting
+      the same value, like a clone sharing a UUID, cannot be inventoried under
+      either key, and reached at the first's endpoint would pass its
+      comparison. Two
+      clusters generated from one Talos secrets bundle share a cluster ID and
+      a certificate authority, so only the first can be recorded; the second
+      is refused at inventory. A node swapped between the
       evidence read and the send stays a residual.
     - **Alternatives.** The SMBIOS UUID only, which the fixture cannot report,
       leaving S1's inventory and this check unrunnable there; the node ID
