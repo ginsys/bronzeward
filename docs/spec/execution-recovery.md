@@ -726,7 +726,7 @@ Required entries:
 | Plan | the binding of §2, the plan-time evidence reference, creator and role |
 | Approval | plan revision, approver, role, epoch, self-approval mark (§2) |
 | Revocation, identity revocation, cancellation | what it names, who, role |
-| Observation started | purpose, and the plan or operation it is taken for, if any; recorded before the remote read, its revision is the observation's basis (below) |
+| Observation started | purpose, the plan or operation it is taken for, if any, and the Talos endpoint it dials: that plan's route when taken for a plan or its operation, the machine's current endpoint otherwise ([persistence and API §3.3](persistence-api.md#33-talos-access)); recorded before the remote read, its revision is the observation's basis (below) |
 | Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), basis, the Talos access version it read (path, version, `created_time`; [persistence and API §3.3](persistence-api.md#33-talos-access)), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read and why: a failed access read or connection reads none, and records its `talos-access-unavailable` cause |
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |

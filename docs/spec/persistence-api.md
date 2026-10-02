@@ -332,7 +332,12 @@ They are held apart **(choice §17.29)**.
   a node's own bare addresses and refuses what a worker does not recognise
   ("no request forwarding", `internal/app/apid/pkg/director/director.go` at
   v1.13.6), so a value with a port or a DNS alias would fail there. A plan
-  binds the endpoint current at its creation as its route.
+  binds the endpoint current at its creation as its route, and every
+  observation taken for that plan or its operation (execution and recovery
+  §4.1) dials that route, never the machine's current endpoint, so the
+  identity it reads is that of the node the request will reach. An
+  observation taken for no plan, and a `source: machine` ingestion, dial the
+  current endpoint; each records the endpoint it dialled.
   `POST /machines/{id}/talos-endpoints` replaces it (an address change, or one
   entered wrongly at inventory, which the SMBIOS UUID index would otherwise
   leave unrecoverable): under the machine row `FOR UPDATE` (T11), it records a
@@ -350,10 +355,12 @@ They are held apart **(choice §17.29)**.
   `BEFORE INSERT` trigger, with a `BEFORE UPDATE` trigger refusing to clear an
   endpoint once set: a table `CHECK`, even `NOT VALID`, is enforced on every
   later update in PostgreSQL, so a legacy row would refuse recovery entry's
-  scope projection (T9), a freeze or an unfreeze. Ingestion start and plan creation naming such a machine
+  scope projection (T9), a freeze or an unfreeze. A `source: machine`
+  ingestion start and a plan creation naming such a machine
   are refused `409 conflict`, naming the missing endpoint, with nothing
   committed, until the replacement route sets one; that change records no
-  previous endpoint.
+  previous endpoint. A `source: document` ingestion dials nothing and is
+  not refused.
 - **The credential is per cluster, in the provider.** Talos authorizes a client
   certificate signed by the cluster's own certificate authority, so one
   credential reaches every node of the cluster (design §13.1, "cluster-specific
@@ -374,7 +381,13 @@ They are held apart **(choice §17.29)**.
   The version number alone is not an identity: deleting the path's metadata,
   or a provider restore, and writing again issues the same path and version for
   other bytes, which is why compilation §9 and dependency monitor choice §11.13
-  identify a KV version by its `created_time` too. The path is disjoint from the secret generations
+  identify a KV version by its `created_time` too. An ingestion records it,
+  with the endpoint dialled, as an event of its `ingest` operation (T7, read
+  through `GET /operations/{id}/events`), committed once the read returns a
+  version and before the node is dialled, so it is kept whether the
+  ingestion then succeeds or fails; a read that returns no version records
+  none, and the terminal event carries its cause. The executor records it on
+  each observation and use-time check (execution and recovery §4.1). The path is disjoint from the secret generations
   under `secret/data/gen/*`, so the ingestion identity still never reads what
   it creates (compilation §1, choice §16.1 there). The compiler, the
   dependency monitor and the normal API cannot read it.
@@ -1476,7 +1489,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); an ingestion start or plan creation naming a machine with no Talos endpoint (§3.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a `source: machine` ingestion start or a plan creation naming a machine with no Talos endpoint (§3.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose SMBIOS UUID or cluster membership is not the machine record's, or that reported none (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
@@ -2319,17 +2332,23 @@ each (design §7.7 consequences):
   out of range and 256 octets, against a 255-octet control accepted; the
   endpoint change read back from the machine's timeline with both endpoints;
   a database holding machine rows migrated from the previous schema, each row
-  left without an endpoint, its ingestion start and plan creation refused
-  `conflict` with nothing committed, while recovery entry and a freeze and
+  left without an endpoint, its `source: machine` ingestion start and plan
+  creation refused `conflict` with nothing committed, a `source: document`
+  ingestion of it accepted, while recovery entry and a freeze and
   unfreeze of it succeed, an insert without an endpoint and an update clearing
   one each refused, then set by the replacement route with no previous
   endpoint recorded, after which both proceed;
   the version identity recorded as path, version and
   `created_time`, with a control that deletes the path's metadata and rewrites
-  it, whose new version the record must tell apart; reads of the fixture's worker by its own endpoint with no
+  it, whose new version the record must tell apart; an ingestion's access
+  version and dialled endpoint read back from its `ingest` operation's events
+  after a success and after a failure following the read (a malformed
+  talosconfig, a refused credential, an identity mismatch); reads of the fixture's worker by its own endpoint with no
   `node` metadata, under an explicit port, the default port and a DNS name;
   an endpoint replacement from A to B after a plan was created, the plan
-  still bound to A, a plan created afterwards bound to B, and the change, its
+  still bound to A, its evidence and completion observations dialling A and
+  recording it, with a control that dials the machine's current endpoint and
+  must then fail, a plan created afterwards bound to B, and the change, its
   timeline entry and its act all present or all absent, with a control that resolves the
   route from the machine record at dispatch and must then fail; the same
   replacement accepted in recovery mode on a scope still pre-restore
