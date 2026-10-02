@@ -392,7 +392,13 @@ They are held apart **(choice §17.29)**.
   The version number alone is not an identity: deleting the path's metadata,
   or a provider restore, and writing again issues the same path and version for
   other bytes, which is why compilation §9 and dependency monitor choice §11.13
-  identify a KV version by its `created_time` too. An ingestion records it,
+  identify a KV version by its `created_time` too. A dispatch reads it once,
+  before its evidence observation: that observation, the use-time check's
+  record and every attempt of the operation use that one version, so a
+  rotation between them cannot change the credential the request carries,
+  and a credential Talos refuses fails the observation before anything is
+  committed. A retry's newly gathered evidence (execution and recovery §3.3)
+  reads it again, and its attempt uses that version. An ingestion records it,
   with the endpoint dialled, as an event of its `ingest` operation (T7, read
   through `GET /operations/{id}/events`), committed once the read returns a
   version and before the node is dialled, so it is kept whether the
@@ -403,9 +409,12 @@ They are held apart **(choice §17.29)**.
   it creates (compilation §1, choice §16.1 there). The compiler, the
   dependency monitor and the normal API cannot read it.
 - **What it can do.** Reading a node's machine configuration needs the
-  `os:admin` Talos role, measured on the fixture (`internal/talos`
-  `TestLiveRoleProbe`, Talos v1.13.6: `os:reader` and `os:operator` are refused
-  the `MachineConfig` resource). The same certificate can apply, reboot and
+  `os:admin` Talos role, as observed on the fixture (`internal/talos`
+  `TestLiveRoleProbe`, Talos v1.13.6, recorded in the fixture README:
+  `os:reader` and `os:operator` read the version but are refused the
+  `MachineConfig` resource with `PermissionDenied`). The probe reports those denials but
+  asserts only that `os:admin` reads, so the claim rests on that observation
+  until the probe asserts the denial code for both roles (§16). The same certificate can apply, reboot and
   reset; Talos cannot express a read-only grant for it. The bound on what
   ingestion does with it is the application's read-only Talos client, whose
   source is held to an allowlist of machinery calls by test. The executor
@@ -2381,7 +2390,12 @@ each (design §7.7 consequences):
   `node` metadata; a `drift` and a `restoration` observation of a migrated
   machine without an endpoint dialling nothing and recording that cause, the
   scope left `blocked` until the replacement route sets one and a later
-  observation succeeds; the executor's observation client held to its read
+  observation succeeds; a rotation between a dispatch's evidence observation
+  and its attempt, the attempt still using the version the observation used,
+  with a control that reads the latest version at send and must then fail;
+  `TestLiveRoleProbe` asserting `PermissionDenied` for `os:reader` and
+  `os:operator` on `MachineConfig`, with a control that probes the `os:admin`
+  configuration in the `os:reader` slot and must then fail; the executor's observation client held to its read
   allowlist by test, with a control that adds a mutating call and must then
   fail, a `drift` observation succeeding with no plan, and the mutating
   client refused for a plan whose approval was revoked; and the
