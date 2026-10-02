@@ -356,7 +356,11 @@ They are held apart **(choice §17.29)**.
 - **Who reads it.** The ingestion identity, for a `source: machine` ingestion,
   and the executor identity, for its observations and dispatch (execution and
   recovery §3.1 item 2), each read its latest version at use and record that
-  version, never the value. The path is disjoint from the secret generations
+  version's identity, never the value: its path, version and `created_time`.
+  The version number alone is not an identity: deleting the path's metadata,
+  or a provider restore, and writing again issues the same path and version for
+  other bytes, which is why compilation §9 and dependency monitor choice §11.13
+  identify a KV version by its `created_time` too. The path is disjoint from the secret generations
   under `secret/data/gen/*`, so the ingestion identity still never reads what
   it creates (compilation §1, choice §16.1 there). The compiler, the
   dependency monitor and the normal API cannot read it.
@@ -371,21 +375,28 @@ They are held apart **(choice §17.29)**.
   it, for one connection. It is never stored in the database, logged, returned
   or quoted in an error (compilation §13).
 - **Identity before use.** Before using a configuration read for ingestion, the
-  ingestion reads the node's SMBIOS UUID on the same connection and compares
-  it with the machine record; a different or absent UUID fails the ingestion
-  with `409 machine-identity-mismatch`, as below, and nothing read is kept.
+  ingestion reads the node's SMBIOS UUID and cluster membership on the same
+  connection and compares both with the machine record, the identity execution
+  and recovery's choice §10.26 defines. A different or absent UUID, or a node
+  of another cluster (a machine moved between clusters, or another cluster's
+  talosconfig written at this cluster's path), fails the ingestion with
+  `409 machine-identity-mismatch`, as below, and nothing read is kept.
   Dispatch has execution and recovery's own comparison (its §3.2
-  comparison 3). A node swapped between the identity read and the
-  configuration read is the residual its choice §10.26 states.
-- **Failure.** An absent secret, one this identity cannot read, a document
-  that is not a usable talosconfig, or an endpoint that does not answer is the
-  problem `503 talos-access-unavailable`, naming the cluster or machine and
-  never a value. For an ingestion it arises after `POST /ingestions` has
+  comparison 3). Reading either through the Talos API is unevidenced, as that
+  choice states, and a node swapped between the identity read and the
+  configuration read is the residual it states.
+- **Failure.** An absent secret, one this identity cannot read, a provider
+  that is sealed or does not answer, a document that is not a usable
+  talosconfig, a credential Talos refuses, or an endpoint that does not answer
+  is the problem `503 talos-access-unavailable`, naming the cluster or machine
+  and never a value or the parser's or client's own text. For an ingestion it arises after `POST /ingestions` has
   committed the claim and its `running` operation (T11; compilation §2.3
   step 0), so it ends them as a refused input does: one transaction, under
   the claim's owner check (§5.1), writes the claim `abandoned` (compilation
   §3.2) and fails the operation with this problem and its terminal event
-  (§8.2). No generation, draft revision or read value is written. For
+  (§8.2). No generation, draft revision or read value is written. The
+  ingestion is not retried in place, as no `ingest` operation is (§8.2): once
+  the cause is repaired, the operator starts a new one. For
   dispatch it is a failed use-time check (execution and recovery §3.1
   item 2). A restore of the provider
   to an older snapshot can bring back a superseded credential; if Talos no
@@ -1441,7 +1452,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
 | 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
-| 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose SMBIOS UUID is not the machine record's, or none (§3.3); its claim is abandoned and nothing read is kept |
+| 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose SMBIOS UUID or cluster membership is not the machine record's, or that reported none (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
@@ -1451,7 +1462,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
 | 501 | `not-implemented` | a §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
 | 503 | `dependency-unavailable` | the provider is sealed or unreachable, or authentication could not reach the identity provider or the database; nothing was committed |
-| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or of a failed use-time check at dispatch: the cluster's Talos access configuration is absent, unreadable by the identity or not a usable talosconfig, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept |
+| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or of a failed use-time check at dispatch: the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept |
 | 503 | `transient-conflict` | deadlock retries exhausted (§5) |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing was committed |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
@@ -2250,11 +2261,19 @@ each (design §7.7 consequences):
   normal API identities refused it, with a control that grants the compiler
   the read and must then succeed; the ingestion identity refused every
   `secret/data/gen/*` read and every write under `secret/data/access/`; a
-  `source: machine` ingestion against a node whose SMBIOS UUID differs failing
-  `machine-identity-mismatch` with nothing kept; an absent secret and an
-  unreachable endpoint failing `talos-access-unavailable`, each leaving the
-  claim `abandoned` and the operation `failed` with its terminal event, and
-  no generation; reads of the fixture's worker by its own endpoint with no
+  `source: machine` ingestion against a node whose SMBIOS UUID differs, and
+  one whose cluster membership differs, each failing
+  `machine-identity-mismatch` with nothing kept; each cause §3.3 lists for
+  `talos-access-unavailable` (an absent secret, the ingestion identity's read
+  denied, OpenBao sealed and partitioned, a malformed talosconfig carrying a
+  synthetic client key, a well-formed credential Talos refuses, an endpoint
+  that does not answer) failing with it, each leaving the
+  claim `abandoned` and the operation `failed` with its terminal event, no
+  generation, and no part of the talosconfig in the problem, the logs or the
+  scan, with a control that passes the parser's or client's error text through
+  and must then be caught; the version identity recorded as path, version and
+  `created_time`, with a control that deletes the path's metadata and rewrites
+  it, whose new version the record must tell apart; reads of the fixture's worker by its own endpoint with no
   `node` metadata, under an explicit port, the default port and a DNS name;
   an endpoint replacement from A to B after a plan was created, the plan
   still bound to A, a plan created afterwards bound to B, and the change and

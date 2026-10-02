@@ -292,7 +292,8 @@ instance (the operation does not exist yet; §2):
    under the executor identity: decryption of the bound artifact under the
    bound key identity and version, and the operation credentials for the
    target: its cluster's Talos access configuration, read at its latest
-   version, which the evidence records, never the value
+   version, whose path, version and `created_time` the evidence records,
+   never the value
    ([persistence and API §3.3](persistence-api.md#33-talos-access)).
 
 Item 2 is deliberately narrow. The executor holds scoped artifact decryption
