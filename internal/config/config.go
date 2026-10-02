@@ -27,6 +27,41 @@ type Config struct {
 	// it yet; it configures internal/provider. There is no Talos block: each cluster's
 	// talosconfig is read from the provider at use (persistence-api §3.3).
 	Provider *Provider `yaml:"provider"`
+	// Ingestion is required with Provider and refused without it: ingestion is what uses it.
+	Ingestion *Ingestion `yaml:"ingestion"`
+}
+
+// Ingestion is the staging claims' timers (compilation.md §3.2, §3.5) and the instance name its
+// owner identity starts with. The values are open; only their order is required.
+type Ingestion struct {
+	Instance       string        `yaml:"instance"`
+	Heartbeat      time.Duration `yaml:"heartbeat"`
+	Lease          time.Duration `yaml:"lease"`
+	AbsoluteExpiry time.Duration `yaml:"absoluteExpiry"`
+	Sweep          time.Duration `yaml:"sweep"`
+}
+
+var instanceName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+func (i *Ingestion) validate() error {
+	if !instanceName.MatchString(i.Instance) {
+		return errors.New("config: ingestion.instance is required: 1 to 63 lower-case letters, digits and inner hyphens")
+	}
+	for _, d := range []struct {
+		field string
+		v     time.Duration
+	}{{"heartbeat", i.Heartbeat}, {"lease", i.Lease}, {"absoluteExpiry", i.AbsoluteExpiry}, {"sweep", i.Sweep}} {
+		if d.v <= 0 {
+			return fmt.Errorf("config: ingestion.%s must be positive", d.field)
+		}
+	}
+	if i.Heartbeat >= i.Lease {
+		return errors.New("config: ingestion.heartbeat must be shorter than ingestion.lease")
+	}
+	if i.Lease >= i.AbsoluteExpiry {
+		return errors.New("config: ingestion.lease must be shorter than ingestion.absoluteExpiry")
+	}
+	return nil
 }
 
 // Provider is the OpenBao the server stores generations and encrypts under (compilation.md §4.1,
@@ -136,6 +171,16 @@ func Load(r io.Reader) (Config, error) {
 	}
 	if c.Provider != nil {
 		if err := c.Provider.validate(); err != nil {
+			return Config{}, err
+		}
+	}
+	switch {
+	case c.Provider != nil && c.Ingestion == nil:
+		return Config{}, errors.New("config: ingestion is required with provider")
+	case c.Provider == nil && c.Ingestion != nil:
+		return Config{}, errors.New("config: ingestion needs provider")
+	case c.Ingestion != nil:
+		if err := c.Ingestion.validate(); err != nil {
 			return Config{}, err
 		}
 	}

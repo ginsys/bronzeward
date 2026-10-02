@@ -38,3 +38,12 @@ execution:
 #   address: http://127.0.0.1:58201
 #   keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest}
 #   ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
+# Required with provider, refused without it: the staging claims' timers (compilation.md §3.2
+# requires only heartbeat < lease < absoluteExpiry; the values are open) and this instance's
+# name, which starts the owner identity of its claims.
+# ingestion:
+#   instance: a
+#   heartbeat: 5s
+#   lease: 15s
+#   absoluteExpiry: 10m
+#   sweep: 15s
