@@ -21,7 +21,8 @@ const AbandonedTitle = "The ingestion was abandoned"
 
 // Sweep writes each due claim abandoned and clears its payload, in a transaction of its own that
 // also fails the claim's running ingest operation ingestion-abandoned with its terminal event
-// (persistence-api §8.2, T8). It returns how many claims it abandoned.
+// (persistence-api §8.2, T8). It returns how many claims it abandoned, and the errors of those
+// it could not, joined.
 func Sweep(ctx context.Context, db *sql.DB) (int, error) {
 	return sweep(ctx, db, nil)
 }
@@ -35,17 +36,24 @@ func sweep(ctx context.Context, db *sql.DB, afterScan func()) (int, error) {
 	if afterScan != nil {
 		afterScan()
 	}
+	// A claim whose abandonment fails is reported and passed over: it is listed first in every
+	// scan, so stopping there would leave every claim after it uncleared.
 	n := 0
+	var errs []error
 	for _, id := range ids {
 		ok, err := abandonDue(ctx, db, id)
 		if err != nil {
-			return n, err
+			errs = append(errs, err)
+			if ctx.Err() != nil { // cancelled: reported once, not for every claim not reached
+				break
+			}
+			continue
 		}
 		if ok {
 			n++
 		}
 	}
-	return n, nil
+	return n, errors.Join(errs...)
 }
 
 // candidates lists the claims due now. It decides nothing: each write re-states the condition.

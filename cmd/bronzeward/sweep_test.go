@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,9 +116,7 @@ func TestStartSweep(t *testing.T) {
 	first := dueClaim(t, db, human, cluster, machine)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	if err := startSweep(t.Context(), ctx, db, 20*time.Millisecond, func(string, ...any) {}); err != nil {
-		t.Fatal(err)
-	}
+	startSweep(t.Context(), ctx, db, 20*time.Millisecond, func(string, ...any) {})
 	if s := claimState(t, db, first); s != "abandoned" {
 		t.Fatalf("after the startup sweep the claim is %s", s)
 	}
@@ -127,6 +127,29 @@ func TestStartSweep(t *testing.T) {
 			t.Fatal("no periodic sweep abandoned the second claim")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A claim whose abandonment fails at startup is logged, not fatal: reads already treat it as
+// abandoned, and the server must still start and sweep the rest.
+func TestStartSweepLogsAFailure(t *testing.T) {
+	db, human, cluster, machine := sweepFixture(t)
+	stuck := dueClaim(t, db, human, cluster, machine)
+	// An event the operation's last_event does not count: the terminal event's number is taken.
+	if _, err := db.Exec(`INSERT INTO operation_event (operation, number, epoch, kind, entry, at)
+		SELECT id, 1, epoch, 'ingest', '{"type":"started"}', now() FROM operation WHERE ingestion = $1`, stuck); err != nil {
+		t.Fatal(err)
+	}
+	other := dueClaim(t, db, human, cluster, machine)
+	var logged []string
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	startSweep(t.Context(), ctx, db, time.Hour, func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) })
+	if s := claimState(t, db, other); s != "abandoned" {
+		t.Errorf("the other due claim is %s", s)
+	}
+	if len(logged) == 0 || !strings.Contains(strings.Join(logged, "\n"), stuck) {
+		t.Errorf("logged %q, want the stuck claim's error", logged)
 	}
 }
 
