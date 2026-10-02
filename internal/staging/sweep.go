@@ -91,10 +91,40 @@ func abandonDue(ctx context.Context, db *sql.DB, claim string) (bool, error) {
 	if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&epoch); err != nil {
 		return false, fmt.Errorf("staging: sweep %s: %w", claim, err)
 	}
+	ok, err := AbandonDue(ctx, tx, claim, epoch)
+	if !ok || err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("staging: sweep %s: %w", claim, err)
+	}
+	return true, nil
+}
+
+// AbandonDueNoWait is AbandonDue for a caller that may not wait for the claim's row: a claim
+// another transaction holds is left as it is and reported not written. An ingestion start holds
+// its draft, and T1 locks its claim before that draft, so waiting there could deadlock.
+func AbandonDueNoWait(ctx context.Context, tx *sql.Tx, claim, epoch string) (bool, error) {
+	var held string
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM staging_claim WHERE id = $1 AND `+due+` FOR UPDATE SKIP LOCKED`,
+		claim).Scan(&held); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("staging: abandon %s: %w", claim, err)
+	}
+	return AbandonDue(ctx, tx, claim, epoch)
+}
+
+// AbandonDue writes claim abandoned with its payload cleared if it is due when its row is
+// locked, and fails its running ingest operation ingestion-abandoned with a terminal event in
+// epoch, in the caller's transaction (T8). The caller holds the installation state FOR SHARE, so
+// epoch is current until it commits. It reports whether it wrote the claim.
+func AbandonDue(ctx context.Context, tx *sql.Tx, claim, epoch string) (bool, error) {
 	res, err := tx.ExecContext(ctx, `UPDATE staging_claim SET state = 'abandoned', payload = NULL, payload_digest = NULL
 		WHERE id = $1 AND `+due, claim)
 	if err != nil {
-		return false, fmt.Errorf("staging: sweep %s: %w", claim, err)
+		return false, fmt.Errorf("staging: abandon %s: %w", claim, err)
 	}
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return false, err
@@ -109,16 +139,13 @@ func abandonDue(ctx context.Context, db *sql.DB, claim string) (bool, error) {
 	switch {
 	case errors.Is(err, sql.ErrNoRows): // no operation left running: the claim alone is written
 	case err != nil:
-		return false, fmt.Errorf("staging: sweep %s: fail its operation: %w", claim, err)
+		return false, fmt.Errorf("staging: abandon %s: fail its operation: %w", claim, err)
 	default:
 		if _, err := tx.ExecContext(ctx, `INSERT INTO operation_event (operation, number, epoch, kind, entry, at)
 			VALUES ($1, $2, $3, 'ingest', '{"type":"failed","code":"ingestion-abandoned"}', now())`,
 			op, number, epoch); err != nil {
-			return false, fmt.Errorf("staging: sweep %s: the terminal event: %w", claim, err)
+			return false, fmt.Errorf("staging: abandon %s: the terminal event: %w", claim, err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("staging: sweep %s: %w", claim, err)
 	}
 	return true, nil
 }

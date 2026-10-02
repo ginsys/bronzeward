@@ -61,24 +61,29 @@ func decodeBody(r *http.Request, in input, omit string) ([]byte, error) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errNotObject
 	}
-	var v any
-	if err := json.Unmarshal(b, &v); err != nil {
-		return nil, errNotObject
-	}
-	if holdsNUL(v) {
-		return nil, errors.New("a string holds U+0000, which cannot be stored")
-	}
+	// The document is dropped before anything here decodes a value: it stays raw bytes, read
+	// only by its own type (compilation §2.1), which also refuses U+0000 in it.
+	rest := b
 	if omit != "" {
 		var members map[string]json.RawMessage
 		if err := json.Unmarshal(b, &members); err != nil {
 			return nil, errNotObject
 		}
+		clear(members[omit])
 		delete(members, omit)
-		if b, err = json.Marshal(members); err != nil {
+		if rest, err = json.Marshal(members); err != nil {
 			return nil, errNotObject
 		}
+		clear(b)
 	}
-	canon, err := jcs.Transform(b)
+	var v any
+	if err := json.Unmarshal(rest, &v); err != nil {
+		return nil, errNotObject
+	}
+	if holdsNUL(v) {
+		return nil, errors.New("a string holds U+0000, which cannot be stored")
+	}
+	canon, err := jcs.Transform(rest)
 	if err != nil {
 		return nil, errNotObject
 	}

@@ -108,6 +108,7 @@ func TestUnmarshalJSON(t *testing.T) {
 		"invalid UTF-8":            "\"" + secretText + "\xff\"",
 		"a lone surrogate escape":  `"` + secretText + `\udc00"`,
 		"an escape over the limit": `"` + strings.Repeat(`a`, MaxDocument+1) + `"`,
+		"U+0000":                   `"` + secretText + `\u0000"`,
 	} {
 		var u Unresolved
 		err := json.Unmarshal([]byte(b), &u)

@@ -14,8 +14,9 @@ import (
 )
 
 // POST /ingestions starts an import (persistence-api.md §8, §9.2). It is T11 (§5): the key lock,
-// the installation state FOR SHARE, the draft FOR UPDATE, then the staging claim held and its
-// ingest operation running, together, only if this process's epoch is the current one (§5.1).
+// the installation state FOR SHARE, the draft FOR UPDATE, a due claim of the draft revision's
+// running operation written abandoned, then the staging claim held and its ingest operation
+// running, together, only if this process's epoch is the current one (§5.1).
 // Its fingerprint is keyed (§7.1): the document is HMACed, never stored. The runner takes the
 // job after the COMMIT.
 func ingestionStart() effectRoute {
@@ -116,13 +117,22 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 		return result{}, refuse(http.StatusUnprocessableEntity, "validation-failed", "the machine is not in the draft's cluster").
 			with("machine", in.Machine).with("draft", in.Draft)
 	}
-	// §7.3's natural key, under the draft's lock: one running ingest per draft revision.
-	var running string
-	switch err := tx.QueryRowContext(ctx, `SELECT id FROM operation
-		WHERE kind = 'ingest' AND state = 'running' AND draft = $1 AND draft_revision = $2`, in.Draft, rev).Scan(&running); {
+	// §7.3's natural key, under the draft's lock: one running ingest per draft revision. A running
+	// operation whose claim is due is abandoned here first, as the sweep would: a late sweep
+	// delays only the clearing of ciphertext, never a start (compilation §3.5). A claim another
+	// transaction holds is not waited for: T1 takes its claim before this draft.
+	var running, claim string
+	switch err := tx.QueryRowContext(ctx, `SELECT id, ingestion FROM operation
+		WHERE kind = 'ingest' AND state = 'running' AND draft = $1 AND draft_revision = $2`, in.Draft, rev).Scan(&running, &claim); {
 	case err == nil:
-		return result{}, refuse(http.StatusConflict, "conflict", "an ingestion of this draft revision is running").
-			with("operation", running)
+		abandoned, err := staging.AbandonDueNoWait(ctx, tx, claim, q.epoch)
+		if err != nil {
+			return result{}, err
+		}
+		if !abandoned {
+			return result{}, refuse(http.StatusConflict, "conflict", "an ingestion of this draft revision is running").
+				with("operation", running)
+		}
 	case !errors.Is(err, sql.ErrNoRows):
 		return result{}, err
 	}
