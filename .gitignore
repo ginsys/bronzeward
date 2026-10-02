@@ -6,3 +6,7 @@
 /site/
 /.venv-site/
 __pycache__/
+
+# mise run build's binaries and mise run dev's synthetic OIDC key. Anchored, so fixtures/bin/ stays.
+/bin/
+/.dev/
