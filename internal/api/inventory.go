@@ -39,10 +39,11 @@ type effectRoute struct {
 	action string
 	input  func() input
 	effect effectFunc
+	keyed  string // route.keyed
 }
 
 func (er effectRoute) on(rt *route) *route {
-	rt.action, rt.input, rt.effect = er.action, er.input, er.effect
+	rt.action, rt.input, rt.effect, rt.keyed = er.action, er.input, er.effect, er.keyed
 	return rt
 }
 

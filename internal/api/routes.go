@@ -77,7 +77,7 @@ func routes() []*route {
 		g("/releases/{id}/machines/{m}/review"),
 		g("/plans"), g("/plans/{id}"), g("/approvals/{id}"), g("/operations"), read(g("/operations/{id}"), getOperation),
 		g("/operations/{id}/events"), read(g("/acts"), listActs), g("/recovery"),
-		ifm(human(m(post, "/ingestions", author))),
+		ingestionStart().on(ifm(human(m(post, "/ingestions", author)))),
 		human(m(post, "/ingestions/{id}/marks", author)), human(m(post, "/ingestions/{id}/takeovers", author)),
 		human(m(post, "/ingestions/{id}/abandonments", author)),
 		clusterCreation().on(human(m(post, "/clusters", author))),
