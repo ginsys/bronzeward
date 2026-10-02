@@ -123,6 +123,11 @@ func TestTalosAccessRefusesMalformed(t *testing.T) {
 		m[k] = v
 		return m
 	}
+	without := func(k string) map[string]any {
+		m := with(k, nil)
+		delete(m, k)
+		return m
+	}
 	for name, payload := range map[string]any{
 		"no data":            data(nil),
 		"no fields":          kvRead(nil, meta),
@@ -138,6 +143,12 @@ func TestTalosAccessRefusesMalformed(t *testing.T) {
 		"created not a time": kvRead(ok, with("created_time", "TALOS-ACCESS-KEY")),
 		"deleted":            kvRead(ok, with("deletion_time", "2026-10-02T11:00:00Z")),
 		"destroyed":          kvRead(ok, with("destroyed", true)),
+		// Liveness is read, not assumed: an answer that does not state it is not a live version.
+		"deletion_time missing": kvRead(ok, without("deletion_time")),
+		"deletion_time null":    kvRead(ok, with("deletion_time", nil)),
+		"destroyed missing":     kvRead(ok, without("destroyed")),
+		"destroyed null":        kvRead(ok, with("destroyed", nil)),
+		"destroyed a string":    kvRead(ok, with("destroyed", "false")),
 	} {
 		i, _ := standIn(t, testKeys, func(w http.ResponseWriter, _ *http.Request) { respond(t, w, 200, payload) })
 		_, err := i.TalosAccess(t.Context(), id.New(id.Cluster))

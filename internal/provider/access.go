@@ -81,8 +81,8 @@ func (i *Ingestion) TalosAccess(ctx context.Context, cluster string) (TalosAcces
 			Metadata *struct {
 				Version      *int    `json:"version"`
 				CreatedTime  *string `json:"created_time"`
-				DeletionTime string  `json:"deletion_time"`
-				Destroyed    bool    `json:"destroyed"`
+				DeletionTime *string `json:"deletion_time"`
+				Destroyed    *bool   `json:"destroyed"`
 			} `json:"metadata"`
 		} `json:"data"`
 	}
@@ -103,7 +103,11 @@ func (i *Ingestion) TalosAccess(ctx context.Context, cluster string) (TalosAcces
 	if err != nil || created.IsZero() {
 		return TalosAccess{}, r.bad("the created_time is not a time")
 	}
-	if m.DeletionTime != "" || m.Destroyed {
+	// A live version states it: deletion_time "" and destroyed false. Absent or null is not live.
+	if m.DeletionTime == nil || m.Destroyed == nil {
+		return TalosAccess{}, r.bad("no deletion_time or destroyed")
+	}
+	if *m.DeletionTime != "" || *m.Destroyed {
 		return TalosAccess{}, r.bad("the version is deleted or destroyed")
 	}
 	raw, ok := out.Data.Data["talosconfig"]
