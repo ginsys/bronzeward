@@ -5,18 +5,23 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	pathpkg "path" // the tests declare path
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/staging"
 )
 
 const prefix = "/api/v1"
@@ -26,13 +31,31 @@ type Authenticator interface {
 	Authenticate(ctx context.Context, authorization string) (auth.Principal, error)
 }
 
+// Ingester is what ingestion needs of *provider.Ingestion (compilation.md §1, §2.3).
+type Ingester interface {
+	Digest(ctx context.Context, input []byte, version int) (provider.Digest, error)
+	CreateGeneration(ctx context.Context, p provider.GenerationPath, v provider.Value) (provider.Generation, error)
+	EncryptBaseline(ctx context.Context, plaintext []byte) (provider.Ciphertext, error)
+	EncryptStaging(ctx context.Context, envelope []byte) (provider.Ciphertext, error)
+}
+
 type API struct {
 	db     *sql.DB
 	authn  Authenticator
 	denied auth.Denied
 	issuer string
 	mux    *http.ServeMux
+	d      deps
 	o      options
+}
+
+// deps are what ingestion needs: the provider client, the claim timers and this process as the
+// owner of the claims it creates. With no provider configured, ing is nil and the ingestion
+// routes answer 503.
+type deps struct {
+	ing    Ingester
+	timers config.Ingestion
+	owner  staging.Owner
 }
 
 // options are nil or false in production; tests set them.
@@ -60,7 +83,9 @@ type request struct {
 	recovery     bool
 	key, ifMatch string
 	input        input
+	material     []byte // the length-prefixed request without a keyed member (§7.1)
 	fingerprint  []byte
+	fpKey        string // the digest key that computed fingerprint, "transit/<key>@v<N>"; empty for SHA-256
 	actID        string // the act of the transaction attempt in progress
 }
 
@@ -68,16 +93,22 @@ type ctxKey struct{}
 
 func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*request) }
 
-// New returns the /api/v1 handler.
-func New(db *sql.DB, a Authenticator, cfg config.Auth) http.Handler {
-	return newAPI(db, a, cfg, options{})
+// New returns the /api/v1 handler. ing and ic are nil without a provider. epoch is the one this
+// process read at its start: it owns claims under it, and under no later one (§5.1).
+func New(db *sql.DB, a Authenticator, cfg config.Auth, ing Ingester, ic *config.Ingestion, epoch string) http.Handler {
+	d := deps{ing: ing}
+	if ic != nil {
+		d.timers = *ic
+		d.owner = staging.Owner{ID: ic.Instance + "/" + strconv.Itoa(os.Getpid()) + "/" + rand.Text(), Epoch: epoch}
+	}
+	return newAPI(db, a, cfg, d, options{})
 }
 
-func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, o options) *API {
+func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *API {
 	if o.logf == nil {
 		o.logf = log.Printf
 	}
-	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, mux: http.NewServeMux(), o: o}
+	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, mux: http.NewServeMux(), d: d, o: o}
 	for _, rt := range append(routes(), o.extra...) {
 		api.mux.Handle(rt.method+" "+prefix+rt.pattern, api.handle(rt))
 	}

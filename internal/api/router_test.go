@@ -159,7 +159,7 @@ func (s stubAuthn) Authenticate(context.Context, string) (auth.Principal, error)
 
 func TestAuthenticationUnavailableIs503(t *testing.T) {
 	e := newEnv(t, options{})
-	a := newAPI(e.db, stubAuthn{err: fmt.Errorf("%w: discovery", auth.ErrUnavailable)}, e.cfg, options{logf: e.logf})
+	a := newAPI(e.db, stubAuthn{err: fmt.Errorf("%w: discovery", auth.ErrUnavailable)}, e.cfg, deps{}, options{logf: e.logf})
 	wantProblem(t, e.do(a, call{method: "GET", path: prefix + "/acts", token: "x"}), http.StatusServiceUnavailable, "dependency-unavailable")
 }
 

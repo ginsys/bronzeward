@@ -29,6 +29,7 @@ type env struct {
 	iss     *issuer.Issuer
 	cfg     config.Auth
 	api     *API
+	d       deps
 	robot   string // its bearer token
 	robotID string
 	mu      sync.Mutex
@@ -37,7 +38,13 @@ type env struct {
 
 func newEnv(t *testing.T, o options) *env {
 	t.Helper()
-	e := &env{t: t, db: migrated(t)}
+	return newEnvWith(t, deps{}, o)
+}
+
+// newEnvWith is newEnv with ingestion's dependencies.
+func newEnvWith(t *testing.T, d deps, o options) *env {
+	t.Helper()
+	e := &env{t: t, db: migrated(t), d: d}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +74,7 @@ func (e *env) build(o options) *API {
 	if o.logf == nil {
 		o.logf = e.logf
 	}
-	return newAPI(e.db, auth.NewVerifier(e.cfg, e.db, auth.Discover(e.cfg.OIDC)), e.cfg, o)
+	return newAPI(e.db, auth.NewVerifier(e.cfg, e.db, auth.Discover(e.cfg.OIDC)), e.cfg, e.d, o)
 }
 
 func (e *env) logf(format string, args ...any) {

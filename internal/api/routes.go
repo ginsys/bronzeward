@@ -15,7 +15,11 @@ type route struct {
 	humanOnly       bool        // automation is refused whatever its roles (§10.3)
 	ifMatch         bool        // If-Match is required
 	action          string      // the act's action (§10.5)
-	input           func() input
+	// keyed names the body member that carries unextracted input: the request is fingerprinted
+	// with the digest key (§7.1), its input implements documentInput, and that member is left out
+	// of the canonical body the rest of the fingerprint covers. Empty for SHA-256.
+	keyed string
+	input func() input
 	// prepare runs after the key's lookup and before the transaction; it may write its own
 	// short transaction, as §10's first-use insert does.
 	prepare func(ctx context.Context, a *API, q *request) error
@@ -37,6 +41,10 @@ type result struct {
 	location, etag string
 	body           any
 	subjects       []string // the act's subject identifiers
+	operation      string   // a 202's operation, recorded with the idempotency record (§7.1)
+	// afterCommit runs once, after this request's own COMMIT is confirmed, outside the
+	// transaction; never for a rolled-back attempt or a replay.
+	afterCommit func()
 }
 
 var anyRole = []auth.Role{auth.Viewer, auth.Author, auth.Publisher, auth.Approver, auth.RecoveryAdmin}

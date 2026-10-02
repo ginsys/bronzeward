@@ -16,10 +16,19 @@ import (
 	"strings"
 
 	"github.com/gowebpki/jcs"
+
+	"github.com/ginsys/bronzeward/internal/ingest"
 )
 
 // input is a mutating route's body, decoded strictly (§9.1) and checked before any transaction.
 type input interface{ check(a *API) error }
+
+// documentInput is a keyed route's input: its document is the unextracted input the digest key's
+// HMAC covers in place of the canonical body's member (§7.1).
+type documentInput interface {
+	input
+	document() ingest.Unresolved
+}
 
 const maxBody = 1 << 20
 
@@ -28,8 +37,9 @@ var errNotObject = errors.New("the body must be one JSON object of this route's 
 // decodeBody reads r's body into in and returns its RFC 8785 canonical form (§7.1). It refuses a
 // content type other than JSON, a body over maxBody, a member that is unknown, repeated or
 // differently cased (encoding/json would accept the last two), and trailing data. Its errors name
-// no value (§9.4).
-func decodeBody(r *http.Request, in input) ([]byte, error) {
+// no value (§9.4). A non-empty omit is a keyed route's document member (§7.1): it is decoded into
+// in but left out of the canonical form.
+func decodeBody(r *http.Request, in input, omit string) ([]byte, error) {
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
 		return nil, errors.New("Content-Type must be application/json")
 	}
@@ -57,6 +67,16 @@ func decodeBody(r *http.Request, in input) ([]byte, error) {
 	}
 	if holdsNUL(v) {
 		return nil, errors.New("a string holds U+0000, which cannot be stored")
+	}
+	if omit != "" {
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(b, &members); err != nil {
+			return nil, errNotObject
+		}
+		delete(members, omit)
+		if b, err = json.Marshal(members); err != nil {
+			return nil, errNotObject
+		}
 	}
 	canon, err := jcs.Transform(b)
 	if err != nil {
@@ -121,15 +141,20 @@ func exactMembers(b []byte, in input) error {
 
 var wildcard = regexp.MustCompile(`\{([a-z]+)\}`)
 
-// fingerprint is §7.1's: SHA-256 over the method, the route template, its path parameters, If-Match
-// and the canonical body, each length-prefixed so that no two requests share an encoding.
+// fingerprint is §7.1's: SHA-256 over material.
 func fingerprint(q *request, canon []byte) []byte {
-	h := sha256.New()
+	sum := sha256.Sum256(material(q, canon))
+	return sum[:]
+}
+
+// material is what §7.1's fingerprint covers: the method, the route template, its path
+// parameters, If-Match and the canonical body, each length-prefixed so that no two requests share
+// an encoding. A keyed route's HMAC covers it followed by the document.
+func material(q *request, canon []byte) []byte {
+	var b []byte
 	put := func(s string) {
-		var n [8]byte
-		binary.BigEndian.PutUint64(n[:], uint64(len(s)))
-		h.Write(n[:])
-		h.Write([]byte(s))
+		b = binary.BigEndian.AppendUint64(b, uint64(len(s)))
+		b = append(b, s...)
 	}
 	put(q.route.method)
 	put(q.route.pattern)
@@ -139,5 +164,5 @@ func fingerprint(q *request, canon []byte) []byte {
 	}
 	put(q.ifMatch)
 	put(string(canon))
-	return h.Sum(nil)
+	return b
 }
