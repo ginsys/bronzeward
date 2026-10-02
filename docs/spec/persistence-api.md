@@ -325,14 +325,21 @@ They are held apart **(choice §17.29)**.
 - **The endpoint is per machine, in the database.** `POST /machines` requires
   `talosEndpoint`: a DNS name or an IP literal (an IPv6 literal in brackets),
   with an optional port, `50000` when absent; no scheme, path, user part or
-  whitespace, at most 255 octets. Every read of the node goes directly to it,
-  as endpoint and as target node, never through another node's proxy
-  (execution and recovery §3.5, choice §10.9 there). A plan binds the
-  endpoint current at its creation as its route.
+  whitespace, at most 255 octets. The endpoint is only dialled: every request
+  to the node goes to it and carries no `node` or `nodes` routing metadata,
+  so the node dialled answers for itself and no apid forwards it (execution
+  and recovery §3.5, choice §10.9 there). Talos compares `node` metadata with
+  a node's own bare addresses and refuses what a worker does not recognise
+  ("no request forwarding", `internal/app/apid/pkg/director/director.go` at
+  v1.13.6), so a value with a port or a DNS alias would fail there. A plan
+  binds the endpoint current at its creation as its route.
   `POST /machines/{id}/talos-endpoints` replaces it (an address change, or one
   entered wrongly at inventory, which the SMBIOS UUID index would otherwise
   leave unrecoverable): it records a MachineEndpointChange and its act
-  (§10.5), and changes no existing plan, whose route stays the one it bound.
+  (§10.5) in one transaction, and changes no existing plan, whose route stays
+  the one it bound. Like inventory, it is accepted installation-wide in
+  recovery mode (§12.2): it changes nothing on a machine, and a restored
+  endpoint may be the one that no longer answers.
 - **The credential is per cluster, in the provider.** Talos authorizes a client
   certificate signed by the cluster's own certificate authority, so one
   credential reaches every node of the cluster (design §13.1, "cluster-specific
@@ -365,15 +372,22 @@ They are held apart **(choice §17.29)**.
   or quoted in an error (compilation §13).
 - **Identity before use.** Before using a configuration read for ingestion, the
   ingestion reads the node's SMBIOS UUID on the same connection and compares
-  it with the machine record; a different or absent UUID fails the `ingest`
-  operation with `409 machine-identity-mismatch` and nothing read is kept.
+  it with the machine record; a different or absent UUID fails the ingestion
+  with `409 machine-identity-mismatch`, as below, and nothing read is kept.
   Dispatch has execution and recovery's own comparison (its §3.2
   comparison 3). A node swapped between the identity read and the
   configuration read is the residual its choice §10.26 states.
 - **Failure.** An absent secret, one this identity cannot read, a document
-  that is not a usable talosconfig, or an endpoint that does not answer fails
-  the operation with `503 talos-access-unavailable`, naming the cluster or
-  machine and never a value; nothing is committed. A restore of the provider
+  that is not a usable talosconfig, or an endpoint that does not answer is the
+  problem `503 talos-access-unavailable`, naming the cluster or machine and
+  never a value. For an ingestion it arises after `POST /ingestions` has
+  committed the claim and its `running` operation (T11; compilation §2.3
+  step 0), so it ends them as a refused input does: one transaction, under
+  the claim's owner check (§5.1), writes the claim `abandoned` (compilation
+  §3.2) and fails the operation with this problem and its terminal event
+  (§8.2). No generation, draft revision or read value is written. For
+  dispatch it is a failed use-time check (execution and recovery §3.1
+  item 2). A restore of the provider
   to an older snapshot can bring back a superseded credential; if Talos no
   longer accepts it, reads fail the same way until the operator writes a
   current one.
@@ -1065,7 +1079,9 @@ transaction that writes a staging claim `abandoned` fails that claim's
 the same transaction: the operator's abandonment (T11), the sweep that writes
 a lapsed transient claim or an expired one abandoned and a takeover with
 nothing to decrypt (T8; compilation §3.4, §3.5), and recovery-mode entry (T9)
-**(choice §17.12)**.
+**(choice §17.12)**. A failed node read of a `source: machine` ingestion
+(§3.3) abandons its claim too, and fails the operation with its own problem
+in that transaction instead.
 
 Recovery-mode entry fails every `queued` or `running` `publish` job with
 `recovery-mode-entered`, and every `running` `ingest` operation with
@@ -1425,7 +1441,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
 | 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
-| 409 | `machine-identity-mismatch` | a `source: machine` ingestion read a node whose SMBIOS UUID is not the machine record's, or none (§3.3); nothing read is kept |
+| 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose SMBIOS UUID is not the machine record's, or none (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
@@ -1435,7 +1451,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
 | 501 | `not-implemented` | a §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
 | 503 | `dependency-unavailable` | the provider is sealed or unreachable, or authentication could not reach the identity provider or the database; nothing was committed |
-| 503 | `talos-access-unavailable` | a node read could not start: the cluster's Talos access configuration is absent, unreadable by the identity or not a usable talosconfig, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; nothing was committed |
+| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or of a failed use-time check at dispatch: the cluster's Talos access configuration is absent, unreadable by the identity or not a usable talosconfig, or the machine's Talos endpoint did not answer (§3.3); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept |
 | 503 | `transient-conflict` | deadlock retries exhausted (§5) |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing was committed |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
@@ -1850,7 +1866,8 @@ the scope **(choice §17.13)**:
   remove authority (approval and identity revocation, plan cancellation,
   freeze) and acts that record recovery (accounting decisions, takeover
   requests, scope marks, scope release, resolutions, leaving recovery mode).
-- **Accepted installation-wide**: inventory, drafts, ingestion and
+- **Accepted installation-wide**: inventory (a machine's Talos endpoint
+  change included, §3.3), drafts, ingestion and
   publication. They write the database and the provider and change nothing on
   a machine; a `source: machine` ingestion reads the node, which is the
   observation design §14.6 allows. A machine inventoried after entry gets a
@@ -2235,7 +2252,16 @@ each (design §7.7 consequences):
   `secret/data/gen/*` read and every write under `secret/data/access/`; a
   `source: machine` ingestion against a node whose SMBIOS UUID differs failing
   `machine-identity-mismatch` with nothing kept; an absent secret and an
-  unreachable endpoint failing `talos-access-unavailable`; and the
+  unreachable endpoint failing `talos-access-unavailable`, each leaving the
+  claim `abandoned` and the operation `failed` with its terminal event, and
+  no generation; reads of the fixture's worker by its own endpoint with no
+  `node` metadata, under an explicit port, the default port and a DNS name;
+  an endpoint replacement from A to B after a plan was created, the plan
+  still bound to A, a plan created afterwards bound to B, and the change and
+  its act both present or both absent, with a control that resolves the
+  route from the machine record at dispatch and must then fail; the same
+  replacement accepted in recovery mode on a scope still pre-restore
+  unaccounted; and the
   talosconfig's client key in compilation §15's scan of the database, logs and
   responses, with a positive control.
 
