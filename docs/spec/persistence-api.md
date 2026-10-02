@@ -217,7 +217,7 @@ that the trigger fires **(choice §17.3)**.
 | --- | --- | --- | --- |
 | Cluster | mutable, revisioned | name, endpoint, contract, status | this contract |
 | Machine | mutable, revisioned | `mch` id, hardware evidence with its SMBIOS UUID (unique, §7.3), cluster membership, Talos endpoint (§3.3), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
-| MachineEndpointChange | immutable | a machine's previous Talos endpoint (none for a machine migrated without one) and new one, who changed it, role, epoch, time (§3.3) | this contract |
+| MachineEndpointChange | immutable | a machine's previous Talos endpoint and new one, who changed it, role, epoch, time (§3.3) | this contract |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
 | Profile / ProfileRevision | mutable head / immutable | ordered fragment revision ids | this contract |
@@ -351,24 +351,10 @@ They are held apart **(choice §17.29)**.
   `400 invalid-request`, on either route, with nothing committed. It changes no existing plan, whose route stays
   the one it bound. Like inventory, it is accepted installation-wide in
   recovery mode (§12.2): it changes nothing on a machine, and a restored
-  endpoint may be the one that no longer answers. A machine inventoried before
-  the endpoint existed, in a database migrated from an earlier schema, has
-  none: the migration adds the column null for existing rows (§11 rule 4) and
-  invents no address. The requirement binds inserts only, by a
-  `BEFORE INSERT` trigger, with a `BEFORE UPDATE` trigger refusing to clear an
-  endpoint once set: a table `CHECK`, even `NOT VALID`, is enforced on every
-  later update in PostgreSQL, so a legacy row would refuse recovery entry's
-  scope projection (T9), a freeze or an unfreeze. A `source: machine`
-  ingestion start and a plan creation naming such a machine
-  are refused `409 conflict`, naming the missing endpoint, with nothing
-  committed, until the replacement route sets one; that change records no
-  previous endpoint. A `source: document` ingestion dials nothing and is
-  not refused. A `drift` or `restoration` observation of such a machine dials
-  nothing and records the missing endpoint as its cause (execution and
-  recovery §4.1): no drift is opened, and a failed `restoration` observation
-  leaves the scope `blocked` until a later one succeeds (execution and
-  recovery §7.4), which the replacement route, accepted in recovery mode,
-  makes possible.
+  endpoint may be the one that no longer answers. The column is `NOT NULL`:
+  every machine has an endpoint. Bronzeward is unreleased, so the migration
+  adding it supports no earlier database: on one already holding machines it
+  fails, and the operator recreates the database (§11 rule 6).
 - **The credential is per cluster, in the provider.** Talos authorizes a client
   certificate signed by the cluster's own certificate authority, so one
   credential reaches every node of the cluster (design §13.1, "cluster-specific
@@ -1522,7 +1508,7 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a `source: machine` ingestion start or a plan creation naming a machine with no Talos endpoint (§3.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID already recorded, naming its machine (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose SMBIOS UUID or cluster membership is not the machine record's, or that reported none (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
@@ -1820,13 +1806,13 @@ Rules **(choice §17.24)**:
    versions.
 3. A migration touches no provider and dispatches nothing.
 4. A migration never rewrites existing rows of an immutable table. It may add
-   tables, columns with constant defaults, indexes and constraints. A
-   required value that existing rows cannot have, such as a machine's Talos
-   endpoint (§3.3), is added null for them, an insert-time trigger requires it
-   of new rows (a table constraint would also bind updates of the existing
-   rows), and the contract defines what a row without it refuses.
+   tables, columns with constant defaults, indexes and constraints.
 5. There is no downgrade. Undoing a migration means restoring a database
    backup, which is a restore (§12).
+6. Until a first release, a migration need not upgrade an earlier database.
+   One adding a required value that existing rows cannot have, such as a
+   machine's Talos endpoint (§3.3), adds it `NOT NULL` and fails on a
+   database holding such rows; the operator recreates the database.
 
 DB tested the engine properties only. No v1 migration tool, online migration
 of a large table or downgrade was attempted
@@ -2364,13 +2350,6 @@ each (design §7.7 consequences):
   scheme, a path, a user part, whitespace, a DNS name, an unbracketed IPv6 literal, a port
   out of range, against IPv4 and bracketed IPv6 controls accepted; the
   endpoint change read back from the machine's timeline with both endpoints;
-  a database holding machine rows migrated from the previous schema, each row
-  left without an endpoint, its `source: machine` ingestion start and plan
-  creation refused `conflict` with nothing committed, a `source: document`
-  ingestion of it accepted, while recovery entry and a freeze and
-  unfreeze of it succeed, an insert without an endpoint and an update clearing
-  one each refused, then set by the replacement route with no previous
-  endpoint recorded, after which both proceed;
   the version identity recorded as path, version and
   `created_time`, with a control that deletes the path's metadata and rewrites
   it, whose new version the record must tell apart; an ingestion's access
@@ -2387,10 +2366,7 @@ each (design §7.7 consequences):
   replacement accepted in recovery mode on a scope still pre-restore
   unaccounted; a talosconfig whose contexts' `endpoints` and `nodes` name the
   fixture's other node, every read still reaching the endpoint chosen with no
-  `node` metadata; a `drift` and a `restoration` observation of a migrated
-  machine without an endpoint dialling nothing and recording that cause, the
-  scope left `blocked` until the replacement route sets one and a later
-  observation succeeds; a rotation between a dispatch's evidence observation
+  `node` metadata; a rotation between a dispatch's evidence observation
   and its attempt, the attempt still using the version the observation used,
   with a control that reads the latest version at send and must then fail;
   `TestLiveRoleProbe` asserting `PermissionDenied` for `os:reader` and
