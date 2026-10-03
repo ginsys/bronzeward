@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"testing"
 	"time"
 
@@ -259,26 +260,60 @@ func TestSourcesRevisionRowsWithTheirRevision(t *testing.T) {
 // test-only trigger on the late row, firing after with_revision (triggers fire in name order),
 // waits on an advisory lock the barrier holds: an intact guard refuses the row before it, a missing
 // one reaches it. The writer commits only once the statement has been refused or waits on the
-// barrier, which is released after the commit.
+// barrier, which is released after the commit. Every statement, cleanup included, runs under a
+// deadline.
 func unseenRevisionRow(t *testing.T, db *sql.DB, s sources) {
 	t.Helper()
-	mustExec(t, db, `CREATE FUNCTION test_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	exec := func(e interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}, q string, args ...any) {
+		t.Helper()
+		if _, err := e.ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Cleanup runs after ctx may have expired, so it gets its own deadline.
+	bounded := func(f func(context.Context) error) error {
+		c, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		return f(c)
+	}
+
+	exec(db, `CREATE FUNCTION test_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
 		BEGIN
 			IF NEW.revision = current_setting('bw.barrier', true) THEN
 				PERFORM pg_advisory_xact_lock(2309);
 			END IF;
 			RETURN NEW;
 		END $$`)
-	mustExec(t, db, `CREATE TRIGGER zz_barrier BEFORE INSERT ON profile_revision_fragment FOR EACH ROW EXECUTE FUNCTION test_barrier()`)
-	defer mustExec(t, db, `DROP FUNCTION test_barrier() CASCADE`)
+	// Runs last, once both transactions (which hold locks on the trigger's table) have ended.
+	defer func() {
+		if err := bounded(func(c context.Context) error {
+			_, err := db.ExecContext(c, `DROP FUNCTION test_barrier() CASCADE`)
+			return err
+		}); err != nil {
+			t.Error(err)
+		}
+	}()
+	exec(db, `CREATE TRIGGER zz_barrier BEFORE INSERT ON profile_revision_fragment FOR EACH ROW EXECUTE FUNCTION test_barrier()`)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 	barrier, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = barrier.Close() }()
+	// Registered before the lock is taken, so every later exit releases it. A session that cannot be
+	// shown unlocked is discarded, never returned to the pool still holding the lock.
+	defer func() {
+		if err := bounded(func(c context.Context) error {
+			_, err := barrier.ExecContext(c, `SELECT pg_advisory_unlock_all()`)
+			return err
+		}); err != nil {
+			_ = barrier.Raw(func(any) error { return driver.ErrBadConn })
+		}
+		_ = barrier.Close()
+	}()
 	var holder int
 	if err := barrier.QueryRowContext(ctx, `SELECT pg_backend_pid() FROM pg_advisory_lock(2309)`).Scan(&holder); err != nil {
 		t.Fatal(err)
@@ -293,15 +328,18 @@ func unseenRevisionRow(t *testing.T, db *sql.DB, s sources) {
 		t.Fatal(err)
 	}
 	defer func() { _ = late.Rollback() }()
-	// Runs before the rollbacks above, on every path: the statement is cancelled and the barrier
-	// released, so no rollback waits on a statement still blocked behind it.
+	// Runs before the rollbacks above: the statement is cancelled and the barrier released, so no
+	// rollback waits on a statement still blocked behind it.
 	defer func() {
 		cancel()
-		_, _ = barrier.ExecContext(context.Background(), `SELECT pg_advisory_unlock_all()`)
+		_ = bounded(func(c context.Context) error {
+			_, err := barrier.ExecContext(c, `SELECT pg_advisory_unlock_all()`)
+			return err
+		})
 	}()
 	pending := id.New(id.ProfileRevision)
-	mustExec(t, writer, insertProfileRevision, pending, s.cluster, "pending", s.human)
-	mustExec(t, late, `SELECT set_config('bw.barrier', $1, true)`, pending)
+	exec(writer, insertProfileRevision, pending, s.cluster, "pending", s.human)
+	exec(late, `SELECT set_config('bw.barrier', $1, true)`, pending)
 	done := make(chan error, 1)
 	go func() {
 		_, err := late.ExecContext(ctx, insertProfilePin, pending, s.cluster, 0, s.frv1)
