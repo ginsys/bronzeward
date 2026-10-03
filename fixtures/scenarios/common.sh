@@ -23,6 +23,9 @@ keep_secret() {
 # automation token bin/seed issues, with its secret half, which the refused variants still carry.
 redacted=()
 redact_automation_token() { redacted+=("$1" "${1##*.}"); }
+# withheld: fixture secrets a request body carries on purpose, such as the canary in a refused
+# input; no transcript shows them, each is written <withheld>.
+withheld=()
 
 # result PASS|FAIL|SKIP <reference> <what>. No line carries a token or a response value.
 result() {
@@ -63,25 +66,32 @@ mint() {
 # call <method> <path> <token> [body] [idempotency key] [if-match]: the status of a request to the
 # instance on port $call_port (A's unless the scenario sets it), 000 when nothing answers; the
 # response headers and body are left in $EV/last.headers and $EV/last.body, both emptied first.
-# The token goes over stdin: a command line is readable by any local user.
+# The token goes over stdin and the body through a file only the user reads: a command line is
+# readable by any local user.
 call_port=$SERVER_A_PORT
 call() {
-  local method=$1 path=$2 token=$3 body=${4:-} key=${5:-} match=${6:-} args=()
+  local method=$1 path=$2 token=$3 body=${4:-} key=${5:-} match=${6:-} args=() sent=$STATE/$scenario-request-body
   : >"$EV/last.headers"
   : >"$EV/last.body"
-  [ -z "$body" ] || args+=(--header 'Content-Type: application/json' --data-binary "$body")
+  if [ -n "$body" ]; then
+    (umask 077 && printf '%s' "$body" >"$sent")
+    args+=(--header 'Content-Type: application/json' --data-binary "@$sent")
+  fi
   [ -z "$key" ] || args+=(--header "Idempotency-Key: $key")
   [ -z "$match" ] || args+=(--header "If-Match: $match")
   { [ -z "$token" ] || printf 'Authorization: Bearer %s\n' "$token"; } |
     command curl --disable --noproxy '*' --silent --max-time 10 --output "$EV/last.body" \
       --dump-header "$EV/last.headers" --write-out '%{http_code}' \
       --header @- --request "$method" "${args[@]}" "http://127.0.0.1:$call_port$path" || true
+  rm -f -- "$sent"
 }
 # transcript <status> <call args...>: the request and its response into $EV/http/<n>.txt, in call
-# order, the token withheld (acceptance plan §2). The request bodies are the script's own literals.
+# order, the token withheld (acceptance plan §2). The request bodies are the script's own literals,
+# each withheld value replaced.
 http_n=0
 transcript() {
-  local status=$1 method=$2 path=$3 token=$4 body=${5:-} key=${6:-} match=${7:-}
+  local status=$1 method=$2 path=$3 token=$4 body=${5:-} key=${6:-} match=${7:-} s
+  for s in "${withheld[@]}"; do body=${body//"$s"/<withheld>}; done
   http_n=$((http_n + 1))
   {
     printf '> %s %s\n' "$method" "$path"
