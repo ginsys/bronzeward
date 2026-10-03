@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -186,12 +187,13 @@ func (e *orphanEnv) reference(t *testing.T, path string) {
 }
 
 // run runs the command and returns what it printed on its stdout, and everything else it wrote:
-// its stderr, the process's own stdout and stderr, and the log.
-func (e *orphanEnv) run(args ...string) (string, string, error) {
+// its stderr, the process's own stdout and stderr, and the log. The outputs are restored however
+// the command ends, a control's t.Fatal included.
+func (e *orphanEnv) run(args ...string) (printed, other string, err error) {
 	var out, errb, logb bytes.Buffer
-	r, w, perr := os.Pipe()
-	if perr != nil {
-		return "", "", perr
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", "", err
 	}
 	read := make(chan []byte)
 	go func() {
@@ -201,14 +203,36 @@ func (e *orphanEnv) run(args ...string) (string, string, error) {
 	stdout, stderr, logw := os.Stdout, os.Stderr, log.Writer()
 	os.Stdout, os.Stderr = w, w
 	log.SetOutput(&logb)
-	err := runOrphans(append([]string{"-config", e.config}, args...), &out, &errb)
-	os.Stdout, os.Stderr = stdout, stderr
-	log.SetOutput(logw)
-	w.Close()
-	errb.Write(<-read)
-	r.Close()
-	errb.Write(logb.Bytes())
-	return out.String(), errb.String(), err
+	defer func() {
+		os.Stdout, os.Stderr = stdout, stderr
+		log.SetOutput(logw)
+		w.Close()
+		errb.Write(<-read)
+		r.Close()
+		errb.Write(logb.Bytes())
+		printed, other = out.String(), errb.String()
+	}()
+	err = runOrphans(append([]string{"-config", e.config}, args...), &out, &errb)
+	return
+}
+
+// TestOrphansRunRestoresOutputs: run restores the process's stdout, stderr and log output even when
+// the command never returns, as when a control's t.Fatal ends the goroutine.
+func TestOrphansRunRestoresOutputs(t *testing.T) {
+	e := newOrphanEnv(t)
+	stdout, stderr, logw := os.Stdout, os.Stderr, log.Writer()
+	orphanHooks.afterLoad = runtime.Goexit
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.run("-cluster", e.a)
+	}()
+	<-done
+	if os.Stdout != stdout || os.Stderr != stderr || log.Writer() != logw {
+		os.Stdout, os.Stderr = stdout, stderr
+		log.SetOutput(logw)
+		t.Fatal("an exit inside the command left the outputs redirected")
+	}
 }
 
 // leaks reports whether text names a generation path or an identifier.
