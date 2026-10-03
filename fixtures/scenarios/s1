@@ -393,11 +393,13 @@ scan_clean() {
 }
 # outcome_bundle <row ref> <name>: the evidence bundle after one success or refusal, and its scan
 # clean: the acceptance plan's S1 retains one scan bundle per success, refusal and interruption
-# point, since a later bundle cannot show what an earlier outcome left behind.
+# point, since a later bundle cannot show what an earlier outcome left behind. The capture takes
+# time the rows after it did not budget for, so the author token is minted again if it is old.
 outcome_bundle() {
   evidence_to "$2" || die "no bundle after $2: bin/evidence failed"
   check "$1" "after $2, its bundle and the run directory: no fixture secret but the scan's control" \
     scan_clean "$2"
+  fresh_author
 }
 
 # Predicates for check: their arguments land in commands.tsv, so they take IDs and counts only.
