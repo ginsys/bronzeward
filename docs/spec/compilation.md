@@ -73,6 +73,7 @@ to that work:
 | Compiler | read the pinned secret versions; encrypt with the artifact key | artifact, baseline or staging decryption; secret creation; the Talos access configuration; machine operation | `compiler`: `read` on `secret/data/*`, encrypt on the artifact key, decrypt refused (PC §4.1 rows 004, 038, 040) |
 | Executor | decrypt artifacts, gated by approval; read the cluster's Talos access configuration (below) | every other secret read; staging and baseline decryption | `executor`: decrypt only, secret read refused (PC §4.1 rows 039, 005); [execution and recovery §3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
 | Metadata | [design §7.6](../design/Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks) classification | any value | `metadata`: KV metadata and Transit key state, no data (PC §4.1) |
+| Orphan report | `list` and `read` on `secret/metadata/gen/*`, for [persistence and API §6.4](persistence-api.md#64-orphans)'s report | any value; any other path; Transit | `metadata` listed under one generation path (PC §4 row 065); this identity not measured |
 | Normal API | metadata and workflow | any secret value, any plaintext input | not measured; design §13.1 |
 
 The Talos access configuration is the one management credential these

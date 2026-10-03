@@ -912,13 +912,26 @@ Handling in the PoC:
   no orphan is adopted into a new draft, even after a restore
   removed the draft that referenced it. The input is ingested again
   (compilation §3.5) **(choice §17.8)**.
-- **Reported.** An orphan report lists generation paths whose claim component
-  names an `abandoned` claim, or no claim at all, with the claim's state and
-  times. It reads provider metadata under the metadata identity and names only
-  paths, never values. PC's metadata identity listed paths (row 065, under
-  one generation path); whether the PoC's policy grants list at each level of
-  `gen/<cluster>/<claim id>/<value id>` is not measured. If it does not, the
-  report covers abandoned claims only, from the claim's own recorded paths.
+- **Reported.** The operator command `bronzeward orphans --config <file>
+  --cluster <id>`, run on the server host as `migrate` and `token` are, reports
+  orphans; no route serves them. It authenticates to the provider with the
+  **orphan-report identity** and no other: a static token of its own, in the
+  file the configuration's `provider.reportTokenFile` names (mode 0600 or
+  tighter, read at use), whose policy grants `read` and `list` on
+  `secret/metadata/gen/*` and nothing else: no `secret/data/*`, no other
+  metadata path, no Transit **(choice §17.30)**. The command lists
+  `secret/metadata/gen/<cluster id>/` and then each `<claim id>/` under it,
+  outside any transaction (rule 1 of §5), and then reads the named claims in one
+  read-only transaction. It reports each path whose claim is `abandoned`, or
+  absent from the database, with the claim's id, state, creation time and
+  absolute expiry where the row exists. A `held` or `resumed` claim is still in
+  flight and a `released` one's generations are referenced by its draft
+  revision (compilation §13), so their paths are not reported. A claim row is
+  committed by ingestion start (T11, compilation §2.3 step 0) before the first
+  generation is created at step 6, so a path without one is source 3 above, or
+  a claim this database never held. The report names paths, claim ids, states
+  and times only, never a value or custom metadata, and changes nothing in the
+  provider or the database.
 
 ## 7. Idempotency
 
@@ -2465,7 +2478,17 @@ each (design §7.7 consequences):
   client refused for a plan whose approval was revoked; and the
   talosconfig's client key in compilation §15's scan of the database, logs,
   responses and temporary files, over successful, refused and interrupted
-  ingestions, executor observations and dispatches, with a positive control.
+  ingestions, executor observations and dispatches, with a positive control;
+- the orphan report (§6.4): the orphan-report identity listing
+  `secret/metadata/gen/<cluster id>/` and a claim's directory under it and
+  reading a generation's metadata, and refused a `secret/data/gen/*` read, a
+  `list` of `secret/metadata/access/`, and every Transit request, with a
+  control that grants it `read` on `secret/data/gen/*` and must then succeed;
+  the report naming the paths of an `abandoned` claim and a path whose claim
+  row does not exist, and not the paths of a `held`, a `resumed` and a
+  `released` claim, with a control that reports every listed path and must
+  then fail; and the provider's versions and the claim rows unchanged by a
+  run.
 
 Evidence gaps this contract carries rather than closes:
 
@@ -2481,8 +2504,8 @@ Evidence gaps this contract carries rather than closes:
   item 4, execution and recovery's and still unmodelled.
 - **Same-key concurrency**: unmeasured (§7.2).
 - **Orphan listing**: PC measured listing under one generation path (row
-  065), not whether the PoC policy grants it at each level of the generation
-  tree (§6.4).
+  065); listing at each level of the generation tree under the orphan-report
+  identity's policy is unmeasured until the check above runs (§6.4).
 - **Unkeyed configuration digests**: releases and import base revisions persist
   unkeyed SHA-256 digests of whole configurations (§1.1, §6.2), whose
   guessability was not assessed (compilation §4.1; execution and recovery's
@@ -2656,6 +2679,17 @@ design and evidence do not settle the question. Each is marked in place as
     owner decision, 2026-10-02). Alternatives: a separate observer identity,
     holding the same mutation-capable credential; observations under the
     ingestion identity, which can write secret generations.
+30. **The orphan report lists generation paths under an identity of its own,
+    `read` and `list` on `secret/metadata/gen/*` only, with its own token
+    file** (§6.4). Owner decision, 2026-10-03 (ginsys/bronzeward#22): a
+    listing reveals random identifiers, never values, and the dependency
+    monitor's metadata identity keeps its `read`-only grant (dependency
+    monitor choice §11.9). Alternatives: grant the metadata identity `list`
+    on `secret/metadata/gen/*`, one credential fewer but a capability the
+    monitor never uses, the alternative §11.9 rejected; no listing, reporting
+    abandoned claims from the database alone, which names no path (a claim
+    records none, and choice 8 rejected a path ledger) and cannot see the
+    orphans of a claim a restore removed.
 
 ## 18. Traceability
 
@@ -2671,7 +2705,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §5.1 fences, claims | §7.2, §12.5 | [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions) rows 015–018; [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) rows 019–021 |
 | §6 publication | §7.4, §7.8 | DB §4.2 rows 004–011, 058–061; KL §7 item 1 |
 | §6.3 partial publication | §7.4, §7.6, §7.8 | [PC §4](../design/research/20260924-provider-capability-comparison.md#4-the-matrix) row 083; [KL §3.2](../design/research/20260924-key-loss-restoration.md#32-what-each-case-showed) cases G, H; [RC §6.4](../design/research/20260924-retention-metadata-classification.md#64-criterion-4-provider-limits-and-the-alert-policy-the-evidence-supports) |
-| §6.4 orphans | §7.4, §7.8 | DB §9; KL case G; PC §4 row 065 |
+| §6.4 orphans | §7.4, §7.8, §13.2 | DB §9; KL case G; PC §4 row 065; the orphan-report identity's grants not measured (§16, choice §17.30) |
 | §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; DB §4.6 (advisory lock); [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |
 | §8 operations | §11.1, §12.5, §15.2 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2) row 009; DB §4.5 rows 020, 021 |
 | §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5 |

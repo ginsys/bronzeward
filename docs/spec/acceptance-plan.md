@@ -207,7 +207,8 @@ configuration digest, equal to the pre-state; the executor identity's decryption
   unmarked string: each refused before any provider write, quoting no input text.
 - The ingesting process killed after each pipeline step 0 to 8 under transient staging: the claim is
   abandoned at lease lapse, its operation fails `ingestion-abandoned`, and generations already
-  created are listed as orphans, none deleted.
+  created are listed as orphans by the orphan report under its own identity
+  ([PA §6.4](persistence-api.md#64-orphans)), none deleted.
 - The same under encrypted staging: takeover by a second ingestion principal only after lease lapse;
   the old owner's draft transaction refused; a takeover with nothing to decrypt abandons; with
   OpenBao partitioned the taker keeps the claim `resumed`
@@ -827,6 +828,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: `FOR SHARE` at publication (DB row 011) | S2 negative controls | #23 |
 | PA §16: ownership check inside the attempt's `UPDATE` (row 018) | S4 negative controls | #26 |
 | PA §16: claim eligibility re-check (row 020): the takeover's conditional `UPDATE` refusing a claim whose absolute expiry passed after it was locked, with the control that decides on the earlier read, is `TestTakeOverRechecksEligibility` | *check* | #22 |
+| PA §16: the orphan report's identity, listing and reading generation metadata and refused everything else, with the read-grant control; its selection of abandoned and absent claims over live and released ones, with the report-everything control; nothing changed by a run | S1 negative controls plus *check* | #22 |
 | PA §16: migration advisory lock (row 026); immutability triggers; startup refusal on each schema mismatch; authentication refusals; role checks that role alone decides, and the human-only refusals | S0, S2 pass criteria, plus *check* for startup | #21, #23 |
 | PA §16: role checks whose outcome needs the route's handler or state, against the design §13.7 scenarios | S2 step 7, S3 (its handover part included), S4, S5 steps 3 and 7, S6.1 step 7, S7 | #23, #25, #26, #27, #28, #29 |
 | PA §16: the epoch term and process-epoch checks; the recovery-start process in the new epoch; per-scope refusals and the recovery-start refusal | S7 | #29 |
