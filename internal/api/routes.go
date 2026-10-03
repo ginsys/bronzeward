@@ -86,9 +86,14 @@ func routes() []*route {
 		endpointReplacement().on(human(m(post, "/machines/{id}/talos-endpoints", author))),
 		draftCreation().on(m(post, "/drafts", author)),
 	)
-	for _, part := range []string{"/fragments/{name}", "/profiles/{name}", "/assignments/{machine}"} {
-		rs = append(rs, ifm(m(put, "/drafts/{id}"+part, author)), ifm(m(del, "/drafts/{id}"+part, author)))
-	}
+	rs = append(rs,
+		ifm(m(put, "/drafts/{id}/fragments/{name}", author)),
+		fragmentRemoval().on(ifm(m(del, "/drafts/{id}/fragments/{name}", author))),
+		profileUpdate().on(ifm(m(put, "/drafts/{id}/profiles/{name}", author))),
+		profileRemoval().on(ifm(m(del, "/drafts/{id}/profiles/{name}", author))),
+		ifm(m(put, "/drafts/{id}/assignments/{machine}", author)),
+		assignmentRemoval().on(ifm(m(del, "/drafts/{id}/assignments/{machine}", author))),
+	)
 	rs = append(rs,
 		ifm(m(post, "/drafts/{id}/discard", author)),
 		ifm(m(post, "/drafts/{id}/publications", publisher)),

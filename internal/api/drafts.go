@@ -1,0 +1,340 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/http"
+	"regexp"
+
+	"github.com/ginsys/bronzeward/internal/id"
+)
+
+// The draft update routes for profiles and assignments, the removals of all three kinds and the
+// discard (persistence-api.md §3.1, §9.2, §9.3, choice §17.31). None of them can carry a secret
+// value, so each is a plain T1 (§5) under the SHA-256 fingerprint; the fragment PUT, which
+// ingests, is not here.
+
+func profileUpdate() effectRoute {
+	return effectRoute{action: "draft.profile.update", input: func() input { return &profileInput{} }, effect: updateProfile}
+}
+
+func fragmentRemoval() effectRoute   { return removal("fragment") }
+func profileRemoval() effectRoute    { return removal("profile") }
+func assignmentRemoval() effectRoute { return removal("assignment") }
+
+func removal(kind string) effectRoute {
+	return effectRoute{action: "draft." + kind + ".remove", input: func() input { return &noBody{} },
+		effect: func(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
+			return removeSource(ctx, tx, q, kind)
+		}}
+}
+
+// noBody is a DELETE route's input: it takes no body (§9.3), and decodeBody refuses one.
+type noBody struct{}
+
+func (*noBody) check(*API) error { return nil }
+
+// sourceName is a fragment or profile name (choice §17.31), as migration 0009's source_name.
+var sourceName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+func validName(s string) bool { return len(s) <= 63 && sourceName.MatchString(s) }
+
+// sourceEntry is a draft's fragment, profile or assignment entry (§3.1, §9.3). Head is the head of
+// its name or machine, if one exists; Base the head revision it was edited from (null: absent);
+// Revision the proposed revision (null: a removal).
+type sourceEntry struct {
+	Kind     string  `json:"kind"`
+	Name     string  `json:"name,omitempty"`
+	Machine  string  `json:"machine,omitempty"`
+	Head     *string `json:"head"`
+	Base     *int    `json:"base"`
+	Revision *string `json:"revision"`
+}
+
+// sourceUpdate is a draft update's answer (§9.3).
+type sourceUpdate struct {
+	Draft string      `json:"draft"`
+	Entry sourceEntry `json:"entry"`
+}
+
+// lockedDraft is a draft its request's transaction holds FOR UPDATE.
+type lockedDraft struct {
+	id, cluster string
+	revision    int
+}
+
+// lockDraft is T1's draft check, which a discard (T11) shares (§3.1, §5): the draft FOR UPDATE,
+// open, at the request's If-Match, with no publication of it queued or running.
+func lockDraft(ctx context.Context, tx *sql.Tx, q *request) (lockedDraft, error) {
+	d := lockedDraft{id: q.r.PathValue("id")}
+	var state, token string
+	switch err := tx.QueryRowContext(ctx, `SELECT cluster, state, revision, etag_token FROM draft WHERE id = $1 FOR UPDATE`,
+		d.id).Scan(&d.cluster, &state, &d.revision, &token); {
+	case errors.Is(err, sql.ErrNoRows):
+		return d, refuse(http.StatusNotFound, "not-found", "no such draft").with("draft", d.id)
+	case err != nil:
+		return d, err
+	case state != "open":
+		return d, refuse(http.StatusConflict, "conflict", "the draft is "+state).with("draft", d.id)
+	case etag(d.revision, token) != q.ifMatch:
+		return d, refuse(http.StatusPreconditionFailed, "precondition-failed", "the draft has moved").with("draft", d.id)
+	}
+	var pub string
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM operation WHERE draft = $1 AND kind = 'publish'
+		AND state IN ('queued', 'running') ORDER BY id LIMIT 1`, d.id).Scan(&pub); {
+	case err == nil:
+		return d, refuse(http.StatusConflict, "conflict", "a publication of the draft is active").
+			with("draft", d.id).with("operation", pub)
+	case !errors.Is(err, sql.ErrNoRows):
+		return d, err
+	}
+	return d, nil
+}
+
+// advance moves a locked draft to its next revision and returns the new ETag.
+func (d lockedDraft) advance(ctx context.Context, tx *sql.Tx) (string, error) {
+	token := etagToken()
+	if _, err := tx.ExecContext(ctx, `UPDATE draft SET revision = revision + 1, etag_token = $2 WHERE id = $1`, d.id, token); err != nil {
+		return "", err
+	}
+	return etag(d.revision+1, token), nil
+}
+
+// sourceKey names an entry: a fragment or profile by name, an assignment by machine.
+type sourceKey struct{ kind, name, machine string }
+
+// keyOf reads the entry's name or machine from the path. A machine must be in the draft's cluster.
+func keyOf(ctx context.Context, tx *sql.Tx, q *request, d lockedDraft, kind string) (sourceKey, error) {
+	k := sourceKey{kind: kind}
+	if kind != "assignment" {
+		k.name = q.r.PathValue("name")
+		if !validName(k.name) {
+			return k, refuse(http.StatusBadRequest, "invalid-request", "the name must be 1 to 63 lowercase letters, digits and inner hyphens")
+		}
+		return k, nil
+	}
+	k.machine = q.r.PathValue("machine")
+	var ok bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM machine WHERE id = $1 AND cluster = $2)`,
+		k.machine, d.cluster).Scan(&ok); err != nil {
+		return k, err
+	}
+	if !ok {
+		return k, refuse(http.StatusNotFound, "not-found", "no such machine in the draft's cluster").with("machine", k.machine)
+	}
+	return k, nil
+}
+
+// headOf reads the head of k in the draft's cluster: its id, head revision and current revision
+// (nil once removed). No head is all nil.
+func headOf(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey) (head *string, base *int, current *string, err error) {
+	var q string
+	args := []any{d.cluster, k.name}
+	switch k.kind {
+	case "fragment":
+		q = `SELECT id, head_revision, head_revision_id FROM fragment WHERE cluster = $1 AND name = $2`
+	case "profile":
+		q = `SELECT id, head_revision, head_revision_id FROM profile WHERE cluster = $1 AND name = $2`
+	default:
+		q, args = `SELECT id, head_revision, head_revision_id FROM assignment WHERE cluster = $1 AND machine = $2`, []any{d.cluster, k.machine}
+	}
+	var h string
+	var b int
+	var cur sql.NullString
+	switch err := tx.QueryRowContext(ctx, q, args...).Scan(&h, &b, &cur); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil, nil, nil
+	case err != nil:
+		return nil, nil, nil, err
+	}
+	if cur.Valid {
+		current = &cur.String
+	}
+	return &h, &b, current, nil
+}
+
+// entryOf reads the draft's entry for k: whether it exists, its base and its proposed revision.
+func entryOf(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey) (found bool, base *int, rev *string, err error) {
+	var b sql.NullInt64
+	var r sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT base, COALESCE(fragment_revision, profile_revision, assignment_revision)
+		FROM draft_source_entry WHERE draft = $1 AND kind = $2 AND name IS NOT DISTINCT FROM $3 AND machine IS NOT DISTINCT FROM $4`,
+		d.id, k.kind, nullable(k.name), nullable(k.machine)).Scan(&b, &r)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil, nil, nil
+	case err != nil:
+		return false, nil, nil, err
+	}
+	if b.Valid {
+		n := int(b.Int64)
+		base = &n
+	}
+	if r.Valid {
+		rev = &r.String
+	}
+	return true, base, rev, nil
+}
+
+func nullable(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
+
+// setEntry records the draft's entry for k with revision rev (empty: a removal) and answers it. A
+// new entry takes the head's revision as its base (absent with no head); an existing one keeps the
+// base it was first edited from, so a head published since is caught as stale at publication
+// (§4.2) instead of being overwritten.
+func setEntry(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey, rev string) (sourceEntry, error) {
+	e := sourceEntry{Kind: k.kind, Name: k.name, Machine: k.machine}
+	if rev != "" {
+		e.Revision = &rev
+	}
+	head, headRev, _, err := headOf(ctx, tx, d, k)
+	if err != nil {
+		return e, err
+	}
+	e.Head = head
+	found, base, _, err := entryOf(ctx, tx, d, k)
+	if err != nil {
+		return e, err
+	}
+	cols := map[string]sql.NullString{"fragment": {}, "profile": {}, "assignment": {}}
+	cols[k.kind] = nullable(rev)
+	if found {
+		e.Base = base
+		_, err = tx.ExecContext(ctx, `UPDATE draft_source_entry SET fragment_revision = $5, profile_revision = $6, assignment_revision = $7
+			WHERE draft = $1 AND kind = $2 AND name IS NOT DISTINCT FROM $3 AND machine IS NOT DISTINCT FROM $4`,
+			d.id, k.kind, nullable(k.name), nullable(k.machine), cols["fragment"], cols["profile"], cols["assignment"])
+		return e, err
+	}
+	e.Base = headRev
+	_, err = tx.ExecContext(ctx, `INSERT INTO draft_source_entry (draft, cluster, kind, name, machine, fragment_revision,
+		profile_revision, assignment_revision, base) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		d.id, d.cluster, k.kind, nullable(k.name), nullable(k.machine), cols["fragment"], cols["profile"], cols["assignment"], headRev)
+	return e, err
+}
+
+// answer advances the draft and builds the 200 a draft update answers (§9.2).
+func (d lockedDraft) answer(ctx context.Context, tx *sql.Tx, e sourceEntry, subjects ...string) (result, error) {
+	tag, err := d.advance(ctx, tx)
+	if err != nil {
+		return result{}, err
+	}
+	return result{status: http.StatusOK, etag: tag, body: sourceUpdate{Draft: d.id, Entry: e}, subjects: append([]string{d.id}, subjects...)}, nil
+}
+
+// removeSource proposes the removal of a fragment, profile or assignment (§3.1, choice §17.31): an
+// entry with no revision. A name with neither a live head nor an entry in this draft is 404.
+func removeSource(ctx context.Context, tx *sql.Tx, q *request, kind string) (result, error) {
+	d, err := lockDraft(ctx, tx, q)
+	if err != nil {
+		return result{}, err
+	}
+	k, err := keyOf(ctx, tx, q, d, kind)
+	if err != nil {
+		return result{}, err
+	}
+	found, _, _, err := entryOf(ctx, tx, d, k)
+	if err != nil {
+		return result{}, err
+	}
+	if !found {
+		_, _, current, err := headOf(ctx, tx, d, k)
+		if err != nil {
+			return result{}, err
+		}
+		if current == nil {
+			r := refuse(http.StatusNotFound, "not-found", "no such "+kind+" in the draft or its cluster")
+			if kind == "assignment" {
+				return result{}, r.with("machine", k.machine)
+			}
+			return result{}, r.with("name", k.name)
+		}
+	}
+	e, err := setEntry(ctx, tx, d, k, "")
+	if err != nil {
+		return result{}, err
+	}
+	return d.answer(ctx, tx, e)
+}
+
+// profileInput is a profile revision's body: fragment revisions in order (§9.3).
+type profileInput struct {
+	Fragments []string `json:"fragments"`
+}
+
+func (in *profileInput) check(*API) error {
+	if len(in.Fragments) == 0 || len(in.Fragments) > 256 {
+		return errors.New("fragments must list 1 to 256 fragment revisions")
+	}
+	seen := map[string]bool{}
+	for i, f := range in.Fragments {
+		if id.MustHave(f, id.FragmentRevision) != nil {
+			return fmt.Errorf("fragments[%d] must be an frv identifier", i)
+		}
+		if seen[f] {
+			return fmt.Errorf("fragments[%d] repeats a revision", i)
+		}
+		seen[f] = true
+	}
+	return nil
+}
+
+// pinnable reports whether frv may be pinned in the draft (§3.1): a revision of the draft's cluster
+// that is the revision this draft proposes for its fragment or, with no entry for it, the
+// fragment's head revision.
+func pinnable(ctx context.Context, tx *sql.Tx, d lockedDraft, frv string) (bool, error) {
+	var name string
+	switch err := tx.QueryRowContext(ctx, `SELECT name FROM fragment_revision WHERE id = $1 AND cluster = $2`, frv, d.cluster).Scan(&name); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	k := sourceKey{kind: "fragment", name: name}
+	found, _, proposed, err := entryOf(ctx, tx, d, k)
+	if err != nil || found {
+		return found && proposed != nil && *proposed == frv, err
+	}
+	_, _, current, err := headOf(ctx, tx, d, k)
+	return current != nil && *current == frv, err
+}
+
+func updateProfile(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
+	in := q.input.(*profileInput)
+	d, err := lockDraft(ctx, tx, q)
+	if err != nil {
+		return result{}, err
+	}
+	k, err := keyOf(ctx, tx, q, d, "profile")
+	if err != nil {
+		return result{}, err
+	}
+	for i, f := range in.Fragments {
+		ok, err := pinnable(ctx, tx, d, f)
+		if err != nil {
+			return result{}, err
+		}
+		if !ok {
+			return result{}, refuse(http.StatusUnprocessableEntity, "validation-failed",
+				"a pin must be its fragment's head revision or the revision this draft proposes for it").
+				with("path", fmt.Sprintf("fragments[%d]", i)).with("revision", f)
+		}
+	}
+	prv := id.New(id.ProfileRevision)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO profile_revision (id, cluster, name, author, created_at) VALUES ($1, $2, $3, $4, now())`,
+		prv, d.cluster, k.name, q.principal.ID); err != nil {
+		return result{}, err
+	}
+	for i, f := range in.Fragments {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO profile_revision_fragment (revision, cluster, position, fragment_revision)
+			VALUES ($1, $2, $3, $4)`, prv, d.cluster, i, f); err != nil {
+			return result{}, err
+		}
+	}
+	e, err := setEntry(ctx, tx, d, k, prv)
+	if err != nil {
+		return result{}, err
+	}
+	return d.answer(ctx, tx, e, prv)
+}
