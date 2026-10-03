@@ -350,7 +350,7 @@ func checkFailure(t *testing.T, m *matrix, r Report, err error, step, class stri
 	if err == nil {
 		t.Fatalf("%s: no error", step)
 	}
-	if want := "orphans: " + step + ": " + class; err.Error() != want {
+	if want := step + ": " + class; err.Error() != want {
 		t.Fatalf("error %q, want %q", err, want)
 	}
 	if strings.Contains(err.Error(), "gen/") || strings.Contains(err.Error(), "cl_") || strings.Contains(err.Error(), "ing_") {
