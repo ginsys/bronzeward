@@ -1,11 +1,11 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
 )
@@ -137,7 +137,8 @@ func TestDraftUpdateIdentifiers(t *testing.T) {
 
 // PA §5 rules 2 and 5: an update locks the heads its pins and selections are checked against,
 // FOR SHARE, before the draft, so a publication advancing or removing one (T3, which holds it FOR
-// UPDATE) is waited for and its result checked, never committed past.
+// UPDATE) is waited for and its result checked, never committed past. A head created after that
+// lock pass is not one the update checked: it is refused as the name was when the heads were taken.
 func TestDraftUpdateLocksCheckedHeads(t *testing.T) {
 	d := newDraftEnv(t)
 	f1 := d.fragmentRevision(d.cluster, "registries", "override")
@@ -145,23 +146,33 @@ func TestDraftUpdateLocksCheckedHeads(t *testing.T) {
 	frg := d.fragmentHead("registries", "override", f1, 1)
 	prf := d.profileHead("workers", 1)
 	token := d.human("h-author")
+	update := func(q string, args ...any) func(*sql.Tx) error {
+		return func(tx *sql.Tx) error { _, err := tx.Exec(q, args...); return err }
+	}
 	for _, c := range []struct {
-		name, head, move, part, body, path string
-		args                               []any
+		name, table, row, part, body, path string
+		move                               func(*sql.Tx) error
 	}{
-		{"pinned fragment advanced", frg, `UPDATE fragment SET head_revision_id = $2, head_revision = 2 WHERE id = $1`,
-			"/profiles/storage", `{"fragments":["` + f1 + `"]}`, "fragments[0]", []any{frg, f2}},
-		{"selected profile removed", prf, `UPDATE profile SET head_revision_id = NULL, head_revision = 2 WHERE id = $1`,
-			"/assignments/" + d.machine, `{"profiles":["workers"]}`, "profiles[0]", []any{prf}},
-		{"selected fragment removed", frg, `UPDATE fragment SET head_revision_id = NULL, head_revision = 3 WHERE id = $1`,
-			"/assignments/" + d.machine, `{"fragments":{"override":["registries"]}}`, "fragments.override[0]", []any{frg}},
+		{"pinned fragment advanced", "fragment", frg, "/profiles/storage", `{"fragments":["` + f1 + `"]}`, "fragments[0]",
+			update(`UPDATE fragment SET head_revision_id = $2, head_revision = 2 WHERE id = $1`, frg, f2)},
+		{"selected profile removed", "profile", prf, "/assignments/" + d.machine, `{"profiles":["workers"]}`, "profiles[0]",
+			update(`UPDATE profile SET head_revision_id = NULL, head_revision = 2 WHERE id = $1`, prf)},
+		{"selected fragment removed", "fragment", frg, "/assignments/" + d.machine, `{"fragments":{"override":["registries"]}}`,
+			"fragments.override[0]", update(`UPDATE fragment SET head_revision_id = NULL, head_revision = 3 WHERE id = $1`, frg)},
+		// The holder takes the draft, so the update passes its lock pass with no head for the name
+		// and waits on the draft while a publication creates one.
+		{"selected profile created after the lock pass", "draft", d.draft, "/assignments/" + d.machine, `{"profiles":["fresh"]}`,
+			"profiles[0]", func(*sql.Tx) error { d.profileHead("fresh", 1); return nil }},
 	} {
-		table := map[bool]string{true: "fragment", false: "profile"}[c.head == frg]
 		tx, err := d.db.Begin()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tx.Exec(`SELECT 1 FROM `+table+` WHERE id = $1 FOR UPDATE`, c.head); err != nil {
+		var holder int
+		if err := tx.QueryRow(`SELECT pg_backend_pid()`).Scan(&holder); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(`SELECT 1 FROM `+c.table+` WHERE id = $1 FOR UPDATE`, c.row); err != nil {
 			t.Fatal(err)
 		}
 		done := make(chan *httptest.ResponseRecorder, 1)
@@ -169,13 +180,14 @@ func TestDraftUpdateLocksCheckedHeads(t *testing.T) {
 		go func() {
 			done <- d.do(d.api, call{method: "PUT", path: prefix + "/drafts/" + d.draft + c.part, token: token, key: k, ifMatch: d.etag, body: c.body})
 		}()
-		select {
-		case rec := <-done:
-			_ = tx.Rollback()
-			t.Fatalf("%s: answered %d while the head was locked; want it to wait", c.name, rec.Code)
-		case <-time.After(500 * time.Millisecond):
+		waitBlockedBy(t, d.db, holder)
+		if c.table != "draft" {
+			// Waiting on the head, the update holds no draft lock yet (rule 5's order).
+			if _, err := d.db.Exec(`SELECT 1 FROM draft WHERE id = $1 FOR UPDATE NOWAIT`, d.draft); err != nil {
+				t.Errorf("%s: the draft is locked while the update waits for a head: %v", c.name, err)
+			}
 		}
-		if _, err := tx.Exec(c.move, c.args...); err != nil {
+		if err := c.move(tx); err != nil {
 			t.Fatal(err)
 		}
 		if err := tx.Commit(); err != nil {
