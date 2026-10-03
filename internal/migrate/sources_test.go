@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -231,8 +232,19 @@ func TestSourcesRevisionRowsWithTheirRevision(t *testing.T) {
 	// A revision another transaction has written but not committed is no revision to this one: the
 	// row is refused when it is inserted, never left to the foreign key, which runs at the end of
 	// the statement and would accept it had that transaction committed meanwhile. The statement
-	// below inserts the late row, then sleeps on its second row, a pin of the statement's own
-	// revision, while the writer commits.
+	// below inserts the late row, then its second row, a pin of the statement's own revision, waits
+	// on an advisory lock the barrier holds. The writer commits only once the statement has either
+	// refused the first row or reached that barrier, and the barrier is released after the commit.
+	ctx := context.Background()
+	barrier, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = barrier.Close() }()
+	var holder int
+	if err := barrier.QueryRowContext(ctx, `SELECT pg_backend_pid() FROM pg_advisory_lock(2309)`).Scan(&holder); err != nil {
+		t.Fatal(err)
+	}
 	writer, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -250,15 +262,40 @@ func TestSourcesRevisionRowsWithTheirRevision(t *testing.T) {
 	go func() {
 		_, err := late.Exec(`INSERT INTO profile_revision_fragment (revision, cluster, position, fragment_revision)
 			SELECT v.r, $3, 0, $4 FROM (VALUES (0, $1::text), (1, $2::text)) v (n, r)
-			WHERE v.n = 0 OR (SELECT true FROM pg_sleep(1))`, pending, mine, s.cluster, s.frv1)
+			WHERE v.n = 0 OR (SELECT true FROM pg_advisory_xact_lock(2309))`, pending, mine, s.cluster, s.frv1)
 		done <- err
 	}()
-	time.Sleep(300 * time.Millisecond)
+	var lateErr error
+	refused := false
+	for deadline := time.Now().Add(5 * time.Second); !refused; time.Sleep(10 * time.Millisecond) {
+		select {
+		case lateErr = <-done:
+			refused = true
+			continue
+		default:
+		}
+		var waiting bool
+		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY (pg_blocking_pids(pid)))`, holder).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the statement neither refused its first row nor reached the barrier")
+		}
+	}
 	if err := writer.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-done; sqlState(err) != "23503" {
-		t.Errorf("pin of a revision committed during the statement: %v; want SQLSTATE 23503", err)
+	if _, err := barrier.ExecContext(ctx, `SELECT pg_advisory_unlock(2309)`); err != nil {
+		t.Fatal(err)
+	}
+	if !refused {
+		lateErr = <-done
+	}
+	if sqlState(lateErr) != "23503" {
+		t.Errorf("pin of a revision committed during the statement: %v; want SQLSTATE 23503", lateErr)
 	}
 
 	// The writer is the top-level transaction, also in a savepoint, and whatever an INSERT supplies.
