@@ -10,20 +10,20 @@ usage() {
   cat >&2 <<'EOF'
 usage: inject <action> [args]
 
-  targets: postgres | openbao | controlplane | worker | A | B | issuer
+  targets: postgres | openbao | controlplane | worker | A | B | C | issuer
 
   kill <target>                 SIGKILL the container (crash, no shutdown hooks)
   start <target>                start it again and wait until it answers; openbao comes back
-                                sealed and is unsealed; A and B get their recorded link splits back
+                                sealed and is unsealed; A, B and C get their recorded link splits back
   pause <target>                freeze every process (hung peer, connections stay open)
   unpause <target>
   netsplit <target>             detach from its network (unreachable, process keeps running);
-                                not A, B or issuer: no scenario netsplits an instance
+                                not A, B, C or issuer: no scenario netsplits an instance
   netjoin <target>              reattach: a Talos node on its fixed address, a service under its name
 
-  linksplit <A|B> <controlplane|worker>   cut one instance from one Talos node (a blackhole
+  linksplit <A|B|C> <controlplane|worker> cut one instance from one Talos node (a blackhole
                                           route in the instance; kept across its kill and start)
-  linkjoin <A|B> <controlplane|worker>    remove that route
+  linkjoin <A|B|C> <controlplane|worker>  remove that route
 
   seal openbao                  seal OpenBao: every request refused until unsealed
   unseal openbao                unseal it and wait for an active node
@@ -125,14 +125,14 @@ case $action in
     case $action in
       linksplit | linkjoin)
         [ $# -eq 2 ] || usage
-        case $1 in A | B) ;; *) die "a link split is between an instance, A or B, and a Talos node, not '$1'" ;; esac
+        case $1 in A | B | C) ;; *) die "a link split is between an instance, A, B or C, and a Talos node, not '$1'" ;; esac
         split_ip=$(node_ip "$2") || die "a link split is to a Talos node, controlplane or worker, not '$2'"
         split_instance=$1 split_node=$2
         ;;
       *)
         [ $# -eq 1 ] || usage
         case $action:$1 in
-          netsplit:A | netsplit:B | netsplit:issuer | netjoin:A | netjoin:B | netjoin:issuer)
+          netsplit:A | netsplit:B | netsplit:C | netsplit:issuer | netjoin:A | netjoin:B | netjoin:C | netjoin:issuer)
             die "no scenario netsplits an instance; use linksplit" ;;
         esac
         ;;
@@ -532,9 +532,8 @@ case $action in
         ;;
       # Asked on the published port, as a client would: /livez is the one route that needs no
       # token. --disable: the caller's curlrc is not read.
-      A | B)
-        port=$SERVER_A_PORT
-        [ "$1" = A ] || port=$SERVER_B_PORT
+      A | B | C)
+        case $1 in A) port=$SERVER_A_PORT ;; B) port=$SERVER_B_PORT ;; C) port=$SERVER_C_PORT ;; esac
         instance_live() { timeout "$REQUEST_LIMIT" curl --disable --noproxy '*' --fail --silent -o /dev/null "http://127.0.0.1:$port/livez"; }
         # Asked once more by finish after a signal: answering is not enough, the recorded splits
         # must be back too.

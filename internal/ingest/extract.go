@@ -11,6 +11,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/seam"
 )
 
 // Request is one ingestion: the input, the paths the operator marks, and the declarations the
@@ -57,6 +58,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	if err != nil {
 		return nil, err
 	}
+	seam.At("parse")
 	// A refusal path can run through a key that holds a value being extracted, before or after
 	// substitution: every refusal is redacted against those values. When the machinery cannot
 	// load a document its secret fields are unknown, and a refusal names documents only.
@@ -95,10 +97,12 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	if err != nil {
 		return nil, err
 	}
+	seam.At("identify")
 	exs, err := substitute(all, req.Declarations.References)
 	if err != nil {
 		return nil, err
 	}
+	seam.At("substitute")
 	for _, e := range embedded {
 		plainStyle(e.doc)
 		text, err := encodeStream([]*yaml.Node{e.doc})

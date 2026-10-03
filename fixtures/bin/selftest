@@ -713,20 +713,26 @@ grep --quiet ' done netjoin worker$' <(tail -n 1 "$STATE/injections.log") ||
   fail "injections.log does not record the second netjoin of the joined worker as done"
 ok "netsplit / netjoin worker returns on the same address, and only on the recorded network; attached elsewhere it is failed, joined again it is done"
 
-# The server under test: instances A and B of the image up built, and the issuer they trust. A and
-# B are created, not started (S0 begins from an empty schema); the issuer runs.
-for c in "$FIXTURE_NAME-bronzeward-a" "$FIXTURE_NAME-bronzeward-b" "$FIXTURE_NAME-issuer"; do
+# The server under test: instances A and B of the image up built, C of its interruption build, and
+# the issuer they trust. A, B and C are created, not started (S0 begins from an empty schema); the
+# issuer runs.
+for c in "$FIXTURE_NAME-bronzeward-a" "$FIXTURE_NAME-bronzeward-b" "$FIXTURE_NAME-bronzeward-c" "$FIXTURE_NAME-issuer"; do
   container_id "$c" >/dev/null || fail "$c was not verified after up"
 done
 up_image=$(cat "$STATE/up-image") || fail "up recorded no image"
-for c in "$BW_A" "$BW_B" "$ISSUER"; do
+for c in "$BW_A" "$BW_B" "$BW_C" "$ISSUER"; do
   [ "$(docker inspect --format '{{.Image}}' "$(container_id "$c")")" = "$up_image" ] || fail "$c does not run the image up recorded"
 done
-for c in "$BW_A" "$BW_B"; do
+for c in "$BW_A" "$BW_B" "$BW_C"; do
   [ "$(docker inspect --format '{{.State.Status}}' "$(container_id "$c")")" = created ] || fail "$c is not created-and-not-started after up"
 done
+# A and B run the server, C the interruption build: the entrypoint each was created with.
+for c in "$BW_A:/bronzeward" "$BW_B:/bronzeward" "$BW_C:/bronzeward-interrupt"; do
+  [ "$(docker inspect --format '{{json .Config.Entrypoint}}' "$(container_id "${c%%:*}")")" = "[\"${c#*:}\"]" ] ||
+    fail "${c%%:*} does not run ${c#*:}"
+done
 [ "$(docker inspect --format '{{.State.Running}}' "$(container_id "$ISSUER")")" = true ] || fail "the issuer is not running after up"
-ok "instances A and B are created and the issuer runs, all three on the image up recorded"
+ok "instances A, B and C are created and the issuer runs, all four on the image up recorded; A and B run /bronzeward, C /bronzeward-interrupt"
 
 # mint <human>: an access token for the issuer A and B trust, from its key, by the oidc binary of
 # the image up built. Minted offline: the issuer is not published.

@@ -13,6 +13,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/seam"
 	"github.com/ginsys/bronzeward/internal/staging"
 )
 
@@ -67,10 +68,14 @@ func (a *API) runIngest(ctx context.Context, j job) {
 	if j.resume != nil {
 		imp, ref, err = a.resume(ctx, j)
 	} else {
+		// The fixture's interruption points (internal/seam), named for compilation §2.3's steps;
+		// empty in every build but the fixture's instance C.
+		seam.At("claim")
 		if j.node != nil {
 			j.input, ref, err = a.readNode(ctx, j)
 		}
 		if ref == nil && err == nil {
+			seam.At("read")
 			imp, ref, err = a.stage(ctx, j)
 		}
 	}
@@ -131,6 +136,7 @@ func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 	if err != nil {
 		return imported{}, a.failure(j, "extraction", err), nil
 	}
+	seam.At("guard")
 	gens := map[string]string{}
 	s, err := c.Commit(ctx, func(ctx context.Context, name string, v provider.Value) error {
 		p, err := provider.NewGenerationPath(j.claim.Cluster, j.claim.ID, provider.NewValueID())
@@ -142,15 +148,18 @@ func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 			return err
 		}
 		gens[name] = g.Path.String()
+		seam.At("generation")
 		return nil
 	})
 	if err != nil {
 		return imported{}, a.failure(j, "generation create", err), nil
 	}
+	seam.At("construct")
 	b, err := ingest.ComputeBaseline(ctx, j.input, a.d.ing.EncryptBaseline, a.d.ing.Digest)
 	if err != nil {
 		return imported{}, a.failure(j, "baseline", err), nil
 	}
+	seam.At("baseline")
 	imp := imported{sanitized: s, gens: gens, baseline: b}
 	if j.claim.Mode != "encrypted" {
 		return imp, nil, nil
@@ -171,6 +180,7 @@ func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 	}); err != nil {
 		return imported{}, nil, fmt.Errorf("storing the envelope: %w", err)
 	}
+	seam.At("staged")
 	return imp, nil, nil
 }
 

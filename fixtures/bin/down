@@ -422,11 +422,11 @@ exact() {
 }
 # Every fixed name by its exact name too, not by the labels alone: a container, network or volume
 # made under one of them since the removal, without the label, would pass the listings above, and
-# the next up would refuse the name while this run had reported nothing left. The four containers
+# the next up would refuse the name while this run had reported nothing left. The containers
 # and the two networks (Compose names its default network after the project; the Talos
 # provisioner names its network after the cluster), then the node volumes and the declared
 # Compose volumes.
-for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$ISSUER" "$CP" "$WORKER"; do
+for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$BW_C" "$ISSUER" "$CP" "$WORKER"; do
   probe container exact container "$name"
 done
 for name in "${FIXTURE_NAME}_default" "$FIXTURE_NAME"; do
