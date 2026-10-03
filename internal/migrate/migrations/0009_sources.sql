@@ -12,6 +12,23 @@ CREATE DOMAIN source_name AS text
 CREATE DOMAIN fragment_layer AS text
   CONSTRAINT fragment_layer_known CHECK (VALUE IN ('global', 'site', 'cluster', 'role', 'workload', 'override'));
 
+-- A revision's rows are written in the transaction that writes the revision (§3): make_immutable
+-- refuses UPDATE and DELETE, and this refuses an INSERT that would add to a committed revision,
+-- with the same SQLSTATE. TG_ARGV[0] names the revision table; the row names it in `revision`. A
+-- revision written in this transaction carries its xmin; no draft update uses a savepoint. A
+-- revision that does not exist is left to the foreign key.
+CREATE FUNCTION refuse_late_revision_row() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  own boolean;
+BEGIN
+  EXECUTE format('SELECT xmin = pg_current_xact_id()::xid FROM %I WHERE id = $1', TG_ARGV[0]) INTO own USING NEW.revision;
+  IF own IS FALSE THEN
+    RAISE EXCEPTION 'table %: a row of a committed revision is refused', TG_TABLE_NAME USING ERRCODE = 'BW001';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
 -- A fragment revision (§3; compilation §2, §5): its sanitized document, written by a draft update.
 -- It names its fragment by cluster and name, since the head may not exist until publication.
 CREATE TABLE fragment_revision (
@@ -41,6 +58,8 @@ CREATE TABLE fragment_reference (
   CHECK (encoding IS NULL OR kind = 'string')
 );
 CALL make_immutable('fragment_reference');
+CREATE TRIGGER with_revision BEFORE INSERT ON fragment_reference
+  FOR EACH ROW EXECUTE FUNCTION refuse_late_revision_row('fragment_revision');
 
 -- A profile revision: fragment revisions in order (§3.1). A pin stays in its profile's cluster.
 CREATE TABLE profile_revision (
@@ -65,6 +84,8 @@ CREATE TABLE profile_revision_fragment (
   FOREIGN KEY (fragment_revision, cluster) REFERENCES fragment_revision (id, cluster)
 );
 CALL make_immutable('profile_revision_fragment');
+CREATE TRIGGER with_revision BEFORE INSERT ON profile_revision_fragment
+  FOR EACH ROW EXECUTE FUNCTION refuse_late_revision_row('profile_revision');
 
 -- An assignment revision: a machine's profiles, then its fragments per layer, each by name (§3.1).
 CREATE TABLE assignment_revision (
@@ -87,6 +108,8 @@ CREATE TABLE assignment_revision_profile (
   UNIQUE (revision, profile)
 );
 CALL make_immutable('assignment_revision_profile');
+CREATE TRIGGER with_revision BEFORE INSERT ON assignment_revision_profile
+  FOR EACH ROW EXECUTE FUNCTION refuse_late_revision_row('assignment_revision');
 
 CREATE TABLE assignment_revision_fragment (
   revision text NOT NULL REFERENCES assignment_revision (id),
@@ -97,6 +120,8 @@ CREATE TABLE assignment_revision_fragment (
   UNIQUE (revision, fragment)
 );
 CALL make_immutable('assignment_revision_fragment');
+CREATE TRIGGER with_revision BEFORE INSERT ON assignment_revision_fragment
+  FOR EACH ROW EXECUTE FUNCTION refuse_late_revision_row('assignment_revision');
 
 -- Heads (§3.1, §4.1): one per name in a cluster, or per machine, pointing at a revision of that
 -- name (and, for a fragment, layer); a removal sets the pointer to NULL and keeps the head.

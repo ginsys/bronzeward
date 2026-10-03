@@ -257,11 +257,23 @@ func TestProfileRemoval(t *testing.T) {
 }
 
 // profileHead inserts a profile revision of name and a head at it, as publication would.
-func (d *draftEnv) profileHead(name string, headRevision int) string {
+func (d *draftEnv) profileHead(name string, headRevision int, pins ...string) string {
 	d.t.Helper()
 	prv, prf := id.New(id.ProfileRevision), id.New(id.Profile)
-	mustExec(d.t, d.db, `INSERT INTO profile_revision (id, cluster, name, author, created_at) VALUES ($1, $2, $3, $4, now())`,
+	tx, err := d.db.Begin()
+	if err != nil {
+		d.t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(d.t, tx, `INSERT INTO profile_revision (id, cluster, name, author, created_at) VALUES ($1, $2, $3, $4, now())`,
 		prv, d.cluster, name, d.seed)
+	for i, frv := range pins { // in the revision's own transaction (§3)
+		mustExec(d.t, tx, `INSERT INTO profile_revision_fragment (revision, cluster, position, fragment_revision) VALUES ($1, $2, $3, $4)`,
+			prv, d.cluster, i, frv)
+	}
+	if err := tx.Commit(); err != nil {
+		d.t.Fatal(err)
+	}
 	mustExec(d.t, d.db, `INSERT INTO profile (id, cluster, scope, name, head_revision_id, head_revision, etag_token, created_at)
 		VALUES ($1, $2, 'cluster', $3, $4, $5, 'm3oxmlfh6phr7aigshdydcb4ji', now())`, prf, d.cluster, name, prv, headRevision)
 	return prf

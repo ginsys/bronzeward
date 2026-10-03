@@ -8,7 +8,12 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
+// execer is a *sql.DB or a *sql.Tx.
+type execer interface {
+	Exec(string, ...any) (sql.Result, error)
+}
+
+func mustExec(t *testing.T, db execer, q string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(q, args...); err != nil {
 		t.Fatalf("%s: %v", q, err)

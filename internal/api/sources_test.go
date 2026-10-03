@@ -25,17 +25,23 @@ func TestSourceReads(t *testing.T) {
 	siteDNS := d.fragmentRevision(d.cluster, "site-dns", "site")
 	frg := d.fragmentHead("registries", "override", frv, 2)
 	removed := d.fragmentHead("gone", "site", nil, 3)
-	prf := d.profileHead("workers", 1)
+	prf := d.profileHead("workers", 1, frv, siteDNS)
 	var prv string
 	if err := d.db.QueryRow(`SELECT head_revision_id FROM profile WHERE id = $1`, prf).Scan(&prv); err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, d.db, `INSERT INTO profile_revision_fragment (revision, cluster, position, fragment_revision) VALUES ($1, $2, 0, $3), ($1, $2, 1, $4)`,
-		prv, d.cluster, frv, siteDNS)
 	asr, asg := id.New(id.AssignmentRevision), id.New(id.Assignment)
-	mustExec(t, d.db, `INSERT INTO assignment_revision (id, cluster, machine, author, created_at) VALUES ($1, $2, $3, $4, now())`, asr, d.cluster, d.machine, d.seed)
-	mustExec(t, d.db, `INSERT INTO assignment_revision_profile (revision, position, profile) VALUES ($1, 0, 'workers')`, asr)
-	mustExec(t, d.db, `INSERT INTO assignment_revision_fragment (revision, layer, position, fragment) VALUES ($1, 'override', 0, 'registries')`, asr)
+	tx, err := d.db.Begin() // a revision's rows are written with it (§3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(t, tx, `INSERT INTO assignment_revision (id, cluster, machine, author, created_at) VALUES ($1, $2, $3, $4, now())`, asr, d.cluster, d.machine, d.seed)
+	mustExec(t, tx, `INSERT INTO assignment_revision_profile (revision, position, profile) VALUES ($1, 0, 'workers')`, asr)
+	mustExec(t, tx, `INSERT INTO assignment_revision_fragment (revision, layer, position, fragment) VALUES ($1, 'override', 0, 'registries')`, asr)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	mustExec(t, d.db, `INSERT INTO assignment (id, cluster, machine, head_revision_id, head_revision, etag_token, created_at)
 		VALUES ($1, $2, $3, $4, 1, 'm3oxmlfh6phr7aigshdydcb4ji', now())`, asg, d.cluster, d.machine, asr)
 
@@ -110,7 +116,7 @@ func TestDraftReadShowsSourceEntries(t *testing.T) {
 	d := newDraftEnv(t)
 	frv := d.fragmentRevision(d.cluster, "registries", "override")
 	frg := d.fragmentHead("registries", "override", frv, 2)
-	d.profileHead("workers", 1)
+	prf := d.profileHead("workers", 1)
 	prv := d.ok(d.put("/profiles/storage", `{"fragments":["`+frv+`"]}`, d.etag, d.key())).Revision
 	asr := d.ok(d.put("/assignments/"+d.machine, `{"profiles":["workers"]}`, d.etag, d.key())).Revision
 	d.ok(d.del("/fragments/registries", d.etag, d.key()))
@@ -132,7 +138,7 @@ func TestDraftReadShowsSourceEntries(t *testing.T) {
 	want := []map[string]any{
 		{"kind": "fragment", "name": "registries", "head": frg, "base": float64(2), "revision": nil},
 		{"kind": "profile", "name": "storage", "head": nil, "base": nil, "revision": *prv},
-		{"kind": "profile", "name": "workers", "head": b.Entries[2]["head"], "base": float64(1), "revision": nil},
+		{"kind": "profile", "name": "workers", "head": prf, "base": float64(1), "revision": nil},
 		{"kind": "assignment", "machine": d.machine, "head": nil, "base": nil, "revision": *asr},
 	}
 	for i, w := range want {
@@ -145,9 +151,6 @@ func TestDraftReadShowsSourceEntries(t *testing.T) {
 				t.Errorf("entry %d: %v; want %v", i, b.Entries[i], w)
 			}
 		}
-	}
-	if h, _ := b.Entries[2]["head"].(string); id.MustHave(h, id.Profile) != nil {
-		t.Errorf("removal of a head names no head: %v", b.Entries[2])
 	}
 	list := decode[listPage[map[string]any]](t, d.get("/drafts"), http.StatusOK)
 	if len(list.Items) != 1 || len(list.Items[0]["entries"].([]any)) != 4 {
