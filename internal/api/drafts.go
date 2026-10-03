@@ -110,19 +110,21 @@ func lockDraft(ctx context.Context, tx *sql.Tx, q *request) (lockedDraft, error)
 // checked against (§5 rule 2), by id and before the draft (rule 5), so a publication advancing or
 // removing one (T3, FOR UPDATE) is waited for and its result is what the update checks. The draft's
 // cluster names them; a draft that does not exist locks nothing and lockDraft refuses it. Pins name
-// their fragment through their immutable revision row. A head a publication creates meanwhile is
-// not held: the name had none when checked, so the check refused it or took the draft's own entry.
-func lockHeads(ctx context.Context, tx *sql.Tx, q *request, pins, fragments, profiles []string) error {
+// their fragment through their immutable revision row. It returns the heads it holds: a head a
+// publication creates after this pass is not among them, and the checks treat its name as having
+// no head, as it had when the heads were taken.
+func lockHeads(ctx context.Context, tx *sql.Tx, q *request, pins, fragments, profiles []string) (map[string]bool, error) {
+	held := map[string]bool{}
 	draft := q.r.PathValue("id")
 	if id.MustHave(draft, id.Draft) != nil {
-		return nil
+		return held, nil
 	}
 	var cluster string
 	switch err := tx.QueryRowContext(ctx, `SELECT cluster FROM draft WHERE id = $1`, draft).Scan(&cluster); {
 	case errors.Is(err, sql.ErrNoRows):
-		return nil
+		return held, nil
 	case err != nil:
-		return err
+		return nil, err
 	}
 	// fragment ids (frg_) sort before profile ids (prf_), so this is one pass in id order.
 	for _, s := range []struct {
@@ -137,18 +139,33 @@ func lockHeads(ctx context.Context, tx *sql.Tx, q *request, pins, fragments, pro
 	} {
 		rows, err := tx.QueryContext(ctx, s.query, s.args...)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for rows.Next() {
+			var h string
+			if err := rows.Scan(&h); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			held[h] = true
 		}
 		if err := rows.Close(); err != nil {
-			return err
+			return nil, err
 		}
 		if err := rows.Err(); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return held, nil
+}
+
+// heldHead reads the head of k as headOf does, but as no head unless lockHeads holds it.
+func heldHead(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey, held map[string]bool) (current *string, err error) {
+	head, _, current, err := headOf(ctx, tx, d, k)
+	if err != nil || head == nil || !held[*head] {
+		return nil, err
+	}
+	return current, nil
 }
 
 // advance moves a locked draft to its next revision and returns the new ETag.
@@ -344,8 +361,9 @@ func (in *profileInput) check(*API) error {
 
 // pinnable reports whether frv may be pinned in the draft (§3.1): a revision of the draft's cluster
 // that is the revision this draft proposes for its fragment or, with no entry for it, the
-// fragment's head revision. The entry decides over the head, which publication replaces with it.
-func pinnable(ctx context.Context, tx *sql.Tx, d lockedDraft, frv string) (bool, error) {
+// fragment's head revision, a head lockHeads holds. The entry decides over the head, which
+// publication replaces with it.
+func pinnable(ctx context.Context, tx *sql.Tx, d lockedDraft, held map[string]bool, frv string) (bool, error) {
 	var name string
 	switch err := tx.QueryRowContext(ctx, `SELECT name FROM fragment_revision WHERE id = $1 AND cluster = $2`, frv, d.cluster).Scan(&name); {
 	case errors.Is(err, sql.ErrNoRows):
@@ -358,13 +376,14 @@ func pinnable(ctx context.Context, tx *sql.Tx, d lockedDraft, frv string) (bool,
 	if err != nil || found {
 		return found && proposed != nil && *proposed == frv, err
 	}
-	_, _, current, err := headOf(ctx, tx, d, k)
+	current, err := heldHead(ctx, tx, d, k, held)
 	return current != nil && *current == frv, err
 }
 
 func updateProfile(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*profileInput)
-	if err := lockHeads(ctx, tx, q, in.Fragments, nil, nil); err != nil {
+	held, err := lockHeads(ctx, tx, q, in.Fragments, nil, nil)
+	if err != nil {
 		return result{}, err
 	}
 	d, err := lockDraft(ctx, tx, q)
@@ -376,7 +395,7 @@ func updateProfile(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result,
 		return result{}, err
 	}
 	for i, f := range in.Fragments {
-		ok, err := pinnable(ctx, tx, d, f)
+		ok, err := pinnable(ctx, tx, d, held, f)
 		if err != nil {
 			return result{}, err
 		}
@@ -480,12 +499,13 @@ func names(path string, list []string, seen map[string]bool) error {
 }
 
 // selectable reports whether the draft may select name (§3.1): proposed by this draft or, with no
-// entry for it, a head with a revision. For a fragment it also returns that revision's layer.
-func selectable(ctx context.Context, tx *sql.Tx, d lockedDraft, kind, name string) (ok bool, layer string, err error) {
+// entry for it, a head lockHeads holds with a revision. For a fragment it also returns that
+// revision's layer.
+func selectable(ctx context.Context, tx *sql.Tx, d lockedDraft, held map[string]bool, kind, name string) (ok bool, layer string, err error) {
 	k := sourceKey{kind: kind, name: name}
 	found, _, rev, err := entryOf(ctx, tx, d, k)
 	if err == nil && !found {
-		_, _, rev, err = headOf(ctx, tx, d, k)
+		rev, err = heldHead(ctx, tx, d, k, held)
 	}
 	if err != nil || rev == nil {
 		return false, "", err
@@ -502,7 +522,8 @@ func updateAssignment(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 	for _, list := range in.Fragments {
 		fragments = append(fragments, list...)
 	}
-	if err := lockHeads(ctx, tx, q, nil, fragments, in.Profiles); err != nil {
+	held, err := lockHeads(ctx, tx, q, nil, fragments, in.Profiles)
+	if err != nil {
 		return result{}, err
 	}
 	d, err := lockDraft(ctx, tx, q)
@@ -519,7 +540,7 @@ func updateAssignment(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 			with("path", fmt.Sprintf("%s[%d]", path, i))
 	}
 	for i, p := range in.Profiles {
-		if ok, _, err := selectable(ctx, tx, d, "profile", p); err != nil {
+		if ok, _, err := selectable(ctx, tx, d, held, "profile", p); err != nil {
 			return result{}, err
 		} else if !ok {
 			return result{}, invalid("profiles", i)
@@ -527,7 +548,7 @@ func updateAssignment(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 	}
 	for _, layer := range fragmentLayers {
 		for i, f := range in.Fragments[layer] {
-			if ok, l, err := selectable(ctx, tx, d, "fragment", f); err != nil {
+			if ok, l, err := selectable(ctx, tx, d, held, "fragment", f); err != nil {
 				return result{}, err
 			} else if !ok || l != layer {
 				return result{}, invalid("fragments."+layer, i)
