@@ -899,6 +899,22 @@ image_migrations() {
   printf '%s\n' "${embedded[*]}"
 }
 
+# applied_once <every> <log> <log>: whether the two concurrent `bw migrate` logs each report what
+# they applied and, between them, applied each of <every> (image_migrations' list) exactly once.
+# The lock is per migration (persistence-api §11), so which run applies which is not fixed: the
+# second can find some recorded and apply the rest.
+applied_once() {
+  local every=$1 line reports=0 these versions=()
+  while IFS= read -r line; do
+    [[ $line =~ ^applied\ \[(.*)\]$ ]] || continue
+    reports=$((reports + 1))
+    read -ra these <<<"${BASH_REMATCH[1]}"
+    versions+=("${these[@]}")
+  done < <(cat -- "${@:2}")
+  [ "$reports" -eq 2 ] && [ "${#versions[@]}" -gt 0 ] || return 1
+  [ "$(printf '%s\n' "${versions[@]}" | LC_ALL=C sort -n | tr '\n' ' ')" = "$every " ]
+}
+
 # issuer_answers: the issuer's discovery document, asked from inside the network namespace of the
 # container verified under the name, so that the answer is that container's.
 issuer_answers() {
