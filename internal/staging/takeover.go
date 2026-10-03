@@ -35,19 +35,20 @@ const eligible = `mode = 'encrypted' AND state IN ('held', 'resumed')
 	AND owner_epoch = (SELECT epoch FROM installation_state)`
 
 // takeoverOptions are test seams. afterLock runs once the claim is locked, before the write;
-// noRecheck is DB row 020's control: a read before afterLock decides, and the write drops the
-// eligibility terms.
+// afterWrite runs once the claim's write returned; noRecheck is DB row 020's control: a read
+// before afterLock decides, and the write drops the eligibility terms.
 type takeoverOptions struct {
-	afterLock func()
-	noRecheck bool
+	afterLock  func()
+	afterWrite func()
+	noRecheck  bool
 }
 
 // TakeOver makes o the claim's owner at the next generation, its state resumed with a fresh
 // lease of lease (never past its absolute expiry), and moves its running ingest operation's owner
 // fields from the generation it took over, in the caller's transaction (T8). The eligibility is
 // the UPDATE's predicate; a read after a refused write names the reason. A claim with no payload
-// has nothing to decrypt: it is abandoned under the new generation, and the caller fails its
-// operation. The same owner may take its own lapsed claim over.
+// has nothing to decrypt: the same write abandons it under the new generation, and the caller
+// fails its operation. The same owner may take its own lapsed claim over.
 func TakeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, claim string) (Taken, error) {
 	return takeOver(ctx, tx, o, lease, claim, takeoverOptions{})
 }
@@ -72,8 +73,11 @@ func takeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, cla
 	tk := Taken{Claim: Claim{ID: claim, Mode: "encrypted"}}
 	var until time.Time
 	var digest []byte
+	// A claim with no payload is abandoned by this same write: eligibility was settled here, under
+	// the lock, so no later fence may refuse it once a deadline passes.
 	err := tx.QueryRowContext(ctx, `UPDATE staging_claim SET owner = $2, owner_gen = owner_gen + 1, owner_epoch = $3,
-		state = 'resumed', lease_until = least(clock_timestamp() + $4::bigint * interval '1 microsecond', expires_at)
+		state = CASE WHEN payload IS NULL THEN 'abandoned' ELSE 'resumed' END,
+		lease_until = least(clock_timestamp() + $4::bigint * interval '1 microsecond', expires_at)
 		WHERE id = $1 AND $3 = (SELECT epoch FROM installation_state) AND `+pred+`
 		RETURNING owner_gen, cluster, machine, lease_until, payload, payload_digest`,
 		claim, o.ID, o.Epoch, lease.Microseconds()).Scan(&tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine, &until, &tk.Payload, &digest)
@@ -85,6 +89,9 @@ func takeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, cla
 	}
 	if err != nil {
 		return Taken{}, fmt.Errorf("staging: take over: %w", err)
+	}
+	if opts.afterWrite != nil {
+		opts.afterWrite()
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE operation SET owner = $2, owner_gen = $3, owner_epoch = $4, lease_until = $5
 		WHERE ingestion = $1 AND state = 'running' AND owner_gen = $3 - 1`, claim, o.ID, tk.Claim.Gen, o.Epoch, until)
@@ -99,9 +106,6 @@ func takeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, cla
 		return Taken{}, errors.New("staging: take over: the claim's running operation is not at the generation taken over")
 	}
 	if tk.Payload == nil {
-		if err := end(ctx, tx, o, tk.Claim, "abandoned"); err != nil {
-			return Taken{}, err
-		}
 		return tk, nil
 	}
 	if len(digest) != len(tk.Digest) {
