@@ -2529,7 +2529,11 @@ each (design §7.7 consequences):
   disposable path for every change), so that a malformed probe cannot pass as
   a refusal;
   the command refusing a `provider.reportTokenFile` with group or other
-  permission bits before any provider request, and, with the file replaced
+  permission bits, one that is a FIFO and one that is a symlink, each before
+  any provider request; no route serving the report, none of the routes
+  naming it and its candidate paths answering `404` to a human and to
+  automation, with a control that registers such a route and must then fail;
+  and, with the file replaced
   within one run after the configuration has loaded and before the first
   provider request, the replacement token the one that reaches the provider,
   with a control that reads the file once at configuration load and must then
@@ -2588,8 +2592,10 @@ Evidence gaps this contract carries rather than closes:
   item 4, execution and recovery's and still unmodelled.
 - **Same-key concurrency**: unmeasured (§7.2).
 - **Orphan listing**: PC measured listing under one generation path (row
-  065); listing at each level of the generation tree under the orphan-report
-  identity's policy is unmeasured until the check above runs (§6.4).
+  065); the check above measures listing at each level of the generation tree
+  under the orphan-report identity's policy on the OpenBao version the fixture
+  pins, against a dev-mode server and in S1 against the fixture's (§6.4). No
+  other OpenBao version, and no Vault, is measured.
 - **Unkeyed configuration digests**: releases and import base revisions persist
   unkeyed SHA-256 digests of whole configurations (§1.1, §6.2), whose
   guessability was not assessed (compilation §4.1; execution and recovery's
@@ -2789,7 +2795,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §5.1 fences, claims | §7.2, §12.5 | [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions) rows 015–018; [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) rows 019–021 |
 | §6 publication | §7.4, §7.8 | DB §4.2 rows 004–011, 058–061; KL §7 item 1 |
 | §6.3 partial publication | §7.4, §7.6, §7.8 | [PC §4](../design/research/20260924-provider-capability-comparison.md#4-the-matrix) row 083; [KL §3.2](../design/research/20260924-key-loss-restoration.md#32-what-each-case-showed) cases G, H; [RC §6.4](../design/research/20260924-retention-metadata-classification.md#64-criterion-4-provider-limits-and-the-alert-policy-the-evidence-supports) |
-| §6.4 orphans | §7.4, §7.8, §13.2 | DB §9; KL case G; PC §4 row 065; the orphan-report identity's grants not measured (§16, choice §17.30) |
+| §6.4 orphans | §7.4, §7.8, §13.2 | DB §9; KL case G; PC §4 row 065; the orphan-report identity's grants and the report's selection: §16 check, the pinned OpenBao only (choice §17.30) |
 | §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; DB §4.6 (advisory lock); [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |
 | §8 operations | §11.1, §12.5, §15.2 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2) row 009; DB §4.5 rows 020, 021 |
 | §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5 |
