@@ -864,6 +864,10 @@ orphan_rows() {
     orphans_listed
   check 'S1 interruption, orphans' "every interrupted claim's generations still listed after the report, none deleted" orphans_kept
 }
+# The database dump taken after every success, refusal and interruption, for the final bundle to
+# expand and scan (PA §16: no request body in the backups). bin/evidence scans only the backups
+# that exist, and nothing else in S1 takes one.
+backup_name=s1-$run_key
 
 run() {
   # Preconditions: S0's migrate and seed, both instances up, then the pre-state.
@@ -1059,6 +1063,8 @@ run() {
   outcome_bundle 'S1 takeover, C §3.4' success-takeover
   interruption_matrix
   orphan_rows
+  check 'S1 backups, PA §16' 'inject db-snapshot: a dump of the bronzeward database after the imports, refusals and interruptions' \
+    "$bin/inject" db-snapshot "$backup_name"
 
   # Step 5: the post-state, compared with the pre-state.
   evidence_to post || die "no post-state: bin/evidence failed"
@@ -1093,6 +1099,14 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
     result FAIL 'S1 step 5' "the bundle is incomplete: $final/unavailable.txt names what was not captured"
   else
     result PASS 'S1 step 5' 'the bundle is complete: bin/evidence captured every source'
+  fi
+  # The scan above covers the dump only if the bundle holds it expanded, with the database's rows
+  # in it: an interrupted claim's id is the control.
+  if [ "${#interrupted[@]}" -gt 0 ] &&
+    grep --quiet --fixed-strings -- "${interrupted[0]%% *}" "$final/backups/pg-$backup_name.dump.sql"; then
+    result PASS 'S1 step 5, PA §16' 'the scanned bundle holds the database dump expanded, an interrupted claim among its rows (control)'
+  else
+    result FAIL 'S1 step 5, PA §16' 'the scanned bundle does not hold the database dump expanded with the run'"'"'s rows: the backup went unscanned'
   fi
   # The tokens this run minted and created, searched in the run directory, the final bundle and
   # every bundle the run captured before it (the pre- and post-state, each refusal's and

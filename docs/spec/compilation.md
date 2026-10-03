@@ -215,8 +215,8 @@ backup-visible surfaces were read only in the captured bundles: the honest
 runs, the runs held and killed in review, the run killed inside the database
 transaction, and the recovery runs (E1 4.2). This pipeline differs from E1's
 (the guard runs before the provider write, digests are keyed, the baseline is
-step 8), so no interruption of this pipeline has been measured; §15 requires
-it.
+step 8), so E1 measured no interruption of this pipeline; §15 states what
+does.
 
 An interruption after step 6 can leave provider generations that no draft
 references. They are unused provider objects under
@@ -1277,13 +1277,17 @@ Evidence gaps this contract carries rather than closes:
 **Ingestion and staging**
 
 - **Interruption of this pipeline**: measured for the import only. S1 kills
-  the ingestion at each of steps 0 to 8 under both staging modes, then checks
-  the claim, the operation, the draft's ETag and that no generation was
-  deleted, and scans the logs, the database's data directory and the backups
-  for every fixture secret, each scan beside a positive control (§2.3;
-  [acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)). E1's screen covered the run root and live tables only,
-  for a different pipeline (E1 4.2, 4.6). Interruption of a draft update is
-  not measured.
+  the ingestion at each of steps 0 to 8 under both staging modes. After each
+  kill it checks the claim, the operation and the draft's ETag, and that as
+  many generations as were created before the kill are still listed under the
+  claim; versions are not inspected. It then scans the logs and the database's
+  data directory, write-ahead log included, for every fixture secret beside a
+  positive control. One database dump, taken after the last kill, is scanned
+  at the end, with a control that the dump holds an interrupted claim's row
+  (§2.3;
+  [acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)).
+  E1's screen covered the run root and live tables only, for a different
+  pipeline (E1 4.2, 4.6). Interruption of a draft update is not measured.
 - **Schema detector coverage**: `schema-covers-base-secrets` was never seen to
   fail and ran on control-plane bases only; disk-encryption, installer and disk
   configuration were absent from the environment; the list's precision was not
