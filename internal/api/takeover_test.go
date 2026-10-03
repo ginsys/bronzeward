@@ -392,6 +392,7 @@ func TestTakeoverRacesT1(t *testing.T) {
 	t.Run("T1 first", func(t *testing.T) {
 		ie := newIngestEnv(t, options{})
 		op, j := ie.startJob(t, map[string]any{"staging": "encrypted"})
+		ie.d.timers.Heartbeat = time.Hour // no heartbeat waits on the claim during the race
 		b := ie.newTaker(options{})
 		tok := ie.human("h-author")
 		inT1 := false
@@ -400,18 +401,31 @@ func TestTakeoverRacesT1(t *testing.T) {
 		ie.runWith(t, options{beforeT1: func() {
 			// A lease that outlives T1's release and lapses before its COMMIT: the takeover then
 			// finds a claim eligible as last committed, and only T1's lock holds it off.
-			mustExec(t, ie.db, `UPDATE staging_claim SET lease_until = clock_timestamp() + interval '500 milliseconds' WHERE id = $1`, j.claim.ID)
-			lapsed = time.Now().Add(600 * time.Millisecond)
+			mustExec(t, ie.db, `UPDATE staging_claim SET lease_until = clock_timestamp() + interval '2 seconds' WHERE id = $1`, j.claim.ID)
+			lapsed = time.Now().Add(2100 * time.Millisecond)
 			inT1 = true
 		}, commit: func(tx *sql.Tx) error {
 			if inT1 {
+				var t1 int
+				if err := tx.QueryRow(`SELECT pg_backend_pid()`).Scan(&t1); err != nil {
+					return err
+				}
 				time.Sleep(time.Until(lapsed))
 				go func() { done <- ie.do(b, takeoverCall(tok, "k-take-race-t1-0123", j.claim.ID)) }()
-				waitForLockWait(t, ie.db)
+				waitBlockedBy(t, ie.db, t1)
 			}
 			return tx.Commit()
 		}}, j)
-		doc := wantProblem(t, <-done, http.StatusConflict, "conflict")
+		if !inT1 {
+			t.Fatal("the run never reached T1")
+		}
+		var rec *httptest.ResponseRecorder
+		select {
+		case rec = <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("no takeover answered: T1 never reached its COMMIT, or the takeover hung")
+		}
+		doc := wantProblem(t, rec, http.StatusConflict, "conflict")
 		if doc["detail"] != "the ingestion has ended" {
 			t.Fatalf("detail %v", doc["detail"])
 		}
@@ -442,15 +456,16 @@ func TestTakeoverRacesT1(t *testing.T) {
 	})
 }
 
-// waitForLockWait returns once a session of this database waits for a lock, or fails the test.
-func waitForLockWait(t *testing.T, db *sql.DB) {
+// waitBlockedBy returns once a session waits for a lock the backend blocker holds, or fails the
+// test.
+func waitBlockedBy(t *testing.T, db *sql.DB, blocker int) {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		if count(t, db, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`) > 0 {
+		if count(t, db, `SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, blocker) > 0 {
 			return
 		}
 	}
-	t.Error("no session waited for a lock")
+	t.Error("no session waited for T1's lock")
 }
 
 // Review Focus 2: two takers of one lapsed claim: exactly one 202, the other 409 on the winner's
