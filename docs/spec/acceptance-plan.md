@@ -140,7 +140,9 @@ integrated run and those runs' retained evidence together (§7.1).
 [§11](persistence-api.md#11-migrations), [§13.5](persistence-api.md#135-a-migration),
 [§14](persistence-api.md#14-failure-and-rejection-cases).
 
-**Pass criteria.** One migrate run applies the schema; the other waits, then skips it. Every token
+**Pass criteria.** Between the two migrate runs, each migration is applied exactly once: the lock is
+taken per migration ([PA §11](persistence-api.md#11-migrations)), so a run waits on the migration the
+other holds, then skips it, and either run may apply any version. Every token
 defect answers `401`, except a revoked or denied subject, which answers `403 identity-revoked`; none
 creates a principal row. Each denial step 4 walks answers `403 forbidden` and writes no act row; the
 identity revocation is recorded with its identity and role

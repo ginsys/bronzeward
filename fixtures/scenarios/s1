@@ -42,27 +42,35 @@ etag_of_last() { sed -n 's/^[Ee][Tt][Aa][Gg]: *//p' "$EV/last.headers" | tr -d '
 sql() { pg psql -U bronzeward -d bronzeward -Atc "$1"; }
 # digest_of <bundle file> <node ip>: the first field of that node's line.
 digest_of() { awk -v n="$2" '$2 == n {print $1}' "$1"; }
-# mutations <node ip>: how many Talos mutation requests that node's apid log records.
-mutations() {
-  local log
-  log=$(node_talos "$1" logs apid) || return 1
-  grep --count --extended-regexp -- "$MUTATIONS" <<<"$log" || true
+# apid_log <node ip>: that node's apid log, as its buffer holds it now.
+apid_log() { node_talos "$1" logs apid; }
+# run_mutations <log before> <log now>: how many Talos mutation requests the log now records past
+# the log before. That must be its prefix: a buffer that has dropped its oldest lines since may
+# have dropped one of the run's as well, so then there is no count (status 1).
+run_mutations() {
+  [[ "$2" == "$1"* ]] || return 1
+  grep --count --extended-regexp -- "$MUTATIONS" <<<"${2:${#1}}" || true
 }
-# no_mutation <label> <node ip> <count before> <count after>: the S1 pass row that the node's apid
-# log recorded no mutation request across the run, written only once a dry-run apply on that node,
-# made after the count, raises its count; FAIL otherwise.
+# no_mutation <label> <node ip> <log before> <log after>: the S1 pass row that the node's apid log
+# recorded no mutation request past the log read before the run, written only once a dry-run apply
+# on that node, made after the read, appears past it too; FAIL otherwise. Entries are compared,
+# not totals, so a run's mutation cannot hide behind an old entry the buffer dropped.
 no_mutation() {
-  local ctl
+  local run ctl log
+  # A pass criterion (acceptance plan S1): unshown is not passed.
+  run=$(run_mutations "$3" "$4") || {
+    result FAIL 'S1 pass' "no Talos mutation in $1's apid log: not shown, the log no longer begins with the one read before the run (its buffer dropped lines)"
+    return 0
+  }
   node_talos "$2" apply-config --dry-run \
     --file <(node_talos "$2" get machineconfig v1alpha1 -o jsonpath='{.spec}') >/dev/null 2>&1 ||
     die "the dry-run apply control did not run on $1"
-  ctl=$(mutations "$2") || die "cannot read $1's apid log"
-  if [ "$ctl" -gt "$4" ]; then
-    check 'S1 pass' "no Talos mutation request in $1's apid log across the run (control: the dry-run apply there is counted)" \
-      same "$3" "$4"
+  log=$(apid_log "$2") || die "cannot read $1's apid log"
+  if ctl=$(run_mutations "$3" "$log") && [ "$ctl" -gt "$run" ]; then
+    check 'S1 pass' "no Talos mutation request in $1's apid log past the entries read before the run (control: the dry-run apply there is found past them)" \
+      same "$run" 0
   else
-    # A pass criterion (acceptance plan S1): unshown is not passed.
-    result FAIL 'S1 pass' "no Talos mutation in $1's apid log: not shown, the dry-run apply control there is not in the log either"
+    result FAIL 'S1 pass' "no Talos mutation in $1's apid log: not shown, the dry-run apply control is not found past the entries read before the run"
   fi
 }
 
@@ -620,13 +628,12 @@ claim_generations() {
 # committed revision's reference rows.
 gen_count=''
 # generations_kept <step>: every generation created before the kill is still listed under the
-# claim, none deleted: none before step 6, one at it (the seam follows the first create), all of
-# the import's after it.
+# claim, none deleted: none before step 6, all of the import's once it is done (the generation
+# seam follows the last create).
 generations_kept() {
   local want=0 got
   case $1 in
-    generation) want=1 ;;
-    construct | baseline) want=$gen_count ;;
+    generation | construct | baseline) want=$gen_count ;;
   esac
   got=$(claim_generations) || return 1
   [ "$got" = "$want" ] || {
@@ -636,9 +643,10 @@ generations_kept() {
 }
 
 # takeover_rows: C stalls an encrypted import after staging it; its heartbeat keeps the lease, so
-# B's takeover is refused; C frozen, the lease lapses, and with OpenBao sealed B's takeover is
+# B's takeover is refused; C frozen, the lease lapses, and with OpenBao partitioned B's takeover is
 # accepted but its decryption fails, the claim resumed under B; A's takeover is refused while B's
-# lease is live, then, unsealed and B's lease lapsed, accepted, and A's draft transaction commits.
+# lease is live, then, OpenBao joined again and B's lease lapsed, accepted, and A's draft
+# transaction commits.
 # C, released and thawed, writes nothing.
 takeover_rows() {
   local lease0 revisions
@@ -657,18 +665,19 @@ takeover_rows() {
   outcome_bundle 'S1 takeover, C §3.4' takeover-refused-b
   check 'S1 takeover, C §3.4' 'inject pause C (its heartbeat frozen with its run)' "$bin/inject" pause C
   check 'S1 takeover, C §3.4' "C's lease lapses" within 40 lapsed
-  if ! "$bin/inject" seal openbao >/dev/null; then
-    "$bin/inject" unseal openbao >/dev/null || die "s1: OpenBao could not be unsealed"
-    die "s1: OpenBao could not be sealed"
+  if ! "$bin/inject" netsplit openbao >/dev/null; then
+    "$bin/inject" netjoin openbao >/dev/null || die "s1: OpenBao could not be put back on its network"
+    die "s1: OpenBao could not be partitioned"
   fi
-  check 'S1 takeover, C §3.4' "B's takeover with OpenBao sealed: 202 (a takeover reads no key)" takeover B 202 - sealed
+  check 'S1 takeover, C §3.4' "B's takeover with OpenBao partitioned: 202 (a takeover reads no key)" takeover B 202 - partitioned
+  # B's decryption fails at once when B dials afresh, or at the provider's 30-second request bound
+  # on a connection it already held; B's heartbeat keeps its lease meanwhile.
   check 'S1 takeover, C §3.4' "B's decryption fails: resume-failed event, the claim resumed under B at generation 2, its envelope kept" \
-    within 20 resumed_under_b
+    within 45 resumed_under_b
   check 'S1 takeover, C §3.4' "A's takeover while B's lease is live (read first): 409 conflict, the lease not lapsed" refused_live A b-live
-  "$bin/inject" unseal openbao >/dev/null || die "s1: OpenBao could not be unsealed"
+  "$bin/inject" netjoin openbao >/dev/null || die "s1: OpenBao could not be put back on its network"
   # One bundle for B's failed decryption and A's refusal: A's takeover must land inside B's
-  # 15-second lease, which a capture between them would outlast, and a capture reads OpenBao, so
-  # it waits for the unseal.
+  # 15-second lease, which a capture between them would outlast.
   outcome_bundle 'S1 takeover, C §3.4' takeover-resume-failed-refused-a
   check 'S1 takeover, C §3.4' "B's lease lapses (its run stopped)" within 40 lapsed
   revisions=$(sql 'SELECT count(*) FROM import_base_revision') || die "s1: cannot count import base revisions"
@@ -718,8 +727,9 @@ interrupt_case() {
     generations_kept "$step"
   check "$row_ref" "killed at $step ($staging_mode): the draft's ETag unchanged" draft_etag_is "$etag"
   check "$row_ref" 'inject start C' "$bin/inject" start C
+  outcome_bundle "$row_ref" "interrupt-$step-$staging_mode"
 }
-# interruption_matrix: every kill point in both staging modes, one bundle per point.
+# interruption_matrix: every kill point in both staging modes, one bundle per point and mode.
 interruption_matrix() {
   local step
   gen_count=$(sql "SELECT count(*) FROM import_base_reference WHERE revision =
@@ -730,9 +740,6 @@ interruption_matrix() {
   for step in $kill_points; do
     interrupt_case "$step" transient
     interrupt_case "$step" encrypted
-    evidence_to "interrupt-$step" || die "no bundle after the kills at $step: bin/evidence failed"
-    check 'S1 interruption' "after the kills at $step, its bundle and the run directory: no fixture secret but the scan's control" \
-      scan_clean "interrupt-$step"
   done
 }
 
@@ -754,9 +761,9 @@ run() {
     counted 2 '^[0-9a-f]{64} ' "$EV/pre-talos-config-sha256.txt"
   check 'S1 precondition' 'pre-state: both nodes have a machine-configuration resource version' \
     counted 2 '^[0-9]+ ' "$EV/pre-talos-config-version.txt"
-  local cp_mut w_mut
-  cp_mut=$(mutations "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
-  w_mut=$(mutations "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  local cp_log w_log
+  cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
 
   # Step 1: the cluster by its Talos cluster ID, each machine by its node ID and endpoint.
   local cid cid_w nid_cp nid_w
@@ -926,13 +933,13 @@ run() {
   check 'S1 pass' "neither node's machine-configuration resource version changed" \
     same_file "$EV/pre-talos-config-version.txt" "$EV/post-talos-config-version.txt"
   local cp_after w_after
-  cp_after=$(mutations "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
-  w_after=$(mutations "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
   # The positive control, after the post-state and on each node for its own row: a dry-run apply
-  # is a mutation method, and the same query must count it on that node, or its log does not
+  # is a mutation method, and the same query must find it on that node, or its log does not
   # record methods and the row proves nothing.
-  no_mutation "the control plane" "$TALOS_CONTROLPLANE_IP" "$cp_mut" "$cp_after"
-  no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_mut" "$w_after"
+  no_mutation "the control plane" "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
+  no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_log" "$w_after"
 }
 
 "$s1_mode"
