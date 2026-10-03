@@ -97,6 +97,9 @@ worker_digest() {
   config=$(worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}')
   printf '%s\n' "$config" | sha256sum | cut -d' ' -f1
 }
+# The worker's machine-config resource version: jq keeps the metadata and drops the spec, which
+# holds the cluster's secrets.
+worker_version() { worker_talos get machineconfig v1alpha1 -o json | jq -er '.metadata.version'; }
 # The statement over stdin: some name the canary, which a `-c` would put on a command line.
 sql() { printf '%s\n' "$1" | pg_stdin psql -U bronzeward -d bronzeward -v ON_ERROR_STOP=1 -Atq; }
 kv_version() { # kv_version <field>: a field of version 1 of the test secret's metadata
@@ -184,8 +187,21 @@ grep --quiet --fixed-strings 'no claim taken from this checkout' <<<"$down_said"
   fail "down failed without the claim, but not by refusing: $(tail -n 1 <<<"$down_said")"
 ok "inject, evidence and down refuse while another process holds the fixture lock, and leave the fixture whole; inject and evidence refuse when the claim is missing or names another checkout; down refuses when it is missing"
 
-# Talos: a full-config no-reboot apply on the worker lands byte for byte.
+# Talos: the worker carries S1's synthetic secret outside the schema's secret fields, as file
+# content (acceptance-plan S1 preconditions). Matched, never printed.
+config=$(worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}')
+grep --quiet --fixed-strings 'path: /var/etc/bw-s1.conf' <<<"$config" ||
+  fail "the worker carries no /var/etc/bw-s1.conf file"
+# talosctl renders the entry as a list item, keys commented: "- content: <value> # The contents ...".
+grep --quiet --extended-regexp '^ +(- )?content: BWSYNTH-[0-9a-f]{32}( #.*)?$' <<<"$config" ||
+  fail "the worker's file content is not a synthetic secret"
+unset config
+ok "the worker carries a synthetic secret as machine.files content"
+
+# Talos: a full-config no-reboot apply on the worker lands byte for byte, and moves its resource
+# version, which S1 records beside the digest.
 before=$(worker_digest)
+version_before=$(worker_version)
 worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$STATE/data/selftest-worker.yaml"
 talosctl machineconfig patch "$STATE/data/selftest-worker.yaml" \
   --patch "{\"machine\":{\"nodeLabels\":{\"bronzeward.test/selftest\":\"r$(date -u +%s%N)\"}}}" \
@@ -194,8 +210,10 @@ sent=$(sha256sum <"$STATE/data/selftest-worker-next.yaml" | cut -d' ' -f1)
 worker_talos apply-config --mode=no-reboot --file "$STATE/data/selftest-worker-next.yaml" >/dev/null
 after=$(worker_digest)
 [ "$after" = "$sent" ] && [ "$after" != "$before" ] || fail "observed digest $after, sent $sent, before $before"
+version_after=$(worker_version)
+[ "$version_after" -gt "$version_before" ] || fail "the worker's config version stayed at $version_before across an apply ($version_after)"
 rm -f "$STATE/data/selftest-worker.yaml" "$STATE/data/selftest-worker-next.yaml"
-ok "no-reboot apply: observed config digest equals the sent one"
+ok "no-reboot apply: observed config digest equals the sent one; the resource version moved"
 
 # PostgreSQL: snapshot, diverge, restore.
 sql "drop table if exists bw_selftest; create table bw_selftest (v text); insert into bw_selftest values ('$BW_CANARY')" >/dev/null
@@ -648,6 +666,10 @@ hung=$("$here/evidence") || rc=$?
 grep --quiet "^UNAVAILABLE $TALOS_CONTROLPLANE_IP\$" "$hung/talos-config-sha256.txt" || fail "evidence claims to have read the paused control plane"
 grep --quiet --extended-regexp "^[0-9a-f]{64} $TALOS_WORKER_IP\$" "$hung/talos-config-sha256.txt" ||
   fail "evidence could not read the worker while only the control plane was paused"
+grep --quiet "^UNAVAILABLE $TALOS_CONTROLPLANE_IP\$" "$hung/talos-config-version.txt" ||
+  fail "evidence claims to have read the paused control plane's config version"
+grep --quiet --extended-regexp "^[0-9]+ $TALOS_WORKER_IP\$" "$hung/talos-config-version.txt" ||
+  fail "evidence did not record the worker's config version"
 wait_for 60 "the worker through the control plane after unpause" worker_talos version --short
 ok "evidence reads each Talos node on its own address: paused control plane, worker still read"
 
