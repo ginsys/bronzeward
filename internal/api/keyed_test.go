@@ -35,6 +35,10 @@ type fakeIngester struct {
 	calls    int
 	created  []string
 	envelope []byte
+	// staged maps each staging ciphertext to its envelope; decryptErr fails every decryption.
+	staged     map[provider.Ciphertext][]byte
+	decryptErr error
+	decrypts   int
 	// access is the cluster's Talos access TalosAccess answers, or accessErr; accessReads
 	// records the clusters asked for.
 	access      provider.TalosAccess
@@ -100,12 +104,33 @@ func (f *fakeIngester) EncryptBaseline(_ context.Context, plaintext []byte) (pro
 	return fakeCiphertext("baseline", plaintext), nil
 }
 
-// EncryptStaging records the last envelope it encrypted.
+// EncryptStaging records the last envelope it encrypted, and keeps each one for DecryptStaging.
 func (f *fakeIngester) EncryptStaging(_ context.Context, envelope []byte) (provider.Ciphertext, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.envelope = append([]byte(nil), envelope...)
-	return fakeCiphertext("staging", envelope), nil
+	ct := fakeCiphertext("staging", envelope)
+	if f.staged == nil {
+		f.staged = map[provider.Ciphertext][]byte{}
+	}
+	f.staged[ct] = f.envelope
+	return ct, nil
+}
+
+// DecryptStaging answers the envelope EncryptStaging encrypted to ct, or decryptErr, and counts
+// the calls.
+func (f *fakeIngester) DecryptStaging(_ context.Context, ct provider.Ciphertext) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.decrypts++
+	if f.decryptErr != nil {
+		return nil, f.decryptErr
+	}
+	p, ok := f.staged[ct]
+	if !ok {
+		return nil, errors.New("fake: not a staging ciphertext of this provider")
+	}
+	return append([]byte(nil), p...), nil
 }
 
 // TalosAccess answers f.access, or f.accessErr, and counts the reads.

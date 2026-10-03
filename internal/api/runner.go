@@ -64,11 +64,15 @@ func (a *API) runIngest(ctx context.Context, j job) {
 	var imp imported
 	var ref *refusal
 	var err error
-	if j.node != nil {
-		j.input, ref, err = a.readNode(ctx, j)
-	}
-	if ref == nil && err == nil {
-		imp, ref, err = a.stage(ctx, j)
+	if j.resume != nil {
+		imp, ref, err = a.resume(ctx, j)
+	} else {
+		if j.node != nil {
+			j.input, ref, err = a.readNode(ctx, j)
+		}
+		if ref == nil && err == nil {
+			imp, ref, err = a.stage(ctx, j)
+		}
 	}
 	j.input = ingest.Unresolved{} // step 8 was the last to read it
 	switch {
@@ -168,6 +172,35 @@ func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 		return imported{}, nil, fmt.Errorf("storing the envelope: %w", err)
 	}
 	return imp, nil, nil
+}
+
+// resume is a taken-over run's steps 2-8 (compilation §3.4): the staged envelope decrypted and
+// opened in place of extraction, generation creates and the baseline, which ran before the
+// takeover. A decryption failure leaves the claim resumed under this owner with a resume-failed
+// event, and the run stops: another takeover may retry once the lease lapses, until the absolute
+// expiry. An envelope that does not match its digest, or does not decode, is an integrity
+// failure and the refusal returned.
+func (a *API) resume(ctx context.Context, j job) (imported, *refusal, error) {
+	plain, err := a.d.ing.DecryptStaging(ctx, j.resume.ct)
+	if err != nil {
+		a.o.logf("ingestion %s: decrypting the staged envelope: %v", j.claim.ID, err)
+		if err := a.inTx(ctx, func(tx *sql.Tx) error {
+			if err := staging.Hold(ctx, tx, a.d.owner, j.claim); err != nil {
+				return err
+			}
+			return a.event(ctx, tx, j, map[string]any{"type": "resume-failed", "code": "dependency-unavailable"})
+		}); err != nil {
+			return imported{}, nil, fmt.Errorf("recording the failed resume: %w", err)
+		}
+		return imported{}, nil, errStop
+	}
+	st, err := ingest.Open(plain, j.resume.sum)
+	if err != nil {
+		a.o.logf("ingestion %s: opening the staged envelope: %v", j.claim.ID, err)
+		return imported{}, refuse(http.StatusInternalServerError, "internal-error",
+			"the staged envelope is incomplete or does not match its digest; the claim is abandoned"), nil
+	}
+	return imported{sanitized: st.Sanitized, gens: st.Generations, baseline: st.Baseline}, nil, nil
 }
 
 // failure is the problem a failed step leaves on the operation. A compilation refusal carries its
