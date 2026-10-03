@@ -401,8 +401,9 @@ func TestAssignmentUpdateRefusals(t *testing.T) {
 	}
 }
 
-// PA §3.1 rule 8 for a fragment: a removal of a head takes its revision as base; of a fragment only
-// this draft proposes, base stays absent; of a name with neither, 404. The fragment PUT, which
+// PA §3.1 rule 8 for a fragment: a removal of a head, removed already or not, takes its head
+// revision as base; of a fragment only this draft proposes, base stays absent; of a name with
+// neither, 404. The fragment PUT, which
 // ingests, lands with ginsys/bronzeward#23's next part.
 func TestFragmentRemoval(t *testing.T) {
 	d := newDraftEnv(t)
@@ -418,10 +419,16 @@ func TestFragmentRemoval(t *testing.T) {
 	if e.Revision != nil || e.Head != nil || e.Base != nil {
 		t.Fatalf("removal of a proposed fragment %+v", e)
 	}
-	if n := count(t, d.db, `SELECT count(*) FROM draft_source_entry WHERE kind = 'fragment' AND fragment_revision IS NULL`); n != 2 {
+	// A head a publication removed is still a head: the removal records its head revision as base.
+	gone := d.fragmentHead("gone", "site", nil, 3)
+	e = d.ok(d.del("/fragments/gone", d.etag, d.key()))
+	if e.Revision != nil || e.Head == nil || *e.Head != gone || e.Base == nil || *e.Base != 3 {
+		t.Fatalf("removal of a removed head %+v", e)
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM draft_source_entry WHERE kind = 'fragment' AND fragment_revision IS NULL`); n != 3 {
 		t.Fatalf("%d removal entries", n)
 	}
-	if n := count(t, d.db, `SELECT count(*) FROM act WHERE action = 'draft.fragment.remove'`); n != 2 {
+	if n := count(t, d.db, `SELECT count(*) FROM act WHERE action = 'draft.fragment.remove'`); n != 3 {
 		t.Fatalf("%d acts", n)
 	}
 	wantProblem(t, d.put("/fragments/registries", `{"layer":"override","document":"machine: {}"}`, d.etag, d.key()),
