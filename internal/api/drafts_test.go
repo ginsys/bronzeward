@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ginsys/bronzeward/internal/id"
@@ -252,5 +253,116 @@ func TestProfileRemoval(t *testing.T) {
 	}
 	if n := count(t, d.db, `SELECT count(*) FROM act WHERE action = 'draft.profile.remove'`); n != 2 {
 		t.Fatalf("%d acts", n)
+	}
+}
+
+// profileHead inserts a profile revision of name and a head at it, as publication would.
+func (d *draftEnv) profileHead(name string, headRevision int) string {
+	d.t.Helper()
+	prv, prf := id.New(id.ProfileRevision), id.New(id.Profile)
+	mustExec(d.t, d.db, `INSERT INTO profile_revision (id, cluster, name, author, created_at) VALUES ($1, $2, $3, $4, now())`,
+		prv, d.cluster, name, d.seed)
+	mustExec(d.t, d.db, `INSERT INTO profile (id, cluster, scope, name, head_revision_id, head_revision, etag_token, created_at)
+		VALUES ($1, $2, 'cluster', $3, $4, $5, 'm3oxmlfh6phr7aigshdydcb4ji', now())`, prf, d.cluster, name, prv, headRevision)
+	return prf
+}
+
+// PA §3.1, §9.3, choice §17.31: an assignment selects profiles, then fragments per layer, by name.
+// Each name has a head with a revision or is proposed in this draft, and is not removed by it; a
+// fragment carries the layer it is listed under. Anything else is 422 naming the body path.
+func TestAssignmentUpdate(t *testing.T) {
+	d := newDraftEnv(t)
+	d.profileHead("workers", 1)
+	d.fragmentHead("registries", "override", d.fragmentRevision(d.cluster, "registries", "override"), 2)
+	mustExec(t, d.db, `INSERT INTO draft_source_entry (draft, cluster, kind, name, fragment_revision) VALUES ($1, $2, 'fragment', 'site-dns', $3)`,
+		d.draft, d.cluster, d.fragmentRevision(d.cluster, "site-dns", "site"))
+	d.fragmentHead("ntp", "site", d.fragmentRevision(d.cluster, "ntp", "site"), 1)
+	d.fragmentHead("gone", "site", nil, 3)
+	mustExec(t, d.db, `INSERT INTO draft_source_entry (draft, cluster, kind, name, base) VALUES ($1, $2, 'fragment', 'ntp', 1)`, d.draft, d.cluster)
+	d.profileHead("storage", 1)
+	mustExec(t, d.db, `INSERT INTO draft_source_entry (draft, cluster, kind, name, base) VALUES ($1, $2, 'profile', 'storage', 1)`, d.draft, d.cluster)
+	part := "/assignments/" + d.machine
+
+	for name, c := range map[string]struct{ body, path string }{
+		"unknown profile":              {`{"profiles":["workers","absent"]}`, "profiles[1]"},
+		"profile the draft removes":    {`{"profiles":["storage"]}`, "profiles[0]"},
+		"fragment under another layer": {`{"profiles":["workers"],"fragments":{"site":["registries"]}}`, "fragments.site[0]"},
+		"proposed fragment's layer":    {`{"fragments":{"override":["registries","site-dns"]}}`, "fragments.override[1]"},
+		"fragment the draft removes":   {`{"fragments":{"site":["site-dns","ntp"]}}`, "fragments.site[1]"},
+		"removed head":                 {`{"fragments":{"site":["gone"]}}`, "fragments.site[0]"},
+		"unknown fragment":             {`{"fragments":{"override":["absent"]}}`, "fragments.override[0]"},
+	} {
+		doc := wantProblem(t, d.put(part, c.body, d.etag, d.key()), http.StatusUnprocessableEntity, "validation-failed")
+		if doc["path"] != c.path {
+			t.Errorf("%s: %v; want %s named", name, doc, c.path)
+		}
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM assignment_revision`); n != 0 {
+		t.Fatalf("refusals wrote %d revisions", n)
+	}
+
+	e := d.ok(d.put(part, `{"profiles":["workers"],"fragments":{"override":["registries"],"site":["site-dns"]}}`, d.etag, d.key()))
+	if e.Kind != "assignment" || e.Machine != d.machine || e.Name != "" || e.Head != nil || e.Base != nil || e.Revision == nil {
+		t.Fatalf("entry %+v", e)
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM assignment_revision_profile WHERE revision = '`+*e.Revision+`' AND position = 0 AND profile = 'workers'`); n != 1 {
+		t.Fatalf("%d profile rows", n)
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM assignment_revision_fragment WHERE revision = '`+*e.Revision+`'
+		AND (layer, position, fragment) IN (('override', 0, 'registries'), ('site', 0, 'site-dns'))`); n != 2 {
+		t.Fatalf("%d fragment rows", n)
+	}
+	// The head of the machine's assignment is a new entry's base; a removal, then an update, keeps
+	// one entry and its base.
+	asr := id.New(id.AssignmentRevision)
+	mustExec(t, d.db, `INSERT INTO assignment_revision (id, cluster, machine, author, created_at) VALUES ($1, $2, $3, $4, now())`,
+		asr, d.cluster, d.machine, d.seed)
+	asg := id.New(id.Assignment)
+	mustExec(t, d.db, `INSERT INTO assignment (id, cluster, machine, head_revision_id, head_revision, etag_token, created_at)
+		VALUES ($1, $2, $3, $4, 2, 'm3oxmlfh6phr7aigshdydcb4ji', now())`, asg, d.cluster, d.machine, asr)
+	mustExec(t, d.db, `DELETE FROM draft_source_entry WHERE kind = 'assignment'`)
+	e = d.ok(d.del(part, d.etag, d.key()))
+	if e.Revision != nil || e.Head == nil || *e.Head != asg || e.Base == nil || *e.Base != 2 {
+		t.Fatalf("removal %+v", e)
+	}
+	e = d.ok(d.put(part, `{"profiles":["workers"]}`, d.etag, d.key()))
+	if e.Revision == nil || e.Base == nil || *e.Base != 2 {
+		t.Fatalf("update after the removal %+v", e)
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM draft_source_entry WHERE kind = 'assignment'`); n != 1 {
+		t.Fatalf("%d assignment entries", n)
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM act WHERE action = 'draft.assignment.update'`); n != 2 {
+		t.Fatalf("%d update acts", n)
+	}
+
+	// A machine of another cluster, or none, is not found in the draft's cluster.
+	other := d.createCluster(d.api, d.human("h-author"), "k-cluster-other-0123456789")
+	rec := d.do(d.api, machineCall(d.human("h-author"), "k-machine-other-0123456789", other, "1c6b7d2f-3a4e-4f60-9bac-1d2e3f4a5b6c"))
+	foreign := decode[machineBody](t, rec, http.StatusCreated).ID
+	for _, m := range []string{foreign, id.New(id.Machine)} {
+		wantProblem(t, d.put("/assignments/"+m, `{"profiles":["workers"]}`, d.etag, d.key()), http.StatusNotFound, "not-found")
+		wantProblem(t, d.del("/assignments/"+m, d.etag, d.key()), http.StatusNotFound, "not-found")
+	}
+}
+
+// The assignment body: at least one selection; known layers; valid names, none repeated.
+func TestAssignmentUpdateRefusals(t *testing.T) {
+	d := newDraftEnv(t)
+	part := "/assignments/" + d.machine
+	for name, body := range map[string]string{
+		"nothing selected":            `{}`,
+		"empty lists":                 `{"profiles":[],"fragments":{}}`,
+		"empty layer":                 `{"profiles":["workers"],"fragments":{"site":[]}}`,
+		"unknown layer":               `{"fragments":{"machine-intrinsic":["registries"]}}`,
+		"repeated profile":            `{"profiles":["workers","workers"]}`,
+		"fragment under two layers":   `{"fragments":{"site":["registries"],"override":["registries"]}}`,
+		"profile name with a capital": `{"profiles":["Workers"]}`,
+		"fragment name too long":      `{"fragments":{"site":["` + strings.Repeat("a", 64) + `"]}}`,
+		"unknown member":              `{"profiles":["workers"],"machine":"x"}`,
+	} {
+		if rec := d.put(part, body, d.etag, d.key()); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s; want 400", name, rec.Code, rec.Body)
+		}
 	}
 }

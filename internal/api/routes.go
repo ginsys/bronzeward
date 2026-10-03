@@ -91,7 +91,7 @@ func routes() []*route {
 		fragmentRemoval().on(ifm(m(del, "/drafts/{id}/fragments/{name}", author))),
 		profileUpdate().on(ifm(m(put, "/drafts/{id}/profiles/{name}", author))),
 		profileRemoval().on(ifm(m(del, "/drafts/{id}/profiles/{name}", author))),
-		ifm(m(put, "/drafts/{id}/assignments/{machine}", author)),
+		assignmentUpdate().on(ifm(m(put, "/drafts/{id}/assignments/{machine}", author))),
 		assignmentRemoval().on(ifm(m(del, "/drafts/{id}/assignments/{machine}", author))),
 	)
 	rs = append(rs,
