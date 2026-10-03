@@ -27,7 +27,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: bronzeward serve|migrate|token ...")
+		fmt.Fprintln(os.Stderr, "usage: bronzeward serve|migrate|token|orphans ...")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -44,6 +44,11 @@ func main() {
 	case "token":
 		if err := runToken(os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, "bronzeward token:", err)
+			os.Exit(1)
+		}
+	case "orphans":
+		if err := runOrphans(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "bronzeward orphans:", err)
 			os.Exit(1)
 		}
 	default:
