@@ -1,0 +1,343 @@
+#!/usr/bin/env bash
+# Acceptance plan S1, adoption of the existing cluster, against the fixture. `run`: the
+# preconditions, steps 1 to 5 and the pass criteria. Each check writes PASS, FAIL or SKIP, its
+# acceptance-plan reference and what it checked to s1.tsv in the evidence directory and to stdout;
+# the directory is then scanned by bin/evidence. Exit 1 on any FAIL.
+# Usage: scenarios/s1 run   (on a fresh fixtures/bin/up)
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+s1_mode=${1:-}
+case $s1_mode in run) ;; *) die "usage: scenarios/s1 run" ;; esac
+need docker curl jq timeout id sleep git date sha256sum base64
+need_state
+# No fixture lock of its own: bw, seed, inject and evidence each take the one they need.
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+EV=$STATE/evidence/s1-$s1_mode-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV" "$EV/http"
+scenario=s1
+# shellcheck source-path=SCRIPTDIR source=common.sh
+. "$here/common.sh"
+
+# The worker's file secret bin/up planted, by the path its patch gave it (machine.files[0]).
+WORKER_MARK='doc[0]/machine/files/0/content'
+# The Talos API methods that change a node. A read-only ingestion calls none of them.
+MUTATIONS='MachineService/(ApplyConfiguration|Reboot|Reset|Shutdown|Upgrade|Rollback|Bootstrap|EtcdLeaveCluster|EtcdRemoveMember|EtcdForfeitLeadership)|LifecycleService/'
+run_key=$(date -u +%s%N)
+
+# node_talos <node ip> <talosctl args...>: talosctl against one node, through that node.
+node_talos() { talosctl_timed 20 -e "$1" -n "$1" "${@:2}"; }
+# key <name>: this run's Idempotency-Key for one request.
+key() { printf 's1-%s-%s' "$run_key" "$1"; }
+# etag_of_last: the ETag header of the last response.
+etag_of_last() { sed -n 's/^[Ee][Tt][Aa][Gg]: *//p' "$EV/last.headers" | tr -d '\r'; }
+# sql <statement>: one psql answer, unaligned, as Bronzeward's owner role.
+sql() { pg psql -U bronzeward -d bronzeward -Atc "$1"; }
+# digest_of <bundle file> <node ip>: the first field of that node's line.
+digest_of() { awk -v n="$2" '$2 == n {print $1}' "$1"; }
+# mutations <node ip>: how many Talos mutation requests that node's apid log records.
+mutations() {
+  local log
+  log=$(node_talos "$1" logs apid) || return 1
+  grep --count --extended-regexp -- "$MUTATIONS" <<<"$log" || true
+}
+
+# Step 1's records. Globals: a command substitution would lose them.
+cluster='' machine_cp='' machine_w=''
+# record <reference> <what> <path> <body> <key name>: a 201 for h-author's POST, its id in
+# $recorded.
+recorded=''
+record() {
+  local ref=$1 what=$2 path=$3 body=$4
+  recorded=
+  check "$ref" "$what" answers 201 - POST "$path" "$author" "$body" "$(key "${path##*/}-$5")"
+  recorded=$(jq -er '.id' "$EV/last.body" 2>/dev/null) || recorded=
+  [ -n "$recorded" ] || die "s1: $what: no id in the response; nothing after it can run"
+}
+
+# Step 3's draft and its current ETag.
+draft='' etag=''
+# ingest <machine id> <marks JSON array>: POST /ingestions with If-Match the draft's ETag, then
+# the claim to its end, the operation's state and the draft's new ETag.
+ingest() {
+  local m=$1 marks=$2 body ing op state n
+  body=$(jq -nc --arg m "$m" --arg d "$draft" --argjson marks "$marks" \
+    '{kind: "import", source: "machine", staging: "transient", machine: $m, draft: $d, marks: $marks}')
+  answers 202 - POST /api/v1/ingestions "$author" "$body" "$(key "ingestion-$m")" "$etag" || return 1
+  if ! ing=$(jq -er '.ingestion' "$EV/last.body") || ! op=$(jq -er '.operation' "$EV/last.body"); then
+    say "s1: POST /ingestions: no ingestion or operation in the 202"
+    return 1
+  fi
+  # The claim ends released or abandoned; the lease is 15 s, so a minute is generous.
+  state=
+  for ((n = 0; n < 60; n++)); do
+    answers 200 - GET "/api/v1/ingestions/$ing" "$author" || return 1
+    state=$(jq -er '.state' "$EV/last.body") || state=
+    case $state in released | abandoned) break ;; esac
+    sleep 1
+  done
+  [ "$state" = released ] || {
+    say "s1: ingestion of $m: claim $state, want released"
+    return 1
+  }
+  answers_with '.state == "succeeded"' 200 - GET "/api/v1/operations/$op" "$author" || return 1
+  answers 200 - GET "/api/v1/drafts/$draft" "$author" || return 1
+  local next
+  next=$(etag_of_last)
+  [ -n "$next" ] && [ "$next" != "$etag" ] || {
+    say "s1: the draft's ETag did not move across the ingestion of $m"
+    return 1
+  }
+  etag=$next
+}
+
+# has_references <machine id> [marked]: the machine's import base document holds !bwref
+# references, one row each, and, with marked, the file content as one. The document is matched in
+# the database, never printed.
+has_references() {
+  local m=$1 refs
+  refs=$(sql "SELECT count(*) FROM import_base_reference r JOIN import_base_revision b ON b.id = r.revision WHERE b.machine = '$m'") || return 1
+  [ "$refs" -ge 1 ] || {
+    say "s1: $m: no reference rows"
+    return 1
+  }
+  [ "$(sql "SELECT count(*) FROM import_base_revision WHERE machine = '$m' AND position('!bwref' IN document) > 0")" = 1 ] || {
+    say "s1: $m: the import base document holds no !bwref"
+    return 1
+  }
+  [ "${2:-}" != marked ] ||
+    [ "$(sql "SELECT count(*) FROM import_base_revision WHERE machine = '$m' AND document ~ '\\ycontent: !bwref '")" = 1 ] || {
+    say "s1: $m: the file content is not a reference"
+    return 1
+  }
+}
+
+# generations_listed: every generation a reference row names is listed under its claim's path by
+# the metadata identity, at version 1 (create-only), and those paths list nothing else.
+generations_listed() {
+  local rows path dir value listing names want got
+  rows=$(sql "SELECT generation FROM import_base_reference ORDER BY generation") || return 1
+  [ -n "$rows" ] || return 1
+  want=$(printf '%s\n' "$rows" | sort -u)
+  got=
+  for dir in $(printf '%s\n' "$rows" | sed 's|/[^/]*$||' | sort -u); do
+    listing=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN bao kv list -format=json -mount=secret "$dir") || {
+      say "s1: the metadata identity cannot list $dir"
+      return 1
+    }
+    names=$(jq -er '.[]' <<<"$listing") || return 1
+    for value in $names; do got+="$dir/$value"$'\n'; done
+  done
+  got=$(printf '%s' "$got" | sed '/^$/d' | sort -u)
+  [ "$got" = "$want" ] || {
+    say "s1: the generation paths listed are not the referenced ones"
+    return 1
+  }
+  for path in $rows; do
+    value=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN bao kv metadata get -format=json -mount=secret "$path" | jq -er '.data.current_version') || return 1
+    [ "$value" = 1 ] || {
+      say "s1: $path is at version $value, not a create-only generation"
+      return 1
+    }
+  done
+}
+
+# baseline_is_pre_state <machine id> <node ip> <pre-state digest file>: the OpenBao administrator
+# decrypts the machine's baseline ciphertext outside Bronzeward; its configuration digest
+# (execution-recovery §1: trailing newlines made one) is the one recorded and the pre-state's.
+# The plaintext stays in the pipe.
+baseline_is_pre_state() {
+  local row ct recorded_digest got pre
+  row=$(sql "SELECT encode(baseline_ciphertext, 'escape') || ' ' || encode(configuration_digest, 'hex') FROM import_base_revision WHERE machine = '$1'") || return 1
+  ct=${row%% *} recorded_digest=${row##* }
+  got=$(printf '%s\n' "$(bao write -field=plaintext transit/decrypt/bw-baseline ciphertext="$ct" | base64 -d)" |
+    sha256sum | cut -d' ' -f1) || return 1
+  pre=$(digest_of "$3" "$2")
+  [ "$got" = "$recorded_digest" ] && [ "$got" = "$pre" ] || {
+    say "s1: $1: decrypted baseline $got, recorded $recorded_digest, pre-state $pre"
+    return 1
+  }
+}
+
+# executor_refused <machine id>: the executor identity's decryption of the baseline is refused.
+executor_token=''
+executor_refused() {
+  local ct out rc=0
+  ct=$(sql "SELECT encode(baseline_ciphertext, 'escape') FROM import_base_revision WHERE machine = '$1'") || return 1
+  out=$(BAO_TOKEN=$executor_token bao write -field=plaintext transit/decrypt/bw-baseline ciphertext="$ct" 2>&1) || rc=$?
+  if [ "$rc" -eq 0 ] || ! grep --quiet --ignore-case --fixed-strings 'permission denied' <<<"$out"; then
+    say "s1: the executor's baseline decryption was not refused for permission (exit $rc)"
+    return 1
+  fi
+}
+
+# Predicates for check: their arguments land in commands.tsv, so they take IDs and counts only.
+same() { [ "$1" = "$2" ]; }
+differ() { [ "$1" != "$2" ]; }
+# counted <n> <ERE> <file>: exactly n lines of the file match.
+counted() { [ "$(grep --count --extended-regexp -- "$2" "$3")" = "$1" ]; }
+# put_access <cluster id>: the operator's write of bin/up's talosconfig, over stdin.
+put_access() { bao_stdin kv put -mount=secret "access/talos/$1" talosconfig=- <"$TALOSCONFIG" >/dev/null; }
+# access_read <cluster id>: the executor identity reads the cluster's Talos access.
+access_read() { BAO_TOKEN=$executor_token bao kv get -format=json -mount=secret "access/talos/$1" >/dev/null 2>&1; }
+
+# same_file <a> <b>: two capture files are byte-identical and name both nodes.
+same_file() { cmp --quiet -- "$1" "$2" && [ "$(grep --count --extended-regexp '^[0-9a-f]+ ' "$1")" = 2 ]; }
+
+# evidence_to <name>: a bundle captured and scanned now, its path in $bundle and in $EV/<name>.
+bundle=''
+evidence_to() {
+  bundle=$("$bin/evidence" "$EV" 2>"$EV/$1-evidence.log") || {
+    say "s1: bin/evidence ($1) failed: $(tail -n 1 "$EV/$1-evidence.log")"
+    return 1
+  }
+  printf '%s\n' "$bundle" >"$EV/$1-bundle"
+}
+
+run() {
+  # Preconditions: S0's migrate and seed, both instances up, then the pre-state.
+  check 'S1 precondition' 'bw migrate' "$bin/bw" migrate
+  check 'S1 precondition' 'inject start A' "$bin/inject" start A
+  check 'S1 precondition' 'inject start B' "$bin/inject" start B
+  check 'S1 precondition' 'A answers /livez' answers 204 - GET /livez ''
+  "$bin/seed" >/dev/null || die "bin/seed failed"
+  redact_automation_token "$(cat -- "$STATE/automation-token")"
+  author=$(mint h-author) || die "cannot mint an author token"
+  keep_secret "$author"
+  evidence_to pre || die "no pre-state: bin/evidence failed"
+  cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"
+  cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
+  check 'S1 precondition' 'pre-state: both nodes have a configuration digest' \
+    counted 2 '^[0-9a-f]{64} ' "$EV/pre-talos-config-sha256.txt"
+  check 'S1 precondition' 'pre-state: both nodes have a machine-configuration resource version' \
+    counted 2 '^[0-9]+ ' "$EV/pre-talos-config-version.txt"
+  local cp_mut w_mut
+  cp_mut=$(mutations "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_mut=$(mutations "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+
+  # Step 1: the cluster by its Talos cluster ID, each machine by its node ID and endpoint.
+  local cid cid_w nid_cp nid_w
+  cid=$(node_talos "$TALOS_CONTROLPLANE_IP" get info -o json | jq -er '.spec.clusterId') ||
+    die "cannot read the control plane's cluster ID"
+  cid_w=$(node_talos "$TALOS_WORKER_IP" get info -o json | jq -er '.spec.clusterId') ||
+    die "cannot read the worker's cluster ID"
+  nid_cp=$(node_talos "$TALOS_CONTROLPLANE_IP" get identity -o json | jq -er '.spec.nodeId') ||
+    die "cannot read the control plane's node ID"
+  nid_w=$(node_talos "$TALOS_WORKER_IP" get identity -o json | jq -er '.spec.nodeId') ||
+    die "cannot read the worker's node ID"
+  check 'S1 step 1' 'both nodes report one cluster ID' same "$cid" "$cid_w"
+  check 'S1 step 1' 'the nodes report two node IDs' differ "$nid_cp" "$nid_w"
+  record 'S1 step 1' 'POST /clusters as h-author with the Talos cluster ID: 201' /api/v1/clusters \
+    "$(jq -nc --arg c "$cid" --arg e "https://$TALOS_CONTROLPLANE_IP:6443" --arg v "${TALOS_VERSION%.*}" \
+      '{name: "bw-fixture", endpoint: $e, contract: $v, talosClusterId: $c}')" cluster
+  cluster=$recorded
+  record 'S1 step 1' 'POST /machines (control plane) by Talos node ID and endpoint: 201' /api/v1/machines \
+    "$(jq -nc --arg c "$cluster" --arg n "$nid_cp" --arg e "$TALOS_CONTROLPLANE_IP:50000" \
+      '{cluster: $c, talosNodeId: $n, talosEndpoint: $e}')" controlplane
+  machine_cp=$recorded
+  record 'S1 step 1' 'POST /machines (worker) by Talos node ID and endpoint: 201' /api/v1/machines \
+    "$(jq -nc --arg c "$cluster" --arg n "$nid_w" --arg e "$TALOS_WORKER_IP:50000" \
+      '{cluster: $c, talosNodeId: $n, talosEndpoint: $e}')" worker
+  machine_w=$recorded
+
+  # Step 2: the operator writes bin/up's os:admin talosconfig to the cluster's access path.
+  check 'S1 step 2' 'bao kv put -mount=secret access/talos/<cluster> as the administrator, talosconfig over stdin' \
+    put_access "$cluster"
+
+  # Steps 3 and 4: the import draft, then each node in turn under its current ETag.
+  check 'S1 step 3' 'POST /drafts as h-author: 201 with an ETag' \
+    answers 201 - POST /api/v1/drafts "$author" "$(jq -nc --arg c "$cluster" '{cluster: $c, title: "S1 import"}')" "$(key draft)"
+  draft=$(jq -er '.id' "$EV/last.body" 2>/dev/null) || die "s1: the draft has no id; nothing after it can run"
+  etag=$(etag_of_last)
+  [ -n "$etag" ] || die "s1: the draft has no ETag; nothing after it can run"
+  check 'S1 steps 3-4' 'control plane ingested (source machine, transient): claim released, operation succeeded, ETag moved' \
+    ingest "$machine_cp" '[]'
+  check 'S1 steps 3-4' 'worker ingested with its file content marked: claim released, operation succeeded, ETag moved' \
+    ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')"
+
+  # Pass criteria the database and OpenBao answer.
+  check 'S1 pass' 'control plane: !bwref references where the schema list identified values' has_references "$machine_cp"
+  check 'S1 pass' 'worker: !bwref references, the marked file content among them' has_references "$machine_w" marked
+  check 'S1 pass' 'each reference a create-only generation, listed under its claim by the metadata identity, nothing else there' \
+    generations_listed
+  check 'S1 pass' 'control plane: the baseline, decrypted by the administrator, has the recorded configuration digest, the pre-state' \
+    baseline_is_pre_state "$machine_cp" "$TALOS_CONTROLPLANE_IP" "$EV/pre-talos-config-sha256.txt"
+  check 'S1 pass' 'worker: the baseline, decrypted by the administrator, has the recorded configuration digest, the pre-state' \
+    baseline_is_pre_state "$machine_w" "$TALOS_WORKER_IP" "$EV/pre-talos-config-sha256.txt"
+  executor_token=$(bao token create -policy=bw-executor -no-default-policy -ttl=10m -format=json | jq -er '.auth.client_token') ||
+    die "cannot create an executor token"
+  keep_secret "$executor_token"
+  check 'S1 pass' "the executor identity's decryption of the worker's baseline: refused" executor_refused "$machine_w"
+  check 'S1 pass' "control: the same executor token reads the cluster's Talos access" access_read "$cluster"
+
+  # Step 5: the post-state, compared with the pre-state.
+  evidence_to post || die "no post-state: bin/evidence failed"
+  cp -- "$bundle/talos-config-sha256.txt" "$EV/post-talos-config-sha256.txt"
+  cp -- "$bundle/talos-config-version.txt" "$EV/post-talos-config-version.txt"
+  check 'S1 pass' "neither node's configuration digest changed" \
+    same_file "$EV/pre-talos-config-sha256.txt" "$EV/post-talos-config-sha256.txt"
+  check 'S1 pass' "neither node's machine-configuration resource version changed" \
+    same_file "$EV/pre-talos-config-version.txt" "$EV/post-talos-config-version.txt"
+  local cp_after w_after w_ctl
+  cp_after=$(mutations "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_after=$(mutations "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  # The positive control, after the post-state: a dry-run apply on the worker is a mutation
+  # method; the same query must count it, or the log does not record methods and the check proves
+  # nothing.
+  node_talos "$TALOS_WORKER_IP" apply-config --dry-run \
+    --file <(node_talos "$TALOS_WORKER_IP" get machineconfig v1alpha1 -o jsonpath='{.spec}') >/dev/null 2>&1 ||
+    die "the dry-run apply control did not run"
+  w_ctl=$(mutations "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  if [ "$w_ctl" -gt "$w_after" ]; then
+    check 'S1 pass' "no Talos mutation request in the control plane's apid log across the run (control: the dry-run apply is counted)" \
+      same "$cp_mut" "$cp_after"
+    check 'S1 pass' "no Talos mutation request in the worker's apid log across the run (control: the dry-run apply is counted)" \
+      same "$w_mut" "$w_after"
+  else
+    result SKIP 'S1 pass' 'no Talos mutation in the apid logs: not shown, the dry-run apply control is not in the log either'
+  fi
+}
+
+"$s1_mode"
+rm -f -- "$EV/last.body" "$EV/last.headers"
+# The final bundle: the evidence directory and the run directory scanned, as S0's step 5 does.
+ev_log=$(mktemp)
+if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
+  cat -- "$ev_log" >&2
+  if grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$ev_log"; then
+    result PASS 'S1 step 5' 'bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret, the marked value included'
+  else
+    result FAIL 'S1 step 5' "the leak scan reports fixture secrets: $final/leak-scan.txt"
+  fi
+  if [ -e "$final/unavailable.txt" ]; then
+    result FAIL 'S1 step 5' "the bundle is incomplete: $final/unavailable.txt names what was not captured"
+  else
+    result PASS 'S1 step 5' 'the bundle is complete: bin/evidence captured every source'
+  fi
+  # The tokens this run minted and created, searched in the bundle and the run directory, with a
+  # control holding the last of them that must be the one file listed (as s0 does).
+  local_ctl=$STATE/s1-token-control
+  trap 'rm -f -- "$local_ctl"' EXIT
+  printf 'x %s x\n' "${secrets[-1]:-}" >"$local_ctl"
+  hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
+    "$EV" "$final" "$local_ctl") || hits=
+  rm -f -- "$local_ctl"
+  trap - EXIT
+  if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
+    result PASS 'S1 step 5' "none of the ${#secrets[@]} tokens this run minted or created is in the bundle or the run directory (control found)"
+  else
+    printf 's1: files holding a token of this run: %s\n' "${hits:-none, not even the control}" >&2
+    result FAIL 'S1 step 5' "the tokens this run minted or created: ${#secrets[@]} searched, the listing is not the control alone"
+  fi
+else
+  cat -- "$ev_log" >&2
+  result FAIL 'S1 step 5' 'bin/evidence failed'
+fi
+rm -f -- "$ev_log"
+say "s1 $s1_mode: $failed failed; evidence in $EV, bundle ${final:-none}"
+[ "$failed" -eq 0 ]
