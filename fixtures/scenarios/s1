@@ -48,6 +48,17 @@ mutations() {
   grep --count --extended-regexp -- "$MUTATIONS" <<<"$log" || true
 }
 
+# h-author's token. The issuer's tokens live five minutes (its Lifetime) and the run is longer, so
+# each phase asks for one with most of its life left: minted again once the last is three minutes
+# old, longer than any phase between two calls runs.
+author='' author_at=0
+fresh_author() {
+  [ -z "$author" ] || [ $((SECONDS - author_at)) -ge 180 ] || return 0
+  author=$(mint h-author) || die "cannot mint an author token"
+  keep_secret "$author"
+  author_at=$SECONDS
+}
+
 # Step 1's records. Globals: a command substitution would lose them.
 cluster='' machine_cp='' machine_w=''
 # record <reference> <what> <path> <body> <key name>: a 201 for h-author's POST, its id in
@@ -422,10 +433,12 @@ interrupt() {
 c_log() { docker logs "${verified_container_ids[$BW_C]}" 2>&1; }
 # c_says <ERE>: a line of C's log matches.
 c_says() { c_log | grep --quiet --extended-regexp -- "$1"; }
-# c_exited: C is not running, and its log says the seam killed it at baseline.
-c_exited() {
+# kills_at <step>: how many times C's log says the seam ended it at the step, across its restarts.
+kills_at() { c_log | grep --count --line-regexp --fixed-strings -- "fixture interrupt: kill at $1" || true; }
+# c_killed_at <step> <count>: C is not running, and its log names that many kills at the step.
+c_killed_at() {
   [ "$(docker inspect --format '{{.State.Running}}' "${verified_container_ids[$BW_C]}")" = false ] &&
-    c_says '^fixture interrupt: kill at baseline$'
+    [ "$(kills_at "$1")" = "$2" ]
 }
 # within <seconds> <command...>: the command succeeds within that many seconds, asked each second.
 within() {
@@ -437,15 +450,15 @@ within() {
   "${@:2}"
 }
 
-# The encrypted import C runs: its claim and operation.
+# The import C runs: its claim and operation.
 tk_ing='' tk_op=''
-# c_import <key name>: an encrypted import of the worker, its file content marked, POSTed to C
-# under the draft's current ETag: 202, its claim and operation in tk_ing and tk_op.
+# c_import <key name> transient|encrypted: an import of the worker, its file content marked, POSTed
+# to C under the draft's current ETag: 202, its claim and operation in tk_ing and tk_op.
 c_import() {
   local body rc=0
   tk_ing='' tk_op=''
-  body=$(jq -nc --arg m "$machine_w" --arg d "$draft" --arg p "$WORKER_MARK" \
-    '{kind: "import", source: "machine", staging: "encrypted", machine: $m, draft: $d, marks: [$p]}')
+  body=$(jq -nc --arg m "$machine_w" --arg d "$draft" --arg p "$WORKER_MARK" --arg s "$2" \
+    '{kind: "import", source: "machine", staging: $s, machine: $m, draft: $d, marks: [$p]}')
   call_port=$SERVER_C_PORT
   answers 202 - POST /api/v1/ingestions "$author" "$body" "$(key "ingestion-$1")" "$etag" || rc=1
   call_port=$SERVER_A_PORT
@@ -506,14 +519,57 @@ revisions_are() { [ "$(sql 'SELECT count(*) FROM import_base_revision')" = "$1" 
 # nothing_after_a <revisions>: since A's commit, nothing written: the claim, the events, the import
 # base revisions and the draft's ETag all as A left them.
 nothing_after_a() { committed_by_a && revisions_are "$1" && draft_etag_is "$etag"; }
-# killed_before_staging: C exited at its baseline, the claim held at generation 1 without an
-# envelope, no staged event.
-killed_before_staging() { c_exited && claim_is held 1 none && events_are 'started talos-access'; }
-# abandoned_nothing: the takeover abandoned the claim at generation 2 without a payload, and failed
-# the operation ingestion-abandoned with the cause nothing-to-decrypt and no taken-over event.
+
+# The kill points: compilation §2.3's steps 0 to 8, as internal/seam names them.
+kill_points='claim read parse identify substitute guard generation construct baseline'
+# pre_events <step>: the operation's events when C exits at the step: its start, and from the read
+# on the Talos access version read.
+pre_events() { if [ "$1" = claim ]; then printf started; else printf 'started talos-access'; fi; }
+# killed_at <step> <kills before>: C exited at the step, the claim held at generation 1 without an
+# envelope, the operation's events those before the step.
+killed_at() { c_killed_at "$1" "$(($2 + 1))" && claim_is held 1 none && events_are "$(pre_events "$1")"; }
+# op_failed_abandoned: tk_op failed ingestion-abandoned, read in the database: a poll, so no
+# transcript per try.
+op_failed_abandoned() {
+  [ "$(sql "SELECT state || ' ' || (error->>'type') FROM operation WHERE id = '$tk_op'")" = 'failed urn:bronzeward:problem:ingestion-abandoned' ]
+}
+# swept <step>: the sweep wrote the transient claim abandoned at generation 1 without a payload,
+# and failed its operation ingestion-abandoned with one terminal event.
+swept() { claim_is abandoned 1 none && events_are "$(pre_events "$1") failed" && op_is failed ingestion-abandoned; }
+# abandoned_nothing <step>: the takeover abandoned the claim at generation 2 without a payload and
+# failed the operation ingestion-abandoned with the cause nothing-to-decrypt, no taken-over event.
 abandoned_nothing() {
-  claim_is abandoned 2 none && events_are 'started talos-access failed' && op_is failed ingestion-abandoned &&
+  claim_is abandoned 2 none && events_are "$(pre_events "$1") failed" && op_is failed ingestion-abandoned &&
     failed_cause_is nothing-to-decrypt
+}
+# claim_generations: how many generations the metadata identity lists under tk_ing's path; 0 when
+# the path holds none (bao's JSON answer is then {} with exit 2).
+claim_generations() {
+  local out rc=0
+  out=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN bao kv list -format=json -mount=secret "gen/$cluster/$tk_ing" 2>&1) || rc=$?
+  case $rc in
+    0) jq -er 'length' <<<"$out" ;;
+    2) [ "$out" = '{}' ] && printf '0\n' ;;
+    *) return 1 ;;
+  esac
+}
+# How many generations an import of the worker with its file content marked makes: its last
+# committed revision's reference rows.
+gen_count=''
+# generations_kept <step>: every generation created before the kill is still listed under the
+# claim, none deleted: none before step 6, one at it (the seam follows the first create), all of
+# the import's after it.
+generations_kept() {
+  local want=0 got
+  case $1 in
+    generation) want=1 ;;
+    construct | baseline) want=$gen_count ;;
+  esac
+  got=$(claim_generations) || return 1
+  [ "$got" = "$want" ] || {
+    say "s1: killed at $1: $got generation(s) listed under the claim, want $want"
+    return 1
+  }
 }
 
 # takeover_rows: C stalls an encrypted import after staging it; its heartbeat keeps the lease, so
@@ -523,8 +579,9 @@ abandoned_nothing() {
 # C, released and thawed, writes nothing.
 takeover_rows() {
   local lease0 revisions
+  fresh_author
   check 'S1 takeover, C §3.4' 'C told to stall its next run after the staged event' interrupt staged stall
-  check 'S1 takeover, C §3.4' 'encrypted import of the worker on C: 202' c_import takeover
+  check 'S1 takeover, C §3.4' 'encrypted import of the worker on C: 202' c_import takeover encrypted
   [ -n "$tk_op" ] ||
     die "s1: the encrypted import on C was not accepted; nothing after it can run"
   check 'S1 takeover, C §3.4' "C's run stalls after the staged event: the claim held at generation 1 with its envelope" \
@@ -562,23 +619,52 @@ takeover_rows() {
     nothing_after_a "$((revisions + 1))"
 }
 
-# nothing_to_decrypt_row: C exits after its baseline, before any envelope is stored; once the
-# lease lapses, A's takeover abandons the claim, its operation failed ingestion-abandoned with the
-# cause nothing-to-decrypt, and the draft is unchanged. C is started again after.
-nothing_to_decrypt_row() {
-  check 'S1 takeover, C §3.4' 'C told to exit at once at its next baseline' interrupt baseline kill
-  check 'S1 takeover, C §3.4' 'encrypted import of the worker on C: 202' c_import nothing
-  [ -n "$tk_op" ] ||
-    die "s1: the encrypted import on C was not accepted; nothing after it can run"
-  check 'S1 takeover, C §3.4' 'C exits at its baseline: the claim held at generation 1 without an envelope, no staged event' \
-    within 60 killed_before_staging
-  check 'S1 takeover, C §3.4' "C's lease lapses" within 40 lapsed
-  check 'S1 takeover, C §3.4' "A's takeover with nothing to decrypt: 202 at the operation" takeover A 202 - nothing
-  check 'S1 takeover, C §3.4' 'the claim abandoned at generation 2 without a payload, the operation failed ingestion-abandoned, cause nothing-to-decrypt' \
-    abandoned_nothing
-  check 'S1 takeover, C §3.4' "the draft's ETag unchanged" draft_etag_is "$etag"
-  check 'S1 takeover, C §3.4' "C's control file removed" interrupt -
-  check 'S1 takeover, C §3.4' 'inject start C' "$bin/inject" start C
+# interrupt_case <step> transient|encrypted: C exits at once at the step, before any envelope is
+# stored. Transient: once the lease lapses the sweep abandons the claim (C §3.5). Encrypted: the
+# claim outlives its lease until its expiry, and A's takeover abandons it with nothing to decrypt
+# (C §3.4). Either way the operation fails ingestion-abandoned, every generation created before the
+# kill is still listed, and the draft is unchanged. C is started again after.
+interrupt_case() {
+  local step=$1 staging_mode=$2 kills row_ref='S1 interruption, C §3.5'
+  [ "$staging_mode" = transient ] || row_ref='S1 interruption, C §3.4'
+  fresh_author
+  kills=$(kills_at "$step")
+  check "$row_ref" "C told to exit at once at $step" interrupt "$step" kill
+  check "$row_ref" "$staging_mode import of the worker on C: 202" c_import "kill-$step-$staging_mode" "$staging_mode"
+  [ -n "$tk_op" ] || die "s1: the $staging_mode import on C was not accepted; nothing after it can run"
+  check "$row_ref" "C exits at $step ($staging_mode): the claim held at generation 1 without an envelope, only the events before $step" \
+    within 60 killed_at "$step" "$kills"
+  check "$row_ref" "C's control file removed" interrupt -
+  if [ "$staging_mode" = transient ]; then
+    check "$row_ref" "killed at $step, transient: once the lease lapses, the sweep fails the operation ingestion-abandoned" \
+      within 45 op_failed_abandoned
+    check "$row_ref" "killed at $step, transient: the claim abandoned at generation 1 without a payload, one failed event" swept "$step"
+  else
+    check "$row_ref" "killed at $step, encrypted: the lease lapses" within 40 lapsed
+    check "$row_ref" "killed at $step, encrypted: A's takeover: 202 at the operation" takeover A 202 - "kill-$step"
+    check "$row_ref" "killed at $step, encrypted: the claim abandoned at generation 2 without a payload, the operation failed ingestion-abandoned, cause nothing-to-decrypt" \
+      abandoned_nothing "$step"
+  fi
+  check "$row_ref" "killed at $step ($staging_mode): every generation created before the kill still listed under the claim, none deleted" \
+    generations_kept "$step"
+  check "$row_ref" "killed at $step ($staging_mode): the draft's ETag unchanged" draft_etag_is "$etag"
+  check "$row_ref" 'inject start C' "$bin/inject" start C
+}
+# interruption_matrix: every kill point in both staging modes, one bundle per point.
+interruption_matrix() {
+  local step
+  gen_count=$(sql "SELECT count(*) FROM import_base_reference WHERE revision =
+    (SELECT id FROM import_base_revision WHERE machine = '$machine_w' ORDER BY created_at DESC LIMIT 1)") ||
+    die "s1: cannot count the worker's references"
+  check 'S1 interruption' "control: an import of the worker makes $gen_count generations, so a kill after step 6 has some to keep" \
+    differ "$gen_count" 0
+  for step in $kill_points; do
+    interrupt_case "$step" transient
+    interrupt_case "$step" encrypted
+    evidence_to "interrupt-$step" || die "no bundle after the kills at $step: bin/evidence failed"
+    check 'S1 interruption' "after the kills at $step, its bundle and the run directory: no fixture secret but the scan's control" \
+      scan_clean "interrupt-$step"
+  done
 }
 
 run() {
@@ -591,8 +677,7 @@ run() {
   check 'S1 precondition' 'A answers /livez' answers 204 - GET /livez ''
   "$bin/seed" >/dev/null || die "bin/seed failed"
   redact_automation_token "$(cat -- "$STATE/automation-token")"
-  author=$(mint h-author) || die "cannot mint an author token"
-  keep_secret "$author"
+  fresh_author
   evidence_to pre || die "no pre-state: bin/evidence failed"
   cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"
   cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
@@ -631,6 +716,7 @@ run() {
       '{cluster: $c, talosNodeId: $n, talosEndpoint: $e}')" worker
   machine_w=$recorded
 
+  fresh_author
   # Step 2: the operator writes bin/up's os:admin talosconfig to the cluster's access path.
   check 'S1 step 2' 'bao kv put -mount=secret access/talos/<cluster> as the administrator, talosconfig over stdin' \
     put_access "$cluster"
@@ -663,6 +749,7 @@ run() {
   check 'S1 pass' "the executor identity's decryption of the worker's baseline: refused" executor_refused "$machine_w"
   check 'S1 pass' "control: the same executor token reads the cluster's Talos access" access_read "$cluster"
 
+  fresh_author
   # The refusal set (C §13): each refused before any provider write, one bundle each. The control
   # for "no claim under gen/": the two imports above listed theirs.
   check 'S1 refusal' 'control: before the imports gen/<cluster>/ listed no claim, after them exactly their two' \
@@ -683,6 +770,7 @@ run() {
     answers_with '.humanOnly == true' 403 forbidden POST /api/v1/ingestions "$robot" "$(machine_body "$machine_cp")" \
     "$(key automation)" "$etag"
 
+  fresh_author
   # Talos access refusals (PA §3.3, §16): each fixture-producible cause, one import each, its fault
   # put in place before and taken away after.
   check 'S1 access' 'the access secret absent (metadata deleted): abandoned, 503 talos-access-unavailable, cause absent, nothing kept' \
@@ -705,9 +793,9 @@ run() {
   check 'S1 access' "control: with every fault taken away, the worker's import is not refused" \
     ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')" again
 
-  # Takeover and interruption on instance C (C §3.3, §3.4).
+  # Takeover and interruption on instance C (C §3.3 to §3.5).
   takeover_rows
-  nothing_to_decrypt_row
+  interruption_matrix
 
   # The rows the Go tests prove (ruling 1), in a clone of the image commit, so that the results
   # are the server's own commit's; removed again once they have run.
