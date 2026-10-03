@@ -50,17 +50,44 @@ digest_of() { awk -v n="$2" '$2 == n {print $1}' "$1"; }
 apid_log() { node_talos "$1" logs apid; }
 # run_mutations <log before> <log now>: how many Talos mutation requests the log now records past
 # the log before. That must be its prefix: a buffer that has dropped its oldest lines since may
-# have dropped one of the run's as well, so then there is no count (status 1).
+# have dropped one of the run's as well, so then there is no count (status 1). A failed extraction
+# or count is no count either (status 2), never a count of 0.
 run_mutations() {
   [[ "$2" == "$1"* ]] || return 1
-  log_methods <<<"${2:${#1}}" | grep --count --fixed-strings --line-regexp -- "$MUTATIONS" || true
+  local methods n
+  methods=$(log_methods <<<"${2:${#1}}") || return 2
+  # grep's status 1 is "no line matched", its count 0; anything above is an error.
+  n=$(grep --count --fixed-strings --line-regexp -- "$MUTATIONS" <<<"$methods") || [ $? -eq 1 ] || return 2
+  printf '%s\n' "$n"
 }
 # log_methods: the method each request line names, one per line, from apid lines read on stdin
 # (`... OK [/machine.MachineService/Version] 1.3ms stream Success (...)`, whatever the status).
-# Whole names, matched whole: EtcdRemoveMember would not match EtcdRemoveMemberByID.
+# Whole names, matched whole: EtcdRemoveMember would not match EtcdRemoveMemberByID. Fails when
+# grep or sed does; no request line is an empty answer.
 log_methods() {
-  { grep --only-matching --extended-regexp -- '\[/[A-Za-z0-9_.]+/[A-Za-z0-9_]+\]' || true; } |
-    sed 's/^\[\///; s/\]$//'
+  local lines
+  lines=$(grep --only-matching --extended-regexp -- '\[/[A-Za-z0-9_.]+/[A-Za-z0-9_]+\]') || [ $? -eq 1 ] || return 2
+  [ -z "$lines" ] || sed 's/^\[\///; s/\]$//' <<<"$lines"
+}
+# matcher_fails_closed: the matcher's control for its own failure. With grep failing at the
+# extraction, and then at the count, a log holding a mutation gives status 2, not a count.
+matcher_fails_closed() {
+  local line='10.0.0.1: 2026/01/01 00:00:00.000000 log.go:98: OK [/machine.MachineService/MetaWrite] 1ms (runtime=Talos)'
+  local which rc out wrong=()
+  [ "$(run_mutations '' "$line")" = 1 ] || wrong+=('MetaWrite not counted with grep working')
+  for which in --only-matching --count; do
+    rc=0
+    # shellcheck disable=SC2329 # grep is the shim run_mutations calls, in this subshell only
+    out=$(
+      grep() { if [[ " $* " == *" $which "* ]]; then return 2; fi; command grep "$@"; }
+      run_mutations '' "$line"
+    ) || rc=$?
+    [ "$rc" -eq 2 ] || wrong+=("grep failing at $which: status $rc, output '$out'")
+  done
+  [ "${#wrong[@]}" -eq 0 ] || {
+    say "s1: the matcher did not fail closed: ${wrong[*]}"
+    return 1
+  }
 }
 # methods_counted: the matcher's control for every kind. One apid line per classified method, in
 # the format the log records, is counted once when the method is mutating and not at all when it is
@@ -69,7 +96,8 @@ methods_counted() {
   local m class n wrong=()
   while IFS=$'\t' read -r m class; do
     case $m in '' | '#'*) continue ;; esac
-    n=$(run_mutations '' "10.0.0.1: 2026/01/01 00:00:00.000000 log.go:98: OK [/$m] 1ms stream Success (runtime=Talos)")
+    n=$(run_mutations '' "10.0.0.1: 2026/01/01 00:00:00.000000 log.go:98: OK [/$m] 1ms stream Success (runtime=Talos)") ||
+      n="no count, status $?"
     case $class:$n in mutating:1 | read:0) ;; *) wrong+=("$m ($class, counted $n)") ;; esac
   done <"$METHODS"
   [ "${#wrong[@]}" -eq 0 ] || {
@@ -82,21 +110,31 @@ methods_counted() {
 # on that node, made after the read, appears past it too; FAIL otherwise. Entries are compared,
 # not totals, so a run's mutation cannot hide behind an old entry the buffer dropped.
 no_mutation() {
-  local run ctl log
+  local run ctl log rc=0
   # A pass criterion (acceptance plan S1): unshown is not passed.
-  run=$(run_mutations "$3" "$4") || {
+  run=$(run_mutations "$3" "$4") || rc=$?
+  case $rc in
+  0) ;;
+  1)
     result FAIL 'S1 pass' "no Talos mutation in $1's apid log: not shown, the log no longer begins with the one read before the run (its buffer dropped lines)"
     return 0
-  }
+    ;;
+  *)
+    result FAIL 'S1 pass' "no Talos mutation in $1's apid log: not shown, the mutation matcher failed on it"
+    return 0
+    ;;
+  esac
   node_talos "$2" apply-config --dry-run \
     --file <(node_talos "$2" get machineconfig v1alpha1 -o jsonpath='{.spec}') >/dev/null 2>&1 ||
     die "the dry-run apply control did not run on $1"
   log=$(apid_log "$2") || die "cannot read $1's apid log"
-  if ctl=$(run_mutations "$3" "$log") && [ "$ctl" -gt "$run" ]; then
+  rc=0
+  ctl=$(run_mutations "$3" "$log") || rc=$?
+  if [ "$rc" -eq 0 ] && [ "$ctl" -gt "$run" ]; then
     check 'S1 pass' "no Talos mutation request in $1's apid log past the entries read before the run (control: the dry-run apply there is found past them)" \
       same "$run" 0
   else
-    result FAIL 'S1 pass' "no Talos mutation in $1's apid log: not shown, the dry-run apply control is not found past the entries read before the run"
+    result FAIL 'S1 pass' "no Talos mutation in $1's apid log: not shown, the dry-run apply control is not found past the entries read before the run (matcher status $rc)"
   fi
 }
 
@@ -832,6 +870,8 @@ run() {
 
   check 'S1 precondition' "the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all ($(grep -c . <<<"$MUTATIONS") mutating, talos-api-methods.tsv)" \
     methods_counted
+  check 'S1 precondition' 'the mutation matcher gives no count, not 0, when grep fails extracting the methods or counting them' \
+    matcher_fails_closed
   fresh_author
   evidence_to pre || die "no pre-state: bin/evidence failed"
   cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"

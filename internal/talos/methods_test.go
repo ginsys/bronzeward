@@ -2,7 +2,11 @@ package talos
 
 import (
 	"bufio"
+	"io/fs"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -20,12 +24,77 @@ import (
 // methodsFile is the classification scenarios/s1 counts mutations by.
 const methodsFile = "../../fixtures/talos-api-methods.tsv"
 
-// apiServices are every gRPC service of the Talos API in the pinned modules.
+// apiServices are every gRPC service of the Talos API in the pinned modules; TestTalosAPIMethods
+// holds the list to the services the modules generate (apiModules).
 var apiServices = []*grpc.ServiceDesc{
 	&cluster.ClusterService_ServiceDesc, &cosiapi.State_ServiceDesc, &inspect.InspectService_ServiceDesc,
 	&machine.DebugService_ServiceDesc, &machine.ImageService_ServiceDesc, &machine.LifecycleService_ServiceDesc,
 	&machine.MachineService_ServiceDesc, &security.SecurityService_ServiceDesc,
 	&storage.StorageService_ServiceDesc, &timeapi.TimeService_ServiceDesc,
+}
+
+// apiModules are the modules whose generated gRPC services apid serves, and the directory in each
+// that holds them.
+var apiModules = map[string]string{
+	"github.com/siderolabs/talos/pkg/machinery": "api",
+	"github.com/cosi-project/runtime":           "api",
+}
+
+// serviceName is a generated grpc.ServiceDesc's service name, in a *_grpc.pb.go file.
+var serviceName = regexp.MustCompile(`ServiceName:\s*"([^"]+)"`)
+
+// moduleServices names every gRPC service generated in apiModules, in the versions go.mod pins.
+func moduleServices(t *testing.T) []string {
+	t.Helper()
+	var names []string
+	for mod, sub := range apiModules {
+		cmd := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", mod)
+		cmd.Dir = moduleRoot(t)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("go list -m %s: %v", mod, err)
+		}
+		dir := strings.TrimSpace(string(out))
+		if dir == "" {
+			t.Fatalf("go list -m %s: no module directory", mod)
+		}
+		err = filepath.WalkDir(filepath.Join(dir, sub), func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, "_grpc.pb.go") {
+				return err
+			}
+			src, err := os.ReadFile(path)
+			for _, m := range serviceName.FindAllSubmatch(src, -1) {
+				names = append(names, string(m[1]))
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// serviceProblems reports every generated service apiServices omits and every listed service the
+// modules do not generate.
+func serviceProblems(generated []string, services []*grpc.ServiceDesc) []string {
+	var problems, listed []string
+	for _, s := range services {
+		listed = append(listed, s.ServiceName)
+	}
+	for _, g := range generated {
+		if !slices.Contains(listed, g) {
+			problems = append(problems, "service not listed: "+g)
+		}
+	}
+	for _, l := range listed {
+		if !slices.Contains(generated, l) {
+			problems = append(problems, "no such service: "+l)
+		}
+	}
+	slices.Sort(problems)
+	return problems
 }
 
 // deniedClients are the entries of denied that name a client, not a method.
@@ -128,10 +197,28 @@ func classificationProblems(class map[string]string, services []*grpc.ServiceDes
 	return problems
 }
 
-// TestTalosAPIMethods: the classification lists every method of the pinned Talos API services once,
-// and nothing else, so a module bump that adds a method fails here until it is classified; and
-// every method the read-only guard denies is mutating, so the two lists cannot drift apart.
+// TestTalosAPIMethods: apiServices are the services the pinned modules generate, and the
+// classification lists every method of theirs once, and nothing else, so a module bump that adds a
+// service or a method fails here until it is classified; and every method the read-only guard
+// denies is mutating, so the two lists cannot drift apart.
 func TestTalosAPIMethods(t *testing.T) {
+	generated := moduleServices(t)
+	if p := serviceProblems(generated, apiServices); len(p) > 0 {
+		t.Fatalf("apiServices:\n%s", strings.Join(p, "\n"))
+	}
+	t.Logf("%d services generated", len(generated))
+	for name, c := range map[string]struct {
+		generated []string
+		want      string
+	}{
+		"new service":  {append(slices.Clone(generated), "machine.NewService"), "service not listed: machine.NewService"},
+		"gone service": {slices.DeleteFunc(slices.Clone(generated), func(s string) bool { return s == "time.TimeService" }), "no such service: time.TimeService"},
+	} {
+		if p := serviceProblems(c.generated, apiServices); !slices.Equal(p, []string{c.want}) {
+			t.Errorf("control %s: got %q, want %q", name, p, c.want)
+		}
+	}
+
 	class := readMethods(t, methodsFile)
 	if p := classificationProblems(class, apiServices, denied); len(p) > 0 {
 		t.Fatalf("%s:\n%s", methodsFile, strings.Join(p, "\n"))

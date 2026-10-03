@@ -1,11 +1,11 @@
 # Every gRPC method of the Talos API services in the pinned modules (talos machinery v1.13.6, cosi
 # runtime v1.14.1), as apid logs it, and its class: mutating when it changes a node, its
-# workloads or its etcd member, issues a credential, or the read-only guard denies it (a packet
-# capture); read otherwise. scenarios/s1 counts the
+# workloads or its etcd member, issues a credential (HealthCheck mints an admin certificate on the
+# node for its own checks), or the read-only guard denies it (a packet capture); read otherwise. scenarios/s1 counts the
 # mutating ones in a node's apid log. internal/talos's TestTalosAPIMethods holds this file to the
 # modules' service descriptors (one row per method, none extra) and to the read-only guard's
 # denied list (every method it denies is mutating).
-cluster.ClusterService/HealthCheck	read
+cluster.ClusterService/HealthCheck	mutating
 cosi.resource.State/Create	mutating
 cosi.resource.State/Destroy	mutating
 cosi.resource.State/Get	read
