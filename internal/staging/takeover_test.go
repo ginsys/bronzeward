@@ -265,6 +265,32 @@ func TestTakeOverNothingToDecrypt(t *testing.T) {
 	}
 }
 
+// Compilation §3.4: a write refused on a live lease stays a lease-live refusal when the lease
+// lapses before the read that names the reason.
+func TestTakeOverLeaseLapsingAfterTheRefusal(t *testing.T) {
+	f := setup(t)
+	_, c := f.staged(t)
+	exec(t, f.db, `UPDATE staging_claim SET lease_until = clock_timestamp() + interval '1 second' WHERE id = $1`, c.ID)
+	var lease time.Time
+	if err := f.db.QueryRow(`SELECT lease_until FROM staging_claim WHERE id = $1`, c.ID).Scan(&lease); err != nil {
+		t.Fatal(err)
+	}
+	lapsed := false
+	_, err := f.takeWith(t, f.taker(t), c.ID, takeoverOptions{afterWrite: func() {
+		time.Sleep(time.Until(lease) + 100*time.Millisecond)
+		lapsed = true
+	}})
+	if !lapsed {
+		t.Fatalf("the takeover never wrote the claim: %v", err)
+	}
+	if !errors.Is(err, ErrLeaseLive) {
+		t.Fatalf("%v; want ErrLeaseLive", err)
+	}
+	if r := f.row(t, c.ID); r.state != "held" || r.gen != 1 {
+		t.Errorf("claim %+v; want it as it was", r)
+	}
+}
+
 // Persistence-api §5.1 and DB row 020: the takeover's eligibility is its UPDATE's own predicate,
 // evaluated at the current time after the claim is locked, not a read before it. A claim whose
 // absolute expiry passes between the lock and the write is refused; the control decides by a read

@@ -35,7 +35,8 @@ const eligible = `mode = 'encrypted' AND state IN ('held', 'resumed')
 	AND owner_epoch = (SELECT epoch FROM installation_state)`
 
 // takeoverOptions are test seams. afterLock runs once the claim is locked, before the write;
-// afterWrite runs once the claim's write returned; noRecheck is DB row 020's control: a read
+// afterWrite runs once the claim's write returned, refused or not; noRecheck is DB row 020's
+// control: a read
 // before afterLock decides, and the write drops the eligibility terms.
 type takeoverOptions struct {
 	afterLock  func()
@@ -81,17 +82,19 @@ func takeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, cla
 		WHERE id = $1 AND $3 = (SELECT epoch FROM installation_state) AND `+pred+`
 		RETURNING owner_gen, cluster, machine, lease_until, payload, payload_digest`,
 		claim, o.ID, o.Epoch, lease.Microseconds()).Scan(&tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine, &until, &tk.Payload, &digest)
+	if opts.afterWrite != nil {
+		opts.afterWrite()
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := notEligible(ctx, tx, o, claim); err != nil {
 			return Taken{}, err
 		}
-		return Taken{}, ErrNotEligible
+		// Eligible now, refused at the write: under the claim's lock only time moves, and only a
+		// lease can lapse in between (an expiry passing refuses both).
+		return Taken{}, ErrLeaseLive
 	}
 	if err != nil {
 		return Taken{}, fmt.Errorf("staging: take over: %w", err)
-	}
-	if opts.afterWrite != nil {
-		opts.afterWrite()
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE operation SET owner = $2, owner_gen = $3, owner_epoch = $4, lease_until = $5
 		WHERE ingestion = $1 AND state = 'running' AND owner_gen = $3 - 1`, claim, o.ID, tk.Claim.Gen, o.Epoch, until)
