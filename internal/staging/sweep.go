@@ -7,14 +7,14 @@ import (
 	"fmt"
 )
 
-// due is a live claim past its absolute expiry, or a transient claim past its lease (compilation
+// DueSQL is a live claim past its absolute expiry, or a transient claim past its lease (compilation
 // §3.5). An encrypted claim whose lease lapsed stays live until its expiry: a takeover may resume
 // it (§3.4).
-const due = `state IN ('held', 'resumed') AND (expires_at <= clock_timestamp() OR (mode = 'transient' AND lease_until <= clock_timestamp()))`
+const DueSQL = `state IN ('held', 'resumed') AND (expires_at <= clock_timestamp() OR (mode = 'transient' AND lease_until <= clock_timestamp()))`
 
 // EffectiveStateSQL is a claim's state as every read and transition treats it (compilation
 // §3.5): abandoned once due, whether or not a sweep has written it yet; the stored state otherwise.
-const EffectiveStateSQL = `CASE WHEN ` + due + ` THEN 'abandoned' ELSE state END`
+const EffectiveStateSQL = `CASE WHEN ` + DueSQL + ` THEN 'abandoned' ELSE state END`
 
 // AbandonedTitle is the title of the ingestion-abandoned problem (persistence-api §9.4).
 const AbandonedTitle = "The ingestion was abandoned"
@@ -58,7 +58,7 @@ func sweep(ctx context.Context, db *sql.DB, afterScan func()) (int, error) {
 
 // candidates lists the claims due now. It decides nothing: each write re-states the condition.
 func candidates(ctx context.Context, db *sql.DB) ([]string, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id FROM staging_claim WHERE `+due+` ORDER BY expires_at, id`)
+	rows, err := db.QueryContext(ctx, `SELECT id FROM staging_claim WHERE `+DueSQL+` ORDER BY expires_at, id`)
 	if err != nil {
 		return nil, fmt.Errorf("staging: sweep: %w", err)
 	}
@@ -106,7 +106,7 @@ func abandonDue(ctx context.Context, db *sql.DB, claim string) (bool, error) {
 // its draft, and T1 locks its claim before that draft, so waiting there could deadlock.
 func AbandonDueNoWait(ctx context.Context, tx *sql.Tx, claim, epoch string) (bool, error) {
 	var held string
-	switch err := tx.QueryRowContext(ctx, `SELECT id FROM staging_claim WHERE id = $1 AND `+due+` FOR UPDATE SKIP LOCKED`,
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM staging_claim WHERE id = $1 AND `+DueSQL+` FOR UPDATE SKIP LOCKED`,
 		claim).Scan(&held); {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
@@ -122,7 +122,7 @@ func AbandonDueNoWait(ctx context.Context, tx *sql.Tx, claim, epoch string) (boo
 // epoch is current until it commits. It reports whether it wrote the claim.
 func AbandonDue(ctx context.Context, tx *sql.Tx, claim, epoch string) (bool, error) {
 	res, err := tx.ExecContext(ctx, `UPDATE staging_claim SET state = 'abandoned', payload = NULL, payload_digest = NULL
-		WHERE id = $1 AND `+due, claim)
+		WHERE id = $1 AND `+DueSQL, claim)
 	if err != nil {
 		return false, fmt.Errorf("staging: abandon %s: %w", claim, err)
 	}
