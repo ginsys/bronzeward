@@ -218,6 +218,56 @@ if ! { pg_id=$(container_id "$PG" 2>/dev/null) && timeout 120 docker cp --quiet 
   unavailable "PostgreSQL data directory (container gone or its storage unreadable): what the server wrote to disk NOT scanned"
 fi
 
+# What an instance wrote outside its log, a temporary or staging file a kill left behind, is in its
+# container's writable layer, and read from there whether the process runs or not. docker diff
+# lists what the layer holds (kept as layers/<name>.diff); each entry added or changed is copied as
+# it is, under layers/<name>/ at its own path. A directory is not copied whole, since its entries
+# are listed on their own, and nothing at, under or above a mount is: copied whole, it would bring
+# in the configuration mounted read-only, tokens included, which is input, not something the
+# instance wrote. A symbolic link is kept as the text of its target (layers/<name>.links), never
+# followed: what it names is outside the layer, and the scan below refuses a link. A tmpfs is not
+# in the layer at all, so one on an instance leaves the capture incomplete.
+copy_layer() { # copy_layer <container name>
+  local id diff mounts tmpfs kind path m skip links
+  id=$(container_id "$1" 2>/dev/null) || return 1
+  diff=$(timeout 60 docker diff "$id" 2>/dev/null) || return 1
+  mounts=$(docker inspect --format '{{range .Mounts}}{{println .Destination}}{{end}}' "$id" 2>/dev/null) || return 1
+  # shellcheck disable=SC2016  # $d is a Go template variable, not a shell one
+  tmpfs=$(docker inspect --format '{{range $d, $_ := .HostConfig.Tmpfs}}{{println $d}}{{end}}' "$id" 2>/dev/null) || return 1
+  [ -z "$tmpfs" ] || return 1
+  printf '%s\n' "$diff" >"$out/layers/$1.diff"
+  : >"$out/layers/$1.links"
+  mkdir "$out/layers/$1" || return 1
+  while IFS=' ' read -r kind path; do
+    case $kind in A | C) ;; *) continue ;; esac
+    [ "${path#/}" != "$path" ] || return 1
+    skip=0
+    while IFS= read -r m; do
+      [ -n "$m" ] || continue
+      if [ "$path" = "$m" ] || [ "${path#"$m"/}" != "$path" ] || [ "${m#"$path"/}" != "$m" ]; then
+        skip=1
+      fi
+    done <<<"$mounts"
+    [ "$skip" -eq 0 ] || continue
+    # A directory with entries of its own listed: those are copied, not it.
+    grep --quiet --fixed-strings -- " $path/" <<<"$diff" && continue
+    mkdir -p -- "$out/layers/$1$(dirname -- "$path")" || return 1
+    timeout 60 docker cp --quiet "$id:$path" "$out/layers/$1$path" 2>/dev/null || return 1
+    if [ -L "$out/layers/$1$path" ]; then
+      printf '%s -> %s\n' "$path" "$(readlink -- "$out/layers/$1$path")" >>"$out/layers/$1.links"
+      rm -- "$out/layers/$1$path"
+    fi
+  done <<<"$diff"
+  # A directory copied is one listed without entries, so it holds no link; checked all the same.
+  links=$(find "$out/layers/$1" -type l -print -quit) && [ -z "$links" ]
+}
+mkdir "$out/layers"
+for c in "$BW_A" "$BW_B" "$BW_C"; do
+  copy_layer "$c" ||
+    unavailable "writable layer of $c (container gone, its storage unreadable, or a tmpfs mounted): what the instance wrote outside its log NOT scanned"
+done
+unset c
+
 # Backups are compressed; a scan of the raw files would be clean for the wrong reason. Expanding a
 # dump needs no server, so it runs in a throwaway container and works while postgres is down.
 # A dump or archive that an interrupted action left under its temporary name holds the same
