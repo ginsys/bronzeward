@@ -28,7 +28,7 @@ import (
 var Keys = []string{"bw-artifact", "bw-baseline", "bw-staging", "bw-digest"}
 
 // Policies are the fixture's policy files, by the name bin/up writes each under.
-var Policies = []string{"bw-ingestion", "bw-compiler", "bw-executor", "bw-metadata-only"}
+var Policies = []string{"bw-ingestion", "bw-compiler", "bw-executor", "bw-metadata-only", "bw-orphan-report"}
 
 // Bao is one test's view of the server.
 type Bao struct {
@@ -87,6 +87,9 @@ func (b *Bao) Policy(name, hcl string) {
 		}
 	})
 }
+
+// Name is the name name is written under on the server for this test.
+func (b *Bao) Name(name string) string { return b.prefix + name }
 
 // Token is a child token of the administrator holding exactly the named policies (each written
 // by New or Policy), without the default policy, with a five-minute TTL, revoked when the test
