@@ -40,6 +40,7 @@ type Ingester interface {
 	CreateGeneration(ctx context.Context, p provider.GenerationPath, v provider.Value) (provider.Generation, error)
 	EncryptBaseline(ctx context.Context, plaintext []byte) (provider.Ciphertext, error)
 	EncryptStaging(ctx context.Context, envelope []byte) (provider.Ciphertext, error)
+	DecryptStaging(ctx context.Context, ct provider.Ciphertext) ([]byte, error)
 	TalosAccess(ctx context.Context, cluster string) (provider.TalosAccess, error)
 }
 

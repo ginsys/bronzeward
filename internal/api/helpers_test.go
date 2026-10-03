@@ -71,10 +71,15 @@ func newEnvWith(t *testing.T, d deps, o options) *env {
 
 // build returns an API over e's database and issuer, as serve builds it, with test options.
 func (e *env) build(o options) *API {
+	return e.buildWith(e.d, o)
+}
+
+// buildWith is build with other ingestion dependencies: another process over the same database.
+func (e *env) buildWith(d deps, o options) *API {
 	if o.logf == nil {
 		o.logf = e.logf
 	}
-	return newAPI(e.db, auth.NewVerifier(e.cfg, e.db, auth.Discover(e.cfg.OIDC)), e.cfg, e.d, o)
+	return newAPI(e.db, auth.NewVerifier(e.cfg, e.db, auth.Discover(e.cfg.OIDC)), e.cfg, d, o)
 }
 
 func (e *env) logf(format string, args ...any) {

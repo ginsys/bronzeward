@@ -10,6 +10,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/ingest"
+	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
 )
 
@@ -81,7 +82,8 @@ func (in *ingestionInput) withoutDocument() bool { return in.Source == "machine"
 
 // job is one ingestion as the runner takes it from T11: the claim at its generation, the
 // operation, the draft revision it binds and the request's input, held in memory only. A source
-// machine job has no input yet: the runner reads it from node, the machine as T11 read it.
+// machine job has no input yet: the runner reads it from node, the machine as T11 read it. A
+// resumed job has none either: the runner decrypts resume, the claim's staged envelope.
 type job struct {
 	claim    staging.Claim
 	op       string
@@ -91,6 +93,13 @@ type job struct {
 	decl     ingest.Declarations
 	input    ingest.Unresolved
 	node     *node
+	resume   *staged
+}
+
+// staged is a taken-over claim's payload, the envelope's ciphertext, and its plaintext's digest.
+type staged struct {
+	ct  provider.Ciphertext
+	sum [32]byte
 }
 
 // node is a machine's Talos endpoint and the identity its node must report (§3.3): its identity
@@ -221,6 +230,68 @@ var getIngestion = item(id.Ingestion, func(ctx context.Context, tx *sql.Tx, v st
 	b, err := readIngestion(ctx, tx, v)
 	return "", b, err
 })
+
+// POST /ingestions/{id}/takeovers is an operator's takeover of an encrypted claim whose lease
+// lapsed (§9.2, compilation §3.4), T8: this process becomes the claim's owner at the next
+// generation with the claim resumed, its running ingest operation moves with it, and the
+// taken-over event is appended under the new generation. The runner then decrypts the envelope
+// and goes to T1. A claim with nothing to decrypt is abandoned in the same transaction and its
+// operation fails ingestion-abandoned; the answer is still 202 at the operation.
+func ingestionTakeover() effectRoute {
+	return effectRoute{action: "ingestion.takeover", input: func() input { return &takeoverInput{} }, effect: takeOverIngestion}
+}
+
+type takeoverInput struct{}
+
+func (*takeoverInput) check(*API) error { return nil }
+
+func takeOverIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
+	claim := q.r.PathValue("id")
+	notFound := refuse(http.StatusNotFound, "not-found", "no such ingestion")
+	if id.MustHave(claim, id.Ingestion) != nil {
+		return result{}, notFound
+	}
+	if a.d.owner.ID == "" || a.d.ing == nil {
+		return result{}, refuse(http.StatusServiceUnavailable, "dependency-unavailable", "ingestion is not configured; nothing was committed")
+	}
+	tk, err := staging.TakeOver(ctx, tx, a.d.owner, a.d.timers.Lease, claim)
+	conflict := func(detail string) (result, error) {
+		return result{}, refuse(http.StatusConflict, "conflict", detail).with("ingestion", claim)
+	}
+	switch {
+	case errors.Is(err, staging.ErrNoClaim):
+		return result{}, notFound
+	case errors.Is(err, staging.ErrNotEncrypted):
+		return conflict("only an encrypted claim is taken over")
+	case errors.Is(err, staging.ErrEnded):
+		return conflict("the ingestion has ended")
+	case errors.Is(err, staging.ErrLeaseLive):
+		return conflict("the claim's lease has not lapsed")
+	case errors.Is(err, staging.ErrClaimEpoch):
+		return conflict("the claim predates the current epoch")
+	case err != nil:
+		return result{}, err
+	}
+	j := job{claim: tk.Claim}
+	if err := tx.QueryRowContext(ctx, `SELECT id, draft, draft_revision FROM operation WHERE ingestion = $1 AND state = 'running'`,
+		claim).Scan(&j.op, &j.draft, &j.draftRev); err != nil {
+		return result{}, err
+	}
+	res := result{status: http.StatusAccepted, location: prefix + "/operations/" + j.op,
+		body: map[string]string{"operation": j.op, "ingestion": claim}, subjects: []string{j.op, claim, j.draft, tk.Claim.Machine},
+		operation: j.op}
+	if tk.Payload == nil {
+		ref := refuse(http.StatusConflict, "ingestion-abandoned", "the claim held no staged envelope to resume; ingest the input again")
+		entry := map[string]any{"type": "failed", "code": "ingestion-abandoned", "cause": "nothing-to-decrypt"}
+		return res, a.finish(ctx, tx, j, "failed", nil, problemDoc(j.op, ref), entry)
+	}
+	if err := a.event(ctx, tx, j, map[string]any{"type": "taken-over", "generation": tk.Claim.Gen}); err != nil {
+		return result{}, err
+	}
+	j.resume = &staged{ct: provider.Ciphertext(tk.Payload), sum: tk.Digest}
+	res.afterCommit = func() { a.startRunner(j) }
+	return res, nil
+}
 
 // POST /ingestions/{id}/abandonments is an operator's abandonment (§9.2, compilation §3.2), T11:
 // a claim live as read is written abandoned with its payload cleared, and its running ingest
