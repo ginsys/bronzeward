@@ -12,17 +12,29 @@ CREATE DOMAIN source_name AS text
 CREATE DOMAIN fragment_layer AS text
   CONSTRAINT fragment_layer_known CHECK (VALUE IN ('global', 'site', 'cluster', 'role', 'workload', 'override'));
 
+-- A revision's writer: the transaction that wrote it, set here whatever the INSERT supplies.
+-- pg_current_xact_id() is the top-level transaction's full ID, also inside a savepoint, and is
+-- never reused, unlike a row's 32-bit xmin. make_immutable keeps it from changing.
+CREATE FUNCTION stamp_revision_writer() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.writer := pg_current_xact_id();
+  RETURN NEW;
+END
+$$;
+
 -- A revision's rows are written in the transaction that writes the revision (§3): make_immutable
 -- refuses UPDATE and DELETE, and this refuses an INSERT that would add to a committed revision,
 -- with the same SQLSTATE. TG_ARGV[0] names the revision table; the row names it in `revision`. A
--- revision written in this transaction carries its xmin; no draft update uses a savepoint. A
--- revision that does not exist is left to the foreign key.
+-- revision this transaction cannot see is refused here as the foreign key would, and at once: the
+-- foreign key runs at the end of the statement and would accept one committed meanwhile.
 CREATE FUNCTION refuse_late_revision_row() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
-  own boolean;
+  w xid8;
 BEGIN
-  EXECUTE format('SELECT xmin = pg_current_xact_id()::xid FROM %I WHERE id = $1', TG_ARGV[0]) INTO own USING NEW.revision;
-  IF own IS FALSE THEN
+  EXECUTE format('SELECT writer FROM %I WHERE id = $1', TG_ARGV[0]) INTO w USING NEW.revision;
+  IF w IS NULL THEN
+    RAISE EXCEPTION 'table %: no such revision', TG_TABLE_NAME USING ERRCODE = 'foreign_key_violation';
+  ELSIF w <> pg_current_xact_id() THEN
     RAISE EXCEPTION 'table %: a row of a committed revision is refused', TG_TABLE_NAME USING ERRCODE = 'BW001';
   END IF;
   RETURN NEW;
@@ -39,11 +51,13 @@ CREATE TABLE fragment_revision (
   document   text NOT NULL CHECK (document <> ''),
   author     text NOT NULL REFERENCES principal (id),
   created_at timestamptz NOT NULL,
+  writer     xid8 NOT NULL,
   UNIQUE (id, cluster),
   UNIQUE (id, cluster, name),
   UNIQUE (id, cluster, name, layer)
 );
 CALL make_immutable('fragment_revision');
+CREATE TRIGGER writer BEFORE INSERT ON fragment_revision FOR EACH ROW EXECUTE FUNCTION stamp_revision_writer();
 
 -- A fragment revision's reference rows, as import_base_reference's (compilation §5.1, §5.2; §6.4).
 CREATE TABLE fragment_reference (
@@ -68,10 +82,12 @@ CREATE TABLE profile_revision (
   name       source_name NOT NULL,
   author     text NOT NULL REFERENCES principal (id),
   created_at timestamptz NOT NULL,
+  writer     xid8 NOT NULL,
   UNIQUE (id, cluster),
   UNIQUE (id, cluster, name)
 );
 CALL make_immutable('profile_revision');
+CREATE TRIGGER writer BEFORE INSERT ON profile_revision FOR EACH ROW EXECUTE FUNCTION stamp_revision_writer();
 
 CREATE TABLE profile_revision_fragment (
   revision          text NOT NULL,
@@ -94,11 +110,13 @@ CREATE TABLE assignment_revision (
   machine    text NOT NULL,
   author     text NOT NULL REFERENCES principal (id),
   created_at timestamptz NOT NULL,
+  writer     xid8 NOT NULL,
   FOREIGN KEY (machine, cluster) REFERENCES machine (id, cluster),
   UNIQUE (id, cluster),
   UNIQUE (id, cluster, machine)
 );
 CALL make_immutable('assignment_revision');
+CREATE TRIGGER writer BEFORE INSERT ON assignment_revision FOR EACH ROW EXECUTE FUNCTION stamp_revision_writer();
 
 CREATE TABLE assignment_revision_profile (
   revision text NOT NULL REFERENCES assignment_revision (id),

@@ -3,6 +3,7 @@ package migrate
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
 )
@@ -225,6 +226,60 @@ func TestSourcesRevisionRowsWithTheirRevision(t *testing.T) {
 	}
 	if _, err := db.Exec(insertProfilePin, id.New(id.ProfileRevision), s.cluster, 0, s.frv1); sqlState(err) != "23503" {
 		t.Errorf("pin of no revision: %v; want SQLSTATE 23503", err)
+	}
+
+	// A revision another transaction has written but not committed is no revision to this one: the
+	// row is refused when it is inserted, never left to the foreign key, which runs at the end of
+	// the statement and would accept it had that transaction committed meanwhile. The statement
+	// below inserts the late row, then sleeps on its second row, a pin of the statement's own
+	// revision, while the writer commits.
+	writer, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Rollback() }()
+	late, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = late.Rollback() }()
+	pending, mine := id.New(id.ProfileRevision), id.New(id.ProfileRevision)
+	mustExec(t, writer, insertProfileRevision, pending, s.cluster, "pending", s.human)
+	mustExec(t, late, insertProfileRevision, mine, s.cluster, "mine", s.human)
+	done := make(chan error, 1)
+	go func() {
+		_, err := late.Exec(`INSERT INTO profile_revision_fragment (revision, cluster, position, fragment_revision)
+			SELECT v.r, $3, 0, $4 FROM (VALUES (0, $1::text), (1, $2::text)) v (n, r)
+			WHERE v.n = 0 OR (SELECT true FROM pg_sleep(1))`, pending, mine, s.cluster, s.frv1)
+		done <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	if err := writer.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; sqlState(err) != "23503" {
+		t.Errorf("pin of a revision committed during the statement: %v; want SQLSTATE 23503", err)
+	}
+
+	// The writer is the top-level transaction, also in a savepoint, and whatever an INSERT supplies.
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	saved, forged := id.New(id.ProfileRevision), id.New(id.ProfileRevision)
+	mustExec(t, tx, `SAVEPOINT s`)
+	mustExec(t, tx, insertProfileRevision, saved, s.cluster, "saved", s.human)
+	mustExec(t, tx, `RELEASE SAVEPOINT s`)
+	mustExec(t, tx, `SAVEPOINT pin`)
+	if _, err := tx.Exec(insertProfilePin, saved, s.cluster, 0, s.frv1); err != nil {
+		t.Errorf("pin of a revision written in a savepoint of this transaction: %v", err)
+		mustExec(t, tx, `ROLLBACK TO SAVEPOINT pin`)
+	}
+	mustExec(t, tx, `INSERT INTO profile_revision (id, cluster, name, author, created_at, writer) VALUES ($1, $2, 'forged', $3, now(), '3')`,
+		forged, s.cluster, s.human)
+	if _, err := tx.Exec(insertProfilePin, forged, s.cluster, 0, s.frv1); err != nil {
+		t.Errorf("pin of a revision whose INSERT supplied a writer: %v", err)
 	}
 }
 
