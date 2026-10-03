@@ -913,7 +913,7 @@ Handling in the PoC:
   removed the draft that referenced it. The input is ingested again
   (compilation §3.5) **(choice §17.8)**.
 - **Reported.** The operator command `bronzeward orphans --config <file>
-  --cluster <id>`, run on the server host as `migrate` and `token` are, reports
+  [--cluster <id>]`, run on the server host as `migrate` and `token` are, reports
   orphans; no route serves them. It authenticates to the provider with the
   **orphan-report identity** and no other: a static token of its own, in the
   file the configuration's `provider.reportTokenFile` names (mode 0600 or
@@ -921,7 +921,10 @@ Handling in the PoC:
   `secret/metadata/gen/*` and nothing else: no `secret/data/*`, no other
   metadata path, no Transit **(choice §17.30)**. The command lists
   `secret/metadata/gen/<cluster id>/` and then each `<claim id>/` under it,
-  outside any transaction (rule 1 of §5), and then reads the committed
+  for the cluster given or, without `--cluster`, for every cluster directory
+  `secret/metadata/gen/` lists, so that a cluster a restore removed from the
+  database, its id now recorded nowhere else, is still found (source 3);
+  all of this outside any transaction (rule 1 of §5), and then reads the committed
   reference rows naming those paths and the claims their claim components name
   in one statement, so that both come from one snapshot under read committed
   (rule 3 of §5): read apart, a draft transaction committing between the two
@@ -941,16 +944,18 @@ Handling in the PoC:
   expiry may still release the claim (compilation choice §16.30). A recorded
   `abandoned` is final: the sweep and every other abandonment take the
   claim's row lock first and so follow that draft transaction. The
-  unreferenced paths of a claim recorded `held` or `resumed` past its
-  absolute expiry are listed apart, as expired and not yet abandoned, with
-  the same fields and never counted as orphans: with no controller running,
-  no sweep marks such a claim `abandoned`, and omitting them would hide its
-  orphans for as long as none runs. A claim row is committed by ingestion start (T11,
+  unreferenced paths of a claim recorded `held` or `resumed` that compilation
+  §3.5 already treats as `abandoned`, past its absolute expiry or, for a
+  `transient` claim, past its lease, are listed apart, as expired and not yet
+  abandoned, with the same fields plus the claim's mode and lease, and never
+  counted as orphans: with no controller running, no sweep marks such a claim
+  `abandoned`, and omitting them would hide its orphans for as long as none
+  runs. A claim row is committed by ingestion start (T11,
   compilation §2.3 step 0) before the first generation is created at step 6,
   so a path without one is source 3 above, or a claim this database never
-  held. The report names paths, claim ids, states and times only, never a
-  value or custom metadata, and changes nothing in the provider or the
-  database.
+  held. The report names paths, claim ids, states, modes and times only, never
+  a value or custom metadata, on its output, in a log or in an error, and
+  changes nothing in the provider or the database.
 
 ## 7. Idempotency
 
@@ -2500,18 +2505,19 @@ each (design §7.7 consequences):
   ingestions, executor observations and dispatches, with a positive control;
 - the orphan report (§6.4): the orphan-report identity listing
   `secret/metadata/gen/<cluster id>/` and a claim's directory under it and
-  reading a generation's metadata, and refused a `secret/data/gen/*` read, a
-  `list` of `secret/metadata/access/` and a `read` of an access path's
-  metadata under it, and every Transit request, with a control that grants it
-  `read` on `secret/data/gen/*` and one that grants it `read` and `list` on
-  `secret/metadata/*`, each of which must then succeed;
-  the same identity refused every change under the generation path (a
-  `secret/data/gen/*` create and a `DELETE` of its latest version, a metadata
-  update and a metadata delete under `secret/metadata/gen/*`, and a
-  `secret/delete/gen/*` and `secret/destroy/gen/*` request), with a control
-  that grants it `delete` on `secret/metadata/gen/*` and one that grants it
-  `delete` on `secret/data/gen/*`, each of which must then succeed against a
-  disposable path;
+  reading a generation's metadata, and refused each of: a `secret/data/gen/*`
+  read (`read`), a `list` of `secret/metadata/access/` (`list`) and a read of
+  an access path's metadata under it (`read`), a Transit encrypt and decrypt
+  (`update` on the key's `transit/encrypt/` and `transit/decrypt/` paths), and
+  every change under the generation path: a `secret/data/gen/*` create
+  (`create`) and a `DELETE` of its latest version (`delete`), a metadata
+  update (`update`) and a metadata delete (`delete`) under
+  `secret/metadata/gen/*`, and a `secret/delete/gen/*` and
+  `secret/destroy/gen/*` request (`update`); each refusal paired with a
+  control that grants the identity the capability named beside it on that
+  path alone, under which the same request must then succeed (against a
+  disposable path for every change), so that a malformed probe cannot pass as
+  a refusal;
   the report naming an unreferenced generation of an `abandoned` claim, of a
   `released` claim and of a path whose claim row does not exist, and not the
   generations of a `held` or a `resumed` claim nor a referenced generation of
@@ -2523,11 +2529,18 @@ each (design §7.7 consequences):
   absolute expiry, still recorded `held` while a draft transaction that
   passed its owner check holds its lock and then commits, its generations not
   reported as orphans, with a control that treats the claim as `abandoned` at
-  read time and must then report them; a claim past its absolute expiry still
-  recorded `held` with no controller running, its unreferenced generations
-  listed as expired and not yet abandoned, with a control that omits every
-  `held` claim's generations and must then fail; and the provider's
-  versions and the claim rows unchanged by a run.
+  read time and must then report them; with no controller running, an
+  `encrypted` claim past its absolute expiry and a `transient` claim past its
+  lease but not its expiry, both still recorded `held`, their unreferenced
+  generations listed as expired and not yet abandoned, with a control that
+  omits every `held` claim's generations and must then fail; without
+  `--cluster`, the generations under a cluster directory whose cluster and
+  claim rows a restore removed reported, with a control that lists only the
+  clusters the database records and must then fail; a generation whose custom
+  metadata holds a synthetic sentinel, the sentinel absent from the report's
+  output, logs and errors, with a control that prints the provider's metadata
+  response and must then fail; and the provider's versions and the claim rows
+  unchanged by a run.
 
 Evidence gaps this contract carries rather than closes:
 
