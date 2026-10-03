@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
 )
@@ -130,6 +131,59 @@ func TestDraftUpdateIdentifiers(t *testing.T) {
 		wantProblem(t, rec, http.StatusNotFound, "not-found")
 		if strings.Contains(rec.Body.String(), "synthetic") {
 			t.Errorf("%s %s: the refusal repeats the path: %s", c.method, c.path, rec.Body.String())
+		}
+	}
+}
+
+// PA §5 rules 2 and 5: an update locks the heads its pins and selections are checked against,
+// FOR SHARE, before the draft, so a publication advancing or removing one (T3, which holds it FOR
+// UPDATE) is waited for and its result checked, never committed past.
+func TestDraftUpdateLocksCheckedHeads(t *testing.T) {
+	d := newDraftEnv(t)
+	f1 := d.fragmentRevision(d.cluster, "registries", "override")
+	f2 := d.fragmentRevision(d.cluster, "registries", "override")
+	frg := d.fragmentHead("registries", "override", f1, 1)
+	prf := d.profileHead("workers", 1)
+	token := d.human("h-author")
+	for _, c := range []struct {
+		name, head, move, part, body, path string
+		args                               []any
+	}{
+		{"pinned fragment advanced", frg, `UPDATE fragment SET head_revision_id = $2, head_revision = 2 WHERE id = $1`,
+			"/profiles/storage", `{"fragments":["` + f1 + `"]}`, "fragments[0]", []any{frg, f2}},
+		{"selected profile removed", prf, `UPDATE profile SET head_revision_id = NULL, head_revision = 2 WHERE id = $1`,
+			"/assignments/" + d.machine, `{"profiles":["workers"]}`, "profiles[0]", []any{prf}},
+		{"selected fragment removed", frg, `UPDATE fragment SET head_revision_id = NULL, head_revision = 3 WHERE id = $1`,
+			"/assignments/" + d.machine, `{"fragments":{"override":["registries"]}}`, "fragments.override[0]", []any{frg}},
+	} {
+		table := map[bool]string{true: "fragment", false: "profile"}[c.head == frg]
+		tx, err := d.db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(`SELECT 1 FROM `+table+` WHERE id = $1 FOR UPDATE`, c.head); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan *httptest.ResponseRecorder, 1)
+		k := d.key()
+		go func() {
+			done <- d.do(d.api, call{method: "PUT", path: prefix + "/drafts/" + d.draft + c.part, token: token, key: k, ifMatch: d.etag, body: c.body})
+		}()
+		select {
+		case rec := <-done:
+			_ = tx.Rollback()
+			t.Fatalf("%s: answered %d while the head was locked; want it to wait", c.name, rec.Code)
+		case <-time.After(500 * time.Millisecond):
+		}
+		if _, err := tx.Exec(c.move, c.args...); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		doc := wantProblem(t, <-done, http.StatusUnprocessableEntity, "validation-failed")
+		if doc["path"] != c.path {
+			t.Errorf("%s: %v; want path %s", c.name, doc, c.path)
 		}
 	}
 }
