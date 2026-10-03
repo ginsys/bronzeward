@@ -24,7 +24,9 @@ import (
 //	BW_TEST_TALOSCONFIG=fixtures/.state/talosconfig BW_TEST_TALOS_ENDPOINT=10.55.0.3 \
 //	go test -count=1 -v -run Live ./internal/talos
 //
-// They skip without those two variables; CI has no fixture. The test reads the talosconfig file
+// TestLiveRoleProbe needs the control plane's endpoint (10.55.0.2): Talos generates client
+// configurations only on a control plane node. They skip without those two variables; CI has no
+// fixture. The test reads the talosconfig file
 // and passes its bytes, as the provider read hands them over; the package never reads a path.
 
 func liveTarget(t *testing.T) ([]byte, string) {
