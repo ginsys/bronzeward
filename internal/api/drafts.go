@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/ginsys/bronzeward/internal/id"
 )
@@ -103,6 +104,51 @@ func lockDraft(ctx context.Context, tx *sql.Tx, q *request) (lockedDraft, error)
 		return d, err
 	}
 	return d, nil
+}
+
+// lockHeads holds, FOR SHARE, the fragment and profile heads an update's pins and selections are
+// checked against (§5 rule 2), by id and before the draft (rule 5), so a publication advancing or
+// removing one (T3, FOR UPDATE) is waited for and its result is what the update checks. The draft's
+// cluster names them; a draft that does not exist locks nothing and lockDraft refuses it. Pins name
+// their fragment through their immutable revision row. A head a publication creates meanwhile is
+// not held: the name had none when checked, so the check refused it or took the draft's own entry.
+func lockHeads(ctx context.Context, tx *sql.Tx, q *request, pins, fragments, profiles []string) error {
+	draft := q.r.PathValue("id")
+	if id.MustHave(draft, id.Draft) != nil {
+		return nil
+	}
+	var cluster string
+	switch err := tx.QueryRowContext(ctx, `SELECT cluster FROM draft WHERE id = $1`, draft).Scan(&cluster); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	}
+	// fragment ids (frg_) sort before profile ids (prf_), so this is one pass in id order.
+	for _, s := range []struct {
+		query string
+		args  []any
+	}{
+		{`SELECT id FROM fragment WHERE cluster = $1 AND (name = ANY (string_to_array($2, ','))
+			OR name IN (SELECT name FROM fragment_revision WHERE cluster = $1 AND id = ANY (string_to_array($3, ','))))
+			ORDER BY id FOR SHARE`, []any{cluster, strings.Join(fragments, ","), strings.Join(pins, ",")}},
+		{`SELECT id FROM profile WHERE cluster = $1 AND name = ANY (string_to_array($2, ',')) ORDER BY id FOR SHARE`,
+			[]any{cluster, strings.Join(profiles, ",")}},
+	} {
+		rows, err := tx.QueryContext(ctx, s.query, s.args...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // advance moves a locked draft to its next revision and returns the new ETag.
@@ -318,6 +364,9 @@ func pinnable(ctx context.Context, tx *sql.Tx, d lockedDraft, frv string) (bool,
 
 func updateProfile(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*profileInput)
+	if err := lockHeads(ctx, tx, q, in.Fragments, nil, nil); err != nil {
+		return result{}, err
+	}
 	d, err := lockDraft(ctx, tx, q)
 	if err != nil {
 		return result{}, err
@@ -449,6 +498,13 @@ func selectable(ctx context.Context, tx *sql.Tx, d lockedDraft, kind, name strin
 
 func updateAssignment(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*assignmentInput)
+	var fragments []string
+	for _, list := range in.Fragments {
+		fragments = append(fragments, list...)
+	}
+	if err := lockHeads(ctx, tx, q, nil, fragments, in.Profiles); err != nil {
+		return result{}, err
+	}
 	d, err := lockDraft(ctx, tx, q)
 	if err != nil {
 		return result{}, err
