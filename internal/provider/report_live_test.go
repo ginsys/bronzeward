@@ -324,3 +324,43 @@ func TestLiveReportIdentity(t *testing.T) {
 		t.Logf("refused: %s; control: succeeds with %s added", pr.what, pr.grant)
 	}
 }
+
+// TestLiveReportClient: the list client, with the orphan-report token, finds the generations an
+// administrator seeded at each level, and an absent directory is empty.
+func TestLiveReportClient(t *testing.T) {
+	b := live(t)
+	cl, claim := id.New(id.Cluster), id.New(id.Ingestion)
+	p1, p2 := seed(t, b, cl, claim), seed(t, b, cl, claim)
+	rep, err := NewReport(b.Addr, tokenOf(b.Token("bw-orphan-report")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	cls, err := rep.Clusters(ctx)
+	if err != nil || !slices.Contains(cls.Names, cl) {
+		t.Fatalf("clusters: %d names, %v", len(cls.Names), err)
+	}
+	claims, err := rep.Claims(ctx, cl)
+	if err != nil || !slices.Equal(claims.Names, []string{claim}) || claims.Skipped != 0 {
+		t.Fatalf("claims %+v, %v", claims, err)
+	}
+	gens, err := rep.Values(ctx, cl, claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, g := range gens.Paths {
+		got = append(got, g.String())
+	}
+	slices.Sort(got)
+	want := []string{p1, p2}
+	slices.Sort(want)
+	if !slices.Equal(got, want) || gens.Skipped != 0 {
+		t.Fatalf("generations %q (skipped %d), want %q", got, gens.Skipped, want)
+	}
+	empty, err := rep.Claims(ctx, id.New(id.Cluster))
+	if err != nil || len(empty.Names) != 0 {
+		t.Fatalf("an absent cluster: %+v, %v", empty, err)
+	}
+	t.Logf("the report client listed %d generations of the seeded claim; an absent cluster lists empty", len(got))
+}
