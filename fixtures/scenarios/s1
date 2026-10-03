@@ -48,6 +48,22 @@ mutations() {
   log=$(node_talos "$1" logs apid) || return 1
   grep --count --extended-regexp -- "$MUTATIONS" <<<"$log" || true
 }
+# no_mutation <label> <node ip> <count before> <count after>: the S1 pass row that the node's apid
+# log recorded no mutation request across the run, written only once a dry-run apply on that node,
+# made after the count, raises its count; SKIP otherwise.
+no_mutation() {
+  local ctl
+  node_talos "$2" apply-config --dry-run \
+    --file <(node_talos "$2" get machineconfig v1alpha1 -o jsonpath='{.spec}') >/dev/null 2>&1 ||
+    die "the dry-run apply control did not run on $1"
+  ctl=$(mutations "$2") || die "cannot read $1's apid log"
+  if [ "$ctl" -gt "$4" ]; then
+    check 'S1 pass' "no Talos mutation request in $1's apid log across the run (control: the dry-run apply there is counted)" \
+      same "$3" "$4"
+  else
+    result SKIP 'S1 pass' "no Talos mutation in $1's apid log: not shown, the dry-run apply control there is not in the log either"
+  fi
+}
 
 # h-author's token. The issuer's tokens live five minutes (its Lifetime) and the run is longer, so
 # each phase asks for one with most of its life left: minted again once the last is three minutes
@@ -267,10 +283,14 @@ refusal_observed() {
     return 1
   }
   answers_with "$filter" 200 - GET "/api/v1/operations/$op" "$author" || return 1
-  if grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" -- "$EV/last.body"; then
-    say "s1: refusal $name: the operation's problem holds a fixture secret"
-    return 1
-  fi
+  # 1 is the only clean answer: 0 found a secret, and 2 read no pattern file or no body.
+  local leak=0
+  grep --quiet --fixed-strings --file="$STATE/scan-patterns.txt" -- "$EV/last.body" || leak=$?
+  case $leak in
+    1) ;;
+    0) say "s1: refusal $name: the operation's problem holds a fixture secret"; return 1 ;;
+    *) say "s1: refusal $name: the operation's problem could not be scanned (grep exit $leak)"; return 1 ;;
+  esac
   [ "$cause" = - ] ||
     [ "$(sql "SELECT entry->>'cause' FROM operation_event WHERE operation = '$op' AND entry->>'type' = 'failed'")" = "$cause" ] || {
     say "s1: refusal $name: the terminal event does not name the cause $cause"
@@ -486,6 +506,17 @@ events_are() {
 }
 # lapsed: tk_ing's lease has lapsed by the database's clock.
 lapsed() { [ "$(sql "SELECT lease_until <= clock_timestamp() FROM staging_claim WHERE id = '$tk_ing'")" = t ]; }
+# refused_live <A|B> <key name>: with the lease read as live just before, that instance's takeover
+# answers 409 for the live lease, not for one of the other conflicts a takeover can meet.
+refused_live() {
+  local rc=0
+  ! lapsed || { say "s1: the lease had already lapsed before $1's takeover"; return 1; }
+  [ "$1" = A ] || call_port=$SERVER_B_PORT
+  answers_with '.detail == "the claim'"'"'s lease has not lapsed"' 409 conflict \
+    POST "/api/v1/ingestions/$tk_ing/takeovers" "$author" '{}' "$(key "takeover-$2")" || rc=1
+  call_port=$SERVER_A_PORT
+  return "$rc"
+}
 # past <epoch seconds>: the database's clock is past it.
 past() { [ "$(sql "SELECT clock_timestamp() > to_timestamp($1)")" = t ]; }
 # lease_epoch: tk_ing's lease end, in epoch seconds.
@@ -590,7 +621,7 @@ takeover_rows() {
   lease0=$(lease_epoch) || die "s1: cannot read the claim's lease"
   check 'S1 lease extension, C §3.3' "the claim's first lease end passes while C's run stalls" within 30 past "$lease0"
   check 'S1 lease extension, C §3.3' "C's heartbeat extended the lease: the claim still live, held at generation 1" live_at_first
-  check 'S1 takeover, C §3.4' "B's takeover while C's lease is live: 409 conflict" takeover B 409 conflict live
+  check 'S1 takeover, C §3.4' "B's takeover while C's lease is live (read first): 409 conflict, the lease not lapsed" refused_live B live
   check 'S1 takeover, C §3.4' 'inject pause C (its heartbeat frozen with its run)' "$bin/inject" pause C
   check 'S1 takeover, C §3.4' "C's lease lapses" within 40 lapsed
   if ! "$bin/inject" seal openbao >/dev/null; then
@@ -600,7 +631,7 @@ takeover_rows() {
   check 'S1 takeover, C §3.4' "B's takeover with OpenBao sealed: 202 (a takeover reads no key)" takeover B 202 - sealed
   check 'S1 takeover, C §3.4' "B's decryption fails: resume-failed event, the claim resumed under B at generation 2, its envelope kept" \
     within 20 resumed_under_b
-  check 'S1 takeover, C §3.4' "A's takeover while B's lease is live: 409 conflict" takeover A 409 conflict b-live
+  check 'S1 takeover, C §3.4' "A's takeover while B's lease is live (read first): 409 conflict, the lease not lapsed" refused_live A b-live
   "$bin/inject" unseal openbao >/dev/null || die "s1: OpenBao could not be unsealed"
   check 'S1 takeover, C §3.4' "B's lease lapses (its run stopped)" within 40 lapsed
   revisions=$(sql 'SELECT count(*) FROM import_base_revision') || die "s1: cannot count import base revisions"
@@ -832,24 +863,14 @@ run() {
     same_file "$EV/pre-talos-config-sha256.txt" "$EV/post-talos-config-sha256.txt"
   check 'S1 pass' "neither node's machine-configuration resource version changed" \
     same_file "$EV/pre-talos-config-version.txt" "$EV/post-talos-config-version.txt"
-  local cp_after w_after w_ctl
+  local cp_after w_after
   cp_after=$(mutations "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
   w_after=$(mutations "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
-  # The positive control, after the post-state: a dry-run apply on the worker is a mutation
-  # method; the same query must count it, or the log does not record methods and the check proves
-  # nothing.
-  node_talos "$TALOS_WORKER_IP" apply-config --dry-run \
-    --file <(node_talos "$TALOS_WORKER_IP" get machineconfig v1alpha1 -o jsonpath='{.spec}') >/dev/null 2>&1 ||
-    die "the dry-run apply control did not run"
-  w_ctl=$(mutations "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
-  if [ "$w_ctl" -gt "$w_after" ]; then
-    check 'S1 pass' "no Talos mutation request in the control plane's apid log across the run (control: the dry-run apply is counted)" \
-      same "$cp_mut" "$cp_after"
-    check 'S1 pass' "no Talos mutation request in the worker's apid log across the run (control: the dry-run apply is counted)" \
-      same "$w_mut" "$w_after"
-  else
-    result SKIP 'S1 pass' 'no Talos mutation in the apid logs: not shown, the dry-run apply control is not in the log either'
-  fi
+  # The positive control, after the post-state and on each node for its own row: a dry-run apply
+  # is a mutation method, and the same query must count it on that node, or its log does not
+  # record methods and the row proves nothing.
+  no_mutation "the control plane" "$TALOS_CONTROLPLANE_IP" "$cp_mut" "$cp_after"
+  no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_mut" "$w_after"
 }
 
 "$s1_mode"
