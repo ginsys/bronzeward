@@ -42,8 +42,13 @@ var errNotObject = errors.New("the body must be one JSON object of this route's 
 func decodeBody(r *http.Request, in input, omit string) ([]byte, error) {
 	if _, ok := in.(*noBody); ok {
 		var one [1]byte
-		if n, _ := io.ReadFull(r.Body, one[:]); n != 0 {
+		n, err := io.ReadFull(r.Body, one[:])
+		if n != 0 {
 			return nil, errors.New("this route takes no body")
+		}
+		// Only a clean end is an empty body; a failed read must not commit a removal.
+		if !errors.Is(err, io.EOF) {
+			return nil, errors.New("the body could not be read")
 		}
 		return []byte{}, nil
 	}

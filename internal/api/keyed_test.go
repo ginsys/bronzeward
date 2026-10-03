@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -303,6 +304,19 @@ func TestDecodeBodyOmits(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	if _, err := decodeBody(r, &docInput{}, "document"); err == nil || !strings.Contains(err.Error(), "U+0000") {
 		t.Fatalf("U+0000 in another member: %v", err)
+	}
+}
+
+// A bodyless route accepts only an empty body: a read that fails before its first byte (a
+// truncated request, say) is refused, not taken for no body, so it cannot commit a removal.
+func TestDecodeBodyNoBodyReadFailure(t *testing.T) {
+	r := httptest.NewRequest("DELETE", "/", strings.NewReader(""))
+	if canon, err := decodeBody(r, &noBody{}, ""); err != nil || len(canon) != 0 {
+		t.Fatalf("empty body: canon %q, err %v", canon, err)
+	}
+	r = httptest.NewRequest("DELETE", "/", iotest.ErrReader(errors.New("connection reset")))
+	if _, err := decodeBody(r, &noBody{}, ""); err == nil {
+		t.Fatal("a failed read was taken for an empty body")
 	}
 }
 
