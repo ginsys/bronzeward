@@ -59,34 +59,41 @@ type listPage[T any] struct {
 func listed[T any](p id.Prefix, query string, scan func(*sql.Rows) (T, string, error)) readFunc {
 	return func(a *API, w http.ResponseWriter, q *request) {
 		readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
-			out := listPage[T]{Items: []T{}}
-			limit, after, ref := page(q, p)
-			if ref != nil {
-				return "", nil, ref
-			}
-			rows, err := tx.QueryContext(ctx, query, after, limit+1)
-			if err != nil {
-				return "", nil, err
-			}
-			defer rows.Close()
-			var ids []string
-			for rows.Next() {
-				it, itemID, err := scan(rows)
-				if err != nil {
-					return "", nil, err
-				}
-				out.Items, ids = append(out.Items, it), append(ids, itemID)
-			}
-			if err := rows.Err(); err != nil {
-				return "", nil, err
-			}
-			if len(out.Items) > limit {
-				out.Items = out.Items[:limit]
-				out.Next = makeCursor(q.epoch, ids[limit-1])
-			}
-			return "", out, nil
+			out, err := listRows(ctx, tx, q, p, query, scan)
+			return "", out, err
 		})
 	}
+}
+
+// listRows reads one page for listed; args follow query's $1 and $2.
+func listRows[T any](ctx context.Context, tx *sql.Tx, q *request, p id.Prefix, query string, scan func(*sql.Rows) (T, string, error),
+	args ...any) (listPage[T], error) {
+	out := listPage[T]{Items: []T{}}
+	limit, after, ref := page(q, p)
+	if ref != nil {
+		return out, ref
+	}
+	rows, err := tx.QueryContext(ctx, query, append([]any{after, limit + 1}, args...)...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		it, itemID, err := scan(rows)
+		if err != nil {
+			return out, err
+		}
+		out.Items, ids = append(out.Items, it), append(ids, itemID)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	if len(out.Items) > limit {
+		out.Items = out.Items[:limit]
+		out.Next = makeCursor(q.epoch, ids[limit-1])
+	}
+	return out, nil
 }
 
 // item answers one entity p named by the route's {id}. It takes no query (§9.1: unknown fields
@@ -178,11 +185,13 @@ func draftLock(a *API) string {
 func scanDraft(r interface{ Scan(...any) error }) (draftRow, error) {
 	var d draftRow
 	err := r.Scan(&d.ID, &d.Cluster, &d.Title, &d.State, &d.Revision, &d.token)
-	d.Entries = []draftEntry{}
+	d.Entries = []any{}
 	return d, err
 }
 
-// withEntries reads the entries of ds, in machine order, into them.
+// withEntries reads the entries of ds into them: import base entries in machine order, then
+// source entries (§3.1) as the update routes answer them, fragments, profiles and assignments,
+// each by name or machine.
 func withEntries(ctx context.Context, tx *sql.Tx, ds []*draftBody) error {
 	if len(ds) == 0 {
 		return nil
@@ -193,21 +202,32 @@ func withEntries(ctx context.Context, tx *sql.Tx, ds []*draftBody) error {
 		byID[d.ID] = d
 		ids = append(ids, d.ID)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT draft, kind, machine, import_base_revision FROM draft_entry
-		WHERE draft = ANY (string_to_array($1, ',')) ORDER BY draft, machine`, strings.Join(ids, ","))
+	err := eachRow(ctx, tx, `SELECT draft, kind, machine, import_base_revision FROM draft_entry
+		WHERE draft = ANY (string_to_array($1, ',')) ORDER BY draft, machine`, strings.Join(ids, ","), func(r *sql.Rows) error {
+		var d string
+		var e draftEntry
+		err := r.Scan(&d, &e.Kind, &e.Machine, &e.Revision)
+		byID[d].Entries = append(byID[d].Entries, e)
+		return err
+	})
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var d string
-		var e draftEntry
-		if err := rows.Scan(&d, &e.Kind, &e.Machine, &e.Revision); err != nil {
+	return eachRow(ctx, tx, `SELECT e.draft, e.kind, COALESCE(e.name, ''), COALESCE(e.machine, ''), COALESCE(f.id, p.id, a.id), e.base,
+			COALESCE(e.fragment_revision, e.profile_revision, e.assignment_revision)
+		FROM draft_source_entry e
+		LEFT JOIN fragment f ON e.kind = 'fragment' AND f.cluster = e.cluster AND f.name = e.name
+		LEFT JOIN profile p ON e.kind = 'profile' AND p.cluster = e.cluster AND p.name = e.name
+		LEFT JOIN assignment a ON e.kind = 'assignment' AND a.machine = e.machine
+		WHERE e.draft = ANY (string_to_array($1, ','))
+		ORDER BY e.draft, array_position(ARRAY['fragment', 'profile', 'assignment'], e.kind), e.name, e.machine`,
+		strings.Join(ids, ","), func(r *sql.Rows) error {
+			var d string
+			var e sourceEntry
+			err := r.Scan(&d, &e.Kind, &e.Name, &e.Machine, &e.Head, &e.Base, &e.Revision)
+			byID[d].Entries = append(byID[d].Entries, e)
 			return err
-		}
-		byID[d].Entries = append(byID[d].Entries, e)
-	}
-	return rows.Err()
+		})
 }
 
 func listDrafts(a *API, w http.ResponseWriter, q *request) {
