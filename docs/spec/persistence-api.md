@@ -926,7 +926,7 @@ Handling in the PoC:
   database, its id now recorded nowhere else, is still found (source 3);
   all of this outside any transaction (rule 1 of §5), and then reads the committed
   reference rows naming those paths and the claims their claim components name
-  in one statement, so that both come from one snapshot under read committed
+  in one statement, inside a read-only transaction, so that both come from one snapshot under read committed
   (rule 3 of §5): read apart, a draft transaction committing between the two
   reads would show a generation unreferenced and its claim `released`. It
   reports each listed path that no committed reference row names and whose
@@ -955,7 +955,10 @@ Handling in the PoC:
   so a path without one is source 3 above, or a claim this database never
   held. The report names paths, claim ids, states, modes and times only, never
   a value or custom metadata, on its output, in a log or in an error, and
-  changes nothing in the provider or the database.
+  changes nothing in the provider or the database. It prints nothing until
+  every listing and the statement have succeeded: a provider or database
+  failure at any point exits nonzero with an error naming the failed step
+  and no path, so a partial report is never printed as a complete one.
 
 ## 7. Idempotency
 
@@ -2503,21 +2506,31 @@ each (design §7.7 consequences):
   talosconfig's client key in compilation §15's scan of the database, logs,
   responses and temporary files, over successful, refused and interrupted
   ingestions, executor observations and dispatches, with a positive control;
-- the orphan report (§6.4): the orphan-report identity listing
-  `secret/metadata/gen/<cluster id>/` and a claim's directory under it and
-  reading a generation's metadata, and refused each of: a `secret/data/gen/*`
-  read (`read`), a `list` of `secret/metadata/access/` (`list`) and a read of
-  an access path's metadata under it (`read`), a Transit encrypt and decrypt
+- the orphan report (§6.4): the orphan-report identity's token carrying
+  exactly one policy, whose rules, read back from the provider with the
+  fixture's administrative token, grant `read` and `list` on
+  `secret/metadata/gen/*` and no other path or capability, with a control
+  that adds any one other stanza and must then fail, so that the boundary
+  does not rest on a list of probes; the identity listing
+  `secret/metadata/gen/` and `secret/metadata/gen/<cluster id>/` and a
+  claim's directory under it and reading a generation's metadata, and refused
+  each of: a `secret/data/gen/*` read and a `secret/data/access/talos/*` read
+  (`read`), a `list` of `secret/metadata/access/` (`list`) and a read of an
+  access path's metadata under it (`read`), a Transit encrypt and decrypt
   (`update` on the key's `transit/encrypt/` and `transit/decrypt/` paths), and
   every change under the generation path: a `secret/data/gen/*` create
-  (`create`) and a `DELETE` of its latest version (`delete`), a metadata
-  update (`update`) and a metadata delete (`delete`) under
-  `secret/metadata/gen/*`, and a `secret/delete/gen/*` and
+  (`create`), write to an existing generation (`update`), `PATCH` (`patch`)
+  and `DELETE` of its latest version (`delete`), a metadata update
+  (`update`) and a metadata delete (`delete`) under `secret/metadata/gen/*`,
+  and a `secret/delete/gen/*`, `secret/undelete/gen/*` and
   `secret/destroy/gen/*` request (`update`); each refusal paired with a
   control that grants the identity the capability named beside it on that
   path alone, under which the same request must then succeed (against a
   disposable path for every change), so that a malformed probe cannot pass as
   a refusal;
+  the provider sealed after the first cluster directory is listed, and the
+  database statement failing, each exiting nonzero with no path printed, with
+  a control that prints each path as it is listed and must then fail;
   the report naming an unreferenced generation of an `abandoned` claim, of a
   `released` claim and of a path whose claim row does not exist, and not the
   generations of a `held` or a `resumed` claim nor a referenced generation of
@@ -2539,8 +2552,9 @@ each (design §7.7 consequences):
   clusters the database records and must then fail; a generation whose custom
   metadata holds a synthetic sentinel, the sentinel absent from the report's
   output, logs and errors, with a control that prints the provider's metadata
-  response and must then fail; and the provider's versions and the claim rows
-  unchanged by a run.
+  response and must then fail; and the provider's versions and every table's
+  rows (a full data dump compared before and after) unchanged by a run, with
+  a control that records one audit row and must then fail.
 
 Evidence gaps this contract carries rather than closes:
 
