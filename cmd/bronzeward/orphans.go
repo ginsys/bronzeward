@@ -51,17 +51,19 @@ func runOrphans(args []string, stdout, stderr io.Writer) error {
 	if *cluster != "" && id.MustHave(*cluster, id.Cluster) != nil {
 		return errors.New("-cluster is not a cluster identifier")
 	}
+	// Each failure before the first listing names its step. Its reason names only the operator's
+	// own files and settings, never a generation path, a value or metadata.
 	cfg, err := readConfig(*path)
 	if err != nil {
-		return err
+		return fmt.Errorf("reading the configuration: %w", err)
 	}
 	if cfg.Provider == nil || cfg.Provider.ReportTokenFile == "" {
-		return errors.New("the configuration names no provider.reportTokenFile")
+		return errors.New("reading the configuration: it names no provider.reportTokenFile")
 	}
 	var early provider.Token
 	if orphanHooks.tokenAtLoad {
 		if early, err = provider.ReadTokenFile(cfg.Provider.ReportTokenFile); err != nil {
-			return err
+			return fmt.Errorf("reading the report token: %w", err)
 		}
 	}
 	if orphanHooks.afterLoad != nil {
@@ -71,25 +73,25 @@ func runOrphans(args []string, stdout, stderr io.Writer) error {
 	defer stop()
 	db, err := database.Open(ctx, cfg.Database.DSN)
 	if err != nil {
-		return err
+		return fmt.Errorf("opening the database: %w", err)
 	}
 	defer db.Close()
 	ms, err := migrate.Embedded()
 	if err != nil {
-		return err
+		return fmt.Errorf("checking the schema: %w", err)
 	}
 	if err := migrate.Check(ctx, db, ms); err != nil {
-		return err
+		return fmt.Errorf("checking the schema: %w", err)
 	}
 	tok := early
 	if !orphanHooks.tokenAtLoad {
 		if tok, err = provider.ReadTokenFile(cfg.Provider.ReportTokenFile); err != nil {
-			return err
+			return fmt.Errorf("reading the report token: %w", err)
 		}
 	}
 	rep, err := provider.NewReport(cfg.Provider.Address, tok)
 	if err != nil {
-		return err
+		return fmt.Errorf("reading the configuration: %w", err)
 	}
 	var l orphans.Lister = rep
 	if orphanHooks.lister != nil {
