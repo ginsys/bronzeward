@@ -1530,7 +1530,7 @@ PUT /api/v1/drafts/drf_2rmpezm5rfx47azsgmp66z457a/assignments/mch_tqhcznunhyle4h
 Idempotency-Key: 9b7e2c14-0f6d-4a38-8e51-c3a9d2f47b06
 If-Match: "8-a4kc2xq7zxgbgnmwvtqwhk3f5e"
 
-{"profiles": ["workers"], "fragments": {"override": ["registries"]}}
+{"profiles": ["workers"], "fragments": {"cluster": ["registries"]}}
 
 HTTP/1.1 200 OK
 ETag: "9-pq3vylwbn4ijc5mc6z6yq2dmzi"
@@ -1541,7 +1541,7 @@ ETag: "9-pq3vylwbn4ijc5mc6z6yq2dmzi"
            "revision": "asr_e7v7jq6g4e3tsx2wq5ynldkb3a"}}
 ```
 
-Here `registries` must carry the `override` layer. Discarding a draft takes an
+Here `registries` must carry the `cluster` layer, as its fragment entry does. Discarding a draft takes an
 empty object and answers the draft, `discarded`:
 
 ```http
@@ -1587,7 +1587,7 @@ HTTP/1.1 200 OK
 {"id": "asr_e7v7jq6g4e3tsx2wq5ynldkb3a",
  "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
  "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
- "profiles": ["workers"], "fragments": {"override": ["registries"]},
+ "profiles": ["workers"], "fragments": {"cluster": ["registries"]},
  "author": "idn_5u4k6llt7jsktfhcfv35xmdetu",
  "createdAt": "2026-09-26T09:12:40Z"}
 ```
