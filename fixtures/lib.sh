@@ -904,15 +904,17 @@ image_migrations() {
 # The lock is per migration (persistence-api §11), so which run applies which is not fixed: the
 # second can find some recorded and apply the rest.
 applied_once() {
-  local every=$1 line reports=0 these versions=()
+  # Names no script sourcing this file uses: shellcheck follows the source and holds an array
+  # local here against a string of the same name there (experiments/e4-database-semantics).
+  local every=$1 line migrate_reports=0 migrate_words migrate_versions=()
   while IFS= read -r line; do
     [[ $line =~ ^applied\ \[(.*)\]$ ]] || continue
-    reports=$((reports + 1))
-    read -ra these <<<"${BASH_REMATCH[1]}"
-    versions+=("${these[@]}")
+    migrate_reports=$((migrate_reports + 1))
+    read -ra migrate_words <<<"${BASH_REMATCH[1]}"
+    migrate_versions+=("${migrate_words[@]}")
   done < <(cat -- "${@:2}")
-  [ "$reports" -eq 2 ] && [ "${#versions[@]}" -gt 0 ] || return 1
-  [ "$(printf '%s\n' "${versions[@]}" | LC_ALL=C sort -n | tr '\n' ' ')" = "$every " ]
+  [ "$migrate_reports" -eq 2 ] && [ "${#migrate_versions[@]}" -gt 0 ] || return 1
+  [ "$(printf '%s\n' "${migrate_versions[@]}" | LC_ALL=C sort -n | tr '\n' ' ')" = "$every " ]
 }
 
 # issuer_answers: the issuer's discovery document, asked from inside the network namespace of the
