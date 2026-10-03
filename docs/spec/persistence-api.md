@@ -2530,8 +2530,10 @@ each (design §7.7 consequences):
   a refusal;
   the command refusing a `provider.reportTokenFile` with group or other
   permission bits before any provider request, and, with the file replaced
-  between two runs, the second run using the new token, with a control that
-  reads the file once at configuration load and must then fail;
+  within one run after the configuration has loaded and before the first
+  provider request, the replacement token the one that reaches the provider,
+  with a control that reads the file once at configuration load and must then
+  fail by sending the old token;
   with two populated clusters, `--cluster <id>` listing and reporting only
   that cluster's subtree, with a control that always walks every cluster and
   must then fail;
