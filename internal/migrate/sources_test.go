@@ -28,6 +28,12 @@ const (
 		assignment_revision, base) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 )
 
+// stmt is a statement and its arguments.
+type stmt struct {
+	q    string
+	args []any
+}
+
 // sources holds one of each 0009 row, inserted by sourceRows on top of adoptionRows.
 type sources struct {
 	adoption
@@ -40,18 +46,27 @@ func sourceRows(t *testing.T, db *sql.DB) sources {
 		frvOther: id.New(id.FragmentRevision), frvSite: id.New(id.FragmentRevision), frg: id.New(id.Fragment),
 		prv: id.New(id.ProfileRevision), prf: id.New(id.Profile), asr: id.New(id.AssignmentRevision), asg: id.New(id.Assignment)}
 	doc := "machine:\n  registries: {}\n"
-	mustExec(t, db, insertFragmentRevision, s.frv1, s.cluster, "registries", "override", doc, s.human)
+	// A revision's rows are written in its own transaction.
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(t, tx, insertFragmentRevision, s.frv1, s.cluster, "registries", "override", doc, s.human)
+	mustExec(t, tx, insertFragmentReference, s.frv1, "registry/example-pass", "string", 1, nil, generation(s.cluster, s.claim))
+	mustExec(t, tx, insertProfileRevision, s.prv, s.cluster, "workers", s.human)
+	mustExec(t, tx, insertProfilePin, s.prv, s.cluster, 0, s.frv1)
+	mustExec(t, tx, insertAssignmentRevision, s.asr, s.cluster, s.machine, s.human)
+	mustExec(t, tx, insertAssignmentProfile, s.asr, 0, "workers")
+	mustExec(t, tx, insertAssignmentFragment, s.asr, "site", 0, "site-dns")
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	mustExec(t, db, insertFragmentRevision, s.frv2, s.cluster, "registries", "override", doc, s.human)
 	mustExec(t, db, insertFragmentRevision, s.frvOther, s.other, "registries", "override", doc, s.human)
 	mustExec(t, db, insertFragmentRevision, s.frvSite, s.cluster, "site-dns", "site", doc, s.human)
-	mustExec(t, db, insertFragmentReference, s.frv1, "registry/example-pass", "string", 1, nil, generation(s.cluster, s.claim))
 	mustExec(t, db, insertFragment, s.frg, s.cluster, "cluster", "registries", "override", s.frv1, 1)
-	mustExec(t, db, insertProfileRevision, s.prv, s.cluster, "workers", s.human)
-	mustExec(t, db, insertProfilePin, s.prv, s.cluster, 0, s.frv1)
 	mustExec(t, db, insertProfile, s.prf, s.cluster, "cluster", "workers", s.prv, 1)
-	mustExec(t, db, insertAssignmentRevision, s.asr, s.cluster, s.machine, s.human)
-	mustExec(t, db, insertAssignmentProfile, s.asr, 0, "workers")
-	mustExec(t, db, insertAssignmentFragment, s.asr, "site", 0, "site-dns")
 	mustExec(t, db, insertAssignment, s.asg, s.cluster, s.machine, s.asr, 1)
 	mustExec(t, db, insertSourceEntry, s.draft, s.cluster, "fragment", "registries", nil, s.frv2, nil, nil, 1)
 	mustExec(t, db, insertSourceEntry, s.draft, s.cluster, "profile", "workers", nil, nil, nil, nil, 1)
@@ -67,6 +82,14 @@ func TestSourcesConstraints(t *testing.T) {
 	s := sourceRows(t, db)
 	frv := func() string { return id.New(id.FragmentRevision) }
 	doc := "machine: {}\n"
+	// A row of a revision is written with it, so those cases first insert one in their transaction.
+	frvNew, prvNew, asrNew := frv(), id.New(id.ProfileRevision), id.New(id.AssignmentRevision)
+	withFragment := []stmt{{insertFragmentRevision, []any{frvNew, s.cluster, "dns", "site", doc, s.human}},
+		{insertFragmentReference, []any{frvNew, "registry/example-pass", "string", 1, nil, generation(s.cluster, s.claim)}}}
+	withProfile := []stmt{{insertProfileRevision, []any{prvNew, s.cluster, "workers", s.human}},
+		{insertProfilePin, []any{prvNew, s.cluster, 0, s.frv1}}}
+	withAssignment := []stmt{{insertAssignmentRevision, []any{asrNew, s.cluster, s.machine, s.human}},
+		{insertAssignmentProfile, []any{asrNew, 0, "workers"}}, {insertAssignmentFragment, []any{asrNew, "site", 0, "site-dns"}}}
 	for _, c := range []struct {
 		name, q string
 		args    []any
@@ -80,22 +103,22 @@ func TestSourcesConstraints(t *testing.T) {
 		{"empty fragment document", insertFragmentRevision, []any{frv(), s.cluster, "dns", "site", "", s.human}, "23514"},
 		{"fragment revision of no principal", insertFragmentRevision, []any{frv(), s.cluster, "dns", "site", doc, id.New(id.Principal)}, "23503"},
 		{"fragment reference of no revision", insertFragmentReference, []any{frv(), "registry/x", "string", 1, nil, generation(s.cluster, s.claim)}, "23503"},
-		{"second reference of one name", insertFragmentReference, []any{s.frv1, "registry/example-pass", "string", 2, nil, generation(s.cluster, s.claim)}, "23505"},
+		{"second reference of one name", insertFragmentReference, []any{frvNew, "registry/example-pass", "string", 2, nil, generation(s.cluster, s.claim)}, "23505"},
 		{"library fragment", insertFragment, []any{id.New(id.Fragment), s.cluster, "library", "site-dns", "site", s.frvSite, 1}, "23514"},
 		{"second fragment head of one name", insertFragment, []any{id.New(id.Fragment), s.cluster, "cluster", "registries", "override", s.frv2, 1}, "23505"},
 		{"fragment head at another name's revision", insertFragment, []any{id.New(id.Fragment), s.cluster, "cluster", "site-dns", "site", s.frv1, 1}, "23503"},
 		{"fragment head in another layer than its revision", insertFragment, []any{id.New(id.Fragment), s.cluster, "cluster", "site-dns", "global", s.frvSite, 1}, "23503"},
 		{"fragment head at another cluster's revision", insertFragment, []any{id.New(id.Fragment), s.other, "cluster", "site-dns", "site", s.frvSite, 1}, "23503"},
 		{"fragment head revision 0", insertFragment, []any{id.New(id.Fragment), s.cluster, "cluster", "site-dns", "site", s.frvSite, 0}, "23514"},
-		{"profile pin of another cluster's fragment", insertProfilePin, []any{s.prv, s.cluster, 1, s.frvOther}, "23503"},
-		{"one fragment pinned twice", insertProfilePin, []any{s.prv, s.cluster, 1, s.frv1}, "23505"},
-		{"profile pin at a negative position", insertProfilePin, []any{s.prv, s.cluster, -1, s.frv2}, "23514"},
+		{"profile pin of another cluster's fragment", insertProfilePin, []any{prvNew, s.cluster, 1, s.frvOther}, "23503"},
+		{"one fragment pinned twice", insertProfilePin, []any{prvNew, s.cluster, 1, s.frv1}, "23505"},
+		{"profile pin at a negative position", insertProfilePin, []any{prvNew, s.cluster, -1, s.frv2}, "23514"},
 		{"library profile", insertProfile, []any{id.New(id.Profile), s.cluster, "library", "workers2", nil, 1}, "23514"},
 		{"second profile head of one name", insertProfile, []any{id.New(id.Profile), s.cluster, "cluster", "workers", nil, 1}, "23505"},
 		{"assignment revision of another cluster's machine", insertAssignmentRevision, []any{id.New(id.AssignmentRevision), s.cluster, s.otherMachine, s.human}, "23503"},
-		{"one profile selected twice", insertAssignmentProfile, []any{s.asr, 1, "workers"}, "23505"},
-		{"selection in an unknown layer", insertAssignmentFragment, []any{s.asr, "rack", 0, "rack-dns"}, "23514"},
-		{"one fragment selected twice", insertAssignmentFragment, []any{s.asr, "global", 0, "site-dns"}, "23505"},
+		{"one profile selected twice", insertAssignmentProfile, []any{asrNew, 1, "workers"}, "23505"},
+		{"selection in an unknown layer", insertAssignmentFragment, []any{asrNew, "rack", 0, "rack-dns"}, "23514"},
+		{"one fragment selected twice", insertAssignmentFragment, []any{asrNew, "global", 0, "site-dns"}, "23505"},
 		{"second assignment head of one machine", insertAssignment, []any{id.New(id.Assignment), s.cluster, s.machine, nil, 1}, "23505"},
 		{"entry with two revisions", insertSourceEntry, []any{s.draft2, s.cluster, "fragment", "registries", nil, s.frv2, s.prv, nil, 1}, "23514"},
 		{"profile entry naming a machine", insertSourceEntry, []any{s.draft2, s.cluster, "profile", "workers", s.machine, nil, nil, nil, 1}, "23514"},
@@ -107,15 +130,36 @@ func TestSourcesConstraints(t *testing.T) {
 		{"entry at another name's revision", insertSourceEntry, []any{s.draft2, s.cluster, "fragment", "site-dns", nil, s.frv1, nil, nil, nil}, "23503"},
 		{"entry in another cluster than its draft", insertSourceEntry, []any{s.draft2, s.other, "fragment", "registries", nil, s.frvOther, nil, nil, nil}, "23503"},
 	} {
-		if _, err := db.Exec(c.q, c.args...); sqlState(err) != c.want {
-			t.Errorf("%s: %v; want SQLSTATE %s", c.name, err, c.want)
-		}
+		func() {
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			pre := map[any][]stmt{frvNew: withFragment, prvNew: withProfile, asrNew: withAssignment}[c.args[0]]
+			for _, p := range pre {
+				mustExec(t, tx, p.q, p.args...)
+			}
+			if _, err := tx.Exec(c.q, c.args...); sqlState(err) != c.want {
+				t.Errorf("%s: %v; want SQLSTATE %s", c.name, err, c.want)
+			}
+		}()
 	}
 	// Controls: the same shapes commit with valid values.
 	mustExec(t, db, insertFragmentRevision, frv(), s.cluster, "a12345678901234567890123456789012345678901234567890123456789012", "global", doc, s.human)
 	mustExec(t, db, insertFragment, id.New(id.Fragment), s.cluster, "cluster", "site-dns", "site", s.frvSite, 1)
 	mustExec(t, db, insertFragment, id.New(id.Fragment), s.cluster, "cluster", "removed", "site", nil, 2)
-	mustExec(t, db, insertProfilePin, s.prv, s.cluster, 1, s.frv2)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range withProfile {
+		mustExec(t, tx, p.q, p.args...)
+	}
+	mustExec(t, tx, insertProfilePin, prvNew, s.cluster, 1, s.frv2)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	mustExec(t, db, insertSourceEntry, s.draft2, s.cluster, "fragment", "registries", nil, s.frv1, nil, nil, 1)
 	mustExec(t, db, insertSourceEntry, s.draft2, s.cluster, "assignment", nil, s.machine, nil, nil, nil, 1)
 	mustExec(t, db, insertSourceEntry, s.draft2, s.cluster, "profile", "new-profile", nil, nil, nil, nil, nil)
@@ -160,6 +204,27 @@ func TestSourcesConstraintControl(t *testing.T) {
 				t.Errorf("after %s: %v; want it to commit", c.drop, err)
 			}
 		}()
+	}
+}
+
+// PA §3: a revision's rows are written in the transaction that writes the revision, so its
+// content cannot grow once it is committed; an insert for a revision that does not exist is the
+// foreign key's to refuse.
+func TestSourcesRevisionRowsWithTheirRevision(t *testing.T) {
+	db, _ := installed(t)
+	s := sourceRows(t, db)
+	for _, c := range []stmt{
+		{insertFragmentReference, []any{s.frv1, "registry/late", "string", 1, nil, generation(s.cluster, s.claim)}},
+		{insertProfilePin, []any{s.prv, s.cluster, 1, s.frv2}},
+		{insertAssignmentProfile, []any{s.asr, 1, "late"}},
+		{insertAssignmentFragment, []any{s.asr, "global", 0, "late"}},
+	} {
+		if _, err := db.Exec(c.q, c.args...); sqlState(err) != ImmutableSQLState {
+			t.Errorf("%s %v: %v; want SQLSTATE %s", c.q, c.args, err, ImmutableSQLState)
+		}
+	}
+	if _, err := db.Exec(insertProfilePin, id.New(id.ProfileRevision), s.cluster, 0, s.frv1); sqlState(err) != "23503" {
+		t.Errorf("pin of no revision: %v; want SQLSTATE 23503", err)
 	}
 }
 
