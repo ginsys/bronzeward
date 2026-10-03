@@ -95,7 +95,7 @@ func routes() []*route {
 		assignmentRemoval().on(ifm(m(del, "/drafts/{id}/assignments/{machine}", author))),
 	)
 	rs = append(rs,
-		ifm(m(post, "/drafts/{id}/discard", author)),
+		draftDiscard().on(ifm(m(post, "/drafts/{id}/discard", author))),
 		ifm(m(post, "/drafts/{id}/publications", publisher)),
 		m(post, "/plans", publisher),
 		// The creator is a publisher (choice §17.22); whether this one created the plan is the

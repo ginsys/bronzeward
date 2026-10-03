@@ -366,3 +366,75 @@ func TestAssignmentUpdateRefusals(t *testing.T) {
 		}
 	}
 }
+
+// PA §3.1 rule 8 for a fragment: a removal of a head takes its revision as base; of a fragment only
+// this draft proposes, base stays absent; of a name with neither, 404. The fragment PUT, which
+// ingests, lands with ginsys/bronzeward#23's next part.
+func TestFragmentRemoval(t *testing.T) {
+	d := newDraftEnv(t)
+	wantProblem(t, d.del("/fragments/registries", d.etag, d.key()), http.StatusNotFound, "not-found")
+	frg := d.fragmentHead("registries", "override", d.fragmentRevision(d.cluster, "registries", "override"), 2)
+	e := d.ok(d.del("/fragments/registries", d.etag, d.key()))
+	if e.Kind != "fragment" || e.Name != "registries" || e.Revision != nil || e.Head == nil || *e.Head != frg || e.Base == nil || *e.Base != 2 {
+		t.Fatalf("removal of a head %+v", e)
+	}
+	mustExec(t, d.db, `INSERT INTO draft_source_entry (draft, cluster, kind, name, fragment_revision) VALUES ($1, $2, 'fragment', 'site-dns', $3)`,
+		d.draft, d.cluster, d.fragmentRevision(d.cluster, "site-dns", "site"))
+	e = d.ok(d.del("/fragments/site-dns", d.etag, d.key()))
+	if e.Revision != nil || e.Head != nil || e.Base != nil {
+		t.Fatalf("removal of a proposed fragment %+v", e)
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM draft_source_entry WHERE kind = 'fragment' AND fragment_revision IS NULL`); n != 2 {
+		t.Fatalf("%d removal entries", n)
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM act WHERE action = 'draft.fragment.remove'`); n != 2 {
+		t.Fatalf("%d acts", n)
+	}
+	wantProblem(t, d.put("/fragments/registries", `{"layer":"override","document":"machine: {}"}`, d.etag, d.key()),
+		http.StatusNotImplemented, "not-implemented")
+}
+
+// PA §3.1, §9.3, T11: a discard takes {} and the draft's If-Match, refuses a draft with an active
+// publication, and answers the draft discarded at its next revision; the draft then takes neither
+// an update nor another discard, and a replay answers the same.
+func TestDraftDiscard(t *testing.T) {
+	d := newDraftEnv(t)
+	discard := func(body, ifMatch, k string) *httptest.ResponseRecorder {
+		return d.do(d.api, call{method: "POST", path: prefix + "/drafts/" + d.draft + "/discard", token: d.human("h-author"),
+			key: k, ifMatch: ifMatch, body: body})
+	}
+	d.profileHead("workers", 1)
+	frv := d.fragmentRevision(d.cluster, "registries", "override")
+	d.fragmentHead("registries", "override", frv, 1)
+	d.ok(d.put("/profiles/workers", `{"fragments":["`+frv+`"]}`, d.etag, d.key()))
+
+	wantProblem(t, discard(`{"reason":"x"}`, d.etag, d.key()), http.StatusBadRequest, "invalid-request")
+	wantProblem(t, discard(`{}`, `"2-aaaaaaaaaaaaaaaaaaaaaaaaaa"`, d.key()), http.StatusPreconditionFailed, "precondition-failed")
+	op := id.New(id.Operation)
+	mustExec(t, d.db, `INSERT INTO operation (id, kind, state, epoch, owner_gen, draft, draft_revision, created_by, created_by_kind, created_role, created_at)
+		SELECT $1, 'publish', 'queued', epoch, 0, $2, 2, $3, 'human', 'publisher', now() FROM installation_state`, op, d.draft, d.seed)
+	if doc := wantProblem(t, discard(`{}`, d.etag, d.key()), http.StatusConflict, "conflict"); doc["operation"] != op {
+		t.Fatalf("discard with a queued publication: %v; want it named", doc)
+	}
+	mustExec(t, d.db, `UPDATE operation SET state = 'failed', error = '{}'::jsonb WHERE id = $1`, op)
+
+	k := d.key()
+	rec := discard(`{}`, d.etag, k)
+	b := decode[draftBody](t, rec, http.StatusOK)
+	if b.ID != d.draft || b.State != "discarded" || b.Revision != 3 {
+		t.Fatalf("discard answered %+v", b)
+	}
+	if replay := discard(`{}`, d.etag, k); replay.Code != http.StatusOK || replay.Body.String() != rec.Body.String() {
+		t.Fatalf("replay %d %s", replay.Code, replay.Body)
+	}
+	var state string
+	var revision int
+	if err := d.db.QueryRow(`SELECT state, revision FROM draft WHERE id = $1`, d.draft).Scan(&state, &revision); err != nil || state != "discarded" || revision != 3 {
+		t.Fatalf("draft %s at %d, %v", state, revision, err)
+	}
+	wantProblem(t, d.put("/profiles/workers", `{"fragments":["`+frv+`"]}`, d.etag, d.key()), http.StatusConflict, "conflict")
+	wantProblem(t, discard(`{}`, d.etag, d.key()), http.StatusConflict, "conflict")
+	if n := count(t, d.db, `SELECT count(*) FROM act WHERE action = 'draft.discard'`); n != 1 {
+		t.Fatalf("%d acts", n)
+	}
+}

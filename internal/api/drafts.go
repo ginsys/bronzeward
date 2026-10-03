@@ -25,6 +25,10 @@ func assignmentUpdate() effectRoute {
 	return effectRoute{action: "draft.assignment.update", input: func() input { return &assignmentInput{} }, effect: updateAssignment}
 }
 
+func draftDiscard() effectRoute {
+	return effectRoute{action: "draft.discard", input: func() input { return &discardInput{} }, effect: discardDraft}
+}
+
 func fragmentRemoval() effectRoute   { return removal("fragment") }
 func profileRemoval() effectRoute    { return removal("profile") }
 func assignmentRemoval() effectRoute { return removal("assignment") }
@@ -342,6 +346,32 @@ func updateProfile(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result,
 		return result{}, err
 	}
 	return d.answer(ctx, tx, e, prv)
+}
+
+// discardInput is a discard's body: an empty object (§9.3).
+type discardInput struct{}
+
+func (*discardInput) check(*API) error { return nil }
+
+// discardDraft ends an open draft (§3.1, T11): it takes T1's draft check, moves the draft to its
+// next revision as `discarded` and answers it.
+func discardDraft(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
+	d, err := lockDraft(ctx, tx, q)
+	if err != nil {
+		return result{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE draft SET state = 'discarded', revision = revision + 1, etag_token = $2 WHERE id = $1`,
+		d.id, etagToken()); err != nil {
+		return result{}, err
+	}
+	row, err := scanDraft(tx.QueryRowContext(ctx, selectDraft+` WHERE id = $1`, d.id))
+	if err != nil {
+		return result{}, err
+	}
+	if err := withEntries(ctx, tx, []*draftBody{&row.draftBody}); err != nil {
+		return result{}, err
+	}
+	return result{status: http.StatusOK, body: &row.draftBody, subjects: []string{d.id}}, nil
 }
 
 // fragmentLayers are the layers in composition order (§9.3, choice §17.31): design §6.2's seven
