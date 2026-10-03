@@ -368,6 +368,19 @@ for node in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
 done >"$out/talos-config-sha256.txt"
 unset config
 
+# Each node's machine-config resource version, which any apply moves even where the digest would
+# not show it (acceptance-plan S1 pass criteria). jq keeps the metadata; the spec is never kept.
+for node in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
+  if version=$(talosctl_timed 20 -e "$node" -n "$node" \
+    get machineconfig v1alpha1 -o json 2>/dev/null | jq -er '.metadata.version') && [[ $version =~ ^[0-9]+$ ]]; then
+    printf '%s %s\n' "$version" "$node"
+  else
+    printf 'UNAVAILABLE %s\n' "$node"
+    unavailable "machine config version of $node"
+  fi
+done >"$out/talos-config-version.txt"
+unset version
+
 [ ! -f "$STATE/injections.log" ] || cp "$STATE/injections.log" "$out/injections.log"
 
 # Leak scan. Counts only: a matched line is never printed. Any path or file the scan cannot read

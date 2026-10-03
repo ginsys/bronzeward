@@ -498,6 +498,13 @@ if ! marker=$(mktemp "$STATE/down-node-volumes-incomplete.XXXXXX") ||
   ! mv --no-target-directory -- "$marker" "$STATE/down-node-volumes-incomplete"; then
   die "could not mark $STATE as having an unrecorded cluster"
 fi
+# The worker carries one synthetic secret outside the Talos schema's secret fields, as file content
+# (acceptance-plan S1 preconditions). The patch is the value's only copy outside the node, removed
+# once the cluster exists; the BWSYNTH- prefix puts it in every scan.
+worker_secret=$(synthetic) || die "could not generate the worker's synthetic file secret"
+printf 'machine:\n  files:\n    - path: /var/etc/bw-s1.conf\n      permissions: 0o600\n      op: create\n      content: %s\n' \
+  "$worker_secret" >"$STATE/worker-patch.yaml" || die "could not write the worker's config patch"
+unset worker_secret
 talosctl cluster create docker \
   --name "$FIXTURE_NAME" \
   --state "$STATE/talos" \
@@ -505,7 +512,9 @@ talosctl cluster create docker \
   --kubernetes-version "$KUBERNETES_VERSION" \
   --subnet "$TALOS_SUBNET" \
   --workers 1 \
+  --config-patch-workers "@$STATE/worker-patch.yaml" \
   --talosconfig-destination "$TALOSCONFIG"
+rm -f -- "$STATE/worker-patch.yaml"
 # The Talos containers carry only the cluster name, which any container can be labelled with. Their
 # IDs, recorded here, are what bin/down holds every container of that label to before removing it.
 container_ids=$(docker ps --all --quiet --no-trunc --filter "label=talos.cluster.name=$FIXTURE_NAME") ||
