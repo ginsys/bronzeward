@@ -934,13 +934,18 @@ Handling in the PoC:
   before an interruption at compilation §2.3 step 8, its earlier payload then
   resumed and released, compilation §3), and recovery-mode entry marks an
   earlier epoch's claims `abandoned` whatever their generations' references
-  (§12.2). A claim recorded `held` or `resumed` is omitted because its
+  (§12.2). A claim recorded `held` or `resumed` gives no orphan because its
   ingestion may still be in flight, even past its expiry: the report goes by
   the state the row records, not by the read-time treatment of compilation
   §3.5, since a draft transaction that passed its owner check before the
   expiry may still release the claim (compilation choice §16.30). A recorded
   `abandoned` is final: the sweep and every other abandonment take the
-  claim's row lock first and so follow that draft transaction. A claim row is committed by ingestion start (T11,
+  claim's row lock first and so follow that draft transaction. The
+  unreferenced paths of a claim recorded `held` or `resumed` past its
+  absolute expiry are listed apart, as expired and not yet abandoned, with
+  the same fields and never counted as orphans: with no controller running,
+  no sweep marks such a claim `abandoned`, and omitting them would hide its
+  orphans for as long as none runs. A claim row is committed by ingestion start (T11,
   compilation §2.3 step 0) before the first generation is created at step 6,
   so a path without one is source 3 above, or a claim this database never
   held. The report names paths, claim ids, states and times only, never a
@@ -2496,13 +2501,17 @@ each (design §7.7 consequences):
 - the orphan report (§6.4): the orphan-report identity listing
   `secret/metadata/gen/<cluster id>/` and a claim's directory under it and
   reading a generation's metadata, and refused a `secret/data/gen/*` read, a
-  `list` of `secret/metadata/access/`, and every Transit request, with a
-  control that grants it `read` on `secret/data/gen/*` and must then succeed;
+  `list` of `secret/metadata/access/` and a `read` of an access path's
+  metadata under it, and every Transit request, with a control that grants it
+  `read` on `secret/data/gen/*` and one that grants it `read` and `list` on
+  `secret/metadata/*`, each of which must then succeed;
   the same identity refused every change under the generation path (a
-  `secret/data/gen/*` create, a metadata update and a metadata delete under
-  `secret/metadata/gen/*`, and a `secret/delete/gen/*` and
-  `secret/destroy/gen/*` request), with a control that grants it `delete` on
-  `secret/metadata/gen/*` and must then succeed against a disposable path;
+  `secret/data/gen/*` create and a `DELETE` of its latest version, a metadata
+  update and a metadata delete under `secret/metadata/gen/*`, and a
+  `secret/delete/gen/*` and `secret/destroy/gen/*` request), with a control
+  that grants it `delete` on `secret/metadata/gen/*` and one that grants it
+  `delete` on `secret/data/gen/*`, each of which must then succeed against a
+  disposable path;
   the report naming an unreferenced generation of an `abandoned` claim, of a
   `released` claim and of a path whose claim row does not exist, and not the
   generations of a `held` or a `resumed` claim nor a referenced generation of
@@ -2513,8 +2522,11 @@ each (design §7.7 consequences):
   transaction between them and must then report them; a claim past its
   absolute expiry, still recorded `held` while a draft transaction that
   passed its owner check holds its lock and then commits, its generations not
-  reported, with a control that treats the claim as `abandoned` at read time
-  and must then report them; and the provider's
+  reported as orphans, with a control that treats the claim as `abandoned` at
+  read time and must then report them; a claim past its absolute expiry still
+  recorded `held` with no controller running, its unreferenced generations
+  listed as expired and not yet abandoned, with a control that omits every
+  `held` claim's generations and must then fail; and the provider's
   versions and the claim rows unchanged by a run.
 
 Evidence gaps this contract carries rather than closes:
