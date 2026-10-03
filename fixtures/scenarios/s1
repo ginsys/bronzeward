@@ -1101,9 +1101,14 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
     result PASS 'S1 step 5' 'the bundle is complete: bin/evidence captured every source'
   fi
   # The scan above covers the dump only if the bundle holds it expanded, with the database's rows
-  # in it: an interrupted claim's id is the control.
+  # in it: an interrupted claim's own row, the line keyed by its id inside the staging_claim COPY
+  # block (other tables carry the id too, so a bare match would not show the claim row is there).
   if [ "${#interrupted[@]}" -gt 0 ] &&
-    grep --quiet --fixed-strings -- "${interrupted[0]%% *}" "$final/backups/pg-$backup_name.dump.sql"; then
+    awk -v id="${interrupted[0]%% *}" '
+      /^COPY public\.staging_claim / { block = 1; next }
+      block && /^\\\.$/ { block = 0 }
+      block && index($0, id "\t") == 1 { found = 1 }
+      END { exit !found }' "$final/backups/pg-$backup_name.dump.sql"; then
     result PASS 'S1 step 5, PA §16' 'the scanned bundle holds the database dump expanded, an interrupted claim among its rows (control)'
   else
     result FAIL 'S1 step 5, PA §16' 'the scanned bundle does not hold the database dump expanded with the run'"'"'s rows: the backup went unscanned'
