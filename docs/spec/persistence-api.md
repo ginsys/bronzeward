@@ -277,6 +277,24 @@ both answer `409 conflict` naming the operation, so the revision the operation
 is bound to cannot move under it. Once the operation fails, the draft accepts
 edits again.
 
+A profile revision pins fragment **revisions**; an assignment revision selects
+profiles and fragments by **name**, per layer, and the publication that
+compiles it uses each named head's revision, which T3 holds unchanged
+(§6.2). A fragment carries one of six layers, in composition order `global`,
+`site`, `cluster`, `role`, `workload`, `override`: design §6.2's seven minus
+machine-intrinsic, which is the import base (compilation §6). Each pin must be
+its fragment's head revision or the revision this draft proposes for it, each
+selected name must have a head with a revision or be proposed (not removed) in
+this draft, and a fragment selected under a layer must carry that layer;
+otherwise the update is refused `422 validation-failed`, naming the body path
+(compilation §7, stage 1). Publication checks the same again. A removal of a
+name the draft introduces, with no head, leaves an entry whose base is absent
+and whose publication creates nothing; a removal of a name with neither a head
+nor an entry is `404`. The PoC accepts cluster scope only: a fragment or
+profile names its draft's cluster, and the library scope of choice §17.28 is
+refused by the schema until a later phase defines how its draft is reviewed
+**(choice §17.31)**.
+
 A draft and its release cover one cluster, while a fragment may belong to the
 library. A library fragment changed in one cluster's draft is published once,
 through that cluster's release; another cluster using it picks up the new head
@@ -1476,6 +1494,58 @@ ETag: "7-shw6tpirbqvgj3qjuv2hicf6vm"
 `<value>` stands for the value the operator submits; it appears in no stored
 record or response. `DELETE` on the same route proposes the removal, with no
 body. `marks` are compilation §2.2 paths.
+
+A profile pins fragment revisions in order; an assignment selects profiles,
+then fragments per layer, by name (§3.1). Neither body can hold a secret
+value, so neither route ingests: each is a plain T1 under the SHA-256
+fingerprint (§7.1). A name the draft introduces has `"head": null` and
+`"base": null`; a removal has `"revision": null`:
+
+```http
+PUT /api/v1/drafts/drf_2rmpezm5rfx47azsgmp66z457a/profiles/workers
+Idempotency-Key: 3d5f0e9a-71c2-4b8e-a6d4-2f9c1b7e0a53
+If-Match: "7-shw6tpirbqvgj3qjuv2hicf6vm"
+
+{"fragments": ["frv_sqb745zrpl2xltek22ai7sbdue"]}
+
+HTTP/1.1 200 OK
+ETag: "8-a4kc2xq7zxgbgnmwvtqwhk3f5e"
+
+{"draft": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "entry": {"kind": "profile", "name": "workers", "head": null, "base": null,
+           "revision": "prv_6h2o4vzxkdyb7xg5qwsl3fjrua"}}
+
+PUT /api/v1/drafts/drf_2rmpezm5rfx47azsgmp66z457a/assignments/mch_tqhcznunhyle4hnxru5hkt35uq
+Idempotency-Key: 9b7e2c14-0f6d-4a38-8e51-c3a9d2f47b06
+If-Match: "8-a4kc2xq7zxgbgnmwvtqwhk3f5e"
+
+{"profiles": ["workers"], "fragments": {"override": ["registries"]}}
+
+HTTP/1.1 200 OK
+ETag: "9-pq3vylwbn4ijc5mc6z6yq2dmzi"
+
+{"draft": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "entry": {"kind": "assignment", "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+           "head": "asg_kyzk4xw2xq2jtc3pnu6d5vbz3e", "base": 2,
+           "revision": "asr_e7v7jq6g4e3tsx2wq5ynldkb3a"}}
+```
+
+Here `registries` must carry the `override` layer. Discarding a draft takes an
+empty object and answers the draft, `discarded`:
+
+```http
+POST /api/v1/drafts/drf_2rmpezm5rfx47azsgmp66z457a/discard
+Idempotency-Key: 5c0a8f3e-6b14-4d7a-9e2c-71f5b8d3a046
+If-Match: "9-pq3vylwbn4ijc5mc6z6yq2dmzi"
+
+{}
+
+HTTP/1.1 200 OK
+
+{"id": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha", "title": "registry mirror",
+ "state": "discarded", "revision": 10, "entries": [...]}
+```
 
 Starting an import, and reading a release and a machine:
 
@@ -2781,6 +2851,17 @@ design and evidence do not settle the question. Each is marked in place as
     abandoned claims from the database alone, which names no path (a claim
     records none, and choice 8 rejected a path ledger) and cannot see the
     orphans of a claim a restore removed.
+31. **A profile pins fragment revisions; an assignment selects heads by
+    name; six fragment layers; cluster scope only in the PoC** (§3.1). A
+    profile is "an ordered list of fragment revisions" (design §6.2), while
+    T3's check of unchanged heads and choice 28's library pickup need the
+    assignment to name heads. Pins and names are checked when the draft is
+    updated and again at publication. Alternatives: profiles naming heads
+    too, which makes a profile's content move without an edit to it;
+    assignments pinning revisions, which leaves T3's unchanged heads nothing
+    to protect and a library change no way to reach a cluster without an
+    edit to every assignment. Library scope waits for a phase that defines
+    its review (ginsys/bronzeward#23 scope).
 
 ## 18. Traceability
 
@@ -2788,7 +2869,7 @@ design and evidence do not settle the question. Each is marked in place as
 | --- | --- | --- |
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
-| §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28 |
+| §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31 |
 | §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.13.6); the provider read grant on `secret/data/access/talos/*` not measured (choice §17.29) |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
