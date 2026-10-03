@@ -239,6 +239,30 @@ func TestTakeOverNothingToDecrypt(t *testing.T) {
 	if op := f.opOwner(t, c.ID); op.state != "running" || op.owner != b.ID || op.gen != 2 {
 		t.Errorf("operation %+v; want it running under the taker for the caller to fail", op)
 	}
+
+	// Eligibility is settled by the takeover's write under the lock: a payload-less claim whose
+	// absolute expiry passes after that write is still abandoned, never refused by a later fence.
+	_, c = f.create(t, "encrypted")
+	f.lapse(t, c.ID)
+	exec(t, f.db, `UPDATE staging_claim SET expires_at = clock_timestamp() + interval '1 second' WHERE id = $1`, c.ID)
+	var expires time.Time
+	if err := f.db.QueryRow(`SELECT expires_at FROM staging_claim WHERE id = $1`, c.ID).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	expired := false
+	tk, err = f.takeWith(t, b, c.ID, takeoverOptions{afterWrite: func() {
+		time.Sleep(time.Until(expires) + 100*time.Millisecond)
+		expired = true
+	}})
+	if !expired {
+		t.Fatalf("the takeover never wrote the claim: %v", err)
+	}
+	if err != nil || tk.Payload != nil || tk.Claim.Gen != 2 {
+		t.Fatalf("taken %+v, %v; want it abandoned at generation 2", tk, err)
+	}
+	if r := f.row(t, c.ID); r.state != "abandoned" || r.gen != 2 || r.payload != nil || r.digest != nil {
+		t.Errorf("claim expiring after the write %+v", r)
+	}
 }
 
 // Persistence-api §5.1 and DB row 020: the takeover's eligibility is its UPDATE's own predicate,
