@@ -1547,6 +1547,40 @@ HTTP/1.1 200 OK
  "state": "discarded", "revision": 10, "entries": [...]}
 ```
 
+A draft's `entries` list its import base entries in machine order, then its
+fragment, profile and assignment entries in that order, by name or machine,
+each as the update route answered it. A head answers its current revision
+(`null` once removed) and head revision, with `"<headRevision>-<token>"` as
+its ETag (§4.1). Its `revisions` are every revision of its name, or its
+machine, published or not, in identifier order. A revision answers its
+content: a fragment revision its sanitized `document` and `layer`, a profile
+revision its `fragments` pins in order, an assignment revision its `profiles`
+and `fragments` per layer:
+
+```http
+GET /api/v1/fragments/frg_rgkebwvneg6mxhid62gec5difi
+
+HTTP/1.1 200 OK
+ETag: "4-m3oxmlfh6phr7aigshdydcb4ji"
+
+{"id": "frg_rgkebwvneg6mxhid62gec5difi",
+ "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha", "scope": "cluster",
+ "name": "registries", "layer": "cluster",
+ "revision": "frv_sqb745zrpl2xltek22ai7sbdue", "headRevision": 4,
+ "createdAt": "2026-09-26T09:14:05Z"}
+
+GET /api/v1/assignment-revisions/asr_e7v7jq6g4e3tsx2wq5ynldkb3a
+
+HTTP/1.1 200 OK
+
+{"id": "asr_e7v7jq6g4e3tsx2wq5ynldkb3a",
+ "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
+ "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+ "profiles": ["workers"], "fragments": {"override": ["registries"]},
+ "author": "idn_5u4k6llt7jsktfhcfv35xmdetu",
+ "createdAt": "2026-09-26T09:12:40Z"}
+```
+
 Starting an import, and reading a release and a machine:
 
 ```http

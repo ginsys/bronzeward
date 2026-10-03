@@ -323,12 +323,12 @@ type draftEntry struct {
 
 // draftBody is §9.3's draft resource, with its title.
 type draftBody struct {
-	ID       string       `json:"id"`
-	Cluster  string       `json:"cluster"`
-	Title    string       `json:"title"`
-	State    string       `json:"state"`
-	Revision int          `json:"revision"`
-	Entries  []draftEntry `json:"entries"`
+	ID       string `json:"id"`
+	Cluster  string `json:"cluster"`
+	Title    string `json:"title"`
+	State    string `json:"state"`
+	Revision int    `json:"revision"`
+	Entries  []any  `json:"entries"` // draftEntry, then sourceEntry values
 }
 
 var tokenEncoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
@@ -347,7 +347,7 @@ func createDraft(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, e
 	if err := clusterExists(ctx, tx, in.Cluster); err != nil {
 		return result{}, err
 	}
-	b := draftBody{ID: id.New(id.Draft), Cluster: in.Cluster, Title: in.Title, State: "open", Revision: 1, Entries: []draftEntry{}}
+	b := draftBody{ID: id.New(id.Draft), Cluster: in.Cluster, Title: in.Title, State: "open", Revision: 1, Entries: []any{}}
 	token := etagToken()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO draft (id, cluster, title, state, revision, etag_token, created_at)
 		VALUES ($1, $2, $3, 'open', 1, $4, now())`, b.ID, b.Cluster, b.Title, token); err != nil {

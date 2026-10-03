@@ -69,7 +69,9 @@ func routes() []*route {
 		g("/machines/{id}/observations"), g("/machines/{id}/timeline"),
 	}
 	for _, kind := range []string{"fragment", "profile", "assignment"} {
-		rs = append(rs, g("/"+kind+"s"), g("/"+kind+"s/{id}"), g("/"+kind+"s/{id}/revisions"), g("/"+kind+"-revisions/{id}"))
+		for _, p := range []string{"/" + kind + "s", "/" + kind + "s/{id}", "/" + kind + "s/{id}/revisions", "/" + kind + "-revisions/{id}"} {
+			rs = append(rs, read(g(p), sourceReads[p]))
+		}
 	}
 	rs = append(rs,
 		read(g("/drafts"), listDrafts), read(g("/drafts/{id}"), getDraft),
