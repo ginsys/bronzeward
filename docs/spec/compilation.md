@@ -131,8 +131,8 @@ JSON Pointer inside that document, for example
 key, is addressable: `doc[0]/machine/nodeLabels/example.test~1role`. Every
 document of the stream is addressable. E1 found both gaps in its own path
 syntax ([E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits);
-E1 §8 item 5); this escaping scheme is chosen here and is untested
-**(choice §16.2)**.
+E1 §8 item 5); this escaping scheme is chosen here **(choice §16.2)**, and §15
+states what tests it.
 
 A path inside an identified embedded document (§5.4) appends `|<format>` and a
 second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/password`.
@@ -1276,9 +1276,14 @@ Evidence gaps this contract carries rather than closes:
 
 **Ingestion and staging**
 
-- **Interruption of this pipeline**: never measured. E1's screen covered the
-  run root and live tables only, and backup-visible surfaces were read only in
-  its captured bundles, for a different pipeline (§2.3; E1 4.2, 4.6).
+- **Interruption of this pipeline**: measured for the import only. S1 kills
+  the ingestion at each of steps 0 to 8 under both staging modes, then checks
+  the claim, the operation, the draft's ETag and that no generation was
+  deleted, and scans the logs, the database's data directory and the backups
+  for every fixture secret, each scan beside a positive control (§2.3;
+  [acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)). E1's screen covered the run root and live tables only,
+  for a different pipeline (E1 4.2, 4.6). Interruption of a draft update is
+  not measured.
 - **Schema detector coverage**: `schema-covers-base-secrets` was never seen to
   fail and ran on control-plane bases only; disk-encryption, installer and disk
   configuration were absent from the environment; the list's precision was not
@@ -1293,9 +1298,11 @@ Evidence gaps this contract carries rather than closes:
 - **Whole-configuration digests**: the unkeyed baseline and artifact
   configuration digests are only as unguessable as the whole configuration;
   that was not assessed (§4.1).
-- **Claim contention**: E1 ran one process against one claim; no two
-  principals raced, and no clock was skewed (E1 §7). Lease, expiry and
-  heartbeat values are open (§3.2).
+- **Claim contention**: E1 ran one process against one claim (E1 §7). The
+  implementation's tests race two takers of one lapsed claim, at the claim and
+  at the takeover route, and exactly one wins (§3.4); they refuse each owner
+  statement that breaks one term of its fence (§3.2). No clock was skewed: both
+  times are the database's. Lease, expiry and heartbeat values are open (§3.2).
 - **Identities**: PC measured the `publisher` create-only policy and the
   compiler and executor policies (§1). The implementation's policy tests also
   exercise staging-key, baseline-key and HMAC use under the fixture's
@@ -1304,7 +1311,10 @@ Evidence gaps this contract carries rather than closes:
   is refused to ingestion by its policy (403) before check-and-set is reached:
   with `update` added to that policy, the same request is refused by
   check-and-set (400) instead.
-- **Addressing**: the JSON Pointer scheme (§2.2) is untested.
+- **Addressing**: the scheme (§2.2) is tested by the implementation's own
+  parser only: each path formats back to itself, `~0` and `~1` escapes, `|`
+  inside an embedded document's tokens, and refused malformed paths. S1 marks
+  a value by such a path. No other RFC 6901 implementation was compared.
 - **Ingestion input**: only configurations read back from a node were
   ingested; a generated configuration before Talos normalizes it was not (E1 §7).
 
@@ -1353,8 +1363,8 @@ in place as
 1. **Ingestion and compiler as two identities** (§1). Alternative: design
    §13.2's single role. Input to identity and approval policy, which owns the
    identities.
-2. **RFC 6901 addressing with `doc[n]`** (§2.2). Untested; any scheme that
-   escapes `.` and `[` would meet E1's finding.
+2. **RFC 6901 addressing with `doc[n]`** (§2.2). Any scheme that escapes `.`
+   and `[` would meet E1's finding.
 3. **Create-only `cas=0` generations at paths of their own, with a component
    the database does not issue** (§2.3 step 6). Alternative: design §7.8 item
    1's overwritten path with explicit `max_versions`. Collision rationale
