@@ -50,7 +50,7 @@ mutations() {
 }
 # no_mutation <label> <node ip> <count before> <count after>: the S1 pass row that the node's apid
 # log recorded no mutation request across the run, written only once a dry-run apply on that node,
-# made after the count, raises its count; SKIP otherwise.
+# made after the count, raises its count; FAIL otherwise.
 no_mutation() {
   local ctl
   node_talos "$2" apply-config --dry-run \
@@ -61,7 +61,8 @@ no_mutation() {
     check 'S1 pass' "no Talos mutation request in $1's apid log across the run (control: the dry-run apply there is counted)" \
       same "$3" "$4"
   else
-    result SKIP 'S1 pass' "no Talos mutation in $1's apid log: not shown, the dry-run apply control there is not in the log either"
+    # A pass criterion (acceptance plan S1): unshown is not passed.
+    result FAIL 'S1 pass' "no Talos mutation in $1's apid log: not shown, the dry-run apply control there is not in the log either"
   fi
 }
 
@@ -382,8 +383,14 @@ sealed_refused() {
     return 1
   }
 }
-# scan_clean <name>: the bundle evidence_to <name> captured holds no fixture secret but its control.
-scan_clean() { grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$EV/$1-evidence.log"; }
+# scan_clean <name>: the bundle evidence_to <name> captured is complete and holds no fixture
+# secret but its control: a source not captured was not scanned either.
+scan_clean() {
+  local b
+  b=$(cat -- "$EV/$1-bundle") && [ -n "$b" ] && [ -d "$b" ] || return 1
+  [ ! -e "$b/unavailable.txt" ] || { say "s1: the $1 bundle is incomplete: $b/unavailable.txt"; return 1; }
+  grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$EV/$1-evidence.log"
+}
 # refusal_bundle <name>: the evidence bundle after one refusal, and its scan clean.
 refusal_bundle() {
   evidence_to "refusal-$1" || die "no bundle for the $1 refusal: bin/evidence failed"
@@ -483,6 +490,17 @@ c_import() {
   call_port=$SERVER_C_PORT
   answers 202 - POST /api/v1/ingestions "$author" "$body" "$(key "ingestion-$1")" "$etag" || rc=1
   call_port=$SERVER_A_PORT
+  # C writes its 202 before it starts the run, but the answer is sent only once the handler returns,
+  # so a kill at the claim point can end C between its COMMIT and the send. The same request to A
+  # then gets the committed answer, replayed under its Idempotency-Key, never a second import.
+  if [ "$rc" -ne 0 ] && [ "$last_status" = 000 ]; then
+    rc=0
+    answers 202 - POST /api/v1/ingestions "$author" "$body" "$(key "ingestion-$1")" "$etag" || rc=1
+    [ "$rc" -ne 0 ] || grep --quiet --ignore-case '^Idempotent-Replayed: true' "$EV/last.headers" || {
+      say "s1: the import $1 C did not answer was not a replay on A"
+      rc=1
+    }
+  fi
   [ "$rc" -eq 0 ] || return 1
   tk_ing=$(jq -er '.ingestion' "$EV/last.body") && tk_op=$(jq -er '.operation' "$EV/last.body")
 }
@@ -889,17 +907,24 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   else
     result PASS 'S1 step 5' 'the bundle is complete: bin/evidence captured every source'
   fi
-  # The tokens this run minted and created, searched in the bundle and the run directory, with a
+  # The tokens this run minted and created, searched in the run directory, the final bundle and
+  # every bundle the run captured before it (the pre- and post-state, each refusal's and
+  # interruption's: siblings of the run directory, so only their recorded paths reach them), with a
   # control holding the last of them that must be the one file listed (as s0 does).
   local_ctl=$STATE/s1-token-control
   trap 'rm -f -- "$local_ctl"' EXIT
   printf 'x %s x\n' "${secrets[-1]:-}" >"$local_ctl"
+  earlier=()
+  for f in "$EV"/*-bundle; do
+    [ -e "$f" ] || continue
+    earlier+=("$(cat -- "$f")")
+  done
   hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
-    "$EV" "$final" "$local_ctl") || hits=
+    "$EV" "$final" "${earlier[@]}" "$local_ctl") || hits=
   rm -f -- "$local_ctl"
   trap - EXIT
   if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
-    result PASS 'S1 step 5' "none of the ${#secrets[@]} tokens this run minted or created is in the bundle or the run directory (control found)"
+    result PASS 'S1 step 5' "none of the ${#secrets[@]} tokens this run minted or created is in any bundle of the run or the run directory (control found)"
   else
     printf 's1: files holding a token of this run: %s\n' "${hits:-none, not even the control}" >&2
     result FAIL 'S1 step 5' "the tokens this run minted or created: ${#secrets[@]} searched, the listing is not the control alone"
