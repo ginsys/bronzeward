@@ -24,7 +24,7 @@ keep_secret() {
 redacted=()
 redact_automation_token() { redacted+=("$1" "${1##*.}"); }
 # withheld: fixture secrets a request body carries on purpose, such as the canary in a refused
-# input; no transcript shows them, each is written <withheld>.
+# input; no transcript or commands.tsv line shows them, each is written <withheld>.
 withheld=()
 
 # result PASS|FAIL|SKIP <reference> <what>. No line carries a token or a response value.
@@ -33,12 +33,14 @@ result() {
   [ "$1" != FAIL ] || failed=$((failed + 1))
 }
 # ran <reference> <exit> <command...>: the command and its exit status as a line of commands.tsv
-# (acceptance plan §2's common evidence), every token this run holds written as <token>.
+# (acceptance plan §2's common evidence), every token this run holds written as <token> and every
+# withheld value as <withheld>.
 ran() {
   local ref=$1 rc=$2 cmd s
   shift 2
   cmd=$(printf '%q ' "$@")
   for s in "${secrets[@]}" "${redacted[@]}"; do cmd=${cmd//"$s"/<token>}; done
+  for s in "${withheld[@]}"; do cmd=${cmd//"$s"/<withheld>}; done
   printf '%s\t%s\t%s\n' "$ref" "$rc" "${cmd% }" >>"$EV/commands.tsv"
 }
 # check <reference> <what> <command...>: PASS when the command succeeds; the command and its exit

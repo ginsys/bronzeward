@@ -71,6 +71,9 @@ state_made=0
 up_failed() {
   local recorded
   if [ -n "$recovery" ]; then
+    # The worker's patch, left by a cluster create that failed or was cut short: the synthetic
+    # secret's only copy outside the node, which nothing needs once up has failed.
+    rm -f -- "$STATE/worker-patch.yaml" 2>/dev/null
     # The record of the Compose volumes made so far, when the stage that makes them was cut short
     # before publishing it: a plain down then holds those to it, and refuses the one in question,
     # which the hint names.
