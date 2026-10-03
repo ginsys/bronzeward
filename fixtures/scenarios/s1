@@ -3,7 +3,8 @@
 # preconditions, steps 1 to 5 and the pass criteria. Each check writes PASS, FAIL or SKIP, its
 # acceptance-plan reference and what it checked to s1.tsv in the evidence directory and to stdout;
 # the directory is then scanned by bin/evidence. Exit 1 on any FAIL.
-# Usage: scenarios/s1 run   (on a fresh fixtures/bin/up)
+# Usage: scenarios/s1 run   (on a fresh fixtures/bin/up, with mise run dev-db and mise run dev-bao
+# up for the Go tests)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -381,6 +382,26 @@ evidence_to() {
   printf '%s\n' "$bundle" >"$EV/$1-bundle"
 }
 
+# The rows no request reaches (a heartbeat is internal to an instance, a crash inside T1 needs a
+# seam inside the process; ruling 1), proven by the Go tests that already prove them. Anchored:
+# TestHeartbeat alone, not TestHeartbeatLossStopsRunner.
+go_tests='TestOwnerFenceMatrix|TestHeartbeat|TestHeartbeatExtendsFromTheLockTime|TestCrashInsideT1LeavesDraft|TestTakeoverRacesT1|TestTakeoverNothingToDecrypt|TestTakeoverDecryptFailureLeavesResumed|TestMachineAccessUnavailable'
+# go_rows_ran: those tests, in the clone, against go-db's PostgreSQL and OpenBao (mise run dev-db
+# and dev-bao by default), as go-db runs them: a missing service fails, it does not skip. The DSN
+# and token reach the tests through the environment, never the command line, so neither is in a
+# retained file. Passes when go test exited 0 with no test skipped.
+go_rows_ran() {
+  (
+    export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
+    export BW_TEST_BAO_ADDR="${BW_TEST_BAO_ADDR:-http://127.0.0.1:58201}"
+    export BW_TEST_BAO_TOKEN="${BW_TEST_BAO_TOKEN:-bw-dev-root-token}"
+    logged go-rows env BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 mise exec -- go test -count=1 -v -run "^($go_tests)\$" \
+      ./internal/staging ./internal/api
+  ) && ! grep --quiet -- '--- SKIP' "$EV/go-rows.log"
+}
+# go_row <test>: the test's own top-level PASS line is in go-rows.log.
+go_row() { grep --quiet -- "^--- PASS: $1 (" "$EV/go-rows.log"; }
+
 run() {
   # Preconditions: S0's migrate and seed, both instances up, then the pre-state.
   check 'S1 precondition' 'bw migrate' "$bin/bw" migrate
@@ -502,6 +523,32 @@ run() {
     access_case cluster-id "$machine_w" 409 machine-identity-mismatch cluster-id
   check 'S1 access' "control: with every fault taken away, the worker's import is not refused" \
     ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')" again
+
+  # The rows the Go tests prove (ruling 1), in a clone of the image commit, so that the results
+  # are the server's own commit's; removed again once they have run.
+  if clone_made go-rows-clone; then
+    check 'S1 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the tests run on the server's build (clone HEAD $clone_head)" go_env_clean
+    check 'S1 Go tests' 'the tests below ran against PostgreSQL and OpenBao and passed, none skipped (go-rows.log)' go_rows_ran
+    check 'S1 lease extension, C §3.3' "a heartbeat from another ingestion principal, one of an older generation, and the owner's own after its lease lapsed: each refused, the claim unchanged (TestOwnerFenceMatrix)" \
+      go_row TestOwnerFenceMatrix
+    check 'S1 lease extension, C §3.3' "control: the owner's heartbeat while live extends the lease, never past the absolute expiry (TestHeartbeat)" \
+      go_row TestHeartbeat
+    check 'S1 lease extension, C §3.3' "control: the extension counts from when the heartbeat took the claim's lock (TestHeartbeatExtendsFromTheLockTime)" \
+      go_row TestHeartbeatExtendsFromTheLockTime
+    check 'S1 interruption' 'a crash inside the draft transaction: the draft and its ETag unchanged, nothing it wrote committed, the claim unreleased (TestCrashInsideT1LeavesDraft)' \
+      go_row TestCrashInsideT1LeavesDraft
+    check 'S1 takeover, C §3.4' "the old owner's draft transaction refused after a takeover, nothing of the draft written (TestTakeoverRacesT1)" \
+      go_row TestTakeoverRacesT1
+    check 'S1 takeover, C §3.4' 'a takeover with nothing to decrypt abandons the claim, its operation failed ingestion-abandoned (TestTakeoverNothingToDecrypt)' \
+      go_row TestTakeoverNothingToDecrypt
+    check 'S1 takeover, C §3.4' "a decryption failure leaves the claim resumed under the taker, then taken over once its lease lapses (TestTakeoverDecryptFailureLeavesResumed)" \
+      go_row TestTakeoverDecryptFailureLeavesResumed
+    check 'S1 access, PA §16' 'the provider unavailable to the access read: 503 talos-access-unavailable, cause provider-unavailable, the claim abandoned (TestMachineAccessUnavailable)' \
+      go_row TestMachineAccessUnavailable
+  else
+    result FAIL 'S1 Go tests' 'no clone of the image commit (go-rows-clone.log): the Go tests did not run'
+  fi
+  rm -rf -- "$clone_dir"
 
   # Step 5: the post-state, compared with the pre-state.
   evidence_to post || die "no post-state: bin/evidence failed"
