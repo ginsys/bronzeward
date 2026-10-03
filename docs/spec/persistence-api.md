@@ -531,10 +531,8 @@ rows 001–003).
 
 ### 4.1 ETags
 
-A revision number is a precondition only inside a strong ETag that also
-carries a random token, replaced on every write **(choice §17.2)**. A body may
-report the number for reading (a draft's `revision`, an entry's `base`, a
-head's `headRevision`); no request takes it as a precondition:
+A revision number leaves the database only inside a strong ETag that also
+carries a random token, replaced on every write **(choice §17.2)**:
 
 ```text
 ETag: "5-m3oxmlfh6phr7aigshdydcb4ji"
