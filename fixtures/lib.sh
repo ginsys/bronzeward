@@ -276,6 +276,7 @@ state_files_own() {
   for file in lock bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env up-compose.yaml \
     up-image up-build linksplits automation-token automation-identity server/a/config.yaml server/b/config.yaml server/c/config.yaml \
     server/a/openbao-ingestion.token server/b/openbao-ingestion.token server/c/openbao-ingestion.token \
+    server/a/openbao-report.token server/b/openbao-report.token server/c/openbao-report.token \
     server/c/interrupt issuer/key.json; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
@@ -1182,12 +1183,13 @@ scan_patterns() {
   # Both encodings of the unseal key: they share no substring, and either is the credential.
   bao_keys=$(jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json") || return 1
   metadata_token=$(awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env") || return 1
-  # The instances' OpenBao ingestion tokens: a missing file fails the list, since bin/up writes all
-  # three before the list is first made.
+  # The instances' OpenBao ingestion and orphan-report tokens: a missing file fails the list, since
+  # bin/up writes all six before the list is first made.
   ingestion_tokens=$(cat -- "$STATE/server/a/openbao-ingestion.token" "$STATE/server/b/openbao-ingestion.token" \
-    "$STATE/server/c/openbao-ingestion.token") || return 1
-  if [ "$(wc -l <<<"$ingestion_tokens")" -ne 3 ] || grep --quiet --line-regexp '' <<<"$ingestion_tokens"; then
-    die "the instances' OpenBao ingestion tokens are not one line each; they would go unscanned"
+    "$STATE/server/c/openbao-ingestion.token" "$STATE/server/a/openbao-report.token" \
+    "$STATE/server/b/openbao-report.token" "$STATE/server/c/openbao-report.token") || return 1
+  if [ "$(wc -l <<<"$ingestion_tokens")" -ne 6 ] || grep --quiet --line-regexp '' <<<"$ingestion_tokens"; then
+    die "the instances' OpenBao ingestion and orphan-report tokens are not one line each; they would go unscanned"
   fi
   talos_secrets=$(awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \
     "$STATE/talos-secrets.yaml") || return 1

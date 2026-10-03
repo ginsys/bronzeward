@@ -172,7 +172,7 @@ server_template=$(cat -- "$FIXTURES/server.yaml.in") || die "cannot read $FIXTUR
 # The OpenBao policies too, the files internal/baotest also writes (fixtures/openbao/policies):
 # read once here, written to OpenBao from this reading, held below to the files the tree check sees.
 declare -A policies
-for policy in bw-ingestion bw-compiler bw-executor bw-metadata-only; do
+for policy in bw-ingestion bw-compiler bw-executor bw-metadata-only bw-orphan-report; do
   policies[$policy]=$(cat -- "$FIXTURES/openbao/policies/$policy.hcl") ||
     die "cannot read $FIXTURES/openbao/policies/$policy.hcl"
 done
@@ -480,22 +480,25 @@ for policy in "${!policies[@]}"; do
     die "could not write the OpenBao policy $policy"
 done
 unset policies policy key
-# One ingestion token per instance, under bw-ingestion alone (no default policy, as the live policy
-# tests issue theirs), written whole beside the instance's configuration (mktemp in the
-# directory, then a rename): an instance never reads a cut token.
+# Per instance, one ingestion token under bw-ingestion alone and one orphan-report token under
+# bw-orphan-report alone (no default policy, as the live policy tests issue theirs), each written
+# whole beside the instance's configuration (mktemp in the directory, then a rename): an instance
+# never reads a cut token.
 for instance in a b c; do
-  # Assigned first: a command substitution that is only a printf argument cannot fail the script.
-  ingestion_token=$(bao token create -policy=bw-ingestion -no-default-policy -format=json | jq -er .auth.client_token) ||
-    die "could not create instance $instance's OpenBao ingestion token"
-  token_file=$(mktemp "$STATE/server/$instance/openbao-ingestion.token.XXXXXX") ||
-    die "could not write instance $instance's OpenBao ingestion token"
-  if ! printf '%s\n' "$ingestion_token" >"$token_file" ||
-    ! mv --no-target-directory -- "$token_file" "$STATE/server/$instance/openbao-ingestion.token"; then
-    rm -f -- "$token_file"
-    die "could not write instance $instance's OpenBao ingestion token"
-  fi
+  for role in ingestion:bw-ingestion report:bw-orphan-report; do
+    # Assigned first: a command substitution that is only a printf argument cannot fail the script.
+    role_token=$(bao token create -policy="${role#*:}" -no-default-policy -format=json | jq -er .auth.client_token) ||
+      die "could not create instance $instance's OpenBao ${role%%:*} token"
+    token_file=$(mktemp "$STATE/server/$instance/openbao-${role%%:*}.token.XXXXXX") ||
+      die "could not write instance $instance's OpenBao ${role%%:*} token"
+    if ! printf '%s\n' "$role_token" >"$token_file" ||
+      ! mv --no-target-directory -- "$token_file" "$STATE/server/$instance/openbao-${role%%:*}.token"; then
+      rm -f -- "$token_file"
+      die "could not write instance $instance's OpenBao ${role%%:*} token"
+    fi
+  done
 done
-unset ingestion_token token_file instance
+unset role_token role token_file instance
 # Assigned first: a command substitution that is only a printf argument cannot fail the script.
 metadata_token=$(bao token create -policy=bw-metadata-only -format=json | jq -er .auth.client_token) ||
   die "could not create the metadata-only OpenBao token"

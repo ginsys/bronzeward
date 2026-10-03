@@ -110,11 +110,13 @@ the files in [`openbao/policies`](openbao/policies):
 - `bw-executor`: decrypts under the artifact key; reads each cluster's Talos access credential, as
   ingestion does.
 - `bw-metadata-only`: the classification experiment's identity, which reads no value.
+- `bw-orphan-report`: the orphan report's identity (persistence-api §6.4): lists and reads metadata
+  under `secret/metadata/gen/`, nothing else.
 
 `bin/up` writes them from those files, which `mise run go-db` also writes into a dev-mode OpenBao
 for the policy tests (`internal/provider`), so the fixture and the tests hold the same policies.
-Only ingestion has tokens here, one per instance, without OpenBao's default policy; compiler and
-executor tokens come with those components.
+Only ingestion and the orphan report have tokens here, one of each per instance, without OpenBao's
+default policy; compiler and executor tokens come with those components.
 
 ## Versions
 
@@ -140,6 +142,9 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
   `server/c/openbao-ingestion.token`: each instance's OpenBao token, under `bw-ingestion` alone, beside its `config.yaml` and read by it as
   `/etc/bronzeward/openbao-ingestion.token` (see [OpenBao keys and policies](#openbao-keys-and-policies)).
   A missing one fails the scan-pattern list.
+- `server/a/openbao-report.token`, `server/b/openbao-report.token`, `server/c/openbao-report.token`:
+  each instance's orphan-report token, under `bw-orphan-report` alone, read as
+  `/etc/bronzeward/openbao-report.token` by `bw orphans`. A missing one fails the scan-pattern list.
 - `talos-secrets.yaml`, `controlplane.yaml`, `talosconfig`, `kubeconfig`: the cluster's own
   generated secrets bundle and client configs.
 - `scan-patterns.txt`: every one of the above as a fixed string, the client private keys in
@@ -263,7 +268,7 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 removal of `.state` would take a link and leave the cluster's credentials at the far end. The files `bin/up` generates
 (`lock`, `secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
-node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env`, `up-compose.yaml` and the instances' `openbao-ingestion.token`) must each be
+node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env`, `up-compose.yaml` and the instances' `openbao-ingestion.token` and `openbao-report.token`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
@@ -420,9 +425,13 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
 - S0 step 3's automation token from an earlier recovery epoch is not driven end to end: no route
   enters recovery mode before ginsys/bronzeward#29. `scenarios/s0` records it as `SKIP`; the Go test
   `TestAutomationExpiredRevokedEarlierEpoch` in `internal/auth` covers the refusal.
-- S1 lists the generations an interrupted or refused import left with the metadata identity's
-  `bao kv list`, not through an orphan report: Bronzeward has none yet. A refusal is checked to
-  have created none; an interruption, to have kept every one it made.
+- S1 counts the generations an interrupted or refused import left with the metadata identity's
+  `bao kv list`: a refusal is checked to have created none, an interruption to have kept every one
+  it made. After the interruptions, `bw orphans` runs under the orphan-report identity and must list
+  each interrupted claim's generations as orphans of that abandoned claim, with every count
+  unchanged after it; its output is kept as `orphan-report.txt`. It runs against instance A's
+  configuration only, on cluster scope, and the Go tests in `cmd/bronzeward` and
+  `internal/orphans` carry the report's other checks.
 - S1's interruptions are at the points `internal/seam` names. A kill between two of them, inside
   a database transaction, is covered by the Go test `TestCrashInsideT1LeavesDraft`, which S1 runs.
 - Talos node volumes are anonymous. `bin/up` records their names in `.state/` once the cluster
