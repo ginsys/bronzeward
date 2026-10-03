@@ -2528,9 +2528,11 @@ each (design §7.7 consequences):
   path alone, under which the same request must then succeed (against a
   disposable path for every change), so that a malformed probe cannot pass as
   a refusal;
-  the provider sealed after the first cluster directory is listed, and the
+  with two populated claim directories, the provider sealed after a
+  generation in the first is listed and before the second is listed, and the
   database statement failing, each exiting nonzero with no path printed, with
-  a control that prints each path as it is listed and must then fail;
+  a control that prints each generation path as it is listed and must then
+  fail by printing that first generation;
   the report naming an unreferenced generation of an `abandoned` claim, of a
   `released` claim and of a path whose claim row does not exist, and not the
   generations of a `held` or a `resumed` claim nor a referenced generation of
