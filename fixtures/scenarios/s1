@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Acceptance plan S1, adoption of the existing cluster, against the fixture. `run`: the
 # preconditions, steps 1 to 5, the pass criteria, the refusal set, the Talos access refusals, and
-# takeover, lease and interruption on instance C. Each check writes PASS, FAIL or SKIP, its
+# takeover, lease and interruption on instance C, and the orphan report over the interrupted
+# claims. Each check writes PASS, FAIL or SKIP, its
 # acceptance-plan reference and what it checked to s1.tsv in the evidence directory and to stdout;
 # the directory is then scanned by bin/evidence. Exit 1 on any FAIL.
 # Usage: scenarios/s1 run   (on a fresh fixtures/bin/up, with mise run dev-db and mise run dev-bao
@@ -678,11 +679,11 @@ abandoned_nothing() {
   claim_is abandoned 2 none && events_are "$(pre_events "$1") failed" && op_is failed ingestion-abandoned &&
     failed_cause_is nothing-to-decrypt
 }
-# claim_generations: how many generations the metadata identity lists under tk_ing's path; 0 when
-# the path holds none (bao's JSON answer is then {} with exit 2).
+# claim_generations [claim]: how many generations the metadata identity lists under the claim's
+# path (tk_ing's by default); 0 when the path holds none (bao's JSON answer is then {} with exit 2).
 claim_generations() {
   local out rc=0
-  out=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN bao kv list -format=json -mount=secret "gen/$cluster/$tk_ing" 2>&1) || rc=$?
+  out=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN bao kv list -format=json -mount=secret "gen/$cluster/${1:-$tk_ing}" 2>&1) || rc=$?
   case $rc in
     0) jq -er 'length' <<<"$out" ;;
     2) [ "$out" = '{}' ] && printf '0\n' ;;
@@ -692,14 +693,19 @@ claim_generations() {
 # How many generations an import of the worker with its file content marked makes: its last
 # committed revision's reference rows.
 gen_count=''
-# generations_kept <step>: every generation created before the kill is still listed under the
-# claim, none deleted: none before step 6, all of the import's once it is done (the generation
-# seam follows the last create).
-generations_kept() {
-  local want=0 got
+# generations_made <step>: how many generations an import killed at the step created: none before
+# step 6, all of the import's once it is done (the generation seam follows the last create).
+generations_made() {
   case $1 in
-    generation | construct | baseline) want=$gen_count ;;
+    generation | construct | baseline) printf '%s\n' "$gen_count" ;;
+    *) printf '0\n' ;;
   esac
+}
+# generations_kept <step>: every generation created before the kill is still listed under the
+# claim, none deleted.
+generations_kept() {
+  local want got
+  want=$(generations_made "$1")
   got=$(claim_generations) || return 1
   [ "$got" = "$want" ] || {
     say "s1: killed at $1: $got generation(s) listed under the claim, want $want"
@@ -792,6 +798,7 @@ interrupt_case() {
   fi
   check "$row_ref" "killed at $step ($staging_mode): every generation created before the kill still listed under the claim, none deleted" \
     generations_kept "$step"
+  interrupted+=("$tk_ing $(generations_made "$step")")
   check "$row_ref" "killed at $step ($staging_mode): the draft's ETag unchanged" draft_etag_is "$etag"
   outcome_bundle "$row_ref" "interrupt-$step-$staging_mode"
   check "$row_ref" 'inject start C' "$bin/inject" start C
@@ -808,6 +815,54 @@ interruption_matrix() {
     interrupt_case "$step" transient
     interrupt_case "$step" encrypted
   done
+}
+
+# The interrupted claims, each "<claim> <generations it made>", for the orphan report.
+interrupted=()
+# orphans_listed: the report lists each interrupted claim's generations as orphans of that claim
+# recorded abandoned, as many as the import made.
+orphans_listed() {
+  local entry claim want got tab=$'\t'
+  for entry in "${interrupted[@]}"; do
+    read -r claim want <<<"$entry"
+    got=$(grep --count --extended-regexp -- \
+      "^orphan${tab}gen/$cluster/$claim/[^${tab}]+${tab}claim=$claim${tab}state=abandoned${tab}" "$EV/orphan-report.txt") || got=0
+    [ "$got" = "$want" ] || {
+      say "s1: the orphan report lists $got generation(s) of $claim, want $want"
+      return 1
+    }
+  done
+}
+# orphans_kept: after the report, the metadata identity still lists every interrupted claim's
+# generations: the report deleted none.
+orphans_kept() {
+  local entry claim want got
+  for entry in "${interrupted[@]}"; do
+    read -r claim want <<<"$entry"
+    got=$(claim_generations "$claim") || return 1
+    [ "$got" = "$want" ] || {
+      say "s1: after the orphan report, $got generation(s) listed under $claim, want $want"
+      return 1
+    }
+  done
+}
+# orphan_report: bw orphans on the cluster, under the orphan-report identity (persistence-api §6.4),
+# its output kept in the evidence.
+orphan_report() { "$bin/bw" orphans -cluster "$cluster" >"$EV/orphan-report.txt"; }
+# orphan_rows: the acceptance plan's S1 interruption rows for the orphan report, after every kill.
+orphan_rows() {
+  local entry total=0 want
+  for entry in "${interrupted[@]}"; do
+    want=${entry#* }
+    total=$((total + want))
+  done
+  check 'S1 interruption, orphans' "control: the interruptions left $total generation(s) of abandoned claims to report" \
+    differ "$total" 0
+  check 'S1 interruption, orphans' 'bw orphans on the cluster, under the orphan-report identity, exits 0 (orphan-report.txt)' \
+    orphan_report
+  check 'S1 interruption, orphans' "each of the ${#interrupted[@]} interrupted claims' generations listed as orphans of that abandoned claim" \
+    orphans_listed
+  check 'S1 interruption, orphans' "every interrupted claim's generations still listed after the report, none deleted" orphans_kept
 }
 
 run() {
@@ -1003,6 +1058,7 @@ run() {
   takeover_rows
   outcome_bundle 'S1 takeover, C §3.4' success-takeover
   interruption_matrix
+  orphan_rows
 
   # Step 5: the post-state, compared with the pre-state.
   evidence_to post || die "no post-state: bin/evidence failed"

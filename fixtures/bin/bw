@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Run one command of the server image bin/up built, on the fixture's Compose network, against
-# instance A's configuration: bw migrate, bw token issue|rotate|revoke|list ...
+# instance A's configuration: bw migrate, bw token issue|rotate|revoke|list ..., bw orphans
 # Usage: bw <bronzeward command> [args]   (-config is appended; never name a path in the container)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-[ $# -ge 1 ] || die "usage: bw <migrate|token ...> [args]"
+[ $# -ge 1 ] || die "usage: bw <migrate|token ...|orphans> [args]"
 [ "$1" != serve ] || die "bw serve is refused: instances A and B are the servers (fixtures/bin/inject start A|B)"
 need docker timeout id
 need_state
