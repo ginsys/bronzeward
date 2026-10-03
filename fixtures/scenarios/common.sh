@@ -155,3 +155,48 @@ issue() {
   issued_n=$((issued_n + 1))
   [ -n "$issued" ] && [ -n "$tok" ]
 }
+
+# Go suites a scenario runs, it runs in a clone of the image commit (image_clone), not in this
+# checkout: nothing here, edited, untracked, ignored or misreported by git's configuration, reaches
+# the bytes they test (ginsys/bronzeward#68). Under .state, which down removes; the scenario removes
+# it again once its suites have run.
+clone_dir=$STATE/$scenario-clone
+clone_src=$clone_dir/src
+clone_head=
+# clone_made <name>: a fresh clone at clone_src, its HEAD in clone_head, recorded in $EV/<name>.log.
+clone_made() {
+  local name=$1 rc=0
+  rm -rf -- "$clone_dir"
+  mkdir -- "$clone_dir"
+  image_clone "$clone_src" >"$EV/$name.log" 2>&1 || rc=$?
+  ran "$name" "$rc" image_clone "$clone_src"
+  [ "$rc" -eq 0 ] || return "$rc"
+  clone_head=$(sed -n 's/^clone .* HEAD \([0-9a-f]*\)$/\1/p' "$EV/$name.log")
+}
+# in_clone <command...>: in the clone, isolated_run: only the caller's variables the suites need
+# (locations, locale, Go, BW_TEST_*, proxies), git's configuration, attributes, hooks and templates
+# off for every git the suites run, and no mise configuration but the clone's.
+in_clone() {
+  isolated_run "$clone_src" "$@"
+}
+# logged <name> <command...>: in the clone, output to $EV/<name>.log, which starts with the
+# command and the clone's HEAD and ends with its exit status; both go to commands.tsv too.
+logged() {
+  local name=$1 rc=0
+  shift
+  printf '$ %s\n# in a clone of the image commit, HEAD %s\n' "$*" "$clone_head" >"$EV/$name.log"
+  in_clone timeout 1800 "$@" >>"$EV/$name.log" 2>&1 || rc=$?
+  printf 'exit %d\n' "$rc" >>"$EV/$name.log"
+  ran "$name" "$rc" "$@"
+  return "$rc"
+}
+# go_env_clean: no Go setting, from the environment or go env -w, selects or skips tests or changes
+# what they build: GOFLAGS=-run=^$ alone makes every suite exit 0 having run nothing. And the
+# suites' Go is the one up-build records for the image: GOTOOLCHAIN can switch it.
+go_env_clean() {
+  local out v
+  out=$(in_clone mise exec -- go env GOFLAGS GOEXPERIMENT GOWORK GOVERSION) || return 1
+  mapfile -t v <<<"$out"
+  [ "${#v[@]}" -eq 4 ] && [ -z "${v[0]}${v[1]}${v[2]}" ] && [ -n "${v[3]}" ] &&
+    [ "${v[3]}" = "$(sed -n 's/^go //p' "$STATE/up-build")" ]
+}

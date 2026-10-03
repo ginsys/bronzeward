@@ -58,19 +58,8 @@ migrate_twice() {
   [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$applied" = "applied [$every]|applied []|" ]
 }
 
-# Step 1's suites run in a clone of the image commit (image_clone), not in this checkout: nothing
-# here, edited, untracked, ignored or misreported by git's configuration, reaches the bytes they
-# test (ginsys/bronzeward#68). Under .state, which down removes; removed again after step 1.
-clone_dir=$STATE/s0-clone
-clone_src=$clone_dir/src
-clone_head=
-# in_clone <command...>: in the clone, isolated_run: only the caller's variables the suites need
-# (locations, locale, Go, BW_TEST_*, proxies), git's configuration, attributes, hooks and templates
-# off for every git the suites run, and no mise configuration but the clone's (tasks_in_clone checks
-# the tasks resolve in the clone).
-in_clone() {
-  isolated_run "$clone_src" "$@"
-}
+# Step 1's suites run in common.sh's clone of the image commit (clone_made, in_clone, logged),
+# removed again after step 1.
 # tasks_in_clone: verify's and go-db's tasks, and every task they depend on, are the clone's own,
 # defined there and run there: logs that name the clone's HEAD would otherwise attribute another
 # tree's results to it.
@@ -79,17 +68,6 @@ tasks_in_clone() {
   listing=$(in_clone mise tasks ls --json --hidden) || return 1
   outside=$(tasks_outside "$clone_src" verify go-db <<<"$listing") || return 1
   [ -z "$outside" ] || { say "tasks not the clone's own: $outside"; return 1; }
-}
-# logged <name> <command...>: in the clone, output to $EV/<name>.log, which starts with the
-# command and the clone's HEAD and ends with its exit status; both go to commands.tsv too.
-logged() {
-  local name=$1 rc=0
-  shift
-  printf '$ %s\n# in a clone of the image commit, HEAD %s\n' "$*" "$clone_head" >"$EV/$name.log"
-  in_clone timeout 1800 "$@" >>"$EV/$name.log" 2>&1 || rc=$?
-  printf 'exit %d\n' "$rc" >>"$EV/$name.log"
-  ran "$name" "$rc" "$@"
-  return "$rc"
 }
 # go_controls_ran: the advisory-lock controls, against go-db's database, as go-db runs them: without
 # a database they would skip, and a skip is not a PASS line. The DSN reaches the test through the
@@ -144,28 +122,13 @@ same_checkout() {
   [ "$(fixtures_git rev-parse HEAD)" = "$(sed -n 's/^commit //p' "$STATE/up-build")" ] && [ "$n" -eq 0 ]
 }
 
-# go_env_clean: no Go setting, from the environment or go env -w, selects or skips tests or changes
-# what they build: GOFLAGS=-run=^$ alone makes every suite exit 0 having run nothing. And the
-# suites' Go is the one up-build records for the image: GOTOOLCHAIN can switch it.
-go_env_clean() {
-  local out v
-  out=$(in_clone mise exec -- go env GOFLAGS GOEXPERIMENT GOWORK GOVERSION) || return 1
-  mapfile -t v <<<"$out"
-  [ "${#v[@]}" -eq 4 ] && [ -z "${v[0]}${v[1]}${v[2]}" ] && [ -n "${v[3]}" ] &&
-    [ "${v[3]}" = "$(sed -n 's/^go //p' "$STATE/up-build")" ]
-}
-
 run() {
   # Step 1: the suites, and the advisory-lock negative control as the Go test (ruling 5), in a
   # clone of the commit the image was built from. Without the clone they do not run: the
   # checkout's results would not be the commit's.
   local rc=0
-  rm -rf -- "$clone_dir"
-  mkdir -- "$clone_dir"
-  image_clone "$clone_src" >"$EV/step1-clone.log" 2>&1 || rc=$?
-  ran step1-clone "$rc" image_clone "$clone_src"
+  clone_made step1-clone || rc=$?
   if [ "$rc" -eq 0 ]; then
-    clone_head=$(sed -n 's/^clone .* HEAD \([0-9a-f]*\)$/\1/p' "$EV/step1-clone.log")
     result PASS 'S0 step 1' "the suites run in a clone of the image commit, made with no git configuration but its own (HEAD $clone_head)"
     check 'S0 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the suites run every test on the server's build" go_env_clean
     check 'S0 precondition' "verify's and go-db's tasks, with those they depend on, are defined in the clone and run there" tasks_in_clone
