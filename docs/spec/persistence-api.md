@@ -2528,6 +2528,13 @@ each (design §7.7 consequences):
   path alone, under which the same request must then succeed (against a
   disposable path for every change), so that a malformed probe cannot pass as
   a refusal;
+  the command refusing a `provider.reportTokenFile` with group or other
+  permission bits before any provider request, and, with the file replaced
+  between two runs, the second run using the new token, with a control that
+  reads the file once at configuration load and must then fail;
+  with two populated clusters, `--cluster <id>` listing and reporting only
+  that cluster's subtree, with a control that always walks every cluster and
+  must then fail;
   with two populated claim directories, the provider sealed after a
   generation in the first is listed and before the second is listed, and the
   database statement failing, each exiting nonzero with no path printed, with
@@ -2537,7 +2544,10 @@ each (design §7.7 consequences):
   `released` claim and of a path whose claim row does not exist, and not the
   generations of a `held` or a `resumed` claim nor a referenced generation of
   an `abandoned` claim, with a control that selects by claim state alone and
-  must then fail; a draft transaction releasing a claim committed while the
+  must then fail; an `abandoned` claim's generations referenced one through an
+  import-base reference row and one through a fragment revision's reference
+  row (once that revision's schema exists), neither reported, with a control
+  that reads one kind of reference row only and must then fail; a draft transaction releasing a claim committed while the
   report runs, its generations not reported, with a control that reads the
   reference rows and the claims in two statements, commits the draft
   transaction between them and must then report them; a claim past its
@@ -2545,10 +2555,14 @@ each (design §7.7 consequences):
   passed its owner check holds its lock and then commits, its generations not
   reported as orphans, with a control that treats the claim as `abandoned` at
   read time and must then report them; with no controller running, an
-  `encrypted` claim past its absolute expiry and a `transient` claim past its
-  lease but not its expiry, both still recorded `held`, their unreferenced
-  generations listed as expired and not yet abandoned, with a control that
-  omits every `held` claim's generations and must then fail; without
+  `encrypted` claim recorded `held` and one recorded `resumed`, each past its
+  absolute expiry, and a `transient` claim past its lease but not its expiry,
+  recorded `held`, their unreferenced generations listed as expired and not
+  yet abandoned, with a control that omits every `held` or `resumed` claim's
+  generations and must then fail; an `encrypted` claim recorded `held` past its lease but
+  not its absolute expiry (still open to takeover), its generations neither
+  reported nor listed apart, with a control that treats every lapsed lease as
+  abandonment and must then fail; without
   `--cluster`, the generations under a cluster directory whose cluster and
   claim rows a restore removed reported, with a control that lists only the
   clusters the database records and must then fail; a generation whose custom
