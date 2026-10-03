@@ -756,9 +756,9 @@ a_reaches() {
     --label "bronzeward.fixture.tool=$FIXTURE_NAME" --entrypoint nc "$CURL_IMAGE" -z -w 2 "$1" 50000 >/dev/null 2>&1
 }
 
-# Two migrations at once: one applies every migration, the other finds nothing left to apply
-# (the advisory lock, persistence-api.md §11). Then the automation identity, whose token is a
-# secret the scan must know.
+# Two migrations at once: between them each migration is applied once, a run finding recorded
+# those the other applied (the advisory lock, persistence-api.md §11). Then the automation
+# identity, whose token is a secret the scan must know.
 "$here/bw" migrate >"$STATE/selftest-migrate-1.out" 2>&1 &
 m1=$!
 "$here/bw" migrate >"$STATE/selftest-migrate-2.out" 2>&1 &
@@ -767,10 +767,12 @@ rc1=0 rc2=0
 wait "$m1" || rc1=$?
 wait "$m2" || rc2=$?
 migrated=$(cat "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out" | { grep '^applied ' || true; } | LC_ALL=C sort | tr '\n' '|')
+every=$(image_migrations) || fail "cannot list the migrations the server image embeds"
+once=0
+applied_once "$every" "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out" || once=$?
 rm "$STATE/selftest-migrate-1.out" "$STATE/selftest-migrate-2.out"
 [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] || fail "concurrent bw migrate failed (exit $rc1 and $rc2)"
-every=$(image_migrations) || fail "cannot list the migrations the server image embeds"
-[ "$migrated" = "applied [$every]|applied []|" ] || fail "concurrent bw migrate: $migrated; want one to apply [$every] and one []"
+[ "$once" -eq 0 ] || fail "concurrent bw migrate: $migrated; want [$every] applied once between them"
 unset every
 # A seed interrupted after bw token issue leaves the token in the .partial file: the scan knows it
 # and its secret half, and seed refuses rather than issue another. Removed before anything can fail.

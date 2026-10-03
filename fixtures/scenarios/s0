@@ -41,10 +41,10 @@ set_denied() {
 }
 restart_a() { "$bin/inject" kill A >/dev/null && "$bin/inject" start A >/dev/null; }
 
-# migrate_twice: two bw migrate at once; one applies every migration the image embeds and one finds
-# none left.
+# migrate_twice: two bw migrate at once; between them each migration the image embeds is applied
+# once (the lock is per migration, so one run can find some recorded and apply the rest).
 migrate_twice() {
-  local rc1=0 rc2=0 m1 m2 applied every
+  local rc1=0 rc2=0 m1 m2 every
   every=$(image_migrations) || return 1
   "$bin/bw" migrate >"$EV/migrate-1.log" 2>&1 &
   m1=$!
@@ -54,8 +54,7 @@ migrate_twice() {
   wait "$m2" || rc2=$?
   ran migrate-1 "$rc1" "$bin/bw" migrate
   ran migrate-2 "$rc2" "$bin/bw" migrate
-  applied=$(cat "$EV/migrate-1.log" "$EV/migrate-2.log" | { grep '^applied ' || true; } | LC_ALL=C sort | tr '\n' '|')
-  [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$applied" = "applied [$every]|applied []|" ]
+  [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && applied_once "$every" "$EV/migrate-1.log" "$EV/migrate-2.log"
 }
 
 # Step 1's suites run in common.sh's clone of the image commit (clone_made, in_clone, logged),
@@ -142,7 +141,7 @@ run() {
   check 'S0 precondition' 'the checkout is the image commit, unmodified, after step 1' same_checkout
 
   # Step 2: two migrations at once apply once; A starts on the schema.
-  check 'S0 step 2' 'two bw migrate at once: one applies every migration of the image, the other []' migrate_twice
+  check 'S0 step 2' 'two bw migrate at once: each migration of the image applied once between them' migrate_twice
   check 'S0 step 2' 'inject start A' "$bin/inject" start A
   check 'S0 step 2' 'A answers /livez' answers 204 - GET /livez ''
 
