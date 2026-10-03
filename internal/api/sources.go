@@ -141,9 +141,11 @@ func withPins(ctx context.Context, tx *sql.Tx, bs []*profileRevisionBody) error 
 	return eachRow(ctx, tx, `SELECT revision, fragment_revision FROM profile_revision_fragment
 		WHERE revision = ANY (string_to_array($1, ',')) ORDER BY revision, position`, strings.Join(ids, ","), func(r *sql.Rows) error {
 		var rev, frv string
-		err := r.Scan(&rev, &frv)
+		if err := r.Scan(&rev, &frv); err != nil {
+			return err
+		}
 		byID[rev].Fragments = append(byID[rev].Fragments, frv)
-		return err
+		return nil
 	})
 }
 
@@ -157,9 +159,11 @@ func withSelections(ctx context.Context, tx *sql.Tx, bs []*assignmentRevisionBod
 	err := eachRow(ctx, tx, `SELECT revision, profile FROM assignment_revision_profile
 		WHERE revision = ANY (string_to_array($1, ',')) ORDER BY revision, position`, strings.Join(ids, ","), func(r *sql.Rows) error {
 		var rev, p string
-		err := r.Scan(&rev, &p)
+		if err := r.Scan(&rev, &p); err != nil {
+			return err
+		}
 		byID[rev].Profiles = append(byID[rev].Profiles, p)
-		return err
+		return nil
 	})
 	if err != nil {
 		return err
@@ -167,9 +171,11 @@ func withSelections(ctx context.Context, tx *sql.Tx, bs []*assignmentRevisionBod
 	return eachRow(ctx, tx, `SELECT revision, layer, fragment FROM assignment_revision_fragment
 		WHERE revision = ANY (string_to_array($1, ',')) ORDER BY revision, layer, position`, strings.Join(ids, ","), func(r *sql.Rows) error {
 		var rev, layer, f string
-		err := r.Scan(&rev, &layer, &f)
+		if err := r.Scan(&rev, &layer, &f); err != nil {
+			return err
+		}
 		byID[rev].Fragments[layer] = append(byID[rev].Fragments[layer], f)
-		return err
+		return nil
 	})
 }
 

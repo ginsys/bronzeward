@@ -206,9 +206,11 @@ func withEntries(ctx context.Context, tx *sql.Tx, ds []*draftBody) error {
 		WHERE draft = ANY (string_to_array($1, ',')) ORDER BY draft, machine`, strings.Join(ids, ","), func(r *sql.Rows) error {
 		var d string
 		var e draftEntry
-		err := r.Scan(&d, &e.Kind, &e.Machine, &e.Revision)
+		if err := r.Scan(&d, &e.Kind, &e.Machine, &e.Revision); err != nil {
+			return err
+		}
 		byID[d].Entries = append(byID[d].Entries, e)
-		return err
+		return nil
 	})
 	if err != nil {
 		return err
@@ -224,9 +226,11 @@ func withEntries(ctx context.Context, tx *sql.Tx, ds []*draftBody) error {
 		strings.Join(ids, ","), func(r *sql.Rows) error {
 			var d string
 			var e sourceEntry
-			err := r.Scan(&d, &e.Kind, &e.Name, &e.Machine, &e.Head, &e.Base, &e.Revision)
+			if err := r.Scan(&d, &e.Kind, &e.Name, &e.Machine, &e.Head, &e.Base, &e.Revision); err != nil {
+				return err
+			}
 			byID[d].Entries = append(byID[d].Entries, e)
-			return err
+			return nil
 		})
 }
 
