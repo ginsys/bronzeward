@@ -286,15 +286,18 @@ profiles and fragments by **name**, per layer, and the publication that
 compiles it uses each named head's revision, which T3 holds unchanged
 (§6.2). A fragment carries one of six layers, in composition order `global`,
 `site`, `cluster`, `role`, `workload`, `override`: design §6.2's seven minus
-machine-intrinsic, which is the import base (compilation §6). Each pin must be
-its fragment's head revision or the revision this draft proposes for it, each
-selected name must have a head with a revision or be proposed (not removed) in
-this draft, and a fragment selected under a layer must carry that layer;
-otherwise the update is refused `422 validation-failed`, naming the body path
-(compilation §7, stage 1). Publication checks the same again. A removal of a
-name the draft introduces, with no head, leaves an entry whose base is absent
-and whose publication creates nothing; a removal of a name with neither a head
-nor an entry is `404`. The PoC accepts cluster scope only: a fragment or
+machine-intrinsic, which is the import base (compilation §6). The draft's own
+entry for a name decides over its head, since publication replaces the head
+with it: a pin must be the revision this draft proposes for its fragment or,
+with no entry for that fragment, the fragment's head revision; a selected name
+must be proposed by this draft or, with no entry for it, have a head with a
+revision; a name this draft removes can be neither pinned nor selected; and a
+fragment selected under a layer must carry that layer. Otherwise the update is
+refused `422 validation-failed`, naming the body path (compilation §7, stage
+1). Publication checks the same again. A removal of a name the draft
+introduces, with no head, leaves an entry whose base is absent and whose
+publication creates nothing; a removal of a name with neither a head (one a
+publication removed counts) nor an entry is `404`. The PoC accepts cluster scope only: a fragment or
 profile names its draft's cluster, and the library scope of choice §17.28 is
 refused by the schema until a later phase defines how its draft is reviewed
 **(choice §17.31)**.

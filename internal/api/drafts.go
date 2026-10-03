@@ -239,7 +239,8 @@ func (d lockedDraft) answer(ctx context.Context, tx *sql.Tx, e sourceEntry, subj
 }
 
 // removeSource proposes the removal of a fragment, profile or assignment (§3.1, choice §17.31): an
-// entry with no revision. A name with neither a live head nor an entry in this draft is 404.
+// entry with no revision. A name with neither a head (removed already or not) nor an entry in this
+// draft is 404.
 func removeSource(ctx context.Context, tx *sql.Tx, q *request, kind string) (result, error) {
 	d, err := lockDraft(ctx, tx, q)
 	if err != nil {
@@ -254,11 +255,11 @@ func removeSource(ctx context.Context, tx *sql.Tx, q *request, kind string) (res
 		return result{}, err
 	}
 	if !found {
-		_, _, current, err := headOf(ctx, tx, d, k)
+		head, _, _, err := headOf(ctx, tx, d, k)
 		if err != nil {
 			return result{}, err
 		}
-		if current == nil {
+		if head == nil {
 			r := refuse(http.StatusNotFound, "not-found", "no such "+kind+" in the draft or its cluster")
 			if kind == "assignment" {
 				return result{}, r.with("machine", k.machine)
@@ -297,7 +298,7 @@ func (in *profileInput) check(*API) error {
 
 // pinnable reports whether frv may be pinned in the draft (§3.1): a revision of the draft's cluster
 // that is the revision this draft proposes for its fragment or, with no entry for it, the
-// fragment's head revision.
+// fragment's head revision. The entry decides over the head, which publication replaces with it.
 func pinnable(ctx context.Context, tx *sql.Tx, d lockedDraft, frv string) (bool, error) {
 	var name string
 	switch err := tx.QueryRowContext(ctx, `SELECT name FROM fragment_revision WHERE id = $1 AND cluster = $2`, frv, d.cluster).Scan(&name); {
@@ -332,7 +333,7 @@ func updateProfile(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result,
 		}
 		if !ok {
 			return result{}, refuse(http.StatusUnprocessableEntity, "validation-failed",
-				"a pin must be its fragment's head revision or the revision this draft proposes for it").
+				"a pin must be the revision this draft proposes for its fragment or, with no entry for it, the fragment's head revision").
 				with("path", fmt.Sprintf("fragments[%d]", i)).with("revision", f)
 		}
 	}
