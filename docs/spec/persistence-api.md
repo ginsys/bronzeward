@@ -921,9 +921,12 @@ Handling in the PoC:
   `secret/metadata/gen/*` and nothing else: no `secret/data/*`, no other
   metadata path, no Transit **(choice §17.30)**. The command lists
   `secret/metadata/gen/<cluster id>/` and then each `<claim id>/` under it,
-  outside any transaction (rule 1 of §5), and then reads, in one read-only
-  transaction, the committed reference rows naming those paths and the claims
-  their claim components name. It reports each listed path that no committed
+  outside any transaction (rule 1 of §5), and then reads the committed
+  reference rows naming those paths and the claims their claim components name
+  in one statement, so that both come from one snapshot under read committed
+  (rule 3 of §5): read apart, a draft transaction committing between the two
+  reads would show a generation unreferenced and its claim `released`. It
+  reports each listed path that no committed
   reference row names and whose claim is not live (`held` or `resumed`), with
   the claim's id and, where its row exists, its state, creation time and
   absolute expiry. The reference rows decide, not the claim's state: a
@@ -2499,8 +2502,11 @@ each (design §7.7 consequences):
   `released` claim and of a path whose claim row does not exist, and not the
   generations of a `held` or a `resumed` claim nor a referenced generation of
   an `abandoned` claim, with a control that selects by claim state alone and
-  must then fail; and the provider's versions and the claim rows unchanged by
-  a run.
+  must then fail; a draft transaction releasing a claim committed while the
+  report runs, its generations not reported, with a control that reads the
+  reference rows and the claims in two statements, commits the draft
+  transaction between them and must then report them; and the provider's
+  versions and the claim rows unchanged by a run.
 
 Evidence gaps this contract carries rather than closes:
 
