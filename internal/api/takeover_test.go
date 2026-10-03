@@ -395,11 +395,19 @@ func TestTakeoverRacesT1(t *testing.T) {
 		b := ie.newTaker(options{})
 		tok := ie.human("h-author")
 		inT1 := false
+		var lapsed time.Time
 		done := make(chan *httptest.ResponseRecorder, 1)
-		ie.runWith(t, options{beforeT1: func() { inT1 = true }, commit: func(tx *sql.Tx) error {
-			if inT1 { // T1 holds the claim: the takeover waits for it, then finds it released
+		ie.runWith(t, options{beforeT1: func() {
+			// A lease that outlives T1's release and lapses before its COMMIT: the takeover then
+			// finds a claim eligible as last committed, and only T1's lock holds it off.
+			mustExec(t, ie.db, `UPDATE staging_claim SET lease_until = clock_timestamp() + interval '500 milliseconds' WHERE id = $1`, j.claim.ID)
+			lapsed = time.Now().Add(600 * time.Millisecond)
+			inT1 = true
+		}, commit: func(tx *sql.Tx) error {
+			if inT1 {
+				time.Sleep(time.Until(lapsed))
 				go func() { done <- ie.do(b, takeoverCall(tok, "k-take-race-t1-0123", j.claim.ID)) }()
-				time.Sleep(200 * time.Millisecond)
+				waitForLockWait(t, ie.db)
 			}
 			return tx.Commit()
 		}}, j)
@@ -434,6 +442,17 @@ func TestTakeoverRacesT1(t *testing.T) {
 	})
 }
 
+// waitForLockWait returns once a session of this database waits for a lock, or fails the test.
+func waitForLockWait(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if count(t, db, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`) > 0 {
+			return
+		}
+	}
+	t.Error("no session waited for a lock")
+}
+
 // Review Focus 2: two takers of one lapsed claim: exactly one 202, the other 409 on the winner's
 // live lease; the generation goes up by exactly one.
 func TestTakeoverConcurrentTakers(t *testing.T) {
@@ -459,11 +478,15 @@ func TestTakeoverConcurrentTakers(t *testing.T) {
 	}
 }
 
-// C §13: a resumed run echoes no input, in a response, a stored row or the log.
+// C §13: a resumed run echoes no input, in a response, a stored row or the log. The decrypted
+// envelope's other contents, the sanitized text kept in the document and the baseline
+// ciphertext, are T1's to store, and are emitted nowhere: no response, event, problem or log.
 func TestTakeoverNoEcho(t *testing.T) {
 	ie := newIngestEnv(t, options{})
 	canary := "bw-canary-" + strings.ToLower(rand.Text())
-	op, j := ie.startJob(t, map[string]any{"staging": "encrypted", "document": "machine:\n  token: " + canary + "\n"})
+	const kept = "bw-kept-label-canary" // unmarked, so it stays in the sanitized document
+	op, j := ie.startJob(t, map[string]any{"staging": "encrypted",
+		"document": "machine:\n  token: " + canary + "\n  nodeLabels:\n    tier: " + kept + "\n"})
 	ie.stageThenStop(t, j)
 	ie.lapse(t, j.claim.ID)
 	b := ie.newTaker(options{})
@@ -473,4 +496,23 @@ func TestTakeoverNoEcho(t *testing.T) {
 		t.Fatalf("operation %+v", r)
 	}
 	assertAbsent(t, ie, canary)
+	var ct []byte
+	if err := ie.db.QueryRow(`SELECT baseline_ciphertext FROM import_base_revision WHERE document LIKE '%' || $1 || '%'`,
+		kept).Scan(&ct); err != nil {
+		t.Fatalf("the kept text is not in the stored document: %v", err)
+	}
+	for _, s := range []string{kept, string(ct)} {
+		for _, body := range ie.bodies {
+			if strings.Contains(body, s) {
+				t.Errorf("a response body holds the envelope: %s", body)
+			}
+		}
+		if ie.logged(s) {
+			t.Error("the log holds the envelope")
+		}
+		if n := count(t, ie.db, `SELECT count(*) FROM operation o LEFT JOIN operation_event e ON e.operation = o.id
+			WHERE o.id = $1 AND (o::text LIKE '%' || $2 || '%' OR e::text LIKE '%' || $2 || '%')`, op, s); n != 0 {
+			t.Error("the operation or its events hold the envelope")
+		}
+	}
 }

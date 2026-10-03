@@ -165,4 +165,17 @@ func TestOpen(t *testing.T) {
 			}
 		})
 	}
+
+	// A complete envelope followed by anything but whitespace is not one envelope, under its own
+	// digest; trailing whitespace is.
+	for _, tail := range []string{"]", "}", "]garbage", " {}", "\n" + `"` + secretText + `"`} {
+		b := append(bytes.Clone(p), tail...)
+		if _, err := Open(b, sha256.Sum256(b)); err == nil {
+			t.Errorf("an envelope followed by %q opened", tail)
+		}
+	}
+	b := append(bytes.Clone(p), " \n"...)
+	if _, err := Open(b, sha256.Sum256(b)); err != nil {
+		t.Errorf("an envelope followed by whitespace: %v", err)
+	}
 }
