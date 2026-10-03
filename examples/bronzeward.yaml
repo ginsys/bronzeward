@@ -35,11 +35,14 @@ execution:
 # names are the fixture's; the token file holds ingestion's static OpenBao token, mode 0600,
 # never renewed. `mise run dev-bao` starts a dev-mode OpenBao on loopback for tests, without
 # these keys or a token file. Each cluster's talosconfig is an operator-written provider secret
-# at access/talos/<cluster id> (persistence-api.md §3.3), not a file named here.
+# at access/talos/<cluster id> (persistence-api.md §3.3), not a file named here. reportTokenFile,
+# optional, holds the orphan-report identity's token for `bronzeward orphans` (persistence-api.md
+# §6.4), under the same rules; the server never reads it.
 # provider:
 #   address: http://127.0.0.1:58201
 #   keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest}
 #   ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
+#   reportTokenFile: /etc/bronzeward/openbao-report.token
 # Required with provider, refused without it: the staging claims' timers (compilation.md §3.2
 # requires only heartbeat < lease < absoluteExpiry; the values are open) and this instance's
 # name, which starts the owner identity of its claims. The server writes due claims abandoned
