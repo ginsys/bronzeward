@@ -417,5 +417,6 @@ func (c *Candidate) Commit(ctx context.Context, create func(ctx context.Context,
 			return Sanitized{}, newCreateError(v.name, err)
 		}
 	}
+	seam.At("generation") // step 6 done: every generation created, nothing constructed
 	return newSanitized(c.docs, c.decl), nil
 }

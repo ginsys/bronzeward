@@ -148,7 +148,6 @@ func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 			return err
 		}
 		gens[name] = g.Path.String()
-		seam.At("generation")
 		return nil
 	})
 	if err != nil {
