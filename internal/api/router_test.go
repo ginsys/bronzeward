@@ -188,6 +188,29 @@ func TestNoDispatchTokenOrRoleRoute(t *testing.T) {
 	}
 }
 
+// §6.4, §16: no route serves the orphan report; it is the operator command alone. Control: a
+// registered report route answers, so the 404s are not the router refusing every unknown path.
+func TestNoOrphanReportRoute(t *testing.T) {
+	for _, rt := range routes() {
+		if strings.Contains(strings.ToLower(rt.pattern), "orphan") {
+			t.Fatalf("route %s %s names the orphan report", rt.method, rt.pattern)
+		}
+	}
+	reportPaths := []string{prefix + "/orphans", prefix + "/orphan-report", prefix + "/clusters/" + id.New(id.Cluster) + "/orphans"}
+	e := newEnv(t, options{})
+	all := e.human("h-all")
+	for _, p := range reportPaths {
+		for _, tok := range []string{all, e.robot} {
+			wantProblem(t, e.do(e.api, call{method: "GET", path: p, token: tok}), http.StatusNotFound, "not-found")
+		}
+	}
+	c := newEnv(t, options{extra: []*route{{method: http.MethodGet, pattern: "/orphans", roles: anyRole}}})
+	if rec := c.do(c.api, call{method: "GET", path: reportPaths[0], token: c.human("h-all")}); rec.Code == http.StatusNotFound {
+		t.Fatal("control: a registered report route answered 404")
+	}
+	t.Logf("no route names the orphan report; %d report paths answer 404 to a human and automation; control (registered route): answered", len(reportPaths))
+}
+
 // §10.3: no qualifying role, or automation on a human-only route, is 403 forbidden naming the roles.
 func TestForbidden(t *testing.T) {
 	e := newEnv(t, options{})
