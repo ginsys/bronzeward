@@ -2594,7 +2594,8 @@ Evidence gaps this contract carries rather than closes:
 - **Orphan listing**: PC measured listing under one generation path (row
   065); the check above measures listing at each level of the generation tree
   under the orphan-report identity's policy on the OpenBao version the fixture
-  pins, against a dev-mode server and in S1 against the fixture's (§6.4). No
+  pins against a dev-mode server, and S1 the cluster and claim levels, under
+  `--cluster`, against the fixture's (§6.4). No
   other OpenBao version, and no Vault, is measured.
 - **Unkeyed configuration digests**: releases and import base revisions persist
   unkeyed SHA-256 digests of whole configurations (§1.1, §6.2), whose

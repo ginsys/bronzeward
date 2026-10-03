@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -183,10 +185,29 @@ func (e *orphanEnv) reference(t *testing.T, path string) {
 		VALUES ($1, $2, 'string', 1, NULL, $3)`, e.base, "n"+strings.ToLower(provider.NewValueID()), path)
 }
 
-// run runs the command and returns what it printed on stdout and stderr.
+// run runs the command and returns what it printed on its stdout, and everything else it wrote:
+// its stderr, the process's own stdout and stderr, and the log.
 func (e *orphanEnv) run(args ...string) (string, string, error) {
-	var out, errb bytes.Buffer
+	var out, errb, logb bytes.Buffer
+	r, w, perr := os.Pipe()
+	if perr != nil {
+		return "", "", perr
+	}
+	read := make(chan []byte)
+	go func() {
+		b, _ := io.ReadAll(r)
+		read <- b
+	}()
+	stdout, stderr, logw := os.Stdout, os.Stderr, log.Writer()
+	os.Stdout, os.Stderr = w, w
+	log.SetOutput(&logb)
 	err := runOrphans(append([]string{"-config", e.config}, args...), &out, &errb)
+	os.Stdout, os.Stderr = stdout, stderr
+	log.SetOutput(logw)
+	w.Close()
+	errb.Write(<-read)
+	r.Close()
+	errb.Write(logb.Bytes())
 	return out.String(), errb.String(), err
 }
 
@@ -269,39 +290,73 @@ func TestOrphansClusterScope(t *testing.T) {
 }
 
 // TestOrphansTokenFileRefused: a token file with a group or other permission bit, a FIFO, or a
-// symlink is refused before any provider request.
+// symlink is refused, for that reason, before any provider request. Baseline: the same token in a
+// regular 0600 file reaches the provider.
 func TestOrphansTokenFileRefused(t *testing.T) {
 	e := newOrphanEnv(t)
 	good := e.b.Token("bw-orphan-report")
+	e.gen(t, e.a, id.New(id.Ingestion))
+	if _, _, err := e.run("-cluster", e.a); err != nil || len(e.p.requests()) == 0 {
+		t.Fatalf("baseline: err %v, %d provider requests", err, len(e.p.requests()))
+	}
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.token")
 	writeFile(t, target, good, 0o600)
-	for name, prepare := range map[string]func(){
-		"group-readable": func() { writeFile(t, e.tokenFile, good, 0o640) },
-		"FIFO": func() {
+	for name, c := range map[string]struct {
+		prepare func()
+		reason  string
+	}{
+		"group-readable": {func() { writeFile(t, e.tokenFile, good, 0o640) }, "has mode 640"},
+		"FIFO": {func() {
 			if err := syscall.Mkfifo(e.tokenFile, 0o600); err != nil {
 				t.Fatal(err)
 			}
-		},
-		"symlink": func() {
+		}, "is not a regular file"},
+		"symlink": {func() {
 			if err := os.Symlink(target, e.tokenFile); err != nil {
 				t.Fatal(err)
 			}
-		},
+		}, syscall.ELOOP.Error()},
 	} {
 		if err := os.Remove(e.tokenFile); err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
 		}
-		prepare()
+		c.prepare()
 		before := len(e.p.requests())
 		out, _, err := e.run("-cluster", e.a)
-		if err == nil || out != "" {
+		if err == nil || out != "" || !strings.HasPrefix(err.Error(), "reading the report token: ") ||
+			!strings.Contains(err.Error(), c.reason) {
 			t.Fatalf("%s: err %v, printed %q", name, err, out)
 		}
 		if n := len(e.p.requests()) - before; n != 0 {
 			t.Fatalf("%s: %d provider requests before the refusal", name, n)
 		}
 		t.Logf("%s token file refused before any provider request: %v", name, err)
+	}
+}
+
+// TestOrphansStartupFailuresNameTheStep: a configuration that does not load and a database that
+// does not answer each exit nonzero naming the step, before any provider request, printing nothing.
+func TestOrphansStartupFailuresNameTheStep(t *testing.T) {
+	e := newOrphanEnv(t)
+	body, err := os.ReadFile(e.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	unreachable := filepath.Join(dir, "unreachable.yaml")
+	dsn := regexp.MustCompile(`dsn: .*`).ReplaceAllString(string(body), "dsn: postgres://bw@127.0.0.1:1/bw?connect_timeout=2")
+	writeFile(t, unreachable, dsn, 0o600)
+	for config, step := range map[string]string{
+		filepath.Join(dir, "absent.yaml"): "reading the configuration: ",
+		unreachable:                       "opening the database: ",
+	} {
+		e.config = config
+		out, _, err := e.run("-cluster", e.a)
+		if err == nil || out != "" || !strings.HasPrefix(err.Error(), step) || len(e.p.requests()) != 0 {
+			t.Fatalf("%s: err %v, printed %q, %d provider requests", step, err, out, len(e.p.requests()))
+		}
+		t.Logf("%v", err)
 	}
 }
 
@@ -388,7 +443,8 @@ func (b breakDB) Claims(ctx context.Context, cluster string) (provider.Listing, 
 }
 
 // TestOrphansNoCustomMetadata: a generation's custom metadata holding a sentinel never reaches the
-// output or an error. Control: printing the provider's metadata response prints it.
+// output, the process's stdout or stderr, the log or an error. Control: the provider's metadata
+// response written to each of those surfaces is seen there.
 func TestOrphansNoCustomMetadata(t *testing.T) {
 	e := newOrphanEnv(t)
 	p := e.gen(t, e.a, id.New(id.Ingestion))
@@ -397,32 +453,51 @@ func TestOrphansNoCustomMetadata(t *testing.T) {
 		map[string]any{"custom_metadata": map[string]string{"note": sentinel}}); err != nil || s/100 != 2 {
 		t.Fatalf("writing custom metadata: status %d, %v: %s", s, err, body)
 	}
-	out, stderr, err := e.run("-cluster", e.a)
-	if err != nil || !strings.Contains(out, p) || strings.Contains(out+stderr, sentinel) {
-		t.Fatalf("err %v; output holds the sentinel %v", err, strings.Contains(out+stderr, sentinel))
+	out, other, err := e.run("-cluster", e.a)
+	if err != nil || !strings.Contains(out, p) || strings.Contains(out+other, sentinel) {
+		t.Fatalf("err %v; output holds the sentinel %v", err, strings.Contains(out+other, sentinel))
 	}
 	tok := e.b.Token("bw-orphan-report")
-	orphanHooks.lister = func(l orphans.Lister, w io.Writer) orphans.Lister { return metadataPrinting{l, w, e.b, tok} }
-	out, _, err = e.run("-cluster", e.a)
-	if err != nil || !strings.Contains(out, sentinel) {
-		t.Fatalf("control: printing the metadata response did not print the sentinel: %v", err)
+	// An error is not a surface the control can reach: Collect reduces every listing error to its
+	// step and class, whose exact text TestOrphansFailuresPrintNothing asserts.
+	for _, surface := range []string{"output", "stderr", "log"} {
+		orphanHooks.lister = func(l orphans.Lister, w io.Writer) orphans.Lister {
+			return metadataPrinting{l, w, e.b, tok, surface}
+		}
+		out, other, err = e.run("-cluster", e.a)
+		seen := out + other
+		if err != nil {
+			seen += err.Error()
+		}
+		if !strings.Contains(seen, sentinel) {
+			t.Fatalf("control: the metadata response written to the %s was not seen: %v", surface, err)
+		}
 	}
-	t.Logf("the sentinel is absent from the output; control (print the metadata response): present")
+	t.Logf("the sentinel is absent; control (the metadata response on output, stderr, log): seen on each")
 }
 
-// metadataPrinting is the control that prints each listed generation's metadata response.
+// metadataPrinting is the control that writes each listed generation's metadata response to one
+// surface: the command's output, the process's stderr, or the log.
 type metadataPrinting struct {
 	orphans.Lister
-	w   io.Writer
-	b   *baotest.Bao
-	tok string
+	w       io.Writer
+	b       *baotest.Bao
+	tok     string
+	surface string
 }
 
 func (m metadataPrinting) Values(ctx context.Context, cluster, claim string) (provider.Generations, error) {
 	g, err := m.Lister.Values(ctx, cluster, claim)
 	for _, x := range g.Paths {
 		_, body, _ := m.b.Do(m.tok, http.MethodGet, "/v1/secret/metadata/"+x.String(), nil)
-		m.w.Write(body)
+		switch m.surface {
+		case "output":
+			m.w.Write(body)
+		case "stderr":
+			os.Stderr.Write(body)
+		case "log":
+			log.Print(string(body))
+		}
 	}
 	return g, err
 }
@@ -443,8 +518,14 @@ func TestOrphansChangesNothing(t *testing.T) {
 				return err
 			}
 		}
-		if _, _, err := e.run("-cluster", e.a); err != nil {
+		sent := len(e.p.requests())
+		out, _, err := e.run("-cluster", e.a)
+		if err != nil {
 			t.Fatal(err)
+		}
+		if len(e.p.requests()) == sent || !strings.Contains(out, "orphan\t"+gens[0]+"\t") ||
+			!strings.Contains(out, "orphan\t"+gens[2]+"\t") || strings.Contains(out, gens[1]) {
+			t.Fatalf("the run did not list and report the seeded orphans:\n%s", out)
 		}
 		after := e.state(t, gens)
 		switch {
