@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 
 	"github.com/ginsys/bronzeward/internal/id"
 )
@@ -18,6 +19,10 @@ import (
 
 func profileUpdate() effectRoute {
 	return effectRoute{action: "draft.profile.update", input: func() input { return &profileInput{} }, effect: updateProfile}
+}
+
+func assignmentUpdate() effectRoute {
+	return effectRoute{action: "draft.assignment.update", input: func() input { return &assignmentInput{} }, effect: updateAssignment}
 }
 
 func fragmentRemoval() effectRoute   { return removal("fragment") }
@@ -337,4 +342,127 @@ func updateProfile(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result,
 		return result{}, err
 	}
 	return d.answer(ctx, tx, e, prv)
+}
+
+// fragmentLayers are the layers in composition order (§9.3, choice §17.31): design §6.2's seven
+// minus machine-intrinsic, which is the import base.
+var fragmentLayers = []string{"global", "site", "cluster", "role", "workload", "override"}
+
+// assignmentInput is an assignment revision's body: profiles, then fragments per layer, by name
+// (§9.3).
+type assignmentInput struct {
+	Profiles  []string            `json:"profiles"`
+	Fragments map[string][]string `json:"fragments"`
+}
+
+func (in *assignmentInput) check(*API) error {
+	n := len(in.Profiles)
+	if err := names("profiles", in.Profiles, map[string]bool{}); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for layer, list := range in.Fragments {
+		if !slices.Contains(fragmentLayers, layer) {
+			return errors.New("fragments has a member that is not a layer: global, site, cluster, role, workload or override")
+		}
+		if len(list) == 0 {
+			return fmt.Errorf("fragments.%s must list a fragment", layer)
+		}
+		if err := names("fragments."+layer, list, seen); err != nil {
+			return err
+		}
+		n += len(list)
+	}
+	if n == 0 || n > 256 {
+		return errors.New("an assignment must select 1 to 256 profiles and fragments")
+	}
+	return nil
+}
+
+// names checks a list of names, none in seen, and adds them to it.
+func names(path string, list []string, seen map[string]bool) error {
+	for i, s := range list {
+		if !validName(s) {
+			return fmt.Errorf("%s[%d] must be 1 to 63 lowercase letters, digits and inner hyphens", path, i)
+		}
+		if seen[s] {
+			return fmt.Errorf("%s[%d] repeats a name", path, i)
+		}
+		seen[s] = true
+	}
+	return nil
+}
+
+// selectable reports whether the draft may select name (§3.1): proposed by this draft or, with no
+// entry for it, a head with a revision. For a fragment it also returns that revision's layer.
+func selectable(ctx context.Context, tx *sql.Tx, d lockedDraft, kind, name string) (ok bool, layer string, err error) {
+	k := sourceKey{kind: kind, name: name}
+	found, _, rev, err := entryOf(ctx, tx, d, k)
+	if err == nil && !found {
+		_, _, rev, err = headOf(ctx, tx, d, k)
+	}
+	if err != nil || rev == nil {
+		return false, "", err
+	}
+	if kind == "fragment" {
+		err = tx.QueryRowContext(ctx, `SELECT layer FROM fragment_revision WHERE id = $1`, *rev).Scan(&layer)
+	}
+	return true, layer, err
+}
+
+func updateAssignment(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
+	in := q.input.(*assignmentInput)
+	d, err := lockDraft(ctx, tx, q)
+	if err != nil {
+		return result{}, err
+	}
+	k, err := keyOf(ctx, tx, q, d, "assignment")
+	if err != nil {
+		return result{}, err
+	}
+	invalid := func(path string, i int) error {
+		return refuse(http.StatusUnprocessableEntity, "validation-failed",
+			"a name must have a head or be proposed by this draft, not removed by it, and a fragment must carry its layer").
+			with("path", fmt.Sprintf("%s[%d]", path, i))
+	}
+	for i, p := range in.Profiles {
+		if ok, _, err := selectable(ctx, tx, d, "profile", p); err != nil {
+			return result{}, err
+		} else if !ok {
+			return result{}, invalid("profiles", i)
+		}
+	}
+	for _, layer := range fragmentLayers {
+		for i, f := range in.Fragments[layer] {
+			if ok, l, err := selectable(ctx, tx, d, "fragment", f); err != nil {
+				return result{}, err
+			} else if !ok || l != layer {
+				return result{}, invalid("fragments."+layer, i)
+			}
+		}
+	}
+	asr := id.New(id.AssignmentRevision)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO assignment_revision (id, cluster, machine, author, created_at) VALUES ($1, $2, $3, $4, now())`,
+		asr, d.cluster, k.machine, q.principal.ID); err != nil {
+		return result{}, err
+	}
+	for i, p := range in.Profiles {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO assignment_revision_profile (revision, position, profile) VALUES ($1, $2, $3)`,
+			asr, i, p); err != nil {
+			return result{}, err
+		}
+	}
+	for _, layer := range fragmentLayers {
+		for i, f := range in.Fragments[layer] {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO assignment_revision_fragment (revision, layer, position, fragment)
+				VALUES ($1, $2, $3, $4)`, asr, layer, i, f); err != nil {
+				return result{}, err
+			}
+		}
+	}
+	e, err := setEntry(ctx, tx, d, k, asr)
+	if err != nil {
+		return result{}, err
+	}
+	return d.answer(ctx, tx, e, asr)
 }
