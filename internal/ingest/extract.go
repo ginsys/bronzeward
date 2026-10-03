@@ -102,7 +102,6 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	if err != nil {
 		return nil, err
 	}
-	seam.At("substitute")
 	for _, e := range embedded {
 		plainStyle(e.doc)
 		text, err := encodeStream([]*yaml.Node{e.doc})
@@ -129,6 +128,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	if err != nil {
 		return nil, errors.New("ingest: the sanitized stream does not parse back")
 	}
+	seam.At("substitute") // step 4 done: the candidate document and its declarations built, not guarded
 	if guarded {
 		if err := guard(back, exs, declared); err != nil {
 			return nil, err
