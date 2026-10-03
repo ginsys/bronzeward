@@ -49,7 +49,7 @@ type Error struct {
 	err         error
 }
 
-func (e *Error) Error() string { return "orphans: " + e.Step + ": " + e.Class }
+func (e *Error) Error() string { return e.Step + ": " + e.Class }
 func (e *Error) Unwrap() error { return e.err }
 
 // Steps.
@@ -108,7 +108,7 @@ func collect(ctx context.Context, l Lister, db *sql.DB, cluster string, o option
 	switch {
 	case cluster != "":
 		if id.MustHave(cluster, id.Cluster) != nil {
-			return Report{}, errors.New("orphans: the cluster is not a cluster identifier")
+			return Report{}, errors.New("the cluster is not a cluster identifier")
 		}
 		clusters = []string{cluster}
 	case o.dbClusters:
