@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/ginsys/bronzeward/internal/provider"
 )
@@ -92,7 +93,11 @@ func Open(plaintext []byte, sum [32]byte) (Staged, error) {
 	var e envelope
 	dec := json.NewDecoder(bytes.NewReader(plaintext))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&e); err != nil || dec.More() {
+	if err := dec.Decode(&e); err != nil {
+		return Staged{}, errEnvelope
+	}
+	// More reports false before a stray ] or }; only the end of input ends the envelope.
+	if _, err := dec.Token(); err != io.EOF {
 		return Staged{}, errEnvelope
 	}
 	if e.Version != 1 || e.Documents == "" || e.Baseline.Ciphertext == "" || e.Baseline.DigestKey == "" {
