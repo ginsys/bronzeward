@@ -211,7 +211,15 @@ every table **(choice §17.9)**. The only in-place clearing is compilation's: a
 claim's payload is set to `NULL` on release or abandonment.
 
 Immutable tables carry a trigger that refuses `UPDATE` and `DELETE`, with a test
-that the trigger fires **(choice §17.3)**.
+that the trigger fires **(choice §17.3)**. A source revision's rows (a fragment
+revision's reference rows, a profile revision's pins, an assignment revision's
+selections) are written in the transaction that writes the revision, and a
+trigger refuses a row for a revision already committed, so a revision's
+content cannot grow after it is read. Each revision records its writer, the
+full transaction ID set by the database on insert; a row whose revision has
+another writer is refused, and one whose revision this transaction cannot see
+is refused as a missing reference when it is inserted, not at the end of the
+statement.
 
 | Entity | Kind | Holds | Owner of semantics |
 | --- | --- | --- | --- |
@@ -276,6 +284,27 @@ is `queued` or `running`, the draft accepts neither an update nor a discard:
 both answer `409 conflict` naming the operation, so the revision the operation
 is bound to cannot move under it. Once the operation fails, the draft accepts
 edits again.
+
+A profile revision pins fragment **revisions**; an assignment revision selects
+profiles and fragments by **name**, per layer, and the publication that
+compiles it uses each named head's revision, which T3 holds unchanged
+(§6.2). A fragment carries one of six layers, in composition order `global`,
+`site`, `cluster`, `role`, `workload`, `override`: design §6.2's seven minus
+machine-intrinsic, which is the import base (compilation §6). The draft's own
+entry for a name decides over its head, since publication replaces the head
+with it: a pin must be the revision this draft proposes for its fragment or,
+with no entry for that fragment, the fragment's head revision; a selected name
+must be proposed by this draft or, with no entry for it, have a head with a
+revision; a name this draft removes can be neither pinned nor selected; and a
+fragment selected under a layer must carry that layer. Otherwise the update is
+refused `422 validation-failed`, naming the body path (compilation §7, stage
+1). Publication checks the same again. A removal of a name the draft
+introduces, with no head, leaves an entry whose base is absent and whose
+publication creates nothing; a removal of a name with neither a head (one a
+publication removed counts) nor an entry is `404`. The PoC accepts cluster scope only: a fragment or
+profile names its draft's cluster, and the library scope of choice §17.28 is
+refused by the schema until a later phase defines how its draft is reviewed
+**(choice §17.31)**.
 
 A draft and its release cover one cluster, while a fragment may belong to the
 library. A library fragment changed in one cluster's draft is published once,
@@ -599,7 +628,7 @@ The transactions this contract defines or constrains:
 
 | # | Transaction | Locks and checks | Writes |
 | --- | --- | --- | --- |
-| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed`, and a draft no longer `open` or one with an active publication fails it `409 conflict` (naming that publication), each with its terminal event, in the owner-checked transaction that abandons its claim once the draft transaction has rolled back (§8.2). An import of a machine already in the draft replaces its draft entry. Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
+| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; the fragment and profile heads a profile's pins or an assignment's selections are checked against (§3.1), `FOR SHARE` in id order, a head created after this step counting as no head; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed`, and a draft no longer `open` or one with an active publication fails it `409 conflict` (naming that publication), each with its terminal event, in the owner-checked transaction that abandons its claim once the draft transaction has rolled back (§8.2). An import of a machine already in the draft replaces its draft entry. Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
 | T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active `publish` one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
 | T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published and, for an `apply-config` plan, the machine's `Desired` (execution and recovery choice §10.24); execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
@@ -1476,6 +1505,94 @@ ETag: "7-shw6tpirbqvgj3qjuv2hicf6vm"
 `<value>` stands for the value the operator submits; it appears in no stored
 record or response. `DELETE` on the same route proposes the removal, with no
 body. `marks` are compilation §2.2 paths.
+
+A profile pins fragment revisions in order; an assignment selects profiles,
+then fragments per layer, by name (§3.1). Neither body can hold a secret
+value, so neither route ingests: each is a plain T1 under the SHA-256
+fingerprint (§7.1). A name the draft introduces has `"head": null` and
+`"base": null`; a removal has `"revision": null`:
+
+```http
+PUT /api/v1/drafts/drf_2rmpezm5rfx47azsgmp66z457a/profiles/workers
+Idempotency-Key: 3d5f0e9a-71c2-4b8e-a6d4-2f9c1b7e0a53
+If-Match: "7-shw6tpirbqvgj3qjuv2hicf6vm"
+
+{"fragments": ["frv_sqb745zrpl2xltek22ai7sbdue"]}
+
+HTTP/1.1 200 OK
+ETag: "8-a4kc2xq7zxgbgnmwvtqwhk3f5e"
+
+{"draft": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "entry": {"kind": "profile", "name": "workers", "head": null, "base": null,
+           "revision": "prv_6h2o4vzxkdyb7xg5qwsl3fjrua"}}
+
+PUT /api/v1/drafts/drf_2rmpezm5rfx47azsgmp66z457a/assignments/mch_tqhcznunhyle4hnxru5hkt35uq
+Idempotency-Key: 9b7e2c14-0f6d-4a38-8e51-c3a9d2f47b06
+If-Match: "8-a4kc2xq7zxgbgnmwvtqwhk3f5e"
+
+{"profiles": ["workers"], "fragments": {"cluster": ["registries"]}}
+
+HTTP/1.1 200 OK
+ETag: "9-pq3vylwbn4ijc5mc6z6yq2dmzi"
+
+{"draft": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "entry": {"kind": "assignment", "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+           "head": "asg_kyzk4xw2xq2jtc3pnu6d5vbz3e", "base": 2,
+           "revision": "asr_e7v7jq6g4e3tsx2wq5ynldkb3a"}}
+```
+
+Here `registries` must carry the `cluster` layer, as its fragment entry does. Discarding a draft takes an
+empty object and answers the draft, `discarded`:
+
+```http
+POST /api/v1/drafts/drf_2rmpezm5rfx47azsgmp66z457a/discard
+Idempotency-Key: 5c0a8f3e-6b14-4d7a-9e2c-71f5b8d3a046
+If-Match: "9-pq3vylwbn4ijc5mc6z6yq2dmzi"
+
+{}
+
+HTTP/1.1 200 OK
+
+{"id": "drf_2rmpezm5rfx47azsgmp66z457a",
+ "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha", "title": "registry mirror",
+ "state": "discarded", "revision": 10, "entries": [...]}
+```
+
+A draft's `entries` list its import base entries in machine order, then its
+fragment, profile and assignment entries in that order, by name or machine,
+each as the update route answered it. A head answers its current revision
+(`null` once removed) and head revision, with `"<headRevision>-<token>"` as
+its ETag (§4.1). Its `revisions` are every revision of its name, or its
+machine, published or not, in identifier order. A revision answers its
+content: a fragment revision its sanitized `document` and `layer`, a profile
+revision its `fragments` pins in order, an assignment revision its `profiles`
+and `fragments` per layer. The discarded draft moved no head, so `registries`
+still answers head revision 3, the base the draft edited from, while the
+draft's own revisions stay readable by id:
+
+```http
+GET /api/v1/fragments/frg_rgkebwvneg6mxhid62gec5difi
+
+HTTP/1.1 200 OK
+ETag: "3-m3oxmlfh6phr7aigshdydcb4ji"
+
+{"id": "frg_rgkebwvneg6mxhid62gec5difi",
+ "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha", "scope": "cluster",
+ "name": "registries", "layer": "cluster",
+ "revision": "frv_lc4wfn2tqz3mxu7h5kdo6ybvpe", "headRevision": 3,
+ "createdAt": "2026-09-20T08:30:11Z"}
+
+GET /api/v1/assignment-revisions/asr_e7v7jq6g4e3tsx2wq5ynldkb3a
+
+HTTP/1.1 200 OK
+
+{"id": "asr_e7v7jq6g4e3tsx2wq5ynldkb3a",
+ "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
+ "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+ "profiles": ["workers"], "fragments": {"cluster": ["registries"]},
+ "author": "idn_5u4k6llt7jsktfhcfv35xmdetu",
+ "createdAt": "2026-09-26T09:12:40Z"}
+```
 
 Starting an import, and reading a release and a machine:
 
@@ -2781,6 +2898,17 @@ design and evidence do not settle the question. Each is marked in place as
     abandoned claims from the database alone, which names no path (a claim
     records none, and choice 8 rejected a path ledger) and cannot see the
     orphans of a claim a restore removed.
+31. **A profile pins fragment revisions; an assignment selects heads by
+    name; six fragment layers; cluster scope only in the PoC** (§3.1). A
+    profile is "an ordered list of fragment revisions" (design §6.2), while
+    T3's check of unchanged heads and choice 28's library pickup need the
+    assignment to name heads. Pins and names are checked when the draft is
+    updated and again at publication. Alternatives: profiles naming heads
+    too, which makes a profile's content move without an edit to it;
+    assignments pinning revisions, which leaves T3's unchanged heads nothing
+    to protect and a library change no way to reach a cluster without an
+    edit to every assignment. Library scope waits for a phase that defines
+    its review (ginsys/bronzeward#23 scope).
 
 ## 18. Traceability
 
@@ -2788,7 +2916,7 @@ design and evidence do not settle the question. Each is marked in place as
 | --- | --- | --- |
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
-| §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28 |
+| §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31 |
 | §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.13.6); the provider read grant on `secret/data/access/talos/*` not measured (choice §17.29) |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |

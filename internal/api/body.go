@@ -38,8 +38,15 @@ var errNotObject = errors.New("the body must be one JSON object of this route's 
 // content type other than JSON, a body over maxBody, a member that is unknown, repeated or
 // differently cased (encoding/json would accept the last two), and trailing data. Its errors name
 // no value (§9.4). A non-empty omit is a keyed route's document member (§7.1): it is decoded into
-// in but left out of the canonical form.
+// in but left out of the canonical form. A noBody route takes no body at all, and no content type.
 func decodeBody(r *http.Request, in input, omit string) ([]byte, error) {
+	if _, ok := in.(*noBody); ok {
+		var one [1]byte
+		if n, _ := io.ReadFull(r.Body, one[:]); n != 0 {
+			return nil, errors.New("this route takes no body")
+		}
+		return []byte{}, nil
+	}
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
 		return nil, errors.New("Content-Type must be application/json")
 	}
