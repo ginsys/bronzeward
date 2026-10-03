@@ -229,74 +229,7 @@ func TestSourcesRevisionRowsWithTheirRevision(t *testing.T) {
 		t.Errorf("pin of no revision: %v; want SQLSTATE 23503", err)
 	}
 
-	// A revision another transaction has written but not committed is no revision to this one: the
-	// row is refused when it is inserted, never left to the foreign key, which runs at the end of
-	// the statement and would accept it had that transaction committed meanwhile. The statement
-	// below inserts the late row, then its second row, a pin of the statement's own revision, waits
-	// on an advisory lock the barrier holds. The writer commits only once the statement has either
-	// refused the first row or reached that barrier, and the barrier is released after the commit.
-	ctx := context.Background()
-	barrier, err := db.Conn(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = barrier.Close() }()
-	var holder int
-	if err := barrier.QueryRowContext(ctx, `SELECT pg_backend_pid() FROM pg_advisory_lock(2309)`).Scan(&holder); err != nil {
-		t.Fatal(err)
-	}
-	writer, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = writer.Rollback() }()
-	late, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = late.Rollback() }()
-	pending, mine := id.New(id.ProfileRevision), id.New(id.ProfileRevision)
-	mustExec(t, writer, insertProfileRevision, pending, s.cluster, "pending", s.human)
-	mustExec(t, late, insertProfileRevision, mine, s.cluster, "mine", s.human)
-	done := make(chan error, 1)
-	go func() {
-		_, err := late.Exec(`INSERT INTO profile_revision_fragment (revision, cluster, position, fragment_revision)
-			SELECT v.r, $3, 0, $4 FROM (VALUES (0, $1::text), (1, $2::text)) v (n, r)
-			WHERE v.n = 0 OR (SELECT true FROM pg_advisory_xact_lock(2309))`, pending, mine, s.cluster, s.frv1)
-		done <- err
-	}()
-	var lateErr error
-	refused := false
-	for deadline := time.Now().Add(5 * time.Second); !refused; time.Sleep(10 * time.Millisecond) {
-		select {
-		case lateErr = <-done:
-			refused = true
-			continue
-		default:
-		}
-		var waiting bool
-		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY (pg_blocking_pids(pid)))`, holder).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the statement neither refused its first row nor reached the barrier")
-		}
-	}
-	if err := writer.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := barrier.ExecContext(ctx, `SELECT pg_advisory_unlock(2309)`); err != nil {
-		t.Fatal(err)
-	}
-	if !refused {
-		lateErr = <-done
-	}
-	if sqlState(lateErr) != "23503" {
-		t.Errorf("pin of a revision committed during the statement: %v; want SQLSTATE 23503", lateErr)
-	}
+	unseenRevisionRow(t, db, s)
 
 	// The writer is the top-level transaction, also in a savepoint, and whatever an INSERT supplies.
 	tx, err := db.Begin()
@@ -317,6 +250,98 @@ func TestSourcesRevisionRowsWithTheirRevision(t *testing.T) {
 		forged, s.cluster, s.human)
 	if _, err := tx.Exec(insertProfilePin, forged, s.cluster, 0, s.frv1); err != nil {
 		t.Errorf("pin of a revision whose INSERT supplied a writer: %v", err)
+	}
+}
+
+// unseenRevisionRow: a revision another transaction has written but not committed is no revision
+// to this one. Its row is refused when it is inserted, never left to the foreign key, which runs at
+// the end of the statement and would accept it had that transaction committed meanwhile. A
+// test-only trigger on the late row, firing after with_revision (triggers fire in name order),
+// waits on an advisory lock the barrier holds: an intact guard refuses the row before it, a missing
+// one reaches it. The writer commits only once the statement has been refused or waits on the
+// barrier, which is released after the commit.
+func unseenRevisionRow(t *testing.T, db *sql.DB, s sources) {
+	t.Helper()
+	mustExec(t, db, `CREATE FUNCTION test_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.revision = current_setting('bw.barrier', true) THEN
+				PERFORM pg_advisory_xact_lock(2309);
+			END IF;
+			RETURN NEW;
+		END $$`)
+	mustExec(t, db, `CREATE TRIGGER zz_barrier BEFORE INSERT ON profile_revision_fragment FOR EACH ROW EXECUTE FUNCTION test_barrier()`)
+	defer mustExec(t, db, `DROP FUNCTION test_barrier() CASCADE`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	barrier, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = barrier.Close() }()
+	var holder int
+	if err := barrier.QueryRowContext(ctx, `SELECT pg_backend_pid() FROM pg_advisory_lock(2309)`).Scan(&holder); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Rollback() }()
+	late, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = late.Rollback() }()
+	// Runs before the rollbacks above, on every path: the statement is cancelled and the barrier
+	// released, so no rollback waits on a statement still blocked behind it.
+	defer func() {
+		cancel()
+		_, _ = barrier.ExecContext(context.Background(), `SELECT pg_advisory_unlock_all()`)
+	}()
+	pending := id.New(id.ProfileRevision)
+	mustExec(t, writer, insertProfileRevision, pending, s.cluster, "pending", s.human)
+	mustExec(t, late, `SELECT set_config('bw.barrier', $1, true)`, pending)
+	done := make(chan error, 1)
+	go func() {
+		_, err := late.ExecContext(ctx, insertProfilePin, pending, s.cluster, 0, s.frv1)
+		done <- err
+	}()
+	var lateErr error
+	refused := false
+	for !refused {
+		select {
+		case lateErr = <-done:
+			refused = true
+			continue
+		case <-ctx.Done():
+			t.Fatal("the statement neither was refused nor reached the barrier")
+		case <-time.After(10 * time.Millisecond):
+		}
+		var waiting bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY (pg_blocking_pids(pid)))`,
+			holder).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+	}
+	if err := writer.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := barrier.ExecContext(ctx, `SELECT pg_advisory_unlock(2309)`); err != nil {
+		t.Fatal(err)
+	}
+	if !refused {
+		select {
+		case lateErr = <-done:
+		case <-ctx.Done():
+			t.Fatal("the statement did not finish after the barrier was released")
+		}
+	}
+	if sqlState(lateErr) != "23503" {
+		t.Errorf("pin of a revision committed during the statement: %v; want SQLSTATE 23503", lateErr)
 	}
 }
 
