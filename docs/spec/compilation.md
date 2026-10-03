@@ -367,7 +367,11 @@ Its effects:
   to redo;
 - a takeover whose decryption fails, for example with the provider unreachable,
   leaves the taker owning the claim until its lease lapses; the claim can be
-  taken over again until its absolute expiry and is then abandoned.
+  taken over again until its absolute expiry and is then abandoned;
+- a decrypted envelope that does not match the claim's stored digest, or does
+  not decode, is an integrity failure: the taker abandons the claim, its
+  operation fails `500 internal-error`, and the draft transaction writes
+  nothing.
 
 The claim row's generation fence coordinates ingestion workers only. It does
 not stop a stale process from doing work outside the database; it stops that
