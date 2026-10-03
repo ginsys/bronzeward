@@ -921,17 +921,23 @@ Handling in the PoC:
   `secret/metadata/gen/*` and nothing else: no `secret/data/*`, no other
   metadata path, no Transit **(choice §17.30)**. The command lists
   `secret/metadata/gen/<cluster id>/` and then each `<claim id>/` under it,
-  outside any transaction (rule 1 of §5), and then reads the named claims in one
-  read-only transaction. It reports each path whose claim is `abandoned`, or
-  absent from the database, with the claim's id, state, creation time and
-  absolute expiry where the row exists. A `held` or `resumed` claim is still in
-  flight and a `released` one's generations are referenced by its draft
-  revision (compilation §13), so their paths are not reported. A claim row is
-  committed by ingestion start (T11, compilation §2.3 step 0) before the first
-  generation is created at step 6, so a path without one is source 3 above, or
-  a claim this database never held. The report names paths, claim ids, states
-  and times only, never a value or custom metadata, and changes nothing in the
-  provider or the database.
+  outside any transaction (rule 1 of §5), and then reads, in one read-only
+  transaction, the committed reference rows naming those paths and the claims
+  their claim components name. It reports each listed path that no committed
+  reference row names and whose claim is not live (`held` or `resumed`), with
+  the claim's id and, where its row exists, its state, creation time and
+  absolute expiry. The reference rows decide, not the claim's state: a
+  `released` claim can leave an orphan (a further mark's generations created
+  before an interruption at compilation §2.3 step 8, its earlier payload then
+  resumed and released, compilation §3), and recovery-mode entry marks an
+  earlier epoch's claims `abandoned` whatever their generations' references
+  (§12.2). A live claim's generations are omitted because its ingestion is
+  still in flight. A claim row is committed by ingestion start (T11,
+  compilation §2.3 step 0) before the first generation is created at step 6,
+  so a path without one is source 3 above, or a claim this database never
+  held. The report names paths, claim ids, states and times only, never a
+  value or custom metadata, and changes nothing in the provider or the
+  database.
 
 ## 7. Idempotency
 
@@ -2484,11 +2490,17 @@ each (design §7.7 consequences):
   reading a generation's metadata, and refused a `secret/data/gen/*` read, a
   `list` of `secret/metadata/access/`, and every Transit request, with a
   control that grants it `read` on `secret/data/gen/*` and must then succeed;
-  the report naming the paths of an `abandoned` claim and a path whose claim
-  row does not exist, and not the paths of a `held`, a `resumed` and a
-  `released` claim, with a control that reports every listed path and must
-  then fail; and the provider's versions and the claim rows unchanged by a
-  run.
+  the same identity refused every change under the generation path (a
+  `secret/data/gen/*` create, a metadata update and a metadata delete under
+  `secret/metadata/gen/*`, and a `secret/delete/gen/*` and
+  `secret/destroy/gen/*` request), with a control that grants it `delete` on
+  `secret/metadata/gen/*` and must then succeed against a disposable path;
+  the report naming an unreferenced generation of an `abandoned` claim, of a
+  `released` claim and of a path whose claim row does not exist, and not the
+  generations of a `held` or a `resumed` claim nor a referenced generation of
+  an `abandoned` claim, with a control that selects by claim state alone and
+  must then fail; and the provider's versions and the claim rows unchanged by
+  a run.
 
 Evidence gaps this contract carries rather than closes:
 
