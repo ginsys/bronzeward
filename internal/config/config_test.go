@@ -233,6 +233,16 @@ func TestProviderBlock(t *testing.T) {
 		p.Keys.Staging != "bw-staging" || p.Keys.Digest != "bw-digest" || p.IngestionTokenFile != "/etc/bronzeward/openbao-ingestion.token" {
 		t.Fatalf("%+v", p)
 	}
+	if p.ReportTokenFile != "" {
+		t.Fatalf("an absent reportTokenFile reads %q", p.ReportTokenFile)
+	}
+	c, err = Load(strings.NewReader(base + authBlock + providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-report.token\n" + ingestionBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Provider.ReportTokenFile != "/etc/bronzeward/openbao-report.token" {
+		t.Fatalf("reportTokenFile %q", c.Provider.ReportTokenFile)
+	}
 	for name, in := range map[string]string{
 		"loopback http":  strings.Replace(providerBlock, "https://bao.example.test:8200", "http://127.0.0.1:58200", 1),
 		"listed http":    strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1) + "  plainHTTPHosts: [openbao]\n",
@@ -260,6 +270,7 @@ func TestProviderBlock(t *testing.T) {
 		"key too long":      {strings.Replace(providerBlock, "bw-digest", strings.Repeat("k", 228), 1), "provider.keys.digest"},
 		"shared key":        {strings.Replace(providerBlock, "bw-digest", "bw-staging", 1), "distinct"},
 		"no token file":     {strings.Replace(providerBlock, "  ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "", 1), "provider.ingestionTokenFile is required"},
+		"shared token file": {providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "provider.reportTokenFile names ingestion's token file"},
 		"unknown field":     {providerBlock + "  token: x\n", "field token not found"},
 		"unknown key":       {strings.Replace(providerBlock, "digest: bw-digest", "digest: bw-digest, artifact: bw-artifact", 1), "field artifact not found"},
 	} {

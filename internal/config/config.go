@@ -80,6 +80,9 @@ type Provider struct {
 	// IngestionTokenFile holds ingestion's static token: a regular file of mode 0600 or tighter,
 	// read at use, one trailing newline trimmed, never renewed.
 	IngestionTokenFile string `yaml:"ingestionTokenFile"`
+	// ReportTokenFile holds the orphan-report identity's static token (persistence-api.md §6.4),
+	// under the same rules. The server does not use it; `bronzeward orphans` requires it.
+	ReportTokenFile string `yaml:"reportTokenFile"`
 }
 
 // ProviderKeys names the three Transit keys ingestion uses, each its own.
@@ -224,6 +227,10 @@ func (p *Provider) validate() error {
 	}
 	if p.IngestionTokenFile == "" {
 		return errors.New("config: provider.ingestionTokenFile is required")
+	}
+	if p.ReportTokenFile == p.IngestionTokenFile {
+		// The report authenticates with its own identity and no other (§6.4).
+		return errors.New("config: provider.reportTokenFile names ingestion's token file; the report has its own token")
 	}
 	return nil
 }
