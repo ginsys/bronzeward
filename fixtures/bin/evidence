@@ -221,14 +221,28 @@ fi
 # What an instance wrote outside its log, a temporary or staging file a kill left behind, is in its
 # container's writable layer, and read from there whether the process runs or not. docker diff
 # lists what the layer holds (kept as layers/<name>.diff); each entry added or changed is copied as
-# it is, under layers/<name>/ at its own path. A directory is not copied whole, since its entries
-# are listed on their own, and nothing at, under or above a mount is: copied whole, it would bring
-# in the configuration mounted read-only, tokens included, which is input, not something the
-# instance wrote. A symbolic link is kept as the text of its target (layers/<name>.links), never
-# followed: what it names is outside the layer, and the scan below refuses a link. A tmpfs is not
-# in the layer at all, so one on an instance leaves the capture incomplete.
+# it is, under layers/<name>/ at its own path. A path is every byte of its line after the "A " or
+# "C ", so a name ending in a space is its own entry, and paths are compared as paths, never as
+# text: a directory is an entry another listed path lies under, and is not copied whole, since its
+# entries are copied on their own. Nothing at, under or above a mount is copied: copied whole, it
+# would bring in the configuration mounted read-only, tokens included, which is input, not
+# something the instance wrote. A symbolic link is kept as the text of its target
+# (layers/<name>.links), never followed: what it names is outside the layer. A tmpfs is not in the
+# layer at all, so one on an instance leaves the capture incomplete.
+# links_to_text <dir> <list>: each symbolic link under the directory replaced by a line of the list
+# naming it and its target. Run after every copy and after a capture that failed, whatever it left:
+# the scan below follows links, and would follow one out of the bundle.
+links_to_text() {
+  local link left
+  while IFS= read -r -d '' link; do
+    printf '%s -> %s\n' "${link#"$1"}" "$(readlink -- "$link")" >>"$2" || return 1
+    rm -- "$link" || return 1
+  done < <(find "$1" -type l -print0)
+  left=$(find "$1" -type l -print -quit) && [ -z "$left" ]
+}
 copy_layer() { # copy_layer <container name>
-  local id diff mounts tmpfs kind path m skip links
+  local id diff mounts tmpfs line i path m p skip dest
+  local kinds=() paths=()
   id=$(container_id "$1" 2>/dev/null) || return 1
   diff=$(timeout 60 docker diff "$id" 2>/dev/null) || return 1
   mounts=$(docker inspect --format '{{range .Mounts}}{{println .Destination}}{{end}}' "$id" 2>/dev/null) || return 1
@@ -238,9 +252,15 @@ copy_layer() { # copy_layer <container name>
   printf '%s\n' "$diff" >"$out/layers/$1.diff"
   : >"$out/layers/$1.links"
   mkdir "$out/layers/$1" || return 1
-  while IFS=' ' read -r kind path; do
-    case $kind in A | C) ;; *) continue ;; esac
-    [ "${path#/}" != "$path" ] || return 1
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    [ "${line:1:2}" = ' /' ] || return 1
+    kinds+=("${line:0:1}")
+    paths+=("${line:2}")
+  done <<<"$diff"
+  for i in "${!paths[@]}"; do
+    path=${paths[$i]}
+    case ${kinds[$i]} in A | C) ;; D) continue ;; *) return 1 ;; esac
     skip=0
     while IFS= read -r m; do
       [ -n "$m" ] || continue
@@ -248,23 +268,23 @@ copy_layer() { # copy_layer <container name>
         skip=1
       fi
     done <<<"$mounts"
+    for p in "${paths[@]}"; do
+      [ "${p#"$path"/}" = "$p" ] || skip=1
+    done
     [ "$skip" -eq 0 ] || continue
-    # A directory with entries of its own listed: those are copied, not it.
-    grep --quiet --fixed-strings -- " $path/" <<<"$diff" && continue
-    mkdir -p -- "$out/layers/$1$(dirname -- "$path")" || return 1
-    timeout 60 docker cp --quiet "$id:$path" "$out/layers/$1$path" 2>/dev/null || return 1
-    if [ -L "$out/layers/$1$path" ]; then
-      printf '%s -> %s\n' "$path" "$(readlink -- "$out/layers/$1$path")" >>"$out/layers/$1.links"
-      rm -- "$out/layers/$1$path"
-    fi
-  done <<<"$diff"
-  # A directory copied is one listed without entries, so it holds no link; checked all the same.
-  links=$(find "$out/layers/$1" -type l -print -quit) && [ -z "$links" ]
+    dest=$out/layers/$1$path
+    mkdir -p -- "${dest%/*}" || return 1
+    timeout 60 docker cp --quiet "$id:$path" "$dest" 2>/dev/null || return 1
+    links_to_text "$out/layers/$1" "$out/layers/$1.links" || return 1
+  done
 }
 mkdir "$out/layers"
 for c in "$BW_A" "$BW_B" "$BW_C"; do
   copy_layer "$c" ||
     unavailable "writable layer of $c (container gone, its storage unreadable, or a tmpfs mounted): what the instance wrote outside its log NOT scanned"
+  # A capture that failed may have left a link mid-copy.
+  [ ! -d "$out/layers/$c" ] || links_to_text "$out/layers/$c" "$out/layers/$c.links" ||
+    die "a symbolic link copied from the layer of $c could not be removed, and the scan would follow it. Results void"
 done
 unset c
 
