@@ -48,14 +48,15 @@ func child(t *testing.T, file, step string) (*exec.ExitError, string) {
 	return ee, stderr.String()
 }
 
-// The step the control file names, with kill, ends the process by SIGKILL, saying where first.
+// The step the control file names, with kill, ends the process at once with status 137, saying
+// where first: not by a signal, which a container's PID 1 cannot send itself.
 func TestKill(t *testing.T) {
 	ee, stderr := child(t, control(t, "guard kill\n"), "guard")
 	if ee == nil {
 		t.Fatal("the process returned from At")
 	}
-	if ws, ok := ee.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
-		t.Fatalf("the process ended %v, not by SIGKILL", ee)
+	if ws, ok := ee.Sys().(syscall.WaitStatus); !ok || !ws.Exited() || ws.ExitStatus() != 137 {
+		t.Fatalf("the process ended %v, not by exiting 137", ee)
 	}
 	if !strings.Contains(stderr, "fixture interrupt: kill at guard\n") {
 		t.Fatalf("stderr %q", stderr)
