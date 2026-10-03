@@ -391,11 +391,13 @@ scan_clean() {
   [ ! -e "$b/unavailable.txt" ] || { say "s1: the $1 bundle is incomplete: $b/unavailable.txt"; return 1; }
   grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$EV/$1-evidence.log"
 }
-# refusal_bundle <name>: the evidence bundle after one refusal, and its scan clean.
-refusal_bundle() {
-  evidence_to "refusal-$1" || die "no bundle for the $1 refusal: bin/evidence failed"
-  check 'S1 refusal' "after the $1 refusal, its bundle and the run directory: no fixture secret but the scan's control" \
-    scan_clean "refusal-$1"
+# outcome_bundle <row ref> <name>: the evidence bundle after one success or refusal, and its scan
+# clean: the acceptance plan's S1 retains one scan bundle per success, refusal and interruption
+# point, since a later bundle cannot show what an earlier outcome left behind.
+outcome_bundle() {
+  evidence_to "$2" || die "no bundle after $2: bin/evidence failed"
+  check "$1" "after $2, its bundle and the run directory: no fixture secret but the scan's control" \
+    scan_clean "$2"
 }
 
 # Predicates for check: their arguments land in commands.tsv, so they take IDs and counts only.
@@ -422,20 +424,28 @@ evidence_to() {
 }
 
 # The rows no request reaches (a heartbeat is internal to an instance, a crash inside T1 needs a
-# seam inside the process; ruling 1), proven by the Go tests that already prove them. Anchored:
-# TestHeartbeat alone, not TestHeartbeatLossStopsRunner.
-go_tests='TestOwnerFenceMatrix|TestHeartbeat|TestHeartbeatExtendsFromTheLockTime|TestCrashInsideT1LeavesDraft|TestTakeoverRacesT1|TestTakeoverNothingToDecrypt|TestTakeoverDecryptFailureLeavesResumed|TestMachineAccessUnavailable'
+# seam inside the process; ruling 1), proven by the Go tests that already prove them, and every
+# test the acceptance plan's §7.1 names for ginsys/bronzeward#22 (its *check* items), so that
+# S1's evidence holds their results. Anchored: TestHeartbeat alone, not TestHeartbeatLossStopsRunner.
+go_tests='TestOwnerFenceMatrix|TestHeartbeat|TestHeartbeatExtendsFromTheLockTime|TestCrashInsideT1LeavesDraft'
+go_tests+='|TestTakeOver|TestTakeOverRefusals|TestTakeOverRechecksEligibility|TestTakeOverConcurrentTakers'
+go_tests+='|TestTakeoverResumesToT1|TestTakeoverRefusals|TestTakeoverNothingToDecrypt|TestTakeoverDecryptFailureLeavesResumed'
+go_tests+='|TestTakeoverDigestMismatchAbandons|TestTakeoverRacesT1|TestTakeoverConcurrentTakers|TestTakeoverNoEcho'
+go_tests+='|TestMachineIdentityMismatch|TestMachineIngestionIdentityControls|TestMachineAccessUnavailable|TestMachineIngestion'
+go_tests+='|TestMachineAccessEventFencedByTheClaim|TestMachineAccessErrorTextControl|TestLiveRoleProbe'
 # go_rows_ran: those tests, in the clone, against go-db's PostgreSQL and OpenBao (mise run dev-db
-# and dev-bao by default), as go-db runs them: a missing service fails, it does not skip. The DSN
-# and token reach the tests through the environment, never the command line, so neither is in a
-# retained file. Passes when go test exited 0 with no test skipped.
+# and dev-bao by default), as go-db runs them: a missing service fails, it does not skip; the live
+# role probe against the fixture's worker with bin/up's talosconfig. The DSN, token and path reach
+# the tests through the environment, never the command line, so none is in a retained file.
+# Passes when go test exited 0 with no test skipped.
 go_rows_ran() {
   (
     export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
     export BW_TEST_BAO_ADDR="${BW_TEST_BAO_ADDR:-http://127.0.0.1:58201}"
     export BW_TEST_BAO_TOKEN="${BW_TEST_BAO_TOKEN:-bw-dev-root-token}"
+    export BW_TEST_TALOSCONFIG=$TALOSCONFIG BW_TEST_TALOS_ENDPOINT=$TALOS_WORKER_IP
     logged go-rows env BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 mise exec -- go test -count=1 -v -run "^($go_tests)\$" \
-      ./internal/staging ./internal/api
+      ./internal/staging ./internal/api ./internal/talos
   ) && ! grep --quiet -- '--- SKIP' "$EV/go-rows.log"
 }
 # go_row <test>: the test's own top-level PASS line is in go-rows.log.
@@ -781,8 +791,10 @@ run() {
   claims_before=$(gen_claims) || die "s1: the metadata identity cannot list gen/$cluster"
   check 'S1 steps 3-4' 'control plane ingested (source machine, transient): claim released, operation succeeded, ETag moved' \
     ingest "$machine_cp" '[]'
+  outcome_bundle 'S1 steps 3-4' success-controlplane
   check 'S1 steps 3-4' 'worker ingested with its file content marked: claim released, operation succeeded, ETag moved' \
     ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')"
+  outcome_bundle 'S1 steps 3-4' success-worker
 
   # Pass criteria the database and OpenBao answer.
   check 'S1 pass' 'control plane: !bwref references where the schema list identified values' has_references "$machine_cp"
@@ -807,44 +819,54 @@ run() {
   withheld+=("$BW_CANARY")
   check 'S1 refusal' 'worker, source machine, a mark addressing no node: abandoned, 422 mark-unaddressed naming the mark, no secret in the problem, ETag and gen/ unchanged' \
     refused unaddressed "$machine_w" '["doc[0]/machine/files/9/content"]' mark-unaddressed '["doc[0]/machine/files/9/content"]'
-  refusal_bundle unaddressed
+  outcome_bundle 'S1 refusal' refusal-unaddressed
   check 'S1 refusal' 'source document, unparseable: abandoned, 422 parse, no secret in the problem, ETag and gen/ unchanged' \
     refused parse "$machine_w" '[]' parse - document
-  refusal_bundle parse
+  outcome_bundle 'S1 refusal' refusal-parse
   check 'S1 refusal' 'source document, the extracted token also an unmarked label: abandoned, 422 guard-value naming the label, no secret in the problem, ETag and gen/ unchanged' \
     refused guard "$machine_w" '[]' guard-value '["doc[0]/machine/nodeLabels/copy"]' document
-  refusal_bundle guard
+  outcome_bundle 'S1 refusal' refusal-guard
   local robot
   robot=$(cat -- "$STATE/automation-token") || die "no automation token in $STATE"
   check 'S1 refusal, PA §10.3' 'automation (the seed token) on POST /ingestions: 403 forbidden, humanOnly' \
     answers_with '.humanOnly == true' 403 forbidden POST /api/v1/ingestions "$robot" "$(machine_body "$machine_cp")" \
     "$(key automation)" "$etag"
+  outcome_bundle 'S1 refusal, PA §10.3' refusal-automation
 
   fresh_author
   # Talos access refusals (PA §3.3, §16): each fixture-producible cause, one import each, its fault
   # put in place before and taken away after.
   check 'S1 access' 'the access secret absent (metadata deleted): abandoned, 503 talos-access-unavailable, cause absent, nothing kept' \
     access_case absent "$machine_w" 503 talos-access-unavailable absent
+  outcome_bundle 'S1 access' access-absent
   check 'S1 access' 'the access secret not a talosconfig: abandoned, 503 talos-access-unavailable, cause talosconfig, nothing kept' \
     access_case garbage "$machine_w" 503 talos-access-unavailable talosconfig
+  outcome_bundle 'S1 access' access-garbage
   check 'S1 access' 'the access secret not exactly a talosconfig field: abandoned, 503 talos-access-unavailable, cause malformed, nothing kept' \
     access_case malformed "$machine_w" 503 talos-access-unavailable malformed
+  outcome_bundle 'S1 access' access-malformed
   check 'S1 access' 'OpenBao sealed: refused at the request, 503 dependency-unavailable, no claim, ETag and gen/ unchanged' \
     sealed_refused
+  outcome_bundle 'S1 access' access-sealed
   check 'S1 access' "the worker's endpoint silent to A (link split): abandoned, 503 talos-access-unavailable, cause node-unreachable, nothing kept" \
     access_case silent "$machine_w" 503 talos-access-unavailable node-unreachable
+  outcome_bundle 'S1 access' access-silent
   record 'S1 access' 'POST /machines with a node ID no node has, at the control plane endpoint: 201' /api/v1/machines \
     "$(jq -nc --arg c "$cluster" --arg n "s1-no-such-node-$run_key" --arg e "$TALOS_CONTROLPLANE_IP:50000" \
       '{cluster: $c, talosNodeId: $n, talosEndpoint: $e}')" stranger
   check 'S1 access' 'a machine recorded with another node ID: abandoned, 409 machine-identity-mismatch, cause node-id, nothing kept' \
     access_case node-id "$recorded" 409 machine-identity-mismatch node-id
+  outcome_bundle 'S1 access' access-node-id
   check 'S1 access' 'the cluster recorded with another Talos cluster ID: abandoned, 409 machine-identity-mismatch, cause cluster-id, nothing kept' \
     access_case cluster-id "$machine_w" 409 machine-identity-mismatch cluster-id
+  outcome_bundle 'S1 access' access-cluster-id
   check 'S1 access' "control: with every fault taken away, the worker's import is not refused" \
     ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')" again
+  outcome_bundle 'S1 access' success-worker-again
 
   # Takeover and interruption on instance C (C §3.3 to §3.5).
   takeover_rows
+  outcome_bundle 'S1 takeover, C §3.4' success-takeover
   interruption_matrix
 
   # The rows the Go tests prove (ruling 1), in a clone of the image commit, so that the results
@@ -868,6 +890,19 @@ run() {
       go_row TestTakeoverDecryptFailureLeavesResumed
     check 'S1 access, PA §16' 'the provider unavailable to the access read: 503 talos-access-unavailable, cause provider-unavailable, the claim abandoned (TestMachineAccessUnavailable)' \
       go_row TestMachineAccessUnavailable
+    # The acceptance plan's §7.1 *check* items for ginsys/bronzeward#22, one row per test it names.
+    local t
+    for t in TestTakeOver TestTakeOverRefusals TestTakeOverRechecksEligibility TestTakeOverConcurrentTakers \
+      TestTakeoverResumesToT1 TestTakeoverRefusals TestTakeoverDigestMismatchAbandons TestTakeoverConcurrentTakers \
+      TestTakeoverNoEcho; do
+      check 'S1 takeover, C §15 check' "$t passed" go_row "$t"
+    done
+    for t in TestMachineIdentityMismatch TestMachineIngestionIdentityControls TestMachineIngestion \
+      TestMachineAccessEventFencedByTheClaim TestMachineAccessErrorTextControl; do
+      check 'S1 access, PA §16 check' "$t passed" go_row "$t"
+    done
+    check 'S1 access, PA §16 check' "TestLiveRoleProbe passed against the fixture's worker: os:reader and os:operator refused MachineConfig with PermissionDenied, os:admin reads" \
+      go_row TestLiveRoleProbe
   else
     result FAIL 'S1 Go tests' 'no clone of the image commit (go-rows-clone.log): the Go tests did not run'
   fi
