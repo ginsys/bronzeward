@@ -5,10 +5,10 @@
 -- Bronzeward is unreleased, so this migration supports no earlier database (§11 rule 6): on one
 -- holding clusters, PostgreSQL refuses the NOT NULL column and the operator recreates the database.
 
--- The Talos cluster ID as `talosctl get info` prints it: the standard base64 encoding of 32 bytes,
--- in its one canonical spelling, compared byte for byte.
+-- The Talos cluster ID as `talosctl get info` prints it: the URL-safe, padded base64 encoding of
+-- 32 bytes, in its one canonical spelling, compared byte for byte.
 ALTER TABLE cluster ADD COLUMN talos_cluster_id text NOT NULL
-  CHECK (talos_cluster_id ~ '^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$');
+  CHECK (talos_cluster_id ~ '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]=$');
 -- §7.3's cluster key: one Talos cluster ID is one record across the installation.
 CREATE UNIQUE INDEX cluster_talos_cluster_id ON cluster (talos_cluster_id);
 

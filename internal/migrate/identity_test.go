@@ -19,7 +19,7 @@ const (
 		VALUES ($1, 'x', 'https://x.test', 'v1.13', $2, now())`
 	insertClusterNoID = `INSERT INTO cluster (id, name, endpoint, contract, created_at) VALUES ($1, 'x', 'https://x.test', 'v1.13', now())`
 	nodeID            = "7x1SuC8Ege5BGXdAfTEff5iQnlWZLfv9h1LGMxA2pYkC"
-	clusterID         = "8TMwqXnWOTdw7xFDHSn+f6JMbBQrSWAuyzCfGIRVSL0="
+	clusterID         = "8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0="
 )
 
 func TestMachineIdentityConstraints(t *testing.T) {
@@ -43,8 +43,9 @@ func TestMachineIdentityConstraints(t *testing.T) {
 		{"second nil UUID", insertMachine, []any{id.New(id.Machine), a.other, "00000000-0000-0000-0000-000000000000", nil, "normal"}, "23505"},
 		{"cluster without a Talos cluster ID", insertClusterNoID, []any{id.New(id.Cluster)}, "23502"},
 		{"second cluster with one Talos cluster ID", insertClusterID, []any{id.New(id.Cluster), clusterID}, "23505"},
-		{"Talos cluster ID of 31 bytes", insertClusterID, []any{id.New(id.Cluster), "8TMwqXnWOTdw7xFDHSn+f6JMbBQrSWAuyzCfGIRVSA=="}, "23514"},
-		{"Talos cluster ID unpadded", insertClusterID, []any{id.New(id.Cluster), "8TMwqXnWOTdw7xFDHSn+f6JMbBQrSWAuyzCfGIRVSL0"}, "23514"},
+		{"Talos cluster ID of 31 bytes", insertClusterID, []any{id.New(id.Cluster), "8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSA=="}, "23514"},
+		{"Talos cluster ID unpadded", insertClusterID, []any{id.New(id.Cluster), "8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0"}, "23514"},
+		{"Talos cluster ID in the standard alphabet", insertClusterID, []any{id.New(id.Cluster), "8TMwqXnWOTdw7xFDHSn+f6JMbBQrSWAuyzCfGIRVSL0="}, "23514"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := db.Exec(c.q, c.args...); sqlState(err) != c.want {

@@ -88,17 +88,18 @@ func (in *clusterInput) check(*API) error {
 		return errors.New("contract must be a Talos contract minor, as v1.13")
 	}
 	if !validClusterID(in.TalosClusterID) {
-		return errors.New("talosClusterId must be the cluster ID `talosctl get info` prints: 32 bytes in standard base64 (persistence-api.md §7.3)")
+		return errors.New("talosClusterId must be the cluster ID `talosctl get info` prints: 32 bytes in URL-safe base64 (persistence-api.md §7.3)")
 	}
 	return nil
 }
 
-// validClusterID takes a Talos cluster ID in its one canonical spelling: the standard, padded
-// base64 encoding of 32 bytes. Decoding alone would also take nonzero padding bits and the line
-// breaks the decoder skips, so the decoded bytes must encode back to exactly what was given.
+// validClusterID takes a Talos cluster ID in its one canonical spelling: the URL-safe, padded
+// base64 encoding of 32 bytes Talos prints. Decoding alone would also take nonzero padding bits
+// and the line breaks the decoder skips, so the decoded bytes must encode back to exactly what was
+// given.
 func validClusterID(s string) bool {
-	b, err := base64.StdEncoding.DecodeString(s)
-	return err == nil && len(b) == 32 && base64.StdEncoding.EncodeToString(b) == s
+	b, err := base64.URLEncoding.DecodeString(s)
+	return err == nil && len(b) == 32 && base64.URLEncoding.EncodeToString(b) == s
 }
 
 // nodeIDShape is a Talos node ID as `talosctl get identity` prints it: opaque printable ASCII
