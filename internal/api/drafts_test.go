@@ -112,6 +112,28 @@ func TestDraftUpdatePreconditions(t *testing.T) {
 		token: d.human("h-author"), key: d.key(), ifMatch: d.etag, body: body}), http.StatusNotFound, "not-found")
 }
 
+// PA §9.4: a path identifier that is not one of its entity is 404 before any query, and the
+// refusal repeats none of its text.
+func TestDraftUpdateIdentifiers(t *testing.T) {
+	d := newDraftEnv(t)
+	assignment := `{"profiles":["workers"]}`
+	for _, c := range []struct{ method, path, body string }{
+		{"PUT", "/drafts/synthetic-secret-text/assignments/" + d.machine, assignment},
+		{"PUT", "/drafts/drf_synthetic%00secret/profiles/workers", `{"fragments":["` + id.New(id.FragmentRevision) + `"]}`},
+		{"PUT", "/drafts/" + d.draft + "/assignments/synthetic-secret-text", assignment},
+		{"PUT", "/drafts/" + d.draft + "/assignments/mch_synthetic%00secret", assignment},
+		{"DELETE", "/drafts/" + d.draft + "/assignments/synthetic-secret-text", ""},
+		{"DELETE", "/drafts/synthetic-secret-text/fragments/registries", ""},
+		{"POST", "/drafts/synthetic-secret-text/discard", "{}"},
+	} {
+		rec := d.do(d.api, call{method: c.method, path: prefix + c.path, token: d.human("h-author"), key: d.key(), ifMatch: d.etag, body: c.body})
+		wantProblem(t, rec, http.StatusNotFound, "not-found")
+		if strings.Contains(rec.Body.String(), "synthetic") {
+			t.Errorf("%s %s: the refusal repeats the path: %s", c.method, c.path, rec.Body.String())
+		}
+	}
+}
+
 // PA §9.2: DELETE takes no body; any body is refused before anything runs.
 func TestDraftRemovalTakesNoBody(t *testing.T) {
 	d := newDraftEnv(t)

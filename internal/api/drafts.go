@@ -78,6 +78,9 @@ type lockedDraft struct {
 // open, at the request's If-Match, with no publication of it queued or running.
 func lockDraft(ctx context.Context, tx *sql.Tx, q *request) (lockedDraft, error) {
 	d := lockedDraft{id: q.r.PathValue("id")}
+	if id.MustHave(d.id, id.Draft) != nil {
+		return d, refuse(http.StatusNotFound, "not-found", "no such draft") // §9.4: the path's text is not repeated
+	}
 	var state, token string
 	switch err := tx.QueryRowContext(ctx, `SELECT cluster, state, revision, etag_token FROM draft WHERE id = $1 FOR UPDATE`,
 		d.id).Scan(&d.cluster, &state, &d.revision, &token); {
@@ -125,6 +128,9 @@ func keyOf(ctx context.Context, tx *sql.Tx, q *request, d lockedDraft, kind stri
 		return k, nil
 	}
 	k.machine = q.r.PathValue("machine")
+	if id.MustHave(k.machine, id.Machine) != nil {
+		return k, refuse(http.StatusNotFound, "not-found", "no such machine in the draft's cluster")
+	}
 	var ok bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM machine WHERE id = $1 AND cluster = $2)`,
 		k.machine, d.cluster).Scan(&ok); err != nil {
