@@ -179,7 +179,8 @@ func statusOf(t *testing.T, b *baotest.Bao, tok, method, path, contentType strin
 	return resp.StatusCode
 }
 
-// seed writes one generation as the administrator and returns its path below the mount.
+// seed writes one generation as the administrator and returns its path below the mount. The test's
+// end deletes its metadata, so the shared provider's tree does not grow with every run.
 func seed(t *testing.T, b *baotest.Bao, cluster, claim string) string {
 	t.Helper()
 	p := "gen/" + cluster + "/" + claim + "/" + NewValueID()
@@ -187,6 +188,11 @@ func seed(t *testing.T, b *baotest.Bao, cluster, claim string) string {
 	if err != nil || status != http.StatusOK {
 		t.Fatalf("seeding %s: status %d, %v: %s", p, status, err, body)
 	}
+	t.Cleanup(func() {
+		if status, _, err := b.Do(b.Admin(), http.MethodDelete, "/v1/secret/metadata/"+p, nil); err != nil || status/100 != 2 {
+			t.Errorf("deleting %s: status %d, %v", p, status, err)
+		}
+	})
 	return p
 }
 
