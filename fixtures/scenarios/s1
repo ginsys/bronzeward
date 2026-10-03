@@ -402,11 +402,192 @@ go_rows_ran() {
 # go_row <test>: the test's own top-level PASS line is in go-rows.log.
 go_row() { grep --quiet -- "^--- PASS: $1 (" "$EV/go-rows.log"; }
 
+# The takeover rows (C §3.4) on instance C, the interruption build: its run stops where C's
+# control file says (internal/seam), and B and A take the claim over.
+# interrupt <step> kill|stall, or interrupt -: C's control file, written whole under another name
+# and moved into place, so that C never reads half of it; - removes it.
+interrupt() {
+  local control=$STATE/server/c/interrupt tmp
+  if [ "$1" = - ]; then
+    rm -f -- "$control"
+    return
+  fi
+  tmp=$(mktemp -- "$STATE/server/c/interrupt.XXXXXX") || return 1
+  if ! printf '%s %s\n' "$1" "$2" >"$tmp" || ! mv -f -- "$tmp" "$control"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+# c_log: instance C's log, by the container ID need_state verified.
+c_log() { docker logs "${verified_container_ids[$BW_C]}" 2>&1; }
+# c_says <ERE>: a line of C's log matches.
+c_says() { c_log | grep --quiet --extended-regexp -- "$1"; }
+# c_exited: C is not running, and its log says the seam killed it at baseline.
+c_exited() {
+  [ "$(docker inspect --format '{{.State.Running}}' "${verified_container_ids[$BW_C]}")" = false ] &&
+    c_says '^fixture interrupt: kill at baseline$'
+}
+# within <seconds> <command...>: the command succeeds within that many seconds, asked each second.
+within() {
+  local n
+  for ((n = 1; n < $1; n++)); do
+    "${@:2}" && return 0
+    sleep 1
+  done
+  "${@:2}"
+}
+
+# The encrypted import C runs: its claim and operation.
+tk_ing='' tk_op=''
+# c_import <key name>: an encrypted import of the worker, its file content marked, POSTed to C
+# under the draft's current ETag: 202, its claim and operation in tk_ing and tk_op.
+c_import() {
+  local body rc=0
+  tk_ing='' tk_op=''
+  body=$(jq -nc --arg m "$machine_w" --arg d "$draft" --arg p "$WORKER_MARK" \
+    '{kind: "import", source: "machine", staging: "encrypted", machine: $m, draft: $d, marks: [$p]}')
+  call_port=$SERVER_C_PORT
+  answers 202 - POST /api/v1/ingestions "$author" "$body" "$(key "ingestion-$1")" "$etag" || rc=1
+  call_port=$SERVER_A_PORT
+  [ "$rc" -eq 0 ] || return 1
+  tk_ing=$(jq -er '.ingestion' "$EV/last.body") && tk_op=$(jq -er '.operation' "$EV/last.body")
+}
+# takeover <A|B> <status> <problem code or -> <key name>: an author's takeover of tk_ing on that
+# instance gets that status (and problem).
+takeover() {
+  local rc=0
+  [ "$1" = A ] || call_port=$SERVER_B_PORT
+  answers "$2" "$3" POST "/api/v1/ingestions/$tk_ing/takeovers" "$author" '{}' "$(key "takeover-$4")" || rc=1
+  call_port=$SERVER_A_PORT
+  return "$rc"
+}
+# claim_is <state> <owner generation> payload|none: tk_ing's stored row.
+claim_is() {
+  [ "$(sql "SELECT state || ' ' || owner_gen || ' ' || CASE WHEN payload IS NULL THEN 'none' ELSE 'payload' END
+    FROM staging_claim WHERE id = '$tk_ing'")" = "$1 $2 $3" ]
+}
+# events_are <list>: tk_op's event types in order, space-separated.
+events_are() {
+  [ "$(sql "SELECT string_agg(entry->>'type', ' ' ORDER BY number) FROM operation_event WHERE operation = '$tk_op'")" = "$1" ]
+}
+# lapsed: tk_ing's lease has lapsed by the database's clock.
+lapsed() { [ "$(sql "SELECT lease_until <= clock_timestamp() FROM staging_claim WHERE id = '$tk_ing'")" = t ]; }
+# past <epoch seconds>: the database's clock is past it.
+past() { [ "$(sql "SELECT clock_timestamp() > to_timestamp($1)")" = t ]; }
+# lease_epoch: tk_ing's lease end, in epoch seconds.
+lease_epoch() { sql "SELECT extract(epoch FROM lease_until) FROM staging_claim WHERE id = '$tk_ing'"; }
+# The operation's events up to the staged one, on an import of a machine: its start, the Talos
+# access version read, the envelope stored.
+staged_events='started talos-access staged'
+# stalled_staged: C's run stopped after storing the envelope, its claim held at generation 1.
+stalled_staged() { c_says '^fixture interrupt: stall at staged$' && claim_is held 1 payload && events_are "$staged_events"; }
+# live_at_first: the claim live, still held at generation 1 with its envelope.
+live_at_first() { ! lapsed && claim_is held 1 payload; }
+# resumed_under_b: B's resume failed: its taken-over and resume-failed events, the claim resumed at
+# generation 2 with its envelope kept.
+resumed_under_b() { events_are "$staged_events taken-over resume-failed" && claim_is resumed 2 payload; }
+# committed_by_a: A's resume committed: its taken-over and succeeded events, the claim released at
+# generation 3 without a payload.
+committed_by_a() { events_are "$staged_events taken-over resume-failed taken-over succeeded" && claim_is released 3 none; }
+# op_is <state> [problem code]: tk_op's state (and its problem's type), read as an author.
+op_is() {
+  local filter=".state == \"$1\""
+  [ -z "${2:-}" ] || filter+=" and .error.type == \"urn:bronzeward:problem:$2\""
+  answers_with "$filter" 200 - GET "/api/v1/operations/$tk_op" "$author"
+}
+# failed_cause_is <cause>: tk_op's failed event names that cause.
+failed_cause_is() {
+  [ "$(sql "SELECT entry->>'cause' FROM operation_event WHERE operation = '$tk_op' AND entry->>'type' = 'failed'")" = "$1" ]
+}
+# draft_etag_is <etag>: the draft's current ETag.
+draft_etag_is() { answers 200 - GET "/api/v1/drafts/$draft" "$author" && [ "$(etag_of_last)" = "$1" ]; }
+# revisions_are <n>: how many import base revisions exist.
+revisions_are() { [ "$(sql 'SELECT count(*) FROM import_base_revision')" = "$1" ]; }
+# nothing_after_a <revisions>: since A's commit, nothing written: the claim, the events, the import
+# base revisions and the draft's ETag all as A left them.
+nothing_after_a() { committed_by_a && revisions_are "$1" && draft_etag_is "$etag"; }
+# killed_before_staging: C exited at its baseline, the claim held at generation 1 without an
+# envelope, no staged event.
+killed_before_staging() { c_exited && claim_is held 1 none && events_are 'started talos-access'; }
+# abandoned_nothing: the takeover abandoned the claim at generation 2 without a payload, and failed
+# the operation ingestion-abandoned with the cause nothing-to-decrypt and no taken-over event.
+abandoned_nothing() {
+  claim_is abandoned 2 none && events_are 'started talos-access failed' && op_is failed ingestion-abandoned &&
+    failed_cause_is nothing-to-decrypt
+}
+
+# takeover_rows: C stalls an encrypted import after staging it; its heartbeat keeps the lease, so
+# B's takeover is refused; C frozen, the lease lapses, and with OpenBao sealed B's takeover is
+# accepted but its decryption fails, the claim resumed under B; A's takeover is refused while B's
+# lease is live, then, unsealed and B's lease lapsed, accepted, and A's draft transaction commits.
+# C, released and thawed, writes nothing.
+takeover_rows() {
+  local lease0 revisions
+  check 'S1 takeover, C §3.4' 'C told to stall its next run after the staged event' interrupt staged stall
+  check 'S1 takeover, C §3.4' 'encrypted import of the worker on C: 202' c_import takeover
+  [ -n "$tk_op" ] ||
+    die "s1: the encrypted import on C was not accepted; nothing after it can run"
+  check 'S1 takeover, C §3.4' "C's run stalls after the staged event: the claim held at generation 1 with its envelope" \
+    within 60 stalled_staged
+  lease0=$(lease_epoch) || die "s1: cannot read the claim's lease"
+  check 'S1 lease extension, C §3.3' "the claim's first lease end passes while C's run stalls" within 30 past "$lease0"
+  check 'S1 lease extension, C §3.3' "C's heartbeat extended the lease: the claim still live, held at generation 1" live_at_first
+  check 'S1 takeover, C §3.4' "B's takeover while C's lease is live: 409 conflict" takeover B 409 conflict live
+  check 'S1 takeover, C §3.4' 'inject pause C (its heartbeat frozen with its run)' "$bin/inject" pause C
+  check 'S1 takeover, C §3.4' "C's lease lapses" within 40 lapsed
+  if ! "$bin/inject" seal openbao >/dev/null; then
+    "$bin/inject" unseal openbao >/dev/null || die "s1: OpenBao could not be unsealed"
+    die "s1: OpenBao could not be sealed"
+  fi
+  check 'S1 takeover, C §3.4' "B's takeover with OpenBao sealed: 202 (a takeover reads no key)" takeover B 202 - sealed
+  check 'S1 takeover, C §3.4' "B's decryption fails: resume-failed event, the claim resumed under B at generation 2, its envelope kept" \
+    within 20 resumed_under_b
+  check 'S1 takeover, C §3.4' "A's takeover while B's lease is live: 409 conflict" takeover A 409 conflict b-live
+  "$bin/inject" unseal openbao >/dev/null || die "s1: OpenBao could not be unsealed"
+  check 'S1 takeover, C §3.4' "B's lease lapses (its run stopped)" within 40 lapsed
+  revisions=$(sql 'SELECT count(*) FROM import_base_revision') || die "s1: cannot count import base revisions"
+  check 'S1 takeover, C §3.4' "A's takeover once B's lease lapsed: 202" takeover A 202 - after-b
+  check 'S1 takeover, C §3.4' "A resumes and commits: taken-over and succeeded events, the claim released at generation 3" \
+    within 60 committed_by_a
+  check 'S1 takeover, C §3.4' "A's draft transaction: the operation succeeded" op_is succeeded
+  check 'S1 takeover, C §3.4' "A's draft transaction: one new import base revision" revisions_are "$((revisions + 1))"
+  answers 200 - GET "/api/v1/drafts/$draft" "$author" || die "s1: cannot read the draft"
+  check 'S1 takeover, C §3.4' "A's draft transaction moved the draft's ETag" differ "$(etag_of_last)" "$etag"
+  etag=$(etag_of_last)
+  check 'S1 takeover, C §3.4' "C's stall released" interrupt -
+  check 'S1 takeover, C §3.4' 'inject unpause C' "$bin/inject" unpause C
+  check 'S1 takeover, C §3.4' "C, the old owner, is fenced: its log has its heartbeat or its draft transaction refused" \
+    within 30 c_says "ingestion $tk_ing: (heartbeat refused|the draft transaction: )"
+  check 'S1 takeover, C §3.4' "C wrote nothing: the claim, the events, the import base revisions and the draft's ETag as A left them" \
+    nothing_after_a "$((revisions + 1))"
+}
+
+# nothing_to_decrypt_row: C exits after its baseline, before any envelope is stored; once the
+# lease lapses, A's takeover abandons the claim, its operation failed ingestion-abandoned with the
+# cause nothing-to-decrypt, and the draft is unchanged. C is started again after.
+nothing_to_decrypt_row() {
+  check 'S1 takeover, C §3.4' 'C told to exit at once at its next baseline' interrupt baseline kill
+  check 'S1 takeover, C §3.4' 'encrypted import of the worker on C: 202' c_import nothing
+  [ -n "$tk_op" ] ||
+    die "s1: the encrypted import on C was not accepted; nothing after it can run"
+  check 'S1 takeover, C §3.4' 'C exits at its baseline: the claim held at generation 1 without an envelope, no staged event' \
+    within 60 killed_before_staging
+  check 'S1 takeover, C §3.4' "C's lease lapses" within 40 lapsed
+  check 'S1 takeover, C §3.4' "A's takeover with nothing to decrypt: 202 at the operation" takeover A 202 - nothing
+  check 'S1 takeover, C §3.4' 'the claim abandoned at generation 2 without a payload, the operation failed ingestion-abandoned, cause nothing-to-decrypt' \
+    abandoned_nothing
+  check 'S1 takeover, C §3.4' "the draft's ETag unchanged" draft_etag_is "$etag"
+  check 'S1 takeover, C §3.4' "C's control file removed" interrupt -
+  check 'S1 takeover, C §3.4' 'inject start C' "$bin/inject" start C
+}
+
 run() {
   # Preconditions: S0's migrate and seed, both instances up, then the pre-state.
   check 'S1 precondition' 'bw migrate' "$bin/bw" migrate
   check 'S1 precondition' 'inject start A' "$bin/inject" start A
   check 'S1 precondition' 'inject start B' "$bin/inject" start B
+  interrupt - || die "cannot remove C's control file"
+  check 'S1 precondition' 'inject start C (the interruption build, no interruption named)' "$bin/inject" start C
   check 'S1 precondition' 'A answers /livez' answers 204 - GET /livez ''
   "$bin/seed" >/dev/null || die "bin/seed failed"
   redact_automation_token "$(cat -- "$STATE/automation-token")"
@@ -523,6 +704,10 @@ run() {
     access_case cluster-id "$machine_w" 409 machine-identity-mismatch cluster-id
   check 'S1 access' "control: with every fault taken away, the worker's import is not refused" \
     ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')" again
+
+  # Takeover and interruption on instance C (C §3.3, §3.4).
+  takeover_rows
+  nothing_to_decrypt_row
 
   # The rows the Go tests prove (ruling 1), in a clone of the image commit, so that the results
   # are the server's own commit's; removed again once they have run.
