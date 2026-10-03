@@ -1226,9 +1226,13 @@ PoC **(choice §17.14)**.
 
 An `ingest` operation's events are `{"type": "started"}`, written with the
 operation; `{"type": "staged"}` once an encrypted claim's envelope is stored;
-and one terminal event, `{"type": "succeeded", "importBaseRevision": "<ibr
-identifier>"}` or `{"type": "failed", "code": "<problem code>"}`. No event
-carries input text. The operation resource shows its stored row: an operation
+`{"type": "taken-over", "generation": <n>}` when a takeover (compilation §3.4)
+resumes the claim at owner generation `n`; `{"type": "resume-failed", "code":
+"dependency-unavailable"}` when that owner cannot decrypt the envelope, the
+claim left `resumed` to its lease; and one terminal event, `{"type":
+"succeeded", "importBaseRevision": "<ibr identifier>"}` or `{"type": "failed",
+"code": "<problem code>"}`. A takeover with nothing to decrypt writes the
+failure with `"cause": "nothing-to-decrypt"`. No event carries input text. The operation resource shows its stored row: an operation
 whose claim a read already treats as abandoned (compilation §3.5) stays
 `running` here until a sweep writes it: the next periodic sweep, or a later
 one if that sweep fails or waits for a lock. An ingestion start of the same
@@ -1497,7 +1501,11 @@ claim is past its absolute expiry, or a transient one past its lease, whether
 or not the sweep has written it. It never carries the owner string, the
 payload or its digest. `POST /ingestions/{id}/abandonments` takes `{}` and
 answers 200 with the resource; a claim already `released` or `abandoned`, as
-a read treats it, is `409 conflict`. `scopeState` is `normal`, or one of
+a read treats it, is `409 conflict`. `POST /ingestions/{id}/takeovers` takes
+`{}` and answers 202 with `{"operation": "<op identifier>", "ingestion":
+"<ingestion identifier>"}` and a `Location` at the operation; a claim that is
+transient, ended as a read treats it, still leased or of an earlier epoch is
+`409 conflict`, and nothing changes. `scopeState` is `normal`, or one of
 execution and recovery's recovery scope states while recovery mode is in
 effect.
 
