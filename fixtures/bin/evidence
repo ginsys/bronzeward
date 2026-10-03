@@ -220,28 +220,21 @@ fi
 
 # What an instance wrote outside its log, a temporary or staging file a kill left behind, is in its
 # container's writable layer, and read from there whether the process runs or not. docker diff
-# lists what the layer holds (kept as layers/<name>.diff); each entry added or changed is copied as
-# it is, under layers/<name>/ at its own path. A path is every byte of its line after the "A " or
-# "C ", so a name ending in a space is its own entry, and paths are compared as paths, never as
-# text: a directory is an entry another listed path lies under, and is not copied whole, since its
-# entries are copied on their own. Nothing at, under or above a mount is copied: copied whole, it
-# would bring in the configuration mounted read-only, tokens included, which is input, not
-# something the instance wrote. A symbolic link is kept as the text of its target
-# (layers/<name>.links), never followed: what it names is outside the layer. A tmpfs is not in the
-# layer at all, so one on an instance leaves the capture incomplete.
-# links_to_text <dir> <list>: each symbolic link under the directory replaced by a line of the list
-# naming it and its target. Run after every copy and after a capture that failed, whatever it left:
-# the scan below follows links, and would follow one out of the bundle.
-links_to_text() {
-  local link left
-  while IFS= read -r -d '' link; do
-    printf '%s -> %s\n' "${link#"$1"}" "$(readlink -- "$link")" >>"$2" || return 1
-    rm -- "$link" || return 1
-  done < <(find "$1" -type l -print0)
-  left=$(find "$1" -type l -print -quit) && [ -z "$left" ]
-}
+# lists what the layer holds (kept as layers/<name>.diff). Each entry added or changed is kept as
+# the tar archive docker cp streams of it, layers/<name>/<n>.tar, its path on line n of
+# layers/<name>.paths, and never extracted: no name, link or path of the container's reaches the
+# host's filesystem, and the scan reads the archive's bytes, in which a file's content is whole.
+# A path is every byte of its line after the "A " or "C "; one that is not absolute and canonical,
+# and a line not of that form (a name holding a newline makes one), leaves the capture
+# incomplete. Paths are compared as paths: a directory is an entry another listed path lies under,
+# and is not archived whole, since its entries are archived on their own. Nothing at, under or
+# above a mount is archived: it would bring in the configuration mounted read-only, tokens
+# included, which is input, not something the instance wrote. An instance that replaced a listed
+# path's parent with a link to the mount after docker diff would have the mount's file archived,
+# which the scan then reports, as it reports any copy of a token. A tmpfs is not in the layer at
+# all, so one on an instance leaves the capture incomplete.
 copy_layer() { # copy_layer <container name>
-  local id diff mounts tmpfs line i path m p skip dest
+  local id diff mounts tmpfs line i path m p skip n=0
   local kinds=() paths=()
   id=$(container_id "$1" 2>/dev/null) || return 1
   diff=$(timeout 60 docker diff "$id" 2>/dev/null) || return 1
@@ -250,14 +243,17 @@ copy_layer() { # copy_layer <container name>
   tmpfs=$(docker inspect --format '{{range $d, $_ := .HostConfig.Tmpfs}}{{println $d}}{{end}}' "$id" 2>/dev/null) || return 1
   [ -z "$tmpfs" ] || return 1
   printf '%s\n' "$diff" >"$out/layers/$1.diff"
-  : >"$out/layers/$1.links"
+  : >"$out/layers/$1.paths"
   mkdir "$out/layers/$1" || return 1
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    [ "${line:1:2}" = ' /' ] || return 1
-    kinds+=("${line:0:1}")
-    paths+=("${line:2}")
-  done <<<"$diff"
+  if [ -n "$diff" ]; then
+    while IFS= read -r line; do
+      [ "${line:1:2}" = ' /' ] || return 1
+      path=${line:2}
+      case $path/ in *//* | */./* | */../*) return 1 ;; esac
+      kinds+=("${line:0:1}")
+      paths+=("$path")
+    done <<<"$diff"
+  fi
   for i in "${!paths[@]}"; do
     path=${paths[$i]}
     case ${kinds[$i]} in A | C) ;; D) continue ;; *) return 1 ;; esac
@@ -272,19 +268,15 @@ copy_layer() { # copy_layer <container name>
       [ "${p#"$path"/}" = "$p" ] || skip=1
     done
     [ "$skip" -eq 0 ] || continue
-    dest=$out/layers/$1$path
-    mkdir -p -- "${dest%/*}" || return 1
-    timeout 60 docker cp --quiet "$id:$path" "$dest" 2>/dev/null || return 1
-    links_to_text "$out/layers/$1" "$out/layers/$1.links" || return 1
+    n=$((n + 1))
+    printf '%s\n' "$path" >>"$out/layers/$1.paths"
+    timeout 60 docker cp --quiet "$id:$path" - >"$out/layers/$1/$n.tar" 2>/dev/null || return 1
   done
 }
 mkdir "$out/layers"
 for c in "$BW_A" "$BW_B" "$BW_C"; do
   copy_layer "$c" ||
-    unavailable "writable layer of $c (container gone, its storage unreadable, or a tmpfs mounted): what the instance wrote outside its log NOT scanned"
-  # A capture that failed may have left a link mid-copy.
-  [ ! -d "$out/layers/$c" ] || links_to_text "$out/layers/$c" "$out/layers/$c.links" ||
-    die "a symbolic link copied from the layer of $c could not be removed, and the scan would follow it. Results void"
+    unavailable "writable layer of $c (container gone, its storage unreadable, a path it lists not one to copy, or a tmpfs mounted): what the instance wrote outside its log NOT scanned"
 done
 unset c
 
