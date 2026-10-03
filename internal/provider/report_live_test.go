@@ -188,12 +188,19 @@ func seed(t *testing.T, b *baotest.Bao, cluster, claim string) string {
 	if err != nil || status != http.StatusOK {
 		t.Fatalf("seeding %s: status %d, %v: %s", p, status, err, body)
 	}
+	removeAtEnd(t, b, p)
+	return p
+}
+
+// removeAtEnd deletes p's metadata, every version included, as the administrator when the test
+// ends; a path that was never written is deleted all the same.
+func removeAtEnd(t *testing.T, b *baotest.Bao, p string) {
+	t.Helper()
 	t.Cleanup(func() {
 		if status, _, err := b.Do(b.Admin(), http.MethodDelete, "/v1/secret/metadata/"+p, nil); err != nil || status/100 != 2 {
 			t.Errorf("deleting %s: status %d, %v", p, status, err)
 		}
 	})
-	return p
 }
 
 // listKeys lists dir (below secret/metadata/) as tok and returns the names, failing unless 200.
@@ -242,6 +249,7 @@ func TestLiveReportIdentity(t *testing.T) {
 	if status, _, err := b.Do(b.Admin(), http.MethodPost, "/v1/secret/data/"+access, map[string]any{"data": map[string]string{"talosconfig": "synthetic"}}); err != nil || status != http.StatusOK {
 		t.Fatalf("seeding the access path: status %d, %v", status, err)
 	}
+	removeAtEnd(t, b, access)
 	ct, err := encrypt(t, b, b.Admin(), "bw-staging", []byte("synthetic"))
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +301,9 @@ func TestLiveReportIdentity(t *testing.T) {
 			return statusOf(t, b, tok, http.MethodPost, "/v1/transit/decrypt/bw-staging", "", map[string]string{"ciphertext": string(ct)})
 		}},
 		{"a generation create", "create-gen", func(tok string) int {
-			return statusOf(t, b, tok, http.MethodPost, "/v1/secret/data/gen/"+cl+"/"+id.New(id.Ingestion)+"/"+NewValueID(), "", data)
+			fresh := "gen/" + cl + "/" + id.New(id.Ingestion) + "/" + NewValueID()
+			removeAtEnd(t, b, fresh)
+			return statusOf(t, b, tok, http.MethodPost, "/v1/secret/data/"+fresh, "", data)
 		}},
 		{"a write to an existing generation", "update-gen", func(tok string) int {
 			return statusOf(t, b, tok, http.MethodPost, "/v1/secret/data/"+disposable(), "", data)
