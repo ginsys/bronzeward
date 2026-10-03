@@ -701,7 +701,9 @@ takeover_rows() {
 # stored. Transient: once the lease lapses the sweep abandons the claim (C §3.5). Encrypted: the
 # claim outlives its lease until its expiry, and A's takeover abandons it with nothing to decrypt
 # (C §3.4). Either way the operation fails ingestion-abandoned, every generation created before the
-# kill is still listed, and the draft is unchanged. C is started again after.
+# kill is still listed, and the draft is unchanged. The bundle is captured while C is still stopped,
+# so its writable layer is what the kill left, before a startup could clean it; C is started again
+# after.
 interrupt_case() {
   local step=$1 staging_mode=$2 kills row_ref='S1 interruption, C §3.5'
   [ "$staging_mode" = transient ] || row_ref='S1 interruption, C §3.4'
@@ -726,8 +728,8 @@ interrupt_case() {
   check "$row_ref" "killed at $step ($staging_mode): every generation created before the kill still listed under the claim, none deleted" \
     generations_kept "$step"
   check "$row_ref" "killed at $step ($staging_mode): the draft's ETag unchanged" draft_etag_is "$etag"
-  check "$row_ref" 'inject start C' "$bin/inject" start C
   outcome_bundle "$row_ref" "interrupt-$step-$staging_mode"
+  check "$row_ref" 'inject start C' "$bin/inject" start C
 }
 # interruption_matrix: every kill point in both staging modes, one bundle per point and mode.
 interruption_matrix() {
