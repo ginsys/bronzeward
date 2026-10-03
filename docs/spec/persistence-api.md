@@ -926,16 +926,21 @@ Handling in the PoC:
   in one statement, so that both come from one snapshot under read committed
   (rule 3 of §5): read apart, a draft transaction committing between the two
   reads would show a generation unreferenced and its claim `released`. It
-  reports each listed path that no committed
-  reference row names and whose claim is not live (`held` or `resumed`), with
+  reports each listed path that no committed reference row names and whose
+  claim row does not record `held` or `resumed`, with
   the claim's id and, where its row exists, its state, creation time and
   absolute expiry. The reference rows decide, not the claim's state: a
   `released` claim can leave an orphan (a further mark's generations created
   before an interruption at compilation §2.3 step 8, its earlier payload then
   resumed and released, compilation §3), and recovery-mode entry marks an
   earlier epoch's claims `abandoned` whatever their generations' references
-  (§12.2). A live claim's generations are omitted because its ingestion is
-  still in flight. A claim row is committed by ingestion start (T11,
+  (§12.2). A claim recorded `held` or `resumed` is omitted because its
+  ingestion may still be in flight, even past its expiry: the report goes by
+  the state the row records, not by the read-time treatment of compilation
+  §3.5, since a draft transaction that passed its owner check before the
+  expiry may still release the claim (compilation choice §16.30). A recorded
+  `abandoned` is final: the sweep and every other abandonment take the
+  claim's row lock first and so follow that draft transaction. A claim row is committed by ingestion start (T11,
   compilation §2.3 step 0) before the first generation is created at step 6,
   so a path without one is source 3 above, or a claim this database never
   held. The report names paths, claim ids, states and times only, never a
@@ -2505,7 +2510,11 @@ each (design §7.7 consequences):
   must then fail; a draft transaction releasing a claim committed while the
   report runs, its generations not reported, with a control that reads the
   reference rows and the claims in two statements, commits the draft
-  transaction between them and must then report them; and the provider's
+  transaction between them and must then report them; a claim past its
+  absolute expiry, still recorded `held` while a draft transaction that
+  passed its owner check holds its lock and then commits, its generations not
+  reported, with a control that treats the claim as `abandoned` at read time
+  and must then report them; and the provider's
   versions and the claim rows unchanged by a run.
 
 Evidence gaps this contract carries rather than closes:

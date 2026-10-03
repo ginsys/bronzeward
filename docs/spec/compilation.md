@@ -387,7 +387,9 @@ abandoned run's provider generations remain as unused objects (§2.3).
 Abandonment is evaluated at read time and written by a sweep
 **(choice §16.8)**: every transition and every read treats a claim past its
 absolute expiry, or a transient claim past its lease, as `abandoned`, whether
-or not the row says so yet; an ingestion-identity sweep then writes the state
+or not the row says so yet, except the orphan report, which goes by the
+recorded state ([persistence and API §6.4](persistence-api.md#64-orphans));
+an ingestion-identity sweep then writes the state
 and clears the payload, at startup and periodically. A late sweep therefore
 delays only the clearing of ciphertext, never a refusal. The sweep interval is
 open.
