@@ -18,7 +18,7 @@ import (
 const (
 	standInUUID    = "3E8D9F4B-5C6A-4B8C-9D2E-3F4A5B6C7D8E"
 	standInNode    = "7x1SuC8Ege5BGXdAfTEff5iQnlWZLfv9h1LGMxA2pYkC"
-	standInCluster = "8TMwqXnWOTdw7xFDHSn+f6JMbBQrSWAuyzCfGIRVSL0="
+	standInCluster = "8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0="
 )
 
 func dialStandIn(t *testing.T) (*talostest.Node, Reader, context.Context) {

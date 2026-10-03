@@ -16,7 +16,7 @@ import (
 const (
 	// Every cluster has a Talos cluster ID (0008); each row's is derived from its identifier.
 	insertCluster = `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)
-		VALUES ($1, $2, $3, $4, encode(sha256(convert_to($1::text, 'UTF8')), 'base64'), now())`
+		VALUES ($1, $2, $3, $4, translate(encode(sha256(convert_to($1::text, 'UTF8')), 'base64'), '+/', '-_'), now())`
 	// Every machine has a Talos endpoint (0006); these rows share one.
 	insertMachine = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, created_at)
 		VALUES ($1, $2, $3, $4, $5, '10.55.0.3:50000', now())`

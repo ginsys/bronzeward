@@ -35,7 +35,7 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder, status int) T {
 // talosClusterID is a Talos cluster ID of the shape `talosctl get info` prints, distinct per seed.
 func talosClusterID(seed string) string {
 	s := sha256.Sum256([]byte(seed))
-	return base64.StdEncoding.EncodeToString(s[:])
+	return base64.URLEncoding.EncodeToString(s[:])
 }
 
 // clusterCall records a cluster as tok, its Talos cluster ID derived from k.
@@ -52,6 +52,33 @@ func (e *env) createCluster(h http.Handler, tok, k string) string {
 		e.t.Fatalf("POST /clusters: %d %s", rec.Code, rec.Body)
 	}
 	return decode[clusterBody](e.t, rec, http.StatusCreated).ID
+}
+
+// §7.3: the Talos cluster ID is taken in the alphabet `talosctl get info` prints, URL-safe base64
+// with its padding ("_" seen on the fixture's cluster), "-" and "_" included, and refused in the
+// standard alphabet, whose "+" and "/" Talos never prints.
+func TestClusterIDTalosAlphabet(t *testing.T) {
+	e := newEnv(t, options{})
+	author := e.human("h-author")
+	urlSafe, standard := "", ""
+	for i := 0; urlSafe == "" || standard == ""; i++ {
+		s := sha256.Sum256([]byte("alphabet-" + strconv.Itoa(i)))
+		if u := base64.URLEncoding.EncodeToString(s[:]); urlSafe == "" && strings.ContainsAny(u, "-_") {
+			urlSafe = u
+		}
+		if v := base64.StdEncoding.EncodeToString(s[:]); standard == "" && strings.ContainsAny(v, "+/") {
+			standard = v
+		}
+	}
+	body := func(c string) string {
+		return `{"name":"office","endpoint":"https://cp.example.test:6443","contract":"v1.13","talosClusterId":"` + c + `"}`
+	}
+	rec := e.do(e.api, call{method: "POST", path: prefix + "/clusters", token: author, key: "k-alphabet-url-safe-0123456", body: body(urlSafe)})
+	if got := decode[clusterBody](t, rec, http.StatusCreated); got.TalosClusterID != urlSafe {
+		t.Fatalf("recorded %q, want %q", got.TalosClusterID, urlSafe)
+	}
+	rec = e.do(e.api, call{method: "POST", path: prefix + "/clusters", token: author, key: "k-alphabet-standard-0123456", body: body(standard)})
+	wantProblem(t, rec, http.StatusBadRequest, "invalid-request")
 }
 
 // validEndpoint takes https://<host>[:<port>] and nothing else: the controls beside the refusals

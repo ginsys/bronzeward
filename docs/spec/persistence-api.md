@@ -1074,7 +1074,7 @@ A Talos node ID is an opaque string accepted as Talos prints it (44
 alphanumeric characters on the nodes read for choice §10.26); it is compared
 byte for byte, never normalised. The
 cluster key is the Talos cluster ID the operator reads from one of its nodes
-(`talosctl get info`), the standard base64 encoding of 32 bytes, also
+(`talosctl get info`), the URL-safe, padded base64 encoding of 32 bytes, also
 compared byte for byte; a second cluster generated from the same Talos
 secrets bundle shares it and is refused `409 conflict`. The indexes cannot catch a record entered with a
 wrong value, or under the node-ID key for a machine that reports a UUID;
