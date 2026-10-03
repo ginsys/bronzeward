@@ -28,8 +28,12 @@ scenario=s1
 
 # The worker's file secret bin/up planted, by the path its patch gave it (machine.files[0]).
 WORKER_MARK='doc[0]/machine/files/0/content'
-# The Talos API methods that change a node. A read-only ingestion calls none of them.
-MUTATIONS='MachineService/(ApplyConfiguration|Reboot|Reset|Shutdown|Upgrade|Rollback|Bootstrap|EtcdLeaveCluster|EtcdRemoveMember|EtcdForfeitLeadership)|LifecycleService/'
+# Every Talos API method and its class (internal/talos's TestTalosAPIMethods holds the file to the
+# pinned modules and to the read-only guard). MUTATIONS: the mutating ones, one per line, which a
+# read-only ingestion never sends.
+METHODS=$here/../talos-api-methods.tsv
+MUTATIONS=$(awk -F '\t' '$2 == "mutating" { print $1 }' "$METHODS")
+[ -n "$MUTATIONS" ] || die "no mutating method in $METHODS"
 run_key=$(date -u +%s%N)
 
 # node_talos <node ip> <talosctl args...>: talosctl against one node, through that node.
@@ -49,7 +53,29 @@ apid_log() { node_talos "$1" logs apid; }
 # have dropped one of the run's as well, so then there is no count (status 1).
 run_mutations() {
   [[ "$2" == "$1"* ]] || return 1
-  grep --count --extended-regexp -- "$MUTATIONS" <<<"${2:${#1}}" || true
+  log_methods <<<"${2:${#1}}" | grep --count --fixed-strings --line-regexp -- "$MUTATIONS" || true
+}
+# log_methods: the method each request line names, one per line, from apid lines read on stdin
+# (`... OK [/machine.MachineService/Version] 1.3ms stream Success (...)`, whatever the status).
+# Whole names, matched whole: EtcdRemoveMember would not match EtcdRemoveMemberByID.
+log_methods() {
+  { grep --only-matching --extended-regexp -- '\[/[A-Za-z0-9_.]+/[A-Za-z0-9_]+\]' || true; } |
+    sed 's/^\[\///; s/\]$//'
+}
+# methods_counted: the matcher's control for every kind. One apid line per classified method, in
+# the format the log records, is counted once when the method is mutating and not at all when it is
+# a read; FAIL names each method counted otherwise.
+methods_counted() {
+  local m class n wrong=()
+  while IFS=$'\t' read -r m class; do
+    case $m in '' | '#'*) continue ;; esac
+    n=$(run_mutations '' "10.0.0.1: 2026/01/01 00:00:00.000000 log.go:98: OK [/$m] 1ms stream Success (runtime=Talos)")
+    case $class:$n in mutating:1 | read:0) ;; *) wrong+=("$m ($class, counted $n)") ;; esac
+  done <"$METHODS"
+  [ "${#wrong[@]}" -eq 0 ] || {
+    say "s1: miscounted: ${wrong[*]}"
+    return 1
+  }
 }
 # no_mutation <label> <node ip> <log before> <log after>: the S1 pass row that the node's apid log
 # recorded no mutation request past the log read before the run, written only once a dry-run apply
@@ -443,6 +469,7 @@ go_tests+='|TestTakeoverResumesToT1|TestTakeoverRefusals|TestTakeoverNothingToDe
 go_tests+='|TestTakeoverDigestMismatchAbandons|TestTakeoverRacesT1|TestTakeoverConcurrentTakers|TestTakeoverNoEcho'
 go_tests+='|TestMachineIdentityMismatch|TestMachineIngestionIdentityControls|TestMachineAccessUnavailable|TestMachineIngestion'
 go_tests+='|TestMachineAccessEventFencedByTheClaim|TestMachineAccessErrorTextControl|TestLiveRoleProbe'
+go_tests+='|TestSMBIOSUUIDIsOneMachine|TestSMBIOSUUIDControl|TestIdentityKeyConcurrent|TestInventoryIdentityKeys|TestInventoryRefusals'
 # go_rows_ran: those tests, in the clone, against go-db's PostgreSQL and OpenBao (mise run dev-db
 # and dev-bao by default), as go-db runs them: a missing service fails, it does not skip; the live
 # role probe against the fixture's control plane with bin/up's talosconfig. The DSN, token and path reach
@@ -755,6 +782,56 @@ run() {
   check 'S1 precondition' 'A answers /livez' answers 204 - GET /livez ''
   "$bin/seed" >/dev/null || die "bin/seed failed"
   redact_automation_token "$(cat -- "$STATE/automation-token")"
+
+  # The rows the Go tests prove (ruling 1), in a clone of the image commit, so that the results
+  # are the server's own commit's; removed again once they have run. They run before the apid
+  # logs are read below: the role probe's GenerateClientConfiguration on the control plane is the
+  # scenario's own mutation request, not the system's, and stays out of step 5's interval.
+  if clone_made go-rows-clone; then
+    check 'S1 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the tests run on the server's build (clone HEAD $clone_head)" go_env_clean
+    check 'S1 Go tests' 'the tests below ran against PostgreSQL and OpenBao and passed, none skipped (go-rows.log)' go_rows_ran
+    check 'S1 lease extension, C §3.3' "a heartbeat from another ingestion principal, one of an older generation, and the owner's own after its lease lapsed: each refused, the claim unchanged (TestOwnerFenceMatrix)" \
+      go_row TestOwnerFenceMatrix
+    check 'S1 lease extension, C §3.3' "control: the owner's heartbeat while live extends the lease, never past the absolute expiry (TestHeartbeat)" \
+      go_row TestHeartbeat
+    check 'S1 lease extension, C §3.3' "control: the extension counts from when the heartbeat took the claim's lock (TestHeartbeatExtendsFromTheLockTime)" \
+      go_row TestHeartbeatExtendsFromTheLockTime
+    check 'S1 interruption' 'a crash inside the draft transaction: the draft and its ETag unchanged, nothing it wrote committed, the claim unreleased (TestCrashInsideT1LeavesDraft)' \
+      go_row TestCrashInsideT1LeavesDraft
+    check 'S1 takeover, C §3.4' "the old owner's draft transaction refused after a takeover, nothing of the draft written (TestTakeoverRacesT1)" \
+      go_row TestTakeoverRacesT1
+    check 'S1 takeover, C §3.4' 'a takeover with nothing to decrypt abandons the claim, its operation failed ingestion-abandoned (TestTakeoverNothingToDecrypt)' \
+      go_row TestTakeoverNothingToDecrypt
+    check 'S1 takeover, C §3.4' "a decryption failure leaves the claim resumed under the taker, then taken over once its lease lapses (TestTakeoverDecryptFailureLeavesResumed)" \
+      go_row TestTakeoverDecryptFailureLeavesResumed
+    check 'S1 access, PA §16' 'the provider unavailable to the access read: 503 talos-access-unavailable, cause provider-unavailable, the claim abandoned (TestMachineAccessUnavailable)' \
+      go_row TestMachineAccessUnavailable
+    # The acceptance plan's §7.1 *check* items for ginsys/bronzeward#22, one row per test it names.
+    local t
+    for t in TestTakeOver TestTakeOverRefusals TestTakeOverRechecksEligibility TestTakeOverConcurrentTakers \
+      TestTakeoverResumesToT1 TestTakeoverRefusals TestTakeoverDigestMismatchAbandons TestTakeoverConcurrentTakers \
+      TestTakeoverNoEcho; do
+      check 'S1 takeover, C §15 check' "$t passed" go_row "$t"
+    done
+    for t in TestMachineIdentityMismatch TestMachineIngestionIdentityControls TestMachineIngestion \
+      TestMachineAccessEventFencedByTheClaim TestMachineAccessErrorTextControl; do
+      check 'S1 access, PA §16 check' "$t passed" go_row "$t"
+    done
+    # PA §16's inventory item: one SMBIOS UUID, Talos node ID or Talos cluster ID under two keys,
+    # one refused; a body with both identity keys, or neither, refused.
+    for t in TestSMBIOSUUIDIsOneMachine TestSMBIOSUUIDControl TestIdentityKeyConcurrent \
+      TestInventoryIdentityKeys TestInventoryRefusals; do
+      check 'S1 inventory, PA §16 check' "$t passed" go_row "$t"
+    done
+    check 'S1 access, PA §16 check' "TestLiveRoleProbe passed against the fixture's control plane: os:reader and os:operator refused MachineConfig with PermissionDenied, os:admin reads" \
+      go_row TestLiveRoleProbe
+  else
+    result FAIL 'S1 Go tests' 'no clone of the image commit (go-rows-clone.log): the Go tests did not run'
+  fi
+  rm -rf -- "$clone_dir"
+
+  check 'S1 precondition' "the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all ($(grep -c . <<<"$MUTATIONS") mutating, talos-api-methods.tsv)" \
+    methods_counted
   fresh_author
   evidence_to pre || die "no pre-state: bin/evidence failed"
   cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"
@@ -886,45 +963,6 @@ run() {
   takeover_rows
   outcome_bundle 'S1 takeover, C §3.4' success-takeover
   interruption_matrix
-
-  # The rows the Go tests prove (ruling 1), in a clone of the image commit, so that the results
-  # are the server's own commit's; removed again once they have run.
-  if clone_made go-rows-clone; then
-    check 'S1 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the tests run on the server's build (clone HEAD $clone_head)" go_env_clean
-    check 'S1 Go tests' 'the tests below ran against PostgreSQL and OpenBao and passed, none skipped (go-rows.log)' go_rows_ran
-    check 'S1 lease extension, C §3.3' "a heartbeat from another ingestion principal, one of an older generation, and the owner's own after its lease lapsed: each refused, the claim unchanged (TestOwnerFenceMatrix)" \
-      go_row TestOwnerFenceMatrix
-    check 'S1 lease extension, C §3.3' "control: the owner's heartbeat while live extends the lease, never past the absolute expiry (TestHeartbeat)" \
-      go_row TestHeartbeat
-    check 'S1 lease extension, C §3.3' "control: the extension counts from when the heartbeat took the claim's lock (TestHeartbeatExtendsFromTheLockTime)" \
-      go_row TestHeartbeatExtendsFromTheLockTime
-    check 'S1 interruption' 'a crash inside the draft transaction: the draft and its ETag unchanged, nothing it wrote committed, the claim unreleased (TestCrashInsideT1LeavesDraft)' \
-      go_row TestCrashInsideT1LeavesDraft
-    check 'S1 takeover, C §3.4' "the old owner's draft transaction refused after a takeover, nothing of the draft written (TestTakeoverRacesT1)" \
-      go_row TestTakeoverRacesT1
-    check 'S1 takeover, C §3.4' 'a takeover with nothing to decrypt abandons the claim, its operation failed ingestion-abandoned (TestTakeoverNothingToDecrypt)' \
-      go_row TestTakeoverNothingToDecrypt
-    check 'S1 takeover, C §3.4' "a decryption failure leaves the claim resumed under the taker, then taken over once its lease lapses (TestTakeoverDecryptFailureLeavesResumed)" \
-      go_row TestTakeoverDecryptFailureLeavesResumed
-    check 'S1 access, PA §16' 'the provider unavailable to the access read: 503 talos-access-unavailable, cause provider-unavailable, the claim abandoned (TestMachineAccessUnavailable)' \
-      go_row TestMachineAccessUnavailable
-    # The acceptance plan's §7.1 *check* items for ginsys/bronzeward#22, one row per test it names.
-    local t
-    for t in TestTakeOver TestTakeOverRefusals TestTakeOverRechecksEligibility TestTakeOverConcurrentTakers \
-      TestTakeoverResumesToT1 TestTakeoverRefusals TestTakeoverDigestMismatchAbandons TestTakeoverConcurrentTakers \
-      TestTakeoverNoEcho; do
-      check 'S1 takeover, C §15 check' "$t passed" go_row "$t"
-    done
-    for t in TestMachineIdentityMismatch TestMachineIngestionIdentityControls TestMachineIngestion \
-      TestMachineAccessEventFencedByTheClaim TestMachineAccessErrorTextControl; do
-      check 'S1 access, PA §16 check' "$t passed" go_row "$t"
-    done
-    check 'S1 access, PA §16 check' "TestLiveRoleProbe passed against the fixture's control plane: os:reader and os:operator refused MachineConfig with PermissionDenied, os:admin reads" \
-      go_row TestLiveRoleProbe
-  else
-    result FAIL 'S1 Go tests' 'no clone of the image commit (go-rows-clone.log): the Go tests did not run'
-  fi
-  rm -rf -- "$clone_dir"
 
   # Step 5: the post-state, compared with the pre-state.
   evidence_to post || die "no post-state: bin/evidence failed"
