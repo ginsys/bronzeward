@@ -1566,18 +1566,20 @@ its ETag (§4.1). Its `revisions` are every revision of its name, or its
 machine, published or not, in identifier order. A revision answers its
 content: a fragment revision its sanitized `document` and `layer`, a profile
 revision its `fragments` pins in order, an assignment revision its `profiles`
-and `fragments` per layer:
+and `fragments` per layer. The discarded draft moved no head, so `registries`
+still answers head revision 3, the base the draft edited from, while the
+draft's own revisions stay readable by id:
 
 ```http
 GET /api/v1/fragments/frg_rgkebwvneg6mxhid62gec5difi
 
 HTTP/1.1 200 OK
-ETag: "4-m3oxmlfh6phr7aigshdydcb4ji"
+ETag: "3-m3oxmlfh6phr7aigshdydcb4ji"
 
 {"id": "frg_rgkebwvneg6mxhid62gec5difi",
  "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha", "scope": "cluster",
  "name": "registries", "layer": "cluster",
- "revision": "frv_sqb745zrpl2xltek22ai7sbdue", "headRevision": 4,
+ "revision": "frv_lc4wfn2tqz3mxu7h5kdo6ybvpe", "headRevision": 3,
  "createdAt": "2026-09-26T09:14:05Z"}
 
 GET /api/v1/assignment-revisions/asr_e7v7jq6g4e3tsx2wq5ynldkb3a
