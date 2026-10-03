@@ -302,7 +302,8 @@ fetch_tools
 # not there.
 docker image pull --quiet "$CURL_IMAGE" >/dev/null || die "could not pull the client image $CURL_IMAGE"
 
-# The server under test and the OIDC issuer, built into one image of two static binaries and
+# The server under test, instance C's interruption build of it and the OIDC issuer, built into
+# one image of three static binaries and
 # nothing else, imported for this run and never pulled. They are built from the commit, exported
 # with git archive, not from the checkout: an edit or a checkout during the build cannot reach
 # them, so the recorded commit is the source that ran. Only with the Go version mise.toml pins,
@@ -318,7 +319,7 @@ build_commit=$(fixtures_git rev-parse HEAD) || die "cannot read the commit the s
 build_differs=$(checkout_differs) || die "cannot ask git how the checkout differs from $build_commit"
 S_IMG=$STATE/image
 S_SRC=$STATE/source
-mkdir "$S_IMG" "$S_SRC" "$STATE/issuer" "$STATE/server" "$STATE/server/a" "$STATE/server/b"
+mkdir "$S_IMG" "$S_SRC" "$STATE/issuer" "$STATE/server" "$STATE/server/a" "$STATE/server/b" "$STATE/server/c"
 # From the repository root: run in fixtures/, git archive exports only that directory.
 fixtures_git -C .. archive --format=tar "$build_commit" | tar -x -C "$S_SRC" -f - ||
   die "could not export $build_commit to build the server image from"
@@ -333,6 +334,15 @@ for binary in bronzeward:./cmd/bronzeward oidc:./fixtures/oidc; do
     -o "$S_IMG/${binary%%:*}" "${binary#*:}") || die "could not build ${binary#*:} from $build_commit"
 done
 unset binary
+# Instance C's server: the same commit with the interruption seam compiled in (internal/seam).
+(cd -- "$S_SRC" && CGO_ENABLED=0 GOFLAGS=-mod=readonly timeout 600 go build -trimpath -buildvcs=false \
+  -tags fixtureinterrupt -o "$S_IMG/bronzeward-interrupt" ./cmd/bronzeward) ||
+  die "could not build the interruption build of ./cmd/bronzeward from $build_commit"
+# The seam's message is in C's binary and not in A's and B's: the server under test has no seam.
+grep --quiet --fixed-strings -- 'fixture interrupt: ' "$S_IMG/bronzeward-interrupt" ||
+  die "the interruption build has no seam; the tag did not reach it"
+! grep --quiet --fixed-strings -- 'fixture interrupt: ' "$S_IMG/bronzeward" ||
+  die "the server binary carries the interruption seam"
 rm -rf -- "$S_SRC"
 record up-build "commit $build_commit
 differing-paths $build_differs
@@ -341,7 +351,7 @@ unset build_pin build_commit build_differs build_go S_SRC
 "$S_IMG/oidc" keygen -out "$STATE/issuer/key.json" || die "could not generate the issuer's signing key"
 # By ID from here on: a re-tag between the import and Compose cannot substitute another image. The
 # ID is recorded before anything uses it, so that down removes the image whatever fails after.
-image_id=$(tar -C "$S_IMG" -c bronzeward oidc |
+image_id=$(tar -C "$S_IMG" -c bronzeward bronzeward-interrupt oidc |
   docker image import --change 'ENTRYPOINT ["/bronzeward"]' --change "LABEL $RUN_LABEL=$BW_RUN_ID" - \
     "${FIXTURE_NAME}-bronzeward:$BW_RUN_ID") || die "could not import the server image"
 [[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || die "docker image import answered '$image_id', not an image ID"
@@ -361,23 +371,23 @@ fi
 # Each instance's configuration, rendered in the shell: sed would carry the password on its command
 # line, readable by any local user.
 dsn="postgres://bronzeward:${BW_POSTGRES_PASSWORD}@postgres:5432/bronzeward?sslmode=disable"
-for instance in a b; do
+for instance in a b c; do
   rendered=${server_template//@DSN@/"$dsn"}
   printf '%s\n' "${rendered//@INSTANCE@/"$instance"}" >"$STATE/server/$instance/config.yaml" ||
     die "could not write the configuration of instance $instance"
 done
 unset dsn instance rendered server_template
 
-say "starting postgres, openbao and the issuer; creating instances A and B"
+say "starting postgres, openbao and the issuer; creating instances A, B and C"
 compose up --detach --quiet-pull --wait postgres
 compose up --detach --quiet-pull openbao issuer
-compose create bronzeward-a bronzeward-b
+compose create bronzeward-a bronzeward-b bronzeward-c
 # The Compose containers carry the project's labels, which any container can be given under the
 # fixed names once the real one is gone by hand. Recorded by ID under each name, as the Talos
 # nodes are below: containers_own (lib.sh) holds the name to the ID before inject or evidence act
 # on it, and bin/down holds every labelled container to the record before removing any. This run
 # acts on them by these IDs too (bao and pg in lib.sh take the ID the name was verified under).
-for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$ISSUER"; do
+for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$BW_C" "$ISSUER"; do
   # The one Compose made, told by its labels, as containers_own tells it: the name and the project
   # labels alone could be a replacement's, made under the fixed name once the real one was gone
   # between compose up and this look, since any container can carry them; this run's own value,
@@ -470,7 +480,7 @@ unset policies policy key
 # One ingestion token per instance, under bw-ingestion alone (no default policy, as the live policy
 # tests issue theirs), written whole beside the instance's configuration (mktemp in the
 # directory, then a rename): an instance never reads a cut token.
-for instance in a b; do
+for instance in a b c; do
   # Assigned first: a command substitution that is only a printf argument cannot fail the script.
   ingestion_token=$(bao token create -policy=bw-ingestion -no-default-policy -format=json | jq -er .auth.client_token) ||
     die "could not create instance $instance's OpenBao ingestion token"
@@ -549,10 +559,10 @@ network_id=$(attached_network Talos talos.cluster.name "$FIXTURE_NAME" \
   "${verified_container_ids[$CP]}" "${verified_container_ids[$WORKER]}") || exit 1
 printf '%s\n' "$network_id" >"$STATE/down-node-networks.partial"
 mv --no-target-directory -- "$STATE/down-node-networks.partial" "$STATE/down-node-networks"
-# Instances A and B reach the Talos nodes on the cluster's network, the one just recorded, by its
+# Instances A, B and C reach the Talos nodes on the cluster's network, the one just recorded, by its
 # ID and each by the ID verified under its name. Connected while created: each takes an address
 # when it starts.
-for name in "$BW_A" "$BW_B"; do
+for name in "$BW_A" "$BW_B" "$BW_C"; do
   docker network connect "$network_id" "${verified_container_ids[$name]}" ||
     die "could not connect $name to the Talos network"
 done
@@ -589,8 +599,8 @@ for c in "$PG" "$BAO" "$ISSUER" "$CP" "$WORKER"; do
     *) die "$c stopped while the fixture was starting (see 'Known limits' in fixtures/README.md)" ;;
   esac
 done
-# A and B are created and never started: S0 starts them.
-for c in "$BW_A" "$BW_B"; do
+# A, B and C are created and never started: S0 starts A and B, S1 C.
+for c in "$BW_A" "$BW_B" "$BW_C"; do
   id=$(container_id "$c") || die "$c was not recorded under its name; the fixture is not known to be up"
   [ "$(docker inspect --type container --format '{{.State.Status}}' "$id")" = created ] ||
     die "$c is no longer created-and-not-started; something started or removed it while the fixture was starting"
@@ -619,6 +629,7 @@ fixture is up
   talos         controlplane $TALOS_CONTROLPLANE_IP, worker $TALOS_WORKER_IP
                 TALOSCONFIG=$TALOSCONFIG
   local stores  $STATE/data (SQLite files, age/SOPS stores)
-  bronzeward    A http://127.0.0.1:$SERVER_A_PORT, B http://127.0.0.1:$SERVER_B_PORT (created, not started:
-                fixtures/bin/inject start A|B); issuer http://issuer:5556 on the Compose network only
+  bronzeward    A http://127.0.0.1:$SERVER_A_PORT, B http://127.0.0.1:$SERVER_B_PORT, C (interruption build)
+                http://127.0.0.1:$SERVER_C_PORT (created, not started:
+                fixtures/bin/inject start A|B|C); issuer http://issuer:5556 on the Compose network only
 EOF

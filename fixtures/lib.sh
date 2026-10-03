@@ -45,7 +45,7 @@ unset TAR_OPTIONS GZIP
 # the cluster's client credentials and goes with .state at teardown: through a link, the removal
 # would take the link and leave them.
 for managed in "$STATE" "$STATE/data" "$STATE/backups" "$STATE/evidence" "$STATE/talos" "$STATE/server" "$STATE/server/a" \
-  "$STATE/server/b" "$STATE/issuer" "$STATE/image" "$CACHE"; do
+  "$STATE/server/b" "$STATE/server/c" "$STATE/issuer" "$STATE/image" "$CACHE"; do
   if [ -L "$managed" ]; then
     printf 'fixtures: %s is a symlink; the fixture never creates one. Remove the link and run again\n' "$managed" >&2
     exit 1
@@ -66,7 +66,7 @@ versions_env=$(cat -- "$FIXTURES/versions.env") || {
 versions_keys=(TALOS_VERSION TALOSCTL_URL TALOSCTL_SHA256 TALOS_IMAGE KUBERNETES_VERSION OPENBAO_IMAGE
   CURL_IMAGE POSTGRES_IMAGE SOPS_VERSION SOPS_URL SOPS_SHA256 AGE_VERSION AGE_URL AGE_SHA256 AGE_BINARY_SHA256
   AGE_KEYGEN_SHA256 FIXTURE_NAME TALOS_SUBNET TALOS_CONTROLPLANE_IP TALOS_WORKER_IP POSTGRES_PORT OPENBAO_PORT
-  SERVER_A_PORT SERVER_B_PORT)
+  SERVER_A_PORT SERVER_B_PORT SERVER_C_PORT)
 unset -v "${versions_keys[@]}"
 # Parsed, never sourced: sourced, a value that is an expansion (`$RANDOM`, `${X:-58200}`) would
 # be evaluated, and the same bytes could give another value at another command, with the record
@@ -198,8 +198,10 @@ BAO=$FIXTURE_NAME-openbao
 CP=$FIXTURE_NAME-controlplane-1
 WORKER=$FIXTURE_NAME-worker-1
 # The server under test, two instances of the image bin/up builds, and the OIDC issuer they trust.
+# C runs the image's other binary, the server built with the interruption seam (internal/seam).
 BW_A=$FIXTURE_NAME-bronzeward-a
 BW_B=$FIXTURE_NAME-bronzeward-b
+BW_C=$FIXTURE_NAME-bronzeward-c
 ISSUER=$FIXTURE_NAME-issuer
 # On the containers a command runs for a moment from the recorded image or the pinned client image
 # (a token minted, a route or a port tried from inside a namespace): bin/down removes one left
@@ -272,8 +274,9 @@ need_state() {
 state_files_own() {
   local file
   for file in lock bao-init.json talosconfig kubeconfig talos-secrets.yaml controlplane.yaml scan-patterns.txt injections.log down-node-containers down-node-networks down-compose-containers down-compose-volumes down-compose-networks up-manifest up-fixtures-diff.txt up-fixture-name up-daemon up-versions.env up-compose.yaml \
-    up-image up-build linksplits automation-token automation-identity server/a/config.yaml server/b/config.yaml \
-    server/a/openbao-ingestion.token server/b/openbao-ingestion.token issuer/key.json; do
+    up-image up-build linksplits automation-token automation-identity server/a/config.yaml server/b/config.yaml server/c/config.yaml \
+    server/a/openbao-ingestion.token server/b/openbao-ingestion.token server/c/openbao-ingestion.token \
+    server/c/interrupt issuer/key.json; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -324,7 +327,7 @@ containers_own() {
   local name answer
   # shellcheck disable=SC2034  # read by bin/inject
   verified_container_ids=()
-  for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$ISSUER"; do
+  for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$BW_C" "$ISSUER"; do
     if ! answer=$(docker inspect --type container --format \
       '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
       "$name" 2>&1); then
@@ -1101,8 +1104,9 @@ container() {
     worker) printf '%s\n' "$WORKER" ;;
     A) printf '%s\n' "$BW_A" ;;
     B) printf '%s\n' "$BW_B" ;;
+    C) printf '%s\n' "$BW_C" ;;
     issuer) printf '%s\n' "$ISSUER" ;;
-    *) die "unknown target '$1' (postgres, openbao, controlplane, worker, A, B, issuer)" ;;
+    *) die "unknown target '$1' (postgres, openbao, controlplane, worker, A, B, C, issuer)" ;;
   esac
 }
 
@@ -1160,10 +1164,11 @@ scan_patterns() {
   # Both encodings of the unseal key: they share no substring, and either is the credential.
   bao_keys=$(jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json") || return 1
   metadata_token=$(awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env") || return 1
-  # The instances' OpenBao ingestion tokens: a missing file fails the list, since bin/up writes both
-  # before the list is first made.
-  ingestion_tokens=$(cat -- "$STATE/server/a/openbao-ingestion.token" "$STATE/server/b/openbao-ingestion.token") || return 1
-  if [ "$(wc -l <<<"$ingestion_tokens")" -ne 2 ] || grep --quiet --line-regexp '' <<<"$ingestion_tokens"; then
+  # The instances' OpenBao ingestion tokens: a missing file fails the list, since bin/up writes all
+  # three before the list is first made.
+  ingestion_tokens=$(cat -- "$STATE/server/a/openbao-ingestion.token" "$STATE/server/b/openbao-ingestion.token" \
+    "$STATE/server/c/openbao-ingestion.token") || return 1
+  if [ "$(wc -l <<<"$ingestion_tokens")" -ne 3 ] || grep --quiet --line-regexp '' <<<"$ingestion_tokens"; then
     die "the instances' OpenBao ingestion tokens are not one line each; they would go unscanned"
   fi
   talos_secrets=$(awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \

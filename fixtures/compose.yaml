@@ -81,6 +81,23 @@ services:
     volumes:
       - ${BW_STATE}/server/b:/etc/bronzeward:ro
 
+  # C: the image's other binary, the server built with the fixtureinterrupt tag, whose ingestion
+  # runs stop where server/c/interrupt says (internal/seam, acceptance plan S1's interruptions). A
+  # and B never run it. Created, not started, like them.
+  bronzeward-c:
+    image: ${BW_IMAGE}
+    pull_policy: never
+    container_name: ${FIXTURE_NAME}-bronzeward-c
+    labels:
+      bronzeward.fixture.run: ${BW_RUN_ID}
+    user: "${BW_UID}:${BW_GID}"
+    entrypoint: ["/bronzeward-interrupt"]
+    command: ["serve", "-config", "/etc/bronzeward/config.yaml"]
+    ports:
+      - "127.0.0.1:${SERVER_C_PORT}:8080"
+    volumes:
+      - ${BW_STATE}/server/c:/etc/bronzeward:ro
+
   # The disposable OIDC issuer, reached by A and B as http://issuer:5556, a host their
   # configuration lists in plainHTTPHosts. Not published: tokens are minted offline from its key.
   issuer:
