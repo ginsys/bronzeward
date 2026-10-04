@@ -134,15 +134,6 @@ func TestRedactMessage(t *testing.T) {
 			t.Errorf("a token holding a value: %q, %s; want withheld", got, outcome)
 		}
 	})
-	t.Run("token names a short value", func(t *testing.T) {
-		o := r
-		o.exact = maps.Clone(r.exact)
-		o.exact["app/str"] = true
-		if got, outcome := redactMessage("composition", "label \""+compileSecret+"\" is too long", "label \""+s["str"]+"\" is too long", ts, false, o); outcome != messageWithheld ||
-			got != withheld {
-			t.Errorf("a token naming a value: %q, %s; want withheld", got, outcome)
-		}
-	})
 	t.Run("verbatim message is a value", func(t *testing.T) {
 		o := r
 		o.exact = maps.Clone(r.exact)
@@ -204,6 +195,8 @@ func TestCompileMessages(t *testing.T) {
 		{"rejection, mapping after it", []Source{port, labels}, RuleRejected, "fragment[0]", "`<redacted:port@1>...` into int"},
 		{"rejection, mapping before it", []Source{labels, port}, RuleRejected, "fragment[1]", withheldNotice("composition")},
 		{"token spells the value", []Source{str("machine:\n  features:\n    kubePrism:\n      port: !bwref "+compileSecret+"\n", compileSecret, compileSecret)},
+			RuleRejected, "fragment[0]", withheldNotice("composition")},
+		{"token names a short value", []Source{str("machine:\n  features:\n    kubePrism:\n      port: !bwref abcde\n", "abcde", "abcde")},
 			RuleRejected, "fragment[0]", withheldNotice("composition")},
 	} {
 		t.Run(c.name, func(t *testing.T) {
