@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -54,6 +55,7 @@ type tracer struct {
 type standInText struct {
 	value string // the placed stand-in
 	raw   string // for TraceBytes, the stand-in before encoding
+	host  string // inside an identified embedded document, that document's written trace text
 }
 
 // ID is the tracer's id, unique within one composition's trace pass.
@@ -111,6 +113,17 @@ func (t Tracer) Carried(v string) bool {
 		return v == x.value
 	}
 	return false
+}
+
+// HostFormat is the format of the identified embedded document the tracer stands in, when v is
+// exactly that document's text as the trace pass wrote it, and "" otherwise. The text holds the
+// pass's stand-ins, so it is unique to the pass: it finds the document's copies in a composed
+// trace output, to be walked as embedded there (WalkLeaves).
+func (t Tracer) HostFormat(v string) string {
+	if t.p == nil || t.p.text == nil || t.p.path.Format == "" || v != t.p.text.host {
+		return ""
+	}
+	return t.p.path.Format
 }
 
 // canonicalBase64 is s decoded as standard base64 and encoded again, when that differs from s.
@@ -179,6 +192,12 @@ func Trace(s Sanitized, values map[string]provider.Value, first, flip int) (Reso
 			next++
 		}
 		return n, nil
+	}, func(p Path, text string) {
+		for _, t := range ts {
+			if x := t.p; x.path.Format != "" && x.path.Doc == p.Doc && slices.Equal(x.path.Pointer, p.Pointer) && x.text.host == "" {
+				x.text.host = text
+			}
+		}
 	})
 	if err != nil {
 		return Resolved{}, nil, err
