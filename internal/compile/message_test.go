@@ -78,7 +78,8 @@ func messageFixture(t *testing.T) ([]traced, redactor, map[string]string) {
 // cannot explain, or explains in more than one way, is withheld behind a notice naming the step.
 // A message from a step whose input holds a boolean reference is withheld unless it is empty: a
 // boolean's stand-in is its own value, so no quote of it is marked. Exact copies of a resolved
-// string of six bytes or more are then redacted as values, longest first (compilation.md §8.3).
+// string of six bytes or more are then redacted as values, overlapping copies as one
+// (compilation.md §8.3).
 func TestRedactMessage(t *testing.T) {
 	ts, r, s := messageFixture(t)
 	withheld := "<withheld: the composition message may quote a sensitive value>"
@@ -132,6 +133,25 @@ func TestRedactMessage(t *testing.T) {
 		if got, outcome := redactMessage("composition", "label \""+compileSecret+"\" is too long", "label \""+s["str"]+"\" is too long", ts, false, o); outcome != messageWithheld ||
 			got != withheld {
 			t.Errorf("a token holding a value: %q, %s; want withheld", got, outcome)
+		}
+	})
+	t.Run("overlapping value copies", func(t *testing.T) {
+		// One value's tail is another's head: the whole run is one value token, so no part of
+		// the longer value is shown.
+		o := r
+		o.contains = append(slices.Clone(r.contains), "zzXXXXXX", "XXXXXXsecretpart")
+		if got, outcome := redactMessage("composition", "a zzXXXXXXsecretpart b", "a zzXXXXXXsecretpart b", ts, false, o); outcome != messageVerbatim ||
+			got != "a <redacted:value> b" {
+			t.Errorf("overlapping copies: %q, %s", got, outcome)
+		}
+	})
+	t.Run("partly overlapping quotes", func(t *testing.T) {
+		qs, ok := orderQuotes([]quote{{span: [2]int{0, 10}}, {span: [2]int{2, 4}}, {span: [2]int{12, 20}}})
+		if !ok || len(qs) != 2 || qs[0].span != [2]int{0, 10} || qs[1].span != [2]int{12, 20} {
+			t.Errorf("nested quotes: %v, %v", qs, ok)
+		}
+		if _, ok := orderQuotes([]quote{{span: [2]int{0, 10}}, {span: [2]int{5, 15}}}); ok {
+			t.Error("partly overlapping quotes of two references were ordered")
 		}
 	})
 	t.Run("verbatim message is a value", func(t *testing.T) {

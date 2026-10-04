@@ -205,9 +205,11 @@ func (t Tracer) Quotes(msg string) [][2]int {
 		}
 	}
 	slices.SortFunc(all, func(a, b [2]int) int { return cmp.Or(a[0]-b[0], b[1]-a[1]) })
+	// Overlapping quotes merge, so a quote that runs past another's end is marked to its own.
 	var out [][2]int
 	for _, s := range all {
 		if len(out) > 0 && s[0] < out[len(out)-1][1] {
+			out[len(out)-1][1] = max(out[len(out)-1][1], s[1])
 			continue
 		}
 		out = append(out, s)

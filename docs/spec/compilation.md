@@ -1002,7 +1002,8 @@ with the stand-in format **(choice §16.22)**.
 - **Value forms.** The value means looks for the forms §6 step 7 refuses: a
   resolved `string` value, a mapping reference's key or `string` member, the
   standard base64 encoding of one of them and its canonical re-encoding. In a
-  message it replaces a copy of six bytes or more, longest first. In the
+  message it replaces each run of text covered by copies of six bytes or more,
+  copies that overlap or touch as one run, so no part of a copy is left. In the
   redacted configuration it also replaces a whole scalar or key equal to a form
   of any length, which step 7 cannot refuse when the value is under six bytes.
   Integer and boolean values are not looked for, as in the path means.

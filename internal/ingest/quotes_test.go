@@ -84,6 +84,15 @@ func TestTracerQuotes(t *testing.T) {
 			t.Errorf("Quotes = %v, want %v", got, want)
 		}
 	})
+	t.Run("overlapping forms", func(t *testing.T) {
+		// A placed form whose tail is the raw form's head: the two quotes merge into one span,
+		// so no byte of either is left outside a quote.
+		tr := Tracer{&tracer{kind: TraceBytes, text: &standInText{value: "QUJDzq041ab", raw: "zq041abcdef"}}}
+		msg := "x QUJDzq041abcdef y"
+		if got, want := tr.Quotes(msg), [][2]int{{2, 17}}; !reflect.DeepEqual(got, want) {
+			t.Errorf("Quotes = %v, want %v", got, want)
+		}
+	})
 	t.Run("boolean and headless", func(t *testing.T) {
 		msg := "true is not allowed here, nor xxx"
 		if got := ts[TraceBoolean].Quotes(msg); got != nil {

@@ -43,10 +43,11 @@ func tokenOf(t traced) string {
 // withheld when the passes disagree, when the template does not match or matches in more than
 // one way, when the step's input is unmarked (it holds a boolean reference, whose stand-in is its
 // own value, or a mapping reference, whose keys the trace pass keeps, so nothing marks a quote of
-// either), or when the values did not all decode. What is shown then has every exact copy of a
-// resolved string of copyFloor bytes or more redacted as a value, longest first, and is withheld
-// if a value form still remains, as when a token's reference name spells one. The result never
-// holds real's text when it is withheld, and real itself is never kept.
+// either), when two quotes of different references partly overlap, or when the values did not
+// all decode. What is shown then has every exact copy of a resolved string of copyFloor bytes or
+// more redacted as a value, overlapping copies as one, and is withheld if a value form still
+// remains, as when a token's reference name spells one. The result never holds real's text when
+// it is withheld, and real itself is never kept.
 func redactMessage(step, real, trace string, ts []traced, unmarked bool, r redactor) (string, messageOutcome) {
 	if real == "" && trace == "" {
 		return "", messageNone
@@ -55,23 +56,15 @@ func redactMessage(step, real, trace string, ts []traced, unmarked bool, r redac
 	if r.opaque || unmarked || real == "" || trace == "" {
 		return withheld, messageWithheld
 	}
-	type quote struct {
-		span [2]int
-		t    traced
-	}
 	var all []quote
 	for _, t := range ts {
 		for _, s := range t.Quotes(trace) {
 			all = append(all, quote{s, t})
 		}
 	}
-	slices.SortFunc(all, func(a, b quote) int { return cmp.Or(a.span[0]-b.span[0], b.span[1]-a.span[1]) })
-	var qs []quote
-	for _, q := range all {
-		if len(qs) > 0 && q.span[0] < qs[len(qs)-1].span[1] {
-			continue
-		}
-		qs = append(qs, q)
+	qs, ok := orderQuotes(all)
+	if !ok {
+		return withheld, messageWithheld
 	}
 	if len(qs) == 0 {
 		if real != trace {
@@ -122,14 +115,56 @@ func redactMessage(step, real, trace string, ts []traced, unmarked bool, r redac
 	return out.String(), messageRedacted
 }
 
-// values is s with every exact copy of a value form of copyFloor bytes or more replaced by
-// valueToken, longest first, so a value holding another is replaced whole.
-func (r redactor) values(s string) string {
-	fs := slices.Clone(r.contains)
-	slices.SortFunc(fs, func(a, b string) int { return cmp.Or(len(b)-len(a), strings.Compare(a, b)) })
-	var pairs []string
-	for _, f := range fs {
-		pairs = append(pairs, f, valueToken)
+// quote is where a trace message quotes one tracer's stand-in.
+type quote struct {
+	span [2]int
+	t    traced
+}
+
+// orderQuotes is all in message order, a quote inside another dropped. Two quotes that only partly
+// overlap name two references for one run of text, so no token can stand for it: not ok.
+func orderQuotes(all []quote) ([]quote, bool) {
+	slices.SortFunc(all, func(a, b quote) int { return cmp.Or(a.span[0]-b.span[0], b.span[1]-a.span[1]) })
+	var qs []quote
+	for _, q := range all {
+		if len(qs) > 0 && q.span[0] < qs[len(qs)-1].span[1] {
+			if q.span[1] > qs[len(qs)-1].span[1] {
+				return nil, false
+			}
+			continue
+		}
+		qs = append(qs, q)
 	}
-	return strings.NewReplacer(pairs...).Replace(s)
+	return qs, true
+}
+
+// values is s with every run covered by exact copies of value forms of copyFloor bytes or more
+// replaced by one valueToken. Copies that overlap or touch are one run, so no part of any copy is
+// left beside a token.
+func (r redactor) values(s string) string {
+	covered := make([]bool, len(s))
+	for _, f := range r.contains {
+		for i := 0; ; i++ {
+			j := strings.Index(s[i:], f)
+			if j < 0 {
+				break
+			}
+			i += j
+			for k := i; k < i+len(f); k++ {
+				covered[k] = true
+			}
+		}
+	}
+	var out strings.Builder
+	for i := 0; i < len(s); i++ {
+		if !covered[i] {
+			out.WriteByte(s[i])
+			continue
+		}
+		out.WriteString(valueToken)
+		for i+1 < len(s) && covered[i+1] {
+			i++
+		}
+	}
+	return out.String()
 }
