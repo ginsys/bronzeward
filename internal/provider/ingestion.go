@@ -1,9 +1,11 @@
-// Package provider is Bronzeward's OpenBao client. It exposes one role type, Ingestion, with
-// exactly the operations compilation.md §1 and persistence-api.md §3.3 give the ingestion
-// identity: create-only secret generations, encryption under the baseline key, encryption and
-// decryption under the staging key, HMAC under the digest key, and a read of a cluster's Talos
-// access credential. It reads no other secret, has no baseline or artifact decryption and no
-// other provider call, whatever a token's policy would allow (TestIngestionMethodSet).
+// Package provider is Bronzeward's OpenBao client. It exposes one role type per identity, each
+// with exactly the operations compilation.md §1 gives that identity, whatever a token's policy
+// would allow (the method-set tests). Ingestion holds create-only secret generations, encryption
+// under the baseline key, encryption and decryption under the staging key, HMAC under the digest
+// key, and a read of a cluster's Talos access credential (persistence-api.md §3.3); it reads no
+// other secret and has no baseline or artifact decryption. Compiler reads a pinned generation
+// version and encrypts under the artifact key. Metadata asks for one object's metadata by name
+// (dependency-monitor.md §4). Report lists the generation tree (persistence-api.md §6.4).
 //
 // No error from this package carries a request or response body, server error text or a
 // transport error's text; see requestError. A provider error on CreateGeneration, typed or not,
@@ -143,15 +145,16 @@ func versioned(s string) (int, string, error) {
 // EncryptBaseline encrypts the exact input under the baseline key (compilation.md §2.3 step 8):
 // no identity of compilation.md §1 can decrypt it.
 func (i *Ingestion) EncryptBaseline(ctx context.Context, plaintext []byte) (Ciphertext, error) {
-	return i.encrypt(ctx, i.keys.Baseline, plaintext)
+	return i.c.encrypt(ctx, i.keys.Baseline, plaintext)
 }
 
 // EncryptStaging encrypts an encrypted claim's envelope under the staging key (compilation.md §3).
 func (i *Ingestion) EncryptStaging(ctx context.Context, envelope []byte) (Ciphertext, error) {
-	return i.encrypt(ctx, i.keys.Staging, envelope)
+	return i.c.encrypt(ctx, i.keys.Staging, envelope)
 }
 
-func (i *Ingestion) encrypt(ctx context.Context, key string, plaintext []byte) (Ciphertext, error) {
+// encrypt is a Transit encrypt under key, for the role types that hold one.
+func (c *client) encrypt(ctx context.Context, key string, plaintext []byte) (Ciphertext, error) {
 	path, err := transitPath("encrypt", key)
 	if err != nil {
 		return "", err
@@ -160,7 +163,7 @@ func (i *Ingestion) encrypt(ctx context.Context, key string, plaintext []byte) (
 	if err != nil {
 		return "", errors.New("provider: the request could not be encoded")
 	}
-	r, err := i.c.do(ctx, http.MethodPost, path, body, false)
+	r, err := c.do(ctx, http.MethodPost, path, body, false)
 	if err != nil {
 		return "", err
 	}
