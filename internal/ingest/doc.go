@@ -9,6 +9,11 @@
 // handed to the caller's create function (§2.3 step 6, which writes the provider generations).
 // The zero Sanitized is refused by Check.
 //
+// Resolve is extraction's inverse, compilation's step 4 (§6): it replaces each reference of a
+// Sanitized by its value and yields a Resolved, plaintext that renders nothing and leaves the
+// package only as the machinery's own composition input or patch. It sits here, beside the
+// walker, paths and declarations it inverts, so that none of them is exported.
+//
 // Choices made here, not in the specification:
 //
 //   - Schema identification loads each document of the stream on its own with the pinned
@@ -56,4 +61,9 @@
 //   - Marks inside an identified embedded document are resolved in its parsed form; the document
 //     is then written back as block YAML with two-space indentation, without the author's styles
 //     or comments, whether it was declared yaml or json (§5.4).
+//   - A resolved mapping's members are placed in key order: a provider value holds no other.
+//     A resolved string keeps no style of the reference's; the encoder quotes one that would
+//     read as another kind.
+//   - A resolved fragment the machinery cannot load is ErrPatchLoad, without the machinery's
+//     message, which quotes the value. How such a message is shown is §8.3's.
 package ingest
