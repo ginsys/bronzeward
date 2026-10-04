@@ -394,8 +394,9 @@ and clears the payload, at startup and periodically. A late sweep therefore
 delays only the clearing of ciphertext, never a refusal. The sweep interval is
 open.
 
-Every comparison with a claim's lease or absolute expiry, and a heartbeat's new
-lease, uses the database's current time, `clock_timestamp()`, not the
+Every comparison with a claim's lease or absolute expiry, a new claim's lease
+and expiry, and a heartbeat's new lease, use the database's current time,
+`clock_timestamp()`, not the
 transaction's start `now()`
 ([persistence and API §5](persistence-api.md#5-transaction-boundaries) rule 4).
 An owner transition takes the claim's row lock before it evaluates its
