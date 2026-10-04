@@ -100,6 +100,36 @@ func TestGuardChecksMarkedMappingKeys(t *testing.T) {
 	}
 }
 
+// TestGuardMatchesMappingKeysAsTokens: a marked mapping's key is searched for as a whole token,
+// with neither neighbour an ASCII letter or digit, so a key such as username inside a longer word
+// such as usernames, which every Talos base holds, is no copy; its member values are still
+// searched for anywhere.
+func TestGuardMatchesMappingKeysAsTokens(t *testing.T) {
+	const auth = "machine:\n  registries:\n    config:\n      r.test:\n        auth:\n          username: " + secretText + "-u\n          password: " + secretText + "\n"
+	const mark = "doc[0]/machine/registries/config/r.test/auth"
+	for _, tc := range []struct {
+		name, copy string
+		refused    bool
+	}{
+		{"in a longer word", "usernames", false},
+		{"after a letter", "myusername", false},
+		{"bounded by a slash", "user/username", true},
+		{"at the end after a sign", "login=password", true},
+		{"a member value inside a word", "x" + secretText + "x", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Extract(request(t, auth+"cluster:\n  clusterName: "+tc.copy+"\n", mark))
+			var r *Refusal
+			switch {
+			case !tc.refused && err != nil:
+				t.Fatalf("got %v, want no refusal", err)
+			case tc.refused && (!errors.As(err, &r) || r.Rule != RuleGuardSubstring || !slices.Contains(r.Paths, "doc[0]/cluster/clusterName")):
+				t.Fatalf("got %v, want a %s refusal at doc[0]/cluster/clusterName", err, RuleGuardSubstring)
+			}
+		})
+	}
+}
+
 // TestGuardSkipsThisRunsReferences: the substring search skips the content of this run's
 // !bwref nodes (compilation.md §4.2), so a value found only inside a minted name passes.
 func TestGuardSkipsThisRunsReferences(t *testing.T) {

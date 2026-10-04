@@ -486,7 +486,12 @@ both:
    and 5.19 for the unaddressable keys).
 2. **Substring search.** Every scalar is searched for every extracted value as a
    substring. This catches a secret embedded in a larger value, such as a token
-   inside a URL or a join command, which value comparison cannot see.
+   inside a URL or a join command, which value comparison cannot see. A
+   mapping's key is searched for as a whole token: an occurrence counts only
+   where neither neighbouring byte is an ASCII letter or digit. Key names are
+   common words, and contained in a longer one they are no copy: a marked
+   registry `auth` mapping's key `username` sits inside the `usernames` key every
+   Talos base holds. §6 step 7 matches keys the same way.
 
 The substring search skips the scalar content of this run's `!bwref` nodes,
 which is a reference name, as E1's substring search skipped the references it
@@ -751,8 +756,11 @@ For each machine:
    the six-byte floor is SP's value matcher's (SP §2). A copy is a value
    contained in a leaf, not only one equal to it, so a literal that embeds the
    value is refused too. A `mapping` value's keys are values (§4.2), so each
-   key of six bytes or more is matched as a `string` value is, whatever its
-   member's kind. A stored form that is valid standard base64 is also matched
+   key of six bytes or more is matched too, whatever its member's kind, but
+   as a whole token: an occurrence counts only where neither neighbouring
+   byte is an ASCII letter or digit. Key names are common words, and contained
+   in a longer one they are no copy: SP's map case places a key `username`,
+   and every Talos base holds `usernames`. A stored form that is valid standard base64 is also matched
    in its canonical re-encoding, which the machinery writes for a byte field
    (§8.1); the floor applies to that re-encoding's own length, since decoding
    skips line breaks. Every output leaf is checked, including the leaves of

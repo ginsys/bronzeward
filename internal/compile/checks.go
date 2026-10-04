@@ -61,11 +61,20 @@ func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error 
 	// two values, not a literal written into a source, and the leaf is never a copy.
 	// The floor applies to each form's own length, as the redactor's does, so a canonical
 	// re-encoding shorter than the value it re-spells is not looked for.
-	var forms []string
+	// A mapping's key is matched as a whole token (keyForms): key names are common words, and as a
+	// substring they would refuse every base holding a longer word, such as usernames for username.
+	var forms, keyForms []string
 	add := func(fs ...string) {
 		for _, f := range fs {
 			if len(f) >= copyFloor {
 				forms = append(forms, f)
+			}
+		}
+	}
+	addKey := func(fs ...string) {
+		for _, f := range fs {
+			if len(f) >= copyFloor {
+				keyForms = append(keyForms, f)
 			}
 		}
 	}
@@ -82,9 +91,9 @@ func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error 
 		// A mapping's key is a value the provider holds (§4.2), whatever its member's kind; the
 		// output leaves are value nodes, so the key where its reference placed it is never one.
 		if t.Member() >= 0 {
-			add(t.Leaf())
+			addKey(t.Leaf())
 			if c, ok := canonical(t.Leaf()); ok {
-				add(c)
+				addKey(c)
 			}
 		}
 		if t.Kind() != ingest.TraceString && t.Kind() != ingest.TraceBytes {
@@ -113,7 +122,8 @@ func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error 
 		}
 	}
 	copied := func(v string) bool {
-		return slices.ContainsFunc(forms, func(f string) bool { return strings.Contains(v, f) })
+		return slices.ContainsFunc(forms, func(f string) bool { return strings.Contains(v, f) }) ||
+			slices.ContainsFunc(keyForms, func(f string) bool { return ingest.ContainsToken(v, f) })
 	}
 	var copies []string
 	for _, l := range real {

@@ -282,6 +282,42 @@ func TestCompileRefusesAMappingKeyCopy(t *testing.T) {
 	}
 }
 
+// A mapping reference's key is matched as a whole token, bounded by a byte that is not a letter or
+// a digit or by the text's ends: a key such as username is a copy where it stands as a word, never
+// as part of a longer one, such as the usernames key every Talos base holds (SP's map case).
+func TestCompileMappingKeyCopyIsAWholeToken(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	auth := map[string]provider.Value{"app/auth": value(t, provider.KindMapping,
+		map[string]any{"username": compileSecret + "-user", "password": compileSecret})}
+	f0 := source(t, "machine:\n  registries:\n    config:\n      registry.example.test:\n        auth: !bwref app/auth\n",
+		refs(map[string]ingest.Reference{"app/auth": ref(provider.KindMapping)}), auth)
+	if _, err := Compile(Input{Base: base, Fragments: []Source{f0}, Mode: ModeMetal}); err != nil {
+		t.Fatalf("a mapping reference whose key is part of a longer base key: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		leaf string
+		copy bool
+	}{
+		"longer word": {"usernames-list", false},
+		"prefixed":    {"myusername", false},
+		"bounded":     {"user/username", true},
+		"whole":       {"username", true},
+		"at the end":  {"login=password", true},
+	} {
+		f1 := source(t, "machine:\n  nodeLabels:\n    copy: "+tc.leaf+"\n", ingest.Declarations{}, nil)
+		in := Input{Base: base, Fragments: []Source{f0, f1}, Mode: ModeMetal}
+		if !tc.copy {
+			if _, err := Compile(in); err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+			continue
+		}
+		if e := refusal(t, in, RuleCopy); !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeLabels/copy"}) {
+			t.Errorf("%s: refused at %v, want the copy's path", name, e.Paths)
+		}
+	}
+}
+
 // An output mapping key holding a resolved value is a copy, by its path with the key redacted,
 // whether its value is a literal or another reference; the keys a mapping reference places are
 // not (TestCompileRefusesAMappingKeyCopy).

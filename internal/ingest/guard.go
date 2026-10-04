@@ -30,6 +30,26 @@ func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) erro
 	for _, ex := range exs {
 		minted[ex.name] = true
 	}
+	// A mapping's key is searched for as a whole token (ContainsToken): key names are common words,
+	// and as a substring they would refuse every base holding a longer word, such as usernames for
+	// username. Member values are searched for anywhere.
+	var members []any
+	var keys []string
+	for _, ex := range exs {
+		m, ok := ex.plain.(map[string]any)
+		if !ok {
+			members = append(members, ex.plain)
+			continue
+		}
+		for _, k := range sortedKeys(m) {
+			members = append(members, m[k])
+			keys = append(keys, k)
+		}
+	}
+	memberTexts := searchTexts(members)
+	copied := func(s string) bool {
+		return containsAny(s, memberTexts) || slices.ContainsFunc(keys, func(k string) bool { return k != "" && ContainsToken(s, k) })
+	}
 	var equal, within []string
 	hit := func(list *[]string, p Path) {
 		if s := redactPath(p, texts); !slices.Contains(*list, s) {
@@ -37,7 +57,7 @@ func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) erro
 		}
 	}
 	for i, d := range docs {
-		if containsAny(d.HeadComment+"\n"+d.FootComment, texts) {
+		if copied(d.HeadComment + "\n" + d.FootComment) {
 			hit(&within, Path{Doc: i})
 		}
 	}
@@ -46,11 +66,11 @@ func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) erro
 		if key && n.Kind == yaml.ScalarNode {
 			p = p.child(n.Value)
 		}
-		if containsAny(n.HeadComment+"\n"+n.LineComment+"\n"+n.FootComment, texts) {
+		if copied(n.HeadComment + "\n" + n.LineComment + "\n" + n.FootComment) {
 			hit(&within, p)
 		}
 		// Anchor and alias names are persisted text too.
-		if containsAny(n.Anchor, texts) || n.Kind == yaml.AliasNode && containsAny(n.Value, texts) {
+		if copied(n.Anchor) || n.Kind == yaml.AliasNode && copied(n.Value) {
 			hit(&within, p)
 		}
 		if n.Kind != yaml.ScalarNode {
@@ -62,7 +82,7 @@ func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) erro
 				// nodes, or sit in a comment the parsed document drops.
 				if equalsAny(n, values) {
 					hit(&equal, p)
-				} else if containsAny(withoutMinted(n.Value, minted), texts) {
+				} else if copied(withoutMinted(n.Value, minted)) {
 					hit(&within, p)
 				}
 				return walkEmbedded(inner, p, format, check)
@@ -72,7 +92,7 @@ func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) erro
 		case equalsAny(n, values):
 			hit(&equal, p)
 		case n.Tag == refTag && minted[n.Value]:
-		case containsAny(n.Value, texts):
+		case copied(n.Value):
 			hit(&within, p)
 		}
 		return nil
@@ -254,6 +274,30 @@ func withoutMinted(s string, minted map[string]bool) string {
 		s = strings.ReplaceAll(s, refTag+" "+name, "")
 	}
 	return s
+}
+
+// ContainsToken reports whether f occurs in s with neither neighbour an ASCII letter or digit: at
+// each end, the text's edge or another byte. Mapping keys are matched this way, by the guard here
+// and by compilation's copy check.
+func ContainsToken(s, f string) bool {
+	word := func(i int) bool {
+		if i < 0 || i >= len(s) {
+			return false
+		}
+		c := s[i]
+		return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
+	}
+	for i := 0; ; {
+		j := strings.Index(s[i:], f)
+		if j < 0 {
+			return false
+		}
+		j += i
+		if !word(j-1) && !word(j+len(f)) {
+			return true
+		}
+		i = j + 1
+	}
 }
 
 func containsAny(s string, texts []string) bool {
