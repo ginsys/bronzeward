@@ -282,6 +282,41 @@ func TestCompileRefusesAMappingKeyCopy(t *testing.T) {
 	}
 }
 
+// An output mapping key holding a resolved value is a copy, by its path with the key redacted,
+// whether its value is a literal or another reference; the keys a mapping reference places are
+// not (TestCompileRefusesAMappingKeyCopy).
+func TestCompileRefusesAKeyCopy(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	f0 := source(t, "machine:\n  nodeAnnotations:\n    m: !bwref app/s\n", strRef("app/s"),
+		map[string]provider.Value{"app/s": value(t, provider.KindString, compileSecret)})
+	v := map[string]provider.Value{"app/v": value(t, provider.KindString, "other-value-1")}
+	for name, f1 := range map[string]Source{
+		"literal value":   source(t, "machine:\n  nodeLabels:\n    "+compileSecret+": v\n", ingest.Declarations{}, nil),
+		"reference value": source(t, "machine:\n  nodeLabels:\n    "+compileSecret+": !bwref app/v\n", strRef("app/v"), v),
+		"contained":       source(t, "machine:\n  nodeLabels:\n    x-"+compileSecret+": v\n", ingest.Declarations{}, nil),
+	} {
+		e := refusal(t, Input{Base: base, Fragments: []Source{f0, f1}, Mode: ModeMetal}, RuleCopy, compileSecret)
+		if !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeLabels/<redacted>"}) {
+			t.Errorf("%s: refused at %v, want the key's path", name, e.Paths)
+		}
+	}
+}
+
+// A string placed in a byte field the machinery re-encodes canonically is looked for in that
+// re-encoding too: a literal holding the canonical spelling of a non-canonical value is a copy
+// (compilation.md §6 step 7, §8.1 Canonical base64).
+func TestCompileRefusesACanonicalCopy(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	const stored, canonical = "c2VjcmV0LWtleR==", "c2VjcmV0LWtleQ=="
+	f0 := source(t, "machine:\n  acceptedCAs:\n    - crt: !bwref app/c\n", strRef("app/c"),
+		map[string]provider.Value{"app/c": value(t, provider.KindString, stored)})
+	f1 := source(t, "machine:\n  nodeAnnotations:\n    copy: "+canonical+"\n", ingest.Declarations{}, nil)
+	e := refusal(t, Input{Base: base, Fragments: []Source{f0, f1}, Mode: ModeMetal}, RuleCopy, stored, canonical)
+	if !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeAnnotations/copy"}) {
+		t.Errorf("refused at %v, want the copy's path", e.Paths)
+	}
+}
+
 // A non-ASCII string compiles: its stand-in never splits a character, so the trace pass composes
 // as the real one does (compilation.md §8.1).
 func TestCompileMultibyteValue(t *testing.T) {
