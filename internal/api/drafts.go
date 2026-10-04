@@ -61,12 +61,14 @@ type sourceEntry struct {
 	Head     *string `json:"head"`
 	Base     *int    `json:"base"`
 	Revision *string `json:"revision"`
+	Document *string `json:"document,omitempty"` // a fragment update's sanitized document
 }
 
-// sourceUpdate is a draft update's answer (§9.3).
+// sourceUpdate is a draft update's answer (§9.3); a fragment update names its ingestion.
 type sourceUpdate struct {
-	Draft string      `json:"draft"`
-	Entry sourceEntry `json:"entry"`
+	Draft     string      `json:"draft"`
+	Entry     sourceEntry `json:"entry"`
+	Ingestion string      `json:"ingestion,omitempty"`
 }
 
 // lockedDraft is a draft its request's transaction holds FOR UPDATE.

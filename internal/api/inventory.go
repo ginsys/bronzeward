@@ -37,14 +37,15 @@ func draftCreation() effectRoute {
 
 // effectRoute is what a mutating route adds to its §9.2 row.
 type effectRoute struct {
-	action string
-	input  func() input
-	effect effectFunc
-	keyed  string // route.keyed
+	action  string
+	input   func() input
+	prepare func(ctx context.Context, a *API, q *request) error // route.prepare
+	effect  effectFunc
+	keyed   string // route.keyed
 }
 
 func (er effectRoute) on(rt *route) *route {
-	rt.action, rt.input, rt.effect, rt.keyed = er.action, er.input, er.effect, er.keyed
+	rt.action, rt.input, rt.prepare, rt.effect, rt.keyed = er.action, er.input, er.prepare, er.effect, er.keyed
 	return rt
 }
 

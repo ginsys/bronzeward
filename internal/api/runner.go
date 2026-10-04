@@ -138,18 +138,7 @@ func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 	}
 	seam.At("guard")
 	gens := map[string]string{}
-	s, err := c.Commit(ctx, func(ctx context.Context, name string, v provider.Value) error {
-		p, err := provider.NewGenerationPath(j.claim.Cluster, j.claim.ID, provider.NewValueID())
-		if err != nil {
-			return err
-		}
-		g, err := a.d.ing.CreateGeneration(ctx, p, v)
-		if err != nil {
-			return err
-		}
-		gens[name] = g.Path.String()
-		return nil
-	})
+	s, err := c.Commit(ctx, a.createGeneration(j.claim, gens))
 	if err != nil {
 		return imported{}, a.failure(j, "generation create", err), nil
 	}
@@ -181,6 +170,23 @@ func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 	}
 	seam.At("staged")
 	return imp, nil, nil
+}
+
+// createGeneration is step 6's create for claim: each value at a fresh path under the claim's
+// cluster and id, its path recorded in gens by name.
+func (a *API) createGeneration(claim staging.Claim, gens map[string]string) func(context.Context, string, provider.Value) error {
+	return func(ctx context.Context, name string, v provider.Value) error {
+		p, err := provider.NewGenerationPath(claim.Cluster, claim.ID, provider.NewValueID())
+		if err != nil {
+			return err
+		}
+		g, err := a.d.ing.CreateGeneration(ctx, p, v)
+		if err != nil {
+			return err
+		}
+		gens[name] = g.Path.String()
+		return nil
+	}
 }
 
 // resume is a taken-over run's steps 2-8 (compilation §3.4): the staged envelope decrypted and
