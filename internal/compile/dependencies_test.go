@@ -57,7 +57,7 @@ func transitBody(minDecryption int, created ...time.Time) []byte {
 }
 
 func ok(body []byte) classify.Answer {
-	return classify.Answer{Status: http.StatusOK, Date: dateHeader(depDate), Body: body}
+	return classify.Answer{Status: http.StatusOK, Date: dateHeader(depDate), Body: classify.NewBody(body)}
 }
 
 // fakeMeta answers KV by path and Transit with its answers in turn, and records every request.
@@ -155,8 +155,8 @@ func TestCheckPinnedRefuses(t *testing.T) {
 	}{
 		{"destroyed", ok(destroyed), time.Time{}, classify.Lost, classify.Destroyed},
 		{"soft-deleted", ok(softDeleted), time.Time{}, classify.Blocked, classify.SoftDeleted},
-		{"denied", classify.Answer{Status: http.StatusForbidden, Body: []byte(depSecret)}, time.Time{}, classify.Unknown, classify.Denied},
-		{"unreadable", classify.Answer{Status: http.StatusOK, Body: []byte(`{"data":"` + depSecret + `"}`)}, time.Time{}, classify.Unknown, classify.Unreadable},
+		{"denied", classify.Answer{Status: http.StatusForbidden, Body: classify.NewBody([]byte(depSecret))}, time.Time{}, classify.Unknown, classify.Denied},
+		{"unreadable", classify.Answer{Status: http.StatusOK, Body: classify.NewBody([]byte(`{"data":"` + depSecret + `"}`))}, time.Time{}, classify.Unknown, classify.Unreadable},
 		{"absent version", ok(kvBody()), time.Time{}, classify.Unknown, classify.InsufficientEvidence},
 		{"recorded identity differs", ok(kvBody(created)), created.Add(time.Second), classify.Unknown, classify.IdentityMismatch},
 	} {

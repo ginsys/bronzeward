@@ -221,7 +221,7 @@ func TestLiveMetadataIdentity(t *testing.T) {
 		_, err := raw(t, b, tok, http.MethodPost, "/v1/transit/keys/bw-artifact/config", map[string]bool{"deletion_allowed": false})
 		return err
 	})
-	if strings.Contains(string(kv.Body), "synthetic") {
+	if strings.Contains(string(kv.Body.Bytes()), "synthetic") {
 		t.Fatal("the metadata answer carries the value")
 	}
 }

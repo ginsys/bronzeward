@@ -78,9 +78,42 @@ type Dependency struct {
 type Answer struct {
 	Status      int
 	Date        string
-	Body        []byte
+	Body        Body
 	Unreachable bool
 }
+
+// Body is a provider answer's body, as received. It renders as "[provider answer body]" under
+// every fmt verb, refuses marshaling, and holds the bytes behind a pointer: a struct holding a
+// Body in an unexported field is printed by reflection, which no method can intercept, and then
+// shows the pointer, not the bytes (as provider.Token).
+// The pointer is to a string, not a slice: fmt's bad-verb output dereferences a pointer to a
+// slice or struct (%!s(*[]uint8=&[...])) but prints any other pointer as its address.
+type Body struct{ p *string }
+
+const bodyText = "[provider answer body]"
+
+// NewBody holds a copy of b.
+func NewBody(b []byte) Body {
+	if b == nil {
+		return Body{}
+	}
+	s := string(b)
+	return Body{&s}
+}
+
+// Bytes is a copy of the body as received; nil when none was held.
+func (b Body) Bytes() []byte {
+	if b.p == nil {
+		return nil
+	}
+	return []byte(*b.p)
+}
+
+func (Body) String() string               { return bodyText }
+func (Body) GoString() string             { return bodyText }
+func (Body) Format(f fmt.State, _ rune)   { io.WriteString(f, bodyText) }
+func (Body) MarshalJSON() ([]byte, error) { return nil, errAnswerMarshal }
+func (Body) MarshalText() ([]byte, error) { return nil, errAnswerMarshal }
 
 // Result is one classification. Created is the version's creation time from the answer, when the
 // answer gives the recorded version with the recorded identity; Deletion is a KV version's
@@ -112,15 +145,17 @@ func (Answer) MarshalJSON() ([]byte, error) { return nil, errAnswerMarshal }
 // MarshalText refuses, as MarshalJSON.
 func (Answer) MarshalText() ([]byte, error) { return nil, errAnswerMarshal }
 
-// ParseDate reads a Date header (RFC 9110 §5.6.7, whole seconds), in UTC. A fractional second is
-// refused: §3 compares a deletion with the Date's second, and the encryption bracket a creation
-// time with it (compilation §11).
+// ParseDate reads a Date header in one of RFC 9110 §5.6.7's three forms, in UTC. The text must be
+// exactly what its form writes for the time it names: time.Parse also takes a fractional second
+// (with a dot or a comma, and drops digits past the ninth), which §3's same-second rule and the
+// encryption bracket (compilation §11) cannot use.
 func ParseDate(s string) (time.Time, bool) {
-	t, err := http.ParseTime(s)
-	if err != nil || t.Nanosecond() != 0 {
-		return time.Time{}, false
+	for _, layout := range []string{http.TimeFormat, time.RFC850, time.ANSIC} {
+		if t, err := time.Parse(layout, s); err == nil && t.Format(layout) == s {
+			return t.UTC(), true
+		}
 	}
-	return t.UTC(), true
+	return time.Time{}, false
 }
 
 // errUnreadable is an answer that does not parse as the provider's metadata.
@@ -148,9 +183,9 @@ func Classify(d Dependency, a Answer) Result {
 	var err error
 	switch d.Provider {
 	case KV:
-		r, err = classifyKV(d, a.Body, date)
+		r, err = classifyKV(d, a.Body.Bytes(), date)
 	case Transit:
-		r, err = classifyTransit(d, a.Body)
+		r, err = classifyTransit(d, a.Body.Bytes())
 	default:
 		err = errUnreadable
 	}

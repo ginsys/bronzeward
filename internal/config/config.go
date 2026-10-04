@@ -236,8 +236,10 @@ func (p *Provider) validate() error {
 	}
 	// Each identity authenticates with its own token and no other (compilation.md §1,
 	// dependency-monitor.md §4, persistence-api.md §6.4). The report's is optional: only
-	// `bronzeward orphans` uses it. Paths compare resolved against the working directory, as the
-	// server opens them, so two spellings of one file are one file.
+	// `bronzeward orphans` uses it. Each path is absolute and in clean form, so one file has one
+	// spelling here: folding `.`, `..` or a relative path by text would equate files a directory
+	// symlink keeps apart. A symlinked directory or a hard link can still give one file two
+	// spellings; that is not detectable without opening the files.
 	files := []struct{ field, path string }{
 		{"ingestionTokenFile", p.IngestionTokenFile}, {"compilerTokenFile", p.CompilerTokenFile},
 		{"metadataTokenFile", p.MetadataTokenFile}, {"reportTokenFile", p.ReportTokenFile},
@@ -249,13 +251,11 @@ func (p *Provider) validate() error {
 			}
 			return fmt.Errorf("config: provider.%s is required", f.field)
 		}
-		abs, err := filepath.Abs(f.path)
-		if err != nil {
-			return fmt.Errorf("config: provider.%s: %w", f.field, err)
+		if !filepath.IsAbs(f.path) || filepath.Clean(f.path) != f.path {
+			return fmt.Errorf("config: provider.%s must be an absolute path in clean form", f.field)
 		}
-		files[i].path = abs
 		for _, o := range files[:i] {
-			if o.path == abs {
+			if o.path == f.path {
 				return fmt.Errorf("config: provider.%s and provider.%s name the same file; each identity has its own token", o.field, f.field)
 			}
 		}

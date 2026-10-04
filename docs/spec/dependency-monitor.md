@@ -93,8 +93,9 @@ One classification is one provider answer to one request:
 2. **Take the provider's time.** A KV deletion time is compared with the
    answer's `Date` header, never with the monitor's clock
    ([RC §5.6](../design/research/20260924-retention-metadata-classification.md#56-a-deletion-time-compared-with-the-clients-clock)).
-   The header has whole seconds; one with a fractional second is not
-   readable.
+   The header is read only in one of the three HTTP-date forms (RFC 9110
+   §5.6.7), exactly as that form writes it, so in whole seconds; any other
+   text, a fractional second included, is not readable.
 3. **Apply the rules.** The first row that matches decides:
 
 | Provider | Answer | Class | Reason |
