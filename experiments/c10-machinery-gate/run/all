@@ -34,8 +34,9 @@ e2_talosctl_ready
 {
   printf 'commit\t%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
   printf 'uncommitted-inputs\t%s\n' "$(git -C "$REPO_DIR" status --porcelain -- internal/ingest internal/compile internal/provider \
-    experiments/c10-machinery-gate experiments/e2-structural-references go.mod go.sum fixtures \
-    ':!experiments/c10-machinery-gate/evidence' ':!experiments/e2-structural-references/evidence' | wc -l)"
+    experiments/c10-machinery-gate experiments/e2-structural-references experiments/e2-sensitivity-provenance \
+    go.mod go.sum fixtures ':!experiments/c10-machinery-gate/evidence' ':!experiments/e2-structural-references/evidence' \
+    ':!experiments/e2-sensitivity-provenance/evidence' | wc -l)"
   printf 'talosctl\t%s\n' "$(talosctl version --client --short | tr '\n' ' ' | sed 's/ *$//')"
   printf 'talosctl-sha256\t%s\n' "$TALOSCTL_SHA256"
   printf 'machinery\t%s\n' "$(go -C "$REPO_DIR" list -m -f '{{.Version}}' github.com/siderolabs/talos/pkg/machinery)"

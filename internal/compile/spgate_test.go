@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -80,6 +81,13 @@ var spByContract = map[string]struct {
 	"map-partial": {"output", string(RuleCopy)},
 }
 
+// spBaseRefNA are the SP cases whose base-ref cell does not apply although their fragments cell
+// composes, with the ingestion rule that refuses the marked base. A marked true equals the other
+// true scalars every base holds: §4.2's accepted cost of value comparison.
+var spBaseRefNA = map[string]string{
+	"bool": string(ingest.RuleGuardValue),
+}
+
 type spCell struct {
 	base, name, cell                     string
 	talosctl, machinery, bytes           string
@@ -92,14 +100,19 @@ type spCell struct {
 	findings, note                       string
 	nativeMismatch, machineryDisagrees   bool
 	notApplicable                        bool
+	naUnexpected                         bool     // not applicable for a reason no expectation names
 	out                                  []byte   // the compiler's composition, parity cells only
 	outputs                              []string // the case references' output paths, sorted
 	records                              []Record // the case references' provenance records
 }
 
 func (c spCell) unexpected() bool {
+	// A finding fails every cell; a cell that does not apply fails unless an expectation names why.
+	if c.findings != "" {
+		return true
+	}
 	if c.notApplicable {
-		return false
+		return c.naUnexpected
 	}
 	return c.talosctl != c.machinery || c.bytes == "differs" || c.machineryDisagrees || c.nativeMismatch ||
 		c.expected != c.observed || c.wantRule != "" && (c.stage != c.wantStage || c.rule != c.wantRule) ||
@@ -218,6 +231,31 @@ func TestSensitivityGate(t *testing.T) {
 		{"base-ref-applicable", strconv.Itoa(applicable)},
 		{"base-ref-not-applicable", strconv.Itoa(notApplicable)},
 		{"unexpected", strconv.Itoa(unexpected)},
+	}
+	// The results must hold no case value in any of the oracle's forms: they are written only if
+	// the oracle finds none, and every form of copyFloor bytes or more is recorded in
+	// sp-patterns.txt (beside the outputs, outside evidence) for run/collect-evidence's scan.
+	var all []secret
+	patterns := map[string]bool{}
+	for _, name := range names {
+		for _, s := range spSecrets(t, name, nil) {
+			all = append(all, s)
+			for _, forms := range oracleNeedles(s, "") {
+				for _, f := range forms {
+					if len(f) >= copyFloor && !strings.Contains(f, "\n") {
+						patterns[f] = true
+					}
+				}
+			}
+		}
+	}
+	for _, rows := range [][][]string{matrix, controls, summary} {
+		if found := oracleScan(tsv(rows), all, ""); len(found) > 0 {
+			t.Fatalf("the SP results hold %d case value forms; nothing written", len(found))
+		}
+	}
+	if err := os.WriteFile(filepath.Join(out, "sp-patterns.txt"), []byte(strings.Join(slices.Sorted(maps.Keys(patterns)), "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	for _, f := range []struct {
 		name string
@@ -438,7 +476,7 @@ func spBaseRef(t *testing.T, bc, fc spCell, real srCase, mode Mode, baseSrc Sour
 		}
 	}
 	if k < 0 {
-		bc.notApplicable, bc.note = true, "no fragment holds a case reference"
+		bc.notApplicable, bc.naUnexpected, bc.note = true, true, "no fragment holds a case reference"
 		return bc
 	}
 	// What moves into the base and a later fragment overrides is refused as a base override.
@@ -450,7 +488,7 @@ func spBaseRef(t *testing.T, bc, fc spCell, real srCase, mode Mode, baseSrc Sour
 	}
 	prefix, err := Compile(Input{Base: baseSrc, Fragments: frags[:k+1], Mode: mode})
 	if err != nil {
-		bc.notApplicable, bc.note = true, "the moved fragments alone do not compile: "+errorRule(err)
+		bc.notApplicable, bc.naUnexpected, bc.note = true, true, "the moved fragments alone do not compile: "+errorRule(err)
 		bc.findings = spFindings(secrets, public, spTexts(t, prefix, err))
 		return bc
 	}
@@ -472,13 +510,13 @@ func spBaseRef(t *testing.T, bc, fc spCell, real srCase, mode Mode, baseSrc Sour
 		marked[at] = true
 		p, err := ingest.ParsePath(at)
 		if err != nil {
-			bc.notApplicable, bc.note = true, "an output path marks cannot name"
+			bc.notApplicable, bc.naUnexpected, bc.note = true, true, "an output path marks cannot name"
 			return bc
 		}
 		marks = append(marks, p)
 	}
 	if len(marks) == 0 {
-		bc.notApplicable, bc.note = true, "the moved references reach no output leaf"
+		bc.notApplicable, bc.naUnexpected, bc.note = true, true, "the moved references reach no output leaf"
 		return bc
 	}
 	moved := prefix.m.bytes()
@@ -491,6 +529,8 @@ func spBaseRef(t *testing.T, bc, fc spCell, real srCase, mode Mode, baseSrc Sour
 	text, values, err := gateIngest(moved, marks, decl, nil)
 	if err != nil {
 		bc.notApplicable, bc.note = true, "the marked base does not ingest: "+errorRule(err)
+		bc.naUnexpected = spBaseRefNA[bc.name] != errorRule(err)
+		bc.findings = spFindings(secrets, public, spErrorTexts(err))
 		return bc
 	}
 	bc.note = fmt.Sprintf("%d fragments moved, %d marks", k+1, len(marks))
