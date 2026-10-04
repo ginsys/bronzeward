@@ -194,6 +194,26 @@ func TestResolveRefusals(t *testing.T) {
 	}
 }
 
+// A mapping whose key holds "|" placed in the outer stream would give its member a path that reads
+// as an embedded document's (compilation.md §2.2), so resolution is refused at the reference's
+// path, quoting no key; inside an embedded document such a key is an ordinary inner token.
+func TestResolveRefusesOuterPipeMemberKeys(t *testing.T) {
+	values := map[string]provider.Value{"app/map": value(t, provider.KindMapping, map[string]any{resolveSecret + "|yaml": "v"})}
+	decl := Declarations{References: map[string]Reference{"app/map": str(provider.KindMapping)}}
+	_, err := Resolve(sanitizedOf(t, "machine:\n  nodeAnnotations: !bwref app/map\n", decl), values)
+	var ref *Refusal
+	if !errors.As(err, &ref) || ref.Rule != RuleBadPath || !reflect.DeepEqual(ref.Paths, []string{"doc[0]/machine/nodeAnnotations"}) {
+		t.Fatalf("got %v, want a %s refusal at the reference", err, RuleBadPath)
+	}
+	if strings.Contains(fmt.Sprintf("%v %+v %#v", err, err, ref), resolveSecret) {
+		t.Errorf("the refusal quotes the key")
+	}
+	decl.Embedded = []Embedded{{Path: manifestPath, Format: "yaml"}}
+	if _, err := Resolve(sanitizedOf(t, manifestStream("kind: Secret\nstringData: !bwref app/map\n"), decl), values); err != nil {
+		t.Errorf("inside an embedded document: %v", err)
+	}
+}
+
 // A resolved stream leaves this package only as the machinery's own input or patch, loaded as
 // talosctl loads a patch file (compilation.md §6 step 5).
 func TestResolvedPatchAndInput(t *testing.T) {

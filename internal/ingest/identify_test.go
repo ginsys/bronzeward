@@ -332,6 +332,11 @@ func TestIdentifySchemaRefusals(t *testing.T) {
 		// the selector of a list-entry delete is dropped unloaded, so a secret there escapes
 		{"list-entry delete", "machine:\n  network:\n    interfaces:\n      - interface: eth0\n        $patch: delete\n", RuleSchemaUnloadable},
 		{"bare list-entry delete", "machine:\n  network:\n    interfaces:\n      - $patch: delete\n", RuleSchemaUnloadable},
+		// the machinery matches a directive by its literal key and value, so one spelled through
+		// aliases is data to it, as to directive(), and fails to load where a field holds no map
+		{"aliased directive key", "machine:\n  env:\n    &p $patch: x\n  nodeLabels:\n    c:\n      *p : delete\n      x: " + secretText + "\n", RuleSchemaUnloadable},
+		{"aliased directive value", "machine:\n  env:\n    d: &d delete\n  nodeLabels:\n    c:\n      $patch: *d\n      x: " + secretText + "\n", RuleSchemaUnloadable},
+		{"aliased list-entry delete", "machine:\n  env:\n    &p $patch: x\n  network:\n    interfaces:\n      - interface: eth0\n        *p : delete\n", RuleSchemaUnloadable},
 		{"secret selector of a list-entry delete", "kind: WireguardConfig\napiVersion: v1alpha1\nname: wg0\npeers:\n  - presharedKey: " +
 			b64Secret + "\n    $patch: delete\n", RuleSchemaUnloadable},
 		{"merge key", "machine:\n  <<: {token: " + secretText + "}\n", ""},

@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 
@@ -275,7 +276,8 @@ func Trace(s Sanitized, values map[string]provider.Value, first, flip int) (Reso
 
 // standIn is SP's shape stand-in (compilation.md §8.1, choice §16.22): each letter becomes x or
 // X, each digit 0, every other byte stays, and each line of five bytes or more starts with zq and
-// the three-digit id.
+// the three-digit id. The bytes left of a character the head cuts become x, so the stand-in stays
+// UTF-8 and keeps its length.
 func standIn(real string, id int) string {
 	head := fmt.Sprintf("zq%03d", id)
 	lines := strings.Split(real, "\n")
@@ -293,6 +295,9 @@ func standIn(real string, id int) string {
 		}
 		if len(b) >= len(head) {
 			copy(b, head)
+			for j := len(head); j < len(b) && !utf8.RuneStart(b[j]); j++ {
+				b[j] = 'x'
+			}
 		}
 		lines[i] = string(b)
 	}

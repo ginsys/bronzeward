@@ -154,6 +154,11 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	outcomes := make([]outcome, len(ts))
 	for i, t := range ts {
 		o := outcome{tracer: t.Tracer, source: t.source, paths: attrs[t.ID()], by: -1}
+		if len(o.paths) > 0 && t.source == 0 && len(sources) > 1 {
+			if o.by, err = pre.narrowed(t, len(o.paths)); err != nil {
+				return Compiled{}, err
+			}
+		}
 		if len(o.paths) == 0 {
 			present, err := pre.presence(t)
 			if err != nil {

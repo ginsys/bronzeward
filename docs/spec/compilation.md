@@ -137,7 +137,10 @@ states what tests it.
 A path inside an identified embedded document (§5.4) appends `|<format>` and a
 second pointer: `doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/password`.
 The first `|` ends the outer pointer, so an outer token cannot hold `|`; an
-inner token can.
+inner token can. An outer mapping key holding `|` is therefore refused at parse
+(§2.3 step 2), and so is resolving a `mapping` value whose key holds `|` outside
+an embedded document (`bad-path`, at the reference's path): either would
+give a node a path that reads as an embedded document's.
 
 ### 2.3 Pipeline
 
@@ -150,7 +153,8 @@ inner token can.
 2. **Parse** every document of the stream. A parse failure refuses the input;
    the refusal quotes no input text. A mapping that holds a key twice is a
    parse failure, as YAML forbids it, so a path never names two nodes. So is a
-   mapping key that is not a scalar, which no path token can name.
+   mapping key that is not a scalar, which no path token can name, and an
+   outer mapping key holding `|` (§2.2).
 3. **Identify** the values to extract: every field the pinned Talos machinery
    marks secret (the `pkg/machinery` `RedactSecrets` field list, SP §2), and
    every path the operator marks in the request. A mark that addresses no node
@@ -744,7 +748,9 @@ For each machine:
    copy ([SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records));
    the six-byte floor is SP's value matcher's (SP §2). A copy is a value
    contained in a leaf, not only one equal to it, so a literal that embeds the
-   value is refused too. Every output leaf is checked, including the leaves of
+   value is refused too. A `mapping` value's keys are values (§4.2), so each
+   key of six bytes or more is matched as a `string` value is, whatever its
+   member's kind. Every output leaf is checked, including the leaves of
    an identified embedded document that holds no reference. A leaf that
    provenance attributes to any reference is
    never a copy: a reference replaces a whole node, so another reference's
@@ -808,7 +814,7 @@ directive, without a merge engine
 ([SP §6.1](../design/research/20260925-sensitivity-provenance.md#61-criterion-1-sensitivity-through-each-transformation)).
 The cost is one extra composition per boolean and per fragment prefix (SP §9).
 
-The implementation settles six points SP left open:
+The implementation settles seven points SP left open:
 
 - **Canonical base64.** The machinery decodes the byte fields it holds as
   base64, such as `cluster.ca.key`, and writes them again in canonical
@@ -829,6 +835,10 @@ The implementation settles six points SP left open:
   composition is refused as `trace-indistinct`, naming both occurrences. A
   mapping reference with no member is refused the same way: no leaf could
   carry its stand-in.
+- **Multibyte characters.** When the `zq` head ends
+  inside a multibyte character, that character's remaining bytes become `x`,
+  so the stand-in stays valid UTF-8 and keeps its byte length; otherwise the
+  trace pass could not compose a value the real one accepts.
 - **Mapping members.** A member of a mapping reference is named by its
   position in key order, never by its key, which is a value the provider holds
   (§4.2).
@@ -837,7 +847,12 @@ The implementation settles six points SP left open:
   one must differ. A stand-in that happens to equal an unchanged literal of
   the composition therefore fails closed rather than being attributed.
 - **Overrides.** A prefix is composed only for an occurrence that reached no
-  output leaf. An occurrence absent from its own source's prefix fails closed.
+  output leaf, or for an import base occurrence that reaches fewer output
+  leaves than it does in the import base alone: an aliased reference one of
+  whose aliases a fragment replaced or deleted. That fragment, the one after
+  which fewer leaves first carry it, overrode the reference (§6 step 7). The
+  import base alone is composed once for this whenever it holds a reference
+  and a fragment follows. An occurrence absent from its own source's prefix fails closed.
   A boolean that reached no output leaf is flipped in the prefixes from its
   own on, and the fragment after which flipping it stops changing a leaf is
   the one that overrode it; SP left that outcome unknown, which §8.2's
