@@ -196,27 +196,41 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 }
 
 // ingestionBody is the ingestion resource (§9.2): its staging claim as every read treats it
-// (compilation §3.5) and its ingest operation. The owner string, the payload and its digest are
-// never answered.
+// (compilation §3.5) and its ingest operation. An import's claim names its machine; a draft
+// update's names its draft and has no operation, so both are null. The owner string, the payload
+// and its digest are never answered.
 type ingestionBody struct {
 	ID              string    `json:"id"`
 	Kind            string    `json:"kind"`
 	Mode            string    `json:"mode"`
 	State           string    `json:"state"`
-	Machine         string    `json:"machine"`
+	Machine         *string   `json:"machine"`
 	Draft           string    `json:"draft"`
-	Operation       string    `json:"operation"`
+	Operation       *string   `json:"operation"`
 	OwnerGeneration int64     `json:"ownerGeneration"`
 	LeaseUntil      time.Time `json:"leaseUntil"`
 	ExpiresAt       time.Time `json:"expiresAt"`
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
-const selectIngestion = `SELECT c.id, c.kind, c.mode, c.state, c.machine, o.draft, o.id, c.owner_gen, c.lease_until, c.expires_at,
-		c.created_at
-	FROM (SELECT id, kind, mode, ` + staging.EffectiveStateSQL + ` AS state, machine, owner_gen, lease_until, expires_at, created_at
-		FROM staging_claim) c
-	JOIN operation o ON o.ingestion = c.id
+// subjects are the act subjects the ingestion names: the claim, then its operation, draft and
+// machine where it has them.
+func (b ingestionBody) subjects() []string {
+	s := []string{b.ID}
+	for _, v := range []*string{b.Operation, &b.Draft, b.Machine} {
+		if v != nil && *v != "" {
+			s = append(s, *v)
+		}
+	}
+	return s
+}
+
+// An import's claim has exactly one ingest operation; a draft update's has none.
+const selectIngestion = `SELECT c.id, c.kind, c.mode, c.state, c.machine, COALESCE(o.draft, c.draft), o.id, c.owner_gen, c.lease_until,
+		c.expires_at, c.created_at
+	FROM (SELECT id, kind, mode, ` + staging.EffectiveStateSQL + ` AS state, machine, draft, owner_gen, lease_until, expires_at,
+		created_at FROM staging_claim) c
+	LEFT JOIN operation o ON o.ingestion = c.id
 	WHERE c.id = $1`
 
 func readIngestion(ctx context.Context, tx *sql.Tx, claim string) (ingestionBody, error) {
@@ -350,5 +364,5 @@ func abandonIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (resu
 	if err != nil {
 		return result{}, err
 	}
-	return result{status: http.StatusOK, body: b, subjects: []string{claim, b.Operation, b.Draft, b.Machine}}, nil
+	return result{status: http.StatusOK, body: b, subjects: b.subjects()}, nil
 }

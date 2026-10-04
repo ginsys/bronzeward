@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/ingest"
 )
 
 // The source reads (PA §9.2, §9.3): heads, a head's revisions and one revision, for fragments,
@@ -49,13 +51,22 @@ type assignmentBody struct {
 }
 
 type fragmentRevisionBody struct {
-	ID        string    `json:"id"`
-	Cluster   string    `json:"cluster"`
-	Name      string    `json:"name"`
-	Layer     string    `json:"layer"`
-	Document  string    `json:"document"`
-	Author    string    `json:"author"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID           string               `json:"id"`
+	Cluster      string               `json:"cluster"`
+	Name         string               `json:"name"`
+	Layer        string               `json:"layer"`
+	Document     string               `json:"document"`
+	Declarations fragmentDeclarations `json:"declarations"`
+	Author       string               `json:"author"`
+	CreatedAt    time.Time            `json:"createdAt"`
+}
+
+// fragmentDeclarations are a revision's declarations as compilation §5.2 states them: each
+// reference row's name with its kind, version and encoding, never its generation path, and the
+// embedded documents the revision identifies.
+type fragmentDeclarations struct {
+	References map[string]ingest.Reference `json:"references"`
+	Embedded   []ingest.Embedded           `json:"embedded"`
 }
 
 type profileRevisionBody struct {
@@ -84,7 +95,7 @@ const (
 	selectProfile  = `SELECT id, cluster, scope, name, head_revision_id, head_revision, created_at, etag_token FROM profile`
 	selectAssign   = `SELECT id, cluster, machine, head_revision_id, head_revision, created_at, etag_token FROM assignment`
 
-	selectFragmentRevision   = `SELECT r.id, r.cluster, r.name, r.layer, r.document, r.author, r.created_at FROM fragment_revision r`
+	selectFragmentRevision   = `SELECT r.id, r.cluster, r.name, r.layer, r.document, r.embedded, r.author, r.created_at FROM fragment_revision r`
 	selectProfileRevision    = `SELECT r.id, r.cluster, r.name, r.author, r.created_at FROM profile_revision r`
 	selectAssignmentRevision = `SELECT r.id, r.cluster, r.machine, r.author, r.created_at FROM assignment_revision r`
 )
@@ -111,10 +122,32 @@ func scanAssignment(r scanner) (*assignmentBody, error) {
 }
 
 func scanFragmentRevision(r scanner) (*fragmentRevisionBody, error) {
-	b := &fragmentRevisionBody{}
-	err := r.Scan(&b.ID, &b.Cluster, &b.Name, &b.Layer, &b.Document, &b.Author, &b.CreatedAt)
+	b := &fragmentRevisionBody{Declarations: fragmentDeclarations{References: map[string]ingest.Reference{}}}
+	var embedded []byte
+	if err := r.Scan(&b.ID, &b.Cluster, &b.Name, &b.Layer, &b.Document, &embedded, &b.Author, &b.CreatedAt); err != nil {
+		return b, err
+	}
 	b.CreatedAt = b.CreatedAt.UTC()
-	return b, err
+	return b, json.Unmarshal(embedded, &b.Declarations.Embedded)
+}
+
+// withReferences reads the reference rows of bs into their declarations.
+func withReferences(ctx context.Context, tx *sql.Tx, bs []*fragmentRevisionBody) error {
+	byID := map[string]*fragmentRevisionBody{}
+	var ids []string
+	for _, b := range bs {
+		byID[b.ID], ids = b, append(ids, b.ID)
+	}
+	return eachRow(ctx, tx, `SELECT revision, name, kind, version, COALESCE(encoding, '') FROM fragment_reference
+		WHERE revision = ANY (string_to_array($1, ','))`, strings.Join(ids, ","), func(r *sql.Rows) error {
+		var rev, name string
+		var ref ingest.Reference
+		if err := r.Scan(&rev, &name, &ref.Kind, &ref.Version, &ref.Encoding); err != nil {
+			return err
+		}
+		byID[rev].Declarations.References[name] = ref
+		return nil
+	})
 }
 
 func scanProfileRevision(r scanner) (*profileRevisionBody, error) {
@@ -277,8 +310,8 @@ var sourceReads = map[string]readFunc{
 		func(b *fragmentBody) string { return etag(b.HeadRevision, b.token) }),
 	"/fragments/{id}/revisions": revisionsOf(id.Fragment, id.FragmentRevision, "fragment", selectFragmentRevision+
 		` JOIN fragment h ON h.cluster = r.cluster AND h.name = r.name WHERE h.id = $3 AND r.id > $1 ORDER BY r.id LIMIT $2`,
-		scanFragmentRevision, nil),
-	"/fragment-revisions/{id}": revisionItem(id.FragmentRevision, selectFragmentRevision, scanFragmentRevision, nil),
+		scanFragmentRevision, withReferences),
+	"/fragment-revisions/{id}": revisionItem(id.FragmentRevision, selectFragmentRevision, scanFragmentRevision, withReferences),
 
 	"/profiles": headList(id.Profile, selectProfile, scanProfile),
 	"/profiles/{id}": headItem(id.Profile, selectProfile, scanProfile,
