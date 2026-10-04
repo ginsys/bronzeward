@@ -279,6 +279,17 @@ func TestEncryptArtifacts(t *testing.T) {
 			t.Fatalf("artifact %d: key %s version %d created %v", i, e.Key, e.Version, e.Created)
 		}
 	}
+
+	// An entry for a version not used does not make the answer unreadable, before or after.
+	other := ok([]byte(`{"data":{"keys":{"1":null,"2":` + strconv.FormatInt(v2.Unix(), 10) + `},"latest_version":2,"min_available_version":0,"min_decryption_version":1,"soft_deleted":false}}`))
+	calls = nil
+	got, err = EncryptArtifacts(t.Context(), fakeMeta{transit: []classify.Answer{other, other}, calls: &calls}, fakeEncrypter{versions: []int{2}, calls: &calls}, "bw-artifact", artifacts(1))
+	if err != nil {
+		t.Fatalf("a malformed entry for an unused version: %v", err)
+	}
+	if got[0].Version != 2 || !got[0].Created.Equal(v2) {
+		t.Fatalf("version %d created %v", got[0].Version, got[0].Created)
+	}
 }
 
 func TestEncryptArtifactsRefuses(t *testing.T) {
@@ -301,7 +312,7 @@ func TestEncryptArtifactsRefuses(t *testing.T) {
 		{"first read without a Date", noDate, ok(transitBody(1, before)), []int{1}, 0, "", ReasonNoDate},
 		{"first read with an unreadable Date", badDate, ok(transitBody(1, before)), []int{1}, 0, "", ReasonNoDate},
 		{"first read with a fractional Date", fractionalDate, ok(transitBody(1, before)), []int{1}, 0, "", ReasonNoDate},
-		{"first read with a null creation time", nullTime, nullTime, []int{1}, 0, classify.Unknown, string(classify.Unreadable)},
+		{"first read with a null creation time for the used version", nullTime, nullTime, []int{1}, 1, "", ReasonNotInFirstRead},
 		{"version created in the Date's second", ok(transitBody(1, depDate)), ok(transitBody(1, depDate)), []int{1}, 1, "", ReasonCreatedNotBeforeDate},
 		{"version created after the Date", ok(transitBody(1, depDate.Add(time.Second))), ok(transitBody(1, depDate.Add(time.Second))), []int{1}, 1, "", ReasonCreatedNotBeforeDate},
 		{"version the first read lacks", ok(transitBody(1, before)), ok(transitBody(1, before, before)), []int{2}, 1, "", ReasonNotInFirstRead},
