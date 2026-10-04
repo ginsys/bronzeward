@@ -109,14 +109,18 @@ the files in [`openbao/policies`](openbao/policies):
 - `bw-compiler`: reads generations; encrypts under the artifact key.
 - `bw-executor`: decrypts under the artifact key; reads each cluster's Talos access credential, as
   ingestion does.
-- `bw-metadata-only`: the classification experiment's identity, which reads no value.
+- `bw-metadata`: the server's metadata identity (dependency-monitor §4, choice §11.9): reads KV
+  metadata under `secret/metadata/` and Transit key state under `transit/keys/` by name, without
+  list, value or Transit operation.
+- `bw-metadata-only`: the classification experiment's and evidence observer's identity, which
+  also lists and reads no value.
 - `bw-orphan-report`: the orphan report's identity (persistence-api §6.4): lists and reads metadata
   under `secret/metadata/gen/`, nothing else.
 
 `bin/up` writes them from those files, which `mise run go-db` also writes into a dev-mode OpenBao
 for the policy tests (`internal/provider`), so the fixture and the tests hold the same policies.
-Only ingestion and the orphan report have tokens here, one of each per instance, without OpenBao's
-default policy; compiler and executor tokens come with those components.
+Ingestion, the compiler, the metadata identity and the orphan report have tokens here, one of
+each per instance, without OpenBao's default policy; executor tokens come with that component.
 
 ## Versions
 
@@ -145,6 +149,10 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
 - `server/a/openbao-report.token`, `server/b/openbao-report.token`, `server/c/openbao-report.token`:
   each instance's orphan-report token, under `bw-orphan-report` alone, read as
   `/etc/bronzeward/openbao-report.token` by `bw orphans`. A missing one fails the scan-pattern list.
+- `server/<instance>/openbao-compiler.token` and `server/<instance>/openbao-metadata.token` for
+  instances a, b and c: each instance's compiler and metadata tokens, under `bw-compiler` and
+  `bw-metadata` alone, read as `/etc/bronzeward/openbao-compiler.token` and
+  `/etc/bronzeward/openbao-metadata.token`. A missing one fails the scan-pattern list.
 - `talos-secrets.yaml`, `controlplane.yaml`, `talosconfig`, `kubeconfig`: the cluster's own
   generated secrets bundle and client configs.
 - `scan-patterns.txt`: every one of the above as a fixed string, the client private keys in
@@ -268,7 +276,7 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 removal of `.state` would take a link and leave the cluster's credentials at the far end. The files `bin/up` generates
 (`lock`, `secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
-node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env`, `up-compose.yaml` and the instances' `openbao-ingestion.token` and `openbao-report.token`) must each be
+node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env`, `up-compose.yaml` and the instances' `openbao-ingestion.token`, `openbao-compiler.token`, `openbao-metadata.token` and `openbao-report.token`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the

@@ -80,16 +80,24 @@ type Provider struct {
 	// IngestionTokenFile holds ingestion's static token: a regular file of mode 0600 or tighter,
 	// read at use, one trailing newline trimmed, never renewed.
 	IngestionTokenFile string `yaml:"ingestionTokenFile"`
+	// CompilerTokenFile holds the compiler identity's static token (compilation.md §1), under the
+	// same rules: it reads pinned generations and encrypts under the artifact key.
+	CompilerTokenFile string `yaml:"compilerTokenFile"`
+	// MetadataTokenFile holds the metadata identity's static token (dependency-monitor.md §4),
+	// under the same rules: it reads KV and Transit metadata by name, nothing else.
+	MetadataTokenFile string `yaml:"metadataTokenFile"`
 	// ReportTokenFile holds the orphan-report identity's static token (persistence-api.md §6.4),
 	// under the same rules. The server does not use it; `bronzeward orphans` requires it.
 	ReportTokenFile string `yaml:"reportTokenFile"`
 }
 
-// ProviderKeys names the three Transit keys ingestion uses, each its own.
+// ProviderKeys names the Transit keys: the three ingestion uses and the one artifacts are
+// encrypted under (compilation.md §11), each its own.
 type ProviderKeys struct {
 	Baseline string `yaml:"baseline"`
 	Staging  string `yaml:"staging"`
 	Digest   string `yaml:"digest"`
+	Artifact string `yaml:"artifact"`
 }
 
 type Database struct {
@@ -210,7 +218,7 @@ func (p *Provider) validate() error {
 		return errors.New("config: provider.address uses http on a host that is neither loopback nor in provider.plainHTTPHosts; use https or list the host")
 	}
 	keys := []struct{ field, name string }{
-		{"baseline", p.Keys.Baseline}, {"staging", p.Keys.Staging}, {"digest", p.Keys.Digest},
+		{"baseline", p.Keys.Baseline}, {"staging", p.Keys.Staging}, {"digest", p.Keys.Digest}, {"artifact", p.Keys.Artifact},
 	}
 	for i, k := range keys {
 		if k.name == "" {
@@ -221,16 +229,29 @@ func (p *Provider) validate() error {
 		}
 		for _, o := range keys[:i] {
 			if o.name == k.name {
-				return fmt.Errorf("config: provider.keys.%s and provider.keys.%s name the same key; the three must be distinct", o.field, k.field)
+				return fmt.Errorf("config: provider.keys.%s and provider.keys.%s name the same key; the four must be distinct", o.field, k.field)
 			}
 		}
 	}
-	if p.IngestionTokenFile == "" {
-		return errors.New("config: provider.ingestionTokenFile is required")
+	// Each identity authenticates with its own token and no other (compilation.md §1,
+	// dependency-monitor.md §4, persistence-api.md §6.4). The report's is optional: only
+	// `bronzeward orphans` uses it.
+	files := []struct{ field, path string }{
+		{"ingestionTokenFile", p.IngestionTokenFile}, {"compilerTokenFile", p.CompilerTokenFile},
+		{"metadataTokenFile", p.MetadataTokenFile}, {"reportTokenFile", p.ReportTokenFile},
 	}
-	if p.ReportTokenFile == p.IngestionTokenFile {
-		// The report authenticates with its own identity and no other (§6.4).
-		return errors.New("config: provider.reportTokenFile names ingestion's token file; the report has its own token")
+	for i, f := range files {
+		if f.path == "" {
+			if f.field == "reportTokenFile" {
+				continue
+			}
+			return fmt.Errorf("config: provider.%s is required", f.field)
+		}
+		for _, o := range files[:i] {
+			if o.path == f.path {
+				return fmt.Errorf("config: provider.%s and provider.%s name the same file; each identity has its own token", o.field, f.field)
+			}
+		}
 	}
 	return nil
 }

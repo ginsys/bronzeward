@@ -32,16 +32,21 @@ execution:
   maxTransportDeadline: 5m
 # The secret provider (compilation.md §4.1), optional: without it an ingestion start answers
 # 503. The key
-# names are the fixture's; the token file holds ingestion's static OpenBao token, mode 0600,
-# never renewed. `mise run dev-bao` starts a dev-mode OpenBao on loopback for tests, without
-# these keys or a token file. Each cluster's talosconfig is an operator-written provider secret
-# at access/talos/<cluster id> (persistence-api.md §3.3), not a file named here. reportTokenFile,
-# optional, holds the orphan-report identity's token for `bronzeward orphans` (persistence-api.md
-# §6.4), under the same rules; the server never reads it.
+# names are the fixture's; the four keys are distinct, and artifact is the key artifacts are
+# encrypted under (compilation.md §11). Each token file holds one identity's static OpenBao token,
+# mode 0600, never renewed, and the files are distinct: ingestion's, the compiler's
+# (compilation.md §1) and the metadata identity's (dependency-monitor.md §4). `mise run dev-bao`
+# starts a dev-mode OpenBao on loopback for tests, without these keys or token files. Each
+# cluster's talosconfig is an operator-written provider secret at access/talos/<cluster id>
+# (persistence-api.md §3.3), not a file named here. reportTokenFile, optional, holds the
+# orphan-report identity's token for `bronzeward orphans` (persistence-api.md §6.4), under the
+# same rules; the server never reads it.
 # provider:
 #   address: http://127.0.0.1:58201
-#   keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest}
+#   keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest, artifact: bw-artifact}
 #   ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
+#   compilerTokenFile: /etc/bronzeward/openbao-compiler.token
+#   metadataTokenFile: /etc/bronzeward/openbao-metadata.token
 #   reportTokenFile: /etc/bronzeward/openbao-report.token
 # Required with provider, refused without it: the staging claims' timers (compilation.md §3.2
 # requires only heartbeat < lease < absoluteExpiry; the values are open) and this instance's
