@@ -112,6 +112,7 @@ func TestContainsToken(t *testing.T) {
 		{"usernames", "username", false},
 		{"myusername", "username", false},
 		{"aaa-aa", "aa", true},
+		{"a-a-a-", "a-a-", true}, // the first occurrence fails its right edge; the overlapping one matches
 		{"a", "", false},
 		{"", "", false},
 		{"-", "", false},
