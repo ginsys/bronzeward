@@ -114,6 +114,10 @@ func TestContainsToken(t *testing.T) {
 		{"username/", "username", true},
 		{"Ausername", "username", false},
 		{"username9", "username", false},
+		{"zusername", "username", false}, // each end of each word-byte range
+		{"usernameZ", "username", false},
+		{"0username", "username", false},
+		{"userName", "username", false},  // matched as written, case and all
 		{"_username_", "username", true}, // only ASCII letters and digits are word bytes
 		{"éusernameé", "username", true}, // a non-ASCII byte is not one either
 		{"aaa-aa", "aa", true},
