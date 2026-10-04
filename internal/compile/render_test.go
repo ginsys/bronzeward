@@ -147,6 +147,31 @@ func TestCompiledRedacted(t *testing.T) {
 	}
 }
 
+// An alias in an embedded document is redacted as a copy of its anchor: rewriting the anchor's
+// short copy of a value does not move the key that aliases it, so the integer under that key is
+// still its token.
+func TestRedactedAliases(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	frag := source(t, "cluster:\n  inlineManifests:\n    - name: y\n      contents: |\n        anchor: &k abc\n        copy: !bwref app/short\n        ? *k\n        : !bwref app/pin\n",
+		ingest.Declarations{
+			References: map[string]ingest.Reference{"app/short": ref(provider.KindString), "app/pin": ref(provider.KindInteger)},
+			Embedded:   []ingest.Embedded{{Path: "doc[0]/cluster/inlineManifests/0/contents", Format: "yaml"}},
+		},
+		map[string]provider.Value{"app/short": value(t, provider.KindString, "abc"), "app/pin": value(t, provider.KindInteger, 39157)})
+	out, err := compiled(t, Input{Base: base, Fragments: []Source{frag}, Mode: ModeMetal}).Redacted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"anchor: <redacted:value>", "copy: <redacted:app/short@1>", "<redacted:value>: <redacted:app/pin@1>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the redacted configuration lacks %q", want)
+		}
+	}
+	if strings.Contains(out, ": 39157\n") || strings.Contains(out, "*k") || strings.Contains(out, "&k") {
+		t.Error("the redacted configuration shows the integer, an anchor or a dangling alias")
+	}
+}
+
 // The schema means covers every field the pinned machinery marks secret, as ingestion identifies
 // them: a base whose secrets were not extracted shows none of them.
 func TestRedactedSchemaMeans(t *testing.T) {

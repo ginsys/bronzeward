@@ -173,3 +173,46 @@ func TestRewriteLeaves(t *testing.T) {
 		t.Error("an unmet host was accepted")
 	}
 }
+
+// An alias is written as a copy of its anchored node, so rewriting one occurrence neither changes
+// another nor the path of a key that aliases it, and no alias is left without its anchor; inside
+// an embedded document too.
+func TestRewriteLeavesAliases(t *testing.T) {
+	text := "s: &a abc\nt: *a\n? *a\n: 7\ny: |\n  u: &b xyz\n  ? *b\n  : 8\n"
+	var seen []string
+	b, err := RewriteLeaves([]byte(text), map[string]string{"doc[0]/y": "yaml"}, func(p Path, n *yaml.Node) error {
+		if n.Kind == yaml.ScalarNode {
+			seen = append(seen, p.String())
+			n.Tag, n.Value = "!!str", "<"+p.String()+">"
+		}
+		return nil
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"doc[0]/s", "doc[0]/t", "doc[0]/abc", "doc[0]/y|yaml/u", "doc[0]/y|yaml/xyz"}
+	if !slices.Equal(seen, want) {
+		t.Errorf("visited %v, want %v", seen, want)
+	}
+	wantText := "s: <doc[0]/s>\nt: <doc[0]/t>\nabc: <doc[0]/abc>\ny: |\n  u: <doc[0]/y|yaml/u>\n  xyz: <doc[0]/y|yaml/xyz>\n"
+	if string(b) != wantText {
+		t.Errorf("RewriteLeaves =\n%s\nwant\n%s", b, wantText)
+	}
+
+	// Nested aliases that would expand to 10^9 nodes are refused, not expanded.
+	var bomb strings.Builder
+	bomb.WriteString("l0: &l0 [x]\n")
+	for i := 1; i <= 9; i++ {
+		fmt.Fprintf(&bomb, "l%d: &l%d [", i, i)
+		for j := range 10 {
+			if j > 0 {
+				bomb.WriteString(", ")
+			}
+			fmt.Fprintf(&bomb, "*l%d", i-1)
+		}
+		bomb.WriteString("]\n")
+	}
+	if _, err := RewriteLeaves([]byte(bomb.String()), nil, nil, nil); err != errLeavesAlias {
+		t.Error("an alias expansion beyond the limit was accepted")
+	}
+}

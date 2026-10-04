@@ -71,9 +71,11 @@ func redactedText(b []byte, hosts map[string]string, outcomes []outcome, r redac
 		}
 		return r.values(s)
 	}
+	met := map[string]bool{}
 	out, err := ingest.RewriteLeaves(b, hosts, func(p ingest.Path, n *yaml.Node) error {
 		switch k := p.String(); {
 		case tokens[k] != "":
+			met[k] = true
 			text(n, tokens[k])
 		case schema[k]:
 			text(n, schemaToken)
@@ -93,7 +95,9 @@ func redactedText(b []byte, hosts map[string]string, outcomes []outcome, r redac
 		}
 		return nil
 	})
-	if err != nil {
+	// Every attributed leaf must have been met where attribution found it; one that was not, such
+	// as an integer the value means does not look for, would be shown as it is.
+	if err != nil || len(met) != len(tokens) {
 		return "", errRedactRewrite
 	}
 	if r.holds(string(out)) {
