@@ -252,6 +252,23 @@ func TestCompileRefusesAnAliasOverride(t *testing.T) {
 	}
 }
 
+// A base literal that equals a short reference's stand-in is not that reference: a fragment that
+// replaces the literal overrides nothing (compilation.md §8.1).
+func TestCompileStandInLiteralIsNotAnOverride(t *testing.T) {
+	text := mutate(t, generatedBase(t), func(m *yaml.Node) {
+		m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "nodeAnnotations"},
+			&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Value: "a"}, {Kind: yaml.ScalarNode, Value: "abcd"},
+				{Kind: yaml.ScalarNode, Value: "b"}, {Kind: yaml.ScalarNode, Value: "xxxx"},
+			}})
+	})
+	base := source(t, string(text), ingest.Declarations{}, nil, "doc[0]/machine/nodeAnnotations/a")
+	f := source(t, "machine:\n  nodeAnnotations:\n    b: plain\n", ingest.Declarations{}, nil)
+	if _, err := Compile(Input{Base: base, Fragments: []Source{f}, Mode: ModeMetal}); err != nil {
+		t.Errorf("replacing a literal shaped like a stand-in: %v", err)
+	}
+}
+
 // A mapping reference's keys are values the provider holds (compilation.md §4.2), so a key of six
 // bytes or more written as a literal elsewhere is a copy, whatever its member's kind.
 func TestCompileRefusesAMappingKeyCopy(t *testing.T) {

@@ -132,6 +132,7 @@ func overrider(own int, present []bool) (int, error) {
 // composition per proper fragment prefix), to name the fragment that overrode an occurrence.
 type prefixes struct {
 	sources []Source
+	real    []ingest.Resolved
 	trace   []ingest.Resolved
 	first   []int
 	hosts   []ingest.Host
@@ -139,16 +140,21 @@ type prefixes struct {
 }
 
 type prefix struct {
-	leaves []leaf
+	leaves []leaf // the trace composition's
+	real   []leaf // the real composition's, of the same shape
 	hosts  map[string]string
 }
 
-// at is the trace composition of the import base and the first k fragments.
+// at is the trace and the real composition of the import base and the first k fragments.
 func (p *prefixes) at(k int) (prefix, error) {
 	if x, ok := p.done[k]; ok {
 		return x, nil
 	}
 	m, err := Compose(p.trace[0], p.trace[1:k+1])
+	if err != nil {
+		return prefix{}, fidelity()
+	}
+	rm, err := Compose(p.real[0], p.real[1:k+1])
 	if err != nil {
 		return prefix{}, fidelity()
 	}
@@ -160,10 +166,17 @@ func (p *prefixes) at(k int) (prefix, error) {
 	if err != nil {
 		return prefix{}, fidelity()
 	}
+	rls, err := leaves(rm.bytes(), hosts)
+	if err != nil {
+		return prefix{}, fidelity()
+	}
+	if at, ok := shapeDiffers(rls, ls); ok {
+		return prefix{}, fidelity(at)
+	}
 	if p.done == nil {
 		p.done = map[int]prefix{}
 	}
-	p.done[k] = prefix{ls, hosts}
+	p.done[k] = prefix{ls, rls, hosts}
 	return p.done[k], nil
 }
 
@@ -213,8 +226,9 @@ func (p *prefixes) narrowed(t traced, full int) (int, error) {
 }
 
 // count is the number of leaves of the prefix composition of the import base and the first k
-// fragments that carry t: a value's where a leaf carries its stand-in; a boolean's where flipping
-// it changes a leaf.
+// fragments that carry t: a value's where a leaf carries its stand-in and differs from the real
+// prefix's, as attribution counts it, so a literal shaped like a stand-in is not one; a boolean's
+// where flipping it changes a leaf.
 func (p *prefixes) count(t traced, k int) (int, error) {
 	x, err := p.at(k)
 	if err != nil {
@@ -222,8 +236,8 @@ func (p *prefixes) count(t traced, k int) (int, error) {
 	}
 	if t.Kind() != ingest.TraceBoolean {
 		c := 0
-		for _, l := range x.leaves {
-			if l.kind == yaml.ScalarNode && t.Carried(l.value) {
+		for i, l := range x.leaves {
+			if l.kind == yaml.ScalarNode && l.value != x.real[i].value && t.Carried(l.value) {
 				c++
 			}
 		}

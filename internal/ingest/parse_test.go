@@ -132,6 +132,9 @@ func TestParseRefusesOuterPipeKeys(t *testing.T) {
 		"machine:\n  nodeAnnotations:\n    " + secretText + "|b: x\n",
 		"a: [{b|c: 1}]\n",
 		"k: &k " + secretText + "|b\nm:\n  *k : 1\n",
+		// the decoder writes a binary key's decoded text, which the path would not show
+		"machine:\n  kubelet:\n    extraConfig:\n      !!binary YXx5YW1s: x\n",
+		"machine:\n  kubelet:\n    extraConfig:\n      !!binary YWJj: x\n",
 	} {
 		_, err := Extract(request(t, in))
 		if !isRule(err, RuleParse) {
