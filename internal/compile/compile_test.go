@@ -3,6 +3,8 @@ package compile
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,6 +50,18 @@ func generatedBase(t *testing.T) []byte {
 // each extracted value beside the given ones, and resolves the result.
 func resolved(t *testing.T, text string, decl ingest.Declarations, values map[string]provider.Value, marks ...string) ingest.Resolved {
 	t.Helper()
+	s := source(t, text, decl, values, marks...)
+	r, err := ingest.Resolve(s.Text, s.Values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// source ingests text as resolved does and gives the composition input: the sanitized text, its
+// revision and digest, and every value it references.
+func source(t *testing.T, text string, decl ingest.Declarations, values map[string]provider.Value, marks ...string) Source {
+	t.Helper()
 	u, err := ingest.Read(strings.NewReader(text), 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -75,11 +89,8 @@ func resolved(t *testing.T, text string, decl ingest.Declarations, values map[st
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := ingest.Resolve(s, all)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return r
+	sum := sha256.Sum256([]byte(text))
+	return Source{Revision: "rev-" + hex.EncodeToString(sum[:4]), Digest: hex.EncodeToString(sum[:]), Text: s, Values: all}
 }
 
 func value(t *testing.T, k provider.Kind, v any) provider.Value {
