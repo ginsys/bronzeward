@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -507,4 +508,69 @@ func TestFragmentRevisionDeclarations(t *testing.T) {
 		t.Fatalf("listed %d revisions", len(list.Items))
 	}
 	check(list.Items[0], true)
+}
+
+// Review Focus 1, PA §7.2: a duplicate that arrives while the first PUT's T1 is uncommitted waits
+// for the key's lock and then replays the first answer; it neither ingests nor answers the draft's
+// new revision as a stale If-Match.
+func TestFragmentPutConcurrentDuplicate(t *testing.T) {
+	var ie *ingestEnv
+	const k = "k-fragment-dup-0001"
+	body := fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil)
+	var put call
+	done := make(chan *httptest.ResponseRecorder, 1)
+	inT1, held := false, false
+	ie = newFragmentEnv(t, options{
+		afterEffect: func() { inT1 = true },
+		commit: func(tx *sql.Tx) error {
+			if inT1 && !held {
+				held = true
+				var t1 int
+				if err := tx.QueryRow(`SELECT pg_backend_pid()`).Scan(&t1); err != nil {
+					return err
+				}
+				go func() { done <- ie.do(ie.api, put) }()
+				waitBlockedBy(t, ie.db, t1)
+			}
+			return tx.Commit()
+		},
+	})
+	put = call{method: "PUT", path: prefix + "/drafts/" + ie.draft + "/fragments/registries", token: ie.human("h-author"), key: k,
+		ifMatch: ie.etag, body: body}
+	first := ie.do(ie.api, put)
+	if !held {
+		t.Fatal("the first PUT never reached T1's COMMIT")
+	}
+	var second *httptest.ResponseRecorder
+	select {
+	case second = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the duplicate never answered")
+	}
+	b := ie.fragmentOK(t, first)
+	if second.Code != http.StatusOK || second.Header().Get("Idempotent-Replayed") != "true" || second.Body.String() != first.Body.String() {
+		t.Fatalf("duplicate %d %v %s", second.Code, second.Header(), second.Body)
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim`); n != 1 {
+		t.Fatalf("%d claims for one key", n)
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM fragment_revision`); n != 1 {
+		t.Fatalf("%d revisions for one key", n)
+	}
+	if b.Ingestion == "" {
+		t.Fatal("no ingestion named")
+	}
+}
+
+// PA §9.3: a draft's entries are as the update route answered them, so a fragment entry carries
+// its sanitized document in the draft read too.
+func TestFragmentPutDraftReadMatches(t *testing.T) {
+	ie := newFragmentEnv(t, options{})
+	b := ie.fragmentOK(t, ie.putFragment("registries", fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil), ie.etag,
+		"k-fragment-match-0001"))
+	d := decode[struct{ Entries []sourceEntry }](t, ie.do(ie.api, call{method: "GET", path: prefix + "/drafts/" + ie.draft,
+		token: ie.human("h-author")}), http.StatusOK)
+	if len(d.Entries) != 1 || d.Entries[0].Document == nil || *d.Entries[0].Document != *b.Entry.Document {
+		t.Fatalf("draft entries %+v; want the answered entry %+v", d.Entries, b.Entry)
+	}
 }

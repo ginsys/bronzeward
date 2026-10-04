@@ -274,8 +274,8 @@ func TestCreate(t *testing.T) {
 		t.Fatalf("%d rows, %v; want none", n, err)
 	}
 	for name, c := range map[string]Claim{
-		"generation 2":   {ID: id.New(id.Ingestion), Mode: "transient", Cluster: f.cluster, Machine: f.machine, Gen: 2},
-		"an empty owner": {ID: id.New(id.Ingestion), Mode: "transient", Cluster: f.cluster, Machine: f.machine, Gen: 1},
+		"generation 2":   {ID: id.New(id.Ingestion), Kind: "import", Mode: "transient", Cluster: f.cluster, Machine: f.machine, Gen: 2},
+		"an empty owner": {ID: id.New(id.Ingestion), Kind: "import", Mode: "transient", Cluster: f.cluster, Machine: f.machine, Gen: 1},
 	} {
 		o := Owner{ID: "a/4242/start-1", Epoch: currentEpoch(t, f.db)}
 		if name == "an empty owner" {
