@@ -411,3 +411,100 @@ func TestFragmentPutNoEcho(t *testing.T) {
 	}
 	assertAbsent(t, ie, canary)
 }
+
+// PA §9.2: the ingestion resource of a draft-update claim names its draft, with machine and
+// operation null; an operator abandons a live one as any other, and the answer is the same shape.
+func TestIngestionReadDraftUpdate(t *testing.T) {
+	ie := newFragmentEnv(t, options{})
+	b := ie.fragmentOK(t, ie.putFragment("registries", fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil), ie.etag,
+		"k-fragment-read-0001"))
+	got := decode[map[string]any](t, ie.do(ie.api, getIngestionCall(ie.human("h-author"), b.Ingestion)), http.StatusOK)
+	if got["kind"] != "draft-update" || got["mode"] != "transient" || got["state"] != "released" || got["draft"] != ie.draft ||
+		got["machine"] != nil || got["operation"] != nil {
+		t.Fatalf("ingestion %v", got)
+	}
+	for _, m := range ingestionMembers {
+		if _, ok := got[m]; !ok {
+			t.Fatalf("member %s missing from %v", m, got)
+		}
+	}
+
+	var principal string
+	if err := ie.db.QueryRow(`SELECT id FROM principal WHERE sub = 'h-author'`).Scan(&principal); err != nil {
+		t.Fatal(err)
+	}
+	c := staging.Claim{ID: id.New(id.Ingestion), Kind: "draft-update", Mode: "transient", Cluster: ie.cluster, Draft: ie.draft, Gen: 1}
+	tx, err := ie.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := staging.Create(t.Context(), tx, ie.d.owner, staging.Timers{Lease: time.Minute, AbsoluteExpiry: time.Hour}, c, principal,
+		"k-fragment-read-0002"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	ab := decode[map[string]any](t, ie.do(ie.api, abandonCall(ie.human("h-author"), "k-abandon-draft-0001", c.ID)), http.StatusOK)
+	if ab["state"] != "abandoned" || ab["draft"] != ie.draft || ab["machine"] != nil || ab["operation"] != nil {
+		t.Fatalf("abandonment answer %v", ab)
+	}
+}
+
+// PA §9.2: a fragment revision answers its declarations: each reference row's name with its kind,
+// version and encoding, and the embedded documents it identifies, in the item and the list.
+func TestFragmentRevisionDeclarations(t *testing.T) {
+	ie := newFragmentEnv(t, options{})
+	first := ie.fragmentOK(t, ie.putFragment("registries", fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil), ie.etag,
+		"k-fragment-decl-0001"))
+	minted := fragmentRefs(t, ie, *first.Entry.Revision)[0]
+	doc := "machine:\n  nodeLabels:\n    tier: !bwref " + minted.name + "\n" +
+		"cluster:\n  inlineManifests:\n    - name: m\n      contents: |\n        apiVersion: v1\n        kind: ConfigMap\n"
+	decl := map[string]any{
+		"references": map[string]any{minted.name: map[string]any{"kind": "string", "version": 1}},
+		"embedded":   []any{map[string]any{"path": "doc[0]/cluster/inlineManifests/0/contents", "format": "yaml"}},
+	}
+	b := ie.fragmentOK(t, ie.putFragment("workers", fragmentPut(t, "role", doc, []string{}, decl), ie.etag, "k-fragment-decl-0002"))
+
+	type revision struct {
+		ID           string `json:"id"`
+		Declarations struct {
+			References map[string]map[string]any `json:"references"`
+			Embedded   []map[string]any          `json:"embedded"`
+		} `json:"declarations"`
+	}
+	check := func(r revision, embedded bool) {
+		t.Helper()
+		ref, ok := r.Declarations.References[minted.name]
+		if len(r.Declarations.References) != 1 || !ok || ref["kind"] != "string" || ref["version"] != float64(1) || ref["encoding"] != nil {
+			t.Fatalf("revision %s references %v", r.ID, r.Declarations.References)
+		}
+		if _, leaked := ref["generation"]; leaked {
+			t.Fatalf("revision %s answers a generation path", r.ID)
+		}
+		switch {
+		case r.Declarations.Embedded == nil:
+			t.Fatalf("revision %s has no embedded member", r.ID)
+		case embedded && (len(r.Declarations.Embedded) != 1 || r.Declarations.Embedded[0]["format"] != "yaml" ||
+			r.Declarations.Embedded[0]["path"] != "doc[0]/cluster/inlineManifests/0/contents"):
+			t.Fatalf("revision %s embedded %v", r.ID, r.Declarations.Embedded)
+		case !embedded && len(r.Declarations.Embedded) != 0:
+			t.Fatalf("revision %s embedded %v", r.ID, r.Declarations.Embedded)
+		}
+	}
+	tok := ie.human("h-author")
+	check(decode[revision](t, ie.do(ie.api, call{method: "GET", path: prefix + "/fragment-revisions/" + *first.Entry.Revision, token: tok}),
+		http.StatusOK), false)
+	check(decode[revision](t, ie.do(ie.api, call{method: "GET", path: prefix + "/fragment-revisions/" + *b.Entry.Revision, token: tok}),
+		http.StatusOK), true)
+
+	head := id.New(id.Fragment) // publication writes heads; the list needs one
+	mustExec(t, ie.db, `INSERT INTO fragment (id, cluster, scope, name, layer, head_revision_id, head_revision, etag_token, created_at)
+		VALUES ($1, $2, 'cluster', 'workers', 'role', $3, 1, 'm3oxmlfh6phr7aigshdydcb4ji', now())`, head, ie.cluster, *b.Entry.Revision)
+	list := decode[struct{ Items []revision }](t, ie.do(ie.api, call{method: "GET", path: prefix + "/fragments/" + head + "/revisions", token: tok}),
+		http.StatusOK)
+	if len(list.Items) != 1 {
+		t.Fatalf("listed %d revisions", len(list.Items))
+	}
+	check(list.Items[0], true)
+}
