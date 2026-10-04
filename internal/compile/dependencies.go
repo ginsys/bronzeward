@@ -3,7 +3,6 @@ package compile
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"slices"
 	"time"
 
@@ -141,8 +140,8 @@ func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter
 	if r := classify.Classify(classify.Dependency{Provider: classify.Transit, Object: key, Version: 1}, first); r.Class == classify.Unknown && answerFailed(r.Reason) {
 		return nil, &DependencyError{Object: key, Version: 1, Class: r.Class, Reason: string(r.Reason)}
 	}
-	date, err := http.ParseTime(first.Date)
-	if err != nil {
+	date, readable := classify.ParseDate(first.Date)
+	if !readable {
 		return nil, &DependencyError{Object: key, Reason: ReasonNoDate}
 	}
 	out := make([]Encrypted, len(artifacts))
@@ -162,7 +161,7 @@ func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter
 			switch {
 			case c.IsZero():
 				return nil, &DependencyError{Object: key, Version: v, Reason: ReasonNotInFirstRead}
-			case !c.Before(date.Truncate(time.Second)):
+			case !c.Before(date):
 				return nil, &DependencyError{Object: key, Version: v, Reason: ReasonCreatedNotBeforeDate}
 			}
 			created[v] = c

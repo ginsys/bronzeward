@@ -86,6 +86,22 @@ func TestReadGeneration(t *testing.T) {
 	}
 }
 
+// A version whose deletion is scheduled (delete_version_after) is still live: OpenBao serves its
+// data with the deletion time, and answers 404 once it has passed. The classification decides
+// whether it may be used (compilation §6 step 3).
+func TestReadGenerationScheduledDeletion(t *testing.T) {
+	c, _ := compilerStandIn(t, func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, 200, kvVersion(map[string]any{"kind": "string", "value": pinnedText}, 3, pinnedCreated.Format(time.RFC3339Nano), "2026-10-25T00:00:00Z", false))
+	})
+	v, created, err := c.ReadGeneration(t.Context(), newPath(t), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := v.Decode(); err != nil || got != pinnedText || !created.Equal(pinnedCreated) {
+		t.Fatalf("value %v, created %v, %v", got == pinnedText, created, err)
+	}
+}
+
 // Every kind round-trips; an integer stays exact.
 func TestReadGenerationKinds(t *testing.T) {
 	for _, tc := range []struct {
@@ -118,21 +134,21 @@ func TestReadGenerationRefusesMalformed(t *testing.T) {
 	created := pinnedCreated.Format(time.RFC3339Nano)
 	value := map[string]any{"kind": "string", "value": pinnedText}
 	for name, payload := range map[string]any{
-		"another version":       kvVersion(value, 4, created, "", false),
-		"no version":            kvVersion(value, nil, created, "", false),
-		"no created_time":       kvVersion(value, 3, nil, "", false),
-		"created_time not time": kvVersion(value, 3, pinnedText, "", false),
-		"deleted":               kvVersion(value, 3, created, "2026-09-25T00:00:00Z", false),
-		"destroyed":             kvVersion(value, 3, created, "", true),
-		"no deletion_time":      kvVersion(value, 3, created, nil, false),
-		"no destroyed":          kvVersion(value, 3, created, "", nil),
-		"no data":               kvVersion(nil, 3, created, "", false),
-		"an extra field":        kvVersion(map[string]any{"kind": "string", "value": pinnedText, "x": pinnedText}, 3, created, "", false),
-		"no kind":               kvVersion(map[string]any{"value": pinnedText}, 3, created, "", false),
-		"wrong kind":            kvVersion(map[string]any{"kind": "integer", "value": pinnedText}, 3, created, "", false),
-		"unknown kind":          kvVersion(map[string]any{"kind": pinnedText, "value": pinnedText}, 3, created, "", false),
-		"a float":               kvVersion(map[string]any{"kind": "integer", "value": 1.5}, 3, created, "", false),
-		"no metadata":           data(map[string]any{"data": value}),
+		"another version":        kvVersion(value, 4, created, "", false),
+		"no version":             kvVersion(value, nil, created, "", false),
+		"no created_time":        kvVersion(value, 3, nil, "", false),
+		"created_time not time":  kvVersion(value, 3, pinnedText, "", false),
+		"deletion_time not time": kvVersion(value, 3, created, pinnedText, false),
+		"destroyed":              kvVersion(value, 3, created, "", true),
+		"no deletion_time":       kvVersion(value, 3, created, nil, false),
+		"no destroyed":           kvVersion(value, 3, created, "", nil),
+		"no data":                kvVersion(nil, 3, created, "", false),
+		"an extra field":         kvVersion(map[string]any{"kind": "string", "value": pinnedText, "x": pinnedText}, 3, created, "", false),
+		"no kind":                kvVersion(map[string]any{"value": pinnedText}, 3, created, "", false),
+		"wrong kind":             kvVersion(map[string]any{"kind": "integer", "value": pinnedText}, 3, created, "", false),
+		"unknown kind":           kvVersion(map[string]any{"kind": pinnedText, "value": pinnedText}, 3, created, "", false),
+		"a float":                kvVersion(map[string]any{"kind": "integer", "value": 1.5}, 3, created, "", false),
+		"no metadata":            data(map[string]any{"data": value}),
 	} {
 		c, _ := compilerStandIn(t, func(w http.ResponseWriter, _ *http.Request) { respond(t, w, 200, payload) })
 		_, _, err := c.ReadGeneration(t.Context(), newPath(t), 3)

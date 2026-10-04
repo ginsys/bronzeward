@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -235,7 +236,8 @@ func (p *Provider) validate() error {
 	}
 	// Each identity authenticates with its own token and no other (compilation.md §1,
 	// dependency-monitor.md §4, persistence-api.md §6.4). The report's is optional: only
-	// `bronzeward orphans` uses it.
+	// `bronzeward orphans` uses it. Paths compare resolved against the working directory, as the
+	// server opens them, so two spellings of one file are one file.
 	files := []struct{ field, path string }{
 		{"ingestionTokenFile", p.IngestionTokenFile}, {"compilerTokenFile", p.CompilerTokenFile},
 		{"metadataTokenFile", p.MetadataTokenFile}, {"reportTokenFile", p.ReportTokenFile},
@@ -247,8 +249,13 @@ func (p *Provider) validate() error {
 			}
 			return fmt.Errorf("config: provider.%s is required", f.field)
 		}
+		abs, err := filepath.Abs(f.path)
+		if err != nil {
+			return fmt.Errorf("config: provider.%s: %w", f.field, err)
+		}
+		files[i].path = abs
 		for _, o := range files[:i] {
-			if o.path == f.path {
+			if o.path == abs {
 				return fmt.Errorf("config: provider.%s and provider.%s name the same file; each identity has its own token", o.field, f.field)
 			}
 		}

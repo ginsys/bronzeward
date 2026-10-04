@@ -287,6 +287,9 @@ func TestEncryptArtifactsRefuses(t *testing.T) {
 	noDate.Date = ""
 	badDate := ok(transitBody(1, before))
 	badDate.Date = "yesterday"
+	fractionalDate := ok(transitBody(1, before))
+	fractionalDate.Date = "Sun, 04 Oct 2026 12:00:30.500 GMT"
+	nullTime := ok([]byte(`{"data":{"keys":{"1":null},"latest_version":1,"min_available_version":0,"min_decryption_version":1,"soft_deleted":false}}`))
 	for _, c := range []struct {
 		name          string
 		first, second classify.Answer
@@ -297,6 +300,8 @@ func TestEncryptArtifactsRefuses(t *testing.T) {
 	}{
 		{"first read without a Date", noDate, ok(transitBody(1, before)), []int{1}, 0, "", ReasonNoDate},
 		{"first read with an unreadable Date", badDate, ok(transitBody(1, before)), []int{1}, 0, "", ReasonNoDate},
+		{"first read with a fractional Date", fractionalDate, ok(transitBody(1, before)), []int{1}, 0, "", ReasonNoDate},
+		{"first read with a null creation time", nullTime, nullTime, []int{1}, 0, classify.Unknown, string(classify.Unreadable)},
 		{"version created in the Date's second", ok(transitBody(1, depDate)), ok(transitBody(1, depDate)), []int{1}, 1, "", ReasonCreatedNotBeforeDate},
 		{"version created after the Date", ok(transitBody(1, depDate.Add(time.Second))), ok(transitBody(1, depDate.Add(time.Second))), []int{1}, 1, "", ReasonCreatedNotBeforeDate},
 		{"version the first read lacks", ok(transitBody(1, before)), ok(transitBody(1, before, before)), []int{2}, 1, "", ReasonNotInFirstRead},

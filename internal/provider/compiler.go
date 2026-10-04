@@ -85,12 +85,20 @@ func (c *Compiler) ReadGeneration(ctx context.Context, p GenerationPath, version
 	if err != nil || created.IsZero() {
 		return Value{}, time.Time{}, r.bad("the created_time is not a time")
 	}
-	// A live version states it: deletion_time "" and destroyed false. Absent or null is not live.
+	// A live version states it: destroyed false, and deletion_time "" or a scheduled deletion
+	// (delete_version_after). OpenBao answers a version whose deletion has passed with 404, so a
+	// version served with its data is live; whether a scheduled one may be used is the
+	// classification's (compilation §6 step 3). Absent or null is not live.
 	if m.DeletionTime == nil || m.Destroyed == nil {
 		return Value{}, time.Time{}, r.bad("no deletion_time or destroyed")
 	}
-	if *m.DeletionTime != "" || *m.Destroyed {
-		return Value{}, time.Time{}, r.bad("the version is deleted or destroyed")
+	if *m.Destroyed {
+		return Value{}, time.Time{}, r.bad("the version is destroyed")
+	}
+	if *m.DeletionTime != "" {
+		if _, err := time.Parse(time.RFC3339Nano, *m.DeletionTime); err != nil {
+			return Value{}, time.Time{}, r.bad("the deletion_time is not a time")
+		}
 	}
 	d := out.Data.Data
 	rawKind, okKind := d["kind"]

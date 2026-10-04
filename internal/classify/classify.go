@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -92,6 +93,36 @@ type Result struct {
 	Date     time.Time
 }
 
+// errAnswerMarshal refuses to marshal an answer: its body is the provider's raw bytes, and an
+// error answer may echo what it was sent.
+var errAnswerMarshal = errors.New("classify: an answer is not marshaled")
+
+// Format renders an answer's status only, for every verb: never its body.
+func (a Answer) Format(f fmt.State, _ rune) {
+	if a.Unreachable {
+		fmt.Fprint(f, "answer{unreachable}")
+		return
+	}
+	fmt.Fprintf(f, "answer{status %d}", a.Status)
+}
+
+// MarshalJSON refuses, as Format hides the body.
+func (Answer) MarshalJSON() ([]byte, error) { return nil, errAnswerMarshal }
+
+// MarshalText refuses, as MarshalJSON.
+func (Answer) MarshalText() ([]byte, error) { return nil, errAnswerMarshal }
+
+// ParseDate reads a Date header (RFC 9110 §5.6.7, whole seconds), in UTC. A fractional second is
+// refused: §3 compares a deletion with the Date's second, and the encryption bracket a creation
+// time with it (compilation §11).
+func ParseDate(s string) (time.Time, bool) {
+	t, err := http.ParseTime(s)
+	if err != nil || t.Nanosecond() != 0 {
+		return time.Time{}, false
+	}
+	return t.UTC(), true
+}
+
 // errUnreadable is an answer that does not parse as the provider's metadata.
 var errUnreadable = errors.New("unreadable")
 
@@ -112,10 +143,7 @@ func Classify(d Dependency, a Answer) Result {
 	case a.Status != http.StatusOK:
 		return Result{Class: Unknown, Reason: Unreadable}
 	}
-	var date time.Time
-	if t, err := http.ParseTime(a.Date); err == nil {
-		date = t.UTC()
-	}
+	date, _ := ParseDate(a.Date)
 	var r Result
 	var err error
 	switch d.Provider {
@@ -182,7 +210,7 @@ func classifyKV(d Dependency, body []byte, date time.Time) (Result, error) {
 	}
 	r := Result{Created: created, Deletion: deletion}
 	switch {
-	case deletion.IsZero():
+	case *entry.DeletionTime == "":
 		r.Class, r.Reason = Retained, None
 	case date.IsZero() || deletion.Truncate(time.Second).Equal(date):
 		r.Class, r.Reason = Unknown, DeletionTimeUndecidable
@@ -223,11 +251,11 @@ func classifyTransit(d Dependency, body []byte) (Result, error) {
 	var created time.Time
 	raw, listed := data.Keys[strconv.FormatInt(d.Version, 10)]
 	if listed {
-		var secs int64
-		if err := json.Unmarshal(raw, &secs); err != nil {
+		var secs *int64
+		if err := json.Unmarshal(raw, &secs); err != nil || secs == nil {
 			return Result{}, errUnreadable
 		}
-		created = time.Unix(secs, 0).UTC()
+		created = time.Unix(*secs, 0).UTC()
 	}
 	switch {
 	case listed && !d.Created.IsZero() && !created.Equal(d.Created):
