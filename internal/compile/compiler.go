@@ -46,10 +46,12 @@ type Compiled struct {
 // outcome is where one tracer's value ended up: the output paths holding it, or the fragment
 // that overrode it.
 type outcome struct {
-	tracer ingest.Tracer
-	source int      // 0 the import base, i+1 fragment i
-	paths  []string // the output paths, or none when overridden
-	by     int      // the overriding fragment's index, or -1
+	tracer  ingest.Tracer
+	source  int      // 0 the import base, i+1 fragment i
+	paths   []string // the output paths, or none when overridden
+	by      int      // the overriding fragment's index, or -1
+	shown   []string // paths, redacted (compilation.md §8.3)
+	shownAt string   // the occurrence's source path, redacted
 }
 
 // traced is a tracer and the source it was placed in.
@@ -66,13 +68,22 @@ func (c Compiled) Materialized() Materialized { return c.m }
 // every output leaf holding a reference's value, names the fragment that overrode every other
 // occurrence from the trace pass's prefix compositions, checks the output for copies and base
 // overrides (step 7), and validates the real composition and every pass in the node's mode. A
-// refusal names rules and paths only. A real rejection or an invalid real configuration is
-// returned as Compose and Validate return it, whatever the passes do.
+// refusal names rules and paths only, a path token holding a resolved value redacted (§8.3). A
+// real rejection or an invalid real configuration is returned as Compose and Validate return it,
+// whatever the passes do.
 func Compile(in Input) (Compiled, error) {
+	sources := append([]Source{in.Base}, in.Fragments...)
+	c, err := compile(in, sources)
+	if err != nil {
+		return Compiled{}, newRedactor(sources).paths(err)
+	}
+	return c, nil
+}
+
+func compile(in Input, sources []Source) (Compiled, error) {
 	if _, err := ParseMode(string(in.Mode)); err != nil {
 		return Compiled{}, err
 	}
-	sources := append([]Source{in.Base}, in.Fragments...)
 	real := make([]ingest.Resolved, len(sources))
 	for i, s := range sources {
 		r, err := ingest.Resolve(s.Text, s.Values)
@@ -88,22 +99,31 @@ func Compile(in Input) (Compiled, error) {
 	trace := make([]ingest.Resolved, len(sources))
 	first := make([]int, len(sources))
 	var ts []traced
+	var hs []ingest.Host
 	for i, s := range sources {
 		first[i] = len(ts)
-		r, xs, err := ingest.Trace(s.Text, s.Values, first[i], -1)
+		r, xs, h, err := ingest.Trace(s.Text, s.Values, first[i], -1)
 		if err != nil {
 			return Compiled{}, fmt.Errorf("compile: %s: %w", inputName(i), err)
 		}
 		trace[i] = r
+		hs = append(hs, h...)
 		for _, x := range xs {
 			ts = append(ts, traced{x, i})
+		}
+	}
+	for i, t := range ts {
+		for _, u := range ts[i+1:] {
+			if err := t.Indistinct(u.Tracer); err != nil {
+				return Compiled{}, fmt.Errorf("compile: %w", err)
+			}
 		}
 	}
 	tm, err := Compose(trace[0], trace[1:])
 	if err != nil {
 		return Compiled{}, fidelity()
 	}
-	attrs, hosts, err := attribute(m.bytes(), tm.bytes(), ts)
+	attrs, hosts, err := attribute(m.bytes(), tm.bytes(), ts, hs)
 	if err != nil {
 		return Compiled{}, err
 	}
@@ -118,7 +138,7 @@ func Compile(in Input) (Compiled, error) {
 		}
 		fs := slices.Clone(trace)
 		s := sources[t.source]
-		if fs[t.source], _, err = ingest.Trace(s.Text, s.Values, first[t.source], t.ID()); err != nil {
+		if fs[t.source], _, _, err = ingest.Trace(s.Text, s.Values, first[t.source], t.ID()); err != nil {
 			return Compiled{}, fidelity()
 		}
 		fm, err := Compose(fs[0], fs[1:])
@@ -130,7 +150,7 @@ func Compile(in Input) (Compiled, error) {
 		}
 		passes = append(passes, fm)
 	}
-	pre := prefixes{sources: sources, trace: trace, first: first, ts: ts}
+	pre := prefixes{sources: sources, trace: trace, first: first, hosts: hs}
 	outcomes := make([]outcome, len(ts))
 	for i, t := range ts {
 		o := outcome{tracer: t.Tracer, source: t.source, paths: attrs[t.ID()], by: -1}
@@ -158,6 +178,13 @@ func Compile(in Input) (Compiled, error) {
 	for _, p := range passes {
 		if err := p.Validate(in.Mode); err != nil {
 			return Compiled{}, fidelity()
+		}
+	}
+	red := newRedactor(sources)
+	for i, o := range outcomes {
+		outcomes[i].shownAt = red.path(o.tracer.Path().String())
+		for _, p := range o.paths {
+			outcomes[i].shown = append(outcomes[i].shown, red.path(p))
 		}
 	}
 	return Compiled{m: m, outcomes: outcomes, origins: origins(sources)}, nil
@@ -197,15 +224,15 @@ func leaves(b []byte, hosts map[string]string) ([]leaf, error) {
 }
 
 // hostsOf finds a composed trace stream's identified embedded documents: every string that is
-// exactly a document the trace pass wrote (ingest.Tracer.HostFormat), by path.
-func hostsOf(b []byte, ts []traced) (map[string]string, error) {
+// exactly a document the trace pass wrote (ingest.Host), by path.
+func hostsOf(b []byte, hs []ingest.Host) (map[string]string, error) {
 	hosts := map[string]string{}
 	err := ingest.WalkLeaves(b, nil, func(p ingest.Path, n *yaml.Node) error {
 		if n.Kind != yaml.ScalarNode {
 			return nil
 		}
-		for _, t := range ts {
-			if f := t.HostFormat(n.Value); f != "" {
+		for _, h := range hs {
+			if f := h.HostFormat(n.Value); f != "" {
 				hosts[p.String()] = f
 				return nil
 			}
@@ -230,8 +257,8 @@ func shapeDiffers(a, b []leaf) (string, bool) {
 // §8.1): every leaf where they differ must carry a tracer and is attributed to every tracer it
 // carries, and a leaf that carries one must differ. It returns the attributed output paths by
 // tracer id and the trace composition's identified embedded documents.
-func attribute(real, trace []byte, ts []traced) (map[int][]string, map[string]string, error) {
-	hosts, err := hostsOf(trace, ts)
+func attribute(real, trace []byte, ts []traced, hs []ingest.Host) (map[int][]string, map[string]string, error) {
+	hosts, err := hostsOf(trace, hs)
 	if err != nil {
 		return nil, nil, fidelity()
 	}

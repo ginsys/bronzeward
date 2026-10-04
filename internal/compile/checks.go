@@ -24,20 +24,23 @@ const (
 const copyFloor = 6
 
 // checkOutput is compilation.md §6 step 7 over the real composition's leaves and the occurrences'
-// outcomes. A copy is refused at its output paths; a base override names the first overriding
-// fragment and the base paths it overrode. The value is never in the refusal.
+// outcomes. A copy is refused at its output paths; a base override names the first fragment in
+// composition order that overrode the base and only the base paths it overrode. The value is
+// never in the refusal.
 func checkOutput(real []leaf, sources []Source, outcomes []outcome) error {
-	var overridden []string
 	by := -1
 	for _, o := range outcomes {
-		if o.source == 0 && o.by >= 0 {
-			overridden = append(overridden, o.tracer.Path().String())
-			if by < 0 {
-				by = o.by
-			}
+		if o.source == 0 && o.by >= 0 && (by < 0 || o.by < by) {
+			by = o.by
 		}
 	}
 	if by >= 0 {
+		var overridden []string
+		for _, o := range outcomes {
+			if o.source == 0 && o.by == by {
+				overridden = append(overridden, o.tracer.Path().String())
+			}
+		}
 		slices.Sort(overridden)
 		return &Error{Rule: RuleBaseOverride, Input: inputName(by + 1), Paths: slices.Compact(overridden)}
 	}
@@ -58,7 +61,7 @@ func checkOutput(real []leaf, sources []Source, outcomes []outcome) error {
 		if err != nil {
 			return fidelity()
 		}
-		if t.Leaf() != "" {
+		if t.Member() >= 0 {
 			m, _ := x.(map[string]any)
 			x = m[t.Leaf()]
 		}

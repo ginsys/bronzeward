@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
 )
@@ -95,5 +97,121 @@ func TestCompileRefusesABaseOverride(t *testing.T) {
 				t.Errorf("refused %s at %v, want fragment[1] at %s", e.Input, e.Paths, c.path)
 			}
 		})
+	}
+}
+
+// A refusal names paths only, and a path token that holds a resolved value, such as a copy written
+// as its own key, is redacted (compilation.md §8.3).
+func TestCompileRefusalRedactsValueTokens(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	const six = "ab12xy"
+	f0 := source(t, "machine:\n  nodeAnnotations:\n    s: !bwref app/six\n", strRef("app/six"),
+		map[string]provider.Value{"app/six": value(t, provider.KindString, six)})
+	f1 := source(t, "machine:\n  nodeAnnotations:\n    "+six+": "+six+"\n", ingest.Declarations{}, nil)
+	e := refusal(t, Input{Base: base, Fragments: []Source{f0, f1}, Mode: ModeMetal}, RuleCopy, six)
+	if !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeAnnotations/<redacted>"}) {
+		t.Errorf("refused at %v, want the redacted copy path", e.Paths)
+	}
+}
+
+// The redactor replaces a path token equal to a resolved string, a mapping member or key, in its
+// stored or base64 form, or containing one of six bytes or more; other tokens, integers and
+// booleans stay, and an unparseable path is redacted whole (compilation.md §8.3).
+func TestRedactorPaths(t *testing.T) {
+	r := newRedactor([]Source{{Values: map[string]provider.Value{
+		"s":   value(t, provider.KindString, "abc"),
+		"l":   value(t, provider.KindString, "long-value"),
+		"m":   value(t, provider.KindMapping, map[string]any{"mkey": "mval", "": 7}),
+		"i":   value(t, provider.KindInteger, 6443),
+		"b":   value(t, provider.KindBoolean, true),
+		"enc": value(t, provider.KindString, "wxyz"),
+	}}})
+	enc := base64.StdEncoding.EncodeToString([]byte("wxyz"))
+	for in, want := range map[string]string{
+		"doc[0]/machine/abc":                        "doc[0]/machine/<redacted>",
+		"doc[0]/machine/abcd":                       "doc[0]/machine/abcd",
+		"doc[0]/x-long-value-y/a":                   "doc[0]/<redacted>/a",
+		"doc[0]/mkey/mval":                          "doc[0]/<redacted>/<redacted>",
+		"doc[0]/a//b":                               "doc[0]/a/<redacted>/b",
+		"doc[0]/6443/true":                          "doc[0]/6443/true",
+		"doc[0]/" + enc:                             "doc[0]/<redacted>",
+		"doc[1]/m|json/abc":                         "doc[1]/m|json/<redacted>",
+		"doc[0]/cluster/inlineManifests/0/contents": "doc[0]/cluster/inlineManifests/0/contents",
+		"not a path":                                "<redacted>",
+	} {
+		if got := r.path(in); got != want {
+			t.Errorf("path(%q) = %q, want %q", in, got, want)
+		}
+	}
+	opaque := newRedactor([]Source{{Values: map[string]provider.Value{"bad": {}}}})
+	if got := opaque.path("doc[0]/machine"); got != "<redacted>" {
+		t.Errorf("with an undecodable value: %q, want the path redacted whole", got)
+	}
+}
+
+// A stand-in too short to hold an id is found only where a leaf equals it, so an overridden base
+// reference of three bytes is named as overridden, not attributed to the longer stand-ins that
+// hold its letters; two such references of one shape cannot be told apart and are refused
+// (compilation.md §8.1).
+func TestCompileShortStandIns(t *testing.T) {
+	text := mutate(t, generatedBase(t), func(m *yaml.Node) {
+		m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "nodeAnnotations"},
+			&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "a"}, {Kind: yaml.ScalarNode, Value: "abc"}}})
+	})
+	base := source(t, string(text), ingest.Declarations{}, nil, "doc[0]/machine/nodeAnnotations/a")
+	override := source(t, "machine:\n  nodeAnnotations:\n    a: literal-text\n", ingest.Declarations{}, nil)
+	e := refusal(t, Input{Base: base, Fragments: []Source{override}, Mode: ModeMetal}, RuleBaseOverride, "abc")
+	if e.Input != "fragment[0]" || !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeAnnotations/a"}) {
+		t.Errorf("refused %s at %v, want fragment[0] at the annotation", e.Input, e.Paths)
+	}
+	same := source(t, "machine:\n  nodeLabels:\n    d: !bwref app/def\n", strRef("app/def"),
+		map[string]provider.Value{"app/def": value(t, provider.KindString, "def")})
+	_, err := Compile(Input{Base: base, Fragments: []Source{same}, Mode: ModeMetal})
+	var ref *ingest.Refusal
+	if !errors.As(err, &ref) || ref.Rule != ingest.RuleTraceIndistinct {
+		t.Errorf("two three-letter stand-ins: %v, want trace-indistinct", err)
+	}
+}
+
+// An identified embedded document is walked in the output whether or not a reference stands in
+// it, so a copy written there with JSON escapes is refused at its decoded leaf; a mapping member
+// under an empty key is still a member, and a copy of it is refused (compilation.md §6 step 7).
+func TestCompileCopyChecksEveryLeaf(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	const quoted, member = "secret\"word", "member-secret"
+	f0 := source(t, "machine:\n  nodeLabels:\n    q: !bwref app/q\n  nodeAnnotations: !bwref app/m\n",
+		refs(map[string]ingest.Reference{"app/q": ref(provider.KindString), "app/m": ref(provider.KindMapping)}),
+		map[string]provider.Value{
+			"app/q": value(t, provider.KindString, quoted),
+			"app/m": value(t, provider.KindMapping, map[string]any{"": member}),
+		})
+	manifest := ingest.Declarations{Embedded: []ingest.Embedded{{Path: "doc[0]/cluster/inlineManifests/0/contents", Format: "json"}}}
+	for _, c := range []struct {
+		name, text string
+		decl       ingest.Declarations
+		path       string
+	}{
+		{"escaped in embedded JSON", "cluster:\n  inlineManifests:\n    - name: j\n      contents: |\n        {\"copy\": \"secret\\\"word\"}\n",
+			manifest, "doc[0]/cluster/inlineManifests/0/contents|json/copy"},
+		{"member under an empty key", "machine:\n  nodeLabels:\n    copy: " + member + "\n", ingest.Declarations{}, "doc[0]/machine/nodeLabels/copy"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f1 := source(t, c.text, c.decl, nil)
+			e := refusal(t, Input{Base: base, Fragments: []Source{f0, f1}, Mode: ModeMetal}, RuleCopy, quoted, member)
+			if !slices.Equal(e.Paths, []string{c.path}) {
+				t.Errorf("refused at %v, want %s", e.Paths, c.path)
+			}
+		})
+	}
+}
+
+// Two fragments overriding two base references: the refusal names the first and only its paths.
+func TestCompileBaseOverrideNamesOneFragment(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	f0 := source(t, "cluster:\n  token: abcdef.0123456789abcdef\n", ingest.Declarations{}, nil)
+	f1 := source(t, "machine:\n  token: fedcba.9876543210fedcba\n", ingest.Declarations{}, nil)
+	e := refusal(t, Input{Base: base, Fragments: []Source{f0, f1}, Mode: ModeMetal}, RuleBaseOverride)
+	if e.Input != "fragment[0]" || !slices.Equal(e.Paths, []string{"doc[0]/cluster/token"}) {
+		t.Errorf("refused %s at %v, want fragment[0] at doc[0]/cluster/token only", e.Input, e.Paths)
 	}
 }

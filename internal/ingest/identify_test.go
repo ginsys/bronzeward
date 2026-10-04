@@ -219,8 +219,7 @@ func TestIdentifyExcludesReferences(t *testing.T) {
 // 5), so the document loads as composition loads a patch and its schema secrets are still found.
 func TestIdentifyAcceptsDeleteDirectives(t *testing.T) {
 	text := "machine:\n  token: " + secretText + "\n  nodeLabels:\n    c:\n      $patch: delete\n" +
-		"  registries:\n    config:\n      registry.example.test:\n        auth:\n          password:\n            $patch: delete\n" +
-		"  network:\n    interfaces:\n      - interface: eth0\n        $patch: delete\n"
+		"  registries:\n    config:\n      registry.example.test:\n        auth:\n          password:\n            $patch: delete\n"
 	got, err := identifyText(t, text)
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +329,11 @@ func TestIdentifySchemaRefusals(t *testing.T) {
 		{"unknown field", "machine:\n  token: " + secretText + "\n  nope: " + secretText + "\n", RuleSchemaUnloadable},
 		{"not a mapping", "- " + secretText + "\n", RuleSchemaUnloadable},
 		{"value beside a delete", "machine:\n  nodeLabels:\n    c:\n      $patch: delete\n      x: " + secretText + "\n", RuleSchemaUnloadable},
-		{"second key of a list delete", "machine:\n  network:\n    interfaces:\n      - interface: eth0\n        x: " + secretText + "\n        $patch: delete\n", RuleSchemaUnloadable},
+		// the selector of a list-entry delete is dropped unloaded, so a secret there escapes
+		{"list-entry delete", "machine:\n  network:\n    interfaces:\n      - interface: eth0\n        $patch: delete\n", RuleSchemaUnloadable},
+		{"bare list-entry delete", "machine:\n  network:\n    interfaces:\n      - $patch: delete\n", RuleSchemaUnloadable},
+		{"secret selector of a list-entry delete", "kind: WireguardConfig\napiVersion: v1alpha1\nname: wg0\npeers:\n  - presharedKey: " +
+			b64Secret + "\n    $patch: delete\n", RuleSchemaUnloadable},
 		{"merge key", "machine:\n  <<: {token: " + secretText + "}\n", ""},
 		{"key folded over lines", "machine:\n  ca:\n    crt: " + b64Crt + "\n    key: |\n      " + b64Secret[:8] + "\n      " + b64Secret[8:] + "\n", RuleSchemaIndirect},
 		{"binary tag", "cluster:\n  secretboxEncryptionSecret: !!binary " + b64Secret + "\n", RuleSchemaIndirect},

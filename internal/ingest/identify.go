@@ -95,38 +95,42 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 	return out, nil
 }
 
-// plainDeletes reports whether every delete directive under n holds nothing but itself, or, in a
-// list, itself and the one scalar member that selects the entry. The machinery drops a directive's
-// mapping whole, so anything else beside it would be stored without ever being loaded.
-func plainDeletes(n *yaml.Node, inList bool) bool {
+// plainDeletes reports whether every delete directive under n holds nothing but itself and stands
+// outside a list. The machinery drops a directive's mapping whole, and a list entry's directive
+// with the member that selects the entry, so anything beside it would be stored without ever being
+// loaded; a list-entry delete is refused, since its selector could be such a value.
+func plainDeletes(n *yaml.Node) bool {
 	switch n.Kind {
 	case yaml.MappingNode:
-		directive := false
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			if k, v := n.Content[i], n.Content[i+1]; k.Value == "$patch" && v.Kind == yaml.ScalarNode && v.Value == "delete" {
-				directive = true
-			}
-		}
-		if directive {
-			want := 2
-			if inList {
-				want = 4
-			}
-			return len(n.Content) == want && n.Content[1].Kind == yaml.ScalarNode && n.Content[len(n.Content)-1].Kind == yaml.ScalarNode
+		if directive(n) {
+			return len(n.Content) == 2
 		}
 		for i := 1; i < len(n.Content); i += 2 {
-			if !plainDeletes(n.Content[i], false) {
+			if !plainDeletes(n.Content[i]) {
 				return false
 			}
 		}
 	case yaml.SequenceNode:
 		for _, c := range n.Content {
-			if !plainDeletes(c, true) {
+			if directive(c) || !plainDeletes(c) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// directive reports whether n is a mapping holding a delete directive.
+func directive(n *yaml.Node) bool {
+	if n.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if k, v := n.Content[i], n.Content[i+1]; k.Value == "$patch" && v.Kind == yaml.ScalarNode && v.Value == "delete" {
+			return true
+		}
+	}
+	return false
 }
 
 // schemaPointer is a leaf the machinery redacts and its unredacted encoded value.
@@ -145,7 +149,7 @@ func schemaPointers(doc *yaml.Node, i int, nulled map[*yaml.Node]bool) ([]schema
 	if top == nil || top.Kind == yaml.ScalarNode && top.Tag == "!!null" {
 		return nil, nil
 	}
-	if !plainDeletes(top, false) {
+	if !plainDeletes(top) {
 		return nil, unloadable
 	}
 	text, err := yaml.Marshal(copyWithoutReferences(top, map[*yaml.Node]*yaml.Node{}, nulled))

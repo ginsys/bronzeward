@@ -168,9 +168,10 @@ inner token can.
    A document is loaded as composition loads a fragment, so its `$patch:
    delete` directives (step 5 of §6) are accepted. The machinery drops a
    directive's mapping whole, so a directive mapping that holds anything
-   besides the directive (in a list, besides it and the one scalar member that
-   selects the entry) refuses the input: that content would be stored without
-   ever being loaded.
+   besides the directive refuses the input: that content would be stored
+   without ever being loaded. A directive in a list entry refuses the input
+   too, since the member that selects the entry is dropped unloaded and could
+   hold a schema secret; list-element overrides by selector are not run (§15).
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
    candidate sanitized document. Names are minted as §5.1 states.
@@ -743,9 +744,14 @@ For each machine:
    copy ([SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records));
    the six-byte floor is SP's value matcher's (SP §2). A copy is a value
    contained in a leaf, not only one equal to it, so a literal that embeds the
-   value is refused too. A leaf that provenance attributes to any reference is
+   value is refused too. Every output leaf is checked, including the leaves of
+   an identified embedded document that holds no reference. A leaf that
+   provenance attributes to any reference is
    never a copy: a reference replaces a whole node, so another reference's
-   value inside it is an overlap of two values, not a literal in a source. The
+   value inside it is an overlap of two values, not a literal in a source. An
+   override refusal names the first fragment in composition order that
+   overrode an import base reference, and only the base paths that fragment
+   overrode. The
    check runs before validation, so a fragment that both overrides an import
    base reference and invalidates the configuration is refused as an override.
 8. **Validate** the complete materialized configuration with the pinned renderer
@@ -802,7 +808,7 @@ directive, without a merge engine
 ([SP §6.1](../design/research/20260925-sensitivity-provenance.md#61-criterion-1-sensitivity-through-each-transformation)).
 The cost is one extra composition per boolean and per fragment prefix (SP §9).
 
-The implementation settles four points SP left open:
+The implementation settles six points SP left open:
 
 - **Canonical base64.** The machinery decodes the byte fields it holds as
   base64, such as `cluster.ca.key`, and writes them again in canonical
@@ -812,8 +818,20 @@ The implementation settles four points SP left open:
   attributed (a probe at PoC time, kept as a regression test).
 - **Embedded documents in the output.** Composition does not keep source
   paths, so an identified embedded document is found in the output by exact
-  match of the text the trace pass wrote for it. A document met on one side
+  match of the text the trace pass wrote for it, whether or not a reference
+  stands in it, so that §6 step 7 sees its leaves. A document met on one side
   only fails closed.
+- **Short stand-ins.** A stand-in with no line long enough for the `zq` head
+  holds only `x`, `X`, `0` and punctuation, so every longer stand-in of the
+  same shape holds it. Such a stand-in is found only where a leaf, or a leaf's
+  base64 decoding, equals it. Two stand-ins of one composition of which either
+  holds the other, placed or before encoding, cannot be told apart, and the
+  composition is refused as `trace-indistinct`, naming both occurrences. A
+  mapping reference with no member is refused the same way: no leaf could
+  carry its stand-in.
+- **Mapping members.** A member of a mapping reference is named by its
+  position in key order, never by its key, which is a value the provider holds
+  (§4.2).
 - **Attribution.** SP's rule is adopted whole: every leaf where the real and
   trace compositions differ must carry a stand-in, and every leaf that carries
   one must differ. A stand-in that happens to equal an unchanged literal of
@@ -850,8 +868,12 @@ composition (SP §6.3):
 | --- | --- |
 | reference, version | logical name and pinned version |
 | encoding | the declared modifier, if any |
+| member | for a mapping reference, the member's position in key order (§8.1) |
 | source | import base or fragment revision, its SHA-256, source document and path |
 | outcome | exactly one of: output document and path (one row per path, so an alias has two); or the fragment that overrode it |
+
+Every path in the record is written with its value tokens redacted (§8.3), as
+is the path of a reproduction dependency (§9).
 
 SP's third outcome, `unresolved`, cannot occur in a published release, because
 every tag must resolve (§6 step 4) and a tag inside unidentified text is
@@ -873,7 +895,7 @@ is redacted by three complementary means, all applied:
 
 | Means | Covers | Token |
 | --- | --- | --- |
-| Composed path | every leaf §8.1 attributes to a reference | `<redacted:REF@VERSION>`, and `<redacted:REF@VERSION#leaf>` for one leaf of a mapping reference |
+| Composed path | every leaf §8.1 attributes to a reference | `<redacted:REF@VERSION>`, and `<redacted:REF@VERSION#N>` for the member at position N of a mapping reference (§8.1) |
 | Schema | every field the pinned machinery marks secret, which covers the base secrets | `<redacted:schema>` |
 | Value | exact copies of resolved values that no path covers | `<redacted:value>` |
 
@@ -886,6 +908,15 @@ A token names the reference and version, so a rotation shows as
 The token syntax is SP's, which SP calls the experiment's (SP §8); it is adopted
 with the stand-in format **(choice §16.22)**.
 
+- **Paths.** A path names keys, and a key can be a value: a mapping
+  reference's key, or a literal written as a key. Every path a compilation
+  surface shows, in a refusal, a provenance record or a dependency record, has
+  each token that equals a resolved `string` value, a mapping reference's key
+  or `string` member, or the standard base64 encoding of one of them, or that
+  contains one of them of six bytes or more, written `<redacted>`. Integer and
+  boolean values are not looked for, as in the value means. A path that does
+  not parse, or any path of a compilation whose pinned values do not all
+  decode, is written `<redacted>` whole.
 - **Paired diffs.** Where a diff shows a base leaf beside a redacted output
   leaf, the base side is redacted as `<redacted:paired>`, whatever its kind; a
   boolean could otherwise be read by elimination (SP §2, §4.4).

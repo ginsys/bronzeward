@@ -19,12 +19,14 @@ type Origin struct {
 
 // Record is one row of the provenance record (compilation.md §8.2): a reference occurrence, or one
 // member of a mapping reference, and exactly one outcome, the output path it reached (one row per
-// path, so an alias has two) or the fragment that overrode it.
+// path, so an alias has two) or the fragment that overrode it. A member is named by its position,
+// since its key is a value the provider holds, and a path token holding a resolved value, such as
+// that key, reads <redacted> (§8.3).
 type Record struct {
 	Reference    string
 	Version      int64
 	Encoding     string // the declared encoding modifier, if any
-	Leaf         string // the mapping member, or "" for a scalar reference
+	Member       int    // the mapping member's position in key order, or -1 for a scalar reference
 	Source       Origin
 	SourcePath   string // the occurrence's document and path in its source
 	Output       string // the output document and path, or "" when overridden
@@ -59,15 +61,15 @@ func (c Compiled) Provenance() []Record {
 	var out []Record
 	for _, o := range c.outcomes {
 		t := o.tracer
-		r := Record{Reference: t.Ref(), Version: t.Version(), Encoding: t.Encoding(), Leaf: t.Leaf(),
-			Source: c.origins[o.source], SourcePath: t.Path().String()}
+		r := Record{Reference: t.Ref(), Version: t.Version(), Encoding: t.Encoding(), Member: t.Member(),
+			Source: c.origins[o.source], SourcePath: o.shownAt}
 		if o.by >= 0 {
 			by := c.origins[o.by+1]
 			r.OverriddenBy = &by
 			out = append(out, r)
 			continue
 		}
-		for _, p := range o.paths {
+		for _, p := range o.shown {
 			r.Output = p
 			out = append(out, r)
 		}
@@ -94,7 +96,7 @@ func (c Compiled) Reproduction() []Occurrence {
 	var out []Occurrence
 	for _, o := range c.outcomes {
 		x := Occurrence{Reference: o.tracer.Ref(), Version: o.tracer.Version(), Source: c.origins[o.source],
-			Path: o.tracer.Path().String()}
+			Path: o.shownAt}
 		if !slices.Contains(out, x) {
 			out = append(out, x)
 		}
@@ -124,7 +126,7 @@ type prefixes struct {
 	sources []Source
 	trace   []ingest.Resolved
 	first   []int
-	ts      []traced
+	hosts   []ingest.Host
 	done    map[int]prefix
 }
 
@@ -142,7 +144,7 @@ func (p *prefixes) at(k int) (prefix, error) {
 	if err != nil {
 		return prefix{}, fidelity()
 	}
-	hosts, err := hostsOf(m.bytes(), p.ts)
+	hosts, err := hostsOf(m.bytes(), p.hosts)
 	if err != nil {
 		return prefix{}, fidelity()
 	}
@@ -174,7 +176,7 @@ func (p *prefixes) presence(t traced) ([]bool, error) {
 		}
 		fs := slices.Clone(p.trace[:k+1])
 		s := p.sources[t.source]
-		if fs[t.source], _, err = ingest.Trace(s.Text, s.Values, p.first[t.source], t.ID()); err != nil {
+		if fs[t.source], _, _, err = ingest.Trace(s.Text, s.Values, p.first[t.source], t.ID()); err != nil {
 			return nil, fidelity()
 		}
 		fm, err := Compose(fs[0], fs[1:])

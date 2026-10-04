@@ -1,7 +1,10 @@
 package ingest
 
 import (
+	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -76,9 +79,10 @@ func TestWalkLeavesRefusesMissingHost(t *testing.T) {
 	}
 }
 
-// HostFormat names the embedded document a tracer stands in when given exactly that document's
-// trace text, so the composed output's copy of it can be found and descended into.
-func TestTracerHostFormat(t *testing.T) {
+// The trace pass gives one host per identified embedded document, with or without a reference in
+// it, naming its format when given exactly the text it wrote, so the composed output's copies can
+// be found and descended into. A host can hold plaintext, so it never renders.
+func TestTraceHosts(t *testing.T) {
 	values := map[string]provider.Value{
 		"app/pass": value(t, provider.KindString, resolveSecret),
 		"app/str":  value(t, provider.KindString, resolveSecret),
@@ -87,22 +91,36 @@ func TestTracerHostFormat(t *testing.T) {
 		References: map[string]Reference{"app/pass": str(provider.KindString), "app/str": str(provider.KindString)},
 		Embedded:   []Embedded{{Path: manifestPath, Format: "json"}},
 	}
-	text := manifestStream("{\"user\": \"admin\", \"password\": !bwref app/pass}\n") + "machine:\n  nodeLabels:\n    s: !bwref app/str\n"
-	out, ts := traced(t, sanitizedOf(t, text, decl), values, 0, -1)
-	host := innerText(t, []byte(out))
-	if len(ts) != 2 {
-		t.Fatalf("%d tracers", len(ts))
+	for name, text := range map[string]string{
+		"with a reference": manifestStream("{\"user\": \"admin\", \"password\": !bwref app/pass}\n") +
+			"machine:\n  nodeLabels:\n    s: !bwref app/str\n",
+		"without a reference": manifestStream("{\"user\": \"admin\", \"copy\": \""+resolveSecret+"\\\"\"}\n") +
+			"machine:\n  nodeLabels:\n    s: !bwref app/str\n    p: !bwref app/pass\n",
+	} {
+		r, _, hosts, err := Trace(sanitizedOf(t, text, decl), values, 0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		host := innerText(t, r.bytes())
+		if len(hosts) != 1 {
+			t.Fatalf("%s: %d hosts", name, len(hosts))
+		}
+		if got := hosts[0].HostFormat(host); got != "json" {
+			t.Errorf("%s: host format %q, want json", name, got)
+		}
+		if got := hosts[0].HostFormat(host + " "); got != "" {
+			t.Errorf("%s: another text has host format %q", name, got)
+		}
+		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x"} {
+			if got := fmt.Sprintf(verb, hosts); strings.Contains(got, "admin") || strings.Contains(got, fmt.Sprintf("%x", "admin")) {
+				t.Errorf("%s: %s shows the host text: %s", name, verb, got)
+			}
+		}
+		if b, err := json.Marshal(hosts[0]); err == nil || b != nil {
+			t.Errorf("%s: json.Marshal: %s, %v", name, b, err)
+		}
 	}
-	if got := ts[0].HostFormat(host); got != "json" {
-		t.Errorf("embedded tracer's host format %q, want json", got)
-	}
-	if got := ts[0].HostFormat(host + " "); got != "" {
-		t.Errorf("another text has host format %q", got)
-	}
-	if got := ts[1].HostFormat(host); got != "" {
-		t.Errorf("a tracer outside any embedded document has host format %q", got)
-	}
-	if got := (Tracer{}).HostFormat(""); got != "" {
-		t.Errorf("the zero tracer has host format %q", got)
+	if got := (Host{}).HostFormat(""); got != "" {
+		t.Errorf("the zero host has format %q", got)
 	}
 }
