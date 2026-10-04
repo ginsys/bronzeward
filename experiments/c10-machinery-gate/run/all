@@ -34,9 +34,13 @@ e2_talosctl_ready
 # The gate's inputs: every package of this module the gate test compiles, the experiments whose
 # tools and cases it runs, and the fixture.
 mod_dir=$(go -C "$REPO_DIR" list -m -f '{{.Dir}}')
-mapfile -t gate_pkgs < <(go -C "$REPO_DIR" list -deps -test -f '{{if and .Module .Module.Main}}{{.Dir}}{{end}}' ./internal/compile |
+# An assignment, not a process substitution, so set -e and pipefail see a failed go list.
+gate_list=$(go -C "$REPO_DIR" list -deps -test -f '{{if and .Module .Module.Main}}{{.Dir}}{{end}}' ./internal/compile |
   awk -v r="$mod_dir/" 'index($0, r) == 1 { print substr($0, length(r) + 1) }' | sort -u)
-[ "${#gate_pkgs[@]}" -ge 4 ] || die "cannot list the packages the gate compiles"
+mapfile -t gate_pkgs <<<"$gate_list"
+if [ "${#gate_pkgs[@]}" -lt 4 ] || ! grep -qx 'internal/compile' <<<"$gate_list"; then
+  die "cannot list the packages the gate compiles"
+fi
 {
   printf 'commit\t%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
   printf 'uncommitted-inputs\t%s\n' "$(git -C "$REPO_DIR" status --porcelain -- "${gate_pkgs[@]}" \
