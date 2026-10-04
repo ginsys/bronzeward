@@ -15,6 +15,15 @@
 //   - The reserved-text output check names documents only. A path inside the output can hold a
 //     resolved mapping key, and composition does not yet know which tokens are resolved values;
 //     paths with redaction come with provenance (§8).
-//   - An Error never carries the machinery's message, which quotes values; how such a message
-//     may be shown is §8.3's.
+//   - An Error from Compose or Validate never carries the machinery's message, which quotes
+//     values. Compile's carries it redacted by the trace pass's message of the same step, or a
+//     fixed withheld notice (§8.3); the plaintext message is never kept beside the error, so
+//     nothing unwraps or reflects to it.
+//   - A template must split the real message in one way only: a lazy and a greedy match of the
+//     text between quotes must agree, or the message is withheld.
+//   - A step whose input holds a boolean reference withholds its message whether the template
+//     reports it verbatim or redacted.
+//   - Compiled.Redacted applies the value means to every whole scalar and key equal to a value
+//     form of any length, beyond the six-byte floor for contained copies, and refuses a rendering
+//     that still holds a form of six bytes or more.
 package compile

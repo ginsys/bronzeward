@@ -953,15 +953,21 @@ with the stand-in format **(choice §16.22)**.
   boolean could otherwise be read by elimination (SP §2, §4.4).
 - **Messages.** A renderer message is redacted by template: the same step on
   the trace pass gives a message whose stand-in quotes mark where the real one
-  quotes a value, and each is replaced by its token. A message the template
-  cannot explain, or a step that succeeded in one pass and failed in the other,
-  is **withheld** (SP §2, §6.2). Decode errors quote a seven-byte prefix of a
-  wrongly typed value (SR §8), which the template covers (SP §5).
+  quotes a value, and each is replaced by its token. The text around the
+  quotes must match exactly and split the real message in one way only. A
+  message the template cannot explain or explains in more than one way, or a
+  step that succeeded in one pass and failed in the other, is **withheld**
+  (SP §2, §6.2). Decode errors quote a seven-byte prefix of a wrongly typed
+  value (SR §8), which the template covers (SP §5). The value means then
+  applies to what remains.
 - **Verbatim messages from boolean inputs are withheld.** A boolean's stand-in
   is its own value, so a message quoting it matches its trace message and
   nothing marks the quote (SP §6.3). Until a way to mark such a quote exists, a
   message that the template reports verbatim is withheld when the step's input
-  holds a boolean reference **(choice §16.23)**.
+  holds a boolean reference **(choice §16.23)**. A redacted message from such a
+  step is withheld too, since its unmarked text can quote the boolean as well.
+  A composition step's input is the import base and the fragments up to the
+  one rejected; validation's is every source.
 - **Verbatim messages quoting an authored literal are shown.** SP hands this
   case to this contract (SP §10). An authored literal is source text that
   ingestion has already passed as not secret and that ordinary persistence
@@ -972,7 +978,9 @@ with the stand-in format **(choice §16.22)**.
   copy that is shorter, or of an integer or boolean value, is not detected and
   is listed in §8.4 **(choice §16.23)**.
 - **Withheld means not persisted.** A withheld message is replaced by a fixed
-  notice naming the step; its text is not stored, logged or put into a support
+  notice naming the step, `<withheld: the composition message may quote a
+  sensitive value>` or the same for validation; its text is not stored, logged
+  or put into a support
   bundle, consistent with design §15.4 **(choice §16.23)**. SP leaves open how
   withheld messages reach a support bundle (SP §10); under this contract they
   do not.
@@ -984,6 +992,21 @@ with the stand-in format **(choice §16.22)**.
 - **Embedded JSON.** A token written into re-serialized embedded JSON has its
   angle brackets written as JSON Unicode escapes, so a reader searching for the
   literal token prefix will not find it (SP §6.3).
+- **Value forms.** The value means looks for the forms §6 step 7 refuses: a
+  resolved `string` value, a mapping reference's key or `string` member, the
+  standard base64 encoding of one of them and its canonical re-encoding. In a
+  message it replaces a copy of six bytes or more, longest first. In the
+  redacted configuration it also replaces a whole scalar or key equal to a form
+  of any length, which step 7 cannot refuse when the value is under six bytes.
+  Integer and boolean values are not looked for, as in the path means.
+- **The redacted configuration.** The compiled configuration is shown as the
+  real composition with the three means applied: each attributed leaf, and
+  each key of a mapping reference's member, is its reference's token; each
+  field the machinery marks secret is `<redacted:schema>`; the value means
+  covers the rest. Identified embedded documents are written back with their
+  tokens. A compilation whose pinned values do not all decode, or whose
+  rendering still holds a value form of six bytes or more, shows nothing and
+  says so.
 
 ### 8.4 What redaction does not cover
 
@@ -1452,7 +1475,13 @@ Evidence gaps this contract carries rather than closes:
   per-side diff, not that it sits on a removed line (SP §8).
 - **Messages**: a quoted boolean cannot be marked, so such messages are
   withheld; an authored literal copying a short, integer or boolean secret is
-  not detected; withheld messages reach no support bundle (§8.3, §8.4).
+  not detected; withheld messages reach no support bundle (§8.3, §8.4). The
+  implementation's unit tests drive the machinery's own type-mismatch and
+  invalid-value messages through the template, and control a template
+  mismatch, an ambiguous split and a step that fails in one pass only; no
+  test drives a message from a renderer that misbehaves. Paired diffs
+  (`<redacted:paired>`) are applied by the first surface that shows a diff;
+  the redacted configuration shows none.
 - **Tracer limits no case reached**: a string line under five bytes carries no
   id, an integer stand-in can equal a literal integer, and a validation rule can
   judge a stand-in differently from its value (SP §8); the last is refused under
