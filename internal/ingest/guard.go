@@ -278,8 +278,11 @@ func withoutMinted(s string, minted map[string]bool) string {
 
 // ContainsToken reports whether f occurs in s with neither neighbour an ASCII letter or digit: at
 // each end, the text's edge or another byte. Mapping keys are matched this way, by the guard here
-// and by compilation's copy check.
+// and by compilation's copy check. An empty f matches nothing.
 func ContainsToken(s, f string) bool {
+	if f == "" {
+		return false
+	}
 	word := func(i int) bool {
 		if i < 0 || i >= len(s) {
 			return false

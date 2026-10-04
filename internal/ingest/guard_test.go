@@ -100,6 +100,28 @@ func TestGuardChecksMarkedMappingKeys(t *testing.T) {
 	}
 }
 
+// TestContainsToken: a whole-token match needs a non-word byte or the text's edge on both sides,
+// overlapping occurrences are each tried, and an empty token matches nothing.
+func TestContainsToken(t *testing.T) {
+	for _, c := range []struct {
+		s, f string
+		want bool
+	}{
+		{"username", "username", true},
+		{"user/username", "username", true},
+		{"usernames", "username", false},
+		{"myusername", "username", false},
+		{"aaa-aa", "aa", true},
+		{"a", "", false},
+		{"", "", false},
+		{"-", "", false},
+	} {
+		if got := ContainsToken(c.s, c.f); got != c.want {
+			t.Errorf("ContainsToken(%q, %q) = %v, want %v", c.s, c.f, got, c.want)
+		}
+	}
+}
+
 // TestGuardMatchesMappingKeysAsTokens: a marked mapping's key is searched for as a whole token,
 // with neither neighbour an ASCII letter or digit, so a key such as username inside a longer word
 // such as usernames, which every Talos base holds, is no copy; its member values are still
