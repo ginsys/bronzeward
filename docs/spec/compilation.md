@@ -1471,7 +1471,11 @@ Evidence gaps this contract carries rather than closes:
   compiler and executor policies (§1). The implementation's policy tests also
   exercise staging-key, baseline-key and HMAC use under the fixture's
   policies, each refusal beside a control with the refused grant added, against
-  OpenBao 2.6.1 in dev mode. There, a `cas=0` create on an existing generation
+  OpenBao 2.6.1 in dev mode. They read the compiler and metadata policies back
+  from the provider and compare them exactly; the compiler identity reads a
+  pinned generation and encrypts an artifact the executor decrypts, and is
+  refused an artifact decrypt, a generation create, a generation's metadata
+  and the Talos access. There, a `cas=0` create on an existing generation
   is refused to ingestion by its policy (403) before check-and-set is reached:
   with `update` added to that policy, the same request is refused by
   check-and-set (400) instead.
@@ -1521,6 +1525,16 @@ Evidence gaps this contract carries rather than closes:
   fidelity failure (§8.1), so a short value can block a publication that would
   otherwise be correct; no case measured how often.
 - **Embedded formatting**: an author's formatting is not preserved (§5.4).
+
+**Dependencies**
+
+- **Step 3, step 4 and §11's bracket** are tested on synthetic answers only:
+  each refusal (not `retained`, a changed `created_time`, a first read with no
+  readable `Date`, a version created in or after that `Date`'s second or
+  missing from the first read, a version recreated or below a floor at the
+  second read) beside its passing case, and a mutation of each check fails its
+  test. No key or path was recreated against a provider (dependency monitor
+  §10.2), and no publication runs them yet.
 
 **Renderer and environment**
 

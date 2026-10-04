@@ -164,8 +164,9 @@ func TestLiveCompilerIdentity(t *testing.T) {
 }
 
 // TestLiveMetadataIdentity: the metadata client's two answers, KV metadata and Transit key state,
-// classify as retained; the identity is refused a value read (RC row 057), a list and any Transit
-// operation or key configuration.
+// classify as retained; the identity is refused a value read (RC row 057), a list, a decrypt
+// under the key it classified retained (dependency-monitor.md §10.1 item 5), an encryption and a
+// key configuration.
 func TestLiveMetadataIdentity(t *testing.T) {
 	b := live(t)
 	liveGrants(b)
@@ -201,6 +202,14 @@ func TestLiveMetadataIdentity(t *testing.T) {
 	})
 	deniedWithout(t, b, "the metadata identity listing a cluster's claims", []string{"bw-metadata"}, "gen-meta-list", func(tok string) error {
 		_, err := raw(t, b, tok, "LIST", "/v1/secret/metadata/gen/"+cl, nil)
+		return err
+	})
+	ct, err := encrypt(t, b, b.Token("bw-compiler"), "bw-artifact", []byte("artifact"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deniedWithout(t, b, "the metadata identity decrypting under a key it classified retained", []string{"bw-metadata"}, "decrypt-artifact", func(tok string) error {
+		_, err := decrypt(t, b, tok, "bw-artifact", ct)
 		return err
 	})
 	deniedWithout(t, b, "the metadata identity encrypting", []string{"bw-metadata"}, "encrypt-artifact", func(tok string) error {
