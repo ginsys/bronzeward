@@ -2,7 +2,9 @@ package classify
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -254,6 +256,19 @@ func TestClassify(t *testing.T) {
 				d["versions"] = map[string]any{"01": version1(d)}
 			}))
 		}, Unknown, InsufficientEvidence},
+		{"transit creation time null", Dependency{Provider: Transit, Object: "bw-artifact", Version: 1}, func(t *testing.T) Answer {
+			return answer(t, edit(transit, func(d map[string]any) { d["keys"] = map[string]any{"1": nil} }))
+		}, Unknown, Unreadable},
+		{"kv deletion_time set to the zero time", kvDep(1), func(t *testing.T) Answer {
+			return answer(t, edit(kv, func(d map[string]any) { version1(d)["deletion_time"] = time.Time{}.Format(time.RFC3339Nano) }))
+		}, Blocked, SoftDeleted},
+		{"kv deletion with a fractional Date", kvDep(1), func(t *testing.T) Answer {
+			a := answer(t, edit(kv, func(d map[string]any) {
+				version1(d)["deletion_time"] = date.Add(750 * time.Millisecond).Format(time.RFC3339Nano)
+			}))
+			a.Date = "Thu, 24 Sep 2026 19:51:17.500 GMT"
+			return a
+		}, Unknown, DeletionTimeUndecidable},
 		{"transit creation time not a number", transitDep(1), func(t *testing.T) Answer {
 			return answer(t, edit(transit, func(d map[string]any) { d["keys"] = map[string]any{"1": "then"} }))
 		}, Unknown, Unreadable},
@@ -301,6 +316,44 @@ func TestClassifyTimes(t *testing.T) {
 	}
 	if got := Classify(kvDep(1), answer(t, kv())); !got.Deletion.IsZero() || !got.Date.Equal(date) {
 		t.Fatalf("a live version: deletion %v, date %v", got.Deletion, got.Date)
+	}
+}
+
+// ParseDate reads a Date header in whole seconds only: a fractional second would let a deletion in
+// the Date's own second compare as before or after it.
+func TestParseDate(t *testing.T) {
+	if got, ok := ParseDate(dateText); !ok || !got.Equal(date) || got.Location() != time.UTC {
+		t.Fatalf("ParseDate(%q) = %v, %v; want %v, true", dateText, got, ok, date)
+	}
+	for _, s := range []string{"", "soon", "Thu, 24 Sep 2026 19:51:17.500 GMT", "Thu, 24 Sep 2026 19:51:17.000000001 GMT"} {
+		if got, ok := ParseDate(s); ok {
+			t.Errorf("ParseDate(%q) = %v, true; want refused", s, got)
+		}
+	}
+}
+
+// An answer's body never renders and never marshals: an error answer may echo what it was sent.
+func TestAnswerHidesBody(t *testing.T) {
+	const canary = "bw-canary-7f3a"
+	a := Answer{Status: http.StatusForbidden, Date: dateText, Body: []byte(`{"errors":["` + canary + `"]}`)}
+	nested := struct{ A Answer }{a}
+	for _, f := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x"} {
+		for _, v := range []any{a, &a, nested} {
+			if s := fmt.Sprintf(f, v); strings.Contains(s, canary) || strings.Contains(s, fmt.Sprintf("%x", canary)) {
+				t.Errorf("%s of %T renders the body: %s", f, v, s)
+			}
+		}
+	}
+	if s := fmt.Sprint(a); !strings.Contains(s, "403") {
+		t.Errorf("an answer renders %q; want its status", s)
+	}
+	for _, v := range []any{a, &a, nested} {
+		if b, err := json.Marshal(v); err == nil {
+			t.Errorf("json.Marshal(%T) = %s; want refused", v, b)
+		}
+	}
+	if b, err := a.MarshalText(); err == nil {
+		t.Errorf("MarshalText = %s; want refused", b)
 	}
 }
 

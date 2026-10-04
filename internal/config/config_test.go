@@ -2,7 +2,10 @@ package config
 
 import (
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -292,6 +295,31 @@ func TestProviderBlock(t *testing.T) {
 		}
 		if err != nil && strings.Contains(err.Error(), "hunter2") {
 			t.Errorf("%s: the error quotes the password: %v", name, err)
+		}
+	}
+}
+
+// Two spellings of one file are one file: the server opens each relative to its working
+// directory, as Load resolves them here.
+func TestLoadRefusesTokenFileAliases(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(wd, "/etc/bronzeward/openbao-compiler.token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "provider.compilerTokenFile and provider.metadataTokenFile name the same file"
+	for name, alias := range map[string]string{
+		"dot":          "/etc/bronzeward/./openbao-compiler.token",
+		"double slash": "/etc//bronzeward/openbao-compiler.token",
+		"dot-dot":      "/etc/bronzeward/x/../openbao-compiler.token",
+		"relative":     rel,
+	} {
+		block := strings.Replace(providerBlock, "/etc/bronzeward/openbao-metadata.token", strconv.Quote(alias), 1)
+		if _, err := Load(strings.NewReader(base + authBlock + block + ingestionBlock)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s (%s): %v; want an error naming %q", name, alias, err, want)
 		}
 	}
 }
