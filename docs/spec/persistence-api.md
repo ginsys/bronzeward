@@ -1381,8 +1381,8 @@ route that dispatches, none that issues, rotates or lists automation tokens,
 none that revokes a token except by revoking its service identity (T5c,
 §10.4), and none that grants roles: those requests reach no handler and answer `404` (design
 §13.7 items 1 and 2). How a staged ingestion is reviewed, and when its `ingest`
-operation ends, belong to the edit and publication flow
-([ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23)); this
+operation ends, belong to the operator review pause
+([ginsys/bronzeward#104](https://github.com/ginsys/bronzeward/issues/104)); this
 contract fixes those routes' roles, idempotency and records.
 
 An adoption approval is requested as a plan with `"operation": "adopt"`, which
