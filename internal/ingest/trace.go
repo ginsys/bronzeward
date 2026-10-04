@@ -1,10 +1,12 @@
 package ingest
 
 import (
+	"cmp"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -158,6 +160,86 @@ func (t Tracer) Carried(v string) bool {
 		return v == x.value
 	}
 	return false
+}
+
+// minQuote is the shortest quote of a stand-in a message is searched for: its head alone.
+const minQuote = 5
+
+// Quotes is every place, as [start, end) byte offsets in order, where a message of a step on the
+// trace pass quotes this tracer: a string's stand-in, or a prefix of five bytes or more of it or of
+// one of its lines (every such line starts with the head; a decode error quotes seven bytes); a
+// base64-encoded string's placed stand-in exactly, or its raw one as a string's; an integer's
+// bounded by non-digits. A boolean, and a stand-in too short for its id, mark no quote: the first
+// is its own value and the second is the value's shape only (compilation.md §8.3; SP §6.2).
+func (t Tracer) Quotes(msg string) [][2]int {
+	if t.p == nil || t.p.text == nil || t.p.text.headless {
+		return nil
+	}
+	x := t.p.text
+	var all [][2]int
+	switch t.p.kind {
+	case TraceString:
+		all = prefixQuotes(msg, x.value)
+	case TraceBytes:
+		for i := 0; x.value != ""; {
+			j := strings.Index(msg[i:], x.value)
+			if j < 0 {
+				break
+			}
+			all = append(all, [2]int{i + j, i + j + len(x.value)})
+			i += j + len(x.value)
+		}
+		all = append(all, prefixQuotes(msg, x.raw)...)
+	case TraceInteger:
+		digit := func(c byte) bool { return c >= '0' && c <= '9' }
+		for i := 0; ; {
+			j := strings.Index(msg[i:], x.value)
+			if j < 0 {
+				break
+			}
+			s, e := i+j, i+j+len(x.value)
+			if (s == 0 || !digit(msg[s-1])) && (e == len(msg) || !digit(msg[e])) {
+				all = append(all, [2]int{s, e})
+			}
+			i = s + 1
+		}
+	}
+	slices.SortFunc(all, func(a, b [2]int) int { return cmp.Or(a[0]-b[0], b[1]-a[1]) })
+	var out [][2]int
+	for _, s := range all {
+		if len(out) > 0 && s[0] < out[len(out)-1][1] {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// prefixQuotes is each place msg quotes v, or one of its lines, from the start for at least
+// minQuote bytes, taking the longest such quote at each.
+func prefixQuotes(msg, v string) [][2]int {
+	if len(v) < minQuote {
+		return nil
+	}
+	candidates := append([]string{v}, strings.Split(v, "\n")...)
+	head := v[:minQuote]
+	var out [][2]int
+	for i := 0; ; {
+		j := strings.Index(msg[i:], head)
+		if j < 0 {
+			return out
+		}
+		s, best := i+j, 0
+		for _, c := range candidates {
+			n := 0
+			for n < len(msg)-s && n < len(c) && msg[s+n] == c[n] {
+				n++
+			}
+			best = max(best, n)
+		}
+		out = append(out, [2]int{s, s + best})
+		i = s + best
+	}
 }
 
 // Host is one identified embedded document of a stream as a trace pass wrote it. It finds the
