@@ -216,8 +216,9 @@ func withEntries(ctx context.Context, tx *sql.Tx, ds []*draftBody) error {
 		return err
 	}
 	return eachRow(ctx, tx, `SELECT e.draft, e.kind, COALESCE(e.name, ''), COALESCE(e.machine, ''), COALESCE(f.id, p.id, a.id), e.base,
-			COALESCE(e.fragment_revision, e.profile_revision, e.assignment_revision)
+			COALESCE(e.fragment_revision, e.profile_revision, e.assignment_revision), fr.document
 		FROM draft_source_entry e
+		LEFT JOIN fragment_revision fr ON fr.id = e.fragment_revision
 		LEFT JOIN fragment f ON e.kind = 'fragment' AND f.cluster = e.cluster AND f.name = e.name
 		LEFT JOIN profile p ON e.kind = 'profile' AND p.cluster = e.cluster AND p.name = e.name
 		LEFT JOIN assignment a ON e.kind = 'assignment' AND a.machine = e.machine
@@ -226,7 +227,7 @@ func withEntries(ctx context.Context, tx *sql.Tx, ds []*draftBody) error {
 		strings.Join(ids, ","), func(r *sql.Rows) error {
 			var d string
 			var e sourceEntry
-			if err := r.Scan(&d, &e.Kind, &e.Name, &e.Machine, &e.Head, &e.Base, &e.Revision); err != nil {
+			if err := r.Scan(&d, &e.Kind, &e.Name, &e.Machine, &e.Head, &e.Base, &e.Revision, &e.Document); err != nil {
 				return err
 			}
 			byID[d].Entries = append(byID[d].Entries, e)

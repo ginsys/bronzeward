@@ -78,27 +78,17 @@ func (q *request) endIngest() {
 	}
 }
 
-// prepareFragment is §2.3 steps 0-7. The draft check runs first in a transaction it rolls back,
-// so a missing, closed or moved draft creates no claim and records nothing. The claim is then
-// created under the key's lock, after the lookup and a check that no live claim holds the key: a
-// due one is abandoned, a live one refuses 409. The claim heartbeats until the request ends.
+// prepareFragment is §2.3 steps 0-7. The claim transaction takes the key's lock first, so a
+// duplicate of a request still in T1 waits for it and then finds its record: a record is replayed.
+// A live claim for the key refuses 409, a due one is abandoned. Then the draft check: a missing,
+// closed or moved draft refuses, and the transaction creates no claim and records nothing.
+// Otherwise the claim is created there, and heartbeats until the request ends.
 func prepareFragment(ctx context.Context, a *API, q *request) error {
 	in := q.input.(*fragmentInput)
 	if a.d.owner.ID == "" || a.d.ing == nil {
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "ingestion is not configured; nothing was committed")
 	}
-	var d lockedDraft
-	if err := a.rolledBack(ctx, func(tx *sql.Tx) error {
-		var err error
-		if d, err = lockDraft(ctx, tx, q); err != nil {
-			return err
-		}
-		_, err = keyOf(ctx, tx, q, d, "fragment")
-		return err
-	}); err != nil {
-		return err
-	}
-	c := staging.Claim{ID: id.New(id.Ingestion), Kind: "draft-update", Mode: "transient", Cluster: d.cluster, Draft: d.id, Gen: 1}
+	var c staging.Claim
 	replay := false
 	if err := a.inTx(ctx, func(tx *sql.Tx) error {
 		if err := a.lockKey(ctx, tx, q); err != nil {
@@ -124,6 +114,14 @@ func prepareFragment(ctx context.Context, a *API, q *request) error {
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
+		d, err := lockDraft(ctx, tx, q)
+		if err != nil {
+			return err
+		}
+		if _, err := keyOf(ctx, tx, q, d, "fragment"); err != nil {
+			return err
+		}
+		c = staging.Claim{ID: id.New(id.Ingestion), Kind: "draft-update", Mode: "transient", Cluster: d.cluster, Draft: d.id, Gen: 1}
 		owner := a.d.owner
 		if a.o.noEpochTerm {
 			owner.Epoch = q.epoch
@@ -218,16 +216,6 @@ func (a *API) stop(name string) error {
 		return errKilled
 	}
 	return nil
-}
-
-// rolledBack runs fn in a transaction it always rolls back: a check that writes nothing.
-func (a *API) rolledBack(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("%w: %w", errUnavailable, err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	return fn(tx)
 }
 
 // updateFragment is T1 (§5) for a fragment update: the claim held first, as every claim
