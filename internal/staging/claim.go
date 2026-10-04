@@ -67,8 +67,10 @@ type execer interface {
 }
 
 // Create inserts c held at generation 1 for o, with a lease of t.Lease capped at the absolute
-// expiry t.AbsoluteExpiry from now (T11's claim half), in the caller's transaction. The INSERT
-// selects from installation_state, so a process whose epoch is not current creates nothing.
+// expiry t.AbsoluteExpiry from now (T11's claim half), in the caller's transaction. Both run from
+// the database's clock at the insert, not the transaction's start, so a lock wait before it does
+// not consume the lease. The INSERT selects from installation_state, so a process whose epoch is
+// not current creates nothing.
 func Create(ctx context.Context, tx *sql.Tx, o Owner, t Timers, c Claim, principal, key string) error {
 	if o.ID == "" || o.Epoch == "" || c.Gen != 1 {
 		return errors.New("staging: a claim is created by an owner with its epoch, at generation 1")
@@ -78,9 +80,9 @@ func Create(ctx context.Context, tx *sql.Tx, o Owner, t Timers, c Claim, princip
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until,
 		expires_at, principal, idempotency_key, cluster, machine, draft, kind, created_at)
-		SELECT $1, $2, 'held', $3, 1, $4, now() + $5::bigint * interval '1 microsecond',
-		now() + $6::bigint * interval '1 microsecond', $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, now()
-		FROM installation_state WHERE epoch = $4`,
+		SELECT $1, $2, 'held', $3, 1, $4, at.t + $5::bigint * interval '1 microsecond',
+		at.t + $6::bigint * interval '1 microsecond', $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, at.t
+		FROM installation_state, (SELECT clock_timestamp() AS t) at WHERE epoch = $4`,
 		c.ID, c.Mode, o.ID, o.Epoch, t.Lease.Microseconds(), t.AbsoluteExpiry.Microseconds(), principal, key, c.Cluster, c.Machine,
 		c.Draft, c.Kind)
 	if err != nil {

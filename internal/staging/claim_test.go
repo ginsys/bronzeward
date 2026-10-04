@@ -294,6 +294,30 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+// A claim's lease and expiry run from when it is inserted, not from its transaction's start: a
+// caller that waited on a lock longer than the lease before creating it still creates a live claim.
+func TestCreateDeadlinesFromInsertion(t *testing.T) {
+	f := setup(t)
+	c := Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: "transient", Cluster: f.cluster, Machine: f.machine, Gen: 1}
+	o := Owner{ID: "a/4242/start-1", Epoch: currentEpoch(t, f.db)}
+	short := Timers{Lease: time.Second, AbsoluteExpiry: time.Hour}
+	if err := inTx(t.Context(), f.db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(t.Context(), `SELECT pg_sleep(1.2)`); err != nil {
+			return err
+		}
+		return Create(t.Context(), tx, o, short, c, f.human, "k-late-0123456789")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var live bool
+	if err := f.db.QueryRow(`SELECT lease_until > clock_timestamp() FROM staging_claim WHERE id = $1`, c.ID).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if !live {
+		t.Fatal("the claim was created with its lease already passed")
+	}
+}
+
 // Only an encrypted claim holds a payload; release and abandonment clear it with its digest.
 func TestPayload(t *testing.T) {
 	f := setup(t)
