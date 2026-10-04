@@ -585,8 +585,13 @@ controls and S7's variants; the rest run as *checks*
   `deletion-scheduled` alert can omit a release published while it is
   recorded; ordering it against publication is tracked in ginsys/bronzeward#24.
 - **Read-only policy.** RC's metadata token also held `list`; this contract
-  drops it, since the procedure never lists, and item 5 of §10.1 is the first
-  evidence that `read` alone suffices.
+  drops it, since the procedure never lists. The implementation's policy tests
+  show `read` alone answers a generation's KV metadata and a Transit key's
+  state, each classified `retained`, and that the identity is refused a value
+  read, a list, a decrypt and an encryption under the key it classified and a
+  key configuration, each beside a control with the refused grant added,
+  against OpenBao 2.6.1 in dev mode, not the fixture's Raft node. That the
+  monitor sends every request with this token is item 5's, still to show.
 - **A short deletion schedule** can reach `blocked` without a
   `deletion-scheduled` warning (§6.2); `blocked` still alerts at once.
 - **No interval is measured.** 60 seconds, 10 seconds, 15 minutes and three
