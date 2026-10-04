@@ -34,7 +34,7 @@ const (
 // Tracer is the stand-in one reference occurrence, or one member of a mapping reference, carries
 // through a trace pass (compilation.md §8.1). It holds the value's length and character classes,
 // so it is handled like the value: every fmt verb prints a placeholder, the marshallers fail and
-// the stand-in sits behind a pointer.
+// the stand-in, the member's key and the source path sit two pointers deep.
 type Tracer struct{ p *tracer }
 
 type tracer struct {
@@ -42,13 +42,20 @@ type tracer struct {
 	ref      string
 	version  int64
 	encoding string
-	leaf     string
 	member   int // the member's position in key order, or -1 for a scalar reference
 	kind     TraceKind
-	path     Path
-	// text is behind a second pointer: fmt's reflection prints a pointed-to struct's fields
-	// under a bad verb, but only an address for a pointer one level further down.
+	// at and text are behind a second pointer: fmt prints a struct holding a Tracer in an
+	// unexported field by reflection, and under a verb a pointer does not take (%s, %q) it prints
+	// the pointed-to tracer's fields, but only an address for a pointer one level further down.
+	at   *occurrence
 	text *standInText
+}
+
+// occurrence is where a tracer stands: the mapping member's key, a value, and the source path,
+// whose tokens may be values (compilation.md §8.3).
+type occurrence struct {
+	leaf string
+	path Path
 }
 
 type standInText struct {
@@ -71,7 +78,12 @@ func (t Tracer) Encoding() string { return t.get().encoding }
 
 // Leaf is the key of the mapping member the tracer stands for, "" for a scalar reference. The key
 // is a value the provider holds (compilation.md §4.2).
-func (t Tracer) Leaf() string { return t.get().leaf }
+func (t Tracer) Leaf() string {
+	if at := t.get().at; at != nil {
+		return at.leaf
+	}
+	return ""
+}
 
 // Member is the position in key order of the mapping member the tracer stands for, or -1 for a
 // scalar reference.
@@ -81,7 +93,12 @@ func (t Tracer) Member() int { return t.get().member }
 func (t Tracer) Kind() TraceKind { return t.get().kind }
 
 // Path is where the occurrence stands in its source stream.
-func (t Tracer) Path() Path { return t.get().path }
+func (t Tracer) Path() Path {
+	if at := t.get().at; at != nil {
+		return at.path
+	}
+	return Path{}
+}
 
 func (t Tracer) get() tracer {
 	if t.p == nil {
@@ -206,7 +223,7 @@ func Trace(s Sanitized, values map[string]provider.Value, first, flip int) (Reso
 			if next > maxTracerID {
 				return nil, refuse(RuleTraceIndistinct, p.String())
 			}
-			t := &tracer{id: next, ref: name, version: ref.Version, encoding: ref.Encoding, leaf: keys[i], member: -1, path: p}
+			t := &tracer{id: next, ref: name, version: ref.Version, encoding: ref.Encoding, member: -1, at: &occurrence{keys[i], p}}
 			if n.Kind == yaml.MappingNode {
 				t.member = i
 			}

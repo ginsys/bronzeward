@@ -1,13 +1,13 @@
 package provider
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"regexp"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -26,14 +26,15 @@ const (
 // data is {"kind": <Kind>, "value": <JSON>} (compilation.md choice §16.28); a reader decodes an
 // integer as a JSON number with UseNumber. NewValue builds a checked one, and CreateGeneration
 // checks again whatever it is given. A Value renders as a placeholder under every fmt verb and
-// refuses to marshal. Like Token, it holds its content behind a pointer: a struct holding a Value
-// in an unexported field is printed by reflection, which no method can intercept, and then shows
-// the pointer.
+// refuses to marshal. A struct holding a Value in an unexported field is printed by reflection,
+// which no method can intercept, and under a verb a pointer does not take (%s, %q) fmt then
+// prints the pointed-to value's fields; the JSON is one pointer further down, where fmt prints
+// only an address.
 type Value struct{ p *value }
 
 type value struct {
 	kind Kind
-	json json.RawMessage
+	json *string
 }
 
 // Kind is the value's kind.
@@ -89,7 +90,8 @@ func NewValue(k Kind, v any) (Value, error) {
 	if err != nil {
 		return Value{}, errors.New("provider: the value could not be encoded")
 	}
-	val := Value{&value{kind: k, json: b}}
+	s := string(b)
+	val := Value{&value{kind: k, json: &s}}
 	if err := val.check(); err != nil {
 		return Value{}, err
 	}
@@ -103,7 +105,7 @@ func (v Value) Decode() (any, error) {
 	if err := v.check(); err != nil {
 		return nil, err
 	}
-	dec := json.NewDecoder(bytes.NewReader(v.p.json))
+	dec := json.NewDecoder(strings.NewReader(*v.p.json))
 	dec.UseNumber()
 	var out any
 	if err := dec.Decode(&out); err != nil {
@@ -157,10 +159,10 @@ func (v Value) check() error {
 	if v.p == nil {
 		return errors.New("provider: a value made by NewValue is required")
 	}
-	if !utf8.Valid(v.p.json) {
+	if !utf8.ValidString(*v.p.json) {
 		return errors.New("provider: the value is not valid UTF-8")
 	}
-	dec := json.NewDecoder(bytes.NewReader(v.p.json))
+	dec := json.NewDecoder(strings.NewReader(*v.p.json))
 	dec.UseNumber()
 	tok, err := dec.Token()
 	if err != nil {

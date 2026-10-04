@@ -26,6 +26,13 @@ import (
 // compileSecret is a synthetic value, used nowhere else.
 const compileSecret = "compile-test-secret-7a3c"
 
+// shows is whether a rendering holds s as text, as hex or as the decimal bytes fmt prints for a
+// []byte it reaches by reflection.
+func shows(rendered, s string) bool {
+	return strings.Contains(rendered, s) || strings.Contains(rendered, fmt.Sprintf("%x", s)) ||
+		strings.Contains(rendered, strings.Trim(fmt.Sprint([]byte(s)), "[]"))
+}
+
 // generatedBase is a freshly generated controlplane configuration, as the operator would import
 // it, with the install disk talosctl gen config sets by default.
 func generatedBase(t *testing.T) []byte {
@@ -313,9 +320,10 @@ func TestMaterializedNeverRenders(t *testing.T) {
 		t.Fatal("control: the composition does not hold the value")
 	}
 	holder := struct{ M Materialized }{m}
-	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x"} {
-		for _, x := range []any{m, &m, holder} {
-			if s := fmt.Sprintf(verb, x); strings.Contains(s, compileSecret) || strings.Contains(s, "team") {
+	hidden := struct{ m Materialized }{m} // printed by reflection, past the placeholder
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%d"} {
+		for _, x := range []any{m, &m, holder, hidden} {
+			if s := fmt.Sprintf(verb, x); shows(s, compileSecret) || shows(s, "team") {
 				t.Fatalf("%s renders the composition: %s", verb, s)
 			}
 		}

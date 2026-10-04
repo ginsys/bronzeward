@@ -30,9 +30,10 @@ const (
 var ErrPatchLoad = errors.New("ingest: the machinery cannot load the resolved fragment")
 
 // Resolved is a sanitized stream with every reference replaced by its value: plaintext. Like
-// Unresolved, every fmt verb prints a placeholder, the marshallers fail and the bytes sit behind
-// a pointer. It leaves this package only as the machinery's own composition input or patch.
-type Resolved struct{ b *[]byte }
+// Unresolved, every fmt verb prints a placeholder, the marshallers fail and the text sits behind
+// a pointer to a string. It leaves this package only as the machinery's own composition input or
+// patch.
+type Resolved struct{ s *string }
 
 // Input is the resolved stream as the first composition input, the import base.
 func (r Resolved) Input() configpatcher.Input {
@@ -124,7 +125,8 @@ func resolveWith(s Sanitized, value func(name string, r Reference, p Path) (*yam
 	if err != nil {
 		return Resolved{}, err
 	}
-	return Resolved{b: &out}, nil
+	text := string(out)
+	return Resolved{s: &text}, nil
 }
 
 // placed is the node a declared name resolves to, or the rule that refuses it.
@@ -190,12 +192,12 @@ func encodeEmbedded(doc *yaml.Node, format string) (string, error) {
 	return string(b), err
 }
 
-// bytes is the resolved stream, for this package only.
+// bytes is a copy of the resolved stream, for this package only.
 func (r Resolved) bytes() []byte {
-	if r.b == nil {
+	if r.s == nil {
 		return nil
 	}
-	return *r.b
+	return []byte(*r.s)
 }
 
 const resolvedPlaceholder = "[resolved configuration]"

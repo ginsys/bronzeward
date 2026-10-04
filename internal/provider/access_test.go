@@ -162,7 +162,7 @@ func TestTalosAccessRefusesMalformed(t *testing.T) {
 }
 
 func TestTalosAccessDoesNotRender(t *testing.T) {
-	a := TalosAccess{v: TalosAccessVersion{Path: "access/talos/cl_x", Version: 1}, b: new([]byte(talosconfigText))}
+	a := TalosAccess{v: TalosAccessVersion{Path: "access/talos/cl_x", Version: 1}, s: new(talosconfigText)}
 	type nested struct{ a TalosAccess }
 	type exported struct{ A TalosAccess }
 	outputs := map[string]string{}
@@ -186,7 +186,7 @@ func TestTalosAccessDoesNotRender(t *testing.T) {
 		}
 	}
 	for what, out := range outputs {
-		if strings.Contains(out, "TALOS-ACCESS-KEY") || strings.Contains(out, "54414c4f") || strings.Contains(out, "VEFMT1") || strings.Contains(out, "contexts") {
+		if strings.Contains(out, "TALOS-ACCESS-KEY") || strings.Contains(out, "54414c4f") || strings.Contains(out, "VEFMT1") || strings.Contains(out, "contexts") || strings.Contains(out, "84 65 76 79 83") {
 			t.Errorf("%s renders the talosconfig: %s", what, out)
 		}
 	}

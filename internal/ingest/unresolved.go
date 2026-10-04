@@ -14,10 +14,11 @@ import (
 
 // Unresolved is input as read, before extraction (compilation.md §2.1): a configuration read
 // back from a node or a draft update's text. No sink accepts it. Every fmt verb prints a
-// placeholder and the marshallers fail; the bytes sit behind a pointer so that a struct holding
-// one in an unexported field prints an address, not the bytes. Only this package's parser reads
-// them.
-type Unresolved struct{ b *[]byte }
+// placeholder and the marshallers fail. The text sits behind a pointer to a string: fmt prints a
+// struct holding an Unresolved in an unexported field by reflection, past those methods, and
+// under a verb a pointer does not take (%s, %q) it dereferences a pointer to a slice, array,
+// struct or map, but never one to a string. Only this package's parser reads it.
+type Unresolved struct{ s *string }
 
 // ErrEmptyInput refuses an input with no bytes.
 var ErrEmptyInput = errors.New("ingest: the input is empty")
@@ -39,16 +40,17 @@ func Read(r io.Reader, max int64) (Unresolved, error) {
 	if len(b) == 0 {
 		return Unresolved{}, ErrEmptyInput
 	}
-	return Unresolved{b: &b}, nil
+	s := string(b)
+	return Unresolved{s: &s}, nil
 }
 
 // FromTalos is a machine configuration read from a node, as input.
 func FromTalos(c talos.Config) Unresolved {
-	b := c.Bytes()
-	if len(b) == 0 {
+	s := string(c.Bytes())
+	if s == "" {
 		return Unresolved{}
 	}
-	return Unresolved{b: &b}
+	return Unresolved{s: &s}
 }
 
 // MaxDocument is the largest document a request body carries, in bytes as decoded.
@@ -71,25 +73,24 @@ func (u *Unresolved) UnmarshalJSON(b []byte) error {
 	if len(s) == 0 || len(s) > MaxDocument || strings.ContainsRune(s, utf8.RuneError) || strings.ContainsRune(s, 0) {
 		return errDocument
 	}
-	d := []byte(s)
-	u.b = &d
+	u.s = &s
 	return nil
 }
 
 // Size is the input's length in bytes.
 func (u Unresolved) Size() int {
-	if u.b == nil {
+	if u.s == nil {
 		return 0
 	}
-	return len(*u.b)
+	return len(*u.s)
 }
 
-// bytes is the input, for the parser only.
+// bytes is a copy of the input, for the parser only.
 func (u Unresolved) bytes() []byte {
-	if u.b == nil {
+	if u.s == nil {
 		return nil
 	}
-	return *u.b
+	return []byte(*u.s)
 }
 
 const unresolvedText = "[unresolved input]"

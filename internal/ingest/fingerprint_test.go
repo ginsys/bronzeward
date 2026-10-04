@@ -15,8 +15,7 @@ import (
 )
 
 func unresolved(s string) Unresolved {
-	b := []byte(s)
-	return Unresolved{b: &b}
+	return Unresolved{s: &s}
 }
 
 // fakeHMAC is SHA-256 over the version and the input, recording each input; version 0 answers

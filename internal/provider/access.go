@@ -34,19 +34,21 @@ type TalosAccessVersion struct {
 }
 
 // TalosAccess is a cluster's Talos credential as read: its version identity and its talosconfig.
-// It does not render: every fmt verb prints a placeholder and the marshallers fail. The bytes sit
-// behind a pointer so that printing a struct holding a TalosAccess in an unexported field shows an
-// address, not the bytes. Talosconfig is the one way out.
+// It does not render: every fmt verb prints a placeholder and the marshallers fail. The text sits
+// behind a pointer to a string: fmt prints a struct holding a TalosAccess in an unexported field
+// by reflection, past those methods, and under a verb a pointer does not take (%s, %q) it
+// dereferences a pointer to a slice, array, struct or map, but never one to a string.
+// Talosconfig is the one way out.
 type TalosAccess struct {
 	v TalosAccessVersion
-	b *[]byte
+	s *string
 }
 
 // NewTalosAccess is a TalosAccess holding a copy of talosconfig at v, for a caller that stands in
 // for the provider (a test of ingestion). It reads nothing.
 func NewTalosAccess(v TalosAccessVersion, talosconfig []byte) TalosAccess {
-	b := append([]byte(nil), talosconfig...)
-	return TalosAccess{v: v, b: &b}
+	s := string(talosconfig)
+	return TalosAccess{v: v, s: &s}
 }
 
 // Version is the identity of the version read.
@@ -54,10 +56,10 @@ func (a TalosAccess) Version() TalosAccessVersion { return a.v }
 
 // Talosconfig is a copy of the talosconfig document.
 func (a TalosAccess) Talosconfig() []byte {
-	if a.b == nil {
+	if a.s == nil {
 		return nil
 	}
-	return append([]byte(nil), *a.b...)
+	return []byte(*a.s)
 }
 
 const accessText = "[talos access]"
@@ -126,6 +128,5 @@ func (i *Ingestion) TalosAccess(ctx context.Context, cluster string) (TalosAcces
 	if dec.Decode(&tc) != nil || tc == "" {
 		return TalosAccess{}, r.bad("the talosconfig is not a non-empty string")
 	}
-	b := []byte(tc)
-	return TalosAccess{v: TalosAccessVersion{Path: p, Version: *m.Version, CreatedTime: created}, b: &b}, nil
+	return TalosAccess{v: TalosAccessVersion{Path: p, Version: *m.Version, CreatedTime: created}, s: &tc}, nil
 }

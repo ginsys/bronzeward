@@ -37,7 +37,7 @@ func TestValueDecode(t *testing.T) {
 // A Value not made by NewValue, or one whose content no longer holds to its kind, decodes to an
 // error that quotes nothing.
 func TestValueDecodeRefusesUnchecked(t *testing.T) {
-	raw := func(k Kind, s string) Value { return Value{&value{kind: k, json: json.RawMessage(s)}} }
+	raw := func(k Kind, s string) Value { return Value{&value{kind: k, json: &s}} }
 	for name, v := range map[string]Value{
 		"zero value":    {},
 		"kind mismatch": raw(KindInteger, `"PROVIDER-PLAINTEXT"`),

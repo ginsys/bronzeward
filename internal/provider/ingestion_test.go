@@ -74,7 +74,7 @@ func TestCreateGenerationRefusesUnchecked(t *testing.T) {
 	i, rec := standIn(t, testKeys, func(w http.ResponseWriter, _ *http.Request) {
 		respond(t, w, 200, data(map[string]any{"version": 1}))
 	})
-	raw := func(k Kind, s string) Value { return Value{&value{kind: k, json: json.RawMessage(s)}} }
+	raw := func(k Kind, s string) Value { return Value{&value{kind: k, json: &s}} }
 	for name, c := range map[string]struct {
 		p GenerationPath
 		v Value
@@ -121,8 +121,8 @@ func TestNewValueKinds(t *testing.T) {
 			t.Errorf("NewValue(%s, %T): %v", c.k, c.v, err)
 			continue
 		}
-		if got.Kind() != c.k || string(got.p.json) != c.want {
-			t.Errorf("NewValue(%s, %T) = %s %s, want %s", c.k, c.v, got.Kind(), got.p.json, c.want)
+		if got.Kind() != c.k || *got.p.json != c.want {
+			t.Errorf("NewValue(%s, %T) = %s %s, want %s", c.k, c.v, got.Kind(), *got.p.json, c.want)
 		}
 	}
 	for _, c := range []struct {
@@ -148,7 +148,7 @@ func TestNewValueKinds(t *testing.T) {
 		{"unknown kind", "list", "a"},
 	} {
 		if got, err := NewValue(c.k, c.v); err == nil {
-			t.Errorf("%s: NewValue accepted it as %s", c.name, got.p.json)
+			t.Errorf("%s: NewValue accepted it as %s", c.name, *got.p.json)
 		} else if strings.Contains(err.Error(), "a\xffb") {
 			t.Errorf("%s: the error quotes the value: %v", c.name, err)
 		}
@@ -190,7 +190,7 @@ func TestValueDoesNotRender(t *testing.T) {
 		}
 	}
 	for what, out := range outputs {
-		if strings.Contains(out, "PROVIDER-PLAINTEXT") || strings.Contains(out, "50524f") || strings.Contains(out, "UFJPVklE") {
+		if strings.Contains(out, "PROVIDER-PLAINTEXT") || strings.Contains(out, "50524f") || strings.Contains(out, "UFJPVklE") || strings.Contains(out, "80 82 79 86 73 68 69 82") {
 			t.Errorf("%s renders the value: %s", what, out)
 		}
 	}
@@ -200,7 +200,7 @@ func TestValueDoesNotRender(t *testing.T) {
 		}
 	}
 	// Control: the value is there to leak.
-	if !strings.Contains(string(v.p.json), "PROVIDER-PLAINTEXT") || v.Kind() != KindString {
+	if !strings.Contains(*v.p.json, "PROVIDER-PLAINTEXT") || v.Kind() != KindString {
 		t.Fatal("the value does not hold the plaintext; this test proves nothing")
 	}
 }

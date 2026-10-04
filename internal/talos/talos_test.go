@@ -56,7 +56,7 @@ func TestConfigDoesNotRender(t *testing.T) {
 		}
 	}
 	for what, out := range outputs {
-		if strings.Contains(out, "SECRET") || strings.Contains(out, "token") || strings.Contains(out, "5345435245") || strings.Contains(out, "bWFjaGluZ") {
+		if strings.Contains(out, "SECRET") || strings.Contains(out, "token") || strings.Contains(out, "5345435245") || strings.Contains(out, "bWFjaGluZ") || strings.Contains(out, "83 69 67 82 69 84") {
 			t.Errorf("%s renders the configuration: %s", what, out)
 		}
 	}

@@ -72,8 +72,11 @@ func (e *Error) Error() string {
 }
 
 // Materialized is one machine's complete composed configuration: plaintext. Every fmt verb
-// prints a placeholder, the marshallers fail and the bytes sit behind a pointer.
-type Materialized struct{ b *[]byte }
+// prints a placeholder and the marshallers fail. The text sits behind a pointer to a string: fmt
+// prints a struct holding a Materialized in an unexported field by reflection, past those
+// methods, and under a verb a pointer does not take (%s, %q) it dereferences a pointer to a
+// slice, array, struct or map, but never one to a string.
+type Materialized struct{ s *string }
 
 // Compose performs compilation.md §6 steps 5 and 7 (reserved text): the base is the composition
 // input and each fragment, in order, a strategic merge patch, applied as talosctl's
@@ -115,7 +118,8 @@ func Compose(base ingest.Resolved, fragments []ingest.Resolved) (Materialized, e
 	if len(paths) > 0 {
 		return Materialized{}, &Error{Rule: RuleReservedText, Paths: paths}
 	}
-	return Materialized{b: &out}, nil
+	s := string(out)
+	return Materialized{s: &s}, nil
 }
 
 const reserved = "!bwref"
@@ -156,13 +160,13 @@ func holdsReserved(n *yaml.Node) bool {
 // loaded again and validated in the node's mode, as talosctl validate --strict validates it
 // (local, warnings as errors). Warnings that strict mode leaves as warnings are not reported.
 func (m Materialized) Validate(mode Mode) error {
-	if m.b == nil {
+	if m.s == nil {
 		return errors.New("compile: no composed configuration to validate")
 	}
 	if _, err := ParseMode(string(mode)); err != nil {
 		return err
 	}
-	cfg, err := configloader.NewFromBytes(bytes.Clone(*m.b))
+	cfg, err := configloader.NewFromBytes([]byte(*m.s))
 	if err != nil {
 		return &Error{Rule: RuleInvalid}
 	}
@@ -172,12 +176,12 @@ func (m Materialized) Validate(mode Mode) error {
 	return nil
 }
 
-// bytes is the composed configuration, for this package only.
+// bytes is a copy of the composed configuration, for this package only.
 func (m Materialized) bytes() []byte {
-	if m.b == nil {
+	if m.s == nil {
 		return nil
 	}
-	return *m.b
+	return []byte(*m.s)
 }
 
 const materializedText = "[materialized configuration]"
