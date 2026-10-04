@@ -144,3 +144,32 @@ func TestTraceHosts(t *testing.T) {
 		t.Errorf("the zero host has format %q", got)
 	}
 }
+
+// RewriteLeaves walks as WalkLeaves and WalkKeys do, the callbacks changing nodes in place, and
+// writes the stream back: an embedded JSON document compact with its angle brackets escaped, an
+// embedded YAML document and the stream with two-space indentation; a host that is not met fails.
+func TestRewriteLeaves(t *testing.T) {
+	text := "a: v\nd: '{\"p\": \"q\", \"r\": 1}'\ny: |\n  k: w\n---\nf: x\n"
+	host := map[string]string{"doc[0]/d": "json", "doc[0]/y": "yaml"}
+	b, err := RewriteLeaves([]byte(text), host, func(p Path, n *yaml.Node) error {
+		if n.Kind == yaml.ScalarNode && p.String() != "doc[0]/d|json/r" {
+			n.Tag, n.Value = "!!str", "<"+p.String()+">"
+		}
+		return nil
+	}, func(p Path, k *yaml.Node) error {
+		if p.String() == "doc[0]/y|yaml/k" {
+			k.Value = "<key>"
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "a: <doc[0]/a>\nd: |\n  {\"p\":\"\\u003cdoc[0]/d|json/p\\u003e\",\"r\":1}\ny: |\n  <key>: <doc[0]/y|yaml/k>\n---\nf: <doc[1]/f>\n"
+	if string(b) != want {
+		t.Errorf("RewriteLeaves =\n%s\nwant\n%s", b, want)
+	}
+	if _, err := RewriteLeaves([]byte(text), map[string]string{"doc[0]/z": "json"}, nil, nil); err == nil {
+		t.Error("an unmet host was accepted")
+	}
+}

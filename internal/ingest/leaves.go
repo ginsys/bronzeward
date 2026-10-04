@@ -29,10 +29,30 @@ func WalkKeys(b []byte, embedded map[string]string, fn func(p Path, k *yaml.Node
 	return walkComposed(b, embedded, nil, fn)
 }
 
+// RewriteLeaves walks a composed stream b as WalkLeaves and WalkKeys walk it, fn and keyFn (either
+// may be nil) changing the nodes they are given in place, and writes the stream back: each
+// identified embedded document as Resolve writes one (JSON compact with sorted keys, so a "<" or
+// ">" is written as a JSON Unicode escape; YAML with two-space indentation), then the stream with
+// two-space indentation. No error quotes the stream.
+func RewriteLeaves(b []byte, embedded map[string]string, fn, keyFn func(p Path, n *yaml.Node) error) ([]byte, error) {
+	docs, err := composedDocs(b, embedded, fn, keyFn, true)
+	if err != nil {
+		return nil, err
+	}
+	return encodeStream(docs)
+}
+
 func walkComposed(b []byte, embedded map[string]string, fn, keyFn func(p Path, n *yaml.Node) error) error {
+	_, err := composedDocs(b, embedded, fn, keyFn, false)
+	return err
+}
+
+// composedDocs walks a composed stream's documents, writing each embedded document back into
+// its host when write is set.
+func composedDocs(b []byte, embedded map[string]string, fn, keyFn func(p Path, n *yaml.Node) error, write bool) ([]*yaml.Node, error) {
 	docs, err := parseStream(b)
 	if err != nil {
-		return errLeavesParse
+		return nil, errLeavesParse
 	}
 	met := map[string]bool{}
 	var walk func(n *yaml.Node, p Path) error
@@ -45,7 +65,15 @@ func walkComposed(b []byte, embedded map[string]string, fn, keyFn func(p Path, n
 					return errLeavesHost
 				}
 				met[p.String()] = true
-				return walk(root(inner), Path{Doc: p.Doc, Pointer: p.Pointer, Format: format})
+				if err := walk(root(inner), Path{Doc: p.Doc, Pointer: p.Pointer, Format: format}); err != nil || !write {
+					return err
+				}
+				text, err := encodeEmbedded(inner, format)
+				if err != nil {
+					return errLeavesHost
+				}
+				n.Tag, n.Value, n.Style = "!!str", text, yaml.LiteralStyle
+				return nil
 			}
 		}
 		if fn != nil {
@@ -78,12 +106,12 @@ func walkComposed(b []byte, embedded map[string]string, fn, keyFn func(p Path, n
 	for i, d := range docs {
 		if top := root(d); top != nil {
 			if err := walk(top, Path{Doc: i}); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	if len(met) != len(embedded) {
-		return errLeavesHost
+		return nil, errLeavesHost
 	}
-	return nil
+	return docs, nil
 }
