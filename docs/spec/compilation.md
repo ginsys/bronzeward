@@ -165,6 +165,12 @@ inner token can.
    Identification reads such a node as a null, so a document whose identified
    nodes the machinery cannot load as nulls (a mark on a document's `kind`)
    refuses the input: once stored, it could not be ingested again.
+   A document is loaded as composition loads a fragment, so its `$patch:
+   delete` directives (step 5 of §6) are accepted. The machinery drops a
+   directive's mapping whole, so a directive mapping that holds anything
+   besides the directive (in a list, besides it and the one scalar member that
+   selects the entry) refuses the input: that content would be stored without
+   ever being loaded.
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
    candidate sanitized document. Names are minted as §5.1 states.
@@ -735,7 +741,13 @@ For each machine:
    generation; whether to rotate the secret is the operator's decision. SP's
    duplicate-literal case is the evidence that only value matching sees such a
    copy ([SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records));
-   the six-byte floor is SP's value matcher's (SP §2).
+   the six-byte floor is SP's value matcher's (SP §2). A copy is a value
+   contained in a leaf, not only one equal to it, so a literal that embeds the
+   value is refused too. A leaf that provenance attributes to any reference is
+   never a copy: a reference replaces a whole node, so another reference's
+   value inside it is an overlap of two values, not a literal in a source. The
+   check runs before validation, so a fragment that both overrides an import
+   base reference and invalidates the configuration is refused as an override.
 8. **Validate** the complete materialized configuration with the pinned renderer
    in the node's platform mode (§7 stage 3).
 
@@ -789,6 +801,30 @@ references overwritten by a literal, by another reference and by a delete
 directive, without a merge engine
 ([SP §6.1](../design/research/20260925-sensitivity-provenance.md#61-criterion-1-sensitivity-through-each-transformation)).
 The cost is one extra composition per boolean and per fragment prefix (SP §9).
+
+The implementation settles four points SP left open:
+
+- **Canonical base64.** The machinery decodes the byte fields it holds as
+  base64, such as `cluster.ca.key`, and writes them again in canonical
+  standard base64, which can change the last character before the padding. A
+  string stand-in is therefore also matched in that re-encoding. Without it,
+  3 of the 9 schema secrets of a generated control-plane base were not
+  attributed (a probe at PoC time, kept as a regression test).
+- **Embedded documents in the output.** Composition does not keep source
+  paths, so an identified embedded document is found in the output by exact
+  match of the text the trace pass wrote for it. A document met on one side
+  only fails closed.
+- **Attribution.** SP's rule is adopted whole: every leaf where the real and
+  trace compositions differ must carry a stand-in, and every leaf that carries
+  one must differ. A stand-in that happens to equal an unchanged literal of
+  the composition therefore fails closed rather than being attributed.
+- **Overrides.** A prefix is composed only for an occurrence that reached no
+  output leaf. An occurrence absent from its own source's prefix fails closed.
+  A boolean that reached no output leaf is flipped in the prefixes from its
+  own on, and the fragment after which flipping it stops changing a leaf is
+  the one that overrode it; SP left that outcome unknown, which §8.2's
+  "exactly one" outcome does not allow. The prefixes are not validated: a
+  prefix may be legitimately incomplete.
 
 The trace and flip compositions carry each value's length and character
 classes, so they are handled like the real composition: never persisted, logged
@@ -1342,8 +1378,14 @@ Evidence gaps this contract carries rather than closes:
   target, list-element overrides by selector, more than two fragments, worker
   configurations, a tag name that is valid base64 or a YAML 1.1 boolean word,
   and a hand-formatted embedded literal (SR §8; SP §8).
-- **Fidelity control**: a one-mutation smoke test that never injected a
-  structural change, not exercised in 16 of 56 cells (SP §4.4, §8).
+- **Fidelity control**: SP's was a one-mutation smoke test that never
+  injected a structural change, not exercised in 16 of 56 cells (SP §4.4, §8).
+  The implementation's unit tests inject a changed tree into the comparison
+  (a key added, a key renamed, a scalar made a list, a tag changed, an
+  untraced leaf changed, a stand-in planted in an unchanged leaf, a flip pass
+  with a key added) and each is refused; a trace pass that fails validation
+  while the real composition passes is refused too. Those injections are made
+  on the compared trees, not through a renderer that misbehaves.
 - **Paired-diff control**: loose; it shows the base text is present in the
   per-side diff, not that it sits on a removed line (SP §8).
 - **Messages**: a quoted boolean cannot be marked, so such messages are
@@ -1352,7 +1394,9 @@ Evidence gaps this contract carries rather than closes:
 - **Tracer limits no case reached**: a string line under five bytes carries no
   id, an integer stand-in can equal a literal integer, and a validation rule can
   judge a stand-in differently from its value (SP §8); the last is refused under
-  §8.1.
+  §8.1. A short stand-in that equals an unchanged literal is refused as a
+  fidelity failure (§8.1), so a short value can block a publication that would
+  otherwise be correct; no case measured how often.
 - **Embedded formatting**: an author's formatting is not preserved (§5.4).
 
 **Renderer and environment**
