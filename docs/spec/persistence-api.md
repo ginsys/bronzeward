@@ -1070,11 +1070,14 @@ below.
 The draft entry routes are also the one exception to "a refusal commits no
 record", because their ingestion persists a staging claim before T1 that a
 refusal does not undo. Their claim records the principal and the idempotency
-key. A refusal after the claim exists (compilation's `422`) commits the
+key. A `4xx` refusal after the claim exists (compilation's `422`, or T1's
+`412` or `409`) commits the
 idempotency record with the refusal's response, and the act of §10.5 naming
 the refused request, in the transaction that records the claim's outcome: the
 claim and its provider generations persist, so the audit records who caused
-them. A retry therefore replays the refusal and ingests nothing.
+them. A retry therefore replays the refusal and ingests nothing. A `5xx`
+refusal records nothing; a retry ingests afresh once the earlier claim has
+ended, as below.
 A retry that finds a claim for its key but no record looks at the claim's
 lease (compilation §3). While the lease is live, the first request may still be
 ingesting, and the retry answers `409 conflict` naming the request in progress;
@@ -1506,6 +1509,22 @@ ETag: "7-shw6tpirbqvgj3qjuv2hicf6vm"
 record or response. `DELETE` on the same route proposes the removal, with no
 body. `marks` are compilation §2.2 paths.
 
+The body's optional `declarations` member holds the compilation §5.2
+declarations of the `!bwref` tags the document already carries, as
+`{"references": {"<name>": {"kind", "version", "encoding"}}, "embedded":
+[{"path", "format"}]}`. A marked value is extracted to a new generation under
+this update's claim; a carried reference resolves to the generation of a
+reference row of the draft's cluster, a fragment revision's or an import
+base's, with the same name, kind and version. A carried name that matches no
+such row, or rows with different generations, is `422 validation-failed` with
+`"rule": "unknown-reference"` and the `"reference"` name. The update ingests
+under a claim of kind `draft-update` that names the draft and stages
+transiently only (compilation §3): no envelope is written, so an interrupted
+update is never taken over, and its retry ingests afresh. The answer's
+`document` is the sanitized text, and `ingestion` names the claim; a refusal
+after the claim exists names it too. The ingestion resource of that claim has
+`kind` `draft-update`, its `draft`, and `machine` and `operation` `null`.
+
 A profile pins fragment revisions in order; an assignment selects profiles,
 then fragments per layer, by name (§3.1). Neither body can hold a secret
 value, so neither route ingests: each is a plain T1 under the SHA-256
@@ -1564,7 +1583,9 @@ each as the update route answered it. A head answers its current revision
 (`null` once removed) and head revision, with `"<headRevision>-<token>"` as
 its ETag (§4.1). Its `revisions` are every revision of its name, or its
 machine, published or not, in identifier order. A revision answers its
-content: a fragment revision its sanitized `document` and `layer`, a profile
+content: a fragment revision its sanitized `document`, `layer` and
+`declarations` (each reference row's name with its kind, version and encoding,
+never its generation path, and its `embedded` documents), a profile
 revision its `fragments` pins in order, an assignment revision its `profiles`
 and `fragments` per layer. The discarded draft moved no head, so `registries`
 still answers head revision 3, the base the draft edited from, while the
