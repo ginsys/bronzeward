@@ -145,12 +145,21 @@ func (Answer) MarshalJSON() ([]byte, error) { return nil, errAnswerMarshal }
 // MarshalText refuses, as MarshalJSON.
 func (Answer) MarshalText() ([]byte, error) { return nil, errAnswerMarshal }
 
+var dateLayouts = []string{
+	http.TimeFormat,
+	"Monday, 02-Jan-06 15:04:05 GMT",
+	time.ANSIC,
+	"Mon Jan 02 15:04:05 2006",
+}
+
 // ParseDate reads a Date header in one of RFC 9110 §5.6.7's three forms, in UTC. The text must be
 // exactly what its form writes for the time it names: time.Parse also takes a fractional second
 // (with a dot or a comma, and drops digits past the ninth), which §3's same-second rule and the
-// encryption bracket (compilation §11) cannot use.
+// encryption bracket (compilation §11) cannot use. The RFC 850 form ends in a literal GMT
+// (time.RFC850's zone element takes any abbreviation), and the asctime form's day is either
+// space-padded (time.ANSIC) or two digits.
 func ParseDate(s string) (time.Time, bool) {
-	for _, layout := range []string{http.TimeFormat, time.RFC850, time.ANSIC} {
+	for _, layout := range dateLayouts {
 		if t, err := time.Parse(layout, s); err == nil && t.Format(layout) == s {
 			return t.UTC(), true
 		}
