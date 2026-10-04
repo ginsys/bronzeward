@@ -1,0 +1,4 @@
+cases	15
+bases	fixture generated
+rows	30
+unexpected	0

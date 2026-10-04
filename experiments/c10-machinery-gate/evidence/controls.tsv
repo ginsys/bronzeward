@@ -1,0 +1,4 @@
+control	fixture	compiler-round-trip	identical
+control	fixture	compiler-validates-container	pass
+control	generated	compiler-round-trip	identical
+control	generated	compiler-validates-metal	pass
