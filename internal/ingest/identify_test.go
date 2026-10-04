@@ -215,6 +215,21 @@ func TestIdentifyExcludesReferences(t *testing.T) {
 	}
 }
 
+// A fragment may remove a key with the strategic-merge delete directive (compilation.md §6 step
+// 5), so the document loads as composition loads a patch and its schema secrets are still found.
+func TestIdentifyAcceptsDeleteDirectives(t *testing.T) {
+	text := "machine:\n  token: " + secretText + "\n  nodeLabels:\n    c:\n      $patch: delete\n" +
+		"  registries:\n    config:\n      registry.example.test:\n        auth:\n          password:\n            $patch: delete\n" +
+		"  network:\n    interfaces:\n      - interface: eth0\n        $patch: delete\n"
+	got, err := identifyText(t, text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set := pathSet(got); !sameSet(set, map[string]bool{"doc[0]/machine/token": true}) {
+		t.Errorf("identified %v", keys(set))
+	}
+}
+
 func TestIdentifyAliasedNodeOnce(t *testing.T) {
 	got, err := identifyText(t, "machine:\n  token: &t "+secretText+"\ncluster:\n  token: *t\n")
 	if err != nil {
@@ -314,6 +329,8 @@ func TestIdentifySchemaRefusals(t *testing.T) {
 		{"unknown kind", "apiVersion: v1alpha1\nkind: Nope\nsecret: " + secretText + "\n", RuleSchemaUnloadable},
 		{"unknown field", "machine:\n  token: " + secretText + "\n  nope: " + secretText + "\n", RuleSchemaUnloadable},
 		{"not a mapping", "- " + secretText + "\n", RuleSchemaUnloadable},
+		{"value beside a delete", "machine:\n  nodeLabels:\n    c:\n      $patch: delete\n      x: " + secretText + "\n", RuleSchemaUnloadable},
+		{"second key of a list delete", "machine:\n  network:\n    interfaces:\n      - interface: eth0\n        x: " + secretText + "\n        $patch: delete\n", RuleSchemaUnloadable},
 		{"merge key", "machine:\n  <<: {token: " + secretText + "}\n", ""},
 		{"key folded over lines", "machine:\n  ca:\n    crt: " + b64Crt + "\n    key: |\n      " + b64Secret[:8] + "\n      " + b64Secret[8:] + "\n", RuleSchemaIndirect},
 		{"binary tag", "cluster:\n  secretboxEncryptionSecret: !!binary " + b64Secret + "\n", RuleSchemaIndirect},
