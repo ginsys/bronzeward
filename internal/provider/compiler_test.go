@@ -205,6 +205,10 @@ func TestEncryptArtifact(t *testing.T) {
 	if plain, err := base64.StdEncoding.DecodeString(body.Plaintext); q.method != http.MethodPost || q.path != "/v1/transit/encrypt/"+testArtifactKey || err != nil || string(plain) != pinnedText {
 		t.Fatalf("sent %s %s", q.method, q.path)
 	}
+	// The key it names is the one it encrypts under: the key publication reads and records.
+	if c.ArtifactKey() != testArtifactKey {
+		t.Fatalf("ArtifactKey() = %q, want %q", c.ArtifactKey(), testArtifactKey)
+	}
 }
 
 func TestNewCompilerRefuses(t *testing.T) {
@@ -228,7 +232,7 @@ func (withArtifactDecrypt) DecryptArtifact(context.Context, Ciphertext) ([]byte,
 // The compiler identity's operations and nothing else (compilation.md §1): no decryption, no
 // secret creation, no other read, whatever the policy would allow.
 func TestCompilerMethodSet(t *testing.T) {
-	want := []string{"EncryptArtifact", "ReadGeneration"}
+	want := []string{"ArtifactKey", "EncryptArtifact", "ReadGeneration"}
 	if got := methodNames(reflect.TypeFor[*Compiler]()); !slices.Equal(got, want) {
 		t.Fatalf("*Compiler exports %q, want exactly %q", got, want)
 	}

@@ -118,6 +118,10 @@ func (c *Compiler) ReadGeneration(ctx context.Context, p GenerationPath, version
 	return v, created.UTC(), nil
 }
 
+// ArtifactKey is the name of the Transit key EncryptArtifact encrypts under: the key §11's
+// metadata reads classify and §9 records.
+func (c *Compiler) ArtifactKey() string { return c.artifact }
+
 // EncryptArtifact encrypts an artifact under the artifact key (compilation.md §11). Only the
 // executor may decrypt it.
 func (c *Compiler) EncryptArtifact(ctx context.Context, plaintext []byte) (Ciphertext, error) {
