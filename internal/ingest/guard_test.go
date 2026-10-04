@@ -111,6 +111,11 @@ func TestContainsToken(t *testing.T) {
 		{"user/username", "username", true},
 		{"usernames", "username", false},
 		{"myusername", "username", false},
+		{"username/", "username", true},
+		{"Ausername", "username", false},
+		{"username9", "username", false},
+		{"_username_", "username", true}, // only ASCII letters and digits are word bytes
+		{"éusernameé", "username", true}, // a non-ASCII byte is not one either
 		{"aaa-aa", "aa", true},
 		{"a-a-a-", "a-a-", true}, // the first occurrence fails its right edge; the overlapping one matches
 		{"a", "", false},
