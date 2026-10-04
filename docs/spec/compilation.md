@@ -996,6 +996,14 @@ and SP matrices are re-run through it and reach the same verdicts, and §15's
 leak scan covers its channel. If the fallback fails either, the compiler is
 not accepted and the selection returns to the owner.
 
+**SR half measured.** The [machinery gate](../../experiments/c10-machinery-gate/README.md)
+re-ran SR's 15 cases on both of SR's bases: the machinery's composition of the
+literal form equals talosctl's byte for byte with the same validation verdict
+in every case, and the compiler on the tag form reaches SR's tag/early verdict
+in every case except the two §5.5 refuses at authoring by contract (a quoted
+look-alike and a reference inside unidentified embedded text). The SP half is
+not yet run, so the condition is not yet met.
+
 The executor's Talos client is not selected here. E3 shows the same RPC
 outcomes through both implementations (E3 §4.3); the choice belongs to
 [execution and recovery](execution-recovery.md).
@@ -1325,9 +1333,11 @@ Evidence gaps this contract carries rather than closes:
 
 **Composition, provenance and redaction**
 
-- **Machinery composition parity**: inferred only (FR §8 C4); the §10.1
-  condition. References inside a base were never resolved: SR's and SP's bases
-  held literal secrets (§6).
+- **Machinery composition parity**: measured for SR's matrix only, on both
+  of its bases (§10.1, machinery gate); SP's matrix through the compiler's path
+  is not run, so the §10.1 condition is still open. The gate's bases pass
+  through ingestion, so their schema secrets are references resolved by the
+  compiler; SR's case references stand in fragments only, never in a base.
 - **Kinds and cases not run**: durations, IP and CIDR fields, a list as a
   target, list-element overrides by selector, more than two fragments, worker
   configurations, a tag name that is valid base64 or a YAML 1.1 boolean word,

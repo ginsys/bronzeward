@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# The machinery gate (compilation.md §10.1) for SR: SR's matrix re-run with composition through the
+# compiler's own machinery path, into C10_OUT. On each of SR's two bases (the running fixture's
+# control-plane configuration, container mode; `gen config` output, metal mode) and for every SR
+# case:
+#   talosctl   the pinned talosctl's `machineconfig patch` of the literal (reference-free) fragments
+#              and its `validate --strict` verdict, as SR measured them;
+#   machinery  the same composition and verdict through the machinery's configpatcher, in process;
+#   compiler   the tag form ingested, resolved, composed and validated by internal/ingest and
+#              internal/compile, compared with talosctl's output.
+# The Go side is TestMachineryGate in internal/compile, which writes matrix.tsv, controls.tsv and
+# summary.txt here and fails on an unexpected row.
+set -euo pipefail
+C10_RUN_DIR=$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+C10_DIR=$(dirname -- "$C10_RUN_DIR")
+[ -n "${C10_OUT:-}" ] || {
+  printf '%s\n' "set C10_OUT to an empty directory outside this checkout" >&2
+  exit 1
+}
+# SR's library gives the pinned talosctl, the prototype build (for its fragment forms) and the
+# output-directory checks; it reads its output directory from E2_OUT.
+E2_OUT=$C10_OUT
+# shellcheck source-path=SCRIPTDIR source=../../e2-structural-references/run/lib.sh
+. "$C10_DIR/../e2-structural-references/run/lib.sh"
+need go git cmp awk sed sort
+
+mkdir -p -- "$C10_OUT"
+[ -z "$(ls -A -- "$C10_OUT")" ] || die "$C10_OUT is not empty; give each run a new directory"
+cd -- "$C10_OUT"
+printf 'C10 machinery gate, started %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >c10-machinery-gate.run
+
+e2_build
+e2_talosctl_ready
+{
+  printf 'commit\t%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
+  printf 'uncommitted-inputs\t%s\n' "$(git -C "$REPO_DIR" status --porcelain -- internal/ingest internal/compile internal/provider \
+    experiments/c10-machinery-gate experiments/e2-structural-references go.mod go.sum fixtures \
+    ':!experiments/c10-machinery-gate/evidence' ':!experiments/e2-structural-references/evidence' | wc -l)"
+  printf 'talosctl\t%s\n' "$(talosctl version --client --short | tr '\n' ' ' | sed 's/ *$//')"
+  printf 'talosctl-sha256\t%s\n' "$TALOSCTL_SHA256"
+  printf 'machinery\t%s\n' "$(go -C "$REPO_DIR" list -m -f '{{.Version}}' github.com/siderolabs/talos/pkg/machinery)"
+  printf 'go\t%s\n' "$(go version)"
+} >run.txt
+
+# The bases, as SR made them: each re-read through talosctl's no-op patch and validated in its mode.
+need_state
+[ -s "$STATE/controlplane.yaml" ] || die "the fixture has no $STATE/controlplane.yaml; run fixtures/bin/up first"
+mkdir base
+printf 'machine: {}\n' >noop.yaml
+declare -A modes=([fixture]=container [generated]=metal)
+bases=(fixture generated)
+cp -- "$STATE/controlplane.yaml" base/fixture.source.yaml
+talosctl gen secrets -o base/secrets.yaml 2>base/gen.err
+talosctl gen config c10-machinery "https://$TALOS_CONTROLPLANE_IP:6443" --with-secrets base/secrets.yaml \
+  --output-types controlplane --with-docs=false --with-examples=false -o base/generated.source.yaml 2>>base/gen.err
+for base in "${bases[@]}"; do
+  talosctl machineconfig patch "base/$base.source.yaml" --patch @noop.yaml -o "base/$base.yaml" 2>>base/gen.err
+  talosctl validate --config "base/$base.yaml" --mode "${modes[$base]}" --strict >"base/$base.validate.txt" 2>&1 ||
+    die "control failed: the $base base does not validate in ${modes[$base]} mode"
+done
+
+# SR's fragment forms, generated once: literal (the native input) and tag (bronzeward's syntax).
+names=()
+for dir in "$E2_DIR"/cases/*/; do
+  names+=("$(basename -- "$dir")")
+done
+for name in "${names[@]}"; do
+  mkdir -p -- "gen/$name"
+  bwref info "$E2_DIR/cases/$name" >"gen/$name/info.tsv"
+  bwref gen "$E2_DIR/cases/$name" "gen/$name"
+done
+
+# talosctl's native composition and verdict of each case's literal form.
+for base in "${bases[@]}"; do
+  for name in "${names[@]}"; do
+    d=cases/$base/$name/native
+    mkdir -p -- "$d"
+    args=()
+    while IFS= read -r f; do
+      args+=(--patch "@gen/$name/literal/$f")
+    done < <(awk -F'\t' '$1 == "fragment" { print $2 }' "gen/$name/info.tsv")
+    if ! talosctl machineconfig patch "base/$base.yaml" "${args[@]}" -o "$d/out.yaml" 2>"$d/compose.err"; then
+      printf 'rejected\n' >"$d/outcome"
+    elif talosctl validate --config "$d/out.yaml" --mode "${modes[$base]}" --strict >"$d/validate.txt" 2>&1; then
+      printf 'pass\n' >"$d/outcome"
+    else
+      printf 'invalid\n' >"$d/outcome"
+    fi
+  done
+done
+
+rc=0
+C10_OUT=$C10_OUT go -C "$REPO_DIR" test ./internal/compile -run '^TestMachineryGate$' -count=1 -v >gate.log 2>&1 || rc=$?
+printf 'complete %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >complete
+[ -s summary.txt ] || die "the gate wrote no summary (go test exit $rc); see $C10_OUT/gate.log"
+say "C10 machinery gate: $(tr '\t\n' '= ' <summary.txt)(go test exit $rc); see $C10_OUT/matrix.tsv"
+exit "$rc"
