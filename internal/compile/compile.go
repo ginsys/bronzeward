@@ -52,23 +52,30 @@ const (
 )
 
 // Error is a refused composition or a failed validation. It names the rule, the input the
-// machinery rejected ("base" or "fragment[<i>]") and the documents a check refused; never the
-// machinery's message, which quotes values. A native rejection is a correct result, not a
-// compiler fault (compilation.md §7).
+// machinery rejected ("base" or "fragment[<i>]") and the documents a check refused. Message is
+// the machinery's message as compilation.md §8.3 shows it, set by Compile only: redacted by the
+// trace pass's message of the same step, or a notice that it is withheld. The message as the
+// machinery wrote it quotes values and is never kept. A native rejection is a correct result,
+// not a compiler fault (compilation.md §7).
 type Error struct {
-	Rule  Rule
-	Input string
-	Paths []string
+	Rule    Rule
+	Input   string
+	Paths   []string
+	Message string
 }
 
 func (e *Error) Error() string {
+	s := fmt.Sprintf("compile: refused (%s)", e.Rule)
 	switch {
 	case e.Input != "":
-		return fmt.Sprintf("compile: refused (%s) at %s", e.Rule, e.Input)
+		s += " at " + e.Input
 	case len(e.Paths) > 0:
-		return fmt.Sprintf("compile: refused (%s) at %s", e.Rule, strings.Join(e.Paths, ", "))
+		s += " at " + strings.Join(e.Paths, ", ")
 	}
-	return fmt.Sprintf("compile: refused (%s)", e.Rule)
+	if e.Message != "" {
+		s += ": " + e.Message
+	}
+	return s
 }
 
 // Materialized is one machine's complete composed configuration: plaintext. Every fmt verb
@@ -85,9 +92,16 @@ type Materialized struct{ s *string }
 // as a JSON6902 patch is refused by ingest's rule, returned as is; ingestion already refuses such
 // a fragment as schema-unloadable, so this holds only for a Resolved made some other way.
 func Compose(base ingest.Resolved, fragments []ingest.Resolved) (Materialized, error) {
+	m, _, err := compose(base, fragments)
+	return m, err
+}
+
+// compose is Compose, also giving the machinery's message for a rejection: plaintext, which
+// quotes values, for Compile's template redaction only.
+func compose(base ingest.Resolved, fragments []ingest.Resolved) (Materialized, string, error) {
 	in := base.Input()
 	if _, err := in.Config(); err != nil {
-		return Materialized{}, &Error{Rule: RuleRejected, Input: "base"}
+		return Materialized{}, err.Error(), &Error{Rule: RuleRejected, Input: "base"}
 	}
 	for i, f := range fragments {
 		name := fmt.Sprintf("fragment[%d]", i)
@@ -95,31 +109,39 @@ func Compose(base ingest.Resolved, fragments []ingest.Resolved) (Materialized, e
 		if err != nil {
 			var r *ingest.Refusal
 			if errors.As(err, &r) {
-				return Materialized{}, fmt.Errorf("compile: %s: %w", name, err)
+				return Materialized{}, "", fmt.Errorf("compile: %s: %w", name, err)
 			}
-			return Materialized{}, &Error{Rule: RuleRejected, Input: name}
+			// ingest's Patch drops the machinery's message; loading the same bytes as it does
+			// gives it again.
+			cause := ""
+			if b, berr := f.Input().Bytes(); berr == nil {
+				if _, lerr := configpatcher.LoadPatch(b); lerr != nil {
+					cause = lerr.Error()
+				}
+			}
+			return Materialized{}, cause, &Error{Rule: RuleRejected, Input: name}
 		}
 		if in, err = configpatcher.Apply(in, []configpatcher.Patch{p}); err != nil {
-			return Materialized{}, &Error{Rule: RuleRejected, Input: name}
+			return Materialized{}, err.Error(), &Error{Rule: RuleRejected, Input: name}
 		}
 	}
 	cfg, err := in.Config()
 	if err != nil {
-		return Materialized{}, &Error{Rule: RuleRejected}
+		return Materialized{}, err.Error(), &Error{Rule: RuleRejected}
 	}
 	out, err := cfg.EncodeBytes(encoder.WithComments(encoder.CommentsDisabled))
 	if err != nil {
-		return Materialized{}, &Error{Rule: RuleRejected}
+		return Materialized{}, err.Error(), &Error{Rule: RuleRejected}
 	}
 	paths, err := reservedText(out)
 	if err != nil {
-		return Materialized{}, err
+		return Materialized{}, "", err
 	}
 	if len(paths) > 0 {
-		return Materialized{}, &Error{Rule: RuleReservedText, Paths: paths}
+		return Materialized{}, "", &Error{Rule: RuleReservedText, Paths: paths}
 	}
 	s := string(out)
-	return Materialized{s: &s}, nil
+	return Materialized{s: &s}, "", nil
 }
 
 const reserved = "!bwref"
@@ -160,20 +182,27 @@ func holdsReserved(n *yaml.Node) bool {
 // loaded again and validated in the node's mode, as talosctl validate --strict validates it
 // (local, warnings as errors). Warnings that strict mode leaves as warnings are not reported.
 func (m Materialized) Validate(mode Mode) error {
+	_, err := m.validate(mode)
+	return err
+}
+
+// validate is Validate, also giving the machinery's message for an invalid configuration:
+// plaintext, which quotes values, for Compile's template redaction only.
+func (m Materialized) validate(mode Mode) (string, error) {
 	if m.s == nil {
-		return errors.New("compile: no composed configuration to validate")
+		return "", errors.New("compile: no composed configuration to validate")
 	}
 	if _, err := ParseMode(string(mode)); err != nil {
-		return err
+		return "", err
 	}
 	cfg, err := configloader.NewFromBytes([]byte(*m.s))
 	if err != nil {
-		return &Error{Rule: RuleInvalid}
+		return err.Error(), &Error{Rule: RuleInvalid}
 	}
 	if _, err := cfg.Validate(mode, validation.WithLocal(), validation.WithStrict()); err != nil {
-		return &Error{Rule: RuleInvalid}
+		return err.Error(), &Error{Rule: RuleInvalid}
 	}
-	return nil
+	return "", nil
 }
 
 // bytes is a copy of the composed configuration, for this package only.
