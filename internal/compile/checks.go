@@ -25,13 +25,14 @@ const copyFloor = 6
 
 // canonical is s decoded as standard base64 and encoded again, when s decodes and that differs:
 // the spelling the machinery writes for a byte field it decodes (§8.1), holding the same bytes.
+// Decoding skips line breaks, so a string of them alone has no canonical form.
 func canonical(s string) (string, bool) {
 	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
 		return "", false
 	}
 	c := base64.StdEncoding.EncodeToString(b)
-	return c, c != s
+	return c, c != "" && c != s
 }
 
 // checkOutput is compilation.md §6 step 7 over the real composition's leaves and mapping keys and
@@ -58,7 +59,16 @@ func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error 
 	// A reference replaces a whole node, so a leaf provenance attributes holds a reference's
 	// placed value and nothing else: another reference whose value it contains is an overlap of
 	// two values, not a literal written into a source, and the leaf is never a copy.
+	// The floor applies to each form's own length, as the redactor's does, so a canonical
+	// re-encoding shorter than the value it re-spells is not looked for.
 	var forms []string
+	add := func(fs ...string) {
+		for _, f := range fs {
+			if len(f) >= copyFloor {
+				forms = append(forms, f)
+			}
+		}
+	}
 	attributed := map[string]bool{}
 	placed := map[[2]string]bool{} // the keys mapping references placed, by the path they name
 	for _, o := range outcomes {
@@ -71,10 +81,10 @@ func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error 
 		}
 		// A mapping's key is a value the provider holds (§4.2), whatever its member's kind; the
 		// output leaves are value nodes, so the key where its reference placed it is never one.
-		if t.Member() >= 0 && len(t.Leaf()) >= copyFloor {
-			forms = append(forms, t.Leaf())
+		if t.Member() >= 0 {
+			add(t.Leaf())
 			if c, ok := canonical(t.Leaf()); ok {
-				forms = append(forms, c)
+				add(c)
 			}
 		}
 		if t.Kind() != ingest.TraceString && t.Kind() != ingest.TraceBytes {
@@ -92,13 +102,13 @@ func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error 
 		if !ok || len(s) < copyFloor {
 			continue
 		}
-		forms = append(forms, s)
+		add(s)
 		switch t.Kind() {
 		case ingest.TraceBytes:
-			forms = append(forms, base64.StdEncoding.EncodeToString([]byte(s)))
+			add(base64.StdEncoding.EncodeToString([]byte(s)))
 		case ingest.TraceString:
 			if c, ok := canonical(s); ok {
-				forms = append(forms, c)
+				add(c)
 			}
 		}
 	}

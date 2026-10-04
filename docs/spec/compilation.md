@@ -753,7 +753,8 @@ For each machine:
    key of six bytes or more is matched as a `string` value is, whatever its
    member's kind. A stored form that is valid standard base64 is also matched
    in its canonical re-encoding, which the machinery writes for a byte field
-   (§8.1). Every output leaf is checked, including the leaves of
+   (§8.1); the floor applies to that re-encoding's own length, since decoding
+   skips line breaks. Every output leaf is checked, including the leaves of
    an identified embedded document that holds no reference, and so is every
    output mapping key, reported at the path of the value it names, except a
    key a `mapping` reference placed beside its own attributed member. A leaf that
