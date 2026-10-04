@@ -10,7 +10,32 @@ import (
 var (
 	errLeavesParse = errors.New("ingest: a composed stream does not parse")
 	errLeavesHost  = errors.New("ingest: an identified embedded document is not met as a parseable string")
+	errLeavesAlias = errors.New("ingest: a composed stream's aliases expand beyond the limit")
 )
+
+// expandLimit bounds the nodes a rewrite's alias expansion may create, so that nested aliases
+// cannot grow a stream without bound.
+const expandLimit = 1 << 20
+
+// expand is a copy of n with every alias replaced by a copy of its anchored node and no anchor
+// left. The parser has already refused cyclic aliases.
+func expand(n *yaml.Node, budget *int) (*yaml.Node, error) {
+	if *budget--; *budget < 0 {
+		return nil, errLeavesAlias
+	}
+	if n.Kind == yaml.AliasNode {
+		return expand(n.Alias, budget)
+	}
+	c := *n
+	c.Anchor, c.Content = "", make([]*yaml.Node, len(n.Content))
+	for i, x := range n.Content {
+		var err error
+		if c.Content[i], err = expand(x, budget); err != nil {
+			return nil, err
+		}
+	}
+	return &c, nil
+}
 
 // WalkLeaves visits every value node of every document of a composed stream b, in document order,
 // containers included so that two streams' shapes can be compared. An alias is followed and
@@ -54,6 +79,16 @@ func composedDocs(b []byte, embedded map[string]string, fn, keyFn func(p Path, n
 	if err != nil {
 		return nil, errLeavesParse
 	}
+	// A rewrite changes nodes in place, so every alias first becomes a copy of its anchored node:
+	// rewriting one occurrence must change neither another nor the path of a key that aliases it.
+	budget := expandLimit
+	if write {
+		for i, d := range docs {
+			if docs[i], err = expand(d, &budget); err != nil {
+				return nil, err
+			}
+		}
+	}
 	met := map[string]bool{}
 	var walk func(n *yaml.Node, p Path) error
 	walk = func(n *yaml.Node, p Path) error {
@@ -63,6 +98,11 @@ func composedDocs(b []byte, embedded map[string]string, fn, keyFn func(p Path, n
 				inner, err := embeddedDocument(n)
 				if err != nil || root(inner) == nil {
 					return errLeavesHost
+				}
+				if write {
+					if inner, err = expand(inner, &budget); err != nil {
+						return err
+					}
 				}
 				met[p.String()] = true
 				if err := walk(root(inner), Path{Doc: p.Doc, Pointer: p.Pointer, Format: format}); err != nil || !write {

@@ -41,16 +41,18 @@ func tokenOf(t traced) string {
 // stand-in quotes mark where real quotes values, and the text between them must match exactly
 // and in one way only; each value quote is then replaced by its reference's token. A message is
 // withheld when the passes disagree, when the template does not match or matches in more than
-// one way, when the step's input holds a boolean reference (whose stand-in is its own value, so
-// nothing marks a quote of it), or when the values did not all decode. What is shown then has
-// every exact copy of a resolved string of copyFloor bytes or more redacted as a value, longest
-// first. The result never holds real's text when it is withheld, and real itself is never kept.
-func redactMessage(step, real, trace string, ts []traced, boolInput bool, r redactor) (string, messageOutcome) {
+// one way, when the step's input is unmarked (it holds a boolean reference, whose stand-in is its
+// own value, or a mapping reference, whose keys the trace pass keeps, so nothing marks a quote of
+// either), or when the values did not all decode. What is shown then has every exact copy of a
+// resolved string of copyFloor bytes or more redacted as a value, longest first, and is withheld
+// if a value form still remains, as when a token's reference name spells one. The result never
+// holds real's text when it is withheld, and real itself is never kept.
+func redactMessage(step, real, trace string, ts []traced, unmarked bool, r redactor) (string, messageOutcome) {
 	if real == "" && trace == "" {
 		return "", messageNone
 	}
 	withheld := withheldNotice(step)
-	if r.opaque || boolInput || real == "" || trace == "" {
+	if r.opaque || unmarked || real == "" || trace == "" {
 		return withheld, messageWithheld
 	}
 	type quote struct {
@@ -75,7 +77,10 @@ func redactMessage(step, real, trace string, ts []traced, boolInput bool, r reda
 		if real != trace {
 			return withheld, messageWithheld
 		}
-		return r.values(real), messageVerbatim
+		if out := r.values(real); !r.holds(out) {
+			return out, messageVerbatim
+		}
+		return withheld, messageWithheld
 	}
 	// The lazy and the greedy match give the lexicographically first and last split of real
 	// among the quotes; when they agree the split is the only one.
@@ -105,6 +110,10 @@ func redactMessage(step, real, trace string, ts []traced, boolInput bool, r reda
 		last = lazy[3+2*i]
 	}
 	out.WriteString(r.values(real[last:]))
+	// A token names its reference, and a name can spell a value.
+	if r.holds(out.String()) {
+		return withheld, messageWithheld
+	}
 	return out.String(), messageRedacted
 }
 

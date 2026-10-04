@@ -966,8 +966,13 @@ with the stand-in format **(choice §16.22)**.
   message that the template reports verbatim is withheld when the step's input
   holds a boolean reference **(choice §16.23)**. A redacted message from such a
   step is withheld too, since its unmarked text can quote the boolean as well.
-  A composition step's input is the import base and the fragments up to the
-  one rejected; validation's is every source.
+  A mapping reference's keys are unmarked the same way: the trace pass keeps
+  them, so a message naming one (an invalid label key, say) matches its trace
+  message verbatim, and a key may be shorter than the value means' floor. A
+  step whose input holds a mapping reference is withheld likewise. A
+  composition step's input is the import base and the fragments up to the one
+  rejected; validation's is every source. A message is also withheld when a
+  value form survives in it, as when a reference's name spells its value.
 - **Verbatim messages quoting an authored literal are shown.** SP hands this
   case to this contract (SP §10). An authored literal is source text that
   ingestion has already passed as not secret and that ordinary persistence

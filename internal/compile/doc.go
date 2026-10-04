@@ -21,8 +21,11 @@
 //     nothing unwraps or reflects to it.
 //   - A template must split the real message in one way only: a lazy and a greedy match of the
 //     text between quotes must agree, or the message is withheld.
-//   - A step whose input holds a boolean reference withholds its message whether the template
-//     reports it verbatim or redacted.
+//   - A step whose input holds a boolean or a mapping reference withholds its message whether
+//     the template reports it verbatim or redacted: a boolean's stand-in is its value and a
+//     mapping's keys are not traced, so nothing marks a quote of either.
+//   - Compiled.Redacted expands every alias into a copy of its anchor before rewriting, and
+//     refuses when an attributed leaf was not met where attribution found it.
 //   - Compiled.Redacted applies the value means to every whole scalar and key equal to a value
 //     form of any length, beyond the six-byte floor for contained copies, and refuses a rendering
 //     that still holds a form of six bytes or more.

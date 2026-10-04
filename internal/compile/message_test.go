@@ -3,6 +3,7 @@ package compile
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -82,7 +83,7 @@ func TestRedactMessage(t *testing.T) {
 	withheld := "<withheld: the composition message may quote a sensitive value>"
 	for _, c := range []struct {
 		name, real, trace string
-		boolInput         bool
+		unmarked          bool
 		want              string
 		outcome           messageOutcome
 	}{
@@ -115,7 +116,7 @@ func TestRedactMessage(t *testing.T) {
 			"label \"<redacted:app/str@1>\" near <redacted:value>", messageRedacted},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got, outcome := redactMessage("composition", c.real, c.trace, ts, c.boolInput, r)
+			got, outcome := redactMessage("composition", c.real, c.trace, ts, c.unmarked, r)
 			if got != c.want || outcome != c.outcome {
 				t.Errorf("redactMessage = %q, %s; want %q, %s", got, outcome, c.want, c.outcome)
 			}
@@ -124,6 +125,14 @@ func TestRedactMessage(t *testing.T) {
 			}
 		})
 	}
+	t.Run("token spells a value", func(t *testing.T) {
+		o := r
+		o.contains = append(slices.Clone(r.contains), "app/str@1")
+		if got, outcome := redactMessage("composition", "label \""+compileSecret+"\" is too long", "label \""+s["str"]+"\" is too long", ts, false, o); outcome != messageWithheld ||
+			got != withheld {
+			t.Errorf("a token holding a value: %q, %s; want withheld", got, outcome)
+		}
+	})
 	t.Run("opaque values", func(t *testing.T) {
 		o := r
 		o.opaque = true
@@ -147,9 +156,14 @@ func TestCompileMessages(t *testing.T) {
 		return source(t, text+"machine:\n  features:\n    rbac: !bwref flag\n", refs(map[string]ingest.Reference{"flag": ref(provider.KindBoolean)}),
 			map[string]provider.Value{"flag": value(t, provider.KindBoolean, true)})
 	}
+	withMap := func(text string) Source {
+		return source(t, text+"machine:\n  nodeLabels: !bwref labels\n", refs(map[string]ingest.Reference{"labels": ref(provider.KindMapping)}),
+			map[string]provider.Value{"labels": value(t, provider.KindMapping, map[string]any{"k!": "ok"})})
+	}
 	literal := source(t, "cluster:\n  network:\n    dnsDomain: not a domain\n", ingest.Declarations{}, nil)
 	port := str("machine:\n  features:\n    kubePrism:\n      port: !bwref port\n", "port", compileSecret)
 	flag := withFlag("")
+	labels := withMap("")
 	for _, c := range []struct {
 		name  string
 		frags []Source
@@ -167,6 +181,12 @@ func TestCompileMessages(t *testing.T) {
 			withheldNotice("validation")},
 		{"rejection, boolean after it", []Source{port, flag}, RuleRejected, "fragment[0]", "`<redacted:port@1>...` into int"},
 		{"rejection, boolean before it", []Source{flag, port}, RuleRejected, "fragment[1]", withheldNotice("composition")},
+		{"literal beside a mapping", []Source{withMap("cluster:\n  network:\n    dnsDomain: not a domain\n")}, RuleInvalid, "",
+			withheldNotice("validation")},
+		{"rejection, mapping after it", []Source{port, labels}, RuleRejected, "fragment[0]", "`<redacted:port@1>...` into int"},
+		{"rejection, mapping before it", []Source{labels, port}, RuleRejected, "fragment[1]", withheldNotice("composition")},
+		{"token spells the value", []Source{str("machine:\n  features:\n    kubePrism:\n      port: !bwref "+compileSecret+"\n", compileSecret, compileSecret)},
+			RuleRejected, "fragment[0]", withheldNotice("composition")},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := Compile(Input{Base: base, Fragments: c.frags, Mode: ModeMetal})
