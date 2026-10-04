@@ -98,9 +98,50 @@ for base in "${bases[@]}"; do
   done
 done
 
+# SP's matrix: each SP case's real pass as SP derives it (bwprov derive: SR's fragments or the
+# case's own, with the case's values placed), its literal and tag forms (bwref gen; gen stops at
+# the first form it cannot write, after these two), and talosctl's composition and verdict of the
+# literal form on each base. Each base's secrets are the scalars of its bundle under a key, secret
+# or token field, as SP reads them: the gate's oracle looks for them.
+SP_DIR=$C10_DIR/../e2-sensitivity-provenance
+go -C "$SP_DIR" build -o "$C10_OUT/bin/bwprov" . || die "cannot build bwprov"
+cp -- "$STATE/talos-secrets.yaml" base/fixture.bundle.yaml
+cp -- base/secrets.yaml base/generated.bundle.yaml
+for base in "${bases[@]}"; do
+  awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ && NF == 2 {
+      print $1 "\t" $2 }' "base/$base.bundle.yaml" >"base/$base.secrets.tsv"
+  [ "$(wc -l <"base/$base.secrets.tsv")" -ge 5 ] || die "fewer than 5 secrets in the $base bundle"
+done
+sp_names=()
+for dir in "$SP_DIR"/cases/*/; do
+  sp_names+=("$(basename -- "$dir")")
+done
+for name in "${sp_names[@]}"; do
+  d=sp/$name
+  mkdir -p -- "$d"
+  "$C10_OUT/bin/bwprov" derive "$SP_DIR/cases/$name" "$E2_DIR/cases" "$d/derived"
+  bwref gen "$d/derived/real/case" "$d/gen" 2>"$d/gen.err" || [ -d "$d/gen/tag" ] ||
+    die "bwref gen wrote no tag form for SP case $name: $(cat -- "$d/gen.err")"
+  for base in "${bases[@]}"; do
+    n=$d/$base/native
+    mkdir -p -- "$n"
+    args=()
+    while IFS= read -r f; do
+      args+=(--patch "@$d/gen/literal/$f")
+    done < <(awk -F'\t' '$1 == "fragment" { print $2 }' "$d/derived/info.tsv")
+    if ! talosctl machineconfig patch "base/$base.yaml" "${args[@]}" -o "$n/out.yaml" 2>"$n/compose.err"; then
+      printf 'rejected\n' >"$n/outcome"
+    elif talosctl validate --config "$n/out.yaml" --mode "${modes[$base]}" --strict >"$n/validate.txt" 2>&1; then
+      printf 'pass\n' >"$n/outcome"
+    else
+      printf 'invalid\n' >"$n/outcome"
+    fi
+  done
+done
+
 rc=0
-C10_OUT=$C10_OUT go -C "$REPO_DIR" test ./internal/compile -run '^TestMachineryGate$' -count=1 -v >gate.log 2>&1 || rc=$?
+C10_OUT=$C10_OUT go -C "$REPO_DIR" test ./internal/compile -run '^Test(Machinery|Sensitivity)Gate$' -count=1 -v >gate.log 2>&1 || rc=$?
 printf 'complete %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >complete
-[ -s summary.txt ] || die "the gate wrote no summary (go test exit $rc); see $C10_OUT/gate.log"
-say "C10 machinery gate: $(tr '\t\n' '= ' <summary.txt)(go test exit $rc); see $C10_OUT/matrix.tsv"
+[ -s summary.txt ] && [ -s sp-summary.txt ] || die "the gate wrote no summary (go test exit $rc); see $C10_OUT/gate.log"
+say "C10 machinery gate: SR $(tr '\t\n' '= ' <summary.txt)SP $(tr '\t\n' '= ' <sp-summary.txt)(go test exit $rc); see $C10_OUT/matrix.tsv and sp-matrix.tsv"
 exit "$rc"

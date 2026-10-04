@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Copy a completed gate run's results from C10_OUT into evidence/: run.txt, summary.txt,
-# controls.tsv and matrix.tsv. They hold outcomes, verdicts and rule names only. Nothing is copied
-# unless every file scans clean against the leak-refusal patterns run/all recorded for that run
-# (every long scalar of both bases' secrets bundles and the fixture's leak-scan patterns); a match
-# or a failed scan refuses.
+# controls.tsv and matrix.tsv (SR), sp-summary.txt, sp-controls.tsv and sp-matrix.tsv (SP). They
+# hold outcomes, verdicts, rule names and reference names only. Nothing is copied unless every file
+# scans clean against the leak-refusal patterns run/all recorded for that run (every long scalar of
+# both bases' secrets bundles and the fixture's leak-scan patterns) and the marker every SP case
+# value carries, BWSYNTH; a match or a failed scan refuses.
 set -euo pipefail
 C10_RUN_DIR=$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 C10_DIR=$(dirname -- "$C10_RUN_DIR")
@@ -21,11 +22,11 @@ patterns=$C10_OUT/patterns.txt
 [ -f "$patterns" ] || die "the run recorded no leak-refusal patterns"
 [ "$(wc -l <"$patterns")" -ge 10 ] || die "fewer than 10 leak-refusal patterns"
 
-files=(run.txt summary.txt controls.tsv matrix.tsv)
+files=(run.txt summary.txt controls.tsv matrix.tsv sp-summary.txt sp-controls.tsv sp-matrix.tsv)
 for f in "${files[@]}"; do
   [ -s "$C10_OUT/$f" ] || die "$C10_OUT/$f is missing or empty"
   rc=0
-  grep -qF -f "$patterns" -- "$C10_OUT/$f" || rc=$?
+  grep -qF -e BWSYNTH -f "$patterns" -- "$C10_OUT/$f" || rc=$?
   case $rc in
     0) die "$f holds a secret pattern; nothing collected" ;;
     1) ;;
