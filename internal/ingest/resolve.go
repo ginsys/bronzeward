@@ -65,12 +65,13 @@ func Resolve(s Sanitized, values map[string]provider.Value) (Resolved, error) {
 			return nil, refuse(rule, p.String())
 		}
 		return v, nil
-	})
+	}, nil)
 }
 
 // resolveWith replaces each reference of s, in walk order, by the node value gives for its name,
-// declaration and path, keeping its anchor, and writes each identified embedded document back.
-func resolveWith(s Sanitized, value func(name string, r Reference, p Path) (*yaml.Node, error)) (Resolved, error) {
+// declaration and path, keeping its anchor, and writes each identified embedded document back,
+// telling hosted (if set) the document's path and written text.
+func resolveWith(s Sanitized, value func(name string, r Reference, p Path) (*yaml.Node, error), hosted func(p Path, text string)) (Resolved, error) {
 	if err := s.Check(); err != nil {
 		return Resolved{}, err
 	}
@@ -111,6 +112,9 @@ func resolveWith(s Sanitized, value func(name string, r Reference, p Path) (*yam
 			return refuse(RuleEmbedded, p.String())
 		}
 		n.Tag, n.Value, n.Style = "!!str", text, yaml.LiteralStyle
+		if hosted != nil {
+			hosted(p, text)
+		}
 		return nil
 	}
 	if err := walkStream(docs, place); err != nil {
