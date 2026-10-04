@@ -2,7 +2,6 @@ package compile
 
 import (
 	"encoding/base64"
-	"maps"
 	"strings"
 	"testing"
 
@@ -192,11 +191,11 @@ func TestRedactedTextGuards(t *testing.T) {
 	if _, err := redactedText(b, nil, at("doc[0]/no-such-leaf"), r); err == nil {
 		t.Error("an attributed leaf that was not met rendered")
 	}
-	o := r
-	o.exact = maps.Clone(r.exact)
-	o.exact[ts[0].Ref()] = true
-	if _, err := redactedText(b, nil, at("doc[0]/version"), o); err == nil {
-		t.Error("a token naming a value rendered")
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	frag := source(t, "machine:\n  nodeLabels:\n    s: !bwref abcde\n", strRef("abcde"),
+		map[string]provider.Value{"abcde": value(t, provider.KindString, "abcde")})
+	if out, err := compiled(t, Input{Base: base, Fragments: []Source{frag}, Mode: ModeMetal}).Redacted(); err == nil {
+		t.Errorf("a token naming a five-byte value rendered: holds it %v", strings.Contains(out, "abcde"))
 	}
 }
 
