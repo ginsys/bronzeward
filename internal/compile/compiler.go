@@ -40,13 +40,16 @@ type Input struct {
 type Compiled struct {
 	m        Materialized
 	outcomes []outcome
+	origins  []Origin // by source: 0 the import base, i+1 fragment i
 }
 
-// outcome is where one tracer's value ended up: the output paths holding it.
+// outcome is where one tracer's value ended up: the output paths holding it, or the fragment
+// that overrode it.
 type outcome struct {
 	tracer ingest.Tracer
-	source int // 0 the import base, i+1 fragment i
-	paths  []string
+	source int      // 0 the import base, i+1 fragment i
+	paths  []string // the output paths, or none when overridden
+	by     int      // the overriding fragment's index, or -1
 }
 
 // traced is a tracer and the source it was placed in.
@@ -133,11 +136,22 @@ func Compile(in Input) (Compiled, error) {
 			return Compiled{}, fidelity()
 		}
 	}
+	pre := prefixes{sources: sources, trace: trace, first: first, ts: ts}
 	outcomes := make([]outcome, len(ts))
 	for i, t := range ts {
-		outcomes[i] = outcome{tracer: t.Tracer, source: t.source, paths: attrs[t.ID()]}
+		o := outcome{tracer: t.Tracer, source: t.source, paths: attrs[t.ID()], by: -1}
+		if len(o.paths) == 0 {
+			present, err := pre.presence(t)
+			if err != nil {
+				return Compiled{}, err
+			}
+			if o.by, err = overrider(t.source, present); err != nil {
+				return Compiled{}, err
+			}
+		}
+		outcomes[i] = o
 	}
-	return Compiled{m: m, outcomes: outcomes}, nil
+	return Compiled{m: m, outcomes: outcomes, origins: origins(sources)}, nil
 }
 
 func inputName(i int) string {
