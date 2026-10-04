@@ -1,7 +1,9 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,9 +27,12 @@ func newFragmentEnv(t *testing.T, o options) *ingestEnv {
 	return ie
 }
 
+// putFragment PUTs body as h-author and records the response body for assertAbsent.
 func (ie *ingestEnv) putFragment(name, body, ifMatch, k string) *httptest.ResponseRecorder {
-	return ie.do(ie.api, call{method: "PUT", path: prefix + "/drafts/" + ie.draft + "/fragments/" + name,
+	rec := ie.do(ie.api, call{method: "PUT", path: prefix + "/drafts/" + ie.draft + "/fragments/" + name,
 		token: ie.human("h-author"), key: k, ifMatch: ifMatch, body: body})
+	ie.bodies = append(ie.bodies, rec.Body.String())
+	return rec
 }
 
 // fragmentPut is a fragment PUT body; decl, when not nil, is its declarations member.
@@ -332,4 +337,77 @@ func TestFragmentPutLiveClaimForKey(t *testing.T) {
 	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim WHERE id = $1 AND state = 'abandoned'`, c.ID); n != 1 {
 		t.Fatal("the lapsed claim was not abandoned")
 	}
+}
+
+// C §2.3, PA §7.2: a process killed at any step of a draft update's ingestion leaves its claim
+// held under the request's key and writes nothing else: no revision, no record. Generations exist
+// only once step 6 began. Once the lease lapses the sweep abandons the claim, and a retry with the
+// key ingests afresh.
+func TestFragmentPutInterrupted(t *testing.T) {
+	for _, tc := range []struct {
+		step    string
+		creates int
+	}{{"claim", 0}, {"read", 0}, {"guard", 0}, {"generation", 1}, {"construct", 1}} {
+		t.Run(tc.step, func(t *testing.T) {
+			stopped := false
+			ie := newFragmentEnv(t, options{stopAt: func(s string) bool {
+				if s != tc.step || stopped {
+					return false
+				}
+				stopped = true
+				return true
+			}})
+			const k = "k-fragment-killed-0001"
+			body := fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil)
+			wantProblem(t, ie.putFragment("registries", body, ie.etag, k), http.StatusInternalServerError, "internal-error")
+			var claim, state string
+			if err := ie.db.QueryRow(`SELECT id, state FROM staging_claim WHERE idempotency_key = $1`, k).Scan(&claim, &state); err != nil || state != "held" {
+				t.Fatalf("claim %q state %q (%v)", claim, state, err)
+			}
+			if calls, _ := ie.f.paths(); calls != tc.creates {
+				t.Fatalf("%d generation creates; want %d", calls, tc.creates)
+			}
+			if n := count(t, ie.db, `SELECT count(*) FROM fragment_revision`); n != 0 {
+				t.Fatalf("%d revisions", n)
+			}
+			if n := count(t, ie.db, `SELECT count(*) FROM idempotency_record WHERE key = $1`, k); n != 0 {
+				t.Fatalf("%d records", n)
+			}
+			mustExec(t, ie.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, claim)
+			if n, err := staging.Sweep(t.Context(), ie.db); err != nil || n != 1 {
+				t.Fatalf("sweep abandoned %d (%v)", n, err)
+			}
+			if b := ie.fragmentOK(t, ie.putFragment("registries", body, ie.etag, k)); b.Ingestion == claim {
+				t.Fatal("the retry reused the swept claim")
+			}
+		})
+	}
+}
+
+// C §13: no input text reaches a table, the log or a response, after a marked value and a schema
+// secret are extracted and after refusals in parsing, the guard and a mark addressing nothing.
+func TestFragmentPutNoEcho(t *testing.T) {
+	ie := newFragmentEnv(t, options{})
+	canary := "bw-canary-" + strings.ToLower(rand.Text())
+	for i, c := range []struct {
+		doc    string
+		marks  []string
+		status int
+	}{
+		{"machine:\n  nodeLabels:\n    tier: " + canary + "\n", []string{labelMark}, http.StatusOK},
+		{"machine:\n  token: " + canary + "\n", []string{}, http.StatusOK},
+		{"machine: [" + canary + "\n", []string{}, http.StatusUnprocessableEntity},
+		{"machine:\n  token: " + canary + "\n  nodeLabels:\n    copy: x" + canary + "\n", []string{}, http.StatusUnprocessableEntity},
+		{"machine:\n  token: " + canary + "\n", []string{"doc[0]/machine/nope"}, http.StatusUnprocessableEntity},
+	} {
+		rec := ie.putFragment(fmt.Sprintf("canary-%d", i), fragmentPut(t, "cluster", c.doc, c.marks, nil), ie.etag,
+			fmt.Sprintf("k-fragment-echo-%04d", i))
+		if rec.Code != c.status {
+			t.Fatalf("case %d: %d %s", i, rec.Code, rec.Body)
+		}
+		if rec.Code == http.StatusOK {
+			ie.etag = rec.Header().Get("ETag")
+		}
+	}
+	assertAbsent(t, ie, canary)
 }

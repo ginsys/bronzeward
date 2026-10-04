@@ -81,6 +81,7 @@ type options struct {
 	onRunner       func(job)                                                                            // takes each job instead of the runner
 	afterStage     func()                                                                               // runs when a job is staged, before T1
 	beforeT1       func()                                                                               // runs before T1 begins
+	stopAt         func(step string) bool                                                               // a draft update's ingestion stops at step, as a killed process would
 	dial           func(ctx context.Context, talosconfig []byte, endpoint string) (talos.Reader, error) // talos.Dial by default
 	nodeTimeout    time.Duration                                                                        // bounds each node request; nodeTimeout by default
 	quoteErrors    bool                                                                                 // the pass-through control (§16): a node read's failure logs its error text
