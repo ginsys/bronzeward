@@ -83,7 +83,7 @@ func (c Compiled) Effective() []Dependency {
 	var out []Dependency
 	for _, o := range c.outcomes {
 		d := Dependency{Reference: o.tracer.Ref(), Version: o.tracer.Version()}
-		if len(o.paths) > 0 && !slices.Contains(out, d) {
+		if len(o.shown) > 0 && !slices.Contains(out, d) {
 			out = append(out, d)
 		}
 	}
@@ -91,15 +91,23 @@ func (c Compiled) Effective() []Dependency {
 }
 
 // Reproduction is the reproduction dependencies: every reference occurrence of the import base
-// and the fragments, overridden ones included. A mapping reference is one occurrence.
+// and the fragments, overridden ones included. A mapping reference is one occurrence: its
+// members share their source and source path, which is told apart before it is redacted.
 func (c Compiled) Reproduction() []Occurrence {
 	var out []Occurrence
+	type occurrence struct {
+		source int
+		path   string
+	}
+	seen := map[occurrence]bool{}
 	for _, o := range c.outcomes {
-		x := Occurrence{Reference: o.tracer.Ref(), Version: o.tracer.Version(), Source: c.origins[o.source],
-			Path: o.shownAt}
-		if !slices.Contains(out, x) {
-			out = append(out, x)
+		k := occurrence{o.source, o.tracer.Path().String()}
+		if seen[k] {
+			continue
 		}
+		seen[k] = true
+		out = append(out, Occurrence{Reference: o.tracer.Ref(), Version: o.tracer.Version(), Source: c.origins[o.source],
+			Path: o.shownAt})
 	}
 	return out
 }

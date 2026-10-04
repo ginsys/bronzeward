@@ -3,6 +3,7 @@ package compile
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -76,19 +77,32 @@ func (r redactor) tokens(ts []string) []string {
 	return out
 }
 
-// paths redacts every path of a compile refusal in place: a rule's own or one ingest raised.
+// paths redacts every path of a compile refusal: a rule's own or one ingest raised. A wrapper
+// built by fmt.Errorf holds its message as written, so a wrapped refusal is returned wrapped
+// again, with the same prefix, around the redacted refusal; a message that does not end with the
+// refusal's own is dropped for the refusal alone.
 func (r redactor) paths(err error) error {
+	var inner error
+	var paths []string
 	var e *Error
-	if errors.As(err, &e) {
-		for i, p := range e.Paths {
-			e.Paths[i] = r.path(p)
-		}
-	}
 	var f *ingest.Refusal
-	if errors.As(err, &f) {
-		for i, p := range f.Paths {
-			f.Paths[i] = r.path(p)
-		}
+	switch {
+	case errors.As(err, &e):
+		inner, paths = e, e.Paths
+	case errors.As(err, &f):
+		inner, paths = f, f.Paths
+	default:
+		return err
 	}
-	return err
+	before, whole := inner.Error(), err.Error()
+	for i, p := range paths {
+		paths[i] = r.path(p)
+	}
+	if inner == err {
+		return err
+	}
+	if prefix, ok := strings.CutSuffix(whole, before); ok {
+		return fmt.Errorf("%s%w", prefix, inner)
+	}
+	return inner
 }

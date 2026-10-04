@@ -3,6 +3,7 @@ package compile
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -111,6 +112,27 @@ func TestCompileRefusalRedactsValueTokens(t *testing.T) {
 	e := refusal(t, Input{Base: base, Fragments: []Source{f0, f1}, Mode: ModeMetal}, RuleCopy, six)
 	if !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeAnnotations/<redacted>"}) {
 		t.Errorf("refused at %v, want the redacted copy path", e.Paths)
+	}
+}
+
+// A refusal raised inside resolution and wrapped with the input's name is redacted in its message
+// too, not only in its paths (compilation.md §8.3).
+func TestCompileRefusalRedactsWrappedMessage(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	const six = "ab12xy"
+	f := source(t, "machine:\n  nodeAnnotations:\n    s: !bwref app/six\n    "+six+"-k: !bwref app/gone\n",
+		refs(map[string]ingest.Reference{"app/six": ref(provider.KindString), "app/gone": ref(provider.KindString)}),
+		map[string]provider.Value{"app/six": value(t, provider.KindString, six)})
+	_, err := Compile(Input{Base: base, Fragments: []Source{f}, Mode: ModeMetal})
+	var r *ingest.Refusal
+	if !errors.As(err, &r) || !slices.Equal(r.Paths, []string{"doc[0]/machine/nodeAnnotations/<redacted>"}) {
+		t.Fatalf("got %v, want a refusal at the redacted path", err)
+	}
+	if s := fmt.Sprintf("%s %v %+v", err.Error(), err, err); strings.Contains(s, six) {
+		t.Errorf("the refusal message holds the value: %s", s)
+	}
+	if !strings.HasPrefix(err.Error(), "compile: fragment[0]: ") {
+		t.Errorf("the message %q lost the input it names", err.Error())
 	}
 }
 

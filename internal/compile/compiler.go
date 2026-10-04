@@ -48,7 +48,7 @@ type Compiled struct {
 type outcome struct {
 	tracer  ingest.Tracer
 	source  int      // 0 the import base, i+1 fragment i
-	paths   []string // the output paths, or none when overridden
+	paths   []string // the output paths, or none when overridden; cleared once shown is set
 	by      int      // the overriding fragment's index, or -1
 	shown   []string // paths, redacted (compilation.md §8.3)
 	shownAt string   // the occurrence's source path, redacted
@@ -180,12 +180,15 @@ func compile(in Input, sources []Source) (Compiled, error) {
 			return Compiled{}, fidelity()
 		}
 	}
+	// The kept outcomes hold redacted paths only: fmt reaches an unexported field by reflection,
+	// past Compiled's own placeholder.
 	red := newRedactor(sources)
 	for i, o := range outcomes {
 		outcomes[i].shownAt = red.path(o.tracer.Path().String())
 		for _, p := range o.paths {
 			outcomes[i].shown = append(outcomes[i].shown, red.path(p))
 		}
+		outcomes[i].paths = nil
 	}
 	return Compiled{m: m, outcomes: outcomes, origins: origins(sources)}, nil
 }
