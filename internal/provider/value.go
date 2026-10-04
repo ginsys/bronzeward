@@ -96,6 +96,22 @@ func NewValue(k Kind, v any) (Value, error) {
 	return val, nil
 }
 
+// Decode is NewValue's inverse, for resolution (compilation.md §6 step 4) only: a string, an
+// integer as a json.Number, a bool, or a map[string]any of those. The result is plaintext; the
+// caller places it and renders it nowhere. Errors never quote the value.
+func (v Value) Decode() (any, error) {
+	if err := v.check(); err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(v.p.json))
+	dec.UseNumber()
+	var out any
+	if err := dec.Decode(&out); err != nil {
+		return nil, errors.New("provider: the value is not JSON")
+	}
+	return out, nil
+}
+
 func scalarGoKind(v any) (Kind, error) {
 	switch x := v.(type) {
 	case string:
