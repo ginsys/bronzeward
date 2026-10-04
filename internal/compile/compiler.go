@@ -69,8 +69,10 @@ func (c Compiled) Materialized() Materialized { return c.m }
 // occurrence from the trace pass's prefix compositions, checks the output for copies and base
 // overrides (step 7), and validates the real composition and every pass in the node's mode. A
 // refusal names rules and paths only, a path token holding a resolved value redacted (§8.3). A
-// real rejection or an invalid real configuration is returned as Compose and Validate return it,
-// whatever the passes do.
+// real rejection is returned as Compose returns it. Validation follows step 7 and the trace
+// passes, so a step-7 refusal or a pass that fails to compose or attribute is returned first; an
+// invalid real configuration is then returned as Validate returns it, before any pass's own
+// validation.
 func Compile(in Input) (Compiled, error) {
 	sources := append([]Source{in.Base}, in.Fragments...)
 	c, err := compile(in, sources)

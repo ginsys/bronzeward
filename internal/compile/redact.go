@@ -60,25 +60,47 @@ func newRedactor(sources []Source) redactor {
 	return r
 }
 
-// path is s with every token holding a resolved value replaced by redactedToken; a path that does
-// not parse is redacted whole.
+// path is s with every token holding a resolved value replaced by redactedToken. The rendering is
+// checked too, as ingestion's is: escaping can spell a value a token does not hold, and a value
+// can span tokens, so such a path keeps its document only. A path that does not parse, or whose
+// document alone holds a value, is redacted whole.
 func (r redactor) path(s string) string {
 	p, err := ingest.ParsePath(s)
 	if r.opaque || err != nil {
 		return redactedToken
 	}
 	p.Pointer, p.Inner = r.tokens(p.Pointer), r.tokens(p.Inner)
-	return p.String()
+	if s := p.String(); !r.renders(s) {
+		return s
+	}
+	if d := (ingest.Path{Doc: p.Doc}).String(); !r.renders(d) {
+		return d
+	}
+	return redactedToken
 }
 
 func (r redactor) tokens(ts []string) []string {
 	out := slices.Clone(ts)
 	for i, t := range out {
-		if r.exact[t] || slices.ContainsFunc(r.contains, func(f string) bool { return strings.Contains(t, f) }) {
+		if r.holds(t) {
 			out[i] = redactedToken
 		}
 	}
 	return out
+}
+
+func (r redactor) holds(t string) bool {
+	return r.exact[t] || slices.ContainsFunc(r.contains, func(f string) bool { return strings.Contains(t, f) })
+}
+
+// renders reports whether a rendered path holds a value: as written, unescaped, or in any piece
+// between separators.
+func (r redactor) renders(s string) bool {
+	plain := strings.NewReplacer("~1", "/", "~0", "~").Replace(s)
+	if r.holds(s) || r.holds(plain) {
+		return true
+	}
+	return slices.ContainsFunc(strings.FieldsFunc(plain, func(c rune) bool { return c == '/' || c == '|' }), r.holds)
 }
 
 // paths redacts every path of a compile refusal: a rule's own or one ingest raised. A wrapper
