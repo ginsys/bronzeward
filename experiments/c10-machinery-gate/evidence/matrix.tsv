@@ -1,0 +1,31 @@
+base	case	talosctl	machinery	bytes	expected	observed	stage	validate	native-validate	rule
+fixture	alias	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	bool	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	bytes	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	collision	pass	pass	same	refused	refused	authoring	-	pass	fragment[0] reserved-text
+fixture	document	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	embedded-json	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	embedded-yaml	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	int	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	invalid-value	invalid	invalid	same	parity	parity	-	fail	fail	-
+fixture	map	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	override-literal	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	override-ref	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	string	pass	pass	same	parity	parity	-	pass	pass	-
+fixture	type-mismatch	rejected	rejected	-	rejected	rejected	compose	-	-	fragment[0]
+fixture	unidentified-embedded	pass	pass	same	refused	refused	authoring	-	pass	fragment[0] reserved-text
+generated	alias	pass	pass	same	parity	parity	-	pass	pass	-
+generated	bool	pass	pass	same	parity	parity	-	pass	pass	-
+generated	bytes	pass	pass	same	parity	parity	-	pass	pass	-
+generated	collision	pass	pass	same	refused	refused	authoring	-	pass	fragment[0] reserved-text
+generated	document	pass	pass	same	parity	parity	-	pass	pass	-
+generated	embedded-json	pass	pass	same	parity	parity	-	pass	pass	-
+generated	embedded-yaml	pass	pass	same	parity	parity	-	pass	pass	-
+generated	int	pass	pass	same	parity	parity	-	pass	pass	-
+generated	invalid-value	invalid	invalid	same	parity	parity	-	fail	fail	-
+generated	map	pass	pass	same	parity	parity	-	pass	pass	-
+generated	override-literal	pass	pass	same	parity	parity	-	pass	pass	-
+generated	override-ref	pass	pass	same	parity	parity	-	pass	pass	-
+generated	string	pass	pass	same	parity	parity	-	pass	pass	-
+generated	type-mismatch	rejected	rejected	-	rejected	rejected	compose	-	-	fragment[0]
+generated	unidentified-embedded	pass	pass	same	refused	refused	authoring	-	pass	fragment[0] reserved-text
