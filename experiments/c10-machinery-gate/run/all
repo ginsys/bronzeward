@@ -58,6 +58,15 @@ for base in "${bases[@]}"; do
   talosctl validate --config "base/$base.yaml" --mode "${modes[$base]}" --strict >"base/$base.validate.txt" 2>&1 ||
     die "control failed: the $base base does not validate in ${modes[$base]} mode"
 done
+# The leak-refusal patterns of this run's bases, recorded now: run/collect-evidence scans with
+# these, not with whatever fixture is up when it runs. Every long scalar of either secrets bundle
+# and the fixture's own leak-scan patterns.
+{
+  bwref patterns base/secrets.yaml
+  bwref patterns "$STATE/talos-secrets.yaml"
+  cat -- "$STATE/scan-patterns.txt"
+} | sort -u >patterns.txt
+[ "$(wc -l <patterns.txt)" -ge 10 ] || die "fewer than 10 leak-refusal patterns"
 
 # SR's fragment forms, generated once: literal (the native input) and tag (bronzeward's syntax).
 names=()

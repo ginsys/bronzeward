@@ -81,7 +81,7 @@ func TestMachineryGate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resolvedBase, err := gateResolve(base, ingest.Declarations{}, nil)
+		resolvedBase, _, err := gateResolve(base, ingest.Declarations{}, nil)
 		if err != nil {
 			t.Fatalf("control: the %s base does not ingest and resolve: %v", b.name, err)
 		}
@@ -133,14 +133,17 @@ type gateRow struct {
 	expected, observed, stage  string // the compiler on the tag form
 	validate, nativeValidate   string
 	rule                       string
+	refusal, wantRefusal       ingest.Rule // ingestion's refusal rule, and the one the contract requires
 	machineryVerdictDisagrees  bool
 }
 
 // unexpected: the machinery's native composition differs from talosctl's in outcome or bytes, or
-// the compiler's outcome is not the expected one, or a parity output's verdict differs.
+// the compiler's outcome is not the expected one, or a parity output's verdict differs, or an
+// expected authoring refusal came from another stage or rule.
 func (r gateRow) unexpected() bool {
 	return r.talosctl != r.machinery || r.bytes == "differs" || r.machineryVerdictDisagrees ||
-		r.expected != r.observed || r.observed == "parity" && r.validate != r.nativeValidate
+		r.expected != r.observed || r.observed == "parity" && r.validate != r.nativeValidate ||
+		r.wantRefusal != "" && (r.stage != "authoring" || r.refusal != r.wantRefusal)
 }
 
 func (r gateRow) cells() []string {
@@ -165,7 +168,7 @@ func gateCase(t *testing.T, out, baseName string, mode Mode, base []byte, resolv
 	}
 	row := gateRow{base: baseName, name: name, expected: c.Expect["tag"]["early"]}
 	if authoringRefused[name] {
-		row.expected = "refused"
+		row.expected, row.wantRefusal = "refused", ingest.RuleReservedText
 	}
 
 	// talosctl's native composition and verdict, as run/all recorded them.
@@ -233,12 +236,12 @@ func gateCase(t *testing.T, out, baseName string, mode Mode, base []byte, resolv
 				decl.Embedded = append(decl.Embedded, ingest.Embedded{Path: p, Format: e.Format})
 			}
 		}
-		r, err := gateResolve(text, decl, values)
+		r, stage, err := gateResolve(text, decl, values)
 		if err != nil {
-			row.observed, row.stage = "refused", "authoring"
+			row.observed, row.stage, row.rule = "refused", stage, fmt.Sprintf("fragment[%d] error", i)
 			var refusal *ingest.Refusal
 			if errors.As(err, &refusal) {
-				row.rule = fmt.Sprintf("fragment[%d] %s", i, refusal.Rule)
+				row.refusal, row.rule = refusal.Rule, fmt.Sprintf("fragment[%d] %s", i, refusal.Rule)
 			}
 			return row
 		}
@@ -270,15 +273,16 @@ func gateCase(t *testing.T, out, baseName string, mode Mode, base []byte, resolv
 	return row
 }
 
-// gateResolve ingests text and resolves it with values plus whatever ingestion extracts.
-func gateResolve(text []byte, decl ingest.Declarations, values map[string]provider.Value) (ingest.Resolved, error) {
+// gateResolve ingests text and resolves it with values plus whatever ingestion extracts. A failure
+// names its stage: authoring (reading, extraction, staging) or resolve.
+func gateResolve(text []byte, decl ingest.Declarations, values map[string]provider.Value) (ingest.Resolved, string, error) {
 	u, err := ingest.Read(bytes.NewReader(text), 1<<20)
 	if err != nil {
-		return ingest.Resolved{}, err
+		return ingest.Resolved{}, "authoring", err
 	}
 	c, err := ingest.Extract(ingest.Request{Input: u, Declarations: decl})
 	if err != nil {
-		return ingest.Resolved{}, err
+		return ingest.Resolved{}, "authoring", err
 	}
 	all := map[string]provider.Value{}
 	for k, v := range values {
@@ -289,9 +293,13 @@ func gateResolve(text []byte, decl ingest.Declarations, values map[string]provid
 		return nil
 	})
 	if err != nil {
-		return ingest.Resolved{}, err
+		return ingest.Resolved{}, "authoring", err
 	}
-	return ingest.Resolve(s, all)
+	r, err := ingest.Resolve(s, all)
+	if err != nil {
+		return ingest.Resolved{}, "resolve", err
+	}
+	return r, "", nil
 }
 
 // nativeCompose is talosctl machineconfig patch's composition through the machinery.

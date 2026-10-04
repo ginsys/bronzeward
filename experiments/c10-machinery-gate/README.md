@@ -20,9 +20,11 @@ On each of SR's two bases and for each of SR's 15 cases
 
 `expected` is SR's tag/early expectation, except for `collision` and `unidentified-embedded`:
 a quoted reference look-alike and a reference inside unidentified embedded text are reserved
-text, refused at authoring by contract (compilation §5.5, choice §16.19). A row is unexpected if
-the machinery and talosctl disagree in outcome, bytes or verdict, if the compiler's outcome is not
-the expected one, or if a parity output's verdict differs from talosctl's.
+text, refused at authoring by contract (compilation §5.5, choice §16.19); those two rows must be
+refused at authoring with ingestion's `reserved-text` rule, not by any other stage or rule. A row
+is unexpected if the machinery and talosctl disagree in outcome, bytes or verdict, if the
+compiler's outcome is not the expected one, if a parity output's verdict differs from talosctl's,
+or if an expected authoring refusal came from another stage or rule.
 
 Controls, per base: the base alone through ingestion and the compiler equals the base talosctl
 normalized, and validates in its mode.
@@ -48,9 +50,11 @@ C10_OUT=/the/same/dir experiments/c10-machinery-gate/run/collect-evidence
 `run/all` reuses SR's `run/lib.sh` (pinned talosctl, SR's prototype for the literal and tag
 forms) and runs `TestMachineryGate` in `internal/compile` with `C10_OUT` set; without it the test
 is skipped. The test writes `matrix.tsv`, `controls.tsv` and `summary.txt` and fails on any
-unexpected row. `run/collect-evidence` copies those and `run.txt` into `evidence/`, refusing a file
-that holds any long scalar of either base's secrets bundle or a fixture leak-scan pattern. The
-outputs themselves hold the bases' synthetic secrets and stay in `C10_OUT`.
+unexpected row. `run/all` also records the run's leak-refusal patterns (every long scalar of either
+base's secrets bundle and the fixture's leak-scan patterns) in `C10_OUT/patterns.txt`.
+`run/collect-evidence` copies those results and `run.txt` into `evidence/` only if every file scans
+clean against that record; a match or a failed scan refuses and copies nothing. The outputs
+themselves hold the bases' synthetic secrets and stay in `C10_OUT`.
 
 ## Result
 
