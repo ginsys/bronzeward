@@ -1,4 +1,4 @@
-commit	b02248131ac548df59e4a3384e43c4357f8a43dd
+commit	8f15a401fb53b42f6fb8ee273fb5ad61eb7cc63c
 uncommitted-inputs	0
 talosctl	Client: Talos v1.13.6
 talosctl-sha256	540c5e7cb0d3fa3a9b2e1c717ced212727b73bcaf0cf9cf9ba2472ec381041d4
