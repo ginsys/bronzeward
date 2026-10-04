@@ -59,6 +59,18 @@ func (r Resolved) Patch() (configpatcher.Patch, error) {
 // written back whole (§5.4). Every reference resolves or nothing does; a refusal names paths
 // only. The caller supplies exactly the pinned versions; Resolve selects none.
 func Resolve(s Sanitized, values map[string]provider.Value) (Resolved, error) {
+	return resolveWith(s, func(name string, r Reference, p Path) (*yaml.Node, error) {
+		v, rule := placed(name, r, values)
+		if rule != "" {
+			return nil, refuse(rule, p.String())
+		}
+		return v, nil
+	})
+}
+
+// resolveWith replaces each reference of s, in walk order, by the node value gives for its name,
+// declaration and path, keeping its anchor, and writes each identified embedded document back.
+func resolveWith(s Sanitized, value func(name string, r Reference, p Path) (*yaml.Node, error)) (Resolved, error) {
 	if err := s.Check(); err != nil {
 		return Resolved{}, err
 	}
@@ -76,9 +88,9 @@ func Resolve(s Sanitized, values map[string]provider.Value) (Resolved, error) {
 			return nil
 		}
 		if n.Tag == refTag {
-			v, rule := placed(n.Value, s.decl.References[n.Value], values)
-			if rule != "" {
-				return refuse(rule, p.String())
+			v, err := value(n.Value, s.decl.References[n.Value], p)
+			if err != nil {
+				return err
 			}
 			*n = yaml.Node{Kind: v.Kind, Tag: v.Tag, Value: v.Value, Content: v.Content, Anchor: n.Anchor}
 			return nil
