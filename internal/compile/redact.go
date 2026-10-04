@@ -93,14 +93,17 @@ func (r redactor) holds(t string) bool {
 	return r.exact[t] || slices.ContainsFunc(r.contains, func(f string) bool { return strings.Contains(t, f) })
 }
 
-// renders reports whether a rendered path holds a value: as written, unescaped, or in any piece
-// between separators.
+// renders reports whether a rendered path holds a value: as written or unescaped, whole or in any
+// piece between separators.
 func (r redactor) renders(s string) bool {
 	plain := strings.NewReplacer("~1", "/", "~0", "~").Replace(s)
-	if r.holds(s) || r.holds(plain) {
-		return true
+	sep := func(c rune) bool { return c == '/' || c == '|' }
+	for _, x := range []string{s, plain} {
+		if r.holds(x) || slices.ContainsFunc(strings.FieldsFunc(x, sep), r.holds) {
+			return true
+		}
 	}
-	return slices.ContainsFunc(strings.FieldsFunc(plain, func(c rune) bool { return c == '/' || c == '|' }), r.holds)
+	return false
 }
 
 // paths redacts every path of a compile refusal: a rule's own or one ingest raised. A wrapper
