@@ -68,8 +68,10 @@ func (c Compiled) Materialized() Materialized { return c.m }
 // every output leaf holding a reference's value, names the fragment that overrode every other
 // occurrence from the trace pass's prefix compositions, checks the output for copies and base
 // overrides (step 7), and validates the real composition and every pass in the node's mode. A
-// refusal names rules and paths only, a path token holding a resolved value redacted (§8.3). A
-// real rejection is returned as Compose returns it. Validation follows step 7 and the trace
+// refusal names rules and paths, a path token holding a resolved value redacted (§8.3). A real
+// rejection is returned as Compose returns it, and an invalid real configuration as Validate
+// does, with the machinery's message redacted by the trace pass's message of the same step, or
+// withheld (§8.3). Validation follows step 7 and the trace
 // passes, so a step-7 refusal or a pass that fails to compose or attribute is returned first; an
 // invalid real configuration is then returned as Validate returns it, before any pass's own
 // validation.
@@ -94,32 +96,16 @@ func compile(in Input, sources []Source) (Compiled, error) {
 		}
 		real[i] = r
 	}
-	m, err := Compose(real[0], real[1:])
+	m, cause, err := compose(real[0], real[1:])
+	trace, first, ts, hs, traceErr := traceAll(sources)
 	if err != nil {
-		return Compiled{}, err
+		return Compiled{}, explain("composition", err, cause, sources, ts, traceErr, func() (string, error) {
+			_, c, err := compose(trace[0], trace[1:])
+			return c, err
+		})
 	}
-	trace := make([]ingest.Resolved, len(sources))
-	first := make([]int, len(sources))
-	var ts []traced
-	var hs []ingest.Host
-	for i, s := range sources {
-		first[i] = len(ts)
-		r, xs, h, err := ingest.Trace(s.Text, s.Values, first[i], -1)
-		if err != nil {
-			return Compiled{}, fmt.Errorf("compile: %s: %w", inputName(i), err)
-		}
-		trace[i] = r
-		hs = append(hs, h...)
-		for _, x := range xs {
-			ts = append(ts, traced{x, i})
-		}
-	}
-	for i, t := range ts {
-		for _, u := range ts[i+1:] {
-			if err := t.Indistinct(u.Tracer); err != nil {
-				return Compiled{}, fmt.Errorf("compile: %w", err)
-			}
-		}
+	if traceErr != nil {
+		return Compiled{}, traceErr
 	}
 	tm, err := Compose(trace[0], trace[1:])
 	if err != nil {
@@ -183,8 +169,8 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	if err := checkOutput(realLeaves, realKeys, sources, outcomes); err != nil {
 		return Compiled{}, err
 	}
-	if err := m.Validate(in.Mode); err != nil {
-		return Compiled{}, err
+	if cause, err := m.validate(in.Mode); err != nil {
+		return Compiled{}, explain("validation", err, cause, sources, ts, nil, func() (string, error) { return tm.validate(in.Mode) })
 	}
 	for _, p := range passes {
 		if err := p.Validate(in.Mode); err != nil {
@@ -202,6 +188,65 @@ func compile(in Input, sources []Source) (Compiled, error) {
 		outcomes[i].paths = nil
 	}
 	return Compiled{m: m, outcomes: outcomes, origins: origins(sources)}, nil
+}
+
+// traceAll traces every source, ids in source order: the trace pass's inputs, each source's
+// first id, the tracers and the hosts. Two tracers a message or a leaf could not tell apart
+// refuse.
+func traceAll(sources []Source) ([]ingest.Resolved, []int, []traced, []ingest.Host, error) {
+	trace := make([]ingest.Resolved, len(sources))
+	first := make([]int, len(sources))
+	var ts []traced
+	var hs []ingest.Host
+	for i, s := range sources {
+		first[i] = len(ts)
+		r, xs, h, err := ingest.Trace(s.Text, s.Values, first[i], -1)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("compile: %s: %w", inputName(i), err)
+		}
+		trace[i] = r
+		hs = append(hs, h...)
+		for _, x := range xs {
+			ts = append(ts, traced{x, i})
+		}
+	}
+	for i, t := range ts {
+		for _, u := range ts[i+1:] {
+			if err := t.Indistinct(u.Tracer); err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("compile: %w", err)
+			}
+		}
+	}
+	return trace, first, ts, hs, nil
+}
+
+// explain sets the message of a real rejection or invalid verdict as compilation.md §8.3 shows
+// it: cause, the machinery's message, redacted by the message the same step gave on the trace
+// pass (trace), when that pass was traced and the step refused it alike; otherwise withheld. The
+// step's input holds a boolean reference when one is placed in a source up to the rejected one,
+// or in any source for the final load and for validation. Any other error is returned as is.
+func explain(step string, err error, cause string, sources []Source, ts []traced, traceErr error, trace func() (string, error)) error {
+	var e *Error
+	if !errors.As(err, &e) || cause == "" {
+		return err
+	}
+	tc := ""
+	if traceErr == nil {
+		c, terr := trace()
+		var te *Error
+		if errors.As(terr, &te) && te.Rule == e.Rule && te.Input == e.Input {
+			tc = c
+		}
+	}
+	upto := len(sources) - 1
+	for i := range sources {
+		if inputName(i) == e.Input {
+			upto = i
+		}
+	}
+	boolInput := slices.ContainsFunc(ts, func(t traced) bool { return t.Kind() == ingest.TraceBoolean && t.source <= upto })
+	e.Message, _ = redactMessage(step, cause, tc, ts, boolInput, newRedactor(sources))
+	return err
 }
 
 func inputName(i int) string {

@@ -1,6 +1,7 @@
 package compile
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -131,4 +132,64 @@ func TestRedactMessage(t *testing.T) {
 			t.Errorf("opaque: %q, %s; want withheld", got, outcome)
 		}
 	})
+}
+
+// A native rejection or an invalid configuration carries the machinery's message as §8.3 shows
+// it: redacted by the trace pass's message of the same step, or withheld when only the real pass
+// failed or the step's input holds a boolean reference. No rendering of the error, and nothing it
+// wraps, holds a value (compilation.md §8.3, §13).
+func TestCompileMessages(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	str := func(text, name, v string) Source {
+		return source(t, text, strRef(name), map[string]provider.Value{name: value(t, provider.KindString, v)})
+	}
+	withFlag := func(text string) Source {
+		return source(t, text+"machine:\n  features:\n    rbac: !bwref flag\n", refs(map[string]ingest.Reference{"flag": ref(provider.KindBoolean)}),
+			map[string]provider.Value{"flag": value(t, provider.KindBoolean, true)})
+	}
+	literal := source(t, "cluster:\n  network:\n    dnsDomain: not a domain\n", ingest.Declarations{}, nil)
+	port := str("machine:\n  features:\n    kubePrism:\n      port: !bwref port\n", "port", compileSecret)
+	flag := withFlag("")
+	for _, c := range []struct {
+		name  string
+		frags []Source
+		rule  Rule
+		input string
+		want  string // the message, or a part of it
+	}{
+		{"type mismatch", []Source{port}, RuleRejected, "fragment[0]", "cannot construct !!str `<redacted:port@1>...` into int"},
+		{"invalid value", []Source{str("cluster:\n  network:\n    dnsDomain: !bwref domain\n", "domain", "compile not a domain 7a3c")},
+			RuleInvalid, "", "\"<redacted:domain@1>\" is not a valid DNS name"},
+		{"real pass only", []Source{str("cluster:\n  network:\n    dnsDomain: !bwref domain\n", "domain", "-bad.example")},
+			RuleInvalid, "", withheldNotice("validation")},
+		{"literal", []Source{literal}, RuleInvalid, "", "\"not a domain\" is not a valid DNS name"},
+		{"literal beside a boolean", []Source{withFlag("cluster:\n  network:\n    dnsDomain: not a domain\n")}, RuleInvalid, "",
+			withheldNotice("validation")},
+		{"rejection, boolean after it", []Source{port, flag}, RuleRejected, "fragment[0]", "`<redacted:port@1>...` into int"},
+		{"rejection, boolean before it", []Source{flag, port}, RuleRejected, "fragment[1]", withheldNotice("composition")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Compile(Input{Base: base, Fragments: c.frags, Mode: ModeMetal})
+			var e *Error
+			if !errors.As(err, &e) || e.Rule != c.rule || e.Input != c.input {
+				t.Fatalf("got %v, want a %s refusal at %q", err, c.rule, c.input)
+			}
+			if !strings.Contains(e.Message, c.want) || strings.HasPrefix(c.want, "<withheld") && e.Message != c.want {
+				t.Errorf("message %q, want %q", e.Message, c.want)
+			}
+			if !strings.HasSuffix(err.Error(), ": "+e.Message) {
+				t.Errorf("Error() %q does not end with the message", err.Error())
+			}
+			if errors.Unwrap(err) != nil {
+				t.Errorf("the refusal wraps %v", errors.Unwrap(err))
+			}
+			for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q"} {
+				for _, v := range []string{compileSecret, "compile not", "`compile", "-bad.example", "zq0"} {
+					if s := fmt.Sprintf(verb, err); shows(s, v) {
+						t.Errorf("%s renders %q: %s", verb, v, s)
+					}
+				}
+			}
+		})
+	}
 }
