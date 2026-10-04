@@ -63,9 +63,11 @@ func (c Compiled) Materialized() Materialized { return c.m }
 
 // Compile performs compilation.md §6 steps 4 to 8 on in: it resolves every source, composes them,
 // traces the composition with a trace pass and a flip pass per boolean reference, attributes
-// every output leaf holding a reference's value, and validates the real composition and every
-// pass in the node's mode. A refusal names rules and paths only. A real rejection or an invalid
-// real configuration is returned as Compose and Validate return it, whatever the passes do.
+// every output leaf holding a reference's value, names the fragment that overrode every other
+// occurrence from the trace pass's prefix compositions, checks the output for copies and base
+// overrides (step 7), and validates the real composition and every pass in the node's mode. A
+// refusal names rules and paths only. A real rejection or an invalid real configuration is
+// returned as Compose and Validate return it, whatever the passes do.
 func Compile(in Input) (Compiled, error) {
 	if _, err := ParseMode(string(in.Mode)); err != nil {
 		return Compiled{}, err
@@ -128,14 +130,6 @@ func Compile(in Input) (Compiled, error) {
 		}
 		passes = append(passes, fm)
 	}
-	if err := m.Validate(in.Mode); err != nil {
-		return Compiled{}, err
-	}
-	for _, p := range passes {
-		if err := p.Validate(in.Mode); err != nil {
-			return Compiled{}, fidelity()
-		}
-	}
 	pre := prefixes{sources: sources, trace: trace, first: first, ts: ts}
 	outcomes := make([]outcome, len(ts))
 	for i, t := range ts {
@@ -150,6 +144,21 @@ func Compile(in Input) (Compiled, error) {
 			}
 		}
 		outcomes[i] = o
+	}
+	realLeaves, err := leaves(m.bytes(), hosts)
+	if err != nil {
+		return Compiled{}, fidelity()
+	}
+	if err := checkOutput(realLeaves, sources, outcomes); err != nil {
+		return Compiled{}, err
+	}
+	if err := m.Validate(in.Mode); err != nil {
+		return Compiled{}, err
+	}
+	for _, p := range passes {
+		if err := p.Validate(in.Mode); err != nil {
+			return Compiled{}, fidelity()
+		}
 	}
 	return Compiled{m: m, outcomes: outcomes, origins: origins(sources)}, nil
 }
