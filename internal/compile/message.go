@@ -140,31 +140,64 @@ func orderQuotes(all []quote) ([]quote, bool) {
 
 // values is s with every run covered by exact copies of value forms of copyFloor bytes or more
 // replaced by one valueToken. Copies that overlap or touch are one run, so no part of any copy is
-// left beside a token.
+// left beside a token. Each form is matched in one pass and each copy counted at its two ends, so
+// the cost grows with the lengths of s and the forms, not with how often copies overlap.
 func (r redactor) values(s string) string {
-	covered := make([]bool, len(s))
+	// edge[i] is the copies starting at i less those ending there; their running sum is how many
+	// copies cover a byte.
+	edge := make([]int, len(s)+1)
 	for _, f := range r.contains {
-		for i := 0; ; i++ {
-			j := strings.Index(s[i:], f)
-			if j < 0 {
-				break
-			}
-			i += j
-			for k := i; k < i+len(f); k++ {
-				covered[k] = true
-			}
+		for _, i := range occurrences(s, f) {
+			edge[i]++
+			edge[i+len(f)]--
 		}
 	}
 	var out strings.Builder
+	n := 0
 	for i := 0; i < len(s); i++ {
-		if !covered[i] {
+		n += edge[i]
+		if n == 0 {
 			out.WriteByte(s[i])
 			continue
 		}
 		out.WriteString(valueToken)
-		for i+1 < len(s) && covered[i+1] {
+		for i+1 < len(s) && n+edge[i+1] > 0 {
 			i++
+			n += edge[i]
 		}
 	}
 	return out.String()
+}
+
+// occurrences is where every copy of f starts in s, overlapping copies included, found in one pass
+// (Knuth-Morris-Pratt).
+func occurrences(s, f string) []int {
+	if f == "" || len(f) > len(s) {
+		return nil
+	}
+	// next[i] is the length of the longest proper prefix of f[:i+1] that is also its suffix.
+	next := make([]int, len(f))
+	for i, k := 1, 0; i < len(f); i++ {
+		for k > 0 && f[i] != f[k] {
+			k = next[k-1]
+		}
+		if f[i] == f[k] {
+			k++
+		}
+		next[i] = k
+	}
+	var at []int
+	for i, k := 0, 0; i < len(s); i++ {
+		for k > 0 && s[i] != f[k] {
+			k = next[k-1]
+		}
+		if s[i] == f[k] {
+			k++
+		}
+		if k == len(f) {
+			at = append(at, i+1-len(f))
+			k = next[k-1]
+		}
+	}
+	return at
 }

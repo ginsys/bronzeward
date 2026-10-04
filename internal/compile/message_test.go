@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
@@ -143,6 +144,35 @@ func TestRedactMessage(t *testing.T) {
 		if got, outcome := redactMessage("composition", "a zzXXXXXXsecretpart b", "a zzXXXXXXsecretpart b", ts, false, o); outcome != messageVerbatim ||
 			got != "a <redacted:value> b" {
 			t.Errorf("overlapping copies: %q, %s", got, outcome)
+		}
+	})
+	t.Run("copies of one value overlapping each other", func(t *testing.T) {
+		// "abababab" starts at 0 and 2 of "ababababab"; matching only copies that do not overlap
+		// would leave the last "ab" shown.
+		o := redactor{exact: map[string]bool{}, contains: []string{"abababab"}}
+		if got := o.values("x ababababab y"); got != "x "+valueToken+" y" {
+			t.Errorf("values = %q", got)
+		}
+	})
+	t.Run("touching value copies", func(t *testing.T) {
+		o := redactor{exact: map[string]bool{}, contains: []string{"qqqqqq", "rrrrrr"}}
+		if got := o.values("x qqqqqqrrrrrr y"); got != "x "+valueToken+" y" {
+			t.Errorf("values = %q", got)
+		}
+	})
+	t.Run("overlapping repetitions in linear time", func(t *testing.T) {
+		// A long value repeated inside a longer text overlaps itself at every position; marking
+		// each copy byte by byte would take 2^36 steps here.
+		o := redactor{exact: map[string]bool{}, contains: []string{strings.Repeat("a", 1<<18)}}
+		done := make(chan string, 1)
+		go func() { done <- o.values("x" + strings.Repeat("a", 1<<19) + "y") }()
+		select {
+		case got := <-done:
+			if got != "x"+valueToken+"y" {
+				t.Errorf("values = %.40q", got)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("values did not finish in 2s")
 		}
 	})
 	t.Run("partly overlapping quotes", func(t *testing.T) {
