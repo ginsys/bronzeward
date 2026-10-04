@@ -469,8 +469,7 @@ func TestAssignmentUpdateRefusals(t *testing.T) {
 
 // PA §3.1 rule 8 for a fragment: a removal of a head, removed already or not, takes its head
 // revision as base; of a fragment only this draft proposes, base stays absent; of a name with
-// neither, 404. The fragment PUT, which
-// ingests, lands with ginsys/bronzeward#23's next part.
+// neither, 404.
 func TestFragmentRemoval(t *testing.T) {
 	d := newDraftEnv(t)
 	wantProblem(t, d.del("/fragments/registries", d.etag, d.key()), http.StatusNotFound, "not-found")
@@ -497,8 +496,6 @@ func TestFragmentRemoval(t *testing.T) {
 	if n := count(t, d.db, `SELECT count(*) FROM act WHERE action = 'draft.fragment.remove'`); n != 3 {
 		t.Fatalf("%d acts", n)
 	}
-	wantProblem(t, d.put("/fragments/registries", `{"layer":"override","document":"machine: {}"}`, d.etag, d.key()),
-		http.StatusNotImplemented, "not-implemented")
 }
 
 // PA §3.1, §9.3, T11: a discard takes {} and the draft's If-Match, refuses a draft with an active

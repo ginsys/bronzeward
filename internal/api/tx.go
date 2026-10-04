@@ -73,11 +73,19 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 	}
 	if q.route.prepare != nil {
 		if err := q.route.prepare(ctx, a, q); err != nil {
+			q.endIngest()
 			a.fail(w, q, err)
 			return
 		}
 	}
 	rec, fresh, err := a.run(ctx, q)
+	q.endIngest()
+	if err == nil && !fresh && q.ingest != nil {
+		// Another request committed the key's record first: this claim has no transaction left.
+		if err := a.inTx(ctx, func(tx *sql.Tx) error { return staging.Abandon(ctx, tx, a.d.owner, q.ingest.claim) }); err != nil {
+			a.o.logf("ingestion %s: the abandonment was not recorded: %v", q.ingest.claim.ID, err)
+		}
+	}
 	if err != nil {
 		a.fail(w, q, err)
 		return

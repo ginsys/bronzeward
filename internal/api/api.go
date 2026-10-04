@@ -99,8 +99,9 @@ type request struct {
 	input        input
 	material     []byte // the length-prefixed request without a keyed member (§7.1)
 	fingerprint  []byte
-	fpKey        string // the digest key that computed fingerprint, "transit/<key>@v<N>"; empty for SHA-256
-	actID        string // the act of the transaction attempt in progress
+	fpKey        string       // the digest key that computed fingerprint, "transit/<key>@v<N>"; empty for SHA-256
+	actID        string       // the act of the transaction attempt in progress
+	ingest       *draftIngest // a draft update's ingestion, from its prepare to its end
 }
 
 type ctxKey struct{}

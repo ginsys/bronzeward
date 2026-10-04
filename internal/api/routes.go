@@ -89,7 +89,7 @@ func routes() []*route {
 		draftCreation().on(m(post, "/drafts", author)),
 	)
 	rs = append(rs,
-		ifm(m(put, "/drafts/{id}/fragments/{name}", author)),
+		fragmentUpdate().on(ifm(m(put, "/drafts/{id}/fragments/{name}", author))),
 		fragmentRemoval().on(ifm(m(del, "/drafts/{id}/fragments/{name}", author))),
 		profileUpdate().on(ifm(m(put, "/drafts/{id}/profiles/{name}", author))),
 		profileRemoval().on(ifm(m(del, "/drafts/{id}/profiles/{name}", author))),
