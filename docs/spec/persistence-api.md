@@ -1669,7 +1669,10 @@ HTTP/1.1 200 OK
 {"release": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
  "machine": "mch_tqhcznunhyle4hnxru5hkt35uq", "mode": "metal",
  "configuration": "machine:\n  type: worker\n  token: <redacted:schema>\n  ...",
- "provenance": [{"reference": "registry/example-pass", "version": 3, ...}]}
+ "provenance": [{"reference": "registry/example-pass", "version": 3,
+                 "source": {"revision": "frv_sqb745zrpl2xltek22ai7sbdue", "digest": "4fc8...eeb8",
+                            "path": "doc[0]/machine/registries"},
+                 "output": "doc[0]/machine/registries/config/<redacted>/auth/password"}]}
 
 GET /api/v1/machines/mch_tqhcznunhyle4hnxru5hkt35uq
 
@@ -1705,10 +1708,18 @@ per source, the head, the revision the release left it at (`null`: removed)
 and the head revision; per machine, the mode it was validated in and its
 review route. `GET /releases` lists releases in identifier order, each as the
 item read answers it. The review answers the redacted configuration and the
-provenance records as publication stored them (compilation §8.2, §8.3, §11),
-never traced again. A configuration that could not be redacted is `null`,
-with a `notice` saying so. No release read carries a ciphertext or a digest;
-a release that does not cover the machine is `404 not-found`.
+provenance records publication stored (compilation §8.2, §8.3, §11), never
+traced again. Each record carries §8.2's fields alone: `reference`,
+`version`, `encoding` (absent when none), `member` (absent for a scalar
+reference), `source` (the import base or fragment revision, the SHA-256 of
+its stored sanitized text as `digest`, and the occurrence's redacted `path`)
+and exactly one outcome, `output` (the redacted output path) or
+`overriddenBy` (the overriding fragment revision and its `digest`). A stored
+record with any other field or shape is never forwarded: the read is `500
+internal-error`. A configuration that could not be redacted is `null`, with a
+`notice` saying so. No release read carries a ciphertext, an artifact or
+configuration digest or the release digest; a release that does not cover
+the machine is `404 not-found`.
 
 Entering recovery mode, which names the restored backups (§12.2):
 

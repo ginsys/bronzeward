@@ -1,11 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -56,12 +58,77 @@ type releaseBody struct {
 // publication stored it: the redacted configuration and the provenance records. A configuration
 // that could not be redacted shows nothing and says so.
 type reviewBody struct {
-	Release       string          `json:"release"`
-	Machine       string          `json:"machine"`
-	Mode          string          `json:"mode"`
-	Configuration *string         `json:"configuration"`
-	Notice        string          `json:"notice,omitempty"`
-	Provenance    json.RawMessage `json:"provenance"`
+	Release       string             `json:"release"`
+	Machine       string             `json:"machine"`
+	Mode          string             `json:"mode"`
+	Configuration *string            `json:"configuration"`
+	Notice        string             `json:"notice,omitempty"`
+	Provenance    []provenanceRecord `json:"provenance"`
+}
+
+// provenanceRecord is one row of the provenance record (compilation.md §8.2), as T3 stores it and
+// the review answers it: the reference at its pinned version, its declared encoding, a mapping
+// member's position (absent for a scalar reference), the source revision with the SHA-256 of its
+// stored sanitized text and the occurrence's redacted path, and exactly one outcome: the redacted
+// output path, or the fragment revision that overrode it.
+type provenanceRecord struct {
+	Reference    string            `json:"reference"`
+	Version      int64             `json:"version"`
+	Encoding     string            `json:"encoding,omitempty"`
+	Member       *int              `json:"member,omitempty"`
+	Source       provenanceSource  `json:"source"`
+	Output       string            `json:"output,omitempty"`
+	OverriddenBy *provenanceOrigin `json:"overriddenBy,omitempty"`
+}
+
+type provenanceOrigin struct {
+	Revision string `json:"revision"`
+	Digest   string `json:"digest"`
+}
+
+type provenanceSource struct {
+	Revision string `json:"revision"`
+	Digest   string `json:"digest"`
+	Path     string `json:"path"`
+}
+
+// errProvenance is a stored provenance record that is not §8.2's. Its content is never named, since
+// a field it should not hold could hold anything.
+var errProvenance = errors.New("a stored provenance record does not have the provenance record's shape")
+
+// projectProvenance decodes stored provenance into §8.2's fields alone and checks each record's
+// shape, so a field outside them, or a record of another shape, is refused, never forwarded.
+func projectProvenance(stored []byte) ([]provenanceRecord, error) {
+	dec := json.NewDecoder(bytes.NewReader(stored))
+	dec.DisallowUnknownFields()
+	var out []provenanceRecord
+	if err := dec.Decode(&out); err != nil || out == nil {
+		return nil, errProvenance
+	}
+	revision := func(v string, kinds ...id.Prefix) bool {
+		return slices.ContainsFunc(kinds, func(k id.Prefix) bool { return id.MustHave(v, k) == nil })
+	}
+	for _, r := range out {
+		if r.Reference == "" || r.Version < 1 || (r.Member != nil && *r.Member < 0) ||
+			!revision(r.Source.Revision, id.ImportBase, id.FragmentRevision) || !sha256Hex(r.Source.Digest) || r.Source.Path == "" ||
+			(r.Output == "") == (r.OverriddenBy == nil) ||
+			(r.OverriddenBy != nil && (!revision(r.OverriddenBy.Revision, id.FragmentRevision) || !sha256Hex(r.OverriddenBy.Digest))) {
+			return nil, errProvenance
+		}
+	}
+	return out, nil
+}
+
+func sha256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return false
+		}
+	}
+	return true
 }
 
 // withheldNotice says that a configuration is not shown (compilation.md §8.3).
@@ -156,7 +223,7 @@ func getReview(a *API, w http.ResponseWriter, q *request) {
 			return "", nil, refuse(http.StatusNotFound, "not-found", "no such resource")
 		}
 		var b reviewBody
-		var provenance string
+		var provenance []byte
 		err := tx.QueryRowContext(ctx, `SELECT release, machine, mode, redacted, provenance::text FROM release_machine
 			WHERE release = $1 AND machine = $2`, rel, m).Scan(&b.Release, &b.Machine, &b.Mode, &b.Configuration, &provenance)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -168,7 +235,9 @@ func getReview(a *API, w http.ResponseWriter, q *request) {
 		if b.Configuration == nil {
 			b.Notice = withheldNotice
 		}
-		b.Provenance = json.RawMessage(provenance)
+		if b.Provenance, err = projectProvenance(provenance); err != nil {
+			return "", nil, err
+		}
 		return "", b, nil
 	})
 }

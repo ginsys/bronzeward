@@ -88,7 +88,7 @@ ALTER TABLE assignment ADD UNIQUE (id, cluster, machine);
 CREATE TABLE release_source (
   release             text NOT NULL,
   cluster             text NOT NULL,
-  kind                text NOT NULL,
+  kind                text NOT NULL CHECK (kind IN ('fragment', 'profile', 'assignment')),
   fragment            text,
   profile             text,
   assignment          text,
@@ -98,13 +98,15 @@ CREATE TABLE release_source (
   profile_revision    text,
   assignment_revision text,
   head_revision       integer NOT NULL CHECK (head_revision >= 1),
+  -- Each kind's shape is an implication, so a row of an unknown kind is refused by the kind check
+  -- alone.
   CONSTRAINT release_source_shape CHECK (
-    (kind = 'fragment' AND fragment IS NOT NULL AND name IS NOT NULL AND profile IS NULL AND assignment IS NULL
-      AND machine IS NULL AND profile_revision IS NULL AND assignment_revision IS NULL) OR
-    (kind = 'profile' AND profile IS NOT NULL AND name IS NOT NULL AND fragment IS NULL AND assignment IS NULL
-      AND machine IS NULL AND fragment_revision IS NULL AND assignment_revision IS NULL) OR
-    (kind = 'assignment' AND assignment IS NOT NULL AND machine IS NOT NULL AND fragment IS NULL AND profile IS NULL
-      AND name IS NULL AND fragment_revision IS NULL AND profile_revision IS NULL)),
+    (kind <> 'fragment' OR (fragment IS NOT NULL AND name IS NOT NULL AND profile IS NULL AND assignment IS NULL
+      AND machine IS NULL AND profile_revision IS NULL AND assignment_revision IS NULL)) AND
+    (kind <> 'profile' OR (profile IS NOT NULL AND name IS NOT NULL AND fragment IS NULL AND assignment IS NULL
+      AND machine IS NULL AND fragment_revision IS NULL AND assignment_revision IS NULL)) AND
+    (kind <> 'assignment' OR (assignment IS NOT NULL AND machine IS NOT NULL AND fragment IS NULL AND profile IS NULL
+      AND name IS NULL AND fragment_revision IS NULL AND profile_revision IS NULL))),
   UNIQUE (release, fragment),
   UNIQUE (release, profile),
   UNIQUE (release, assignment),
@@ -141,19 +143,23 @@ CREATE TABLE dependency_status (
   recorded_at           timestamptz NOT NULL,
   answer_date           timestamptz,
   UNIQUE (provider, object, version),
+  -- Implications per provider, so a row of an unknown provider is refused by the provider check
+  -- alone.
   CONSTRAINT dependency_status_object CHECK (
-    (provider = 'kv' AND object ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$') OR
-    (provider = 'transit' AND object NOT IN ('.', '..') AND octet_length(object) BETWEEN 1 AND 227
-      AND object !~ '[/#?%\\[:space:][:cntrl:]]')),
+    (provider <> 'kv' OR object ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$') AND
+    (provider <> 'transit' OR (object NOT IN ('.', '..') AND octet_length(object) BETWEEN 1 AND 227
+      AND object !~ '[/#?%\\[:space:][:cntrl:]]'))),
   CONSTRAINT dependency_status_reason CHECK ((class = 'retained') = (reason IS NULL)),
   CONSTRAINT dependency_status_unknown_since CHECK ((class = 'unknown') = (unknown_since IS NOT NULL))
 );
 
 -- A release machine's dependency records (compilation §9): each effective dependency, each
--- reproduction dependency (a reference occurrence in its source revision, by its redacted path)
--- and the artifact's encryption dependency. Each names a provider object version by the creation
--- time the provider gave it, kept as RFC 3339 text: a KV created_time has nanoseconds, which a
--- timestamp would round.
+-- reproduction dependency and the artifact's encryption dependency. A reproduction dependency is
+-- one reference occurrence in its source revision: its path is shown redacted, so two occurrences
+-- can share one (a mapping key holding a value reads <redacted>), and each is named by its
+-- ordinal among its source revision's occurrences instead. Each record names a provider object
+-- version by the creation time the provider gave it, kept as RFC 3339 text: a KV created_time
+-- has nanoseconds, which a timestamp would round.
 CREATE TABLE dependency (
   release         text NOT NULL,
   machine         text NOT NULL,
@@ -167,19 +173,21 @@ CREATE TABLE dependency (
   source_revision text CHECK (source_revision ~ '^(ibr|frv)_[a-z2-7]{26}$'),
   source_digest   bytea CHECK (length(source_digest) = 32),
   path            text CHECK (path <> '' AND octet_length(path) <= 4096),
+  occurrence      integer CHECK (occurrence >= 0),
+  -- Implications per kind, so a row of an unknown kind is refused by the kind check alone.
   CONSTRAINT dependency_shape CHECK (
-    (kind = 'encryption' AND provider = 'transit' AND reference IS NULL AND source_revision IS NULL
-      AND source_digest IS NULL AND path IS NULL) OR
-    (kind = 'effective' AND provider = 'kv' AND reference IS NOT NULL AND source_revision IS NULL
-      AND source_digest IS NULL AND path IS NULL) OR
-    (kind = 'reproduction' AND provider = 'kv' AND reference IS NOT NULL AND source_revision IS NOT NULL
-      AND source_digest IS NOT NULL AND path IS NOT NULL)),
+    (kind <> 'encryption' OR (provider = 'transit' AND reference IS NULL AND source_revision IS NULL
+      AND source_digest IS NULL AND path IS NULL AND occurrence IS NULL)) AND
+    (kind <> 'effective' OR (provider = 'kv' AND reference IS NOT NULL AND source_revision IS NULL
+      AND source_digest IS NULL AND path IS NULL AND occurrence IS NULL)) AND
+    (kind <> 'reproduction' OR (provider = 'kv' AND reference IS NOT NULL AND source_revision IS NOT NULL
+      AND source_digest IS NOT NULL AND path IS NOT NULL AND occurrence IS NOT NULL))),
   FOREIGN KEY (release, machine) REFERENCES release_machine (release, machine),
   FOREIGN KEY (provider, object, version) REFERENCES dependency_status (provider, object, version)
 );
 CREATE UNIQUE INDEX dependency_effective ON dependency (release, machine, reference, object, version)
   WHERE kind = 'effective';
-CREATE UNIQUE INDEX dependency_reproduction ON dependency (release, machine, source_revision, path)
+CREATE UNIQUE INDEX dependency_reproduction ON dependency (release, machine, source_revision, occurrence)
   WHERE kind = 'reproduction';
 CREATE UNIQUE INDEX dependency_encryption ON dependency (release, machine) WHERE kind = 'encryption';
 CALL make_immutable('dependency');

@@ -1058,7 +1058,9 @@ provenance record (§8.2) (SP §6.3; SR §6.2):
 - **Reproduction (source) dependencies**: every reference occurrence in the
   import base and the source fragments, with the revision and its digest,
   overridden ones included. This is what rendering the same release again from
-  source needs.
+  source needs. Two occurrences whose redacted paths read the same (§8.3), such
+  as two keys of one mapping, are two dependencies, told apart by their
+  position among their source revision's occurrences.
 
 A reproduction dependency can outlive every effective one: an overridden
 reference is absent from the artifact but still needed to re-render it
