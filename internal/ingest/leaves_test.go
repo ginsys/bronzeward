@@ -215,4 +215,8 @@ func TestRewriteLeavesAliases(t *testing.T) {
 	if _, err := RewriteLeaves([]byte(bomb.String()), nil, nil, nil); err != errLeavesAlias {
 		t.Error("an alias expansion beyond the limit was accepted")
 	}
+	// The limit counts the nodes expansion creates, not the document's own.
+	if _, err := RewriteLeaves([]byte(strings.Repeat("- x\n", expandLimit)), nil, nil, nil); err != nil {
+		t.Errorf("a document without aliases beyond the limit's size was refused: %v", err)
+	}
 }

@@ -972,7 +972,9 @@ with the stand-in format **(choice §16.22)**.
   step whose input holds a mapping reference is withheld likewise. A
   composition step's input is the import base and the fragments up to the one
   rejected; validation's is every source. A message is also withheld when a
-  value form survives in it, as when a reference's name spells its value.
+  value form survives in it, as when a reference's name spells its value, or
+  when a token it would hold names a reference whose name equals a value form
+  of any length, which the six-byte search cannot see.
 - **Verbatim messages quoting an authored literal are shown.** SP hands this
   case to this contract (SP §10). An authored literal is source text that
   ingestion has already passed as not secret and that ordinary persistence
@@ -1009,9 +1011,11 @@ with the stand-in format **(choice §16.22)**.
   each key of a mapping reference's member, is its reference's token; each
   field the machinery marks secret is `<redacted:schema>`; the value means
   covers the rest. Identified embedded documents are written back with their
-  tokens. A compilation whose pinned values do not all decode, or whose
-  rendering still holds a value form of six bytes or more, shows nothing and
-  says so.
+  tokens. A compilation whose pinned values do not all decode, whose rendering
+  still holds a value form of six bytes or more, or one of whose tokens names
+  a reference whose name equals a value form, shows nothing and says so. A
+  value form that only partly copies a reference name of the same fragment is
+  the authored-literal case of §8.4.
 
 ### 8.4 What redaction does not cover
 

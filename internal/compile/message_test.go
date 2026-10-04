@@ -3,6 +3,7 @@ package compile
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -131,6 +132,23 @@ func TestRedactMessage(t *testing.T) {
 		if got, outcome := redactMessage("composition", "label \""+compileSecret+"\" is too long", "label \""+s["str"]+"\" is too long", ts, false, o); outcome != messageWithheld ||
 			got != withheld {
 			t.Errorf("a token holding a value: %q, %s; want withheld", got, outcome)
+		}
+	})
+	t.Run("token names a short value", func(t *testing.T) {
+		o := r
+		o.exact = maps.Clone(r.exact)
+		o.exact["app/str"] = true
+		if got, outcome := redactMessage("composition", "label \""+compileSecret+"\" is too long", "label \""+s["str"]+"\" is too long", ts, false, o); outcome != messageWithheld ||
+			got != withheld {
+			t.Errorf("a token naming a value: %q, %s; want withheld", got, outcome)
+		}
+	})
+	t.Run("verbatim message is a value", func(t *testing.T) {
+		o := r
+		o.exact = maps.Clone(r.exact)
+		o.exact["abc"] = true
+		if got, outcome := redactMessage("composition", "abc", "abc", ts, false, o); outcome != messageWithheld || got != withheld {
+			t.Errorf("a whole message equal to a value: %q, %s; want withheld", got, outcome)
 		}
 	})
 	t.Run("opaque values", func(t *testing.T) {

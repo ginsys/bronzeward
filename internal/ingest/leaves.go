@@ -18,19 +18,26 @@ var (
 const expandLimit = 1 << 20
 
 // expand is a copy of n with every alias replaced by a copy of its anchored node and no anchor
-// left. The parser has already refused cyclic aliases.
+// left. Each node an alias's copy adds is charged to budget; the document's own nodes are not.
+// The parser has already refused cyclic aliases.
 func expand(n *yaml.Node, budget *int) (*yaml.Node, error) {
-	if *budget--; *budget < 0 {
-		return nil, errLeavesAlias
-	}
+	return expandNode(n, budget, false)
+}
+
+func expandNode(n *yaml.Node, budget *int, copied bool) (*yaml.Node, error) {
 	if n.Kind == yaml.AliasNode {
-		return expand(n.Alias, budget)
+		return expandNode(n.Alias, budget, true)
+	}
+	if copied {
+		if *budget--; *budget < 0 {
+			return nil, errLeavesAlias
+		}
 	}
 	c := *n
 	c.Anchor, c.Content = "", make([]*yaml.Node, len(n.Content))
 	for i, x := range n.Content {
 		var err error
-		if c.Content[i], err = expand(x, budget); err != nil {
+		if c.Content[i], err = expandNode(x, budget, copied); err != nil {
 			return nil, err
 		}
 	}

@@ -2,6 +2,7 @@ package compile
 
 import (
 	"encoding/base64"
+	"maps"
 	"strings"
 	"testing"
 
@@ -169,6 +170,33 @@ func TestRedactedAliases(t *testing.T) {
 	}
 	if strings.Contains(out, ": 39157\n") || strings.Contains(out, "*k") || strings.Contains(out, "&k") {
 		t.Error("the redacted configuration shows the integer, an anchor or a dangling alias")
+	}
+}
+
+// The rendering fails closed: an attributed leaf it did not meet, or a token whose reference name
+// is a value of any length, shows nothing.
+func TestRedactedTextGuards(t *testing.T) {
+	cfg, err := configloader.NewFromBytes(generatedBase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := cfg.EncodeBytes(encoder.WithComments(encoder.CommentsDisabled))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, r, _ := messageFixture(t)
+	at := func(p string) []outcome { return []outcome{{tracer: ts[0].Tracer, source: 1, paths: []string{p}}} }
+	if _, err := redactedText(b, nil, at("doc[0]/version"), r); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if _, err := redactedText(b, nil, at("doc[0]/no-such-leaf"), r); err == nil {
+		t.Error("an attributed leaf that was not met rendered")
+	}
+	o := r
+	o.exact = maps.Clone(r.exact)
+	o.exact[ts[0].Ref()] = true
+	if _, err := redactedText(b, nil, at("doc[0]/version"), o); err == nil {
+		t.Error("a token naming a value rendered")
 	}
 }
 

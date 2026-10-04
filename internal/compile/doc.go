@@ -29,4 +29,7 @@
 //   - Compiled.Redacted applies the value means to every whole scalar and key equal to a value
 //     form of any length, beyond the six-byte floor for contained copies, and refuses a rendering
 //     that still holds a form of six bytes or more.
+//   - A token names its reference, so a message is withheld, and Compiled.Redacted refuses, when
+//     a token would name a reference whose name equals a value form of any length.
+//   - The alias expansion is bounded by the nodes the copies add, not by the document's own.
 package compile
