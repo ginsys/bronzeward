@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -13,12 +15,27 @@ import (
 // releaseSeed is a published release of d's draft, written as T3 writes one: two machines, one
 // whose configuration could not be redacted, and a fragment source with a removed one.
 type releaseSeed struct {
-	rel, op, frg, frv, gone, machine2 string
+	rel, op, frg, frv, gone, machine2, ibr string
 }
 
 const releaseCipher = "vault:v1:c2VjcmV0LWNpcGhlcnRleHQ="
 
-func (d *draftEnv) release(draft string, revision int) releaseSeed {
+// releaseProvenance is two provenance records (compilation §8.2) as T3 stores them: the import
+// base's occurrence, overridden by the fragment, and the fragment's mapping member, base64-encoded,
+// at its output path. {ibr} and {frv} stand for the seed's revisions.
+const releaseProvenance = `[{"reference":"registry/example-pass","version":3,` +
+	`"source":{"revision":"{ibr}","digest":"` + hexA + `","path":"doc[0]/machine/registries/config/<redacted>/auth/password"},` +
+	`"overriddenBy":{"revision":"{frv}","digest":"` + hexB + `"}},` +
+	`{"reference":"registry/example-pass","version":3,"encoding":"base64","member":0,` +
+	`"source":{"revision":"{frv}","digest":"` + hexB + `","path":"doc[0]/machine/registries"},` +
+	`"output":"doc[0]/machine/registries/config/<redacted>/auth/password"}]`
+
+const (
+	hexA = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
+	hexB = "4fc82b26aecb47d2868c4efbe3581732a3e7cbcc6c2efb32062c08170a05eeb8"
+)
+
+func (d *draftEnv) release(draft string, revision int, provenance string) releaseSeed {
 	d.t.Helper()
 	t := d.t
 	s := releaseSeed{rel: id.New(id.Release), op: id.New(id.Operation)}
@@ -26,6 +43,7 @@ func (d *draftEnv) release(draft string, revision int) releaseSeed {
 	rec := d.do(d.api, machineCall(d.human("h-author"), "k-machine2-"+draft[4:14], d.cluster, fmt.Sprintf("0b5a6c1e-2f3d-4e5f-8a9b-%012x", d.keys)))
 	s.machine2 = decode[machineBody](t, rec, http.StatusCreated).ID
 	ibr1, ibr2 := id.New(id.ImportBase), id.New(id.ImportBase)
+	s.ibr = ibr1
 	for _, ib := range [][2]string{{ibr1, d.machine}, {ibr2, s.machine2}} {
 		mustExec(t, d.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
 			baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
@@ -53,8 +71,9 @@ func (d *draftEnv) release(draft string, revision int) releaseSeed {
 	}{{d.machine, ibr1, "machine:\n  type: worker\n  token: <redacted:schema>\n"}, {s.machine2, ibr2, nil}} {
 		mustExec(t, tx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision, mode, ciphertext,
 				ciphertext_digest, configuration_digest, redacted, provenance)
-			VALUES ($1, $2, $3, $4, 'container', $5, $6, $6, $7, '[{"reference": "registry/example-pass", "version": 3}]')`,
-			s.rel, d.cluster, m.machine, m.ibr, releaseCipher, make([]byte, 32), m.redacted)
+			VALUES ($1, $2, $3, $4, 'container', $5, $6, $6, $7, $8::jsonb)`,
+			s.rel, d.cluster, m.machine, m.ibr, releaseCipher, make([]byte, 32), m.redacted,
+			strings.NewReplacer("{ibr}", m.ibr, "{frv}", s.frv).Replace(provenance))
 	}
 	mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, fragment, name, fragment_revision, head_revision)
 		VALUES ($1, $2, 'fragment', $3, $4, $5, 1), ($1, $2, 'fragment', $6, $7, NULL, 2)`,
@@ -73,7 +92,7 @@ func (d *draftEnv) release(draft string, revision int) releaseSeed {
 // redacted shows nothing and says so. No answer carries ciphertext or a digest (PA §9.1).
 func TestReleaseReads(t *testing.T) {
 	d := newDraftEnv(t)
-	s := d.release(d.draft, 1)
+	s := d.release(d.draft, 1, releaseProvenance)
 
 	rec := d.get("/releases/" + s.rel)
 	r := decode[releaseBody](t, rec, http.StatusOK)
@@ -117,9 +136,25 @@ func TestReleaseReads(t *testing.T) {
 	rec = d.get("/releases/" + s.rel + "/machines/" + d.machine + "/review")
 	v := decode[reviewBody](t, rec, http.StatusOK)
 	if v.Release != s.rel || v.Machine != d.machine || v.Mode != "container" || v.Configuration == nil ||
-		*v.Configuration != "machine:\n  type: worker\n  token: <redacted:schema>\n" || v.Notice != "" ||
-		string(v.Provenance) != `[{"version":3,"reference":"registry/example-pass"}]` {
-		t.Fatalf("review %+v (%s)", v, v.Provenance)
+		*v.Configuration != "machine:\n  type: worker\n  token: <redacted:schema>\n" || v.Notice != "" {
+		t.Fatalf("review %+v", v)
+	}
+	// The records answered are the records stored, field for field.
+	var answered struct {
+		Provenance json.RawMessage `json:"provenance"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &answered); err != nil {
+		t.Fatal(err)
+	}
+	var gotProv, wantProv any
+	if err := json.Unmarshal(answered.Provenance, &gotProv); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(strings.NewReplacer("{ibr}", s.ibr, "{frv}", s.frv).Replace(releaseProvenance)), &wantProv); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotProv, wantProv) {
+		t.Fatalf("provenance %s; want %s", answered.Provenance, releaseProvenance)
 	}
 	rec = d.get("/releases/" + s.rel + "/machines/" + s.machine2 + "/review")
 	if strings.Contains(rec.Body.String(), "vault:") {
@@ -134,7 +169,7 @@ func TestReleaseReads(t *testing.T) {
 	rec = d.do(d.api, call{method: "POST", path: prefix + "/drafts", token: d.human("h-author"), key: "k-draft2-0123456789",
 		body: `{"cluster":"` + d.cluster + `","title":"second"}`})
 	draft2 := decode[draftBody](t, rec, http.StatusCreated).ID
-	s2 := d.release(draft2, 1)
+	s2 := d.release(draft2, 1, releaseProvenance)
 	list := decode[listPage[releaseBody]](t, d.get("/releases"), http.StatusOK)
 	want := []string{s.rel, s2.rel}
 	slices.Sort(want)
@@ -175,6 +210,49 @@ func TestReleaseReads(t *testing.T) {
 		{"/releases/" + s.rel + "/machines/" + d.machine + "/review?x=1", http.StatusBadRequest, "invalid-request"},
 	} {
 		wantProblem(t, d.get(c.path), c.status, c.code)
+	}
+}
+
+// The review answers each provenance record by compilation §8.2's fields alone: a stored record
+// with another field, or one that breaks its shape, is answered as nothing and logged without its
+// content, never forwarded.
+func TestReleaseReviewProvenanceProjected(t *testing.T) {
+	d := newDraftEnv(t)
+	const standIn = "bw-stand-in-7f3c" // a field's content that must reach neither answer nor log
+	good := `{"reference":"registry/example-pass","version":3,"source":{"revision":"{frv}","digest":"` + hexB +
+		`","path":"doc[0]/machine/registries"},"output":"doc[0]/machine/registries"}`
+	for i, c := range []struct{ name, stored string }{
+		{"another field", `[{"reference":"registry/example-pass","version":3,"value":"` + standIn + `","source":{"revision":"{frv}",` +
+			`"digest":"` + hexB + `","path":"doc[0]/machine/registries"},"output":"doc[0]/machine/registries"}]`},
+		{"another source field", strings.Replace("["+good+"]", `"path"`, `"text":"`+standIn+`","path"`, 1)},
+		{"both outcomes", `[` + strings.Replace(good, `"output"`, `"overriddenBy":{"revision":"{frv}","digest":"`+hexB+`"},"output"`, 1) + `]`},
+		{"no outcome", `[` + strings.Replace(good, `,"output":"doc[0]/machine/registries"`, ``, 1) + `]`},
+		{"a digest that is not SHA-256 hex", `[` + strings.Replace(good, hexB, standIn, 1) + `]`},
+		{"a source revision of another kind", `[` + strings.Replace(good, `{frv}`, d.draft, 1) + `]`},
+		{"no reference", `[` + strings.Replace(good, `"registry/example-pass"`, `""`, 1) + `]`},
+		{"version 0", `[` + strings.Replace(good, `"version":3`, `"version":0`, 1) + `]`},
+		{"a member below 0", `[` + strings.Replace(good, `"version":3`, `"version":3,"member":-1`, 1) + `]`},
+		{"a record that is not an object", `["` + standIn + `"]`},
+		{"control", `[` + good + `]`}, // the record each case above breaks one way
+	} {
+		draft := d.draft
+		if i > 0 {
+			rec := d.do(d.api, call{method: "POST", path: prefix + "/drafts", token: d.human("h-author"),
+				key: fmt.Sprintf("k-draft-prov-%010d", i), body: `{"cluster":"` + d.cluster + `","title":"provenance"}`})
+			draft = decode[draftBody](t, rec, http.StatusCreated).ID
+		}
+		s := d.release(draft, 1, c.stored)
+		rec := d.get("/releases/" + s.rel + "/machines/" + d.machine + "/review")
+		if c.name == "control" {
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s: %d %s", c.name, rec.Code, rec.Body)
+			}
+			continue
+		}
+		wantProblem(t, rec, http.StatusInternalServerError, "internal-error")
+		if strings.Contains(rec.Body.String(), standIn) || d.logged(standIn) {
+			t.Fatalf("%s: the stored content reached the answer or the log: %s", c.name, rec.Body)
+		}
 	}
 }
 
