@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -276,22 +277,7 @@ func gateCase(t *testing.T, out, baseName string, mode Mode, base []byte, resolv
 // gateResolve ingests text and resolves it with values plus whatever ingestion extracts. A failure
 // names its stage: authoring (reading, extraction, staging) or resolve.
 func gateResolve(text []byte, decl ingest.Declarations, values map[string]provider.Value) (ingest.Resolved, string, error) {
-	u, err := ingest.Read(bytes.NewReader(text), 1<<20)
-	if err != nil {
-		return ingest.Resolved{}, "authoring", err
-	}
-	c, err := ingest.Extract(ingest.Request{Input: u, Declarations: decl})
-	if err != nil {
-		return ingest.Resolved{}, "authoring", err
-	}
-	all := map[string]provider.Value{}
-	for k, v := range values {
-		all[k] = v
-	}
-	s, err := c.Commit(context.Background(), func(_ context.Context, name string, v provider.Value) error {
-		all[name] = v
-		return nil
-	})
+	s, all, err := gateIngest(text, nil, decl, values)
 	if err != nil {
 		return ingest.Resolved{}, "authoring", err
 	}
@@ -300,6 +286,31 @@ func gateResolve(text []byte, decl ingest.Declarations, values map[string]provid
 		return ingest.Resolved{}, "resolve", err
 	}
 	return r, "", nil
+}
+
+// gateIngest ingests text with marks and declarations as bronzeward does (compilation.md §2.3):
+// the sanitized text, and values plus every value ingestion extracted, by reference name.
+func gateIngest(text []byte, marks []ingest.Path, decl ingest.Declarations, values map[string]provider.Value) (ingest.Sanitized, map[string]provider.Value, error) {
+	u, err := ingest.Read(bytes.NewReader(text), 1<<20)
+	if err != nil {
+		return ingest.Sanitized{}, nil, err
+	}
+	c, err := ingest.Extract(ingest.Request{Input: u, Marks: marks, Declarations: decl})
+	if err != nil {
+		return ingest.Sanitized{}, nil, err
+	}
+	all := maps.Clone(values)
+	if all == nil {
+		all = map[string]provider.Value{}
+	}
+	s, err := c.Commit(context.Background(), func(_ context.Context, name string, v provider.Value) error {
+		all[name] = v
+		return nil
+	})
+	if err != nil {
+		return ingest.Sanitized{}, nil, err
+	}
+	return s, all, nil
 }
 
 // nativeCompose is talosctl machineconfig patch's composition through the machinery.
