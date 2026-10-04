@@ -1,0 +1,6 @@
+pair	fixture	moved	pass
+pair	fixture	rotate	pass
+control	fixture	oracle-finds-planted-value	pass
+pair	generated	moved	pass
+pair	generated	rotate	pass
+control	generated	oracle-finds-planted-value	pass

@@ -1,0 +1,6 @@
+cases	28
+bases	fixture generated
+rows	112
+base-ref-applicable	38
+base-ref-not-applicable	18
+unexpected	0

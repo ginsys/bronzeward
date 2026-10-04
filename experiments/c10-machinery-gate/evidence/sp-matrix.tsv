@@ -1,0 +1,113 @@
+base	case	cell	talosctl	machinery	bytes	expected	observed	stage	rule	effective	want-effective	overridden	want-overridden	versions	patch	want-patch	validate	want-validate	findings	note
+fixture	alias	fragments	pass	pass	same	parity	parity	-	-	reg-secret	reg-secret	-	-	reg-secret@1	none	none	none	none	-	-
+fixture	alias	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 2 marks
+fixture	bool	fragments	pass	pass	same	parity	parity	-	-	wipe	wipe	-	-	wipe@1	none	none	none	none	-	-
+fixture	bool	base-ref	pass	pass	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the marked base does not ingest: guard-value
+fixture	bytes	fragments	pass	pass	same	parity	parity	-	-	extra-ca	extra-ca	-	-	extra-ca@1	none	none	none	none	-	-
+fixture	bytes	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	collision	fragments	pass	pass	same	refused	refused	authoring	reserved-text	-	-	-	-	-	skipped	skipped	skipped	skipped	-	-
+fixture	collision	base-ref	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell is refused at authoring
+fixture	delete	fragments	pass	pass	same	parity	parity	-	-	-	-	reg-pass	reg-pass	same	none	none	none	none	-	-
+fixture	delete	base-ref	pass	pass	same	refused	refused	output	base-override	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	document	fragments	pass	pass	same	parity	parity	-	-	roots	roots	-	-	roots@1	none	none	none	none	-	-
+fixture	document	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	duplicate-literal	fragments	pass	pass	same	refused	refused	output	exact-copy	-	-	-	-	-	skipped	skipped	skipped	skipped	-	-
+fixture	duplicate-literal	base-ref	pass	pass	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+fixture	embedded-json	fragments	pass	pass	same	parity	parity	-	-	app-token	app-token	-	-	app-token@1	none	none	none	none	-	-
+fixture	embedded-json	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	embedded-yaml	fragments	pass	pass	same	parity	parity	-	-	app-pass	app-pass	-	-	app-pass@1	none	none	none	none	-	-
+fixture	embedded-yaml	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	int	fragments	pass	pass	same	parity	parity	-	-	prism-port	prism-port	-	-	prism-port@1	none	none	none	none	-	-
+fixture	int	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	invalid-value	fragments	invalid	invalid	same	invalid	invalid	validate	invalid	-	-	-	-	-	none	none	redacted	redacted	-	-
+fixture	invalid-value	base-ref	invalid	invalid	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+fixture	list-append	fragments	pass	pass	same	parity	parity	-	-	manifest-url	manifest-url	-	-	manifest-url@1	none	none	none	none	-	-
+fixture	list-append	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	2 fragments moved, 1 marks
+fixture	list-duplicate	fragments	invalid	invalid	same	invalid	invalid	validate	invalid	-	-	-	-	-	none	none	verbatim	verbatim	-	-
+fixture	list-duplicate	base-ref	invalid	invalid	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+fixture	map	fragments	pass	pass	same	parity	parity	-	-	reg-auth	reg-auth	-	-	reg-auth@1	none	none	none	none	-	-
+fixture	map	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	map-partial	fragments	pass	pass	same	refused	refused	output	exact-copy	-	-	-	-	-	skipped	skipped	skipped	skipped	-	-
+fixture	map-partial	base-ref	pass	pass	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+fixture	moved-r1	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+fixture	moved-r1	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	moved-r2	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+fixture	moved-r2	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	override-literal	fragments	pass	pass	same	parity	parity	-	-	-	-	reg-pass	reg-pass	same	none	none	none	none	-	-
+fixture	override-literal	base-ref	pass	pass	same	refused	refused	output	base-override	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	override-ref	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+fixture	override-ref	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	2 fragments moved, 1 marks
+fixture	ref-over-ref	fragments	pass	pass	same	parity	parity	-	-	pass-b	pass-b	pass-a	pass-a	pass-b@1	none	none	none	none	-	-
+fixture	ref-over-ref	base-ref	pass	pass	same	refused	refused	output	base-override	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	rotate-r1	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+fixture	rotate-r1	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	rotate-r2	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@2	none	none	none	none	-	-
+fixture	rotate-r2	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	string	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+fixture	string	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	type-mismatch	fragments	rejected	rejected	-	rejected	rejected	compose	fragment[0]	-	-	-	-	-	redacted	redacted	skipped	skipped	-	-
+fixture	type-mismatch	base-ref	rejected	rejected	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+fixture	type-mismatch-two	fragments	rejected	rejected	-	rejected	rejected	compose	fragment[0]	-	-	-	-	-	redacted	redacted	skipped	skipped	-	-
+fixture	type-mismatch-two	base-ref	rejected	rejected	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+fixture	unidentified-embedded	fragments	pass	pass	same	refused	refused	authoring	reserved-text	-	-	-	-	-	skipped	skipped	skipped	skipped	-	-
+fixture	unidentified-embedded	base-ref	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell is refused at authoring
+fixture	whole-content	fragments	pass	pass	same	parity	parity	-	-	script	script	-	-	script@1	none	none	none	none	-	-
+fixture	whole-content	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+fixture	yaml-escape	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+fixture	yaml-escape	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	alias	fragments	pass	pass	same	parity	parity	-	-	reg-secret	reg-secret	-	-	reg-secret@1	none	none	none	none	-	-
+generated	alias	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 2 marks
+generated	bool	fragments	pass	pass	same	parity	parity	-	-	wipe	wipe	-	-	wipe@1	none	none	none	none	-	-
+generated	bool	base-ref	pass	pass	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the marked base does not ingest: guard-value
+generated	bytes	fragments	pass	pass	same	parity	parity	-	-	extra-ca	extra-ca	-	-	extra-ca@1	none	none	none	none	-	-
+generated	bytes	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	collision	fragments	pass	pass	same	refused	refused	authoring	reserved-text	-	-	-	-	-	skipped	skipped	skipped	skipped	-	-
+generated	collision	base-ref	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell is refused at authoring
+generated	delete	fragments	pass	pass	same	parity	parity	-	-	-	-	reg-pass	reg-pass	same	none	none	none	none	-	-
+generated	delete	base-ref	pass	pass	same	refused	refused	output	base-override	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	document	fragments	pass	pass	same	parity	parity	-	-	roots	roots	-	-	roots@1	none	none	none	none	-	-
+generated	document	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	duplicate-literal	fragments	pass	pass	same	refused	refused	output	exact-copy	-	-	-	-	-	skipped	skipped	skipped	skipped	-	-
+generated	duplicate-literal	base-ref	pass	pass	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+generated	embedded-json	fragments	pass	pass	same	parity	parity	-	-	app-token	app-token	-	-	app-token@1	none	none	none	none	-	-
+generated	embedded-json	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	embedded-yaml	fragments	pass	pass	same	parity	parity	-	-	app-pass	app-pass	-	-	app-pass@1	none	none	none	none	-	-
+generated	embedded-yaml	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	int	fragments	pass	pass	same	parity	parity	-	-	prism-port	prism-port	-	-	prism-port@1	none	none	none	none	-	-
+generated	int	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	invalid-value	fragments	invalid	invalid	same	invalid	invalid	validate	invalid	-	-	-	-	-	none	none	redacted	redacted	-	-
+generated	invalid-value	base-ref	invalid	invalid	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+generated	list-append	fragments	pass	pass	same	parity	parity	-	-	manifest-url	manifest-url	-	-	manifest-url@1	none	none	none	none	-	-
+generated	list-append	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	2 fragments moved, 1 marks
+generated	list-duplicate	fragments	invalid	invalid	same	invalid	invalid	validate	invalid	-	-	-	-	-	none	none	verbatim	verbatim	-	-
+generated	list-duplicate	base-ref	invalid	invalid	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+generated	map	fragments	pass	pass	same	parity	parity	-	-	reg-auth	reg-auth	-	-	reg-auth@1	none	none	none	none	-	-
+generated	map	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	map-partial	fragments	pass	pass	same	refused	refused	output	exact-copy	-	-	-	-	-	skipped	skipped	skipped	skipped	-	-
+generated	map-partial	base-ref	pass	pass	same	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+generated	moved-r1	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+generated	moved-r1	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	moved-r2	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+generated	moved-r2	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	override-literal	fragments	pass	pass	same	parity	parity	-	-	-	-	reg-pass	reg-pass	same	none	none	none	none	-	-
+generated	override-literal	base-ref	pass	pass	same	refused	refused	output	base-override	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	override-ref	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+generated	override-ref	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	2 fragments moved, 1 marks
+generated	ref-over-ref	fragments	pass	pass	same	parity	parity	-	-	pass-b	pass-b	pass-a	pass-a	pass-b@1	none	none	none	none	-	-
+generated	ref-over-ref	base-ref	pass	pass	same	refused	refused	output	base-override	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	rotate-r1	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+generated	rotate-r1	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	rotate-r2	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@2	none	none	none	none	-	-
+generated	rotate-r2	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	string	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+generated	string	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	type-mismatch	fragments	rejected	rejected	-	rejected	rejected	compose	fragment[0]	-	-	-	-	-	redacted	redacted	skipped	skipped	-	-
+generated	type-mismatch	base-ref	rejected	rejected	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+generated	type-mismatch-two	fragments	rejected	rejected	-	rejected	rejected	compose	fragment[0]	-	-	-	-	-	redacted	redacted	skipped	skipped	-	-
+generated	type-mismatch-two	base-ref	rejected	rejected	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell does not compose
+generated	unidentified-embedded	fragments	pass	pass	same	refused	refused	authoring	reserved-text	-	-	-	-	-	skipped	skipped	skipped	skipped	-	-
+generated	unidentified-embedded	base-ref	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	-	the fragments cell is refused at authoring
+generated	whole-content	fragments	pass	pass	same	parity	parity	-	-	script	script	-	-	script@1	none	none	none	none	-	-
+generated	whole-content	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
+generated	yaml-escape	fragments	pass	pass	same	parity	parity	-	-	reg-pass	reg-pass	-	-	reg-pass@1	none	none	none	none	-	-
+generated	yaml-escape	base-ref	pass	pass	same	parity	parity	-	-	-	-	-	-	-	-	-	-	-	-	1 fragments moved, 1 marks
