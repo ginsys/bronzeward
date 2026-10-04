@@ -105,6 +105,11 @@ func redactMessage(step, real, trace string, ts []traced, unmarked bool, r redac
 	var out strings.Builder
 	last := 0
 	for i, q := range qs {
+		// A token names its reference, and a name can be a value too short to be looked for in
+		// the text.
+		if r.exact[q.t.Ref()] {
+			return withheld, messageWithheld
+		}
 		out.WriteString(r.values(real[last:lazy[2+2*i]]))
 		out.WriteString(tokenOf(q.t))
 		last = lazy[3+2*i]

@@ -57,6 +57,9 @@ func redactedText(b []byte, hosts map[string]string, outcomes []outcome, r redac
 	tokens := map[string]string{}
 	members := map[string]bool{}
 	for _, o := range outcomes {
+		if len(o.paths) > 0 && r.exact[o.tracer.Ref()] {
+			return "", errRedactSurvive
+		}
 		for _, p := range o.paths {
 			tokens[p] = tokenOf(traced{o.tracer, o.source})
 			members[p] = o.tracer.Member() >= 0
