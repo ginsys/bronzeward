@@ -187,7 +187,7 @@ func passes(t *testing.T, frag Source) (real, trace []byte, ts []traced) {
 	next := 0
 	for i, s := range []Source{base, frag} {
 		rs = append(rs, mustResolve(t, s))
-		r, xs, err := ingest.Trace(s.Text, s.Values, next, -1)
+		r, xs, _, err := ingest.Trace(s.Text, s.Values, next, -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,7 +248,7 @@ func TestFidelityFailsOnAnInjectedChange(t *testing.T) {
 		refs(map[string]ingest.Reference{"team": ref(provider.KindString), "rbac": ref(provider.KindBoolean)}),
 		map[string]provider.Value{"team": value(t, provider.KindString, compileSecret), "rbac": value(t, provider.KindBoolean, true)})
 	real, trace, ts := passes(t, frag)
-	if _, _, err := attribute(real, trace, ts); err != nil {
+	if _, _, err := attribute(real, trace, ts, nil); err != nil {
 		t.Fatalf("control: the unchanged passes fail: %v", err)
 	}
 	for name, change := range map[string]func(*yaml.Node){
@@ -266,7 +266,7 @@ func TestFidelityFailsOnAnInjectedChange(t *testing.T) {
 		},
 		"an untraced leaf changed": func(m *yaml.Node) { child(m, "install").Content[1].Value = "/dev/injected" },
 	} {
-		_, _, err := attribute(real, mutate(t, trace, change), ts)
+		_, _, err := attribute(real, mutate(t, trace, change), ts, nil)
 		var e *Error
 		if !errors.As(err, &e) || e.Rule != RuleFidelity {
 			t.Errorf("%s: got %v, want a fidelity refusal", name, err)
@@ -284,11 +284,11 @@ func TestFidelityFailsOnAnInjectedChange(t *testing.T) {
 	}
 	planted := func(m *yaml.Node) { child(m, "install").Content[1].Value = standIn }
 	var fe *Error
-	if _, _, err := attribute(mutate(t, real, planted), mutate(t, trace, planted), ts); !errors.As(err, &fe) || fe.Rule != RuleFidelity {
+	if _, _, err := attribute(mutate(t, real, planted), mutate(t, trace, planted), ts, nil); !errors.As(err, &fe) || fe.Rule != RuleFidelity {
 		t.Errorf("a tracer in an unchanged leaf: got %v, want a fidelity refusal", err)
 	}
 	// A flip pass is held to the trace pass's shape the same way.
-	_, hosts, _ := attribute(real, trace, ts)
+	_, hosts, _ := attribute(real, trace, ts, nil)
 	traceLeaves, err := leaves(trace, hosts)
 	if err != nil {
 		t.Fatal(err)

@@ -17,7 +17,7 @@ import (
 
 func traced(t *testing.T, s Sanitized, values map[string]provider.Value, first, flip int) (string, []Tracer) {
 	t.Helper()
-	r, ts, err := Trace(s, values, first, flip)
+	r, ts, _, err := Trace(s, values, first, flip)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestTraceRefusals(t *testing.T) {
 		"integer":       {map[string]provider.Value{"app/str": good["app/str"], "app/int": value(t, provider.KindInteger, 61001)}, 0, -1, RuleTraceIndistinct, "doc[0]/machine/nodeLabels/i"},
 		"id past 999":   {good, 999, -1, RuleTraceIndistinct, "doc[0]/machine/nodeLabels/i"},
 	} {
-		r, ts, err := Trace(s, c.values, c.first, c.flip)
+		r, ts, _, err := Trace(s, c.values, c.first, c.flip)
 		var ref *Refusal
 		if !errors.As(err, &ref) || ref.Rule != c.rule || r.b != nil || ts != nil {
 			t.Errorf("%s: got %v, want a %s refusal and nothing traced", name, err, c.rule)
@@ -193,14 +193,73 @@ func TestTraceRefusals(t *testing.T) {
 			t.Errorf("%s: the refusal quotes the value", name)
 		}
 	}
-	if _, _, err := Trace(Sanitized{}, nil, 0, -1); !errors.Is(err, ErrZeroSanitized) {
+	if _, _, _, err := Trace(Sanitized{}, nil, 0, -1); !errors.Is(err, ErrZeroSanitized) {
 		t.Errorf("the zero Sanitized: %v", err)
 	}
 	// A flip pass must name a boolean tracer of this stream.
 	for _, flip := range []int{0, 1, 2} {
-		if r, ts, err := Trace(s, good, 0, flip); err == nil || r.b != nil || ts != nil {
+		if r, ts, _, err := Trace(s, good, 0, flip); err == nil || r.b != nil || ts != nil {
 			t.Errorf("flip %d of a stream without booleans: %v", flip, err)
 		}
+	}
+	// An empty mapping has no leaf to carry a stand-in, so nothing could show where it went.
+	m := sanitizedOf(t, "machine:\n  nodeAnnotations: !bwref app/map\n", Declarations{References: map[string]Reference{"app/map": str(provider.KindMapping)}})
+	_, ts, _, err := Trace(m, map[string]provider.Value{"app/map": value(t, provider.KindMapping, map[string]any{})}, 0, -1)
+	var ref *Refusal
+	if !errors.As(err, &ref) || ref.Rule != RuleTraceIndistinct || ts != nil || !reflect.DeepEqual(ref.Paths, []string{"doc[0]/machine/nodeAnnotations"}) {
+		t.Errorf("an empty mapping: %v, want a trace-indistinct refusal at its path", err)
+	}
+}
+
+// A mapping reference's tracers name their member by key and by position in key order, an empty
+// key included; a scalar reference's tracer is no member (compilation.md §8.2).
+func TestTraceMembers(t *testing.T) {
+	text := "machine:\n  nodeLabels:\n    s: !bwref app/str\n  nodeAnnotations: !bwref app/map\n"
+	decl := Declarations{References: map[string]Reference{"app/str": str(provider.KindString), "app/map": str(provider.KindMapping)}}
+	_, ts := traced(t, sanitizedOf(t, text, decl), map[string]provider.Value{
+		"app/str": value(t, provider.KindString, resolveSecret),
+		"app/map": value(t, provider.KindMapping, map[string]any{"": "empty-" + resolveSecret, "b": "bee-" + resolveSecret}),
+	}, 0, -1)
+	type row struct {
+		leaf   string
+		member int
+	}
+	var got []row
+	for _, x := range ts {
+		got = append(got, row{x.Leaf(), x.Member()})
+	}
+	if want := []row{{"", -1}, {"", 0}, {"b", 1}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("members %v, want %v", got, want)
+	}
+}
+
+// Two tracers are indistinct when either carries the other's stand-in, as two short values of one
+// shape do: their stand-ins hold no id. A stand-in without an id is carried only by a leaf equal
+// to it, so a longer stand-in holding its letters is told apart (compilation.md §8.1).
+func TestTracerIndistinct(t *testing.T) {
+	text := "machine:\n  nodeLabels:\n    a: !bwref app/a\n    b: !bwref app/b\n    c: !bwref app/c\n    s: !bwref app/str\n"
+	decl := Declarations{References: map[string]Reference{
+		"app/a": str(provider.KindString), "app/b": str(provider.KindString), "app/c": str(provider.KindString), "app/str": str(provider.KindString),
+	}}
+	_, ts := traced(t, sanitizedOf(t, text, decl), map[string]provider.Value{
+		"app/a": value(t, provider.KindString, "abc"), "app/b": value(t, provider.KindString, "def"),
+		"app/c": value(t, provider.KindString, "ab1"), "app/str": value(t, provider.KindString, resolveSecret),
+	}, 0, -1)
+	var ref *Refusal
+	if err := ts[0].Indistinct(ts[1]); !errors.As(err, &ref) || ref.Rule != RuleTraceIndistinct ||
+		!reflect.DeepEqual(ref.Paths, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/nodeLabels/b"}) {
+		t.Errorf("two equal short stand-ins: %v, want trace-indistinct at both paths", err)
+	}
+	for _, pair := range [][2]int{{0, 2}, {0, 3}, {3, 0}, {2, 3}} {
+		if err := ts[pair[0]].Indistinct(ts[pair[1]]); err != nil {
+			t.Errorf("tracers %v: %v, want them distinct", pair, err)
+		}
+	}
+	// A base64-encoded string's raw stand-in is compared too, not only its placed encoding.
+	s := Tracer{&tracer{kind: TraceString, text: &standInText{value: "x0x"}}}
+	b := Tracer{&tracer{kind: TraceBytes, text: &standInText{value: "eXgweHg=", raw: "yx0xy"}}}
+	if err := s.Indistinct(b); !errors.As(err, &ref) || ref.Rule != RuleTraceIndistinct {
+		t.Errorf("a stand-in held by a raw one: %v, want trace-indistinct", err)
 	}
 }
 
@@ -209,8 +268,10 @@ func TestTraceRefusals(t *testing.T) {
 // a generated base, compilation.md §8.1); a base64-encoded string's encoding, or a leaf decoding
 // to its stand-in; an integer exactly; a boolean never (it is attributed by flipping).
 func TestTracerCarried(t *testing.T) {
-	text := "machine:\n  nodeLabels:\n    s: !bwref app/str\n    k: !bwref app/key\n    e: !bwref app/enc\n    i: !bwref app/int\n    b: !bwref app/bool\n"
+	text := "machine:\n  nodeLabels:\n    s: !bwref app/str\n    k: !bwref app/key\n    e: !bwref app/enc\n    i: !bwref app/int\n    b: !bwref app/bool\n" +
+		"    h: !bwref app/short\n    g: !bwref app/shortenc\n"
 	decl := Declarations{References: map[string]Reference{
+		"app/short": str(provider.KindString), "app/shortenc": {Kind: provider.KindString, Version: 1, Encoding: "base64"},
 		"app/str": str(provider.KindString), "app/key": str(provider.KindString),
 		"app/enc": {Kind: provider.KindString, Version: 1, Encoding: "base64"},
 		"app/int": str(provider.KindInteger), "app/bool": str(provider.KindBoolean),
@@ -221,9 +282,10 @@ func TestTracerCarried(t *testing.T) {
 	_, ts := traced(t, sanitizedOf(t, text, decl), map[string]provider.Value{
 		"app/str": value(t, provider.KindString, resolveSecret), "app/key": value(t, provider.KindString, key),
 		"app/enc": value(t, provider.KindString, resolveSecret), "app/int": value(t, provider.KindInteger, 5),
-		"app/bool": value(t, provider.KindBoolean, true),
+		"app/bool": value(t, provider.KindBoolean, true), "app/short": value(t, provider.KindString, "abc"),
+		"app/shortenc": value(t, provider.KindString, "abc"),
 	}, 0, -1)
-	if len(ts) != 5 {
+	if len(ts) != 7 {
 		t.Fatalf("%d tracers", len(ts))
 	}
 	keyStand := standIn(key, 1)
@@ -254,6 +316,15 @@ func TestTracerCarried(t *testing.T) {
 		{3, "61003", true},
 		{3, "610030", false},
 		{4, "true", false},
+		// a stand-in too short for an id is carried by an equal leaf only: its letters are in
+		// every other stand-in
+		{5, "xxx", true},
+		{5, "a xxx", false},
+		{5, standIn(resolveSecret, 0), false},
+		{6, base64.StdEncoding.EncodeToString([]byte("xxx")), true},
+		{6, "xxx", true},
+		{6, base64.StdEncoding.EncodeToString([]byte(encRaw)), false},
+		{6, encRaw, false},
 	} {
 		if got := ts[c.tracer].Carried(c.leaf); got != c.want {
 			t.Errorf("tracer %d Carried(leaf %d bytes) = %v, want %v", c.tracer, len(c.leaf), got, c.want)

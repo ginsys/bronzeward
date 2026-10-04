@@ -2,6 +2,7 @@ package compile
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -16,7 +17,9 @@ func origin(s Source, fragment int) Origin {
 }
 
 // Each occurrence has one record per output path it reached, naming its reference, version,
-// encoding, mapping member and source revision, digest and path (compilation.md §8.2).
+// encoding, mapping member and source revision, digest and path (compilation.md §8.2). A member is
+// named by its position in key order, and a path token holding its key is redacted: the key is a
+// value the provider holds (§4.2).
 func TestProvenanceRecords(t *testing.T) {
 	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
 	frag := source(t, "machine:\n  nodeLabels:\n    s: &a !bwref app/str\n    t: *a\n    e: !bwref app/enc\n"+
@@ -29,7 +32,7 @@ func TestProvenanceRecords(t *testing.T) {
 		map[string]provider.Value{
 			"app/str":  value(t, provider.KindString, compileSecret),
 			"app/bool": value(t, provider.KindBoolean, false),
-			"app/map":  value(t, provider.KindMapping, map[string]any{"one": "first-" + compileSecret, "two": "second-" + compileSecret}),
+			"app/map":  value(t, provider.KindMapping, map[string]any{"key-one-7c": "first-" + compileSecret, "key-two-7c": "second-" + compileSecret}),
 			"app/enc":  value(t, provider.KindString, compileSecret),
 		})
 	c := compiled(t, Input{Base: base, Fragments: []Source{frag}, Mode: ModeMetal})
@@ -46,15 +49,18 @@ func TestProvenanceRecords(t *testing.T) {
 	fo := origin(frag, 0)
 	labels, annotations := "doc[0]/machine/nodeLabels/", "doc[0]/machine/nodeAnnotations"
 	want := []Record{
-		{Reference: "app/str", Version: 1, Source: fo, SourcePath: labels + "s", Output: labels + "s"},
-		{Reference: "app/str", Version: 1, Source: fo, SourcePath: labels + "s", Output: labels + "t"},
-		{Reference: "app/enc", Version: 2, Encoding: "base64", Source: fo, SourcePath: labels + "e", Output: labels + "e"},
-		{Reference: "app/map", Version: 3, Leaf: "one", Source: fo, SourcePath: annotations, Output: annotations + "/one"},
-		{Reference: "app/map", Version: 3, Leaf: "two", Source: fo, SourcePath: annotations, Output: annotations + "/two"},
-		{Reference: "app/bool", Version: 1, Source: fo, SourcePath: "doc[0]/machine/features/rbac", Output: "doc[0]/machine/features/rbac"},
+		{Reference: "app/str", Version: 1, Member: -1, Source: fo, SourcePath: labels + "s", Output: labels + "s"},
+		{Reference: "app/str", Version: 1, Member: -1, Source: fo, SourcePath: labels + "s", Output: labels + "t"},
+		{Reference: "app/enc", Version: 2, Encoding: "base64", Member: -1, Source: fo, SourcePath: labels + "e", Output: labels + "e"},
+		{Reference: "app/map", Version: 3, Member: 0, Source: fo, SourcePath: annotations, Output: annotations + "/<redacted>"},
+		{Reference: "app/map", Version: 3, Member: 1, Source: fo, SourcePath: annotations, Output: annotations + "/<redacted>"},
+		{Reference: "app/bool", Version: 1, Member: -1, Source: fo, SourcePath: "doc[0]/machine/features/rbac", Output: "doc[0]/machine/features/rbac"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("records\n%+v\nwant\n%+v", got, want)
+	}
+	if s := fmt.Sprintf("%+v", c.Provenance()); strings.Contains(s, "key-one-7c") || strings.Contains(s, "key-two-7c") {
+		t.Errorf("the records hold a mapping key: %s", s)
 	}
 	maps := 0
 	for _, o := range c.Reproduction() {
@@ -64,6 +70,40 @@ func TestProvenanceRecords(t *testing.T) {
 	}
 	if maps != 1 {
 		t.Errorf("the mapping reference is %d reproduction occurrences, want one", maps)
+	}
+}
+
+// A source path token that holds a resolved value, here a key equal to its own reference's value,
+// is redacted in the records and the reproduction dependencies alike (compilation.md §8.3).
+func TestProvenanceRedactsSourcePaths(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	const six = "ab12xy"
+	frag := source(t, "machine:\n  nodeLabels:\n    "+six+": !bwref app/six\n", strRef("app/six"),
+		map[string]provider.Value{"app/six": value(t, provider.KindString, six)})
+	c := compiled(t, Input{Base: base, Fragments: []Source{frag}, Mode: ModeMetal})
+	const at = "doc[0]/machine/nodeLabels/<redacted>"
+	found := 0
+	for _, r := range c.Provenance() {
+		if r.Reference == "app/six" {
+			found++
+			if r.SourcePath != at || r.Output != at {
+				t.Errorf("record %+v, want %s at both paths", r, at)
+			}
+		}
+	}
+	for _, o := range c.Reproduction() {
+		if o.Reference == "app/six" {
+			found++
+			if o.Path != at {
+				t.Errorf("reproduction occurrence at %s, want %s", o.Path, at)
+			}
+		}
+	}
+	if found != 2 {
+		t.Errorf("%d rows for the reference, want one record and one occurrence", found)
+	}
+	if s := fmt.Sprintf("%+v %+v", c.Provenance(), c.Reproduction()); strings.Contains(s, six) {
+		t.Errorf("the records hold the value: %s", s)
 	}
 }
 
@@ -90,17 +130,24 @@ func TestProvenanceOverrides(t *testing.T) {
 	f2 := source(t, "machine:\n  nodeLabels:\n    unrelated: plain\n", ingest.Declarations{}, nil)
 	c := compiled(t, Input{Base: base, Fragments: []Source{f0, f1, f2}, Mode: ModeMetal})
 	by := origin(f1, 1)
+	var got []Record
 	for _, r := range c.Provenance() {
-		switch r.Reference {
-		case "app/a", "app/b", "app/c", "app/flag":
-			if r.Output != "" || r.OverriddenBy == nil || *r.OverriddenBy != by || r.Source != origin(f0, 0) {
-				t.Errorf("%s: output %q overridden by %+v, want fragment 1", r.Reference, r.Output, r.OverriddenBy)
-			}
-		case "app/keep", "app/other":
-			if r.Output == "" || r.OverriddenBy != nil {
-				t.Errorf("%s: output %q overridden by %+v, want it in the output", r.Reference, r.Output, r.OverriddenBy)
-			}
+		if !r.Source.Base {
+			got = append(got, r)
 		}
+	}
+	labels := "doc[0]/machine/nodeLabels/"
+	rbac := "doc[0]/machine/features/rbac"
+	want := []Record{
+		{Reference: "app/a", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "a", OverriddenBy: &by},
+		{Reference: "app/b", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "b", OverriddenBy: &by},
+		{Reference: "app/c", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "c", OverriddenBy: &by},
+		{Reference: "app/keep", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "keep", Output: labels + "keep"},
+		{Reference: "app/flag", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: rbac, OverriddenBy: &by},
+		{Reference: "app/other", Version: 1, Member: -1, Source: origin(f1, 1), SourcePath: labels + "b", Output: labels + "b"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("records\n%+v\nwant\n%+v", got, want)
 	}
 	effective := map[string]bool{}
 	for _, d := range c.Effective() {
@@ -117,8 +164,7 @@ func TestProvenanceOverrides(t *testing.T) {
 			reproduction = append(reproduction, o)
 		}
 	}
-	labels := "doc[0]/machine/nodeLabels/"
-	want := []Occurrence{
+	wantOcc := []Occurrence{
 		{Reference: "app/a", Version: 1, Source: origin(f0, 0), Path: labels + "a"},
 		{Reference: "app/b", Version: 1, Source: origin(f0, 0), Path: labels + "b"},
 		{Reference: "app/c", Version: 1, Source: origin(f0, 0), Path: labels + "c"},
@@ -126,8 +172,8 @@ func TestProvenanceOverrides(t *testing.T) {
 		{Reference: "app/flag", Version: 1, Source: origin(f0, 0), Path: "doc[0]/machine/features/rbac"},
 		{Reference: "app/other", Version: 1, Source: origin(f1, 1), Path: labels + "b"},
 	}
-	if !reflect.DeepEqual(reproduction, want) {
-		t.Errorf("reproduction\n%+v\nwant\n%+v", reproduction, want)
+	if !reflect.DeepEqual(reproduction, wantOcc) {
+		t.Errorf("reproduction\n%+v\nwant\n%+v", reproduction, wantOcc)
 	}
 }
 
