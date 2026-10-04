@@ -263,7 +263,9 @@ func keys(b []byte, hosts map[string]string) ([]leaf, error) {
 }
 
 // hostsOf finds a composed trace stream's identified embedded documents: every string that is
-// exactly a document the trace pass wrote (ingest.Host), by path.
+// exactly a document the trace pass wrote (ingest.Host), by path. Documents of two formats can
+// trace to the same text (a boolean has no stand-in), and the text cannot tell them apart, so
+// that fails closed.
 func hostsOf(b []byte, hs []ingest.Host) (map[string]string, error) {
 	hosts := map[string]string{}
 	err := ingest.WalkLeaves(b, nil, func(p ingest.Path, n *yaml.Node) error {
@@ -271,10 +273,14 @@ func hostsOf(b []byte, hs []ingest.Host) (map[string]string, error) {
 			return nil
 		}
 		for _, h := range hs {
-			if f := h.HostFormat(n.Value); f != "" {
-				hosts[p.String()] = f
-				return nil
+			f := h.HostFormat(n.Value)
+			if f == "" {
+				continue
 			}
+			if g, ok := hosts[p.String()]; ok && g != f {
+				return fidelity()
+			}
+			hosts[p.String()] = f
 		}
 		return nil
 	})

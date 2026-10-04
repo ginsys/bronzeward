@@ -738,8 +738,9 @@ For each machine:
    multi-document configuration (SR §8).
 6. **Trace** the composition for provenance (§8.1).
 7. **Check the output**: no string scalar holds reserved text (§5.5), and no
-   resolved `string` value of six bytes or more, in its stored or placed form,
-   appears as an exact copy at an output leaf that provenance does not attribute
+   resolved `string` value's stored or placed form of six bytes or more (each
+   form measured by its own length, so a short value's longer base64 placed
+   form counts) appears as an exact copy at an output leaf that provenance does not attribute
    to its reference; and no ordinary fragment overrode a reference of the
    import base (choice §16.20). A copy is refused **(choice §16.21)** and
    reported by path only, as a source-side exposure: the value was already
@@ -832,7 +833,8 @@ The implementation settles seven points SP left open:
   paths, so an identified embedded document is found in the output by exact
   match of the text the trace pass wrote for it, whether or not a reference
   stands in it, so that §6 step 7 sees its leaves. A document met on one side
-  only fails closed.
+  only fails closed, and so does a text that matches documents of two formats
+  (a boolean has no stand-in, so a JSON and a YAML document can trace alike).
 - **Short stand-ins.** A stand-in with no line long enough for the `zq` head
   holds only `x`, `X`, `0` and punctuation, so every longer stand-in of the
   same shape holds it. Such a stand-in is found only where a leaf, or a leaf's
@@ -940,9 +942,10 @@ with the stand-in format **(choice §16.22)**.
   canonical re-encoding (§6 step 7), or that
   contains one of them of six bytes or more, written `<redacted>`. Integer and
   boolean values are not looked for, as in the value means. The rendered path
-  is checked too, as written, unescaped and in each piece between separators,
-  since escaping can spell a value no token holds and a value can span tokens;
-  such a path keeps its document only. A path that does
+  is checked too, as written and unescaped, for a value of six bytes or more
+  anywhere and for any value as a run of whole tokens, since escaping can
+  spell a value no token holds and a value can span tokens; such a path keeps
+  its document only. A path that does
   not parse, or any path of a compilation whose pinned values do not all
   decode, is written `<redacted>` whole.
 - **Paired diffs.** Where a diff shows a base leaf beside a redacted output

@@ -138,6 +138,22 @@ func TestProvenanceRedactsRenderedPaths(t *testing.T) {
 	}
 }
 
+// A value shorter than six bytes is looked for as whole tokens, so one spanning a run of tokens is
+// not shown either.
+func TestProvenanceRedactsShortSpanningValues(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	frag := source(t, "cluster:\n  inlineManifests:\n    - name: y\n      contents: |\n        a:\n          b: !bwref app/s\n",
+		ingest.Declarations{
+			References: map[string]ingest.Reference{"app/s": ref(provider.KindString)},
+			Embedded:   []ingest.Embedded{{Path: "doc[0]/cluster/inlineManifests/0/contents", Format: "yaml"}},
+		},
+		map[string]provider.Value{"app/s": value(t, provider.KindString, "a/b")})
+	out := compiled(t, Input{Base: base, Fragments: []Source{frag}, Mode: ModeMetal})
+	if s := fmt.Sprintf("%+v %+v", out.Provenance(), out.Reproduction()); strings.Contains(s, "a/b") {
+		t.Error("the records hold the value")
+	}
+}
+
 // Two occurrences whose source paths redact alike are still two reproduction dependencies.
 func TestReproductionKeepsRedactedOccurrences(t *testing.T) {
 	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)

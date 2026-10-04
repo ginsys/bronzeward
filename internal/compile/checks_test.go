@@ -330,6 +330,21 @@ func TestCompileRefusesACanonicalCopy(t *testing.T) {
 	}
 }
 
+// A base64-encoded reference's placed form is looked for by its own length: a stored value of
+// five bytes is placed as eight.
+func TestCompileRefusesALongPlacedFormOfAShortValue(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	const stored, placed = "abcde", "YWJjZGU="
+	enc := source(t, "machine:\n  nodeAnnotations:\n    e: !bwref app/e\n",
+		refs(map[string]ingest.Reference{"app/e": {Kind: provider.KindString, Version: 1, Encoding: "base64"}}),
+		map[string]provider.Value{"app/e": value(t, provider.KindString, stored)})
+	lit := source(t, "machine:\n  nodeAnnotations:\n    copy: "+placed+"\n", ingest.Declarations{}, nil)
+	e := refusal(t, Input{Base: base, Fragments: []Source{enc, lit}, Mode: ModeMetal}, RuleCopy, stored, placed)
+	if !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeAnnotations/copy"}) {
+		t.Errorf("refused at %v, want the copy's path", e.Paths)
+	}
+}
+
 // The floor applies to each form's own length: base64 decoding skips line breaks, so a canonical
 // re-encoding can be shorter than six bytes, which is not looked for as a short value is not, or
 // empty, which would otherwise match every leaf.

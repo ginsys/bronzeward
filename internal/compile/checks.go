@@ -99,7 +99,7 @@ func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error 
 			x = m[t.Leaf()]
 		}
 		s, ok := x.(string)
-		if !ok || len(s) < copyFloor {
+		if !ok {
 			continue
 		}
 		add(s)
