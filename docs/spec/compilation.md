@@ -1140,8 +1140,20 @@ re-ran SR's 15 cases on both of SR's bases: the machinery's composition of the
 literal form equals talosctl's byte for byte with the same validation verdict
 in every case, and the compiler on the tag form reaches SR's tag/early verdict
 in every case except the two §5.5 refuses at authoring by contract (a quoted
-look-alike and a reference inside unidentified embedded text). The SP half is
-not yet run, so the condition is not yet met.
+look-alike and a reference inside unidentified embedded text).
+
+**SP half measured; the condition is met.** The same gate re-ran SP's 28 cases
+on both bases. The machinery's composition equals talosctl's byte for byte
+with the same verdict in every composed case. The compiler reaches SP's
+outcome, effective and overridden references at the case's versions and
+message outcomes in every case except four refused by contract: the two §5.5
+refuses at authoring, and `duplicate-literal` and `map-partial`, exact copies
+(choice §16.21; the latter's literal writes a mapping reference's key). With
+the case's first referencing fragments moved into the import base by marks,
+the remaining fragments reach the same bytes, or are refused where they
+override what moved (choice §16.20). SP's oracle finds no case value and no
+base secret in anything the compiler renders. The compiler process's leak scan
+over publications is §15's, not this condition's.
 
 The executor's Talos client is not selected here. E3 shows the same RPC
 outcomes through both implementations (E3 §4.3); the choice belongs to
@@ -1472,11 +1484,13 @@ Evidence gaps this contract carries rather than closes:
 
 **Composition, provenance and redaction**
 
-- **Machinery composition parity**: measured for SR's matrix only, on both
-  of its bases (§10.1, machinery gate); SP's matrix through the compiler's path
-  is not run, so the §10.1 condition is still open. The gate's bases pass
-  through ingestion, so their schema secrets are references resolved by the
-  compiler; SR's case references stand in fragments only, never in a base.
+- **Machinery composition parity**: measured for SR's and SP's matrices on
+  both of SR's bases (§10.1, machinery gate). The gate's bases pass through
+  ingestion, so their schema secrets are references resolved by the compiler;
+  case references reach a base only by marks on a composition the compiler
+  produced, never in a hand-written import base. SP's pair controls compared
+  its tool's diffs; bronzeward has no diff yet, so the pairs check versions
+  and output paths only.
 - **Kinds and cases not run**: durations, IP and CIDR fields, a list as a
   target, list-element overrides by selector, more than two fragments, worker
   configurations, a tag name that is valid base64 or a YAML 1.1 boolean word,
