@@ -46,7 +46,7 @@ func answer(t *testing.T, data map[string]any) Answer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Answer{Status: http.StatusOK, Date: dateText, Body: body}
+	return Answer{Status: http.StatusOK, Date: dateText, Body: NewBody(body)}
 }
 
 func kvDep(version int64) Dependency {
@@ -82,13 +82,13 @@ func TestClassify(t *testing.T) {
 		{"307", kvDep(1), func(*testing.T) Answer { return Answer{Status: 307} }, Unknown, Unreadable},
 		{"204", kvDep(1), func(*testing.T) Answer { return Answer{Status: 204} }, Unknown, Unreadable},
 		{"500", transitDep(1), func(*testing.T) Answer { return Answer{Status: 500} }, Unknown, Unreadable},
-		{"not JSON", kvDep(1), func(*testing.T) Answer { return Answer{Status: 200, Date: dateText, Body: []byte("{")} }, Unknown, Unreadable},
+		{"not JSON", kvDep(1), func(*testing.T) Answer { return Answer{Status: 200, Date: dateText, Body: NewBody([]byte("{"))} }, Unknown, Unreadable},
 		{"trailing data", kvDep(1), func(t *testing.T) Answer {
 			a := answer(t, kv())
-			a.Body = append(a.Body, []byte("{}")...)
+			a.Body = NewBody(append(a.Body.Bytes(), []byte("{}")...))
 			return a
 		}, Unknown, Unreadable},
-		{"no data", transitDep(1), func(*testing.T) Answer { return Answer{Status: 200, Date: dateText, Body: []byte(`{}`)} }, Unknown, Unreadable},
+		{"no data", transitDep(1), func(*testing.T) Answer { return Answer{Status: 200, Date: dateText, Body: NewBody([]byte(`{}`))} }, Unknown, Unreadable},
 
 		// KV v2.
 		{"kv retained", kvDep(1), func(t *testing.T) Answer { return answer(t, kv()) }, Retained, None},
@@ -325,7 +325,18 @@ func TestParseDate(t *testing.T) {
 	if got, ok := ParseDate(dateText); !ok || !got.Equal(date) || got.Location() != time.UTC {
 		t.Fatalf("ParseDate(%q) = %v, %v; want %v, true", dateText, got, ok, date)
 	}
-	for _, s := range []string{"", "soon", "Thu, 24 Sep 2026 19:51:17.500 GMT", "Thu, 24 Sep 2026 19:51:17.000000001 GMT"} {
+	// RFC 9110 §5.6.7's obsolete forms are still a recipient's to accept.
+	for _, s := range []string{"Thursday, 24-Sep-26 19:51:17 GMT", "Thu Sep 24 19:51:17 2026"} {
+		if got, ok := ParseDate(s); !ok || !got.Equal(date) {
+			t.Errorf("ParseDate(%q) = %v, %v; want %v, true", s, got, ok, date)
+		}
+	}
+	for _, s := range []string{
+		"", "soon", "Thu, 24 Sep 2026 19:51:17.500 GMT", "Thu, 24 Sep 2026 19:51:17.000000001 GMT",
+		// time.Parse drops digits past the ninth and accepts a zero fraction and a comma.
+		"Thu, 24 Sep 2026 19:51:17.0000000001 GMT", "Thu, 24 Sep 2026 19:51:17.000 GMT", "Thu, 24 Sep 2026 19:51:17,500 GMT",
+		"Thursday, 24-Sep-26 19:51:17.000 GMT", "Thu Sep 24 19:51:17.000 2026",
+	} {
 		if got, ok := ParseDate(s); ok {
 			t.Errorf("ParseDate(%q) = %v, true; want refused", s, got)
 		}
@@ -335,25 +346,48 @@ func TestParseDate(t *testing.T) {
 // An answer's body never renders and never marshals: an error answer may echo what it was sent.
 func TestAnswerHidesBody(t *testing.T) {
 	const canary = "bw-canary-7f3a"
-	a := Answer{Status: http.StatusForbidden, Date: dateText, Body: []byte(`{"errors":["` + canary + `"]}`)}
+	a := Answer{Status: http.StatusForbidden, Date: dateText, Body: NewBody([]byte(`{"errors":["` + canary + `"]}`))}
 	nested := struct{ A Answer }{a}
-	for _, f := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x"} {
-		for _, v := range []any{a, &a, nested} {
-			if s := fmt.Sprintf(f, v); strings.Contains(s, canary) || strings.Contains(s, fmt.Sprintf("%x", canary)) {
-				t.Errorf("%s of %T renders the body: %s", f, v, s)
+	// Reflection prints an unexported field without calling its methods; only the pointer holding
+	// the bytes keeps them out.
+	hidden := struct{ a Answer }{a}
+	hiddenBody := struct{ b Body }{a.Body}
+	renders := []string{canary, fmt.Sprintf("%x", canary), fmt.Sprint([]byte(canary))[1:20], fmt.Sprintf("%#v", []byte(canary))[7:30]}
+	for _, f := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%d"} {
+		for _, v := range []any{a, &a, a.Body, nested, hidden, &hidden, hiddenBody, []Answer{a}, map[string]Answer{"k": a}} {
+			s := fmt.Sprintf(f, v)
+			for _, r := range renders {
+				if strings.Contains(s, r) {
+					t.Errorf("%s of %T renders the body: %s", f, v, s)
+				}
 			}
 		}
 	}
 	if s := fmt.Sprint(a); !strings.Contains(s, "403") {
 		t.Errorf("an answer renders %q; want its status", s)
 	}
-	for _, v := range []any{a, &a, nested} {
+	for _, v := range []any{a, &a, a.Body, nested} {
 		if b, err := json.Marshal(v); err == nil {
 			t.Errorf("json.Marshal(%T) = %s; want refused", v, b)
 		}
 	}
+	if b, err := json.Marshal(hidden); err != nil || strings.Contains(string(b), canary) {
+		t.Errorf("json.Marshal of an unexported answer = %s, %v", b, err)
+	}
 	if b, err := a.MarshalText(); err == nil {
 		t.Errorf("MarshalText = %s; want refused", b)
+	}
+	if b, err := a.Body.MarshalText(); err == nil {
+		t.Errorf("Body.MarshalText = %s; want refused", b)
+	}
+	// fmt prefers Format, so String and GoString are reached only by a direct call.
+	for name, s := range map[string]string{"String": a.Body.String(), "GoString": a.Body.GoString()} {
+		if strings.Contains(s, canary) {
+			t.Errorf("Body.%s leaks the body", name)
+		}
+	}
+	if string(a.Body.Bytes()) != `{"errors":["`+canary+`"]}` || NewBody(nil).Bytes() != nil || (Body{}).Bytes() != nil {
+		t.Error("Bytes does not return what NewBody held")
 	}
 }
 

@@ -42,7 +42,7 @@ func TestMetadataAsksByName(t *testing.T) {
 	if q := rec.last(); q.method != http.MethodGet || q.path != "/v1/secret/metadata/"+p.String() || q.token != testToken || len(q.body) != 0 {
 		t.Fatalf("sent %s %s", q.method, q.path)
 	}
-	if a.Status != 200 || a.Date != metaDate || string(a.Body) != body || a.Unreachable {
+	if a.Status != 200 || a.Date != metaDate || string(a.Body.Bytes()) != body || a.Unreachable {
 		t.Fatalf("answer %+v", a)
 	}
 	a, err = m.Transit(t.Context(), testArtifactKey)
@@ -52,7 +52,7 @@ func TestMetadataAsksByName(t *testing.T) {
 	if q := rec.last(); q.method != http.MethodGet || q.path != "/v1/transit/keys/"+testArtifactKey || len(q.body) != 0 {
 		t.Fatalf("sent %s %s", q.method, q.path)
 	}
-	if a.Status != 200 || a.Date != metaDate || string(a.Body) != body {
+	if a.Status != 200 || a.Date != metaDate || string(a.Body.Bytes()) != body {
 		t.Fatalf("answer %+v", a)
 	}
 }
@@ -106,8 +106,8 @@ func TestMetadataBodyCapped(t *testing.T) {
 		io.WriteString(w, `{"data":{"pad":"`+strings.Repeat("x", maxResponse)+`"}}`)
 	})
 	a, err := m.Transit(t.Context(), testArtifactKey)
-	if err != nil || a.Status != 200 || a.Body != nil {
-		t.Fatalf("status %d, %d body bytes, %v", a.Status, len(a.Body), err)
+	if err != nil || a.Status != 200 || a.Body.Bytes() != nil {
+		t.Fatalf("status %d, %d body bytes, %v", a.Status, len(a.Body.Bytes()), err)
 	}
 	if r := classify.Classify(classify.Dependency{Provider: classify.Transit, Object: testArtifactKey, Version: 1}, a); r.Reason != classify.Unreadable {
 		t.Fatalf("classified %s/%q", r.Class, r.Reason)

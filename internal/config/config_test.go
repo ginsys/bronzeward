@@ -299,9 +299,10 @@ func TestProviderBlock(t *testing.T) {
 	}
 }
 
-// Two spellings of one file are one file: the server opens each relative to its working
-// directory, as Load resolves them here.
-func TestLoadRefusesTokenFileAliases(t *testing.T) {
+// A token file is named by one spelling only: an absolute path in clean form. Another spelling of
+// a file another identity names would pass a comparison of the text, and folding `..` by text
+// would join two files that a directory symlink keeps apart, so neither is accepted.
+func TestLoadRefusesUncleanTokenFilePaths(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -310,17 +311,24 @@ func TestLoadRefusesTokenFileAliases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "provider.compilerTokenFile and provider.metadataTokenFile name the same file"
+	const want = "provider.metadataTokenFile must be an absolute path in clean form"
 	for name, alias := range map[string]string{
-		"dot":          "/etc/bronzeward/./openbao-compiler.token",
-		"double slash": "/etc//bronzeward/openbao-compiler.token",
-		"dot-dot":      "/etc/bronzeward/x/../openbao-compiler.token",
-		"relative":     rel,
+		"dot":           "/etc/bronzeward/./openbao-compiler.token",
+		"double slash":  "/etc//bronzeward/openbao-compiler.token",
+		"dot-dot":       "/etc/bronzeward/x/../openbao-compiler.token",
+		"symlinked dir": "/etc/bronzeward/current/../openbao-compiler.token",
+		"trailing dot":  "/etc/bronzeward/openbao-metadata.token/.",
+		"relative":      rel,
+		"bare name":     "openbao-metadata.token",
 	} {
 		block := strings.Replace(providerBlock, "/etc/bronzeward/openbao-metadata.token", strconv.Quote(alias), 1)
 		if _, err := Load(strings.NewReader(base + authBlock + block + ingestionBlock)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s (%s): %v; want an error naming %q", name, alias, err, want)
 		}
+	}
+	// The optional report token file is held to the same form when given.
+	if _, err := Load(strings.NewReader(base + authBlock + providerBlock + "  reportTokenFile: openbao-report.token\n" + ingestionBlock)); err == nil || !strings.Contains(err.Error(), "provider.reportTokenFile must be an absolute path in clean form") {
+		t.Errorf("relative report token file: %v", err)
 	}
 }
 

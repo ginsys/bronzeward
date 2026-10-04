@@ -65,5 +65,5 @@ func (c *client) get(ctx context.Context, path string) classify.Answer {
 	if len(body) > maxResponse {
 		body = nil
 	}
-	return classify.Answer{Status: resp.StatusCode, Date: resp.Header.Get("Date"), Body: body}
+	return classify.Answer{Status: resp.StatusCode, Date: resp.Header.Get("Date"), Body: classify.NewBody(body)}
 }
