@@ -23,11 +23,11 @@ const (
 // copyFloor is SP's value matcher's floor: a shorter value is not looked for.
 const copyFloor = 6
 
-// checkOutput is compilation.md §6 step 7 over the real composition's leaves and the occurrences'
-// outcomes. A copy is refused at its output paths; a base override names the first fragment in
-// composition order that overrode the base and only the base paths it overrode. The value is
-// never in the refusal.
-func checkOutput(real []leaf, sources []Source, outcomes []outcome) error {
+// checkOutput is compilation.md §6 step 7 over the real composition's leaves and mapping keys and
+// the occurrences' outcomes. A copy is refused at its output paths, a key at the path of the value
+// it names; a base override names the first fragment in composition order that overrode the base
+// and only the base paths it overrode. The value is never in the refusal.
+func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error {
 	by := -1
 	for _, o := range outcomes {
 		if o.source == 0 && o.by >= 0 && (by < 0 || o.by < by) {
@@ -49,10 +49,14 @@ func checkOutput(real []leaf, sources []Source, outcomes []outcome) error {
 	// two values, not a literal written into a source, and the leaf is never a copy.
 	var forms []string
 	attributed := map[string]bool{}
+	placed := map[[2]string]bool{} // the keys mapping references placed, by the path they name
 	for _, o := range outcomes {
 		t := o.tracer
 		for _, p := range o.paths {
 			attributed[p] = true
+			if t.Member() >= 0 {
+				placed[[2]string{p, t.Leaf()}] = true
+			}
 		}
 		// A mapping's key is a value the provider holds (§4.2), whatever its member's kind; the
 		// output leaves are value nodes, so the key where its reference placed it is never one.
@@ -75,18 +79,35 @@ func checkOutput(real []leaf, sources []Source, outcomes []outcome) error {
 			continue
 		}
 		forms = append(forms, s)
-		if t.Kind() == ingest.TraceBytes {
+		switch t.Kind() {
+		case ingest.TraceBytes:
 			forms = append(forms, base64.StdEncoding.EncodeToString([]byte(s)))
+		case ingest.TraceString:
+			// A byte field the machinery decodes is written again in canonical base64 (§8.1).
+			if b, err := base64.StdEncoding.DecodeString(s); err == nil {
+				if c := base64.StdEncoding.EncodeToString(b); c != s {
+					forms = append(forms, c)
+				}
+			}
 		}
+	}
+	copied := func(v string) bool {
+		return slices.ContainsFunc(forms, func(f string) bool { return strings.Contains(v, f) })
 	}
 	var copies []string
 	for _, l := range real {
-		if l.kind == yaml.ScalarNode && !attributed[l.path] && slices.ContainsFunc(forms, func(f string) bool { return strings.Contains(l.value, f) }) {
+		if l.kind == yaml.ScalarNode && !attributed[l.path] && copied(l.value) {
 			copies = append(copies, l.path)
 		}
 	}
+	for _, k := range keys {
+		if !placed[[2]string{k.path, k.value}] && copied(k.value) {
+			copies = append(copies, k.path)
+		}
+	}
 	if len(copies) > 0 {
-		return &Error{Rule: RuleCopy, Paths: copies}
+		slices.Sort(copies)
+		return &Error{Rule: RuleCopy, Paths: slices.Compact(copies)}
 	}
 	return nil
 }

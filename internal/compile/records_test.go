@@ -73,21 +73,26 @@ func TestProvenanceRecords(t *testing.T) {
 	}
 }
 
+// unlabel deletes machine.nodeLabels, so that a key copying a value never reaches the output.
+const unlabel = "machine:\n  nodeLabels:\n    $patch: delete\n"
+
 // A source path token that holds a resolved value, here a key equal to its own reference's value,
-// is redacted in the records and the reproduction dependencies alike (compilation.md §8.3).
+// is redacted in the records and the reproduction dependencies alike (compilation.md §8.3). The key
+// would be a copy in the output (TestCompileRefusesAKeyCopy), so a later fragment deletes it.
 func TestProvenanceRedactsSourcePaths(t *testing.T) {
 	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
 	const six = "ab12xy"
 	frag := source(t, "machine:\n  nodeLabels:\n    "+six+": !bwref app/six\n", strRef("app/six"),
 		map[string]provider.Value{"app/six": value(t, provider.KindString, six)})
-	c := compiled(t, Input{Base: base, Fragments: []Source{frag}, Mode: ModeMetal})
+	del := source(t, unlabel, ingest.Declarations{}, nil)
+	c := compiled(t, Input{Base: base, Fragments: []Source{frag, del}, Mode: ModeMetal})
 	const at = "doc[0]/machine/nodeLabels/<redacted>"
 	found := 0
 	for _, r := range c.Provenance() {
 		if r.Reference == "app/six" {
 			found++
-			if r.SourcePath != at || r.Output != at {
-				t.Errorf("record %+v, want %s at both paths", r, at)
+			if r.SourcePath != at || r.OverriddenBy == nil || r.OverriddenBy.Fragment != 1 {
+				t.Errorf("record %+v, want %s overridden by fragment 1", r, at)
 			}
 		}
 	}
@@ -116,16 +121,17 @@ func TestProvenanceRedactsSourcePaths(t *testing.T) {
 // Two occurrences whose source paths redact alike are still two reproduction dependencies.
 func TestReproductionKeepsRedactedOccurrences(t *testing.T) {
 	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
-	frag := source(t, "machine:\n  nodeAnnotations:\n    sensitive-a: !bwref app/s\n    sensitive-b: !bwref app/s\n",
+	frag := source(t, "machine:\n  nodeLabels:\n    sensitive-a: !bwref app/s\n    sensitive-b: !bwref app/s\n",
 		strRef("app/s"), map[string]provider.Value{"app/s": value(t, provider.KindString, "sensitive")})
-	c := compiled(t, Input{Base: base, Fragments: []Source{frag}, Mode: ModeMetal})
+	del := source(t, unlabel, ingest.Declarations{}, nil)
+	c := compiled(t, Input{Base: base, Fragments: []Source{frag, del}, Mode: ModeMetal})
 	var got []string
 	for _, o := range c.Reproduction() {
 		if o.Reference == "app/s" {
 			got = append(got, o.Path)
 		}
 	}
-	at := "doc[0]/machine/nodeAnnotations/<redacted>"
+	at := "doc[0]/machine/nodeLabels/<redacted>"
 	if !slices.Equal(got, []string{at, at}) {
 		t.Errorf("reproduction paths %v, want two occurrences at %s", got, at)
 	}

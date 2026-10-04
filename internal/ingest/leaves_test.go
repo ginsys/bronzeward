@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -59,6 +60,25 @@ func TestWalkLeaves(t *testing.T) {
 		{"doc[1]/f", q, "!!str", "x"},
 	}
 	if !reflect.DeepEqual(got, want) {
+		t.Errorf("visited\n%v\nwant\n%v", got, want)
+	}
+}
+
+// WalkKeys visits every mapping key, at the path of the value it names, through aliases and
+// inside an identified embedded document, and no value.
+func TestWalkKeys(t *testing.T) {
+	text := "a: &x\n  k: v\nb: *x\nc: [{n: 1}]\nd: '{\"p\": \"q\"}'\n---\nf: x\n"
+	var got []string
+	err := WalkKeys([]byte(text), map[string]string{"doc[0]/d": "json"}, func(p Path, k *yaml.Node) error {
+		got = append(got, p.String()+"="+k.Value)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"doc[0]/a=a", "doc[0]/a/k=k", "doc[0]/b=b", "doc[0]/b/k=k", "doc[0]/c=c", "doc[0]/c/0/n=n",
+		"doc[0]/d=d", "doc[0]/d|json/p=p", "doc[1]/f=f"}
+	if !slices.Equal(got, want) {
 		t.Errorf("visited\n%v\nwant\n%v", got, want)
 	}
 }

@@ -19,6 +19,17 @@ var (
 // instead of being visited. Every named path must be met as such a string, or the walk fails.
 // Neither error quotes the stream.
 func WalkLeaves(b []byte, embedded map[string]string, fn func(p Path, n *yaml.Node) error) error {
+	return walkComposed(b, embedded, fn, nil)
+}
+
+// WalkKeys visits every mapping key of a composed stream b as WalkLeaves walks it, embedded
+// documents included, at the path of the value it names. A key is a node of its own, not a value:
+// WalkLeaves does not visit it.
+func WalkKeys(b []byte, embedded map[string]string, fn func(p Path, k *yaml.Node) error) error {
+	return walkComposed(b, embedded, nil, fn)
+}
+
+func walkComposed(b []byte, embedded map[string]string, fn, keyFn func(p Path, n *yaml.Node) error) error {
 	docs, err := parseStream(b)
 	if err != nil {
 		return errLeavesParse
@@ -37,13 +48,21 @@ func WalkLeaves(b []byte, embedded map[string]string, fn func(p Path, n *yaml.No
 				return walk(root(inner), Path{Doc: p.Doc, Pointer: p.Pointer, Format: format})
 			}
 		}
-		if err := fn(p, n); err != nil {
-			return err
+		if fn != nil {
+			if err := fn(p, n); err != nil {
+				return err
+			}
 		}
 		switch n.Kind {
 		case yaml.MappingNode:
 			for i := 0; i+1 < len(n.Content); i += 2 {
-				if err := walk(n.Content[i+1], p.child(keyToken(n.Content[i]))); err != nil {
+				c := p.child(keyToken(n.Content[i]))
+				if keyFn != nil {
+					if err := keyFn(c, deref(n.Content[i])); err != nil {
+						return err
+					}
+				}
+				if err := walk(n.Content[i+1], c); err != nil {
 					return err
 				}
 			}

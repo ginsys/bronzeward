@@ -174,7 +174,11 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	if err != nil {
 		return Compiled{}, fidelity()
 	}
-	if err := checkOutput(realLeaves, sources, outcomes); err != nil {
+	realKeys, err := keys(m.bytes(), hosts)
+	if err != nil {
+		return Compiled{}, fidelity()
+	}
+	if err := checkOutput(realLeaves, realKeys, sources, outcomes); err != nil {
 		return Compiled{}, err
 	}
 	if err := m.Validate(in.Mode); err != nil {
@@ -226,6 +230,31 @@ func leaves(b []byte, hosts map[string]string) ([]leaf, error) {
 			l.tag, l.value = n.Tag, n.Value
 		}
 		out = append(out, l)
+		return nil
+	})
+	return out, err
+}
+
+// keys is every mapping key of a composed stream, at the path of the value it names, descending
+// into the identified embedded documents hosts names. A key that is not a scalar is each scalar it
+// holds. Like a leaf's, its value is compared and never printed or returned.
+func keys(b []byte, hosts map[string]string) ([]leaf, error) {
+	var out []leaf
+	var add func(p string, n *yaml.Node)
+	add = func(p string, n *yaml.Node) {
+		if n.Kind == yaml.AliasNode && n.Alias != nil {
+			n = n.Alias
+		}
+		if n.Kind == yaml.ScalarNode {
+			out = append(out, leaf{path: p, kind: n.Kind, tag: n.Tag, value: n.Value})
+			return
+		}
+		for _, c := range n.Content {
+			add(p, c)
+		}
+	}
+	err := ingest.WalkKeys(b, hosts, func(p ingest.Path, k *yaml.Node) error {
+		add(p.String(), k)
 		return nil
 	})
 	return out, err

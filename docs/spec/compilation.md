@@ -751,8 +751,12 @@ For each machine:
    contained in a leaf, not only one equal to it, so a literal that embeds the
    value is refused too. A `mapping` value's keys are values (§4.2), so each
    key of six bytes or more is matched as a `string` value is, whatever its
-   member's kind. Every output leaf is checked, including the leaves of
-   an identified embedded document that holds no reference. A leaf that
+   member's kind. A stored form that is valid standard base64 is also matched
+   in its canonical re-encoding, which the machinery writes for a byte field
+   (§8.1). Every output leaf is checked, including the leaves of
+   an identified embedded document that holds no reference, and so is every
+   output mapping key, reported at the path of the value it names, except a
+   key a `mapping` reference placed beside its own attributed member. A leaf that
    provenance attributes to any reference is
    never a copy: a reference replaces a whole node, so another reference's
    value inside it is an overlap of two values, not a literal in a source. An
