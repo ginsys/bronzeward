@@ -126,6 +126,7 @@ func TestProvenanceRedactsRenderedPaths(t *testing.T) {
 		{"escaped", "machine:\n  nodeAnnotations:\n    abc/de: !bwref app/s\n", "abc~1de"},
 		{"spanning", "machine:\n  nodeAnnotations:\n    abcdef: !bwref app/s\n", "nodeAnnotations/abcd"},
 		{"spanning unescaped", "machine:\n  nodeAnnotations:\n    abc/de: !bwref app/s\n", "nodeAnnotations/abc/d"},
+		{"short escaped", "machine:\n  nodeAnnotations:\n    a/b: !bwref app/s\n", "a~1b"},
 	} {
 		frag := source(t, c.text, strRef("app/s"),
 			map[string]provider.Value{"app/s": value(t, provider.KindString, c.value)})
