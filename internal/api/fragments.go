@@ -13,6 +13,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/ingest"
+	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/seam"
 	"github.com/ginsys/bronzeward/internal/staging"
 )
@@ -142,10 +143,18 @@ func prepareFragment(ctx context.Context, a *API, q *request) error {
 	}()
 	g := &draftIngest{claim: c, stop: func() { cancel(); beat.Wait() }}
 	q.ingest = g
-	seam.At("claim")
-	seam.At("read")
-	g.ref = a.extractDraft(pctx, j, in, g)
+	if err := a.step("claim"); err != nil {
+		return err
+	}
+	if err := a.step("read"); err != nil {
+		return err
+	}
+	var err error
+	g.ref, err = a.extractDraft(pctx, j, in, g)
 	in.Document = ingest.Unresolved{} // the last step to read it has run
+	if err != nil {
+		return err
+	}
 	if g.ref != nil {
 		g.ref = g.ref.with("ingestion", c.ID)
 	}
@@ -163,20 +172,51 @@ func prepareFragment(ctx context.Context, a *API, q *request) error {
 }
 
 // extractDraft is §2.3 steps 2-7 on the request's document: extract, create the generations, and
-// the sanitized value set on g. A failed step is the refusal returned.
-func (a *API) extractDraft(ctx context.Context, j job, in *fragmentInput, g *draftIngest) *refusal {
+// the sanitized value set on g. A failed step is the refusal returned; an interruption the error.
+func (a *API) extractDraft(ctx context.Context, j job, in *fragmentInput, g *draftIngest) (*refusal, error) {
 	cand, err := ingest.Extract(ingest.Request{Input: in.Document, Marks: in.marks, Declarations: in.Declarations})
 	if err != nil {
-		return a.failure(j, "extraction", err)
+		return a.failure(j, "extraction", err), nil
 	}
-	seam.At("guard")
+	if err := a.step("guard"); err != nil {
+		return nil, err
+	}
 	gens := map[string]string{}
-	s, err := cand.Commit(ctx, a.createGeneration(j.claim, gens))
-	if err != nil {
-		return a.failure(j, "generation create", err)
+	create := a.createGeneration(j.claim, gens)
+	s, err := cand.Commit(ctx, func(ctx context.Context, name string, v provider.Value) error {
+		if err := create(ctx, name, v); err != nil {
+			return err
+		}
+		return a.stop("generation") // Commit's own seam marks the fixture's point, after the last create
+	})
+	switch {
+	case errors.Is(err, errKilled):
+		return nil, err
+	case err != nil:
+		return a.failure(j, "generation create", err), nil
 	}
-	seam.At("construct")
+	if err := a.step("construct"); err != nil {
+		return nil, err
+	}
 	g.sanitized, g.gens = s, gens
+	return nil, nil
+}
+
+// errKilled ends a draft update's ingestion at a test's interruption point (options.stopAt) as a
+// killed process would end it: nothing more is written and nothing abandoned; the claim lapses.
+var errKilled = errors.New("the ingestion stopped at an interruption point")
+
+// step is an interruption point of a draft update's ingestion, named for compilation §2.3's step:
+// the fixture's seam (internal/seam), then a test's stop.
+func (a *API) step(name string) error {
+	seam.At(name)
+	return a.stop(name)
+}
+
+func (a *API) stop(name string) error {
+	if a.o.stopAt != nil && a.o.stopAt(name) {
+		return errKilled
+	}
 	return nil
 }
 
