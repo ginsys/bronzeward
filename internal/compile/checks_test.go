@@ -83,14 +83,17 @@ func TestCompileRefusesABaseOverride(t *testing.T) {
 	}{
 		{"literal", "machine:\n  token: abcdef.0123456789abcdef\n", "doc[0]/machine/token", ingest.Declarations{}, nil},
 		{"delete", "cluster:\n  secretboxEncryptionSecret:\n    $patch: delete\n", "doc[0]/cluster/secretboxEncryptionSecret", ingest.Declarations{}, nil},
-		// the check precedes validation: without this key the configuration is also invalid
-		{"delete of a required key", "machine:\n  ca:\n    key:\n      $patch: delete\n", "doc[0]/machine/ca/key", ingest.Declarations{}, nil},
+		// the check precedes validation: this fragment also makes the configuration invalid
+		{"literal in an invalid configuration", "machine:\n  token: abcdef.0123456789abcdef\ncluster:\n  network:\n    dnsDomain: not a domain\n",
+			"doc[0]/machine/token", ingest.Declarations{}, nil},
 		{"reference", "cluster:\n  token: !bwref app/tok\n", "doc[0]/cluster/token", strRef("app/tok"), tok},
 	} {
-		f := source(t, c.text, c.decl, c.values)
-		e := refusal(t, Input{Base: base, Fragments: []Source{other, f}, Mode: ModeMetal}, RuleBaseOverride, "abcdef.0123456789abcdef", "zyxwvu")
-		if e.Input != "fragment[1]" || !slices.Equal(e.Paths, []string{c.path}) {
-			t.Errorf("%s: refused %s at %v, want fragment[1] at %s", c.name, e.Input, e.Paths, c.path)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			f := source(t, c.text, c.decl, c.values)
+			e := refusal(t, Input{Base: base, Fragments: []Source{other, f}, Mode: ModeMetal}, RuleBaseOverride, "abcdef.0123456789abcdef", "zyxwvu")
+			if e.Input != "fragment[1]" || !slices.Equal(e.Paths, []string{c.path}) {
+				t.Errorf("refused %s at %v, want fragment[1] at %s", e.Input, e.Paths, c.path)
+			}
+		})
 	}
 }
