@@ -136,9 +136,9 @@ func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter
 	if err != nil {
 		return nil, fmt.Errorf("compile: reading the artifact key %s: %w", key, err)
 	}
-	// The status and the body's shape do not depend on the version asked.
-	if r := classify.Classify(classify.Dependency{Provider: classify.Transit, Object: key, Version: 1}, first); r.Class == classify.Unknown && answerFailed(r.Reason) {
-		return nil, &DependencyError{Object: key, Version: 1, Class: r.Class, Reason: string(r.Reason)}
+	// The status and the body's shape, not any one version's entry.
+	if r := classify.AnswerReason(classify.Transit, first); r != classify.None {
+		return nil, &DependencyError{Object: key, Class: classify.Unknown, Reason: string(r)}
 	}
 	date, readable := classify.ParseDate(first.Date)
 	if !readable {
@@ -187,13 +187,4 @@ func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter
 		}
 	}
 	return out, nil
-}
-
-// answerFailed is a reason that comes from the answer as a whole, not from one version's entry.
-func answerFailed(r classify.Reason) bool {
-	switch r {
-	case classify.Unreachable, classify.Denied, classify.Absent, classify.Unavailable, classify.Unreadable:
-		return true
-	}
-	return false
 }

@@ -321,6 +321,45 @@ func TestClassifyTimes(t *testing.T) {
 
 // ParseDate reads a Date header in whole seconds only: a fractional second would let a deletion in
 // the Date's own second compare as before or after it.
+// AnswerReason fails an answer for its status or its shape, never for one version's entry.
+func TestAnswerReason(t *testing.T) {
+	badKVEntry, badKeyEntry := kv(), transit()
+	badKVEntry["versions"].(map[string]any)["2"] = "not an entry"
+	badKeyEntry["keys"].(map[string]any)["2"] = nil
+	noVersions, noKeys := kv(), transit()
+	delete(noVersions, "versions")
+	delete(noKeys, "keys")
+	for _, c := range []struct {
+		name string
+		p    Provider
+		a    Answer
+		want Reason
+	}{
+		{"kv readable", KV, answer(t, kv()), None},
+		{"transit readable", Transit, answer(t, transit()), None},
+		{"kv entry for another version", KV, answer(t, badKVEntry), None},
+		{"transit entry for another version", Transit, answer(t, badKeyEntry), None},
+		{"kv without versions", KV, answer(t, noVersions), Unreadable},
+		{"transit without keys", Transit, answer(t, noKeys), Unreadable},
+		{"transit body for kv", KV, answer(t, transit()), Unreadable},
+		{"not json", Transit, Answer{Status: 200, Body: NewBody([]byte("nope"))}, Unreadable},
+		{"403", Transit, Answer{Status: 403}, Denied},
+		{"404", KV, Answer{Status: 404}, Absent},
+		{"503", KV, Answer{Status: 503}, Unavailable},
+		{"500", Transit, Answer{Status: 500}, Unreadable},
+		{"no answer", Transit, Answer{Unreachable: true}, Unreachable},
+		{"unknown provider", Provider("x"), answer(t, kv()), Unreadable},
+	} {
+		if got := AnswerReason(c.p, c.a); got != c.want {
+			t.Errorf("%s: AnswerReason = %q; want %q", c.name, got, c.want)
+		}
+	}
+	// Classify agrees where the answer fails as a whole.
+	if r := Classify(transitDep(2), answer(t, badKeyEntry)); r.Reason != Unreadable {
+		t.Errorf("Classify of the malformed version itself = %q; want unreadable", r.Reason)
+	}
+}
+
 func TestParseDate(t *testing.T) {
 	if got, ok := ParseDate(dateText); !ok || !got.Equal(date) || got.Location() != time.UTC {
 		t.Fatalf("ParseDate(%q) = %v, %v; want %v, true", dateText, got, ok, date)

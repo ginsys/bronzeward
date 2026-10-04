@@ -175,17 +175,8 @@ func Classify(d Dependency, a Answer) Result {
 	if d.Version < 1 {
 		return Result{Class: Unknown, Reason: Malformed}
 	}
-	switch {
-	case a.Unreachable:
-		return Result{Class: Unknown, Reason: Unreachable}
-	case a.Status == http.StatusForbidden:
-		return Result{Class: Unknown, Reason: Denied}
-	case a.Status == http.StatusNotFound:
-		return Result{Class: Unknown, Reason: Absent}
-	case a.Status == http.StatusServiceUnavailable:
-		return Result{Class: Unknown, Reason: Unavailable}
-	case a.Status != http.StatusOK:
-		return Result{Class: Unknown, Reason: Unreadable}
+	if r := statusReason(a); r != None {
+		return Result{Class: Unknown, Reason: r}
 	}
 	date, _ := ParseDate(a.Date)
 	var r Result
@@ -205,6 +196,45 @@ func Classify(d Dependency, a Answer) Result {
 	return r
 }
 
+// AnswerReason is the reason the answer fails for every version of the object: one of §3's status
+// rows, or a body that does not parse as the provider's metadata. It is None when each version's
+// own entry decides; an entry for one version never makes the answer fail for another.
+func AnswerReason(p Provider, a Answer) Reason {
+	if r := statusReason(a); r != None {
+		return r
+	}
+	var err error
+	switch p {
+	case KV:
+		_, err = decodeKV(a.Body.Bytes())
+	case Transit:
+		_, err = decodeTransit(a.Body.Bytes())
+	default:
+		err = errUnreadable
+	}
+	if err != nil {
+		return Unreadable
+	}
+	return None
+}
+
+// statusReason is §3's row for an answer that is not a 200, or None.
+func statusReason(a Answer) Reason {
+	switch {
+	case a.Unreachable:
+		return Unreachable
+	case a.Status == http.StatusForbidden:
+		return Denied
+	case a.Status == http.StatusNotFound:
+		return Absent
+	case a.Status == http.StatusServiceUnavailable:
+		return Unavailable
+	case a.Status != http.StatusOK:
+		return Unreadable
+	}
+	return None
+}
+
 // kvEntry is one version of a KV v2 metadata answer. Pointers tell a missing field from a zero
 // one.
 type kvEntry struct {
@@ -213,17 +243,28 @@ type kvEntry struct {
 	Destroyed    *bool   `json:"destroyed"`
 }
 
-func classifyKV(d Dependency, body []byte, date time.Time) (Result, error) {
-	var data struct {
-		CurrentVersion *int64                     `json:"current_version"`
-		OldestVersion  *int64                     `json:"oldest_version"`
-		Versions       map[string]json.RawMessage `json:"versions"`
-	}
+// kvData is a KV v2 metadata answer's data, its required fields present.
+type kvData struct {
+	CurrentVersion *int64                     `json:"current_version"`
+	OldestVersion  *int64                     `json:"oldest_version"`
+	Versions       map[string]json.RawMessage `json:"versions"`
+}
+
+func decodeKV(body []byte) (kvData, error) {
+	var data kvData
 	if err := decodeData(body, &data); err != nil {
-		return Result{}, err
+		return kvData{}, err
 	}
 	if data.CurrentVersion == nil || data.OldestVersion == nil || data.Versions == nil {
-		return Result{}, errUnreadable
+		return kvData{}, errUnreadable
+	}
+	return data, nil
+}
+
+func classifyKV(d Dependency, body []byte, date time.Time) (Result, error) {
+	data, err := decodeKV(body)
+	if err != nil {
+		return Result{}, err
 	}
 	var entry *kvEntry
 	var deletion time.Time
@@ -278,19 +319,30 @@ func kvCreated(s *string) (time.Time, bool) {
 	return t.UTC(), true
 }
 
-func classifyTransit(d Dependency, body []byte) (Result, error) {
-	var data struct {
-		Keys                 map[string]json.RawMessage `json:"keys"`
-		LatestVersion        *int64                     `json:"latest_version"`
-		MinAvailableVersion  *int64                     `json:"min_available_version"`
-		MinDecryptionVersion *int64                     `json:"min_decryption_version"`
-		SoftDeleted          json.RawMessage            `json:"soft_deleted"`
-	}
+// transitData is a Transit key answer's data, its keys map present.
+type transitData struct {
+	Keys                 map[string]json.RawMessage `json:"keys"`
+	LatestVersion        *int64                     `json:"latest_version"`
+	MinAvailableVersion  *int64                     `json:"min_available_version"`
+	MinDecryptionVersion *int64                     `json:"min_decryption_version"`
+	SoftDeleted          json.RawMessage            `json:"soft_deleted"`
+}
+
+func decodeTransit(body []byte) (transitData, error) {
+	var data transitData
 	if err := decodeData(body, &data); err != nil {
-		return Result{}, err
+		return transitData{}, err
 	}
 	if data.Keys == nil {
-		return Result{}, errUnreadable
+		return transitData{}, errUnreadable
+	}
+	return data, nil
+}
+
+func classifyTransit(d Dependency, body []byte) (Result, error) {
+	data, err := decodeTransit(body)
+	if err != nil {
+		return Result{}, err
 	}
 	var created time.Time
 	raw, listed := data.Keys[strconv.FormatInt(d.Version, 10)]
