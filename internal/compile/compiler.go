@@ -41,6 +41,10 @@ type Compiled struct {
 	m        Materialized
 	outcomes []outcome
 	origins  []Origin // by source: 0 the import base, i+1 fragment i
+	// redacted is the configuration Redacted shows (compilation.md §8.3), or nil with redactErr
+	// saying why it could not be redacted; it holds no value.
+	redacted  *string
+	redactErr error
 }
 
 // outcome is where one tracer's value ended up: the output paths holding it, or the fragment
@@ -180,6 +184,12 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	// The kept outcomes hold redacted paths only: fmt reaches an unexported field by reflection,
 	// past Compiled's own placeholder.
 	red := newRedactor(sources)
+	c := Compiled{m: m, origins: origins(sources)}
+	if text, err := redactedText(m.bytes(), hosts, outcomes, red); err != nil {
+		c.redactErr = err
+	} else {
+		c.redacted = &text
+	}
 	for i, o := range outcomes {
 		outcomes[i].shownAt = red.path(o.tracer.Path().String())
 		for _, p := range o.paths {
@@ -187,7 +197,8 @@ func compile(in Input, sources []Source) (Compiled, error) {
 		}
 		outcomes[i].paths = nil
 	}
-	return Compiled{m: m, outcomes: outcomes, origins: origins(sources)}, nil
+	c.outcomes = outcomes
+	return c, nil
 }
 
 // traceAll traces every source, ids in source order: the trace pass's inputs, each source's
