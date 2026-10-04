@@ -935,7 +935,8 @@ with the stand-in format **(choice §16.22)**.
   reference's key, or a literal written as a key. Every path a compilation
   surface shows, in a refusal, a provenance record or a dependency record, has
   each token that equals a resolved `string` value, a mapping reference's key
-  or `string` member, or the standard base64 encoding of one of them, or that
+  or `string` member, the standard base64 encoding of one of them or its
+  canonical re-encoding (§6 step 7), or that
   contains one of them of six bytes or more, written `<redacted>`. Integer and
   boolean values are not looked for, as in the value means. A path that does
   not parse, or any path of a compilation whose pinned values do not all

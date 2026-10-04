@@ -23,6 +23,17 @@ const (
 // copyFloor is SP's value matcher's floor: a shorter value is not looked for.
 const copyFloor = 6
 
+// canonical is s decoded as standard base64 and encoded again, when s decodes and that differs:
+// the spelling the machinery writes for a byte field it decodes (§8.1), holding the same bytes.
+func canonical(s string) (string, bool) {
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return "", false
+	}
+	c := base64.StdEncoding.EncodeToString(b)
+	return c, c != s
+}
+
 // checkOutput is compilation.md §6 step 7 over the real composition's leaves and mapping keys and
 // the occurrences' outcomes. A copy is refused at its output paths, a key at the path of the value
 // it names; a base override names the first fragment in composition order that overrode the base
@@ -62,6 +73,9 @@ func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error 
 		// output leaves are value nodes, so the key where its reference placed it is never one.
 		if t.Member() >= 0 && len(t.Leaf()) >= copyFloor {
 			forms = append(forms, t.Leaf())
+			if c, ok := canonical(t.Leaf()); ok {
+				forms = append(forms, c)
+			}
 		}
 		if t.Kind() != ingest.TraceString && t.Kind() != ingest.TraceBytes {
 			continue
@@ -83,11 +97,8 @@ func checkOutput(real, keys []leaf, sources []Source, outcomes []outcome) error 
 		case ingest.TraceBytes:
 			forms = append(forms, base64.StdEncoding.EncodeToString([]byte(s)))
 		case ingest.TraceString:
-			// A byte field the machinery decodes is written again in canonical base64 (§8.1).
-			if b, err := base64.StdEncoding.DecodeString(s); err == nil {
-				if c := base64.StdEncoding.EncodeToString(b); c != s {
-					forms = append(forms, c)
-				}
+			if c, ok := canonical(s); ok {
+				forms = append(forms, c)
 			}
 		}
 	}
