@@ -105,6 +105,28 @@ func TestProvenanceRedactsSourcePaths(t *testing.T) {
 	if s := fmt.Sprintf("%+v %+v", c.Provenance(), c.Reproduction()); strings.Contains(s, six) {
 		t.Errorf("the records hold the value: %s", s)
 	}
+	// fmt reaches an unexported field by reflection, past Compiled's own placeholder.
+	if s := fmt.Sprintf("%+v %#v", struct{ c Compiled }{c}, struct{ c Compiled }{c}); strings.Contains(s, six) {
+		t.Errorf("a struct holding the compilation renders the value: %s", s)
+	}
+}
+
+// Two occurrences whose source paths redact alike are still two reproduction dependencies.
+func TestReproductionKeepsRedactedOccurrences(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	frag := source(t, "machine:\n  nodeAnnotations:\n    sensitive-a: !bwref app/s\n    sensitive-b: !bwref app/s\n",
+		strRef("app/s"), map[string]provider.Value{"app/s": value(t, provider.KindString, "sensitive")})
+	c := compiled(t, Input{Base: base, Fragments: []Source{frag}, Mode: ModeMetal})
+	var got []string
+	for _, o := range c.Reproduction() {
+		if o.Reference == "app/s" {
+			got = append(got, o.Path)
+		}
+	}
+	at := "doc[0]/machine/nodeAnnotations/<redacted>"
+	if !slices.Equal(got, []string{at, at}) {
+		t.Errorf("reproduction paths %v, want two occurrences at %s", got, at)
+	}
 }
 
 // A reference overwritten by a literal, by another reference or by a delete directive, and a

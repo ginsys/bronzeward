@@ -30,12 +30,13 @@ func compiled(t *testing.T, in Input) Compiled {
 	return c
 }
 
-// pathsOf is every output path attributed to the tracers of reference name, in tracer order.
+// pathsOf is every output path attributed to the tracers of reference name, in tracer order, as
+// kept: redacted (compilation.md §8.3).
 func pathsOf(c Compiled, name string) []string {
 	var out []string
 	for _, o := range c.outcomes {
 		if o.tracer.Ref() == name {
-			out = append(out, o.paths...)
+			out = append(out, o.shown...)
 		}
 	}
 	return out
@@ -52,10 +53,10 @@ func TestCompileAttributesTheGeneratedBase(t *testing.T) {
 	}
 	var all []string
 	for _, o := range c.outcomes {
-		if len(o.paths) == 0 {
+		if len(o.shown) == 0 {
 			t.Errorf("occurrence at %s is not attributed", o.tracer.Path())
 		}
-		all = append(all, o.paths...)
+		all = append(all, o.shown...)
 	}
 	for _, p := range []string{"doc[0]/cluster/ca/key", "doc[0]/cluster/aggregatorCA/key", "doc[0]/cluster/etcd/ca/key"} {
 		if !slices.Contains(all, p) {
@@ -106,7 +107,7 @@ func TestCompileAttributesEachKind(t *testing.T) {
 	for name, want := range map[string][]string{
 		"app/str":  {"doc[0]/machine/nodeLabels/s", "doc[0]/machine/nodeLabels/t"},
 		"app/enc":  {"doc[0]/machine/nodeLabels/e"},
-		"app/map":  {"doc[0]/machine/nodeAnnotations/one", "doc[0]/machine/nodeAnnotations/two"},
+		"app/map":  {"doc[0]/machine/nodeAnnotations/<redacted>", "doc[0]/machine/nodeAnnotations/<redacted>"},
 		"app/bool": {"doc[0]/machine/features/rbac"},
 		"app/int":  {"doc[0]/machine/features/kubePrism/port"},
 		"app/json": {"doc[0]/cluster/inlineManifests/0/contents|json/password"},
@@ -117,8 +118,8 @@ func TestCompileAttributesEachKind(t *testing.T) {
 		}
 	}
 	for _, o := range c.outcomes {
-		if o.tracer.Ref() == "app/str" && len(o.paths) != 2 {
-			t.Errorf("the aliased occurrence has %d paths, want one tracer at both", len(o.paths))
+		if o.tracer.Ref() == "app/str" && len(o.shown) != 2 {
+			t.Errorf("the aliased occurrence has %d paths, want one tracer at both", len(o.shown))
 		}
 	}
 }
