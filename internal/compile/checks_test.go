@@ -330,6 +330,25 @@ func TestCompileRefusesACanonicalCopy(t *testing.T) {
 	}
 }
 
+// The floor applies to each form's own length: base64 decoding skips line breaks, so a canonical
+// re-encoding can be shorter than six bytes, which is not looked for as a short value is not, or
+// empty, which would otherwise match every leaf.
+func TestCompileCopyFormsKeepTheFloor(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	short := source(t, "machine:\n  nodeAnnotations:\n    m: !bwref app/s\n", strRef("app/s"),
+		map[string]provider.Value{"app/s": value(t, provider.KindString, "YQ==\n\n")})
+	empty := source(t, "machine:\n  nodeAnnotations: !bwref app/m\n", refs(map[string]ingest.Reference{"app/m": ref(provider.KindMapping)}),
+		map[string]provider.Value{"app/m": value(t, provider.KindMapping, map[string]any{"\n\n\n\n\n\n": "v"})})
+	lit := source(t, "machine:\n  nodeLabels:\n    x-YQ--y: x-YQ==-y\n", ingest.Declarations{}, nil)
+	for name, f := range map[string]Source{"short canonical": short, "empty canonical": empty} {
+		_, err := Compile(Input{Base: base, Fragments: []Source{f, lit}, Mode: ModeMetal})
+		var e *Error
+		if errors.As(err, &e) && e.Rule == RuleCopy {
+			t.Errorf("%s: refused as a copy at %v", name, e.Paths)
+		}
+	}
+}
+
 // A non-ASCII string compiles: its stand-in never splits a character, so the trace pass composes
 // as the real one does (compilation.md §8.1).
 func TestCompileMultibyteValue(t *testing.T) {
