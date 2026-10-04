@@ -1715,8 +1715,9 @@ reference), `source` (the import base or fragment revision, the SHA-256 of
 its stored sanitized text as `digest`, and the occurrence's redacted `path`)
 and exactly one outcome, `output` (the redacted output path) or
 `overriddenBy` (the overriding fragment revision and its `digest`). A stored
-record with any other field or shape is never forwarded: the read is `500
-internal-error`. A configuration that could not be redacted is `null`, with a
+record with any other field, a `null`, a field name in another case, an
+encoding outside compilation §5.2's enum or a reference outside its grammar
+is never forwarded: the read is `500 internal-error`. A configuration that could not be redacted is `null`, with a
 `notice` saying so. No release read carries a ciphertext, an artifact or
 configuration digest or the release digest; a release that does not cover
 the machine is `404 not-found`.

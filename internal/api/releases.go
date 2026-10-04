@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/ingest"
 )
 
 // rendererBody is a release's renderer and contract record (compilation.md §10.2).
@@ -97,7 +99,9 @@ type provenanceSource struct {
 var errProvenance = errors.New("a stored provenance record does not have the provenance record's shape")
 
 // projectProvenance decodes stored provenance into §8.2's fields alone and checks each record's
-// shape, so a field outside them, or a record of another shape, is refused, never forwarded.
+// shape, so a field outside them, or a record of another shape, is refused, never forwarded. The
+// projection must encode back to the stored value exactly: the decoder matches a field name in any
+// case and reads a null as absent, and either would otherwise answer a record that was not stored.
 func projectProvenance(stored []byte) ([]provenanceRecord, error) {
 	dec := json.NewDecoder(bytes.NewReader(stored))
 	dec.DisallowUnknownFields()
@@ -105,11 +109,17 @@ func projectProvenance(stored []byte) ([]provenanceRecord, error) {
 	if err := dec.Decode(&out); err != nil || out == nil {
 		return nil, errProvenance
 	}
+	var was, is any
+	again, err := json.Marshal(out)
+	if err != nil || json.Unmarshal(stored, &was) != nil || json.Unmarshal(again, &is) != nil || !reflect.DeepEqual(was, is) {
+		return nil, errProvenance
+	}
 	revision := func(v string, kinds ...id.Prefix) bool {
 		return slices.ContainsFunc(kinds, func(k id.Prefix) bool { return id.MustHave(v, k) == nil })
 	}
 	for _, r := range out {
-		if r.Reference == "" || r.Version < 1 || (r.Member != nil && *r.Member < 0) ||
+		if !ingest.ValidReference(r.Reference) || len(r.Reference) > 256 || r.Version < 1 ||
+			(r.Encoding != "" && r.Encoding != "base64") || (r.Member != nil && *r.Member < 0) ||
 			!revision(r.Source.Revision, id.ImportBase, id.FragmentRevision) || !sha256Hex(r.Source.Digest) || r.Source.Path == "" ||
 			(r.Output == "") == (r.OverriddenBy == nil) ||
 			(r.OverriddenBy != nil && (!revision(r.OverriddenBy.Revision, id.FragmentRevision) || !sha256Hex(r.OverriddenBy.Digest))) {

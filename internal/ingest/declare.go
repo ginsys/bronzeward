@@ -51,6 +51,9 @@ var nameSyntax = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(/[a-z0-9]([a
 // validName is the name grammar of §5.1.
 func validName(s string) bool { return nameSyntax.MatchString(s) }
 
+// ValidReference reports whether s is a logical name by §5.1's grammar.
+func ValidReference(s string) bool { return validName(s) }
+
 // checkDeclarations holds each declaration to §5.2 and returns the identified embedded documents
 // by the path of the scalar that holds them.
 func checkDeclarations(d Declarations) (map[string]string, error) {
