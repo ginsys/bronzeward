@@ -122,11 +122,7 @@ func prepareFragment(ctx context.Context, a *API, q *request) error {
 			return err
 		}
 		c = staging.Claim{ID: id.New(id.Ingestion), Kind: "draft-update", Mode: "transient", Cluster: d.cluster, Draft: d.id, Gen: 1}
-		owner := a.d.owner
-		if a.o.noEpochTerm {
-			owner.Epoch = q.epoch
-		}
-		return staging.Create(ctx, tx, owner, staging.Timers{Lease: a.d.timers.Lease, AbsoluteExpiry: a.d.timers.AbsoluteExpiry},
+		return staging.Create(ctx, tx, a.d.owner, staging.Timers{Lease: a.d.timers.Lease, AbsoluteExpiry: a.d.timers.AbsoluteExpiry},
 			c, q.principal.ID, q.key)
 	}); err != nil || replay {
 		return err

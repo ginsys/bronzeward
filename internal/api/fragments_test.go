@@ -574,3 +574,17 @@ func TestFragmentPutDraftReadMatches(t *testing.T) {
 		t.Fatalf("draft entries %+v; want the answered entry %+v", d.Entries, b.Entry)
 	}
 }
+
+// PA §5.1: a process whose epoch a recovery-mode entry superseded creates no draft-update claim;
+// the PUT is refused before any ingestion starts.
+func TestFragmentPutEpochTerm(t *testing.T) {
+	ie := newFragmentEnv(t, options{})
+	newEpoch(t, ie.db)
+	rec := ie.putFragment("registries", fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil), ie.etag,
+		"k-fragment-epoch-0001")
+	wantProblem(t, rec, http.StatusServiceUnavailable, "epoch-superseded")
+	var n int
+	if err := ie.db.QueryRow(`SELECT count(*) FROM staging_claim WHERE kind = 'draft-update'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d draft-update claims, %v; want none", n, err)
+	}
+}
