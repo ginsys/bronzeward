@@ -939,7 +939,10 @@ with the stand-in format **(choice §16.22)**.
   or `string` member, the standard base64 encoding of one of them or its
   canonical re-encoding (§6 step 7), or that
   contains one of them of six bytes or more, written `<redacted>`. Integer and
-  boolean values are not looked for, as in the value means. A path that does
+  boolean values are not looked for, as in the value means. The rendered path
+  is checked too, as written, unescaped and in each piece between separators,
+  since escaping can spell a value no token holds and a value can span tokens;
+  such a path keeps its document only. A path that does
   not parse, or any path of a compilation whose pinned values do not all
   decode, is written `<redacted>` whole.
 - **Paired diffs.** Where a diff shows a base leaf beside a redacted output

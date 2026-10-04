@@ -118,6 +118,25 @@ func TestProvenanceRedactsSourcePaths(t *testing.T) {
 	}
 }
 
+// A path is checked as rendered too: a value equal to the escaped spelling of a key that holds
+// none, or spanning two tokens, is not shown.
+func TestProvenanceRedactsRenderedPaths(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	for _, c := range []struct{ name, text, value string }{
+		{"escaped", "machine:\n  nodeAnnotations:\n    abc/de: !bwref app/s\n", "abc~1de"},
+		{"spanning", "machine:\n  nodeAnnotations:\n    abcdef: !bwref app/s\n", "nodeAnnotations/abcd"},
+		{"spanning unescaped", "machine:\n  nodeAnnotations:\n    abc/de: !bwref app/s\n", "nodeAnnotations/abc/d"},
+	} {
+		frag := source(t, c.text, strRef("app/s"),
+			map[string]provider.Value{"app/s": value(t, provider.KindString, c.value)})
+		out := compiled(t, Input{Base: base, Fragments: []Source{frag}, Mode: ModeMetal})
+		s := fmt.Sprintf("%+v %+v", out.Provenance(), out.Reproduction())
+		if plain := strings.NewReplacer("~1", "/", "~0", "~").Replace(s); strings.Contains(s, c.value) || strings.Contains(plain, c.value) {
+			t.Errorf("%s: the records hold the value", c.name)
+		}
+	}
+}
+
 // Two occurrences whose source paths redact alike are still two reproduction dependencies.
 func TestReproductionKeepsRedactedOccurrences(t *testing.T) {
 	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
