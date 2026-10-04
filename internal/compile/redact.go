@@ -93,17 +93,41 @@ func (r redactor) holds(t string) bool {
 	return r.exact[t] || slices.ContainsFunc(r.contains, func(f string) bool { return strings.Contains(t, f) })
 }
 
-// renders reports whether a rendered path holds a value: as written or unescaped, whole or in any
-// piece between separators.
+// renders reports whether a rendered path holds a value, as written or unescaped: one of copyFloor
+// bytes or more anywhere, or any value as a run of whole pieces between separators, as a token
+// equal to it would be.
 func (r redactor) renders(s string) bool {
 	plain := strings.NewReplacer("~1", "/", "~0", "~").Replace(s)
-	sep := func(c rune) bool { return c == '/' || c == '|' }
 	for _, x := range []string{s, plain} {
-		if r.holds(x) || slices.ContainsFunc(strings.FieldsFunc(x, sep), r.holds) {
+		if r.holds(x) {
 			return true
+		}
+		for f := range r.exact {
+			if run(x, f) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// run reports whether f occurs in x bounded by x's ends or a path separator on both sides.
+func run(x, f string) bool {
+	if f == "" {
+		return false
+	}
+	sep := func(s string, i int) bool { return s[i] == '/' || s[i] == '|' }
+	for i := 0; ; {
+		j := strings.Index(x[i:], f)
+		if j < 0 {
+			return false
+		}
+		start, end := i+j, i+j+len(f)
+		if (start == 0 || sep(x, start-1)) && (end == len(x) || sep(x, end)) {
+			return true
+		}
+		i = start + 1
+	}
 }
 
 // paths redacts every path of a compile refusal: a rule's own or one ingest raised. A wrapper

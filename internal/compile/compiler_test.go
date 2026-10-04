@@ -124,6 +124,42 @@ func TestCompileAttributesEachKind(t *testing.T) {
 	}
 }
 
+// Embedded documents of two formats that trace to the same text are not told apart by text: a
+// boolean carries no stand-in, so a JSON and a YAML flow sequence of one boolean both trace alike.
+// The compilation either names each occurrence in its own format or fails closed.
+func TestCompileTellsEqualHostsApartOrRefuses(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	manifests := source(t, "cluster:\n  inlineManifests:\n    - name: j\n      contents: |\n        [!bwref app/fj]\n"+
+		"    - name: y\n      contents: |\n        [!bwref app/fy]\n",
+		ingest.Declarations{
+			References: map[string]ingest.Reference{"app/fj": ref(provider.KindBoolean), "app/fy": ref(provider.KindBoolean)},
+			Embedded: []ingest.Embedded{
+				{Path: "doc[0]/cluster/inlineManifests/0/contents", Format: "json"},
+				{Path: "doc[0]/cluster/inlineManifests/1/contents", Format: "yaml"},
+			},
+		},
+		map[string]provider.Value{
+			"app/fj": value(t, provider.KindBoolean, true),
+			"app/fy": value(t, provider.KindBoolean, true),
+		})
+	c, err := Compile(Input{Base: base, Fragments: []Source{manifests}, Mode: ModeMetal})
+	if err != nil {
+		var e *Error
+		if !errors.As(err, &e) || e.Rule != RuleFidelity {
+			t.Fatalf("refused with %v, want %s or a compilation", err, RuleFidelity)
+		}
+		return
+	}
+	for name, want := range map[string][]string{
+		"app/fj": {"doc[0]/cluster/inlineManifests/0/contents|json/0"},
+		"app/fy": {"doc[0]/cluster/inlineManifests/1/contents|yaml/0"},
+	} {
+		if got := pathsOf(c, name); !slices.Equal(got, want) {
+			t.Errorf("%s attributed to %v, want %v", name, got, want)
+		}
+	}
+}
+
 // A real rejection or an invalid real configuration is the machinery's verdict on the real
 // input, returned as Compose and Validate return it; the trace pass does not replace it.
 func TestCompileReturnsTheRealVerdict(t *testing.T) {
