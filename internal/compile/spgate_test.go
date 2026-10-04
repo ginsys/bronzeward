@@ -233,12 +233,16 @@ func TestSensitivityGate(t *testing.T) {
 		{"unexpected", strconv.Itoa(unexpected)},
 	}
 	// The results must hold no case value in any of the oracle's forms: they are written only if
-	// the oracle finds none, and every form of copyFloor bytes or more is recorded in
-	// sp-patterns.txt (beside the outputs, outside evidence) for run/collect-evidence's scan.
+	// the oracle finds none, and every single-line form of copyFloor bytes or more is recorded in
+	// sp-patterns.txt (beside the outputs, outside evidence) for run/collect-evidence's scan. A
+	// shorter string value would escape that scan, as it escapes the copy check, so none may exist.
 	var all []secret
 	patterns := map[string]bool{}
 	for _, name := range names {
 		for _, s := range spSecrets(t, name, nil) {
+			if s.kind != "int" && s.kind != "bool" && len(s.value) < copyFloor {
+				t.Fatalf("SP case %s has a value shorter than %d bytes; the evidence scan cannot see it", name, copyFloor)
+			}
 			all = append(all, s)
 			for _, forms := range oracleNeedles(s, "") {
 				for _, f := range forms {

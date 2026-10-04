@@ -31,9 +31,15 @@ printf 'C10 machinery gate, started %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >c10-
 
 e2_build
 e2_talosctl_ready
+# The gate's inputs: every package of this module the gate test compiles, the experiments whose
+# tools and cases it runs, and the fixture.
+mod_dir=$(go -C "$REPO_DIR" list -m -f '{{.Dir}}')
+mapfile -t gate_pkgs < <(go -C "$REPO_DIR" list -deps -test -f '{{if and .Module .Module.Main}}{{.Dir}}{{end}}' ./internal/compile |
+  awk -v r="$mod_dir/" 'index($0, r) == 1 { print substr($0, length(r) + 1) }' | sort -u)
+[ "${#gate_pkgs[@]}" -ge 4 ] || die "cannot list the packages the gate compiles"
 {
   printf 'commit\t%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
-  printf 'uncommitted-inputs\t%s\n' "$(git -C "$REPO_DIR" status --porcelain -- internal/ingest internal/compile internal/provider \
+  printf 'uncommitted-inputs\t%s\n' "$(git -C "$REPO_DIR" status --porcelain -- "${gate_pkgs[@]}" \
     experiments/c10-machinery-gate experiments/e2-structural-references experiments/e2-sensitivity-provenance \
     go.mod go.sum fixtures ':!experiments/c10-machinery-gate/evidence' ':!experiments/e2-structural-references/evidence' \
     ':!experiments/e2-sensitivity-provenance/evidence' | wc -l)"
