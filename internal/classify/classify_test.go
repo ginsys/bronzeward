@@ -331,11 +331,21 @@ func TestParseDate(t *testing.T) {
 			t.Errorf("ParseDate(%q) = %v, %v; want %v, true", s, got, ok, date)
 		}
 	}
+	// The asctime form's day before the tenth is space-padded or two digits (date3).
+	early := time.Date(2026, time.September, 3, 19, 51, 17, 0, time.UTC)
+	for _, s := range []string{"Thu Sep  3 19:51:17 2026", "Thu Sep 03 19:51:17 2026", "Thu, 03 Sep 2026 19:51:17 GMT", "Thursday, 03-Sep-26 19:51:17 GMT"} {
+		if got, ok := ParseDate(s); !ok || !got.Equal(early) {
+			t.Errorf("ParseDate(%q) = %v, %v; want %v, true", s, got, ok, early)
+		}
+	}
 	for _, s := range []string{
 		"", "soon", "Thu, 24 Sep 2026 19:51:17.500 GMT", "Thu, 24 Sep 2026 19:51:17.000000001 GMT",
 		// time.Parse drops digits past the ninth and accepts a zero fraction and a comma.
 		"Thu, 24 Sep 2026 19:51:17.0000000001 GMT", "Thu, 24 Sep 2026 19:51:17.000 GMT", "Thu, 24 Sep 2026 19:51:17,500 GMT",
 		"Thursday, 24-Sep-26 19:51:17.000 GMT", "Thu Sep 24 19:51:17.000 2026",
+		// Every form's zone is GMT: a named zone is not the provider's time.
+		"Thursday, 24-Sep-26 19:51:17 PST", "Thursday, 24-Sep-26 19:51:17 UTC", "Thu, 24 Sep 2026 19:51:17 PST",
+		"Thu, 3 Sep 2026 19:51:17 GMT", "Thu Sep 3 19:51:17 2026",
 	} {
 		if got, ok := ParseDate(s); ok {
 			t.Errorf("ParseDate(%q) = %v, true; want refused", s, got)
