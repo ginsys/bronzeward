@@ -264,7 +264,7 @@ func TestEveryProblemIsLogged(t *testing.T) {
 		"404":        {method: "GET", path: prefix + "/nowhere", token: viewer},
 		"428":        {method: "POST", path: prefix + "/plans", token: e.human("h-publisher")},
 		"400 body":   post(author, "k-other-0123456789", `{"note":1}`),
-		"501":        {method: "GET", path: prefix + "/releases", token: viewer},
+		"501":        {method: "GET", path: prefix + "/plans", token: viewer},
 		"422 reused": post(author, key, `{"note":"b"}`),
 		"400 cursor": {method: "GET", path: prefix + "/acts?cursor=x", token: viewer},
 	} {

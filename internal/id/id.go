@@ -36,6 +36,8 @@ const (
 	Token              Prefix = "tok"
 	Ingestion          Prefix = "ing"
 	Act                Prefix = "act"
+	Dependency         Prefix = "dep"
+	DependencyAlert    Prefix = "dal"
 )
 
 // all is persistence-api.md §2's prefix table. It stays unexported so no caller can change what
@@ -43,7 +45,7 @@ const (
 var all = []Prefix{
 	Cluster, Machine, Fragment, FragmentRevision, Profile, ProfileRevision, Assignment,
 	AssignmentRevision, ImportBase, Draft, Release, Epoch, Request, Plan, Approval, Operation,
-	Attempt, Observation, Principal, Token, Ingestion, Act,
+	Attempt, Observation, Principal, Token, Ingestion, Act, Dependency, DependencyAlert,
 }
 
 // All returns a copy of every prefix of persistence-api.md §2's table.

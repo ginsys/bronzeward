@@ -1651,12 +1651,25 @@ HTTP/1.1 200 OK
 {"id": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
  "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
  "draft": "drf_2rmpezm5rfx47azsgmp66z457a", "draftRevision": 7,
+ "operation": "op_xq2mbn6fwt5l4ry3hk7cdzjv4e",
  "publishedBy": {"principal": "idn_5u4k6llt7jsktfhcfv35xmdetu", "role": "publisher"},
  "publishedAt": "2026-09-26T09:14:05Z",
- "sources": [{"head": "frg_rgkebwvneg6mxhid62gec5difi",
+ "renderer": {"contract": "v1.13", "machineryVersion": "v1.13.6",
+              "machineryChecksum": "h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=",
+              "kubernetesVersion": "v1.36.0"},
+ "sources": [{"kind": "fragment", "head": "frg_rgkebwvneg6mxhid62gec5difi",
               "revision": "frv_sqb745zrpl2xltek22ai7sbdue", "headRevision": 4}],
- "machines": [{"machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+ "machines": [{"machine": "mch_tqhcznunhyle4hnxru5hkt35uq", "mode": "metal",
                "review": "/api/v1/releases/rel_fgqvcvz3ck7h7234ljgdbzsj6m/machines/mch_tqhcznunhyle4hnxru5hkt35uq/review"}]}
+
+GET /api/v1/releases/rel_fgqvcvz3ck7h7234ljgdbzsj6m/machines/mch_tqhcznunhyle4hnxru5hkt35uq/review
+
+HTTP/1.1 200 OK
+
+{"release": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
+ "machine": "mch_tqhcznunhyle4hnxru5hkt35uq", "mode": "metal",
+ "configuration": "machine:\n  type: worker\n  token: <redacted:schema>\n  ...",
+ "provenance": [{"reference": "registry/example-pass", "version": 3, ...}]}
 
 GET /api/v1/machines/mch_tqhcznunhyle4hnxru5hkt35uq
 
@@ -1686,6 +1699,16 @@ transient, ended as a read treats it, still leased or of an earlier epoch is
 `409 conflict`, and nothing changes. `scopeState` is `normal`, or one of
 execution and recovery's recovery scope states while recovery mode is in
 effect.
+
+A release answers its renderer and contract record (compilation §10.2) and,
+per source, the head, the revision the release left it at (`null`: removed)
+and the head revision; per machine, the mode it was validated in and its
+review route. `GET /releases` lists releases in identifier order, each as the
+item read answers it. The review answers the redacted configuration and the
+provenance records as publication stored them (compilation §8.2, §8.3, §11),
+never traced again. A configuration that could not be redacted is `null`,
+with a `notice` saying so. No release read carries a ciphertext or a digest;
+a release that does not cover the machine is `404 not-found`.
 
 Entering recovery mode, which names the restored backups (§12.2):
 

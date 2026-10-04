@@ -1,0 +1,351 @@
+package migrate
+
+import (
+	"database/sql"
+	"testing"
+
+	"github.com/ginsys/bronzeward/internal/id"
+)
+
+// The statements 0011's tests insert with.
+const (
+	insertStatus = `INSERT INTO dependency_status (id, provider, object, version, class, reason, first_retained_at,
+		unknown_since, observed_from, recorded_at) VALUES ($1, $2, $3, $4, $5, $6, now(), $7, now(), now())`
+	insertRelease = `INSERT INTO release (id, cluster, draft, draft_revision, digest, contract, machinery_version,
+		machinery_checksum, kubernetes_version, operation, published_by, published_role, epoch, published_at)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, epoch, now() FROM installation_state`
+	insertReleaseMachine = `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
+		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)`
+	insertReleaseSource = `INSERT INTO release_source (release, cluster, kind, fragment, profile, assignment, name, machine,
+		fragment_revision, profile_revision, assignment_revision, head_revision)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+	insertDependency = `INSERT INTO dependency (release, machine, kind, provider, object, version, created, reference,
+		source_revision, source_digest, path) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+)
+
+const (
+	machinery = "v1.13.6"
+	checksum  = "h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0="
+	cipher    = "vault:v1:YWJj"
+	created   = "2026-09-26T09:12:40.123456789Z"
+)
+
+// release holds one published release over sourceRows' draft, inserted by releaseRows.
+type release struct {
+	sources
+	publish, rel, depKV, depKey string
+}
+
+func releaseRows(t *testing.T, db *sql.DB) release {
+	t.Helper()
+	r := release{sources: sourceRows(t, db), publish: id.New(id.Operation), rel: id.New(id.Release),
+		depKV: id.New(id.Dependency), depKey: id.New(id.Dependency)}
+	kv := generation(r.cluster, r.claim)
+	mustExec(t, db, insertOperation, r.publish, "publish", "running", "run-1/4242/publish-1", 1, r.draft, 1, nil, r.human, nil, nil)
+	mustExec(t, db, insertStatus, r.depKV, "kv", kv, 1, "retained", nil, nil)
+	mustExec(t, db, insertStatus, r.depKey, "transit", "bw-artifact", 1, "retained", nil, nil)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(t, tx, insertRelease, r.rel, r.cluster, r.draft, 1, digest(3), "v1.13", machinery, checksum, "v1.36.0",
+		r.publish, r.human, "publisher")
+	mustExec(t, tx, insertReleaseMachine, r.rel, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5),
+		"machine:\n  type: worker\n", `[]`)
+	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1)
+	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "profile", nil, r.prf, nil, "workers", nil, nil, r.prv, nil, 1)
+	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "assignment", nil, nil, r.asg, nil, r.machine, nil, nil, r.asr, 1)
+	mustExec(t, tx, insertDependency, r.rel, r.machine, "effective", "kv", kv, 1, created, "registry/example-pass", nil, nil, nil)
+	mustExec(t, tx, insertDependency, r.rel, r.machine, "reproduction", "kv", kv, 1, created, "registry/example-pass",
+		r.frv1, digest(6), "registries:/machine/registries")
+	mustExec(t, tx, insertDependency, r.rel, r.machine, "encryption", "transit", "bw-artifact", 1, "2026-09-26T09:12:40Z",
+		nil, nil, nil, nil)
+	mustExec(t, tx, `UPDATE draft SET state = 'published', release = $2, revision = revision + 1 WHERE id = $1`, r.draft, r.rel)
+	mustExec(t, tx, `UPDATE machine_state SET desired = $2, revision = revision + 1 WHERE machine = $1`, r.machine, r.rel)
+	mustExec(t, tx, `UPDATE operation SET state = 'succeeded', result = jsonb_build_object('release', $2::text) WHERE id = $1`,
+		r.publish, r.rel)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// PA §3, §6.2, §7.3; compilation §9, §10.2, §11; dependency monitor §5.1: what 0011 refuses.
+func TestReleaseConstraints(t *testing.T) {
+	db, _ := installed(t)
+	r := releaseRows(t, db)
+	kv := generation(r.cluster, r.claim)
+	rel2 := id.New(id.Release)
+	op2 := id.New(id.Operation)
+	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, r.draft2, 1, nil, r.human, nil, nil)
+	// rel2 is inserted in each case's transaction first, so its rows are written with it.
+	withRelease := []stmt{{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
+		"v1.36.0", op2, r.human, "publisher"}}}
+	withMachine := append(withRelease, stmt{insertReleaseMachine, []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal",
+		cipher, digest(4), digest(5), "x: 1\n", `[]`}})
+	newRelease := func(args ...any) []any {
+		base := []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum, "v1.36.0", op2, r.human, "publisher"}
+		for i := 0; i+1 < len(args); i += 2 {
+			base[args[i].(int)] = args[i+1]
+		}
+		return base
+	}
+	machineRow := func(args ...any) []any {
+		base := []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5), "x: 1\n", `[]`}
+		for i := 0; i+1 < len(args); i += 2 {
+			base[args[i].(int)] = args[i+1]
+		}
+		return base
+	}
+	depRow := func(args ...any) []any {
+		base := []any{rel2, r.machine, "effective", "kv", kv, 1, created, "registry/example-pass", nil, nil, nil}
+		for i := 0; i+1 < len(args); i += 2 {
+			base[args[i].(int)] = args[i+1]
+		}
+		return base
+	}
+	for _, c := range []struct {
+		name string
+		pre  []stmt
+		q    string
+		args []any
+		want string
+	}{
+		// release
+		{"second release of one draft revision", nil, insertRelease, newRelease(2, r.draft), "23505"},
+		{"release of another cluster's draft", nil, insertRelease, newRelease(1, r.other), "23503"},
+		{"release of a draft revision 0", nil, insertRelease, newRelease(3, 0), "23514"},
+		{"release digest of 31 bytes", nil, insertRelease, newRelease(4, digest(3)[:31]), "23514"},
+		{"release contract without its minor", nil, insertRelease, newRelease(5, "v1"), "23514"},
+		{"release machinery version without v", nil, insertRelease, newRelease(6, "1.13.6"), "23514"},
+		{"release with an empty machinery checksum", nil, insertRelease, newRelease(7, ""), "23514"},
+		{"release Kubernetes version without its patch", nil, insertRelease, newRelease(8, "v1.36"), "23514"},
+		{"second release of one operation", nil, insertRelease, newRelease(9, r.publish), "23505"},
+		{"release of an ingest operation", nil, insertRelease, newRelease(9, r.ingest), "23503"},
+		{"release published by no principal", nil, insertRelease, newRelease(10, id.New(id.Principal)), "23503"},
+		{"release published under the author role", nil, insertRelease, newRelease(11, "author"), "23514"},
+		{"release with an id of another kind", nil, insertRelease, newRelease(0, id.New(id.Draft)), "23514"},
+		// release_machine
+		{"machine of another cluster", withRelease, insertReleaseMachine, machineRow(2, r.otherMachine), "23503"},
+		{"machine at another machine's import base", withRelease, insertReleaseMachine, machineRow(3, r.otherIBR), "23503"},
+		{"machine at no assignment revision", withRelease, insertReleaseMachine, machineRow(4, id.New(id.AssignmentRevision)), "23503"},
+		{"machine in an unknown mode", withRelease, insertReleaseMachine, machineRow(5, "vm"), "23514"},
+		{"ciphertext without its key version", withRelease, insertReleaseMachine, machineRow(6, "vault:abc"), "23514"},
+		{"ciphertext at key version 0", withRelease, insertReleaseMachine, machineRow(6, "vault:v0:YWJj"), "23514"},
+		{"ciphertext digest of 31 bytes", withRelease, insertReleaseMachine, machineRow(7, digest(4)[:31]), "23514"},
+		{"configuration digest of 33 bytes", withRelease, insertReleaseMachine, machineRow(8, append(digest(5), 1)), "23514"},
+		{"empty redacted configuration", withRelease, insertReleaseMachine, machineRow(9, ""), "23514"},
+		{"provenance that is not a list", withRelease, insertReleaseMachine, machineRow(10, `{}`), "23514"},
+		{"second row of one machine", withMachine, insertReleaseMachine, machineRow(), "23505"},
+		// release_source
+		{"source with two heads", withRelease, insertReleaseSource,
+			[]any{rel2, r.cluster, "fragment", r.frg, r.prf, nil, "registries", nil, r.frv1, nil, nil, 1}, "23514"},
+		{"fragment source naming a machine", withRelease, insertReleaseSource,
+			[]any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", r.machine, r.frv1, nil, nil, 1}, "23514"},
+		{"assignment source with a name", withRelease, insertReleaseSource,
+			[]any{rel2, r.cluster, "assignment", nil, nil, r.asg, "workers", r.machine, nil, nil, r.asr, 1}, "23514"},
+		{"source of an unknown kind", withRelease, insertReleaseSource,
+			[]any{rel2, r.cluster, "import-base", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1}, "23514"},
+		{"source at head revision 0", withRelease, insertReleaseSource,
+			[]any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 0}, "23514"},
+		{"source at another name's revision", withRelease, insertReleaseSource,
+			[]any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frvSite, nil, nil, 1}, "23503"},
+		{"source in another cluster than its release", withRelease, insertReleaseSource,
+			[]any{rel2, r.other, "fragment", r.frg, nil, nil, "registries", nil, r.frvOther, nil, nil, 1}, "23503"},
+		{"second source of one head", append(withRelease, stmt{insertReleaseSource,
+			[]any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1}}), insertReleaseSource,
+			[]any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv2, nil, nil, 2}, "23505"},
+		// dependency
+		{"dependency of a machine the release does not cover", withRelease, insertDependency, depRow(), "23503"},
+		{"dependency of an unknown kind", withMachine, insertDependency, depRow(2, "source"), "23514"},
+		{"dependency without a status row", withMachine, insertDependency, depRow(5, 2), "23503"},
+		{"encryption dependency on KV", withMachine, insertDependency, depRow(2, "encryption", 7, nil), "23514"},
+		{"effective dependency on a Transit key", withMachine, insertDependency,
+			depRow(3, "transit", 4, "bw-artifact"), "23514"},
+		{"encryption dependency with a reference", withMachine, insertDependency,
+			depRow(2, "encryption", 3, "transit", 4, "bw-artifact"), "23514"},
+		{"reproduction dependency without its source", withMachine, insertDependency, depRow(2, "reproduction"), "23514"},
+		{"effective dependency with a source", withMachine, insertDependency,
+			depRow(8, r.frv1, 9, digest(6), 10, "registries:/machine"), "23514"},
+		{"reproduction source of another kind", withMachine, insertDependency,
+			depRow(2, "reproduction", 8, r.draft, 9, digest(6), 10, "registries:/machine"), "23514"},
+		{"creation time without its zone", withMachine, insertDependency, depRow(6, "2026-09-26T09:12:40"), "23514"},
+		{"creation time with ten fraction digits", withMachine, insertDependency,
+			depRow(6, "2026-09-26T09:12:40.1234567890Z"), "23514"},
+		{"second effective row of one version", append(withMachine, stmt{insertDependency, depRow()}), insertDependency,
+			depRow(), "23505"},
+		// dependency_status
+		{"second status of one version", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil}, "23505"},
+		{"status of an unknown class", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 2, "fine", nil, nil}, "23514"},
+		{"status of an unknown provider", nil, insertStatus, []any{id.New(id.Dependency), "s3", kv, 2, "retained", nil, nil}, "23514"},
+		{"unknown status without its start", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", nil}, "23514"},
+		{"retained status with an unknown start", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", nil, "2026-09-26T09:12:40Z"}, "23514"},
+		{"status reason in capitals", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "Soft-Deleted", nil}, "23514"},
+		{"retained status with a reason", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "absent", nil}, "23514"},
+		{"blocked status without a reason", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", nil, nil}, "23514"},
+		{"KV status at a key name", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", "bw-artifact", 1, "retained", nil, nil}, "23514"},
+		{"Transit status at a path", nil, insertStatus,
+			[]any{id.New(id.Dependency), "transit", "transit/bw-artifact", 1, "retained", nil, nil}, "23514"},
+		{"Transit status at ..", nil, insertStatus,
+			[]any{id.New(id.Dependency), "transit", "..", 1, "retained", nil, nil}, "23514"},
+		{"status at version 0", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 0, "retained", nil, nil}, "23514"},
+		{"status with an id of another kind", nil, insertStatus, []any{id.New(id.Release), "kv", kv, 2, "retained", nil, nil}, "23514"},
+		// draft, machine_state, operation
+		{"published draft without its release", nil,
+			`UPDATE draft SET state = 'published' WHERE id = $1`, []any{r.draft2}, "23514"},
+		{"open draft naming a release", nil, `UPDATE draft SET release = $2 WHERE id = $1`, []any{r.draft2, r.rel}, "23514"},
+		{"draft published as another draft's release", nil,
+			`UPDATE draft SET state = 'published', release = $2 WHERE id = $1`, []any{r.draft2, r.rel}, "23503"},
+		{"desired release that does not cover the machine", nil,
+			`INSERT INTO machine_state (machine, desired) VALUES ($1, $2)`, []any{r.otherMachine, r.rel}, "23503"},
+		{"applied release that does not exist", nil,
+			`UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'operation', baseline_revision = 1
+			 WHERE machine = $1`, []any{r.machine, id.New(id.Release), digest(5)}, "23503"},
+		{"second queued publish of one draft revision", []stmt{{`UPDATE operation SET state = 'queued', owner = NULL,
+			owner_epoch = NULL, lease_until = NULL WHERE id = $1`, []any{op2}}}, insertOperation,
+			[]any{id.New(id.Operation), "publish", "queued", nil, 0, r.draft2, 1, nil, r.human, nil, nil}, "23505"},
+	} {
+		func() {
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			for _, p := range c.pre {
+				mustExec(t, tx, p.q, p.args...)
+			}
+			if _, err := tx.Exec(c.q, c.args...); sqlState(err) != c.want {
+				t.Errorf("%s: %v; want SQLSTATE %s", c.name, err, c.want)
+			}
+		}()
+	}
+	// Controls: the same shapes commit with valid values, on a second draft revision.
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", "2026-09-26T09:12:40Z")
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 3, "blocked", "deletion-scheduled", nil)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, p := range withMachine {
+		mustExec(t, tx, p.q, p.args...)
+	}
+	mustExec(t, tx, insertReleaseSource, rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, nil, nil, nil, 2)
+	mustExec(t, tx, insertDependency, depRow(6, "2026-09-26T09:12:40.1Z")...)
+	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine")...)
+	mustExec(t, tx, insertDependency, depRow(2, "encryption", 3, "transit", 4, "bw-artifact", 6, "2026-09-26T09:12:40Z", 7, nil)...)
+	// A publish that failed leaves the draft revision free for the next.
+	mustExec(t, tx, `UPDATE operation SET state = 'failed', error = '{"code": "conflict"}' WHERE id = $1`, op2)
+	mustExec(t, tx, insertOperation, id.New(id.Operation), "publish", "queued", nil, 0, r.draft2, 1, nil, r.human, nil, nil)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	// The baseline revision is a counter (execution and recovery §2): an adoption record sets
+	// Applied at baseline revision 1, and a completed operation's new Applied advances it to 2,
+	// though no import base revision is named by either.
+	mustExec(t, db, `UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'adoption',
+		baseline_revision = 1 WHERE machine = $1`, r.machine, r.rel, digest(3))
+	mustExec(t, db, `UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'operation',
+		baseline_revision = baseline_revision + 1 WHERE machine = $1`, r.machine, rel2, digest(4))
+	if n := count(t, db, "machine_state WHERE baseline_revision = 2"); n != 1 {
+		t.Fatalf("%d machine states at baseline revision 2; want the advanced one", n)
+	}
+}
+
+// The control for 0011's named checks: with each dropped, the row TestReleaseConstraints expects it
+// to refuse commits, so it is that check, not another, that refuses.
+func TestReleaseConstraintControl(t *testing.T) {
+	db, _ := installed(t)
+	r := releaseRows(t, db)
+	kv := generation(r.cluster, r.claim)
+	rel2, op2 := id.New(id.Release), id.New(id.Operation)
+	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, r.draft2, 1, nil, r.human, nil, nil)
+	withRelease := stmt{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
+		"v1.36.0", op2, r.human, "publisher"}}
+	withMachine := stmt{insertReleaseMachine, []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4),
+		digest(5), "x: 1\n", `[]`}}
+	for _, c := range []struct {
+		drop string
+		pre  []stmt
+		q    string
+		args []any
+	}{
+		{"ALTER TABLE release_source DROP CONSTRAINT release_source_shape", []stmt{withRelease}, insertReleaseSource,
+			[]any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", r.machine, r.frv1, nil, nil, 1}},
+		{"ALTER TABLE dependency DROP CONSTRAINT dependency_shape", []stmt{withRelease, withMachine}, insertDependency,
+			[]any{rel2, r.machine, "encryption", "kv", kv, 1, created, nil, nil, nil, nil}},
+		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_object", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", "bw-artifact", 1, "retained", nil, nil}},
+		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_reason", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "absent", nil}},
+		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_unknown_since", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", nil}},
+		{"ALTER TABLE draft DROP CONSTRAINT draft_published_release", nil,
+			`UPDATE draft SET state = 'published' WHERE id = $1`, []any{r.draft2}},
+		{"DROP INDEX operation_active_publish", []stmt{{`UPDATE operation SET state = 'queued', owner = NULL, owner_epoch = NULL,
+			lease_until = NULL WHERE id = $1`, []any{op2}}}, insertOperation,
+			[]any{id.New(id.Operation), "publish", "queued", nil, 0, r.draft2, 1, nil, r.human, nil, nil}},
+	} {
+		func() {
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			if _, err := tx.Exec(c.drop); err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range c.pre {
+				mustExec(t, tx, p.q, p.args...)
+			}
+			if _, err := tx.Exec(c.q, c.args...); err != nil {
+				t.Errorf("after %s: %v; want it to commit", c.drop, err)
+			}
+		}()
+	}
+}
+
+// PA §3, choice §17.3: a release and its rows are immutable, and its rows are written in the
+// release's own transaction, so a committed release cannot grow; a dependency status is mutable.
+func TestReleaseImmutableTables(t *testing.T) {
+	db, _ := installed(t)
+	r := releaseRows(t, db)
+	for table, column := range map[string]string{"release": "digest", "release_machine": "redacted",
+		"release_source": "head_revision", "dependency": "version"} {
+		for _, stmt := range []string{"UPDATE " + table + " SET " + column + " = " + column, "DELETE FROM " + table,
+			"TRUNCATE " + table + " CASCADE"} {
+			if _, err := db.Exec(stmt); sqlState(err) != ImmutableSQLState {
+				t.Errorf("%s: %v; want SQLSTATE %s", stmt, err, ImmutableSQLState)
+			}
+		}
+		if count(t, db, table) == 0 {
+			t.Errorf("%s: a refused statement removed its rows", table)
+		}
+	}
+	for _, c := range []stmt{
+		{insertReleaseMachine, []any{r.rel, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5), "x: 1\n", `[]`}},
+		{insertReleaseSource, []any{r.rel, r.cluster, "fragment", nil, nil, nil, "site-dns", nil, r.frvSite, nil, nil, 1}},
+		{insertDependency, []any{r.rel, r.machine, "effective", "kv", generation(r.cluster, r.claim), 1, created,
+			"registry/late", nil, nil, nil}},
+	} {
+		if _, err := db.Exec(c.q, c.args...); sqlState(err) != ImmutableSQLState {
+			t.Errorf("late row %s: %v; want SQLSTATE %s", c.q, err, ImmutableSQLState)
+		}
+	}
+	if _, err := db.Exec(insertReleaseSource, id.New(id.Release), r.cluster, "fragment", r.frg, nil, nil, "registries", nil,
+		r.frv1, nil, nil, 1); sqlState(err) != "23503" {
+		t.Errorf("source of no release: %v; want SQLSTATE 23503", err)
+	}
+	if _, err := db.Exec(`UPDATE dependency_status SET class = 'unknown', reason = 'unreachable', unknown_since = now(),
+		recorded_at = now() WHERE id = $1`, r.depKV); err != nil {
+		t.Errorf("dependency_status update: %v; it is mutable", err)
+	}
+}
