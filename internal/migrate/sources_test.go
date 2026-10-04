@@ -12,8 +12,8 @@ import (
 
 // The statements 0009's tests insert with.
 const (
-	insertFragmentRevision = `INSERT INTO fragment_revision (id, cluster, name, layer, document, author, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, now())`
+	insertFragmentRevision = `INSERT INTO fragment_revision (id, cluster, name, layer, document, author, embedded, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, '[]', now())`
 	insertFragmentReference = `INSERT INTO fragment_reference (revision, name, kind, version, encoding, generation)
 		VALUES ($1, $2, $3, $4, $5, $6)`
 	insertFragment = `INSERT INTO fragment (id, cluster, scope, name, layer, head_revision_id, head_revision, etag_token, created_at)
@@ -380,6 +380,33 @@ func unseenRevisionRow(t *testing.T, db *sql.DB, s sources) {
 	}
 	if sqlState(lateErr) != "23503" {
 		t.Errorf("pin of a revision committed during the statement: %v; want SQLSTATE 23503", lateErr)
+	}
+}
+
+// 0010 (compilation §5.2): a fragment revision's embedded declarations are a JSON array, never
+// absent, and immutable with the revision.
+func TestFragmentRevisionEmbedded(t *testing.T) {
+	db, _ := installed(t)
+	s := sourceRows(t, db)
+	const q = `INSERT INTO fragment_revision (id, cluster, name, layer, document, author, embedded, created_at)
+		VALUES ($1, $2, 'dns', 'site', 'machine: {}', $3, $4, now())`
+	for _, c := range []struct {
+		name     string
+		embedded any
+		want     string
+	}{
+		{"no embedded", nil, "23502"},
+		{"an object", `{"path": "doc[0]/x", "format": "yaml"}`, "23514"},
+		{"a string", `"[]"`, "23514"},
+	} {
+		if _, err := db.Exec(q, id.New(id.FragmentRevision), s.cluster, s.human, c.embedded); sqlState(err) != c.want {
+			t.Errorf("%s: %v; want SQLSTATE %s", c.name, err, c.want)
+		}
+	}
+	frv := id.New(id.FragmentRevision)
+	mustExec(t, db, q, frv, s.cluster, s.human, `[{"path": "doc[0]/x", "format": "yaml"}]`)
+	if _, err := db.Exec(`UPDATE fragment_revision SET embedded = '[]' WHERE id = $1`, frv); sqlState(err) != ImmutableSQLState {
+		t.Errorf("embedded updated: %v; want SQLSTATE %s", err, ImmutableSQLState)
 	}
 }
 

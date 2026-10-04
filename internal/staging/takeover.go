@@ -71,7 +71,7 @@ func takeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, cla
 	if opts.afterLock != nil {
 		opts.afterLock()
 	}
-	tk := Taken{Claim: Claim{ID: claim, Mode: "encrypted"}}
+	tk := Taken{Claim: Claim{ID: claim, Kind: "import", Mode: "encrypted"}} // only an import stages encrypted (0010)
 	var until time.Time
 	var digest []byte
 	// A claim with no payload is abandoned by this same write: eligibility was settled here, under

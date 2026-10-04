@@ -43,8 +43,8 @@ func (d *draftEnv) key() string {
 func (d *draftEnv) fragmentRevision(cluster, name, layer string) string {
 	d.t.Helper()
 	frv := id.New(id.FragmentRevision)
-	mustExec(d.t, d.db, `INSERT INTO fragment_revision (id, cluster, name, layer, document, author, created_at)
-		VALUES ($1, $2, $3, $4, 'machine: {}', $5, now())`, frv, cluster, name, layer, d.seed)
+	mustExec(d.t, d.db, `INSERT INTO fragment_revision (id, cluster, name, layer, document, author, embedded, created_at)
+		VALUES ($1, $2, $3, $4, 'machine: {}', $5, '[]', now())`, frv, cluster, name, layer, d.seed)
 	return frv
 }
 

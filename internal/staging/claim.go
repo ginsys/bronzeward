@@ -23,10 +23,11 @@ type Owner struct {
 // Timers are the claim's lease and absolute expiry (compilation §3.2), from the configuration.
 type Timers struct{ Lease, AbsoluteExpiry time.Duration }
 
-// Claim is one claim as its owner knows it.
+// Claim is one claim as its owner knows it. Kind is import, with its Machine, or draft-update,
+// with its Draft (persistence-api §9.3).
 type Claim struct {
-	ID, Mode, Cluster, Machine string
-	Gen                        int64
+	ID, Kind, Mode, Cluster, Machine, Draft string
+	Gen                                     int64
 }
 
 var (
@@ -76,11 +77,12 @@ func Create(ctx context.Context, tx *sql.Tx, o Owner, t Timers, c Claim, princip
 		return errors.New("staging: the lease must be positive and shorter than the absolute expiry")
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until,
-		expires_at, principal, idempotency_key, cluster, machine, kind, created_at)
+		expires_at, principal, idempotency_key, cluster, machine, draft, kind, created_at)
 		SELECT $1, $2, 'held', $3, 1, $4, now() + $5::bigint * interval '1 microsecond',
-		now() + $6::bigint * interval '1 microsecond', $7, $8, $9, $10, 'import', now()
+		now() + $6::bigint * interval '1 microsecond', $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, now()
 		FROM installation_state WHERE epoch = $4`,
-		c.ID, c.Mode, o.ID, o.Epoch, t.Lease.Microseconds(), t.AbsoluteExpiry.Microseconds(), principal, key, c.Cluster, c.Machine)
+		c.ID, c.Mode, o.ID, o.Epoch, t.Lease.Microseconds(), t.AbsoluteExpiry.Microseconds(), principal, key, c.Cluster, c.Machine,
+		c.Draft, c.Kind)
 	if err != nil {
 		return fmt.Errorf("staging: create the claim: %w", err)
 	}

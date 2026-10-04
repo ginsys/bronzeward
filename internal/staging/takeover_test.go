@@ -87,7 +87,7 @@ func TestTakeOver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Claim{ID: c.ID, Mode: "encrypted", Cluster: f.cluster, Machine: f.machine, Gen: 2}
+	want := Claim{ID: c.ID, Kind: "import", Mode: "encrypted", Cluster: f.cluster, Machine: f.machine, Gen: 2}
 	if tk.Claim != want || string(tk.Payload) != string(sealed) || tk.Digest != digest {
 		t.Fatalf("taken %+v; want %+v with the payload", tk, want)
 	}

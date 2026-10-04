@@ -71,7 +71,7 @@ func newEpoch(t *testing.T, db *sql.DB) {
 func (f fixture) create(t *testing.T, mode string) (Owner, Claim) {
 	t.Helper()
 	o := Owner{ID: "a/4242/start-1", Epoch: currentEpoch(t, f.db)}
-	c := Claim{ID: id.New(id.Ingestion), Mode: mode, Cluster: f.cluster, Machine: f.machine, Gen: 1}
+	c := Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: mode, Cluster: f.cluster, Machine: f.machine, Gen: 1}
 	draft := id.New(id.Draft)
 	exec(t, f.db, `INSERT INTO draft (id, cluster, title, state, revision, etag_token, created_at)
 		VALUES ($1, $2, 'import', 'open', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaa', now())`, draft, f.cluster)
@@ -122,6 +122,39 @@ func inTx(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// A draft update's claim (persistence-api §9.3) names its draft, no machine and no operation; it is
+// released like an import's.
+func TestCreateDraftUpdate(t *testing.T) {
+	f := setup(t)
+	draft := id.New(id.Draft)
+	exec(t, f.db, `INSERT INTO draft (id, cluster, title, state, revision, etag_token, created_at)
+		VALUES ($1, $2, 'edit', 'open', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaa', now())`, draft, f.cluster)
+	o := Owner{ID: "a/4242/start-1", Epoch: currentEpoch(t, f.db)}
+	c := Claim{ID: id.New(id.Ingestion), Kind: "draft-update", Mode: "transient", Cluster: f.cluster, Draft: draft, Gen: 1}
+	if err := inTx(t.Context(), f.db, func(tx *sql.Tx) error {
+		return Create(t.Context(), tx, o, timers, c, f.human, "k-fragment-0123456789")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var kind string
+	var machine, gotDraft sql.NullString
+	if err := f.db.QueryRow(`SELECT kind, machine, draft FROM staging_claim WHERE id = $1`, c.ID).Scan(&kind, &machine, &gotDraft); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "draft-update" || machine.Valid || gotDraft.String != draft {
+		t.Fatalf("claim kind %q machine %v draft %v", kind, machine, gotDraft)
+	}
+	if err := Heartbeat(t.Context(), f.db, o, c, timers.Lease); err != nil {
+		t.Fatalf("heartbeat with no operation: %v", err)
+	}
+	if err := inTx(t.Context(), f.db, func(tx *sql.Tx) error { return Release(t.Context(), tx, o, c) }); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.row(t, c.ID); r.state != "released" {
+		t.Fatalf("state %s, want released", r.state)
+	}
 }
 
 // Compilation §3.2 / persistence-api §5.1: every owner statement is fenced on the owner, its
@@ -229,7 +262,7 @@ func TestCreate(t *testing.T) {
 	}
 	stale := Owner{ID: "a/4242/start-1", Epoch: currentEpoch(t, f.db)}
 	newEpoch(t, f.db)
-	gone := Claim{ID: id.New(id.Ingestion), Mode: "transient", Cluster: f.cluster, Machine: f.machine, Gen: 1}
+	gone := Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: "transient", Cluster: f.cluster, Machine: f.machine, Gen: 1}
 	err := inTx(t.Context(), f.db, func(tx *sql.Tx) error {
 		return Create(t.Context(), tx, stale, timers, gone, f.human, "k-stale-0123456789")
 	})
@@ -253,7 +286,7 @@ func TestCreate(t *testing.T) {
 		}
 	}
 	for name, tm := range map[string]Timers{"no lease": {AbsoluteExpiry: time.Minute}, "lease past expiry": {Lease: time.Hour, AbsoluteExpiry: time.Minute}} {
-		c := Claim{ID: id.New(id.Ingestion), Mode: "transient", Cluster: f.cluster, Machine: f.machine, Gen: 1}
+		c := Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: "transient", Cluster: f.cluster, Machine: f.machine, Gen: 1}
 		o := Owner{ID: "a/4242/start-1", Epoch: currentEpoch(t, f.db)}
 		if err := inTx(t.Context(), f.db, func(tx *sql.Tx) error { return Create(t.Context(), tx, o, tm, c, f.human, "k-timer-0123456789") }); err == nil {
 			t.Errorf("%s: created", name)
