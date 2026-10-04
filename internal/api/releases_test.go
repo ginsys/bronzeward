@@ -233,6 +233,18 @@ func TestReleaseReviewProvenanceProjected(t *testing.T) {
 		{"version 0", `[` + strings.Replace(good, `"version":3`, `"version":0`, 1) + `]`},
 		{"a member below 0", `[` + strings.Replace(good, `"version":3`, `"version":3,"member":-1`, 1) + `]`},
 		{"a record that is not an object", `["` + standIn + `"]`},
+		{"an encoding outside the enum", `[` + strings.Replace(good, `"version":3`, `"version":3,"encoding":"`+standIn+`"`, 1) + `]`},
+		{"a reference outside the grammar", `[` + strings.Replace(good, `"registry/example-pass"`, `"`+standIn+` x"`, 1) + `]`},
+		{"a field name in another case", `[` + strings.Replace(good, `"reference"`, `"REFERENCE"`, 1) + `]`},
+		{"a null member", `[` + strings.Replace(good, `"version":3`, `"version":3,"member":null`, 1) + `]`},
+		{"a null second outcome", `[` + strings.Replace(good, `"output"`, `"overriddenBy":null,"output"`, 1) + `]`},
+		{"an empty source path", `[` + strings.Replace(good, `"path":"doc[0]/machine/registries"`, `"path":""`, 1) + `]`},
+		{"an override by the import base", `[` + strings.Replace(good, `"output":"doc[0]/machine/registries"`,
+			`"overriddenBy":{"revision":"`+id.New(id.ImportBase)+`","digest":"`+hexB+`"}`, 1) + `]`},
+		{"an override digest that is not SHA-256 hex", `[` + strings.Replace(good, `"output":"doc[0]/machine/registries"`,
+			`"overriddenBy":{"revision":"{frv}","digest":"`+standIn+`"}`, 1) + `]`},
+		{"a digest in capitals", `[` + strings.Replace(good, hexB, strings.ToUpper(hexB), 1) + `]`},
+		{"a field whose name carries the content", `[` + strings.Replace(good, `"version":3`, `"version":3,"`+standIn+`":1`, 1) + `]`},
 		{"control", `[` + good + `]`}, // the record each case above breaks one way
 	} {
 		draft := d.draft
