@@ -8,6 +8,7 @@ import (
 	"io"
 	"slices"
 	"strconv"
+	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/siderolabs/talos/pkg/machinery/config/configpatcher"
@@ -93,6 +94,15 @@ func resolveWith(s Sanitized, value func(name string, r Reference, p Path) (*yam
 			v, err := value(n.Value, s.decl.References[n.Value], p)
 			if err != nil {
 				return err
+			}
+			// The first "|" of a path ends its outer pointer (§2.2): a member key holding one
+			// in the outer stream would have no path.
+			if p.Format == "" && v.Kind == yaml.MappingNode {
+				for i := 0; i < len(v.Content); i += 2 {
+					if strings.Contains(v.Content[i].Value, "|") {
+						return refuse(RuleBadPath, p.String())
+					}
+				}
 			}
 			*n = yaml.Node{Kind: v.Kind, Tag: v.Tag, Value: v.Value, Content: v.Content, Anchor: n.Anchor}
 			return nil

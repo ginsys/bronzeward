@@ -71,11 +71,10 @@ func TestRefusalSweep(t *testing.T) {
 		{rule: RuleLocalTag, text: "machine:\n  token: " + s + "\n  type: []\n  nodeLabels:\n    " + s + ": !unknown x\n"},
 		// The machinery's value is the decoded form of the input text.
 		{rule: RuleLocalTag, text: "cluster:\n  secretboxEncryptionSecret: !!binary " + b64Secret + "\nmachine:\n  nodeLabels:\n    " + b64Secret + ": !unknown x\n", secret: b64Secret},
-		// The key holding the value is escaped in the path, and the path does not parse back.
-		{rule: RuleLocalTag, text: "machine:\n  token: " + s + "/x\n  nodeLabels:\n    " + s + "/x|y: !unknown x\n"},
-		// The key holding the value parses as a path with an embedded-document suffix.
-		{rule: RuleLocalTag, text: "machine:\n  token: " + s + "|yaml\n  nodeLabels:\n    " + s + "|yaml: !unknown x\n"},
-		{rule: RuleLocalTag, text: "machine:\n  token: " + s + "|json\n  nodeLabels:\n    " + s + "|json: !unknown x\n"},
+		// An outer key holding "|" has no path, so it is refused before any path names it.
+		{rule: RuleParse, text: "machine:\n  token: " + s + "/x\n  nodeLabels:\n    " + s + "/x|y: !unknown x\n"},
+		{rule: RuleParse, text: "machine:\n  token: " + s + "|yaml\n  nodeLabels:\n    " + s + "|yaml: !unknown x\n"},
+		{rule: RuleParse, text: "machine:\n  token: " + s + "|json\n  nodeLabels:\n    " + s + "|json: !unknown x\n"},
 		// A key equal to the value as a parsed number, spelled as a float.
 		{rule: RuleGuardValue, text: manifestStream("secret: 314159\n3.14159e5: x\n"), secret: "3.14159e5",
 			marks: []string{manifestPath + "|yaml/secret"}, decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},

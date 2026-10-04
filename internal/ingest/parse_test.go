@@ -123,6 +123,30 @@ func TestParseRefusesNonScalarKeys(t *testing.T) {
 	}
 }
 
+// TestParseRefusesOuterPipeKeys: the first "|" of a path ends its outer pointer (compilation.md
+// §2.2), so an outer key holding one has no path of its own; it would read as an embedded
+// document's. An inner key may hold one. The refusal quotes no key.
+func TestParseRefusesOuterPipeKeys(t *testing.T) {
+	for _, in := range []string{
+		"machine:\n  nodeAnnotations:\n    a|yaml: x\n",
+		"machine:\n  nodeAnnotations:\n    " + secretText + "|b: x\n",
+		"a: [{b|c: 1}]\n",
+		"k: &k " + secretText + "|b\nm:\n  *k : 1\n",
+	} {
+		_, err := Extract(request(t, in))
+		if !isRule(err, RuleParse) {
+			t.Errorf("%q: %v, want a %s refusal", in, err, RuleParse)
+			continue
+		}
+		if strings.Contains(err.Error(), secretText) {
+			t.Errorf("the refusal quotes the input: %v", err)
+		}
+	}
+	if _, err := Extract(request(t, "machine:\n  nodeAnnotations:\n    a: x|yaml\n")); err != nil {
+		t.Errorf("a value holding |: %v", err)
+	}
+}
+
 func isRule(err error, rule Rule) bool {
 	var r *Refusal
 	return errors.As(err, &r) && r.Rule == rule

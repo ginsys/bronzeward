@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -18,7 +19,39 @@ func parse(u Unresolved) ([]*yaml.Node, error) {
 	if len(b) == 0 {
 		return nil, ErrEmptyInput
 	}
-	return parseStream(b)
+	docs, err := parseStream(b)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range docs {
+		if line := pipeKey(d); line != 0 {
+			return nil, refuse(RuleParse, fmt.Sprintf("line %d", line))
+		}
+	}
+	return docs, nil
+}
+
+// pipeKey is the line of a mapping key holding "|", or 0. The first "|" of a path ends its outer
+// pointer (compilation.md §2.2), so such a key in the outer stream has no path: it would read as
+// an embedded document's. An embedded document's own keys are not checked here: an inner token
+// may hold "|". Aliases are not followed, as in badKey.
+func pipeKey(n *yaml.Node) int {
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i < len(n.Content); i += 2 {
+			if k := deref(n.Content[i]); k != nil && strings.Contains(k.Value, "|") {
+				return n.Content[i].Line
+			}
+		}
+	}
+	if n.Kind == yaml.AliasNode {
+		return 0
+	}
+	for _, c := range n.Content {
+		if line := pipeKey(c); line != 0 {
+			return line
+		}
+	}
+	return 0
 }
 
 func parseStream(b []byte) ([]*yaml.Node, error) {

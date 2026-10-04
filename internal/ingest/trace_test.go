@@ -38,6 +38,10 @@ func TestStandIn(t *testing.T) {
 		{"Ab1", 3, "Xx0"},
 		{"x \"q\" \\ tab\tend # y", 7, "zq007 \\ xxx\txxx # x"},
 		{"", 1, ""},
+		// a character the head cuts has its remaining bytes written x
+		{"秘密", 2, "zq002x"},
+		{"abcd秘", 4, "zq004xx"},
+		{"é-secret", 5, "zq005xxxx"},
 	} {
 		if got := standIn(c.real, c.id); got != c.want {
 			t.Errorf("standIn(%q, %d) = %q, want %q", c.real, c.id, got, c.want)

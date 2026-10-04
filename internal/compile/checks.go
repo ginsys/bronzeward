@@ -54,6 +54,11 @@ func checkOutput(real []leaf, sources []Source, outcomes []outcome) error {
 		for _, p := range o.paths {
 			attributed[p] = true
 		}
+		// A mapping's key is a value the provider holds (§4.2), whatever its member's kind; the
+		// output leaves are value nodes, so the key where its reference placed it is never one.
+		if t.Member() >= 0 && len(t.Leaf()) >= copyFloor {
+			forms = append(forms, t.Leaf())
+		}
 		if t.Kind() != ingest.TraceString && t.Kind() != ingest.TraceBytes {
 			continue
 		}

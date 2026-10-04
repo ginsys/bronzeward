@@ -168,34 +168,79 @@ func (p *prefixes) at(k int) (prefix, error) {
 }
 
 // presence is whether t is present in each prefix composition from its own source's on, the full
-// composition, where it reached no output leaf, last. A value is present where a leaf carries its
-// stand-in; a boolean where flipping it changes a leaf.
+// composition, where it reached no output leaf, last.
 func (p *prefixes) presence(t traced) ([]bool, error) {
 	n := len(p.trace) - 1
 	present := make([]bool, n+1)
 	for k := t.source; k < n; k++ {
-		x, err := p.at(k)
+		c, err := p.count(t, k)
 		if err != nil {
 			return nil, err
 		}
-		if t.Kind() != ingest.TraceBoolean {
-			present[k] = slices.ContainsFunc(x.leaves, func(l leaf) bool { return l.kind == yaml.ScalarNode && t.Carried(l.value) })
-			continue
-		}
-		fs := slices.Clone(p.trace[:k+1])
-		s := p.sources[t.source]
-		if fs[t.source], _, _, err = ingest.Trace(s.Text, s.Values, p.first[t.source], t.ID()); err != nil {
-			return nil, fidelity()
-		}
-		fm, err := Compose(fs[0], fs[1:])
-		if err != nil {
-			return nil, fidelity()
-		}
-		changed, err := flipped(x.leaves, fm.bytes(), x.hosts)
-		if err != nil {
-			return nil, err
-		}
-		present[k] = len(changed) > 0
+		present[k] = c > 0
 	}
 	return present, nil
+}
+
+// narrowed is the fragment that overrode some of the leaves an import base occurrence reaches in
+// the base alone, though full leaves still carry it: an aliased reference one of whose aliases a
+// fragment replaced or deleted. It is the fragment after which fewer leaves first carry it, or -1
+// when none did. A fragment cannot add a leaf carrying the base's stand-in: a literal one reaching
+// the full composition fails attribution, as it equals its real leaf. So the counts never grow, the
+// prefixes are composed only when the full count is below the base's, and a count that grows
+// fails closed.
+func (p *prefixes) narrowed(t traced, full int) (int, error) {
+	n := len(p.trace) - 1
+	prev, err := p.count(t, 0)
+	if err != nil || prev == full {
+		return -1, err
+	}
+	for k := 1; k <= n; k++ {
+		c := full
+		if k < n {
+			if c, err = p.count(t, k); err != nil {
+				return 0, err
+			}
+		}
+		if c < prev {
+			return k - 1, nil
+		}
+		if c > prev {
+			return 0, fidelity()
+		}
+	}
+	return -1, nil
+}
+
+// count is the number of leaves of the prefix composition of the import base and the first k
+// fragments that carry t: a value's where a leaf carries its stand-in; a boolean's where flipping
+// it changes a leaf.
+func (p *prefixes) count(t traced, k int) (int, error) {
+	x, err := p.at(k)
+	if err != nil {
+		return 0, err
+	}
+	if t.Kind() != ingest.TraceBoolean {
+		c := 0
+		for _, l := range x.leaves {
+			if l.kind == yaml.ScalarNode && t.Carried(l.value) {
+				c++
+			}
+		}
+		return c, nil
+	}
+	fs := slices.Clone(p.trace[:k+1])
+	s := p.sources[t.source]
+	if fs[t.source], _, _, err = ingest.Trace(s.Text, s.Values, p.first[t.source], t.ID()); err != nil {
+		return 0, fidelity()
+	}
+	fm, err := Compose(fs[0], fs[1:])
+	if err != nil {
+		return 0, fidelity()
+	}
+	changed, err := flipped(x.leaves, fm.bytes(), x.hosts)
+	if err != nil {
+		return 0, err
+	}
+	return len(changed), nil
 }

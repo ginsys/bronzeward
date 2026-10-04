@@ -227,6 +227,57 @@ func TestCompileCopyChecksEveryLeaf(t *testing.T) {
 	}
 }
 
+// An import base reference aliased to two fields is overridden when a fragment replaces one alias,
+// though the other still holds its value: the fragment after which fewer leaves carry it is named
+// (compilation.md §8.1). A fragment that leaves both aliases is not an override.
+func TestCompileRefusesAnAliasOverride(t *testing.T) {
+	const tok = "base-" + compileSecret
+	text := mutate(t, generatedBase(t), func(m *yaml.Node) {
+		ref := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!bwref", Value: "app/ann", Anchor: "s"}
+		m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "nodeAnnotations"},
+			&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Value: "a"}, ref,
+				{Kind: yaml.ScalarNode, Value: "b"}, {Kind: yaml.AliasNode, Value: "s", Alias: ref},
+			}})
+	})
+	base := source(t, string(text), strRef("app/ann"), map[string]provider.Value{"app/ann": value(t, provider.KindString, tok)})
+	other := source(t, "machine:\n  nodeLabels:\n    unrelated: plain\n", ingest.Declarations{}, nil)
+	if _, err := Compile(Input{Base: base, Fragments: []Source{other}, Mode: ModeMetal}); err != nil {
+		t.Fatalf("no override: %v", err)
+	}
+	override := source(t, "machine:\n  nodeAnnotations:\n    b: literal-text\n", ingest.Declarations{}, nil)
+	e := refusal(t, Input{Base: base, Fragments: []Source{other, override}, Mode: ModeMetal}, RuleBaseOverride, tok)
+	if e.Input != "fragment[1]" || !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeAnnotations/a"}) {
+		t.Errorf("refused %s at %v, want fragment[1] at the reference", e.Input, e.Paths)
+	}
+}
+
+// A mapping reference's keys are values the provider holds (compilation.md §4.2), so a key of six
+// bytes or more written as a literal elsewhere is a copy, whatever its member's kind.
+func TestCompileRefusesAMappingKeyCopy(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	const key = "key-" + compileSecret
+	f0 := source(t, "machine:\n  nodeAnnotations: !bwref app/m\n", refs(map[string]ingest.Reference{"app/m": ref(provider.KindMapping)}),
+		map[string]provider.Value{"app/m": value(t, provider.KindMapping, map[string]any{key: "v"})})
+	f1 := source(t, "machine:\n  nodeLabels:\n    copy: "+key+"\n", ingest.Declarations{}, nil)
+	if e := refusal(t, Input{Base: base, Fragments: []Source{f0, f1}, Mode: ModeMetal}, RuleCopy, key); !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeLabels/copy"}) {
+		t.Errorf("refused at %v, want the copy's path", e.Paths)
+	}
+}
+
+// A non-ASCII string compiles: its stand-in never splits a character, so the trace pass composes
+// as the real one does (compilation.md §8.1).
+func TestCompileMultibyteValue(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	for _, v := range []string{"秘密", "abcd秘密", "é-secret"} {
+		f := source(t, "machine:\n  nodeAnnotations:\n    m: !bwref app/m\n", strRef("app/m"),
+			map[string]provider.Value{"app/m": value(t, provider.KindString, v)})
+		if _, err := Compile(Input{Base: base, Fragments: []Source{f}, Mode: ModeMetal}); err != nil {
+			t.Errorf("a %d-byte multibyte value: %v", len(v), err)
+		}
+	}
+}
+
 // Two fragments overriding two base references: the refusal names the first and only its paths.
 func TestCompileBaseOverrideNamesOneFragment(t *testing.T) {
 	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
