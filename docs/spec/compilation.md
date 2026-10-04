@@ -153,8 +153,9 @@ give a node a path that reads as an embedded document's.
 2. **Parse** every document of the stream. A parse failure refuses the input;
    the refusal quotes no input text. A mapping that holds a key twice is a
    parse failure, as YAML forbids it, so a path never names two nodes. So is a
-   mapping key that is not a scalar, which no path token can name, and an
-   outer mapping key holding `|` (§2.2).
+   mapping key that is not a scalar, which no path token can name, an outer
+   mapping key holding `|` (§2.2), and an outer `!!binary` key, which decodes
+   to text its token does not show.
 3. **Identify** the values to extract: every field the pinned Talos machinery
    marks secret (the `pkg/machinery` `RedactSecrets` field list, SP §2), and
    every path the operator marks in the request. A mark that addresses no node
@@ -851,8 +852,11 @@ The implementation settles seven points SP left open:
   leaves than it does in the import base alone: an aliased reference one of
   whose aliases a fragment replaced or deleted. That fragment, the one after
   which fewer leaves first carry it, overrode the reference (§6 step 7). The
-  import base alone is composed once for this whenever it holds a reference
-  and a fragment follows. An occurrence absent from its own source's prefix fails closed.
+  import base alone is composed for this whenever it holds a reference and a
+  fragment follows. Each prefix is composed from the real values too, and a
+  prefix leaf carries a stand-in only where it differs from the real prefix's,
+  as in attribution, so a literal shaped like a stand-in is not counted. An
+  occurrence absent from its own source's prefix fails closed.
   A boolean that reached no output leaf is flipped in the prefixes from its
   own on, and the fragment after which flipping it stops changing a leaf is
   the one that overrode it; SP left that outcome unknown, which §8.2's

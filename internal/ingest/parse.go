@@ -31,14 +31,15 @@ func parse(u Unresolved) ([]*yaml.Node, error) {
 	return docs, nil
 }
 
-// pipeKey is the line of a mapping key holding "|", or 0. The first "|" of a path ends its outer
-// pointer (compilation.md §2.2), so such a key in the outer stream has no path: it would read as
-// an embedded document's. An embedded document's own keys are not checked here: an inner token
-// may hold "|". Aliases are not followed, as in badKey.
+// pipeKey is the line of a mapping key holding "|", or of a binary key, or 0. The first "|" of a
+// path ends its outer pointer (compilation.md §2.2), so such a key in the outer stream has no
+// path: it would read as an embedded document's. A binary key is decoded to text its token does
+// not show, which may hold "|". An embedded document's own keys are not checked here: an inner
+// token may hold "|". Aliases are not followed, as in badKey.
 func pipeKey(n *yaml.Node) int {
 	if n.Kind == yaml.MappingNode {
 		for i := 0; i < len(n.Content); i += 2 {
-			if k := deref(n.Content[i]); k != nil && strings.Contains(k.Value, "|") {
+			if k := deref(n.Content[i]); k != nil && (strings.Contains(k.Value, "|") || k.Tag == "!!binary") {
 				return n.Content[i].Line
 			}
 		}

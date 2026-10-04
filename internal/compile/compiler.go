@@ -150,7 +150,7 @@ func compile(in Input, sources []Source) (Compiled, error) {
 		}
 		passes = append(passes, fm)
 	}
-	pre := prefixes{sources: sources, trace: trace, first: first, hosts: hs}
+	pre := prefixes{sources: sources, real: real, trace: trace, first: first, hosts: hs}
 	outcomes := make([]outcome, len(ts))
 	for i, t := range ts {
 		o := outcome{tracer: t.Tracer, source: t.source, paths: attrs[t.ID()], by: -1}
