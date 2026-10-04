@@ -315,6 +315,19 @@ func TestCompileRefusesACanonicalCopy(t *testing.T) {
 	if !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeAnnotations/copy"}) {
 		t.Errorf("refused at %v, want the copy's path", e.Paths)
 	}
+	// The canonical spelling written as a key is refused, and its path token is redacted.
+	key := source(t, "machine:\n  nodeAnnotations:\n    "+canonical+": v\n", ingest.Declarations{}, nil)
+	e = refusal(t, Input{Base: base, Fragments: []Source{f0, key}, Mode: ModeMetal}, RuleCopy, stored, canonical)
+	if !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeAnnotations/<redacted>"}) {
+		t.Errorf("refused at %v, want the key's redacted path", e.Paths)
+	}
+	// A mapping reference's key is a value too: its canonical spelling is a copy.
+	m := source(t, "machine:\n  nodeLabels: !bwref app/m\n", refs(map[string]ingest.Reference{"app/m": ref(provider.KindMapping)}),
+		map[string]provider.Value{"app/m": value(t, provider.KindMapping, map[string]any{stored: "v"})})
+	e = refusal(t, Input{Base: base, Fragments: []Source{m, f1}, Mode: ModeMetal}, RuleCopy, stored, canonical)
+	if !slices.Equal(e.Paths, []string{"doc[0]/machine/nodeAnnotations/copy"}) {
+		t.Errorf("refused at %v, want the copy's path", e.Paths)
+	}
 }
 
 // A non-ASCII string compiles: its stand-in never splits a character, so the trace pass composes

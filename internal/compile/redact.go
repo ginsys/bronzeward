@@ -14,8 +14,8 @@ import (
 const redactedToken = "<redacted>"
 
 // redactor redacts the path tokens that hold a resolved value: one equal to a resolved string, a
-// mapping member's key or string value, or the base64 encoding of one, or containing one of
-// copyFloor bytes or more. Integers and booleans are not looked for. It holds plaintext, so it
+// mapping member's key or string value, the base64 encoding of one or its canonical re-encoding,
+// or containing one of copyFloor bytes or more. Integers and booleans are not looked for. It holds plaintext, so it
 // lives only inside Compile and is never returned.
 type redactor struct {
 	exact    map[string]bool
@@ -26,7 +26,11 @@ type redactor struct {
 func newRedactor(sources []Source) redactor {
 	r := redactor{exact: map[string]bool{}}
 	add := func(s string) {
-		for _, f := range []string{s, base64.StdEncoding.EncodeToString([]byte(s))} {
+		fs := []string{s, base64.StdEncoding.EncodeToString([]byte(s))}
+		if c, ok := canonical(s); ok {
+			fs = append(fs, c)
+		}
+		for _, f := range fs {
 			r.exact[f] = true
 			if len(f) >= copyFloor {
 				r.contains = append(r.contains, f)
