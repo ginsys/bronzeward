@@ -28,7 +28,7 @@ import (
 var Keys = []string{"bw-artifact", "bw-baseline", "bw-staging", "bw-digest"}
 
 // Policies are the fixture's policy files, by the name bin/up writes each under.
-var Policies = []string{"bw-ingestion", "bw-compiler", "bw-executor", "bw-metadata-only", "bw-orphan-report"}
+var Policies = []string{"bw-ingestion", "bw-compiler", "bw-executor", "bw-metadata", "bw-metadata-only", "bw-orphan-report"}
 
 // Bao is one test's view of the server.
 type Bao struct {

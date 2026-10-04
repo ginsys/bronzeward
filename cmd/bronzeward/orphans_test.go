@@ -121,8 +121,10 @@ func newOrphanEnv(t *testing.T) *orphanEnv {
 	e.config = filepath.Join(dir, "bronzeward.yaml")
 	writeFile(t, e.config, "listen: 127.0.0.1:0\ndatabase:\n  dsn: "+dsn+"\nauth:\n  oidc:\n    issuer: https://idp.test\n    audience: bronzeward\n"+
 		"execution: {maxTransportDeadline: 5m}\nprovider:\n  address: "+e.p.url+"\n"+
-		"  keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest}\n"+
+		"  keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest, artifact: bw-artifact}\n"+
 		"  ingestionTokenFile: "+filepath.Join(dir, "openbao-ingestion.token")+"\n  reportTokenFile: "+e.tokenFile+"\n"+
+		"  compilerTokenFile: "+filepath.Join(dir, "openbao-compiler.token")+"\n"+
+		"  metadataTokenFile: "+filepath.Join(dir, "openbao-metadata.token")+"\n"+
 		"ingestion: {instance: a, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}\n", 0o600)
 	mustDB(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'alice', now())`, e.user)
 	mustDB(t, db, `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)

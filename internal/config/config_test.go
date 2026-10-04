@@ -212,8 +212,10 @@ func TestExecution(t *testing.T) {
 // providerBlock is the smallest valid provider block; each refusal below changes one thing.
 const providerBlock = `provider:
   address: https://bao.example.test:8200
-  keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest}
+  keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest, artifact: bw-artifact}
   ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
+  compilerTokenFile: /etc/bronzeward/openbao-compiler.token
+  metadataTokenFile: /etc/bronzeward/openbao-metadata.token
 `
 
 func TestProviderBlock(t *testing.T) {
@@ -230,7 +232,9 @@ func TestProviderBlock(t *testing.T) {
 	}
 	p := c.Provider
 	if p == nil || p.Address != "https://bao.example.test:8200" || p.Keys.Baseline != "bw-baseline" ||
-		p.Keys.Staging != "bw-staging" || p.Keys.Digest != "bw-digest" || p.IngestionTokenFile != "/etc/bronzeward/openbao-ingestion.token" {
+		p.Keys.Staging != "bw-staging" || p.Keys.Digest != "bw-digest" || p.Keys.Artifact != "bw-artifact" ||
+		p.IngestionTokenFile != "/etc/bronzeward/openbao-ingestion.token" ||
+		p.CompilerTokenFile != "/etc/bronzeward/openbao-compiler.token" || p.MetadataTokenFile != "/etc/bronzeward/openbao-metadata.token" {
 		t.Fatalf("%+v", p)
 	}
 	if p.ReportTokenFile != "" {
@@ -253,26 +257,34 @@ func TestProviderBlock(t *testing.T) {
 		}
 	}
 	for name, c := range map[string]struct{ block, want string }{
-		"no address":        {strings.Replace(providerBlock, "  address: https://bao.example.test:8200\n", "", 1), "provider.address is required"},
-		"unlisted http":     {strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1), "neither loopback nor in provider.plainHTTPHosts"},
-		"other host listed": {strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1) + "  plainHTTPHosts: [issuer]\n", "neither loopback nor in provider.plainHTTPHosts"},
-		"bad listed host":   {providerBlock + "  plainHTTPHosts: [\"open bao\"]\n", "not a bare host name"},
-		"no scheme":         {strings.Replace(providerBlock, "https://", "", 1), "provider.address"},
-		"path":              {strings.Replace(providerBlock, ":8200", ":8200/v1", 1), "provider.address"},
-		"query":             {strings.Replace(providerBlock, ":8200", ":8200?x=1", 1), "provider.address"},
-		"userinfo":          {strings.Replace(providerBlock, "https://", "https://root:hunter2@", 1), "userinfo"},
-		"no baseline key":   {strings.Replace(providerBlock, "baseline: bw-baseline, ", "", 1), "provider.keys.baseline is required"},
-		"no staging key":    {strings.Replace(providerBlock, "staging: bw-staging, ", "", 1), "provider.keys.staging is required"},
-		"no digest key":     {strings.Replace(providerBlock, ", digest: bw-digest", "", 1), "provider.keys.digest is required"},
-		"key with slash":    {strings.Replace(providerBlock, "bw-digest", "a/b", 1), "provider.keys.digest"},
-		"key dot-dot":       {strings.Replace(providerBlock, "bw-digest", `".."`, 1), "provider.keys.digest"},
-		"key with percent":  {strings.Replace(providerBlock, "bw-digest", `"a%2F"`, 1), "provider.keys.digest"},
-		"key too long":      {strings.Replace(providerBlock, "bw-digest", strings.Repeat("k", 228), 1), "provider.keys.digest"},
-		"shared key":        {strings.Replace(providerBlock, "bw-digest", "bw-staging", 1), "distinct"},
-		"no token file":     {strings.Replace(providerBlock, "  ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "", 1), "provider.ingestionTokenFile is required"},
-		"shared token file": {providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "provider.reportTokenFile names ingestion's token file"},
-		"unknown field":     {providerBlock + "  token: x\n", "field token not found"},
-		"unknown key":       {strings.Replace(providerBlock, "digest: bw-digest", "digest: bw-digest, artifact: bw-artifact", 1), "field artifact not found"},
+		"no address":                  {strings.Replace(providerBlock, "  address: https://bao.example.test:8200\n", "", 1), "provider.address is required"},
+		"unlisted http":               {strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1), "neither loopback nor in provider.plainHTTPHosts"},
+		"other host listed":           {strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1) + "  plainHTTPHosts: [issuer]\n", "neither loopback nor in provider.plainHTTPHosts"},
+		"bad listed host":             {providerBlock + "  plainHTTPHosts: [\"open bao\"]\n", "not a bare host name"},
+		"no scheme":                   {strings.Replace(providerBlock, "https://", "", 1), "provider.address"},
+		"path":                        {strings.Replace(providerBlock, ":8200", ":8200/v1", 1), "provider.address"},
+		"query":                       {strings.Replace(providerBlock, ":8200", ":8200?x=1", 1), "provider.address"},
+		"userinfo":                    {strings.Replace(providerBlock, "https://", "https://root:hunter2@", 1), "userinfo"},
+		"no baseline key":             {strings.Replace(providerBlock, "baseline: bw-baseline, ", "", 1), "provider.keys.baseline is required"},
+		"no staging key":              {strings.Replace(providerBlock, "staging: bw-staging, ", "", 1), "provider.keys.staging is required"},
+		"no digest key":               {strings.Replace(providerBlock, ", digest: bw-digest", "", 1), "provider.keys.digest is required"},
+		"key with slash":              {strings.Replace(providerBlock, "bw-digest", "a/b", 1), "provider.keys.digest"},
+		"key dot-dot":                 {strings.Replace(providerBlock, "bw-digest", `".."`, 1), "provider.keys.digest"},
+		"key with percent":            {strings.Replace(providerBlock, "bw-digest", `"a%2F"`, 1), "provider.keys.digest"},
+		"key too long":                {strings.Replace(providerBlock, "bw-digest", strings.Repeat("k", 228), 1), "provider.keys.digest"},
+		"shared key":                  {strings.Replace(providerBlock, "bw-digest", "bw-staging", 1), "distinct"},
+		"no token file":               {strings.Replace(providerBlock, "  ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "", 1), "provider.ingestionTokenFile is required"},
+		"shared token file":           {providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "provider.ingestionTokenFile and provider.reportTokenFile name the same file"},
+		"unknown field":               {providerBlock + "  token: x\n", "field token not found"},
+		"unknown key":                 {strings.Replace(providerBlock, "digest: bw-digest", "digest: bw-digest, other: bw-other", 1), "field other not found"},
+		"no artifact key":             {strings.Replace(providerBlock, ", artifact: bw-artifact", "", 1), "provider.keys.artifact is required"},
+		"artifact shared":             {strings.Replace(providerBlock, "artifact: bw-artifact", "artifact: bw-baseline", 1), "provider.keys.baseline and provider.keys.artifact name the same key"},
+		"artifact slash":              {strings.Replace(providerBlock, "bw-artifact", "a/b", 1), "provider.keys.artifact"},
+		"no compiler token":           {strings.Replace(providerBlock, "  compilerTokenFile: /etc/bronzeward/openbao-compiler.token\n", "", 1), "provider.compilerTokenFile is required"},
+		"no metadata token":           {strings.Replace(providerBlock, "  metadataTokenFile: /etc/bronzeward/openbao-metadata.token\n", "", 1), "provider.metadataTokenFile is required"},
+		"compiler shares ingestion's": {strings.Replace(providerBlock, "openbao-compiler.token", "openbao-ingestion.token", 1), "provider.ingestionTokenFile and provider.compilerTokenFile name the same file"},
+		"metadata shares compiler's":  {strings.Replace(providerBlock, "openbao-metadata.token", "openbao-compiler.token", 1), "provider.compilerTokenFile and provider.metadataTokenFile name the same file"},
+		"report shares metadata's":    {providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-metadata.token\n", "provider.metadataTokenFile and provider.reportTokenFile name the same file"},
 	} {
 		_, err := Load(strings.NewReader(base + authBlock + c.block))
 		if err == nil || !strings.Contains(err.Error(), c.want) {

@@ -172,7 +172,7 @@ server_template=$(cat -- "$FIXTURES/server.yaml.in") || die "cannot read $FIXTUR
 # The OpenBao policies too, the files internal/baotest also writes (fixtures/openbao/policies):
 # read once here, written to OpenBao from this reading, held below to the files the tree check sees.
 declare -A policies
-for policy in bw-ingestion bw-compiler bw-executor bw-metadata-only bw-orphan-report; do
+for policy in bw-ingestion bw-compiler bw-executor bw-metadata bw-metadata-only bw-orphan-report; do
   policies[$policy]=$(cat -- "$FIXTURES/openbao/policies/$policy.hcl") ||
     die "cannot read $FIXTURES/openbao/policies/$policy.hcl"
 done
@@ -473,19 +473,20 @@ done
 # The canary over stdin, not on the CLI's command line: it is what the leak scan looks for.
 printf '%s' "$BW_CANARY" | bao_stdin kv put secret/fixture/inline value=- >/dev/null
 
-# The role policies from the files read above. bw-metadata-only is the metadata-only identity: the
-# classification experiment must not be able to read values.
+# The role policies from the files read above. bw-metadata is the server's metadata identity
+# (read by name only); bw-metadata-only is the evidence observer's, which also lists: neither can
+# read a value.
 for policy in "${!policies[@]}"; do
   printf '%s\n' "${policies[$policy]}" | bao_stdin policy write "$policy" - >/dev/null ||
     die "could not write the OpenBao policy $policy"
 done
 unset policies policy key
-# Per instance, one ingestion token under bw-ingestion alone and one orphan-report token under
-# bw-orphan-report alone (no default policy, as the live policy tests issue theirs), each written
-# whole beside the instance's configuration (mktemp in the directory, then a rename): an instance
-# never reads a cut token.
+# Per instance, one token per server identity, each under its one policy alone: ingestion,
+# compiler, metadata and orphan report (no default policy, as the live policy tests issue theirs),
+# each written whole beside the instance's configuration (mktemp in the directory, then a rename):
+# an instance never reads a cut token.
 for instance in a b c; do
-  for role in ingestion:bw-ingestion report:bw-orphan-report; do
+  for role in ingestion:bw-ingestion compiler:bw-compiler metadata:bw-metadata report:bw-orphan-report; do
     # Assigned first: a command substitution that is only a printf argument cannot fail the script.
     role_token=$(bao token create -policy="${role#*:}" -no-default-policy -format=json | jq -er .auth.client_token) ||
       die "could not create instance $instance's OpenBao ${role%%:*} token"
