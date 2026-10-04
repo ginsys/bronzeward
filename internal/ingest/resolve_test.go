@@ -178,7 +178,7 @@ func TestResolveRefusals(t *testing.T) {
 	} {
 		r, err := Resolve(s, c.values)
 		var ref *Refusal
-		if !errors.As(err, &ref) || ref.Rule != c.rule || r.b != nil {
+		if !errors.As(err, &ref) || ref.Rule != c.rule || r.s != nil {
 			t.Errorf("%s: got %v, want a %s refusal and nothing resolved", name, err, c.rule)
 			continue
 		}
@@ -265,7 +265,7 @@ func TestResolvedNeverRenders(t *testing.T) {
 	holder := struct{ r Resolved }{r}
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
 		for _, x := range []any{r, &r, holder} {
-			if got := fmt.Sprintf(verb, x); strings.Contains(got, resolveSecret) || strings.Contains(got, fmt.Sprintf("%x", resolveSecret)) {
+			if got := fmt.Sprintf(verb, x); shows(got, resolveSecret) {
 				t.Errorf("%s of %T shows the value: %s", verb, x, got)
 			}
 		}

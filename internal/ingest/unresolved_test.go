@@ -15,6 +15,13 @@ import (
 
 const secretText = "ingest-test-secret-7f3c"
 
+// shows is whether a rendering holds s as text, as hex or as the decimal bytes fmt prints for a
+// []byte it reaches by reflection.
+func shows(rendered, s string) bool {
+	return strings.Contains(rendered, s) || strings.Contains(rendered, fmt.Sprintf("%x", s)) ||
+		strings.Contains(rendered, strings.Trim(fmt.Sprint([]byte(s)), "[]"))
+}
+
 // TestUnresolvedNeverRenders: no fmt verb, marshaller or reflection-printed holder shows the input
 // (compilation.md §2.1: no string, formatting or serialization method yields the bytes).
 func TestUnresolvedNeverRenders(t *testing.T) {
@@ -25,7 +32,7 @@ func TestUnresolvedNeverRenders(t *testing.T) {
 	holder := struct{ in Unresolved }{u}
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
 		for _, x := range []any{u, &u, holder} {
-			if got := fmt.Sprintf(verb, x); strings.Contains(got, secretText) || strings.Contains(got, fmt.Sprintf("%x", secretText)) {
+			if got := fmt.Sprintf(verb, x); shows(got, secretText) {
 				t.Errorf("%s of %T shows the input: %s", verb, x, got)
 			}
 		}

@@ -106,8 +106,10 @@ func TestProvenanceRedactsSourcePaths(t *testing.T) {
 		t.Errorf("the records hold the value: %s", s)
 	}
 	// fmt reaches an unexported field by reflection, past Compiled's own placeholder.
-	if s := fmt.Sprintf("%+v %#v", struct{ c Compiled }{c}, struct{ c Compiled }{c}); strings.Contains(s, six) {
-		t.Errorf("a struct holding the compilation renders the value: %s", s)
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%d"} {
+		if s := fmt.Sprintf(verb, struct{ c Compiled }{c}); shows(s, six) {
+			t.Errorf("%s of a struct holding the compilation renders the value: %s", verb, s)
+		}
 	}
 }
 

@@ -182,7 +182,7 @@ func TestTraceRefusals(t *testing.T) {
 	} {
 		r, ts, _, err := Trace(s, c.values, c.first, c.flip)
 		var ref *Refusal
-		if !errors.As(err, &ref) || ref.Rule != c.rule || r.b != nil || ts != nil {
+		if !errors.As(err, &ref) || ref.Rule != c.rule || r.s != nil || ts != nil {
 			t.Errorf("%s: got %v, want a %s refusal and nothing traced", name, err, c.rule)
 			continue
 		}
@@ -198,7 +198,7 @@ func TestTraceRefusals(t *testing.T) {
 	}
 	// A flip pass must name a boolean tracer of this stream.
 	for _, flip := range []int{0, 1, 2} {
-		if r, ts, _, err := Trace(s, good, 0, flip); err == nil || r.b != nil || ts != nil {
+		if r, ts, _, err := Trace(s, good, 0, flip); err == nil || r.s != nil || ts != nil {
 			t.Errorf("flip %d of a stream without booleans: %v", flip, err)
 		}
 	}
@@ -355,5 +355,24 @@ func TestTracerNeverRenders(t *testing.T) {
 	}
 	if b, err := ts[0].MarshalText(); err == nil || b != nil {
 		t.Errorf("MarshalText: %s, %v", b, err)
+	}
+}
+
+// A mapping member's key is a value and its path may hold values, so a struct holding the tracer
+// in an unexported field, which fmt prints by reflection past the placeholder, shows neither under
+// any verb (compilation.md §8.3).
+func TestTracerHolderHidesKeyAndPath(t *testing.T) {
+	text := "machine:\n  nodeAnnotations: !bwref app/map\n"
+	decl := Declarations{References: map[string]Reference{"app/map": str(provider.KindMapping)}}
+	_, ts := traced(t, sanitizedOf(t, text, decl), map[string]provider.Value{
+		"app/map": value(t, provider.KindMapping, map[string]any{resolveSecret: "v"})}, 0, -1)
+	if len(ts) != 1 || ts[0].Leaf() != resolveSecret {
+		t.Fatalf("control: %d tracers, the first not keyed by the value", len(ts))
+	}
+	holder := struct{ t Tracer }{ts[0]}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
+		if got := fmt.Sprintf(verb, holder); shows(got, resolveSecret) || shows(got, "nodeAnnotations") {
+			t.Errorf("%s of a holder shows the key or path: %s", verb, got)
+		}
 	}
 }

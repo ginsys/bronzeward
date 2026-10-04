@@ -196,25 +196,27 @@ func (r *reader) Close() error { return r.api.Close() }
 
 // Config is a machine configuration as read, with its secrets; ingest.FromTalos turns it into the
 // unresolved input ingestion sanitizes. It does not render: every fmt verb
-// prints a placeholder and the marshallers fail. The bytes sit behind a pointer so that printing
-// a struct that holds a Config in an unexported field shows an address, not the bytes. Bytes is
-// the one way out, and guard_test.go limits its callers to this package and internal/ingest.
+// prints a placeholder and the marshallers fail. The text sits behind a pointer to a string: fmt
+// prints a struct holding a Config in an unexported field by reflection, past those methods, and
+// under a verb a pointer does not take (%s, %q) it dereferences a pointer to a slice, array,
+// struct or map, but never one to a string. Bytes is the one way out, and guard_test.go limits
+// its callers to this package and internal/ingest.
 type Config struct {
-	b  *[]byte
+	s  *string
 	rv string
 }
 
 func newConfig(b []byte, resourceVersion string) Config {
-	c := append([]byte(nil), b...)
-	return Config{b: &c, rv: resourceVersion}
+	s := string(b)
+	return Config{s: &s, rv: resourceVersion}
 }
 
 // Bytes is a copy of the configuration.
 func (c Config) Bytes() []byte {
-	if c.b == nil {
+	if c.s == nil {
 		return nil
 	}
-	return append([]byte(nil), *c.b...)
+	return []byte(*c.s)
 }
 
 // ResourceVersion is the COSI resource version the configuration was read at.

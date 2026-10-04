@@ -75,7 +75,7 @@ func (i *Ingestion) CreateGeneration(ctx context.Context, p GenerationPath, v Va
 	body, err := json.Marshal(struct {
 		Options options `json:"options"`
 		Data    data    `json:"data"`
-	}{options{CAS: 0}, data{v.p.kind, v.p.json}})
+	}{options{CAS: 0}, data{v.p.kind, json.RawMessage(*v.p.json)}})
 	if err != nil {
 		return Generation{}, errors.New("provider: the generation could not be encoded")
 	}
