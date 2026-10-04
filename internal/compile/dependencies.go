@@ -22,8 +22,10 @@ type PinnedReader interface {
 	ReadGeneration(ctx context.Context, p provider.GenerationPath, version int64) (provider.Value, time.Time, error)
 }
 
-// ArtifactEncrypter is the compiler identity's encryption under the artifact key.
+// ArtifactEncrypter is the compiler identity's encryption under the artifact key, which it names:
+// the key publication reads and records is the one it encrypts under.
 type ArtifactEncrypter interface {
+	ArtifactKey() string
 	EncryptArtifact(ctx context.Context, plaintext []byte) (provider.Ciphertext, error)
 }
 
@@ -37,11 +39,12 @@ type Pin struct {
 	Recorded  time.Time
 }
 
-// Pinned is a pin step 3 classified retained, with the created_time its metadata answer gave: the
-// identity step 4's read must repeat and §9 records.
+// Pinned is a pin step 3 classified retained, with that classification: its created_time is the
+// identity step 4's read must repeat and §9 records, and the whole is the status publication
+// seeds (dependency-monitor.md §5.2).
 type Pinned struct {
 	Pin
-	Created time.Time
+	Status classify.Result
 }
 
 // The refusals of a changed identity, beside the classification's own reasons.
@@ -94,7 +97,7 @@ func CheckPinned(ctx context.Context, m MetadataReader, pins []Pin) ([]Pinned, e
 		if r.Class != classify.Retained {
 			return nil, &DependencyError{Reference: p.Reference, Object: p.Path.String(), Version: p.Version, Class: r.Class, Reason: string(r.Reason)}
 		}
-		out = append(out, Pinned{Pin: p, Created: r.Created})
+		out = append(out, Pinned{Pin: p, Status: r})
 	}
 	return out, nil
 }
@@ -108,7 +111,7 @@ func ReadPinned(ctx context.Context, r PinnedReader, pins []Pinned) ([]provider.
 		if err != nil {
 			return nil, fmt.Errorf("compile: reading reference %q (%s version %d): %w", p.Reference, p.Path, p.Version, err)
 		}
-		if !created.Equal(p.Created) {
+		if !created.Equal(p.Status.Created) {
 			return nil, &DependencyError{Reference: p.Reference, Object: p.Path.String(), Version: p.Version, Reason: ReasonCreatedChanged}
 		}
 		out = append(out, v)
@@ -116,22 +119,25 @@ func ReadPinned(ctx context.Context, r PinnedReader, pins []Pinned) ([]provider.
 	return out, nil
 }
 
-// Encrypted is one artifact's ciphertext and the artifact key version it used, with that
-// version's creation time: the encryption dependency §9 records.
+// Encrypted is one artifact's ciphertext and the artifact key version it used, with the second
+// read's classification of that version: its creation time is the encryption dependency §9
+// records, and the whole is the status publication seeds (dependency-monitor.md §5.2).
 type Encrypted struct {
 	Ciphertext provider.Ciphertext
 	Key        string
 	Version    int64
-	Created    time.Time
+	Status     classify.Result
 }
 
-// EncryptArtifacts performs compilation.md §11's encryption of every artifact under key: it reads
+// EncryptArtifacts performs compilation.md §11's encryption of every artifact under the
+// encrypter's artifact key: it reads
 // the key's metadata first, encrypts each artifact in order, then reads the metadata again and
 // classifies every version used, with the first read's creation time as the recorded identity.
 // It refuses a first read that is not a readable answer with a readable Date, before encrypting;
 // a version the first read gave no creation time for, or one not created in a second before the
 // first read's Date; and any used version that does not then classify retained.
-func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter, key string, artifacts []Materialized) ([]Encrypted, error) {
+func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter, artifacts []Materialized) ([]Encrypted, error) {
+	key := e.ArtifactKey()
 	first, err := m.Transit(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("compile: reading the artifact key %s: %w", key, err)
@@ -145,6 +151,7 @@ func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter
 		return nil, &DependencyError{Object: key, Reason: ReasonNoDate}
 	}
 	out := make([]Encrypted, len(artifacts))
+	used := make([]int64, len(artifacts))
 	created := map[int64]time.Time{}
 	for i, a := range artifacts {
 		ct, err := e.EncryptArtifact(ctx, a.bytes())
@@ -166,7 +173,8 @@ func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter
 			}
 			created[v] = c
 		}
-		out[i] = Encrypted{Ciphertext: ct, Key: key, Version: v, Created: created[v]}
+		out[i] = Encrypted{Ciphertext: ct, Key: key, Version: v}
+		used[i] = v
 	}
 	if len(artifacts) == 0 {
 		return out, nil
@@ -180,11 +188,16 @@ func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter
 		versions = append(versions, v)
 	}
 	slices.Sort(versions)
+	status := map[int64]classify.Result{}
 	for _, v := range versions {
 		r := classify.Classify(classify.Dependency{Provider: classify.Transit, Object: key, Version: v, Created: created[v]}, second)
 		if r.Class != classify.Retained {
 			return nil, &DependencyError{Object: key, Version: v, Class: r.Class, Reason: string(r.Reason)}
 		}
+		status[v] = r
+	}
+	for i, v := range used {
+		out[i].Status = status[v]
 	}
 	return out, nil
 }

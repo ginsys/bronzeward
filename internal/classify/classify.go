@@ -170,15 +170,16 @@ func ParseDate(s string) (time.Time, bool) {
 // errUnreadable is an answer that does not parse as the provider's metadata.
 var errUnreadable = errors.New("unreadable")
 
-// Classify applies §3's table to the answer for dependency d.
+// Classify applies §3's table to the answer for dependency d. Every result carries the answer's
+// Date when readable, the status rows' included: the recorded status keeps it (§5.1).
 func Classify(d Dependency, a Answer) Result {
+	date, _ := ParseDate(a.Date)
 	if d.Version < 1 {
-		return Result{Class: Unknown, Reason: Malformed}
+		return Result{Class: Unknown, Reason: Malformed, Date: date}
 	}
 	if r := statusReason(a); r != None {
-		return Result{Class: Unknown, Reason: r}
+		return Result{Class: Unknown, Reason: r, Date: date}
 	}
-	date, _ := ParseDate(a.Date)
 	var r Result
 	var err error
 	switch d.Provider {

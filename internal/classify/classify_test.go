@@ -317,6 +317,22 @@ func TestClassifyTimes(t *testing.T) {
 	if got := Classify(kvDep(1), answer(t, kv())); !got.Deletion.IsZero() || !got.Date.Equal(date) {
 		t.Fatalf("a live version: deletion %v, date %v", got.Deletion, got.Date)
 	}
+	// Every row keeps a readable Date, the status rows and a malformed record included.
+	for _, c := range []struct {
+		name string
+		d    Dependency
+		a    Answer
+	}{
+		{"denied", kvDep(1), Answer{Status: http.StatusForbidden, Date: dateText}},
+		{"absent", kvDep(1), Answer{Status: http.StatusNotFound, Date: dateText}},
+		{"unavailable", transitDep(1), Answer{Status: http.StatusServiceUnavailable, Date: dateText}},
+		{"another status", kvDep(1), Answer{Status: http.StatusTooManyRequests, Date: dateText}},
+		{"malformed record", kvDep(0), answer(t, kv())},
+	} {
+		if got := Classify(c.d, c.a); got.Class != Unknown || !got.Date.Equal(date) {
+			t.Errorf("%s: Classify = %s %s, date %v; want unknown, date %v", c.name, got.Class, got.Reason, got.Date, date)
+		}
+	}
 }
 
 // ParseDate reads a Date header in whole seconds only: a fractional second would let a deletion in

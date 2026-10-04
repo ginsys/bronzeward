@@ -115,19 +115,25 @@ func asDependency(t *testing.T, err error) *DependencyError {
 
 func TestCheckPinned(t *testing.T) {
 	created := depDate.Add(-time.Hour).Add(123456789 * time.Nanosecond)
+	deletion := depDate.Add(24 * time.Hour)
 	a, b := genPath(t), genPath(t)
+	scheduled, _ := json.Marshal(map[string]any{"data": map[string]any{"current_version": 2, "oldest_version": 0, "versions": map[string]any{
+		"1": map[string]any{"created_time": created.Add(-time.Hour).Format(time.RFC3339Nano), "deletion_time": "", "destroyed": false},
+		"2": map[string]any{"created_time": created.Format(time.RFC3339Nano), "deletion_time": deletion.Format(time.RFC3339Nano), "destroyed": false},
+	}}})
 	var calls []string
 	m := fakeMeta{kv: map[string]classify.Answer{
 		a.String(): ok(kvBody(created)),
-		b.String(): ok(kvBody(created.Add(-time.Hour), created)),
+		b.String(): ok(scheduled),
 	}, calls: &calls}
 	got, err := CheckPinned(t.Context(), m, []Pin{{Reference: "a", Path: a, Version: 1}, {Reference: "b", Path: b, Version: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Each pin carries its whole classification: the status publication seeds (DM §5.2).
 	want := []Pinned{
-		{Pin: Pin{Reference: "a", Path: a, Version: 1}, Created: created},
-		{Pin: Pin{Reference: "b", Path: b, Version: 2}, Created: created},
+		{Pin: Pin{Reference: "a", Path: a, Version: 1}, Status: classify.Result{Class: classify.Retained, Reason: classify.None, Created: created, Date: depDate}},
+		{Pin: Pin{Reference: "b", Path: b, Version: 2}, Status: classify.Result{Class: classify.Retained, Reason: classify.DeletionScheduled, Created: created, Deletion: deletion, Date: depDate}},
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
@@ -173,7 +179,7 @@ func TestCheckPinnedRefuses(t *testing.T) {
 	// The recorded identity, when equal, is kept.
 	var calls []string
 	m := fakeMeta{kv: map[string]classify.Answer{p.String(): ok(kvBody(created))}, calls: &calls}
-	if got, err := CheckPinned(t.Context(), m, []Pin{{Reference: "db", Path: p, Version: 1, Recorded: created}}); err != nil || !got[0].Created.Equal(created) {
+	if got, err := CheckPinned(t.Context(), m, []Pin{{Reference: "db", Path: p, Version: 1, Recorded: created}}); err != nil || !got[0].Status.Created.Equal(created) {
 		t.Fatalf("a recorded identity the answer repeats: %+v, %v", got, err)
 	}
 	// A request error refuses, naming the reference.
@@ -202,7 +208,7 @@ func (f fakeReader) ReadGeneration(_ context.Context, p provider.GenerationPath,
 func TestReadPinned(t *testing.T) {
 	created := depDate.Add(-time.Hour).Add(5 * time.Microsecond)
 	a, b := genPath(t), genPath(t)
-	pins := []Pinned{{Pin: Pin{Reference: "a", Path: a, Version: 3}, Created: created}, {Pin: Pin{Reference: "b", Path: b, Version: 1}, Created: created}}
+	pins := []Pinned{{Pin: Pin{Reference: "a", Path: a, Version: 3}, Status: classify.Result{Created: created}}, {Pin: Pin{Reference: "b", Path: b, Version: 1}, Status: classify.Result{Created: created}}}
 	var calls []string
 	got, err := ReadPinned(t.Context(), fakeReader{created: map[string]time.Time{a.String(): created, b.String(): created}, calls: &calls}, pins)
 	if err != nil {
@@ -231,11 +237,20 @@ func TestReadPinned(t *testing.T) {
 	}
 }
 
-// fakeEncrypter encrypts under the versions in turn (the last repeating), recording each call.
+// fakeEncrypter encrypts under the versions in turn (the last repeating), recording each call. Its
+// key is "bw-artifact" unless set.
 type fakeEncrypter struct {
+	key      string
 	versions []int
 	err      error
 	calls    *[]string
+}
+
+func (f fakeEncrypter) ArtifactKey() string {
+	if f.key == "" {
+		return "bw-artifact"
+	}
+	return f.key
 }
 
 func (f fakeEncrypter) EncryptArtifact(_ context.Context, plaintext []byte) (provider.Ciphertext, error) {
@@ -260,35 +275,51 @@ func artifacts(n int) []Materialized {
 func TestEncryptArtifacts(t *testing.T) {
 	v1, v2 := depDate.Add(-time.Hour), depDate.Add(-time.Second)
 	var calls []string
-	m := fakeMeta{transit: []classify.Answer{ok(transitBody(1, v1, v2)), ok(transitBody(1, v1, v2))}, calls: &calls}
+	second := ok(transitBody(1, v1, v2))
+	second.Date = dateHeader(depDate.Add(time.Second))
+	m := fakeMeta{transit: []classify.Answer{ok(transitBody(1, v1, v2)), second}, calls: &calls}
 	enc := fakeEncrypter{versions: []int{1, 2}, calls: &calls}
-	got, err := EncryptArtifacts(t.Context(), m, enc, "bw-artifact", artifacts(3))
+	got, err := EncryptArtifacts(t.Context(), m, enc, artifacts(3))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(calls, []string{"transit bw-artifact", "encrypt", "encrypt", "encrypt", "transit bw-artifact"}) {
 		t.Fatalf("requests %q", calls)
 	}
+	// Each artifact carries the second read's whole classification of its version: the status
+	// publication seeds (DM §5.2).
 	want := []struct {
 		version int64
 		created time.Time
 	}{{1, v1}, {2, v2}, {2, v2}}
 	for i, w := range want {
 		e := got[i]
-		if e.Key != "bw-artifact" || e.Version != w.version || !e.Created.Equal(w.created) || !strings.HasPrefix(string(e.Ciphertext), "vault:v"+strconv.FormatInt(w.version, 10)+":") {
-			t.Fatalf("artifact %d: key %s version %d created %v", i, e.Key, e.Version, e.Created)
+		s := classify.Result{Class: classify.Retained, Reason: classify.None, Created: w.created, Date: depDate.Add(time.Second)}
+		if e.Key != "bw-artifact" || e.Version != w.version || e.Status != s || !strings.HasPrefix(string(e.Ciphertext), "vault:v"+strconv.FormatInt(w.version, 10)+":") {
+			t.Fatalf("artifact %d: key %s version %d status %+v", i, e.Key, e.Version, e.Status)
 		}
+	}
+
+	// The key read and recorded is the one the encrypter encrypts under.
+	calls = nil
+	m = fakeMeta{transit: []classify.Answer{ok(transitBody(1, v1)), ok(transitBody(1, v1))}, calls: &calls}
+	got, err = EncryptArtifacts(t.Context(), m, fakeEncrypter{key: "bw-artifact-2", versions: []int{1}, calls: &calls}, artifacts(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(calls, []string{"transit bw-artifact-2", "encrypt", "transit bw-artifact-2"}) || got[0].Key != "bw-artifact-2" {
+		t.Fatalf("requests %q, key %s", calls, got[0].Key)
 	}
 
 	// An entry for a version not used does not make the answer unreadable, before or after.
 	other := ok([]byte(`{"data":{"keys":{"1":null,"2":` + strconv.FormatInt(v2.Unix(), 10) + `},"latest_version":2,"min_available_version":0,"min_decryption_version":1,"soft_deleted":false}}`))
 	calls = nil
-	got, err = EncryptArtifacts(t.Context(), fakeMeta{transit: []classify.Answer{other, other}, calls: &calls}, fakeEncrypter{versions: []int{2}, calls: &calls}, "bw-artifact", artifacts(1))
+	got, err = EncryptArtifacts(t.Context(), fakeMeta{transit: []classify.Answer{other, other}, calls: &calls}, fakeEncrypter{versions: []int{2}, calls: &calls}, artifacts(1))
 	if err != nil {
 		t.Fatalf("a malformed entry for an unused version: %v", err)
 	}
-	if got[0].Version != 2 || !got[0].Created.Equal(v2) {
-		t.Fatalf("version %d created %v", got[0].Version, got[0].Created)
+	if got[0].Version != 2 || !got[0].Status.Created.Equal(v2) {
+		t.Fatalf("version %d created %v", got[0].Version, got[0].Status.Created)
 	}
 }
 
@@ -327,7 +358,7 @@ func TestEncryptArtifactsRefuses(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var calls []string
 			m := fakeMeta{transit: []classify.Answer{c.first, c.second}, calls: &calls}
-			_, err := EncryptArtifacts(t.Context(), m, fakeEncrypter{versions: c.versions, calls: &calls}, "bw-artifact", artifacts(1))
+			_, err := EncryptArtifacts(t.Context(), m, fakeEncrypter{versions: c.versions, calls: &calls}, artifacts(1))
 			d := asDependency(t, err)
 			if d.Object != "bw-artifact" || d.Reference != "" || d.Class != c.class || d.Reason != c.reason {
 				t.Fatalf("got %+v", d)
@@ -340,7 +371,7 @@ func TestEncryptArtifactsRefuses(t *testing.T) {
 
 	var calls []string
 	m := fakeMeta{transit: []classify.Answer{ok(transitBody(1, before)), ok(transitBody(1, before))}, calls: &calls}
-	if _, err := EncryptArtifacts(t.Context(), m, fakeEncrypter{err: provider.ErrDenied, calls: &calls}, "bw-artifact", artifacts(1)); !errors.Is(err, provider.ErrDenied) {
+	if _, err := EncryptArtifacts(t.Context(), m, fakeEncrypter{err: provider.ErrDenied, calls: &calls}, artifacts(1)); !errors.Is(err, provider.ErrDenied) {
 		t.Fatalf("a failed encryption: %v", err)
 	} else {
 		noValue(t, err)
@@ -348,7 +379,7 @@ func TestEncryptArtifactsRefuses(t *testing.T) {
 	calls = nil
 	bad := fakeEncrypterFunc(func([]byte) (provider.Ciphertext, error) { return "vault:" + depSecret, nil })
 	m = fakeMeta{transit: []classify.Answer{ok(transitBody(1, before)), ok(transitBody(1, before))}, calls: &calls}
-	if _, err := EncryptArtifacts(t.Context(), m, bad, "bw-artifact", artifacts(1)); err == nil {
+	if _, err := EncryptArtifacts(t.Context(), m, bad, artifacts(1)); err == nil {
 		t.Fatal("a ciphertext with no key version was accepted")
 	} else {
 		noValue(t, err)
@@ -360,3 +391,5 @@ type fakeEncrypterFunc func([]byte) (provider.Ciphertext, error)
 func (f fakeEncrypterFunc) EncryptArtifact(_ context.Context, p []byte) (provider.Ciphertext, error) {
 	return f(p)
 }
+
+func (fakeEncrypterFunc) ArtifactKey() string { return "bw-artifact" }
