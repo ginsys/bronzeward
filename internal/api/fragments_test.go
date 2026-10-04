@@ -6,6 +6,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/staging"
 )
 
 // The fragment PUT (persistence-api.md §9.3, compilation.md §2.3): its document ingested under a
@@ -192,5 +196,140 @@ func TestFragmentPutCarriedReferenceRefused(t *testing.T) {
 	}
 	if ie.currentETag(t) != ie.etag {
 		t.Fatal("a refused update moved the draft")
+	}
+}
+
+// noIngestion fails unless the PUTs so far created no claim, no generation and no record.
+func noIngestion(t *testing.T, ie *ingestEnv) {
+	t.Helper()
+	calls, _ := ie.f.paths()
+	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim`); n != 0 || calls != 0 {
+		t.Fatalf("%d claims, %d generation creates", n, calls)
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM idempotency_record WHERE key LIKE 'k-fragment-%'`); n != 0 {
+		t.Fatalf("%d records", n)
+	}
+}
+
+// PA §3.1, §7.2: the draft check runs before ingestion. No If-Match is 428, a stale one 412, an
+// active publication 409 naming it, a closed draft 409; none creates a claim, a generation or a
+// record.
+func TestFragmentPutPreconditions(t *testing.T) {
+	ie := newFragmentEnv(t, options{})
+	body := fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil)
+	wantProblem(t, ie.putFragment("registries", body, "", "k-fragment-pre-0001"), http.StatusPreconditionRequired, "precondition-required")
+	wantProblem(t, ie.putFragment("registries", body, `"1-aaaaaaaaaaaaaaaaaaaaaaaaaa"`, "k-fragment-pre-0002"),
+		http.StatusPreconditionFailed, "precondition-failed")
+	wantProblem(t, ie.putFragment("Not_A_Name", body, ie.etag, "k-fragment-pre-0003"), http.StatusBadRequest, "invalid-request")
+	op := id.New(id.Operation)
+	mustExec(t, ie.db, `INSERT INTO operation (id, kind, state, epoch, draft, draft_revision, owner_gen, created_by, created_by_kind,
+		created_role, created_at) SELECT $1, 'publish', 'queued', epoch, $2, 1, 0, p.id, 'human', 'publisher', now()
+		FROM installation_state, principal p WHERE p.sub = 'h-author'`, op, ie.draft)
+	if doc := wantProblem(t, ie.putFragment("registries", body, ie.etag, "k-fragment-pre-0004"), http.StatusConflict, "conflict"); doc["operation"] != op {
+		t.Fatalf("publication refusal %v", doc)
+	}
+	noIngestion(t, ie)
+
+	closed := newFragmentEnv(t, options{})
+	mustExec(t, closed.db, `UPDATE draft SET state = 'discarded' WHERE id = $1`, closed.draft)
+	wantProblem(t, closed.putFragment("registries", body, closed.etag, "k-fragment-pre-0005"), http.StatusConflict, "conflict")
+	noIngestion(t, closed)
+}
+
+// PA §7.2: a refusal after the claim exists is recorded with the claim abandoned. A retry replays
+// it and ingests nothing; the key with another document is another request.
+func TestFragmentPutRefusalReplayed(t *testing.T) {
+	ie := newFragmentEnv(t, options{})
+	const k = "k-fragment-replay-0001"
+	body := fragmentPut(t, "cluster", labelDoc, []string{"doc[0]/machine/nodeLabels/absent"}, nil)
+	first := ie.putFragment("registries", body, ie.etag, k)
+	p := wantProblem(t, first, http.StatusUnprocessableEntity, "validation-failed")
+	claim, _ := p["ingestion"].(string)
+	if p["rule"] != "mark-unaddressed" || claim == "" {
+		t.Fatalf("problem %v", p)
+	}
+	again := ie.putFragment("registries", body, ie.etag, k)
+	wantProblem(t, again, http.StatusUnprocessableEntity, "validation-failed")
+	if again.Header().Get("Idempotent-Replayed") != "true" || again.Body.String() != first.Body.String() {
+		t.Fatalf("replay %v %s", again.Header(), again.Body)
+	}
+	other := ie.putFragment("registries", fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil), ie.etag, k)
+	wantProblem(t, other, http.StatusUnprocessableEntity, "idempotency-key-reused")
+	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim WHERE state = 'abandoned' AND id = $1`, claim); n != 1 {
+		t.Fatalf("claim %s not abandoned", claim)
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim`); n != 1 {
+		t.Fatalf("%d claims after the replays", n)
+	}
+	if ie.currentETag(t) != ie.etag {
+		t.Fatal("a refused update moved the draft")
+	}
+}
+
+// PA §7.2, T1: a draft that moves between ingestion and T1 refuses 412 there; the refusal is
+// recorded with the claim abandoned and replayed. Its generation is left for the orphan report.
+func TestFragmentPutMovedBeforeT1(t *testing.T) {
+	var ie *ingestEnv
+	moved := false
+	ie = newFragmentEnv(t, options{beforeT1: func() {
+		if !moved {
+			moved = true
+			mustExec(t, ie.db, `UPDATE draft SET revision = revision + 1 WHERE id = $1`, ie.draft)
+		}
+	}})
+	const k = "k-fragment-moved-0001"
+	body := fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil)
+	p := wantProblem(t, ie.putFragment("registries", body, ie.etag, k), http.StatusPreconditionFailed, "precondition-failed")
+	var state string
+	if err := ie.db.QueryRow(`SELECT state FROM staging_claim WHERE id = $1`, p["ingestion"]).Scan(&state); err != nil || state != "abandoned" {
+		t.Fatalf("claim %v state %q (%v)", p["ingestion"], state, err)
+	}
+	again := ie.putFragment("registries", body, ie.etag, k)
+	wantProblem(t, again, http.StatusPreconditionFailed, "precondition-failed")
+	if again.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatal("the 412 was not replayed")
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM fragment_revision`); n != 0 {
+		t.Fatalf("%d revisions", n)
+	}
+	if calls, _ := ie.f.paths(); calls != 1 {
+		t.Fatalf("%d generation creates; want the first run's one", calls)
+	}
+}
+
+// PA §7.2: a live claim for the key with no record refuses 409 naming it; once its lease lapses
+// it is abandoned and the PUT ingests afresh under a new claim.
+func TestFragmentPutLiveClaimForKey(t *testing.T) {
+	ie := newFragmentEnv(t, options{})
+	const k = "k-fragment-live-0001"
+	var principal string
+	if err := ie.db.QueryRow(`SELECT id FROM principal WHERE sub = 'h-author'`).Scan(&principal); err != nil {
+		t.Fatal(err)
+	}
+	c := staging.Claim{ID: id.New(id.Ingestion), Kind: "draft-update", Mode: "transient", Cluster: ie.cluster, Draft: ie.draft, Gen: 1}
+	tx, err := ie.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := staging.Create(t.Context(), tx, ie.d.owner, staging.Timers{Lease: time.Minute, AbsoluteExpiry: time.Hour}, c, principal, k); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	body := fragmentPut(t, "cluster", labelDoc, []string{labelMark}, nil)
+	if p := wantProblem(t, ie.putFragment("registries", body, ie.etag, k), http.StatusConflict, "conflict"); p["ingestion"] != c.ID {
+		t.Fatalf("live claim refusal %v", p)
+	}
+	if calls, _ := ie.f.paths(); calls != 0 {
+		t.Fatalf("%d generation creates under a live claim", calls)
+	}
+	mustExec(t, ie.db, `UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, c.ID)
+	b := ie.fragmentOK(t, ie.putFragment("registries", body, ie.etag, k))
+	if b.Ingestion == c.ID {
+		t.Fatal("the lapsed claim was reused")
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim WHERE id = $1 AND state = 'abandoned'`, c.ID); n != 1 {
+		t.Fatal("the lapsed claim was not abandoned")
 	}
 }

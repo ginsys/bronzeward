@@ -146,12 +146,14 @@ func prepareFragment(ctx context.Context, a *API, q *request) error {
 	seam.At("read")
 	g.ref = a.extractDraft(pctx, j, in, g)
 	in.Document = ingest.Unresolved{} // the last step to read it has run
-	if g.ref == nil {
-		return nil
+	if g.ref != nil {
+		g.ref = g.ref.with("ingestion", c.ID)
 	}
-	g.ref = g.ref.with("ingestion", c.ID)
-	if g.ref.status < http.StatusInternalServerError {
-		return nil // T1 records it
+	if g.ref == nil || g.ref.status < http.StatusInternalServerError {
+		if a.o.beforeT1 != nil {
+			a.o.beforeT1()
+		}
+		return nil // T1 writes the update, or records its refusal
 	}
 	// A failure the server or a dependency caused records nothing; the claim is abandoned now.
 	if err := a.inTx(ctx, func(tx *sql.Tx) error { return staging.Abandon(ctx, tx, a.d.owner, c) }); err != nil {
