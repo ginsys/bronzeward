@@ -9,8 +9,8 @@ var shape = regexp.MustCompile(`^[a-z]+_[a-z2-7]{26}$`)
 
 func TestAllIsACopy(t *testing.T) {
 	a := All()
-	if len(a) != 22 {
-		t.Fatalf("All() has %d prefixes, want 22 (persistence-api.md §2)", len(a))
+	if len(a) != 24 {
+		t.Fatalf("All() has %d prefixes, want 24 (persistence-api.md §2)", len(a))
 	}
 	a[0] = "zzz"
 	if _, err := Parse(New(Cluster)); err != nil {

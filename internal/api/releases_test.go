@@ -1,0 +1,187 @@
+package api
+
+import (
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/ginsys/bronzeward/internal/id"
+)
+
+// releaseSeed is a published release of d's draft, written as T3 writes one: two machines, one
+// whose configuration could not be redacted, and a fragment source with a removed one.
+type releaseSeed struct {
+	rel, op, frg, frv, gone, machine2 string
+}
+
+const releaseCipher = "vault:v1:c2VjcmV0LWNpcGhlcnRleHQ="
+
+func (d *draftEnv) release(draft string, revision int) releaseSeed {
+	d.t.Helper()
+	t := d.t
+	s := releaseSeed{rel: id.New(id.Release), op: id.New(id.Operation)}
+	d.keys++
+	rec := d.do(d.api, machineCall(d.human("h-author"), "k-machine2-"+draft[4:14], d.cluster, fmt.Sprintf("0b5a6c1e-2f3d-4e5f-8a9b-%012x", d.keys)))
+	s.machine2 = decode[machineBody](t, rec, http.StatusCreated).ID
+	ibr1, ibr2 := id.New(id.ImportBase), id.New(id.ImportBase)
+	for _, ib := range [][2]string{{ibr1, d.machine}, {ibr2, s.machine2}} {
+		mustExec(t, d.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
+			baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+			ib[0], ib[1], make([]byte, 32))
+	}
+	s.frv = d.fragmentRevision(d.cluster, "registries-"+draft[4:8], "override")
+	s.frg = d.fragmentHead("registries-"+draft[4:8], "override", s.frv, 1)
+	s.gone = d.fragmentHead("gone-"+draft[4:8], "site", nil, 2)
+	mustExec(t, d.db, `INSERT INTO operation (id, kind, state, owner, owner_gen, owner_epoch, lease_until, draft, draft_revision,
+			created_by, created_by_kind, created_role, epoch, created_at)
+		SELECT $1, 'publish', 'running', 'run-1/4242/publish', 1, epoch, now() + interval '1 minute', $2, $3, $4, 'human', 'publisher', epoch, now()
+		FROM installation_state`, s.op, draft, revision, d.seed)
+	tx, err := d.db.Begin() // a release's rows are written with it (PA §3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(t, tx, `INSERT INTO release (id, cluster, draft, draft_revision, digest, contract, machinery_version, machinery_checksum,
+			kubernetes_version, operation, published_by, published_role, epoch, published_at)
+		SELECT $1, $2, $3, $4, $5, 'v1.13', 'v1.13.6', 'h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=', 'v1.36.0', $6, $7,
+			'publisher', epoch, '2026-09-26T09:14:05Z' FROM installation_state`, s.rel, d.cluster, draft, revision, make([]byte, 32), s.op, d.seed)
+	for _, m := range []struct {
+		machine, ibr string
+		redacted     any
+	}{{d.machine, ibr1, "machine:\n  type: worker\n  token: <redacted:schema>\n"}, {s.machine2, ibr2, nil}} {
+		mustExec(t, tx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision, mode, ciphertext,
+				ciphertext_digest, configuration_digest, redacted, provenance)
+			VALUES ($1, $2, $3, $4, 'container', $5, $6, $6, $7, '[{"reference": "registry/example-pass", "version": 3}]')`,
+			s.rel, d.cluster, m.machine, m.ibr, releaseCipher, make([]byte, 32), m.redacted)
+	}
+	mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, fragment, name, fragment_revision, head_revision)
+		VALUES ($1, $2, 'fragment', $3, $4, $5, 1), ($1, $2, 'fragment', $6, $7, NULL, 2)`,
+		s.rel, d.cluster, s.frg, "registries-"+draft[4:8], s.frv, s.gone, "gone-"+draft[4:8])
+	mustExec(t, tx, `UPDATE draft SET state = 'published', release = $2 WHERE id = $1`, draft, s.rel)
+	mustExec(t, tx, `UPDATE operation SET state = 'succeeded', owner = NULL, owner_epoch = NULL, lease_until = NULL,
+		result = jsonb_build_object('release', $2::text) WHERE id = $1`, s.op, s.rel)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// PA §9.2 and its read example: any role reads a release, its sources and machines, and each
+// machine's redacted review data (compilation §8.3, §11); a configuration that could not be
+// redacted shows nothing and says so. No answer carries ciphertext or a digest (PA §9.1).
+func TestReleaseReads(t *testing.T) {
+	d := newDraftEnv(t)
+	s := d.release(d.draft, 1)
+
+	rec := d.get("/releases/" + s.rel)
+	r := decode[releaseBody](t, rec, http.StatusOK)
+	if r.ID != s.rel || r.Cluster != d.cluster || r.Draft != d.draft || r.DraftRevision != 1 || r.Operation != s.op ||
+		r.PublishedBy != (createdBy{Principal: d.seed, Role: "publisher"}) ||
+		r.PublishedAt.Format("2006-01-02T15:04:05Z07:00") != "2026-09-26T09:14:05Z" ||
+		r.Renderer != (rendererBody{Contract: "v1.13", MachineryVersion: "v1.13.6",
+			MachineryChecksum: "h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=", KubernetesVersion: "v1.36.0"}) {
+		t.Fatalf("release %+v", r)
+	}
+	wantSources := []releaseSourceBody{{Kind: "fragment", Head: s.frg, Revision: &s.frv, HeadRevision: 1},
+		{Kind: "fragment", Head: s.gone, HeadRevision: 2}}
+	slices.SortFunc(wantSources, func(a, b releaseSourceBody) int { return strings.Compare(a.Head, b.Head) })
+	if len(r.Sources) != 2 {
+		t.Fatalf("sources %+v", r.Sources)
+	}
+	for i, w := range wantSources {
+		g := r.Sources[i]
+		if g.Kind != w.Kind || g.Head != w.Head || g.HeadRevision != w.HeadRevision || (g.Revision == nil) != (w.Revision == nil) ||
+			(g.Revision != nil && *g.Revision != *w.Revision) {
+			t.Fatalf("source %d %+v; want %+v", i, g, w)
+		}
+	}
+	machines := []string{d.machine, s.machine2}
+	slices.Sort(machines)
+	if len(r.Machines) != 2 {
+		t.Fatalf("machines %+v", r.Machines)
+	}
+	for i, m := range machines {
+		want := releaseMachineBody{Machine: m, Mode: "container", Review: prefix + "/releases/" + s.rel + "/machines/" + m + "/review"}
+		if r.Machines[i] != want {
+			t.Fatalf("machine %d %+v; want %+v", i, r.Machines[i], want)
+		}
+	}
+	for _, leak := range []string{releaseCipher, "digest", "ciphertext", "vault:"} {
+		if strings.Contains(rec.Body.String(), leak) {
+			t.Fatalf("release answer holds %q: %s", leak, rec.Body)
+		}
+	}
+
+	rec = d.get("/releases/" + s.rel + "/machines/" + d.machine + "/review")
+	v := decode[reviewBody](t, rec, http.StatusOK)
+	if v.Release != s.rel || v.Machine != d.machine || v.Mode != "container" || v.Configuration == nil ||
+		*v.Configuration != "machine:\n  type: worker\n  token: <redacted:schema>\n" || v.Notice != "" ||
+		string(v.Provenance) != `[{"version":3,"reference":"registry/example-pass"}]` {
+		t.Fatalf("review %+v (%s)", v, v.Provenance)
+	}
+	rec = d.get("/releases/" + s.rel + "/machines/" + s.machine2 + "/review")
+	if strings.Contains(rec.Body.String(), "vault:") {
+		t.Fatalf("review answer holds ciphertext: %s", rec.Body)
+	}
+	if v := decode[reviewBody](t, rec, http.StatusOK); v.Configuration != nil || v.Notice == "" {
+		t.Fatalf("withheld review %+v; want no configuration and a notice", v)
+	}
+
+	// A second release on another draft: the list pages in identifier order, each item with its
+	// own sources and machines.
+	rec = d.do(d.api, call{method: "POST", path: prefix + "/drafts", token: d.human("h-author"), key: "k-draft2-0123456789",
+		body: `{"cluster":"` + d.cluster + `","title":"second"}`})
+	draft2 := decode[draftBody](t, rec, http.StatusCreated).ID
+	s2 := d.release(draft2, 1)
+	list := decode[listPage[releaseBody]](t, d.get("/releases"), http.StatusOK)
+	want := []string{s.rel, s2.rel}
+	slices.Sort(want)
+	if len(list.Items) != 2 || list.Items[0].ID != want[0] || list.Items[1].ID != want[1] || list.Next != "" {
+		t.Fatalf("releases %+v; want %v", list, want)
+	}
+	for _, it := range list.Items {
+		one := decode[releaseBody](t, d.get("/releases/"+it.ID), http.StatusOK)
+		if len(it.Sources) != 2 || len(it.Machines) != 2 || !sameSources(it.Sources, one.Sources) ||
+			!slices.Equal(it.Machines, one.Machines) {
+			t.Fatalf("listed %+v; read %+v", it, one)
+		}
+	}
+	page1 := decode[listPage[releaseBody]](t, d.get("/releases?limit=1"), http.StatusOK)
+	if len(page1.Items) != 1 || page1.Items[0].ID != want[0] || page1.Next == "" {
+		t.Fatalf("first page %+v", page1)
+	}
+	page2 := decode[listPage[releaseBody]](t, d.get("/releases?limit=1&cursor="+page1.Next), http.StatusOK)
+	if len(page2.Items) != 1 || page2.Items[0].ID != want[1] || page2.Next != "" {
+		t.Fatalf("second page %+v", page2)
+	}
+
+	// Refusals: an unknown release, an identifier of another entity, a machine the release does
+	// not cover, and a query on an item read.
+	for _, c := range []struct {
+		path   string
+		status int
+		code   string
+	}{
+		{"/releases/" + id.New(id.Release), http.StatusNotFound, "not-found"},
+		{"/releases/" + d.draft, http.StatusNotFound, "not-found"},
+		{"/releases/" + id.New(id.Release) + "/machines/" + d.machine + "/review", http.StatusNotFound, "not-found"},
+		{"/releases/" + s.rel + "/machines/" + id.New(id.Machine) + "/review", http.StatusNotFound, "not-found"},
+		{"/releases/" + s.rel + "/machines/" + d.draft + "/review", http.StatusNotFound, "not-found"},
+		{"/releases/" + d.draft + "/machines/" + d.machine + "/review", http.StatusNotFound, "not-found"},
+		{"/releases/" + s2.rel + "/machines/" + "mch_" + strings.Repeat("a", 26) + "/review", http.StatusNotFound, "not-found"},
+		{"/releases/" + s.rel + "?x=1", http.StatusBadRequest, "invalid-request"},
+		{"/releases/" + s.rel + "/machines/" + d.machine + "/review?x=1", http.StatusBadRequest, "invalid-request"},
+	} {
+		wantProblem(t, d.get(c.path), c.status, c.code)
+	}
+}
+
+// sameSources compares two source lists member by member, since Revision is a pointer.
+func sameSources(a, b []releaseSourceBody) bool {
+	return slices.EqualFunc(a, b, func(x, y releaseSourceBody) bool {
+		return x.Kind == y.Kind && x.Head == y.Head && x.HeadRevision == y.HeadRevision && (x.Revision == nil) == (y.Revision == nil) &&
+			(x.Revision == nil || *x.Revision == *y.Revision)
+	})
+}

@@ -199,15 +199,7 @@ func TestAdoptionConstraints(t *testing.T) {
 	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "held", []byte{1}, a.human, "k0123456789abcdef")
 	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "resumed", []byte{1}, nil, nil)
 	mustExec(t, db, insertReference, a.ibr, "pki/extra-ca", "string", 1, "base64", generation(a.cluster, a.claim))
-	// The baseline revision is a counter (execution and recovery §2): an adoption record sets
-	// Applied at baseline revision 1, and a completed operation's new Applied advances it to 2,
-	// though no import base revision is named by either.
-	mustExec(t, db, insertMachineState, a.otherMachine, id.New(id.Release), digest(3), "adoption", 1)
-	mustExec(t, db, `UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'operation',
-		baseline_revision = baseline_revision + 1 WHERE machine = $1`, a.otherMachine, id.New(id.Release), digest(4))
-	if n := count(t, db, "machine_state WHERE baseline_revision = 2"); n != 1 {
-		t.Fatalf("%d machine states at baseline revision 2; want the advanced one", n)
-	}
+	// The baseline revision's counter control needs releases, so it is TestReleaseConstraints'.
 }
 
 // The control for 0005: with each of its constraints dropped, the row TestAdoptionConstraints

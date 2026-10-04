@@ -75,8 +75,8 @@ func routes() []*route {
 	}
 	rs = append(rs,
 		read(g("/drafts"), listDrafts), read(g("/drafts/{id}"), getDraft),
-		read(g("/ingestions/{id}"), getIngestion), g("/releases"), g("/releases/{id}"),
-		g("/releases/{id}/machines/{m}/review"),
+		read(g("/ingestions/{id}"), getIngestion), read(g("/releases"), listReleases), read(g("/releases/{id}"), getRelease),
+		read(g("/releases/{id}/machines/{m}/review"), getReview),
 		g("/plans"), g("/plans/{id}"), g("/approvals/{id}"), g("/operations"), read(g("/operations/{id}"), getOperation),
 		g("/operations/{id}/events"), read(g("/acts"), listActs), g("/recovery"),
 		ingestionStart().on(ifm(human(m(post, "/ingestions", author)))),
