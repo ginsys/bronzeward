@@ -87,10 +87,16 @@ forms), builds SP's `bwprov`, and runs `TestMachineryGate` and `TestSensitivityG
 `controls.tsv` and `summary.txt` (SR) and `sp-matrix.tsv`, `sp-controls.tsv` and
 `sp-summary.txt` (SP), and fail on any unexpected row. `run/all` also records the run's
 leak-refusal patterns (every long scalar of either base's secrets bundle and the fixture's
-leak-scan patterns) in `C10_OUT/patterns.txt`. `run/collect-evidence` copies those results and
-`run.txt` into `evidence/` only if every file scans clean against that record and for `BWSYNTH`,
-the marker every SP value carries; a match or a failed scan refuses and copies nothing. The
-outputs themselves hold synthetic secrets and stay in `C10_OUT`.
+leak-scan patterns) in `C10_OUT/patterns.txt`. `TestSensitivityGate` writes its results only if
+the oracle finds no case value in them, and records every single-line form of every case value
+(placed, escaped, base64 and the rest) in `C10_OUT/sp-patterns.txt`. `run/collect-evidence`
+copies the results and `run.txt` into `evidence/` only if every file scans clean against both
+records and for `BWSYNTH`, the marker in every SP value's plain form; a match or a failed scan
+refuses and copies nothing. The outputs themselves hold synthetic secrets and stay in `C10_OUT`.
+
+A `base-ref` cell that does not apply fails the gate unless its case is expected not to apply
+(`fragments` not at parity, or `bool` refused by the guard as below), and a finding fails it in
+any cell.
 
 ## Result
 

@@ -3,7 +3,8 @@
 # controls.tsv and matrix.tsv (SR), sp-summary.txt, sp-controls.tsv and sp-matrix.tsv (SP). They
 # hold outcomes, verdicts, rule names and reference names only. Nothing is copied unless every file
 # scans clean against the leak-refusal patterns run/all recorded for that run (every long scalar of
-# both bases' secrets bundles and the fixture's leak-scan patterns) and the marker every SP case
+# both bases' secrets bundles and the fixture's leak-scan patterns), every SP case value in each
+# of SP's oracle forms (sp-patterns.txt, written by the gate test) and the marker every SP case
 # value carries, BWSYNTH; a match or a failed scan refuses.
 set -euo pipefail
 C10_RUN_DIR=$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -21,12 +22,15 @@ need grep wc
 patterns=$C10_OUT/patterns.txt
 [ -f "$patterns" ] || die "the run recorded no leak-refusal patterns"
 [ "$(wc -l <"$patterns")" -ge 10 ] || die "fewer than 10 leak-refusal patterns"
+sp_patterns=$C10_OUT/sp-patterns.txt
+[ -f "$sp_patterns" ] || die "the gate recorded no SP value patterns"
+[ "$(wc -l <"$sp_patterns")" -ge 28 ] || die "fewer than 28 SP value patterns"
 
 files=(run.txt summary.txt controls.tsv matrix.tsv sp-summary.txt sp-controls.tsv sp-matrix.tsv)
 for f in "${files[@]}"; do
   [ -s "$C10_OUT/$f" ] || die "$C10_OUT/$f is missing or empty"
   rc=0
-  grep -qF -e BWSYNTH -f "$patterns" -- "$C10_OUT/$f" || rc=$?
+  grep -qF -e BWSYNTH -f "$patterns" -f "$sp_patterns" -- "$C10_OUT/$f" || rc=$?
   case $rc in
     0) die "$f holds a secret pattern; nothing collected" ;;
     1) ;;
