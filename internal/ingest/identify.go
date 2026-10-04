@@ -1,13 +1,16 @@
 package ingest
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/siderolabs/talos/pkg/machinery/config/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
+	"github.com/siderolabs/talos/pkg/machinery/config/container"
 	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
 	"go.yaml.in/yaml/v3"
 
@@ -92,6 +95,40 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 	return out, nil
 }
 
+// plainDeletes reports whether every delete directive under n holds nothing but itself, or, in a
+// list, itself and the one scalar member that selects the entry. The machinery drops a directive's
+// mapping whole, so anything else beside it would be stored without ever being loaded.
+func plainDeletes(n *yaml.Node, inList bool) bool {
+	switch n.Kind {
+	case yaml.MappingNode:
+		directive := false
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if k, v := n.Content[i], n.Content[i+1]; k.Value == "$patch" && v.Kind == yaml.ScalarNode && v.Value == "delete" {
+				directive = true
+			}
+		}
+		if directive {
+			want := 2
+			if inList {
+				want = 4
+			}
+			return len(n.Content) == want && n.Content[1].Kind == yaml.ScalarNode && n.Content[len(n.Content)-1].Kind == yaml.ScalarNode
+		}
+		for i := 1; i < len(n.Content); i += 2 {
+			if !plainDeletes(n.Content[i], false) {
+				return false
+			}
+		}
+	case yaml.SequenceNode:
+		for _, c := range n.Content {
+			if !plainDeletes(c, true) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // schemaPointer is a leaf the machinery redacts and its unredacted encoded value.
 type schemaPointer struct {
 	pointer []string
@@ -108,12 +145,34 @@ func schemaPointers(doc *yaml.Node, i int, nulled map[*yaml.Node]bool) ([]schema
 	if top == nil || top.Kind == yaml.ScalarNode && top.Tag == "!!null" {
 		return nil, nil
 	}
+	if !plainDeletes(top, false) {
+		return nil, unloadable
+	}
 	text, err := yaml.Marshal(copyWithoutReferences(top, map[*yaml.Node]*yaml.Node{}, nulled))
 	if err != nil {
 		return nil, unloadable
 	}
-	p, err := configloader.NewFromBytes(text)
-	if err != nil || len(p.Documents()) != 1 {
+	// A fragment may carry delete directives (compilation.md §6 step 5): it loads as composition
+	// loads a patch, each directive becoming a selector document of its own, which holds no value.
+	// A document of directives only holds no secret.
+	loaded, err := configloader.NewFromBytes(text, configloader.WithAllowPatchDelete())
+	if errors.Is(err, configloader.ErrNoConfig) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, unloadable
+	}
+	var docs []config.Document
+	for _, d := range loaded.Documents() {
+		if _, directive := d.(interface{ ApplyTo(config.Document) error }); !directive {
+			docs = append(docs, d)
+		}
+	}
+	if len(docs) == 0 {
+		return nil, nil
+	}
+	p, err := container.New(docs...)
+	if err != nil || len(docs) != 1 {
 		return nil, unloadable
 	}
 	opt := encoder.WithComments(encoder.CommentsDisabled)
