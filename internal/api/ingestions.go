@@ -164,7 +164,7 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	case !errors.Is(err, sql.ErrNoRows):
 		return result{}, err
 	}
-	c := staging.Claim{ID: id.New(id.Ingestion), Mode: in.Staging, Cluster: cluster, Machine: in.Machine, Gen: 1}
+	c := staging.Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: in.Staging, Cluster: cluster, Machine: in.Machine, Gen: 1}
 	timers := staging.Timers{Lease: a.d.timers.Lease, AbsoluteExpiry: a.d.timers.AbsoluteExpiry}
 	owner := a.d.owner
 	if a.o.noEpochTerm { // the control: the process takes the current epoch as its own, so the term always holds

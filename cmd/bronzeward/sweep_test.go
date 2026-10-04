@@ -29,7 +29,7 @@ func insertClaim(t *testing.T, db *sql.DB, human, cluster, machine string, lapse
 		t.Fatal(err)
 	}
 	o := staging.Owner{ID: "a/4242/start-1", Epoch: epoch}
-	c := staging.Claim{ID: id.New(id.Ingestion), Mode: "transient", Cluster: cluster, Machine: machine, Gen: 1}
+	c := staging.Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: "transient", Cluster: cluster, Machine: machine, Gen: 1}
 	draft := id.New(id.Draft)
 	tx, err := db.Begin()
 	if err != nil {
