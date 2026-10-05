@@ -1680,7 +1680,10 @@ in place as
     revision. Composed twice, it would be recorded as overridden by itself
     (§8.2), against design §6.2's aim that the fragment that last set a field
     can be shown. The compiler refuses a composition naming a revision twice.
-    Alternatives: refuse the selection at draft update and publication, which
+    Cost: a later profile cannot reassert a shared revision. With profiles
+    `P = [A]` and `Q = [B, A]` in that order, B's value wins where A and B set
+    the same field, although Q orders A after B; an intended later override
+    belongs in a fragment of its own. Alternatives: refuse the selection at draft update and publication, which
     forbids sharing one fragment between two profiles of a layer; or compose it
     at its last position, which lets a repeat silently undo every fragment
     between the two.
