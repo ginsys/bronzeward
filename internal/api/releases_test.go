@@ -245,6 +245,8 @@ func TestReleaseReviewProvenanceProjected(t *testing.T) {
 			`"overriddenBy":{"revision":"{frv}","digest":"`+standIn+`"}`, 1) + `]`},
 		{"a digest in capitals", `[` + strings.Replace(good, hexB, strings.ToUpper(hexB), 1) + `]`},
 		{"a field whose name carries the content", `[` + strings.Replace(good, `"version":3`, `"version":3,"`+standIn+`":1`, 1) + `]`},
+		{"a reference of 257 bytes", `[` + strings.Replace(good, `"registry/example-pass"`, `"`+strings.Repeat("a", 257)+`"`, 1) + `]`},
+		{"control: a reference of 256 bytes", `[` + strings.Replace(good, `"registry/example-pass"`, `"`+strings.Repeat("a", 256)+`"`, 1) + `]`},
 		{"control", `[` + good + `]`}, // the record each case above breaks one way
 	} {
 		draft := d.draft
@@ -255,7 +257,7 @@ func TestReleaseReviewProvenanceProjected(t *testing.T) {
 		}
 		s := d.release(draft, 1, c.stored)
 		rec := d.get("/releases/" + s.rel + "/machines/" + d.machine + "/review")
-		if c.name == "control" {
+		if strings.HasPrefix(c.name, "control") {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("%s: %d %s", c.name, rec.Code, rec.Body)
 			}
