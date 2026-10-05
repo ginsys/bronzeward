@@ -1,10 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -379,15 +382,94 @@ func TestPublishCommitExistingRelease(t *testing.T) {
 
 // Another content for a published draft revision is refused 409 conflict (§6.2).
 func TestPublishCommitDifferentContent(t *testing.T) {
-	p := newPublishEnv(t)
-	if _, ref := p.commit(); ref != nil {
-		t.Fatalf("refused: %v", ref)
+	for name, change := range map[string]func(*releaseUnit){
+		"renderer":      func(u *releaseUnit) { u.renderer.KubernetesVersion = "v1.36.1" },
+		"configuration": func(u *releaseUnit) { u.machines[0].configuration = sha256.Sum256([]byte("machine: {x: 1}")) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPublishEnv(t)
+			if _, ref := p.commit(); ref != nil {
+				t.Fatalf("refused: %v", ref)
+			}
+			p.job = p.secondJob()
+			change(&p.unit)
+			p.refused(409, "conflict")
+			if p.count(`SELECT count(*) FROM release`) != 1 {
+				t.Fatal("a second release was written")
+			}
+		})
 	}
-	p.job = p.secondJob()
-	p.unit.renderer.KubernetesVersion = "v1.36.1"
-	p.refused(409, "conflict")
-	if p.count(`SELECT count(*) FROM release`) != 1 {
-		t.Fatal("a second release was written")
+}
+
+// The release digest is SHA-256 over the versioned, length-prefixed encoding ruling R14 names,
+// built here independently of digest; it covers every field of the content and no order.
+func TestReleaseDigest(t *testing.T) {
+	cfg := sha256.Sum256([]byte("machine: {}"))
+	base := func() releaseContent {
+		return releaseContent{cluster: "cl_a", draft: "dr_a", draftRev: 3,
+			renderer: rendererBody{Contract: "c/1", MachineryVersion: "v1.13.6", MachineryChecksum: "sha256:ab",
+				KubernetesVersion: "v1.36.0"},
+			sources:  []contentSource{{kind: "fragment", key: "net", revision: "2"}, {kind: "assignment", key: "m_a", revision: ""}},
+			machines: []contentMachine{{machine: "m_a", importBase: "ibr_a", assignment: "1", mode: "apply", configuration: cfg[:]}},
+		}
+	}
+	var want bytes.Buffer
+	put := func(s string) {
+		_ = binary.Write(&want, binary.BigEndian, uint64(len(s)))
+		want.WriteString(s)
+	}
+	num := func(n int) { _ = binary.Write(&want, binary.BigEndian, uint64(n)) }
+	put("bronzeward-release-digest/1")
+	put("cl_a")
+	put("dr_a")
+	num(3)
+	for _, s := range []string{"c/1", "v1.13.6", "sha256:ab", "v1.36.0"} {
+		put(s)
+	}
+	num(2)
+	for _, s := range []string{"assignment", "m_a", "", "fragment", "net", "2"} {
+		put(s)
+	}
+	num(1)
+	for _, s := range []string{"m_a", "ibr_a", "1", "apply", string(cfg[:])} {
+		put(s)
+	}
+	if got, w := base().digest(), sha256.Sum256(want.Bytes()); got != w {
+		t.Fatalf("digest %x; want %x", got, w)
+	}
+
+	reordered := base()
+	slices.Reverse(reordered.sources)
+	if reordered.digest() != base().digest() {
+		t.Error("source order changes the digest")
+	}
+	other := sha256.Sum256([]byte("machine: {x: 1}"))
+	for name, change := range map[string]func(*releaseContent){
+		"cluster":           func(c *releaseContent) { c.cluster = "cl_b" },
+		"draft":             func(c *releaseContent) { c.draft = "dr_b" },
+		"draft revision":    func(c *releaseContent) { c.draftRev = 4 },
+		"contract":          func(c *releaseContent) { c.renderer.Contract = "c/2" },
+		"machinery version": func(c *releaseContent) { c.renderer.MachineryVersion = "v1.13.7" },
+		"machinery sum":     func(c *releaseContent) { c.renderer.MachineryChecksum = "sha256:cd" },
+		"kubernetes":        func(c *releaseContent) { c.renderer.KubernetesVersion = "v1.36.1" },
+		"source kind":       func(c *releaseContent) { c.sources[0].kind = "profile" },
+		"source key":        func(c *releaseContent) { c.sources[0].key = "dns" },
+		"source revision":   func(c *releaseContent) { c.sources[0].revision = "3" },
+		"source removal":    func(c *releaseContent) { c.sources[0].revision = "" },
+		"source added":      func(c *releaseContent) { c.sources = append(c.sources, contentSource{"fragment", "dns", "1"}) },
+		"machine":           func(c *releaseContent) { c.machines[0].machine = "m_b" },
+		"import base":       func(c *releaseContent) { c.machines[0].importBase = "ibr_b" },
+		"assignment":        func(c *releaseContent) { c.machines[0].assignment = "2" },
+		"mode":              func(c *releaseContent) { c.machines[0].mode = "staged" },
+		"configuration":     func(c *releaseContent) { c.machines[0].configuration = other[:] },
+		// Length prefixes keep a boundary shift between adjacent fields distinct.
+		"boundary": func(c *releaseContent) { c.cluster, c.draft = "cl_ad", "r_a" },
+	} {
+		c := base()
+		change(&c)
+		if c.digest() == base().digest() {
+			t.Errorf("%s does not change the digest", name)
+		}
 	}
 }
 
@@ -590,6 +672,49 @@ func TestPublishCommitRejected(t *testing.T) {
 	}
 }
 
+// A recovery entry between the rolled-back commit and the failure transaction supersedes the
+// owner's epoch: the failure is not recorded either (§5.1, an owner's own transition).
+func TestPublishCommitFailureFencedOnEpoch(t *testing.T) {
+	p := newPublishEnv(t)
+	first := true
+	p.a = p.buildWith(deps{owner: p.owner}, options{commit: func(tx *sql.Tx) error {
+		if !first {
+			return tx.Commit()
+		}
+		first = false
+		_ = tx.Rollback()
+		mustExec(t, p.db, `WITH e AS (INSERT INTO recovery_epoch (epoch, entered_at) VALUES ('ep_`+strings.Repeat("b", 26)+`', now())
+			RETURNING epoch) UPDATE installation_state SET epoch = (SELECT epoch FROM e)`)
+		return &pgconn.PgError{Code: "23514", Message: "deferred check violated at COMMIT (test)"}
+	}})
+	if _, ref, err := p.a.publishCommit(t.Context(), p.job, p.unit); !errors.Is(err, staging.ErrFenced) || ref != nil {
+		t.Fatalf("%v %v; want fenced", ref, err)
+	}
+	var state string
+	var events int
+	if err := p.db.QueryRow(`SELECT state, last_event FROM operation WHERE id = $1`, p.job.op).Scan(&state, &events); err != nil {
+		t.Fatal(err)
+	}
+	if state != "running" || events != 0 {
+		t.Fatalf("operation %s, %d events after the epoch moved", state, events)
+	}
+}
+
+// A COMMIT PostgreSQL answers with ROLLBACK, after a statement whose error went unseen, is a
+// known rollback too: the operation fails 500 internal-error.
+func TestPublishCommitAnsweredRollback(t *testing.T) {
+	p := newPublishEnv(t)
+	first := true
+	p.a = p.buildWith(deps{owner: p.owner}, options{commit: func(tx *sql.Tx) error {
+		if first {
+			first = false
+			_, _ = tx.Exec(`SELECT 1/0`)
+		}
+		return tx.Commit()
+	}})
+	p.refused(500, "internal-error")
+}
+
 // A covered machine whose import base the draft does not carry and which has no Applied release
 // has none (§3.2).
 func TestPublishCommitNoImportBase(t *testing.T) {
@@ -673,20 +798,70 @@ func TestPublishCommitRecoveryMode(t *testing.T) {
 // A status of a named version recorded other than retained after publication began classifying
 // it refuses the publication (dependency monitor §5.2); one recorded before it does not.
 func TestPublishCommitStatusRecordedAfter(t *testing.T) {
-	seed := func(p *publishEnv, recorded time.Time) {
+	seed := func(p *publishEnv, observed, recorded time.Time) {
 		mustExec(p.t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class, reason,
-			observed_from, recorded_at) VALUES ($1, 'kv', $2, 1, '2026-09-26T09:00:00.123456789Z', 'blocked', 'soft-deleted', $3, $3)`,
-			id.New(id.Dependency), p.kvPath, recorded)
+			observed_from, recorded_at) VALUES ($1, 'kv', $2, 1, '2026-09-26T09:00:00.123456789Z', 'blocked', 'soft-deleted', $3, $4)`,
+			id.New(id.Dependency), p.kvPath, observed, recorded)
 	}
 	p := newPublishEnv(t)
-	seed(p, began.Add(time.Second))
+	seed(p, began.Add(time.Second), began.Add(time.Second))
 	if ref := p.refused(422, "validation-failed"); ref.extra["dependency"] == nil {
 		t.Fatalf("refusal names no dependency: %v", ref.extra)
 	}
 
+	// A request that began before publication's but was recorded after it began refuses too: the
+	// comparison takes the time the class was recorded.
 	p = newPublishEnv(t)
-	seed(p, began.Add(-time.Second))
+	seed(p, began.Add(-time.Second), began.Add(time.Second))
+	p.refused(422, "validation-failed")
+
+	p = newPublishEnv(t)
+	seed(p, began.Add(-time.Second), began.Add(-time.Second))
 	if _, ref := p.commit(); ref != nil {
 		t.Fatalf("an earlier transition refused: %v", ref)
 	}
+}
+
+// The re-check holds every named version's status FOR SHARE until the commit (dependency monitor
+// §5.2): a monitor transition starting after it waits for the release, then reads it as a
+// referencing release, so the two are ordered. The probe takes the lock a transition's UPDATE
+// takes, NO KEY UPDATE, which a foreign key's KEY SHARE alone does not block.
+func TestPublishCommitHoldsStatuses(t *testing.T) {
+	p := newPublishEnv(t)
+	statuses := [][3]any{{"kv", p.kvPath, createdText(kvCreated)}, {"transit", "bw-artifact", createdText(transitCreated)}}
+	for _, s := range statuses {
+		mustExec(t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class, first_retained_at,
+			observed_from, recorded_at) VALUES ($1, $2, $3, 1, $4, 'retained', $5, $5, $5)`,
+			id.New(id.Dependency), s[0], s[1], s[2], began.Add(-time.Hour))
+	}
+	first := true
+	p.a = p.buildWith(deps{owner: p.owner}, options{commit: func(tx *sql.Tx) error {
+		if first {
+			first = false
+			for _, s := range statuses {
+				_, err := p.db.Exec(`SELECT 1 FROM dependency_status WHERE provider = $1 AND object = $2 AND created = $3
+					FOR NO KEY UPDATE NOWAIT`, s[0], s[1], s[2])
+				var pe *pgconn.PgError
+				if !errors.As(err, &pe) || pe.Code != "55P03" {
+					t.Errorf("%s status not held at COMMIT: %v", s[0], err)
+				}
+			}
+		}
+		return tx.Commit()
+	}})
+	if _, ref := p.commit(); ref != nil {
+		t.Fatalf("refused: %v", ref)
+	}
+}
+
+// A monitor transition of a version the release names, committed while the commit waits on that
+// row, is read by the re-check and refuses the publication (dependency monitor §5.2).
+func TestPublishCommitStatusTransitionConcurrently(t *testing.T) {
+	p := newPublishEnv(t)
+	mustExec(t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class, first_retained_at,
+		observed_from, recorded_at) VALUES ($1, 'kv', $2, 1, '2026-09-26T09:00:00.123456789Z', 'retained', $3, $3, $3)`,
+		id.New(id.Dependency), p.kvPath, began.Add(-time.Hour))
+	p.hold(`UPDATE dependency_status SET class = 'blocked', reason = 'soft-deleted', observed_from = clock_timestamp(),
+		recorded_at = clock_timestamp() WHERE provider = 'kv' AND object = $1`, p.kvPath)
+	p.refused(422, "validation-failed")
 }
