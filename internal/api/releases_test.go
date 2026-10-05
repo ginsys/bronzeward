@@ -78,6 +78,13 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 	mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, fragment, name, fragment_revision, head_revision)
 		VALUES ($1, $2, 'fragment', $3, $4, $5, 1), ($1, $2, 'fragment', $6, $7, NULL, 2)`,
 		s.rel, d.cluster, s.frg, "registries-"+draft[4:8], s.frv, s.gone, "gone-"+draft[4:8])
+	// Each machine's artifact names its key version in an encryption dependency (compilation §9).
+	mustExec(t, tx, `INSERT INTO dependency_status (id, provider, object, version, class, first_retained_at, observed_from,
+			recorded_at, created) VALUES ($1, 'transit', 'bw-artifact', 1, 'retained', now(), now(), now(), '2026-09-26T09:12:40Z')
+		ON CONFLICT DO NOTHING`, id.New(id.Dependency))
+	mustExec(t, tx, `INSERT INTO dependency (release, machine, kind, provider, object, version, created)
+		VALUES ($1, $2, 'encryption', 'transit', 'bw-artifact', 1, '2026-09-26T09:12:40Z'),
+		       ($1, $3, 'encryption', 'transit', 'bw-artifact', 1, '2026-09-26T09:12:40Z')`, s.rel, d.machine, s.machine2)
 	mustExec(t, tx, `UPDATE draft SET state = 'published', release = $2 WHERE id = $1`, draft, s.rel)
 	mustExec(t, tx, `UPDATE operation SET state = 'succeeded', owner = NULL, owner_epoch = NULL, lease_until = NULL,
 		result = jsonb_build_object('release', $2::text) WHERE id = $1`, s.op, s.rel)
