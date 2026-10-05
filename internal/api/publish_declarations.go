@@ -36,6 +36,7 @@ type declaredSource struct {
 func checkDeclarations(ctx context.Context, tx *sql.Tx, rel string, u releaseUnit) (string, error) {
 	compositions := map[string]map[string]bool{} // machine -> source revision -> is the import base
 	var revisions []string
+	queried := map[string]bool{}
 	if err := eachQueried(ctx, tx, `SELECT m.machine, m.import_base_revision, true FROM release_machine m WHERE m.release = $1
 		UNION SELECT m.machine, p.fragment_revision, false FROM release_machine m
 			JOIN assignment_revision_profile a ON a.revision = m.assignment_revision
@@ -55,7 +56,8 @@ func checkDeclarations(ctx context.Context, tx *sql.Tx, rel string, u releaseUni
 			compositions[machine] = map[string]bool{}
 		}
 		compositions[machine][revision] = base
-		if !slices.Contains(revisions, revision) {
+		if !queried[revision] {
+			queried[revision] = true
 			revisions = append(revisions, revision)
 		}
 		return nil

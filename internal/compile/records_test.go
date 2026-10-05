@@ -191,6 +191,28 @@ func TestReproductionKeepsRedactedOccurrences(t *testing.T) {
 	}
 }
 
+// A composition names each source revision once (compilation.md §6 step 1): a revision composed
+// twice would be recorded as overridden by itself, and its occurrences numbered twice.
+func TestCompileRefusesRevisionComposedTwice(t *testing.T) {
+	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
+	frag := source(t, "machine:\n  nodeLabels:\n    a: !bwref app/s\n",
+		strRef("app/s"), map[string]provider.Value{"app/s": value(t, provider.KindString, "sensitive")})
+	other := source(t, "machine:\n  nodeLabels:\n    b: literal\n", ingest.Declarations{}, nil)
+	sameAsBase := frag
+	sameAsBase.Revision = base.Revision
+	for name, fragments := range map[string][]Source{
+		"fragment twice":     {frag, other, frag},
+		"fragment then base": {sameAsBase},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Compile(Input{Base: base, Fragments: fragments, Mode: ModeMetal})
+			if err == nil || !strings.Contains(err.Error(), "composed twice") {
+				t.Fatalf("Compile = %v, want a revision composed twice refused", err)
+			}
+		})
+	}
+}
+
 // A reference overwritten by a literal, by another reference or by a delete directive, and a
 // boolean overwritten by a literal, is recorded as overridden by the fragment after which it
 // disappears, not by the last fragment; an overridden reference is a reproduction dependency
