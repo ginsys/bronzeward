@@ -85,8 +85,11 @@ func TestReleaseConstraints(t *testing.T) {
 	kv := generation(r.cluster, r.claim)
 	rel2 := id.New(id.Release)
 	op2, op3 := id.New(id.Operation), id.New(id.Operation)
-	claim2 := id.New(id.Ingestion)
+	claim2, bob := id.New(id.Ingestion), id.New(id.Principal)
 	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, r.draft2, 1, nil, r.human, nil, nil)
+	mustExec(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'bob', now())`, bob)
+	// A second version of the artifact key, which no ciphertext of withMachine names.
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "transit", "bw-artifact", 2, "retained", nil, nil, "2026-10-02T00:00:00Z")
 	// rel2 is inserted in each case's transaction first, so its rows are written with it.
 	withRelease := []stmt{{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
 		"v1.36.0", op2, r.human, "publisher"}}}
@@ -140,6 +143,10 @@ func TestReleaseConstraints(t *testing.T) {
 		{"release of another draft revision's publish operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
 			r.draft2, 2, nil, r.human, nil, nil}}}, insertRelease, newRelease(9, op3), "23503"},
 		{"release published by no principal", nil, insertRelease, newRelease(10, id.New(id.Principal)), "23503"},
+		// The publisher is the principal that requested the publish operation, in its role.
+		{"release published by another principal than its operation's", nil, insertRelease, newRelease(10, bob), "23503"},
+		{"release of a publish operation requested in another role", []stmt{{`UPDATE operation SET created_role = 'approver'
+			WHERE id = $1`, []any{op2}}}, insertRelease, newRelease(), "23503"},
 		{"release published under the author role", nil, insertRelease, newRelease(11, "author"), "release_published_role_check"},
 		{"release with an id of another kind", nil, insertRelease, newRelease(0, id.New(id.Draft)), "release_id_check"},
 		// release_machine
@@ -149,11 +156,16 @@ func TestReleaseConstraints(t *testing.T) {
 		{"machine in an unknown mode", withRelease, insertReleaseMachine, machineRow(5, "vm"), "release_machine_mode_check"},
 		{"ciphertext without its key version", withRelease, insertReleaseMachine, machineRow(6, "vault:abc"), "release_machine_ciphertext_check"},
 		{"ciphertext at key version 0", withRelease, insertReleaseMachine, machineRow(6, "vault:v0:YWJj"), "release_machine_ciphertext_check"},
+		{"ciphertext at a key version past bigint", withRelease, insertReleaseMachine,
+			machineRow(6, "vault:v9223372036854775808:YWJj"), "release_machine_ciphertext_check"},
 		{"ciphertext digest of 31 bytes", withRelease, insertReleaseMachine, machineRow(7, digest(4)[:31]), "release_machine_ciphertext_digest_check"},
 		{"configuration digest of 33 bytes", withRelease, insertReleaseMachine, machineRow(8, append(digest(5), 1)), "release_machine_configuration_digest_check"},
 		{"empty redacted configuration", withRelease, insertReleaseMachine, machineRow(9, ""), "release_machine_redacted_check"},
 		{"provenance that is not a list", withRelease, insertReleaseMachine, machineRow(10, `{}`), "release_machine_provenance_check"},
 		{"second row of one machine", withMachine, insertReleaseMachine, machineRow(), "23505"},
+		// Compilation §9: each machine's artifact has one encryption dependency, checked at commit.
+		{"machine without its encryption dependency", withMachine, `SET CONSTRAINTS ALL IMMEDIATE`, nil,
+			"release_machine_encryption"},
 		// release_source
 		{"source with two heads", withRelease, insertReleaseSource,
 			[]any{rel2, r.cluster, "fragment", r.frg, r.prf, nil, "registries", nil, r.frv1, nil, nil, 1}, "release_source_shape"},
@@ -200,13 +212,22 @@ func TestReleaseConstraints(t *testing.T) {
 		{"second effective row of one version", append(withMachine, stmt{insertDependency, depRow()}), insertDependency,
 			depRow(), "23505"},
 		{"second reproduction row of one occurrence", append(withMachine, stmt{insertDependency,
-			depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine/a", 11, 0)}), insertDependency,
-			depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine/b", 11, 0), "23505"},
+			depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine/a", 11, 0)}), insertDependency,
+			depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine/b", 11, 0), "23505"},
 		{"reproduction dependency without its occurrence", withMachine, insertDependency,
 			depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine"), "dependency_shape"},
 		{"reproduction occurrence -1", withMachine, insertDependency,
 			depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine", 11, -1), "dependency_occurrence_check"},
 		{"effective dependency with an occurrence", withMachine, insertDependency, depRow(11, 0), "dependency_shape"},
+		{"encryption dependency at another key version than the ciphertext's", withMachine, insertDependency,
+			depRow(2, "encryption", 3, "transit", 4, "bw-artifact", 5, 2, 6, "2026-10-02T00:00:00Z", 7, nil), "23503"},
+		// A reproduction source is the machine's import base or a fragment revision of the release.
+		{"reproduction source at another machine's import base", withMachine, insertDependency,
+			depRow(2, "reproduction", 8, r.otherIBR, 9, digest(6), 10, "base:/machine", 11, 0), "23503"},
+		{"reproduction source at no import base", withMachine, insertDependency,
+			depRow(2, "reproduction", 8, id.New(id.ImportBase), 9, digest(6), 10, "base:/machine", 11, 0), "23503"},
+		{"reproduction source at a fragment revision the release does not name", withMachine, insertDependency,
+			depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine", 11, 0), "23503"},
 		// dependency_status
 		{"second status of one version", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, created}, "23505"},
 		{"status of an unknown class", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 2, "fine", "absent", nil, created}, "dependency_status_class_check"},
@@ -282,8 +303,9 @@ func TestReleaseConstraints(t *testing.T) {
 	for _, p := range withMachine {
 		mustExec(t, tx, p.q, p.args...)
 	}
-	mustExec(t, tx, insertReleaseSource, rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, nil, nil, nil, 2)
+	mustExec(t, tx, insertReleaseSource, rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv2, nil, nil, 2)
 	mustExec(t, tx, insertDependency, depRow(6, "2026-09-26T09:12:40.1Z")...)
+	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.frv2, 9, digest(6), 10, "registries:/machine", 11, 0)...)
 	// Two occurrences shown at one redacted path are two rows, told apart by their ordinals.
 	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine/<redacted>", 11, 0)...)
 	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine/<redacted>", 11, 1)...)
@@ -351,6 +373,7 @@ func TestReleaseConstraintControl(t *testing.T) {
 		{"ALTER TABLE release DROP CONSTRAINT release_operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
 			r.draft, 1, nil, r.human, nil, nil}}}, insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery,
 			checksum, "v1.36.0", op3, r.human, "publisher"}},
+		{"DROP TRIGGER encryption ON release_machine", []stmt{withRelease, withMachine}, `SET CONSTRAINTS ALL IMMEDIATE`, nil},
 		{"ALTER TABLE draft DROP CONSTRAINT draft_published_release", nil,
 			`UPDATE draft SET state = 'published' WHERE id = $1`, []any{r.draft2}},
 		{"DROP INDEX operation_active_publish", []stmt{{`UPDATE operation SET state = 'queued', owner = NULL, owner_epoch = NULL,

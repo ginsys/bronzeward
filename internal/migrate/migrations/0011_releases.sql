@@ -24,8 +24,10 @@ $$;
 -- publish operation that committed it. digest is the content digest over its metadata and its
 -- machines' configuration digests, never over ciphertext (§6.2). The renderer and contract record
 -- (compilation §10.2): the target contract, the machinery module's version and checksum, and the
--- Kubernetes version; each machine's validation mode is its row's.
-ALTER TABLE operation ADD CONSTRAINT operation_draft_revision UNIQUE (id, kind, draft, draft_revision);
+-- Kubernetes version; each machine's validation mode is its row's. Its publisher is the principal
+-- that requested the publish operation, in the role it requested it in.
+ALTER TABLE operation ADD CONSTRAINT operation_publication
+  UNIQUE (id, kind, draft, draft_revision, created_by, created_role);
 CREATE TABLE release (
   id                 text PRIMARY KEY CHECK (id ~ '^rel_[a-z2-7]{26}$'),
   cluster            text NOT NULL REFERENCES cluster (id),
@@ -49,9 +51,9 @@ CREATE TABLE release (
   UNIQUE (id, draft),
   FOREIGN KEY (draft, cluster) REFERENCES draft (id, cluster),
   -- The publish operation of this draft revision, so a retry finds the release by its operation's
-  -- natural key (§6.2).
-  CONSTRAINT release_operation FOREIGN KEY (operation, operation_kind, draft, draft_revision)
-    REFERENCES operation (id, kind, draft, draft_revision)
+  -- natural key (§6.2), requested by its publisher.
+  CONSTRAINT release_operation FOREIGN KEY (operation, operation_kind, draft, draft_revision, published_by, published_role)
+    REFERENCES operation (id, kind, draft, draft_revision, created_by, created_role)
 );
 CALL make_immutable('release');
 CREATE TRIGGER writer BEFORE INSERT ON release FOR EACH ROW EXECUTE FUNCTION stamp_revision_writer();
@@ -60,7 +62,8 @@ CREATE TRIGGER writer BEFORE INSERT ON release FOR EACH ROW EXECUTE FUNCTION sta
 -- mode it was validated in, its artifact ciphertext and the ciphertext's SHA-256, the SHA-256 of
 -- the plaintext configuration (§1.1), and its review data: the redacted configuration and the
 -- provenance records (compilation §8.2, §8.3), which hold no value. A configuration that could
--- not be redacted is NULL: it shows nothing and says so (§8.3).
+-- not be redacted is NULL: it shows nothing and says so (§8.3). key_version is the Transit key
+-- version the ciphertext names, which its encryption dependency records (compilation §9).
 CREATE TABLE release_machine (
   release              text NOT NULL,
   cluster              text NOT NULL,
@@ -68,12 +71,15 @@ CREATE TABLE release_machine (
   import_base_revision text NOT NULL,
   assignment_revision  text,
   mode                 text NOT NULL CHECK (mode IN ('metal', 'container', 'cloud')),
-  ciphertext           text NOT NULL CHECK (ciphertext ~ '^vault:v[1-9][0-9]*:[A-Za-z0-9+/]+={0,2}$'),
+  ciphertext           text NOT NULL CHECK (ciphertext ~ '^vault:v[1-9][0-9]{0,17}:[A-Za-z0-9+/]+={0,2}$'),
+  key_version          bigint GENERATED ALWAYS AS (substring(ciphertext FROM '^vault:v([0-9]{1,18}):')::bigint) STORED,
   ciphertext_digest    bytea NOT NULL CHECK (length(ciphertext_digest) = 32),
   configuration_digest bytea NOT NULL CHECK (length(configuration_digest) = 32),
   redacted             text CHECK (redacted <> ''),
   provenance           jsonb NOT NULL CHECK (jsonb_typeof(provenance) = 'array'),
   PRIMARY KEY (release, machine),
+  UNIQUE (release, machine, key_version),
+  UNIQUE (release, machine, import_base_revision),
   FOREIGN KEY (release, cluster) REFERENCES release (id, cluster),
   FOREIGN KEY (machine, cluster) REFERENCES machine (id, cluster),
   FOREIGN KEY (import_base_revision, machine) REFERENCES import_base_revision (id, machine),
@@ -82,6 +88,21 @@ CREATE TABLE release_machine (
 CALL make_immutable('release_machine');
 CREATE TRIGGER with_release BEFORE INSERT ON release_machine
   FOR EACH ROW EXECUTE FUNCTION refuse_late_release_row();
+
+-- Each machine's artifact has its encryption dependency (compilation §9), written later in the
+-- release's transaction, so this is checked at commit; the dependency key binds its version.
+CREATE FUNCTION require_encryption_dependency() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM dependency
+                 WHERE release = NEW.release AND machine = NEW.machine AND kind = 'encryption') THEN
+    RAISE EXCEPTION 'release_machine: a machine without its encryption dependency is refused'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'release_machine_encryption', TABLE = 'release_machine';
+  END IF;
+  RETURN NULL;
+END
+$$;
+CREATE CONSTRAINT TRIGGER encryption AFTER INSERT ON release_machine DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION require_encryption_dependency();
 
 -- A release names each head it used once, as its sources (§6.2): the revision (NULL: removed) and
 -- the head revision the release left it at. A head the release introduces is inserted later in the
@@ -114,6 +135,7 @@ CREATE TABLE release_source (
   UNIQUE (release, fragment),
   UNIQUE (release, profile),
   UNIQUE (release, assignment),
+  UNIQUE (release, fragment_revision),
   FOREIGN KEY (release, cluster) REFERENCES release (id, cluster),
   FOREIGN KEY (fragment, cluster, name) REFERENCES fragment (id, cluster, name) DEFERRABLE INITIALLY DEFERRED,
   FOREIGN KEY (profile, cluster, name) REFERENCES profile (id, cluster, name) DEFERRABLE INITIALLY DEFERRED,
@@ -172,7 +194,9 @@ CREATE TABLE dependency_status (
 -- can share one (a mapping key holding a value reads <redacted>), and each is named by its
 -- ordinal among its source revision's occurrences instead. Each record names a provider object
 -- version by the creation time the provider gave it, kept as RFC 3339 text: a KV created_time
--- has nanoseconds, which a timestamp would round.
+-- has nanoseconds, which a timestamp would round. An encryption dependency's version is its
+-- machine's ciphertext key version; a reproduction dependency's source revision is its machine's
+-- import base or a fragment revision among the release's sources.
 CREATE TABLE dependency (
   release         text NOT NULL,
   machine         text NOT NULL,
@@ -187,6 +211,11 @@ CREATE TABLE dependency (
   source_digest   bytea CHECK (length(source_digest) = 32),
   path            text CHECK (path <> '' AND octet_length(path) <= 4096),
   occurrence      integer CHECK (occurrence >= 0),
+  key_version     bigint GENERATED ALWAYS AS (CASE WHEN kind = 'encryption' THEN version END) STORED,
+  source_import_base text GENERATED ALWAYS AS (
+                    CASE WHEN left(source_revision, 4) = 'ibr_' THEN source_revision END) STORED,
+  source_fragment_revision text GENERATED ALWAYS AS (
+                    CASE WHEN left(source_revision, 4) = 'frv_' THEN source_revision END) STORED,
   -- Implications per kind, so a row of an unknown kind is refused by the kind check alone.
   CONSTRAINT dependency_shape CHECK (
     (kind <> 'encryption' OR (provider = 'transit' AND reference IS NULL AND source_revision IS NULL
@@ -196,7 +225,10 @@ CREATE TABLE dependency (
     (kind <> 'reproduction' OR (provider = 'kv' AND reference IS NOT NULL AND source_revision IS NOT NULL
       AND source_digest IS NOT NULL AND path IS NOT NULL AND occurrence IS NOT NULL))),
   FOREIGN KEY (release, machine) REFERENCES release_machine (release, machine),
-  FOREIGN KEY (provider, object, version, created) REFERENCES dependency_status (provider, object, version, created)
+  FOREIGN KEY (provider, object, version, created) REFERENCES dependency_status (provider, object, version, created),
+  FOREIGN KEY (release, machine, key_version) REFERENCES release_machine (release, machine, key_version),
+  FOREIGN KEY (release, machine, source_import_base) REFERENCES release_machine (release, machine, import_base_revision),
+  FOREIGN KEY (release, source_fragment_revision) REFERENCES release_source (release, fragment_revision)
 );
 CREATE UNIQUE INDEX dependency_effective ON dependency (release, machine, reference, object, version)
   WHERE kind = 'effective';

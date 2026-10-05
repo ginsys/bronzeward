@@ -41,7 +41,8 @@ const (
 		SELECT $1, $2, $3, epoch, $4, $5, CASE WHEN $4::text IS NULL THEN NULL ELSE epoch END,
 		CASE WHEN $4::text IS NULL THEN NULL ELSE now() + interval '1 minute' END,
 		$6, $7, $8, $9, CASE WHEN $9::text IS NULL THEN NULL ELSE 'human' END,
-		CASE WHEN $9::text IS NULL THEN NULL ELSE 'author' END, now(), $10::jsonb, $11::jsonb FROM installation_state`
+		CASE WHEN $9::text IS NULL THEN NULL WHEN $2 = 'publish' THEN 'publisher' ELSE 'author' END, now(), $10::jsonb,
+		$11::jsonb FROM installation_state`
 	// The event names its operation's kind (0005), which the key on (operation, kind) checks.
 	insertEvent = `INSERT INTO operation_event (operation, number, epoch, entry, at, kind)
 		SELECT $1, $2, epoch, $3::jsonb, now(), $4 FROM installation_state`
