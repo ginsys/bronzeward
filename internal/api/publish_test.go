@@ -359,10 +359,185 @@ func TestPublishCommitDifferentContent(t *testing.T) {
 	}
 	p.job = p.secondJob()
 	p.unit.renderer.KubernetesVersion = "v1.36.1"
-	if _, ref := p.commit(); ref == nil || ref.status != 409 || ref.code != "conflict" {
-		t.Fatalf("refusal %v; want 409 conflict", ref)
-	}
+	p.refused(409, "conflict")
 	if p.count(`SELECT count(*) FROM release`) != 1 {
 		t.Fatal("a second release was written")
+	}
+}
+
+// refused commits and wants the refusal: nothing of the release committed, and the operation
+// failed with its problem document and terminal event (§6.2, §8.2).
+func (p *publishEnv) refused(status int, code string) *refusal {
+	p.t.Helper()
+	statuses := p.count(`SELECT count(*) FROM dependency_status`)
+	rel, ref := p.commit()
+	if ref == nil || ref.status != status || ref.code != code {
+		p.t.Fatalf("commit %s %v; want %d %s", rel, ref, status, code)
+	}
+	if n := p.count(`SELECT count(*) FROM release WHERE operation = $1`, p.job.op); n != 0 {
+		p.t.Fatalf("%d releases", n)
+	}
+	if n := p.count(`SELECT count(*) FROM dependency_status`); n != statuses {
+		p.t.Fatalf("%d statuses; want %d", n, statuses)
+	}
+	var state, typ, entry string
+	var owner sql.NullString
+	if err := p.db.QueryRow(`SELECT state, error->>'type', owner FROM operation WHERE id = $1`, p.job.op).
+		Scan(&state, &typ, &owner); err != nil {
+		p.t.Fatal(err)
+	}
+	if err := p.db.QueryRow(`SELECT entry::text FROM operation_event WHERE operation = $1 AND number = 1`, p.job.op).
+		Scan(&entry); err != nil {
+		p.t.Fatal(err)
+	}
+	var ev map[string]any
+	if state != "failed" || typ != "urn:bronzeward:problem:"+code || owner.Valid || json.Unmarshal([]byte(entry), &ev) != nil ||
+		len(ev) != 2 || ev["type"] != "failed" || ev["code"] != code {
+		p.t.Fatalf("operation %s %s %v, event %s", state, typ, owner, entry)
+	}
+	return ref
+}
+
+// wantConflicts wants a stale-input refusal naming exactly these inputs, in this order.
+func wantConflicts(t *testing.T, ref *refusal, want ...map[string]any) {
+	t.Helper()
+	got, _ := json.Marshal(ref.extra["conflicts"])
+	exp, _ := json.Marshal(want)
+	if string(got) != string(exp) {
+		t.Fatalf("conflicts %s; want %s", got, exp)
+	}
+}
+
+func TestPublishCommitDraftClosed(t *testing.T) {
+	p := newPublishEnv(t)
+	mustExec(t, p.db, `UPDATE draft SET state = 'discarded' WHERE id = $1`, p.draft)
+	p.refused(409, "conflict")
+}
+
+func TestPublishCommitDraftMoved(t *testing.T) {
+	p := newPublishEnv(t)
+	mustExec(t, p.db, `UPDATE draft SET revision = 2 WHERE id = $1`, p.draft)
+	p.refused(409, "conflict")
+}
+
+// A head the draft changes that moved since the draft's base (§4.2).
+func TestPublishCommitChangedHeadMoved(t *testing.T) {
+	p := newPublishEnv(t)
+	mustExec(t, p.db, `UPDATE fragment SET head_revision = 2 WHERE id = $1`, p.network)
+	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"head": p.network, "expected": 1, "actual": 2})
+}
+
+// A head the release uses unchanged that moved since the snapshot (§4.2, DB row 011).
+func TestPublishCommitUnchangedHeadMoved(t *testing.T) {
+	p := newPublishEnv(t)
+	mustExec(t, p.db, `UPDATE fragment SET head_revision = 2 WHERE id = $1`, p.base)
+	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"head": p.base, "expected": 1, "actual": 2})
+}
+
+// A name the draft introduces that another publication introduced first (§4.2).
+func TestPublishCommitIntroducedNameExists(t *testing.T) {
+	p := newPublishEnv(t)
+	other := p.fragmentHead("storage", "role", p.fragmentRevision(p.cluster, "storage", "role"), 1)
+	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"head": other, "expected": "absent", "actual": 1})
+}
+
+// A covered machine whose import base the draft does not carry and which has no Applied release
+// has none (§3.2).
+func TestPublishCommitNoImportBase(t *testing.T) {
+	p := newPublishEnv(t)
+	mustExec(t, p.db, `DELETE FROM draft_entry WHERE draft = $1`, p.draft)
+	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"machine": p.machine, "expected": p.ibr, "actual": "absent"})
+}
+
+// nextDraft publishes the fixture's draft, records its release Applied, and binds a second draft
+// that changes nothing, compiled on the Applied release's import base.
+func (p *publishEnv) nextDraft() {
+	p.t.Helper()
+	rel, ref := p.commit()
+	if ref != nil {
+		p.t.Fatalf("refused: %v", ref)
+	}
+	mustExec(p.t, p.db, `UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'operation',
+		baseline_revision = 1 WHERE machine = $1`, p.machine, rel, make([]byte, 32))
+	var storageHead, asg string
+	if err := p.db.QueryRow(`SELECT id FROM fragment WHERE cluster = $1 AND name = 'storage'`, p.cluster).Scan(&storageHead); err != nil {
+		p.t.Fatal(err)
+	}
+	if err := p.db.QueryRow(`SELECT id FROM assignment WHERE machine = $1`, p.machine).Scan(&asg); err != nil {
+		p.t.Fatal(err)
+	}
+	d2 := id.New(id.Draft)
+	mustExec(p.t, p.db, `INSERT INTO draft (id, cluster, title, state, revision, etag_token, created_at)
+		VALUES ($1, $2, 'second', 'open', 1, 'm3oxmlfh6phr7aigshdydcb4ji', now())`, d2, p.cluster)
+	op := id.New(id.Operation)
+	mustExec(p.t, p.db, `INSERT INTO operation (id, kind, state, owner, owner_gen, owner_epoch, lease_until, draft, draft_revision,
+			created_by, created_by_kind, created_role, epoch, created_at)
+		VALUES ($1, 'publish', 'running', $2, 1, $3, now() + interval '1 minute', $4, 1, $5, 'human', 'publisher', $3, now())`,
+		op, p.owner.ID, p.owner.Epoch, d2, p.seed)
+	p.job = publishJob{op: op, draft: d2, cluster: p.cluster, draftRev: 1, gen: 1}
+	p.unit.unchanged = []usedHead{{kind: "fragment", head: p.base, revision: p.baseRev, headRevision: 1},
+		{kind: "profile", head: p.prf, revision: p.prv, headRevision: 1},
+		{kind: "fragment", head: p.network, revision: p.networkNew, headRevision: 2},
+		{kind: "fragment", head: storageHead, revision: p.storage, headRevision: 1},
+		{kind: "assignment", head: asg, revision: p.asr, headRevision: 1}}
+}
+
+// A draft without an import base entry compiles on its machine's Applied release's (§3.2).
+func TestPublishCommitAppliedImportBase(t *testing.T) {
+	p := newPublishEnv(t)
+	p.nextDraft()
+	if rel, ref := p.commit(); ref != nil || rel == "" {
+		t.Fatalf("commit %s %v", rel, ref)
+	}
+}
+
+// An adoption that changed the machine's Applied import base after the snapshot (§3.2, §4.2).
+func TestPublishCommitAppliedImportBaseChanged(t *testing.T) {
+	p := newPublishEnv(t)
+	p.nextDraft()
+	other := id.New(id.ImportBase)
+	mustExec(t, p.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
+		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		other, p.machine, make([]byte, 32))
+	p.unit.machines[0].importBase = other
+	p.unit.machines[0].reproduction[0].source = other
+	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"machine": p.machine, "expected": other, "actual": p.ibr})
+}
+
+// In recovery mode, an assignment change on a scope not released is refused, naming the scope
+// (§6.2, §12.2); a released scope publishes.
+func TestPublishCommitRecoveryMode(t *testing.T) {
+	p := newPublishEnv(t)
+	mustExec(t, p.db, `UPDATE installation_state SET recovery_mode = true`)
+	if ref := p.refused(409, "recovery-mode-active"); ref.extra["scope"] != p.machine {
+		t.Fatalf("scope %v", ref.extra["scope"])
+	}
+
+	p = newPublishEnv(t)
+	mustExec(t, p.db, `UPDATE installation_state SET recovery_mode = true`)
+	mustExec(t, p.db, `UPDATE machine SET scope_state = 'released' WHERE id = $1`, p.machine)
+	if _, ref := p.commit(); ref != nil {
+		t.Fatalf("released scope refused: %v", ref)
+	}
+}
+
+// A status of a named version recorded other than retained after publication began classifying
+// it refuses the publication (dependency monitor §5.2); one recorded before it does not.
+func TestPublishCommitStatusRecordedAfter(t *testing.T) {
+	seed := func(p *publishEnv, recorded time.Time) {
+		mustExec(p.t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class, reason,
+			observed_from, recorded_at) VALUES ($1, 'kv', $2, 1, '2026-09-26T09:00:00.123456789Z', 'blocked', 'soft-deleted', $3, $3)`,
+			id.New(id.Dependency), p.kvPath, recorded)
+	}
+	p := newPublishEnv(t)
+	seed(p, began.Add(time.Second))
+	if ref := p.refused(422, "validation-failed"); ref.extra["dependency"] == nil {
+		t.Fatalf("refusal names no dependency: %v", ref.extra)
+	}
+
+	p = newPublishEnv(t)
+	seed(p, began.Add(-time.Second))
+	if _, ref := p.commit(); ref != nil {
+		t.Fatalf("an earlier transition refused: %v", ref)
 	}
 }
