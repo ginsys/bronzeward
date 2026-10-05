@@ -14,6 +14,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/ginsys/bronzeward/internal/ingest"
+	"github.com/ginsys/bronzeward/internal/talos"
 )
 
 // Mode is a node's platform mode, in which its configuration is validated (compilation.md §6
@@ -204,6 +205,15 @@ func (m Materialized) validate(mode Mode) (string, error) {
 		return err.Error(), &Error{Rule: RuleInvalid}
 	}
 	return "", nil
+}
+
+// Digest is execution and recovery's configuration digest over the plaintext (choice §10.2
+// there), which publication records beside the ciphertext (persistence-api.md §1.1 item 2).
+func (m Materialized) Digest() ([32]byte, error) {
+	if m.s == nil {
+		return [32]byte{}, errors.New("compile: no composed configuration to digest")
+	}
+	return talos.ConfigurationDigest([]byte(*m.s)), nil
 }
 
 // bytes is a copy of the composed configuration, for this package only.
