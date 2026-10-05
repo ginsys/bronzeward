@@ -1784,22 +1784,28 @@ The identity is named by `identity` (an `idn` identifier) or by `iss` and
 
 Errors are `application/problem+json` (RFC 9457) **(choice §17.14)**. `type`
 is `urn:bronzeward:problem:<code>`; `detail` names resources and paths, never a
-value; `instance` is the request's identifier, also written to the server log.
+value; `instance` is the request's identifier, also written to the server log,
+or, in a failed operation's `error`, the operation's.
 
 ```json
 {
   "type": "urn:bronzeward:problem:stale-input",
   "title": "An input changed after it was read",
   "status": 409,
-  "detail": "Publication refused: 1 head moved.",
-  "instance": "req_nzeb4lwqu3iaa7pu6p22ninopi",
+  "detail": "Publication refused: 1 input(s) moved.",
+  "instance": "op_zcfwgr7trb76z3zmsndrnk5mcm",
   "conflicts": [
-    {"head": "frg_rgkebwvneg6mxhid62gec5difi",
-     "expected": "3-hnztg6eb5jepsmpyarveova3be",
-     "actual": "4-2sconqraq7nviey6wt7h3th3ry"}
+    {"head": "frg_rgkebwvneg6mxhid62gec5difi", "expected": 3, "actual": 4}
   ]
 }
 ```
+
+A `stale-input` conflict names a head by its identifier, with head revisions
+as integers: the draft's base, or the compilation snapshot's for a head used
+unchanged, and the one T3 read under its lock; `"absent"` for a name the draft
+introduces. It names a machine by its identifier, with import base revision
+identifiers, `"absent"` where there is none. A draft keeps only the base
+counter, not the ETag token, so the token is not named.
 
 | Status | Code | When |
 | --- | --- | --- |
@@ -1809,13 +1815,13 @@ value; `instance` is the request's identifier, also written to the server log.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID or Talos node ID already recorded, naming its machine, or for a Talos cluster ID already recorded, naming its cluster (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2)) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID or Talos node ID already recorded, naming its machine, or for a Talos cluster ID already recorded, naming its cluster (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2); a publish operation whose draft is no longer `open` at the revision it bound, naming the draft, or whose draft revision has a release with other content, naming it (§6.2)) |
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose identity key is not the machine record's or whose Talos cluster ID is not its cluster record's, whose identity read failed, or whose SMBIOS UUID is absent for a machine recorded by one or present for a machine recorded by node ID (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
-| 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13) |
+| 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). Also a publication refused by T3's re-check: a version's status recorded after publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
 | 428 | `precondition-required`, `idempotency-key-required` | `If-Match` or `Idempotency-Key` missing |
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
@@ -2502,6 +2508,7 @@ equals neither the restored epoch nor the lost one.
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
 | Publish | Dependency not `retained`, or provider sealed | `failed`, `503 dependency-unavailable` or `422` | operation, act |
 | Publish | Commit-unknown | resolved by reading the natural key | the release, once |
+| Publish | Deadlock retries exhausted, or `COMMIT` rejected (a deferred constraint) | operation `failed`, `503 transient-conflict` or `500 internal-error` | operation, act |
 | Publish | Worker superseded, or its lease lapsed | its commit refused by the fence; the job claimed again | the other worker's result |
 | Publish | New request for a draft already published | `409 conflict` naming the release | nothing |
 | Plan | Second approval of a plan in one epoch | `409 conflict` | nothing |
