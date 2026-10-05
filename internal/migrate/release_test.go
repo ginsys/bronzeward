@@ -14,9 +14,9 @@ import (
 const (
 	insertStatus = `INSERT INTO dependency_status (id, provider, object, version, class, reason, first_retained_at,
 		unknown_since, observed_from, recorded_at, created) VALUES ($1, $2, $3, $4, $5, $6, now(), $7, now(), now(), $8)`
-	// A KV status with the scheduled deletion time last observed (dependency monitor §3, §5.1).
+	// A status with the scheduled deletion time last observed (dependency monitor §3, §5.1).
 	insertScheduled = `INSERT INTO dependency_status (id, provider, object, version, class, reason, first_retained_at,
-		deletion_observed, observed_from, recorded_at, created) VALUES ($1, 'kv', $2, $3, $4, $5, now(), $6, now(), now(), $7)`
+		deletion_observed, observed_from, recorded_at, created) VALUES ($1, $2, $3, $4, $5, $6, now(), $7, now(), now(), $8)`
 	insertRelease = `INSERT INTO release (id, cluster, draft, draft_revision, digest, contract, machinery_version,
 		machinery_checksum, kubernetes_version, operation, published_by, published_role, epoch, published_at)
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, epoch, now() FROM installation_state`
@@ -223,9 +223,11 @@ func TestReleaseConstraints(t *testing.T) {
 			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", nil, nil, created}, "dependency_status_reason"},
 		// Dependency monitor §3: a future deletion_time is retained, deletion-scheduled, naming the time.
 		{"blocked status with a scheduled deletion", nil, insertScheduled,
-			[]any{id.New(id.Dependency), kv, 2, "blocked", "deletion-scheduled", "2026-10-09T00:00:00Z", created}, "dependency_status_reason"},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "deletion-scheduled", "2026-10-09T00:00:00Z", created}, "dependency_status_reason"},
 		{"scheduled deletion without its time", nil, insertScheduled,
-			[]any{id.New(id.Dependency), kv, 2, "retained", "deletion-scheduled", nil, created}, "dependency_status_schedule"},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "deletion-scheduled", nil, created}, "dependency_status_schedule"},
+		{"Transit status with a scheduled deletion", nil, insertScheduled, []any{id.New(id.Dependency), "transit", "bw-artifact", 2,
+			"retained", "deletion-scheduled", "2026-10-09T00:00:00Z", created}, "dependency_status_schedule"},
 		{"KV status at a key name", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", "bw-artifact", 1, "retained", nil, nil, created}, "dependency_status_object"},
 		{"Transit status at a path", nil, insertStatus,
@@ -268,7 +270,7 @@ func TestReleaseConstraints(t *testing.T) {
 	// Controls: the same shapes commit with valid values, on a second draft revision.
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", "2026-09-26T09:12:40Z", created)
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 3, "blocked", "soft-deleted", nil, created)
-	mustExec(t, db, insertScheduled, id.New(id.Dependency), kv, 4, "retained", "deletion-scheduled", "2026-10-09T00:00:00Z", created)
+	mustExec(t, db, insertScheduled, id.New(id.Dependency), "kv", kv, 4, "retained", "deletion-scheduled", "2026-10-09T00:00:00Z", created)
 	// A version recreated under its object and number is another identity, with its own status.
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, "2026-09-26T09:12:40.1Z")
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "transit", "bw-artifact", 1, "retained", nil, nil, "2026-10-01T00:00:00Z")
@@ -339,7 +341,9 @@ func TestReleaseConstraintControl(t *testing.T) {
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_reason", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "absent", nil, created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_schedule", nil, insertScheduled,
-			[]any{id.New(id.Dependency), kv, 2, "retained", "deletion-scheduled", nil, created}},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "deletion-scheduled", nil, created}},
+		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_schedule", nil, insertScheduled,
+			[]any{id.New(id.Dependency), "transit", "bw-artifact", 2, "retained", "deletion-scheduled", "2026-10-09T00:00:00Z", created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_unknown_since", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", nil, created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_created_check", nil, insertStatus,
