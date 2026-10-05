@@ -676,6 +676,16 @@ func TestPublishCommitRejected(t *testing.T) {
 	}
 }
 
+// A unit that breaks a constraint checked at its statement, here a release machine in a mode other
+// than its machine's platform (§3.3, choice §17.32), rolls back: the operation fails 500
+// internal-error with its terminal event rather than staying running. The other tests, whose unit
+// is in the machine's platform, are its control.
+func TestPublishCommitConstraintViolated(t *testing.T) {
+	p := newPublishEnv(t)
+	p.unit.machines[0].mode = "metal"
+	p.refused(500, "internal-error")
+}
+
 // A recovery entry between the rolled-back commit and the failure transaction supersedes the
 // owner's epoch: the failure is not recorded either (§5.1, an owner's own transition).
 func TestPublishCommitFailureFencedOnEpoch(t *testing.T) {

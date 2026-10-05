@@ -134,6 +134,12 @@ func (a *API) publishCommit(ctx context.Context, j publishJob, u releaseUnit) (s
 		// read (§5 rule 6).
 		a.o.logf("publication %s: %v", j.op, err)
 		ref = refuse(http.StatusInternalServerError, "internal-error", "the publication commit was rejected; nothing was committed")
+	case errors.As(err, &pe) && strings.HasPrefix(pe.Code, "23"):
+		// A statement broke an integrity constraint the unit should have met (a release machine in
+		// another mode than its machine's platform, for one): the transaction rolled back, and a
+		// retry would break it again, so the operation fails rather than staying running.
+		a.o.logf("publication %s: %v", j.op, err)
+		ref = refuse(http.StatusInternalServerError, "internal-error", "the publication broke a database constraint; nothing was committed")
 	}
 	if ref != nil {
 		// The refusal rolled the commit back; a separate transaction records the operation failed
