@@ -38,7 +38,7 @@ func (p *publishEnv) declaredFragment(name, layer, reference, generation string)
 }
 
 // importBase points the draft and the unit at a new import base revision of the same text that
-// declares registry/pass as kind, with encoding (nil for none).
+// declares registry/pass as kind, with encoding (nil for none); the record is compiled as kind.
 func (p *publishEnv) importBase(kind string, encoding any) {
 	p.t.Helper()
 	ibr := id.New(id.ImportBase)
@@ -50,6 +50,7 @@ func (p *publishEnv) importBase(kind string, encoding any) {
 	mustExec(p.t, p.db, `UPDATE draft_entry SET import_base_revision = $2 WHERE draft = $1`, p.draft, ibr)
 	m := &p.unit.machines[0]
 	m.importBase, m.reproduction[0].source, m.provenance[0].Source.Revision = ibr, ibr, ibr
+	m.provenance[0].Kind = kind
 }
 
 // classified adds publication's retained classification of a KV object version to the unit.
@@ -162,6 +163,15 @@ func TestPublishCommitDeclarations(t *testing.T) {
 		}},
 		{"provenance mapping without member", "provenance member does not fit the declared kind", func(p *publishEnv) {
 			p.importBase("mapping", nil)
+		}},
+		// Every scalar kind has no member, so the kind itself is compared.
+		{"provenance scalar kind", "provenance kind differs from the declaration", func(p *publishEnv) {
+			p.unit.machines[0].provenance[0].Kind = "boolean"
+		}},
+		{"provenance mapping member as a scalar kind", "provenance kind differs from the declaration", func(p *publishEnv) {
+			p.importBase("mapping", nil)
+			r := &p.unit.machines[0].provenance[0]
+			r.Member, r.Kind = 0, "string"
 		}},
 		{"provenance override outside", "provenance override is not a fragment of the composition", func(p *publishEnv) {
 			r := &p.unit.machines[0].provenance[0]
@@ -356,7 +366,7 @@ func TestPublishCommitDeclarationsAgree(t *testing.T) {
 			{storage, "fs/key", fsGen, "doc[0]/machine/disks"}, {base, "base/token", baseGen, "doc[0]/cluster/token"}} {
 			m.reproduction = append(m.reproduction, unitDependency{reference: s.reference, object: s.object, version: 1,
 				created: kvCreated, source: s.source, digest: sha256.Sum256([]byte("machine: {}")), path: s.path})
-			m.provenance = append(m.provenance, compile.Record{Reference: s.reference, Version: 1, Member: -1,
+			m.provenance = append(m.provenance, compile.Record{Reference: s.reference, Version: 1, Kind: "string", Member: -1,
 				Source:     compile.Origin{Fragment: i, Revision: s.source, Digest: textDigest("machine: {}")},
 				SourcePath: s.path, Output: s.path})
 			p.classified(s.object, 1)

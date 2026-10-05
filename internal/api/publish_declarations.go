@@ -65,34 +65,38 @@ func checkDeclarations(ctx context.Context, tx *sql.Tx, rel string, u releaseUni
 		return "", err
 	}
 
+	// Each stored text is read once, its declarations without it.
 	sources := map[string]*declaredSource{}
-	if err := eachQueried(ctx, tx, `SELECT r.id, r.document, d.name, d.kind, d.version, coalesce(d.encoding, ''), d.generation
-			FROM import_base_revision r LEFT JOIN import_base_reference d ON d.revision = r.id WHERE r.id = ANY ($1)
-		UNION ALL SELECT r.id, r.document, d.name, d.kind, d.version, coalesce(d.encoding, ''), d.generation
-			FROM fragment_revision r LEFT JOIN fragment_reference d ON d.revision = r.id WHERE r.id = ANY ($1)
-		ORDER BY 1, 3`, revisions, func(row *sql.Rows) error {
+	if err := eachQueried(ctx, tx, `SELECT id, document FROM import_base_revision WHERE id = ANY ($1)
+		UNION ALL SELECT id, document FROM fragment_revision WHERE id = ANY ($1)`, revisions, func(row *sql.Rows) error {
 		var revision, document string
-		var name, kind, encoding, generation sql.NullString
-		var version sql.NullInt64
-		if err := row.Scan(&revision, &document, &name, &kind, &version, &encoding, &generation); err != nil {
+		if err := row.Scan(&revision, &document); err != nil {
 			return err
 		}
-		s := sources[revision]
-		if s == nil {
-			s = &declaredSource{digest: sha256.Sum256([]byte(document)), declarations: map[string]declaration{}}
-			sources[revision] = s
-		}
-		if name.Valid {
-			s.declarations[name.String] = declaration{kind: kind.String, encoding: encoding.String, generation: generation.String,
-				version: version.Int64}
-			s.names = append(s.names, name.String)
-		}
+		sources[revision] = &declaredSource{digest: sha256.Sum256([]byte(document)), declarations: map[string]declaration{}}
 		return nil
 	}); err != nil {
 		return "", err
 	}
 	if len(sources) != len(revisions) {
 		return "", fmt.Errorf("release %s: %d of %d composed source revisions read", rel, len(sources), len(revisions))
+	}
+	if err := eachQueried(ctx, tx, `SELECT revision, name, kind, version, coalesce(encoding, ''), generation
+			FROM import_base_reference WHERE revision = ANY ($1)
+		UNION ALL SELECT revision, name, kind, version, coalesce(encoding, ''), generation
+			FROM fragment_reference WHERE revision = ANY ($1)
+		ORDER BY 1, 2`, revisions, func(row *sql.Rows) error {
+		var revision, name string
+		var d declaration
+		if err := row.Scan(&revision, &name, &d.kind, &d.version, &d.encoding, &d.generation); err != nil {
+			return err
+		}
+		s := sources[revision]
+		s.declarations[name] = d
+		s.names = append(s.names, name)
+		return nil
+	}); err != nil {
+		return "", err
 	}
 
 	for _, m := range u.machines {
@@ -117,7 +121,9 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 	at := func(clause, source, reference string) string {
 		return fmt.Sprintf("%s (source %s, reference %s)", clause, source, reference)
 	}
-	reproduced := map[occurrence]bool{}
+	// A declaration is used where a reproduction dependency and a provenance record name it.
+	type use struct{ source, reference string }
+	reproduced, reproducedUses := map[occurrence]bool{}, map[use]bool{}
 	occurrences := map[string][]int{}
 	var order []string
 	for _, d := range m.reproduction {
@@ -137,6 +143,7 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 			return at("reproduction source digest differs", d.source, d.reference)
 		}
 		reproduced[occurrence{d.source, d.reference, d.path, d.occurrence}] = true
+		reproducedUses[use{d.source, d.reference}] = true
 		if occurrences[d.source] == nil {
 			order = append(order, d.source)
 		}
@@ -152,7 +159,7 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 		}
 	}
 
-	recorded := map[occurrence]bool{}
+	recorded, recordedUses := map[occurrence]bool{}, map[use]bool{}
 	// An occurrence's member has one outcome: one override, or output records. Output records are
 	// not counted: two alias outputs can read the same once redacted (compilation §8.3).
 	type outcome struct {
@@ -177,6 +184,8 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 			return at("provenance encoding differs from the declaration", r.Source.Revision, r.Reference)
 		case decl.kind == "mapping" && r.Member < 0, decl.kind != "mapping" && r.Member != -1:
 			return at("provenance member does not fit the declared kind", r.Source.Revision, r.Reference)
+		case r.Kind != decl.kind:
+			return at("provenance kind differs from the declaration", r.Source.Revision, r.Reference)
 		// The review read refuses a stored record otherwise (projectProvenance).
 		case (r.Output == "") == (r.OverriddenBy == nil):
 			return at("provenance record without exactly one outcome", r.Source.Revision, r.Reference)
@@ -202,6 +211,7 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 			output[k] = true
 		}
 		recorded[o] = true
+		recordedUses[use{r.Source.Revision, r.Reference}] = true
 	}
 
 	// Every declaration is used (compilation §5.2, stage 1), so each has an occurrence in both.
@@ -212,10 +222,10 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 	slices.Sort(composed)
 	for _, source := range composed {
 		for _, name := range sources[source].names {
-			if !hasOccurrence(reproduced, source, name) {
+			if !reproducedUses[use{source, name}] {
 				return at("declaration without a reproduction dependency", source, name)
 			}
-			if !hasOccurrence(recorded, source, name) {
+			if !recordedUses[use{source, name}] {
 				return at("declaration without a provenance record", source, name)
 			}
 		}
@@ -231,13 +241,4 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 		}
 	}
 	return ""
-}
-
-func hasOccurrence(set map[occurrence]bool, source, reference string) bool {
-	for o := range set {
-		if o.source == source && o.reference == reference {
-			return true
-		}
-	}
-	return false
 }
