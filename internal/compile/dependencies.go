@@ -62,8 +62,9 @@ const (
 
 // DependencyError refuses publication for one dependency: a pinned secret version (Reference set)
 // or the artifact key (Reference empty), by its provider object and version. Class and Reason are
-// the classification's when it was not retained; Class is empty for a changed identity, Reason
-// then one of the Reason constants. It names references, paths and key names only, never a value.
+// the classification's when it was not retained; Class is empty for a changed identity, and
+// unknown for a first read with no readable Date, Reason then one of the Reason constants. It
+// names references, paths and key names only, never a value.
 type DependencyError struct {
 	Reference string
 	Object    string
@@ -148,7 +149,8 @@ func EncryptArtifacts(ctx context.Context, m MetadataReader, e ArtifactEncrypter
 	}
 	date, readable := classify.ParseDate(first.Date)
 	if !readable {
-		return nil, &DependencyError{Object: key, Reason: ReasonNoDate}
+		// No time to bracket the creation times with: the answer leaves the key undecided.
+		return nil, &DependencyError{Object: key, Class: classify.Unknown, Reason: ReasonNoDate}
 	}
 	out := make([]Encrypted, len(artifacts))
 	used := make([]int64, len(artifacts))

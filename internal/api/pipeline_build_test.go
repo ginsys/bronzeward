@@ -37,11 +37,14 @@ func buildFragment(extra string) string {
 
 // heldValues is a stand-in provider holding the values ingestion extracted, by generation path:
 // the metadata identity answers each generation retained, created at kvCreated, and the artifact
-// key with one version created at transitCreated; the compiler identity reads the held value and
-// encrypts an artifact under keyVersion (1 when unset) to a digest of it, never to the plaintext.
+// key with one version created at transitCreated (with no Date when noDate); the compiler
+// identity reads the held value (or fails with readErr) and encrypts an artifact under keyVersion
+// (1 when unset) to a digest of it, never to the plaintext.
 type heldValues struct {
 	values     map[string]provider.Value
 	keyVersion int
+	readErr    error
+	noDate     bool
 }
 
 func (h heldValues) KV(_ context.Context, p provider.GenerationPath) (classify.Answer, error) {
@@ -51,15 +54,22 @@ func (h heldValues) KV(_ context.Context, p provider.GenerationPath) (classify.A
 	return kvAnswer(nil, kvCreated), nil
 }
 
-func (heldValues) Transit(context.Context, string) (classify.Answer, error) {
+func (h heldValues) Transit(context.Context, string) (classify.Answer, error) {
 	b, _ := json.Marshal(map[string]any{"data": map[string]any{
 		"keys": map[string]int64{"1": transitCreated.Unix()}, "latest_version": 1, "min_available_version": 0,
 		"min_decryption_version": 1, "soft_deleted": false,
 	}})
-	return classify.Answer{Status: http.StatusOK, Date: pinDate.Format(http.TimeFormat), Body: classify.NewBody(b)}, nil
+	a := classify.Answer{Status: http.StatusOK, Date: pinDate.Format(http.TimeFormat), Body: classify.NewBody(b)}
+	if h.noDate {
+		a.Date = ""
+	}
+	return a, nil
 }
 
 func (h heldValues) ReadGeneration(_ context.Context, p provider.GenerationPath, _ int64) (provider.Value, time.Time, error) {
+	if h.readErr != nil {
+		return provider.Value{}, time.Time{}, h.readErr
+	}
 	v, ok := h.values[p.String()]
 	if !ok {
 		return provider.Value{}, time.Time{}, errors.New("stand-in: no such generation")
@@ -75,8 +85,8 @@ func (h heldValues) EncryptArtifact(_ context.Context, plaintext []byte) (provid
 }
 
 // buildEnv is a publishEnv whose import base is a generated Talos configuration and whose
-// changed network fragment overrides its machine token, both ingested as bronzeward ingests
-// them, with the extracted values held by a stand-in provider.
+// changed network fragment adds a secret the base lacks and copies it by alias, both ingested as
+// bronzeward ingests them, with the extracted values held by a stand-in provider.
 type buildEnv struct {
 	*publishEnv
 	held    heldValues
@@ -313,6 +323,10 @@ func TestBuildReleaseRefuses(t *testing.T) {
 		{"invalid configuration", func(b *buildEnv) {
 			b.fragment("network", "site", buildFragment("machine:\n  type: bogus\n"))
 		}, "invalid", true},
+		// The machinery's own message quotes the held value; only §8.3's redaction keeps it out.
+		{"invalid configuration quoting a value", func(b *buildEnv) {
+			b.fragment("network", "site", buildFragment("machine:\n  type: *secret\n"))
+		}, "", true},
 		{"Kubernetes outside the window", func(b *buildEnv) {
 			b.fragment("network", "site", "machine:\n  kubelet:\n    image: ghcr.io/siderolabs/kubelet:v1.20.0\n")
 		}, "kubernetes", true},
@@ -388,4 +402,34 @@ func TestBuildReleaseEncryptionRefused(t *testing.T) {
 		t.Fatalf("refusal %q names %v", ref.detail, ref.extra["dependency"])
 	}
 	b.noSecretIn(fmt.Sprint(ref.extra) + ref.detail)
+}
+
+// Ruling R33's 503: a value read refused or not understood after its classification found it
+// retained, and an artifact key's first read with no readable Date, leave the dependency unknown;
+// the refusal names it, logs the provider's error and holds no value.
+func TestBuildReleaseDependencyUnknown(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		prepare  func(h *heldValues)
+		provider string
+	}{
+		{"value read absent", func(h *heldValues) { h.readErr = fmt.Errorf("provider: GET: %w", provider.ErrAbsent) }, "kv"},
+		{"value read denied", func(h *heldValues) { h.readErr = fmt.Errorf("provider: GET: %w", provider.ErrDenied) }, "kv"},
+		{"value read not understood", func(h *heldValues) { h.readErr = fmt.Errorf("provider: GET: %w", provider.ErrProtocol) }, "kv"},
+		{"artifact key read without a Date", func(h *heldValues) { h.noDate = true }, "transit"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b := newBuildEnv(t)
+			c.prepare(&b.held)
+			_, ref := b.build()
+			if ref == nil || ref.status != http.StatusServiceUnavailable || ref.code != "dependency-unavailable" {
+				t.Fatalf("buildRelease: %v; want 503 dependency-unavailable", ref)
+			}
+			d, _ := ref.extra["dependency"].(map[string]any)
+			if d == nil || d["provider"] != c.provider || d["class"] != string(classify.Unknown) || (c.provider == "kv") != (d["reference"] != nil) {
+				t.Fatalf("refusal names %v", ref.extra["dependency"])
+			}
+			b.noSecretIn(fmt.Sprint(ref.extra) + ref.detail)
+		})
+	}
 }
