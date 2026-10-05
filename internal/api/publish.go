@@ -102,7 +102,7 @@ var headKinds = map[string]headKind{
 // the head revision the author edited from, 0 when the draft introduces the name.
 type sourceHead struct {
 	kind, key, head, revision string
-	base                      int
+	base, actual              int // actual: the head revision read under its lock
 	changed                   bool
 }
 
@@ -122,6 +122,14 @@ func (a *API) publishCommit(ctx context.Context, j publishJob, u releaseUnit) (s
 		return err
 	})
 	if errors.Is(err, errRefused) {
+		// The refusal rolled the commit back; a separate transaction records the operation failed
+		// with its problem and terminal event (§6.2), fenced on this owner.
+		if err := a.inTx(ctx, func(tx *sql.Tx) error {
+			return a.finishPublish(ctx, tx, j, "failed", nil, problemDoc(j.op, ref),
+				map[string]any{"type": "failed", "code": ref.code})
+		}); err != nil {
+			return "", nil, err
+		}
 		return "", ref, nil
 	}
 	if err != nil {
@@ -142,7 +150,9 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	}
 
 	var epoch string
-	if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&epoch); err != nil {
+	var recovery bool
+	if err := tx.QueryRowContext(ctx, `SELECT epoch, recovery_mode FROM installation_state FOR SHARE`).
+		Scan(&epoch, &recovery); err != nil {
 		return "", nil, err
 	}
 	if epoch != a.d.owner.Epoch {
@@ -153,12 +163,41 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		covered[i] = m.machine
 	}
 	slices.Sort(covered)
-	if _, err := tx.ExecContext(ctx, `SELECT id FROM machine WHERE id = ANY ($1) ORDER BY id FOR SHARE`, covered); err != nil {
+	scopes := map[string]string{}
+	err = eachRow(ctx, tx, `SELECT id, scope_state FROM machine WHERE id = ANY ($1) ORDER BY id FOR SHARE`, covered,
+		func(row *sql.Rows) error {
+			var m, s string
+			err := row.Scan(&m, &s)
+			scopes[m] = s
+			return err
+		})
+	if err != nil {
 		return "", nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `SELECT machine FROM machine_state WHERE machine = ANY ($1) ORDER BY machine FOR UPDATE`,
-		covered); err != nil {
+	// Each covered machine's import base: the draft's entry, or its Applied release's (§3.2), read
+	// under the MachineState lock.
+	bases := map[string]string{}
+	rows, err := tx.QueryContext(ctx, `SELECT s.machine, coalesce(e.import_base_revision, m.import_base_revision, '')
+		FROM machine_state s
+		LEFT JOIN draft_entry e ON e.draft = $2 AND e.machine = s.machine
+		LEFT JOIN release_machine m ON m.release = s.applied_release AND m.machine = s.machine
+		WHERE s.machine = ANY ($1) ORDER BY s.machine FOR UPDATE OF s`, covered, j.draft)
+	if err != nil {
 		return "", nil, err
+	}
+	for rows.Next() {
+		var m, b string
+		if err := rows.Scan(&m, &b); err != nil {
+			_ = rows.Close()
+			return "", nil, err
+		}
+		bases[m] = b
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil, err
+	}
+	if len(scopes) != len(covered) || len(bases) != len(covered) {
+		return "", nil, errors.New("a covered machine has no record or no state")
 	}
 	// One pass over every existing head in id order, changed ones FOR UPDATE (§6.2).
 	locked := slices.Clone(heads)
@@ -168,23 +207,29 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		if h.head == "" {
 			continue
 		}
-		k := headKinds[h.kind]
+		k, ok := headKinds[h.kind]
+		if !ok {
+			return "", nil, fmt.Errorf("head %s of an unknown kind", h.head)
+		}
 		mode := "SHARE"
 		if h.changed {
 			mode = "UPDATE"
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT `+k.key+` FROM `+k.table+` WHERE id = $1 FOR `+mode, h.head).
-			Scan(&h.key); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT `+k.key+`, head_revision FROM `+k.table+` WHERE id = $1 FOR `+mode, h.head).
+			Scan(&h.key, &h.actual); err != nil {
 			return "", nil, err
 		}
 	}
-	keys := map[string]string{}
+	read := map[string]sourceHead{}
 	for _, h := range locked {
-		keys[h.head] = h.key
+		if _, twice := read[h.head]; twice && h.head != "" {
+			return "", nil, fmt.Errorf("head %s used twice", h.head)
+		}
+		read[h.head] = h
 	}
 	for i := range heads {
 		if heads[i].head != "" {
-			heads[i].key = keys[heads[i].head]
+			heads[i].key, heads[i].actual = read[heads[i].head].key, read[heads[i].head].actual
 		}
 	}
 	var draftState string
@@ -238,9 +283,15 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	if !mine {
 		return "", nil, staging.ErrFenced
 	}
+	if ref, err := checkInputs(j, u, draftState, draftRev, heads, locked, bases, scopes, recovery); ref != nil || err != nil {
+		return "", ref, err
+	}
 
 	if err := seedStatuses(ctx, tx, u.statuses); err != nil {
 		return "", nil, err
+	}
+	if ref, err := recheckStatuses(ctx, tx, u); ref != nil || err != nil {
+		return "", ref, err
 	}
 
 	rel := id.New(id.Release)
@@ -303,6 +354,123 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		return "", nil, err
 	}
 	return rel, nil, nil
+}
+
+// checkInputs compares what the commit read under its locks with what the draft and the
+// compilation bound (§6.2): the draft open at the bound revision; stale input in its three forms
+// (§4.2), heads in id order, then machines; and, for an assignment change in recovery mode, the
+// machine's scope released (§12.2). A changed assignment of a machine the release does not cover
+// is the unit's defect, and an error (ruling R13).
+func checkInputs(j publishJob, u releaseUnit, draftState string, draftRev int, heads, locked []sourceHead,
+	bases, scopes map[string]string, recovery bool) (*refusal, error) {
+	switch {
+	case draftState != "open":
+		return refuse(http.StatusConflict, "conflict", "the draft is no longer open").with("draft", j.draft), nil
+	case draftRev != j.draftRev:
+		return refuse(http.StatusConflict, "conflict", "the draft moved after the publication bound it").with("draft", j.draft), nil
+	}
+	conflicts := []map[string]any{}
+	for _, h := range locked {
+		switch {
+		case h.head == "":
+		case h.changed && h.base == 0:
+			conflicts = append(conflicts, map[string]any{"head": h.head, "expected": "absent", "actual": h.actual})
+		case h.actual != h.base:
+			conflicts = append(conflicts, map[string]any{"head": h.head, "expected": h.base, "actual": h.actual})
+		}
+	}
+	machines := slices.Clone(u.machines)
+	slices.SortFunc(machines, func(x, y unitMachine) int { return strings.Compare(x.machine, y.machine) })
+	for _, m := range machines {
+		if b := bases[m.machine]; b != m.importBase {
+			actual := any(b)
+			if b == "" {
+				actual = "absent"
+			}
+			conflicts = append(conflicts, map[string]any{"machine": m.machine, "expected": m.importBase, "actual": actual})
+		}
+	}
+	if len(conflicts) > 0 {
+		return refuse(http.StatusConflict, "stale-input", fmt.Sprintf("Publication refused: %d input(s) moved.", len(conflicts))).
+			with("conflicts", conflicts), nil
+	}
+	for _, h := range heads {
+		if !h.changed || h.kind != "assignment" {
+			continue
+		}
+		scope, covered := scopes[h.key]
+		switch {
+		case !covered:
+			return nil, fmt.Errorf("the draft changes the assignment of machine %s, which the release does not cover", h.key)
+		case recovery && scope != "released":
+			return refuse(http.StatusConflict, "recovery-mode-active",
+				"recovery mode refuses an assignment change on a scope not released in the current epoch").with("scope", h.key), nil
+		}
+	}
+	return nil, nil
+}
+
+// recheckStatuses locks every named version's status FOR SHARE in dep order, rows a concurrent
+// publication inserted included, and refuses one recorded other than retained after publication
+// began classifying that version (dependency monitor §5.2).
+func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, error) {
+	type key struct {
+		provider, object string
+		version          int64
+		created          string
+	}
+	began := map[key]time.Time{}
+	for _, s := range u.statuses {
+		began[key{string(s.provider), s.object, s.version, createdText(s.result.Created)}] = s.began
+	}
+	var providers, objects, created []string
+	var versions []int64
+	named := map[key]bool{}
+	name := func(provider string, d unitDependency) error {
+		k := key{provider, d.object, d.version, createdText(d.created)}
+		if _, ok := began[k]; !ok {
+			return fmt.Errorf("the %s dependency %s version %d has no classification", provider, d.object, d.version)
+		}
+		if !named[k] {
+			named[k] = true
+			providers, objects, versions, created = append(providers, k.provider), append(objects, k.object),
+				append(versions, k.version), append(created, k.created)
+		}
+		return nil
+	}
+	for _, m := range u.machines {
+		for _, d := range slices.Concat(m.effective, m.reproduction) {
+			if err := name("kv", d); err != nil {
+				return nil, err
+			}
+		}
+		if err := name("transit", m.encryption); err != nil {
+			return nil, err
+		}
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT provider, object, version, created, class, recorded_at FROM dependency_status
+		WHERE (provider, object, version, created) IN (SELECT * FROM unnest($1::text[], $2::text[], $3::bigint[], $4::text[]))
+		ORDER BY id FOR SHARE`, providers, objects, versions, created)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ref *refusal
+	for rows.Next() {
+		var k key
+		var class string
+		var recorded time.Time
+		if err := rows.Scan(&k.provider, &k.object, &k.version, &k.created, &class, &recorded); err != nil {
+			return nil, err
+		}
+		if ref == nil && class != string(classify.Retained) && recorded.After(began[k]) {
+			ref = refuse(http.StatusUnprocessableEntity, "validation-failed",
+				fmt.Sprintf("Publication refused: the %s dependency %s version %d was recorded %s after publication classified it.",
+					k.provider, k.object, k.version, class)).
+				with("dependency", map[string]any{"provider": k.provider, "object": k.object, "version": k.version})
+		}
+	}
+	return ref, rows.Err()
 }
 
 // draftHeads reads the draft's source entries with the head each names, if one exists yet.

@@ -16,6 +16,8 @@ var titles = map[string]string{
 	"identity-revoked":          "The identity is revoked",
 	"not-found":                 "No such resource or route",
 	"conflict":                  "The resource refuses the act in its current state",
+	"stale-input":               "An input changed after it was read",
+	"recovery-mode-active":      "Recovery mode refuses the act on this scope",
 	"ingestion-abandoned":       staging.AbandonedTitle,
 	"idempotency-key-reused":    "The idempotency key was used for another request",
 	"idempotency-key-required":  "An Idempotency-Key header is required",
