@@ -930,7 +930,7 @@ that does not record them, or holds a replaced module, cannot publish (a server
 fault, `500`); the Kubernetes version is the kubelet image tag of every covered
 machine's validated configuration, which must agree across them and lie in the
 machinery's `SupportedWith` window. A refused contract or Kubernetes version is
-`422 validation-failed`, naming the rule and the image's path, never the image
+`422 validation-failed`, naming the rule and the check, never the image or a path
 (compilation choices §16.32 to §16.34).
 
 ### 6.3 Partial publication

@@ -79,31 +79,26 @@ func CheckContract(machinery, contract string) error {
 // §10.2): the tag of its kubelet image, the machinery's default when none is set. It is refused
 // unless it is a release in the SupportedWith window of machinery's Talos minor, which validation
 // does not check, and unless the image is the one the redacted configuration shows: an image a
-// reference placed, or a copy of a value, is not recorded. The refusal names the check, never the
-// image.
+// reference placed, or a copy of a value, is not recorded. The refusal names the check in fixed
+// text, never the image, and carries no path: a path is text a value could equal (§8.3), and
+// the configuration has one kubelet image.
 func (c Compiled) KubernetesVersion(machinery string) (string, error) {
-	refuse := func(path, msg string) error {
-		e := &Error{Rule: RuleKubernetes, Message: msg}
-		if path != "" {
-			e.Paths = []string{path}
-		}
-		return e
-	}
+	refuse := func(msg string) error { return &Error{Rule: RuleKubernetes, Message: msg} }
 	if c.m.s == nil {
-		return "", refuse("", "no compiled configuration")
+		return "", refuse("no compiled configuration")
 	}
 	cfg, err := configloader.NewFromBytes(c.m.bytes())
 	if err != nil || cfg.Machine() == nil {
-		return "", refuse("", "the configuration has no machine document")
+		return "", refuse("the configuration has no machine document")
 	}
 	composed := cfg.Machine().Kubelet().Image()
 	redacted, err := c.Redacted()
 	if err != nil {
-		return "", refuse("", "the kubelet image cannot be shown")
+		return "", refuse("the kubelet image cannot be shown")
 	}
-	image, path, err := shownImage(redacted)
+	image, err := shownImage(redacted)
 	if err != nil {
-		return "", refuse(path, "the kubelet image cannot be shown")
+		return "", refuse("the kubelet image cannot be shown")
 	}
 	if image == "" {
 		image = fmt.Sprintf("%s:v%s", constants.KubeletImage, constants.DefaultKubernetesVersion)
@@ -111,29 +106,29 @@ func (c Compiled) KubernetesVersion(machinery string) (string, error) {
 	// Compile already refuses a copy of a value in an unattributed leaf, so the shown image differs
 	// from the composed one only if redaction changed it some other way: fail closed.
 	if image != composed {
-		return "", refuse(path, "the kubelet image holds a value")
+		return "", refuse("the kubelet image holds a value")
 	}
 	// The tag as the machinery reads it (v1alpha1.KubernetesVersionFromImageRef): after the last
 	// ":v", up to a digest.
 	i := strings.LastIndex(image, ":v")
 	if i < 0 {
-		return "", refuse(path, "the kubelet image names no Kubernetes version")
+		return "", refuse("the kubelet image names no Kubernetes version")
 	}
 	tag, _, _ := strings.Cut(image[i+1:], "@")
 	k := releaseTag.FindStringSubmatch(tag)
 	if k == nil {
-		return "", refuse(path, "the kubelet image names no Kubernetes version")
+		return "", refuse("the kubelet image names no Kubernetes version")
 	}
 	m := moduleVersion.FindStringSubmatch(machinery)
 	if m == nil {
-		return "", refuse(path, "the renderer's version is not known")
+		return "", refuse("the renderer's version is not known")
 	}
 	w, ok := kubernetesWindows[[2]uint64{number(m[1]), number(m[2])}]
 	if !ok {
-		return "", refuse(path, "the renderer's version is not known")
+		return "", refuse("the renderer's version is not known")
 	}
 	if v := [3]uint64{number(k[1]), number(k[2]), number(k[3])}; less(v, w[0]) || !less(v, w[1]) {
-		return "", refuse(path, "the Kubernetes version is outside the renderer's supported window")
+		return "", refuse("the Kubernetes version is outside the renderer's supported window")
 	}
 	return tag, nil
 }
@@ -165,35 +160,35 @@ func less(a, b [3]uint64) bool {
 	return false
 }
 
-// shownImage is the kubelet image the redacted configuration sets, "" when it sets none, and its
-// path. A key on its way that redaction replaced hides whether an image is set, so it refuses.
-func shownImage(redacted string) (string, string, error) {
+// shownImage is the kubelet image the redacted configuration sets, "" when it sets none. A key on
+// its way that redaction replaced hides whether an image is set, so it refuses, as does a second
+// image.
+func shownImage(redacted string) (string, error) {
 	errHidden := errors.New("compile: the kubelet image is hidden")
 	dec := yaml.NewDecoder(bytes.NewReader([]byte(redacted)))
-	image, at := "", ""
-	for doc := 0; ; doc++ {
+	image, found := "", false
+	for {
 		var n yaml.Node
 		err := dec.Decode(&n)
 		if errors.Is(err, io.EOF) {
-			return image, at, nil
+			return image, nil
 		}
 		if err != nil {
-			return "", "", errHidden
+			return "", errHidden
 		}
 		if len(n.Content) == 0 {
 			continue
 		}
-		path := fmt.Sprintf("doc[%d]/machine/kubelet/image", doc)
 		node := n.Content[0]
 		for _, key := range []string{"machine", "kubelet", "image"} {
 			if node.Kind != yaml.MappingNode {
-				return "", path, errHidden
+				return "", errHidden
 			}
 			var next *yaml.Node
 			for i := 0; i+1 < len(node.Content); i += 2 {
 				k := node.Content[i]
 				if strings.Contains(k.Value, "<redacted") {
-					return "", path, errHidden
+					return "", errHidden
 				}
 				if k.Value == key {
 					next = node.Content[i+1]
@@ -204,10 +199,10 @@ func shownImage(redacted string) (string, string, error) {
 			}
 			node = next
 			if key == "image" {
-				if node.Kind != yaml.ScalarNode || at != "" {
-					return "", path, errHidden
+				if node.Kind != yaml.ScalarNode || found {
+					return "", errHidden
 				}
-				image, at = node.Value, path
+				image, found = node.Value, true
 			}
 		}
 	}

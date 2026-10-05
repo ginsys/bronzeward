@@ -174,6 +174,11 @@ func TestKubernetesVersionRefuses(t *testing.T) {
 			if strings.Contains(err.Error(), "kubelet:") || strings.Contains(err.Error(), "1.3") {
 				t.Errorf("the refusal quotes the image: %v", err)
 			}
+			// A path is text a value could equal (§8.3); the refusal names the field in its fixed
+			// message instead.
+			if len(e.Paths) != 0 || e.Input != "" {
+				t.Errorf("the refusal carries input-shaped text: %+v", e)
+			}
 		})
 	}
 	if _, err := (Compiled{}).KubernetesVersion("v1.13.6"); err == nil {
