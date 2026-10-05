@@ -45,7 +45,8 @@ type tracer struct {
 	ref      string
 	version  int64
 	encoding string
-	member   int // the member's position in key order, or -1 for a scalar reference
+	declared provider.Kind // the reference's declared kind
+	member   int           // the member's position in key order, or -1 for a scalar reference
 	kind     TraceKind
 	// at and text are behind a second pointer: fmt prints a struct holding a Tracer in an
 	// unexported field by reflection, and under a verb a pointer does not take (%s, %q) it prints
@@ -78,6 +79,9 @@ func (t Tracer) Version() int64 { return t.get().version }
 
 // Encoding is the declared placement encoding, if any.
 func (t Tracer) Encoding() string { return t.get().encoding }
+
+// Declared is the reference's declared kind.
+func (t Tracer) Declared() provider.Kind { return t.get().declared }
 
 // Leaf is the key of the mapping member the tracer stands for, "" for a scalar reference. The key
 // is a value the provider holds (compilation.md §4.2).
@@ -308,7 +312,8 @@ func Trace(s Sanitized, values map[string]provider.Value, first, flip int) (Reso
 			if next > maxTracerID {
 				return nil, refuse(RuleTraceIndistinct, p.String())
 			}
-			t := &tracer{id: next, ref: name, version: ref.Version, encoding: ref.Encoding, member: -1, at: &occurrence{keys[i], p}}
+			t := &tracer{id: next, ref: name, version: ref.Version, encoding: ref.Encoding, declared: ref.Kind, member: -1,
+				at: &occurrence{keys[i], p}}
 			if n.Kind == yaml.MappingNode {
 				t.member = i
 			}

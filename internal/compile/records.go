@@ -25,6 +25,7 @@ type Origin struct {
 type Record struct {
 	Reference    string
 	Version      int64
+	Kind         string // the declared kind it was compiled as: string, integer, boolean or mapping
 	Encoding     string // the declared encoding modifier, if any
 	Member       int    // the mapping member's position in key order, or -1 for a scalar reference
 	Source       Origin
@@ -66,7 +67,7 @@ func (c Compiled) Provenance() []Record {
 	ordinals := c.ordinals()
 	for i, o := range c.outcomes {
 		t := o.tracer
-		r := Record{Reference: t.Ref(), Version: t.Version(), Encoding: t.Encoding(), Member: t.Member(),
+		r := Record{Reference: t.Ref(), Version: t.Version(), Kind: string(t.Declared()), Encoding: t.Encoding(), Member: t.Member(),
 			Source: c.origins[o.source], SourcePath: o.shownAt, Occurrence: ordinals[i]}
 		if o.by >= 0 {
 			by := c.origins[o.by+1]

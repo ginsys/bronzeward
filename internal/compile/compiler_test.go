@@ -122,6 +122,15 @@ func TestCompileAttributesEachKind(t *testing.T) {
 			t.Errorf("the aliased occurrence has %d paths, want one tracer at both", len(o.shown))
 		}
 	}
+	// Each record names the kind its reference was declared and compiled as (publication holds it
+	// to the stored declaration).
+	kinds := map[string]string{"app/str": "string", "app/enc": "string", "app/map": "mapping", "app/bool": "boolean",
+		"app/int": "integer", "app/json": "string", "app/yaml": "string"}
+	for _, r := range c.Provenance() {
+		if want, ok := kinds[r.Reference]; ok && r.Kind != want {
+			t.Errorf("%s recorded as kind %q, want %q", r.Reference, r.Kind, kinds[r.Reference])
+		}
+	}
 }
 
 // Embedded documents of two formats that trace to the same text are not told apart by text: a

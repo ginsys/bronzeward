@@ -49,13 +49,13 @@ func TestProvenanceRecords(t *testing.T) {
 	fo := origin(frag, 0)
 	labels, annotations := "doc[0]/machine/nodeLabels/", "doc[0]/machine/nodeAnnotations"
 	want := []Record{
-		{Reference: "app/str", Version: 1, Member: -1, Source: fo, SourcePath: labels + "s", Output: labels + "s"},
-		{Reference: "app/str", Version: 1, Member: -1, Source: fo, SourcePath: labels + "s", Output: labels + "t"},
-		{Reference: "app/enc", Version: 2, Encoding: "base64", Member: -1, Source: fo, SourcePath: labels + "e", Occurrence: 1,
+		{Reference: "app/str", Version: 1, Kind: "string", Member: -1, Source: fo, SourcePath: labels + "s", Output: labels + "s"},
+		{Reference: "app/str", Version: 1, Kind: "string", Member: -1, Source: fo, SourcePath: labels + "s", Output: labels + "t"},
+		{Reference: "app/enc", Version: 2, Kind: "string", Encoding: "base64", Member: -1, Source: fo, SourcePath: labels + "e", Occurrence: 1,
 			Output: labels + "e"},
-		{Reference: "app/map", Version: 3, Member: 0, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
-		{Reference: "app/map", Version: 3, Member: 1, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
-		{Reference: "app/bool", Version: 1, Member: -1, Source: fo, SourcePath: "doc[0]/machine/features/rbac", Occurrence: 3,
+		{Reference: "app/map", Version: 3, Kind: "mapping", Member: 0, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
+		{Reference: "app/map", Version: 3, Kind: "mapping", Member: 1, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
+		{Reference: "app/bool", Version: 1, Kind: "boolean", Member: -1, Source: fo, SourcePath: "doc[0]/machine/features/rbac", Occurrence: 3,
 			Output: "doc[0]/machine/features/rbac"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -245,13 +245,13 @@ func TestProvenanceOverrides(t *testing.T) {
 	labels := "doc[0]/machine/nodeLabels/"
 	rbac := "doc[0]/machine/features/rbac"
 	want := []Record{
-		{Reference: "app/a", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "a", OverriddenBy: &by},
-		{Reference: "app/b", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "b", Occurrence: 1, OverriddenBy: &by},
-		{Reference: "app/c", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "c", Occurrence: 2, OverriddenBy: &by},
-		{Reference: "app/keep", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "keep", Occurrence: 3,
+		{Reference: "app/a", Version: 1, Kind: "string", Member: -1, Source: origin(f0, 0), SourcePath: labels + "a", OverriddenBy: &by},
+		{Reference: "app/b", Version: 1, Kind: "string", Member: -1, Source: origin(f0, 0), SourcePath: labels + "b", Occurrence: 1, OverriddenBy: &by},
+		{Reference: "app/c", Version: 1, Kind: "string", Member: -1, Source: origin(f0, 0), SourcePath: labels + "c", Occurrence: 2, OverriddenBy: &by},
+		{Reference: "app/keep", Version: 1, Kind: "string", Member: -1, Source: origin(f0, 0), SourcePath: labels + "keep", Occurrence: 3,
 			Output: labels + "keep"},
-		{Reference: "app/flag", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: rbac, Occurrence: 4, OverriddenBy: &by},
-		{Reference: "app/other", Version: 1, Member: -1, Source: origin(f1, 1), SourcePath: labels + "b", Output: labels + "b"},
+		{Reference: "app/flag", Version: 1, Kind: "boolean", Member: -1, Source: origin(f0, 0), SourcePath: rbac, Occurrence: 4, OverriddenBy: &by},
+		{Reference: "app/other", Version: 1, Kind: "string", Member: -1, Source: origin(f1, 1), SourcePath: labels + "b", Output: labels + "b"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("records\n%+v\nwant\n%+v", got, want)
