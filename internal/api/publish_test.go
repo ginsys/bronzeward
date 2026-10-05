@@ -279,3 +279,90 @@ func TestPublishCommit(t *testing.T) {
 		t.Fatalf("%d dependency rows, %v; want 3", n, err)
 	}
 }
+
+// count is the number of rows query returns.
+func (p *publishEnv) count(query string, args ...any) int {
+	p.t.Helper()
+	var n int
+	if err := p.db.QueryRow(query, args...).Scan(&n); err != nil {
+		p.t.Fatal(err)
+	}
+	return n
+}
+
+// secondJob is another running publish operation of the same draft revision, as a worker that
+// superseded the first one's would hold.
+func (p *publishEnv) secondJob() publishJob {
+	p.t.Helper()
+	op := id.New(id.Operation)
+	mustExec(p.t, p.db, `INSERT INTO operation (id, kind, state, owner, owner_gen, owner_epoch, lease_until, draft, draft_revision,
+			created_by, created_by_kind, created_role, epoch, created_at)
+		VALUES ($1, 'publish', 'running', $2, 1, $3, now() + interval '1 minute', $4, 1, $5, 'human', 'publisher', $3, now())`,
+		op, p.owner.ID, p.owner.Epoch, p.draft, p.seed)
+	return publishJob{op: op, draft: p.draft, cluster: p.cluster, draftRev: 1, gen: 1}
+}
+
+// A commit retried after a commit-unknown meets its own release first and returns it, writing
+// nothing (§6.2).
+func TestPublishCommitRetry(t *testing.T) {
+	p := newPublishEnv(t)
+	rel, ref := p.commit()
+	if ref != nil {
+		t.Fatalf("refused: %v", ref)
+	}
+	again, ref := p.commit()
+	if ref != nil || again != rel {
+		t.Fatalf("retry %s %v; want %s", again, ref, rel)
+	}
+	if n := p.count(`SELECT count(*) FROM release`); n != 1 {
+		t.Fatalf("%d releases", n)
+	}
+	if n := p.count(`SELECT last_event FROM operation WHERE id = $1`, p.job.op); n != 1 {
+		t.Fatalf("last event %d", n)
+	}
+	if n := p.count(`SELECT revision FROM draft WHERE id = $1`, p.draft); n != 2 {
+		t.Fatalf("draft revision %d", n)
+	}
+}
+
+// A second operation of the published draft revision, with the same content, ends succeeded with
+// the existing release and its own terminal event, and writes nothing else (§6.2).
+func TestPublishCommitExistingRelease(t *testing.T) {
+	p := newPublishEnv(t)
+	rel, ref := p.commit()
+	if ref != nil {
+		t.Fatalf("refused: %v", ref)
+	}
+	p.job = p.secondJob()
+	again, ref := p.commit()
+	if ref != nil || again != rel {
+		t.Fatalf("second operation %s %v; want %s", again, ref, rel)
+	}
+	var state, result string
+	if err := p.db.QueryRow(`SELECT state, result->>'release' FROM operation WHERE id = $1`, p.job.op).Scan(&state, &result); err != nil {
+		t.Fatal(err)
+	}
+	if state != "succeeded" || result != rel || p.count(`SELECT count(*) FROM operation_event WHERE operation = $1`, p.job.op) != 1 {
+		t.Fatalf("operation %s %s", state, result)
+	}
+	if p.count(`SELECT count(*) FROM release`) != 1 || p.count(`SELECT revision FROM draft WHERE id = $1`, p.draft) != 2 ||
+		p.count(`SELECT revision FROM machine_state WHERE machine = $1`, p.machine) != 2 {
+		t.Fatal("the second commit wrote more than its operation")
+	}
+}
+
+// Another content for a published draft revision is refused 409 conflict (§6.2).
+func TestPublishCommitDifferentContent(t *testing.T) {
+	p := newPublishEnv(t)
+	if _, ref := p.commit(); ref != nil {
+		t.Fatalf("refused: %v", ref)
+	}
+	p.job = p.secondJob()
+	p.unit.renderer.KubernetesVersion = "v1.36.1"
+	if _, ref := p.commit(); ref == nil || ref.status != 409 || ref.code != "conflict" {
+		t.Fatalf("refusal %v; want 409 conflict", ref)
+	}
+	if p.count(`SELECT count(*) FROM release`) != 1 {
+		t.Fatal("a second release was written")
+	}
+}
