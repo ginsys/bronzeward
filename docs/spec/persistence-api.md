@@ -224,7 +224,7 @@ statement.
 | Entity | Kind | Holds | Owner of semantics |
 | --- | --- | --- | --- |
 | Cluster | mutable, revisioned | name, endpoint, Talos cluster ID (unique, §7.3), contract, status | this contract |
-| Machine | mutable, revisioned | `mch` id, identity key: its SMBIOS UUID or, for a machine that reports none, its Talos node ID, fixed at inventory (unique, §7.3), hardware evidence, cluster membership, Talos endpoint (§3.3), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
+| Machine | mutable, revisioned | `mch` id, identity key: its SMBIOS UUID or, for a machine that reports none, its Talos node ID, fixed at inventory (unique, §7.3), hardware evidence, cluster membership, Talos endpoint (§3.3), platform mode: `metal`, `container` or `cloud`, required at inventory with no default and fixed there, the mode its configuration validates in and its release machines record (compilation §6 step 8; choice §17.32), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
 | MachineEndpointChange | immutable | a machine's previous Talos endpoint and new one, who changed it, role, epoch, time (§3.3) | this contract |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
@@ -1389,7 +1389,7 @@ idempotency and conflict behavior.
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/takeovers` (a further mark on a staged ingestion; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
-| `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
+| `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3) | 201 | `author`, human only (§10.3) |
 | `POST /machines/{id}/talos-endpoints` (replace a machine's Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
@@ -1712,6 +1712,7 @@ HTTP/1.1 200 OK
 {"id": "mch_tqhcznunhyle4hnxru5hkt35uq",
  "cluster": "cl_oxbgrzprzpvnecj5ve3jht3dha",
  "hardware": {"smbiosUuid": "...", "talosNodeId": null, "serial": "..."},
+ "platform": "metal",
  "talosEndpoint": "10.55.0.3:50000",
  "desired": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
  "applied": {"release": "rel_uxpkmwd6ckxmj4z75j7y2mcxb4", "source": "operation"},
@@ -2636,6 +2637,9 @@ each (design §7.7 consequences):
   inventory requests for one SMBIOS UUID under different keys, one refused,
   and the same for one Talos node ID and for one Talos cluster ID; an
   inventory body with both `smbiosUuid` and `talosNodeId`, or neither, refused;
+  an inventory body without a `platform`, or with one other than `metal`,
+  `container` and `cloud`, refused, and a release machine whose mode is not
+  its machine's platform refused, each with its control;
 - machine revisions, shared by plan, operation and machine-scope entries,
   allocated in commit order under concurrent writers to one scope, with a
   control that allocates without the lock;
@@ -3015,6 +3019,15 @@ design and evidence do not settle the question. Each is marked in place as
     to protect and a library change no way to reach a cluster without an
     edit to every assignment. Library scope waits for a phase that defines
     its review (ginsys/bronzeward#23 scope).
+32. **The operator records each machine's platform mode at inventory** (§3,
+    `platform`). Compilation §6 step 8 validates "in the node's platform
+    mode", and no other record holds it: a `source: document` import never
+    reads the node, and a document carries no mode. The mode is fixed with
+    the machine, like its identity key, and each release machine records it
+    as its `mode`. Alternatives: read it from the node at each publication,
+    which adds a Talos read to a step that holds no Talos access and fails
+    for a document-only machine; a cluster-wide mode, which a mixed cluster
+    cannot use; a default, which records a guess as a fact.
 
 ## 18. Traceability
 
@@ -3022,7 +3035,7 @@ design and evidence do not settle the question. Each is marked in place as
 | --- | --- | --- |
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
-| §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31 |
+| §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32 |
 | §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.13.6); the provider read grant on `secret/data/access/talos/*` not measured (choice §17.29) |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |

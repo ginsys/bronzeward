@@ -108,9 +108,10 @@ func TestValidEndpoint(t *testing.T) {
 	}
 }
 
+// machineCall inventories a machine by its SMBIOS UUID, on the container platform the fixture's nodes run on.
 func machineCall(tok, k, cluster, uuid string) call {
 	return call{method: "POST", path: prefix + "/machines", token: tok, key: k,
-		body: `{"cluster":"` + cluster + `","smbiosUuid":"` + uuid + `","serial":"SN-1","talosEndpoint":"10.55.0.3"}`}
+		body: `{"cluster":"` + cluster + `","smbiosUuid":"` + uuid + `","serial":"SN-1","platform":"container","talosEndpoint":"10.55.0.3"}`}
 }
 
 // nodeA is a Talos node ID as `talosctl get identity` prints it.
@@ -119,7 +120,7 @@ const nodeA = "7x1SuC8Ege5BGXdAfTEff5iQnlWZLfv9h1LGMxA2pYkC"
 // nodeMachineCall inventories a machine that reports no SMBIOS UUID, by its Talos node ID.
 func nodeMachineCall(tok, k, cluster, node string) call {
 	return call{method: "POST", path: prefix + "/machines", token: tok, key: k,
-		body: `{"cluster":"` + cluster + `","talosNodeId":"` + node + `","talosEndpoint":"10.55.0.4"}`}
+		body: `{"cluster":"` + cluster + `","talosNodeId":"` + node + `","platform":"container","talosEndpoint":"10.55.0.4"}`}
 }
 
 // PA §3.3: POST /machines takes an IPv4 or bracketed IPv6 literal with an optional port and stores
@@ -136,7 +137,7 @@ func TestInventoryTalosEndpoint(t *testing.T) {
 	} {
 		uuid := fmt.Sprintf("5a0f1b6d-7e8c-4d0e-9f4a-%012x", i)
 		rec := e.do(e.api, call{method: "POST", path: prefix + "/machines", token: author, key: fmt.Sprintf("k-endpoint-%d-0123456789", i),
-			body: `{"cluster":"` + cl + `","smbiosUuid":"` + uuid + `","talosEndpoint":"` + c.in + `"}`})
+			body: `{"cluster":"` + cl + `","smbiosUuid":"` + uuid + `","platform":"metal","talosEndpoint":"` + c.in + `"}`})
 		m := decode[machineBody](t, rec, http.StatusCreated)
 		if m.TalosEndpoint != c.want {
 			t.Errorf("POST %s: talosEndpoint %q; want %q", c.in, m.TalosEndpoint, c.want)
@@ -144,6 +145,26 @@ func TestInventoryTalosEndpoint(t *testing.T) {
 		got := decode[machineBody](t, e.do(e.api, call{method: "GET", path: prefix + "/machines/" + m.ID, token: viewer}), http.StatusOK)
 		if got.TalosEndpoint != c.want {
 			t.Errorf("GET after %s: talosEndpoint %q; want %q", c.in, got.TalosEndpoint, c.want)
+		}
+	}
+}
+
+// PA §3.3: POST /machines records the machine's platform mode, the mode its configuration validates
+// in (compilation §6 step 8); the resource and GET answer it.
+func TestInventoryPlatform(t *testing.T) {
+	e := newEnv(t, options{})
+	author, viewer := e.human("h-author"), e.human("h-viewer")
+	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+	for i, p := range []string{"metal", "container", "cloud"} {
+		uuid := fmt.Sprintf("6d2e3f4a-5b6c-4d7e-8f9a-%012x", i)
+		rec := e.do(e.api, call{method: "POST", path: prefix + "/machines", token: author, key: fmt.Sprintf("k-platform-%d-0123456789", i),
+			body: `{"cluster":"` + cl + `","smbiosUuid":"` + uuid + `","platform":"` + p + `","talosEndpoint":"10.55.0.3"}`})
+		m := decode[machineBody](t, rec, http.StatusCreated)
+		if m.Platform != p {
+			t.Errorf("POST %s: platform %q", p, m.Platform)
+		}
+		if got := decode[machineBody](t, e.do(e.api, call{method: "GET", path: prefix + "/machines/" + m.ID, token: viewer}), http.StatusOK); got.Platform != p {
+			t.Errorf("GET after %s: platform %q", p, got.Platform)
 		}
 	}
 }
@@ -342,7 +363,7 @@ func TestInventoryRefusals(t *testing.T) {
 	// padding bits, and a line break the decoder skips.
 	loose, broken := talosClusterID("x")[:42]+"B=", talosClusterID("x")[:20]+`\n`+talosClusterID("x")[20:]
 	m := func(members string) string {
-		return `{"cluster":"` + cl + `",` + members + `,"talosEndpoint":"10.55.0.3"}`
+		return `{"cluster":"` + cl + `",` + members + `,"platform":"metal","talosEndpoint":"10.55.0.3"}`
 	}
 	for name, c := range map[string]struct {
 		path, body string
@@ -357,16 +378,21 @@ func TestInventoryRefusals(t *testing.T) {
 		"contract patch":           {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13.6-` + marker + `"` + tc + `}`, 400, "invalid-request"},
 		"blank name":               {"/clusters", `{"name":"  ","endpoint":"https://a.test","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
 		"name missing":             {"/clusters", `{"endpoint":"https://a.test","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
-		"no talos endpoint":        {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `"}`, 400, "invalid-request"},
-		"DNS talos endpoint":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"` + marker + `.test"}`, 400, "invalid-request"},
-		"endpoint scheme":          {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"https://10.55.0.3"}`, 400, "invalid-request"},
-		"endpoint path":            {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3:50000/` + marker + `"}`, 400, "invalid-request"},
-		"endpoint user part":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"` + marker + `@10.55.0.3"}`, 400, "invalid-request"},
-		"endpoint whitespace":      {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":" 10.55.0.3"}`, 400, "invalid-request"},
-		"bare IPv6 endpoint":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"fd00::3"}`, 400, "invalid-request"},
-		"endpoint port 65536":      {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3:65536"}`, 400, "invalid-request"},
-		"endpoint not a string":    {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":["10.55.0.3"]}`, 400, "invalid-request"},
-		"malformed UUID":           {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + marker + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"no talos endpoint":        {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal"}`, 400, "invalid-request"},
+		"no platform":              {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"null platform":            {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":null,"talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"unknown platform":         {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"` + marker + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"platform in capitals":     {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"Metal","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"platform not a string":    {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":["metal"],"talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"DNS talos endpoint":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":"` + marker + `.test"}`, 400, "invalid-request"},
+		"endpoint scheme":          {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":"https://10.55.0.3"}`, 400, "invalid-request"},
+		"endpoint path":            {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":"10.55.0.3:50000/` + marker + `"}`, 400, "invalid-request"},
+		"endpoint user part":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":"` + marker + `@10.55.0.3"}`, 400, "invalid-request"},
+		"endpoint whitespace":      {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":" 10.55.0.3"}`, 400, "invalid-request"},
+		"bare IPv6 endpoint":       {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":"fd00::3"}`, 400, "invalid-request"},
+		"endpoint port 65536":      {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":"10.55.0.3:65536"}`, 400, "invalid-request"},
+		"endpoint not a string":    {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":["10.55.0.3"]}`, 400, "invalid-request"},
+		"malformed UUID":           {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + marker + `","platform":"metal","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
 		"no identity key":          {"/machines", m(`"serial":"` + marker + `"`), 400, "invalid-request"},
 		"both identity keys":       {"/machines", m(`"smbiosUuid":"` + uuidA + `","talosNodeId":"` + marker + `"`), 400, "invalid-request"},
 		"both keys null":           {"/machines", m(`"smbiosUuid":null,"talosNodeId":null`), 400, "invalid-request"},
@@ -381,15 +407,15 @@ func TestInventoryRefusals(t *testing.T) {
 		"unpadded cluster ID":      {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13","talosClusterId":"` + strings.TrimSuffix(talosClusterID("x"), "=") + `"}`, 400, "invalid-request"},
 		"non-canonical cluster ID": {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13","talosClusterId":"` + loose + `"}`, 400, "invalid-request"},
 		"cluster ID with a break":  {"/clusters", `{"name":"x","endpoint":"https://a.test","contract":"v1.13","talosClusterId":"` + broken + `"}`, 400, "invalid-request"},
-		"blank serial":             {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","serial":" ","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
-		"cluster of a draft":       {"/machines", `{"cluster":"` + drf + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
-		"unknown cluster":          {"/machines", `{"cluster":"` + id.New(id.Cluster) + `","smbiosUuid":"` + uuidA + `","serial":"` + marker + `","talosEndpoint":"10.55.0.3"}`, 404, "not-found"},
-		"hardware member":          {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","hardware":{"smbiosUuid":"` + uuidA + `"},"talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"blank serial":             {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","serial":" ","platform":"metal","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"cluster of a draft":       {"/machines", `{"cluster":"` + drf + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"unknown cluster":          {"/machines", `{"cluster":"` + id.New(id.Cluster) + `","smbiosUuid":"` + uuidA + `","serial":"` + marker + `","platform":"metal","talosEndpoint":"10.55.0.3"}`, 404, "not-found"},
+		"hardware member":          {"/machines", `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","hardware":{"smbiosUuid":"` + uuidA + `"},"platform":"metal","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
 		"draft of no cluster":      {"/drafts", `{"cluster":"` + id.New(id.Cluster) + `","title":"` + marker + `"}`, 404, "not-found"},
 		"blank title":              {"/drafts", `{"cluster":"` + cl + `","title":""}`, 400, "invalid-request"},
 		// A mutating route takes no query (§9.1), and the fingerprint does not cover one.
 		"cluster with a query": {"/clusters?dryRun=" + marker, `{"name":"x","endpoint":"https://a.test","contract":"v1.13"` + tc + `}`, 400, "invalid-request"},
-		"machine with a query": {"/machines?x=" + marker, `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
+		"machine with a query": {"/machines?x=" + marker, `{"cluster":"` + cl + `","smbiosUuid":"` + uuidA + `","platform":"metal","talosEndpoint":"10.55.0.3"}`, 400, "invalid-request"},
 		"draft with a query":   {"/drafts?x=" + marker, `{"cluster":"` + cl + `","title":"t"}`, 400, "invalid-request"},
 	} {
 		rec := e.do(e.api, call{method: "POST", path: prefix + c.path, token: author, key: "k-refused-" + strings.ReplaceAll(name, " ", "-") + "-0123456", body: c.body})

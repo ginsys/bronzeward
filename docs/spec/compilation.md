@@ -778,7 +778,8 @@ For each machine:
    check runs before validation, so a fragment that both overrides an import
    base reference and invalidates the configuration is refused as an override.
 8. **Validate** the complete materialized configuration with the pinned renderer
-   in the node's platform mode (§7 stage 3).
+   in the node's platform mode, the one its machine records (persistence-api
+   §3, choice §17.32 there) (§7 stage 3).
 
 The compiler's only transformations of native YAML are step 4's replacement of
 tagged nodes and re-serialization of identified embedded documents. Everything

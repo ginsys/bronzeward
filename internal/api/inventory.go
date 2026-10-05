@@ -178,8 +178,12 @@ type machineInput struct {
 	SMBIOSUUID    *string `json:"smbiosUuid"`
 	TalosNodeID   *string `json:"talosNodeId"`
 	Serial        *string `json:"serial"`
+	Platform      string  `json:"platform"`
 	TalosEndpoint string  `json:"talosEndpoint"`
 }
+
+// platforms are the platform modes a machine's configuration validates in (compilation §6 step 8).
+var platforms = map[string]bool{"metal": true, "container": true, "cloud": true}
 
 var uuidShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
@@ -204,6 +208,9 @@ func (in *machineInput) check(*API) error {
 		if err := text("serial", *in.Serial, 128); err != nil {
 			return err
 		}
+	}
+	if !platforms[in.Platform] {
+		return errors.New("platform must be metal, container or cloud (persistence-api.md §3.3)")
 	}
 	ep, err := talosEndpoint(in.TalosEndpoint)
 	if err != nil {
@@ -243,6 +250,7 @@ type machineBody struct {
 	ID            string    `json:"id"`
 	Cluster       string    `json:"cluster"`
 	Hardware      hardware  `json:"hardware"`
+	Platform      string    `json:"platform"`
 	TalosEndpoint string    `json:"talosEndpoint"`
 	Desired       *string   `json:"desired"`
 	Applied       *applied  `json:"applied"`
@@ -263,17 +271,17 @@ func inventoryMachine(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 		return result{}, err
 	}
 	b := machineBody{ID: id.New(id.Machine), Cluster: in.Cluster,
-		Hardware:      hardware{SMBIOSUUID: in.SMBIOSUUID, TalosNodeID: in.TalosNodeID, Serial: in.Serial},
-		TalosEndpoint: in.TalosEndpoint, ScopeState: "normal"}
+		Hardware: hardware{SMBIOSUUID: in.SMBIOSUUID, TalosNodeID: in.TalosNodeID, Serial: in.Serial},
+		Platform: in.Platform, TalosEndpoint: in.TalosEndpoint, ScopeState: "normal"}
 	if q.recovery {
 		b.ScopeState = "pre-restore-unaccounted"
 	}
 	// No conflict target: the two identity keys' indexes are the only ones a fresh identifier can
 	// meet, and the request carries exactly one key.
 	var inserted string
-	err := tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, smbios_uuid, talos_node_id, serial, scope_state, talos_endpoint, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, now()) ON CONFLICT DO NOTHING RETURNING id`,
-		b.ID, b.Cluster, b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID, b.Hardware.Serial, b.ScopeState, b.TalosEndpoint).Scan(&inserted)
+	err := tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, smbios_uuid, talos_node_id, serial, scope_state, talos_endpoint, platform, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now()) ON CONFLICT DO NOTHING RETURNING id`,
+		b.ID, b.Cluster, b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID, b.Hardware.Serial, b.ScopeState, b.TalosEndpoint, b.Platform).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
 		var existing string
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE smbios_uuid = $1 OR talos_node_id = $2`,

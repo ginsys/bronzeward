@@ -263,6 +263,8 @@ func TestReleaseConstraints(t *testing.T) {
 		{"machine at another machine's import base", withRelease, insertReleaseMachine, machineRow(3, r.otherIBR), "23503"},
 		{"machine at no assignment revision", withRelease, insertReleaseMachine, machineRow(4, id.New(id.AssignmentRevision)), "23503"},
 		{"machine in an unknown mode", withRelease, insertReleaseMachine, machineRow(5, "vm"), "release_machine_mode_check"},
+		// PA §3.3: a machine validates in its recorded platform mode.
+		{"machine in a mode other than its platform", withRelease, insertReleaseMachine, machineRow(5, "container"), "release_machine_platform"},
 		{"ciphertext without its key version", withRelease, insertReleaseMachine, machineRow(6, "vault:abc"), "release_machine_ciphertext_check"},
 		{"ciphertext at key version 0", withRelease, insertReleaseMachine, machineRow(6, "vault:v0:YWJj"), "release_machine_ciphertext_check"},
 		// Compilation §9: a key version has up to 19 digits, as a bigint holds.

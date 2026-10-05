@@ -10,10 +10,10 @@ import (
 
 // The statements the endpoint tests insert with.
 const (
-	insertMachineAt = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, created_at)
-		VALUES ($1, $2, $3, NULL, 'normal', $4, now())`
-	insertMachineNoEndpoint = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, created_at)
-		VALUES ($1, $2, $3, NULL, 'normal', now())`
+	insertMachineAt = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, platform, created_at)
+		VALUES ($1, $2, $3, NULL, 'normal', $4, 'metal', now())`
+	insertMachineNoEndpoint = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, platform, created_at)
+		VALUES ($1, $2, $3, NULL, 'normal', 'metal', now())`
 	insertAct = `INSERT INTO act (id, principal, principal_kind, via, role, action, subjects, request_id, epoch, at)
 		SELECT $1, $2, 'human', 'api', 'author', 'machine.talos-endpoint', ARRAY[$3], $4, epoch, now() FROM installation_state`
 	insertMachineEvent = `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)

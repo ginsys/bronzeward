@@ -963,11 +963,11 @@ run() {
   cluster=$recorded
   record 'S1 step 1' 'POST /machines (control plane) by Talos node ID and endpoint: 201' /api/v1/machines \
     "$(jq -nc --arg c "$cluster" --arg n "$nid_cp" --arg e "$TALOS_CONTROLPLANE_IP:50000" \
-      '{cluster: $c, talosNodeId: $n, talosEndpoint: $e}')" controlplane
+      '{cluster: $c, talosNodeId: $n, platform: "container", talosEndpoint: $e}')" controlplane
   machine_cp=$recorded
   record 'S1 step 1' 'POST /machines (worker) by Talos node ID and endpoint: 201' /api/v1/machines \
     "$(jq -nc --arg c "$cluster" --arg n "$nid_w" --arg e "$TALOS_WORKER_IP:50000" \
-      '{cluster: $c, talosNodeId: $n, talosEndpoint: $e}')" worker
+      '{cluster: $c, talosNodeId: $n, platform: "container", talosEndpoint: $e}')" worker
   machine_w=$recorded
 
   fresh_author
@@ -1047,7 +1047,7 @@ run() {
   outcome_bundle 'S1 access' access-silent
   record 'S1 access' 'POST /machines with a node ID no node has, at the control plane endpoint: 201' /api/v1/machines \
     "$(jq -nc --arg c "$cluster" --arg n "s1-no-such-node-$run_key" --arg e "$TALOS_CONTROLPLANE_IP:50000" \
-      '{cluster: $c, talosNodeId: $n, talosEndpoint: $e}')" stranger
+      '{cluster: $c, talosNodeId: $n, platform: "container", talosEndpoint: $e}')" stranger
   check 'S1 access' 'a machine recorded with another node ID: abandoned, 409 machine-identity-mismatch, cause node-id, nothing kept' \
     access_case node-id "$recorded" 409 machine-identity-mismatch node-id
   outcome_bundle 'S1 access' access-node-id
