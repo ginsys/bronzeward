@@ -17,6 +17,7 @@ type draftEnv struct {
 	*env
 	cluster, machine, draft, etag, seed string
 	keys                                int
+	removedOnly                         bool // d.release names only a removed fragment, no fragment revision
 }
 
 func newDraftEnv(t *testing.T) *draftEnv {

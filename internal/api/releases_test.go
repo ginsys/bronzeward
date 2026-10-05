@@ -75,9 +75,14 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 			s.rel, d.cluster, m.machine, m.ibr, releaseCipher, make([]byte, 32), m.redacted,
 			strings.NewReplacer("{ibr}", m.ibr, "{ibr2}", ibr2, "{frv}", s.frv).Replace(provenance))
 	}
-	mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, fragment, name, fragment_revision, head_revision)
-		VALUES ($1, $2, 'fragment', $3, $4, $5, 1), ($1, $2, 'fragment', $6, $7, NULL, 2)`,
-		s.rel, d.cluster, s.frg, "registries-"+draft[4:8], s.frv, s.gone, "gone-"+draft[4:8])
+	if d.removedOnly {
+		mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, fragment, name, fragment_revision, head_revision)
+			VALUES ($1, $2, 'fragment', $3, $4, NULL, 2)`, s.rel, d.cluster, s.gone, "gone-"+draft[4:8])
+	} else {
+		mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, fragment, name, fragment_revision, head_revision)
+			VALUES ($1, $2, 'fragment', $3, $4, $5, 1), ($1, $2, 'fragment', $6, $7, NULL, 2)`,
+			s.rel, d.cluster, s.frg, "registries-"+draft[4:8], s.frv, s.gone, "gone-"+draft[4:8])
+	}
 	// Each machine's artifact names its key version in an encryption dependency (compilation §9).
 	mustExec(t, tx, `INSERT INTO dependency_status (id, provider, object, version, class, first_retained_at, observed_from,
 			recorded_at, created) VALUES ($1, 'transit', 'bw-artifact', 1, 'retained', now(), now(), now(), '2026-09-26T09:12:40Z')
@@ -270,6 +275,11 @@ func TestReleaseReviewProvenanceProjected(t *testing.T) {
 		{"control: a source at the machine's import base", `[` + strings.Replace(good, `{frv}`, `{ibr}`, 1) + `]`},
 		{"control: an override by a source", `[` + strings.Replace(good, `"output":"doc[0]/machine/registries"`,
 			`"overriddenBy":{"revision":"{frv}","digest":"`+hexB+`"}`, 1) + `]`},
+		// A release naming no fragment revision (only a removed fragment) admits no empty revision.
+		{"no fragment revision: a source at an empty revision", `[` + strings.Replace(good, `{frv}`, ``, 1) + `]`},
+		{"no fragment revision: an override by an empty revision", `[` + strings.Replace(strings.Replace(good, `{frv}`, `{ibr}`, 1),
+			`"output":"doc[0]/machine/registries"`, `"overriddenBy":{"revision":"","digest":"`+hexB+`"}`, 1) + `]`},
+		{"control: no fragment revision, a source at the machine's import base", `[` + strings.Replace(good, `{frv}`, `{ibr}`, 1) + `]`},
 		{"control", `[` + good + `]`}, // the record each case above breaks one way
 	} {
 		draft := d.draft
@@ -278,6 +288,7 @@ func TestReleaseReviewProvenanceProjected(t *testing.T) {
 				key: fmt.Sprintf("k-draft-prov-%010d", i), body: `{"cluster":"` + d.cluster + `","title":"provenance"}`})
 			draft = decode[draftBody](t, rec, http.StatusCreated).ID
 		}
+		d.removedOnly = strings.Contains(c.name, "no fragment revision")
 		s := d.release(draft, 1, c.stored)
 		rec := d.get("/releases/" + s.rel + "/machines/" + d.machine + "/review")
 		if strings.HasPrefix(c.name, "control") {
