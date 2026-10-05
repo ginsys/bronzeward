@@ -238,15 +238,15 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		Scan(&draftState, &draftRev); err != nil {
 		return "", nil, err
 	}
+	// The operation's lock holds its owner, generation and epoch until COMMIT; the fenced UPDATE
+	// that ends it (finishPublish) is the ownership check, and a superseded worker's whole
+	// transaction rolls back with it, its refusal included (§5.1).
 	var by, role, opState string
-	var owner, ownerEpoch, opRelease sql.NullString
-	var gen int64
-	if err := tx.QueryRowContext(ctx, `SELECT created_by, created_role, state, owner, owner_gen, owner_epoch,
-		result->>'release' FROM operation WHERE id = $1 AND kind = 'publish' FOR UPDATE`, j.op).
-		Scan(&by, &role, &opState, &owner, &gen, &ownerEpoch, &opRelease); err != nil {
+	var opRelease sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT created_by, created_role, state, result->>'release' FROM operation
+		WHERE id = $1 AND kind = 'publish' FOR UPDATE`, j.op).Scan(&by, &role, &opState, &opRelease); err != nil {
 		return "", nil, a.fenced(err)
 	}
-	mine := opState == "running" && owner.String == a.d.owner.ID && gen == j.gen && ownerEpoch.String == a.d.owner.Epoch
 
 	content := releaseContent{cluster: j.cluster, draft: j.draft, draftRev: j.draftRev, renderer: u.renderer}
 	for _, h := range heads {
@@ -269,8 +269,6 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		switch {
 		case same && opState == "succeeded" && opRelease.String == existing:
 			return existing, nil, nil
-		case !mine:
-			return "", nil, staging.ErrFenced
 		case !same:
 			return "", refuse(http.StatusConflict, "conflict", "the draft revision was published with other content").
 				with("release", existing), nil
@@ -279,9 +277,6 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 			map[string]any{"type": "succeeded", "release": existing})
 	case !errors.Is(err, sql.ErrNoRows):
 		return "", nil, err
-	}
-	if !mine {
-		return "", nil, staging.ErrFenced
 	}
 	if ref, err := checkInputs(j, u, draftState, draftRev, heads, locked, bases, scopes, recovery); ref != nil || err != nil {
 		return "", ref, err
