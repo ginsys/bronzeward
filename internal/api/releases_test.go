@@ -70,8 +70,8 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 		redacted     any
 	}{{d.machine, ibr1, "machine:\n  type: worker\n  token: <redacted:schema>\n"}, {s.machine2, ibr2, nil}} {
 		mustExec(t, tx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision, mode, ciphertext,
-				ciphertext_digest, configuration_digest, redacted, provenance)
-			VALUES ($1, $2, $3, $4, 'container', $5, $6, $6, $7, $8::jsonb)`,
+				ciphertext_digest, configuration_digest, redacted, provenance, key_name)
+			VALUES ($1, $2, $3, $4, 'container', $5, $6, $6, $7, $8::jsonb, 'bw-artifact')`,
 			s.rel, d.cluster, m.machine, m.ibr, releaseCipher, make([]byte, 32), m.redacted,
 			strings.NewReplacer("{ibr}", m.ibr, "{ibr2}", ibr2, "{frv}", s.frv).Replace(provenance))
 	}

@@ -639,10 +639,10 @@ func insertReleaseMachine(ctx context.Context, tx *sql.Tx, rel, cluster string, 
 		redacted = sql.NullString{String: *m.redacted, Valid: true}
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
-		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, rel, cluster, m.machine, m.importBase,
+		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`, rel, cluster, m.machine, m.importBase,
 		sql.NullString{String: m.assignment, Valid: m.assignment != ""}, m.mode, string(m.ciphertext), cipherDigest[:],
-		m.configuration[:], redacted, string(provenance))
+		m.configuration[:], redacted, string(provenance), m.encryption.object)
 	return err
 }
 

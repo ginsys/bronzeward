@@ -18,12 +18,15 @@ const (
 	// A status with the scheduled deletion time last observed (dependency monitor §3, §5.1).
 	insertScheduled = `INSERT INTO dependency_status (id, provider, object, version, class, reason, first_retained_at,
 		deletion_observed, observed_from, recorded_at, created) VALUES ($1, $2, $3, $4, $5, $6, now(), $7, now(), now(), $8)`
+	// A status observed and recorded at the times given (dependency monitor §5.2, §6.1).
+	insertStatusAt = `INSERT INTO dependency_status (id, provider, object, version, class, first_retained_at, observed_from,
+		recorded_at, created) VALUES ($1, 'kv', $2, $3, 'retained', now(), $4, $5, $6)`
 	insertRelease = `INSERT INTO release (id, cluster, draft, draft_revision, digest, contract, machinery_version,
 		machinery_checksum, kubernetes_version, operation, published_by, published_role, epoch, published_at)
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, epoch, now() FROM installation_state`
 	insertReleaseMachine = `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
-		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)`
+		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)`
 	insertReleaseSource = `INSERT INTO release_source (release, cluster, kind, fragment, profile, assignment, name, machine,
 		fragment_revision, profile_revision, assignment_revision, head_revision)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
@@ -62,7 +65,7 @@ func releaseRows(t *testing.T, db *sql.DB) release {
 	mustExec(t, tx, insertRelease, r.rel, r.cluster, r.draft, 1, digest(3), "v1.13", machinery, checksum, "v1.36.0",
 		r.publish, r.human, "publisher")
 	mustExec(t, tx, insertReleaseMachine, r.rel, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5),
-		"machine:\n  type: worker\n", `[]`)
+		"machine:\n  type: worker\n", `[]`, "bw-artifact")
 	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1)
 	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "fragment", r.frgSite, nil, nil, "site-dns", nil, r.frvSite, nil, nil, 1)
 	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "profile", nil, r.prf, nil, "workers", nil, nil, r.prv, nil, 1)
@@ -92,13 +95,27 @@ func TestReleaseConstraints(t *testing.T) {
 	claim2, bob := id.New(id.Ingestion), id.New(id.Principal)
 	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, r.draft2, 1, nil, r.human, nil, nil)
 	mustExec(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'bob', now())`, bob)
-	// A second version of the artifact key, which no ciphertext of withMachine names.
+	// A second version of the artifact key, which no ciphertext of withMachine names, and another
+	// key at the version it names.
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "transit", "bw-artifact", 2, "retained", nil, nil, "2026-10-02T00:00:00Z")
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "transit", "bw-other", 1, "retained", nil, nil, "2026-09-26T09:12:40Z")
+	// Versions an effective row can name that no declaration of the sources does: another creation of
+	// the declared version, a later version, another generation.
+	const recreated = "2026-09-26T09:12:40.2Z"
+	kvOther := "gen/" + r.cluster + "/" + r.claim + "/v2"
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, recreated)
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 7, "retained", nil, nil, created)
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kvOther, 1, "retained", nil, nil, created)
+	// A second machine of the cluster, whose import base declares the same reference.
+	machine2, ibr2 := id.New(id.Machine), id.New(id.ImportBase)
+	mustExec(t, db, insertMachine, machine2, r.cluster, "3e8d9f4b-5c6a-4b8c-9d2e-3f4a5b6c7d8e", nil, "normal")
+	mustExec(t, db, insertImportBase, ibr2, machine2, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2))
+	mustExec(t, db, insertReference, ibr2, "registry/example-pass", "string", 1, nil, kv)
 	// rel2 is inserted in each case's transaction first, so its rows are written with it.
 	withRelease := []stmt{{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
 		"v1.36.0", op2, r.human, "publisher"}}}
 	withMachine := append(withRelease, stmt{insertReleaseMachine, []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal",
-		cipher, digest(4), digest(5), "x: 1\n", `[]`}})
+		cipher, digest(4), digest(5), "x: 1\n", `[]`, "bw-artifact"}})
 	newRelease := func(args ...any) []any {
 		base := []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum, "v1.36.0", op2, r.human, "publisher"}
 		for i := 0; i+1 < len(args); i += 2 {
@@ -107,7 +124,7 @@ func TestReleaseConstraints(t *testing.T) {
 		return base
 	}
 	machineRow := func(args ...any) []any {
-		base := []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5), "x: 1\n", `[]`}
+		base := []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5), "x: 1\n", `[]`, "bw-artifact"}
 		for i := 0; i+1 < len(args); i += 2 {
 			base[args[i].(int)] = args[i+1]
 		}
@@ -139,6 +156,17 @@ func TestReleaseConstraints(t *testing.T) {
 	profileSource := source("profile", r.prf, "workers", r.prv)
 	pinnedSource := source("fragment", r.frg, "registries", r.frv1)
 	siteSource := source("fragment", r.frgSite, "site-dns", r.frvSite)
+	// rel2 complete but for its effective and reproduction rows.
+	withSources := append(append([]stmt{}, withMachine...), assignmentSource, profileSource, pinnedSource, siteSource, withEncryption)
+	reproduction := func(object any, version int, at, revision any, occurrence int) stmt {
+		return stmt{insertDependency, depRow(2, "reproduction", 4, object, 5, version, 6, at, 8, revision, 9, digest(6),
+			10, "registries:/machine/registries", 11, occurrence)}
+	}
+	named := func(reference string, s stmt) stmt { s.args[7] = reference; return s }
+	on := func(machine string, s stmt) stmt { s.args[1] = machine; return s }
+	frvExtra := id.New(id.FragmentRevision) // declares a reference no other source does
+	withExtra := []stmt{{insertFragmentRevision, []any{frvExtra, r.cluster, "extras", "site", "machine: {}\n", r.human}},
+		{insertFragmentReference, []any{frvExtra, "registry/fragment-only", "string", 1, nil, kv}}}
 	frvRole := id.New(id.FragmentRevision) // site-dns in the role layer
 	const commit = `SET CONSTRAINTS ALL IMMEDIATE`
 	for _, c := range []struct {
@@ -281,6 +309,53 @@ func TestReleaseConstraints(t *testing.T) {
 		{"effective dependency with an occurrence", withMachine, insertDependency, depRow(11, 0), "dependency_shape"},
 		{"encryption dependency at another key version than the ciphertext's", withMachine, insertDependency,
 			depRow(2, "encryption", 3, "transit", 4, "bw-artifact", 5, 2, 6, "2026-10-02T00:00:00Z", 7, nil), "23503"},
+		// Compilation §9: the encryption dependency names the key that encrypted the artifact, at its
+		// version, not another retained key at the same version.
+		{"encryption dependency on another key than the machine's", withMachine, insertDependency,
+			depRow(2, "encryption", 3, "transit", 4, "bw-other", 6, "2026-09-26T09:12:40Z", 7, nil), "23503"},
+		{"machine without its key name", withRelease, insertReleaseMachine, machineRow(11, nil), "23502"},
+		// Compilation §9: an effective dependency is a reference occurrence of the machine's sources
+		// that reached the artifact, so it has a reproduction row at the same version and creation,
+		// whose source declares that reference at that version and generation; checked at commit.
+		{"effective dependency without its reproduction occurrence", append(withSources, stmt{insertDependency, depRow()}),
+			commit, nil, "dependency_effective"},
+		{"effective dependency of another reference than its occurrence's", append(withSources,
+			stmt{insertDependency, depRow(7, "registry/other")}, reproduction(kv, 1, created, r.frv1, 0)), commit, nil,
+			"dependency_effective"},
+		{"effective dependency at another creation than its occurrence's", append(withSources,
+			stmt{insertDependency, depRow(6, recreated)}, reproduction(kv, 1, created, r.frv1, 0)), commit, nil,
+			"dependency_effective"},
+		{"effective dependency at another version than its occurrence's", append(withSources,
+			stmt{insertDependency, depRow(5, 7)}, reproduction(kv, 1, created, r.frv1, 0)), commit, nil, "dependency_effective"},
+		{"effective dependency whose occurrence declares another version", append(withSources,
+			stmt{insertDependency, depRow(5, 7)}, reproduction(kv, 7, created, r.frv1, 0)), commit, nil, "dependency_effective"},
+		{"effective dependency whose occurrence declares another generation", append(withSources,
+			stmt{insertDependency, depRow(4, kvOther)}, reproduction(kvOther, 1, created, r.ibr, 0)), commit, nil,
+			"dependency_effective"},
+		{"effective dependency whose import base occurrence declares another version", append(withSources,
+			stmt{insertDependency, depRow(5, 7)}, reproduction(kv, 7, created, r.ibr, 0)), commit, nil, "dependency_effective"},
+		{"effective dependency whose fragment occurrence declares another generation", append(withSources,
+			stmt{insertDependency, depRow(4, kvOther)}, reproduction(kvOther, 1, created, r.frv1, 0)), commit, nil,
+			"dependency_effective"},
+		{"effective dependency at another generation than its occurrence's", append(withSources,
+			stmt{insertDependency, depRow(4, kvOther)}, reproduction(kv, 1, created, r.frv1, 0)), commit, nil,
+			"dependency_effective"},
+		{"effective dependency whose occurrence's reference its source does not declare", append(withSources,
+			stmt{insertDependency, depRow(7, "registry/undeclared")}, named("registry/undeclared", reproduction(kv, 1, created, r.frv1, 0))),
+			commit, nil, "dependency_effective"},
+		// Each source's own declarations, not another's.
+		{"effective dependency whose fragment occurrence its revision does not declare", append(withSources,
+			stmt{insertDependency, depRow()}, reproduction(kv, 1, created, r.frvSite, 0)), commit, nil, "dependency_effective"},
+		{"effective dependency whose import base occurrence only a fragment revision declares", append(append(withExtra, withSources...),
+			stmt{insertDependency, depRow(7, "registry/fragment-only")}, named("registry/fragment-only", reproduction(kv, 1, created, r.ibr, 0))),
+			commit, nil, "dependency_effective"},
+		{"effective dependency whose only occurrence is another machine's", append(withSources,
+			stmt{insertReleaseMachine, machineRow(2, machine2, 3, ibr2, 4, nil)},
+			stmt{insertDependency, depRow(1, machine2, 2, "encryption", 3, "transit", 4, "bw-artifact", 6, "2026-09-26T09:12:40Z", 7, nil)},
+			stmt{insertDependency, depRow()}, on(machine2, reproduction(kv, 1, created, ibr2, 0))), commit, nil,
+			"dependency_effective"},
+		{"control: effective dependency with its import base occurrence", append(withSources,
+			stmt{insertDependency, depRow()}, reproduction(kv, 1, created, r.ibr, 0)), commit, nil, ""},
 		// A reproduction source is the machine's import base or a fragment revision of the release.
 		{"reproduction source at another machine's import base", withMachine, insertDependency,
 			depRow(2, "reproduction", 8, r.otherIBR, 9, digest(6), 10, "base:/machine", 11, 0), "23503"},
@@ -340,6 +415,11 @@ func TestReleaseConstraints(t *testing.T) {
 		{"status with an id of another kind", nil, insertStatus, []any{id.New(id.Release), "kv", kv, 2, "retained", nil, nil, created}, "dependency_status_id_check"},
 		{"status creation time without its zone", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", nil, nil, "2026-09-26T09:12:40"}, "dependency_status_created_check"},
+		// Dependency monitor §5.2, §6.1: a class is recorded after the request that observed it began.
+		{"status recorded before it was observed", nil, insertStatusAt,
+			[]any{id.New(id.Dependency), kv, 9, "2026-09-26T09:12:41Z", "2026-09-26T09:12:40.999999Z", created}, "dependency_status_times"},
+		{"control: status recorded when it was observed", nil, insertStatusAt,
+			[]any{id.New(id.Dependency), kv, 9, "2026-09-26T09:12:41Z", "2026-09-26T09:12:41Z", created}, ""},
 		// draft, machine_state, operation
 		{"published draft without its release", nil,
 			`UPDATE draft SET state = 'published' WHERE id = $1`, []any{r.draft2}, "draft_published_release"},
@@ -405,6 +485,8 @@ func TestReleaseConstraints(t *testing.T) {
 		mustExec(t, tx, p.q, p.args...)
 	}
 	mustExec(t, tx, insertDependency, depRow(6, "2026-09-26T09:12:40.1Z")...)
+	p := reproduction(kv, 1, "2026-09-26T09:12:40.1Z", r.frv1, 1)
+	mustExec(t, tx, p.q, p.args...)
 	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine", 11, 0)...)
 	// Two occurrences shown at one redacted path are two rows, told apart by their ordinals.
 	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine/<redacted>", 11, 0)...)
@@ -442,7 +524,7 @@ func TestReleaseConstraintControl(t *testing.T) {
 	withRelease := stmt{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
 		"v1.36.0", op2, r.human, "publisher"}}
 	withMachine := stmt{insertReleaseMachine, []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4),
-		digest(5), "x: 1\n", `[]`}}
+		digest(5), "x: 1\n", `[]`, "bw-artifact"}}
 	for _, c := range []struct {
 		drop string
 		pre  []stmt
@@ -452,7 +534,8 @@ func TestReleaseConstraintControl(t *testing.T) {
 		{"ALTER TABLE release_source DROP CONSTRAINT release_source_shape", []stmt{withRelease}, insertReleaseSource,
 			[]any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", r.machine, r.frv1, nil, nil, 1}},
 		{"ALTER TABLE dependency DROP CONSTRAINT dependency_shape", []stmt{withRelease, withMachine}, insertDependency,
-			[]any{rel2, r.machine, "encryption", "kv", kv, 1, created, nil, nil, nil, nil, nil}},
+			[]any{rel2, r.machine, "encryption", "transit", "bw-artifact", 1, "2026-09-26T09:12:40Z", "registry/example-pass",
+				nil, nil, nil, nil}},
 		{"ALTER TABLE release_source DROP CONSTRAINT release_source_kind_check", []stmt{withRelease}, insertReleaseSource,
 			[]any{rel2, r.cluster, "import-base", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1}},
 		{"ALTER TABLE dependency DROP CONSTRAINT dependency_kind_check", []stmt{withRelease, withMachine}, insertDependency,
@@ -472,7 +555,8 @@ func TestReleaseConstraintControl(t *testing.T) {
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_reason", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "Soft-Deleted", nil, created}},
 		{"ALTER TABLE release_machine DROP CONSTRAINT release_machine_key_version", []stmt{withRelease}, insertReleaseMachine,
-			[]any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", "vault:v9223372036854775808:YWJj", digest(4), digest(5), "x: 1\n", `[]`}},
+			[]any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", "vault:v9223372036854775808:YWJj", digest(4), digest(5), "x: 1\n", `[]`,
+				"bw-artifact"}},
 		{"ALTER TABLE release_machine DROP CONSTRAINT release_machine_assignment_source", []stmt{withRelease, withMachine,
 			{insertDependency, []any{rel2, r.machine, "encryption", "transit", "bw-artifact", 1, "2026-09-26T09:12:40Z", nil, nil, nil, nil, nil}}},
 			`SET CONSTRAINTS ALL IMMEDIATE`, nil},
@@ -492,6 +576,19 @@ func TestReleaseConstraintControl(t *testing.T) {
 			{insertReleaseSource, []any{rel2, r.cluster, "profile", nil, r.prf, nil, "workers", nil, nil, r.prv, nil, 1}},
 			{insertReleaseSource, []any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1}},
 			{insertReleaseSource, []any{rel2, r.cluster, "fragment", r.frgSite, nil, nil, "site-dns", nil, r.frvSite, nil, nil, 1}}},
+			`SET CONSTRAINTS ALL IMMEDIATE`, nil},
+		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_times", nil, insertStatusAt,
+			[]any{id.New(id.Dependency), kv, 9, "2026-09-26T09:12:41Z", "2026-09-26T09:12:40.999999Z", created}},
+		{"ALTER TABLE dependency DROP CONSTRAINT dependency_encryption_key", []stmt{withRelease, withMachine,
+			{insertStatus, []any{id.New(id.Dependency), "transit", "bw-other", 1, "retained", nil, nil, "2026-09-26T09:12:40Z"}}},
+			insertDependency, []any{rel2, r.machine, "encryption", "transit", "bw-other", 1, "2026-09-26T09:12:40Z", nil, nil, nil, nil, nil}},
+		{"DROP TRIGGER effective ON dependency", []stmt{withRelease, withMachine,
+			{insertReleaseSource, []any{rel2, r.cluster, "assignment", nil, nil, r.asg, nil, r.machine, nil, nil, r.asr, 1}},
+			{insertReleaseSource, []any{rel2, r.cluster, "profile", nil, r.prf, nil, "workers", nil, nil, r.prv, nil, 1}},
+			{insertReleaseSource, []any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1}},
+			{insertReleaseSource, []any{rel2, r.cluster, "fragment", r.frgSite, nil, nil, "site-dns", nil, r.frvSite, nil, nil, 1}},
+			{insertDependency, []any{rel2, r.machine, "encryption", "transit", "bw-artifact", 1, "2026-09-26T09:12:40Z", nil, nil, nil, nil, nil}},
+			{insertDependency, []any{rel2, r.machine, "effective", "kv", kv, 1, created, "registry/example-pass", nil, nil, nil, nil}}},
 			`SET CONSTRAINTS ALL IMMEDIATE`, nil},
 		{"ALTER TABLE draft DROP CONSTRAINT draft_published_release", nil,
 			`UPDATE draft SET state = 'published' WHERE id = $1`, []any{r.draft2}},
@@ -536,7 +633,8 @@ func TestReleaseImmutableTables(t *testing.T) {
 		}
 	}
 	for _, c := range []stmt{
-		{insertReleaseMachine, []any{r.rel, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5), "x: 1\n", `[]`}},
+		{insertReleaseMachine, []any{r.rel, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5), "x: 1\n", `[]`,
+			"bw-artifact"}},
 		{insertReleaseSource, []any{r.rel, r.cluster, "fragment", nil, nil, nil, "site-dns", nil, r.frvSite, nil, nil, 1}},
 		{insertDependency, []any{r.rel, r.machine, "effective", "kv", generation(r.cluster, r.claim), 1, created,
 			"registry/late", nil, nil, nil, nil}},
@@ -552,6 +650,49 @@ func TestReleaseImmutableTables(t *testing.T) {
 	if _, err := db.Exec(`UPDATE dependency_status SET class = 'unknown', reason = 'unreachable', unknown_since = now(),
 		recorded_at = now() WHERE id = $1`, r.depKV); err != nil {
 		t.Errorf("dependency_status update: %v; it is mutable", err)
+	}
+}
+
+// Dependency monitor §6.1 step 5 reads the releases that reference a dependency by its status; the
+// lookup uses the index on the status identity, not a scan of every release's rows. A table of a
+// few rows plans a sequential scan whatever its indexes, so the scan is disabled; with the index
+// dropped, the plan no longer names it.
+func TestDependencyStatusIndex(t *testing.T) {
+	db, _ := installed(t)
+	r := releaseRows(t, db)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(t, tx, `SET LOCAL enable_seqscan = off`)
+	plan := func() string {
+		t.Helper()
+		rows, err := tx.Query(`EXPLAIN SELECT DISTINCT d.release FROM dependency d
+			JOIN dependency_status s USING (provider, object, version, created) WHERE s.id = '` + r.depKV + `'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var lines []string
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				t.Fatal(err)
+			}
+			lines = append(lines, line)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(lines, "\n")
+	}
+	if p := plan(); !strings.Contains(p, "dependency_status_identity") {
+		t.Errorf("the lookup does not use the status identity index:\n%s", p)
+	}
+	mustExec(t, tx, `DROP INDEX dependency_status_identity`)
+	if p := plan(); strings.Contains(p, "dependency_status_identity") {
+		t.Errorf("without the index, the plan still names it:\n%s", p)
 	}
 }
 

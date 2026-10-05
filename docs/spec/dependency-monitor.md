@@ -202,7 +202,9 @@ Three tables, all in PA §3:
 
 A DependencyStatus row is updated only under its row lock, in a transaction
 that holds no provider request (PA §5 rule 1): the provider is asked first,
-then the transaction records the answer.
+then the transaction records the answer. A row's `recorded_at` is never
+before its `observed_from`; the schema refuses one that is, since §5.2's
+re-check dates a transition by it.
 
 ### 5.2 Seeding at publication
 
