@@ -151,13 +151,13 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 	}
 
 	recorded := map[occurrence]bool{}
-	// An occurrence's member has one outcome: one override, or one record per distinct output path.
+	// An occurrence's member has one outcome: one override, or output records. Output records are
+	// not counted: two alias outputs can read the same once redacted (compilation §8.3).
 	type outcome struct {
 		occurrence
 		member int
 	}
-	overridden := map[outcome]bool{}
-	outputs := map[outcome]map[string]bool{}
+	overridden, output := map[outcome]bool{}, map[outcome]bool{}
 	for _, r := range m.provenance {
 		if _, ok := composition[r.Source.Revision]; !ok {
 			return at("provenance source outside the composition", r.Source.Revision, r.Reference)
@@ -186,16 +186,13 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 		}
 		o := occurrence{r.Source.Revision, r.Reference, r.SourcePath, r.Occurrence}
 		k := outcome{o, r.Member}
-		if overridden[k] || (r.OverriddenBy != nil && outputs[k] != nil) || outputs[k][r.Output] {
+		if overridden[k] || (r.OverriddenBy != nil && output[k]) {
 			return at("provenance outcome repeated", r.Source.Revision, r.Reference)
 		}
 		if r.OverriddenBy != nil {
 			overridden[k] = true
 		} else {
-			if outputs[k] == nil {
-				outputs[k] = map[string]bool{}
-			}
-			outputs[k][r.Output] = true
+			output[k] = true
 		}
 		recorded[o] = true
 	}
