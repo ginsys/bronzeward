@@ -2533,7 +2533,7 @@ equals neither the restored epoch nor the lost one.
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
 | Publish | Dependency not `retained`, or provider sealed | `failed`, `503 dependency-unavailable` or `422` | operation, act |
 | Publish | Commit-unknown | resolved by reading the natural key | the release, once |
-| Publish | Deadlock retries exhausted, or `COMMIT` rejected (a deferred constraint) | operation `failed`, `503 transient-conflict` or `500 internal-error` | operation, act |
+| Publish | Deadlock retries exhausted, `COMMIT` rejected (a deferred constraint), or a statement breaking an integrity constraint (a release machine whose mode is not its machine's platform, for one) | operation `failed`, `503 transient-conflict` or `500 internal-error` | operation, act |
 | Publish | Compiled release disagrees with its sources' reference declarations or text digests | operation `failed`, `500 internal-error`; the clause logged | operation, act |
 | Publish | Worker superseded, or its lease lapsed | its commit refused by the fence; the job claimed again | the other worker's result |
 | Publish | New request for a draft already published | `409 conflict` naming the release | nothing |

@@ -785,10 +785,11 @@ func TestDependencyStatusIndex(t *testing.T) {
 }
 
 // refusal names a check refusal by its constraint, so a case refused by another check than the one
-// it targets fails; any other refusal is its SQLSTATE alone.
+// it targets fails, and so does release_machine_platform, the foreign key whose case shares its row
+// with others; any other refusal is its SQLSTATE alone.
 func refusal(err error) string {
 	var pe *pgconn.PgError
-	if errors.As(err, &pe) && pe.Code == "23514" {
+	if errors.As(err, &pe) && (pe.Code == "23514" || pe.Code == "23503" && pe.ConstraintName == "release_machine_platform") {
 		return pe.ConstraintName
 	}
 	return sqlState(err)
