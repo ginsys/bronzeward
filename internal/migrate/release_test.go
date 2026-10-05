@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -114,6 +115,37 @@ func TestReleaseConstraints(t *testing.T) {
 	mustExec(t, db, insertImportBase, ibr2, machine2, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2))
 	mustExec(t, db, insertReference, ibr2, "registry/example-pass", "string", 1, nil, kv)
 	mustExec(t, db, insertReference, ibr2, "registry/base-only", "string", 1, nil, kv) // r.ibr does not declare it
+	// Sources r.machine's assignment does not select: the fragment extras, declaring a reference no
+	// other source does, and the profile extras-set pinning it, both of which machine2's assignment
+	// selects; and a workers revision pinning site-dns instead of registries.
+	inTx := func(rows ...stmt) {
+		t.Helper()
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		for _, s := range rows {
+			mustExec(t, tx, s.q, s.args...)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	frvExtra, frgExtra := id.New(id.FragmentRevision), id.New(id.Fragment)
+	prvExtra, prfExtra, prvSiteOnly := id.New(id.ProfileRevision), id.New(id.Profile), id.New(id.ProfileRevision)
+	asr2, asg2 := id.New(id.AssignmentRevision), id.New(id.Assignment)
+	inTx(stmt{insertFragmentRevision, []any{frvExtra, r.cluster, "extras", "site", "machine: {}\n", r.human}},
+		stmt{insertFragmentReference, []any{frvExtra, "registry/fragment-only", "string", 1, nil, kv}})
+	mustExec(t, db, insertFragment, frgExtra, r.cluster, "cluster", "extras", "site", frvExtra, 1)
+	inTx(stmt{insertProfileRevision, []any{prvExtra, r.cluster, "extras-set", r.human}},
+		stmt{insertProfilePin, []any{prvExtra, r.cluster, 0, frvExtra}})
+	mustExec(t, db, insertProfile, prfExtra, r.cluster, "cluster", "extras-set", prvExtra, 1)
+	inTx(stmt{insertProfileRevision, []any{prvSiteOnly, r.cluster, "workers", r.human}},
+		stmt{insertProfilePin, []any{prvSiteOnly, r.cluster, 0, r.frvSite}})
+	inTx(stmt{insertAssignmentRevision, []any{asr2, r.cluster, machine2, r.human}},
+		stmt{insertAssignmentProfile, []any{asr2, 0, "extras-set"}}, stmt{insertAssignmentFragment, []any{asr2, "site", 0, "extras"}})
+	mustExec(t, db, insertAssignment, asg2, r.cluster, machine2, asr2, 1)
 	// rel2 is inserted in each case's transaction first, so its rows are written with it.
 	withRelease := []stmt{{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
 		"v1.36.0", op2, r.human, "publisher"}}}
@@ -167,9 +199,21 @@ func TestReleaseConstraints(t *testing.T) {
 	}
 	named := func(reference string, s stmt) stmt { s.args[7] = reference; return s }
 	on := func(machine string, s stmt) stmt { s.args[1] = machine; return s }
-	frvExtra := id.New(id.FragmentRevision) // declares a reference no other source does
-	withExtra := []stmt{{insertFragmentRevision, []any{frvExtra, r.cluster, "extras", "site", "machine: {}\n", r.human}},
-		{insertFragmentReference, []any{frvExtra, "registry/fragment-only", "string", 1, nil, kv}}}
+	// rel2 also naming extras, and the profile extras-set pinning it; r.machine selects neither.
+	extrasSource := source("fragment", frgExtra, "extras", frvExtra)
+	withExtras := slices.Concat(withSources, []stmt{extrasSource, source("profile", prfExtra, "extras-set", prvExtra)})
+	// machine2 in rel2, its assignment selecting both.
+	withMachine2 := slices.Concat(withExtras, []stmt{{insertReleaseMachine, machineRow(2, machine2, 3, ibr2, 4, asr2)},
+		source("assignment", asg2, machine2, asr2),
+		{insertDependency, depRow(1, machine2, 2, "encryption", 3, "transit", 4, "bw-artifact", 6, "2026-09-26T09:12:40Z", 7, nil)}})
+	fragmentOnly := []stmt{{insertDependency, depRow(7, "registry/fragment-only")},
+		named("registry/fragment-only", reproduction(kv, 1, created, frvExtra, 0))}
+	// site-dns, which the assignment selects, at a revision declaring a reference no other source does.
+	frvSite2 := id.New(id.FragmentRevision)
+	withSite2 := append(append([]stmt{}, withMachine...),
+		stmt{insertFragmentRevision, []any{frvSite2, r.cluster, "site-dns", "site", "machine: {}\n", r.human}},
+		stmt{insertFragmentReference, []any{frvSite2, "registry/site-only", "string", 1, nil, kv}},
+		assignmentSource, profileSource, pinnedSource, source("fragment", r.frgSite, "site-dns", frvSite2), withEncryption)
 	frvRole := id.New(id.FragmentRevision) // site-dns in the role layer
 	const commit = `SET CONSTRAINTS ALL IMMEDIATE`
 	for _, c := range []struct {
@@ -352,9 +396,25 @@ func TestReleaseConstraints(t *testing.T) {
 		{"effective dependency whose import base occurrence only another import base declares", append(withSources,
 			stmt{insertDependency, depRow(7, "registry/base-only")}, named("registry/base-only", reproduction(kv, 1, created, r.ibr, 0))),
 			commit, nil, "dependency_effective"},
-		{"effective dependency whose import base occurrence only a fragment revision declares", append(append(withExtra, withSources...),
+		{"effective dependency whose import base occurrence only a fragment revision declares", append(withSources,
 			stmt{insertDependency, depRow(7, "registry/fragment-only")}, named("registry/fragment-only", reproduction(kv, 1, created, r.ibr, 0))),
 			commit, nil, "dependency_effective"},
+		// The occurrence's source is in the machine's composition, not only somewhere in the release.
+		{"effective dependency whose fragment occurrence its machine does not compose", slices.Concat(withSources,
+			[]stmt{extrasSource}, fragmentOnly), commit, nil, "dependency_effective"},
+		{"effective dependency whose fragment occurrence only a profile its assignment does not select pins",
+			slices.Concat(withExtras, fragmentOnly), commit, nil, "dependency_effective"},
+		{"effective dependency whose fragment occurrence only another machine's assignment selects",
+			slices.Concat(withMachine2, fragmentOnly), commit, nil, "dependency_effective"},
+		{"control: effective dependency with the occurrence of a fragment its assignment selects and pins",
+			slices.Concat(withMachine2, []stmt{{insertDependency, depRow(1, machine2, 7, "registry/fragment-only")},
+				on(machine2, named("registry/fragment-only", reproduction(kv, 1, created, frvExtra, 0)))}), commit, nil, ""},
+		{"effective dependency whose fragment occurrence only another release's profile revision pins", slices.Concat(withMachine,
+			[]stmt{assignmentSource, source("profile", r.prf, "workers", prvSiteOnly), pinnedSource, siteSource, withEncryption,
+				{insertDependency, depRow()}, reproduction(kv, 1, created, r.frv1, 0)}), commit, nil, "dependency_effective"},
+		{"control: effective dependency with the occurrence of a fragment its assignment selects", append(withSite2,
+			stmt{insertDependency, depRow(7, "registry/site-only")}, named("registry/site-only", reproduction(kv, 1, created, frvSite2, 0))),
+			commit, nil, ""},
 		{"effective dependency whose only occurrence is another machine's", append(withSources,
 			stmt{insertReleaseMachine, machineRow(2, machine2, 3, ibr2, 4, nil)},
 			stmt{insertDependency, depRow(1, machine2, 2, "encryption", 3, "transit", 4, "bw-artifact", 6, "2026-09-26T09:12:40Z", 7, nil)},
