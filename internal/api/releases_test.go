@@ -73,7 +73,7 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 				ciphertext_digest, configuration_digest, redacted, provenance)
 			VALUES ($1, $2, $3, $4, 'container', $5, $6, $6, $7, $8::jsonb)`,
 			s.rel, d.cluster, m.machine, m.ibr, releaseCipher, make([]byte, 32), m.redacted,
-			strings.NewReplacer("{ibr}", m.ibr, "{frv}", s.frv).Replace(provenance))
+			strings.NewReplacer("{ibr}", m.ibr, "{ibr2}", ibr2, "{frv}", s.frv).Replace(provenance))
 	}
 	mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, fragment, name, fragment_revision, head_revision)
 		VALUES ($1, $2, 'fragment', $3, $4, $5, 1), ($1, $2, 'fragment', $6, $7, NULL, 2)`,
@@ -260,6 +260,16 @@ func TestReleaseReviewProvenanceProjected(t *testing.T) {
 		{"an output path outside the path grammar", `[` + strings.Replace(good, `"output":"doc[0]/machine/registries"`,
 			`"output":"`+standIn+`"`, 1) + `]`},
 		{"control: paths redacted whole", `[` + strings.ReplaceAll(good, `"doc[0]/machine/registries"`, `"<redacted>"`) + `]`},
+		// A source is the machine's own import base or a fragment revision among the release's sources.
+		{"a source at another machine's import base", `[` + strings.Replace(good, `{frv}`, `{ibr2}`, 1) + `]`},
+		{"a source at an import base of no machine", `[` + strings.Replace(good, `{frv}`, id.New(id.ImportBase), 1) + `]`},
+		{"a source at a fragment revision the release does not name", `[` + strings.Replace(good, `{frv}`,
+			id.New(id.FragmentRevision), 1) + `]`},
+		{"an override by a fragment revision the release does not name", `[` + strings.Replace(good,
+			`"output":"doc[0]/machine/registries"`, `"overriddenBy":{"revision":"`+id.New(id.FragmentRevision)+`","digest":"`+hexB+`"}`, 1) + `]`},
+		{"control: a source at the machine's import base", `[` + strings.Replace(good, `{frv}`, `{ibr}`, 1) + `]`},
+		{"control: an override by a source", `[` + strings.Replace(good, `"output":"doc[0]/machine/registries"`,
+			`"overriddenBy":{"revision":"{frv}","digest":"`+hexB+`"}`, 1) + `]`},
 		{"control", `[` + good + `]`}, // the record each case above breaks one way
 	} {
 		draft := d.draft

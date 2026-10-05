@@ -63,7 +63,9 @@ CREATE TRIGGER writer BEFORE INSERT ON release FOR EACH ROW EXECUTE FUNCTION sta
 -- the plaintext configuration (§1.1), and its review data: the redacted configuration and the
 -- provenance records (compilation §8.2, §8.3), which hold no value. A configuration that could
 -- not be redacted is NULL: it shows nothing and says so (§8.3). key_version is the Transit key
--- version the ciphertext names, which its encryption dependency records (compilation §9).
+-- version the ciphertext names, of up to 19 digits, which its encryption dependency records
+-- (compilation §9); one past the bigint range is NULL and refused. Its assignment revision is the
+-- one its release's assignment source names, inserted later in the transaction.
 CREATE TABLE release_machine (
   release              text NOT NULL,
   cluster              text NOT NULL,
@@ -71,8 +73,11 @@ CREATE TABLE release_machine (
   import_base_revision text NOT NULL,
   assignment_revision  text,
   mode                 text NOT NULL CHECK (mode IN ('metal', 'container', 'cloud')),
-  ciphertext           text NOT NULL CHECK (ciphertext ~ '^vault:v[1-9][0-9]{0,17}:[A-Za-z0-9+/]+={0,2}$'),
-  key_version          bigint GENERATED ALWAYS AS (substring(ciphertext FROM '^vault:v([0-9]{1,18}):')::bigint) STORED,
+  ciphertext           text NOT NULL CHECK (ciphertext ~ '^vault:v[1-9][0-9]{0,18}:[A-Za-z0-9+/]+={0,2}$'),
+  key_version          bigint GENERATED ALWAYS AS (CASE
+                         WHEN substring(ciphertext FROM '^vault:v([0-9]{1,19}):')::numeric <= 9223372036854775807
+                         THEN substring(ciphertext FROM '^vault:v([0-9]{1,19}):')::bigint END) STORED,
+  CONSTRAINT release_machine_key_version CHECK (key_version IS NOT NULL),
   ciphertext_digest    bytea NOT NULL CHECK (length(ciphertext_digest) = 32),
   configuration_digest bytea NOT NULL CHECK (length(configuration_digest) = 32),
   redacted             text CHECK (redacted <> ''),
@@ -136,6 +141,7 @@ CREATE TABLE release_source (
   UNIQUE (release, profile),
   UNIQUE (release, assignment),
   UNIQUE (release, fragment_revision),
+  UNIQUE (release, machine, assignment_revision),
   FOREIGN KEY (release, cluster) REFERENCES release (id, cluster),
   FOREIGN KEY (fragment, cluster, name) REFERENCES fragment (id, cluster, name) DEFERRABLE INITIALLY DEFERRED,
   FOREIGN KEY (profile, cluster, name) REFERENCES profile (id, cluster, name) DEFERRABLE INITIALLY DEFERRED,
@@ -147,6 +153,38 @@ CREATE TABLE release_source (
 CALL make_immutable('release_source');
 CREATE TRIGGER with_release BEFORE INSERT ON release_source
   FOR EACH ROW EXECUTE FUNCTION refuse_late_release_row();
+ALTER TABLE release_machine ADD CONSTRAINT release_machine_assignment_source
+  FOREIGN KEY (release, machine, assignment_revision) REFERENCES release_source (release, machine, assignment_revision)
+  DEFERRABLE INITIALLY DEFERRED;
+
+-- A release's sources are the ones its compilation used (§3.1): each fragment revision a profile
+-- source pins is a fragment source of the release, and each name an assignment source selects is a
+-- source of the release with a revision, a fragment one under the layer its revision carries. The
+-- sources are written in any order, so this is checked at commit.
+CREATE FUNCTION require_release_selection() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.profile_revision IS NOT NULL AND EXISTS (
+       SELECT FROM profile_revision_fragment p WHERE p.revision = NEW.profile_revision AND NOT EXISTS (
+         SELECT FROM release_source s WHERE s.release = NEW.release AND s.fragment_revision = p.fragment_revision)) THEN
+    RAISE EXCEPTION 'release_source: a profile pinning a fragment revision the release does not name is refused'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'release_source_pin', TABLE = 'release_source';
+  END IF;
+  IF NEW.assignment_revision IS NOT NULL AND (EXISTS (
+       SELECT FROM assignment_revision_profile a WHERE a.revision = NEW.assignment_revision AND NOT EXISTS (
+         SELECT FROM release_source s WHERE s.release = NEW.release AND s.kind = 'profile' AND s.name = a.profile
+           AND s.profile_revision IS NOT NULL))
+     OR EXISTS (
+       SELECT FROM assignment_revision_fragment a WHERE a.revision = NEW.assignment_revision AND NOT EXISTS (
+         SELECT FROM release_source s JOIN fragment_revision f ON f.id = s.fragment_revision
+         WHERE s.release = NEW.release AND s.name = a.fragment AND f.layer = a.layer))) THEN
+    RAISE EXCEPTION 'release_source: an assignment selecting a name the release does not name is refused'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'release_source_selection', TABLE = 'release_source';
+  END IF;
+  RETURN NULL;
+END
+$$;
+CREATE CONSTRAINT TRIGGER selection AFTER INSERT ON release_source DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION require_release_selection();
 
 -- The last classification of each provider object version a release depends on (dependency
 -- monitor §5.1): the only mutable dependency table, updated under its row lock. Its object is a
@@ -154,16 +192,16 @@ CREATE TRIGGER with_release BEFORE INSERT ON release_source
 -- one URL path segment of at most 227 bytes). A version is identified with the creation time the
 -- provider gave it (dependency monitor §3), as the dependency records name it: an object deleted
 -- and recreated reissues its version numbers, and the replacement is another dependency with its
--- own status. A retained version has no reason unless its deletion is scheduled, and every other
--- class one; only an unknown one has the time it became unknown.
+-- own status. Its class and reason are a row of the monitor's §3 table for its provider; only an
+-- unknown one has the time it became unknown.
 CREATE TABLE dependency_status (
   id                    text PRIMARY KEY CHECK (id ~ '^dep_[a-z2-7]{26}$'),
   provider              text NOT NULL CHECK (provider IN ('kv', 'transit')),
   object                text NOT NULL,
   version               bigint NOT NULL CHECK (version >= 1),
   created               text NOT NULL CHECK (created ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$'),
-  class                 text NOT NULL CHECK (class IN ('retained', 'blocked', 'lost', 'unknown')),
-  reason                text CHECK (reason ~ '^[a-z]+(-[a-z]+)*$'),
+  class                 text NOT NULL,
+  reason                text,
   first_retained_at     timestamptz,
   unknown_since         timestamptz,
   persistent_alerted_at timestamptz,
@@ -179,12 +217,21 @@ CREATE TABLE dependency_status (
     (provider <> 'kv' OR object ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$') AND
     (provider <> 'transit' OR (object NOT IN ('.', '..') AND octet_length(object) BETWEEN 1 AND 227
       AND object !~ '[/#?%\\[:space:][:cntrl:]]'))),
-  -- Dependency monitor §3: a retained version's only reason is deletion-scheduled, a KV version's,
-  -- with the scheduled time it observed.
-  CONSTRAINT dependency_status_reason CHECK (
-    (class = 'retained') = (reason IS NULL OR reason = 'deletion-scheduled')),
-  CONSTRAINT dependency_status_schedule CHECK (
-    reason <> 'deletion-scheduled' OR (provider = 'kv' AND deletion_observed IS NOT NULL)),
+  -- Dependency monitor §3's table, each provider's classes and reasons; a retained version's only
+  -- reason is a KV version's deletion-scheduled, with the scheduled time it observed. A NULL
+  -- comparison is no match, never a pass.
+  CONSTRAINT dependency_status_reason CHECK (COALESCE(
+    (class = 'retained' AND (reason IS NULL OR (provider = 'kv' AND reason = 'deletion-scheduled'))) OR
+    (class = 'unknown' AND reason IN ('malformed', 'denied', 'absent', 'unavailable', 'unreachable', 'unreadable',
+      'insufficient-evidence', 'identity-mismatch')) OR
+    (class = 'unknown' AND provider = 'kv' AND reason = 'deletion-time-undecidable') OR
+    (class = 'unknown' AND provider = 'transit' AND reason IN ('soft-delete-unobserved', 'trimmed-unverified',
+      'below-decryption-floor-unverified')) OR
+    (class = 'lost' AND provider = 'kv' AND reason IN ('destroyed', 'pruned')) OR
+    (class = 'lost' AND provider = 'transit' AND reason = 'trimmed') OR
+    (class = 'blocked' AND provider = 'kv' AND reason = 'soft-deleted') OR
+    (class = 'blocked' AND provider = 'transit' AND reason = 'below-decryption-floor'), false)),
+  CONSTRAINT dependency_status_schedule CHECK (reason <> 'deletion-scheduled' OR deletion_observed IS NOT NULL),
   CONSTRAINT dependency_status_unknown_since CHECK ((class = 'unknown') = (unknown_since IS NOT NULL))
 );
 
@@ -209,7 +256,7 @@ CREATE TABLE dependency (
                     AND octet_length(reference) <= 256),
   source_revision text CHECK (source_revision ~ '^(ibr|frv)_[a-z2-7]{26}$'),
   source_digest   bytea CHECK (length(source_digest) = 32),
-  path            text CHECK (path <> '' AND octet_length(path) <= 4096),
+  path            text CHECK (path <> ''),
   occurrence      integer CHECK (occurrence >= 0),
   key_version     bigint GENERATED ALWAYS AS (CASE WHEN kind = 'encryption' THEN version END) STORED,
   source_import_base text GENERATED ALWAYS AS (

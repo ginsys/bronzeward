@@ -821,8 +821,13 @@ INSERT INTO release ...;             -- unique (draft_id, draft_revision);
                                      -- published by the principal that
                                      -- requested $op, in its role
 INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
-                                     -- configuration digest, review data
-INSERT INTO release_source ...;      -- every revision and head revision used
+                                     -- configuration digest, review data; its
+                                     -- assignment revision its assignment
+                                     -- source's (checked at commit)
+INSERT INTO release_source ...;      -- every revision and head revision used:
+                                     -- each profile pin a fragment source,
+                                     -- each selected name a source with a
+                                     -- revision (checked at commit)
 INSERT INTO dependency ...;          -- both records, each reproduction source
                                      -- the machine's import base or a release
                                      -- source's fragment revision; and one
