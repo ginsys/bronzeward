@@ -130,6 +130,10 @@ func TestCompileAttributesEachKind(t *testing.T) {
 		if want, ok := kinds[r.Reference]; ok && r.Kind != want {
 			t.Errorf("%s recorded as kind %q, want %q", r.Reference, r.Kind, kinds[r.Reference])
 		}
+		// A mapping's records name its member count, so a missing member shows; app/map has two.
+		if want := map[bool]int{true: 2, false: 0}[r.Reference == "app/map"]; kinds[r.Reference] != "" && r.Members != want {
+			t.Errorf("%s recorded with %d members, want %d", r.Reference, r.Members, want)
+		}
 	}
 }
 

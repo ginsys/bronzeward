@@ -164,6 +164,29 @@ func TestPublishCommitDeclarations(t *testing.T) {
 		{"provenance mapping without member", "provenance member does not fit the declared kind", func(p *publishEnv) {
 			p.importBase("mapping", nil)
 		}},
+		{"provenance scalar with members", "provenance member does not fit the declared kind", func(p *publishEnv) {
+			p.unit.machines[0].provenance[0].Members = 1
+		}},
+		{"provenance member past its mapping", "provenance member does not fit the declared kind", func(p *publishEnv) {
+			p.importBase("mapping", nil)
+			r := &p.unit.machines[0].provenance[0]
+			r.Member, r.Members = 2, 2
+		}},
+		// Each member of a mapping occurrence has an outcome (compilation §8.2).
+		{"provenance mapping member missing", "provenance occurrence without an outcome for every member", func(p *publishEnv) {
+			p.importBase("mapping", nil)
+			r := &p.unit.machines[0].provenance[0]
+			r.Member, r.Members, r.Output = 1, 2, "doc[0]/machine/registries/<redacted>"
+		}},
+		{"provenance member counts differ", "provenance member count differs within an occurrence", func(p *publishEnv) {
+			p.importBase("mapping", nil)
+			m := &p.unit.machines[0]
+			r := m.provenance[0]
+			r.Member, r.Members, r.Output = 0, 2, "doc[0]/machine/registries/<redacted>"
+			m.provenance[0] = r
+			r.Member, r.Members = 1, 3
+			m.provenance = append(m.provenance, r)
+		}},
 		// Every scalar kind has no member, so the kind itself is compared.
 		{"provenance scalar kind", "provenance kind differs from the declaration", func(p *publishEnv) {
 			p.unit.machines[0].provenance[0].Kind = "boolean"
@@ -171,7 +194,7 @@ func TestPublishCommitDeclarations(t *testing.T) {
 		{"provenance mapping member as a scalar kind", "provenance kind differs from the declaration", func(p *publishEnv) {
 			p.importBase("mapping", nil)
 			r := &p.unit.machines[0].provenance[0]
-			r.Member, r.Kind = 0, "string"
+			r.Member, r.Members, r.Kind = 0, 1, "string"
 		}},
 		{"provenance override outside", "provenance override is not a fragment of the composition", func(p *publishEnv) {
 			r := &p.unit.machines[0].provenance[0]
@@ -268,7 +291,7 @@ func TestPublishCommitDeclarationsAgree(t *testing.T) {
 		m := &p.unit.machines[0]
 		// Each member's key is a value, so both output paths read the same (compilation §8.3).
 		r := m.provenance[0]
-		r.Member, r.Output = 0, "doc[0]/machine/registries/<redacted>"
+		r.Member, r.Members, r.Output = 0, 2, "doc[0]/machine/registries/<redacted>"
 		m.provenance[0] = r
 		r.Member = 1
 		m.provenance = append(m.provenance, r)
@@ -299,7 +322,7 @@ func TestPublishCommitDeclarationsAgree(t *testing.T) {
 		p.importBase("mapping", nil)
 		m := &p.unit.machines[0]
 		r := m.provenance[0]
-		r.Member, r.Output = 0, ""
+		r.Member, r.Members, r.Output = 0, 2, ""
 		r.OverriddenBy = &compile.Origin{Fragment: 0, Revision: p.networkNew, Digest: textDigest("machine: {}")}
 		m.provenance[0] = r
 		r.Member = 1

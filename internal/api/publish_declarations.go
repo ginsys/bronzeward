@@ -167,6 +167,8 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 		member int
 	}
 	overridden, output := map[outcome]bool{}, map[outcome]bool{}
+	// Each member of an occurrence has an outcome: a scalar has one member, a mapping its count.
+	members, covered := map[occurrence]int{}, map[occurrence]int{}
 	for _, r := range m.provenance {
 		if _, ok := composition[r.Source.Revision]; !ok {
 			return at("provenance source outside the composition", r.Source.Revision, r.Reference)
@@ -182,7 +184,8 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 			return at("provenance version differs from the declaration", r.Source.Revision, r.Reference)
 		case r.Encoding != decl.encoding:
 			return at("provenance encoding differs from the declaration", r.Source.Revision, r.Reference)
-		case decl.kind == "mapping" && r.Member < 0, decl.kind != "mapping" && r.Member != -1:
+		case decl.kind == "mapping" && (r.Member < 0 || r.Member >= r.Members),
+			decl.kind != "mapping" && (r.Member != -1 || r.Members != 0):
 			return at("provenance member does not fit the declared kind", r.Source.Revision, r.Reference)
 		case r.Kind != decl.kind:
 			return at("provenance kind differs from the declaration", r.Source.Revision, r.Reference)
@@ -204,6 +207,13 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 		k := outcome{o, r.Member}
 		if overridden[k] || (r.OverriddenBy != nil && output[k]) {
 			return at("provenance outcome repeated", r.Source.Revision, r.Reference)
+		}
+		if n, ok := members[o]; ok && n != max(r.Members, 1) {
+			return at("provenance member count differs within an occurrence", r.Source.Revision, r.Reference)
+		}
+		members[o] = max(r.Members, 1)
+		if !output[k] {
+			covered[o]++
 		}
 		if r.OverriddenBy != nil {
 			overridden[k] = true
@@ -228,6 +238,11 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 			if !recordedUses[use{source, name}] {
 				return at("declaration without a provenance record", source, name)
 			}
+		}
+	}
+	for _, r := range m.provenance {
+		if o := (occurrence{r.Source.Revision, r.Reference, r.SourcePath, r.Occurrence}); covered[o] != members[o] {
+			return at("provenance occurrence without an outcome for every member", r.Source.Revision, r.Reference)
 		}
 	}
 	for _, r := range m.provenance {
