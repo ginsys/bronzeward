@@ -22,6 +22,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/baotest"
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
@@ -602,6 +603,58 @@ func TestIngestOddKeysAndURL(t *testing.T) {
 	_, created := ie.f.paths()
 	if n := count(t, ie.db, `SELECT count(*) FROM import_base_reference WHERE revision = $1 AND generation = ANY ($2)`, ibr, created); len(created) != 5 || n != 5 {
 		t.Fatalf("%d of %d created generations referenced", n, len(created))
+	}
+}
+
+// An import whose value sits in an identified embedded document stores the identification with
+// the import base, so the stored revision can be rebuilt with the authoring checks, as publication
+// rebuilds it (ruling R29).
+func TestIngestStoresEmbeddedIdentification(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	const inner = "bw-synthetic-inner-5"
+	doc := "machine:\n  token: " + runToken + "\ncluster:\n  inlineManifests:\n    - name: s\n      contents: |\n" +
+		"        apiVersion: v1\n        kind: Secret\n        stringData:\n          password: " + inner + "\n"
+	op, j := ie.startJob(t, map[string]any{"document": doc,
+		"marks":        []string{"doc[0]/cluster/inlineManifests/0/contents|yaml/stringData/password"},
+		"declarations": map[string]any{"embedded": []map[string]string{{"path": "doc[0]/cluster/inlineManifests/0/contents", "format": "yaml"}}}})
+	ie.runWith(t, options{}, j)
+	r := readOp(t, ie.db, op)
+	if r.state != "succeeded" {
+		t.Fatalf("operation %+v", r)
+	}
+	ibr := fmt.Sprint(r.result["importBaseRevision"])
+	var stored, embedded string
+	if err := ie.db.QueryRow(`SELECT document, embedded FROM import_base_revision WHERE id = $1`, ibr).Scan(&stored, &embedded); err != nil {
+		t.Fatal(err)
+	}
+	decl := ingest.Declarations{References: map[string]ingest.Reference{}}
+	if err := json.Unmarshal([]byte(embedded), &decl.Embedded); err != nil {
+		t.Fatal(err)
+	}
+	if want := []ingest.Embedded{{Path: "doc[0]/cluster/inlineManifests/0/contents", Format: "yaml"}}; !reflect.DeepEqual(decl.Embedded, want) {
+		t.Fatalf("embedded %+v, want %+v", decl.Embedded, want)
+	}
+	rows, err := ie.db.Query(`SELECT name, kind, version, coalesce(encoding, '') FROM import_base_reference WHERE revision = $1`, ibr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var name, kind, encoding string
+		var version int64
+		if err := rows.Scan(&name, &kind, &version, &encoding); err != nil {
+			t.Fatal(err)
+		}
+		decl.References[name] = ingest.Reference{Kind: provider.Kind(kind), Version: version, Encoding: encoding}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(decl.References) != 2 {
+		t.Fatalf("%d references, want 2", len(decl.References))
+	}
+	if _, err := ingest.Stored(stored, decl); err != nil {
+		t.Fatalf("the stored import base does not rebuild: %v", err)
 	}
 }
 

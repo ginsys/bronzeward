@@ -45,8 +45,8 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 	ibr1, ibr2 := id.New(id.ImportBase), id.New(id.ImportBase)
 	s.ibr = ibr1
 	for _, ib := range [][2]string{{ibr1, d.machine}, {ibr2, s.machine2}} {
-		mustExec(t, d.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
-			baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		mustExec(t, d.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+			baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
 			ib[0], ib[1], make([]byte, 32))
 	}
 	s.frv = d.fragmentRevision(d.cluster, "registries-"+draft[4:8], "override")

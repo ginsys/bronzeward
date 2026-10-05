@@ -184,10 +184,13 @@ CREATE UNIQUE INDEX machine_talos_node_id ON machine (talos_node_id);
 -- An import base revision (§3, §3.2; compilation §2.3 step 8, §6): the machine's sanitized
 -- document, its baseline ciphertext, the baseline's keyed digest with the key identity and version
 -- that computed it (compilation §4.1), and its unkeyed configuration digest (choice §16.26 there).
+-- embedded holds the embedded documents the import identified (compilation §5.2), as a fragment
+-- revision's does, so publication rebuilds the stored document with the authoring checks.
 CREATE TABLE import_base_revision (
   id                   text PRIMARY KEY CHECK (id ~ '^ibr_[a-z2-7]{26}$'),
   machine              text NOT NULL REFERENCES machine (id),
   document             text NOT NULL CHECK (document <> ''),
+  embedded             jsonb NOT NULL CHECK (jsonb_typeof(embedded) = 'array'),
   baseline_ciphertext  bytea NOT NULL CHECK (length(baseline_ciphertext) > 0),
   baseline_digest      bytea NOT NULL CHECK (length(baseline_digest) = 32),
   baseline_digest_key  text NOT NULL CHECK (btrim(baseline_digest_key) <> '' AND octet_length(baseline_digest_key) <= 256),
