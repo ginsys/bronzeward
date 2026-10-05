@@ -215,6 +215,10 @@ jobs:
           sparse-checkout: scripts/ci
       - name: Fail unless every job succeeded
         env:
-          RESULTS: ${{ toJSON(needs) }}
+          NEEDS: ${{ toJSON(needs) }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+          COMMIT_LINT: ${{ needs.commit-lint.result }}
           EVENT: ${{ github.event_name }}
-        run: scripts/ci/needs-check.sh
+        run: |
+          printf '%s\n' "$NEEDS"
+          scripts/ci/needs-check.sh

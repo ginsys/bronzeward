@@ -1,25 +1,34 @@
 #!/usr/bin/env bash
-# ci.yml's `checks` job: passes only when every needed job succeeded. RESULTS is toJSON(needs),
-# EVENT the triggering event. commit-lint runs only on pull requests (its own `if:`), so it may be
-# skipped elsewhere; any other result fails, including one GitHub adds later (a hosted-runner
-# outage reports `abandoned`), and so do empty results.
+# ci.yml's `checks` job: passes only when every needed job succeeded. RESULTS is
+# join(needs.*.result, ' '), one word per needed job as GitHub reports it, so no job output can
+# pose as a result; COMMIT_LINT is needs.commit-lint.result and EVENT the triggering event.
+# commit-lint runs only on pull requests (its own `if:`), so one `skipped`, its own, is accepted
+# elsewhere. Any other result fails, including one GitHub adds later (a hosted-runner outage
+# reports `abandoned`), and so do empty results.
 set -euo pipefail
-: "${EVENT:?EVENT is not set}"
-[ -n "${RESULTS:-}" ] || { echo "checks: no job results" >&2; exit 1; }
-printf '%s\n' "$RESULTS"
-awk -v event="$EVENT" '
-  # A job is a two-space-indented key opening an object; its result follows on its own line.
-  match($0, /^  "[^"]+": \{/) { job = substr($0, 4, RLENGTH - 7); next }
-  match($0, /"result": "[^"]*"/) {
-    result = substr($0, RSTART + 11, RLENGTH - 12)
-    jobs++
-    if (result == "success") next
-    if (result == "skipped" && job == "commit-lint" && event != "pull_request") next
-    printf "checks: %s: %s\n", job, result > "/dev/stderr"
-    bad++
-  }
-  END {
-    if (jobs == 0) { print "checks: no job results" > "/dev/stderr"; exit 1 }
-    exit (bad > 0)
-  }
-' <<<"$RESULTS"
+: "${EVENT:?EVENT is not set}" "${COMMIT_LINT:?COMMIT_LINT is not set}"
+read -r -a results <<<"${RESULTS:-}"
+[ "${#results[@]}" -gt 0 ] || { echo "checks: no job results" >&2; exit 1; }
+skip_allowed=0
+if [ "$COMMIT_LINT" = skipped ] && [ "$EVENT" != pull_request ]; then
+  skip_allowed=1
+fi
+bad=0
+for result in "${results[@]}"; do
+  case $result in
+    success) ;;
+    skipped)
+      if [ "$skip_allowed" -eq 1 ]; then
+        skip_allowed=0
+      else
+        echo "checks: a job was skipped" >&2
+        bad=1
+      fi
+      ;;
+    *)
+      echo "checks: a job ended $result" >&2
+      bad=1
+      ;;
+  esac
+done
+exit "$bad"
