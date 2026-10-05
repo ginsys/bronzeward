@@ -83,7 +83,8 @@ jobs:
 
   test:
     # The commit-lint fixtures: every accepted and rejected subject shape, plus the range-walk
-    # failure cases. `commit-lint` below checks only this PR's own subjects.
+    # failure cases. `commit-lint` below checks only this PR's own subjects. Also the fixtures for
+    # `checks`' own script.
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 5
     steps:
@@ -201,22 +202,19 @@ jobs:
       - uses: go-kure/.github/.github/actions/check-action-pins@ae10bfb8f99fd5ddcee3185d1a420be14b201e3c # main 2026-09-07 (go-kure/.github#154 merge)
 
   checks:
-    # Aggregator: fails on any failed or cancelled job. `commit-lint` is skipped by design outside
-    # pull requests, so `skipped` counts as success only for that job.
+    # Aggregator: passes only when every needed job succeeded. `commit-lint` is skipped by design
+    # outside pull requests, so `skipped` counts as success only for that job there. Any other
+    # result fails, including `abandoned` (a job that never got a runner).
     if: always()
     needs: [docs, site, actionlint, test, go, go-db, commit-lint, action-pins]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: scripts/ci
       - name: Fail unless every job succeeded
         env:
           RESULTS: ${{ toJSON(needs) }}
           EVENT: ${{ github.event_name }}
-        run: |
-          echo "$RESULTS"
-          if echo "$RESULTS" | grep -Eq '"result": "(failure|cancelled)"'; then
-            exit 1
-          fi
-          if [ "$EVENT" = pull_request ] && echo "$RESULTS" | grep -Eq '"result": "skipped"'; then
-            exit 1
-          fi
+        run: scripts/ci/needs-check.sh
