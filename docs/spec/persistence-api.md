@@ -381,9 +381,7 @@ They are held apart **(choice §17.29)**.
   the one it bound. Like inventory, it is accepted installation-wide in
   recovery mode (§12.2): it changes nothing on a machine, and a restored
   endpoint may be the one that no longer answers. The column is `NOT NULL`:
-  every machine has an endpoint. Bronzeward is unreleased, so the migration
-  adding it supports no earlier database: on one already holding machines it
-  fails, and the operator recreates the database (§11 rule 6).
+  every machine has an endpoint.
 - **The credential is per cluster, in the provider.** Talos authorizes a client
   certificate signed by the cluster's own certificate authority, so one
   credential reaches every node of the cluster (design §13.1, "cluster-specific
@@ -2139,10 +2137,12 @@ Rules **(choice §17.24)**:
    tables, columns with constant defaults, indexes and constraints.
 5. There is no downgrade. Undoing a migration means restoring a database
    backup, which is a restore (§12).
-6. Until a first release, a migration need not upgrade an earlier database,
-   and rule 4's limit on what it may add does not bind it. One adding a required value that existing rows cannot have, such as a
-   machine's Talos endpoint (§3.3), adds it `NOT NULL` and fails on a
-   database holding such rows; the operator recreates the database.
+6. Until the first release, the schema is one migration,
+   `0001_schema.sql`, edited in place: a schema change edits the statement
+   that creates what it changes, and no migration alters another. A database
+   migrated from an earlier version of that file fails rule 2's checksum
+   comparison and is recreated; nothing upgrades it. Rule 4 binds from the
+   first release.
 
 DB tested the engine properties only. No v1 migration tool, online migration
 of a large table or downgrade was attempted
@@ -2439,15 +2439,17 @@ knows:
 
 ### 13.5 A migration
 
+A release after the first; before it, there is one migration (§11 rule 6).
+
 1. The operator stops the service and runs the migrate command for a binary
-   whose migrations 1–12 are applied and whose 13th adds an index.
+   whose migrations 1–3 are applied and whose 4th adds an index.
 2. An orchestrator also starts a second migrate run. Both take
-   `pg_advisory_xact_lock`; the second waits, then finds version 13 recorded
+   `pg_advisory_xact_lock`; the second waits, then finds version 4 recorded
    and skips it (DB row 025).
-3. Had the first run been killed inside migration 13's transaction, nothing of
-   13 would exist and the next run would apply it (DB row 024).
-4. The operator starts the service. It finds versions 1–13 with matching
-   checksums and starts. An older binary started by mistake finds version 13
+3. Had the first run been killed inside migration 4's transaction, nothing of
+   4 would exist and the next run would apply it (DB row 024).
+4. The operator starts the service. It finds versions 1–4 with matching
+   checksums and starts. An older binary started by mistake finds version 4
    it does not know and refuses to start.
 
 ### 13.6 A restore to an older backup
@@ -2947,7 +2949,11 @@ design and evidence do not settle the question. Each is marked in place as
     The alternative needs a directory lookup or a session to observe the loss.
 24. **Migrations by explicit command with the service stopped; startup refuses
     any schema or checksum mismatch; no rewrite of immutable rows; no
-    downgrade** (§11). Alternative: migrate at startup.
+    downgrade** (§11). Alternative: migrate at startup. Until the first
+    release, one migration edited in place, with earlier databases recreated
+    (§11 rule 6). Owner decision, 2026-10-05 (ginsys/bronzeward#112).
+    Alternative: a migration per change from the start, each altering earlier
+    ones, which is an upgrade path no unreleased database needs.
 25. **The epoch is a random, never-reissued 128-bit identity compared by
     equality, with no counter** (§12.1), as execution and recovery's revision
     requires (§1.2 item 10).

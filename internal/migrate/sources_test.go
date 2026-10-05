@@ -10,7 +10,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-// The statements 0009's tests insert with.
+// The statements the source tests insert with.
 const (
 	insertFragmentRevision = `INSERT INTO fragment_revision (id, cluster, name, layer, document, author, embedded, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, '[]', now())`
@@ -37,7 +37,7 @@ type stmt struct {
 	args []any
 }
 
-// sources holds one of each 0009 row, inserted by sourceRows on top of adoptionRows.
+// sources holds one of each source row, inserted by sourceRows on top of adoptionRows.
 type sources struct {
 	adoption
 	frv1, frv2, frvOther, frvSite, frg, prv, prf, asr, asg string
@@ -168,7 +168,7 @@ func TestSourcesConstraints(t *testing.T) {
 	mustExec(t, db, insertSourceEntry, s.draft2, s.cluster, "profile", "new-profile", nil, nil, nil, nil, nil)
 }
 
-// The control for 0009's named checks: with each dropped, the row TestSourcesConstraints expects it
+// The control for the source tables' named checks: with each dropped, the row TestSourcesConstraints expects it
 // to refuse commits, so it is that check, not another, that refuses.
 func TestSourcesConstraintControl(t *testing.T) {
 	db, _ := installed(t)
@@ -383,7 +383,7 @@ func unseenRevisionRow(t *testing.T, db *sql.DB, s sources) {
 	}
 }
 
-// 0010 (compilation §5.2): a fragment revision's embedded declarations are a JSON array, never
+// Compilation §5.2: a fragment revision's embedded declarations are a JSON array, never
 // absent, and immutable with the revision.
 func TestFragmentRevisionEmbedded(t *testing.T) {
 	db, _ := installed(t)

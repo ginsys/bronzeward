@@ -75,7 +75,7 @@ func newPublishEnv(t *testing.T) *publishEnv {
 	p.baseRev = d.fragmentRevision(d.cluster, "base", "global")
 	p.base = d.fragmentHead("base", "global", p.baseRev, 1)
 
-	// A revision's rows are written in its own transaction (0009).
+	// A revision's rows are written in its own transaction (refuse_late_revision_row).
 	tx, err := d.db.Begin()
 	if err != nil {
 		t.Fatal(err)

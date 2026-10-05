@@ -91,7 +91,7 @@ func TestDraftUpdatePreconditions(t *testing.T) {
 	wantProblem(t, d.put("/profiles/workers", body, `"1-aaaaaaaaaaaaaaaaaaaaaaaaaa"`, d.key()), http.StatusPreconditionFailed, "precondition-failed")
 	for _, state := range []string{"queued", "running"} {
 		op := id.New(id.Operation)
-		// A running job has an owner and a lease (0004); a queued one has neither.
+		// A running job has an owner and a lease; a queued one has neither.
 		mustExec(t, d.db, `INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, lease_until, draft,
 			draft_revision, created_by, created_by_kind, created_role, created_at)
 			SELECT $1, 'publish', $2, epoch, CASE WHEN $2 = 'running' THEN 'run-1/4242/pub' END, CASE WHEN $2 = 'running' THEN 1 ELSE 0 END,

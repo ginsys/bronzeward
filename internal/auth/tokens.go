@@ -22,7 +22,7 @@ const tokenPrefix = "bwt_"
 
 const (
 	DefaultExpiry = 30 * 24 * time.Hour // choice §17.17
-	MaxExpiry     = 90 * 24 * time.Hour // 0002's CHECK says 2160 hours
+	MaxExpiry     = 90 * 24 * time.Hour // the schema's CHECK says 2160 hours
 )
 
 // Issued is a new token. Token is shown once and never stored.

@@ -276,7 +276,7 @@ func inTx(ctx context.Context, conn *sql.Conn, o options, fn func(*sql.Tx) error
 	return tx.Commit()
 }
 
-// ImmutableSQLState is the SQLSTATE an immutable table's trigger raises (0001_foundation.sql).
+// ImmutableSQLState is the SQLSTATE an immutable table's trigger raises (0001_schema.sql).
 const ImmutableSQLState = "BW001"
 
 // Install records the installation once (§12.1): the first run mints its epoch, with that

@@ -7,7 +7,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-// PA §7.1, §10.4: what the schema itself refuses in 0003.
+// PA §7.1, §10.4: what the schema itself refuses in the request tables.
 func TestRequestConstraints(t *testing.T) {
 	db, _ := migrated(t)
 	if _, _, err := Install(context.Background(), db); err != nil {

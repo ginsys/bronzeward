@@ -316,7 +316,7 @@ func TestRevocationRaceNoLockControl(t *testing.T) {
 
 // now() is the transaction's start. A revocation whose transaction began before the rotation it
 // then waits on writes a revoked_at earlier than the new token's issued_at; nothing may refuse
-// that (0002 has no revoked_at-after-issued_at CHECK for this reason).
+// that (the schema has no revoked_at-after-issued_at CHECK for this reason).
 func TestRevocationBegunBeforeRotation(t *testing.T) {
 	db := migrated(t)
 	is := issued(t, storeFor(db), "ci")
