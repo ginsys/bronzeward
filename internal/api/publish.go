@@ -122,7 +122,18 @@ func (a *API) publishCommit(ctx context.Context, j publishJob, u releaseUnit) (s
 		}
 		return err
 	})
-	if errors.Is(err, errRefused) {
+	var pe *pgconn.PgError
+	switch {
+	case errors.Is(err, errRefused):
+	case isDeadlock(err):
+		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the publication deadlocked on every attempt; nothing was committed")
+	case errors.Is(err, errStop) && errors.As(err, &pe) && !connLost(err):
+		// The server rejected the COMMIT, a deferred trigger for one: the release rolled back. A
+		// lost reply instead leaves the outcome unknown, for a retry to read (§5 rule 6).
+		a.o.logf("publication %s: %v", j.op, err)
+		ref = refuse(http.StatusInternalServerError, "internal-error", "the publication commit was rejected; nothing was committed")
+	}
+	if ref != nil {
 		// The refusal rolled the commit back; a separate transaction records the operation failed
 		// with its problem and terminal event (§6.2), fenced on this owner.
 		if err := a.inTx(ctx, func(tx *sql.Tx) error {

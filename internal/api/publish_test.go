@@ -12,6 +12,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/classify"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/staging"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // publishEnv is a draft ready for its publication commit (T3, persistence-api.md §6.2): at
@@ -528,6 +529,65 @@ func TestPublishCommitIntroducedNameConcurrently(t *testing.T) {
 		SELECT $1, cluster, 'cluster', name, layer, id, 1, 'm3oxmlfh6phr7aigshdydcb4ji', now() FROM fragment_revision WHERE id = $2`,
 		other, p.fragmentRevision(p.cluster, "storage", "role"))
 	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"head": other, "expected": "absent", "actual": 1})
+}
+
+// committing answers the first n COMMITs of the commit with err, rolled back, and commits the
+// rest, so the failure transaction that follows commits.
+func (p *publishEnv) committing(n int, err error) *int {
+	calls := new(int)
+	p.a = p.buildWith(deps{owner: p.owner}, options{commit: func(tx *sql.Tx) error {
+		if *calls++; *calls <= n {
+			_ = tx.Rollback()
+			return err
+		}
+		return tx.Commit()
+	}})
+	return calls
+}
+
+// §5 rule 5: a deadlock is retried whole, at most three times; then the operation fails 503
+// transient-conflict.
+func TestPublishCommitDeadlocked(t *testing.T) {
+	p := newPublishEnv(t)
+	calls := p.committing(maxAttempts, &pgconn.PgError{Code: "40P01", Message: "deadlock detected (test)"})
+	p.refused(503, "transient-conflict")
+	if *calls != maxAttempts+1 {
+		t.Fatalf("%d COMMITs; want %d attempts and the failure", *calls, maxAttempts)
+	}
+}
+
+// A COMMIT the server rejected, such as a deferred trigger's, rolled the release back: the
+// operation fails 500 internal-error. A lost reply is its control: the outcome is unknown, so the
+// operation stays running for a retry, which reads the natural key first (§5 rule 6).
+func TestPublishCommitRejected(t *testing.T) {
+	p := newPublishEnv(t)
+	first := true
+	p.a = p.buildWith(deps{owner: p.owner}, options{commit: func(tx *sql.Tx) error {
+		if first {
+			// A source naming a head that does not exist fails its deferred foreign key at COMMIT.
+			first = false
+			mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, profile, name, head_revision)
+				SELECT id, cluster, 'profile', 'prf_`+strings.Repeat("a", 26)+`', 'ghost', 1 FROM release WHERE operation = $1`, p.job.op)
+		}
+		return tx.Commit()
+	}})
+	p.refused(500, "internal-error")
+
+	p = newPublishEnv(t)
+	p.committing(1, &pgconn.PgError{Code: "08006", Message: "connection lost at COMMIT (test)"})
+	if _, ref, err := p.a.publishCommit(t.Context(), p.job, p.unit); err == nil || ref != nil {
+		t.Fatalf("%v %v; want the error", ref, err)
+	}
+	var state string
+	if err := p.db.QueryRow(`SELECT state FROM operation WHERE id = $1`, p.job.op).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "running" {
+		t.Fatalf("operation %s after a lost reply", state)
+	}
+	if _, ref := p.commit(); ref != nil {
+		t.Fatalf("the retry: %v", ref)
+	}
 }
 
 // A covered machine whose import base the draft does not carry and which has no Applied release
