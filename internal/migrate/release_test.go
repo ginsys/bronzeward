@@ -137,6 +137,7 @@ func TestReleaseConstraints(t *testing.T) {
 		{"release of an ingest operation", []stmt{
 			{insertClaim, []any{claim2, "transient", "held", nil, nil, nil}},
 			{insertOperation, []any{op3, "ingest", "running", "run-1/4242/start-2", 1, r.draft2, 1, claim2, r.human, nil, nil}},
+			{`UPDATE operation SET created_role = 'publisher' WHERE id = $1`, []any{op3}},
 		}, insertRelease, newRelease(9, op3), "23503"},
 		{"release of another draft's publish operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
 			r.draft, 1, nil, r.human, nil, nil}}}, insertRelease, newRelease(9, op3), "23503"},
