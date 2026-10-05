@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -362,6 +364,39 @@ func TestPublishCommitDifferentContent(t *testing.T) {
 	p.refused(409, "conflict")
 	if p.count(`SELECT count(*) FROM release`) != 1 {
 		t.Fatal("a second release was written")
+	}
+}
+
+// A worker whose ownership was superseded, or whose epoch is no longer current, writes nothing:
+// no release, and no failure record either (§5.1, §6.2).
+func TestPublishCommitFenced(t *testing.T) {
+	for name, fence := range map[string]string{
+		"generation": `UPDATE operation SET owner_gen = 2 WHERE id = $1`,
+		"owner":      `UPDATE operation SET owner = 'run-2/1/publish' WHERE id = $1`,
+		// A superseded worker that would be refused records no failure either.
+		"refused": `WITH d AS (UPDATE draft SET state = 'discarded' WHERE id = (SELECT draft FROM operation WHERE id = $1))
+			UPDATE operation SET owner_gen = 2 WHERE id = $1`,
+		// A recovery entry moved the installation's epoch; the operation still names this owner's.
+		"epoch": `WITH e AS (INSERT INTO recovery_epoch (epoch, entered_at) VALUES ('ep_` + strings.Repeat("b", 26) + `', now())
+			RETURNING epoch) UPDATE installation_state SET epoch = (SELECT epoch FROM e) WHERE $1 <> ''`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPublishEnv(t)
+			mustExec(t, p.db, fence, p.job.op)
+			_, ref, err := p.a.publishCommit(t.Context(), p.job, p.unit)
+			if !errors.Is(err, staging.ErrFenced) || ref != nil {
+				t.Fatalf("%v %v; want fenced", ref, err)
+			}
+			var state string
+			var events int
+			if err := p.db.QueryRow(`SELECT state, last_event FROM operation WHERE id = $1`, p.job.op).Scan(&state, &events); err != nil {
+				t.Fatal(err)
+			}
+			if state != "running" || events != 0 || p.count(`SELECT count(*) FROM release`) != 0 ||
+				p.count(`SELECT count(*) FROM dependency_status`) != 0 {
+				t.Fatalf("a fenced commit wrote: %s, %d events", state, events)
+			}
+		})
 	}
 }
 
