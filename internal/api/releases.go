@@ -259,7 +259,11 @@ func getReview(a *API, w http.ResponseWriter, q *request) {
 		if b.Configuration == nil {
 			b.Notice = withheldNotice
 		}
-		if b.Provenance, err = projectProvenance(provenance, importBase, strings.Split(fragments, ",")); err != nil {
+		var frv []string // no fragment revision splits to none, never to one empty revision
+		if fragments != "" {
+			frv = strings.Split(fragments, ",")
+		}
+		if b.Provenance, err = projectProvenance(provenance, importBase, frv); err != nil {
 			return "", nil, err
 		}
 		return "", b, nil
