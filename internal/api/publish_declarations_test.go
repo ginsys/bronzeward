@@ -187,23 +187,25 @@ func TestPublishCommitDeclarations(t *testing.T) {
 		{"provenance occurrence", "provenance occurrence without a reproduction dependency", func(p *publishEnv) {
 			p.unit.machines[0].provenance[0].Occurrence = 1
 		}},
-		// An occurrence (a mapping member) has one outcome: one override, or one record per
-		// distinct output path.
+		// An occurrence (a mapping member) has one outcome: one override, or output records.
 		{"provenance override repeated", "provenance outcome repeated", func(p *publishEnv) {
 			m := &p.unit.machines[0]
 			r := &m.provenance[0]
 			r.Output, r.OverriddenBy = "", &compile.Origin{Fragment: 0, Revision: p.networkNew, Digest: textDigest("machine: {}")}
 			m.provenance = append(m.provenance, *r)
 		}},
-		{"provenance output repeated", "provenance outcome repeated", func(p *publishEnv) {
-			m := &p.unit.machines[0]
-			m.provenance = append(m.provenance, m.provenance[0])
-		}},
-		{"provenance overridden and output", "provenance outcome repeated", func(p *publishEnv) {
+		{"provenance output then override", "provenance outcome repeated", func(p *publishEnv) {
 			m := &p.unit.machines[0]
 			r := m.provenance[0]
 			r.Output, r.OverriddenBy = "", &compile.Origin{Fragment: 0, Revision: p.networkNew, Digest: textDigest("machine: {}")}
 			m.provenance = append(m.provenance, r)
+		}},
+		{"provenance override then output", "provenance outcome repeated", func(p *publishEnv) {
+			m := &p.unit.machines[0]
+			out := m.provenance[0]
+			r := &m.provenance[0]
+			r.Output, r.OverriddenBy = "", &compile.Origin{Fragment: 0, Revision: p.networkNew, Digest: textDigest("machine: {}")}
+			m.provenance = append(m.provenance, out)
 		}},
 		{"reproduction path", "reproduction dependency without a provenance record", func(p *publishEnv) {
 			m := &p.unit.machines[0]
@@ -264,6 +266,32 @@ func TestPublishCommitDeclarationsAgree(t *testing.T) {
 		if err := p.db.QueryRow(`SELECT jsonb_path_query_array(provenance, '$[*].source.occurrence')::text FROM release_machine
 			WHERE release = $1`, rel).Scan(&stored); err != nil || stored != "[0, 1]" {
 			t.Fatalf("stored occurrences %q %v, want [0, 1]", stored, err)
+		}
+	})
+	// A fragment that overrides a mapping overrides each of its members: one override per member.
+	t.Run("mapping overridden", func(t *testing.T) {
+		p := newPublishEnv(t)
+		p.importBase("mapping", nil)
+		m := &p.unit.machines[0]
+		r := m.provenance[0]
+		r.Member, r.Output = 0, ""
+		r.OverriddenBy = &compile.Origin{Fragment: 0, Revision: p.networkNew, Digest: textDigest("machine: {}")}
+		m.provenance[0] = r
+		r.Member = 1
+		m.provenance = append(m.provenance, r)
+		if rel, ref := p.commit(); ref != nil || rel == "" {
+			t.Fatalf("commit %s %v", rel, ref)
+		}
+	})
+	// Two alias outputs whose document token holds the value both read <redacted> (compilation
+	// §8.3): two identical records, both accepted.
+	t.Run("alias outputs alike", func(t *testing.T) {
+		p := newPublishEnv(t)
+		m := &p.unit.machines[0]
+		m.provenance[0].Output = "<redacted>"
+		m.provenance = append(m.provenance, m.provenance[0])
+		if rel, ref := p.commit(); ref != nil || rel == "" {
+			t.Fatalf("commit %s %v", rel, ref)
 		}
 	})
 	t.Run("two machines", func(t *testing.T) {
