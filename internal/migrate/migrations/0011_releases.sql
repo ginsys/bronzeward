@@ -157,11 +157,12 @@ CREATE TABLE dependency_status (
     (provider <> 'kv' OR object ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$') AND
     (provider <> 'transit' OR (object NOT IN ('.', '..') AND octet_length(object) BETWEEN 1 AND 227
       AND object !~ '[/#?%\\[:space:][:cntrl:]]'))),
-  -- Dependency monitor §3: a retained version's only reason is deletion-scheduled, with the
-  -- scheduled time it observed.
+  -- Dependency monitor §3: a retained version's only reason is deletion-scheduled, a KV version's,
+  -- with the scheduled time it observed.
   CONSTRAINT dependency_status_reason CHECK (
     (class = 'retained') = (reason IS NULL OR reason = 'deletion-scheduled')),
-  CONSTRAINT dependency_status_schedule CHECK (reason <> 'deletion-scheduled' OR deletion_observed IS NOT NULL),
+  CONSTRAINT dependency_status_schedule CHECK (
+    reason <> 'deletion-scheduled' OR (provider = 'kv' AND deletion_observed IS NOT NULL)),
   CONSTRAINT dependency_status_unknown_since CHECK ((class = 'unknown') = (unknown_since IS NOT NULL))
 );
 
