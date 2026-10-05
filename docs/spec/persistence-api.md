@@ -834,8 +834,10 @@ INSERT INTO release_source ...;      -- every revision and head revision used:
   --   that source's text digest, its reference declared there at the same
   --   version, generation, encoding and kind; every declaration with a
   --   reproduction dependency and a provenance record, both naming the same
-  --   occurrences (compilation §5.2, §8.2, §9). A disagreement is the
-  --   compiled release's defect: 500 internal-error, nothing committed
+  --   occurrences, each occurrence's member with one outcome: one override,
+  --   or one record per distinct output path (compilation §5.2, §8.2, §9).
+  --   A disagreement is the compiled release's defect: 500 internal-error,
+  --   nothing committed
 INSERT INTO dependency ...;          -- both records, each reproduction source
                                      -- the machine's import base or a release
                                      -- source's fragment revision; and one

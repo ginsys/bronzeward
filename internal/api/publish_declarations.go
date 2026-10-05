@@ -151,6 +151,13 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 	}
 
 	recorded := map[occurrence]bool{}
+	// An occurrence's member has one outcome: one override, or one record per distinct output path.
+	type outcome struct {
+		occurrence
+		member int
+	}
+	overridden := map[outcome]bool{}
+	outputs := map[outcome]map[string]bool{}
 	for _, r := range m.provenance {
 		if _, ok := composition[r.Source.Revision]; !ok {
 			return at("provenance source outside the composition", r.Source.Revision, r.Reference)
@@ -177,7 +184,20 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 				return at("provenance override digest differs", r.Source.Revision, r.Reference)
 			}
 		}
-		recorded[occurrence{r.Source.Revision, r.Reference, r.SourcePath, r.Occurrence}] = true
+		o := occurrence{r.Source.Revision, r.Reference, r.SourcePath, r.Occurrence}
+		k := outcome{o, r.Member}
+		if overridden[k] || (r.OverriddenBy != nil && outputs[k] != nil) || outputs[k][r.Output] {
+			return at("provenance outcome repeated", r.Source.Revision, r.Reference)
+		}
+		if r.OverriddenBy != nil {
+			overridden[k] = true
+		} else {
+			if outputs[k] == nil {
+				outputs[k] = map[string]bool{}
+			}
+			outputs[k][r.Output] = true
+		}
+		recorded[o] = true
 	}
 
 	// Every declaration is used (compilation §5.2, stage 1), so each has an occurrence in both.
