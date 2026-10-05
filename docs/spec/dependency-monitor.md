@@ -371,7 +371,7 @@ block, so no lock a pass or the watchdog needs is held across it:
 3. With no DependencyMonitor lock held, the logger writes one log line per
    alert read. Each line has the stable event name `dependency-alert` and the
    row's fields: the `dal` and `dep` identifiers, kind, class, reason,
-   provider object and version, and the referencing releases.
+   provider object, version and creation time, and the referencing releases.
 4. The logger's transaction advances the last logged sequence to the last
    alert written and commits. While step 2 found 100, the logger repeats
    from step 1, so a backlog advances one bounded batch at a time and a batch
