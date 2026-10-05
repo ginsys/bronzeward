@@ -82,6 +82,7 @@ func TestReleaseConstraints(t *testing.T) {
 	kv := generation(r.cluster, r.claim)
 	rel2 := id.New(id.Release)
 	op2, op3 := id.New(id.Operation), id.New(id.Operation)
+	claim2 := id.New(id.Ingestion)
 	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, r.draft2, 1, nil, r.human, nil, nil)
 	// rel2 is inserted in each case's transaction first, so its rows are written with it.
 	withRelease := []stmt{{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
@@ -126,9 +127,15 @@ func TestReleaseConstraints(t *testing.T) {
 		{"release with an empty machinery checksum", nil, insertRelease, newRelease(7, ""), "release_machinery_checksum_check"},
 		{"release Kubernetes version without its patch", nil, insertRelease, newRelease(8, "v1.36"), "release_kubernetes_version_check"},
 		{"second release of one operation", nil, insertRelease, newRelease(9, r.publish), "23505"},
-		{"release of an ingest operation", nil, insertRelease, newRelease(9, r.ingest), "23503"},
-		{"release of another draft revision's publish operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
+		// Each operation differs from the release's in one column of the key alone.
+		{"release of an ingest operation", []stmt{
+			{insertClaim, []any{claim2, "transient", "held", nil, nil, nil}},
+			{insertOperation, []any{op3, "ingest", "running", "run-1/4242/start-2", 1, r.draft2, 1, claim2, r.human, nil, nil}},
+		}, insertRelease, newRelease(9, op3), "23503"},
+		{"release of another draft's publish operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
 			r.draft, 1, nil, r.human, nil, nil}}}, insertRelease, newRelease(9, op3), "23503"},
+		{"release of another draft revision's publish operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
+			r.draft2, 2, nil, r.human, nil, nil}}}, insertRelease, newRelease(9, op3), "23503"},
 		{"release published by no principal", nil, insertRelease, newRelease(10, id.New(id.Principal)), "23503"},
 		{"release published under the author role", nil, insertRelease, newRelease(11, "author"), "release_published_role_check"},
 		{"release with an id of another kind", nil, insertRelease, newRelease(0, id.New(id.Draft)), "release_id_check"},

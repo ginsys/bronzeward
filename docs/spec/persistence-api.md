@@ -808,10 +808,11 @@ SELECT id, digest FROM release
   --   in recovery mode, its scope released in the current epoch
 INSERT INTO dependency_status ... ON CONFLICT DO NOTHING;
                                      -- `retained`, per provider object version
-                                     -- without a row, in (provider_object,
-                                     -- version) order (dependency monitor §5.2)
+                                     -- and creation time without a row, in
+                                     -- (provider_object, version, created)
+                                     -- order (dependency monitor §3, §5.2)
 SELECT class, recorded_at FROM dependency_status
- WHERE (provider_object, version) IN ($named) ORDER BY id FOR SHARE;
+ WHERE (provider_object, version, created) IN ($named) ORDER BY id FOR SHARE;
   -- every named row, a concurrent publication's included: a class other
   -- than `retained` recorded after publication began that version's
   -- classification refuses the publication, as compilation §6 step 3 does
