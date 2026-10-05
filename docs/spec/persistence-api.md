@@ -230,7 +230,7 @@ statement.
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
 | Profile / ProfileRevision | mutable head / immutable | ordered fragment revision ids | this contract |
 | Assignment / AssignmentRevision | mutable head / immutable | per machine: selected profiles and fragments per layer | this contract |
-| ImportBaseRevision | immutable | a machine's sanitized imported document with references, baseline ciphertext, its keyed digest and its configuration digest | compilation §2.3, §6 |
+| ImportBaseRevision | immutable | a machine's sanitized imported document with references and the embedded documents the import identified (publication rebuilds the base with them, §6.1), baseline ciphertext, its keyed digest and its configuration digest | compilation §2.3, §6 |
 | Draft | mutable, revisioned | change set: entries and their base head revisions | this contract |
 | Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1) and the name of the Transit key its artifact was encrypted under; the release covers one cluster and a set of its machines | compilation §11; this contract |
 | Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity: the machine's key at its ciphertext's key version. Each effective dependency has a reproduction dependency of its machine at the same version and creation time, whose source is in the machine's composition and declares it at that version and generation; indexed by its DependencyStatus identity (dependency monitor §6.1) | compilation §9 |
@@ -771,6 +771,50 @@ Bronzeward creates in the PoC are ingestion's generations, created before the
 draft transaction that references them (compilation §2.3). Key changes stay
 with the OpenBao administrator, outside Bronzeward's roles (design §13.7
 item 5).
+
+**Step 1, the snapshot.** One read-only `REPEATABLE READ` transaction reads
+the draft at the revision its operation is bound to (a draft no longer open,
+or moved, is `409 conflict`, as T3 would refuse it), the cluster's contract
+and the release's coverage: every machine of the cluster with an import base
+after the draft (its entry, else its `Applied` release's, §3.2), each with its
+assignment after the draft, or with none, compiling on its base alone
+**(choice §17.33)**. A machine with an assignment but no import base is not
+covered: a draft that changes or removes its assignment is refused
+`422 validation-failed` naming the machine, and a release covering no machine
+is refused `422` naming the cluster. Within a layer, the profiles' pins come
+first, by the assignment's profile position and then the pin's, then the
+assignment's own fragments of that layer by position (compilation §6 step 1).
+§3.1's pin and selection rules are checked again over every profile and
+assignment the release names, changed or not: a stale pin, or a missing,
+removed or wrong-layer name, is refused `422 validation-failed` naming the
+profile or machine, the body path and the revision. The snapshot lists the
+heads the release uses without a draft entry, which T3 holds unchanged
+(§6.2): each covered machine's assignment head (one with no revision
+included), its selected profiles, and the selected and pinned fragments. A
+machine never assigned has no assignment head for T3 to hold, so an
+assignment first created for it after the snapshot is not detected as stale
+input; the release commits with the machine compiled on its base alone.
+
+**Steps 2 and 3, the pins.** Each pinned KV version is classified once and
+read once, however many sources pin it, and every pin is classified before
+any is read. A pin's recorded identity is the creation time of its earliest
+status row, by `observed_from` and then id; a classification or read giving
+another refuses (compilation §6 step 3). Each status's `began` is a database
+time read just before the classifications, or just before the encryptions for
+the artifact key: never later than its request began, so T3's re-check (§6.2)
+can only refuse more.
+
+**Refusals.** A compilation refusal (composition, validation, contract,
+Kubernetes version, ingestion's rules over a stored source) is
+`422 validation-failed` naming the rule, the machine, the input and the
+redacted paths and message (compilation §8.3); covered machines naming
+different Kubernetes versions are `422` with rule `kubernetes`. A dependency
+classified `blocked` or `lost`, or whose identity changed (a creation time
+other than the recorded one, the first read's, or none), is
+`422 validation-failed` naming its provider, object, version and reference;
+one the provider's answer leaves `unknown` for another reason, or a provider
+that cannot be reached, is `503 dependency-unavailable`, and an unreachable
+provider's error is logged with the operation. No refusal holds a value.
 
 ### 6.2 The commit transaction (T3)
 
@@ -2542,7 +2586,10 @@ equals neither the restored epoch nor the lost one.
 | Publish | Moved head, or a covered machine's import base changed (§4.2) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
-| Publish | Dependency not `retained`, or provider sealed | `failed`, `503 dependency-unavailable` or `422` | operation, act |
+| Publish | Dependency `blocked` or `lost`, or its identity changed (§6.1) | `failed`, `422 validation-failed` naming it | operation, act |
+| Publish | Dependency left `unknown` for another reason, or provider sealed or unreachable | `failed`, `503 dependency-unavailable` naming it | operation, act |
+| Publish | Compilation refuses, or covered machines name different Kubernetes versions (§6.1) | `failed`, `422 validation-failed`, rule and paths only | operation, act |
+| Publish | Stale pin or selection; a changed assignment of a machine with no import base; no covered machine (§6.1) | `failed`, `422 validation-failed` | operation, act |
 | Publish | Commit-unknown | resolved by reading the natural key | the release, once |
 | Publish | Deadlock retries exhausted, `COMMIT` rejected (a deferred constraint), or a statement breaking an integrity constraint (a release machine whose mode is not its machine's platform, for one) | operation `failed`, `503 transient-conflict` or `500 internal-error` | operation, act |
 | Publish | Compiled release disagrees with its sources' reference declarations or text digests | operation `failed`, `500 internal-error`; the clause logged | operation, act |
@@ -3039,6 +3086,16 @@ design and evidence do not settle the question. Each is marked in place as
     which adds a Talos read to a step that holds no Talos access and fails
     for a document-only machine; a cluster-wide mode, which a mixed cluster
     cannot use; a default, which records a guess as a fact.
+33. **A release covers every machine of its cluster that has an import
+    base** (§6.1), each with its assignment after the draft, or with none,
+    compiling on its base alone. Design §11.2 makes a release the cluster's
+    desired state, and a library fragment's new head reaches machines no
+    draft entry names (choice 28). Alternatives: only the machines a draft
+    entry touches, which leaves a changed fragment's other users on their old
+    release; every assigned machine, refusing one without an import base,
+    which blocks every publication of the cluster until each assigned machine
+    is imported. Cost: each publication compiles every covered machine, and
+    one machine's failing dependency refuses the cluster's publication.
 
 ## 18. Traceability
 
@@ -3052,7 +3109,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
 | §5 transactions | §7.2, §7.4 | DB §4.2 rows 059, 061; [DB §6.3](../design/research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs); [DB §7](../design/research/20260924-database-semantics.md#7-limits); [DS §7](../design/research/20260925-dispatch-safety.md#7-limits) |
 | §5.1 fences, claims | §7.2, §12.5 | [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions) rows 015–018; [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) rows 019–021 |
-| §6 publication | §7.4, §7.8 | DB §4.2 rows 004–011, 058–061; KL §7 item 1 |
+| §6 publication | §7.4, §7.8, §11.2 | DB §4.2 rows 004–011, 058–061; KL §7 item 1; choice §17.33 |
 | §6.3 partial publication | §7.4, §7.6, §7.8 | [PC §4](../design/research/20260924-provider-capability-comparison.md#4-the-matrix) row 083; [KL §3.2](../design/research/20260924-key-loss-restoration.md#32-what-each-case-showed) cases G, H; [RC §6.4](../design/research/20260924-retention-metadata-classification.md#64-criterion-4-provider-limits-and-the-alert-policy-the-evidence-supports) |
 | §6.4 orphans | §7.4, §7.8, §13.2 | DB §9; KL case G; PC §4 row 065; the orphan-report identity's grants and the report's selection: §16 check, the pinned OpenBao only (choice §17.30) |
 | §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; DB §4.6 (advisory lock); [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |

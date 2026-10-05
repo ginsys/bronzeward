@@ -716,9 +716,13 @@ For each machine:
 
 1. **Snapshot** the import base, the source and assignment revisions, and
    order the fragments by the fixed layers of design §6.2 and their explicit
-   order within a layer. A fragment revision selected more than once, as two
-   profiles may pin it, is composed once, at its first position
-   **(choice §16.31)**.
+   order within a layer: the profiles' pins first, by the assignment's
+   profile position and then the pin's, then the assignment's own fragments
+   of the layer by position. A fragment revision selected more than once, as
+   two profiles may pin it, is composed once, at its first position
+   **(choice §16.31)**. Which machines a release covers, and what the
+   snapshot reads, are
+   [persistence-api §6.1](persistence-api.md#61-steps)'s.
 2. **Pin** every declared reference in the import base and in every selected
    fragment, including references a later fragment will override: record the
    declared version (§5.1) together with the provider object it names. This is
@@ -730,7 +734,9 @@ For each machine:
    never read from its stored status, and the compiler identity must read it at
    the point of use. `blocked`, `lost` or `unknown` refuses publication. A KV
    version's classification also takes its `created_time` from the metadata
-   answer, the identity §9 records.
+   answer, the identity §9 records; one other than the identity first
+   recorded for that version refuses
+   ([persistence-api §6.1](persistence-api.md#61-steps)).
 4. **Resolve** the import base and each fragment with a tag-preserving parser,
    replacing each tagged node by its typed value (with its encoding) before any
    typed decode, and each identified embedded document as in §5.4. Every tag
@@ -1267,7 +1273,8 @@ or encrypted values:
   §11 made, as the dependency monitor seeds it
   ([dependency monitor §5.2](dependency-monitor.md#52-seeding-at-publication)):
   class, reason, the scheduled deletion time if any, and the database time the
-  classification's request began.
+  classification's request began, read before it
+  ([persistence-api §6.1](persistence-api.md#61-steps)).
 
 The persistence contract commits them atomically and rejects stale inputs
 ([ginsys/bronzeward#18](https://github.com/ginsys/bronzeward/issues/18)). A
