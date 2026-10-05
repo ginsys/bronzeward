@@ -834,9 +834,11 @@ INSERT INTO release_source ...;      -- every revision and head revision used:
   --   that source's text digest, its reference declared there at the same
   --   version, generation, encoding and kind; every declaration with a
   --   reproduction dependency and a provenance record, both naming the same
-  --   occurrences, each occurrence's member with one outcome: one override,
-  --   or output records, not counted, since two alias outputs can read the
-  --   same once redacted (compilation §5.2, §8.2, §8.3, §9).
+  --   occurrences, each provenance record with exactly one outcome and
+  --   stored paths (§9.3 review read), each occurrence's member with one
+  --   outcome: one override, or output records, not counted, since two
+  --   alias outputs can read the same once redacted (compilation §5.2,
+  --   §8.2, §8.3, §9).
   --   A disagreement is the compiled release's defect: 500 internal-error,
   --   nothing committed
 INSERT INTO dependency ...;          -- both records, each reproduction source

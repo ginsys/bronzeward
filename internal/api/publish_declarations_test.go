@@ -187,6 +187,21 @@ func TestPublishCommitDeclarations(t *testing.T) {
 		{"provenance occurrence", "provenance occurrence without a reproduction dependency", func(p *publishEnv) {
 			p.unit.machines[0].provenance[0].Occurrence = 1
 		}},
+		// Each record has exactly one outcome and stored paths, as the review read requires.
+		{"provenance without outcome", "provenance record without exactly one outcome", func(p *publishEnv) {
+			p.unit.machines[0].provenance[0].Output = ""
+		}},
+		{"provenance with both outcomes", "provenance record without exactly one outcome", func(p *publishEnv) {
+			r := &p.unit.machines[0].provenance[0]
+			r.OverriddenBy = &compile.Origin{Fragment: 0, Revision: p.networkNew, Digest: textDigest("machine: {}")}
+		}},
+		{"provenance output not a path", "provenance path is not a stored path", func(p *publishEnv) {
+			p.unit.machines[0].provenance[0].Output = "doc[0]/machine/a~2"
+		}},
+		{"provenance source path not a path", "provenance path is not a stored path", func(p *publishEnv) {
+			m := &p.unit.machines[0]
+			m.provenance[0].SourcePath, m.reproduction[0].path = "doc[0]/machine/a~2", "doc[0]/machine/a~2"
+		}},
 		// An occurrence (a mapping member) has one outcome: one override, or output records.
 		{"provenance override repeated", "provenance outcome repeated", func(p *publishEnv) {
 			m := &p.unit.machines[0]

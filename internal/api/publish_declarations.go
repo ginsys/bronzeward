@@ -175,6 +175,11 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 			return at("provenance encoding differs from the declaration", r.Source.Revision, r.Reference)
 		case decl.kind == "mapping" && r.Member < 0, decl.kind != "mapping" && r.Member != -1:
 			return at("provenance member does not fit the declared kind", r.Source.Revision, r.Reference)
+		// The review read refuses a stored record otherwise (projectProvenance).
+		case (r.Output == "") == (r.OverriddenBy == nil):
+			return at("provenance record without exactly one outcome", r.Source.Revision, r.Reference)
+		case !storedPath(r.SourcePath), r.Output != "" && !storedPath(r.Output):
+			return at("provenance path is not a stored path", r.Source.Revision, r.Reference)
 		}
 		if by := r.OverriddenBy; by != nil {
 			if base, ok := composition[by.Revision]; !ok || base {
