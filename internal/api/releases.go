@@ -102,7 +102,9 @@ var errProvenance = errors.New("a stored provenance record does not have the pro
 // shape, so a field outside them, or a record of another shape, is refused, never forwarded. The
 // projection must encode back to the stored value exactly: the decoder matches a field name in any
 // case and reads a null as absent, and either would otherwise answer a record that was not stored.
-func projectProvenance(stored []byte) ([]provenanceRecord, error) {
+// A source is the machine's own import base or one of the release's fragment source revisions, and
+// an override one of those fragment revisions (compilation §8.2).
+func projectProvenance(stored []byte, importBase string, fragments []string) ([]provenanceRecord, error) {
 	dec := json.NewDecoder(bytes.NewReader(stored))
 	dec.DisallowUnknownFields()
 	var out []provenanceRecord
@@ -114,15 +116,13 @@ func projectProvenance(stored []byte) ([]provenanceRecord, error) {
 	if err != nil || json.Unmarshal(stored, &was) != nil || json.Unmarshal(again, &is) != nil || !reflect.DeepEqual(was, is) {
 		return nil, errProvenance
 	}
-	revision := func(v string, kinds ...id.Prefix) bool {
-		return slices.ContainsFunc(kinds, func(k id.Prefix) bool { return id.MustHave(v, k) == nil })
-	}
 	for _, r := range out {
 		if !ingest.ValidReference(r.Reference) || len(r.Reference) > 256 || r.Version < 1 ||
 			(r.Encoding != "" && r.Encoding != "base64") || (r.Member != nil && *r.Member < 0) ||
-			!revision(r.Source.Revision, id.ImportBase, id.FragmentRevision) || !sha256Hex(r.Source.Digest) || !storedPath(r.Source.Path) ||
+			(r.Source.Revision != importBase && !slices.Contains(fragments, r.Source.Revision)) ||
+			!sha256Hex(r.Source.Digest) || !storedPath(r.Source.Path) ||
 			(r.Output == "") == (r.OverriddenBy == nil) || (r.Output != "" && !storedPath(r.Output)) ||
-			(r.OverriddenBy != nil && (!revision(r.OverriddenBy.Revision, id.FragmentRevision) || !sha256Hex(r.OverriddenBy.Digest))) {
+			(r.OverriddenBy != nil && (!slices.Contains(fragments, r.OverriddenBy.Revision) || !sha256Hex(r.OverriddenBy.Digest))) {
 			return nil, errProvenance
 		}
 	}
@@ -244,8 +244,12 @@ func getReview(a *API, w http.ResponseWriter, q *request) {
 		}
 		var b reviewBody
 		var provenance []byte
-		err := tx.QueryRowContext(ctx, `SELECT release, machine, mode, redacted, provenance::text FROM release_machine
-			WHERE release = $1 AND machine = $2`, rel, m).Scan(&b.Release, &b.Machine, &b.Mode, &b.Configuration, &provenance)
+		var importBase, fragments string
+		err := tx.QueryRowContext(ctx, `SELECT release, machine, mode, redacted, provenance::text, import_base_revision,
+				COALESCE((SELECT string_agg(fragment_revision, ',') FROM release_source s
+					WHERE s.release = m.release AND fragment_revision IS NOT NULL), '')
+			FROM release_machine m WHERE release = $1 AND machine = $2`, rel, m).Scan(&b.Release, &b.Machine, &b.Mode,
+			&b.Configuration, &provenance, &importBase, &fragments)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil, refuse(http.StatusNotFound, "not-found", "no such resource")
 		}
@@ -255,7 +259,7 @@ func getReview(a *API, w http.ResponseWriter, q *request) {
 		if b.Configuration == nil {
 			b.Notice = withheldNotice
 		}
-		if b.Provenance, err = projectProvenance(provenance); err != nil {
+		if b.Provenance, err = projectProvenance(provenance, importBase, strings.Split(fragments, ",")); err != nil {
 			return "", nil, err
 		}
 		return "", b, nil

@@ -3,6 +3,7 @@ package migrate
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -40,15 +41,17 @@ const (
 // release holds one published release over sourceRows' draft, inserted by releaseRows.
 type release struct {
 	sources
-	publish, rel, depKV, depKey string
+	publish, rel, depKV, depKey, frgSite string
 }
 
 func releaseRows(t *testing.T, db *sql.DB) release {
 	t.Helper()
 	r := release{sources: sourceRows(t, db), publish: id.New(id.Operation), rel: id.New(id.Release),
-		depKV: id.New(id.Dependency), depKey: id.New(id.Dependency)}
+		depKV: id.New(id.Dependency), depKey: id.New(id.Dependency), frgSite: id.New(id.Fragment)}
 	kv := generation(r.cluster, r.claim)
 	mustExec(t, db, insertOperation, r.publish, "publish", "running", "run-1/4242/publish-1", 1, r.draft, 1, nil, r.human, nil, nil)
+	// The fragment the assignment selects under the site layer.
+	mustExec(t, db, insertFragment, r.frgSite, r.cluster, "cluster", "site-dns", "site", r.frvSite, 1)
 	mustExec(t, db, insertStatus, r.depKV, "kv", kv, 1, "retained", nil, nil, created)
 	mustExec(t, db, insertStatus, r.depKey, "transit", "bw-artifact", 1, "retained", nil, nil, "2026-09-26T09:12:40Z")
 	tx, err := db.Begin()
@@ -61,6 +64,7 @@ func releaseRows(t *testing.T, db *sql.DB) release {
 	mustExec(t, tx, insertReleaseMachine, r.rel, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5),
 		"machine:\n  type: worker\n", `[]`)
 	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1)
+	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "fragment", r.frgSite, nil, nil, "site-dns", nil, r.frvSite, nil, nil, 1)
 	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "profile", nil, r.prf, nil, "workers", nil, nil, r.prv, nil, 1)
 	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "assignment", nil, nil, r.asg, nil, r.machine, nil, nil, r.asr, 1)
 	mustExec(t, tx, insertDependency, r.rel, r.machine, "effective", "kv", kv, 1, created, "registry/example-pass", nil, nil, nil, nil)
@@ -116,6 +120,27 @@ func TestReleaseConstraints(t *testing.T) {
 		}
 		return base
 	}
+	withEncryption := stmt{insertDependency, depRow(2, "encryption", 3, "transit", 4, "bw-artifact", 6, "2026-09-26T09:12:40Z", 7, nil)}
+	// rel2's sources as its compilation used them: the assignment selects the profile workers and
+	// the site fragment site-dns, and workers pins registries at frv1.
+	source := func(kind, head, name, revision any) stmt {
+		row := []any{rel2, r.cluster, kind, nil, nil, nil, name, nil, nil, nil, nil, 1}
+		switch kind {
+		case "fragment":
+			row[3], row[8] = head, revision
+		case "profile":
+			row[4], row[9] = head, revision
+		default: // an assignment names its machine, not a name
+			row[5], row[6], row[7], row[10] = head, nil, name, revision
+		}
+		return stmt{insertReleaseSource, row}
+	}
+	assignmentSource := source("assignment", r.asg, r.machine, r.asr)
+	profileSource := source("profile", r.prf, "workers", r.prv)
+	pinnedSource := source("fragment", r.frg, "registries", r.frv1)
+	siteSource := source("fragment", r.frgSite, "site-dns", r.frvSite)
+	frvRole := id.New(id.FragmentRevision) // site-dns in the role layer
+	const commit = `SET CONSTRAINTS ALL IMMEDIATE`
 	for _, c := range []struct {
 		name string
 		pre  []stmt
@@ -157,16 +182,24 @@ func TestReleaseConstraints(t *testing.T) {
 		{"machine in an unknown mode", withRelease, insertReleaseMachine, machineRow(5, "vm"), "release_machine_mode_check"},
 		{"ciphertext without its key version", withRelease, insertReleaseMachine, machineRow(6, "vault:abc"), "release_machine_ciphertext_check"},
 		{"ciphertext at key version 0", withRelease, insertReleaseMachine, machineRow(6, "vault:v0:YWJj"), "release_machine_ciphertext_check"},
+		// Compilation §9: a key version has up to 19 digits, as a bigint holds.
 		{"ciphertext at a key version past bigint", withRelease, insertReleaseMachine,
-			machineRow(6, "vault:v9223372036854775808:YWJj"), "release_machine_ciphertext_check"},
+			machineRow(6, "vault:v9223372036854775808:YWJj"), "release_machine_key_version"},
+		{"ciphertext at a key version of 20 digits", withRelease, insertReleaseMachine,
+			machineRow(6, "vault:v12345678901234567890:YWJj"), "release_machine_ciphertext_check"},
+		{"control: ciphertext at the largest key version", withRelease, insertReleaseMachine,
+			machineRow(6, "vault:v9223372036854775807:YWJj"), ""},
 		{"ciphertext digest of 31 bytes", withRelease, insertReleaseMachine, machineRow(7, digest(4)[:31]), "release_machine_ciphertext_digest_check"},
 		{"configuration digest of 33 bytes", withRelease, insertReleaseMachine, machineRow(8, append(digest(5), 1)), "release_machine_configuration_digest_check"},
 		{"empty redacted configuration", withRelease, insertReleaseMachine, machineRow(9, ""), "release_machine_redacted_check"},
 		{"provenance that is not a list", withRelease, insertReleaseMachine, machineRow(10, `{}`), "release_machine_provenance_check"},
 		{"second row of one machine", withMachine, insertReleaseMachine, machineRow(), "23505"},
 		// Compilation §9: each machine's artifact has one encryption dependency, checked at commit.
-		{"machine without its encryption dependency", withMachine, `SET CONSTRAINTS ALL IMMEDIATE`, nil,
-			"release_machine_encryption"},
+		{"machine without its encryption dependency", append(withMachine, assignmentSource, profileSource, pinnedSource, siteSource),
+			commit, nil, "release_machine_encryption"},
+		// The machine's assignment revision is its assignment source's, checked at commit.
+		{"machine at an assignment revision the release's sources do not name", append(withMachine, withEncryption), commit, nil,
+			"23503"},
 		// release_source
 		{"source with two heads", withRelease, insertReleaseSource,
 			[]any{rel2, r.cluster, "fragment", r.frg, r.prf, nil, "registries", nil, r.frv1, nil, nil, 1}, "release_source_shape"},
@@ -185,6 +218,24 @@ func TestReleaseConstraints(t *testing.T) {
 		{"second source of one head", append(withRelease, stmt{insertReleaseSource,
 			[]any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1}}), insertReleaseSource,
 			[]any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv2, nil, nil, 2}, "23505"},
+		// PA §3.1: each pin is a fragment source of the release, and each selected name a source with
+		// a revision, a fragment under the layer it carries; checked at commit.
+		{"profile pinning a fragment revision the release does not name", append(withRelease, profileSource), commit, nil,
+			"release_source_pin"},
+		{"profile pinning another revision of a fragment the release names", append(withRelease, profileSource,
+			source("fragment", r.frg, "registries", r.frv2)), commit, nil, "release_source_pin"},
+		{"assignment selecting a profile the release does not name", append(withRelease, assignmentSource, siteSource),
+			commit, nil, "release_source_selection"},
+		{"assignment selecting a profile the release removes", append(withRelease, assignmentSource, siteSource,
+			source("profile", r.prf, "workers", nil)), commit, nil, "release_source_selection"},
+		{"assignment selecting a fragment the release does not name", append(withRelease, assignmentSource, profileSource,
+			pinnedSource), commit, nil, "release_source_selection"},
+		{"assignment selecting a fragment the release removes", append(withRelease, assignmentSource, profileSource,
+			pinnedSource, source("fragment", r.frgSite, "site-dns", nil)), commit, nil, "release_source_selection"},
+		{"assignment selecting a fragment under another layer than its revision's", append(withRelease,
+			stmt{insertFragmentRevision, []any{frvRole, r.cluster, "site-dns", "role", "machine: {}\n", r.human}},
+			assignmentSource, profileSource, pinnedSource, source("fragment", r.frgSite, "site-dns", frvRole)), commit, nil,
+			"release_source_selection"},
 		// dependency
 		{"dependency of a machine the release does not cover", withRelease, insertDependency, depRow(), "23503"},
 		{"dependency of an unknown kind", withMachine, insertDependency, depRow(2, "source"), "dependency_kind_check"},
@@ -231,14 +282,35 @@ func TestReleaseConstraints(t *testing.T) {
 			depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine", 11, 0), "23503"},
 		// dependency_status
 		{"second status of one version", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, created}, "23505"},
-		{"status of an unknown class", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 2, "fine", "absent", nil, created}, "dependency_status_class_check"},
+		{"status of an unknown class", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 2, "fine", "absent", nil, created}, "dependency_status_reason"},
 		{"status of an unknown provider", nil, insertStatus, []any{id.New(id.Dependency), "s3", kv, 2, "retained", nil, nil, created}, "dependency_status_provider_check"},
 		{"unknown status without its start", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", nil, created}, "dependency_status_unknown_since"},
 		{"retained status with an unknown start", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", nil, "2026-09-26T09:12:40Z", created}, "dependency_status_unknown_since"},
 		{"status reason in capitals", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "Soft-Deleted", nil, created}, "dependency_status_reason_check"},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "Soft-Deleted", nil, created}, "dependency_status_reason"},
+		// Dependency monitor §3's table is the whole set of provider, class and reason.
+		{"lost status for a refused request", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "lost", "denied", nil, created}, "dependency_status_reason"},
+		{"KV status trimmed", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "lost", "trimmed", nil, created}, "dependency_status_reason"},
+		{"Transit status destroyed", nil, insertStatus,
+			[]any{id.New(id.Dependency), "transit", "bw-artifact", 3, "lost", "destroyed", nil, created}, "dependency_status_reason"},
+		{"Transit status soft-deleted", nil, insertStatus,
+			[]any{id.New(id.Dependency), "transit", "bw-artifact", 3, "blocked", "soft-deleted", nil, created}, "dependency_status_reason"},
+		{"KV status below the decryption floor", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "below-decryption-floor", nil, created}, "dependency_status_reason"},
+		{"blocked status for an absent version", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "absent", nil, created}, "dependency_status_reason"},
+		{"unknown status without a reason", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", nil, "2026-09-26T09:12:40Z", created}, "dependency_status_reason"},
+		{"unknown status of a reason no row gives", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "flaky", "2026-09-26T09:12:40Z", created}, "dependency_status_reason"},
+		{"Transit status of an undecidable deletion time", nil, insertStatus, []any{id.New(id.Dependency), "transit", "bw-artifact", 3,
+			"unknown", "deletion-time-undecidable", "2026-09-26T09:12:40Z", created}, "dependency_status_reason"},
+		{"KV status of an unobserved soft deletion", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "soft-delete-unobserved", "2026-09-26T09:12:40Z", created}, "dependency_status_reason"},
 		{"retained status with a reason", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "absent", nil, created}, "dependency_status_reason"},
 		{"blocked status without a reason", nil, insertStatus,
@@ -249,7 +321,7 @@ func TestReleaseConstraints(t *testing.T) {
 		{"scheduled deletion without its time", nil, insertScheduled,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "deletion-scheduled", nil, created}, "dependency_status_schedule"},
 		{"Transit status with a scheduled deletion", nil, insertScheduled, []any{id.New(id.Dependency), "transit", "bw-artifact", 2,
-			"retained", "deletion-scheduled", "2026-10-09T00:00:00Z", created}, "dependency_status_schedule"},
+			"retained", "deletion-scheduled", "2026-10-09T00:00:00Z", created}, "dependency_status_reason"},
 		{"KV status at a key name", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", "bw-artifact", 1, "retained", nil, nil, created}, "dependency_status_object"},
 		{"Transit status at a path", nil, insertStatus,
@@ -296,20 +368,42 @@ func TestReleaseConstraints(t *testing.T) {
 	// A version recreated under its object and number is another identity, with its own status.
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, "2026-09-26T09:12:40.1Z")
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "transit", "bw-artifact", 1, "retained", nil, nil, "2026-10-01T00:00:00Z")
+	// Each provider, class and reason of dependency monitor §3's table.
+	for i, s := range []struct{ provider, class, reasons string }{
+		{"kv", "unknown", "malformed denied absent unavailable unreachable unreadable insufficient-evidence identity-mismatch " +
+			"deletion-time-undecidable"},
+		{"transit", "unknown", "malformed denied absent unavailable unreachable unreadable identity-mismatch " +
+			"soft-delete-unobserved insufficient-evidence trimmed-unverified below-decryption-floor-unverified"},
+		{"kv", "lost", "destroyed pruned"},
+		{"transit", "lost", "trimmed"},
+		{"kv", "blocked", "soft-deleted"},
+		{"transit", "blocked", "below-decryption-floor"},
+	} {
+		object := map[string]string{"kv": kv, "transit": "bw-artifact"}[s.provider]
+		for j, reason := range strings.Fields(s.reasons) {
+			var since any
+			if s.class == "unknown" {
+				since = "2026-09-26T09:12:40Z"
+			}
+			mustExec(t, db, insertStatus, id.New(id.Dependency), s.provider, object, 100*(i+1)+j, s.class, reason, since, created)
+		}
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, p := range withMachine {
+	for _, p := range append(withMachine, assignmentSource, profileSource, pinnedSource, siteSource) {
 		mustExec(t, tx, p.q, p.args...)
 	}
-	mustExec(t, tx, insertReleaseSource, rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv2, nil, nil, 2)
 	mustExec(t, tx, insertDependency, depRow(6, "2026-09-26T09:12:40.1Z")...)
-	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.frv2, 9, digest(6), 10, "registries:/machine", 11, 0)...)
+	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine", 11, 0)...)
 	// Two occurrences shown at one redacted path are two rows, told apart by their ordinals.
 	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine/<redacted>", 11, 0)...)
 	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine/<redacted>", 11, 1)...)
+	// A path has no length bound beyond its document's (compilation §9).
+	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10,
+		"base:/machine/"+strings.Repeat("a", 5000), 11, 2)...)
 	mustExec(t, tx, insertDependency, depRow(2, "encryption", 3, "transit", 4, "bw-artifact", 6, "2026-10-01T00:00:00Z", 7, nil)...)
 	// A publish that failed leaves the draft revision free for the next.
 	mustExec(t, tx, `UPDATE operation SET state = 'failed', error = '{"code": "conflict"}' WHERE id = $1`, op2)
@@ -355,7 +449,7 @@ func TestReleaseConstraintControl(t *testing.T) {
 			[]any{rel2, r.cluster, "import-base", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1}},
 		{"ALTER TABLE dependency DROP CONSTRAINT dependency_kind_check", []stmt{withRelease, withMachine}, insertDependency,
 			[]any{rel2, r.machine, "source", "kv", kv, 1, created, "registry/example-pass", nil, nil, nil, nil}},
-		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_class_check", nil, insertStatus,
+		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_reason", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "fine", "absent", nil, created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_provider_check", nil, insertStatus,
 			[]any{id.New(id.Dependency), "s3", kv, 2, "retained", nil, nil, created}},
@@ -365,8 +459,19 @@ func TestReleaseConstraintControl(t *testing.T) {
 			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "absent", nil, created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_schedule", nil, insertScheduled,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "deletion-scheduled", nil, created}},
-		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_schedule", nil, insertScheduled,
+		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_reason", nil, insertScheduled,
 			[]any{id.New(id.Dependency), "transit", "bw-artifact", 2, "retained", "deletion-scheduled", "2026-10-09T00:00:00Z", created}},
+		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_reason", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "Soft-Deleted", nil, created}},
+		{"ALTER TABLE release_machine DROP CONSTRAINT release_machine_key_version", []stmt{withRelease}, insertReleaseMachine,
+			[]any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", "vault:v9223372036854775808:YWJj", digest(4), digest(5), "x: 1\n", `[]`}},
+		{"ALTER TABLE release_machine DROP CONSTRAINT release_machine_assignment_source", []stmt{withRelease, withMachine,
+			{insertDependency, []any{rel2, r.machine, "encryption", "transit", "bw-artifact", 1, "2026-09-26T09:12:40Z", nil, nil, nil, nil, nil}}},
+			`SET CONSTRAINTS ALL IMMEDIATE`, nil},
+		{"DROP TRIGGER selection ON release_source", []stmt{withRelease, {insertReleaseSource,
+			[]any{rel2, r.cluster, "profile", nil, r.prf, nil, "workers", nil, nil, r.prv, nil, 1}}}, `SET CONSTRAINTS ALL IMMEDIATE`, nil},
+		{"DROP TRIGGER selection ON release_source", []stmt{withRelease, {insertReleaseSource,
+			[]any{rel2, r.cluster, "assignment", nil, nil, r.asg, nil, r.machine, nil, nil, r.asr, 1}}}, `SET CONSTRAINTS ALL IMMEDIATE`, nil},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_unknown_since", nil, insertStatus,
 			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", nil, created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_created_check", nil, insertStatus,
@@ -374,7 +479,12 @@ func TestReleaseConstraintControl(t *testing.T) {
 		{"ALTER TABLE release DROP CONSTRAINT release_operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
 			r.draft, 1, nil, r.human, nil, nil}}}, insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery,
 			checksum, "v1.36.0", op3, r.human, "publisher"}},
-		{"DROP TRIGGER encryption ON release_machine", []stmt{withRelease, withMachine}, `SET CONSTRAINTS ALL IMMEDIATE`, nil},
+		{"DROP TRIGGER encryption ON release_machine", []stmt{withRelease, withMachine,
+			{insertReleaseSource, []any{rel2, r.cluster, "assignment", nil, nil, r.asg, nil, r.machine, nil, nil, r.asr, 1}},
+			{insertReleaseSource, []any{rel2, r.cluster, "profile", nil, r.prf, nil, "workers", nil, nil, r.prv, nil, 1}},
+			{insertReleaseSource, []any{rel2, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1}},
+			{insertReleaseSource, []any{rel2, r.cluster, "fragment", r.frgSite, nil, nil, "site-dns", nil, r.frvSite, nil, nil, 1}}},
+			`SET CONSTRAINTS ALL IMMEDIATE`, nil},
 		{"ALTER TABLE draft DROP CONSTRAINT draft_published_release", nil,
 			`UPDATE draft SET state = 'published' WHERE id = $1`, []any{r.draft2}},
 		{"DROP INDEX operation_active_publish", []stmt{{`UPDATE operation SET state = 'queued', owner = NULL, owner_epoch = NULL,
