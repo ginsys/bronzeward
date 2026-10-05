@@ -24,8 +24,8 @@ env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/bin/* fixtures/sce
 """
 
 [tasks.test]
-description = "Fixture tests for scripts/ci/commit-lint.sh"
-run = "bash scripts/test/commit-lint-test.sh"
+description = "Fixture tests for scripts/ci/commit-lint.sh and scripts/ci/needs-check.sh"
+run = ["bash scripts/test/commit-lint-test.sh", "bash scripts/test/needs-check-test.sh"]
 
 [tasks.docs]
 description = "Documentation checks (needs Python 3.9+ with PyYAML 6)"
