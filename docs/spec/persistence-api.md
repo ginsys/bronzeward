@@ -805,16 +805,23 @@ the artifact key: never later than its request began, so T3's re-check (§6.2)
 can only refuse more.
 
 **Refusals.** A compilation refusal (composition, validation, contract,
-Kubernetes version, ingestion's rules over a stored source) is
+Kubernetes version, ingestion's rules applied while composing) is
 `422 validation-failed` naming the rule, the machine, the input and the
 redacted paths and message (compilation §8.3); covered machines naming
 different Kubernetes versions are `422` with rule `kubernetes`. A dependency
 classified `blocked` or `lost`, or whose identity changed (a creation time
 other than the recorded one, the first read's, or none), is
-`422 validation-failed` naming its provider, object, version and reference;
-one the provider's answer leaves `unknown` for another reason, or a provider
-that cannot be reached, is `503 dependency-unavailable`, and an unreachable
-provider's error is logged with the operation. No refusal holds a value.
+`422 validation-failed` naming its provider, object, version and reference.
+One the provider's answer leaves `unknown` for another reason is
+`503 dependency-unavailable` naming it with class `unknown`: so is a value
+read or an encryption the provider refuses, finds absent or answers
+unintelligibly after the classification, and an artifact key's first read
+with no readable `Date`; and so is a provider that cannot be reached. The
+provider's error behind such a read, encryption or unreachable provider is
+logged with the operation. A stored source that ingestion's own well-formedness
+checks no longer accept is the server's error (`500`), not a refusal:
+persistence stores only what ingestion produced and checked, so it means the
+stored text and its reference rows disagree. No refusal holds a value.
 
 ### 6.2 The commit transaction (T3)
 
@@ -2587,7 +2594,7 @@ equals neither the restored epoch nor the lost one.
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
 | Publish | Dependency `blocked` or `lost`, or its identity changed (§6.1) | `failed`, `422 validation-failed` naming it | operation, act |
-| Publish | Dependency left `unknown` for another reason, or provider sealed or unreachable | `failed`, `503 dependency-unavailable` naming it | operation, act |
+| Publish | Dependency left `unknown` for another reason (a value read or encryption refused, absent or not understood; an artifact key read with no `Date`), or provider sealed or unreachable (§6.1) | `failed`, `503 dependency-unavailable` naming it | operation, act |
 | Publish | Compilation refuses, or covered machines name different Kubernetes versions (§6.1) | `failed`, `422 validation-failed`, rule and paths only | operation, act |
 | Publish | Stale pin or selection; a changed assignment of a machine with no import base; no covered machine (§6.1) | `failed`, `422 validation-failed` | operation, act |
 | Publish | Commit-unknown | resolved by reading the natural key | the release, once |

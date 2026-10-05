@@ -91,8 +91,10 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 
 // dependencyRefusal is ruling R33 for one dependency's failure (reference "" for the artifact
 // key): not retained, or an identity that changed, is 422 naming it; a classification the
-// provider's answer leaves undecided, or a provider unreachable, is 503; anything else is an
-// error. A refusal names the dependency, never a value; an unreachable provider's error is logged.
+// provider's answer leaves undecided, a value read or encryption the provider refuses or answers
+// unintelligibly, or a provider unreachable, is 503; anything else is an error. A refusal names
+// the dependency, never a value; a provider's error behind a 503 that is not a classification is
+// logged.
 func (a *API) dependencyRefusal(j publishJob, reference, prov, object string, version int64, err error) (*refusal, error) {
 	if err == nil {
 		return nil, nil
@@ -123,6 +125,12 @@ func (a *API) dependencyRefusal(j publishJob, reference, prov, object string, ve
 		a.o.logf("%s: publication: %v", j.op, err)
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable",
 			"Publication refused: the provider could not be reached; nothing was committed.").with("dependency", dep), nil
+	case errors.Is(err, provider.ErrAbsent), errors.Is(err, provider.ErrDenied), errors.Is(err, provider.ErrProtocol):
+		// A read or encryption refused or not understood after the classification: unknown.
+		a.o.logf("%s: publication: %v", j.op, err)
+		dep["class"] = string(classify.Unknown)
+		return refuse(http.StatusServiceUnavailable, "dependency-unavailable",
+			"Publication refused: the provider's answer leaves a dependency undecided; nothing was committed.").with("dependency", dep), nil
 	}
 	return nil, err
 }

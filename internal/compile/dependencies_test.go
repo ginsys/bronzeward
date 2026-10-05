@@ -340,9 +340,9 @@ func TestEncryptArtifactsRefuses(t *testing.T) {
 		class         classify.Class
 		reason        string
 	}{
-		{"first read without a Date", noDate, ok(transitBody(1, before)), []int{1}, 0, "", ReasonNoDate},
-		{"first read with an unreadable Date", badDate, ok(transitBody(1, before)), []int{1}, 0, "", ReasonNoDate},
-		{"first read with a fractional Date", fractionalDate, ok(transitBody(1, before)), []int{1}, 0, "", ReasonNoDate},
+		{"first read without a Date", noDate, ok(transitBody(1, before)), []int{1}, 0, classify.Unknown, ReasonNoDate},
+		{"first read with an unreadable Date", badDate, ok(transitBody(1, before)), []int{1}, 0, classify.Unknown, ReasonNoDate},
+		{"first read with a fractional Date", fractionalDate, ok(transitBody(1, before)), []int{1}, 0, classify.Unknown, ReasonNoDate},
 		{"first read with a null creation time for the used version", nullTime, nullTime, []int{1}, 1, "", ReasonNotInFirstRead},
 		{"version created in the Date's second", ok(transitBody(1, depDate)), ok(transitBody(1, depDate)), []int{1}, 1, "", ReasonCreatedNotBeforeDate},
 		{"version created after the Date", ok(transitBody(1, depDate.Add(time.Second))), ok(transitBody(1, depDate.Add(time.Second))), []int{1}, 1, "", ReasonCreatedNotBeforeDate},
