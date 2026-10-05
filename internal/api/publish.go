@@ -19,6 +19,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -127,9 +128,10 @@ func (a *API) publishCommit(ctx context.Context, j publishJob, u releaseUnit) (s
 	case errors.Is(err, errRefused):
 	case isDeadlock(err):
 		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the publication deadlocked on every attempt; nothing was committed")
-	case errors.Is(err, errStop) && errors.As(err, &pe) && !connLost(err):
-		// The server rejected the COMMIT, a deferred trigger for one: the release rolled back. A
-		// lost reply instead leaves the outcome unknown, for a retry to read (§5 rule 6).
+	case errors.Is(err, errStop) && (errors.As(err, &pe) && !connLost(err) || errors.Is(err, pgx.ErrTxCommitRollback)):
+		// The server rejected the COMMIT, a deferred trigger for one, or answered it with ROLLBACK:
+		// the release rolled back. A lost reply instead leaves the outcome unknown, for a retry to
+		// read (§5 rule 6).
 		a.o.logf("publication %s: %v", j.op, err)
 		ref = refuse(http.StatusInternalServerError, "internal-error", "the publication commit was rejected; nothing was committed")
 	}
@@ -664,6 +666,15 @@ func insertDependencies(ctx context.Context, tx *sql.Tx, rel string, m unitMachi
 // owner and lease, and appends the terminal event (§8.2), fenced on this owner's generation and
 // epoch.
 func (a *API) finishPublish(ctx context.Context, tx *sql.Tx, j publishJob, state string, result, problem, entry map[string]any) error {
+	// An owner's own transition requires its epoch to be the current one (§5.1), read here also in
+	// the failure transaction, which takes no other lock first.
+	var current string
+	if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&current); err != nil {
+		return err
+	}
+	if current != a.d.owner.Epoch {
+		return staging.ErrFenced
+	}
 	var n int
 	err := tx.QueryRowContext(ctx, `UPDATE operation SET state = $5, result = $6::jsonb, error = $7::jsonb,
 		owner = NULL, owner_epoch = NULL, lease_until = NULL, last_event = last_event + 1
