@@ -184,10 +184,21 @@ func TestPublishCommitDeclarations(t *testing.T) {
 		{"provenance path", "provenance occurrence without a reproduction dependency", func(p *publishEnv) {
 			p.unit.machines[0].provenance[0].SourcePath = "doc[0]/machine/other"
 		}},
+		{"provenance occurrence", "provenance occurrence without a reproduction dependency", func(p *publishEnv) {
+			p.unit.machines[0].provenance[0].Occurrence = 1
+		}},
 		{"reproduction path", "reproduction dependency without a provenance record", func(p *publishEnv) {
 			m := &p.unit.machines[0]
 			d := m.reproduction[0]
 			d.path, d.occurrence = "doc[0]/machine/other", 1
+			m.reproduction = append(m.reproduction, d)
+		}},
+		// Two occurrences whose redacted paths read the same are two dependencies (§9), and each
+		// needs its own provenance.
+		{"redacted paths alike", "reproduction dependency without a provenance record", func(p *publishEnv) {
+			m := &p.unit.machines[0]
+			d := m.reproduction[0]
+			d.occurrence = 1
 			m.reproduction = append(m.reproduction, d)
 		}},
 	} {
@@ -217,6 +228,23 @@ func TestPublishCommitDeclarationsAgree(t *testing.T) {
 		m.provenance = append(m.provenance, r)
 		if rel, ref := p.commit(); ref != nil || rel == "" {
 			t.Fatalf("commit %s %v", rel, ref)
+		}
+	})
+	t.Run("redacted paths alike", func(t *testing.T) {
+		p := newPublishEnv(t)
+		m := &p.unit.machines[0]
+		d, r := m.reproduction[0], m.provenance[0]
+		d.occurrence, r.Occurrence, r.Output = 1, 1, "doc[0]/machine/registries/<redacted>"
+		m.reproduction, m.provenance = append(m.reproduction, d), append(m.provenance, r)
+		rel, ref := p.commit()
+		if ref != nil || rel == "" {
+			t.Fatalf("commit %s %v", rel, ref)
+		}
+		// The stored records keep each occurrence's position.
+		var stored string
+		if err := p.db.QueryRow(`SELECT jsonb_path_query_array(provenance, '$[*].source.occurrence')::text FROM release_machine
+			WHERE release = $1`, rel).Scan(&stored); err != nil || stored != "[0, 1]" {
+			t.Fatalf("stored occurrences %q %v, want [0, 1]", stored, err)
 		}
 	})
 	t.Run("two machines", func(t *testing.T) {

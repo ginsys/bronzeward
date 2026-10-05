@@ -24,10 +24,10 @@ const releaseCipher = "vault:v1:c2VjcmV0LWNpcGhlcnRleHQ="
 // base's occurrence, overridden by the fragment, and the fragment's mapping member, base64-encoded,
 // at its output path. {ibr} and {frv} stand for the seed's revisions.
 const releaseProvenance = `[{"reference":"registry/example-pass","version":3,` +
-	`"source":{"revision":"{ibr}","digest":"` + hexA + `","path":"doc[0]/machine/registries/config/<redacted>/auth/password"},` +
-	`"overriddenBy":{"revision":"{frv}","digest":"` + hexB + `"}},` +
+	`"source":{"revision":"{ibr}","digest":"` + hexA + `","path":"doc[0]/machine/registries/config/<redacted>/auth/password",` +
+	`"occurrence":0},"overriddenBy":{"revision":"{frv}","digest":"` + hexB + `"}},` +
 	`{"reference":"registry/example-pass","version":3,"encoding":"base64","member":0,` +
-	`"source":{"revision":"{frv}","digest":"` + hexB + `","path":"doc[0]/machine/registries"},` +
+	`"source":{"revision":"{frv}","digest":"` + hexB + `","path":"doc[0]/machine/registries","occurrence":1},` +
 	`"output":"doc[0]/machine/registries/config/<redacted>/auth/password"}]`
 
 const (
@@ -232,10 +232,15 @@ func TestReleaseReviewProvenanceProjected(t *testing.T) {
 	d := newDraftEnv(t)
 	const standIn = "bw-stand-in-7f3c" // a field's content that must reach neither answer nor log
 	good := `{"reference":"registry/example-pass","version":3,"source":{"revision":"{frv}","digest":"` + hexB +
-		`","path":"doc[0]/machine/registries"},"output":"doc[0]/machine/registries"}`
+		`","path":"doc[0]/machine/registries","occurrence":0},"output":"doc[0]/machine/registries"}`
 	for i, c := range []struct{ name, stored string }{
 		{"another field", `[{"reference":"registry/example-pass","version":3,"value":"` + standIn + `","source":{"revision":"{frv}",` +
-			`"digest":"` + hexB + `","path":"doc[0]/machine/registries"},"output":"doc[0]/machine/registries"}]`},
+			`"digest":"` + hexB + `","path":"doc[0]/machine/registries","occurrence":0},"output":"doc[0]/machine/registries"}]`},
+		// compilation §8.2: the occurrence's position among its source revision's occurrences.
+		{"no occurrence", `[` + strings.Replace(good, `,"occurrence":0`, ``, 1) + `]`},
+		{"an occurrence below 0", `[` + strings.Replace(good, `"occurrence":0`, `"occurrence":-1`, 1) + `]`},
+		{"a null occurrence", `[` + strings.Replace(good, `"occurrence":0`, `"occurrence":null`, 1) + `]`},
+		{"control: a later occurrence", `[` + strings.Replace(good, `"occurrence":0`, `"occurrence":7`, 1) + `]`},
 		{"another source field", strings.Replace("["+good+"]", `"path"`, `"text":"`+standIn+`","path"`, 1)},
 		{"both outcomes", `[` + strings.Replace(good, `"output"`, `"overriddenBy":{"revision":"{frv}","digest":"`+hexB+`"},"output"`, 1) + `]`},
 		{"no outcome", `[` + strings.Replace(good, `,"output":"doc[0]/machine/registries"`, ``, 1) + `]`},
