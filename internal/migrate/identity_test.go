@@ -1,15 +1,12 @@
 package migrate
 
 import (
-	"context"
-	"strings"
 	"testing"
 
-	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-// 0008's identity keys (persistence-api.md §7.3; execution and recovery choice §10.26).
+// The identity keys (persistence-api.md §7.3; execution and recovery choice §10.26).
 const (
 	insertNodeMachine = `INSERT INTO machine (id, cluster, talos_node_id, scope_state, talos_endpoint, created_at)
 		VALUES ($1, $2, $3, 'normal', '10.55.0.4:50000', now())`
@@ -52,36 +49,6 @@ func TestMachineIdentityConstraints(t *testing.T) {
 				t.Fatalf("%v; want SQLSTATE %s", err, c.want)
 			}
 		})
-	}
-}
-
-// §11 rule 6: 0008 supports no earlier database. On one holding a cluster it is refused and the
-// installation stays at 0007; on one without, it applies.
-func TestIdentityMigrationRefusesClusters(t *testing.T) {
-	ctx := context.Background()
-	ms, err := Embedded()
-	if err != nil || len(ms) < 8 || ms[7].Version != 8 {
-		t.Fatalf("embedded migrations: %v; want 0008 eighth", err)
-	}
-	for _, withCluster := range []bool{true, false} {
-		db, _ := dbtest.New(t)
-		if _, err := Apply(ctx, db, ms[:7]); err != nil {
-			t.Fatal(err)
-		}
-		if withCluster {
-			mustExec(t, db, insertClusterNoID, id.New(id.Cluster))
-		}
-		got, err := Apply(ctx, db, ms)
-		var top int
-		if err := db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&top); err != nil {
-			t.Fatal(err)
-		}
-		switch {
-		case withCluster && (err == nil || !strings.Contains(err.Error(), "talos_cluster_id") || len(got) != 0 || top != 7):
-			t.Errorf("with a cluster: applied %v, %v, at %d; want 0008 refused and the installation at 0007", got, err, top)
-		case !withCluster && (err != nil || top < 8):
-			t.Errorf("without a cluster: applied %v, %v, at %d; want the upgrade to apply", got, err, top)
-		}
 	}
 }
 

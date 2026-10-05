@@ -14,7 +14,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-// The statements 0011's tests insert with.
+// The statements the release tests insert with.
 const (
 	insertStatus = `INSERT INTO dependency_status (id, provider, object, version, class, reason, first_retained_at,
 		unknown_since, observed_from, recorded_at, created) VALUES ($1, $2, $3, $4, $5, $6, now(), $7, now(), now(), $8)`
@@ -88,7 +88,7 @@ func releaseRows(t *testing.T, db *sql.DB) release {
 	return r
 }
 
-// PA §3, §6.2, §7.3; compilation §9, §10.2, §11; dependency monitor §5.1: what 0011 refuses.
+// PA §3, §6.2, §7.3; compilation §9, §10.2, §11; dependency monitor §5.1: what the release tables refuse.
 func TestReleaseConstraints(t *testing.T) {
 	db, _ := installed(t)
 	r := releaseRows(t, db)
@@ -579,7 +579,7 @@ func TestReleaseConstraints(t *testing.T) {
 	}
 }
 
-// The control for 0011's named checks: with each dropped, the row TestReleaseConstraints expects it
+// The control for the release tables' named checks: with each dropped, the row TestReleaseConstraints expects it
 // to refuse commits, so it is that check, not another, that refuses.
 func TestReleaseConstraintControl(t *testing.T) {
 	db, _ := installed(t)

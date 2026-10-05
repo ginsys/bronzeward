@@ -1,17 +1,14 @@
 package migrate
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"testing"
 
-	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-// The statements 0006's tests insert with.
+// The statements the endpoint tests insert with.
 const (
 	insertMachineAt = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, created_at)
 		VALUES ($1, $2, $3, NULL, 'normal', $4, now())`
@@ -88,7 +85,7 @@ func TestEndpointConstraints(t *testing.T) {
 	mustExec(t, db, insertEndpointChange, e.machine, 2, "10.55.0.4:50000", "[fd00::9]:50000", e.act2)
 }
 
-// The control for 0006's checks: with each dropped, the row TestEndpointConstraints expects it to
+// The control for the endpoint checks: with each dropped, the row TestEndpointConstraints expects it to
 // refuse commits, so it is that check, not another, that refuses.
 func TestEndpointConstraintControl(t *testing.T) {
 	db, _ := installed(t)
@@ -124,7 +121,7 @@ func TestEndpointConstraintControl(t *testing.T) {
 	}
 }
 
-// Both 0006 tables are immutable (PA §3: TimelineEvent and MachineEndpointChange), with the
+// Both machine timeline tables are immutable (PA §3: TimelineEvent and MachineEndpointChange), with the
 // control that drops each trigger and must then succeed.
 func TestEndpointImmutableTables(t *testing.T) {
 	db, _ := installed(t)
@@ -159,41 +156,5 @@ func TestEndpointImmutableTables(t *testing.T) {
 			mustTx("UPDATE " + table + " SET revision = revision")
 			mustTx("DELETE FROM " + table)
 		}()
-	}
-}
-
-// §11 rule 6: 0006 supports no earlier database. On an installation at 0005 holding a machine it
-// fails, PostgreSQL refusing the NOT NULL column, and leaves the installation at 0005; the control
-// upgrades the same installation without the machine.
-func TestEndpointMigrationRefusesMachines(t *testing.T) {
-	ctx := context.Background()
-	ms, err := Embedded()
-	if err != nil || len(ms) < 6 || ms[5].Version != 6 {
-		t.Fatalf("embedded migrations: %v; want 0006 sixth", err)
-	}
-	for _, withMachine := range []bool{true, false} {
-		db, _ := dbtest.New(t)
-		if _, err := Apply(ctx, db, ms[:5]); err != nil {
-			t.Fatal(err)
-		}
-		if _, _, err := Install(ctx, db); err != nil {
-			t.Fatal(err)
-		}
-		if withMachine {
-			cl := id.New(id.Cluster)
-			mustExec(t, db, insertClusterNoID, cl)
-			mustExec(t, db, insertMachineNoEndpoint, id.New(id.Machine), cl, "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b")
-		}
-		got, err := Apply(ctx, db, ms)
-		var top int
-		if err := db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&top); err != nil {
-			t.Fatal(err)
-		}
-		switch {
-		case withMachine && (err == nil || !strings.Contains(err.Error(), "talos_endpoint") || len(got) != 0 || top != 5):
-			t.Errorf("with a machine: applied %v, %v, at %d; want 0006 refused and the installation at 0005", got, err, top)
-		case !withMachine && (err != nil || top < 6):
-			t.Errorf("without a machine: applied %v, %v, at %d; want the upgrade to apply", got, err, top)
-		}
 	}
 }

@@ -6,13 +6,13 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-// insertSubjectClaim names every 0007 column, so each refusal below changes one of them.
+// insertSubjectClaim names every subject and digest column, so each refusal below changes one of them.
 const insertSubjectClaim = `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until,
 	expires_at, payload, payload_digest, cluster, machine, kind, created_at)
 	SELECT $1, $2, 'held', 'a/4242/start-1', 1, epoch, now() + interval '1 minute', now() + interval '1 hour',
 	$3, $4, $5, $6, $7, now() FROM installation_state`
 
-// 0007 (compilation §2.3 step 6, §3.4): a claim names the cluster its generations are created
+// Compilation §2.3 step 6, §3.4: a claim names the cluster its generations are created
 // under and the machine it imports, and an encrypted payload carries the digest a resume checks.
 func TestStagingSubject(t *testing.T) {
 	db, _ := installed(t)
@@ -23,7 +23,7 @@ func TestStagingSubject(t *testing.T) {
 		want string
 	}{
 		{"machine of another cluster", []any{"transient", nil, nil, a.cluster, a.otherMachine, "import"}, "23503"},
-		{"no machine", []any{"transient", nil, nil, a.cluster, nil, "import"}, "23514"}, // 0010's subject CHECK
+		{"no machine", []any{"transient", nil, nil, a.cluster, nil, "import"}, "23514"}, // staging_claim_subject
 		{"no cluster", []any{"transient", nil, nil, nil, a.machine, "import"}, "23502"},
 		{"no kind", []any{"transient", nil, nil, a.cluster, a.machine, nil}, "23502"},
 		{"kind drift-adoption", []any{"transient", nil, nil, a.cluster, a.machine, "drift-adoption"}, "23514"},
@@ -48,13 +48,13 @@ func TestStagingSubject(t *testing.T) {
 	mustExec(t, db, `UPDATE staging_claim SET state = 'released', payload = NULL, payload_digest = NULL WHERE id = $1`, enc)
 }
 
-// insertDraftClaim names 0010's subject columns: an import's machine or a draft update's draft.
+// insertDraftClaim names both subject columns: an import's machine or a draft update's draft.
 const insertDraftClaim = `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until,
 	expires_at, cluster, machine, draft, kind, created_at)
 	SELECT $1, $2, 'held', 'a/4242/start-1', 1, epoch, now() + interval '1 minute', now() + interval '1 hour',
 	$3, $4, $5, $6, now() FROM installation_state`
 
-// 0010 (compilation §2.3, §3; persistence-api §9.3): a draft update's claim names its draft and
+// Compilation §2.3, §3; persistence-api §9.3: a draft update's claim names its draft and
 // no machine, an import's its machine and no draft, and a draft update stages transiently only.
 func TestDraftUpdateClaimSubject(t *testing.T) {
 	db, _ := installed(t)

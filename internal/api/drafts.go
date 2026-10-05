@@ -46,7 +46,7 @@ type noBody struct{}
 
 func (*noBody) check(*API) error { return nil }
 
-// sourceName is a fragment or profile name (choice §17.31), as migration 0009's source_name.
+// sourceName is a fragment or profile name (choice §17.31), as the schema's source_name domain.
 var sourceName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 func validName(s string) bool { return len(s) <= 63 && sourceName.MatchString(s) }

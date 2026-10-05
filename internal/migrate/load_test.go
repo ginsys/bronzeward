@@ -10,12 +10,13 @@ import (
 
 func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
 
+// §11 rule 6: until the first release the schema is one migration, edited in place.
 func TestEmbeddedLoads(t *testing.T) {
 	ms, err := Embedded()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ms) == 0 || ms[0].Version != 1 || ms[0].Name != "foundation" {
+	if len(ms) != 1 || ms[0].Version != 1 || ms[0].Name != "schema" {
 		t.Fatalf("got %+v", ms)
 	}
 }

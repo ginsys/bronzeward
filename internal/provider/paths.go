@@ -18,7 +18,7 @@ import (
 // usable one; the zero value addresses nothing and is refused by CreateGeneration.
 type GenerationPath struct{ cluster, claim, value string }
 
-// valueID is the generation column's last component (0004_adoption.sql): it excludes '/', '.',
+// valueID is the generation column's last component (0001_schema.sql): it excludes '/', '.',
 // '%', '#', '?' and whitespace, so a value identifier is one URL path segment carried literally.
 var valueID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
@@ -73,7 +73,7 @@ func transitPath(op, key string) (string, error) {
 // load by the same rule NewIngestion applies.
 func CheckKeyName(key string) error { return keySegment(key) }
 
-// maxKeyRef is the bound of import_base_revision.baseline_digest_key (0004_adoption.sql), where a
+// maxKeyRef is the bound of import_base_revision.baseline_digest_key (0001_schema.sql), where a
 // Digest's KeyRef, "transit/<key>@v<N>", is stored. maxKeyName leaves room for any version Digest
 // accepts (strconv.Atoi: at most 19 digits), so a key that NewIngestion and configuration accept
 // never yields a reference the column refuses after the provider writes have been made.

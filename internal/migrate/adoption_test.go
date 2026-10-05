@@ -4,20 +4,17 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"slices"
-	"strings"
 	"testing"
 
-	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
-// The statements 0004's tests insert with; each takes the installation's epoch where it needs one.
+// The statements the inventory, draft and operation tests insert with; each takes the installation's epoch where it needs one.
 const (
-	// Every cluster has a Talos cluster ID (0008); each row's is derived from its identifier.
+	// Every cluster has a Talos cluster ID; each row's is derived from its identifier.
 	insertCluster = `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)
 		VALUES ($1, $2, $3, $4, translate(encode(sha256(convert_to($1::text, 'UTF8')), 'base64'), '+/', '-_'), now())`
-	// Every machine has a Talos endpoint (0006); these rows share one.
+	// Every machine has a Talos endpoint; these rows share one.
 	insertMachine = `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, created_at)
 		VALUES ($1, $2, $3, $4, $5, '10.55.0.3:50000', now())`
 	insertMachineState = `INSERT INTO machine_state (machine, applied_release, applied_digest, applied_source, baseline_revision)
@@ -29,7 +26,7 @@ const (
 	insertDraft = `INSERT INTO draft (id, cluster, title, state, revision, etag_token, created_at)
 		VALUES ($1, $2, $3, $4, 1, $5, now())`
 	insertEntry = `INSERT INTO draft_entry (draft, cluster, kind, machine, import_base_revision) VALUES ($1, $2, $3, $4, $5)`
-	// A claim's subject (0007) is not what these rows test: each imports the first machine by id,
+	// A claim's subject is not what these rows test: each imports the first machine by id,
 	// and a payload carries its digest. TestStagingSubject tests the subject columns.
 	insertClaim = `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until, expires_at,
 		payload, payload_digest, principal, idempotency_key, cluster, machine, kind, created_at)
@@ -43,12 +40,12 @@ const (
 		$6, $7, $8, $9, CASE WHEN $9::text IS NULL THEN NULL ELSE 'human' END,
 		CASE WHEN $9::text IS NULL THEN NULL WHEN $2 = 'publish' THEN 'publisher' ELSE 'author' END, now(), $10::jsonb,
 		$11::jsonb FROM installation_state`
-	// The event names its operation's kind (0005), which the key on (operation, kind) checks.
+	// The event names its operation's kind, which the key on (operation, kind) checks.
 	insertEvent = `INSERT INTO operation_event (operation, number, epoch, entry, at, kind)
 		SELECT $1, $2, epoch, $3::jsonb, now(), $4 FROM installation_state`
 )
 
-// adoption holds one of each 0004 row, inserted by adoptionRows.
+// adoption holds one of each inventory, draft and operation row, inserted by adoptionRows.
 type adoption struct {
 	human, cluster, other, machine, otherMachine, ibr, otherIBR, draft, draft2, claim, ingest, applyConfig, adopt string
 }
@@ -83,7 +80,7 @@ func digest(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
 
 func generation(cluster, claim string) string { return "gen/" + cluster + "/" + claim + "/v1" }
 
-// PA §3, §5.1, §7.3, §8; compilation §3.2, §5: what the schema itself refuses in 0004.
+// PA §3, §5.1, §7.3, §8; compilation §3.2, §5: what the schema itself refuses in those tables.
 func TestAdoptionConstraints(t *testing.T) {
 	db, _ := installed(t)
 	a := adoptionRows(t, db)
@@ -162,7 +159,7 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"event of no operation", insertEvent, []any{op(), 1, `{}`, "ingest"}, "23503"},
 		{"event with a JSON null entry", insertEvent, []any{a.ingest, 2, "null", "ingest"}, "23514"},
 		{"event with an array entry", insertEvent, []any{a.ingest, 3, "[]", "ingest"}, "23514"},
-		// 0005, issue ginsys/bronzeward#71: execution and recovery §3.2 commits an apply-config
+		// Issue ginsys/bronzeward#71: execution and recovery §3.2 commits an apply-config
 		// operation owned, and §3.4's takeover fence compares that owner, in every state up to a
 		// terminal one.
 		{"committed apply-config with no owner", insertOperation, []any{op(), "apply-config", "committed", nil, 0, nil, nil, nil, nil, nil, nil}, "23514"},
@@ -203,7 +200,7 @@ func TestAdoptionConstraints(t *testing.T) {
 	// The baseline revision's counter control needs releases, so it is TestReleaseConstraints'.
 }
 
-// The control for 0005: with each of its constraints dropped, the row TestAdoptionConstraints
+// The control for the operation fence: with each of its constraints dropped, the row TestAdoptionConstraints
 // expects that constraint to refuse commits, so it is that constraint, not another, that refuses.
 func TestOperationFenceControl(t *testing.T) {
 	db, _ := installed(t)
@@ -235,46 +232,7 @@ func TestOperationFenceControl(t *testing.T) {
 	}
 }
 
-// 0005 refuses an installation whose operation_event already holds rows, which carry no kind to
-// check, and leaves it at 0004; the control upgrades the same installation without the row.
-func TestOperationFenceRefusesKindlessEvents(t *testing.T) {
-	ctx := context.Background()
-	ms, err := Embedded()
-	if err != nil || len(ms) < 5 || ms[3].Version != 4 {
-		t.Fatalf("embedded migrations: %v; want 0004 then 0005", err)
-	}
-	for _, withEvent := range []bool{true, false} {
-		db, _ := dbtest.New(t)
-		if _, err := Apply(ctx, db, ms[:4]); err != nil {
-			t.Fatal(err)
-		}
-		if _, _, err := Install(ctx, db); err != nil {
-			t.Fatal(err)
-		}
-		adopt := id.New(id.Operation)
-		mustExec(t, db, `INSERT INTO operation (id, kind, state, epoch, created_at)
-			SELECT $1, 'adopt', 'completed', epoch, now() FROM installation_state`, adopt)
-		if withEvent {
-			mustExec(t, db, `INSERT INTO operation_event (operation, number, epoch, entry, at)
-				SELECT $1, 1, epoch, '{}', now() FROM installation_state`, adopt)
-		}
-		got, err := Apply(ctx, db, ms)
-		var top int
-		if err := db.QueryRow("SELECT max(version) FROM schema_migrations").Scan(&top); err != nil {
-			t.Fatal(err)
-		}
-		switch {
-		// The message, not only the failure: without the guard, the NOT NULL column would still fail
-		// on the row, with an error naming neither the cause nor the remedy.
-		case withEvent && (err == nil || !strings.Contains(err.Error(), "operation_event holds rows") || len(got) != 0 || top != 4):
-			t.Errorf("with an event: applied %v, %v, at %d; want 0005 refused and the installation at 0004", got, err, top)
-		case !withEvent && (err != nil || top < 5):
-			t.Errorf("without an event: applied %v, %v, at %d; want the upgrade to apply", got, err, top)
-		}
-	}
-}
-
-// Choice §17.3: each immutable 0004 table's trigger fires on UPDATE, DELETE and TRUNCATE.
+// Choice §17.3: each immutable adoption table's trigger fires on UPDATE, DELETE and TRUNCATE.
 func TestAdoptionImmutableTables(t *testing.T) {
 	db, _ := installed(t)
 	adoptionRows(t, db)
@@ -341,9 +299,9 @@ func TestSMBIOSUniqueControl(t *testing.T) {
 	}
 }
 
-// §11: the embedded migrations apply on a fresh database, a second run applies nothing, and the
-// startup check accepts the result; an installation at 0003 upgrades to the binary's schema.
-func TestEmbeddedApplyTwiceAndUpgrade(t *testing.T) {
+// §11: the embedded migration applies on a fresh database, a second run applies nothing, and the
+// startup check accepts the result.
+func TestEmbeddedApplyTwice(t *testing.T) {
 	db, ms := installed(t)
 	ctx := context.Background()
 	if got, err := Apply(ctx, db, ms); err != nil || len(got) != 0 {
@@ -357,27 +315,5 @@ func TestEmbeddedApplyTwiceAndUpgrade(t *testing.T) {
 		if !tableExists(t, db, name) {
 			t.Errorf("%s missing", name)
 		}
-	}
-
-	fresh, _ := dbtest.New(t)
-	if _, err := Apply(ctx, fresh, ms[:3]); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := Install(ctx, fresh); err != nil {
-		t.Fatal(err)
-	}
-	// Every migration from 0004 on, so the check stays true as later migrations are added.
-	var want []int
-	for _, m := range ms[3:] {
-		want = append(want, m.Version)
-	}
-	if got, err := Apply(ctx, fresh, ms); err != nil || want[0] != 4 || !slices.Equal(got, want) {
-		t.Fatalf("upgrade: %v, %v; want %v", got, err, want)
-	}
-	if _, _, err := Install(ctx, fresh); err != nil {
-		t.Fatal(err)
-	}
-	if err := Check(ctx, fresh, ms); err != nil {
-		t.Fatalf("after the upgrade: %v", err)
 	}
 }

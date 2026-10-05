@@ -18,7 +18,7 @@ func textDigest(text string) string {
 }
 
 // declaredFragment inserts a fragment revision declaring reference at generation, in the
-// revision's own transaction (0009).
+// revision's own transaction (refuse_late_revision_row).
 func (p *publishEnv) declaredFragment(name, layer, reference, generation string) string {
 	p.t.Helper()
 	tx, err := p.db.Begin()

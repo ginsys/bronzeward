@@ -15,13 +15,13 @@ import (
 // copied, so a path this package builds and the column it is stored in cannot drift apart.
 func generationCheck(t *testing.T) *regexp.Regexp {
 	t.Helper()
-	b, err := os.ReadFile("../migrate/migrations/0004_adoption.sql")
+	b, err := os.ReadFile("../migrate/migrations/0001_schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := regexp.MustCompile(`generation ~ '([^']+)'`).FindStringSubmatch(string(b))
 	if m == nil {
-		t.Fatal("no generation CHECK in 0004_adoption.sql")
+		t.Fatal("no generation CHECK in 0001_schema.sql")
 	}
 	return regexp.MustCompile(m[1])
 }
@@ -103,13 +103,13 @@ func TestTransitPathRefusesSlash(t *testing.T) {
 // the largest version Digest accepts; one byte more is refused before any provider call, so no
 // generation is created for an ingestion whose record the column would then refuse.
 func TestKeyNameFitsTheKeyReference(t *testing.T) {
-	b, err := os.ReadFile("../migrate/migrations/0004_adoption.sql")
+	b, err := os.ReadFile("../migrate/migrations/0001_schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := regexp.MustCompile(`octet_length\(baseline_digest_key\) <= (\d+)`).FindStringSubmatch(string(b))
 	if m == nil {
-		t.Fatal("no baseline_digest_key bound in 0004_adoption.sql")
+		t.Fatal("no baseline_digest_key bound in 0001_schema.sql")
 	}
 	limit, err := strconv.Atoi(m[1])
 	if err != nil {

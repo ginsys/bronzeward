@@ -127,7 +127,7 @@ func TestImmutableTablesRefuse(t *testing.T) {
 	for _, stmt := range []string{
 		"UPDATE act SET action = action",
 		"DELETE FROM act",
-		"TRUNCATE act CASCADE", // identity_revocation references act (0003)
+		"TRUNCATE act CASCADE", // identity_revocation references act
 		"UPDATE schema_migrations SET name = name",
 		"DELETE FROM schema_migrations",
 		"TRUNCATE schema_migrations",
