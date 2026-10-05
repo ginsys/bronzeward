@@ -102,6 +102,10 @@ func (a *API) dependencyRefusal(j publishJob, reference, prov, object string, ve
 		dep["reference"] = reference
 	}
 	var d *compile.DependencyError
+	if errors.As(err, &d) {
+		object, version = d.Object, d.Version // the artifact key's version is known only here
+		dep["object"], dep["version"] = object, version
+	}
 	switch {
 	case errors.As(err, &d) && d.Class == classify.Unknown && d.Reason != string(classify.IdentityMismatch):
 		dep["class"], dep["reason"] = string(d.Class), d.Reason
