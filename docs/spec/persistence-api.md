@@ -232,8 +232,8 @@ statement.
 | Assignment / AssignmentRevision | mutable head / immutable | per machine: selected profiles and fragments per layer | this contract |
 | ImportBaseRevision | immutable | a machine's sanitized imported document with references, baseline ciphertext, its keyed digest and its configuration digest | compilation §2.3, §6 |
 | Draft | mutable, revisioned | change set: entries and their base head revisions | this contract |
-| Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1); the release covers one cluster and a set of its machines | compilation §11; this contract |
-| Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity | compilation §9 |
+| Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1) and the name of the Transit key its artifact was encrypted under; the release covers one cluster and a set of its machines | compilation §11; this contract |
+| Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity: the machine's key at its ciphertext's key version. Each effective dependency has a reproduction dependency of its machine at the same version and creation time, whose source declares it at that version and generation; indexed by its DependencyStatus identity (dependency monitor §6.1) | compilation §9 |
 | DependencyStatus | mutable | last classification per provider object version and creation time, and when first seen `retained` | design §7.6, §7.8; [dependency monitor §5](dependency-monitor.md#5-state) |
 | DependencyAlert | immutable | every alert the dependency monitor raises | [dependency monitor §6.2](dependency-monitor.md#62-alert-kinds) |
 | DependencyMonitor | mutable singleton | the monitor's progress, last completed pass, last stall alert and last logged alert | [dependency monitor §5.1](dependency-monitor.md#51-records) |
@@ -821,6 +821,7 @@ INSERT INTO release ...;             -- unique (draft_id, draft_revision);
                                      -- published by the principal that
                                      -- requested $op, in its role
 INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
+                                     -- the Transit key it was encrypted under,
                                      -- configuration digest, review data; its
                                      -- assignment revision its assignment
                                      -- source's (checked at commit)
@@ -843,10 +844,15 @@ INSERT INTO release_source ...;      -- every revision and head revision used:
   --   nothing committed
 INSERT INTO dependency ...;          -- both records, each reproduction source
                                      -- the machine's import base or a release
-                                     -- source's fragment revision; and one
-                                     -- encryption dependency per machine, at
-                                     -- its ciphertext's key version (checked
-                                     -- at commit)
+                                     -- source's fragment revision, each
+                                     -- effective one with a reproduction
+                                     -- dependency of its machine at the same
+                                     -- version and creation time, whose source
+                                     -- declares it at that version and
+                                     -- generation; and one encryption
+                                     -- dependency per machine, naming the
+                                     -- machine's key at its ciphertext's key
+                                     -- version (checked at commit)
 UPDATE <head> SET head_revision_id = ..., head_revision = head_revision + 1,
                   etag_token = ...
  WHERE id = ... AND head_revision = $base;
