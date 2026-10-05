@@ -187,6 +187,24 @@ func TestPublishCommitDeclarations(t *testing.T) {
 		{"provenance occurrence", "provenance occurrence without a reproduction dependency", func(p *publishEnv) {
 			p.unit.machines[0].provenance[0].Occurrence = 1
 		}},
+		// An occurrence (a mapping member) has one outcome: one override, or one record per
+		// distinct output path.
+		{"provenance override repeated", "provenance outcome repeated", func(p *publishEnv) {
+			m := &p.unit.machines[0]
+			r := &m.provenance[0]
+			r.Output, r.OverriddenBy = "", &compile.Origin{Fragment: 0, Revision: p.networkNew, Digest: textDigest("machine: {}")}
+			m.provenance = append(m.provenance, *r)
+		}},
+		{"provenance output repeated", "provenance outcome repeated", func(p *publishEnv) {
+			m := &p.unit.machines[0]
+			m.provenance = append(m.provenance, m.provenance[0])
+		}},
+		{"provenance overridden and output", "provenance outcome repeated", func(p *publishEnv) {
+			m := &p.unit.machines[0]
+			r := m.provenance[0]
+			r.Output, r.OverriddenBy = "", &compile.Origin{Fragment: 0, Revision: p.networkNew, Digest: textDigest("machine: {}")}
+			m.provenance = append(m.provenance, r)
+		}},
 		{"reproduction path", "reproduction dependency without a provenance record", func(p *publishEnv) {
 			m := &p.unit.machines[0]
 			d := m.reproduction[0]
@@ -221,10 +239,11 @@ func TestPublishCommitDeclarationsAgree(t *testing.T) {
 		p := newPublishEnv(t)
 		p.importBase("mapping", nil)
 		m := &p.unit.machines[0]
+		// Each member's key is a value, so both output paths read the same (compilation §8.3).
 		r := m.provenance[0]
-		r.Member = 0
+		r.Member, r.Output = 0, "doc[0]/machine/registries/<redacted>"
 		m.provenance[0] = r
-		r.Member, r.Output = 1, "doc[0]/machine/registries/<redacted>"
+		r.Member = 1
 		m.provenance = append(m.provenance, r)
 		if rel, ref := p.commit(); ref != nil || rel == "" {
 			t.Fatalf("commit %s %v", rel, ref)
