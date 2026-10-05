@@ -24,10 +24,13 @@ ALTER TABLE dependency
 
 -- An effective dependency is a reference occurrence that reached the artifact (compilation §9), so
 -- the machine has a reproduction dependency at the same version and creation time, whose source
--- revision declares that reference at that version and generation (compilation §5.1): one the
--- artifact does not hold cannot stand in for the generation it does. A declaration has no creation
--- time; the occurrence's row names it. Its reproduction rows are written in the same transaction,
--- so this is checked at commit.
+-- revision is in the machine's composition and declares that reference at that version and
+-- generation (compilation §5.1): one the artifact does not hold cannot stand in for the generation
+-- it does. The import base is the machine's own by the reproduction row's key; a fragment revision
+-- is one a profile its assignment selects pins, or one the release names under a fragment name the
+-- assignment selects (compilation §6), as T3's own check composes it. A declaration has no
+-- creation time; the occurrence's row names it. Its reproduction rows and the release's sources are
+-- written in the same transaction, so this is checked at commit.
 CREATE FUNCTION require_effective_occurrence() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NOT EXISTS (
@@ -38,7 +41,19 @@ BEGIN
          AND (EXISTS (SELECT FROM import_base_reference d WHERE d.revision = o.source_import_base
                         AND d.name = o.reference AND d.version = o.version AND d.generation = o.object)
            OR EXISTS (SELECT FROM fragment_reference d WHERE d.revision = o.source_fragment_revision
-                        AND d.name = o.reference AND d.version = o.version AND d.generation = o.object))) THEN
+                        AND d.name = o.reference AND d.version = o.version AND d.generation = o.object)
+              AND EXISTS (SELECT FROM release_machine m WHERE m.release = o.release AND m.machine = o.machine
+                            AND (EXISTS (SELECT FROM assignment_revision_profile a
+                                           JOIN release_source s ON s.release = m.release AND s.kind = 'profile'
+                                             AND s.name = a.profile
+                                           JOIN profile_revision_fragment p ON p.revision = s.profile_revision
+                                          WHERE a.revision = m.assignment_revision
+                                            AND p.fragment_revision = o.source_fragment_revision)
+                              OR EXISTS (SELECT FROM assignment_revision_fragment a
+                                           JOIN release_source s ON s.release = m.release AND s.kind = 'fragment'
+                                             AND s.name = a.fragment
+                                          WHERE a.revision = m.assignment_revision
+                                            AND s.fragment_revision = o.source_fragment_revision))))) THEN
     RAISE EXCEPTION 'dependency: an effective dependency without a declared occurrence is refused'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'dependency_effective', TABLE = 'dependency';
   END IF;
