@@ -13,7 +13,7 @@ import (
 // The statements 0011's tests insert with.
 const (
 	insertStatus = `INSERT INTO dependency_status (id, provider, object, version, class, reason, first_retained_at,
-		unknown_since, observed_from, recorded_at) VALUES ($1, $2, $3, $4, $5, $6, now(), $7, now(), now())`
+		unknown_since, observed_from, recorded_at, created) VALUES ($1, $2, $3, $4, $5, $6, now(), $7, now(), now(), $8)`
 	insertRelease = `INSERT INTO release (id, cluster, draft, draft_revision, digest, contract, machinery_version,
 		machinery_checksum, kubernetes_version, operation, published_by, published_role, epoch, published_at)
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, epoch, now() FROM installation_state`
@@ -46,8 +46,8 @@ func releaseRows(t *testing.T, db *sql.DB) release {
 		depKV: id.New(id.Dependency), depKey: id.New(id.Dependency)}
 	kv := generation(r.cluster, r.claim)
 	mustExec(t, db, insertOperation, r.publish, "publish", "running", "run-1/4242/publish-1", 1, r.draft, 1, nil, r.human, nil, nil)
-	mustExec(t, db, insertStatus, r.depKV, "kv", kv, 1, "retained", nil, nil)
-	mustExec(t, db, insertStatus, r.depKey, "transit", "bw-artifact", 1, "retained", nil, nil)
+	mustExec(t, db, insertStatus, r.depKV, "kv", kv, 1, "retained", nil, nil, created)
+	mustExec(t, db, insertStatus, r.depKey, "transit", "bw-artifact", 1, "retained", nil, nil, "2026-09-26T09:12:40Z")
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestReleaseConstraints(t *testing.T) {
 	r := releaseRows(t, db)
 	kv := generation(r.cluster, r.claim)
 	rel2 := id.New(id.Release)
-	op2 := id.New(id.Operation)
+	op2, op3 := id.New(id.Operation), id.New(id.Operation)
 	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, r.draft2, 1, nil, r.human, nil, nil)
 	// rel2 is inserted in each case's transaction first, so its rows are written with it.
 	withRelease := []stmt{{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
@@ -127,6 +127,8 @@ func TestReleaseConstraints(t *testing.T) {
 		{"release Kubernetes version without its patch", nil, insertRelease, newRelease(8, "v1.36"), "release_kubernetes_version_check"},
 		{"second release of one operation", nil, insertRelease, newRelease(9, r.publish), "23505"},
 		{"release of an ingest operation", nil, insertRelease, newRelease(9, r.ingest), "23503"},
+		{"release of another draft revision's publish operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
+			r.draft, 1, nil, r.human, nil, nil}}}, insertRelease, newRelease(9, op3), "23503"},
 		{"release published by no principal", nil, insertRelease, newRelease(10, id.New(id.Principal)), "23503"},
 		{"release published under the author role", nil, insertRelease, newRelease(11, "author"), "release_published_role_check"},
 		{"release with an id of another kind", nil, insertRelease, newRelease(0, id.New(id.Draft)), "release_id_check"},
@@ -164,6 +166,9 @@ func TestReleaseConstraints(t *testing.T) {
 		{"dependency of a machine the release does not cover", withRelease, insertDependency, depRow(), "23503"},
 		{"dependency of an unknown kind", withMachine, insertDependency, depRow(2, "source"), "dependency_kind_check"},
 		{"dependency without a status row", withMachine, insertDependency, depRow(5, 2), "23503"},
+		// Dependency monitor §3: a version's identity includes its creation time.
+		{"dependency on another creation of its version", withMachine, insertDependency,
+			depRow(6, "2026-09-26T09:12:41Z"), "23503"},
 		{"encryption dependency on KV", withMachine, insertDependency, depRow(2, "encryption", 7, nil), "dependency_shape"},
 		{"effective dependency on a Transit key", withMachine, insertDependency,
 			depRow(3, "transit", 4, "bw-artifact"), "dependency_shape"},
@@ -193,27 +198,29 @@ func TestReleaseConstraints(t *testing.T) {
 			depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine", 11, -1), "dependency_occurrence_check"},
 		{"effective dependency with an occurrence", withMachine, insertDependency, depRow(11, 0), "dependency_shape"},
 		// dependency_status
-		{"second status of one version", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil}, "23505"},
-		{"status of an unknown class", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 2, "fine", "absent", nil}, "dependency_status_class_check"},
-		{"status of an unknown provider", nil, insertStatus, []any{id.New(id.Dependency), "s3", kv, 2, "retained", nil, nil}, "dependency_status_provider_check"},
+		{"second status of one version", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, created}, "23505"},
+		{"status of an unknown class", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 2, "fine", "absent", nil, created}, "dependency_status_class_check"},
+		{"status of an unknown provider", nil, insertStatus, []any{id.New(id.Dependency), "s3", kv, 2, "retained", nil, nil, created}, "dependency_status_provider_check"},
 		{"unknown status without its start", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", nil}, "dependency_status_unknown_since"},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", nil, created}, "dependency_status_unknown_since"},
 		{"retained status with an unknown start", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", nil, "2026-09-26T09:12:40Z"}, "dependency_status_unknown_since"},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", nil, "2026-09-26T09:12:40Z", created}, "dependency_status_unknown_since"},
 		{"status reason in capitals", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "Soft-Deleted", nil}, "dependency_status_reason_check"},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "Soft-Deleted", nil, created}, "dependency_status_reason_check"},
 		{"retained status with a reason", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "absent", nil}, "dependency_status_reason"},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "absent", nil, created}, "dependency_status_reason"},
 		{"blocked status without a reason", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", nil, nil}, "dependency_status_reason"},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", nil, nil, created}, "dependency_status_reason"},
 		{"KV status at a key name", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", "bw-artifact", 1, "retained", nil, nil}, "dependency_status_object"},
+			[]any{id.New(id.Dependency), "kv", "bw-artifact", 1, "retained", nil, nil, created}, "dependency_status_object"},
 		{"Transit status at a path", nil, insertStatus,
-			[]any{id.New(id.Dependency), "transit", "transit/bw-artifact", 1, "retained", nil, nil}, "dependency_status_object"},
+			[]any{id.New(id.Dependency), "transit", "transit/bw-artifact", 1, "retained", nil, nil, created}, "dependency_status_object"},
 		{"Transit status at ..", nil, insertStatus,
-			[]any{id.New(id.Dependency), "transit", "..", 1, "retained", nil, nil}, "dependency_status_object"},
-		{"status at version 0", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 0, "retained", nil, nil}, "dependency_status_version_check"},
-		{"status with an id of another kind", nil, insertStatus, []any{id.New(id.Release), "kv", kv, 2, "retained", nil, nil}, "dependency_status_id_check"},
+			[]any{id.New(id.Dependency), "transit", "..", 1, "retained", nil, nil, created}, "dependency_status_object"},
+		{"status at version 0", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 0, "retained", nil, nil, created}, "dependency_status_version_check"},
+		{"status with an id of another kind", nil, insertStatus, []any{id.New(id.Release), "kv", kv, 2, "retained", nil, nil, created}, "dependency_status_id_check"},
+		{"status creation time without its zone", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", nil, nil, "2026-09-26T09:12:40"}, "dependency_status_created_check"},
 		// draft, machine_state, operation
 		{"published draft without its release", nil,
 			`UPDATE draft SET state = 'published' WHERE id = $1`, []any{r.draft2}, "draft_published_release"},
@@ -244,8 +251,11 @@ func TestReleaseConstraints(t *testing.T) {
 		}()
 	}
 	// Controls: the same shapes commit with valid values, on a second draft revision.
-	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", "2026-09-26T09:12:40Z")
-	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 3, "blocked", "deletion-scheduled", nil)
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", "2026-09-26T09:12:40Z", created)
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 3, "blocked", "deletion-scheduled", nil, created)
+	// A version recreated under its object and number is another identity, with its own status.
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, "2026-09-26T09:12:40.1Z")
+	mustExec(t, db, insertStatus, id.New(id.Dependency), "transit", "bw-artifact", 1, "retained", nil, nil, "2026-10-01T00:00:00Z")
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +269,7 @@ func TestReleaseConstraints(t *testing.T) {
 	// Two occurrences shown at one redacted path are two rows, told apart by their ordinals.
 	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine/<redacted>", 11, 0)...)
 	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.ibr, 9, digest(6), 10, "base:/machine/<redacted>", 11, 1)...)
-	mustExec(t, tx, insertDependency, depRow(2, "encryption", 3, "transit", 4, "bw-artifact", 6, "2026-09-26T09:12:40Z", 7, nil)...)
+	mustExec(t, tx, insertDependency, depRow(2, "encryption", 3, "transit", 4, "bw-artifact", 6, "2026-10-01T00:00:00Z", 7, nil)...)
 	// A publish that failed leaves the draft revision free for the next.
 	mustExec(t, tx, `UPDATE operation SET state = 'failed', error = '{"code": "conflict"}' WHERE id = $1`, op2)
 	mustExec(t, tx, insertOperation, id.New(id.Operation), "publish", "queued", nil, 0, r.draft2, 1, nil, r.human, nil, nil)
@@ -284,7 +294,7 @@ func TestReleaseConstraintControl(t *testing.T) {
 	db, _ := installed(t)
 	r := releaseRows(t, db)
 	kv := generation(r.cluster, r.claim)
-	rel2, op2 := id.New(id.Release), id.New(id.Operation)
+	rel2, op2, op3 := id.New(id.Release), id.New(id.Operation), id.New(id.Operation)
 	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, r.draft2, 1, nil, r.human, nil, nil)
 	withRelease := stmt{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
 		"v1.36.0", op2, r.human, "publisher"}}
@@ -305,15 +315,20 @@ func TestReleaseConstraintControl(t *testing.T) {
 		{"ALTER TABLE dependency DROP CONSTRAINT dependency_kind_check", []stmt{withRelease, withMachine}, insertDependency,
 			[]any{rel2, r.machine, "source", "kv", kv, 1, created, "registry/example-pass", nil, nil, nil, nil}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_class_check", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", kv, 2, "fine", "absent", nil}},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "fine", "absent", nil, created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_provider_check", nil, insertStatus,
-			[]any{id.New(id.Dependency), "s3", kv, 2, "retained", nil, nil}},
+			[]any{id.New(id.Dependency), "s3", kv, 2, "retained", nil, nil, created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_object", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", "bw-artifact", 1, "retained", nil, nil}},
+			[]any{id.New(id.Dependency), "kv", "bw-artifact", 1, "retained", nil, nil, created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_reason", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "absent", nil}},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", "absent", nil, created}},
 		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_unknown_since", nil, insertStatus,
-			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", nil}},
+			[]any{id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", nil, created}},
+		{"ALTER TABLE dependency_status DROP CONSTRAINT dependency_status_created_check", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 2, "retained", nil, nil, "2026-09-26T09:12:40"}},
+		{"ALTER TABLE release DROP CONSTRAINT release_operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
+			r.draft, 1, nil, r.human, nil, nil}}}, insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery,
+			checksum, "v1.36.0", op3, r.human, "publisher"}},
 		{"ALTER TABLE draft DROP CONSTRAINT draft_published_release", nil,
 			`UPDATE draft SET state = 'published' WHERE id = $1`, []any{r.draft2}},
 		{"DROP INDEX operation_active_publish", []stmt{{`UPDATE operation SET state = 'queued', owner = NULL, owner_epoch = NULL,
