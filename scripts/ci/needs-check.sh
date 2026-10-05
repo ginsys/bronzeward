@@ -7,8 +7,11 @@
 # reports `abandoned`), and so do empty results.
 set -euo pipefail
 : "${EVENT:?EVENT is not set}" "${COMMIT_LINT:?COMMIT_LINT is not set}"
-read -r -a results <<<"${RESULTS:-}"
-[ "${#results[@]}" -gt 0 ] || { echo "checks: no job results" >&2; exit 1; }
+# Exactly the shape join() gives: one or more words, single spaces, one line. Anything else (empty,
+# an empty field, a second line) fails before a word is read.
+shape='^[a-z_]+( [a-z_]+)*$'
+[[ ${RESULTS:-} =~ $shape ]] || { echo "checks: malformed job results" >&2; exit 1; }
+read -r -a results <<<"$RESULTS"
 skip_allowed=0
 if [ "$COMMIT_LINT" = skipped ] && [ "$EVENT" != pull_request ]; then
   skip_allowed=1

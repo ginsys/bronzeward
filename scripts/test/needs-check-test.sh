@@ -32,6 +32,10 @@ expect 1 merge_group  skipped 'skipped skipped success'     # and only once
 expect 1 pull_request success 'success garbage success'
 expect 1 pull_request success ''                            # no results: nothing ran
 expect 1 pull_request success '   '
+expect 1 pull_request success $'success\nfailure'           # a second line is never ignored
+expect 1 pull_request success 'success  success'            # an empty result between two
+expect 1 pull_request success ' success'
+expect 1 pull_request success 'success '
 
 # An unset COMMIT_LINT or EVENT never passes.
 rc=0
