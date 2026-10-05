@@ -2,7 +2,9 @@ package migrate
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -111,6 +113,7 @@ func TestReleaseConstraints(t *testing.T) {
 	mustExec(t, db, insertMachine, machine2, r.cluster, "3e8d9f4b-5c6a-4b8c-9d2e-3f4a5b6c7d8e", nil, "normal")
 	mustExec(t, db, insertImportBase, ibr2, machine2, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2))
 	mustExec(t, db, insertReference, ibr2, "registry/example-pass", "string", 1, nil, kv)
+	mustExec(t, db, insertReference, ibr2, "registry/base-only", "string", 1, nil, kv) // r.ibr does not declare it
 	// rel2 is inserted in each case's transaction first, so its rows are written with it.
 	withRelease := []stmt{{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
 		"v1.36.0", op2, r.human, "publisher"}}}
@@ -346,6 +349,9 @@ func TestReleaseConstraints(t *testing.T) {
 		// Each source's own declarations, not another's.
 		{"effective dependency whose fragment occurrence its revision does not declare", append(withSources,
 			stmt{insertDependency, depRow()}, reproduction(kv, 1, created, r.frvSite, 0)), commit, nil, "dependency_effective"},
+		{"effective dependency whose import base occurrence only another import base declares", append(withSources,
+			stmt{insertDependency, depRow(7, "registry/base-only")}, named("registry/base-only", reproduction(kv, 1, created, r.ibr, 0))),
+			commit, nil, "dependency_effective"},
 		{"effective dependency whose import base occurrence only a fragment revision declares", append(append(withExtra, withSources...),
 			stmt{insertDependency, depRow(7, "registry/fragment-only")}, named("registry/fragment-only", reproduction(kv, 1, created, r.ibr, 0))),
 			commit, nil, "dependency_effective"},
@@ -654,9 +660,9 @@ func TestReleaseImmutableTables(t *testing.T) {
 }
 
 // Dependency monitor §6.1 step 5 reads the releases that reference a dependency by its status; the
-// lookup uses the index on the status identity, not a scan of every release's rows. A table of a
-// few rows plans a sequential scan whatever its indexes, so the scan is disabled; with the index
-// dropped, the plan no longer names it.
+// lookup searches the index on the status identity with all four columns, not a scan of every
+// release's rows or of the whole index. A table of a few rows plans a sequential scan whatever its
+// indexes, so the scan is disabled; with the index dropped, no plan node searches it.
 func TestDependencyStatusIndex(t *testing.T) {
 	db, _ := installed(t)
 	r := releaseRows(t, db)
@@ -666,33 +672,53 @@ func TestDependencyStatusIndex(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	mustExec(t, tx, `SET LOCAL enable_seqscan = off`)
-	plan := func() string {
-		t.Helper()
-		rows, err := tx.Query(`EXPLAIN SELECT DISTINCT d.release FROM dependency d
-			JOIN dependency_status s USING (provider, object, version, created) WHERE s.id = '` + r.depKV + `'`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = rows.Close() }()
-		var lines []string
-		for rows.Next() {
-			var line string
-			if err := rows.Scan(&line); err != nil {
-				t.Fatal(err)
-			}
-			lines = append(lines, line)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		return strings.Join(lines, "\n")
+	type node struct {
+		Relation  string `json:"Relation Name"`
+		Index     string `json:"Index Name"`
+		Condition string `json:"Index Cond"`
+		Plans     []node `json:"Plans"`
 	}
-	if p := plan(); !strings.Contains(p, "dependency_status_identity") {
-		t.Errorf("the lookup does not use the status identity index:\n%s", p)
+	// searched reports whether a node scans dependency by the index with an equality on each
+	// identity column as its index condition, not as a filter, and returns the plan to show.
+	searched := func() (bool, string) {
+		t.Helper()
+		var text string
+		if err := tx.QueryRow(`EXPLAIN (FORMAT JSON) SELECT DISTINCT d.release FROM dependency d
+			JOIN dependency_status s USING (provider, object, version, created) WHERE s.id = '` + r.depKV + `'`).Scan(&text); err != nil {
+			t.Fatal(err)
+		}
+		var plans []struct {
+			Plan node `json:"Plan"`
+		}
+		if err := json.Unmarshal([]byte(text), &plans); err != nil || len(plans) != 1 {
+			t.Fatalf("plan %q: %v", text, err)
+		}
+		var walk func(n node) bool
+		walk = func(n node) bool {
+			if n.Relation == "dependency" && n.Index == "dependency_status_identity" {
+				all := true
+				for _, column := range []string{"provider", "object", "version", "created"} {
+					all = all && regexp.MustCompile(`\(`+column+` = `).MatchString(n.Condition)
+				}
+				if all {
+					return true
+				}
+			}
+			for _, c := range n.Plans {
+				if walk(c) {
+					return true
+				}
+			}
+			return false
+		}
+		return walk(plans[0].Plan), text
+	}
+	if ok, p := searched(); !ok {
+		t.Errorf("the lookup does not search the status identity index by all four columns:\n%s", p)
 	}
 	mustExec(t, tx, `DROP INDEX dependency_status_identity`)
-	if p := plan(); strings.Contains(p, "dependency_status_identity") {
-		t.Errorf("without the index, the plan still names it:\n%s", p)
+	if ok, p := searched(); ok {
+		t.Errorf("without the index, a plan node still searches it:\n%s", p)
 	}
 }
 
