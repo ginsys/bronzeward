@@ -132,8 +132,8 @@ CREATE TRIGGER with_release BEFORE INSERT ON release_source
 -- one URL path segment of at most 227 bytes). A version is identified with the creation time the
 -- provider gave it (dependency monitor §3), as the dependency records name it: an object deleted
 -- and recreated reissues its version numbers, and the replacement is another dependency with its
--- own status. A retained version has no reason, and every other class one; only an unknown one has
--- the time it became unknown.
+-- own status. A retained version has no reason unless its deletion is scheduled, and every other
+-- class one; only an unknown one has the time it became unknown.
 CREATE TABLE dependency_status (
   id                    text PRIMARY KEY CHECK (id ~ '^dep_[a-z2-7]{26}$'),
   provider              text NOT NULL CHECK (provider IN ('kv', 'transit')),
@@ -157,7 +157,11 @@ CREATE TABLE dependency_status (
     (provider <> 'kv' OR object ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$') AND
     (provider <> 'transit' OR (object NOT IN ('.', '..') AND octet_length(object) BETWEEN 1 AND 227
       AND object !~ '[/#?%\\[:space:][:cntrl:]]'))),
-  CONSTRAINT dependency_status_reason CHECK ((class = 'retained') = (reason IS NULL)),
+  -- Dependency monitor §3: a retained version's only reason is deletion-scheduled, with the
+  -- scheduled time it observed.
+  CONSTRAINT dependency_status_reason CHECK (
+    (class = 'retained') = (reason IS NULL OR reason = 'deletion-scheduled')),
+  CONSTRAINT dependency_status_schedule CHECK (reason <> 'deletion-scheduled' OR deletion_observed IS NOT NULL),
   CONSTRAINT dependency_status_unknown_since CHECK ((class = 'unknown') = (unknown_since IS NOT NULL))
 );
 
