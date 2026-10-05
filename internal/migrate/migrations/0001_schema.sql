@@ -156,7 +156,8 @@ CREATE UNIQUE INDEX cluster_talos_cluster_id ON cluster (talos_cluster_id);
 -- and all-ones values are accepted as a UUID (§7.3): each can be recorded once, and a second
 -- machine reporting it is recorded by node ID and refused at every comparison. The Talos node ID
 -- is as `talosctl get identity` prints it: an opaque string of printable ASCII without spaces,
--- compared byte for byte, never normalised. Every machine has an endpoint, with no default.
+-- compared byte for byte, never normalised. Every machine has an endpoint, with no default, and
+-- the platform mode its configuration validates in (compilation §6 step 8), with no default.
 CREATE TABLE machine (
   id               text PRIMARY KEY CHECK (id ~ '^mch_[a-z2-7]{26}$'),
   cluster          text NOT NULL REFERENCES cluster (id),
@@ -170,7 +171,9 @@ CREATE TABLE machine (
   created_at       timestamptz NOT NULL,
   talos_endpoint   talos_endpoint NOT NULL,
   talos_node_id    text CHECK (talos_node_id ~ '^[!-~]{1,128}$'),
+  platform         text NOT NULL CONSTRAINT machine_platform CHECK (platform IN ('metal', 'container', 'cloud')),
   UNIQUE (id, cluster),
+  UNIQUE (id, platform),
   CONSTRAINT machine_identity_key CHECK ((smbios_uuid IS NULL) <> (talos_node_id IS NULL))
 );
 -- §7.3's machine keys: one SMBIOS UUID, and one Talos node ID, is one record across the
@@ -844,6 +847,8 @@ CREATE TABLE release_machine (
   UNIQUE (release, machine, key_name, key_version),
   FOREIGN KEY (release, cluster) REFERENCES release (id, cluster),
   FOREIGN KEY (machine, cluster) REFERENCES machine (id, cluster),
+  -- Each machine validates in its recorded platform mode (§3.3).
+  CONSTRAINT release_machine_platform FOREIGN KEY (machine, mode) REFERENCES machine (id, platform),
   FOREIGN KEY (import_base_revision, machine) REFERENCES import_base_revision (id, machine),
   FOREIGN KEY (assignment_revision, cluster, machine) REFERENCES assignment_revision (id, cluster, machine),
   CONSTRAINT release_machine_assignment_source

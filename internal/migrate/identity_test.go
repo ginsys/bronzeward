@@ -8,10 +8,10 @@ import (
 
 // The identity keys (persistence-api.md §7.3; execution and recovery choice §10.26).
 const (
-	insertNodeMachine = `INSERT INTO machine (id, cluster, talos_node_id, scope_state, talos_endpoint, created_at)
-		VALUES ($1, $2, $3, 'normal', '10.55.0.4:50000', now())`
-	insertKeyedMachine = `INSERT INTO machine (id, cluster, smbios_uuid, talos_node_id, scope_state, talos_endpoint, created_at)
-		VALUES ($1, $2, $3, $4, 'normal', '10.55.0.5:50000', now())`
+	insertNodeMachine = `INSERT INTO machine (id, cluster, talos_node_id, scope_state, talos_endpoint, platform, created_at)
+		VALUES ($1, $2, $3, 'normal', '10.55.0.4:50000', 'container', now())`
+	insertKeyedMachine = `INSERT INTO machine (id, cluster, smbios_uuid, talos_node_id, scope_state, talos_endpoint, platform, created_at)
+		VALUES ($1, $2, $3, $4, 'normal', '10.55.0.5:50000', 'metal', now())`
 	insertClusterID = `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)
 		VALUES ($1, 'x', 'https://x.test', 'v1.13', $2, now())`
 	insertClusterNoID = `INSERT INTO cluster (id, name, endpoint, contract, created_at) VALUES ($1, 'x', 'https://x.test', 'v1.13', now())`
