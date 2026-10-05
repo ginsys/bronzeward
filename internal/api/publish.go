@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -192,21 +193,16 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		Scan(&draftState, &draftRev); err != nil {
 		return "", nil, err
 	}
-	var by, role string
-	switch err := tx.QueryRowContext(ctx, `SELECT created_by, created_role FROM operation
-		WHERE id = $1 AND kind = 'publish' AND state = 'running' AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4
-		FOR UPDATE`, j.op, a.d.owner.ID, j.gen, a.d.owner.Epoch).Scan(&by, &role); {
-	case errors.Is(err, sql.ErrNoRows):
-		return "", nil, staging.ErrFenced
-	case err != nil:
-		return "", nil, err
+	var by, role, opState string
+	var owner, ownerEpoch, opRelease sql.NullString
+	var gen int64
+	if err := tx.QueryRowContext(ctx, `SELECT created_by, created_role, state, owner, owner_gen, owner_epoch,
+		result->>'release' FROM operation WHERE id = $1 AND kind = 'publish' FOR UPDATE`, j.op).
+		Scan(&by, &role, &opState, &owner, &gen, &ownerEpoch, &opRelease); err != nil {
+		return "", nil, a.fenced(err)
 	}
+	mine := opState == "running" && owner.String == a.d.owner.ID && gen == j.gen && ownerEpoch.String == a.d.owner.Epoch
 
-	if err := seedStatuses(ctx, tx, u.statuses); err != nil {
-		return "", nil, err
-	}
-
-	rel := id.New(id.Release)
 	content := releaseContent{cluster: j.cluster, draft: j.draft, draftRev: j.draftRev, renderer: u.renderer}
 	for _, h := range heads {
 		content.sources = append(content.sources, contentSource{kind: h.kind, key: h.key, revision: h.revision})
@@ -216,6 +212,38 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 			assignment: m.assignment, mode: m.mode, configuration: m.configuration[:]})
 	}
 	digest := content.digest()
+
+	// The release of this draft revision comes first (§6.2): a commit-unknown retry, or a worker
+	// that superseded the first, meets it before the checks its commit has made fail.
+	var existing string
+	var existingDigest []byte
+	switch err := tx.QueryRowContext(ctx, `SELECT id, digest FROM release WHERE draft = $1 AND draft_revision = $2`,
+		j.draft, j.draftRev).Scan(&existing, &existingDigest); {
+	case err == nil:
+		same := string(existingDigest) == string(digest[:])
+		switch {
+		case same && opState == "succeeded" && opRelease.String == existing:
+			return existing, nil, nil
+		case !mine:
+			return "", nil, staging.ErrFenced
+		case !same:
+			return "", refuse(http.StatusConflict, "conflict", "the draft revision was published with other content").
+				with("release", existing), nil
+		}
+		return existing, nil, a.finishPublish(ctx, tx, j, "succeeded", map[string]any{"release": existing}, nil,
+			map[string]any{"type": "succeeded", "release": existing})
+	case !errors.Is(err, sql.ErrNoRows):
+		return "", nil, err
+	}
+	if !mine {
+		return "", nil, staging.ErrFenced
+	}
+
+	if err := seedStatuses(ctx, tx, u.statuses); err != nil {
+		return "", nil, err
+	}
+
+	rel := id.New(id.Release)
 	r := u.renderer
 	if _, err := tx.ExecContext(ctx, `INSERT INTO release (id, cluster, draft, draft_revision, digest, contract,
 		machinery_version, machinery_checksum, kubernetes_version, operation, published_by, published_role, epoch,
