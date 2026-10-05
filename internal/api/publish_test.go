@@ -32,6 +32,8 @@ type publishEnv struct {
 	base, baseRev                   string // the unchanged fragment's head and revision
 	prf, prv                        string // the unchanged profile's head and revision
 	asr                             string // the introduced assignment's revision
+
+	held *sql.Tx // when set, the next commit runs while this transaction holds a row it needs
 }
 
 var (
@@ -131,7 +133,28 @@ func newPublishEnv(t *testing.T) *publishEnv {
 
 func (p *publishEnv) commit() (string, *refusal) {
 	p.t.Helper()
-	rel, ref, err := p.a.publishCommit(p.t.Context(), p.job, p.unit)
+	var rel string
+	var ref *refusal
+	var err error
+	if held := p.held; held != nil {
+		p.held = nil
+		var holder int
+		if err := held.QueryRow(`SELECT pg_backend_pid()`).Scan(&holder); err != nil {
+			p.t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			rel, ref, err = p.a.publishCommit(p.t.Context(), p.job, p.unit)
+		}()
+		waitBlockedBy(p.t, p.db, holder)
+		if err := held.Commit(); err != nil {
+			p.t.Fatal(err)
+		}
+		<-done
+	} else {
+		rel, ref, err = p.a.publishCommit(p.t.Context(), p.job, p.unit)
+	}
 	if err != nil {
 		p.t.Fatalf("publishCommit: %v", err)
 	}
@@ -473,6 +496,37 @@ func TestPublishCommitUnchangedHeadMoved(t *testing.T) {
 func TestPublishCommitIntroducedNameExists(t *testing.T) {
 	p := newPublishEnv(t)
 	other := p.fragmentHead("storage", "role", p.fragmentRevision(p.cluster, "storage", "role"), 1)
+	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"head": other, "expected": "absent", "actual": 1})
+}
+
+// hold runs stmt in a transaction left open, so that the next commit meets the row it wrote.
+func (p *publishEnv) hold(stmt string, args ...any) {
+	p.t.Helper()
+	tx, err := p.db.Begin()
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	p.t.Cleanup(func() { _ = tx.Rollback() })
+	mustExec(p.t, tx, stmt, args...)
+	p.held = tx
+}
+
+// DB rows 010 and 011 (§4.2, §6.2): another publication moves a head the release uses unchanged
+// and commits while the commit waits on its FOR SHARE read; the commit then finds the move.
+func TestPublishCommitUnchangedHeadMovedConcurrently(t *testing.T) {
+	p := newPublishEnv(t)
+	p.hold(`UPDATE fragment SET head_revision = 2 WHERE id = $1`, p.base)
+	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"head": p.base, "expected": 1, "actual": 2})
+}
+
+// Two publications introducing one name meet at the unique index (§6.2): the commit waits for the
+// other's insert and, once it commits, fails naming the other's head.
+func TestPublishCommitIntroducedNameConcurrently(t *testing.T) {
+	p := newPublishEnv(t)
+	other := id.New(id.Fragment)
+	p.hold(`INSERT INTO fragment (id, cluster, scope, name, layer, head_revision_id, head_revision, etag_token, created_at)
+		SELECT $1, cluster, 'cluster', name, layer, id, 1, 'm3oxmlfh6phr7aigshdydcb4ji', now() FROM fragment_revision WHERE id = $2`,
+		other, p.fragmentRevision(p.cluster, "storage", "role"))
 	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"head": other, "expected": "absent", "actual": 1})
 }
 

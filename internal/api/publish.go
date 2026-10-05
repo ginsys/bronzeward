@@ -19,6 +19,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // publishJob is a running publish operation as the worker that claimed it holds it (§5.1): the
@@ -310,8 +311,8 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		if !h.changed {
 			continue
 		}
-		if err := moveHead(ctx, tx, h); err != nil {
-			return "", nil, err
+		if ref, err := moveHead(ctx, tx, j.cluster, h); err != nil || ref != nil {
+			return "", ref, err
 		}
 	}
 	for _, h := range heads {
@@ -491,15 +492,48 @@ func draftHeads(ctx context.Context, tx *sql.Tx, draft string) ([]sourceHead, er
 
 // moveHead points a changed head at its revision, from the base the author edited, or inserts
 // the head of a name the draft introduces at head revision 1; h.base becomes the head revision
-// the release leaves it at.
-func moveHead(ctx context.Context, tx *sql.Tx, h *sourceHead) error {
+// the release leaves it at. A name has no row to lock until it is introduced: another publication
+// that introduced it meanwhile fails the insert at the unique index once it commits, and the
+// commit refuses stale-input naming that head (§6.2).
+func moveHead(ctx context.Context, tx *sql.Tx, cluster string, h *sourceHead) (*refusal, error) {
 	k := headKinds[h.kind]
 	rev := sql.NullString{String: h.revision, Valid: h.revision != ""}
 	if h.head != "" {
-		return tx.QueryRowContext(ctx, `UPDATE `+k.table+` SET head_revision_id = $2, head_revision = head_revision + 1,
+		return nil, tx.QueryRowContext(ctx, `UPDATE `+k.table+` SET head_revision_id = $2, head_revision = head_revision + 1,
 			etag_token = $3 WHERE id = $1 AND head_revision = $4 RETURNING head_revision`,
 			h.head, rev, etagToken(), h.base).Scan(&h.base)
 	}
+	if _, err := tx.ExecContext(ctx, `SAVEPOINT introduce`); err != nil {
+		return nil, err
+	}
+	err := insertHead(ctx, tx, h, rev)
+	var pe *pgconn.PgError
+	if !errors.As(err, &pe) || pe.Code != "23505" {
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `RELEASE SAVEPOINT introduce`)
+		}
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT introduce`); err != nil {
+		return nil, err
+	}
+	key := `machine = $1`
+	args := []any{h.key}
+	if h.kind != "assignment" {
+		key, args = `cluster = $1 AND name = $2`, []any{cluster, h.key}
+	}
+	var other string
+	var actual int
+	if err := tx.QueryRowContext(ctx, `SELECT id, head_revision FROM `+k.table+` WHERE `+key, args...).Scan(&other, &actual); err != nil {
+		return nil, fmt.Errorf("%s %s: %w after %w", h.kind, h.key, err, pe)
+	}
+	return refuse(http.StatusConflict, "stale-input", "Publication refused: 1 input(s) moved.").
+		with("conflicts", []map[string]any{{"head": other, "expected": "absent", "actual": actual}}), nil
+}
+
+// insertHead inserts the head of a name the draft introduces at head revision 1.
+func insertHead(ctx context.Context, tx *sql.Tx, h *sourceHead, rev sql.NullString) error {
+	k := headKinds[h.kind]
 	h.head = id.New(k.prefix)
 	h.base = 1
 	var q string
