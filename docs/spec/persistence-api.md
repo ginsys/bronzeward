@@ -922,6 +922,17 @@ release if the digests match, as DB row 061 returned `existing=true`, and
 otherwise fails `409 conflict`, as row 009 refused the same name with different
 content.
 
+The release's renderer and contract record (compilation §10.2) is taken
+before T3, by the compiler: the contract is the cluster's, refused unless it is
+the minor of the machinery module the server was built with; the machinery
+version and checksum are that build's own record of the module, and a build
+that does not record them, or holds a replaced module, cannot publish (a server
+fault, `500`); the Kubernetes version is the kubelet image tag of every covered
+machine's validated configuration, which must agree across them and lie in the
+machinery's `SupportedWith` window. A refused contract or Kubernetes version is
+`422 validation-failed`, naming the rule and the image's path, never the image
+(compilation choices §16.32 to §16.34).
+
 ### 6.3 Partial publication
 
 Two directions, each walked in §13.2 and §13.3:

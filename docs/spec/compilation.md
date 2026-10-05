@@ -1187,11 +1187,17 @@ outcomes through both implementations (E3 §4.3); the choice belongs to
   (E3 §4.2). For Talos 1.13 the machinery accepts Kubernetes 1.31 to 1.36, which
   equals the documented range (E3 §4.4); the machinery's windows are wider than
   the documented tested path elsewhere, and a stricter support policy is a
-  separate decision (E3 §8).
+  separate decision (E3 §8). The version is the kubelet image tag of the
+  validated configuration, the machinery's default image when none is set, and
+  every machine a release covers must name the same one **(choice §16.32)**.
+  The window is that of the Talos minor of the machinery version itself.
 - **Record the contract, not only the renderer.** The release records the
   target contract, the machinery module version and its checksum, the Kubernetes
   version and the validation mode. A renderer version alone does not say whether
-  a node can decode the output (E3 §8).
+  a node can decode the output (E3 §8). The machinery version and checksum are
+  the compiling build's own record of the module, as `go version -m` prints it
+  **(choice §16.34)**; the contract is refused unless it is the machinery's
+  minor **(choice §16.33)**.
 - **Paths are versioned with the contract.** The v1.14 layout moves many
   v1alpha1 paths into separate documents (E3 §4.1), so marks, declarations and
   embedded identifications hold for the contract their fragment revision was
@@ -1694,6 +1700,32 @@ in place as
     forbids sharing one fragment between two profiles of a layer; or compose it
     at its last position, which lets a repeat silently undo every fragment
     between the two.
+32. **The release's Kubernetes version is the kubelet image tag** (§10.2).
+    No record holds a cluster's Kubernetes version, and the kubelet image is
+    the one field every machine's configuration carries (the machinery
+    defaults it when unset). The tag must be a plain `vX.Y.Z` release, read
+    as the machinery reads it (after the last `:v`, up to a digest), and every
+    covered machine must name the same version; a release is refused
+    otherwise. An image a reference placed, or one redaction would change, is
+    refused rather than recorded, since the record is not secret. Only the
+    kubelet's tag is recorded and checked; the control-plane images'
+    tags are checked by the node at apply (its runtime validation).
+    Alternatives: a Kubernetes version on the cluster record, which the
+    operator would keep in step with every configuration by hand; or the
+    API server image, which worker configurations do not carry.
+33. **The contract must equal the machinery's minor** (§10.2). Choice §16.25
+    compiles only the node's running contract, and the machinery renders a
+    newer contract silently as its own, so a cluster contract other than the
+    renderer's minor is refused at publication. Alternative: accept an older
+    contract the machinery can still render (E3 §4.3 accepted v1.12), which
+    the PoC does not test.
+34. **The machinery version and checksum come from the build** (§10.2):
+    the module's version and go.sum `h1:` checksum as the server binary's build
+    information records them. A build that records neither, or holds a replaced
+    module, refuses every publication, since its renderer cannot be named.
+    Alternatives: constants kept beside `go.mod` by hand, which can drift from
+    what was compiled; or the module's version alone, which does not identify
+    the module's content.
 
 ## 17. Traceability
 

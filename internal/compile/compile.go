@@ -56,7 +56,8 @@ const (
 // the machinery's message as compilation.md §8.3 shows it, set by Compile only: redacted by the
 // trace pass's message of the same step, or a notice that it is withheld. The message as the
 // machinery wrote it quotes values and is never kept. A native rejection is a correct result,
-// not a compiler fault (compilation.md §7).
+// not a compiler fault (compilation.md §7). The renderer record's refusals (RuleContract,
+// RuleKubernetes) carry a fixed text naming the check instead, never the input.
 type Error struct {
 	Rule    Rule
 	Input   string
