@@ -42,8 +42,8 @@ func (p *publishEnv) declaredFragment(name, layer, reference, generation string)
 func (p *publishEnv) importBase(kind string, encoding any) {
 	p.t.Helper()
 	ibr := id.New(id.ImportBase)
-	mustExec(p.t, p.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+	mustExec(p.t, p.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
 		ibr, p.machine, make([]byte, 32))
 	mustExec(p.t, p.db, `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
 		VALUES ($1, 'registry/pass', $2, 1, $3, $4)`, ibr, kind, encoding, p.kvPath)
@@ -66,8 +66,8 @@ func (p *publishEnv) secondMachine() *unitMachine {
 	rec := p.do(p.api, machineCall(p.human("h-author"), "k-machine-2-0123456789", p.cluster, "1c6b7d2f-3a4e-4f60-9bac-1d2e3f4a5b6c"))
 	machine := decode[machineBody](p.t, rec, http.StatusCreated).ID
 	ibr := id.New(id.ImportBase)
-	mustExec(p.t, p.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+	mustExec(p.t, p.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
 		ibr, machine, make([]byte, 32))
 	mustExec(p.t, p.db, `INSERT INTO import_base_reference (revision, name, kind, version, generation)
 		VALUES ($1, 'registry/pass', 'string', 1, $2)`, ibr, p.kvPath)

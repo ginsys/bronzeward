@@ -60,8 +60,8 @@ func newPublishEnv(t *testing.T) *publishEnv {
 
 	p.ibr = id.New(id.ImportBase)
 	p.kvPath = "gen/" + d.cluster + "/" + id.New(id.Ingestion) + "/pass"
-	mustExec(t, d.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+	mustExec(t, d.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
 		p.ibr, d.machine, make([]byte, 32))
 	mustExec(t, d.db, `INSERT INTO import_base_reference (revision, name, kind, version, generation)
 		VALUES ($1, 'registry/pass', 'string', 1, $2)`, p.ibr, p.kvPath)
@@ -784,8 +784,8 @@ func TestPublishCommitAppliedImportBaseChanged(t *testing.T) {
 	p := newPublishEnv(t)
 	p.nextDraft()
 	other := id.New(id.ImportBase)
-	mustExec(t, p.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+	mustExec(t, p.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
 		other, p.machine, make([]byte, 32))
 	p.unit.machines[0].importBase = other
 	p.unit.machines[0].reproduction[0].source = other

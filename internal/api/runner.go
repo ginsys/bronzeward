@@ -279,9 +279,17 @@ func (a *API) commitImport(ctx context.Context, j job, imp imported) (*refusal, 
 		}
 		ibr := id.New(id.ImportBase)
 		b := imp.baseline
-		if _, err := tx.ExecContext(ctx, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext,
-			baseline_digest, baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-			ibr, j.claim.Machine, string(imp.sanitized.Documents()), []byte(b.Ciphertext), b.Digest[:], b.DigestKey,
+		embedded := imp.sanitized.Declarations().Embedded
+		if embedded == nil {
+			embedded = []ingest.Embedded{}
+		}
+		emb, err := json.Marshal(embedded)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext,
+			baseline_digest, baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())`,
+			ibr, j.claim.Machine, string(imp.sanitized.Documents()), emb, []byte(b.Ciphertext), b.Digest[:], b.DigestKey,
 			b.Configuration[:]); err != nil {
 			return err
 		}

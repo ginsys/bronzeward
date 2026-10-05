@@ -496,8 +496,8 @@ func TestDraftReadsLockTheDraft(t *testing.T) {
 			uuid := []string{uuidA, "1c6b7d2f-3a4e-4f6a-9b0c-1d2e3f4a5b6c"}[i]
 			rec := e.do(e.api, machineCall(author, "k-machine-"+strconv.Itoa(i)+"-0123456789", cl, uuid))
 			m, ibr := decode[machineBody](t, rec, http.StatusCreated).ID, id.New(id.ImportBase)
-			mustExec(t, e.db, `INSERT INTO import_base_revision (id, machine, document, baseline_ciphertext, baseline_digest,
-				baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '\x01', $3, 'k:1', $3, now())`,
+			mustExec(t, e.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+				baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'k:1', $3, now())`,
 				ibr, m, make([]byte, 32))
 			var before int
 			if err := e.db.QueryRow("SELECT revision FROM draft WHERE id = $1", d.ID).Scan(&before); err != nil {
