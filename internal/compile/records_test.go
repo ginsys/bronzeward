@@ -53,8 +53,8 @@ func TestProvenanceRecords(t *testing.T) {
 		{Reference: "app/str", Version: 1, Kind: "string", Member: -1, Source: fo, SourcePath: labels + "s", Output: labels + "t"},
 		{Reference: "app/enc", Version: 2, Kind: "string", Encoding: "base64", Member: -1, Source: fo, SourcePath: labels + "e", Occurrence: 1,
 			Output: labels + "e"},
-		{Reference: "app/map", Version: 3, Kind: "mapping", Member: 0, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
-		{Reference: "app/map", Version: 3, Kind: "mapping", Member: 1, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
+		{Reference: "app/map", Version: 3, Kind: "mapping", Member: 0, Members: 2, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
+		{Reference: "app/map", Version: 3, Kind: "mapping", Member: 1, Members: 2, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
 		{Reference: "app/bool", Version: 1, Kind: "boolean", Member: -1, Source: fo, SourcePath: "doc[0]/machine/features/rbac", Occurrence: 3,
 			Output: "doc[0]/machine/features/rbac"},
 	}

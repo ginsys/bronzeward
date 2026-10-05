@@ -28,6 +28,7 @@ type Record struct {
 	Kind         string // the declared kind it was compiled as: string, integer, boolean or mapping
 	Encoding     string // the declared encoding modifier, if any
 	Member       int    // the mapping member's position in key order, or -1 for a scalar reference
+	Members      int    // the mapping's member count, or 0 for a scalar reference
 	Source       Origin
 	SourcePath   string // the occurrence's document and path in its source
 	Occurrence   int    // the occurrence's position among its source revision's, as its Occurrence's
@@ -67,7 +68,7 @@ func (c Compiled) Provenance() []Record {
 	ordinals := c.ordinals()
 	for i, o := range c.outcomes {
 		t := o.tracer
-		r := Record{Reference: t.Ref(), Version: t.Version(), Kind: string(t.Declared()), Encoding: t.Encoding(), Member: t.Member(),
+		r := Record{Reference: t.Ref(), Version: t.Version(), Kind: string(t.Declared()), Encoding: t.Encoding(), Member: t.Member(), Members: t.Members(),
 			Source: c.origins[o.source], SourcePath: o.shownAt, Occurrence: ordinals[i]}
 		if o.by >= 0 {
 			by := c.origins[o.by+1]

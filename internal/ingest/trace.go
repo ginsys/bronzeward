@@ -47,6 +47,7 @@ type tracer struct {
 	encoding string
 	declared provider.Kind // the reference's declared kind
 	member   int           // the member's position in key order, or -1 for a scalar reference
+	members  int           // the mapping's member count, or 0 for a scalar reference
 	kind     TraceKind
 	// at and text are behind a second pointer: fmt prints a struct holding a Tracer in an
 	// unexported field by reflection, and under a verb a pointer does not take (%s, %q) it prints
@@ -95,6 +96,10 @@ func (t Tracer) Leaf() string {
 // Member is the position in key order of the mapping member the tracer stands for, or -1 for a
 // scalar reference.
 func (t Tracer) Member() int { return t.get().member }
+
+// Members is the member count of the mapping reference the tracer stands for a member of, or 0 for
+// a scalar reference.
+func (t Tracer) Members() int { return t.get().members }
 
 // Kind is how the stand-in is placed and found.
 func (t Tracer) Kind() TraceKind { return t.get().kind }
@@ -315,7 +320,7 @@ func Trace(s Sanitized, values map[string]provider.Value, first, flip int) (Reso
 			t := &tracer{id: next, ref: name, version: ref.Version, encoding: ref.Encoding, declared: ref.Kind, member: -1,
 				at: &occurrence{keys[i], p}}
 			if n.Kind == yaml.MappingNode {
-				t.member = i
+				t.member, t.members = i, len(leaves)
 			}
 			x := &standInText{}
 			switch {

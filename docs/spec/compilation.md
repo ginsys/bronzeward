@@ -912,9 +912,10 @@ Every path in the record is written with its value tokens redacted (§8.3), as
 is the path of a reproduction dependency (§9).
 
 The compiler also hands publication the declared kind each record was compiled
-as, which publication holds to the source's declaration before committing
-([PA §6.2](persistence-api.md#62-the-commit-transaction-t3)). The stored record omits it,
-since the declaration holds it.
+as and, for a mapping, its member count. Publication holds the kind to the
+source's declaration and requires an outcome for every member before committing
+([PA §6.2](persistence-api.md#62-the-commit-transaction-t3)). The stored record
+omits both: the declaration holds the kind, and the members' records the count.
 
 SP's third outcome, `unresolved`, cannot occur in a published release, because
 every tag must resolve (§6 step 4) and a tag inside unidentified text is
