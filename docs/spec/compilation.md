@@ -716,7 +716,9 @@ For each machine:
 
 1. **Snapshot** the import base, the source and assignment revisions, and
    order the fragments by the fixed layers of design §6.2 and their explicit
-   order within a layer.
+   order within a layer. A fragment revision selected more than once, as two
+   profiles may pin it, is composed once, at its first position
+   **(choice §16.31)**.
 2. **Pin** every declared reference in the import base and in every selected
    fragment, including references a later fragment will override: record the
    declared version (§5.1) together with the provider object it names. This is
@@ -1673,6 +1675,15 @@ in place as
     check at `COMMIT` (a deferred constraint trigger comparing the expiry with
     `clock_timestamp()`), which would roll back an import whose claim was live
     when released, over a gap in which no other transaction could act on it.
+31. **A fragment revision selected more than once is composed once, at its
+    first position** (§6 step 1). Two profiles of one layer may pin the same
+    revision. Composed twice, it would be recorded as overridden by itself
+    (§8.2), against design §6.2's aim that the fragment that last set a field
+    can be shown. The compiler refuses a composition naming a revision twice.
+    Alternatives: refuse the selection at draft update and publication, which
+    forbids sharing one fragment between two profiles of a layer; or compose it
+    at its last position, which lets a repeat silently undo every fragment
+    between the two.
 
 ## 17. Traceability
 

@@ -92,6 +92,15 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	if _, err := ParseMode(string(in.Mode)); err != nil {
 		return Compiled{}, err
 	}
+	// Each source revision is composed once (compilation.md §6 step 1): composed twice, it would be
+	// recorded as overridden by itself, its occurrences numbered twice.
+	composed := map[string]bool{}
+	for i, s := range sources {
+		if composed[s.Revision] {
+			return Compiled{}, fmt.Errorf("compile: %s: source revision composed twice", inputName(i))
+		}
+		composed[s.Revision] = true
+	}
 	real := make([]ingest.Resolved, len(sources))
 	for i, s := range sources {
 		r, err := ingest.Resolve(s.Text, s.Values)
