@@ -120,13 +120,23 @@ func projectProvenance(stored []byte) ([]provenanceRecord, error) {
 	for _, r := range out {
 		if !ingest.ValidReference(r.Reference) || len(r.Reference) > 256 || r.Version < 1 ||
 			(r.Encoding != "" && r.Encoding != "base64") || (r.Member != nil && *r.Member < 0) ||
-			!revision(r.Source.Revision, id.ImportBase, id.FragmentRevision) || !sha256Hex(r.Source.Digest) || r.Source.Path == "" ||
-			(r.Output == "") == (r.OverriddenBy == nil) ||
+			!revision(r.Source.Revision, id.ImportBase, id.FragmentRevision) || !sha256Hex(r.Source.Digest) || !storedPath(r.Source.Path) ||
+			(r.Output == "") == (r.OverriddenBy == nil) || (r.Output != "" && !storedPath(r.Output)) ||
 			(r.OverriddenBy != nil && (!revision(r.OverriddenBy.Revision, id.FragmentRevision) || !sha256Hex(r.OverriddenBy.Digest))) {
 			return nil, errProvenance
 		}
 	}
 	return out, nil
+}
+
+// storedPath is a path as compilation §8.3 stores one: a path, its value tokens redacted, or
+// <redacted> whole when it did not parse.
+func storedPath(s string) bool {
+	if s == "<redacted>" {
+		return true
+	}
+	_, err := ingest.ParsePath(s)
+	return err == nil
 }
 
 func sha256Hex(s string) bool {

@@ -25,6 +25,7 @@ $$;
 -- machines' configuration digests, never over ciphertext (§6.2). The renderer and contract record
 -- (compilation §10.2): the target contract, the machinery module's version and checksum, and the
 -- Kubernetes version; each machine's validation mode is its row's.
+ALTER TABLE operation ADD CONSTRAINT operation_draft_revision UNIQUE (id, kind, draft, draft_revision);
 CREATE TABLE release (
   id                 text PRIMARY KEY CHECK (id ~ '^rel_[a-z2-7]{26}$'),
   cluster            text NOT NULL REFERENCES cluster (id),
@@ -47,7 +48,10 @@ CREATE TABLE release (
   UNIQUE (id, cluster),
   UNIQUE (id, draft),
   FOREIGN KEY (draft, cluster) REFERENCES draft (id, cluster),
-  FOREIGN KEY (operation, operation_kind) REFERENCES operation (id, kind)
+  -- The publish operation of this draft revision, so a retry finds the release by its operation's
+  -- natural key (§6.2).
+  CONSTRAINT release_operation FOREIGN KEY (operation, operation_kind, draft, draft_revision)
+    REFERENCES operation (id, kind, draft, draft_revision)
 );
 CALL make_immutable('release');
 CREATE TRIGGER writer BEFORE INSERT ON release FOR EACH ROW EXECUTE FUNCTION stamp_revision_writer();
@@ -125,13 +129,17 @@ CREATE TRIGGER with_release BEFORE INSERT ON release_source
 -- The last classification of each provider object version a release depends on (dependency
 -- monitor §5.1): the only mutable dependency table, updated under its row lock. Its object is a
 -- KV generation path (0004's reference rows) or a Transit key name (as configuration accepts one:
--- one URL path segment of at most 227 bytes). A retained version has no reason, and every other
--- class one; only an unknown one has the time it became unknown.
+-- one URL path segment of at most 227 bytes). A version is identified with the creation time the
+-- provider gave it (dependency monitor §3), as the dependency records name it: an object deleted
+-- and recreated reissues its version numbers, and the replacement is another dependency with its
+-- own status. A retained version has no reason, and every other class one; only an unknown one has
+-- the time it became unknown.
 CREATE TABLE dependency_status (
   id                    text PRIMARY KEY CHECK (id ~ '^dep_[a-z2-7]{26}$'),
   provider              text NOT NULL CHECK (provider IN ('kv', 'transit')),
   object                text NOT NULL,
   version               bigint NOT NULL CHECK (version >= 1),
+  created               text NOT NULL CHECK (created ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$'),
   class                 text NOT NULL CHECK (class IN ('retained', 'blocked', 'lost', 'unknown')),
   reason                text CHECK (reason ~ '^[a-z]+(-[a-z]+)*$'),
   first_retained_at     timestamptz,
@@ -142,7 +150,7 @@ CREATE TABLE dependency_status (
   observed_from         timestamptz NOT NULL,
   recorded_at           timestamptz NOT NULL,
   answer_date           timestamptz,
-  UNIQUE (provider, object, version),
+  UNIQUE (provider, object, version, created),
   -- Implications per provider, so a row of an unknown provider is refused by the provider check
   -- alone.
   CONSTRAINT dependency_status_object CHECK (
@@ -183,7 +191,7 @@ CREATE TABLE dependency (
     (kind <> 'reproduction' OR (provider = 'kv' AND reference IS NOT NULL AND source_revision IS NOT NULL
       AND source_digest IS NOT NULL AND path IS NOT NULL AND occurrence IS NOT NULL))),
   FOREIGN KEY (release, machine) REFERENCES release_machine (release, machine),
-  FOREIGN KEY (provider, object, version) REFERENCES dependency_status (provider, object, version)
+  FOREIGN KEY (provider, object, version, created) REFERENCES dependency_status (provider, object, version, created)
 );
 CREATE UNIQUE INDEX dependency_effective ON dependency (release, machine, reference, object, version)
   WHERE kind = 'effective';

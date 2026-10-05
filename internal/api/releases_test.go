@@ -247,6 +247,12 @@ func TestReleaseReviewProvenanceProjected(t *testing.T) {
 		{"a field whose name carries the content", `[` + strings.Replace(good, `"version":3`, `"version":3,"`+standIn+`":1`, 1) + `]`},
 		{"a reference of 257 bytes", `[` + strings.Replace(good, `"registry/example-pass"`, `"`+strings.Repeat("a", 257)+`"`, 1) + `]`},
 		{"control: a reference of 256 bytes", `[` + strings.Replace(good, `"registry/example-pass"`, `"`+strings.Repeat("a", 256)+`"`, 1) + `]`},
+		// compilation §8.3: a stored path is a path, or <redacted> whole.
+		{"a source path outside the path grammar", `[` + strings.Replace(good, `"path":"doc[0]/machine/registries"`,
+			`"path":"`+standIn+`"`, 1) + `]`},
+		{"an output path outside the path grammar", `[` + strings.Replace(good, `"output":"doc[0]/machine/registries"`,
+			`"output":"`+standIn+`"`, 1) + `]`},
+		{"control: paths redacted whole", `[` + strings.ReplaceAll(good, `"doc[0]/machine/registries"`, `"<redacted>"`) + `]`},
 		{"control", `[` + good + `]`}, // the record each case above breaks one way
 	} {
 		draft := d.draft

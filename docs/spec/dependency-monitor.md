@@ -64,8 +64,10 @@ item 2).
 
 ## 2. What is monitored
 
-A **monitored dependency** is one provider object version: a KV path with a
-version, or a Transit key identity with a version. One provider object
+A **monitored dependency** is one provider object version under its §3
+identity: a KV path with a version and its `created_time`, or a Transit key
+identity with a version. A version recreated under the same object and number
+is another monitored dependency, with its own status. One provider object
 version named by several releases, or by both dependency records of one
 release, is one monitored dependency with one status **(choice §11.2)**. Its
 alerts name every release whose dependency records reference it; §5.2 orders
@@ -194,8 +196,8 @@ Three tables, all in PA §3:
 
 | Entity | Kind | Holds |
 | --- | --- | --- |
-| DependencyStatus | mutable, row-locked | `dep` identifier; provider object and version; class and reason; when it was first recorded `retained`; since when it has been `unknown`, if it is; when its last `persistent` alert was raised; the scheduled deletion time last observed and the one last warned; the database time the latest recorded classification's request began (`observed_from`) and the database time it was recorded (`recorded_at`); the answer's `Date`, if any |
-| DependencyAlert | immutable | `dal` identifier; recording sequence, allocated under the DependencyMonitor row lock (§6.1); the `dep` identifier; kind (§6.2); class and reason; provider object and version; the releases referencing it; `observed_from` and `Date`; epoch; time recorded. A `monitor-stalled` alert concerns no dependency: its `dep` identifier, provider object, version, class, reason, releases, `observed_from` and `Date` are empty |
+| DependencyStatus | mutable, row-locked | `dep` identifier; provider object, version and the creation time of its §3 identity; class and reason; when it was first recorded `retained`; since when it has been `unknown`, if it is; when its last `persistent` alert was raised; the scheduled deletion time last observed and the one last warned; the database time the latest recorded classification's request began (`observed_from`) and the database time it was recorded (`recorded_at`); the answer's `Date`, if any |
+| DependencyAlert | immutable | `dal` identifier; recording sequence, allocated under the DependencyMonitor row lock (§6.1); the `dep` identifier; kind (§6.2); class and reason; provider object, version and creation time; the releases referencing it; `observed_from` and `Date`; epoch; time recorded. A `monitor-stalled` alert concerns no dependency: its `dep` identifier, provider object, version, class, reason, releases, `observed_from` and `Date` are empty |
 | DependencyMonitor | mutable singleton, row-locked | the monitor's last progress (§6.3); its last completed pass; when it last raised `monitor-stalled`; the recording sequence of the last alert logged (§7.1) |
 
 A DependencyStatus row is updated only under its row lock, in a transaction
@@ -205,8 +207,9 @@ then the transaction records the answer.
 ### 5.2 Seeding at publication
 
 Publication's commit transaction (PA §6.2, T3) inserts a DependencyStatus row
-for each provider object version its dependency records name that has none,
-in provider object and version order, with class `retained`, the reason and
+for each provider object version and creation time its dependency records name
+that has none, in provider object, version and creation time order, with class
+`retained`, the reason and
 scheduled deletion time publication's own classification gave, first seen
 `retained` at the time publication began that version's classification, and
 `observed_from` equal to that time **(choice §11.3)**. A version that already
@@ -614,9 +617,10 @@ clock step or on several provider nodes, is accepted for the PoC in design §7.7
 1. **A document of its own** rather than a section of the persistence and API
    contract, whose section numbers the acceptance plan cites. Alternative: a
    new section there, renumbering §15 onwards.
-2. **One status per provider object version**, shared by every release that
-   names it (§2). Alternative: one per dependency record, which alerts once
-   per release for one event.
+2. **One status per provider object version and §3 identity**, shared by
+   every release that names it (§2). Alternatives: one per dependency record,
+   which alerts once per release for one event; one per object and version
+   alone, which gives a recreated version the status of the one it replaced.
 3. **Publication seeds the status as `retained`** (§5.2). Alternative: leave
    the first classification to the monitor, delaying the alert for a loss
    before its first pass to `persistent`.

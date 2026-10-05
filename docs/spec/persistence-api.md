@@ -234,7 +234,7 @@ statement.
 | Draft | mutable, revisioned | change set: entries and their base head revisions | this contract |
 | Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1); the release covers one cluster and a set of its machines | compilation §11; this contract |
 | Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity | compilation §9 |
-| DependencyStatus | mutable | last classification per provider object version and when first seen `retained` | design §7.6, §7.8; [dependency monitor §5](dependency-monitor.md#5-state) |
+| DependencyStatus | mutable | last classification per provider object version and creation time, and when first seen `retained` | design §7.6, §7.8; [dependency monitor §5](dependency-monitor.md#5-state) |
 | DependencyAlert | immutable | every alert the dependency monitor raises | [dependency monitor §6.2](dependency-monitor.md#62-alert-kinds) |
 | DependencyMonitor | mutable singleton | the monitor's progress, last completed pass, last stall alert and last logged alert | [dependency monitor §5.1](dependency-monitor.md#51-records) |
 | Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload; for a draft entry route, the principal and idempotency key (§7.2) | compilation §3 |
@@ -1716,7 +1716,8 @@ its stored sanitized text as `digest`, and the occurrence's redacted `path`)
 and exactly one outcome, `output` (the redacted output path) or
 `overriddenBy` (the overriding fragment revision and its `digest`). A stored
 record with any other field, a `null`, a field name in another case, an
-encoding outside compilation §5.2's enum or a reference outside its grammar
+encoding outside compilation §5.2's enum, a reference outside its grammar or
+a path that is neither a compilation §2.2 path nor `<redacted>` whole (§8.3)
 is never forwarded: the read is `500 internal-error`. A configuration that could not be redacted is `null`, with a
 `notice` saying so. No release read carries a ciphertext, an artifact or
 configuration digest or the release digest; a release that does not cover
