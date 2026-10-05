@@ -29,6 +29,7 @@ type Record struct {
 	Member       int    // the mapping member's position in key order, or -1 for a scalar reference
 	Source       Origin
 	SourcePath   string // the occurrence's document and path in its source
+	Occurrence   int    // the occurrence's position among its source revision's, as its Occurrence's
 	Output       string // the output document and path, or "" when overridden
 	OverriddenBy *Origin
 }
@@ -40,12 +41,15 @@ type Dependency struct {
 }
 
 // Occurrence is one reproduction dependency (compilation.md §9): a reference occurrence in the
-// import base or a fragment, with its source revision and digest, overridden or not.
+// import base or a fragment, with its source revision and digest, overridden or not. Two whose
+// redacted paths read the same are told apart by their position among their source revision's
+// occurrences, which the provenance records of each name too.
 type Occurrence struct {
-	Reference string
-	Version   int64
-	Source    Origin
-	Path      string
+	Reference  string
+	Version    int64
+	Source     Origin
+	Path       string
+	Occurrence int
 }
 
 func origins(sources []Source) []Origin {
@@ -59,10 +63,11 @@ func origins(sources []Source) []Origin {
 // Provenance is the provenance record, in occurrence order.
 func (c Compiled) Provenance() []Record {
 	var out []Record
-	for _, o := range c.outcomes {
+	ordinals := c.ordinals()
+	for i, o := range c.outcomes {
 		t := o.tracer
 		r := Record{Reference: t.Ref(), Version: t.Version(), Encoding: t.Encoding(), Member: t.Member(),
-			Source: c.origins[o.source], SourcePath: o.shownAt}
+			Source: c.origins[o.source], SourcePath: o.shownAt, Occurrence: ordinals[i]}
 		if o.by >= 0 {
 			by := c.origins[o.by+1]
 			r.OverriddenBy = &by
@@ -91,23 +96,41 @@ func (c Compiled) Effective() []Dependency {
 }
 
 // Reproduction is the reproduction dependencies: every reference occurrence of the import base
-// and the fragments, overridden ones included. A mapping reference is one occurrence: its
-// members share their source and source path, which is told apart before it is redacted.
+// and the fragments, overridden ones included, numbered from 0 within each source revision.
 func (c Compiled) Reproduction() []Occurrence {
 	var out []Occurrence
+	next := map[int]int{} // per source revision, the next occurrence not yet emitted
+	for i, n := range c.ordinals() {
+		o := c.outcomes[i]
+		if n < next[o.source] {
+			continue
+		}
+		next[o.source] = n + 1
+		out = append(out, Occurrence{Reference: o.tracer.Ref(), Version: o.tracer.Version(), Source: c.origins[o.source],
+			Path: o.shownAt, Occurrence: n})
+	}
+	return out
+}
+
+// ordinals is each outcome's occurrence: its position among its source revision's occurrences, in
+// outcome order. A mapping reference is one occurrence: its members share their source and source
+// path, which is told apart before it is redacted.
+func (c Compiled) ordinals() []int {
 	type occurrence struct {
 		source int
 		path   string
 	}
-	seen := map[occurrence]bool{}
-	for _, o := range c.outcomes {
+	seen := map[occurrence]int{}
+	next := map[int]int{}
+	out := make([]int, len(c.outcomes))
+	for i, o := range c.outcomes {
 		k := occurrence{o.source, o.tracer.Path().String()}
-		if seen[k] {
-			continue
+		n, ok := seen[k]
+		if !ok {
+			n = next[o.source]
+			seen[k], next[o.source] = n, n+1
 		}
-		seen[k] = true
-		out = append(out, Occurrence{Reference: o.tracer.Ref(), Version: o.tracer.Version(), Source: c.origins[o.source],
-			Path: o.shownAt})
+		out[i] = n
 	}
 	return out
 }

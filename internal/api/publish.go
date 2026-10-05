@@ -619,7 +619,8 @@ func insertReleaseMachine(ctx context.Context, tx *sql.Tx, rel, cluster string, 
 	records := make([]provenanceRecord, 0, len(m.provenance))
 	for _, r := range m.provenance {
 		p := provenanceRecord{Reference: r.Reference, Version: r.Version, Encoding: r.Encoding,
-			Source: provenanceSource{Revision: r.Source.Revision, Digest: r.Source.Digest, Path: r.SourcePath}, Output: r.Output}
+			Source: provenanceSource{Revision: r.Source.Revision, Digest: r.Source.Digest, Path: r.SourcePath, Occurrence: r.Occurrence},
+			Output: r.Output}
 		if r.Member >= 0 {
 			p.Member = &r.Member
 		}

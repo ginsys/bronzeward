@@ -71,8 +71,9 @@ type reviewBody struct {
 // provenanceRecord is one row of the provenance record (compilation.md §8.2), as T3 stores it and
 // the review answers it: the reference at its pinned version, its declared encoding, a mapping
 // member's position (absent for a scalar reference), the source revision with the SHA-256 of its
-// stored sanitized text and the occurrence's redacted path, and exactly one outcome: the redacted
-// output path, or the fragment revision that overrode it.
+// stored sanitized text, the occurrence's redacted path and its position among the revision's
+// occurrences, and exactly one outcome: the redacted output path, or the fragment revision that
+// overrode it.
 type provenanceRecord struct {
 	Reference    string            `json:"reference"`
 	Version      int64             `json:"version"`
@@ -89,9 +90,10 @@ type provenanceOrigin struct {
 }
 
 type provenanceSource struct {
-	Revision string `json:"revision"`
-	Digest   string `json:"digest"`
-	Path     string `json:"path"`
+	Revision   string `json:"revision"`
+	Digest     string `json:"digest"`
+	Path       string `json:"path"`
+	Occurrence int    `json:"occurrence"`
 }
 
 // errProvenance is a stored provenance record that is not §8.2's. Its content is never named, since
@@ -120,7 +122,7 @@ func projectProvenance(stored []byte, importBase string, fragments []string) ([]
 		if !ingest.ValidReference(r.Reference) || len(r.Reference) > 256 || r.Version < 1 ||
 			(r.Encoding != "" && r.Encoding != "base64") || (r.Member != nil && *r.Member < 0) ||
 			(r.Source.Revision != importBase && !slices.Contains(fragments, r.Source.Revision)) ||
-			!sha256Hex(r.Source.Digest) || !storedPath(r.Source.Path) ||
+			!sha256Hex(r.Source.Digest) || !storedPath(r.Source.Path) || r.Source.Occurrence < 0 ||
 			(r.Output == "") == (r.OverriddenBy == nil) || (r.Output != "" && !storedPath(r.Output)) ||
 			(r.OverriddenBy != nil && (!slices.Contains(fragments, r.OverriddenBy.Revision) || !sha256Hex(r.OverriddenBy.Digest))) {
 			return nil, errProvenance

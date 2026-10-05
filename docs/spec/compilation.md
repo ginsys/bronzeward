@@ -903,7 +903,7 @@ composition (SP §6.3):
 | reference, version | logical name and pinned version |
 | encoding | the declared modifier, if any |
 | member | for a mapping reference, the member's position in key order (§8.1) |
-| source | import base or fragment revision, its SHA-256, source document and path |
+| source | import base or fragment revision, its SHA-256, source document and path, and the occurrence's position among its source revision's occurrences (§9); a mapping's members and an alias's outputs share their occurrence's position |
 | outcome | exactly one of: output document and path (one row per path, so an alias has two); or the fragment that overrode it |
 
 Every path in the record is written with its value tokens redacted (§8.3), as

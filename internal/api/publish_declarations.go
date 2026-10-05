@@ -101,8 +101,13 @@ func checkDeclarations(ctx context.Context, tx *sql.Tx, rel string, u releaseUni
 	return "", nil
 }
 
-// occurrence is one reference occurrence: its source revision, reference and redacted path.
-type occurrence struct{ source, reference, path string }
+// occurrence is one reference occurrence: its source revision, reference and redacted path, and
+// its position among its source revision's occurrences, which tells apart two whose redacted
+// paths read the same (§9).
+type occurrence struct {
+	source, reference, path string
+	n                       int
+}
 
 // disagreement is the first clause on which m's records disagree with the sources its composition
 // names (composition: source revision -> is the import base), or "".
@@ -129,7 +134,7 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 		case d.digest != s.digest:
 			return at("reproduction source digest differs", d.source, d.reference)
 		}
-		reproduced[occurrence{d.source, d.reference, d.path}] = true
+		reproduced[occurrence{d.source, d.reference, d.path, d.occurrence}] = true
 		if occurrences[d.source] == nil {
 			order = append(order, d.source)
 		}
@@ -172,7 +177,7 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 				return at("provenance override digest differs", r.Source.Revision, r.Reference)
 			}
 		}
-		recorded[occurrence{r.Source.Revision, r.Reference, r.SourcePath}] = true
+		recorded[occurrence{r.Source.Revision, r.Reference, r.SourcePath, r.Occurrence}] = true
 	}
 
 	// Every declaration is used (compilation §5.2, stage 1), so each has an occurrence in both.
@@ -192,12 +197,12 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 		}
 	}
 	for _, r := range m.provenance {
-		if !reproduced[occurrence{r.Source.Revision, r.Reference, r.SourcePath}] {
+		if !reproduced[occurrence{r.Source.Revision, r.Reference, r.SourcePath, r.Occurrence}] {
 			return at("provenance occurrence without a reproduction dependency", r.Source.Revision, r.Reference)
 		}
 	}
 	for _, d := range m.reproduction {
-		if !recorded[occurrence{d.source, d.reference, d.path}] {
+		if !recorded[occurrence{d.source, d.reference, d.path, d.occurrence}] {
 			return at("reproduction dependency without a provenance record", d.source, d.reference)
 		}
 	}

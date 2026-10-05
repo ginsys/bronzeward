@@ -51,10 +51,12 @@ func TestProvenanceRecords(t *testing.T) {
 	want := []Record{
 		{Reference: "app/str", Version: 1, Member: -1, Source: fo, SourcePath: labels + "s", Output: labels + "s"},
 		{Reference: "app/str", Version: 1, Member: -1, Source: fo, SourcePath: labels + "s", Output: labels + "t"},
-		{Reference: "app/enc", Version: 2, Encoding: "base64", Member: -1, Source: fo, SourcePath: labels + "e", Output: labels + "e"},
-		{Reference: "app/map", Version: 3, Member: 0, Source: fo, SourcePath: annotations, Output: annotations + "/<redacted>"},
-		{Reference: "app/map", Version: 3, Member: 1, Source: fo, SourcePath: annotations, Output: annotations + "/<redacted>"},
-		{Reference: "app/bool", Version: 1, Member: -1, Source: fo, SourcePath: "doc[0]/machine/features/rbac", Output: "doc[0]/machine/features/rbac"},
+		{Reference: "app/enc", Version: 2, Encoding: "base64", Member: -1, Source: fo, SourcePath: labels + "e", Occurrence: 1,
+			Output: labels + "e"},
+		{Reference: "app/map", Version: 3, Member: 0, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
+		{Reference: "app/map", Version: 3, Member: 1, Source: fo, SourcePath: annotations, Occurrence: 2, Output: annotations + "/<redacted>"},
+		{Reference: "app/bool", Version: 1, Member: -1, Source: fo, SourcePath: "doc[0]/machine/features/rbac", Occurrence: 3,
+			Output: "doc[0]/machine/features/rbac"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("records\n%+v\nwant\n%+v", got, want)
@@ -162,14 +164,30 @@ func TestReproductionKeepsRedactedOccurrences(t *testing.T) {
 	del := source(t, unlabel, ingest.Declarations{}, nil)
 	c := compiled(t, Input{Base: base, Fragments: []Source{frag, del}, Mode: ModeMetal})
 	var got []string
+	var numbered []int
 	for _, o := range c.Reproduction() {
 		if o.Reference == "app/s" {
 			got = append(got, o.Path)
+			numbered = append(numbered, o.Occurrence)
 		}
 	}
 	at := "doc[0]/machine/nodeLabels/<redacted>"
 	if !slices.Equal(got, []string{at, at}) {
 		t.Errorf("reproduction paths %v, want two occurrences at %s", got, at)
+	}
+	// Each is told apart by its position among its source's occurrences, and its provenance
+	// names the same position.
+	if !slices.Equal(numbered, []int{0, 1}) {
+		t.Errorf("reproduction occurrences %v, want [0 1]", numbered)
+	}
+	var recorded []int
+	for _, r := range c.Provenance() {
+		if r.Reference == "app/s" {
+			recorded = append(recorded, r.Occurrence)
+		}
+	}
+	if slices.Sort(recorded); !slices.Equal(recorded, []int{0, 1}) {
+		t.Errorf("provenance occurrences %v, want [0 1]", recorded)
 	}
 }
 
@@ -206,10 +224,11 @@ func TestProvenanceOverrides(t *testing.T) {
 	rbac := "doc[0]/machine/features/rbac"
 	want := []Record{
 		{Reference: "app/a", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "a", OverriddenBy: &by},
-		{Reference: "app/b", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "b", OverriddenBy: &by},
-		{Reference: "app/c", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "c", OverriddenBy: &by},
-		{Reference: "app/keep", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "keep", Output: labels + "keep"},
-		{Reference: "app/flag", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: rbac, OverriddenBy: &by},
+		{Reference: "app/b", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "b", Occurrence: 1, OverriddenBy: &by},
+		{Reference: "app/c", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "c", Occurrence: 2, OverriddenBy: &by},
+		{Reference: "app/keep", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: labels + "keep", Occurrence: 3,
+			Output: labels + "keep"},
+		{Reference: "app/flag", Version: 1, Member: -1, Source: origin(f0, 0), SourcePath: rbac, Occurrence: 4, OverriddenBy: &by},
 		{Reference: "app/other", Version: 1, Member: -1, Source: origin(f1, 1), SourcePath: labels + "b", Output: labels + "b"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -232,10 +251,10 @@ func TestProvenanceOverrides(t *testing.T) {
 	}
 	wantOcc := []Occurrence{
 		{Reference: "app/a", Version: 1, Source: origin(f0, 0), Path: labels + "a"},
-		{Reference: "app/b", Version: 1, Source: origin(f0, 0), Path: labels + "b"},
-		{Reference: "app/c", Version: 1, Source: origin(f0, 0), Path: labels + "c"},
-		{Reference: "app/keep", Version: 1, Source: origin(f0, 0), Path: labels + "keep"},
-		{Reference: "app/flag", Version: 1, Source: origin(f0, 0), Path: "doc[0]/machine/features/rbac"},
+		{Reference: "app/b", Version: 1, Source: origin(f0, 0), Path: labels + "b", Occurrence: 1},
+		{Reference: "app/c", Version: 1, Source: origin(f0, 0), Path: labels + "c", Occurrence: 2},
+		{Reference: "app/keep", Version: 1, Source: origin(f0, 0), Path: labels + "keep", Occurrence: 3},
+		{Reference: "app/flag", Version: 1, Source: origin(f0, 0), Path: "doc[0]/machine/features/rbac", Occurrence: 4},
 		{Reference: "app/other", Version: 1, Source: origin(f1, 1), Path: labels + "b"},
 	}
 	if !reflect.DeepEqual(reproduction, wantOcc) {

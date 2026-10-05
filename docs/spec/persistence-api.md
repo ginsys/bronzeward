@@ -1692,7 +1692,7 @@ HTTP/1.1 200 OK
  "configuration": "machine:\n  type: worker\n  token: <redacted:schema>\n  ...",
  "provenance": [{"reference": "registry/example-pass", "version": 3,
                  "source": {"revision": "frv_sqb745zrpl2xltek22ai7sbdue", "digest": "4fc8...eeb8",
-                            "path": "doc[0]/machine/registries"},
+                            "path": "doc[0]/machine/registries", "occurrence": 0},
                  "output": "doc[0]/machine/registries/config/<redacted>/auth/password"}]}
 
 GET /api/v1/machines/mch_tqhcznunhyle4hnxru5hkt35uq
@@ -1733,7 +1733,9 @@ provenance records publication stored (compilation §8.2, §8.3, §11), never
 traced again. Each record carries §8.2's fields alone: `reference`,
 `version`, `encoding` (absent when none), `member` (absent for a scalar
 reference), `source` (the import base or fragment revision, the SHA-256 of
-its stored sanitized text as `digest`, and the occurrence's redacted `path`)
+its stored sanitized text as `digest`, the occurrence's redacted `path`, and
+`occurrence`, its position among its source revision's occurrences, never
+below 0)
 and exactly one outcome, `output` (the redacted output path) or
 `overriddenBy` (the overriding fragment revision and its `digest`). A stored
 record with any other field, a `null`, a field name in another case, an
