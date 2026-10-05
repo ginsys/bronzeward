@@ -35,7 +35,9 @@ CREATE TABLE release (
   draft_revision     integer NOT NULL CHECK (draft_revision >= 1),
   digest             bytea NOT NULL CHECK (length(digest) = 32),
   contract           text NOT NULL CHECK (contract ~ '^v[0-9]{1,4}\.[0-9]{1,4}$'),
-  machinery_version  text NOT NULL CHECK (machinery_version ~ '^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(-[0-9A-Za-z.-]{1,64})?$'),
+  -- A canonical Go module version (semver): no empty part, no leading zero in a numeric part.
+  machinery_version  text NOT NULL CHECK (length(machinery_version) <= 80 AND machinery_version ~
+                       '^v(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$'),
   -- The go.sum hash of the machinery module: h1: and the base64 of a SHA-256.
   machinery_checksum text NOT NULL CHECK (machinery_checksum ~ '^h1:[A-Za-z0-9+/]{43}=$'),
   kubernetes_version text NOT NULL CHECK (kubernetes_version ~ '^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$'),
