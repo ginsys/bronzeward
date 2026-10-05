@@ -828,6 +828,14 @@ INSERT INTO release_source ...;      -- every revision and head revision used:
                                      -- each profile pin a fragment source,
                                      -- each selected name a source with a
                                      -- revision (checked at commit)
+  -- per machine, its reproduction dependencies and provenance records
+  --   against the sources its composition names (import base, its profiles'
+  --   pins, its selected fragments): each record's source among them with
+  --   that source's text digest, its reference declared there at the same
+  --   version, generation, encoding and kind; every declaration with a
+  --   reproduction dependency and a provenance record, both naming the same
+  --   occurrences (compilation §5.2, §8.2, §9). A disagreement is the
+  --   compiled release's defect: 500 internal-error, nothing committed
 INSERT INTO dependency ...;          -- both records, each reproduction source
                                      -- the machine's import base or a release
                                      -- source's fragment revision; and one
@@ -2509,6 +2517,7 @@ equals neither the restored epoch nor the lost one.
 | Publish | Dependency not `retained`, or provider sealed | `failed`, `503 dependency-unavailable` or `422` | operation, act |
 | Publish | Commit-unknown | resolved by reading the natural key | the release, once |
 | Publish | Deadlock retries exhausted, or `COMMIT` rejected (a deferred constraint) | operation `failed`, `503 transient-conflict` or `500 internal-error` | operation, act |
+| Publish | Compiled release disagrees with its sources' reference declarations or text digests | operation `failed`, `500 internal-error`; the clause logged | operation, act |
 | Publish | Worker superseded, or its lease lapsed | its commit refused by the fence; the job claimed again | the other worker's result |
 | Publish | New request for a draft already published | `409 conflict` naming the release | nothing |
 | Plan | Second approval of a plan in one epoch | `409 conflict` | nothing |

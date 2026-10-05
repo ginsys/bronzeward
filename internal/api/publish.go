@@ -337,6 +337,17 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 			return "", nil, err
 		}
 	}
+	// The unit's records agree with the declarations of the sources the release now names; a
+	// disagreement is the unit's defect, which a retry would repeat (ruling R16).
+	mismatch, err := checkDeclarations(ctx, tx, rel, u)
+	if err != nil {
+		return "", nil, err
+	}
+	if mismatch != "" {
+		a.o.logf("publication %s: %s", j.op, mismatch)
+		return "", refuse(http.StatusInternalServerError, "internal-error",
+			"the compiled release disagrees with its sources' reference declarations; nothing was committed"), nil
+	}
 	for _, m := range u.machines {
 		if err := insertDependencies(ctx, tx, rel, m); err != nil {
 			return "", nil, err
