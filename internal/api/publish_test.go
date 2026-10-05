@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/classify"
+	"github.com/ginsys/bronzeward/internal/compile"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -122,6 +123,9 @@ func newPublishEnv(t *testing.T) *publishEnv {
 			effective: []unitDependency{{reference: "registry/pass", object: p.kvPath, version: 1, created: kvCreated}},
 			reproduction: []unitDependency{{reference: "registry/pass", object: p.kvPath, version: 1, created: kvCreated,
 				source: p.ibr, digest: sha256.Sum256([]byte("machine: {}")), path: "doc[0]/machine/registries", occurrence: 0}},
+			provenance: []compile.Record{{Reference: "registry/pass", Version: 1, Member: -1,
+				Source:     compile.Origin{Base: true, Fragment: -1, Revision: p.ibr, Digest: textDigest("machine: {}")},
+				SourcePath: "doc[0]/machine/registries", Output: "doc[0]/machine/registries"}},
 			encryption: unitDependency{object: "bw-artifact", version: 1, created: transitCreated},
 		}},
 		statuses: []unitStatus{
