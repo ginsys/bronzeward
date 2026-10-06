@@ -495,7 +495,9 @@ clean_git() {
 # resolve in <dir> is tasks_outside's to check. The caller's values (a DSN, a token, a proxy URL
 # with credentials) reach the command through a pipe on descriptor 3, never as an argument of env
 # or of any other process: a bash under env -i exports them and then runs the command (adding
-# only its own PWD, SHLVL and _).
+# only its own PWD, SHLVL and _). They are written by the printf builtin, so a function of that
+# name the caller exported neither sees nor adds to them, and end with a record no variable can
+# be (=): without it, a transfer cut short, the command does not run (status 125).
 isolated_run() {
   local dir=$1 v inherit=()
   shift
@@ -510,8 +512,14 @@ isolated_run() {
   # shellcheck disable=SC2016 # the bash -c text expands in the inner shell
   (cd -- "$dir" && exec env -i "${git_isolated[@]}" MISE_TRUSTED_CONFIG_PATHS="$dir" \
     MISE_CEILING_PATHS="${dir%/*}" MISE_GLOBAL_CONFIG_FILE=/dev/null MISE_SYSTEM_CONFIG_FILE=/dev/null \
-    "$BASH" -c 'while IFS= read -r -d "" kv; do export -- "$kv"; done <&3 && exec 3<&- && exec "$@"' isolated_run "$@" \
-    3< <(for v in "${inherit[@]}"; do printf '%s=%s\0' "$v" "${!v}"; done))
+    "$BASH" -c 'ok=
+      while IFS= read -r -d "" kv; do
+        if [ "$kv" = = ]; then ok=1; break; fi
+        export -- "$kv" || exit 125
+      done <&3
+      [ -n "$ok" ] || { echo "isolated_run: the environment did not arrive whole" >&2; exit 125; }
+      exec 3<&- && exec "$@"' isolated_run "$@" \
+    3< <(for v in "${inherit[@]}"; do builtin printf '%s=%s\0' "$v" "${!v}" || exit 1; done && builtin printf '=\0'))
 }
 
 # tasks_outside <dir> <task...>: of the tasks named and every task they depend on, those that
