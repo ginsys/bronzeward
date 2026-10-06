@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"net/http"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/staging"
 )
@@ -118,5 +122,181 @@ func TestPublishClaimEpoch(t *testing.T) {
 	var state string
 	if err := d.db.QueryRow(`SELECT state FROM operation WHERE id = $1`, op).Scan(&state); err != nil || state != "queued" {
 		t.Fatalf("operation %s, %v", state, err)
+	}
+}
+
+// worker builds an API over b's database for the process owner, publishing with b's stand-in
+// provider under timers; its publish worker, once started, stops when life ends.
+func (b *buildEnv) worker(owner string, life context.Context, timers config.Ingestion) *API {
+	b.t.Helper()
+	var epoch string
+	if err := b.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
+		b.t.Fatal(err)
+	}
+	return b.buildWith(deps{owner: staging.Owner{ID: owner, Epoch: epoch}, life: life, timers: timers,
+		pub: &publishClients{meta: b.held, reader: b.held, encrypter: b.held}}, options{})
+}
+
+// ended waits, at most 10 s, for op to end, and returns its state, its last owner generation and
+// its event types in number order.
+func (d *draftEnv) ended(op string) (string, int64, []string) {
+	d.t.Helper()
+	var state string
+	var gen int64
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if err := d.db.QueryRow(`SELECT state, owner_gen FROM operation WHERE id = $1`, op).Scan(&state, &gen); err != nil {
+			d.t.Fatal(err)
+		}
+		if state == "succeeded" || state == "failed" {
+			break
+		}
+		if time.Now().After(deadline) {
+			d.t.Fatalf("operation %s still %s after 10 s", op, state)
+		}
+	}
+	var types []string
+	rows, err := d.db.Query(`SELECT entry->>'type' FROM operation_event WHERE operation = $1 AND kind = 'publish' ORDER BY number`, op)
+	if err != nil {
+		d.t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			d.t.Fatal(err)
+		}
+		types = append(types, s)
+	}
+	return state, gen, types
+}
+
+// stopping stops a's worker by ending life, and waits for it.
+func stopping(a *API, stop context.CancelFunc) {
+	stop()
+	a.d.runs.Wait()
+}
+
+var idle = config.Ingestion{Heartbeat: time.Hour, Lease: time.Minute} // no poll and no heartbeat in a test's time
+
+// §5.1, §8.3: T2's COMMIT wakes this process's worker, which claims the job, compiles and commits
+// the release, and ends the operation succeeded naming it: events queued, claimed, succeeded.
+func TestPublishWorker(t *testing.T) {
+	b := newBuildEnv(t)
+	mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
+	life, stop := context.WithCancel(t.Context())
+	a := b.worker("run-1/1/worker", life, idle)
+	a.startPublisher()
+	defer stopping(a, stop)
+
+	op := decode[operationBody](t, b.publish(a, b.etag, b.key(), `{}`), http.StatusAccepted).ID
+	state, gen, types := b.ended(op)
+	if state != "succeeded" || gen != 1 || !slices.Equal(types, []string{"queued", "claimed", "succeeded"}) {
+		t.Fatalf("operation %s at generation %d, events %v", state, gen, types)
+	}
+	if n := count(t, b.db, `SELECT count(*) FROM release r JOIN operation o ON o.result->>'release' = r.id
+		WHERE o.id = $1 AND r.operation = $1`, op); n != 1 {
+		t.Fatalf("%d releases name the operation", n)
+	}
+	if n := count(t, b.db, `SELECT count(*) FROM draft WHERE id = $1 AND state = 'published'`, b.draft); n != 1 {
+		t.Fatal("the draft is not published")
+	}
+}
+
+// A compilation refusal fails the operation with its problem and a failed event naming the code,
+// in the failure transaction (§6.2, ruling R33); nothing is released.
+func TestPublishWorkerRefused(t *testing.T) {
+	b := newBuildEnv(t)
+	mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
+	mustExec(t, b.db, `UPDATE cluster SET contract = 'v1.12' WHERE id = $1`, b.cluster)
+	life, stop := context.WithCancel(t.Context())
+	a := b.worker("run-1/1/worker", life, idle)
+	a.startPublisher()
+	defer stopping(a, stop)
+
+	op := decode[operationBody](t, b.publish(a, b.etag, b.key(), `{}`), http.StatusAccepted).ID
+	state, _, types := b.ended(op)
+	if state != "failed" || !slices.Equal(types, []string{"queued", "claimed", "failed"}) {
+		t.Fatalf("operation %s, events %v", state, types)
+	}
+	var problem, code string
+	if err := b.db.QueryRow(`SELECT o.error->>'type', e.entry->>'code' FROM operation o
+		JOIN operation_event e ON e.operation = o.id AND e.number = o.last_event WHERE o.id = $1`, op).Scan(&problem, &code); err != nil {
+		t.Fatal(err)
+	}
+	if problem != "urn:bronzeward:problem:validation-failed" || code != "validation-failed" {
+		t.Fatalf("problem %s, failed event code %s", problem, code)
+	}
+	if n := count(t, b.db, `SELECT count(*) FROM release`); n != 0 {
+		t.Fatalf("%d releases", n)
+	}
+}
+
+// A run whose claim another worker took over writes nothing: no release, no failure, and the
+// operation stays the new owner's (§5.1).
+func TestPublishRunSuperseded(t *testing.T) {
+	b := newBuildEnv(t)
+	mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
+	a := b.worker("run-1/1/a", t.Context(), idle)
+	other := b.worker("run-1/2/b", t.Context(), idle)
+	op := b.queuePublish(1)
+	j, ok := b.claim(a)
+	if !ok {
+		t.Fatal("nothing claimed")
+	}
+	mustExec(t, b.db, `UPDATE operation SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1`, op)
+	if _, ok := b.claim(other); !ok {
+		t.Fatal("no takeover")
+	}
+	a.runPublish(t.Context(), j)
+	if owner, gen, _ := b.claimed(op, 3); owner != "run-1/2/b" || gen != 2 {
+		t.Fatalf("operation owned by %s at %d", owner, gen)
+	}
+	if n := count(t, b.db, `SELECT count(*) FROM release`) + count(t, b.db, `SELECT count(*) FROM operation_event WHERE operation = $1`, op); n != 3 {
+		t.Fatalf("%d releases and events; want the 3 events", n)
+	}
+}
+
+// The run's heartbeat keeps its lease while a compilation outlasts it, so a polling worker in
+// another process never takes the job over: one claim, at generation 1.
+func TestPublishWorkerHeartbeat(t *testing.T) {
+	b := newBuildEnv(t)
+	mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
+	b.held.slow = 400 * time.Millisecond
+	timers := config.Ingestion{Heartbeat: 20 * time.Millisecond, Lease: 150 * time.Millisecond}
+	life, stop := context.WithCancel(t.Context())
+	a := b.worker("run-1/1/a", life, timers)
+	other := b.worker("run-1/2/b", life, timers)
+	op := b.queuePublish(1)
+	j, ok := b.claim(a)
+	if !ok {
+		t.Fatal("nothing claimed")
+	}
+	other.startPublisher()
+	defer stopping(other, stop)
+	a.runPublish(life, j)
+	state, gen, types := b.ended(op)
+	if state != "succeeded" || gen != 1 || !slices.Equal(types, []string{"queued", "claimed", "succeeded"}) {
+		t.Fatalf("operation %s at generation %d, events %v", state, gen, types)
+	}
+}
+
+// A worker whose epoch is superseded stops claiming and ends (§5.1).
+func TestPublishWorkerEpoch(t *testing.T) {
+	d := newDraftEnv(t)
+	a := d.publisher(options{})
+	newEpoch(t, d.db)
+	a.startPublisher()
+	done := make(chan struct{})
+	go func() {
+		a.d.runs.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the worker still runs in a superseded epoch")
+	}
+	if !d.logged("superseded") {
+		t.Fatal("no log line names the superseded epoch")
 	}
 }

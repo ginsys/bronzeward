@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/staging"
 )
@@ -80,4 +82,106 @@ func (a *API) extendPublish(ctx context.Context, j publishJob) error {
 		}
 		return nil
 	})
+}
+
+// startPublisher starts this process's one publish worker, which runs until life ends; a process
+// without a provider has none.
+func (a *API) startPublisher() {
+	if a.d.pub == nil || a.d.owner.ID == "" {
+		return
+	}
+	a.d.runs.Add(1)
+	go func() {
+		defer a.d.runs.Done()
+		a.publishLoop(a.d.life)
+	}()
+}
+
+// publishLoop claims and runs one job at a time, while any is eligible; then it waits for T2's
+// wake or the next poll, every heartbeat, which finds a lease that lapsed (ruling R39). A
+// superseded epoch ends it: such a process claims nothing until it is restarted.
+func (a *API) publishLoop(ctx context.Context) {
+	t := time.NewTicker(a.d.timers.Heartbeat)
+	defer t.Stop()
+	for {
+		j, ok, err := a.claimPublish(ctx)
+		switch {
+		case ctx.Err() != nil:
+			return
+		case errors.Is(err, staging.ErrEpochSuperseded):
+			a.o.logf("publish worker: the epoch is superseded; it claims nothing until restarted")
+			return
+		case err != nil:
+			a.o.logf("publish worker: the claim: %v", err)
+		case ok:
+			a.runPublish(ctx, j)
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-a.d.wake:
+		case <-t.C:
+		}
+	}
+}
+
+// runPublish builds j's release and commits it (T3), heartbeating the lease every
+// timers.Heartbeat until it returns. A refusal is recorded as the operation's failure; an error,
+// or a heartbeat the fence refuses, stops the run and leaves the job to its lease.
+func (a *API) runPublish(ctx context.Context, j publishJob) {
+	ctx, cancel := context.WithCancel(ctx)
+	var beat sync.WaitGroup
+	beat.Add(1)
+	go func() {
+		defer beat.Done()
+		a.publishHeartbeat(ctx, cancel, j)
+	}()
+	defer func() {
+		cancel()
+		beat.Wait()
+	}()
+	u, ref, err := a.buildRelease(ctx, j, *a.d.pub)
+	switch {
+	case ctx.Err() != nil:
+		a.o.logf("publication %s: stopped before the publication commit", j.op)
+		return
+	case err != nil:
+		a.o.logf("publication %s: %v", j.op, err)
+		return
+	case ref != nil:
+		if err := a.inTx(ctx, func(tx *sql.Tx) error {
+			return a.finishPublish(ctx, tx, j, "failed", nil, problemDoc(j.op, ref), map[string]any{"type": "failed", "code": ref.code})
+		}); err != nil {
+			a.o.logf("publication %s: the failure was not recorded: %v", j.op, err)
+		}
+		return
+	}
+	if _, _, err := a.publishCommit(ctx, j, u); err != nil {
+		a.o.logf("publication %s: the publication commit: %v", j.op, err)
+	}
+}
+
+// publishHeartbeat extends j's lease until ctx ends; an extension the fence refuses stops the run.
+func (a *API) publishHeartbeat(ctx context.Context, stop context.CancelFunc, j publishJob) {
+	t := time.NewTicker(a.d.timers.Heartbeat)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		err := a.extendPublish(ctx, j)
+		switch {
+		case ctx.Err() != nil:
+			return
+		case errors.Is(err, staging.ErrFenced), errors.Is(err, staging.ErrEpochSuperseded):
+			a.o.logf("publication %s: heartbeat refused (%v); the run stops", j.op, err)
+			stop()
+			return
+		case err != nil: // the lease may still hold; the next heartbeat tries again
+			a.o.logf("publication %s: %v", j.op, err)
+		}
+	}
 }
