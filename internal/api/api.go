@@ -54,15 +54,19 @@ type API struct {
 	o      options
 }
 
-// deps are what ingestion needs: the provider client, the claim timers and this process as the
-// owner of the claims it creates. With no provider configured, ing is nil and the ingestion
-// routes answer 503. The runners live for life, the server's lifetime, and runs counts them.
+// deps are what ingestion and publication need: the provider clients, the claim timers and this
+// process as the owner of the claims and jobs it takes. With no provider configured, ing and pub
+// are nil and the ingestion and publication routes answer 503. The runners and the publish worker
+// live for life, the server's lifetime, and runs counts them; wake tells the worker a job was
+// queued.
 type deps struct {
 	ing    Ingester
+	pub    *publishClients
 	timers config.Ingestion
 	owner  staging.Owner
 	life   context.Context
 	runs   *sync.WaitGroup
+	wake   chan struct{}
 }
 
 // options are nil or false in production; tests set them.
@@ -79,6 +83,7 @@ type options struct {
 	beforeCommit   func(attempt int) error                                                              // fails an attempt before COMMIT
 	commit         func(*sql.Tx) error                                                                  // replaces (*sql.Tx).Commit
 	onRunner       func(job)                                                                            // takes each job instead of the runner
+	onPublish      func()                                                                               // runs instead of waking the publish worker
 	afterStage     func()                                                                               // runs when a job is staged, before T1
 	beforeT1       func()                                                                               // runs before T1 begins
 	stopAt         func(step string) bool                                                               // a draft update's ingestion stops at step, as a killed process would

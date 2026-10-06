@@ -303,6 +303,12 @@ type operationBody struct {
 }
 
 var getOperation = item(id.Operation, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
+	b, err := readOperation(ctx, tx, v)
+	return "", b, err
+})
+
+// readOperation reads operation v as §8.3 shows it.
+func readOperation(ctx context.Context, tx *sql.Tx, v string) (operationBody, error) {
 	var b operationBody
 	var draft, principal, role, res, fail sql.NullString
 	var revision sql.NullInt64
@@ -311,7 +317,7 @@ var getOperation = item(id.Operation, func(ctx context.Context, tx *sql.Tx, v st
 		FROM operation WHERE id = $1`, v).Scan(&b.ID, &b.Kind, &b.State, &b.Epoch, &b.LastEvent, &draft, &revision,
 		&principal, &role, &b.CreatedAt, &res, &fail)
 	if err != nil {
-		return "", nil, err
+		return b, err
 	}
 	// A NULL result or error stays a nil RawMessage, which marshals as null (§8.3).
 	if res.Valid {
@@ -327,5 +333,5 @@ var getOperation = item(id.Operation, func(ctx context.Context, tx *sql.Tx, v st
 		b.CreatedBy = &createdBy{Principal: principal.String, Role: role.String}
 	}
 	b.CreatedAt = b.CreatedAt.UTC()
-	return "", b, nil
-})
+	return b, nil
+}
