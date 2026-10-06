@@ -165,6 +165,12 @@ func (a *API) runPublish(ctx context.Context, j publishJob) {
 		cancel()
 		beat.Wait()
 	}()
+	// An interruption point (errKilled, compilation §15) ends the run as an error does: nothing
+	// written, the job left to its lease.
+	if err := a.step("publish-claim"); err != nil {
+		a.o.logf("publication %s: %v", j.op, err)
+		return
+	}
 	u, ref, err := a.buildRelease(ctx, j, *a.d.pub)
 	switch {
 	case ctx.Err() != nil:
