@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/auth"
+	"github.com/ginsys/bronzeward/internal/compile"
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/provider"
@@ -42,6 +43,16 @@ type Ingester interface {
 	EncryptStaging(ctx context.Context, envelope []byte) (provider.Ciphertext, error)
 	DecryptStaging(ctx context.Context, ct provider.Ciphertext) ([]byte, error)
 	TalosAccess(ctx context.Context, cluster string) (provider.TalosAccess, error)
+}
+
+// Publishers are publication's provider identities (compilation.md §1): the metadata identity's
+// reads by name, and the compiler identity's pinned reads and encryption under the artifact key.
+type Publishers struct {
+	Meta     compile.MetadataReader
+	Compiler interface {
+		compile.PinnedReader
+		compile.ArtifactEncrypter
+	}
 }
 
 type API struct {
@@ -114,16 +125,22 @@ type ctxKey struct{}
 
 func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*request) }
 
-// New returns the /api/v1 handler. ing and ic are nil without a provider. epoch is the one this
-// process read at its start: it owns claims under it, and under no later one (§5.1). The ingest
-// runners stop when life ends.
-func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ing Ingester, ic *config.Ingestion, epoch string) http.Handler {
+// New returns the /api/v1 handler. ing, pub and ic are nil without a provider. epoch is the one
+// this process read at its start: it owns claims and jobs under it, and under no later one
+// (§5.1). With a provider, it starts the publish worker. The ingest runners and the worker stop
+// when life ends.
+func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ing Ingester, pub *Publishers, ic *config.Ingestion, epoch string) http.Handler {
 	d := deps{ing: ing, life: life}
+	if pub != nil {
+		d.pub = &publishClients{meta: pub.Meta, reader: pub.Compiler, encrypter: pub.Compiler}
+	}
 	if ic != nil {
 		d.timers = *ic
 		d.owner = staging.Owner{ID: ic.Instance + "/" + strconv.Itoa(os.Getpid()) + "/" + rand.Text(), Epoch: epoch}
 	}
-	return newAPI(db, a, cfg, d, options{})
+	api := newAPI(db, a, cfg, d, options{})
+	api.startPublisher()
+	return api
 }
 
 func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *API {

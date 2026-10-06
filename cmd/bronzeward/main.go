@@ -149,18 +149,14 @@ func serveContext(ctx context.Context, args []string) error {
 	if err := db.QueryRowContext(startCtx, `SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
 		return fmt.Errorf("installation state: %w", err)
 	}
-	var ing api.Ingester // nil without a provider: the ingestion routes answer 503
+	// Without a provider both are nil: the ingestion and publication routes answer 503, and no
+	// publish worker runs.
+	var ing api.Ingester
+	var pub *api.Publishers
 	if cfg.Provider != nil {
-		tok, err := provider.ReadTokenFile(cfg.Provider.IngestionTokenFile)
-		if err != nil {
+		if ing, pub, err = providerClients(cfg.Provider); err != nil {
 			return err
 		}
-		k := cfg.Provider.Keys
-		c, err := provider.NewIngestion(cfg.Provider.Address, tok, provider.Keys{Baseline: k.Baseline, Staging: k.Staging, Digest: k.Digest})
-		if err != nil {
-			return err
-		}
-		ing = c
 	}
 	// Every server sweeps, ingestion configured or not: another instance on the same database
 	// may have left claims behind.
@@ -171,8 +167,9 @@ func serveContext(ctx context.Context, args []string) error {
 	startSweep(startCtx, ctx, db, every, log.Printf)
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
-	// The ingest runners stop with the signal; a claim left held lapses with its lease.
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, ing, cfg.Ingestion, epoch)))
+	// The ingest runners and the publish worker stop with the signal; a claim or job left held
+	// lapses with its lease.
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, ing, pub, cfg.Ingestion, epoch)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {
@@ -189,6 +186,43 @@ func serveContext(ctx context.Context, args []string) error {
 		}
 		return nil
 	}
+}
+
+// providerClients builds the server's provider identities, each with its own token (compilation.md
+// §1): ingestion's, and publication's metadata and compiler identities. An unreadable token file
+// is named by its field.
+func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, error) {
+	token := func(field, path string) (provider.Token, error) {
+		tok, err := provider.ReadTokenFile(path)
+		if err != nil {
+			return provider.Token{}, fmt.Errorf("provider.%s: %w", field, err)
+		}
+		return tok, nil
+	}
+	k := p.Keys
+	tok, err := token("ingestionTokenFile", p.IngestionTokenFile)
+	if err != nil {
+		return nil, nil, err
+	}
+	ing, err := provider.NewIngestion(p.Address, tok, provider.Keys{Baseline: k.Baseline, Staging: k.Staging, Digest: k.Digest})
+	if err != nil {
+		return nil, nil, err
+	}
+	if tok, err = token("compilerTokenFile", p.CompilerTokenFile); err != nil {
+		return nil, nil, err
+	}
+	compiler, err := provider.NewCompiler(p.Address, tok, k.Artifact)
+	if err != nil {
+		return nil, nil, err
+	}
+	if tok, err = token("metadataTokenFile", p.MetadataTokenFile); err != nil {
+		return nil, nil, err
+	}
+	meta, err := provider.NewMetadata(p.Address, tok)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ing, &api.Publishers{Meta: meta, Compiler: compiler}, nil
 }
 
 // fallbackSweep is the sweep interval of a server without an ingestion block, which names its
