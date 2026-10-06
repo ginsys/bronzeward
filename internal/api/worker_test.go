@@ -331,6 +331,53 @@ func TestPublishExtendAfterLockWait(t *testing.T) {
 	}
 }
 
+// A claim that waited for the operation's row longer than a lease, the holder ending without
+// changing it, takes a full lease from when it holds the row, not from before the wait (§5.1).
+func TestPublishClaimAfterLockWait(t *testing.T) {
+	d := newDraftEnv(t)
+	var epoch string
+	if err := d.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
+		t.Fatal(err)
+	}
+	a := d.buildWith(deps{owner: staging.Owner{ID: "run-1/1/a", Epoch: epoch}, pub: &publishClients{},
+		timers: config.Ingestion{Heartbeat: 100 * time.Millisecond, Lease: time.Second}}, options{})
+	op := d.queuePublish(1)
+	holder, err := d.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback()
+	var pid int
+	if err := holder.QueryRow(`SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(`SELECT 1 FROM operation WHERE id = $1 FOR UPDATE`, op); err != nil {
+		t.Fatal(err)
+	}
+	type claimed struct {
+		j   publishJob
+		ok  bool
+		err error
+	}
+	done := make(chan claimed, 1)
+	go func() {
+		j, ok, err := a.claimPublish(context.Background())
+		done <- claimed{j, ok, err}
+	}()
+	waitBlockedBy(t, d.db, pid)
+	time.Sleep(1500 * time.Millisecond)
+	if err := holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	c := <-done
+	if c.err != nil || !c.ok || c.j.op != op {
+		t.Fatalf("claim %+v %v %v", c.j, c.ok, c.err)
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM operation WHERE id = $1 AND lease_until > clock_timestamp() + interval '500 milliseconds'`, op); n != 1 {
+		t.Fatal("the claim's lease was counted from before its wait")
+	}
+}
+
 // The run's heartbeat keeps its lease while a compilation outlasts it, so a polling worker in
 // another process never takes the job over: one claim, at generation 1.
 func TestPublishWorkerHeartbeat(t *testing.T) {
