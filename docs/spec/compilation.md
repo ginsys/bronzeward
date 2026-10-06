@@ -1471,7 +1471,15 @@ Evidence gaps this contract carries rather than closes:
   (§2.3;
   [acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)).
   E1's screen covered the run root and live tables only, for a different
-  pipeline (E1 4.2, 4.6). Interruption of a draft update is not measured.
+  pipeline (E1 4.2, 4.6). A draft update is measured the same way by S2's
+  negative controls, for a fragment update only: the update succeeds, is
+  refused twice, and is killed at each of steps 0 to 7 under transient
+  staging, its only mode; after each kill the claim is swept, the generations
+  made are still listed and the draft's ETag is unchanged, and every outcome is
+  scanned, the logs, the data directory, the write-ahead log and a dump taken
+  after the last kill among the surfaces
+  ([acceptance plan S2](acceptance-plan.md#s2-publication)). Profile and
+  assignment updates ingest no document and hold no claim.
 - **Schema detector coverage**: `schema-covers-base-secrets` was never seen to
   fail and ran on control-plane bases only; disk-encryption, installer and disk
   configuration were absent from the environment; the list's precision was not

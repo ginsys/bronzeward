@@ -39,12 +39,6 @@ run_key=$(date -u +%s%N)
 
 # node_talos <node ip> <talosctl args...>: talosctl against one node, through that node.
 node_talos() { talosctl_timed 20 -e "$1" -n "$1" "${@:2}"; }
-# key <name>: this run's Idempotency-Key for one request.
-key() { printf 's1-%s-%s' "$run_key" "$1"; }
-# etag_of_last: the ETag header of the last response.
-etag_of_last() { sed -n 's/^[Ee][Tt][Aa][Gg]: *//p' "$EV/last.headers" | tr -d '\r'; }
-# sql <statement>: one psql answer, unaligned, as Bronzeward's owner role.
-sql() { pg psql -U bronzeward -d bronzeward -Atc "$1"; }
 # digest_of <bundle file> <node ip>: the first field of that node's line.
 digest_of() { awk -v n="$2" '$2 == n {print $1}' "$1"; }
 # apid_log <node ip>: that node's apid log, as its buffer holds it now.
@@ -139,17 +133,6 @@ no_mutation() {
   fi
 }
 
-# h-author's token. The issuer's tokens live five minutes (its Lifetime) and the run is longer, so
-# each phase asks for one with most of its life left: minted again once the last is three minutes
-# old, longer than any phase between two calls runs.
-author='' author_at=0
-fresh_author() {
-  [ -z "$author" ] || [ $((SECONDS - author_at)) -ge 180 ] || return 0
-  author=$(mint h-author) || die "cannot mint an author token"
-  keep_secret "$author"
-  author_at=$SECONDS
-}
-
 # Step 1's records. Globals: a command substitution would lose them.
 cluster='' machine_cp='' machine_w=''
 # record <reference> <what> <path> <body> <key name>: a 201 for h-author's POST, its id in
@@ -164,7 +147,7 @@ record() {
 }
 
 # Step 3's draft and its current ETag; the claims of the imports that succeeded.
-draft='' etag='' ingested=()
+ingested=()
 # ingest <machine id> <marks JSON array> [key suffix]: POST /ingestions with If-Match the draft's
 # ETag, then the claim to its end, the operation's state and the draft's new ETag. A machine's
 # second import takes a suffix: its Idempotency-Key is its own.
@@ -456,30 +439,6 @@ sealed_refused() {
     return 1
   }
 }
-# scan_clean <name>: the bundle evidence_to <name> captured is complete and holds no fixture
-# secret but its control: a source not captured was not scanned either.
-scan_clean() {
-  local b
-  b=$(cat -- "$EV/$1-bundle") && [ -n "$b" ] && [ -d "$b" ] || return 1
-  [ ! -e "$b/unavailable.txt" ] || { say "s1: the $1 bundle is incomplete: $b/unavailable.txt"; return 1; }
-  grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$EV/$1-evidence.log"
-}
-# outcome_bundle <row ref> <name>: the evidence bundle after one success or refusal, and its scan
-# clean: the acceptance plan's S1 retains one scan bundle per success, refusal and interruption
-# point, since a later bundle cannot show what an earlier outcome left behind. The capture takes
-# time the rows after it did not budget for, so the author token is minted again if it is old.
-outcome_bundle() {
-  evidence_to "$2" || die "no bundle after $2: bin/evidence failed"
-  check "$1" "after $2, its bundle and the run directory: no fixture secret but the scan's control" \
-    scan_clean "$2"
-  fresh_author
-}
-
-# Predicates for check: their arguments land in commands.tsv, so they take IDs and counts only.
-same() { [ "$1" = "$2" ]; }
-differ() { [ "$1" != "$2" ]; }
-# counted <n> <ERE> <file>: exactly n lines of the file match.
-counted() { [ "$(grep --count --extended-regexp -- "$2" "$3")" = "$1" ]; }
 # put_access <cluster id>: the operator's write of bin/up's talosconfig, over stdin.
 put_access() { bao_stdin kv put -mount=secret "access/talos/$1" talosconfig=- <"$TALOSCONFIG" >/dev/null; }
 # access_read <cluster id>: the executor identity reads the cluster's Talos access.
@@ -487,16 +446,6 @@ access_read() { BAO_TOKEN=$executor_token bao kv get -format=json -mount=secret 
 
 # same_file <a> <b>: two capture files are byte-identical and name both nodes.
 same_file() { cmp --quiet -- "$1" "$2" && [ "$(grep --count --extended-regexp '^[0-9a-f]+ ' "$1")" = 2 ]; }
-
-# evidence_to <name>: a bundle captured and scanned now, its path in $bundle and in $EV/<name>.
-bundle=''
-evidence_to() {
-  bundle=$("$bin/evidence" "$EV" 2>"$EV/$1-evidence.log") || {
-    say "s1: bin/evidence ($1) failed: $(tail -n 1 "$EV/$1-evidence.log")"
-    return 1
-  }
-  printf '%s\n' "$bundle" >"$EV/$1-bundle"
-}
 
 # The rows no request reaches (a heartbeat is internal to an instance, a crash inside T1 needs a
 # seam inside the process; ruling 1), proven by the Go tests that already prove them, and every
@@ -530,43 +479,8 @@ go_row() { grep --quiet -- "^--- PASS: $1 (" "$EV/go-rows.log"; }
 
 # The takeover rows (C §3.4) on instance C, the interruption build: its run stops where C's
 # control file says (internal/seam), and B and A take the claim over.
-# interrupt <step> kill|stall, or interrupt -: C's control file, written whole under another name
-# and moved into place, so that C never reads half of it; - removes it.
-interrupt() {
-  local control=$STATE/server/c/interrupt tmp
-  if [ "$1" = - ]; then
-    rm -f -- "$control"
-    return
-  fi
-  tmp=$(mktemp -- "$STATE/server/c/interrupt.XXXXXX") || return 1
-  if ! printf '%s %s\n' "$1" "$2" >"$tmp" || ! mv -f -- "$tmp" "$control"; then
-    rm -f -- "$tmp"
-    return 1
-  fi
-}
-# c_log: instance C's log, by the container ID need_state verified.
-c_log() { docker logs "${verified_container_ids[$BW_C]}" 2>&1; }
-# c_says <ERE>: a line of C's log matches.
-c_says() { c_log | grep --quiet --extended-regexp -- "$1"; }
-# kills_at <step>: how many times C's log says the seam ended it at the step, across its restarts.
-kills_at() { c_log | grep --count --line-regexp --fixed-strings -- "fixture interrupt: kill at $1" || true; }
-# c_killed_at <step> <count>: C is not running, and its log names that many kills at the step.
-c_killed_at() {
-  [ "$(docker inspect --format '{{.State.Running}}' "${verified_container_ids[$BW_C]}")" = false ] &&
-    [ "$(kills_at "$1")" = "$2" ]
-}
-# within <seconds> <command...>: the command succeeds within that many seconds, asked each second.
-within() {
-  local n
-  for ((n = 1; n < $1; n++)); do
-    "${@:2}" && return 0
-    sleep 1
-  done
-  "${@:2}"
-}
-
-# The import C runs: its claim and operation.
-tk_ing='' tk_op=''
+# The import C runs: its claim (tk_ing, common.sh) and operation.
+tk_op=''
 # c_import <key name> transient|encrypted: an import of the worker, its file content marked, POSTed
 # to C under the draft's current ETag: 202, its claim and operation in tk_ing and tk_op.
 c_import() {
@@ -600,17 +514,10 @@ takeover() {
   call_port=$SERVER_A_PORT
   return "$rc"
 }
-# claim_is <state> <owner generation> payload|none: tk_ing's stored row.
-claim_is() {
-  [ "$(sql "SELECT state || ' ' || owner_gen || ' ' || CASE WHEN payload IS NULL THEN 'none' ELSE 'payload' END
-    FROM staging_claim WHERE id = '$tk_ing'")" = "$1 $2 $3" ]
-}
 # events_are <list>: tk_op's event types in order, space-separated.
 events_are() {
   [ "$(sql "SELECT string_agg(entry->>'type', ' ' ORDER BY number) FROM operation_event WHERE operation = '$tk_op'")" = "$1" ]
 }
-# lapsed: tk_ing's lease has lapsed by the database's clock.
-lapsed() { [ "$(sql "SELECT lease_until <= clock_timestamp() FROM staging_claim WHERE id = '$tk_ing'")" = t ]; }
 # refused_live <A|B> <key name>: with the lease read as live just before, that instance's takeover
 # answers 409 for the live lease, not for one of the other conflicts a takeover can meet.
 refused_live() {
@@ -649,8 +556,6 @@ op_is() {
 failed_cause_is() {
   [ "$(sql "SELECT entry->>'cause' FROM operation_event WHERE operation = '$tk_op' AND entry->>'type' = 'failed'")" = "$1" ]
 }
-# draft_etag_is <etag>: the draft's current ETag.
-draft_etag_is() { answers 200 - GET "/api/v1/drafts/$draft" "$author" && [ "$(etag_of_last)" = "$1" ]; }
 # revisions_are <n>: how many import base revisions exist.
 revisions_are() { [ "$(sql 'SELECT count(*) FROM import_base_revision')" = "$1" ]; }
 # nothing_after_a <revisions>: since A's commit, nothing written: the claim, the events, the import
@@ -678,17 +583,6 @@ swept() { claim_is abandoned 1 none && events_are "$(pre_events "$1") failed" &&
 abandoned_nothing() {
   claim_is abandoned 2 none && events_are "$(pre_events "$1") failed" && op_is failed ingestion-abandoned &&
     failed_cause_is nothing-to-decrypt
-}
-# claim_generations [claim]: how many generations the metadata identity lists under the claim's
-# path (tk_ing's by default); 0 when the path holds none (bao's JSON answer is then {} with exit 2).
-claim_generations() {
-  local out rc=0
-  out=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN bao kv list -format=json -mount=secret "gen/$cluster/${1:-$tk_ing}" 2>&1) || rc=$?
-  case $rc in
-    0) jq -er 'length' <<<"$out" ;;
-    2) [ "$out" = '{}' ] && printf '0\n' ;;
-    *) return 1 ;;
-  esac
 }
 # How many generations an import of the worker with its file content marked makes: its last
 # committed revision's reference rows.

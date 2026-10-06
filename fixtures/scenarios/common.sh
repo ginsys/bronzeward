@@ -202,3 +202,117 @@ go_env_clean() {
   [ "${#v[@]}" -eq 4 ] && [ -z "${v[0]}${v[1]}${v[2]}" ] && [ -n "${v[3]}" ] &&
     [ "${v[3]}" = "$(sed -n 's/^go //p' "$STATE/up-build")" ]
 }
+
+# The helpers below serve the scenarios that run on instance C, the interruption build (s1, s2).
+# key <name>: this run's Idempotency-Key for one request ($run_key, set by the scenario).
+key() { printf '%s-%s-%s' "$scenario" "$run_key" "$1"; }
+# etag_of_last: the ETag header of the last response.
+etag_of_last() { sed -n 's/^[Ee][Tt][Aa][Gg]: *//p' "$EV/last.headers" | tr -d '\r'; }
+# sql <statement>: one psql answer, unaligned, as Bronzeward's owner role.
+sql() { pg psql -U bronzeward -d bronzeward -Atc "$1"; }
+
+# h-author's token. The issuer's tokens live five minutes (its Lifetime) and the run is longer, so
+# each phase asks for one with most of its life left: minted again once the last is three minutes
+# old, longer than any phase between two calls runs.
+author='' author_at=0
+fresh_author() {
+  [ -z "$author" ] || [ $((SECONDS - author_at)) -ge 180 ] || return 0
+  author=$(mint h-author) || die "cannot mint an author token"
+  keep_secret "$author"
+  author_at=$SECONDS
+}
+
+# Predicates for check: their arguments land in commands.tsv, so they take IDs and counts only.
+same() { [ "$1" = "$2" ]; }
+differ() { [ "$1" != "$2" ]; }
+# counted <n> <ERE> <file>: exactly n lines of the file match.
+counted() { [ "$(grep --count --extended-regexp -- "$2" "$3")" = "$1" ]; }
+
+# evidence_to <name>: a bundle captured and scanned now, its path in $bundle and in $EV/<name>.
+bundle=''
+evidence_to() {
+  bundle=$("$bin/evidence" "$EV" 2>"$EV/$1-evidence.log") || {
+    say "$scenario: bin/evidence ($1) failed: $(tail -n 1 "$EV/$1-evidence.log")"
+    return 1
+  }
+  printf '%s\n' "$bundle" >"$EV/$1-bundle"
+}
+# scan_clean <name>: the bundle evidence_to <name> captured is complete and holds no fixture
+# secret but its control: a source not captured was not scanned either.
+scan_clean() {
+  local b
+  b=$(cat -- "$EV/$1-bundle") && [ -n "$b" ] && [ -d "$b" ] || return 1
+  [ ! -e "$b/unavailable.txt" ] || { say "$scenario: the $1 bundle is incomplete: $b/unavailable.txt"; return 1; }
+  grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$EV/$1-evidence.log"
+}
+# outcome_bundle <row ref> <name>: the evidence bundle after one success or refusal, and its scan
+# clean: the acceptance plan retains one scan bundle per success, refusal and interruption point,
+# since a later bundle cannot show what an earlier outcome left behind. The capture takes time the
+# rows after it did not budget for, so the author token is minted again if it is old.
+outcome_bundle() {
+  evidence_to "$2" || die "no bundle after $2: bin/evidence failed"
+  check "$1" "after $2, its bundle and the run directory: no fixture secret but the scan's control" \
+    scan_clean "$2"
+  fresh_author
+}
+
+# interrupt <step> kill|stall, or interrupt -: C's control file, written whole under another name
+# and moved into place, so that C never reads half of it; - removes it.
+interrupt() {
+  local control=$STATE/server/c/interrupt tmp
+  if [ "$1" = - ]; then
+    rm -f -- "$control"
+    return
+  fi
+  tmp=$(mktemp -- "$STATE/server/c/interrupt.XXXXXX") || return 1
+  if ! printf '%s %s\n' "$1" "$2" >"$tmp" || ! mv -f -- "$tmp" "$control"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+# c_log: instance C's log, by the container ID need_state verified.
+c_log() { docker logs "${verified_container_ids[$BW_C]}" 2>&1; }
+# c_says <ERE>: a line of C's log matches.
+c_says() { c_log | grep --quiet --extended-regexp -- "$1"; }
+# kills_at <step>: how many times C's log says the seam ended it at the step, across its restarts.
+kills_at() { c_log | grep --count --line-regexp --fixed-strings -- "fixture interrupt: kill at $1" || true; }
+# c_killed_at <step> <count>: C is not running, and its log names that many kills at the step.
+c_killed_at() {
+  [ "$(docker inspect --format '{{.State.Running}}' "${verified_container_ids[$BW_C]}")" = false ] &&
+    [ "$(kills_at "$1")" = "$2" ]
+}
+# within <seconds> <command...>: the command succeeds within that many seconds, asked each second.
+within() {
+  local n
+  for ((n = 1; n < $1; n++)); do
+    "${@:2}" && return 0
+    sleep 1
+  done
+  "${@:2}"
+}
+
+# The claim under test.
+tk_ing=''
+# claim_is <state> <owner generation> payload|none: tk_ing's stored row.
+claim_is() {
+  [ "$(sql "SELECT state || ' ' || owner_gen || ' ' || CASE WHEN payload IS NULL THEN 'none' ELSE 'payload' END
+    FROM staging_claim WHERE id = '$tk_ing'")" = "$1 $2 $3" ]
+}
+# lapsed: tk_ing's lease has lapsed by the database's clock.
+lapsed() { [ "$(sql "SELECT lease_until <= clock_timestamp() FROM staging_claim WHERE id = '$tk_ing'")" = t ]; }
+# claim_generations [claim]: how many generations the metadata identity lists under the claim's
+# path in the scenario's cluster (tk_ing's by default); 0 when the path holds none (bao's JSON
+# answer is then {} with exit 2).
+claim_generations() {
+  local out rc=0
+  out=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN bao kv list -format=json -mount=secret "gen/$cluster/${1:-$tk_ing}" 2>&1) || rc=$?
+  case $rc in
+    0) jq -er 'length' <<<"$out" ;;
+    2) [ "$out" = '{}' ] && printf '0\n' ;;
+    *) return 1 ;;
+  esac
+}
+# The draft under test and its current ETag.
+draft='' etag=''
+# draft_etag_is <etag>: the draft's current ETag.
+draft_etag_is() { answers 200 - GET "/api/v1/drafts/$draft" "$author" && [ "$(etag_of_last)" = "$1" ]; }
