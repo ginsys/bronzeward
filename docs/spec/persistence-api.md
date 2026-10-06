@@ -600,8 +600,9 @@ Rules for every transaction:
    left skew untested (DB §7); compilation §3.2 makes the same choice for
    claims. A time that must follow a lock wait, a DependencyStatus row's
    `recorded_at` (dependency monitor §6.1), the DependencyMonitor row's
-   progress (dependency monitor §6.3) and a staging claim's lease and expiry,
-   when created and when checked (compilation §3.5), is the database's `clock_timestamp()`
+   progress (dependency monitor §6.3), a staging claim's lease and expiry,
+   when created and when checked (compilation §3.5), and a publish job's lease,
+   when claimed, extended and checked at completion (§5.1), is the database's `clock_timestamp()`
    read after the lock is held, since `now()` is fixed when the transaction
    began.
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation
@@ -712,23 +713,26 @@ A job claim re-checks eligibility in the `UPDATE`'s own predicate. For a
 -- after reading installation_state FOR SHARE
 UPDATE operation
    SET state = 'running', owner = $me, owner_gen = owner_gen + 1,
-       owner_epoch = $current_epoch, lease_until = now() + $lease
+       owner_epoch = $current_epoch,
+       lease_until = clock_timestamp() + $lease
  WHERE id = (SELECT id FROM operation
               WHERE kind = 'publish'
                 AND (state = 'queued'
-                     OR (state = 'running' AND lease_until < now()))
+                     OR (state = 'running'
+                         AND lease_until < clock_timestamp()))
               ORDER BY seq LIMIT 1)
-   AND (state = 'queued' OR (state = 'running' AND lease_until < now()))
+   AND (state = 'queued'
+        OR (state = 'running' AND lease_until < clock_timestamp()))
    AND $my_epoch = $current_epoch;
 
 -- lease extension, by the owner only, while the lease is still live;
 -- the row is locked first, so the lease is compared after any wait for it
 SELECT 1 FROM operation WHERE id = $id FOR UPDATE;
 UPDATE operation
-   SET lease_until = now() + $lease
+   SET lease_until = clock_timestamp() + $lease
  WHERE id = $id AND owner = $me AND owner_gen = $my_gen
    AND owner_epoch = $my_epoch AND $my_epoch = $current_epoch
-   AND state = 'running' AND lease_until > now();
+   AND state = 'running' AND lease_until > clock_timestamp();
 ```
 
 An `ingest` operation has no job claim: the staging claim is the single
