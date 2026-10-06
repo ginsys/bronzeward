@@ -301,18 +301,25 @@ claim_is() {
 # lapsed: tk_ing's lease has lapsed by the database's clock.
 lapsed() { [ "$(sql "SELECT lease_until <= clock_timestamp() FROM staging_claim WHERE id = '$tk_ing'")" = t ]; }
 # swept_after_lapse <seconds>: within that many seconds, asked each second, the sweep writes tk_ing
-# abandoned at generation 1 without a payload, and not before its lease lapsed (C §3.5). The state
-# and the lapse are read in one statement by the database's clock (an abandonment leaves
-# lease_until as it was), so an abandonment seen while the lease is still live fails at once.
+# abandoned at generation 1 without a payload, and not before its lease lapsed (C §3.5). Not before
+# is the abandoning transaction's own commit time, which the fixture's database records
+# (compose.yaml: track_commit_timestamp), against the lease deadline the abandonment leaves as it
+# was: when the row was written, not when a poll saw it. The abandonment is the last write to the
+# row, so its xmin is that transaction; no commit time recorded fails, as an unknown.
 swept_after_lapse() {
   local n row
   for ((n = 1; n <= $1; n++)); do
     row=$(sql "SELECT state || ' ' || owner_gen || ' ' || CASE WHEN payload IS NULL THEN 'none' ELSE 'payload' END
-      || ' ' || (lease_until <= clock_timestamp())::text FROM staging_claim WHERE id = '$tk_ing'") || return 1
+      || ' ' || coalesce((pg_xact_commit_timestamp(xmin) >= lease_until)::text, 'unknown')
+      FROM staging_claim WHERE id = '$tk_ing'") || return 1
     case $row in
       'abandoned 1 none true') return 0 ;;
       'abandoned '*' false')
-        say "$scenario: the claim was abandoned while its lease was still live"
+        say "$scenario: the claim's abandonment committed before its lease lapsed"
+        return 1
+        ;;
+      'abandoned '*' unknown')
+        say "$scenario: the database recorded no commit time for the claim's abandonment"
         return 1
         ;;
       'held 1 none '*) ;;

@@ -21,6 +21,9 @@ services:
       - "127.0.0.1:${POSTGRES_PORT}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    # Commit timestamps let the scenarios date the transaction that last wrote a row: a claim's
+    # abandonment against its lease deadline (scenarios/common.sh swept_after_lapse).
+    command: ["postgres", "-c", "track_commit_timestamp=on"]
     # Over TCP on purpose: while the image initializes a new data directory it runs a temporary
     # server on the unix socket only, and a check through that socket reports healthy too early.
     healthcheck:
