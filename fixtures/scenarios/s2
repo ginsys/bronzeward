@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# Acceptance plan S2, publication, against the fixture: its negative control the draft-update
+# ingestion matrix (compilation §15). A fragment update of a new draft that succeeds, two that are
+# refused, and one killed on instance C after each of compilation §2.3's steps 0 to 7; after each,
+# the claim and the draft as the contract leaves them, and one evidence bundle scanned for every
+# fixture secret: the logs, the database's data directory and write-ahead log, the backups, and C's
+# writable layer. Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it
+# checked to s2.tsv in the evidence directory and to stdout; the directory is then scanned by
+# bin/evidence. Exit 1 on any FAIL.
+# Usage: scenarios/s2 run   (after scenarios/s1 run on the same fixtures/bin/up: S2's precondition)
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+s2_mode=${1:-}
+case $s2_mode in run) ;; *) die "usage: scenarios/s2 run" ;; esac
+need docker curl jq timeout id sleep date awk
+need_state
+# No fixture lock of its own: inject and evidence each take the one they need.
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+EV=$STATE/evidence/s2-$s2_mode-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV" "$EV/http"
+scenario=s2
+# shellcheck source-path=SCRIPTDIR source=common.sh
+. "$here/common.sh"
+run_key=$(date -u +%s%N)
+
+cluster=''
+# The marked label every update carries: one generation when its ingestion gets that far.
+LABEL_MARK='doc[0]/machine/nodeLabels/tier'
+# update_input <name>: a fragment document. Each holds the canary, a scan pattern, so a problem, a
+# log or a row that quoted it would fail the scan.
+update_input() {
+  case $1 in
+    marked) printf 'machine:\n  nodeLabels:\n    tier: %s\n' "$BW_CANARY" ;;
+    parse) printf 'machine:\n  nodeLabels:\n    tier: %s\n  certSANs: [\n' "$BW_CANARY" ;;
+    guard) printf 'machine:\n  nodeLabels:\n    tier: %s\n    copy: %s\n' "$BW_CANARY" "$BW_CANARY" ;;
+  esac
+}
+# fragment_body <input name> <marks JSON array>: a fragment PUT body (persistence-api §9.3) of the
+# cluster layer, the document over stdin: on jq's command line it would be readable by any local
+# user.
+fragment_body() {
+  update_input "$1" | jq -Rsc --argjson marks "$2" '{layer: "cluster", document: ., marks: $marks}'
+}
+# put_fragment <status> <problem code or -> <fragment name> <input name> <marks JSON array>: the
+# fragment PUT to A under the draft's current ETag gets that status; its claim in tk_ing.
+put_fragment() {
+  local body
+  tk_ing=''
+  body=$(fragment_body "$4" "$5") || return 1
+  answers "$1" "$2" PUT "/api/v1/drafts/$draft/fragments/$3" "$author" "$body" "$(key "fragment-$3")" "$etag" || return 1
+  tk_ing=$(jq -er '.ingestion' "$EV/last.body") || {
+    say "s2: the answer for $3 names no ingestion"
+    return 1
+  }
+}
+# generations_are <n>: that many generations listed under tk_ing's path.
+generations_are() {
+  local got
+  got=$(claim_generations) || return 1
+  [ "$got" = "$1" ] || {
+    say "s2: $got generation(s) listed under the claim, want $1"
+    return 1
+  }
+}
+# no_record <key name>: no idempotency record under the request's key: nothing answered was kept.
+no_record() { [ "$(sql "SELECT count(*) FROM idempotency_record WHERE key = '$(key "$1")'")" = 0 ]; }
+
+# updated <fragment name>: a marked update succeeds: 200 with a new ETag, the claim released at
+# generation 1 without a payload, its one generation listed.
+updated() {
+  put_fragment 200 - "$1" marked "$(jq -nc --arg p "$LABEL_MARK" '[$p]')" || return 1
+  differ "$(etag_of_last)" "$etag" || {
+    say "s2: the update of $1 did not move the draft's ETag"
+    return 1
+  }
+  etag=$(etag_of_last)
+  claim_is released 1 none && generations_are 1
+}
+# refused <fragment name> <input name> <marks JSON array> <rule> <paths JSON or ->: the update is
+# refused 422 validation-failed naming the rule (and the paths), the claim abandoned at generation
+# 1 without a payload, no generation listed, the draft's ETag unchanged.
+refused() {
+  local filter=".rule == \"$4\""
+  [ "$5" = - ] || filter+=" and .paths == $5"
+  put_fragment 422 validation-failed "$1" "$2" "$3" || return 1
+  jq -e "$filter" "$EV/last.body" >/dev/null || {
+    say "s2: the refusal of $1 does not name the rule $4 (and the paths $5)"
+    return 1
+  }
+  claim_is abandoned 1 none && generations_are 0 && draft_etag_is "$etag"
+}
+
+# The kill points: compilation §2.3's steps 0 to 7, as internal/seam names them for a draft update
+# (step 8, the baseline, is for imports and drift adoptions only).
+kill_points='claim read parse identify substitute guard generation construct'
+# generations_made <step>: how many generations an update killed at the step created: none before
+# step 6, the update's one once it is done (the generation seam follows the last create).
+generations_made() {
+  case $1 in
+    generation | construct) printf '1\n' ;;
+    *) printf '0\n' ;;
+  esac
+}
+# killed_at <step> <kills before>: C exited at the step, the claim held at generation 1 without a
+# payload (a draft update's claim is transient).
+killed_at() { c_killed_at "$1" "$(($2 + 1))" && claim_is held 1 none; }
+# swept: the sweep abandoned tk_ing at generation 1 without a payload, once its lease lapsed.
+swept() { claim_is abandoned 1 none; }
+# c_update <step>: the marked update of fragment kill-<step>, sent to C, which exits at the step
+# before it answers: nothing answers (000). Its claim, found by the request's key, in tk_ing.
+c_update() {
+  local body got name=kill-$1
+  tk_ing=''
+  body=$(fragment_body marked "$(jq -nc --arg p "$LABEL_MARK" '[$p]')") || return 1
+  call_port=$SERVER_C_PORT
+  got=$(call PUT "/api/v1/drafts/$draft/fragments/$name" "$author" "$body" "$(key "fragment-$name")" "$etag")
+  call_port=$SERVER_A_PORT
+  transcript "$got" PUT "/api/v1/drafts/$draft/fragments/$name" "$author" "$body" "$(key "fragment-$name")" "$etag"
+  [ "$got" = 000 ] || {
+    say "s2: C answered the update killed at $1: $got"
+    return 1
+  }
+  tk_ing=$(sql "SELECT id FROM staging_claim WHERE idempotency_key = '$(key "fragment-$name")'")
+  [ -n "$tk_ing" ]
+}
+# The interrupted claims, one of them looked for in the dump at the end.
+interrupted=()
+# kill_case <step>: C exits at once at the step. Once the lease lapses the sweep abandons the claim
+# (C §3.5); every generation created before the kill is still listed; the draft and its ETag are
+# unchanged and no record was kept. The bundle is captured while C is still stopped, so its
+# writable layer is what the kill left, before a startup could clean it; C is started again after.
+kill_case() {
+  local step=$1 kills row_ref='S2 negative controls, C §15'
+  fresh_author
+  kills=$(kills_at "$step")
+  check "$row_ref" "C told to exit at once at $step" interrupt "$step" kill
+  check "$row_ref" "marked update of the draft on C: no answer, C exits at $step" c_update "$step"
+  [ -n "$tk_ing" ] || die "s2: no claim for the update killed at $step; nothing after it can run"
+  check "$row_ref" "C exited at $step: the claim held at generation 1 without a payload" within 60 killed_at "$step" "$kills"
+  check "$row_ref" "C's control file removed" interrupt -
+  check "$row_ref" "killed at $step: once the lease lapses, the sweep abandons the claim at generation 1 without a payload" \
+    within 45 swept
+  check "$row_ref" "killed at $step: every generation created before the kill still listed under the claim, none deleted" \
+    generations_are "$(generations_made "$step")"
+  interrupted+=("$tk_ing")
+  check "$row_ref" "killed at $step: the draft's ETag unchanged" draft_etag_is "$etag"
+  check "$row_ref" "killed at $step: no idempotency record kept for the request" no_record "fragment-kill-$step"
+  outcome_bundle "$row_ref" "interrupt-$step"
+  check "$row_ref" 'inject start C' "$bin/inject" start C
+  check "$row_ref" 'C answers /livez again' within 30 c_live
+}
+# c_live: instance C answers /livez.
+c_live() {
+  local got
+  call_port=$SERVER_C_PORT
+  got=$(call GET /livez '')
+  call_port=$SERVER_A_PORT
+  [ "$got" = 204 ]
+}
+
+# The database dump taken after every success, refusal and interruption, for the final bundle to
+# expand and scan (C §15: backups).
+backup_name=s2-$run_key
+
+run() {
+  # Preconditions: S1's run on this fixture, its cluster recorded, every instance answering.
+  cluster=$(sql "SELECT id FROM cluster WHERE name = 'bw-fixture'") || die "s2: cannot read the cluster"
+  [ -n "$cluster" ] || die "s2: no cluster bw-fixture: run scenarios/s1 run first"
+  interrupt - || die "cannot remove C's control file"
+  check 'S2 precondition' 'A answers /livez' answers 204 - GET /livez ''
+  check 'S2 precondition' 'C (the interruption build, no interruption named) answers /livez' c_live
+  withheld+=("$BW_CANARY")
+  fresh_author
+  check 'S2 step 1' 'POST /drafts as h-author: 201 with an ETag' \
+    answers 201 - POST /api/v1/drafts "$author" "$(jq -nc --arg c "$cluster" '{cluster: $c, title: "S2 draft updates"}')" "$(key draft)"
+  draft=$(jq -er '.id' "$EV/last.body" 2>/dev/null) || die "s2: the draft has no id; nothing after it can run"
+  etag=$(etag_of_last)
+  [ -n "$etag" ] || die "s2: the draft has no ETag; nothing after it can run"
+
+  # Success and refusal (C §13), one bundle each.
+  check 'S2 negative controls, C §15' 'a marked update: 200, ETag moved, the claim released, its one generation listed' updated marked
+  outcome_bundle 'S2 negative controls, C §15' success
+  check 'S2 negative controls, C §15' 'an unparseable update: 422 parse, the claim abandoned, no generation, ETag unchanged' \
+    refused parse parse '[]' parse -
+  outcome_bundle 'S2 negative controls, C §15' refusal-parse
+  check 'S2 negative controls, C §15' 'the marked value also an unmarked label: 422 guard-value naming the label, the claim abandoned, no generation, ETag unchanged' \
+    refused guard guard "$(jq -nc --arg p "$LABEL_MARK" '[$p]')" guard-value '["doc[0]/machine/nodeLabels/copy"]'
+  outcome_bundle 'S2 negative controls, C §15' refusal-guard
+
+  # The interruption matrix on C.
+  local step
+  for step in $kill_points; do kill_case "$step"; done
+  check 'S2 negative controls, C §15' 'control: after the matrix, a marked update still succeeds' updated after-kills
+  check 'S2 backups, C §15' 'inject db-snapshot: a dump of the bronzeward database after the updates, refusals and interruptions' \
+    "$bin/inject" db-snapshot "$backup_name"
+}
+
+"$s2_mode"
+rm -f -- "$EV/last.body" "$EV/last.headers"
+# The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
+ev_log=$(mktemp)
+if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
+  cat -- "$ev_log" >&2
+  if grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$ev_log"; then
+    result PASS 'S2 negative controls, C §15' 'bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret, the canary included'
+  else
+    result FAIL 'S2 negative controls, C §15' "the leak scan reports fixture secrets: $final/leak-scan.txt"
+  fi
+  if [ -e "$final/unavailable.txt" ]; then
+    result FAIL 'S2 negative controls, C §15' "the bundle is incomplete: $final/unavailable.txt names what was not captured"
+  else
+    result PASS 'S2 negative controls, C §15' 'the bundle is complete: bin/evidence captured every source'
+  fi
+  # The scan above covers the dump only if the bundle holds it expanded, with the database's rows
+  # in it: an interrupted claim's own row inside the staging_claim COPY block.
+  if [ "${#interrupted[@]}" -gt 0 ] &&
+    awk -v id="${interrupted[0]}" '
+      /^COPY public\.staging_claim / { block = 1; next }
+      block && /^\\\.$/ { block = 0 }
+      block && index($0, id "\t") == 1 { found = 1 }
+      END { exit !found }' "$final/backups/pg-$backup_name.dump.sql"; then
+    result PASS 'S2 backups, C §15' 'the scanned bundle holds the database dump expanded, an interrupted draft update'"'"'s claim among its rows (control)'
+  else
+    result FAIL 'S2 backups, C §15' 'the scanned bundle does not hold the database dump expanded with the run'"'"'s rows: the backup went unscanned'
+  fi
+  # The tokens this run minted, searched in the run directory, the final bundle and every bundle the
+  # run captured before it, with a control holding the last of them that must be the one file
+  # listed (as s1 does).
+  local_ctl=$STATE/s2-token-control
+  trap 'rm -f -- "$local_ctl"' EXIT
+  printf 'x %s x\n' "${secrets[-1]:-}" >"$local_ctl"
+  earlier=()
+  for f in "$EV"/*-bundle; do
+    [ -e "$f" ] || continue
+    earlier+=("$(cat -- "$f")")
+  done
+  hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
+    "$EV" "$final" "${earlier[@]}" "$local_ctl") || hits=
+  rm -f -- "$local_ctl"
+  trap - EXIT
+  if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
+    result PASS 'S2 negative controls, C §15' "none of the ${#secrets[@]} tokens this run minted is in any bundle of the run or the run directory (control found)"
+  else
+    printf 's2: files holding a token of this run: %s\n' "${hits:-none, not even the control}" >&2
+    result FAIL 'S2 negative controls, C §15' "the tokens this run minted: ${#secrets[@]} searched, the listing is not the control alone"
+  fi
+else
+  cat -- "$ev_log" >&2
+  result FAIL 'S2 negative controls, C §15' 'bin/evidence failed'
+fi
+rm -f -- "$ev_log"
+say "s2 $s2_mode: $failed failed; evidence in $EV, bundle ${final:-none}"
+[ "$failed" -eq 0 ]
