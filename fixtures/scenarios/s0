@@ -405,7 +405,8 @@ if bundle=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   # alone, which the search must find as well.
   local_ctl=$STATE/s0-token-control half_ctl=$STATE/s0-token-half-control
   trap 'rm -f -- "$local_ctl" "$half_ctl"' EXIT
-  printf 'x %s x\n' "${secrets[-1]:-}" >"$local_ctl"
+  # An empty array has no [-1], with or without a default: the FAIL below must stay reachable.
+  if [ "${#secrets[@]}" -gt 0 ]; then printf 'x %s x\n' "${secrets[-1]}" >"$local_ctl"; else : >"$local_ctl"; fi
   controls=("$local_ctl")
   if [ -n "$last_half" ]; then
     printf 'x %s x\n' "$last_half" >"$half_ctl"
