@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/staging"
 )
 
@@ -12,11 +14,19 @@ import (
 // publication clients (persistence-api.md §5.1).
 func (d *draftEnv) publisher(o options) *API {
 	d.t.Helper()
+	return d.publisherAs("run-1/4242/publisher", o)
+}
+
+// publisherAs is publisher for another process, owner, over the same database, in the current
+// epoch. Its lease is a minute and its heartbeat 20 ms.
+func (d *draftEnv) publisherAs(owner string, o options) *API {
+	d.t.Helper()
 	var epoch string
 	if err := d.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
 		d.t.Fatal(err)
 	}
-	return d.buildWith(deps{owner: staging.Owner{ID: "run-1/4242/publisher", Epoch: epoch}, pub: &publishClients{}}, o)
+	return d.buildWith(deps{owner: staging.Owner{ID: owner, Epoch: epoch}, pub: &publishClients{},
+		timers: config.Ingestion{Heartbeat: 20 * time.Millisecond, Lease: time.Minute}}, o)
 }
 
 func (d *draftEnv) publish(h http.Handler, ifMatch, k, body string) *httptest.ResponseRecorder {
