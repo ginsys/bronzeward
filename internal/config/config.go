@@ -32,8 +32,9 @@ type Config struct {
 	Ingestion *Ingestion `yaml:"ingestion"`
 }
 
-// Ingestion is the staging claims' timers (compilation.md §3.2, §3.5) and the instance name its
-// owner identity starts with. The values are open; only their order is required.
+// Ingestion is the staging claims' timers (compilation.md §3.2, §3.5), which publish jobs use too
+// (persistence-api.md §5.1, choice §17.34), and the instance name its owner identity starts with.
+// The values are open; only their order is required.
 type Ingestion struct {
 	Instance       string        `yaml:"instance"`
 	Heartbeat      time.Duration `yaml:"heartbeat"`

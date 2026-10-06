@@ -32,8 +32,9 @@ provider:
   compilerTokenFile: /etc/bronzeward/openbao-compiler.token
   metadataTokenFile: /etc/bronzeward/openbao-metadata.token
   reportTokenFile: /etc/bronzeward/openbao-report.token
-# The staging claims' timers (compilation.md §3.2: only heartbeat < lease < absolute expiry is
-# required) and this instance's name, which starts its claims' owner identity.
+# The staging claims' and publish jobs' timers (compilation.md §3.2, persistence-api.md §5.1:
+# only heartbeat < lease < absolute expiry is required) and this instance's name, which starts
+# its owner identity.
 ingestion:
   instance: @INSTANCE@
   heartbeat: 5s
