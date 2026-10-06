@@ -186,8 +186,17 @@ func TestPublishWorker(t *testing.T) {
 	mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
 	life, stop := context.WithCancel(t.Context())
 	a := b.worker("run-1/1/worker", life, idle)
+	// The worker's first claim finds nothing before T2 runs, so only the wake can start the job.
+	waiting := make(chan struct{}, 1)
+	a.o.onIdle = func() {
+		select {
+		case waiting <- struct{}{}:
+		default:
+		}
+	}
 	a.startPublisher()
 	defer stopping(a, stop)
+	<-waiting
 
 	op := decode[operationBody](t, b.publish(a, b.etag, b.key(), `{}`), http.StatusAccepted).ID
 	state, gen, types := b.ended(op)
@@ -254,6 +263,71 @@ func TestPublishRunSuperseded(t *testing.T) {
 	}
 	if n := count(t, b.db, `SELECT count(*) FROM release`) + count(t, b.db, `SELECT count(*) FROM operation_event WHERE operation = $1`, op); n != 3 {
 		t.Fatalf("%d releases and events; want the 3 events", n)
+	}
+}
+
+// A run whose lease lapsed, with no other claim yet, writes nothing either: neither the release
+// and its success nor a refusal's failure (§5.1, as compilation §3.5 fences a claim).
+func TestPublishRunLapsed(t *testing.T) {
+	for _, refused := range []bool{false, true} {
+		t.Run(map[bool]string{false: "commit", true: "refusal"}[refused], func(t *testing.T) {
+			b := newBuildEnv(t)
+			mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
+			if refused {
+				mustExec(t, b.db, `UPDATE cluster SET contract = 'v1.12' WHERE id = $1`, b.cluster)
+			}
+			a := b.worker("run-1/1/a", t.Context(), idle)
+			op := b.queuePublish(1)
+			j, ok := b.claim(a)
+			if !ok {
+				t.Fatal("nothing claimed")
+			}
+			mustExec(t, b.db, `UPDATE operation SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1`, op)
+			a.runPublish(t.Context(), j)
+			if n := count(t, b.db, `SELECT count(*) FROM operation WHERE id = $1 AND state = 'running' AND owner_gen = 1 AND last_event = 2`, op); n != 1 {
+				t.Fatal("the lapsed run ended the operation")
+			}
+			if n := count(t, b.db, `SELECT count(*) FROM release`) + count(t, b.db, `SELECT count(*) FROM operation_event WHERE operation = $1`, op); n != 2 {
+				t.Fatalf("%d releases and events; want the 2 events", n)
+			}
+		})
+	}
+}
+
+// A lease that lapses while the extension waits for the operation's row is not extended, though
+// the holder ends without changing the row (§5.1): the predicate is read after the lock.
+func TestPublishExtendAfterLockWait(t *testing.T) {
+	d := newDraftEnv(t)
+	a := d.publisherAs("run-1/1/a", options{})
+	op := d.queuePublish(1)
+	j, ok := d.claim(a)
+	if !ok {
+		t.Fatal("nothing claimed")
+	}
+	mustExec(t, d.db, `UPDATE operation SET lease_until = clock_timestamp() + interval '1 second' WHERE id = $1`, op)
+	holder, err := d.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback()
+	var pid int
+	if err := holder.QueryRow(`SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(`SELECT 1 FROM operation WHERE id = $1 FOR UPDATE`, op); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- a.extendPublish(context.Background(), j) }()
+	waitBlockedBy(t, d.db, pid)
+	for count(t, d.db, `SELECT count(*) FROM operation WHERE id = $1 AND lease_until < clock_timestamp()`, op) == 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, staging.ErrFenced) {
+		t.Fatalf("a lease that lapsed in the wait was extended: %v", err)
 	}
 }
 

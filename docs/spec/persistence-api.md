@@ -721,7 +721,9 @@ UPDATE operation
    AND (state = 'queued' OR (state = 'running' AND lease_until < now()))
    AND $my_epoch = $current_epoch;
 
--- lease extension, by the owner only, while the lease is still live
+-- lease extension, by the owner only, while the lease is still live;
+-- the row is locked first, so the lease is compared after any wait for it
+SELECT 1 FROM operation WHERE id = $id FOR UPDATE;
 UPDATE operation
    SET lease_until = now() + $lease
  WHERE id = $id AND owner = $me AND owner_gen = $my_gen
@@ -746,7 +748,13 @@ completed twice ([DB §4.5](../design/research/20260924-database-semantics.md#45
 row 020). A claimer whose lease lapsed is superseded by the next claim, and its
 late completion is refused at the newer generation, as row 021 claimed a job
 after its lease expired and refused the first claimer's completion. A lapsed
-lease is never extended by its old owner. The claim appends the event
+lease is never extended by its old owner, and its owner never completes the job
+either, even before another claim: the completion, T3 or the failure
+transaction, locks the operation's row and requires the same owner predicate
+with a live lease, read at that time, as compilation §3.5 fences a staging
+claim. An `UPDATE` evaluates its predicate before it waits for a row and does
+not evaluate it again when the holder ends without changing the row, so each
+owner statement locks the row first. The claim appends the event
 `{"type": "claimed", "generation": <n>}` at the generation it took (§8.3). A
 publish job's lease is the deployment's `ingestion.lease`, which its owner
 extends every `ingestion.heartbeat`, the timers ingestion's claims use
