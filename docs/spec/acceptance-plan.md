@@ -304,7 +304,10 @@ leaves one release; a lapsed `publish` job is claimed again and its first worker
 refused. The draft-update ingestion, as S1's matrix runs it for import: success, refusal, and the
 process killed after each pipeline step that applies to a draft update, 0 to 7 (C §2.3 step 8 is
 for imports and drift adoptions only), each followed by a scan of every persistence
-surface ([C §15](compilation.md#15-verification-and-evidence-limits)).
+surface ([C §15](compilation.md#15-verification-and-evidence-limits)). The publication, as instance C
+runs it: success, a refusal by the compilation, and the process killed at each of its interruption
+points before `COMMIT` (C §15), each followed by the same scan, C's writable layer included; after
+each kill the job is claimed again once its lease lapses and publishes one release.
 
 **Retained evidence.** The release record and artifact metadata, the review data as served, the
 classifications and alerts, each refusal's problem document, and the resource version before and
@@ -806,7 +809,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | Contract item | Where | Issue (ginsys/bronzeward) |
 | --- | --- | --- |
 | C §15: ingestion success, refusal and interruption at each pipeline step, every surface scanned | S1 (import); S5 step 4 plus *check* (drift adoption); S2 negative controls (draft update) | #22, #27, #23 |
-| C §15: the compiler process's surfaces scanned over successful, rejected and interrupted publications, killed at each point before `COMMIT` while plaintext is held | *check* | #23 |
+| C §15: the compiler process's surfaces scanned over successful, rejected and interrupted publications, killed at each point before `COMMIT` while plaintext is held | S2 negative controls (publication); *check* for the stop at each point | #23 |
 | C §15: claim lease extension by its owner only, takeover of `held` and `resumed` claims only after lapse, stale owner, crash inside the draft transaction, provider unreachable; the takeover, its refusals, a claim with nothing to decrypt, a decryption failure left `resumed` and retried, a digest mismatch, a takeover racing the old owner's draft transaction in both orders and concurrent takers are `TestTakeOver`, `TestTakeOverRefusals`, `TestTakeOverConcurrentTakers`, `TestTakeoverResumesToT1`, `TestTakeoverRefusals`, `TestTakeoverNothingToDecrypt`, `TestTakeoverDecryptFailureLeavesResumed`, `TestTakeoverDigestMismatchAbandons`, `TestTakeoverRacesT1`, `TestTakeoverConcurrentTakers` and `TestTakeoverNoEcho` | S1 negative controls plus *check* | #22 |
 | C §15: SR and SP matrices through the compiler's path, with import-base references and SP's oracle over Bronzeward's own log and support formats; fidelity check | S2 precondition and negative controls | #23 |
 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | the scenario of each clause's issue, plus *check* for the rest | #21 to #29 |
