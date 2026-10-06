@@ -746,8 +746,17 @@ completed twice ([DB §4.5](../design/research/20260924-database-semantics.md#45
 row 020). A claimer whose lease lapsed is superseded by the next claim, and its
 late completion is refused at the newer generation, as row 021 claimed a job
 after its lease expired and refused the first claimer's completion. A lapsed
-lease is never extended by its old owner. The lease length and extension
-interval are open, as compilation §3.2 leaves its own. A fence coordinates
+lease is never extended by its old owner. The claim appends the event
+`{"type": "claimed", "generation": <n>}` at the generation it took (§8.3). A
+publish job's lease is the deployment's `ingestion.lease`, which its owner
+extends every `ingestion.heartbeat`, the timers ingestion's claims use
+**(choice §17.34)**. Each serving process with a provider runs one publish
+worker, which runs one job at a time to its end. It looks for an eligible job
+when a publication request that process served commits, and every `heartbeat`,
+so it also finds a job another process queued or one whose lease lapsed. A
+worker whose claim the epoch term refuses claims nothing until its process
+restarts. A process without a provider runs no worker, and its publication
+route answers `503 dependency-unavailable` (§9.2). A fence coordinates
 workers that use the database; it stops a stale worker's commit, not its work
 outside the database (DS §7).
 
@@ -1423,6 +1432,13 @@ draft revision writes it first (T11), so the natural key (§7.3) never refuses
 on a claim already treated as abandoned.
 `GET /ingestions/{id}` reports the claim's state as read.
 
+A `publish` operation's events are `{"type": "queued"}`, written with the
+operation (T2); `{"type": "claimed", "generation": <n>}` at each job claim
+(§5.1), so a job claimed again after its lease lapsed shows each generation;
+and one terminal event, `{"type": "succeeded", "release": "<release
+identifier>"}` (T3) or `{"type": "failed", "code": "<problem code>"}` (§6.2).
+No event carries input text.
+
 ## 9. API
 
 Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11-northbound-web-api),
@@ -1474,7 +1490,7 @@ idempotency and conflict behavior.
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
-| `POST /drafts/{id}/publications` | 202, `publish` | `publisher`; `If-Match` |
+| `POST /drafts/{id}/publications` | 202, `publish`, created `queued` (§5.1), or the one already queued or running for the draft revision (§7.3); the body is the operation resource, with its `Location`. `503 dependency-unavailable` from a process without a provider | `publisher`; `If-Match` |
 | `POST /plans` with `operation: apply-config` | 201 | `publisher` (EaR) |
 | `POST /plans` with `operation: adopt` | 201 | `publisher` (EaR; §10.3) |
 | `POST /plans/{id}/cancellations` | 200 | the creating identity, under the role it created the plan with; `approver`; `recovery-admin` (EaR; design §13.7 item 6) |
@@ -3121,6 +3137,16 @@ design and evidence do not settle the question. Each is marked in place as
     which blocks every publication of the cluster until each assigned machine
     is imported. Cost: each publication compiles every covered machine, and
     one machine's failing dependency refuses the cluster's publication.
+34. **A publish job uses ingestion's timers** (§5.1): its lease is
+    `ingestion.lease`, its owner extends it every `ingestion.heartbeat`, and
+    the process's publish worker also looks for an eligible job every
+    `heartbeat`. A process has one set of timers, already validated in order
+    (the heartbeat shorter than the lease), and a publication, like an
+    ingestion, holds its job only while it works outside the database.
+    Alternatives: a publication block with its own lease and heartbeat, which
+    adds configuration no PoC case tunes apart; a fixed lease with no
+    extension, which a compilation of many machines can outlast, letting a
+    second worker take a job the first is still building.
 
 ## 18. Traceability
 
@@ -3133,7 +3159,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
 | §5 transactions | §7.2, §7.4 | DB §4.2 rows 059, 061; [DB §6.3](../design/research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs); [DB §7](../design/research/20260924-database-semantics.md#7-limits); [DS §7](../design/research/20260925-dispatch-safety.md#7-limits) |
-| §5.1 fences, claims | §7.2, §12.5 | [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions) rows 015–018; [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) rows 019–021 |
+| §5.1 fences, claims | §7.2, §12.5 | [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions) rows 015–018; [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) rows 019–021; publish job timers: choice §17.34 |
 | §6 publication | §7.4, §7.8, §11.2 | DB §4.2 rows 004–011, 058–061; KL §7 item 1; choice §17.33 |
 | §6.3 partial publication | §7.4, §7.6, §7.8 | [PC §4](../design/research/20260924-provider-capability-comparison.md#4-the-matrix) row 083; [KL §3.2](../design/research/20260924-key-loss-restoration.md#32-what-each-case-showed) cases G, H; [RC §6.4](../design/research/20260924-retention-metadata-classification.md#64-criterion-4-provider-limits-and-the-alert-policy-the-evidence-supports) |
 | §6.4 orphans | §7.4, §7.8, §13.2 | DB §9; KL case G; PC §4 row 065; the orphan-report identity's grants and the report's selection: §16 check, the pinned OpenBao only (choice §17.30) |
