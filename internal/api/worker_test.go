@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/staging"
@@ -277,6 +278,25 @@ func TestPublishWorkerHeartbeat(t *testing.T) {
 	state, gen, types := b.ended(op)
 	if state != "succeeded" || gen != 1 || !slices.Equal(types, []string{"queued", "claimed", "succeeded"}) {
 		t.Fatalf("operation %s at generation %d, events %v", state, gen, types)
+	}
+}
+
+// New starts the publish worker of a process with publishers: a queued job ends without a request.
+func TestNewStartsPublisher(t *testing.T) {
+	b := newBuildEnv(t)
+	mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
+	var epoch string
+	if err := b.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
+		t.Fatal(err)
+	}
+	life, stop := context.WithCancel(t.Context())
+	h := New(life, b.db, auth.NewVerifier(b.cfg, b.db, auth.Discover(b.cfg.OIDC)), b.cfg, nil,
+		&Publishers{Meta: b.held, Compiler: b.held},
+		&config.Ingestion{Instance: "a", Heartbeat: 20 * time.Millisecond, Lease: time.Minute}, epoch)
+	defer stopping(h.(*API), stop)
+	op := b.queuePublish(1)
+	if state, _, _ := b.ended(op); state != "succeeded" {
+		t.Fatalf("operation %s", state)
 	}
 }
 

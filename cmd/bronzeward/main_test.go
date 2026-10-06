@@ -41,6 +41,38 @@ func TestServeRefusesAnUnmigratedDatabase(t *testing.T) {
 	}
 }
 
+// serve reads each identity's token file at startup and refuses to start, naming the field, when
+// one cannot be read: ingestion's, and publication's compiler and metadata identities' (compilation
+// §1). The tokens are synthetic.
+func TestServeReadsEachTokenFile(t *testing.T) {
+	_, dsn, _, _, _ := sweepFixtureDSN(t)
+	for _, missing := range []string{"ingestionTokenFile", "compilerTokenFile", "metadataTokenFile"} {
+		t.Run(missing, func(t *testing.T) {
+			dir := t.TempDir()
+			body := "listen: 127.0.0.1:0\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: https://idp.test\n    audience: bronzeward\n" +
+				"execution: {maxTransportDeadline: 5m}\nprovider:\n  address: http://127.0.0.1:1\n" +
+				"  keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest, artifact: bw-artifact}\n" +
+				"ingestion: {instance: a, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}\n"
+			for _, f := range []string{"ingestionTokenFile", "compilerTokenFile", "metadataTokenFile"} {
+				if f != missing {
+					writeFile(t, filepath.Join(dir, f), "synthetic-"+f+"\n", 0o600)
+				}
+			}
+			body = strings.Replace(body, "  keys:", "  ingestionTokenFile: "+filepath.Join(dir, "ingestionTokenFile")+
+				"\n  compilerTokenFile: "+filepath.Join(dir, "compilerTokenFile")+
+				"\n  metadataTokenFile: "+filepath.Join(dir, "metadataTokenFile")+"\n  keys:", 1)
+			cfg := filepath.Join(dir, "bronzeward.yaml")
+			writeFile(t, cfg, body, 0o600)
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			err := serveContext(ctx, []string{"-config", cfg})
+			if err == nil || !strings.Contains(err.Error(), "provider."+missing) {
+				t.Fatalf("serve: %v; want a refusal naming provider.%s", err, missing)
+			}
+		})
+	}
+}
+
 // newerMigration records a migration this binary does not know, as a newer binary's migrate would.
 func newerMigration(t *testing.T, x interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
