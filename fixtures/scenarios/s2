@@ -224,6 +224,8 @@ pub_is() {
   [ "$(sql "SELECT o.state || ' ' || o.owner_gen || ' ' || (SELECT string_agg(e.entry->>'type', ',' ORDER BY e.number)
     FROM operation_event e WHERE e.operation = o.id) FROM operation o WHERE o.id = '$pub_op'")" = "$1 $2 $3" ]
 }
+# pub_is_unreleased <state> <generation> <event types, comma-separated>: pub_is and unreleased.
+pub_is_unreleased() { pub_is "$@" && unreleased; }
 # pub_lease_held: pub_op still running, its lease deadline (the stopped run's) in pub_lease.
 pub_lease_held() {
   pub_lease=$(sql "SELECT lease_until FROM operation WHERE id = '$pub_op' AND state = 'running'")
@@ -273,9 +275,10 @@ pub_case_start() {
 pub_points='publish-claim publish-snapshot publish-pins publish-compile publish-encrypt publish-commit'
 # pub_kill_case <point>: C exits at once at the point while it runs the publication. Until the
 # lease lapses the operation stays running at owner generation 1 with nothing published; the bundle
-# is captured while C is still stopped, so its writable layer is what the kill left, plaintexts
-# held in memory included; then A and B resume, C is started again, and once the lease lapses the
-# job is claimed at generation 2 and succeeds, with one release.
+# is captured while C is still stopped and A and B still paused, so its writable layer is what the
+# kill left, plaintexts held in memory included, and no takeover can commit during the capture
+# (the state is read again after it); then A and B resume, C is started again, and once the lease
+# lapses the job is claimed at generation 2 and succeeds, with one release.
 pub_kill_case() {
   local p=$1 kills row_ref='S2 negative controls, C §15'
   pub_case_start "kill-$p"
@@ -289,8 +292,10 @@ pub_kill_case() {
   check "$row_ref" "killed at $p: the operation running at generation 1 after its claim, no other event" pub_is running 1 queued,claimed
   check "$row_ref" "killed at $p: no release names the operation, the draft still open" unreleased
   check "$row_ref" "killed at $p: the stopped run's lease deadline read" pub_lease_held
-  check "$row_ref" 'inject unpause A and B' both unpause
   outcome_bundle "$row_ref" "publication-$p"
+  check "$row_ref" "killed at $p: after the capture, still running at generation 1 and unreleased" \
+    pub_is_unreleased running 1 queued,claimed
+  check "$row_ref" 'inject unpause A and B' both unpause
   check "$row_ref" 'inject start C' "$bin/inject" start C
   check "$row_ref" 'C answers /livez again' within 30 c_live
   check "$row_ref" "killed at $p: once the lease lapses, claimed again at generation 2 and succeeded" \
