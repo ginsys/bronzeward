@@ -797,9 +797,9 @@ input; the release commits with the machine compiled on its base alone.
 
 **Steps 2 and 3, the pins.** Each pinned KV version is classified once and
 read once, however many sources pin it, and every pin is classified before
-any is read. A pin's recorded identity is the creation time of its earliest
-status row, by `observed_from` and then id; a classification or read giving
-another refuses (compilation §6 step 3). Each status's `began` is a database
+any is read. A pin's recorded identity is the creation time of its status
+row, the one a KV version holds (dependency monitor §5.1); a classification or
+read giving another refuses (compilation §6 step 3). Each status's `began` is a database
 time read just before the classifications, or just before the encryptions for
 the artifact key: never later than its request began, so T3's re-check (§6.2)
 can only refuse more.
@@ -830,8 +830,11 @@ BEGIN;
 SELECT current_epoch FROM installation_state FOR SHARE;
   -- equals the job's owner_epoch
 SELECT ... FROM machine WHERE id = ANY($covered) ORDER BY id FOR SHARE;
-SELECT ... FROM machine_state
- WHERE machine_id = ANY($covered) ORDER BY machine_id FOR UPDATE;
+SELECT 1 FROM machine_state s JOIN machine m ON m.id = s.machine_id
+ WHERE m.cluster_id = $cluster ORDER BY s.machine_id FOR UPDATE OF s;
+  -- every machine state of the cluster, covered or not
+SELECT ... FROM machine_state ...;   -- each one's import base, in a statement
+                                     -- of its own (see below)
 -- one pass over $changed ∪ $unchanged in id order, one row at a time:
 SELECT head_revision FROM <head table> WHERE id = $head FOR UPDATE;
   -- a changed head
@@ -852,6 +855,9 @@ SELECT id, digest FROM release
   -- $unchanged head revisions equal the snapshot
   -- each covered machine's import base, where the draft carries none,
   --   equals the snapshot's (§4.2), read under the MachineState lock
+  -- no machine of the cluster the release does not cover has an import
+  --   base: one covered since the snapshot is 409 stale-input naming the
+  --   machine, expected "absent"
   -- for each machine whose assignment head is in $changed:
   --   no operation on its scope is committed, sending, verifying or unresolved;
   --   in recovery mode, its scope released in the current epoch
@@ -859,13 +865,16 @@ INSERT INTO dependency_status ... ON CONFLICT DO NOTHING;
                                      -- `retained`, per provider object version
                                      -- and creation time without a row, in
                                      -- (provider_object, version, created)
-                                     -- order (dependency monitor §3, §5.2)
-SELECT class, recorded_at FROM dependency_status
- WHERE (provider_object, version, created) IN ($named) ORDER BY id FOR SHARE;
-  -- every named row, a concurrent publication's included: a class other
-  -- than `retained` recorded after publication began that version's
-  -- classification refuses the publication, as compilation §6 step 3 does
-  -- (dependency monitor §5.2)
+                                     -- order (dependency monitor §3, §5.2); a
+                                     -- KV version holds one creation time, so
+                                     -- another's row is kept, not added to
+SELECT created, class, recorded_at FROM dependency_status
+ WHERE (provider_object, version) IN ($named) ORDER BY id FOR SHARE;
+  -- every named version's rows, a concurrent publication's included: a KV
+  -- row under another creation time refuses the publication 422 (identity
+  -- changed, §6.1); a class other than `retained` recorded after
+  -- publication began that version's classification refuses it, as
+  -- compilation §6 step 3 does (dependency monitor §5.2)
 INSERT INTO release ...;             -- unique (draft_id, draft_revision);
                                      -- published by the principal that
                                      -- requested $op, in its role
@@ -938,7 +947,16 @@ the unchanged heads is the clause without which DB row 011 committed a release
 on a superseded source; row 010 is the same race with the lock, which made the
 writer wait. Atomicity held
 for an injected error, a client kill, a server kill and a network partition
-with the transaction open (rows 006–008, 058, 060). The machine-scope check is
+with the transaction open (rows 006–008, 058, 060). Every machine state of the
+cluster is locked, not only the covered ones, so the coverage (a release
+covers every machine of the cluster with an import base) cannot change before
+COMMIT, and the import bases are read by a statement after the lock: under
+READ COMMITTED a locking read that waited re-checks only the row it locked,
+not the rows joined to it, so a read in the locking statement could return an
+import base committed while it waited, but miss a draft entry or a machine
+covered meanwhile. Two publications seeding one KV version meet at the
+version's unique index, as two introducing one name do: the second waits for
+the first, keeps its row and reads its creation time. The machine-scope check is
 the rule execution and recovery states for any assignment change; §1.2 item 2
 makes it race-free. A name the draft introduces has no row to lock: two
 publications introducing the same name meet at the unique index, where the
@@ -2590,10 +2608,10 @@ equals neither the restored epoch nor the lost one.
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
 | Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record and act; orphans if past compilation §2.3 step 6 |
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
-| Publish | Moved head, or a covered machine's import base changed (§4.2) | operation `failed`, `409 stale-input` | operation, act |
+| Publish | Moved head, a covered machine's import base changed (§4.2), or a machine of the cluster covered since the snapshot (§6.2, expected "absent") | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
-| Publish | Dependency `blocked` or `lost`, or its identity changed (§6.1) | `failed`, `422 validation-failed` naming it | operation, act |
+| Publish | Dependency `blocked` or `lost`, or its identity changed (§6.1), a concurrent publication's seed of another KV creation time included (§6.2) | `failed`, `422 validation-failed` naming it | operation, act |
 | Publish | Dependency left `unknown` for another reason (a value read or encryption refused, absent or not understood; an artifact key read with no `Date`), or provider sealed or unreachable (§6.1) | `failed`, `503 dependency-unavailable` naming it | operation, act |
 | Publish | Compilation refuses, or covered machines name different Kubernetes versions (§6.1) | `failed`, `422 validation-failed`, rule and paths only | operation, act |
 | Publish | Stale pin or selection; a changed assignment of a machine with no import base; no covered machine (§6.1) | `failed`, `422 validation-failed` | operation, act |

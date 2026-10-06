@@ -102,11 +102,10 @@ func TestReleaseConstraints(t *testing.T) {
 	// key at the version it names.
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "transit", "bw-artifact", 2, "retained", nil, nil, "2026-10-02T00:00:00Z")
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "transit", "bw-other", 1, "retained", nil, nil, "2026-09-26T09:12:40Z")
-	// Versions an effective row can name that no declaration of the sources does: another creation of
-	// the declared version, a later version, another generation.
-	const recreated = "2026-09-26T09:12:40.2Z"
+	// Versions an effective row can name that no declaration of the sources does: a later version,
+	// another generation. Another creation of the declared version has no status to name (a KV
+	// version holds one identity).
 	kvOther := "gen/" + r.cluster + "/" + r.claim + "/v2"
-	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, recreated)
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 7, "retained", nil, nil, created)
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kvOther, 1, "retained", nil, nil, created)
 	// A second machine of the cluster, whose import base declares the same reference.
@@ -371,9 +370,6 @@ func TestReleaseConstraints(t *testing.T) {
 		{"effective dependency of another reference than its occurrence's", append(withSources,
 			stmt{insertDependency, depRow(7, "registry/other")}, reproduction(kv, 1, created, r.frv1, 0)), commit, nil,
 			"dependency_effective"},
-		{"effective dependency at another creation than its occurrence's", append(withSources,
-			stmt{insertDependency, depRow(6, recreated)}, reproduction(kv, 1, created, r.frv1, 0)), commit, nil,
-			"dependency_effective"},
 		{"effective dependency at another version than its occurrence's", append(withSources,
 			stmt{insertDependency, depRow(5, 7)}, reproduction(kv, 1, created, r.frv1, 0)), commit, nil, "dependency_effective"},
 		{"effective dependency whose occurrence declares another version", append(withSources,
@@ -433,6 +429,8 @@ func TestReleaseConstraints(t *testing.T) {
 			depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine", 11, 0), "23503"},
 		// dependency_status
 		{"second status of one version", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, created}, "23505"},
+		{"KV version under a second creation time", nil, insertStatus,
+			[]any{id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, "2026-09-26T09:12:40.1Z"}, "dependency_status_kv_version"},
 		{"status of an unknown class", nil, insertStatus, []any{id.New(id.Dependency), "kv", kv, 2, "fine", "absent", nil, created}, "dependency_status_reason"},
 		{"status of an unknown provider", nil, insertStatus, []any{id.New(id.Dependency), "s3", kv, 2, "retained", nil, nil, created}, "dependency_status_provider_check"},
 		{"unknown status without its start", nil, insertStatus,
@@ -521,8 +519,8 @@ func TestReleaseConstraints(t *testing.T) {
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 2, "unknown", "unreachable", "2026-09-26T09:12:40Z", created)
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 3, "blocked", "soft-deleted", nil, created)
 	mustExec(t, db, insertScheduled, id.New(id.Dependency), "kv", kv, 4, "retained", "deletion-scheduled", "2026-10-09T00:00:00Z", created)
-	// A version recreated under its object and number is another identity, with its own status.
-	mustExec(t, db, insertStatus, id.New(id.Dependency), "kv", kv, 1, "retained", nil, nil, "2026-09-26T09:12:40.1Z")
+	// A Transit key version recreated under its name and number is another identity, with its own
+	// status.
 	mustExec(t, db, insertStatus, id.New(id.Dependency), "transit", "bw-artifact", 1, "retained", nil, nil, "2026-10-01T00:00:00Z")
 	// Each provider, class and reason of dependency monitor §3's table.
 	for i, s := range []struct{ provider, class, reasons string }{
@@ -552,8 +550,8 @@ func TestReleaseConstraints(t *testing.T) {
 	for _, p := range append(withMachine, assignmentSource, profileSource, pinnedSource, siteSource) {
 		mustExec(t, tx, p.q, p.args...)
 	}
-	mustExec(t, tx, insertDependency, depRow(6, "2026-09-26T09:12:40.1Z")...)
-	p := reproduction(kv, 1, "2026-09-26T09:12:40.1Z", r.frv1, 1)
+	mustExec(t, tx, insertDependency, depRow()...)
+	p := reproduction(kv, 1, created, r.frv1, 1)
 	mustExec(t, tx, p.q, p.args...)
 	mustExec(t, tx, insertDependency, depRow(2, "reproduction", 8, r.frv1, 9, digest(6), 10, "registries:/machine", 11, 0)...)
 	// Two occurrences shown at one redacted path are two rows, told apart by their ordinals.
@@ -789,7 +787,8 @@ func TestDependencyStatusIndex(t *testing.T) {
 // with others; any other refusal is its SQLSTATE alone.
 func refusal(err error) string {
 	var pe *pgconn.PgError
-	if errors.As(err, &pe) && (pe.Code == "23514" || pe.Code == "23503" && pe.ConstraintName == "release_machine_platform") {
+	if errors.As(err, &pe) && (pe.Code == "23514" || pe.Code == "23503" && pe.ConstraintName == "release_machine_platform" ||
+		pe.Code == "23505" && pe.ConstraintName == "dependency_status_kv_version") {
 		return pe.ConstraintName
 	}
 	return sqlState(err)

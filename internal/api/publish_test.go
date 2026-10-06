@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -514,7 +515,13 @@ func TestPublishCommitFenced(t *testing.T) {
 // failed with its problem document and terminal event (§6.2, §8.2).
 func (p *publishEnv) refused(status int, code string) *refusal {
 	p.t.Helper()
+	// A held transaction's own statuses commit before the refusal; they are not the commit's.
 	statuses := p.count(`SELECT count(*) FROM dependency_status`)
+	if p.held != nil {
+		if err := p.held.QueryRow(`SELECT count(*) FROM dependency_status`).Scan(&statuses); err != nil {
+			p.t.Fatal(err)
+		}
+	}
 	rel, ref := p.commit()
 	if ref == nil || ref.status != status || ref.code != code {
 		p.t.Fatalf("commit %s %v; want %d %s", rel, ref, status, code)
@@ -792,6 +799,40 @@ func TestPublishCommitAppliedImportBaseChanged(t *testing.T) {
 	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"machine": p.machine, "expected": other, "actual": p.ibr})
 }
 
+// coveredMachine registers another machine of the cluster with an import base the unit does not
+// cover, returning it and its import base; stmt, held open until the commit waits on it, records
+// that import base as the draft's entry (a stand-in for an Applied import base, which the
+// coverage takes the same way), changing the machine's state row as a transition does.
+func (p *publishEnv) coveredMachine() (string, string, string) {
+	p.t.Helper()
+	rec := p.do(p.api, machineCall(p.human("h-author"), "k-machine-two-0123456", p.cluster, "1c6b7d2f-3e4a-4f60-9b0c-1d2e3f4a5b6c"))
+	m := decode[machineBody](p.t, rec, http.StatusCreated).ID
+	ibr := id.New(id.ImportBase)
+	mustExec(p.t, p.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		ibr, m, make([]byte, 32))
+	return m, ibr, `WITH s AS (UPDATE machine_state SET revision = revision + 1 WHERE machine = $3 RETURNING machine)
+		INSERT INTO draft_entry (draft, cluster, kind, machine, import_base_revision) SELECT $1, $2, 'import-base', machine, $4 FROM s`
+}
+
+// A machine of the cluster covered after the snapshot (ruling R21'), committed before T3, refuses
+// the publication naming it: the release would leave it out.
+func TestPublishCommitMachineCovered(t *testing.T) {
+	p := newPublishEnv(t)
+	m, ibr, stmt := p.coveredMachine()
+	mustExec(t, p.db, stmt, p.draft, p.cluster, m, ibr)
+	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"machine": m, "expected": "absent", "actual": ibr})
+}
+
+// T3 holds every machine state of the cluster, not only the covered ones: a coverage change
+// committed while the commit waits on that row is read and refuses the publication.
+func TestPublishCommitMachineCoveredConcurrently(t *testing.T) {
+	p := newPublishEnv(t)
+	m, ibr, stmt := p.coveredMachine()
+	p.hold(stmt, p.draft, p.cluster, m, ibr)
+	wantConflicts(t, p.refused(409, "stale-input"), map[string]any{"machine": m, "expected": "absent", "actual": ibr})
+}
+
 // In recovery mode, an assignment change on a scope not released is refused, naming the scope
 // (§6.2, §12.2); a released scope publishes.
 func TestPublishCommitRecoveryMode(t *testing.T) {
@@ -865,6 +906,35 @@ func TestPublishCommitHoldsStatuses(t *testing.T) {
 	}})
 	if _, ref := p.commit(); ref != nil {
 		t.Fatalf("refused: %v", ref)
+	}
+}
+
+// otherIdentity is a retained status of the unit's KV version under another creation time,
+// recorded before publication began: the version's identity changed (PA §6.1).
+const otherIdentity = `INSERT INTO dependency_status (id, provider, object, version, created, class, first_retained_at,
+	observed_from, recorded_at) VALUES ($1, 'kv', $2, 1, '2026-09-26T09:00:01Z', 'retained', $3, $3, $3)`
+
+// A KV version holds one identity: another, recorded before T3, refuses the publication 422
+// naming the dependency, reason created-time-changed (PA §6.1, §6.2).
+func TestPublishCommitStatusOtherIdentity(t *testing.T) {
+	p := newPublishEnv(t)
+	mustExec(t, p.db, otherIdentity, id.New(id.Dependency), p.kvPath, began.Add(-time.Hour))
+	wantIdentityChanged(t, p, p.refused(422, "validation-failed"))
+}
+
+// Two publications of a version no status names yet: the one committing second waits on the
+// first's seed, then reads its identity and is refused, so the version keeps one identity.
+func TestPublishCommitStatusOtherIdentityConcurrently(t *testing.T) {
+	p := newPublishEnv(t)
+	p.hold(otherIdentity, id.New(id.Dependency), p.kvPath, began.Add(-time.Hour))
+	wantIdentityChanged(t, p, p.refused(422, "validation-failed"))
+}
+
+func wantIdentityChanged(t *testing.T, p *publishEnv, ref *refusal) {
+	t.Helper()
+	dep, _ := ref.extra["dependency"].(map[string]any)
+	if dep["provider"] != "kv" || dep["object"] != p.kvPath || dep["version"] != int64(1) || dep["reason"] != "created-time-changed" {
+		t.Fatalf("dependency %v", ref.extra["dependency"])
 	}
 }
 

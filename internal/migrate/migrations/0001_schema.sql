@@ -950,6 +950,12 @@ CREATE TABLE dependency_status (
   CONSTRAINT dependency_status_times CHECK (recorded_at >= observed_from)
 );
 
+-- A KV version holds one identity (dependency monitor §5.1): a second creation time for one
+-- version means its path was deleted and recreated, a changed identity that publication refuses,
+-- never another status. Two publications seeding one version concurrently meet here, and the
+-- second reads the first's row.
+CREATE UNIQUE INDEX dependency_status_kv_version ON dependency_status (object, version) WHERE provider = 'kv';
+
 -- A release machine's dependency records (compilation §9): each effective dependency, each
 -- reproduction dependency and the artifact's encryption dependency. A reproduction dependency is
 -- one reference occurrence in its source revision: its path is shown redacted, so two occurrences
