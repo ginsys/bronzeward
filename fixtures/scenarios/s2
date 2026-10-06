@@ -309,21 +309,19 @@ pub_kill_case() {
 # that S2's evidence holds their results. Anchored, as in S1.
 go_tests='TestFragmentPutPreconditions|TestDraftUpdatePreconditions'
 go_tests+='|TestPublishCommitChangedHeadMoved|TestPublishCommitUnchangedHeadMoved|TestPublishCommitUnchangedHeadMovedConcurrently'
-go_tests+='|TestRefusalSweep|TestFidelityFailsOnAnInjectedChange'
+go_tests+='|TestCompileRefusesAnExactCopy|TestRefusalSweep|TestFidelityFailsOnAnInjectedChange'
 go_tests+='|TestClassify|TestReadPinnedRefuses|TestPublishCommitStatusRecordedAfter'
 go_tests+='|TestReplay|TestPublicationRequest|TestKeyReusedForAnotherRequest|TestProfileUpdate'
 go_tests+='|TestPublishCommitRetry|TestPublishCommitExistingRelease'
 go_tests+='|TestPublishClaim|TestPublishRunLapsed|TestPublishCommitFenced|TestReleaseImmutableTables'
-# go_rows_ran: those tests, in the clone, against go-db's PostgreSQL and OpenBao (mise run dev-db
-# and dev-bao by default), as go-db runs them: a missing service fails, it does not skip. The DSN
-# and token reach the tests through the environment, never the command line. Passes when go test
-# exited 0 with no test skipped.
+# go_rows_ran: those tests, in the clone, against go-db's PostgreSQL (mise run dev-db by default),
+# as go-db runs them: a missing database fails, it does not skip. None of them reads OpenBao: the
+# provider is a stand-in in each. The DSN reaches the tests through the environment (isolated_run's
+# descriptor), never a command line. Passes when go test exited 0 with no test skipped.
 go_rows_ran() {
   (
     export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
-    export BW_TEST_BAO_ADDR="${BW_TEST_BAO_ADDR:-http://127.0.0.1:58201}"
-    export BW_TEST_BAO_TOKEN="${BW_TEST_BAO_TOKEN:-bw-dev-root-token}"
-    logged go-rows env BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 mise exec -- go test -count=1 -v -run "^($go_tests)\$" \
+    logged go-rows env BW_REQUIRE_PG=1 mise exec -- go test -count=1 -v -run "^($go_tests)\$" \
       ./internal/api ./internal/classify ./internal/compile ./internal/ingest ./internal/migrate
   ) && ! grep --quiet -- '--- SKIP' "$EV/go-rows.log"
 }
@@ -334,14 +332,16 @@ go_rows() {
   local ref='S2 negative controls'
   if clone_made go-rows-clone; then
     check 'S2 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the tests run on the server's build (clone HEAD $clone_head)" go_env_clean
-    check 'S2 Go tests' 'the tests below ran against PostgreSQL and OpenBao and passed, none skipped (go-rows.log)' go_rows_ran
+    check 'S2 Go tests' 'the tests below ran against PostgreSQL and passed, none skipped (go-rows.log)' go_rows_ran
     check "$ref" 'a second author on a replaced ETag: 412, nothing written, for a fragment (TestFragmentPutPreconditions)' go_row TestFragmentPutPreconditions
-    check "$ref" 'the same for profiles and assignments (TestDraftUpdatePreconditions)' go_row TestDraftUpdatePreconditions
+    check "$ref" 'the same for a profile: 428 without If-Match, 412 on a replaced ETag, nothing written (TestDraftUpdatePreconditions)' go_row TestDraftUpdatePreconditions
     check "$ref" 'a head the draft changes moved since its base: 409 stale-input naming it (TestPublishCommitChangedHeadMoved)' go_row TestPublishCommitChangedHeadMoved
     check "$ref" 'a head the release uses unchanged moved since the snapshot: 409 stale-input (TestPublishCommitUnchangedHeadMoved)' go_row TestPublishCommitUnchangedHeadMoved
     check "$ref" "FOR SHARE (DB row 011): the commit waits on another publication's move of an unchanged head, then finds it, 409 (TestPublishCommitUnchangedHeadMovedConcurrently; without the lock it does not wait and commits)" \
       go_row TestPublishCommitUnchangedHeadMovedConcurrently
-    check "$ref" "a literal copy of a resolved value and the reserved text !bwref refused, naming paths only (TestRefusalSweep)" go_row TestRefusalSweep
+    check "$ref" 'the compiler refuses a literal copy of a resolved value of six bytes or more, its stored or placed form, by path only (TestCompileRefusesAnExactCopy)' \
+      go_row TestCompileRefusesAnExactCopy
+    check "$ref" "ingestion refuses the reserved text !bwref, every refusal rule naming its rule and quoting no value (TestRefusalSweep)" go_row TestRefusalSweep
     check "$ref" 'the fidelity check fails on an injected change (TestFidelityFailsOnAnInjectedChange)' go_row TestFidelityFailsOnAnInjectedChange
     check "$ref" 'a KV version soft-deleted classified blocked, destroyed lost, the provider unreachable unknown (TestClassify)' go_row TestClassify
     check "$ref" 'a pinned version not retained refuses the publication 422 naming it; one the provider cannot reach, 503 (TestReadPinnedRefuses)' \
@@ -420,14 +420,14 @@ s2_edit() {
     s2_put "$1" "$2-profile" /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')" && prv=$s2_rev &&
     s2_put "$1" "$2-assignment" "/assignments/$machine_w" '{"profiles": ["workers"], "fragments": {}}' && arv=$s2_rev
 }
-# stale_put <path> <body> <table> <name>: a second author's PUT under the ETag the first author's
-# PUT replaced: 412, no revision of that name added, the draft's ETag unchanged. The second author
-# is the automation identity, which holds author.
+# stale_put <path> <body> <key name> <count query>: a second author's PUT under the ETag the first
+# author's PUT replaced: 412, the revisions the query counts not added to, the draft's ETag
+# unchanged. The second author is the automation identity, which holds author.
 stale_put() {
   local before old=$s2_prior_etag
-  before=$(sql "SELECT count(*) FROM $3 WHERE name = '$4'") || return 1
-  answers 412 precondition-failed PUT "/api/v1/drafts/$draft$1" "$robot" "$2" "$(key "stale-$4")" "$old" || return 1
-  [ "$(sql "SELECT count(*) FROM $3 WHERE name = '$4'")" = "$before" ] && draft_etag_is "$etag"
+  before=$(sql "$4") || return 1
+  answers 412 precondition-failed PUT "/api/v1/drafts/$draft$1" "$robot" "$2" "$(key "stale-$3")" "$old" || return 1
+  [ "$(sql "$4")" = "$before" ] && draft_etag_is "$etag"
 }
 s2_prior_etag=''
 # s2_publish <token> <key name>: the draft published on A: 202, the operation (pub_op) succeeded
@@ -449,13 +449,18 @@ desired_is_release() {
 # show).
 only_publish_since() { [ "$(sql "SELECT count(*) FROM operation WHERE seq > $1 AND kind <> 'publish'")" = 0 ]; }
 # review_redacted: step 4's review of the worker: the label present with its value redacted as the
-# reference, the provenance of that reference naming the fragment revision at the label's path.
+# reference at its declared version, the provenance of that reference and version naming the
+# fragment revision at exactly the label's path. The label's line is compared whole (a quoted
+# scalar either way), so another label ending in the name, or another version, does not match.
 review_redacted() {
   answers 200 - GET "/api/v1/releases/$s2_release/machines/$machine_w/review" "$author" || return 1
-  jq -e --arg l "$S2_LABEL" --arg n "$ref_name" --arg f "$frv" '
-    (.configuration | test("\($l): .?<redacted:\($n)@"))
-    and ([.provenance[] | select(.reference == $n and .source.revision == $f
-      and (.output | endswith("machine/nodeLabels/\($l)")))] | length == 1)' "$EV/last.body" >/dev/null
+  jq -e --arg l "$S2_LABEL" --arg n "$ref_name" --argjson v "$ref_version" --arg f "$frv" '
+    "<redacted:\($n)@\($v)>" as $m
+    | ([.configuration | split("\n")[] | sub("^ +"; "")
+        | select(. == "\($l): \($m)" or . == "\($l): '"'"'\($m)'"'"'" or . == "\($l): \"\($m)\"")] | length == 1)
+    and ([.provenance[] | select(.reference == $n and .version == $v and .source.revision == $f
+      and (.output | test("^doc\\[[0-9]+\\]/machine/nodeLabels/") and endswith("/nodeLabels/\($l)")
+        and (split("/") | length == 4)))] | length == 1)' "$EV/last.body" >/dev/null
 }
 # release_sources: step 5's release names step 2's fragment, profile and assignment revisions, and
 # its renderer is at the fixture Talos version's contract minor.
@@ -546,23 +551,27 @@ s2_steps() {
   check 'S2 step 7' 'inject bao-snapshot s2-step1' "$bin/inject" bao-snapshot "$snap"
 
   # Steps 1 and 2, each mutation under the draft's current ETag; a second author on a replaced ETag
-  # gets 412 for the fragment and for the profile.
+  # gets 412 for the fragment, the profile and the assignment.
   check 'S2 step 1' 'POST /drafts as h-author: 201 with an ETag' s2_draft "$author" step1-draft
   s2_prior_etag=$etag
   check 'S2 step 1' "PUT a worker fragment, one node label a !bwref to the worker's extracted file content: 200, ETag moved" \
     s2_put "$author" step1-fragment /fragments/s2-labels "$(label_body)"
   frv=$s2_rev
   check 'S2 negative controls' 'a second author on the replaced ETag, of the fragment: 412, nothing written, ETag unchanged' \
-    stale_put /fragments/s2-labels "$(label_body)" fragment_revision s2-labels
+    stale_put /fragments/s2-labels "$(label_body)" fragment "SELECT count(*) FROM fragment_revision WHERE name = 's2-labels'"
   s2_prior_etag=$etag
   check 'S2 step 2' 'PUT a worker profile listing the fragment revision: 200, ETag moved' \
     s2_put "$author" step1-profile /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')"
   prv=$s2_rev
   check 'S2 negative controls' 'a second author on the replaced ETag, of the profile: 412, nothing written, ETag unchanged' \
-    stale_put /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')" profile_revision workers
+    stale_put /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')" profile "SELECT count(*) FROM profile_revision WHERE name = 'workers'"
+  s2_prior_etag=$etag
   check 'S2 step 2' "PUT the worker's assignment selecting the profile: 200, ETag moved" \
     s2_put "$author" step1-assignment "/assignments/$machine_w" '{"profiles": ["workers"], "fragments": {}}'
   arv=$s2_rev
+  check 'S2 negative controls' 'a second author on the replaced ETag, of the assignment: 412, nothing written, ETag unchanged' \
+    stale_put "/assignments/$machine_w" '{"profiles": ["workers"], "fragments": {}}' assignment \
+    "SELECT count(*) FROM assignment_revision WHERE machine = '$machine_w'"
   [ -n "$frv" ] && [ -n "$prv" ] && [ -n "$arv" ] || die "s2: steps 1 and 2 left no revisions; nothing after them can run"
 
   # Step 3, on A, the workers of A, B and C all running.

@@ -492,7 +492,10 @@ clean_git() {
 # or system one, whose [env], env._.source or [settings] could change what a task runs. A global or
 # system config file of /dev/null also keeps out the conf.d and mise.toml beside it (the selftest
 # shows it for the global one; the system one, under /etc, it cannot plant). Whether the tasks then
-# resolve in <dir> is tasks_outside's to check.
+# resolve in <dir> is tasks_outside's to check. The caller's values (a DSN, a token, a proxy URL
+# with credentials) reach the command through a pipe on descriptor 3, never as an argument of env
+# or of any other process: a bash under env -i exports them and then runs the command (adding
+# only its own PWD, SHLVL and _).
 isolated_run() {
   local dir=$1 v inherit=()
   shift
@@ -501,11 +504,14 @@ isolated_run() {
       PATH | HOME | USER | LOGNAME | LANG | LANGUAGE | LC_* | TERM | TMPDIR | GO* | BW_TEST_* | \
         HTTP_PROXY | HTTPS_PROXY | NO_PROXY | http_proxy | https_proxy | no_proxy | SSL_CERT_FILE | SSL_CERT_DIR | \
         XDG_DATA_HOME | XDG_CACHE_HOME | XDG_STATE_HOME | MISE_DATA_DIR | MISE_CACHE_DIR | MISE_STATE_DIR)
-        inherit+=("$v=${!v}") ;;
+        inherit+=("$v") ;;
     esac
   done
-  (cd -- "$dir" && exec env -i "${inherit[@]}" "${git_isolated[@]}" MISE_TRUSTED_CONFIG_PATHS="$dir" \
-    MISE_CEILING_PATHS="${dir%/*}" MISE_GLOBAL_CONFIG_FILE=/dev/null MISE_SYSTEM_CONFIG_FILE=/dev/null "$@")
+  # shellcheck disable=SC2016 # the bash -c text expands in the inner shell
+  (cd -- "$dir" && exec env -i "${git_isolated[@]}" MISE_TRUSTED_CONFIG_PATHS="$dir" \
+    MISE_CEILING_PATHS="${dir%/*}" MISE_GLOBAL_CONFIG_FILE=/dev/null MISE_SYSTEM_CONFIG_FILE=/dev/null \
+    "$BASH" -c 'while IFS= read -r -d "" kv; do export -- "$kv"; done <&3 && exec 3<&- && exec "$@"' isolated_run "$@" \
+    3< <(for v in "${inherit[@]}"; do printf '%s=%s\0' "$v" "${!v}"; done))
 }
 
 # tasks_outside <dir> <task...>: of the tasks named and every task they depend on, those that
