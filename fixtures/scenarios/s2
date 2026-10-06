@@ -450,17 +450,30 @@ desired_is_release() {
 only_publish_since() { [ "$(sql "SELECT count(*) FROM operation WHERE seq > $1 AND kind <> 'publish'")" = 0 ]; }
 # review_redacted: step 4's review of the worker: the label present with its value redacted as the
 # reference at its declared version, the provenance of that reference and version naming the
-# fragment revision at exactly the label's path. The label's line is compared whole (a quoted
-# scalar either way), so another label ending in the name, or another version, does not match.
+# fragment revision at exactly doc[N]/machine/nodeLabels/<label>. The label's line is then looked
+# for in document N of the configuration and compared whole (a quoted scalar either way), its
+# parent line by indentation nodeLabels: and that one's machine:, so the marker under another key,
+# in another document, under another label ending in the name, or at another version, does not
+# match.
 review_redacted() {
   answers 200 - GET "/api/v1/releases/$s2_release/machines/$machine_w/review" "$author" || return 1
   jq -e --arg l "$S2_LABEL" --arg n "$ref_name" --argjson v "$ref_version" --arg f "$frv" '
+    def ind: capture("^(?<s> *)").s | length;
+    def trim: sub("^ +"; "");
+    def parent($ls; $i): ($ls[$i] | ind) as $k
+      | [range($i - 1; -1; -1) | select(($ls[.] | test("^ *$") | not) and ($ls[.] | ind) < $k)] | first;
     "<redacted:\($n)@\($v)>" as $m
-    | ([.configuration | split("\n")[] | sub("^ +"; "")
-        | select(. == "\($l): \($m)" or . == "\($l): '"'"'\($m)'"'"'" or . == "\($l): \"\($m)\"")] | length == 1)
-    and ([.provenance[] | select(.reference == $n and .version == $v and .source.revision == $f
-      and (.output | test("^doc\\[[0-9]+\\]/machine/nodeLabels/") and endswith("/nodeLabels/\($l)")
-        and (split("/") | length == 4)))] | length == 1)' "$EV/last.body" >/dev/null
+    | [.provenance[] | select(.reference == $n and .version == $v and .source.revision == $f
+        and .output == "doc[\(.output | capture("^doc\\[(?<d>[0-9]+)\\]").d)]/machine/nodeLabels/\($l)")] as $p
+    | if ($p | length) != 1 then false else
+        ($p[0].output | capture("^doc\\[(?<d>[0-9]+)\\]").d | tonumber) as $d
+        | (.configuration | split("\n---\n") | .[$d] // "" | split("\n")) as $ls
+        | [range(0; $ls | length) as $i
+           | select($ls[$i] | trim | IN("\($l): \($m)", "\($l): '"'"'\($m)'"'"'", "\($l): \"\($m)\""))
+           | parent($ls; $i) as $a | select($a != null and ($ls[$a] | trim) == "nodeLabels:")
+           | parent($ls; $a) as $b | select($b != null and $ls[$b] == "machine:")]
+        | length == 1
+      end' "$EV/last.body" >/dev/null
 }
 # release_sources: step 5's release names step 2's fragment, profile and assignment revisions, and
 # its renderer is at the fixture Talos version's contract minor.
