@@ -1566,12 +1566,29 @@ Evidence gaps this contract carries rather than closes:
   missing from the first read, a version recreated or below a floor at the
   second read) beside its passing case, and a mutation of each check fails its
   test. No key or path was recreated against a provider (dependency monitor
-  §10.2), and no publication runs them yet.
+  §10.2); S2's publications pass them on the fixture's provider, where nothing
+  was recreated.
 
 **Renderer and environment**
 
-- **Plaintext boundary**: neither the in-process path nor a subprocess channel
-  was scanned for exposure; the deciding reason in §10.1 is inferred.
+- **Plaintext boundary**: the in-process path is scanned by S2's negative
+  controls, on one instance, for one covered machine (the worker). A
+  publication succeeds, one is refused by the compilation (`base-override`),
+  and one is killed at each of its interruption points: `publish-claim`
+  (after the claim), `publish-snapshot` (the snapshot read),
+  `publish-pins` (the pinned values read and held), `publish-compile` (every
+  covered machine compiled, its configuration held in plaintext),
+  `publish-encrypt` (the artifacts encrypted, the plaintexts still held) and
+  `publish-commit` (every statement of the commit transaction made, before
+  its `COMMIT`). After each, the logs, the instance's writable layer, the
+  database's data directory and write-ahead log are scanned for every fixture
+  secret beside a positive control, and a dump taken after the last at the
+  end. A stop at a point writes nothing: the operation stays `running` at its
+  claim's generation until the lease lapses, then another worker claims it and
+  publishes one release; the implementation's tests stop at each point the
+  same way ([acceptance plan S2](acceptance-plan.md#s2-publication)). The
+  process's memory is not scanned, no subprocess channel exists to scan, and
+  the deciding reason in §10.1 is inferred.
 - **Leak detection**: exact copies only; the OpenBao storage volume is not
   observable, and Transit plaintext crossed loopback without TLS in the fixture
   (E1 §7).

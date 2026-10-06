@@ -349,3 +349,40 @@ claim_generations() {
 draft='' etag=''
 # draft_etag_is <etag>: the draft's current ETag.
 draft_etag_is() { answers 200 - GET "/api/v1/drafts/$draft" "$author" && [ "$(etag_of_last)" = "$1" ]; }
+
+# The claims of the imports that succeeded.
+ingested=()
+# ingest <machine id> <marks JSON array> [key suffix]: POST /ingestions with If-Match the draft's
+# ETag, then the claim to its end, the operation's state and the draft's new ETag. A machine's
+# second import takes a suffix: its Idempotency-Key is its own.
+ingest() {
+  local m=$1 marks=$2 body ing op claim n next
+  body=$(jq -nc --arg m "$m" --arg d "$draft" --argjson marks "$marks" \
+    '{kind: "import", source: "machine", staging: "transient", machine: $m, draft: $d, marks: $marks}')
+  answers 202 - POST /api/v1/ingestions "$author" "$body" "$(key "ingestion-$m${3:+-$3}")" "$etag" || return 1
+  if ! ing=$(jq -er '.ingestion' "$EV/last.body") || ! op=$(jq -er '.operation' "$EV/last.body"); then
+    say "$scenario: POST /ingestions: no ingestion or operation in the 202"
+    return 1
+  fi
+  # The claim ends released or abandoned; the lease is 15 s, so a minute is generous.
+  claim=
+  for ((n = 0; n < 60; n++)); do
+    answers 200 - GET "/api/v1/ingestions/$ing" "$author" || return 1
+    claim=$(jq -er '.state' "$EV/last.body") || claim=
+    case $claim in released | abandoned) break ;; esac
+    sleep 1
+  done
+  [ "$claim" = released ] || {
+    say "$scenario: ingestion of $m: claim $claim, want released"
+    return 1
+  }
+  ingested+=("$ing")
+  answers_with '.state == "succeeded"' 200 - GET "/api/v1/operations/$op" "$author" || return 1
+  answers 200 - GET "/api/v1/drafts/$draft" "$author" || return 1
+  next=$(etag_of_last)
+  [ -n "$next" ] && [ "$next" != "$etag" ] || {
+    say "$scenario: the draft's ETag did not move across the ingestion of $m"
+    return 1
+  }
+  etag=$next
+}

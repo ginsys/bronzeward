@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Acceptance plan S2, publication, against the fixture: its negative control the draft-update
-# ingestion matrix (compilation §15). A fragment update of a new draft that succeeds, two that are
-# refused, and one killed on instance C after each of compilation §2.3's steps 0 to 7; after each,
-# the claim and the draft as the contract leaves them, and one evidence bundle scanned for every
-# fixture secret: the logs, the database's data directory and write-ahead log, the backups, and C's
-# writable layer. Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it
+# Acceptance plan S2, publication, against the fixture: its negative controls, the draft-update
+# ingestion matrix and the publication matrix (compilation §15). A fragment update of a new draft
+# that succeeds, two that are refused, and one killed on instance C after each of compilation
+# §2.3's steps 0 to 7; then a publication on C that succeeds, one the compilation refuses, and one
+# killed at each of the publication's interruption points, each of a new draft into which the
+# worker is imported. After each, the claim or the operation, and the draft, as the contract leaves
+# them, and one evidence bundle scanned for every fixture secret: the logs, the database's data
+# directory and write-ahead log, the backups, and the instances' writable layers. Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it
 # checked to s2.tsv in the evidence directory and to stdout; the directory is then scanned by
 # bin/evidence. Exit 1 on any FAIL.
 # Usage: scenarios/s2 run   (after scenarios/s1 run on the same fixtures/bin/up: S2's precondition)
@@ -39,6 +41,9 @@ update_input() {
     marked) printf 'machine:\n  nodeLabels:\n    tier: %s\n' "$BW_CANARY" ;;
     parse) printf 'machine:\n  nodeLabels:\n    tier: %s\n  certSANs: [\n' "$BW_CANARY" ;;
     guard) printf 'machine:\n  nodeLabels:\n    tier: %s\n    copy: %s\n' "$BW_CANARY" "$BW_CANARY" ;;
+    # The machine token, a reference of the worker's import base (a schema-listed secret): a
+    # publication's compilation refuses the fragment that overrides it (C §6 step 7).
+    override) printf 'machine:\n  token: %s\n' "$BW_CANARY" ;;
   esac
 }
 # fragment_body <input name> <marks JSON array>: a fragment PUT body (persistence-api §9.3) of the
@@ -162,6 +167,124 @@ c_live() {
   [ "$got" = 204 ]
 }
 
+# The publications (compilation §15): each publishes a new draft of its own, into which the worker
+# is imported with its file content marked, so that the release covers it. Each is sent to C with A
+# and B paused, so that C's publish worker is the one that claims it.
+WORKER_MARK='doc[0]/machine/files/0/content'
+# The worker's machine, as S1 recorded it at the worker's Talos endpoint.
+machine_w=''
+# h-publisher's token, minted again as the author's is.
+publisher='' publisher_at=0
+fresh_publisher() {
+  [ -z "$publisher" ] || [ $((SECONDS - publisher_at)) -ge 180 ] || return 0
+  publisher=$(mint h-publisher) || die "cannot mint a publisher token"
+  keep_secret "$publisher"
+  publisher_at=$SECONDS
+}
+# pub_draft <name>: a new draft with the worker imported into it, its id in draft and its ETag in
+# etag; pub_ready 1 once both are.
+pub_ready=0
+pub_draft() {
+  pub_ready=0
+  answers 201 - POST /api/v1/drafts "$author" \
+    "$(jq -nc --arg c "$cluster" --arg t "S2 publication $1" '{cluster: $c, title: $t}')" "$(key "draft-pub-$1")" || return 1
+  draft=$(jq -er '.id' "$EV/last.body") || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ] || return 1
+  ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')" "pub-$1" || return 1
+  pub_ready=1
+}
+# both pause|unpause: that inject action on A and on B.
+both() { "$bin/inject" "$1" A && "$bin/inject" "$1" B; }
+# publish_on_c <name> <statuses ERE>: the publication of the draft, sent to C as h-publisher under
+# the draft's ETag, gets one of the statuses (000 when C exits before it answers). Its operation,
+# found by the draft, in pub_op: one publish operation of the draft, and the one a 202 names.
+pub_op=''
+publish_on_c() {
+  local got path=/api/v1/drafts/$draft/publications
+  pub_op=''
+  call_port=$SERVER_C_PORT
+  got=$(call POST "$path" "$publisher" '{}' "$(key "publication-$1")" "$etag")
+  call_port=$SERVER_A_PORT
+  transcript "$got" POST "$path" "$publisher" '{}' "$(key "publication-$1")" "$etag"
+  [[ $got =~ ^($2)$ ]] || {
+    say "s2: the publication $1 on C: $got, want $2"
+    return 1
+  }
+  [ "$(sql "SELECT count(*) FROM operation WHERE kind = 'publish' AND draft = '$draft'")" = 1 ] || {
+    say "s2: the draft of the publication $1 has not one publish operation"
+    return 1
+  }
+  pub_op=$(sql "SELECT id FROM operation WHERE kind = 'publish' AND draft = '$draft'")
+  [ "$got" != 202 ] || [ "$(jq -r '.id' "$EV/last.body")" = "$pub_op" ]
+}
+# pub_is <state> <owner generation> <event types>: pub_op's stored state, owner generation and its
+# events' types in order, comma-separated.
+pub_is() {
+  [ "$(sql "SELECT o.state || ' ' || o.owner_gen || ' ' || (SELECT string_agg(e.entry->>'type', ',' ORDER BY e.number)
+    FROM operation_event e WHERE e.operation = o.id) FROM operation o WHERE o.id = '$pub_op'")" = "$1 $2 $3" ]
+}
+# released_once: one release names pub_op, and the draft is published as that release.
+released_once() {
+  [ "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" = 1 ] &&
+    [ "$(sql "SELECT d.state FROM draft d JOIN release r ON r.id = d.release AND r.operation = '$pub_op'
+      WHERE d.id = '$draft'")" = published ]
+}
+# unreleased: no release names pub_op, and the draft is still open.
+unreleased() {
+  [ "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" = 0 ] &&
+    [ "$(sql "SELECT state FROM draft WHERE id = '$draft'")" = open ]
+}
+# pub_override: the override fragment put into the draft and selected by the worker's assignment,
+# at the cluster layer (a fragment reaches a machine only through its assignment); the draft's new
+# ETag in etag.
+pub_override() {
+  put_fragment 200 - override override '[]' || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ] || return 1
+  answers 200 - PUT "/api/v1/drafts/$draft/assignments/$machine_w" "$author" \
+    '{"profiles": [], "fragments": {"cluster": ["override"]}}' "$(key assignment-override)" "$etag" || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ]
+}
+# pub_case_start <name>: tokens fresh, the case's draft ready, or the run ends: nothing after it
+# can run.
+pub_case_start() {
+  fresh_author
+  fresh_publisher
+  check 'S2 negative controls, C §15' "publication $1: a new draft with the worker imported, its file content marked" pub_draft "$1"
+  [ "$pub_ready" = 1 ] || die "s2: no draft for the publication $1; nothing after it can run"
+}
+# The interruption points of a publication, as internal/seam names them: after the claim, the
+# snapshot read, the pins read, every machine compiled, the artifacts encrypted, and every
+# statement of the publication commit made before its COMMIT.
+pub_points='publish-claim publish-snapshot publish-pins publish-compile publish-encrypt publish-commit'
+# pub_kill_case <point>: C exits at once at the point while it runs the publication. Until the
+# lease lapses the operation stays running at owner generation 1 with nothing published; the bundle
+# is captured while C is still stopped, so its writable layer is what the kill left, plaintexts
+# held in memory included; then A and B resume, C is started again, and once the lease lapses the
+# job is claimed at generation 2 and succeeds, with one release.
+pub_kill_case() {
+  local p=$1 kills row_ref='S2 negative controls, C §15'
+  pub_case_start "kill-$p"
+  kills=$(kills_at "$p")
+  check "$row_ref" "C told to exit at once at $p" interrupt "$p" kill
+  check "$row_ref" 'inject pause A and B' both pause
+  check "$row_ref" "publication on C: 202, or no answer when C exits first" publish_on_c "kill-$p" '202|000'
+  [ -n "$pub_op" ] || die "s2: no operation for the publication killed at $p; nothing after it can run"
+  check "$row_ref" "C exited at $p" within 60 c_killed_at "$p" "$((kills + 1))"
+  check "$row_ref" "C's control file removed" interrupt -
+  check "$row_ref" "killed at $p: the operation running at generation 1 after its claim, no other event" pub_is running 1 queued,claimed
+  check "$row_ref" "killed at $p: no release names the operation, the draft still open" unreleased
+  check "$row_ref" 'inject unpause A and B' both unpause
+  outcome_bundle "$row_ref" "publication-$p"
+  check "$row_ref" 'inject start C' "$bin/inject" start C
+  check "$row_ref" 'C answers /livez again' within 30 c_live
+  check "$row_ref" "killed at $p: once the lease lapses, claimed again at generation 2 and succeeded" \
+    within 90 pub_is succeeded 2 queued,claimed,claimed,succeeded
+  check "$row_ref" "killed at $p: one release names the operation, the draft published as it" released_once
+}
+
 # The database dump taken after every success, refusal and interruption, for the final bundle to
 # expand and scan (C §15: backups).
 backup_name=s2-$run_key
@@ -195,6 +318,31 @@ run() {
   local step
   for step in $kill_points; do kill_case "$step"; done
   check 'S2 negative controls, C §15' 'control: after the matrix, a marked update still succeeds' updated after-kills
+
+  # The publications on C (C §15): one that succeeds, one the compilation refuses, then one killed
+  # at each interruption point; a bundle after each.
+  local ref='S2 negative controls, C §15' p
+  machine_w=$(sql "SELECT id FROM machine WHERE cluster = '$cluster' AND talos_endpoint::text = '$TALOS_WORKER_IP:50000'") ||
+    die "s2: cannot read the worker's machine"
+  [ -n "$machine_w" ] && [ "$(wc -l <<<"$machine_w")" = 1 ] || die "s2: not one machine at the worker's endpoint: run scenarios/s1 run first"
+  pub_case_start success
+  check "$ref" 'inject pause A and B' both pause
+  check "$ref" 'publication on C: 202' publish_on_c success 202
+  check "$ref" 'publication on C: claimed at generation 1 and succeeded' within 60 pub_is succeeded 1 queued,claimed,succeeded
+  check "$ref" 'publication on C: one release names the operation, the draft published as it' released_once
+  check "$ref" 'inject unpause A and B' both unpause
+  outcome_bundle "$ref" publication-success
+  pub_case_start refusal
+  check "$ref" "a cluster fragment overriding the worker's machine token, selected by its assignment: 200 each" pub_override
+  check "$ref" 'inject pause A and B' both pause
+  check "$ref" 'refused publication on C: 202' publish_on_c refusal 202
+  check "$ref" 'refused publication on C: claimed at generation 1 and failed' within 60 pub_is failed 1 queued,claimed,failed
+  check "$ref" 'inject unpause A and B' both unpause
+  check "$ref" 'refused publication on C: its problem names the rule base-override and the worker' \
+    answers_with ".error.rule == \"base-override\" and .error.machine == \"$machine_w\"" 200 - GET "/api/v1/operations/$pub_op" "$author"
+  check "$ref" 'refused publication on C: no release names the operation, the draft still open' unreleased
+  outcome_bundle "$ref" publication-refusal
+  for p in $pub_points; do pub_kill_case "$p"; done
   check 'S2 backups, C §15' 'inject db-snapshot: a dump of the bronzeward database after the updates, refusals and interruptions' \
     "$bin/inject" db-snapshot "$backup_name"
 }
