@@ -40,13 +40,14 @@ func buildFragment(extra string) string {
 // the metadata identity answers each generation retained, created at kvCreated, and the artifact
 // key with one version created at transitCreated (with no Date when noDate); the compiler
 // identity reads the held value (or fails with readErr) and encrypts an artifact under keyVersion
-// (1 when unset) to a digest of it, never to the plaintext (or fails with encryptErr).
+// (1 when unset) to a digest of it, never to the plaintext (or fails with encryptErr), after slow.
 type heldValues struct {
 	values     map[string]provider.Value
 	keyVersion int
 	readErr    error
 	encryptErr error
 	noDate     bool
+	slow       time.Duration
 }
 
 func (h heldValues) KV(_ context.Context, p provider.GenerationPath) (classify.Answer, error) {
@@ -82,6 +83,7 @@ func (h heldValues) ReadGeneration(_ context.Context, p provider.GenerationPath,
 func (heldValues) ArtifactKey() string { return "bw-artifact" }
 
 func (h heldValues) EncryptArtifact(_ context.Context, plaintext []byte) (provider.Ciphertext, error) {
+	time.Sleep(h.slow)
 	if h.encryptErr != nil {
 		return "", h.encryptErr
 	}

@@ -142,6 +142,9 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 	if d.runs == nil {
 		d.runs = &sync.WaitGroup{}
 	}
+	if d.wake == nil {
+		d.wake = make(chan struct{}, 1)
+	}
 	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, mux: http.NewServeMux(), d: d, o: o}
 	for _, rt := range append(routes(), o.extra...) {
 		api.mux.Handle(rt.method+" "+prefix+rt.pattern, api.handle(rt))
