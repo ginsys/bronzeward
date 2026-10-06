@@ -304,6 +304,305 @@ pub_kill_case() {
   check "$row_ref" "killed at $p: one release names the operation, the draft published as it" released_once
 }
 
+# The negative controls no fixture request reaches (a race at a lock, an injected change, a
+# provider classification, a lost reply after COMMIT), proven by the Go tests that prove them, so
+# that S2's evidence holds their results. Anchored, as in S1.
+go_tests='TestFragmentPutPreconditions|TestDraftUpdatePreconditions'
+go_tests+='|TestPublishCommitChangedHeadMoved|TestPublishCommitUnchangedHeadMoved|TestPublishCommitUnchangedHeadMovedConcurrently'
+go_tests+='|TestRefusalSweep|TestFidelityFailsOnAnInjectedChange'
+go_tests+='|TestClassify|TestReadPinnedRefuses|TestPublishCommitStatusRecordedAfter'
+go_tests+='|TestReplay|TestPublicationRequest|TestKeyReusedForAnotherRequest|TestProfileUpdate'
+go_tests+='|TestPublishCommitRetry|TestPublishCommitExistingRelease'
+go_tests+='|TestPublishClaim|TestPublishRunLapsed|TestPublishCommitFenced|TestReleaseImmutableTables'
+# go_rows_ran: those tests, in the clone, against go-db's PostgreSQL and OpenBao (mise run dev-db
+# and dev-bao by default), as go-db runs them: a missing service fails, it does not skip. The DSN
+# and token reach the tests through the environment, never the command line. Passes when go test
+# exited 0 with no test skipped.
+go_rows_ran() {
+  (
+    export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
+    export BW_TEST_BAO_ADDR="${BW_TEST_BAO_ADDR:-http://127.0.0.1:58201}"
+    export BW_TEST_BAO_TOKEN="${BW_TEST_BAO_TOKEN:-bw-dev-root-token}"
+    logged go-rows env BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 mise exec -- go test -count=1 -v -run "^($go_tests)\$" \
+      ./internal/api ./internal/classify ./internal/compile ./internal/ingest ./internal/migrate
+  ) && ! grep --quiet -- '--- SKIP' "$EV/go-rows.log"
+}
+# go_row <test>: the test's own top-level PASS line is in go-rows.log.
+go_row() { grep --quiet -- "^--- PASS: $1 (" "$EV/go-rows.log"; }
+# go_rows: the rows, in a clone of the image commit, removed again once they have run.
+go_rows() {
+  local ref='S2 negative controls'
+  if clone_made go-rows-clone; then
+    check 'S2 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the tests run on the server's build (clone HEAD $clone_head)" go_env_clean
+    check 'S2 Go tests' 'the tests below ran against PostgreSQL and OpenBao and passed, none skipped (go-rows.log)' go_rows_ran
+    check "$ref" 'a second author on a replaced ETag: 412, nothing written, for a fragment (TestFragmentPutPreconditions)' go_row TestFragmentPutPreconditions
+    check "$ref" 'the same for profiles and assignments (TestDraftUpdatePreconditions)' go_row TestDraftUpdatePreconditions
+    check "$ref" 'a head the draft changes moved since its base: 409 stale-input naming it (TestPublishCommitChangedHeadMoved)' go_row TestPublishCommitChangedHeadMoved
+    check "$ref" 'a head the release uses unchanged moved since the snapshot: 409 stale-input (TestPublishCommitUnchangedHeadMoved)' go_row TestPublishCommitUnchangedHeadMoved
+    check "$ref" "FOR SHARE (DB row 011): the commit waits on another publication's move of an unchanged head, then finds it, 409 (TestPublishCommitUnchangedHeadMovedConcurrently; without the lock it does not wait and commits)" \
+      go_row TestPublishCommitUnchangedHeadMovedConcurrently
+    check "$ref" "a literal copy of a resolved value and the reserved text !bwref refused, naming paths only (TestRefusalSweep)" go_row TestRefusalSweep
+    check "$ref" 'the fidelity check fails on an injected change (TestFidelityFailsOnAnInjectedChange)' go_row TestFidelityFailsOnAnInjectedChange
+    check "$ref" 'a KV version soft-deleted classified blocked, destroyed lost, the provider unreachable unknown (TestClassify)' go_row TestClassify
+    check "$ref" 'a pinned version not retained refuses the publication 422 naming it; one the provider cannot reach, 503 (TestReadPinnedRefuses)' \
+      go_row TestReadPinnedRefuses
+    check "$ref" 'a status recorded other than retained after the publication began refuses its commit (TestPublishCommitStatusRecordedAfter)' go_row TestPublishCommitStatusRecordedAfter
+    check "$ref" 'a repeated request under one key replays the first answer (TestReplay)' go_row TestReplay
+    check "$ref" 'a repeated publication request under one key replays its 202 (TestPublicationRequest)' go_row TestPublicationRequest
+    check "$ref" 'the key reused for another body: 422 idempotency-key-reused (TestKeyReusedForAnotherRequest)' go_row TestKeyReusedForAnotherRequest
+    check "$ref" 'the same on a profile update (TestProfileUpdate)' go_row TestProfileUpdate
+    check "$ref" "a worker's reply lost after COMMIT: the retry meets its own release and writes nothing (TestPublishCommitRetry)" go_row TestPublishCommitRetry
+    check "$ref" 'a second operation of the published draft revision ends with the existing release, not a second (TestPublishCommitExistingRelease)' go_row TestPublishCommitExistingRelease
+    check "$ref" 'a running publish job whose lease lapsed is claimed at the next generation; a live lease is not (TestPublishClaim)' go_row TestPublishClaim
+    check "$ref" 'a run whose lease lapsed writes nothing: no release, no failure (TestPublishRunLapsed)' go_row TestPublishRunLapsed
+    check "$ref" 'a worker whose ownership was superseded writes nothing on commit (TestPublishCommitFenced)' go_row TestPublishCommitFenced
+    check 'S2 pass' 'every release table refuses UPDATE and DELETE (TestReleaseImmutableTables)' go_row TestReleaseImmutableTables
+  else
+    result FAIL 'S2 Go tests' 'no clone of the image commit (go-rows-clone.log): the Go tests did not run'
+  fi
+  rm -rf -- "$clone_dir"
+}
+
+# S2 steps 1 to 5 and 7 (acceptance plan S2), after the matrices, on an Applied state seeded here:
+# the scenario's precondition is S3's handover (ginsys/bronzeward#25), which has not landed, so the
+# worker's Applied is set by SQL to the release last published for it, as an adoption would record
+# it (owner decision, 2026-10-03). The step-1 draft imports nothing: its import base is that
+# Applied release's.
+S2_LABEL=bw-s2
+applied='' ref_name='' ref_version='' frv='' prv='' arv='' s2_release='' robot='' robot_id=''
+# seed_applied: the worker's Applied set to its Desired release, with that release's configuration
+# digest, source adoption and baseline revision 1; the release id in applied.
+seed_applied() {
+  applied=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'") || return 1
+  [ -n "$applied" ] || return 1
+  sql "UPDATE machine_state SET applied_release = desired, applied_source = 'adoption', baseline_revision = 1,
+    applied_digest = (SELECT configuration_digest FROM release_machine WHERE release = '$applied' AND machine = '$machine_w')
+    WHERE machine = '$machine_w'" >/dev/null || return 1
+  [ "$(sql "SELECT applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$applied" ]
+}
+# applied_reference: the reference the Applied release's review records at the worker's marked file
+# content (WORKER_MARK, extracted when the worker was imported), its name and version in ref_name
+# and ref_version.
+applied_reference() {
+  answers 200 - GET "/api/v1/releases/$applied/machines/$machine_w/review" "$1" || return 1
+  ref_name=$(jq -er --arg p "$WORKER_MARK" '[.provenance[] | select(.source.path == $p)] | if length == 1 then .[0].reference else error("not one") end' "$EV/last.body") &&
+    ref_version=$(jq -er --arg p "$WORKER_MARK" '.provenance[] | select(.source.path == $p) | .version' "$EV/last.body")
+}
+# label_body: the worker fragment of step 1: one node label whose value is a !bwref to that
+# reference, declared at its kind and version; no value of its own, so no mark.
+label_body() {
+  printf 'machine:\n  nodeLabels:\n    %s: !bwref %s\n' "$S2_LABEL" "$ref_name" |
+    jq -Rsc --arg n "$ref_name" --argjson v "$ref_version" \
+      '{layer: "role", document: ., marks: [], declarations: {references: {($n): {kind: "string", version: $v}}}}'
+}
+# s2_draft <token> <key name>: POST /drafts; the id in draft, the ETag in etag.
+s2_draft() {
+  answers 201 - POST /api/v1/drafts "$1" "$(jq -nc --arg c "$cluster" --arg t "S2 $2" '{cluster: $c, title: $t}')" "$(key "$2")" || return 1
+  draft=$(jq -er '.id' "$EV/last.body") || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ]
+}
+# s2_put <token> <key name> <path under the draft> <body>: a 200 under the draft's ETag that moves
+# it; the entry's revision in s2_rev, the new ETag in etag.
+s2_rev=''
+s2_put() {
+  answers 200 - PUT "/api/v1/drafts/$draft$3" "$1" "$4" "$(key "$2")" "$etag" || return 1
+  s2_rev=$(jq -er '.entry.revision' "$EV/last.body") || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
+}
+# s2_edit <token> <key prefix>: steps 1 and 2 as that identity: the draft, the worker fragment, the
+# profile listing its revision, the worker's assignment selecting the profile; the revisions in
+# frv, prv, arv.
+s2_edit() {
+  s2_draft "$1" "$2-draft" &&
+    s2_put "$1" "$2-fragment" /fragments/s2-labels "$(label_body)" && frv=$s2_rev &&
+    s2_put "$1" "$2-profile" /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')" && prv=$s2_rev &&
+    s2_put "$1" "$2-assignment" "/assignments/$machine_w" '{"profiles": ["workers"], "fragments": {}}' && arv=$s2_rev
+}
+# stale_put <path> <body> <table> <name>: a second author's PUT under the ETag the first author's
+# PUT replaced: 412, no revision of that name added, the draft's ETag unchanged. The second author
+# is the automation identity, which holds author.
+stale_put() {
+  local before old=$s2_prior_etag
+  before=$(sql "SELECT count(*) FROM $3 WHERE name = '$4'") || return 1
+  answers 412 precondition-failed PUT "/api/v1/drafts/$draft$1" "$robot" "$2" "$(key "stale-$4")" "$old" || return 1
+  [ "$(sql "SELECT count(*) FROM $3 WHERE name = '$4'")" = "$before" ] && draft_etag_is "$etag"
+}
+s2_prior_etag=''
+# s2_publish <token> <key name>: the draft published on A: 202, the operation (pub_op) succeeded
+# with one release, its id in s2_release.
+s2_publish() {
+  answers 202 - POST "/api/v1/drafts/$draft/publications" "$1" '{}' "$(key "$2")" "$etag" || return 1
+  pub_op=$(jq -er '.id' "$EV/last.body") || return 1
+  within 60 pub_is succeeded 1 queued,claimed,succeeded || return 1
+  released_once || return 1
+  s2_release=$(sql "SELECT id FROM release WHERE operation = '$pub_op'")
+  [ -n "$s2_release" ]
+}
+# desired_is_release: the worker's Desired is s2_release; its Applied is still the seeded release.
+desired_is_release() {
+  [ "$(sql "SELECT desired || ' ' || applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$s2_release $applied" ]
+}
+# only_publish_since <operation seq>: no operation but publish created after that sequence number
+# (no plan exists before ginsys/bronzeward#25: an apply-config or adopt operation is how one would
+# show).
+only_publish_since() { [ "$(sql "SELECT count(*) FROM operation WHERE seq > $1 AND kind <> 'publish'")" = 0 ]; }
+# review_redacted: step 4's review of the worker: the label present with its value redacted as the
+# reference, the provenance of that reference naming the fragment revision at the label's path.
+review_redacted() {
+  answers 200 - GET "/api/v1/releases/$s2_release/machines/$machine_w/review" "$author" || return 1
+  jq -e --arg l "$S2_LABEL" --arg n "$ref_name" --arg f "$frv" '
+    (.configuration | test("\($l): .?<redacted:\($n)@"))
+    and ([.provenance[] | select(.reference == $n and .source.revision == $f
+      and (.output | endswith("machine/nodeLabels/\($l)")))] | length == 1)' "$EV/last.body" >/dev/null
+}
+# release_sources: step 5's release names step 2's fragment, profile and assignment revisions, and
+# its renderer is at the fixture Talos version's contract minor.
+release_sources() {
+  local contract=${TALOS_VERSION%.*}
+  answers 200 - GET "/api/v1/releases/$s2_release" "$author" || return 1
+  jq -e --arg f "$frv" --arg p "$prv" --arg a "$arv" --arg c "$contract" '
+    ([.sources[] | select(.kind == "fragment" and .revision == $f)] | length == 1)
+    and ([.sources[] | select(.kind == "profile" and .revision == $p)] | length == 1)
+    and ([.sources[] | select(.kind == "assignment" and .revision == $a)] | length == 1)
+    and .renderer.contract == $c' "$EV/last.body" >/dev/null
+}
+# release_stored: the worker's artifact is Transit ciphertext with its digests; its dependency
+# records name exact versions, the label's reference among them from the fragment revision, an
+# encryption dependency on the artifact key; every one classified retained.
+release_stored() {
+  [ "$(sql "SELECT count(*) FROM release_machine WHERE release = '$s2_release' AND machine = '$machine_w'
+    AND ciphertext LIKE 'vault:v%' AND length(configuration_digest) = 32 AND length(ciphertext_digest) = 32")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM dependency WHERE release = '$s2_release' AND kind = 'reproduction'
+      AND reference = '$ref_name' AND source_revision = '$frv' AND version = $ref_version")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM dependency WHERE release = '$s2_release' AND kind = 'encryption'")" -ge 1 ] &&
+    [ "$(sql "SELECT count(*) FROM dependency d JOIN dependency_status s USING (provider, object, version, created)
+      WHERE d.release = '$s2_release' AND s.class <> 'retained'")" = 0 ]
+}
+# immutable <table> <column>: an UPDATE and a DELETE of the release's rows in the table are refused
+# and leave them as they were.
+immutable() {
+  local before
+  before=$(sql "SELECT md5(string_agg(t::text, ',' ORDER BY t::text)) FROM $1 t WHERE release = '$s2_release'") || return 1
+  [ -n "$before" ] || return 1
+  if sql "UPDATE $1 SET $2 = $2 WHERE release = '$s2_release'" >/dev/null 2>&1; then return 1; fi
+  if sql "DELETE FROM $1 WHERE release = '$s2_release'" >/dev/null 2>&1; then return 1; fi
+  [ "$(sql "SELECT md5(string_agg(t::text, ',' ORDER BY t::text)) FROM $1 t WHERE release = '$s2_release'")" = "$before" ]
+}
+# release_immutable: the same for the release row itself, keyed by id.
+release_immutable() {
+  local before
+  before=$(sql "SELECT md5(r::text) FROM release r WHERE id = '$s2_release'") || return 1
+  if sql "UPDATE release SET draft_revision = draft_revision WHERE id = '$s2_release'" >/dev/null 2>&1; then return 1; fi
+  if sql "DELETE FROM release WHERE id = '$s2_release'" >/dev/null 2>&1; then return 1; fi
+  [ "$(sql "SELECT md5(r::text) FROM release r WHERE id = '$s2_release'")" = "$before" ]
+}
+# The last act recorded when the snapshots were taken.
+act_seq=''
+# robot_acts: the automation identity's acts since the snapshots: author acts of steps 1 and 2,
+# then one publisher act, the publication (persistence-api §10.3, §10.5).
+robot_acts() {
+  [ "$(sql "SELECT string_agg(role || ' ' || action, ',' ORDER BY seq) FROM act WHERE principal = '$robot_id' AND seq > $act_seq")" = \
+    'author draft.create,author draft.fragment.update,author draft.profile.update,author draft.assignment.update,publisher draft.publish' ]
+}
+# restored: the database is the snapshot's: no act after it, step 3's release absent, the worker's
+# Desired and Applied the seeded release.
+restored() {
+  [ "$(sql "SELECT coalesce(max(seq), 0) FROM act")" = "$act_seq" ] &&
+    [ "$(sql "SELECT count(*) FROM release WHERE id = '$s2_release'")" = 0 ] &&
+    [ "$(sql "SELECT desired || ' ' || applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$applied $applied" ]
+}
+# db_reads: A answers a database read again (after a restore swapped the database under it): the
+# seeded Applied release, which the snapshot holds.
+db_reads() { [ "$(call GET "/api/v1/releases/$applied" "$author")" = 200 ]; }
+# same_versions: both nodes' machine-configuration resource versions read before and after, and
+# equal.
+same_versions() {
+  cmp --quiet -- "$EV/pre-talos-config-version.txt" "$EV/post-talos-config-version.txt" &&
+    counted 2 '^[0-9]+ ' "$EV/post-talos-config-version.txt"
+}
+
+s2_steps() {
+  local ref seq snap=s2-step1-$run_key
+  robot=$(cat -- "$STATE/automation-token") || die "no automation token in $STATE"
+  redact_automation_token "$robot"
+  robot_id=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$STATE/automation-identity")
+  [ -n "$robot_id" ] || die "s2: no automation identity in $STATE"
+  fresh_author
+  fresh_publisher
+  ref='S2 precondition (seeded, Q2)'
+  check "$ref" "seed: the worker's Applied set by SQL to its Desired release, source adoption, its configuration digest" seed_applied
+  [ -n "$applied" ] || die "s2: no Applied seeded; nothing after it can run"
+  check "$ref" "the Applied release's review names one reference at the worker's marked file content" applied_reference "$author"
+  [ -n "$ref_name" ] || die "s2: no reference to carry; nothing after it can run"
+  evidence_to pre || die "no pre-state: bin/evidence failed"
+  cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
+  check "$ref" "pre-state: the worker has a machine-configuration resource version" \
+    counted 1 "^[0-9]+ $TALOS_WORKER_IP\$" "$EV/pre-talos-config-version.txt"
+  seq=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s2: cannot read the operations"
+  act_seq=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s2: cannot read the acts"
+  check 'S2 step 7' 'inject db-snapshot s2-step1' "$bin/inject" db-snapshot "$snap"
+  check 'S2 step 7' 'inject bao-snapshot s2-step1' "$bin/inject" bao-snapshot "$snap"
+
+  # Steps 1 and 2, each mutation under the draft's current ETag; a second author on a replaced ETag
+  # gets 412 for the fragment and for the profile.
+  check 'S2 step 1' 'POST /drafts as h-author: 201 with an ETag' s2_draft "$author" step1-draft
+  s2_prior_etag=$etag
+  check 'S2 step 1' "PUT a worker fragment, one node label a !bwref to the worker's extracted file content: 200, ETag moved" \
+    s2_put "$author" step1-fragment /fragments/s2-labels "$(label_body)"
+  frv=$s2_rev
+  check 'S2 negative controls' 'a second author on the replaced ETag, of the fragment: 412, nothing written, ETag unchanged' \
+    stale_put /fragments/s2-labels "$(label_body)" fragment_revision s2-labels
+  s2_prior_etag=$etag
+  check 'S2 step 2' 'PUT a worker profile listing the fragment revision: 200, ETag moved' \
+    s2_put "$author" step1-profile /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')"
+  prv=$s2_rev
+  check 'S2 negative controls' 'a second author on the replaced ETag, of the profile: 412, nothing written, ETag unchanged' \
+    stale_put /profiles/workers "$(jq -nc --arg f "$frv" '{fragments: [$f]}')" profile_revision workers
+  check 'S2 step 2' "PUT the worker's assignment selecting the profile: 200, ETag moved" \
+    s2_put "$author" step1-assignment "/assignments/$machine_w" '{"profiles": ["workers"], "fragments": {}}'
+  arv=$s2_rev
+  [ -n "$frv" ] && [ -n "$prv" ] && [ -n "$arv" ] || die "s2: steps 1 and 2 left no revisions; nothing after them can run"
+
+  # Step 3, on A, the workers of A, B and C all running.
+  check 'S2 step 3' 'POST /publications as h-publisher: 202; the publish operation succeeded with one release, the draft published' \
+    s2_publish "$publisher" step3-publication
+  [ -n "$s2_release" ] || die "s2: step 3 published no release; nothing after it can run"
+  check 'S2 pass' "the release is the worker's Desired; Applied still the seeded release" desired_is_release
+  check 'S2 pass' 'no plan and no operation but publish since the seed' only_publish_since "$seq"
+
+  # Step 4.
+  check 'S2 step 4' "GET the worker's review: the label present, its value redacted as the reference, provenance naming the fragment revision" \
+    review_redacted
+
+  # Step 5.
+  check 'S2 step 5' "GET the release: step 2's fragment, profile and assignment revisions, the renderer at the node's contract minor" release_sources
+  check 'S2 step 5' 'stored: Transit ciphertext and digests; exact-version dependency records, the label reference from the fragment revision; all retained' \
+    release_stored
+  check 'S2 pass' 'the release row refuses UPDATE and DELETE' release_immutable
+  check 'S2 pass' "the release's machine rows refuse UPDATE and DELETE" immutable release_machine mode
+  check 'S2 pass' "the release's source rows refuse UPDATE and DELETE" immutable release_source head_revision
+  check 'S2 pass' "the release's dependency records refuse UPDATE and DELETE" immutable dependency kind
+  check 'S2 pass' 'no plan and no operation but publish since the seed (after step 5)' only_publish_since "$seq"
+  evidence_to post || die "no post-state: bin/evidence failed"
+  cp -- "$bundle/talos-config-version.txt" "$EV/post-talos-config-version.txt"
+  check 'S2 pass' "the worker's machine-configuration resource version unchanged by publication" same_versions
+  check 'S2 step 5' 'the post-state bundle: no fixture secret but the scan control' scan_clean post
+
+  # Step 7: from the snapshots taken before step 1, the automation identity repeats steps 1 to 3.
+  check 'S2 step 7' 'inject db-restore s2-step1' "$bin/inject" db-restore "$snap"
+  check 'S2 step 7' 'inject bao-restore s2-step1' "$bin/inject" bao-restore "$snap"
+  check 'S2 step 7' 'A reads the restored database' within 60 db_reads
+  check 'S2 step 7' "restored: no act after the snapshot, step 3's release gone, the worker's Desired and Applied the seeded release" \
+    restored
+  check 'S2 step 7' 'the automation identity repeats steps 1 and 2 as itself' s2_edit "$robot" step7
+  check 'S2 step 7' 'the automation identity publishes: one release, the draft published' s2_publish "$robot" step7-publication
+  check 'S2 step 7' "the automation identity's acts: steps 1 and 2 under author, the publication under publisher" robot_acts
+  check 'S2 step 7' 'no plan and no operation but publish since the seed' only_publish_since "$seq"
+  outcome_bundle 'S2 step 7' step7
+}
+
 # The database dump taken after every success, refusal and interruption, for the final bundle to
 # expand and scan (C §15: backups).
 backup_name=s2-$run_key
@@ -362,6 +661,10 @@ run() {
   check "$ref" 'refused publication on C: no release names the operation, the draft still open' unreleased
   outcome_bundle "$ref" publication-refusal
   for p in $pub_points; do pub_kill_case "$p"; done
+
+  # S2 steps 1 to 5 and 7, on the Applied state seeded from the last release.
+  s2_steps
+  go_rows
   check 'S2 backups, C §15' 'inject db-snapshot: a dump of the bronzeward database after the updates, refusals and interruptions' \
     "$bin/inject" db-snapshot "$backup_name"
 }
