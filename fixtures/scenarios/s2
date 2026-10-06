@@ -232,7 +232,8 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   # listed (as s1 does).
   local_ctl=$STATE/s2-token-control
   trap 'rm -f -- "$local_ctl"' EXIT
-  printf 'x %s x\n' "${secrets[-1]:-}" >"$local_ctl"
+  # An empty array has no [-1], with or without a default: the FAIL below must stay reachable.
+  if [ "${#secrets[@]}" -gt 0 ]; then printf 'x %s x\n' "${secrets[-1]}" >"$local_ctl"; else : >"$local_ctl"; fi
   earlier=()
   for f in "$EV"/*-bundle; do
     [ -e "$f" ] || continue
