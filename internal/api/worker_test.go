@@ -130,12 +130,18 @@ func TestPublishClaimEpoch(t *testing.T) {
 // provider under timers; its publish worker, once started, stops when life ends.
 func (b *buildEnv) worker(owner string, life context.Context, timers config.Ingestion) *API {
 	b.t.Helper()
+	return b.workerWith(owner, life, timers, options{})
+}
+
+// workerWith is worker with the test options o.
+func (b *buildEnv) workerWith(owner string, life context.Context, timers config.Ingestion, o options) *API {
+	b.t.Helper()
 	var epoch string
 	if err := b.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
 		b.t.Fatal(err)
 	}
 	return b.buildWith(deps{owner: staging.Owner{ID: owner, Epoch: epoch}, life: life, timers: timers,
-		pub: &publishClients{meta: b.held, reader: b.held, encrypter: b.held}}, options{})
+		pub: &publishClients{meta: b.held, reader: b.held, encrypter: b.held}}, o)
 }
 
 // ended waits, at most 10 s, for op to end, and returns its state, its last owner generation and
@@ -289,6 +295,60 @@ func TestPublishRunLapsed(t *testing.T) {
 			}
 			if n := count(t, b.db, `SELECT count(*) FROM release`) + count(t, b.db, `SELECT count(*) FROM operation_event WHERE operation = $1`, op); n != 2 {
 				t.Fatalf("%d releases and events; want the 2 events", n)
+			}
+		})
+	}
+}
+
+// publishPoints are the publication's interruption points, in the order a run reaches them.
+var publishPoints = []string{"publish-claim", "publish-snapshot", "publish-pins", "publish-compile", "publish-encrypt", "publish-commit"}
+
+// compilation §15: a run stopped at an interruption point before COMMIT ends as a killed process
+// would, writing nothing and leaving the job to its lease; once the lease lapses, another worker
+// takes the job over at the next generation and publishes its one release.
+func TestPublishRunStopped(t *testing.T) {
+	for i, point := range publishPoints {
+		t.Run(point, func(t *testing.T) {
+			b := newBuildEnv(t)
+			mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
+			var reached []string
+			a := b.workerWith("run-1/1/a", t.Context(), idle, options{stopAt: func(step string) bool {
+				reached = append(reached, step)
+				return step == point
+			}})
+			op := b.queuePublish(1)
+			j, ok := b.claim(a)
+			if !ok {
+				t.Fatal("nothing claimed")
+			}
+			a.runPublish(t.Context(), j)
+			if !slices.Equal(reached, publishPoints[:i+1]) {
+				t.Fatalf("points reached %v; want %v", reached, publishPoints[:i+1])
+			}
+			if n := count(t, b.db, `SELECT count(*) FROM operation WHERE id = $1 AND state = 'running' AND owner_gen = 1 AND last_event = 2`, op); n != 1 {
+				t.Fatal("the stopped run ended the operation")
+			}
+			if n := count(t, b.db, `SELECT count(*) FROM release`) + count(t, b.db, `SELECT count(*) FROM draft WHERE id = $1 AND state = 'published'`, b.draft); n != 0 {
+				t.Fatalf("the stopped run wrote %d releases or published the draft", n)
+			}
+
+			mustExec(t, b.db, `UPDATE operation SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1`, op)
+			other := b.worker("run-1/2/b", t.Context(), idle)
+			taken, ok := b.claim(other)
+			if !ok || taken.op != op || taken.gen != 2 {
+				t.Fatalf("takeover %+v %v; want %s at generation 2", taken, ok, op)
+			}
+			other.runPublish(t.Context(), taken)
+			state, gen, types := b.ended(op)
+			if state != "succeeded" || gen != 2 || !slices.Equal(types, []string{"queued", "claimed", "claimed", "succeeded"}) {
+				t.Fatalf("operation %s at generation %d, events %v", state, gen, types)
+			}
+			if n := count(t, b.db, `SELECT count(*) FROM release r JOIN operation o ON o.result->>'release' = r.id
+				WHERE o.id = $1 AND r.operation = $1`, op); n != 1 || count(t, b.db, `SELECT count(*) FROM release`) != 1 {
+				t.Fatal("the takeover did not publish exactly one release naming the operation")
+			}
+			if n := count(t, b.db, `SELECT count(*) FROM draft WHERE id = $1 AND state = 'published'`, b.draft); n != 1 {
+				t.Fatal("the draft is not published")
 			}
 		})
 	}

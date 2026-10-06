@@ -122,6 +122,9 @@ func (a *API) publishCommit(ctx context.Context, j publishJob, u releaseUnit) (s
 		if err == nil && ref != nil {
 			return errRefused
 		}
+		if err == nil {
+			err = a.step("publish-commit") // every statement made, before COMMIT
+		}
 		return err
 	})
 	var pe *pgconn.PgError

@@ -196,12 +196,13 @@ func (a *API) extractDraft(ctx context.Context, j job, in *fragmentInput, g *dra
 	return nil, nil
 }
 
-// errKilled ends a draft update's ingestion at a test's interruption point (options.stopAt) as a
-// killed process would end it: nothing more is written and nothing abandoned; the claim lapses.
-var errKilled = errors.New("the ingestion stopped at an interruption point")
+// errKilled ends a draft update's ingestion or a publication at a test's interruption point
+// (options.stopAt) as a killed process would end it: nothing more is written and nothing abandoned
+// or failed; the claim or the publish job's lease lapses.
+var errKilled = errors.New("stopped at an interruption point")
 
-// step is an interruption point of a draft update's ingestion, named for compilation §2.3's step:
-// the fixture's seam (internal/seam), then a test's stop.
+// step is an interruption point of a draft update's ingestion, named for compilation §2.3's step,
+// or of a publication (compilation §15): the fixture's seam (internal/seam), then a test's stop.
 func (a *API) step(name string) error {
 	seam.At(name)
 	return a.stop(name)

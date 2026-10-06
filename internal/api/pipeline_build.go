@@ -33,9 +33,15 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 	if err != nil || ref != nil {
 		return releaseUnit{}, ref, err
 	}
+	if err := a.step("publish-snapshot"); err != nil {
+		return releaseUnit{}, nil, err
+	}
 	pins, ref, err := a.readPinned(ctx, j, s, c.meta, c.reader)
 	if err != nil || ref != nil {
 		return releaseUnit{}, ref, err
+	}
+	if err := a.step("publish-pins"); err != nil { // the resolved values held
+		return releaseUnit{}, nil, err
 	}
 	version, checksum, err := compile.Machinery()
 	if err != nil {
@@ -87,6 +93,9 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 		u.machines = append(u.machines, um)
 		artifacts = append(artifacts, compiled.Materialized())
 	}
+	if err := a.step("publish-compile"); err != nil { // every configuration held in plaintext
+		return releaseUnit{}, nil, err
+	}
 	u.renderer = rendererBody{Contract: s.contract, MachineryVersion: version, MachineryChecksum: checksum, KubernetesVersion: kubernetes}
 
 	var began time.Time
@@ -105,6 +114,9 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 			seen[e.Version] = true
 			u.statuses = append(u.statuses, unitStatus{provider: classify.Transit, object: e.Key, version: e.Version, result: e.Status, began: began})
 		}
+	}
+	if err := a.step("publish-encrypt"); err != nil { // the ciphertexts, the plaintexts still held
+		return releaseUnit{}, nil, err
 	}
 	return u, nil, nil
 }
