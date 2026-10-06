@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -194,14 +195,21 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	if err != nil {
 		return "", nil, err
 	}
-	// Each covered machine's import base: the draft's entry, or its Applied release's (§3.2), read
-	// under the MachineState lock.
+	// Every machine state of the cluster is locked, not only the covered ones, so the coverage
+	// (ruling R21') cannot change before COMMIT. Each machine's import base, the draft's entry or
+	// its Applied release's (§3.2), is read by the next statement: a locking read that waited
+	// re-checks the locked row alone, not rows joined to it.
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM machine_state s JOIN machine m ON m.id = s.machine
+		WHERE m.cluster = $1 ORDER BY s.machine FOR UPDATE OF s`, j.cluster); err != nil {
+		return "", nil, err
+	}
 	bases := map[string]string{}
 	rows, err := tx.QueryContext(ctx, `SELECT s.machine, coalesce(e.import_base_revision, m.import_base_revision, '')
 		FROM machine_state s
+		JOIN machine c ON c.id = s.machine
 		LEFT JOIN draft_entry e ON e.draft = $2 AND e.machine = s.machine
 		LEFT JOIN release_machine m ON m.release = s.applied_release AND m.machine = s.machine
-		WHERE s.machine = ANY ($1) ORDER BY s.machine FOR UPDATE OF s`, covered, j.draft)
+		WHERE c.cluster = $1 ORDER BY s.machine`, j.cluster, j.draft)
 	if err != nil {
 		return "", nil, err
 	}
@@ -216,8 +224,8 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	if err := rows.Err(); err != nil {
 		return "", nil, err
 	}
-	if len(scopes) != len(covered) || len(bases) != len(covered) {
-		return "", nil, errors.New("a covered machine has no record or no state")
+	if len(scopes) != len(covered) || slices.ContainsFunc(covered, func(m string) bool { _, ok := bases[m]; return !ok }) {
+		return "", nil, errors.New("a covered machine has no record or no state of the cluster")
 	}
 	// One pass over every existing head in id order, changed ones FOR UPDATE (§6.2).
 	locked := slices.Clone(heads)
@@ -416,6 +424,12 @@ func checkInputs(j publishJob, u releaseUnit, draftState string, draftRev int, h
 			conflicts = append(conflicts, map[string]any{"machine": m.machine, "expected": m.importBase, "actual": actual})
 		}
 	}
+	// A machine covered now that the unit does not cover (ruling R21').
+	for _, m := range slices.Sorted(maps.Keys(bases)) {
+		if b := bases[m]; b != "" && !slices.ContainsFunc(machines, func(x unitMachine) bool { return x.machine == m }) {
+			conflicts = append(conflicts, map[string]any{"machine": m, "expected": "absent", "actual": b})
+		}
+	}
 	if len(conflicts) > 0 {
 		return refuse(http.StatusConflict, "stale-input", fmt.Sprintf("Publication refused: %d input(s) moved.", len(conflicts))).
 			with("conflicts", conflicts), nil
@@ -449,18 +463,24 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 	for _, s := range u.statuses {
 		began[key{string(s.provider), s.object, s.version, createdText(s.result.Created)}] = s.began
 	}
-	var providers, objects, created []string
+	type version struct {
+		provider, object string
+		version          int64
+	}
+	var providers, objects []string
 	var versions []int64
-	named := map[key]bool{}
+	named := map[version]string{} // the creation time the unit names
 	name := func(provider string, d unitDependency) error {
 		k := key{provider, d.object, d.version, createdText(d.created)}
 		if _, ok := began[k]; !ok {
 			return fmt.Errorf("the %s dependency %s version %d has no classification", provider, d.object, d.version)
 		}
-		if !named[k] {
-			named[k] = true
-			providers, objects, versions, created = append(providers, k.provider), append(objects, k.object),
-				append(versions, k.version), append(created, k.created)
+		v := version{provider, d.object, d.version}
+		if c, ok := named[v]; ok && c != k.created {
+			return fmt.Errorf("the %s dependency %s version %d is named under two creation times", provider, d.object, d.version)
+		} else if !ok {
+			named[v] = k.created
+			providers, objects, versions = append(providers, k.provider), append(objects, k.object), append(versions, k.version)
 		}
 		return nil
 	}
@@ -475,8 +495,8 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 		}
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT provider, object, version, created, class, recorded_at FROM dependency_status
-		WHERE (provider, object, version, created) IN (SELECT * FROM unnest($1::text[], $2::text[], $3::bigint[], $4::text[]))
-		ORDER BY id FOR SHARE`, providers, objects, versions, created)
+		WHERE (provider, object, version) IN (SELECT * FROM unnest($1::text[], $2::text[], $3::bigint[]))
+		ORDER BY id FOR SHARE`, providers, objects, versions)
 	if err != nil {
 		return nil, err
 	}
@@ -488,6 +508,18 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 		var recorded time.Time
 		if err := rows.Scan(&k.provider, &k.object, &k.version, &k.created, &class, &recorded); err != nil {
 			return nil, err
+		}
+		if k.created != named[version{k.provider, k.object, k.version}] {
+			// A Transit key version keeps the identity of each key it was created under; a KV
+			// version holds one, so another means the version was created again (PA §6.1).
+			if ref == nil && k.provider == string(classify.KV) {
+				ref = refuse(http.StatusUnprocessableEntity, "validation-failed",
+					fmt.Sprintf("Publication refused: the kv dependency %s version %d was recorded under another creation time.",
+						k.object, k.version)).
+					with("dependency", map[string]any{"provider": k.provider, "object": k.object, "version": k.version,
+						"reason": compile.ReasonCreatedChanged})
+			}
+			continue
 		}
 		if ref == nil && class != string(classify.Retained) && recorded.After(began[k]) {
 			ref = refuse(http.StatusUnprocessableEntity, "validation-failed",
@@ -589,7 +621,9 @@ func insertHead(ctx context.Context, tx *sql.Tx, h *sourceHead, rev sql.NullStri
 }
 
 // seedStatuses inserts a retained status for each version the unit classified that has none, in
-// (provider, object, version, created) order (dependency monitor §5.2).
+// (provider, object, version, created) order (dependency monitor §5.2). A KV version holds one
+// identity (PA §3): a status of it under another creation time, a concurrent publication's
+// included once that commits, keeps the version, and recheckStatuses refuses.
 func seedStatuses(ctx context.Context, tx *sql.Tx, statuses []unitStatus) error {
 	ordered := slices.Clone(statuses)
 	slices.SortFunc(ordered, func(x, y unitStatus) int {
@@ -607,7 +641,7 @@ func seedStatuses(ctx context.Context, tx *sql.Tx, statuses []unitStatus) error 
 		if _, err := tx.ExecContext(ctx, `INSERT INTO dependency_status (id, provider, object, version, created, class, reason,
 			deletion_observed, first_retained_at, observed_from, recorded_at, answer_date)
 			VALUES ($1, $2, $3, $4, $5, 'retained', $6, $7, $8, $8, clock_timestamp(), $9)
-			ON CONFLICT (provider, object, version, created) DO NOTHING`,
+			ON CONFLICT DO NOTHING`,
 			id.New(id.Dependency), string(s.provider), s.object, s.version, createdText(s.result.Created),
 			sql.NullString{String: string(s.result.Reason), Valid: s.result.Reason != classify.None}, deletion, s.began,
 			sql.NullTime{Time: s.result.Date, Valid: !s.result.Date.IsZero()}); err != nil {

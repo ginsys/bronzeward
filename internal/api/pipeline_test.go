@@ -246,20 +246,18 @@ func TestSnapshotRecheck(t *testing.T) {
 	}
 }
 
-// A pin's recorded identity is the created time of the first status Bronzeward recorded for that
-// version (ruling R31); a version never classified has none.
+// A pin's recorded identity is the created time of its version's status, the one a KV version
+// holds (ruling R31); a version never classified has none.
 func TestSnapshotRecorded(t *testing.T) {
 	p := newPublishEnv(t)
 	if s, _ := p.snapshot(); !s.recorded[pinKey{p.kvPath, 1}].IsZero() {
 		t.Fatalf("recorded %v before any status", s.recorded)
 	}
-	first, later := time.Date(2026, 9, 1, 0, 0, 0, 5, time.UTC), time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
-	for i, c := range []time.Time{later, first} {
-		mustExec(t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class, observed_from, recorded_at)
-			VALUES ($1, 'kv', $2, 1, $3, 'retained', $4, $4)`, id.New(id.Dependency), p.kvPath, createdText(c),
-			time.Date(2026, 9, 10-i*5, 0, 0, 0, 0, time.UTC))
-	}
-	if s, _ := p.snapshot(); !s.recorded[pinKey{p.kvPath, 1}].Equal(first) {
-		t.Fatalf("recorded %v, want %v", s.recorded, first)
+	created := time.Date(2026, 9, 1, 0, 0, 0, 5, time.UTC)
+	mustExec(t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class, observed_from, recorded_at)
+		VALUES ($1, 'kv', $2, 1, $3, 'retained', $4, $4)`, id.New(id.Dependency), p.kvPath, createdText(created),
+		time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC))
+	if s, _ := p.snapshot(); !s.recorded[pinKey{p.kvPath, 1}].Equal(created) {
+		t.Fatalf("recorded %v, want %v", s.recorded, created)
 	}
 }

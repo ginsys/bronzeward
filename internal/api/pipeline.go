@@ -456,8 +456,8 @@ func (r *snapshotReader) readSources(machines []snapshotMachine) (map[string]sto
 	return out, err
 }
 
-// readRecorded reads each declared KV version's recorded created time: its first status's, by the
-// time that status was first observed (ruling R31). A version with none is absent.
+// readRecorded reads each declared KV version's recorded created time, its status's: a KV version
+// holds one (dependency_status_kv_version). A version with none is absent.
 func (r *snapshotReader) readRecorded(sources map[string]storedSource) (map[pinKey]time.Time, error) {
 	var paths []string
 	var versions []int64
@@ -472,9 +472,8 @@ func (r *snapshotReader) readRecorded(sources map[string]storedSource) (map[pinK
 		}
 	}
 	out := map[pinKey]time.Time{}
-	err := r.query(`SELECT DISTINCT ON (object, version) object, version, created FROM dependency_status
-		WHERE provider = 'kv' AND (object, version) IN (SELECT * FROM unnest($1::text[], $2::bigint[]))
-		ORDER BY object, version, observed_from, id`, func(row *sql.Rows) error {
+	err := r.query(`SELECT object, version, created FROM dependency_status
+		WHERE provider = 'kv' AND (object, version) IN (SELECT * FROM unnest($1::text[], $2::bigint[]))`, func(row *sql.Rows) error {
 		var k pinKey
 		var created string
 		if err := row.Scan(&k.path, &k.version, &created); err != nil {

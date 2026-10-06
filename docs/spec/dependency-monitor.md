@@ -66,8 +66,9 @@ item 2).
 
 A **monitored dependency** is one provider object version under its §3
 identity: a KV path with a version and its `created_time`, or a Transit key
-identity with a version. A version recreated under the same object and number
-is another monitored dependency, with its own status. One provider object
+identity with a version. A Transit key version recreated under the same name
+and number is another monitored dependency, with its own status; a KV version
+recreated so is refused at publication (§5.1), so it never has one. One provider object
 version named by several releases, or by both dependency records of one
 release, is one monitored dependency with one status **(choice §11.2)**. Its
 alerts name every release whose dependency records reference it; §5.2 orders
@@ -204,7 +205,11 @@ A DependencyStatus row is updated only under its row lock, in a transaction
 that holds no provider request (PA §5 rule 1): the provider is asked first,
 then the transaction records the answer. A row's `recorded_at` is never
 before its `observed_from`; the schema refuses one that is, since §5.2's
-re-check dates a transition by it.
+re-check dates a transition by it. A KV version holds one row: the schema
+refuses a second creation time for a KV path and version, since publication
+fixes a pin's identity from that row (PA §6.1) and refuses another, so a
+second could only come from two publications seeding the version
+concurrently (§5.2).
 
 ### 5.2 Seeding at publication
 
@@ -215,7 +220,9 @@ that has none, in provider object, version and creation time order, with class
 scheduled deletion time publication's own classification gave, first seen
 `retained` at the time publication began that version's classification, and
 `observed_from` equal to that time **(choice §11.3)**. A version that already
-has a row keeps it. Publication classifies every pinned version (compilation §6
+has a row keeps it; a KV version with a row under another creation time, a
+concurrent publication's included, keeps that row and refuses the
+publication `422`, its identity changed (PA §6.2). Publication classifies every pinned version (compilation §6
 step 3) and its encryption dependency (compilation §11), recording the Transit
 identity of §3 from reads bracketing the encryption. It refuses every version
 that is not `retained`, so every seeded row is `retained`. A seeded scheduled
