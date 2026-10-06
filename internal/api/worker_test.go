@@ -332,8 +332,12 @@ func TestPublishRunStopped(t *testing.T) {
 				t.Fatalf("the stopped run wrote %d releases or published the draft", n)
 			}
 
-			mustExec(t, b.db, `UPDATE operation SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1`, op)
+			// The stopped run's lease is still live: no other worker takes the job until it lapses.
 			other := b.worker("run-1/2/b", t.Context(), idle)
+			if _, ok := b.claim(other); ok {
+				t.Fatal("a job whose lease is live was claimed")
+			}
+			mustExec(t, b.db, `UPDATE operation SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1`, op)
 			taken, ok := b.claim(other)
 			if !ok || taken.op != op || taken.gen != 2 {
 				t.Fatalf("takeover %+v %v; want %s at generation 2", taken, ok, op)
