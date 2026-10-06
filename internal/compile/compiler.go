@@ -105,7 +105,7 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	for i, s := range sources {
 		r, err := ingest.Resolve(s.Text, s.Values)
 		if err != nil {
-			return Compiled{}, fmt.Errorf("compile: %s: %w", inputName(i), err)
+			return Compiled{}, &InputError{Input: inputName(i), Err: err}
 		}
 		real[i] = r
 	}
@@ -222,7 +222,7 @@ func traceAll(sources []Source) ([]ingest.Resolved, []int, []traced, []ingest.Ho
 		first[i] = len(ts)
 		r, xs, h, err := ingest.Trace(s.Text, s.Values, first[i], -1)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("compile: %s: %w", inputName(i), err)
+			return nil, nil, nil, nil, &InputError{Input: inputName(i), Err: err}
 		}
 		trace[i] = r
 		hs = append(hs, h...)

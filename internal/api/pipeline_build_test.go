@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -323,23 +324,39 @@ func TestBuildReleaseRefuses(t *testing.T) {
 		prepare func(b *buildEnv)
 		rule    string
 		machine bool
+		input   string // the input named, when the case checks one
 	}{
 		{"invalid configuration", func(b *buildEnv) {
 			b.fragment("network", "site", buildFragment("machine:\n  type: bogus\n"))
-		}, "invalid", true},
+		}, "invalid", true, ""},
 		// The machinery's own message quotes the held value; only §8.3's redaction keeps it out.
 		{"invalid configuration quoting a value", func(b *buildEnv) {
 			b.fragment("network", "site", buildFragment("machine:\n  type: *secret\n"))
-		}, "", true},
+		}, "", true, ""},
+		// Ingestion's rules applied while composing name the input they refused (PA §6.1): the
+		// network fragment, after the publish fixture's base-layer fragment.
+		{"value of another kind", func(b *buildEnv) {
+			before := maps.Clone(b.held.values)
+			b.fragment("network", "site", buildFragment(""))
+			for gen := range b.held.values {
+				if _, ok := before[gen]; !ok {
+					v, err := provider.NewValue(provider.KindMapping, map[string]string{"member": "other"})
+					if err != nil {
+						b.t.Fatal(err)
+					}
+					b.held.values[gen] = v
+				}
+			}
+		}, "kind-mismatch", true, "fragment[1]"},
 		{"Kubernetes outside the window", func(b *buildEnv) {
 			b.fragment("network", "site", "machine:\n  kubelet:\n    image: ghcr.io/siderolabs/kubelet:v1.20.0\n")
-		}, "kubernetes", true},
+		}, "kubernetes", true, ""},
 		{"contract not the renderer's", func(b *buildEnv) {
 			mustExec(b.t, b.db, `UPDATE cluster SET contract = 'v1.12' WHERE id = $1`, b.cluster)
-		}, "contract", false},
+		}, "contract", false, ""},
 		{"machines disagree on Kubernetes", func(b *buildEnv) {
 			b.secondMachine(minimum)
-		}, "kubernetes", true},
+		}, "kubernetes", true, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -351,6 +368,9 @@ func TestBuildReleaseRefuses(t *testing.T) {
 			}
 			if c.rule != "" && ref.extra["rule"] != c.rule {
 				t.Fatalf("rule %v, want %s", ref.extra["rule"], c.rule)
+			}
+			if c.input != "" && ref.extra["input"] != c.input {
+				t.Fatalf("input %v, want %s", ref.extra["input"], c.input)
 			}
 			if _, ok := ref.extra["machine"]; ok != c.machine {
 				t.Fatalf("refusal %v names a machine: %v", ref.extra, ok)
