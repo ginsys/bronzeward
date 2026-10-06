@@ -151,7 +151,7 @@ func (c *client) do(ctx context.Context, method, path string, body []byte, creat
 	case s == http.StatusServiceUnavailable || s == http.StatusTooManyRequests:
 		return nil, &requestError{method: method, path: path, status: s, kind: ErrUnavailable}
 	default:
-		return nil, &requestError{method: method, path: path, status: s}
+		return nil, &requestError{method: method, path: path, status: s, kind: ErrStatus}
 	}
 }
 

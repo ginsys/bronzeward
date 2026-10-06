@@ -39,11 +39,12 @@ func buildFragment(extra string) string {
 // the metadata identity answers each generation retained, created at kvCreated, and the artifact
 // key with one version created at transitCreated (with no Date when noDate); the compiler
 // identity reads the held value (or fails with readErr) and encrypts an artifact under keyVersion
-// (1 when unset) to a digest of it, never to the plaintext.
+// (1 when unset) to a digest of it, never to the plaintext (or fails with encryptErr).
 type heldValues struct {
 	values     map[string]provider.Value
 	keyVersion int
 	readErr    error
+	encryptErr error
 	noDate     bool
 }
 
@@ -80,6 +81,9 @@ func (h heldValues) ReadGeneration(_ context.Context, p provider.GenerationPath,
 func (heldValues) ArtifactKey() string { return "bw-artifact" }
 
 func (h heldValues) EncryptArtifact(_ context.Context, plaintext []byte) (provider.Ciphertext, error) {
+	if h.encryptErr != nil {
+		return "", h.encryptErr
+	}
 	sum := sha256.Sum256(plaintext)
 	return provider.Ciphertext(fmt.Sprintf("vault:v%d:", max(h.keyVersion, 1)) + base64.StdEncoding.EncodeToString(sum[:])), nil
 }
@@ -416,6 +420,9 @@ func TestBuildReleaseDependencyUnknown(t *testing.T) {
 		{"value read absent", func(h *heldValues) { h.readErr = fmt.Errorf("provider: GET: %w", provider.ErrAbsent) }, "kv"},
 		{"value read denied", func(h *heldValues) { h.readErr = fmt.Errorf("provider: GET: %w", provider.ErrDenied) }, "kv"},
 		{"value read not understood", func(h *heldValues) { h.readErr = fmt.Errorf("provider: GET: %w", provider.ErrProtocol) }, "kv"},
+		{"value read refused by status", func(h *heldValues) { h.readErr = fmt.Errorf("provider: GET: %w", provider.ErrStatus) }, "kv"},
+		{"encryption refused by status", func(h *heldValues) { h.encryptErr = fmt.Errorf("provider: POST: %w", provider.ErrStatus) }, "transit"},
+		{"encryption denied", func(h *heldValues) { h.encryptErr = fmt.Errorf("provider: POST: %w", provider.ErrDenied) }, "transit"},
 		{"artifact key read without a Date", func(h *heldValues) { h.noDate = true }, "transit"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
