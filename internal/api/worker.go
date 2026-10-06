@@ -68,6 +68,9 @@ func (a *API) extendPublish(ctx context.Context, j publishJob) error {
 		if current != a.d.owner.Epoch {
 			return staging.ErrEpochSuperseded
 		}
+		if err := lockOperation(ctx, tx, j.op); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE operation SET lease_until = clock_timestamp() + $5::bigint * interval '1 microsecond'
 			WHERE id = $1 AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4
 				AND state = 'running' AND lease_until > clock_timestamp()`,
@@ -82,6 +85,15 @@ func (a *API) extendPublish(ctx context.Context, j publishJob) error {
 		}
 		return nil
 	})
+}
+
+// lockOperation locks the operation's row before an owner's fenced UPDATE of it: an UPDATE
+// evaluates its predicate before it waits for a row and does not evaluate it again when the
+// holder ends without changing the row, so a lease that lapsed in the wait would go unseen (as
+// staging's lock does for a claim).
+func lockOperation(ctx context.Context, tx *sql.Tx, op string) error {
+	_, err := tx.ExecContext(ctx, `SELECT 1 FROM operation WHERE id = $1 FOR UPDATE`, op)
+	return err
 }
 
 // startPublisher starts this process's one publish worker, which runs until life ends; a process
@@ -116,6 +128,9 @@ func (a *API) publishLoop(ctx context.Context) {
 		case ok:
 			a.runPublish(ctx, j)
 			continue
+		}
+		if a.o.onIdle != nil {
+			a.o.onIdle()
 		}
 		select {
 		case <-ctx.Done():

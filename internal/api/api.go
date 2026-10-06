@@ -95,6 +95,7 @@ type options struct {
 	commit         func(*sql.Tx) error                                                                  // replaces (*sql.Tx).Commit
 	onRunner       func(job)                                                                            // takes each job instead of the runner
 	onPublish      func()                                                                               // runs instead of waking the publish worker
+	onIdle         func()                                                                               // runs when the publish worker found no job, before it waits
 	afterStage     func()                                                                               // runs when a job is staged, before T1
 	beforeT1       func()                                                                               // runs before T1 begins
 	stopAt         func(step string) bool                                                               // a draft update's ingestion stops at step, as a killed process would

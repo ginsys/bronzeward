@@ -727,10 +727,17 @@ func (a *API) finishPublish(ctx context.Context, tx *sql.Tx, j publishJob, state
 	if current != a.d.owner.Epoch {
 		return staging.ErrFenced
 	}
+	// T3 already holds the row; the failure transaction takes it here. Under the lock the lease
+	// is compared with the current time: an owner whose lease lapsed, even with no other claim
+	// yet, ends nothing (§5.1).
+	if err := lockOperation(ctx, tx, j.op); err != nil {
+		return err
+	}
 	var n int
 	err := tx.QueryRowContext(ctx, `UPDATE operation SET state = $5, result = $6::jsonb, error = $7::jsonb,
 		owner = NULL, owner_epoch = NULL, lease_until = NULL, last_event = last_event + 1
-		WHERE id = $1 AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4 AND state = 'running' RETURNING last_event`,
+		WHERE id = $1 AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4 AND state = 'running'
+			AND lease_until > clock_timestamp() RETURNING last_event`,
 		j.op, a.d.owner.ID, j.gen, a.d.owner.Epoch, state, jsonOrNull(result), jsonOrNull(problem)).Scan(&n)
 	if err != nil {
 		return a.fenced(err)
