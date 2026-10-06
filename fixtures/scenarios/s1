@@ -681,7 +681,9 @@ interrupt_case() {
     within 60 killed_at "$step" "$kills"
   check "$row_ref" "C's control file removed" interrupt -
   if [ "$staging_mode" = transient ]; then
-    check "$row_ref" "killed at $step, transient: once the lease lapses, the sweep fails the operation ingestion-abandoned" \
+    check "$row_ref" "killed at $step, transient: the sweep abandons the claim once its lease lapses, not before" \
+      swept_after_lapse 45
+    check "$row_ref" "killed at $step, transient: the sweep fails the operation ingestion-abandoned" \
       within 45 op_failed_abandoned
     check "$row_ref" "killed at $step, transient: the claim abandoned at generation 1 without a payload, one failed event" swept "$step"
   else

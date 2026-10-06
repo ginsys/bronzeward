@@ -300,6 +300,32 @@ claim_is() {
 }
 # lapsed: tk_ing's lease has lapsed by the database's clock.
 lapsed() { [ "$(sql "SELECT lease_until <= clock_timestamp() FROM staging_claim WHERE id = '$tk_ing'")" = t ]; }
+# swept_after_lapse <seconds>: within that many seconds, asked each second, the sweep writes tk_ing
+# abandoned at generation 1 without a payload, and not before its lease lapsed (C §3.5). The state
+# and the lapse are read in one statement by the database's clock (an abandonment leaves
+# lease_until as it was), so an abandonment seen while the lease is still live fails at once.
+swept_after_lapse() {
+  local n row
+  for ((n = 1; n <= $1; n++)); do
+    row=$(sql "SELECT state || ' ' || owner_gen || ' ' || CASE WHEN payload IS NULL THEN 'none' ELSE 'payload' END
+      || ' ' || (lease_until <= clock_timestamp())::text FROM staging_claim WHERE id = '$tk_ing'") || return 1
+    case $row in
+      'abandoned 1 none true') return 0 ;;
+      'abandoned '*' false')
+        say "$scenario: the claim was abandoned while its lease was still live"
+        return 1
+        ;;
+      'held 1 none '*) ;;
+      *)
+        say "$scenario: the claim is '$row' while its sweep is awaited"
+        return 1
+        ;;
+    esac
+    if [ "$n" -lt "$1" ]; then sleep 1; fi
+  done
+  say "$scenario: the claim was not abandoned within $1 seconds"
+  return 1
+}
 # claim_generations [claim]: how many generations the metadata identity lists under the claim's
 # path in the scenario's cluster (tk_ing's by default); 0 when the path holds none (bao's JSON
 # answer is then {} with exit 2).
