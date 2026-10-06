@@ -110,8 +110,6 @@ generations_made() {
 # killed_at <step> <kills before>: C exited at the step, the claim held at generation 1 without a
 # payload (a draft update's claim is transient).
 killed_at() { c_killed_at "$1" "$(($2 + 1))" && claim_is held 1 none; }
-# swept: the sweep abandoned tk_ing at generation 1 without a payload, once its lease lapsed.
-swept() { claim_is abandoned 1 none; }
 # c_update <step>: the marked update of fragment kill-<step>, sent to C, which exits at the step
 # before it answers: nothing answers (000). Its claim, found by the request's key, in tk_ing.
 c_update() {
@@ -144,8 +142,8 @@ kill_case() {
   [ -n "$tk_ing" ] || die "s2: no claim for the update killed at $step; nothing after it can run"
   check "$row_ref" "C exited at $step: the claim held at generation 1 without a payload" within 60 killed_at "$step" "$kills"
   check "$row_ref" "C's control file removed" interrupt -
-  check "$row_ref" "killed at $step: once the lease lapses, the sweep abandons the claim at generation 1 without a payload" \
-    within 45 swept
+  check "$row_ref" "killed at $step: the sweep abandons the claim at generation 1 without a payload once its lease lapses, not before" \
+    swept_after_lapse 45
   check "$row_ref" "killed at $step: every generation created before the kill still listed under the claim, none deleted" \
     generations_are "$(generations_made "$step")"
   interrupted+=("$tk_ing")
