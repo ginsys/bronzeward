@@ -710,17 +710,20 @@ A job claim re-checks eligibility in the `UPDATE`'s own predicate. For a
 **(choice §17.12)**:
 
 ```sql
--- after reading installation_state FOR SHARE
+-- after reading installation_state FOR SHARE; the candidate is locked
+-- first, since an UPDATE forms its new row, lease included, before it
+-- waits for the row
+SELECT id FROM operation
+ WHERE kind = 'publish'
+   AND (state = 'queued'
+        OR (state = 'running' AND lease_until < clock_timestamp()))
+ ORDER BY seq LIMIT 1
+   FOR UPDATE;                                  -- $id
 UPDATE operation
    SET state = 'running', owner = $me, owner_gen = owner_gen + 1,
        owner_epoch = $current_epoch,
        lease_until = clock_timestamp() + $lease
- WHERE id = (SELECT id FROM operation
-              WHERE kind = 'publish'
-                AND (state = 'queued'
-                     OR (state = 'running'
-                         AND lease_until < clock_timestamp()))
-              ORDER BY seq LIMIT 1)
+ WHERE id = $id
    AND (state = 'queued'
         OR (state = 'running' AND lease_until < clock_timestamp()))
    AND $my_epoch = $current_epoch;

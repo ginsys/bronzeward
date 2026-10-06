@@ -31,16 +31,25 @@ func (a *API) claimPublish(ctx context.Context) (publishJob, bool, error) {
 		if current != a.d.owner.Epoch {
 			return staging.ErrEpochSuperseded
 		}
+		// The oldest eligible job is locked first: an UPDATE forms its new row, the lease
+		// included, before it waits for the row, so a lease counted there could lapse in the wait.
 		// The eligibility is re-checked in the UPDATE's own predicate: a job another claimer took
 		// first no longer matches it once its lock is released (DB row 020).
+		var op string
+		switch err := tx.QueryRowContext(ctx, `SELECT id FROM operation WHERE kind = 'publish'
+				AND (state = 'queued' OR (state = 'running' AND lease_until < clock_timestamp())) ORDER BY seq LIMIT 1
+			FOR UPDATE`).Scan(&op); {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil
+		case err != nil:
+			return err
+		}
 		var n int
 		switch err := tx.QueryRowContext(ctx, `UPDATE operation SET state = 'running', owner = $1, owner_gen = owner_gen + 1,
 				owner_epoch = $2, lease_until = clock_timestamp() + $3::bigint * interval '1 microsecond', last_event = last_event + 1
-			WHERE id = (SELECT id FROM operation WHERE kind = 'publish'
-					AND (state = 'queued' OR (state = 'running' AND lease_until < clock_timestamp())) ORDER BY seq LIMIT 1)
-				AND (state = 'queued' OR (state = 'running' AND lease_until < clock_timestamp()))
+			WHERE id = $4 AND (state = 'queued' OR (state = 'running' AND lease_until < clock_timestamp()))
 			RETURNING id, draft, draft_revision, owner_gen, last_event`,
-			a.d.owner.ID, a.d.owner.Epoch, a.d.timers.Lease.Microseconds()).Scan(&j.op, &j.draft, &j.draftRev, &j.gen, &n); {
+			a.d.owner.ID, a.d.owner.Epoch, a.d.timers.Lease.Microseconds(), op).Scan(&j.op, &j.draft, &j.draftRev, &j.gen, &n); {
 		case errors.Is(err, sql.ErrNoRows):
 			return nil
 		case err != nil:
