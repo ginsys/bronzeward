@@ -130,7 +130,8 @@ func run(x, f string) bool {
 	}
 }
 
-// paths redacts every path of a compile refusal: a rule's own or one ingest raised. A wrapper
+// paths redacts every path of a compile refusal: a rule's own or one ingest raised. An
+// InputError directly around the refusal makes its message when asked, so it is kept. A wrapper
 // built by fmt.Errorf holds its message as written, so a wrapped refusal is returned wrapped
 // again, with the same prefix, around the redacted refusal; a message that does not end with the
 // refusal's own is dropped for the refusal alone.
@@ -152,6 +153,9 @@ func (r redactor) paths(err error) error {
 		paths[i] = r.path(p)
 	}
 	if inner == err {
+		return err
+	}
+	if w, ok := err.(*InputError); ok && w.Err == inner {
 		return err
 	}
 	if prefix, ok := strings.CutSuffix(whole, before); ok {

@@ -193,6 +193,9 @@ func compileRefusal(machine string, err error) (*refusal, error) {
 		rule, input, paths, message = string(ce.Rule), ce.Input, ce.Paths, ce.Message
 	case errors.As(err, &ie):
 		rule, paths = string(ie.Rule), ie.Paths
+		if at := (*compile.InputError)(nil); errors.As(err, &at) {
+			input = at.Input
+		}
 	default:
 		return nil, err
 	}

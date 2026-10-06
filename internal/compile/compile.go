@@ -80,6 +80,17 @@ func (e *Error) Error() string {
 	return s
 }
 
+// InputError attributes an error raised while reading one input, such as an ingest.Refusal, to
+// that input ("base" or "fragment[<i>]"). Its message is made when asked, so a refusal's paths
+// redacted in place show redacted.
+type InputError struct {
+	Input string
+	Err   error
+}
+
+func (e *InputError) Error() string { return fmt.Sprintf("compile: %s: %v", e.Input, e.Err) }
+func (e *InputError) Unwrap() error { return e.Err }
+
 // Materialized is one machine's complete composed configuration: plaintext. Every fmt verb
 // prints a placeholder and the marshallers fail. The text sits behind a pointer to a string: fmt
 // prints a struct holding a Materialized in an unexported field by reflection, past those
@@ -111,7 +122,7 @@ func compose(base ingest.Resolved, fragments []ingest.Resolved) (Materialized, s
 		if err != nil {
 			var r *ingest.Refusal
 			if errors.As(err, &r) {
-				return Materialized{}, "", fmt.Errorf("compile: %s: %w", name, err)
+				return Materialized{}, "", &InputError{Input: name, Err: err}
 			}
 			// ingest's Patch drops the machinery's message; loading the same bytes as it does
 			// gives it again.
