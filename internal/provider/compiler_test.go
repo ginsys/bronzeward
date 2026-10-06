@@ -171,6 +171,23 @@ func TestReadGenerationTypedOutcomes(t *testing.T) {
 	}
 }
 
+// An encryption's refusal is typed whatever its status, so publication can name it (persistence
+// §6.1): Transit answers a missing key or a bad request 400 or 404, never ErrAbsent's GET.
+func TestEncryptArtifactTypedOutcomes(t *testing.T) {
+	for status, want := range map[int]error{400: ErrStatus, 404: ErrStatus, 500: ErrStatus, 403: ErrDenied, 503: ErrUnavailable} {
+		c, _ := compilerStandIn(t, func(w http.ResponseWriter, _ *http.Request) {
+			respond(t, w, status, map[string]any{"errors": []string{pinnedText}})
+		})
+		_, err := c.EncryptArtifact(t.Context(), []byte(pinnedText))
+		if !errors.Is(err, want) {
+			t.Errorf("%d: %v, want %v", status, err, want)
+		}
+		if err != nil && strings.Contains(err.Error(), pinnedText) {
+			t.Errorf("%d: the error quotes the plaintext", status)
+		}
+	}
+}
+
 func TestReadGenerationRefusesBeforeSending(t *testing.T) {
 	c, rec := compilerStandIn(t, func(w http.ResponseWriter, _ *http.Request) { respond(t, w, 200, pinned()) })
 	if _, _, err := c.ReadGeneration(t.Context(), GenerationPath{}, 3); err == nil {

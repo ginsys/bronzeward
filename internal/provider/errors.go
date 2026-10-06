@@ -6,7 +6,8 @@ import (
 )
 
 // The typed outcomes of a provider request. An error from this package is at most one of them;
-// one that is none is a status this client does not classify. errors.Is tells them apart.
+// one that is none is a request that was never sent or an argument refused before sending.
+// errors.Is tells them apart.
 var (
 	// ErrDenied is a 403: the identity's policy refused the request, or its token is invalid
 	// or expired (no renewal in the PoC; an expired token is refused like any denial).
@@ -23,6 +24,9 @@ var (
 	// ErrProtocol is a response this client does not understand: a 2xx without its field, with
 	// a field of the wrong type or form, or larger than the response cap.
 	ErrProtocol = errors.New("provider response not understood")
+	// ErrStatus is any other answer that is not a 2xx: a 400, a 404 to a write, a 500, a
+	// redirect (never followed). The provider answered and refused; the status is in the text.
+	ErrStatus = errors.New("provider answered with an error status")
 )
 
 // requestError is every failure of a request. Its text names the method, the path and the status,
@@ -33,7 +37,7 @@ var (
 type requestError struct {
 	method, path string
 	status       int    // 0 when no response was read
-	kind         error  // one of the four, or nil
+	kind         error  // one of the typed outcomes above, or nil
 	detail       string // this package's fixed words
 	cause        error  // a context error, for errors.Is; its text is fixed by the standard library
 }

@@ -143,13 +143,13 @@ func TestStatusClassification(t *testing.T) {
 		{"403 create", 403, `{"errors":["1 error occurred:\n\t* permission denied\n\n"]}`, create, ErrDenied},
 		{"400 CAS", 400, `{"errors":["check-and-set parameter did not match the current version"]}`, create, ErrExists},
 		{"400 CAS wrapped", 400, `{"errors":["1 error occurred:\n\t* check-and-set parameter did not match the current version\n\n"]}`, create, ErrExists},
-		{"400 other", 400, `{"errors":["bad request"]}`, create, nil},
-		{"400 CAS on transit", 400, `{"errors":["check-and-set parameter did not match the current version"]}`, enc, nil},
+		{"400 other", 400, `{"errors":["bad request"]}`, create, ErrStatus},
+		{"400 CAS on transit", 400, `{"errors":["check-and-set parameter did not match the current version"]}`, enc, ErrStatus},
 		{"503", 503, `{"errors":["Vault is sealed"]}`, enc, ErrUnavailable},
 		{"429", 429, `{}`, enc, ErrUnavailable},
-		{"500", 500, `{}`, enc, nil},
-		{"404", 404, `{}`, enc, nil},
-		{"307 not followed", 307, ``, enc, nil},
+		{"500", 500, `{}`, enc, ErrStatus},
+		{"404", 404, `{}`, enc, ErrStatus},
+		{"307 not followed", 307, ``, enc, ErrStatus},
 		{"200 missing field", 200, `{"data":{}}`, enc, ErrProtocol},
 		{"200 null field", 200, `{"data":{"ciphertext":null}}`, enc, ErrProtocol},
 		{"200 null data", 200, `{"data":null}`, enc, ErrProtocol},
@@ -168,7 +168,7 @@ func TestStatusClassification(t *testing.T) {
 			if err == nil {
 				t.Fatal("no error")
 			}
-			typed := []error{ErrDenied, ErrExists, ErrUnavailable, ErrProtocol}
+			typed := []error{ErrDenied, ErrExists, ErrUnavailable, ErrProtocol, ErrStatus}
 			if c.want == nil {
 				for _, k := range typed {
 					if errors.Is(err, k) {

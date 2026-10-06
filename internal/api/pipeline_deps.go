@@ -125,7 +125,8 @@ func (a *API) dependencyRefusal(j publishJob, reference, prov, object string, ve
 		a.o.logf("%s: publication: %v", j.op, err)
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable",
 			"Publication refused: the provider could not be reached; nothing was committed.").with("dependency", dep), nil
-	case errors.Is(err, provider.ErrAbsent), errors.Is(err, provider.ErrDenied), errors.Is(err, provider.ErrProtocol):
+	case errors.Is(err, provider.ErrAbsent), errors.Is(err, provider.ErrDenied), errors.Is(err, provider.ErrProtocol),
+		errors.Is(err, provider.ErrStatus):
 		// A read or encryption refused or not understood after the classification: unknown.
 		a.o.logf("%s: publication: %v", j.op, err)
 		dep["class"] = string(classify.Unknown)
