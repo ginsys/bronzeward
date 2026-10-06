@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
 	"slices"
 	"time"
 
@@ -115,7 +116,11 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 			u.statuses = append(u.statuses, unitStatus{provider: classify.Transit, object: e.Key, version: e.Version, result: e.Status, began: began})
 		}
 	}
-	if err := a.step("publish-encrypt"); err != nil { // the ciphertexts, the plaintexts still held
+	// The ciphertexts, the plaintexts still held: kept reachable past the point, since their last
+	// use was the encryption and a collection could free them before a stop there.
+	err = a.step("publish-encrypt")
+	runtime.KeepAlive(artifacts)
+	if err != nil {
 		return releaseUnit{}, nil, err
 	}
 	return u, nil, nil
