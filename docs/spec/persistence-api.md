@@ -1911,8 +1911,10 @@ path that does not parse is `422 validation-failed` naming its position in
 `marks`, never its text, before any change. A mark or a continuation (`{}`) on a claim not `paused`, past its
 absolute expiry or of an earlier epoch is `409 conflict`, and nothing changes;
 otherwise it answers 202 at once, and the ingestion's events show how the run
-ends (§8.3): `paused` again, `mark-refused` with the claim `paused`, or
-`failed`. A continuation whose draft moved fails the operation `412
+ends (§8.3): `paused` again, `mark-refused` with the claim `paused`,
+`succeeded` after a continuation, `failed`, or `resume-failed` with the claim
+`held` to its lease and the operation `running`, taken over after that lease
+(compilation §3.6 item 6). A continuation whose draft moved fails the operation `412
 precondition-failed` (T1).
 
 `scopeState` is `normal`, or one of
