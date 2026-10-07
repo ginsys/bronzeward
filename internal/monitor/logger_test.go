@@ -6,7 +6,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -270,7 +272,7 @@ func TestLoggerOneWriter(t *testing.T) {
 // lock-holder timeout, so neither a pass nor the watchdog waits on it.
 func TestLoggerBlockedReport(t *testing.T) {
 	f := seed(t)
-	stalledAlert(t, f.db)
+	dal := stalledAlert(t, f.db)
 	tm := Defaults()
 	tm.LockHolder = time.Second
 	m, s := withSink(f, &fake{}, tm)
@@ -278,8 +280,11 @@ func TestLoggerBlockedReport(t *testing.T) {
 	gate := make(chan struct{})
 	defer close(gate)
 	var reports atomic.Int32
-	m.logf = func(string, ...any) {
-		reports.Add(1)
+	reported := make(chan string, 1)
+	m.logf = func(format string, args ...any) {
+		if reports.Add(1) == 1 {
+			reported <- fmt.Sprintf(format, args...)
+		}
 		<-gate
 	}
 	holder, err := f.db.Begin()
@@ -302,8 +307,14 @@ func TestLoggerBlockedReport(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatalf("the logger waited on a blocked report (%d reports)", reports.Load())
 	}
-	if reports.Load() != 1 || lastLogged(t, f.db) != 0 {
-		t.Fatalf("%d reports, cursor %d: the transaction did not expire", reports.Load(), lastLogged(t, f.db))
+	// The batch was read and written, so the cursor's read came first, and advancing the cursor is
+	// what failed.
+	if reports.Load() != 1 || !slices.Equal(s.dals(), []string{dal}) || lastLogged(t, f.db) != 0 {
+		t.Fatalf("%d reports, logged %v, cursor %d: the transaction did not expire after the write",
+			reports.Load(), s.dals(), lastLogged(t, f.db))
+	}
+	if msg := <-reported; !strings.HasPrefix(msg, "dependency monitor logger: last logged:") {
+		t.Fatalf("reported %q, not the cursor update's failure", msg)
 	}
 	// A further report, while that one still blocks, is dropped after the timeout.
 	start := time.Now()
