@@ -213,6 +213,16 @@ fixes a pin's identity from that row (PA §6.1) and refuses another, so a
 second could only come from two publications seeding the version
 concurrently (§5.2).
 
+An alert's insert locks the DependencyMonitor row itself before the schema
+allocates its recording sequence, so no writer can allocate one outside that
+lock (§7.1). The schema also refuses an alert whose kind, class and reason
+are not a row of §3 and §6.2, a `monitor-stalled` alert with any dependency
+field, and an alert that names a release twice or a release that does not
+reference its version. The DependencyMonitor row is created with the
+installation, its progress the installation time, so a monitor that never
+runs is stalled after three intervals (§6.3). The schema refuses an update
+that moves its progress or its last logged sequence back.
+
 ### 5.2 Seeding at publication
 
 Publication's commit transaction (PA §6.2, T3) inserts a DependencyStatus row
