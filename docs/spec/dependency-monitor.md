@@ -71,7 +71,8 @@ and number is another monitored dependency, with its own status; a KV version
 recreated so is refused at publication (§5.1), so it never has one. One provider object
 version named by several releases, or by both dependency records of one
 release, is one monitored dependency with one status **(choice §11.2)**. Its
-alerts name every release whose dependency records reference it; §5.2 orders
+alerts name every release whose dependency records reference it (a repeated
+`deletion-scheduled` warning names only those not yet warned, §6.2); §5.2 orders
 a publication against a transition, and §6.2 warns of a scheduled deletion
 every release committed against it, so no committed release is missing from
 either's alert.
@@ -198,7 +199,7 @@ Three tables, all in PA §3:
 | Entity | Kind | Holds |
 | --- | --- | --- |
 | DependencyStatus | mutable, row-locked | `dep` identifier; provider object, version and the creation time of its §3 identity; class and reason; when it was first recorded `retained`; since when it has been `unknown`, if it is; when its last `persistent` alert was raised; the scheduled deletion time last observed and the one last warned; the database time the latest recorded classification's request began (`observed_from`) and the database time it was recorded (`recorded_at`); the answer's `Date`, if any |
-| DependencyAlert | immutable | `dal` identifier; recording sequence, allocated under the DependencyMonitor row lock (§6.1); the `dep` identifier; kind (§6.2); class and reason; provider object, version and creation time; the releases referencing it; `observed_from` and `Date`; epoch; time recorded. A `monitor-stalled` alert concerns no dependency: its `dep` identifier, provider object, version, class, reason, releases, `observed_from` and `Date` are empty |
+| DependencyAlert | immutable | `dal` identifier; recording sequence, allocated under the DependencyMonitor row lock (§6.1); the `dep` identifier; kind (§6.2); class and reason; provider object, version and creation time; the releases it names; the scheduled deletion time it warns of, for a `deletion-scheduled` alert only; `observed_from` and `Date`; epoch; time recorded. A `monitor-stalled` alert concerns no dependency: its `dep` identifier, provider object, version, class, reason, releases, `observed_from` and `Date` are empty |
 | DependencyMonitor | mutable singleton, row-locked | the monitor's last progress (§6.3); its last completed pass; when it last raised `monitor-stalled`; the recording sequence of the last alert logged (§7.1) |
 
 A DependencyStatus row is updated only under its row lock, in a transaction
@@ -327,8 +328,8 @@ through `regression` and `persistent`.
 `deletion-scheduled` is raised by the pass that records a schedule while its
 time is still ahead, and by any later pass that finds a release its earlier
 warnings for that time did not name: the releases referencing the version,
-read after the row lock (§6.1 step 5), are compared with those the time's
-`deletion-scheduled` alerts named. A release committed against a schedule
+read after the row lock (§6.1 step 5), are compared with those named by the
+version's `deletion-scheduled` alerts that warn of that same time. A release committed against a schedule
 already warned, before or while that warning's pass ran, is therefore named
 by the next pass. A deletion that takes effect before a pass records it,
 one only publication saw included (its seeded row carries the schedule for the
@@ -550,7 +551,8 @@ fail:
     A change recorded at exactly the time publication began its
     classification refuses it; control: comparing "later than", the release
     commits. A `retained` row with a scheduled deletion does not refuse it,
-    whenever recorded or warned; a release committed against a schedule
+    whenever recorded or warned; control: refusing such a row recorded not
+    before publication began, the release is refused. A release committed against a schedule
     already warned, before and during the warning's pass, is named by the
     next pass's `deletion-scheduled` alert for that time, which names no
     release an earlier warning named; controls: warning once per scheduled
