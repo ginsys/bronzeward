@@ -368,27 +368,54 @@ go_rows() {
 # this fixture. Its output holds the bases' synthetic secrets, so it goes to a directory outside the
 # checkout (mktemp -d, under TMPDIR; run/all refuses one inside), only its result tables are kept,
 # in c10/ (the final bundle's scan covers them), and the directory is removed. It runs on this
-# checkout, not a clone, since it reads this fixture's state; its run.txt names the commit and
-# counts uncommitted inputs, which c10_at_image holds to the image's.
+# checkout, not a clone, since it reads this fixture's state, so the checkout is held to the image
+# commit with no path differing and none git is told to skip (checkout_differs, as S0's
+# same_checkout), before the gate and after it; run.txt's own git status count does not see
+# skipped paths. An interruption removes the directory too; a removal that fails fails the row and
+# names the directory.
+c10_tmp=''
+c10_clean() {
+  [ -n "$c10_tmp" ] || return 0
+  rm -rf -- "$c10_tmp"
+  if [ -e "$c10_tmp" ]; then
+    printf 'output directory not removed, holds synthetic fixture secrets: %s\n' "$c10_tmp" >>"$EV/c10-gate.log"
+    return 1
+  fi
+  c10_tmp=''
+}
 c10_ran() {
-  local out f rc=0
-  out=$(mktemp -d) || return 1
-  C10_OUT=$out/out "$FIXTURES/../experiments/c10-machinery-gate/run/all" >"$EV/c10-gate.log" 2>&1 || rc=$?
+  local f rc=0
+  c10_image_checkout || {
+    printf 'not run: the checkout is not the image commit with no path differing\n' >"$EV/c10-gate.log"
+    return 1
+  }
+  c10_tmp=$(mktemp -d) || return 1
+  trap 'c10_clean' EXIT
+  trap 'c10_clean; exit 130' INT TERM
+  C10_OUT=$c10_tmp/out "$FIXTURES/../experiments/c10-machinery-gate/run/all" >"$EV/c10-gate.log" 2>&1 || rc=$?
   printf 'exit %d\n' "$rc" >>"$EV/c10-gate.log"
   ran c10-gate "$rc" experiments/c10-machinery-gate/run/all
   mkdir -p -- "$EV/c10"
   for f in run.txt summary.txt controls.tsv matrix.tsv sp-summary.txt sp-controls.tsv sp-matrix.tsv gate.log; do
-    [ ! -f "$out/out/$f" ] || cp -- "$out/out/$f" "$EV/c10/$f"
+    [ ! -f "$c10_tmp/out/$f" ] || cp -- "$c10_tmp/out/$f" "$EV/c10/$f" || rc=1
   done
-  rm -rf -- "$out"
+  c10_clean || rc=1
+  trap - EXIT INT TERM
   [ "$rc" -eq 0 ]
 }
-# c10_at_image: the gate ran at the commit up-build records for the image, no input uncommitted.
+# c10_image_checkout: this checkout is the commit up-build records for the image, no path differing.
+c10_image_checkout() {
+  local n
+  n=$(checkout_differs) || return 1
+  [ "$(fixtures_git rev-parse HEAD)" = "$(sed -n 's/^commit //p' "$STATE/up-build")" ] && [ "$n" -eq 0 ]
+}
+# c10_at_image: the gate's run.txt names the image commit with no input uncommitted, and the
+# checkout is still that commit with no path differing.
 c10_at_image() {
   local commit
   commit=$(sed -n 's/^commit //p' "$STATE/up-build") && [ -n "$commit" ] || return 1
   awk -F'\t' -v c="$commit" '$1 == "commit" { m = ($2 == c) } $1 == "uncommitted-inputs" { u = $2 }
-    END { exit !(m && u == "0") }' "$EV/c10/run.txt"
+    END { exit !(m && u == "0") }' "$EV/c10/run.txt" && c10_image_checkout
 }
 # c10_matrix <summary>: the matrix has rows, and none is unexpected.
 c10_matrix() {
@@ -402,7 +429,7 @@ c10_controls() {
 c10_rows() {
   local ref='S2 precondition, C §10.1'
   check "$ref" 'the machinery gate, run/all against this fixture, exited 0 (c10-gate.log)' c10_ran
-  check "$ref" 'it ran at the image commit with no uncommitted input (c10/run.txt)' c10_at_image
+  check "$ref" 'it ran at the image commit with no uncommitted input (c10/run.txt), the checkout that commit with no path differing or skipped' c10_at_image
   check "$ref" "SR's matrix through the compiler's path: every case on both bases as expected (c10/summary.txt)" c10_matrix summary.txt
   check "$ref" "SR's controls: the compiler's round trip and validation of each base (c10/controls.tsv)" c10_controls controls.tsv
   check "$ref" "SP's matrix through the compiler's path: every case as expected, no value or base secret in any cell (c10/sp-summary.txt)" \
@@ -605,8 +632,12 @@ restored() {
     [ "$(sql "SELECT desired || ' ' || applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$applied $applied" ]
 }
 # db_reads: A answers a database read again (after a restore swapped the database under it): the
-# seeded Applied release, which the snapshot holds.
-db_reads() { [ "$(call GET "/api/v1/releases/$applied" "$author")" = 200 ]; }
+# seeded Applied release, which the snapshot holds. The token is minted again if old: a restore
+# can outlast its life.
+db_reads() {
+  fresh_author
+  [ "$(call GET "/api/v1/releases/$applied" "$author")" = 200 ]
+}
 # same_versions: both nodes' machine-configuration resource versions read before and after, and
 # equal.
 same_versions() {
@@ -629,15 +660,15 @@ s2_steps() {
   [ -n "$ref_name" ] || die "s2: no reference to carry; nothing after it can run"
   evidence_to pre || die "no pre-state: bin/evidence failed"
   cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
-  # A capture can outlast a token's life: minted again, as after each outcome bundle.
-  fresh_author
-  fresh_publisher
   check "$ref" "pre-state: the worker has a machine-configuration resource version" \
     counted 1 "^[0-9]+ $TALOS_WORKER_IP\$" "$EV/pre-talos-config-version.txt"
   seq=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s2: cannot read the operations"
   act_seq=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s2: cannot read the acts"
   check 'S2 step 7' 'inject db-snapshot s2-step1' "$bin/inject" db-snapshot "$snap"
   check 'S2 step 7' 'inject bao-snapshot s2-step1' "$bin/inject" bao-snapshot "$snap"
+  # The capture and the snapshots can outlast a token's life: each token is minted again before
+  # its next use (fresh_* re-mint one three minutes old).
+  fresh_author
 
   # Steps 1 and 2, each mutation under the draft's current ETag; a second author on a replaced ETag
   # gets 412 for the fragment, the profile and the assignment.
@@ -664,6 +695,7 @@ s2_steps() {
   [ -n "$frv" ] && [ -n "$prv" ] && [ -n "$arv" ] || die "s2: steps 1 and 2 left no revisions; nothing after them can run"
 
   # Step 3, on A, the workers of A, B and C all running.
+  fresh_publisher
   check 'S2 step 3' 'POST /publications as h-publisher: 202; the publish operation succeeded with one release, the draft published' \
     s2_publish "$publisher" step3-publication
   [ -n "$s2_release" ] || die "s2: step 3 published no release; nothing after it can run"
@@ -671,6 +703,7 @@ s2_steps() {
   check 'S2 pass' 'no plan and no operation but publish since the seed' only_publish_since "$seq"
 
   # Step 4.
+  fresh_author
   check 'S2 step 4' "GET the worker's review: the label present, its value redacted as the reference, provenance naming the fragment revision" \
     review_redacted
 
@@ -685,7 +718,6 @@ s2_steps() {
   check 'S2 pass' 'no plan and no operation but publish since the seed (after step 5)' only_publish_since "$seq"
   evidence_to post || die "no post-state: bin/evidence failed"
   cp -- "$bundle/talos-config-version.txt" "$EV/post-talos-config-version.txt"
-  fresh_author
   check 'S2 pass' "the worker's machine-configuration resource version unchanged by publication" same_versions
   check 'S2 step 5' 'the post-state bundle: no fixture secret but the scan control' scan_clean post
 
