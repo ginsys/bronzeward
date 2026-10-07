@@ -483,9 +483,9 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    other scalar, an embedded document's text included, is unchanged byte for
    byte. A mark that would change other text, as re-encoding an embedded
    document in another format does, is refused (`mark-rewrites-text`); the
-   remedy is to mark the containing scalar whole, or to abandon and ingest
-   again with the mark at the start. Step 6 creates the new generations under the same claim. Step 8 does not run
-   again: the envelope's baseline is already the exact input. The new envelope
+   remedy is to abandon and ingest again with the mark at the start, where the
+   run holds every value it guards. Step 6 creates the new generations under
+   the same claim. Step 8 does not run again: the envelope's baseline is already the exact input. The new envelope
    (the re-substituted document, every reference and the baseline ciphertext)
    replaces the payload and its digest in the transaction that pauses the claim
    again (item 1). The marks are held by the serving process only, never
@@ -495,11 +495,11 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    §2.3 step 3, or text the mark would rewrite, item 3) returns the claim to
    `paused` with its earlier envelope and digest unchanged, and the refusal is
    recorded on the ingestion's operation; the review goes on. The refusal names
-   the rule, and the mark by its position in the request, never by its path:
-   an operator's path can hold an earlier extracted value, which the redaction
-   of refusals (§8.3) cannot recognise once the run no longer holds it. A path
-   inside the staged document that the refusal names (a guard hit's) is
-   redacted as for any ingestion. A mark refused
+   the rule, and the mark by its position in the request, and no path at all:
+   an operator's path, or a staged document's path whose tokens together
+   spell it (a guard hit's), can hold an earlier extracted value, which the
+   redaction of refusals (§8.3) cannot recognise once the run no longer holds
+   it. A mark refused
    after a provider write (§2.3 step 6 failing part-way) abandons the claim
    with that refusal, and the generations it created are unused (§2.3).
 5. **Continue.** The operator's continuation takes the claim as a mark does and
