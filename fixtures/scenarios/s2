@@ -834,18 +834,19 @@ s6_alerts() {
   sql "SELECT coalesce(string_agg(kind || ':' || coalesce(dependency, '-') || ':' || coalesce(reason, '-'), ',' ORDER BY seq), '')
     FROM dependency_alert WHERE seq > $s6_a0"
 }
-# s6_named: every alert since s6_a0 concerning a dependency names s2_release and exactly the
-# releases referencing that dependency (DM §6.1), as a set; says which otherwise. A
-# `monitor-stalled` alert names none, and the exact alert list its caller checks refuses it.
+# s6_named: every alert since s6_a0 concerning a dependency names exactly the releases referencing
+# that dependency (DM §6.1), as a set; says which otherwise. s2_release is among them for its own
+# dependencies; the earlier publications' releases for theirs, which regress during the outages
+# too. A `monitor-stalled` alert names none, and the exact alert list its caller checks refuses it.
 s6_named() {
   local bad
   bad=$(sql "SELECT coalesce(string_agg(a.seq::text, ',' ORDER BY a.seq), '') FROM dependency_alert a
-    WHERE a.seq > $s6_a0 AND a.dependency IS NOT NULL AND (a.releases IS NULL OR NOT '$s2_release' = ANY (a.releases)
+    WHERE a.seq > $s6_a0 AND a.dependency IS NOT NULL AND (a.releases IS NULL
       OR (SELECT array_agg(DISTINCT r ORDER BY r) FROM unnest(a.releases) r) IS DISTINCT FROM
         (SELECT array_agg(DISTINCT d.release ORDER BY d.release) FROM dependency d
           JOIN dependency_status s USING (provider, object, version, created) WHERE s.id = a.dependency))") || return 1
   [ -z "$bad" ] || {
-    say "s2: alerts $bad since $s6_a0 do not name exactly the releases referencing their dependency, $s2_release among them"
+    say "s2: alerts $bad since $s6_a0 do not name exactly the releases referencing their dependency"
     return 1
   }
 }
@@ -913,7 +914,7 @@ s6_outage() {
   local ref='S2 negative controls (step 6)'
   check "$ref" "inject $1 openbao" s6_inject "$1" openbao
   check "$ref" "$1: every dependency observed since unknown ($3)" within 300 s6_classes unknown "$3" unknown "$3"
-  check "$ref" "$1: one regression for each dependency but the lost one, naming the release, and no other alert" s6_regressions "$3"
+  check "$ref" "$1: one regression for each dependency but the lost one, each naming exactly the releases referencing it, and no other alert" s6_regressions "$3"
   check "$ref" "$1: GET /dependencies serves every one unknown" s6_served '[.items[] | select(.class != "unknown")] == []'
   check "$ref" "$1: a publication pinning the version refused 503 dependency-unavailable, nothing released" \
     s6_refused "$4" 503 dependency-unavailable '.provider == "kv" or .provider == "transit"'
