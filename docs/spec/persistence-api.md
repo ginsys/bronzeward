@@ -1463,8 +1463,8 @@ failure with `"cause": "nothing-to-decrypt"`. An ingestion under review
 claim pauses; `{"type": "marked", "generation": <n>, "paths": <count>}` when
 a mark takes it; `{"type": "mark-refused", "generation": <n>, "problem":
 <problem document>}` when a mark is refused before any provider write, the
-problem naming the rule and the mark's position in the request, never its
-path (compilation §3.6 item 4); and `{"type": "continued",
+problem naming the rule and the mark's position in the request, and no path
+(compilation §3.6 item 4); and `{"type": "continued",
 "generation": <n>}` when the operator continues it. No event carries input text. The operation resource shows its stored row: an operation
 whose claim a read already treats as abandoned (compilation §3.5) stays
 `running` here until a sweep writes it: the next periodic sweep, or a later
@@ -2865,10 +2865,13 @@ each (design §7.7 consequences):
   addressing no node returning the claim `paused` with its earlier digest
   and a `mark-refused` event, with a control that abandons on every refusal
   and must then fail; a refused mark whose path holds an earlier extracted
-  sentinel, the sentinel absent from the event, the problem and the logs,
-  with a control that names the path and must then fail; a mark inside an
-  embedded JSON document beside a scalar whose text equals an earlier
-  extracted value refused `mark-rewrites-text` before any provider write,
+  sentinel, and a guard hit whose staged-document path spells one, the
+  sentinel absent from the event, the problem and the logs, each with a
+  control that names the path and must then fail; a mark inside a declared
+  embedded JSON document whose re-encoding would assemble an earlier
+  extracted value from separate scalars (`public: visible` from
+  `{"public": "visible"}`, which the first run's guard passes) refused
+  `mark-rewrites-text` before any provider write,
   with a control that skips that check and must then fail by staging the
   earlier value in plaintext; a mark whose provider write fails after one generation
   abandoning the claim; two marks racing one paused claim, exactly one
