@@ -100,6 +100,14 @@ func digest(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
 // seed installs a fresh database and publishes one release over the fixture's sources.
 func seed(t *testing.T) *fixture {
 	t.Helper()
+	return seedWith(t, nil)
+}
+
+// seedWith is seed, with objects called once the fixture's identifiers and KV path are chosen and
+// before any row names them: it may create the provider objects the rows will name and set kvCreated,
+// key and keyCreated to theirs. Both versions stay 1.
+func seedWith(t *testing.T, objects func(f *fixture)) *fixture {
+	t.Helper()
 	db, _ := dbtest.New(t)
 	ms, err := migrate.Embedded()
 	if err != nil {
@@ -119,6 +127,9 @@ func seed(t *testing.T) *fixture {
 		kvCreated: "2026-09-26T09:12:40.123456789Z", key: "bw-artifact", keyCreated: "2026-09-26T09:12:40Z"}
 	// The generation's path names its staging claim, which no row of the fixture needs.
 	f.kv = "gen/" + f.cluster + "/" + f.claim + "/v1"
+	if objects != nil {
+		objects(f)
+	}
 
 	// Inventory (adoption_test.go adoptionRows).
 	mustExec(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'alice', now())`, f.human)

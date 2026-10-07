@@ -640,8 +640,11 @@ fail:
     outside the database leaves A unlogged again and skips that new alert;
     giving a line an identifier of its own writes A's repeat under a new one.
 
-Items 2, 3 and 8's publication refusal are acceptance-plan S2's negative
-controls and S7's variants; the rest run as *checks*
+Item 2's provider object states and item 3 run as a *check* against OpenBao
+through the metadata client; item 2's partitioned, sealed and paused OpenBao
+and item 8's publication refusal are acceptance-plan S2's negative controls,
+and a deleted Transit key and a snapshot older than the database are S7's
+variants; the rest run as *checks*
 ([acceptance plan §7.1](acceptance-plan.md#71-required-verification)).
 
 ### 10.2 Evidence limits
@@ -674,6 +677,12 @@ controls and S7's variants; the rest run as *checks*
   checks show that a pass sends each request as a GET with this token and that
   serve builds the monitor's client from `metadataTokenFile`, against an HTTP
   stand-in that records requests, not OpenBao.
+- **Item 2's object states** (a KV version soft-deleted, undeleted, destroyed
+  and pruned, its metadata deleted; a Transit version below each floor, the
+  key deleted) are shown against OpenBao 2.6.1 in dev mode under the
+  fixture's committed policies, one object per state, not the fixture's Raft
+  node. A soft delete is read a second after it, so the same-second window
+  stays unexercised. The whole-server states run on the fixture (S2).
 - **A short deletion schedule** can reach `blocked` without a
   `deletion-scheduled` warning (§6.2); `blocked` still alerts at once.
 - **No interval is measured.** 60 seconds, 10 seconds, 15 minutes and three
