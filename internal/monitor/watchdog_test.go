@@ -191,6 +191,45 @@ func TestRunHungPasses(t *testing.T) {
 	t.Fatalf("hung passes: %d monitor-stalled alerts, logged %v", stalledCount(t, f.db), s.has("monitor-stalled"))
 }
 
+// §6.1, §6.3, §7.1: a backlog of many full batches on a slow sink is logged by Run's own logger,
+// so passes complete meanwhile and the watchdog finds nothing stalled; a pass that drained the
+// backlog at its start would make no progress until every batch was written.
+func TestRunBacklog(t *testing.T) {
+	f := seed(t)
+	for range 1000 {
+		stalledAlert(t, f.db)
+	}
+	backlog := stalledCount(t, f.db)
+	tm := Defaults()
+	tm.Interval = 200 * time.Millisecond
+	tm.LockHolder = time.Second
+	m, s := withSink(f, &fake{}, tm)
+	s.delay = 5 * time.Millisecond // 0.5 s a batch, 5 s the backlog
+	var before sql.NullTime
+	if err := f.db.QueryRow(`SELECT last_pass FROM dependency_monitor`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	passed := false
+	for deadline := time.Now().Add(2 * time.Second); !passed && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+		if err := f.db.QueryRow(`SELECT last_pass IS DISTINCT FROM $1 FROM dependency_monitor`, before).
+			Scan(&passed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !passed || stalledCount(t, f.db) != backlog {
+		t.Fatalf("pass completed %v, %d monitor-stalled alerts, %d of 1000 lines written", passed,
+			stalledCount(t, f.db)-backlog, len(s.dals()))
+	}
+}
+
 // §6.3, §7.1: with every pass hung and the log sink blocked, the watchdog still raises
 // monitor-stalled every three intervals, and Run returns once cancelled; a log write holds up
 // neither.

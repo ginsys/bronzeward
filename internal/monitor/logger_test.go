@@ -96,6 +96,15 @@ func stalledAlert(t *testing.T, db *sql.DB) string {
 	return dal
 }
 
+func alertCount(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM dependency_alert`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 func lastLogged(t *testing.T, db *sql.DB) int64 {
 	t.Helper()
 	var n int64
@@ -321,6 +330,68 @@ func TestLoggerBlockedReport(t *testing.T) {
 	m.report(context.Background(), "further")
 	if d := time.Since(start); d > 2*time.Second || reports.Load() != 1 {
 		t.Fatalf("a further report waited %v (%d reports)", d, reports.Load())
+	}
+}
+
+// §7.1: an alert a pass records while Run's logger is still writing earlier lines is logged once
+// that write ends, with no further pass or watchdog alert to wake the logger.
+func TestRunWakeWhileLogging(t *testing.T) {
+	f := seed(t)
+	first := stalledAlert(t, f.db)
+	// Slow answers let the logger read and start writing the first alert before the pass records.
+	p := &fake{delay: 500 * time.Millisecond}
+	deletion := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	p.set(kvAnswer(t, f, func(v map[string]any) { v["deletion_time"] = deletion.Format(time.RFC3339Nano) }),
+		transitAnswer(t, f))
+	tm := Defaults()
+	tm.Interval = time.Hour
+	m, s := withSink(f, p, tm)
+	gate := make(chan struct{})
+	s.mu.Lock()
+	s.gate = gate
+	s.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	// The pass's wake at its start reaches the logger, which is writing the first line before the
+	// pass records the second alert.
+	writing := 0
+	for deadline := time.Now().Add(400 * time.Millisecond); writing == 0 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+		s.mu.Lock()
+		writing = s.active
+		s.mu.Unlock()
+	}
+	if writing != 1 || alertCount(t, f.db) != 1 {
+		t.Fatalf("%d writes before the pass recorded, %d alerts", writing, alertCount(t, f.db))
+	}
+	var second string
+	for deadline := time.Now().Add(5 * time.Second); second == "" && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+		if err := f.db.QueryRow(`SELECT coalesce(max(id), '') FROM dependency_alert WHERE kind = 'deletion-scheduled'`).
+			Scan(&second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.mu.Lock()
+	writing = s.active
+	s.mu.Unlock()
+	if second == "" || writing != 1 {
+		t.Fatalf("alert %q recorded with %d writes in progress", second, writing)
+	}
+	s.mu.Lock()
+	s.gate = nil
+	s.mu.Unlock()
+	close(gate)
+	for deadline := time.Now().Add(3 * time.Second); len(s.dals()) < 2 && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := s.dals(); !slices.Equal(got, []string{first, second}) {
+		t.Fatalf("logged %v, want %v", got, []string{first, second})
 	}
 }
 

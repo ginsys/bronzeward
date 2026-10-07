@@ -38,6 +38,8 @@ type Monitor struct {
 	writer chan struct{}
 	// reporter is held by the one call to logf in progress.
 	reporter chan struct{}
+	// wake, once Run has started, asks Run's logger to log (logger.go).
+	wake chan struct{}
 }
 
 // New is a monitor asking meta, with the timings t. It reports its own failures through logf and
@@ -77,14 +79,21 @@ func (m *Monitor) report(ctx context.Context, format string, args ...any) {
 
 // Run passes until ctx ends: each starts one interval after the previous one started, or at once
 // if that one took longer (§6.1, choice §11.4). The watchdog runs beside them on its own schedule
-// (§6.3), and Run returns once both have stopped. A log write and a report blocked in their sink
-// cannot be interrupted, and Run does not wait for them, so at most one of each outlives it.
+// (§6.3), and so does a logger that the passes and the watchdog wake to log their alerts (§7.1).
+// Run returns once all three have stopped. A log write and a report blocked in their sink cannot
+// be interrupted, and Run does not wait for them, so at most one of each outlives it. Run is
+// called at most once on a monitor.
 func (m *Monitor) Run(ctx context.Context) {
+	m.wake = make(chan struct{}, 1)
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		m.watch(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		m.drain(ctx)
 	}()
 	defer wg.Wait()
 	for {
@@ -111,9 +120,9 @@ type dependency struct {
 // Pass classifies every monitored dependency once, then records the pass as completed. A
 // dependency that fails is logged and left for the next pass; the others are still classified.
 // It logs the alerts not yet logged at its start and after each dependency that raised one, once
-// that dependency's advisory lock is released (§7.1).
+// that dependency's advisory lock is released (§7.1): through Run's logger, or itself outside Run.
 func (m *Monitor) Pass(ctx context.Context) error {
-	m.logAlerts(ctx)
+	m.logSoon(ctx)
 	deps, err := m.monitored(ctx)
 	if err != nil {
 		return err
@@ -127,7 +136,7 @@ func (m *Monitor) Pass(ctx context.Context) error {
 			m.report(ctx, "dependency monitor: %s not classified this pass: %v", d.id, err)
 		}
 		if alerted {
-			m.logAlerts(ctx)
+			m.logSoon(ctx)
 		}
 	}
 	return m.completed(ctx)
