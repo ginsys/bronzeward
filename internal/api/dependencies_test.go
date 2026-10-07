@@ -311,13 +311,19 @@ func TestDependencyAlerts(t *testing.T) {
 // types, so a renamed member fails here.
 func TestDependencyMembers(t *testing.T) {
 	d := newDraftEnv(t)
+	// Two of each, so a page of one is cut and carries next.
 	s := d.release(d.draft, 1, releaseProvenance)
+	rec := d.do(d.api, call{method: "POST", path: prefix + "/drafts", token: d.human("h-author"), key: "k-draft2-0123456789",
+		body: `{"cluster":"` + d.cluster + `","title":"second"}`})
+	d.release(decode[draftBody](t, rec, http.StatusCreated).ID, 1, releaseProvenance)
 	art := d.artifactStatus()
 	d.status("bw-other", 1, "retained", "", 0)
-	mustExec(t, d.db, `INSERT INTO dependency_alert (id, seq, kind, dependency, provider, object, version, created, class, reason,
-			releases, observed_from, epoch, recorded_at)
-		VALUES ($1, 0, 'regression', $2, 'transit', 'bw-artifact', 1, '2026-09-26T09:12:40Z', 'unknown', 'unreachable',
-			ARRAY[$3], now(), $4, now())`, id.New(id.DependencyAlert), art, s.rel, epoch(t, d.db))
+	for range 2 {
+		mustExec(t, d.db, `INSERT INTO dependency_alert (id, seq, kind, dependency, provider, object, version, created, class, reason,
+				releases, observed_from, epoch, recorded_at)
+			VALUES ($1, 0, 'regression', $2, 'transit', 'bw-artifact', 1, '2026-09-26T09:12:40Z', 'unknown', 'unreachable',
+				ARRAY[$3], now(), $4, now())`, id.New(id.DependencyAlert), art, s.rel, epoch(t, d.db))
+	}
 	whole := func(m map[string]any) map[string]any { return m }
 	first := func(m map[string]any) map[string]any {
 		items, _ := m["items"].([]any)
@@ -345,6 +351,9 @@ func TestDependencyMembers(t *testing.T) {
 		want []string
 	}{
 		{"/dependencies?limit=1", whole, []string{"items", "lastPass", "next"}},
+		{"/dependencies/" + art + "/releases?limit=1", whole, []string{"items", "next"}},
+		{"/dependencies/" + art + "/alerts?limit=1", whole, []string{"items", "next"}},
+		{"/dependency-alerts?limit=1", whole, []string{"items", "next"}},
 		{"/dependencies", first, dependency},
 		{"/dependencies/" + art, whole, dependency},
 		{"/dependencies/" + art + "/releases", first, []string{"cluster", "publishedAt", "records", "release"}},
