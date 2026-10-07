@@ -73,9 +73,10 @@ version named by several releases, or by both dependency records of one
 release, is one monitored dependency with one status **(choice §11.2)**. Its
 alerts name every release whose dependency records reference it (a repeated
 `deletion-scheduled` warning names only those not yet warned, §6.2); §5.2 orders
-a publication against a transition, and §6.2 warns of a scheduled deletion
-every release committed against it, so no committed release is missing from
-either's alert.
+a publication against a transition, so no committed release is missing from
+its alert, and §6.2 warns of a scheduled deletion every release committed
+against it while the deletion is still ahead at the next pass; one that takes
+effect sooner alerts as `blocked` instead (§10.2).
 
 Each monitored dependency has a `dep` identifier (PA §2), created when its
 first dependency record is committed. The identifier names the status, not the
@@ -244,7 +245,8 @@ names the release. A refusal can be conservative, for a change observed before
 publication's own request but recorded after it began; the retried
 publication classifies afresh. A scheduled deletion leaves a version
 `retained` and needs no such ordering: §6.2 warns each release committed
-against it, whenever it commits.
+against it, whenever it commits, while the deletion is still ahead at the
+next pass; a shorter one alerts as `blocked` (§10.2).
 
 Without this seed, a dependency lost between publication and the monitor's
 first pass would be a dependency never seen `retained`, alerted after 15
