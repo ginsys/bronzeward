@@ -41,21 +41,27 @@ func completed(t *testing.T, m *Monitor) {
 func TestWatchdogStalled(t *testing.T) {
 	f := seed(t)
 	tm := Defaults()
-	tm.Interval = 200 * time.Millisecond
+	// Every check that expects nothing runs well inside three intervals; the repeat is brought due by
+	// moving the last alert back, not by sleeping.
+	tm.Interval = time.Second
 	m, _ := monitorFor(f, &fake{}, tm)
 	completed(t, m)
 	if watchdogOnce(t, m) {
 		t.Fatal("raised with fresh progress")
 	}
-	time.Sleep(700 * time.Millisecond)
+	time.Sleep(3200 * time.Millisecond)
 	if !watchdogOnce(t, m) || watchdogOnce(t, m) {
 		t.Fatal("not raised exactly once after three intervals")
 	}
-	time.Sleep(300 * time.Millisecond)
+	if _, err := f.db.Exec(`UPDATE dependency_monitor SET last_stalled = last_stalled - interval '2 seconds'`); err != nil {
+		t.Fatal(err)
+	}
 	if watchdogOnce(t, m) {
 		t.Fatal("raised again before a further three intervals")
 	}
-	time.Sleep(400 * time.Millisecond)
+	if _, err := f.db.Exec(`UPDATE dependency_monitor SET last_stalled = last_stalled - interval '1100 milliseconds'`); err != nil {
+		t.Fatal(err)
+	}
 	if !watchdogOnce(t, m) {
 		t.Fatal("not raised again after a further three intervals")
 	}
@@ -183,4 +189,40 @@ func TestRunHungPasses(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("hung passes: %d monitor-stalled alerts, logged %v", stalledCount(t, f.db), s.has("monitor-stalled"))
+}
+
+// §6.3, §7.1: with every pass hung and the log sink blocked, the watchdog still raises
+// monitor-stalled every three intervals, and Run returns once cancelled; a log write holds up
+// neither.
+func TestRunBlockedSink(t *testing.T) {
+	f := seed(t)
+	p := &fake{delay: time.Minute}
+	tm := Defaults()
+	tm.Interval = 100 * time.Millisecond
+	tm.Request = time.Minute
+	tm.LockHolder = 300 * time.Millisecond
+	m, s := withSink(f, p, tm)
+	gate := make(chan struct{})
+	s.mu.Lock()
+	s.gate = gate
+	s.mu.Unlock()
+	defer close(gate)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+	deadline := time.Now().Add(4 * time.Second)
+	for stalledCount(t, f.db) < 3 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	n := stalledCount(t, f.db)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Run did not return with the sink blocked (%d monitor-stalled alerts)", n)
+	}
+	if n < 3 {
+		t.Fatalf("%d monitor-stalled alerts with the sink blocked", n)
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
@@ -20,12 +21,21 @@ type sink struct {
 	lines []map[string]any
 	delay time.Duration
 	gate  chan struct{}
+	// active and most count the writes in progress, now and at most.
+	active, most int
 }
 
 func (s *sink) Write(b []byte) (int, error) {
 	s.mu.Lock()
 	delay, gate := s.delay, s.gate
+	s.active++
+	s.most = max(s.most, s.active)
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.active--
+		s.mu.Unlock()
+	}()
 	if gate != nil {
 		<-gate
 	}
@@ -156,7 +166,7 @@ func TestLoggerWaitsForHolder(t *testing.T) {
 	m, s := withSink(f, &fake{}, Defaults())
 	done := make(chan struct{})
 	go func() { m.logAlerts(context.Background()); close(done) }()
-	time.Sleep(300 * time.Millisecond)
+	dbtest.WaitForLockWait(t, f.db)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -204,6 +214,49 @@ func TestLoggerPausedWrite(t *testing.T) {
 	<-done
 	m.logAlerts(context.Background())
 	if got := s.dals(); len(got) < 3 || got[0] != dal || got[1] != dal || lastLogged(t, f.db) != maxSeq(t, f.db) {
+		t.Fatalf("logged %v, cursor %d of %d", got, lastLogged(t, f.db), maxSeq(t, f.db))
+	}
+}
+
+// §7.1 step 3: a write that blocks past the timeout ends its logger, which writes no further line of
+// that batch, and no second write starts on the instance while it blocks; once the sink unblocks,
+// the next logger writes the batch again.
+func TestLoggerOneWriter(t *testing.T) {
+	f := seed(t)
+	first, second := stalledAlert(t, f.db), stalledAlert(t, f.db)
+	tm := Defaults()
+	tm.LockHolder = 300 * time.Millisecond
+	m, s := withSink(f, &fake{}, tm)
+	gate := make(chan struct{})
+	s.mu.Lock()
+	s.gate = gate
+	s.mu.Unlock()
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m.logAlerts(context.Background())
+		}()
+		time.Sleep(400 * time.Millisecond)
+	}
+	s.mu.Lock()
+	most := s.most
+	s.gate = nil
+	s.mu.Unlock()
+	close(gate)
+	wg.Wait()
+	// The blocked write returns now; take the writer once it lets go.
+	m.writer <- struct{}{}
+	<-m.writer
+	if most != 1 {
+		t.Fatalf("%d writes at once on one instance", most)
+	}
+	if got := s.dals(); !slices.Equal(got, []string{first}) {
+		t.Fatalf("an expired batch wrote on: %v", got)
+	}
+	m.logAlerts(context.Background())
+	if got := s.dals(); !slices.Equal(got, []string{first, first, second}) || lastLogged(t, f.db) != maxSeq(t, f.db) {
 		t.Fatalf("logged %v, cursor %d of %d", got, lastLogged(t, f.db), maxSeq(t, f.db))
 	}
 }

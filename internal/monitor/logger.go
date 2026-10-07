@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -59,7 +60,21 @@ func (m *Monitor) logAlerts(ctx context.Context) {
 // logBatch is §7.1 steps 1 to 4 once. The logger's own transaction holds the loggers' lock and
 // the cursor across the write; it holds no DependencyMonitor lock until it advances the cursor,
 // so a write that blocks delays only other loggers, until its timeout ends the transaction.
+//
+// A write to out cannot be interrupted, so the instance writes through one writer at a time, and
+// its callers, a pass and the watchdog, wait for it at most the lock-holder timeout: once to take
+// the writer and once for the write. A write that outlasts its batch ends the logger, and writes no
+// further line of that batch once it returns.
 func (m *Monitor) logBatch(ctx context.Context) (int, error) {
+	if err := m.takeWriter(ctx); err != nil {
+		return 0, err
+	}
+	handed := false
+	defer func() {
+		if !handed {
+			<-m.writer
+		}
+	}()
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -88,14 +103,29 @@ func (m *Monitor) logBatch(ctx context.Context) (int, error) {
 	if len(lines) == 0 {
 		return 0, nil
 	}
+	encoded := make([][]byte, 0, len(lines))
 	for _, l := range lines {
 		b, err := json.Marshal(l)
 		if err != nil {
 			return 0, err
 		}
-		if _, err := m.out.Write(append(b, '\n')); err != nil {
-			return 0, fmt.Errorf("log write: %w", err)
+		encoded = append(encoded, append(b, '\n'))
+	}
+	wctx, cancel := context.WithTimeout(ctx, m.t.LockHolder)
+	defer cancel()
+	done := make(chan error, 1)
+	handed = true
+	go func() {
+		defer func() { <-m.writer }()
+		done <- m.write(wctx, encoded)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return 0, err
 		}
+	case <-wctx.Done():
+		return 0, fmt.Errorf("log write: %w", wctx.Err())
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE dependency_monitor SET last_logged = $1`, lines[len(lines)-1].seq); err != nil {
 		return 0, fmt.Errorf("last logged: %w", err)
@@ -104,6 +134,33 @@ func (m *Monitor) logBatch(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	return len(lines), nil
+}
+
+// takeWriter waits at most the lock-holder timeout for the instance's writer.
+func (m *Monitor) takeWriter(ctx context.Context) error {
+	t := time.NewTimer(m.t.LockHolder)
+	defer t.Stop()
+	select {
+	case m.writer <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return errors.New("an earlier log write is still blocked")
+	}
+}
+
+// write writes the lines in order, one Write each, until ctx ends.
+func (m *Monitor) write(ctx context.Context, lines [][]byte) error {
+	for _, b := range lines {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, err := m.out.Write(b); err != nil {
+			return fmt.Errorf("log write: %w", err)
+		}
+	}
+	return nil
 }
 
 // unlogged is §7.1 step 2: a short transaction that locks the DependencyMonitor row FOR SHARE,
