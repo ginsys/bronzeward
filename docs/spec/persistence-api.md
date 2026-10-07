@@ -2882,7 +2882,7 @@ each (design §7.7 consequences):
   then fail by refusing under another rule; a mark on the string of an
   identified embedded document holding an earlier reference refused
   `mark-kind` likewise, with a control that checks mappings only and must then
-  fail by creating a generation; a mark extracting the sentinel to a new generation
+  fail by refusing under another rule (the embedded declaration left invalid); a mark extracting the sentinel to a new generation
   under the same claim, the claim `paused` again at the next owner
   generation with a new digest and the continuation's draft revision holding
   a reference, not the sentinel, with a control that stores the document
