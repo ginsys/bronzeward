@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/classify"
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/provider"
 )
 
@@ -316,5 +317,68 @@ func TestPassRequestTimeout(t *testing.T) {
 		if got := kinds(alerts(t, f.db, dep)); !slices.Equal(got, []string{"regression"}) {
 			t.Fatalf("%s alerts %v, want regression", dep, got)
 		}
+	}
+}
+
+// alertIDs is the alerts' identifiers and recording sequences, in recording order.
+func alertIDs(t *testing.T, db *sql.DB) (ids []string, seqs []int64) {
+	t.Helper()
+	rows, err := db.Query(`SELECT id, seq FROM dependency_alert ORDER BY seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var seq int64
+		if err := rows.Scan(&id, &seq); err != nil {
+			t.Fatal(err)
+		}
+		ids, seqs = append(ids, id), append(seqs, seq)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return ids, seqs
+}
+
+// Dependency monitor §9, §10.1 item 15: alert A is recorded before a backup and logged after it,
+// alert B is recorded and logged after it. Restored to the backup, the database holds A and not B;
+// the next logger writes A's line again under A's dal identifier and never B's. A new alert C then
+// takes the recording sequence B had, under an identifier neither had, and is logged. Controls:
+// keeping the last logged sequence outside the database leaves A unlogged and skips C; a line
+// with an identifier of its own writes A's repeat under a new one, and one derived from the
+// sequence writes C's under B's.
+func TestLoggerAfterRestore(t *testing.T) {
+	f := seed(t)
+	m, s := withSink(f, &fake{}, Defaults())
+	ctx := context.Background()
+	a := stalledAlert(t, f.db)
+	restored := dbtest.Copy(t, f.db)
+	m.logAlerts(ctx)
+	b := stalledAlert(t, f.db)
+	m.logAlerts(ctx)
+	_, seqs := alertIDs(t, f.db)
+	bSeq := seqs[len(seqs)-1]
+	if got := s.dals(); !slices.Equal(got, []string{a, b}) {
+		t.Fatalf("before the restore logged %v, want [%s %s]", got, a, b)
+	}
+
+	m.db = restored
+	if ids, _ := alertIDs(t, restored); !slices.Equal(ids, []string{a}) {
+		t.Fatalf("restored alerts %v, want [%s]", ids, a)
+	}
+	m.logAlerts(ctx)
+	if got := s.dals(); !slices.Equal(got, []string{a, b, a}) {
+		t.Fatalf("after the restore logged %v, want A's line again: [%s %s %s]", got, a, b, a)
+	}
+	c := stalledAlert(t, restored)
+	ids, seqs := alertIDs(t, restored)
+	if c == a || c == b || !slices.Equal(ids, []string{a, c}) || seqs[1] != bSeq {
+		t.Fatalf("restored alerts %v at %v, want [%s, a new one] with B's sequence %d", ids, seqs, a, bSeq)
+	}
+	m.logAlerts(ctx)
+	if got := s.dals(); !slices.Equal(got, []string{a, b, a, c}) {
+		t.Fatalf("logged %v, want the new alert's line after A's repeat: [%s %s %s %s]", got, a, b, a, c)
 	}
 }

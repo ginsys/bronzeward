@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/ginsys/bronzeward/internal/database"
@@ -31,6 +32,28 @@ func New(t testing.TB) (*sql.DB, string) {
 	if skip {
 		t.Skip("BW_TEST_PG_DSN unset")
 	}
+	return create(t, admin, "")
+}
+
+// Copy returns a connection pool on a new database copied from db's, as a backup taken now and
+// then restored, dropped when the test ends. PostgreSQL copies only a database no other session
+// is connected to, so Copy closes db's idle connections first: db must have none in use, and
+// opens new ones when used again.
+func Copy(t testing.TB, db *sql.DB) *sql.DB {
+	t.Helper()
+	var source string
+	if err := db.QueryRow(`SELECT current_database()`).Scan(&source); err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxIdleConns(0)
+	db.SetMaxIdleConns(2)
+	copied, _ := create(t, os.Getenv("BW_TEST_PG_DSN"), source)
+	return copied
+}
+
+// create makes a database, from template when one is named, and returns a pool on it and its DSN.
+func create(t testing.TB, admin, template string) (*sql.DB, string) {
+	t.Helper()
 	var b [8]byte
 	rand.Read(b[:])
 	name := "bw_test_" + hex.EncodeToString(b[:])
@@ -43,7 +66,12 @@ func New(t testing.TB) (*sql.DB, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := adb.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
+	stmt := "CREATE DATABASE " + name
+	if template != "" {
+		// PostgreSQL waits a few seconds for the closed sessions to end before it refuses.
+		stmt += " TEMPLATE " + pgx.Identifier{template}.Sanitize()
+	}
+	if _, err := adb.ExecContext(ctx, stmt); err != nil {
 		adb.Close()
 		t.Fatal(err)
 	}
