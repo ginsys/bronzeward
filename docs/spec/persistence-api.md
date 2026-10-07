@@ -1503,7 +1503,10 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   `400 cursor-invalid` **(choice §17.14)**.
 - **Redaction**: responses carry sanitized sources, reference names and
   compilation's redacted review data; never a secret value, ciphertext or
-  baseline (design §11.1).
+  baseline (design §11.1). One exception: `GET /ingestions/{id}/review` answers
+  the staged sanitized document, which can still hold a value no one has
+  marked, to the operator reviewing it, under `no-store` (§9.3, compilation
+  §3.6).
 - Every response to an authenticated request carries `Bronzeward-Epoch` with
   the current epoch identity, and `Bronzeward-Recovery-Mode: true` while
   recovery mode is in effect. A `401`, a `403 identity-revoked` and the
@@ -2861,13 +2864,17 @@ each (design §7.7 consequences):
   service identity and on a claim not `paused`, the sentinel absent from
   every log, problem and the database, with a control that logs the answer
   and must then fail; the review route answering `503` when the staging key
-  is unavailable and `500` for an envelope whose digest does not match, the
-  claim `paused` with its digest unchanged after each, with a control that
-  abandons on an integrity failure as a takeover does and must then fail; a
-  mark's and a continuation's run that cannot decrypt the envelope writing
+  is unavailable, and `500` for an envelope whose digest does not match and
+  for a malformed envelope stored with its matching digest, the claim `paused`
+  with its digest unchanged after each, with a control that abandons on an
+  integrity failure as a takeover does and must then fail; a mark's and a
+  continuation's run that cannot decrypt the envelope writing
   `resume-failed`, the claim `held` to its lease and the operation `running`,
   then resumed by takeover, with a control that fails the operation and must
-  then fail; a mark on a mapping holding an earlier reference refused
+  then fail; a mark's and a continuation's run that finds a digest mismatch,
+  and one that finds a malformed envelope, abandoning the claim and failing
+  its operation `500 internal-error`, with a control that pauses the claim
+  again and must then fail; a mark on a mapping holding an earlier reference refused
   `mark-kind` before any provider write, the claim `paused` with its earlier
   digest, with a control that reads a reference member as a string and must
   then fail by refusing under another rule; a mark extracting the sentinel to a new generation
@@ -2888,8 +2895,11 @@ each (design §7.7 consequences):
   with a control that skips that check and must then fail by staging the
   earlier value in plaintext; a mark whose provider write fails after one generation
   abandoning the claim; two marks racing one paused claim, exactly one
-  taking it; a takeover of a `paused` claim refused; a mark's and a
-  continuation's run killed before their next stored state, each resumed by
+  taking it; a takeover of a `paused` claim refused; a mark's run killed at
+  each of the steps it re-enters (§2.3 steps 3 to 7, step 6 after its first
+  generation and before its last) and before it stores its new envelope, and
+  a continuation's run killed before its draft transaction, every surface
+  scanned after each kill as the scan above requires, each resumed by
   takeover from the stored envelope: the mark's pausing again without its
   marks, with a control that resumes the killed run's unsaved marks and must
   then fail, and the continuation's committing, with a control that records
