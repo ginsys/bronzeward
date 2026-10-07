@@ -8,6 +8,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -219,14 +220,16 @@ func TestLoggerPausedWrite(t *testing.T) {
 }
 
 // §7.1 step 3: a write that blocks past the timeout ends its logger, which writes no further line of
-// that batch, and no second write starts on the instance while it blocks; once the sink unblocks,
-// the next logger writes the batch again.
+// that batch and reports nothing, and no second write starts on the instance while it blocks; once
+// the sink unblocks, the next logger writes the batch again.
 func TestLoggerOneWriter(t *testing.T) {
 	f := seed(t)
 	first, second := stalledAlert(t, f.db), stalledAlert(t, f.db)
 	tm := Defaults()
 	tm.LockHolder = 300 * time.Millisecond
 	m, s := withSink(f, &fake{}, tm)
+	var reports atomic.Int32
+	m.logf = func(string, ...any) { reports.Add(1) }
 	gate := make(chan struct{})
 	s.mu.Lock()
 	s.gate = gate
@@ -249,8 +252,8 @@ func TestLoggerOneWriter(t *testing.T) {
 	// The blocked write returns now; take the writer once it lets go.
 	m.writer <- struct{}{}
 	<-m.writer
-	if most != 1 {
-		t.Fatalf("%d writes at once on one instance", most)
+	if most != 1 || reports.Load() != 0 {
+		t.Fatalf("%d writes at once on one instance, %d reports", most, reports.Load())
 	}
 	if got := s.dals(); !slices.Equal(got, []string{first}) {
 		t.Fatalf("an expired batch wrote on: %v", got)
@@ -258,6 +261,55 @@ func TestLoggerOneWriter(t *testing.T) {
 	m.logAlerts(context.Background())
 	if got := s.dals(); !slices.Equal(got, []string{first, first, second}) || lastLogged(t, f.db) != maxSeq(t, f.db) {
 		t.Fatalf("logged %v, cursor %d of %d", got, lastLogged(t, f.db), maxSeq(t, f.db))
+	}
+}
+
+// §7.1, §6.3: a batch read delayed by a holder of the DependencyMonitor row, followed by a slow
+// write, outlasts the logger transaction's idle timeout, so advancing the cursor fails. The failure
+// is reported, and a report blocked in the same sink as the lines holds up the logger at most the
+// lock-holder timeout, so neither a pass nor the watchdog waits on it.
+func TestLoggerBlockedReport(t *testing.T) {
+	f := seed(t)
+	stalledAlert(t, f.db)
+	tm := Defaults()
+	tm.LockHolder = time.Second
+	m, s := withSink(f, &fake{}, tm)
+	s.delay = 700 * time.Millisecond
+	gate := make(chan struct{})
+	defer close(gate)
+	var reports atomic.Int32
+	m.logf = func(string, ...any) {
+		reports.Add(1)
+		<-gate
+	}
+	holder, err := f.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback() }()
+	if _, err := holder.Exec(`SELECT 1 FROM dependency_monitor FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { m.logAlerts(context.Background()); close(done) }()
+	dbtest.WaitForLockWait(t, f.db)
+	time.Sleep(500 * time.Millisecond)
+	if err := holder.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("the logger waited on a blocked report (%d reports)", reports.Load())
+	}
+	if reports.Load() != 1 || lastLogged(t, f.db) != 0 {
+		t.Fatalf("%d reports, cursor %d: the transaction did not expire", reports.Load(), lastLogged(t, f.db))
+	}
+	// A further report, while that one still blocks, is dropped after the timeout.
+	start := time.Now()
+	m.report(context.Background(), "further")
+	if d := time.Since(start); d > 2*time.Second || reports.Load() != 1 {
+		t.Fatalf("a further report waited %v (%d reports)", d, reports.Load())
 	}
 }
 
