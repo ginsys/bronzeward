@@ -544,7 +544,7 @@ c10_rows() {
   check "$ref" "SP's controls: paired-diff moves and rotations, the oracle finds a planted value (c10/sp-controls.tsv)" c10_controls sp-controls.tsv
 }
 
-# S2 steps 1 to 5 and 7 (acceptance plan S2), after the matrices, on an Applied state seeded here:
+# S2 steps 1 to 7 (acceptance plan S2), after the matrices, on an Applied state seeded here:
 # the scenario's precondition is S3's handover (ginsys/bronzeward#25), which has not landed, so the
 # worker's Applied is set by SQL to the release last published for it, as an adoption would record
 # it (owner decision, 2026-10-03). The step-1 draft imports nothing: its import base is that
@@ -1100,7 +1100,7 @@ run() {
   outcome_bundle "$ref" publication-refusal
   for p in $pub_points; do pub_kill_case "$p"; done
 
-  # S2 steps 1 to 5 and 7, on the Applied state seeded from the last release.
+  # S2 steps 1 to 7, on the Applied state seeded from the last release.
   s2_steps
   go_rows
   check 'S2 backups, C §15' 'inject db-snapshot: a dump of the bronzeward database after the updates, refusals and interruptions' \
