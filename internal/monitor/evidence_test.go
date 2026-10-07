@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -186,6 +187,17 @@ type pausing struct {
 	once, opened sync.Once
 	paused       chan struct{}
 	gate         chan struct{}
+	// expired is set when the request's context ended the pause instead of the gate: the pass then
+	// recorded nothing, and the overlap the test arranges never happened.
+	expired atomic.Bool
+}
+
+// released fails the test unless the gate, not the request's timeout, ended the pause.
+func (p *pausing) released(t *testing.T) {
+	t.Helper()
+	if p.expired.Load() {
+		t.Fatal("the paused request timed out before the gate opened, so the first instance recorded nothing")
+	}
 }
 
 func newPausing(p *fake) *pausing {
@@ -203,6 +215,7 @@ func (p *pausing) KV(ctx context.Context, path provider.GenerationPath) (classif
 		select {
 		case <-p.gate:
 		case <-ctx.Done():
+			p.expired.Store(true)
 			return classify.Answer{}, ctx.Err()
 		}
 	}
@@ -251,6 +264,7 @@ func TestOverlappingMonitors(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+	first.released(t)
 	pass(t, m2)
 	if s := statusOf(t, f.db, f.depKV); s.class != "lost" {
 		t.Fatalf("status %+v, want lost", s)
@@ -298,6 +312,7 @@ func TestOverlappingMonitorIdleSession(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+	first.released(t)
 	pass(t, m2)
 	if s := statusOf(t, f.db, f.depKV); s.class != "lost" {
 		t.Fatalf("status %+v, want lost", s)
