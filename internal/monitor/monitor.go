@@ -10,7 +10,9 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/classify"
@@ -25,22 +27,32 @@ type Metadata interface {
 	Transit(ctx context.Context, key string) (classify.Answer, error)
 }
 
-// Monitor runs passes over one database.
+// Monitor runs passes, the watchdog and the logger over one database.
 type Monitor struct {
 	db   *sql.DB
 	meta Metadata
 	t    Timings
 	logf func(string, ...any)
+	out  io.Writer
 }
 
-// New is a monitor asking meta, with the timings t.
-func New(db *sql.DB, meta Metadata, t Timings, logf func(string, ...any)) *Monitor {
-	return &Monitor{db: db, meta: meta, t: t, logf: logf}
+// New is a monitor asking meta, with the timings t. It reports its own failures through logf and
+// writes each alert's log line (§7.1) to out.
+func New(db *sql.DB, meta Metadata, t Timings, logf func(string, ...any), out io.Writer) *Monitor {
+	return &Monitor{db: db, meta: meta, t: t, logf: logf, out: out}
 }
 
 // Run passes until ctx ends: each starts one interval after the previous one started, or at once
-// if that one took longer (§6.1, choice §11.4).
+// if that one took longer (§6.1, choice §11.4). The watchdog runs beside them on its own schedule
+// (§6.3), and Run returns once both have stopped.
 func (m *Monitor) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		m.watch(ctx)
+	}()
+	defer wg.Wait()
 	for {
 		start := time.Now()
 		if err := m.Pass(ctx); err != nil && ctx.Err() == nil {
@@ -64,7 +76,10 @@ type dependency struct {
 
 // Pass classifies every monitored dependency once, then records the pass as completed. A
 // dependency that fails is logged and left for the next pass; the others are still classified.
+// It logs the alerts not yet logged at its start and after each dependency that raised one, once
+// that dependency's advisory lock is released (§7.1).
 func (m *Monitor) Pass(ctx context.Context) error {
+	m.logAlerts(ctx)
 	deps, err := m.monitored(ctx)
 	if err != nil {
 		return err
@@ -73,8 +88,12 @@ func (m *Monitor) Pass(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := m.classifyOne(ctx, d); err != nil && ctx.Err() == nil {
+		alerted, err := m.classifyOne(ctx, d)
+		if err != nil && ctx.Err() == nil {
 			m.logf("dependency monitor: %s not classified this pass: %v", d.id, err)
+		}
+		if alerted {
+			m.logAlerts(ctx)
 		}
 	}
 	return m.completed(ctx)
@@ -102,11 +121,12 @@ func (m *Monitor) monitored(ctx context.Context) ([]dependency, error) {
 
 // classifyOne runs §6.1's steps 1 to 5 for one dependency on one session. Every exit releases the
 // advisory lock, or ends the session: a session-level lock outlives a rolled-back transaction, so
-// a session returned to the pool while holding it would keep every pass from the dependency.
-func (m *Monitor) classifyOne(ctx context.Context, d dependency) (err error) {
+// a session returned to the pool while holding it would keep every pass from the dependency. It
+// reports whether step 5 committed an alert.
+func (m *Monitor) classifyOne(ctx context.Context, d dependency) (alerted bool, err error) {
 	conn, err := m.db.Conn(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() {
 		// A session that cannot be shown released is ended instead.
@@ -117,25 +137,25 @@ func (m *Monitor) classifyOne(ctx context.Context, d dependency) (err error) {
 	}()
 	// Step 1: the server ends a session whose process stopped, and its lock with it.
 	if _, err := conn.ExecContext(ctx, `SELECT set_config('idle_session_timeout', $1, false)`, millis(m.t.IdleSession)); err != nil {
-		return err
+		return false, err
 	}
 	var locked bool
 	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, d.id).Scan(&locked); err != nil {
-		return err
+		return false, err
 	}
 	if !locked {
 		// Another instance is classifying it.
-		return nil
+		return false, nil
 	}
 	// Step 2.
 	var from time.Time
 	if err := conn.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&from); err != nil {
-		return err
+		return false, err
 	}
 	// Steps 3 and 4, holding no transaction (PA §5 rule 1).
 	r, err := m.classify(ctx, d)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// Step 5.
 	return m.record(ctx, conn, d, from, r)
@@ -197,14 +217,14 @@ func generationPath(object string) (provider.GenerationPath, error) {
 // record is §6.1 step 5: the class recorded under the row lock at clock_timestamp() read after it,
 // the releases read after it, and the alerts of §6.2 inserted under the DependencyMonitor row
 // lock, which allocates their recording sequence and is held to commit.
-func (m *Monitor) record(ctx context.Context, conn *sql.Conn, d dependency, from time.Time, r classify.Result) error {
+func (m *Monitor) record(ctx context.Context, conn *sql.Conn, d dependency, from time.Time, r classify.Result) (bool, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := m.holderTimeouts(ctx, tx); err != nil {
-		return err
+		return false, err
 	}
 	var old status
 	var reason sql.NullString
@@ -212,7 +232,7 @@ func (m *Monitor) record(ctx context.Context, conn *sql.Conn, d dependency, from
 	if err := tx.QueryRowContext(ctx, `SELECT class, reason, first_retained_at, unknown_since, persistent_alerted_at,
 		deletion_observed, deletion_warned FROM dependency_status WHERE id = $1 FOR UPDATE`, d.id).
 		Scan(&old.class, &reason, &first, &since, &persistent, &observed, &warned); err != nil {
-		return fmt.Errorf("status: %w", err)
+		return false, fmt.Errorf("status: %w", err)
 	}
 	old.reason = classify.Reason(reason.String)
 	old.firstRetained, old.unknownSince, old.persistentAt = first.Time, since.Time, persistent.Time
@@ -220,14 +240,14 @@ func (m *Monitor) record(ctx context.Context, conn *sql.Conn, d dependency, from
 	// The time the class is recorded: after the row lock, never the transaction's start.
 	var at time.Time
 	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
-		return err
+		return false, err
 	}
 	s, kinds := transition(old, r, at, m.t)
 	releases, err := strings1(ctx, tx, `SELECT DISTINCT release FROM dependency
 		WHERE provider = $1 AND object = $2 AND version = $3 AND created = $4 ORDER BY release`,
 		d.provider, d.object, d.version, d.created)
 	if err != nil {
-		return fmt.Errorf("releases: %w", err)
+		return false, fmt.Errorf("releases: %w", err)
 	}
 	type alert struct {
 		kind     kind
@@ -242,7 +262,7 @@ func (m *Monitor) record(ctx context.Context, conn *sql.Conn, d dependency, from
 		warned, err := strings1(ctx, tx, `SELECT r FROM dependency_alert, unnest(releases) r
 			WHERE dependency = $1 AND kind = 'deletion-scheduled' AND deletion = $2`, d.id, s.deletionObserved)
 		if err != nil {
-			return fmt.Errorf("deletion warnings: %w", err)
+			return false, fmt.Errorf("deletion warnings: %w", err)
 		}
 		if names := unwarned(releases, warned); len(names) > 0 {
 			alerts = append(alerts, alert{kindDeletion, names})
@@ -254,10 +274,10 @@ func (m *Monitor) record(ctx context.Context, conn *sql.Conn, d dependency, from
 		recorded_at = $10, answer_date = $11 WHERE id = $1`, d.id, s.class, nullString(string(s.reason)),
 		nullTime(s.firstRetained), nullTime(s.unknownSince), nullTime(s.persistentAt), nullTime(s.deletionObserved),
 		nullTime(s.deletionWarned), from, at, nullTime(r.Date)); err != nil {
-		return fmt.Errorf("status: %w", err)
+		return false, fmt.Errorf("status: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM dependency_monitor FOR UPDATE`); err != nil {
-		return fmt.Errorf("monitor row: %w", err)
+		return false, fmt.Errorf("monitor row: %w", err)
 	}
 	for _, a := range alerts {
 		var deletion any
@@ -269,13 +289,16 @@ func (m *Monitor) record(ctx context.Context, conn *sql.Conn, d dependency, from
 			SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, epoch, $14 FROM installation_state`,
 			id.New(id.DependencyAlert), string(a.kind), d.id, d.provider, d.object, d.version, d.created, s.class,
 			nullString(string(s.reason)), textArray(a.releases), deletion, from, nullTime(r.Date), at); err != nil {
-			return fmt.Errorf("%s alert: %w", a.kind, err)
+			return false, fmt.Errorf("%s alert: %w", a.kind, err)
 		}
 	}
 	if err := progress(ctx, tx, false); err != nil {
-		return err
+		return false, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return len(alerts) > 0, nil
 }
 
 // completed records a completed pass: its progress and its completion time (§6.3).

@@ -170,7 +170,7 @@ func serveContext(ctx context.Context, args []string) error {
 	// runs one, and the per-dependency lock keeps two from classifying the same dependency
 	// (dependency-monitor §6.1).
 	if pub != nil {
-		go monitor.New(db, pub.Meta, monitor.Defaults(), log.Printf).Run(ctx)
+		go monitor.New(db, pub.Meta, monitor.Defaults(), log.Printf, os.Stderr).Run(ctx)
 	}
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
