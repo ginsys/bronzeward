@@ -211,9 +211,10 @@ every table **(choice §17.9)**. The only in-place clearing is compilation's: a
 claim's payload is set to `NULL` on release or abandonment.
 
 Immutable tables carry a trigger that refuses `UPDATE` and `DELETE`, with a test
-that the trigger fires **(choice §17.3)**. A source revision's rows (a fragment
-revision's reference rows, a profile revision's pins, an assignment revision's
-selections) are written in the transaction that writes the revision, and a
+that the trigger fires **(choice §17.3)**. A source or import base revision's
+rows (a fragment or import base revision's reference rows, a profile revision's
+pins, an assignment revision's selections) are written in the transaction that
+writes the revision, and a
 trigger refuses a row for a revision already committed, so a revision's
 content cannot grow after it is read. Each revision records its writer, the
 full transaction ID set by the database on insert; a row whose revision has

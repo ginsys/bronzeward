@@ -42,11 +42,7 @@ func (p *publishEnv) declaredFragment(name, layer, reference, generation string)
 func (p *publishEnv) importBase(kind string, encoding any) {
 	p.t.Helper()
 	ibr := id.New(id.ImportBase)
-	mustExec(p.t, p.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
-		ibr, p.machine, make([]byte, 32))
-	mustExec(p.t, p.db, `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
-		VALUES ($1, 'registry/pass', $2, 1, $3, $4)`, ibr, kind, encoding, p.kvPath)
+	storeImportBase(p.t, p.db, ibr, p.machine, kind, encoding, p.kvPath)
 	mustExec(p.t, p.db, `UPDATE draft_entry SET import_base_revision = $2 WHERE draft = $1`, p.draft, ibr)
 	m := &p.unit.machines[0]
 	m.importBase, m.reproduction[0].source, m.provenance[0].Source.Revision = ibr, ibr, ibr
@@ -66,11 +62,7 @@ func (p *publishEnv) secondMachine() *unitMachine {
 	rec := p.do(p.api, machineCall(p.human("h-author"), "k-machine-2-0123456789", p.cluster, "1c6b7d2f-3a4e-4f60-9bac-1d2e3f4a5b6c"))
 	machine := decode[machineBody](p.t, rec, http.StatusCreated).ID
 	ibr := id.New(id.ImportBase)
-	mustExec(p.t, p.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
-		ibr, machine, make([]byte, 32))
-	mustExec(p.t, p.db, `INSERT INTO import_base_reference (revision, name, kind, version, generation)
-		VALUES ($1, 'registry/pass', 'string', 1, $2)`, ibr, p.kvPath)
+	storeImportBase(p.t, p.db, ibr, machine, "string", nil, p.kvPath)
 	mustExec(p.t, p.db, `INSERT INTO draft_entry (draft, cluster, kind, machine, import_base_revision)
 		VALUES ($1, $2, 'import-base', $3, $4)`, p.draft, p.cluster, machine, ibr)
 	m := p.unit.machines[0]

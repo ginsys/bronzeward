@@ -88,15 +88,14 @@ func (p *baoProxy) sentTokens() []string {
 	return slices.Clone(p.tokens)
 }
 
-// orphanEnv is one database with cluster a recorded, a machine and an import base revision, the
-// test OpenBao behind a proxy, and a configuration whose report token file holds the orphan-report
-// identity's token.
+// orphanEnv is one database with cluster a recorded and a machine, the test OpenBao behind a proxy,
+// and a configuration whose report token file holds the orphan-report identity's token.
 type orphanEnv struct {
-	db                     *sql.DB
-	b                      *baotest.Bao
-	p                      *baoProxy
-	config, tokenFile      string
-	a, machine, base, user string
+	db                *sql.DB
+	b                 *baotest.Bao
+	p                 *baoProxy
+	config, tokenFile string
+	a, machine, user  string
 }
 
 func newOrphanEnv(t *testing.T) *orphanEnv {
@@ -114,7 +113,7 @@ func newOrphanEnv(t *testing.T) *orphanEnv {
 	}
 	b := baotest.New(t)
 	e := &orphanEnv{db: db, b: b, p: newBaoProxy(t, b.Addr), a: id.New(id.Cluster), machine: id.New(id.Machine),
-		base: id.New(id.ImportBase), user: id.New(id.Principal)}
+		user: id.New(id.Principal)}
 	dir := t.TempDir()
 	e.tokenFile = filepath.Join(dir, "openbao-report.token")
 	writeFile(t, e.tokenFile, b.Token("bw-orphan-report"), 0o600)
@@ -131,9 +130,6 @@ func newOrphanEnv(t *testing.T) *orphanEnv {
 		VALUES ($1, 'office', 'https://cp.example.test:6443', 'v1.13', '8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0=', now())`, e.a)
 	mustDB(t, db, `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, platform, created_at)
 		VALUES ($1, $2, '0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b', 'SN-1', 'normal', '10.55.0.3:50000', 'metal', now())`, e.machine, e.a)
-	mustDB(t, db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
-		e.base, e.machine, bytes.Repeat([]byte{1}, 32))
 	t.Cleanup(func() { orphanHooks = orphanTestHooks{} })
 	return e
 }
@@ -182,10 +178,32 @@ func (e *orphanEnv) gen(t *testing.T, cluster, claim string) string {
 	return p
 }
 
+// reference names path from a new import base revision of the machine, written with it in one
+// transaction, as ingestion's draft transaction writes a revision and its reference rows (PA §3).
 func (e *orphanEnv) reference(t *testing.T, path string) {
 	t.Helper()
-	mustDB(t, e.db, `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
-		VALUES ($1, $2, 'string', 1, NULL, $3)`, e.base, "n"+strings.ToLower(provider.NewValueID()), path)
+	tx, err := e.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	base := id.New(id.ImportBase)
+	for _, s := range []struct {
+		q    string
+		args []any
+	}{
+		{`INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`, []any{base, e.machine, bytes.Repeat([]byte{1}, 32)}},
+		{`INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
+		VALUES ($1, $2, 'string', 1, NULL, $3)`, []any{base, "n" + strings.ToLower(provider.NewValueID()), path}},
+	} {
+		if _, err := tx.Exec(s.q, s.args...); err != nil {
+			t.Fatalf("%s: %v", s.q, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // run runs the command and returns what it printed on its stdout, and everything else it wrote:
