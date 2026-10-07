@@ -90,6 +90,15 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 	mustExec(t, tx, `INSERT INTO dependency (release, machine, kind, provider, object, version, created)
 		VALUES ($1, $2, 'encryption', 'transit', 'bw-artifact', 1, '2026-09-26T09:12:40Z'),
 		       ($1, $3, 'encryption', 'transit', 'bw-artifact', 1, '2026-09-26T09:12:40Z')`, s.rel, d.machine, s.machine2)
+	if d.reproductions {
+		mustExec(t, tx, `INSERT INTO dependency_status (id, provider, object, version, class, first_retained_at, observed_from,
+				recorded_at, created) VALUES ($1, 'kv', $2, 3, 'retained', now(), now(), now(), '2026-09-26T09:11:02.123456789Z')
+			ON CONFLICT DO NOTHING`, id.New(id.Dependency), d.reproducedPass())
+		mustExec(t, tx, `INSERT INTO dependency (release, machine, kind, provider, object, version, created, reference,
+				source_revision, source_digest, path, occurrence)
+			SELECT $1, $2, 'reproduction', 'kv', $3, 3, '2026-09-26T09:11:02.123456789Z', 'registry/example-pass', $4, $5,
+				'doc[0]/machine/registries', o FROM generate_series(0, 1) o`, s.rel, d.machine, d.reproducedPass(), ibr1, make([]byte, 32))
+	}
 	mustExec(t, tx, `UPDATE draft SET state = 'published', release = $2 WHERE id = $1`, draft, s.rel)
 	mustExec(t, tx, `UPDATE operation SET state = 'succeeded', owner = NULL, owner_epoch = NULL, lease_until = NULL,
 		result = jsonb_build_object('release', $2::text) WHERE id = $1`, s.op, s.rel)
@@ -97,6 +106,11 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 		t.Fatal(err)
 	}
 	return s
+}
+
+// reproducedPass is the KV generation path a seeded release reproduces when d.reproductions is set.
+func (d *draftEnv) reproducedPass() string {
+	return "gen/" + d.cluster + "/ing_" + strings.Repeat("a", 26) + "/registry-pass"
 }
 
 // PA §9.2 and its read example: any role reads a release, its sources and machines, and each

@@ -68,11 +68,17 @@ func listed[T any](p id.Prefix, query string, scan func(*sql.Rows) (T, string, e
 // listRows reads one page for listed; args follow query's $1 and $2.
 func listRows[T any](ctx context.Context, tx *sql.Tx, q *request, p id.Prefix, query string, scan func(*sql.Rows) (T, string, error),
 	args ...any) (listPage[T], error) {
-	out := listPage[T]{Items: []T{}}
 	limit, after, ref := page(q, p)
 	if ref != nil {
-		return out, ref
+		return listPage[T]{Items: []T{}}, ref
 	}
+	return pageRows(ctx, tx, q, limit, after, query, scan, args...)
+}
+
+// pageRows reads the page after the identifier after, of at most limit rows, for listRows.
+func pageRows[T any](ctx context.Context, tx *sql.Tx, q *request, limit int, after, query string,
+	scan func(*sql.Rows) (T, string, error), args ...any) (listPage[T], error) {
+	out := listPage[T]{Items: []T{}}
 	rows, err := tx.QueryContext(ctx, query, append([]any{after, limit + 1}, args...)...)
 	if err != nil {
 		return out, err

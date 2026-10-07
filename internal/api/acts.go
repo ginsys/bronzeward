@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -113,16 +114,17 @@ func readActs(a *API, q *request) (actsPage, error) {
 	return out, nil
 }
 
-// page reads limit and cursor, refusing anything else (§9.1: unknown fields are refused). The
-// cursor names the last item listed, an identifier of p.
-func page(q *request, p id.Prefix) (limit int, after string, ref *refusal) {
+// page reads limit, cursor and at most one of each of the route's filters, refusing anything else
+// (§9.1: unknown fields are refused); the route reads its filters. The cursor names the last item
+// listed, an identifier of p.
+func page(q *request, p id.Prefix, filters ...string) (limit int, after string, ref *refusal) {
 	vals, err := url.ParseQuery(q.r.URL.RawQuery)
 	if err != nil {
 		return 0, "", refuse(http.StatusBadRequest, "invalid-request", "the query does not parse")
 	}
 	for k, v := range vals {
-		if (k != "limit" && k != "cursor") || len(v) != 1 {
-			return 0, "", refuse(http.StatusBadRequest, "invalid-request", "the query takes at most one limit and one cursor")
+		if (k != "limit" && k != "cursor" && !slices.Contains(filters, k)) || len(v) != 1 {
+			return 0, "", refuse(http.StatusBadRequest, "invalid-request", "the query takes at most one limit, one cursor and one of each filter")
 		}
 	}
 	limit = defaultLimit

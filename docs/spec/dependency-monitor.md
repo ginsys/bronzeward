@@ -454,6 +454,21 @@ Added to PA §9.2, any role, paginated as PA §9.1 sets:
 They serve provider paths, key names and versions, which are reference names
 (PA §9.1, "Redaction"), never a value or ciphertext.
 
+A dependency answers `id`, `provider`, `object`, `version`, `created`,
+`class`, `reason`, `firstRetainedAt`, `unknownSince`, `observedFrom`,
+`recordedAt` (its latest recorded classification) and `stale` (§6.3); the
+collection's `lastPass` is null before the first completed pass. `class`
+takes one of the four classes, any other value is `400 invalid-request`, and
+the cursor continues the filtered list. Release order is identifier order,
+as `GET /releases` lists; each release answers its `cluster`, `publishedAt`
+and the distinct `machine` and `kind` of every record naming the dependency
+(compilation §9). An alert answers the row of §5.1: `id`, `kind`, the
+dependency's identity, `class`, `reason`, `releases`, `deletion`,
+`observedFrom`, `answerDate`, `epoch` and `recordedAt`, a monitor-stalled
+alert with its dependency fields null. The recording sequence stays in the
+database: an alert cursor names the last alert listed, and on a dependency's
+list a cursor naming another dependency's alert is `400 cursor-invalid`.
+
 ## 8. What a classification is not
 
 Design: §7.6 ("retention and authority are separate checks"). Evidence:
