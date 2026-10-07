@@ -403,11 +403,37 @@ c10_ran() {
   trap - EXIT INT TERM
   [ "$rc" -eq 0 ]
 }
-# c10_image_checkout: this checkout is the commit up-build records for the image, no path differing.
+# c10_image_checkout: this checkout is the commit up-build records for the image, no path
+# differing, and every tracked file's bytes HEAD's.
 c10_image_checkout() {
-  local n
+  local n raw
   n=$(checkout_differs) || return 1
-  [ "$(fixtures_git rev-parse HEAD)" = "$(sed -n 's/^commit //p' "$STATE/up-build")" ] && [ "$n" -eq 0 ]
+  raw=$(c10_raw_differs) || return 1
+  [ "$(fixtures_git rev-parse HEAD)" = "$(sed -n 's/^commit //p' "$STATE/up-build")" ] && [ "$n" -eq 0 ] && [ "$raw" -eq 0 ]
+}
+# c10_raw_differs: how many of HEAD's regular files have other bytes on disk, hashed with no
+# filter: a clean filter (or another content attribute) has git status compare its output, so a
+# modified file whose filtered copy is the commit's is clean to git status and to checkout_differs.
+# Symbolic links and submodules are left to checkout_differs (core.symlinks=true shows a type
+# change). A path git cannot hash, or one holding a newline, fails the count.
+c10_raw_differs() {
+  local top tree rec meta path mode oid paths=() want=() got=() i n=0
+  top=$(fixtures_git rev-parse --show-toplevel) || return 1
+  tree=$(mktemp) || return 1
+  fixtures_git ls-tree -r -z --full-tree HEAD >"$tree" || { rm -f -- "$tree"; return 1; }
+  while IFS= read -r -d '' rec; do
+    meta=${rec%%$'\t'*} path=${rec#*$'\t'}
+    read -r mode _ oid <<<"$meta"
+    case $mode in 100644 | 100755) ;; *) continue ;; esac
+    case $path in *$'\n'*) paths=() && break ;; esac
+    paths+=("$top/$path") want+=("$oid")
+  done <"$tree"
+  rm -f -- "$tree"
+  [ "${#paths[@]}" -gt 0 ] && [ "${#paths[@]}" -eq "${#want[@]}" ] || return 1
+  mapfile -t got < <(printf '%s\n' "${paths[@]}" | fixtures_git hash-object --no-filters --stdin-paths)
+  [ "${#got[@]}" -eq "${#want[@]}" ] || return 1
+  for i in "${!want[@]}"; do [ "${got[$i]}" = "${want[$i]}" ] || n=$((n + 1)); done
+  printf '%d\n' "$n"
 }
 # c10_at_image: the gate's run.txt names the image commit with no input uncommitted, and the
 # checkout is still that commit with no path differing.
@@ -429,7 +455,7 @@ c10_controls() {
 c10_rows() {
   local ref='S2 precondition, C §10.1'
   check "$ref" 'the machinery gate, run/all against this fixture, exited 0 (c10-gate.log)' c10_ran
-  check "$ref" 'it ran at the image commit with no uncommitted input (c10/run.txt), the checkout that commit with no path differing or skipped' c10_at_image
+  check "$ref" 'it ran at the image commit with no uncommitted input (c10/run.txt), the checkout that commit with no path differing or skipped, every tracked file unfiltered the same bytes' c10_at_image
   check "$ref" "SR's matrix through the compiler's path: every case on both bases as expected (c10/summary.txt)" c10_matrix summary.txt
   check "$ref" "SR's controls: the compiler's round trip and validation of each base (c10/controls.tsv)" c10_controls controls.tsv
   check "$ref" "SP's matrix through the compiler's path: every case as expected, no value or base secret in any cell (c10/sp-summary.txt)" \
