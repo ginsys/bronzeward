@@ -207,6 +207,8 @@ func TestRunBlockedSink(t *testing.T) {
 	s.gate = gate
 	s.mu.Unlock()
 	defer close(gate)
+	// serve reports diagnostics on the same stderr, which blocks with it.
+	m.logf = func(string, ...any) { <-gate }
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
