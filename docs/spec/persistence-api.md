@@ -1168,7 +1168,8 @@ key independently. The record stores:
 | `operation_id` | for a `202`, the operation it created |
 
 The fingerprint is SHA-256, except for a route whose body can carry
-unextracted input (a draft source update or an ingestion request): its
+unextracted input (a draft source update, an ingestion request or a mark on a
+paused ingestion, whose paths can name a secret mapping key): its
 fingerprint is HMAC-SHA-256 under compilation's digest key, computed inside the
 ingestion package (compilation §4.1). The record names the key version, and a
 retry's fingerprint is recomputed under that version, not the current one, so a
@@ -1462,7 +1463,8 @@ failure with `"cause": "nothing-to-decrypt"`. An ingestion under review
 claim pauses; `{"type": "marked", "generation": <n>, "paths": <count>}` when
 a mark takes it; `{"type": "mark-refused", "generation": <n>, "problem":
 <problem document>}` when a mark is refused before any provider write, the
-problem naming paths and rules only (§9.4); and `{"type": "continued",
+problem naming the rule and the mark's position in the request, never its
+path (compilation §3.6 item 4); and `{"type": "continued",
 "generation": <n>}` when the operator continues it. No event carries input text. The operation resource shows its stored row: an operation
 whose claim a read already treats as abandoned (compilation §3.5) stays
 `running` here until a sweep writes it: the next periodic sweep, or a later
@@ -1904,8 +1906,8 @@ form), never the baseline, a generation path or the digest. A claim not
 `paused`, as a read treats it, is `409 conflict`; a decryption failure is
 `503 dependency-unavailable` and an integrity failure `500 internal-error`,
 neither changing the claim. A mark takes 1 to 1024 compilation §2.2 paths; a
-path that does not parse is `422 validation-failed` naming it, before any
-change. A mark or a continuation (`{}`) on a claim not `paused`, past its
+path that does not parse is `422 validation-failed` naming its position in
+`marks`, never its text, before any change. A mark or a continuation (`{}`) on a claim not `paused`, past its
 absolute expiry or of an earlier epoch is `409 conflict`, and nothing changes;
 otherwise it answers 202 at once, and the ingestion's events show how the run
 ends (§8.3): `paused` again, `mark-refused` with the claim `paused`, or
@@ -2848,8 +2850,10 @@ each (design §7.7 consequences):
   with a control that accepts it and must then fail; a reviewed ingestion
   `paused` with its envelope stored, its operation `running` and no draft
   revision written, with a control that runs the draft transaction and must
-  then fail; the pausing run's late heartbeat refused, with a control that
-  checks the owner but not the state and must then fail; the review route
+  then fail; the pause ending the claim's lease, with a control that keeps
+  it and must then fail; an owner heartbeat on a claim set `paused` with a
+  live lease refused, with a control that checks the owner but not the state
+  and must then fail; the review route
   answering the document with `no-store` to an `author` only, refused to a
   service identity and on a claim not `paused`, the sentinel absent from
   every log, problem and the database, with a control that logs the answer
@@ -2860,7 +2864,13 @@ each (design §7.7 consequences):
   unsubstituted and must then fail; a mark
   addressing no node returning the claim `paused` with its earlier digest
   and a `mark-refused` event, with a control that abandons on every refusal
-  and must then fail; a mark whose provider write fails after one generation
+  and must then fail; a refused mark whose path holds an earlier extracted
+  sentinel, the sentinel absent from the event, the problem and the logs,
+  with a control that names the path and must then fail; a mark inside an
+  embedded JSON document beside a scalar whose text equals an earlier
+  extracted value refused `mark-rewrites-text` before any provider write,
+  with a control that skips that check and must then fail by staging the
+  earlier value in plaintext; a mark whose provider write fails after one generation
   abandoning the claim; two marks racing one paused claim, exactly one
   taking it; a takeover of a `paused` claim refused; a mark's and a
   continuation's run killed before their next stored state, each resumed by

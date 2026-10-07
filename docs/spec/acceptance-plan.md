@@ -853,7 +853,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: machine revisions allocated in commit order under concurrent writers, with the unlocked control | *check* | #26 |
 | PA §16: an event stream ended by its token's `exp`, resumption refused after revocation | S8 step 3 | #26 |
 | PA §16: no request body in the data directory, write-ahead log or backups | S1, S2 scans | #22, #23 |
-| PA §16 and C §15: the operator review (C §3.6): transient review refused, pause, the pausing run's late heartbeat, the review route's roles, `no-store` and states, a mark extracting a sentinel, a mark refused before and after a provider write, racing marks, a paused claim's takeover refused, a mark's and a continuation's run killed and resumed, a continuation on a moved draft, abandonment, expiry, recovery-mode entry and restart, each with its control and every surface scanned | *check* | #125 |
+| PA §16 and C §15: the operator review (C §3.6): transient review refused, pause and its lease end, an owner heartbeat on a paused claim, the review route's roles, `no-store` and states, a mark extracting a sentinel, a mark refused before and after a provider write, a refusal naming the mark by position, a mark that would rewrite other text refused, racing marks, a paused claim's takeover refused, a mark's and a continuation's run killed and resumed, a continuation on a moved draft, abandonment, expiry, recovery-mode entry and restart, each with its control and every surface scanned | *check* | #125 |
 
 ## 8. Not covered by the PoC
 

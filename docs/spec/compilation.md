@@ -476,9 +476,15 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    the envelope, checks its digest and re-enters §2.3 at step 3 on the staged
    sanitized document with the new marks. Step 5's guard searches for the
    values this mark extracts. The earlier values are in the provider, which the
-   ingestion identity cannot read; they were guarded when they were
-   extracted, and substitution only removes text, so that result still holds.
-   Step 6 creates the new generations under the same claim. Step 8 does not run
+   ingestion identity cannot read, so the guard cannot search for them; they
+   were guarded when they were extracted, and that result holds only if the
+   mark adds no text but its references. The re-substituted document must
+   therefore equal the staged one except at the nodes this mark replaces: every
+   other scalar, an embedded document's text included, is unchanged byte for
+   byte. A mark that would change other text, as re-encoding an embedded
+   document in another format does, is refused (`mark-rewrites-text`); the
+   remedy is to mark the containing scalar whole, or to abandon and ingest
+   again with the mark at the start. Step 6 creates the new generations under the same claim. Step 8 does not run
    again: the envelope's baseline is already the exact input. The new envelope
    (the re-substituted document, every reference and the baseline ciphertext)
    replaces the payload and its digest in the transaction that pauses the claim
@@ -486,9 +492,14 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    stored.
 4. **A refused mark.** A mark refused before any provider write (a mark that
    addresses no node, a guard hit, a node the machinery cannot load as a null,
-   §2.3 step 3) returns the claim to `paused` with its earlier envelope and
-   digest unchanged, and the refusal, naming paths and rule and never a value,
-   is recorded on the ingestion's operation; the review goes on. A mark refused
+   §2.3 step 3, or text the mark would rewrite, item 3) returns the claim to
+   `paused` with its earlier envelope and digest unchanged, and the refusal is
+   recorded on the ingestion's operation; the review goes on. The refusal names
+   the rule, and the mark by its position in the request, never by its path:
+   an operator's path can hold an earlier extracted value, which the redaction
+   of refusals (§8.3) cannot recognise once the run no longer holds it. A path
+   inside the staged document that the refusal names (a guard hit's) is
+   redacted as for any ingestion. A mark refused
    after a provider write (§2.3 step 6 failing part-way) abandons the claim
    with that refusal, and the generations it created are unused (§2.3).
 5. **Continue.** The operator's continuation takes the claim as a mark does and
@@ -510,7 +521,7 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    ingestion instance of the current epoch serves the next request.
 
 No step puts plaintext into the database, a log or an error: the envelope stays
-encrypted in the claim, marks are paths, a refusal names paths and rules, and
+encrypted in the claim, marks live only in the serving process, a refusal names its rule and the mark's position, and
 the show's answer leaves the server only in the response to the requesting
 operator. That answer can still hold a value no one has marked yet, which is
 why it is shown before the draft transaction and only to the roles that may
@@ -1870,7 +1881,13 @@ in place as
     a paused claim left `held` with a lapsed lease, continued by takeover,
     which no reader can tell from a crashed run and whose takeover would skip
     the review; or abandoning the claim on every refused mark, which discards a
-    review for a mistyped path.
+    review for a mistyped path. A mark run cannot read the values extracted
+    before it, so it may add no text but its references (§3.6 item 3), and its
+    refusals name marks by position. Alternatives: carry the extracted values
+    in the envelope so the guard can search for them, which has ingestion read
+    back the secrets it created, against choice §16.1; or re-run the whole
+    pipeline from the exact input, which needs baseline decryption that no
+    identity holds (choice §16.4).
 
 ## 17. Traceability
 
