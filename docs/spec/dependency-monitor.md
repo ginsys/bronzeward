@@ -228,7 +228,7 @@ publication `422`, its identity changed (PA §6.2). Publication classifies every
 step 3) and its encryption dependency (compilation §11), recording the Transit
 identity of §3 from reads bracketing the encryption. It refuses every version
 that is not `retained`, so every seeded row is `retained`. A seeded scheduled
-deletion is warned by the next pass (§6.2).
+deletion still ahead at the next pass is warned by it (§6.2).
 
 After its inserts, T3 locks the DependencyStatus row of every version it names
 `FOR SHARE`, in `dep` order, rows a concurrent publication inserted included. A
@@ -339,7 +339,7 @@ warnings for that time did not name: the releases referencing the version,
 read after the row lock (§6.1 step 5), are compared with those named by the
 version's `deletion-scheduled` alerts that warn of that same time. A release committed against a schedule
 already warned, before or while that warning's pass ran, is therefore named
-by the next pass. A deletion that takes effect before a pass records it,
+by the next pass, if the deletion is still ahead then. A deletion that takes effect before a pass records it,
 one only publication saw included (a row publication seeds carries the
 schedule for the read routes; an existing row keeps its own, since T3 inserts
 only missing rows, §5.2), is first recorded as `blocked`, which alerts at once. The
