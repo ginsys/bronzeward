@@ -341,7 +341,9 @@ write recorded a stale attempt in its control row 018
 Only the current owner at the current owner generation may extend a lease, and
 only while the lease and the absolute expiry are both still in the future
 **(choice §16.7)**. A lapsed lease is never revived by its old owner; after the
-lapse only a takeover (§3.4) or abandonment can change the claim. E1's
+lapse only a takeover (§3.4) or abandonment can change the claim, and for a
+`paused` claim, whose lease the pause ends, an operator's mark or continuation
+instead of a takeover (§3.6). E1's
 prototype extended any live `held` claim for any caller and left the question
 to this contract (E1 5.16, §7).
 
@@ -474,7 +476,11 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    recovery epoch (§3.5): the serving instance becomes its owner at the next
    owner generation with a new lease, and the state is `held`. Its run decrypts
    the envelope, checks its digest and re-enters §2.3 at step 3 on the staged
-   sanitized document with the new marks. Step 5's guard searches for the
+   sanitized document with the new marks. A mark whose node holds a reference
+   (a mapping with a `!bwref` member, or the reference itself) has no kind
+   (§5.2, choice §16.16) and is refused: its earlier value is in the provider,
+   which this run cannot read, so it could be neither extracted nor kept.
+   Step 5's guard searches for the
    values this mark extracts. The earlier values are in the provider, which the
    ingestion identity cannot read, so the guard cannot search for them; they
    were guarded when they were extracted, and that result holds only if the
@@ -492,7 +498,8 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    stored.
 4. **A refused mark.** A mark refused before any provider write (a mark that
    addresses no node, a guard hit, a node the machinery cannot load as a null,
-   §2.3 step 3, or text the mark would rewrite, item 3) returns the claim to
+   §2.3 step 3, a node holding a reference or text the mark would rewrite,
+   item 3) returns the claim to
    `paused` with its earlier envelope and digest unchanged, and the refusal is
    recorded on the ingestion's operation; the review goes on. The refusal names
    the rule, and the mark by its position in the request, and no path at all:

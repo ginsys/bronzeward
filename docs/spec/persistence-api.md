@@ -1806,7 +1806,7 @@ GET /api/v1/ingestions/ing_4ycffhy7bf4o2w6pz5b4r75hmu
 HTTP/1.1 200 OK
 
 {"id": "ing_4ycffhy7bf4o2w6pz5b4r75hmu", "kind": "import",
- "mode": "transient", "state": "held",
+ "mode": "transient", "state": "held", "review": null,
  "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
  "draft": "drf_2rmpezm5rfx47azsgmp66z457a",
  "operation": "op_f6hekztxvswfhzqoe2wbyqnbtq", "ownerGeneration": 1,
@@ -2860,7 +2860,17 @@ each (design §7.7 consequences):
   answering the document with `no-store` to an `author` only, refused to a
   service identity and on a claim not `paused`, the sentinel absent from
   every log, problem and the database, with a control that logs the answer
-  and must then fail; a mark extracting the sentinel to a new generation
+  and must then fail; the review route answering `503` when the staging key
+  is unavailable and `500` for an envelope whose digest does not match, the
+  claim `paused` with its digest unchanged after each, with a control that
+  abandons on an integrity failure as a takeover does and must then fail; a
+  mark's and a continuation's run that cannot decrypt the envelope writing
+  `resume-failed`, the claim `held` to its lease and the operation `running`,
+  then resumed by takeover, with a control that fails the operation and must
+  then fail; a mark on a mapping holding an earlier reference refused before
+  any provider write, the claim `paused` with its earlier digest, with a
+  control that extracts the mapping and must then fail by storing the
+  reference name as a value; a mark extracting the sentinel to a new generation
   under the same claim, the claim `paused` again at the next owner
   generation with a new digest and the continuation's draft revision holding
   a reference, not the sentinel, with a control that stores the document
@@ -3014,11 +3024,11 @@ each (design §7.7 consequences):
   passed its owner check holds its lock and then commits, its generations not
   reported as orphans, with a control that treats the claim as `abandoned` at
   read time and must then report them; with no controller running, an
-  `encrypted` claim recorded `held` and one recorded `resumed`, each past its
-  absolute expiry, and a `transient` claim past its lease but not its expiry,
-  recorded `held`, their unreferenced generations listed as expired and not
-  yet abandoned, with a control that omits every `held` or `resumed` claim's
-  generations and must then fail; an `encrypted` claim recorded `held` past its lease but
+  `encrypted` claim recorded `held`, one recorded `resumed` and one recorded
+  `paused`, each past its absolute expiry, and a `transient` claim past its
+  lease but not its expiry, recorded `held`, their unreferenced generations
+  listed as expired and not yet abandoned, with a control that omits every
+  `held`, `resumed` or `paused` claim's generations and must then fail; an `encrypted` claim recorded `held` past its lease but
   not its absolute expiry (still open to takeover), its generations neither
   reported nor listed apart, with a control that treats every lapsed lease as
   abandonment and must then fail; without
