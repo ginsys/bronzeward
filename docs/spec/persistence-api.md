@@ -641,7 +641,7 @@ The transactions this contract defines or constrains:
 
 | # | Transaction | Locks and checks | Writes |
 | --- | --- | --- | --- |
-| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; the fragment and profile heads a profile's pins or an assignment's selections are checked against (§3.1), `FOR SHARE` in id order, a head created after this step counting as no head; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed`, and a draft no longer `open` or one with an active publication fails it `409 conflict` (naming that publication), each with its terminal event, in the owner-checked transaction that abandons its claim once the draft transaction has rolled back (§8.2). An import of a machine already in the draft replaces its draft entry. Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
+| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; the fragment and profile heads a profile's pins or an assignment's selections are checked against (§3.1), `FOR SHARE` in id order, a head created after this step counting as no head; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed`, and a draft no longer `open`, compared before its revision so that a discarded draft is this case, or one with an active publication fails it `409 conflict` (naming that publication), each with its terminal event, in the owner-checked transaction that abandons its claim once the draft transaction has rolled back (§8.2). An import of a machine already in the draft replaces its draft entry. Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
 | T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active `publish` one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
 | T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published and, for an `apply-config` plan, the machine's `Desired` (execution and recovery choice §10.24); execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
@@ -1918,8 +1918,9 @@ ends (§8.3): `paused` again, `mark-refused` with the claim `paused`,
 `succeeded` after a continuation, `failed`, or `resume-failed` with the claim
 `held` to its lease and the operation `running`, taken over after that lease
 (compilation §3.6 item 6). A continuation whose draft moved fails the operation `412
-precondition-failed`, and one whose draft is no longer `open` or has a `queued`
-or `running` publication fails it `409 conflict`, each abandoning the claim (T1).
+precondition-failed`, and one whose draft is no longer `open` (a discarded
+draft, whatever its revision) or has a `queued` or `running` publication fails
+it `409 conflict`, each abandoning the claim (T1).
 
 `scopeState` is `normal`, or one of
 execution and recovery's recovery scope states while recovery mode is in
@@ -2909,11 +2910,13 @@ each (design §7.7 consequences):
   then fail, and the continuation's committing, with a control that records
   `continued` only as its run ends and must then fail by pausing again; a
   continuation after the draft moved failing `412` and abandoning the claim;
-  a continuation after the draft was discarded, and one while a `publish`
-  operation for the draft is `queued`, its revision unchanged in both, each
-  failing `409` and abandoning the claim with the draft unchanged, with a
-  control that compares the bound revision only and must then fail by writing
-  the draft;
+  a continuation while a `publish` operation for the draft is `queued`, its
+  revision unchanged, failing `409` and abandoning the claim with the draft
+  unchanged, with a control that compares the bound revision only and must
+  then fail by writing the draft; a continuation after the draft was
+  discarded, which advanced its revision, failing `409` and abandoning the
+  claim with the draft still `discarded`, with a control that compares the
+  revision before the state and must then fail by answering `412`;
   a `paused` claim abandoned by the operator, by the sweep at its absolute
   expiry and by recovery-mode entry, and kept `paused` across a server
   restart;
