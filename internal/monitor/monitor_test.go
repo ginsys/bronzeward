@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -104,7 +105,7 @@ func (l *logs) count() int {
 
 func monitorFor(f *fixture, p *fake, tm Timings) (*Monitor, *logs) {
 	l := &logs{}
-	return New(f.db, p, tm, l.logf), l
+	return New(f.db, p, tm, l.logf, io.Discard), l
 }
 
 func pass(t *testing.T, m *Monitor) {
@@ -551,7 +552,7 @@ func TestProgressAfterMonitorLock(t *testing.T) {
 		t.Fatalf("monitored %v %v", deps, err)
 	}
 	steps := map[string]func(context.Context) error{
-		"step 5":    func(ctx context.Context) error { return m.classifyOne(ctx, deps[0]) },
+		"step 5":    func(ctx context.Context) error { _, err := m.classifyOne(ctx, deps[0]); return err },
 		"completed": m.completed,
 	}
 	for name, step := range steps {
