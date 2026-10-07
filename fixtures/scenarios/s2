@@ -875,13 +875,21 @@ s6_regressions() {
   }
 }
 # s6_served <jq filter>: GET /dependencies as h-author, one page, serves exactly the database's
-# dependency statuses, at least one, and satisfies the filter.
+# dependency statuses, at least one: each one's identity, class and reason, and whether its
+# first-retained and unknown-since times are set, as recorded. The times themselves are not
+# compared (Go and PostgreSQL write them differently), nor is staleness, which is the request's
+# own reading; the filter checks that. It then satisfies the filter.
 s6_served() {
-  local ids
-  ids=$(sql "SELECT coalesce(json_agg(id ORDER BY id), '[]') FROM dependency_status") || return 1
-  [ "$ids" != '[]' ] || { say 's2: no dependency status recorded'; return 1; }
+  local want
+  want=$(sql "SELECT coalesce(json_agg(json_build_object('id', id, 'provider', provider, 'object', object,
+      'version', version, 'created', created, 'class', class, 'reason', reason,
+      'firstRetainedAt', first_retained_at IS NOT NULL, 'unknownSince', unknown_since IS NOT NULL) ORDER BY id), '[]')
+    FROM dependency_status") || return 1
+  [ "$want" != '[]' ] || { say 's2: no dependency status recorded'; return 1; }
   fresh_author
-  answers_with "(.next == null) and (([.items[].id] | sort) == ($ids | sort)) and ($1)" \
+  answers_with "(.next == null) and (([.items[] | {id, provider, object, version, created, class, reason,
+      firstRetainedAt: (.firstRetainedAt != null), unknownSince: (.unknownSince != null)}] | sort_by(.id))
+      == ($want | sort_by(.id))) and ($1)" \
     200 - GET '/api/v1/dependencies?limit=500' "$author"
 }
 # s6_pinned_served <class> <reason> <alert kind>: GET /dependencies/{dep_p} serves that class and
@@ -915,7 +923,7 @@ s6_outage() {
   check "$ref" "inject $1 openbao" s6_inject "$1" openbao
   check "$ref" "$1: every dependency observed since unknown ($3)" within 300 s6_classes unknown "$3" unknown "$3"
   check "$ref" "$1: one regression for each dependency but the lost one, each naming exactly the releases referencing it, and no other alert" s6_regressions "$3"
-  check "$ref" "$1: GET /dependencies serves every one unknown" s6_served '[.items[] | select(.class != "unknown")] == []'
+  check "$ref" "$1: GET /dependencies serves every one unknown, none stale, each as the database records it" s6_served '[.items[] | select(.class != "unknown" or .stale)] == []'
   check "$ref" "$1: a publication pinning the version refused 503 dependency-unavailable, nothing released" \
     s6_refused "$4" 503 dependency-unavailable '.provider == "kv" or .provider == "transit"'
   check "$ref" "inject $2 openbao" s6_inject "$2" openbao
