@@ -237,7 +237,9 @@ func TestClassify(t *testing.T) {
 				d["latest_version"], d["min_decryption_version"] = 2, 2
 			}))
 		}, Unknown, BelowDecryptionFloorUnverified},
-		{"transit absent", transitDep(3), func(t *testing.T) Answer { return answer(t, transit()) }, Unknown, InsufficientEvidence},
+		{"transit absent within every floor", transitDep(3), func(t *testing.T) Answer {
+			return answer(t, edit(transit, func(d map[string]any) { d["latest_version"] = 3 }))
+		}, Unknown, InsufficientEvidence},
 		{"transit listed below min_available", transitDep(1), func(t *testing.T) Answer {
 			return answer(t, edit(transit, func(d map[string]any) {
 				d["keys"] = map[string]any{"1": keyTime.Unix(), "2": keyTime.Unix() + 60}

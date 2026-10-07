@@ -878,48 +878,6 @@ func TestPublishCommitStatusRecordedAfter(t *testing.T) {
 	}
 }
 
-// A retained status whose scheduled deletion differs from publication's own and was recorded not
-// before publication began classifying it refuses the publication, so a deletion-scheduled alert
-// and a publication are ordered as a class transition is (dependency monitor §5.2).
-func TestPublishCommitScheduleRecordedAfter(t *testing.T) {
-	schedule := time.Date(2026, 10, 9, 12, 0, 0, 123456789, time.UTC)
-	seed := func(p *publishEnv, deletion any, recorded time.Time) {
-		mustExec(p.t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class, reason,
-			deletion_observed, first_retained_at, observed_from, recorded_at)
-			VALUES ($1, 'kv', $2, 1, '2026-09-26T09:00:00.123456789Z', 'retained', 'deletion-scheduled', $3, $4, $5, $5)`,
-			id.New(id.Dependency), p.kvPath, deletion, began.Add(-time.Hour), recorded)
-	}
-	p := newPublishEnv(t)
-	seed(p, schedule, began)
-	if ref := p.refused(422, "validation-failed"); ref.extra["dependency"] == nil {
-		t.Fatalf("refusal names no dependency: %v", ref.extra)
-	}
-
-	// Recorded before publication began: the next pass's alert names the release.
-	p = newPublishEnv(t)
-	seed(p, schedule, began.Add(-time.Microsecond))
-	if _, ref := p.commit(); ref != nil {
-		t.Fatalf("an earlier schedule refused: %v", ref)
-	}
-
-	// The schedule publication itself observed, recorded again by a pass: nothing changed.
-	p = newPublishEnv(t)
-	p.unit.statuses[0].result.Reason, p.unit.statuses[0].result.Deletion = classify.DeletionScheduled, schedule
-	seed(p, schedule, began.Add(time.Second))
-	if _, ref := p.commit(); ref != nil {
-		t.Fatalf("the observed schedule refused: %v", ref)
-	}
-
-	// Publication observed a schedule the pass then recorded as cleared.
-	p = newPublishEnv(t)
-	p.unit.statuses[0].result.Reason, p.unit.statuses[0].result.Deletion = classify.DeletionScheduled, schedule
-	mustExec(p.t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class,
-		first_retained_at, observed_from, recorded_at)
-		VALUES ($1, 'kv', $2, 1, '2026-09-26T09:00:00.123456789Z', 'retained', $3, $4, $4)`,
-		id.New(id.Dependency), p.kvPath, began.Add(-time.Hour), began.Add(time.Second))
-	p.refused(422, "validation-failed")
-}
-
 // The re-check holds every named version's status FOR SHARE until the commit (dependency monitor
 // §5.2): a monitor transition starting after it waits for the release, then reads it as a
 // referencing release, so the two are ordered. The probe takes the lock a transition's UPDATE

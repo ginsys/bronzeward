@@ -72,8 +72,9 @@ recreated so is refused at publication (§5.1), so it never has one. One provide
 version named by several releases, or by both dependency records of one
 release, is one monitored dependency with one status **(choice §11.2)**. Its
 alerts name every release whose dependency records reference it; §5.2 orders
-a publication against a transition and against a newly recorded scheduled
-deletion, so no committed release is missing from either's alert.
+a publication against a transition, and §6.2 warns of a scheduled deletion
+every release committed against it, so no committed release is missing from
+either's alert.
 
 Each monitored dependency has a `dep` identifier (PA §2), created when its
 first dependency record is committed. The identifier names the status, not the
@@ -229,20 +230,20 @@ deletion is warned by the next pass (§6.2).
 
 After its inserts, T3 locks the DependencyStatus row of every version it names
 `FOR SHARE`, in `dep` order, rows a concurrent publication inserted included. A
-row whose `recorded_at` is not earlier than the time publication began that
-version's classification refuses the publication, as compilation §6 step 3
-refuses a version, when its class is not `retained`, or when it is `retained`
-with a scheduled deletion other than the one publication's classification
-observed, none included. The comparison takes the time the class was recorded,
+row whose class is not `retained` and whose `recorded_at` is not earlier than
+the time publication began that version's classification refuses the
+publication, as compilation §6 step 3 refuses a version. The comparison takes the time the class was recorded,
 not the time its request began, since a request that began before
 publication's own can observe a change after it; a time equal to publication's
 start counts as after it, since a request cannot be shown to precede it. The
 monitor reads a dependency's referencing releases after taking its row lock
-(§6.1 step 5). A transition, or a newly recorded schedule, and a publication
-naming the same version are therefore ordered: either the publication sees it
-and is refused, or its alert names the release. A refusal can be conservative,
-for a change observed before publication's own request but recorded after it
-began; the retried publication classifies afresh.
+(§6.1 step 5). A transition and a publication naming the same version are
+therefore ordered: either the publication sees it and is refused, or its alert
+names the release. A refusal can be conservative, for a change observed before
+publication's own request but recorded after it began; the retried
+publication classifies afresh. A scheduled deletion leaves a version
+`retained` and needs no such ordering: §6.2 warns each release committed
+against it, whenever it commits.
 
 Without this seed, a dependency lost between publication and the monitor's
 first pass would be a dependency never seen `retained`, alerted after 15
@@ -314,7 +315,7 @@ that a later version can make them configurable.
 | any class to `blocked` | `blocked` | at once, once per entry into `blocked`; the alert states that the block is reversible and how (reason, §3) |
 | `retained` or `blocked` to `unknown` | `regression` | at once; the alert states that a 404 may be a deletion or a restore older than the database (PA §6.3) |
 | `unknown` for 15 minutes since `unknown_since`, including a dependency never recorded `retained` | `persistent` | at 15 minutes, then every 15 minutes while it stays `unknown` **(choice §11.6)** |
-| `retained` with a scheduled deletion time not yet warned | `deletion-scheduled` | at once, once per distinct scheduled time |
+| `retained` with a scheduled deletion time not yet warned to every release referencing the version | `deletion-scheduled` | at once, once per distinct scheduled time; again for that time, naming only the releases its earlier warnings did not |
 | no progress for three intervals | `monitor-stalled` | §6.3 |
 
 `unknown_since` is set when the class becomes `unknown` and cleared when it
@@ -324,7 +325,12 @@ metadata check (design §15.3) shows as `unknown` with its reason, and alerts
 through `regression` and `persistent`.
 
 `deletion-scheduled` is raised by the pass that records a schedule while its
-time is still ahead. A deletion that takes effect before a pass records it,
+time is still ahead, and by any later pass that finds a release its earlier
+warnings for that time did not name: the releases referencing the version,
+read after the row lock (§6.1 step 5), are compared with those the time's
+`deletion-scheduled` alerts named. A release committed against a schedule
+already warned, before or while that warning's pass ran, is therefore named
+by the next pass. A deletion that takes effect before a pass records it,
 one only publication saw included (its seeded row carries the schedule for the
 read routes, §5.2), is first recorded as `blocked`, which alerts at once. The
 warning is therefore not guaranteed for a schedule shorter than one interval
@@ -543,12 +549,13 @@ fail:
     `recorded_at` from `now()`, the release commits and the alert omits it.
     A change recorded at exactly the time publication began its
     classification refuses it; control: comparing "later than", the release
-    commits. A `retained` row recorded not before publication began with a
-    scheduled deletion other than publication's own, none included, refuses
-    it, and one with publication's own schedule does not; controls: without
-    the schedule comparison, the release commits and the
-    `deletion-scheduled` alert omits it; comparing against no schedule, the
-    unchanged one refuses.
+    commits. A `retained` row with a scheduled deletion does not refuse it,
+    whenever recorded or warned; a release committed against a schedule
+    already warned, before and during the warning's pass, is named by the
+    next pass's `deletion-scheduled` alert for that time, which names no
+    release an earlier warning named; controls: warning once per scheduled
+    time only, the later release is never named; without excluding the
+    releases already named, every pass warns again.
 11. **The log after a crash**: a process stopped between an alert's commit
     and its log line has the line written by the next instance to log, and an
     alert whose transaction commits after a later-started one's is logged.
