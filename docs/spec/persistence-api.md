@@ -2879,11 +2879,17 @@ each (design §7.7 consequences):
   again and must then fail; a mark on a mapping holding an earlier reference refused
   `mark-kind` before any provider write, the claim `paused` with its earlier
   digest, with a control that reads a reference member as a string and must
-  then fail by refusing under another rule; a mark extracting the sentinel to a new generation
+  then fail by refusing under another rule; a mark on the string of an
+  identified embedded document holding an earlier reference refused
+  `mark-kind` likewise, with a control that checks mappings only and must then
+  fail by creating a generation; a mark extracting the sentinel to a new generation
   under the same claim, the claim `paused` again at the next owner
   generation with a new digest and the continuation's draft revision holding
   a reference, not the sentinel, with a control that stores the document
-  unsubstituted and must then fail; that mark's `202` body, and each mark's
+  unsubstituted and must then fail; that mark on an import, its new envelope
+  carrying the baseline ciphertext and both baseline digests unchanged and the
+  continuation's import base revision (§3) recording them, with a control that drops the
+  digests from the rebuilt envelope and must then fail; that mark's `202` body, and each mark's
   and continuation's, holding no mark path, no sentinel and no staged text,
   with a control that echoes the request's marks in the body and must then
   fail; a mark
@@ -2899,7 +2905,13 @@ each (design §7.7 consequences):
   `mark-rewrites-text` before any provider write,
   with a control that skips that check and must then fail by staging the
   earlier value in plaintext; a mark whose provider write fails after one generation
-  abandoning the claim; two marks racing one paused claim, exactly one
+  abandoning the claim; a mark whose first generation the provider refuses
+  returning the claim to `paused` with its earlier digest and a `mark-refused`
+  event, with a control that abandons on every provider failure and must then
+  fail; a mark path that does not parse and holds the sentinel answering `422`
+  by position with the claim and its digest unchanged, the sentinel absent
+  from the problem, the logs and every surface the scan above names, with a
+  control that echoes the path in the problem and must then fail; two marks racing one paused claim, exactly one
   taking it; a takeover of a `paused` claim refused; a mark's run killed at
   each of the steps it re-enters (§2.3 steps 3 to 7, step 6 after its first
   generation and before its last) and before it stores its new envelope, and

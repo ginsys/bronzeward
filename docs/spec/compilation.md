@@ -216,8 +216,10 @@ give a node a path that reads as an embedded document's.
 
 Under encrypted staging, the claim's payload is written after step 8, and not
 before: one envelope holding the sanitized document, its references and, for
-import and drift adoption, the baseline ciphertext, so that a taker has
-everything the draft transaction persists.
+import and drift adoption, the baseline ciphertext with its keyed digest and
+its configuration digest, so that a taker has everything the draft
+transaction persists; no identity can decrypt the baseline to compute them
+again.
 
 What E1 measured about interruption, for its own prototype and pipeline: its
 80-row screen interrupted runs at ten points and found no synthetic secret in
@@ -278,7 +280,7 @@ pipeline at §2.3 step 3 on the staged document.
 | Mode | Where the change lives | Recovery owner | Use |
 | --- | --- | --- | --- |
 | Protected transient | the ingesting process's memory only; the claim row carries no payload | none | default, for every ingestion that does not pause across the lifetime of its process |
-| Encrypted staging | the claim row carries the change as one envelope (document, references and any baseline ciphertext, §2.3) encrypted under a staging key | a second ingestion principal (§3.4) | only an ingestion whose review must survive its process |
+| Encrypted staging | the claim row carries the change as one envelope (document, references and any baseline ciphertext with its two digests, §2.3) encrypted under a staging key | a second ingestion principal (§3.4) | only an ingestion whose review must survive its process |
 
 The difference is a recovery owner, not secrecy: both keep plaintext out of
 ordinary persistence (E1 §6). Transient staging has no recovery owner by
@@ -476,11 +478,13 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    recovery epoch (§3.5): the serving instance becomes its owner at the next
    owner generation with a new lease, and the state is `held`. Its run decrypts
    the envelope, checks its digest and re-enters §2.3 at step 3 on the staged
-   sanitized document with the new marks. A mark on a mapping with a `!bwref`
-   member has no kind (§5.2, choice §16.16) and is refused (`mark-kind`): the
-   member's earlier value is in the provider, which this run cannot read, so it
-   could be neither extracted nor kept. A mark on a `!bwref` node itself is
-   excluded as step 3 states.
+   sanitized document with the new marks. A mark whose target holds an
+   existing reference is refused (`mark-kind`): a mapping with a `!bwref`
+   member, which has no kind (§5.2, choice §16.16), and the string of an
+   identified embedded document (§5.4) holding a `!bwref` anywhere inside it.
+   The reference's earlier value is in the provider, which this run cannot
+   read, so it could be neither extracted nor kept. A mark on a `!bwref` node
+   itself is excluded as step 3 states.
    Step 5's guard searches for the
    values this mark extracts. The earlier values are in the provider, which the
    ingestion identity cannot read, so the guard cannot search for them; they
@@ -493,8 +497,8 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    remedy is to abandon and ingest again with the mark at the start, where the
    run holds every value it guards. Step 6 creates the new generations under
    the same claim. Step 8 does not run again: the envelope's baseline is already the exact input. The new envelope
-   (the re-substituted document, every reference and the baseline ciphertext)
-   replaces the payload and its digest in the transaction that pauses the claim
+   (the re-substituted document, every reference and the baseline ciphertext
+   with its two digests, carried over unchanged) replaces the payload and its digest in the transaction that pauses the claim
    again (item 1). The marks are held by the serving process only, never
    stored.
 4. **A refused mark.** A mark refused before any provider write (a mark that
@@ -507,7 +511,11 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    an operator's path, or a staged document's path whose tokens together
    spell it (a guard hit's), can hold an earlier extracted value, which the
    redaction of refusals (§8.3) cannot recognise once the run no longer holds
-   it. A mark refused
+   it. A provider failure on the mark's first generation, before any
+   generation was created, is refused the same way: the claim returns to
+   `paused` with its earlier envelope, and a generation the failed request may
+   have created is referenced by no row and reported as an orphan once the
+   claim ends. A mark refused
    after a provider write (§2.3 step 6 failing part-way) abandons the claim
    with that refusal, and the generations it created are unused (§2.3).
 5. **Continue.** The operator's continuation takes the claim as a mark does and
