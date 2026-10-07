@@ -374,9 +374,10 @@ go_rows() {
 # checkout, not a clone, since it reads this fixture's state, so the checkout is held to the image
 # commit with no path differing and none git is told to skip (checkout_differs, as S0's
 # same_checkout), before the gate and after it; run.txt's own git status count does not see
-# skipped paths. An interruption removes the directory too; a removal that fails fails the row and
-# names the directory.
-c10_tmp=''
+# skipped paths. Each of the seven tables must be there and not empty, as run/collect-evidence
+# requires. An interruption removes the directory too; a removal that fails fails the row and
+# names the directory. c10_ran runs in a subshell, so the traps that remove it on an interruption
+# are its own and replace none of the scenario's.
 c10_clean() {
   [ -n "$c10_tmp" ] || return 0
   rm -rf -- "$c10_tmp"
@@ -386,8 +387,8 @@ c10_clean() {
   fi
   c10_tmp=''
 }
-c10_ran() {
-  local f rc=0 gate=0 traps
+c10_ran() (
+  local f rc=0 gate=0
   c10_image_checkout || {
     printf 'not run: the checkout is not the image commit with no path differing\n' >"$EV/c10-gate.log"
     return 1
@@ -397,7 +398,6 @@ c10_ran() {
     return 1
   }
   c10_tmp=$(mktemp -d) || return 1
-  traps=$(trap -p EXIT INT TERM)
   trap 'c10_clean' EXIT
   trap 'c10_clean; exit 130' INT TERM
   C10_OUT=$c10_tmp/out "$FIXTURES/../experiments/c10-machinery-gate/run/all" >"$c10_tmp/stdout.log" 2>&1 || gate=$?
@@ -407,13 +407,13 @@ c10_ran() {
   # run/collect-evidence's (the gate's synthetic base secrets, every SP value form, BWSYNTH): the
   # fixture's final scan knows none of them. The go test log is not kept.
   : >"$EV/c10-gate.log"
-  if c10_patterns; then
-    c10_keep "$c10_tmp/stdout.log" "$EV/c10-gate.log" ||
+  if c10_patterns "$c10_tmp/out"; then
+    c10_keep "$c10_tmp/out" "$c10_tmp/stdout.log" "$EV/c10-gate.log" ||
       { printf 'run/all output withheld: it holds a leak-refusal pattern, or could not be scanned\n' >"$EV/c10-gate.log"; rc=1; }
     mkdir -p -- "$EV/c10"
     for f in run.txt summary.txt controls.tsv matrix.tsv sp-summary.txt sp-controls.tsv sp-matrix.tsv; do
-      [ -f "$c10_tmp/out/$f" ] || { rc=1; continue; }
-      c10_keep "$c10_tmp/out/$f" "$EV/c10/$f" ||
+      [ -s "$c10_tmp/out/$f" ] || { printf '%s missing or empty\n' "$f" >>"$EV/c10-gate.log"; rc=1; continue; }
+      c10_keep "$c10_tmp/out" "$c10_tmp/out/$f" "$EV/c10/$f" ||
         { printf '%s withheld: it holds a leak-refusal pattern, or could not be scanned\n' "$f" >>"$EV/c10-gate.log"; rc=1; }
     done
   else
@@ -422,21 +422,20 @@ c10_ran() {
   fi
   printf 'exit %d\n' "$gate" >>"$EV/c10-gate.log"
   c10_clean || rc=1
-  trap - EXIT INT TERM
-  eval "$traps"
   [ "$rc" -eq 0 ]
-}
-# c10_patterns: the run recorded its leak-refusal patterns, as many as run/collect-evidence requires.
+)
+# c10_patterns <out>: the run recorded its leak-refusal patterns in <out>, as many as
+# run/collect-evidence requires.
 c10_patterns() {
-  [ -f "$c10_tmp/out/patterns.txt" ] && [ "$(wc -l <"$c10_tmp/out/patterns.txt")" -ge 10 ] &&
-    [ -f "$c10_tmp/out/sp-patterns.txt" ] && [ "$(wc -l <"$c10_tmp/out/sp-patterns.txt")" -ge 28 ]
+  [ -f "$1/patterns.txt" ] && [ "$(wc -l <"$1/patterns.txt")" -ge 10 ] &&
+    [ -f "$1/sp-patterns.txt" ] && [ "$(wc -l <"$1/sp-patterns.txt")" -ge 28 ]
 }
-# c10_keep <file> <copy>: the file copied only when none of the patterns, nor BWSYNTH, is in it;
-# a match or a failed scan copies nothing.
+# c10_keep <out> <file> <copy>: the file copied only when none of <out>'s patterns, nor BWSYNTH,
+# is in it; a match or a failed scan copies nothing.
 c10_keep() {
   local rc=0
-  grep -qF -e BWSYNTH -f "$c10_tmp/out/patterns.txt" -f "$c10_tmp/out/sp-patterns.txt" -- "$1" || rc=$?
-  [ "$rc" -eq 1 ] && cp -- "$1" "$2"
+  grep -qF -e BWSYNTH -f "$1/patterns.txt" -f "$1/sp-patterns.txt" -- "$2" || rc=$?
+  [ "$rc" -eq 1 ] && cp -- "$2" "$3"
 }
 # c10_go_env: the Go settings the gate compiles with, read in this checkout as run/all's go reads
 # them: GOFLAGS, GOEXPERIMENT and GOWORK unset, and the version the image was built with (a
@@ -693,6 +692,25 @@ release_stored() {
     [ "$(sql "SELECT count(*) FROM dependency d JOIN dependency_status s USING (provider, object, version, created)
       WHERE d.release = '$s2_release' AND s.class <> 'retained'")" = 0 ]
 }
+# artifact_digests: the worker's stored digests are those of its stored bytes: the ciphertext
+# digest is SHA-256 of the stored ciphertext text, and the configuration digest is the artifact's,
+# as the OpenBao administrator decrypts it outside Bronzeward with the artifact key the row names
+# (execution-recovery §1: trailing newlines made one, as s1's baseline check). The plaintext stays
+# in the pipe.
+artifact_digests() {
+  local row ct cfg ok key got
+  row=$(sql "SELECT ciphertext || ' ' || encode(configuration_digest, 'hex') || ' ' ||
+    (ciphertext_digest = sha256(convert_to(ciphertext, 'UTF8')))::text || ' ' || key_name
+    FROM release_machine WHERE release = '$s2_release' AND machine = '$machine_w'") || return 1
+  read -r ct cfg ok key <<<"$row"
+  [ "$ok" = true ] && [ "$key" = bw-artifact ] && [ -n "$cfg" ] || {
+    say "s2: the stored ciphertext digest matches its ciphertext: ${ok:-no row}; key ${key:-none}"
+    return 1
+  }
+  got=$(printf '%s\n' "$(bao write -field=plaintext "transit/decrypt/$key" ciphertext="$ct" | base64 -d)" |
+    sha256sum | cut -d' ' -f1) || return 1
+  [ "$got" = "$cfg" ] || { say "s2: decrypted artifact digest $got, stored configuration digest $cfg"; return 1; }
+}
 # immutable <table> <column>: an UPDATE and a DELETE of the release's rows in the table are refused
 # and leave them as they were.
 immutable() {
@@ -809,6 +827,7 @@ s2_steps() {
   check 'S2 step 5' "GET the release: step 2's fragment, profile and assignment revisions, the renderer at the node's contract minor" release_sources
   check 'S2 step 5' 'stored: Transit ciphertext and digests; exact-version dependency records, the label reference from the fragment revision and, kept, from the import base at its mark; all retained' \
     release_stored
+  check 'S2 step 5' "stored digests: the ciphertext's is its stored text's, the configuration's is the decrypted artifact's" artifact_digests
   check 'S2 pass' 'the release row refuses UPDATE and DELETE' release_immutable
   check 'S2 pass' "the release's machine rows refuse UPDATE and DELETE" immutable release_machine mode
   check 'S2 pass' "the release's source rows refuse UPDATE and DELETE" immutable release_source head_revision
