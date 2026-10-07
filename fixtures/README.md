@@ -429,7 +429,10 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   recorded ID; the server's DSN is resolved by Docker's DNS when it connects.
 - Requests from the host to A and B go to `127.0.0.1` on their published ports, which answer for
   whatever holds the port by then, as for PostgreSQL and OpenBao. The tokens sent there are
-  synthetic and scanned for.
+  synthetic and scanned for. S2's `TestLiveProviderStates` rows send this run's synthetic OpenBao
+  root token to OpenBao's published port the same way: a Go test on the host cannot send from
+  inside the container's network namespace as `inject` does, and checking the port's holder first
+  would only narrow the race.
 - A link split is re-applied by `inject start` once the instance answers. Between the instance's
   start and that re-application (up to the minute `start` waits for `/livez`), the instance can
   reach the node.
