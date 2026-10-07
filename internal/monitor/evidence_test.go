@@ -1,6 +1,8 @@
 package monitor
 
 import (
+	"context"
+	"database/sql"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -86,5 +88,91 @@ func TestPassMetadataIdentity(t *testing.T) {
 	slices.Sort(paths)
 	if want := []string{kvPath, keyPath}; !slices.Equal(paths, want) {
 		t.Fatalf("asked %q, want %q", paths, want)
+	}
+}
+
+// waitForLockWaits polls until n sessions of this database wait on a lock.
+func waitForLockWaits(t *testing.T, db *sql.DB, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var got int
+		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got >= n {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("fewer than %d sessions waited on a lock within 10s", n)
+}
+
+// lostResult is the classification of the fixture's KV version destroyed.
+func lostResult(t *testing.T, f *fixture) classify.Result {
+	t.Helper()
+	created, err := time.Parse(time.RFC3339Nano, f.kvCreated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := classify.Classify(classify.Dependency{Provider: classify.KV, Object: f.kv, Version: 1, Created: created},
+		kvAnswer(t, f, func(v map[string]any) { v["destroyed"] = true }))
+	if r.Class != classify.Lost {
+		t.Fatalf("observed %s/%s, want lost", r.Class, r.Reason)
+	}
+	return r
+}
+
+// Dependency monitor §10.1 item 6: two instances that both observed one transition and both reach
+// step 5 raise one alert between them. The advisory lock normally keeps the second from
+// classifying at all, so both recordings are driven past it here: each instance's step 5 starts
+// while a third session holds the status row, and both are waiting before it lets go. The one
+// granted the row lock first records the change and its alert; the other then reads the class
+// already recorded and raises nothing. Control: reading the status without the row lock, both read
+// retained before either records, and two lost alerts are raised.
+func TestRecordOneAlertAcrossInstances(t *testing.T) {
+	f := seed(t)
+	p := &fake{}
+	m1, _ := monitorFor(f, p, Defaults())
+	m2, _ := monitorFor(f, p, Defaults())
+	d := dependency{id: f.depKV, provider: "kv", object: f.kv, version: 1, created: f.kvCreated}
+	r := lostResult(t, f)
+	holder, err := f.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback() }()
+	if _, err := holder.Exec(`SELECT 1 FROM dependency_status WHERE id = $1 FOR UPDATE`, d.id); err != nil {
+		t.Fatal(err)
+	}
+	from := time.Now()
+	done := make(chan error, 2)
+	for _, m := range []*Monitor{m1, m2} {
+		go func() {
+			conn, err := f.db.Conn(context.Background())
+			if err != nil {
+				done <- err
+				return
+			}
+			defer conn.Close()
+			_, err = m.record(context.Background(), conn, d, from, r)
+			done <- err
+		}()
+	}
+	waitForLockWaits(t, f.db, 2)
+	if err := holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := kinds(alerts(t, f.db, d.id)); !slices.Equal(got, []string{"lost"}) {
+		t.Fatalf("alerts %v, want one lost", got)
+	}
+	if s := statusOf(t, f.db, d.id); s.class != "lost" {
+		t.Fatalf("status %+v", s)
 	}
 }
