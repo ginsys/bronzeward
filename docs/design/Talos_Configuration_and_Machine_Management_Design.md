@@ -769,7 +769,7 @@ The product requires a proper web API independent of machine transport. UI, auto
 
 - Redacted diffs and plans in API responses; secrets never appear in normal API payloads.
 
-This request shape is illustrative. A client creates a plan against an exact release and records an approval of it; neither request dispatches anything, and no role may request dispatch (§13.7). The controller then dispatches the approved plan (§12.7), and the client follows the operation it creates. The server resolves the immutable plan and rejects an approval whose binding differs from it (§12.7).
+This request shape is illustrative. A client creates a plan against an exact release and records an approval of it; neither request dispatches anything, and no role may request dispatch (§13.7). The controller then dispatches the approved plan (§12.7), and the client follows the operation it creates. The approval binds the immutable plan its path names; plan identifiers are never reissued, so no revision number is sent with it (§12.7).
 
 ```http
 POST /api/v1/plans
@@ -788,9 +788,7 @@ Location: /api/v1/plans/plan_23
 POST /api/v1/plans/plan_23/approvals
 Idempotency-Key: 3c1a...
 
-{
-  "planRevision": 1
-}
+{}
 
 HTTP/1.1 201 Created
 Location: /api/v1/approvals/apr_19

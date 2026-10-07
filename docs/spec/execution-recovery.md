@@ -180,7 +180,7 @@ silently substitutes a newer artifact. The immutable plan binds:
   attempts;
 - rollout scope and limit, expiry, idempotency key and the approval policy
   (design §13.7: one approval by an `approver`);
-- the plan revision and the creating identity and role.
+- the creating identity and role.
 
 The plan also carries **plan-time evidence**: the redacted diff, the upstream
 validation result and any available dry-run evidence, all derived and redacted
@@ -218,7 +218,11 @@ plan and reach its operation through §3.3.
 
 **Approval.** One approval by an identity holding `approver` authorizes a plan;
 automation never holds `approver`, and `recovery-admin` carries no approval
-(design §13.7 items 2 and 3). The approval names the plan revision, records the
+(design §13.7 items 2 and 3). The approval names the plan. A plan is
+immutable, so the plan it names is the whole binding and no revision number
+enters it ([persistence and API §4.1](persistence-api.md#41-etags)); across a
+restore, the epoch (§7.1) is what keeps an earlier approval from authorizing
+anything. It records the
 approving identity, the role it acted under and the recovery epoch in which it
 was recorded (§7.1), and is marked self-approval where design §13.7 item 3
 requires. Of the two recording cases §13.7 leaves to this contract, both are
@@ -739,7 +743,7 @@ Required entries:
 | Entry | Content |
 | --- | --- |
 | Plan | the binding of §2, the plan-time evidence reference, creator and role |
-| Approval | plan revision, approver, role, epoch, self-approval mark (§2) |
+| Approval | the plan, approver, role, epoch, self-approval mark (§2) |
 | Revocation, identity revocation, cancellation | what it names, who, role |
 | Observation started | purpose, the plan or operation it is taken for, if any, and the Talos endpoint it dials: that plan's route when taken for a plan or its operation, the machine's current endpoint otherwise ([persistence and API §3.3](persistence-api.md#33-talos-access)); recorded before the remote read, its revision is the observation's basis (below) |
 | Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`), basis, the Talos access version it read (path, version, `created_time`; [persistence and API §3.3](persistence-api.md#33-talos-access)), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read and why: a failed access read or connection reads none, and records its `talos-access-unavailable` cause |
@@ -1041,7 +1045,7 @@ state is being accepted (design §12.1).
    for a machine with no `Applied`), the machine's `Desired` release at plan creation (or none), the
    open drift record (none for a handover), the adopted release, the baseline's
    configuration digest, a maximum observation age, its expiry, the approval
-   policy, and the plan revision with its creator. It has the plan states of
+   policy, and its creator. It has the plan states of
    §2, and any change to a bound value needs a new plan.
 4. **Record.** The adopt plan's commitment is the **adoption record**
    transaction. It locks the machine row as §3.2 does, so it is ordered against
