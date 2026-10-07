@@ -34,12 +34,14 @@ type Monitor struct {
 	t    Timings
 	logf func(string, ...any)
 	out  io.Writer
+	// writer is held by the one write to out in progress (logger.go).
+	writer chan struct{}
 }
 
 // New is a monitor asking meta, with the timings t. It reports its own failures through logf and
 // writes each alert's log line (§7.1) to out.
 func New(db *sql.DB, meta Metadata, t Timings, logf func(string, ...any), out io.Writer) *Monitor {
-	return &Monitor{db: db, meta: meta, t: t, logf: logf, out: out}
+	return &Monitor{db: db, meta: meta, t: t, logf: logf, out: out, writer: make(chan struct{}, 1)}
 }
 
 // Run passes until ctx ends: each starts one interval after the previous one started, or at once
