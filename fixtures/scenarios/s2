@@ -196,6 +196,7 @@ pub_draft() {
 }
 # both pause|unpause: that inject action on A and on B.
 both() { "$bin/inject" "$1" A && "$bin/inject" "$1" B; }
+servers() { both "$1" && "$bin/inject" "$1" C; }
 # publish_on_c <name> <statuses ERE>: the publication of the draft, sent to C as h-publisher under
 # the draft's ETag, gets one of the statuses (000 when C exits before it answers). Its operation,
 # found by the draft, in pub_op: one publish operation of the draft, and the one a 202 names.
@@ -748,7 +749,12 @@ s2_steps() {
   check 'S2 step 5' 'the post-state bundle: no fixture secret but the scan control' scan_clean post
 
   # Step 7: from the snapshots taken before step 1, the automation identity repeats steps 1 to 3.
+  # The servers are paused across the database swap and keep running: db-restore ends their
+  # sessions and renames in one transaction, and a pool reconnecting in between makes the rename
+  # fail. Unpaused, they reconnect to the restored database.
+  check 'S2 step 7' 'inject pause A, B and C' servers pause
   check 'S2 step 7' 'inject db-restore s2-step1' "$bin/inject" db-restore "$snap"
+  check 'S2 step 7' 'inject unpause A, B and C' servers unpause
   check 'S2 step 7' 'inject bao-restore s2-step1' "$bin/inject" bao-restore "$snap"
   check 'S2 step 7' 'A reads the restored database' within 60 db_reads
   check 'S2 step 7' "restored: no act after the snapshot, step 3's release gone, the worker's Desired and Applied the seeded release" \
