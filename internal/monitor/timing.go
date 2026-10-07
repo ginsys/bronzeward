@@ -31,6 +31,10 @@ func Defaults() Timings {
 	}
 }
 
+// Stale is the age past which a served class is stale: three intervals between the start of the
+// request that observed it and the database's time (§6.3, §7.2).
+func (t Timings) Stale() time.Duration { return stallIntervals * t.Interval }
+
 // next is the wait before the pass after one that started at start and ended at end: one interval
 // after start, or none if the pass took that long (§6.1).
 func next(start, end time.Time, interval time.Duration) time.Duration {
