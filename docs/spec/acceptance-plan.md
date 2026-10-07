@@ -297,8 +297,16 @@ follows it.
 `409 stale-input`; without `FOR SHARE` the stale release commits (DB
 row 011). A literal copy of a resolved value, and the reserved text `!bwref` in a string: refused,
 paths only. A fidelity check firing on an injected structural change (C §8.1). A pinned KV version
-soft-deleted, then destroyed, then OpenBao partitioned: `blocked`, `lost`, `unknown`, each alerted
-as design §7.8 sets, and a publication pinning it refused. A repeated request under one key
+soft-deleted, then destroyed, then OpenBao partitioned, sealed and paused: `blocked`, `lost`,
+`unknown`, each alerted as design §7.8 sets, and a publication pinning it refused. Each provider
+object state, against the fixture's OpenBao through the monitor's metadata client
+(`TestLiveProviderStates`, run with S2's Go tests, its log kept in S2's evidence), one object per
+state, each first `retained`: a KV version soft-deleted (`blocked`), undeleted (`retained`),
+destroyed (`lost`) and pruned past `max_versions` (`lost`); a Transit version below the decryption
+floor and trimmed (`unknown`, each reason naming its floor); deleted KV metadata and a deleted
+Transit key (`unknown`, `regression` on that pass and not again); and the same 404 on a dependency
+never `retained`, which alerts nothing until `persistent`. Each alert as
+[DM §6.2](dependency-monitor.md#62-alert-kinds) sets and no other. A repeated request under one key
 replays; the key reused for another body answers `422`; a `publish` worker killed after `COMMIT`
 leaves one release; a lapsed `publish` job is claimed again and its first worker's completion
 refused. The draft-update ingestion, as S1's matrix runs it for import: success, refusal, and the
