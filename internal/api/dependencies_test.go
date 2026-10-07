@@ -129,9 +129,11 @@ func TestDependencyReads(t *testing.T) {
 // from the last completed pass serves a seeded status as current while passes complete.
 func TestDependencyStaleOwnObservation(t *testing.T) {
 	d := newDraftEnv(t)
-	interval := time.Minute // monitor.Defaults().Interval
-	fresh := d.status("bw-fresh", 1, "retained", "", 2*interval)
-	seeded := d.status("bw-seeded", 1, "retained", "", 4*interval)
+	// Ten seconds either side of three intervals (monitor.Defaults().Interval is a minute): the
+	// read follows the seed within a second.
+	threeIntervals := 3 * time.Minute
+	fresh := d.status("bw-fresh", 1, "retained", "", threeIntervals-10*time.Second)
+	seeded := d.status("bw-seeded", 1, "retained", "", threeIntervals+10*time.Second)
 	mustExec(t, d.db, `UPDATE dependency_monitor SET last_pass = now()`)
 	for dep, want := range map[string]bool{fresh: false, seeded: true} {
 		if got := decode[dependencyBody](t, d.get("/dependencies/"+dep), http.StatusOK); got.Stale != want {
@@ -302,5 +304,61 @@ func TestDependencyAlerts(t *testing.T) {
 		{"/dependencies/" + s.rel + "/alerts", http.StatusNotFound, "not-found"},
 	} {
 		wantProblem(t, d.get(c.path), c.status, c.code)
+	}
+}
+
+// DM §7.2's member names, read from the answers' JSON objects rather than through the response
+// types, so a renamed member fails here.
+func TestDependencyMembers(t *testing.T) {
+	d := newDraftEnv(t)
+	s := d.release(d.draft, 1, releaseProvenance)
+	art := d.artifactStatus()
+	d.status("bw-other", 1, "retained", "", 0)
+	mustExec(t, d.db, `INSERT INTO dependency_alert (id, seq, kind, dependency, provider, object, version, created, class, reason,
+			releases, observed_from, epoch, recorded_at)
+		VALUES ($1, 0, 'regression', $2, 'transit', 'bw-artifact', 1, '2026-09-26T09:12:40Z', 'unknown', 'unreachable',
+			ARRAY[$3], now(), $4, now())`, id.New(id.DependencyAlert), art, s.rel, epoch(t, d.db))
+	whole := func(m map[string]any) map[string]any { return m }
+	first := func(m map[string]any) map[string]any {
+		items, _ := m["items"].([]any)
+		if len(items) == 0 {
+			t.Fatalf("no items in %v", m)
+		}
+		it, _ := items[0].(map[string]any)
+		return it
+	}
+	firstRecord := func(m map[string]any) map[string]any {
+		recs, _ := first(m)["records"].([]any)
+		if len(recs) == 0 {
+			t.Fatalf("no records in %v", m)
+		}
+		r, _ := recs[0].(map[string]any)
+		return r
+	}
+	dependency := []string{"class", "created", "firstRetainedAt", "id", "object", "observedFrom", "provider", "reason",
+		"recordedAt", "stale", "unknownSince", "version"}
+	alert := []string{"answerDate", "class", "created", "deletion", "dependency", "epoch", "id", "kind", "object",
+		"observedFrom", "provider", "reason", "recordedAt", "releases", "version"}
+	for _, c := range []struct {
+		path string
+		pick func(map[string]any) map[string]any
+		want []string
+	}{
+		{"/dependencies?limit=1", whole, []string{"items", "lastPass", "next"}},
+		{"/dependencies", first, dependency},
+		{"/dependencies/" + art, whole, dependency},
+		{"/dependencies/" + art + "/releases", first, []string{"cluster", "publishedAt", "records", "release"}},
+		{"/dependencies/" + art + "/releases", firstRecord, []string{"kind", "machine"}},
+		{"/dependencies/" + art + "/alerts", first, alert},
+		{"/dependency-alerts", first, alert},
+	} {
+		var got []string
+		for k := range c.pick(decode[map[string]any](t, d.get(c.path), http.StatusOK)) {
+			got = append(got, k)
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%s members %v; want %v", c.path, got, c.want)
+		}
 	}
 }
