@@ -367,8 +367,10 @@ go_rows() {
 # The machinery gate (compilation §10.1, the S2 precondition): SR's and SP's matrices re-run with
 # composition through the compiler's own path, by experiments/c10-machinery-gate/run/all against
 # this fixture. Its output holds the bases' synthetic secrets, so it goes to a directory outside the
-# checkout (mktemp -d, under TMPDIR; run/all refuses one inside), only its result tables are kept,
-# in c10/ (the final bundle's scan covers them), and the directory is removed. It runs on this
+# checkout (mktemp -d, under TMPDIR; run/all refuses one inside), only its result tables and
+# run/all's own output are kept, in c10/ and c10-gate.log, each once it scans clean against the
+# run's leak-refusal patterns (the final bundle's scan knows only the fixture's), and the directory
+# is removed. It runs with the Go settings and version the image was built with, and on this
 # checkout, not a clone, since it reads this fixture's state, so the checkout is held to the image
 # commit with no path differing and none git is told to skip (checkout_differs, as S0's
 # same_checkout), before the gate and after it; run.txt's own git status count does not see
@@ -385,24 +387,66 @@ c10_clean() {
   c10_tmp=''
 }
 c10_ran() {
-  local f rc=0
+  local f rc=0 gate=0 traps
   c10_image_checkout || {
     printf 'not run: the checkout is not the image commit with no path differing\n' >"$EV/c10-gate.log"
     return 1
   }
+  c10_go_env || {
+    printf "not run: GOFLAGS, GOEXPERIMENT or GOWORK is set, or the Go version is not the image's\n" >"$EV/c10-gate.log"
+    return 1
+  }
   c10_tmp=$(mktemp -d) || return 1
+  traps=$(trap -p EXIT INT TERM)
   trap 'c10_clean' EXIT
   trap 'c10_clean; exit 130' INT TERM
-  C10_OUT=$c10_tmp/out "$FIXTURES/../experiments/c10-machinery-gate/run/all" >"$EV/c10-gate.log" 2>&1 || rc=$?
-  printf 'exit %d\n' "$rc" >>"$EV/c10-gate.log"
-  ran c10-gate "$rc" experiments/c10-machinery-gate/run/all
-  mkdir -p -- "$EV/c10"
-  for f in run.txt summary.txt controls.tsv matrix.tsv sp-summary.txt sp-controls.tsv sp-matrix.tsv gate.log; do
-    [ ! -f "$c10_tmp/out/$f" ] || cp -- "$c10_tmp/out/$f" "$EV/c10/$f" || rc=1
-  done
+  C10_OUT=$c10_tmp/out "$FIXTURES/../experiments/c10-machinery-gate/run/all" >"$c10_tmp/stdout.log" 2>&1 || gate=$?
+  ran c10-gate "$gate" experiments/c10-machinery-gate/run/all
+  [ "$gate" -eq 0 ] || rc=1
+  # Nothing is kept that does not scan clean against the run's own leak-refusal patterns, as
+  # run/collect-evidence's (the gate's synthetic base secrets, every SP value form, BWSYNTH): the
+  # fixture's final scan knows none of them. The go test log is not kept.
+  : >"$EV/c10-gate.log"
+  if c10_patterns; then
+    c10_keep "$c10_tmp/stdout.log" "$EV/c10-gate.log" ||
+      { printf 'run/all output withheld: it holds a leak-refusal pattern, or could not be scanned\n' >"$EV/c10-gate.log"; rc=1; }
+    mkdir -p -- "$EV/c10"
+    for f in run.txt summary.txt controls.tsv matrix.tsv sp-summary.txt sp-controls.tsv sp-matrix.tsv; do
+      [ -f "$c10_tmp/out/$f" ] || { rc=1; continue; }
+      c10_keep "$c10_tmp/out/$f" "$EV/c10/$f" ||
+        { printf '%s withheld: it holds a leak-refusal pattern, or could not be scanned\n' "$f" >>"$EV/c10-gate.log"; rc=1; }
+    done
+  else
+    printf 'run/all output withheld: the run recorded no leak-refusal patterns to scan it against\n' >"$EV/c10-gate.log"
+    rc=1
+  fi
+  printf 'exit %d\n' "$gate" >>"$EV/c10-gate.log"
   c10_clean || rc=1
   trap - EXIT INT TERM
+  eval "$traps"
   [ "$rc" -eq 0 ]
+}
+# c10_patterns: the run recorded its leak-refusal patterns, as many as run/collect-evidence requires.
+c10_patterns() {
+  [ -f "$c10_tmp/out/patterns.txt" ] && [ "$(wc -l <"$c10_tmp/out/patterns.txt")" -ge 10 ] &&
+    [ -f "$c10_tmp/out/sp-patterns.txt" ] && [ "$(wc -l <"$c10_tmp/out/sp-patterns.txt")" -ge 28 ]
+}
+# c10_keep <file> <copy>: the file copied only when none of the patterns, nor BWSYNTH, is in it;
+# a match or a failed scan copies nothing.
+c10_keep() {
+  local rc=0
+  grep -qF -e BWSYNTH -f "$c10_tmp/out/patterns.txt" -f "$c10_tmp/out/sp-patterns.txt" -- "$1" || rc=$?
+  [ "$rc" -eq 1 ] && cp -- "$1" "$2"
+}
+# c10_go_env: the Go settings the gate compiles with, read in this checkout as run/all's go reads
+# them: GOFLAGS, GOEXPERIMENT and GOWORK unset, and the version the image was built with (a
+# GOTOOLCHAIN switch shows as another version), as go_env_clean holds the Go rows' clone.
+c10_go_env() {
+  local out v
+  out=$(go -C "$FIXTURES/.." env GOFLAGS GOEXPERIMENT GOWORK GOVERSION) || return 1
+  mapfile -t v <<<"$out"
+  [ "${#v[@]}" -eq 4 ] && [ -z "${v[0]}${v[1]}${v[2]}" ] && [ -n "${v[3]}" ] &&
+    [ "${v[3]}" = "$(sed -n 's/^go //p' "$STATE/up-build")" ]
 }
 # c10_image_checkout: this checkout is the commit up-build records for the image, no path
 # differing, and every tracked file's bytes HEAD's.
@@ -471,15 +515,22 @@ c10_rows() {
 # Applied release's.
 S2_LABEL=bw-s2
 applied='' ref_name='' ref_version='' frv='' prv='' arv='' s2_release='' robot='' robot_id=''
-# seed_applied: the worker's Applied set to its Desired release, with that release's configuration
-# digest, source adoption and baseline revision 1; the release id in applied.
+# seed_applied: the worker's Applied set to its Desired release, source adoption and baseline
+# revision 1, with the baseline's digest as an adoption records it (execution and recovery §6.3,
+# choice §10.15): the configuration digest of the release's import base revision, computed when
+# the worker's configuration was read from the node, not the recompiled artifact's, which a
+# re-encoding renderer may change. The release id in applied.
 seed_applied() {
   applied=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'") || return 1
   [ -n "$applied" ] || return 1
   sql "UPDATE machine_state SET applied_release = desired, applied_source = 'adoption', baseline_revision = 1,
-    applied_digest = (SELECT configuration_digest FROM release_machine WHERE release = '$applied' AND machine = '$machine_w')
+    applied_digest = (SELECT b.configuration_digest FROM release_machine rm
+      JOIN import_base_revision b ON b.id = rm.import_base_revision AND b.machine = rm.machine
+      WHERE rm.release = '$applied' AND rm.machine = '$machine_w')
     WHERE machine = '$machine_w'" >/dev/null || return 1
-  [ "$(sql "SELECT applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$applied" ]
+  [ "$(sql "SELECT count(*) FROM machine_state s JOIN release_machine rm ON rm.release = s.applied_release AND rm.machine = s.machine
+    JOIN import_base_revision b ON b.id = rm.import_base_revision AND b.machine = rm.machine
+    WHERE s.machine = '$machine_w' AND s.applied_release = '$applied' AND s.applied_digest = b.configuration_digest")" = 1 ]
 }
 # applied_reference: the reference the Applied release's review records at the worker's marked file
 # content (WORKER_MARK, extracted when the worker was imported), its name and version in ref_name
@@ -681,7 +732,7 @@ s2_steps() {
   fresh_author
   fresh_publisher
   ref='S2 precondition (seeded, Q2)'
-  check "$ref" "seed: the worker's Applied set by SQL to its Desired release, source adoption, its configuration digest" seed_applied
+  check "$ref" "seed: the worker's Applied set by SQL to its Desired release, source adoption, the configuration digest of its import base as read from the node (an adoption's record)" seed_applied
   [ -n "$applied" ] || die "s2: no Applied seeded; nothing after it can run"
   check "$ref" "the Applied release's review names one reference at the worker's marked file content" applied_reference "$author"
   [ -n "$ref_name" ] || die "s2: no reference to carry; nothing after it can run"
@@ -777,6 +828,11 @@ run() {
   interrupt - || die "cannot remove C's control file"
   check 'S2 precondition' 'A answers /livez' answers 204 - GET /livez ''
   check 'S2 precondition' 'C (the interruption build, no interruption named) answers /livez' c_live
+  # The machinery gate first (acceptance plan S2's precondition): no release is made and no
+  # evidence captured on a compiler it has not accepted.
+  local gate_failed=$failed
+  c10_rows
+  [ "$failed" -eq "$gate_failed" ] || die "s2: the machinery gate did not pass; S2 does not run on a compiler it has not accepted"
   withheld+=("$BW_CANARY")
   fresh_author
   check 'S2 step 1' 'POST /drafts as h-author: 201 with an ETag' \
@@ -828,7 +884,6 @@ run() {
   # S2 steps 1 to 5 and 7, on the Applied state seeded from the last release.
   s2_steps
   go_rows
-  c10_rows
   check 'S2 backups, C §15' 'inject db-snapshot: a dump of the bronzeward database after the updates, refusals and interruptions' \
     "$bin/inject" db-snapshot "$backup_name"
 }
