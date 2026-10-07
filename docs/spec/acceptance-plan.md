@@ -836,8 +836,12 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: role checks whose outcome needs the route's handler or state, against the design §13.7 scenarios | S2 step 7, S3 (its handover part included), S4, S5 steps 3 and 7, S6.1 step 7, S7 | #23, #25, #26, #27, #28, #29 |
 | PA §16: the epoch term and process-epoch checks; the recovery-start process in the new epoch; per-scope refusals and the recovery-start refusal | S7 | #29 |
 | PA §16: one idempotency key in flight twice, with the key-lock control | *check* | #21 |
-| DM §10.1 items 2, 3 and 8's publication refusal: fixture classifications, their alerts and the refused publication | S2 step 6 and negative controls; S7 variants | #24 |
-| DM §10.1 items 1, 4 to 7, 8's dispatch half and 9 to 15: every classification rule, persistent unknown, metadata-only access, one alert per transition, silence, Transit and KV identity, publication against a transition, logging after a crash, per-dependency staleness, recovery start, overlapping monitors, the alert log after a database restore | *check* | #24 |
+| DM §10.1 items 2 and 3: each provider object state (KV soft-deleted, undeleted, destroyed, pruned and its metadata deleted; a Transit version below the decryption floor and trimmed, the key deleted) classified through the metadata client under the fixture's policy, with exactly its alerts, and item 3's unseeded control, are `TestLiveProviderStates` | *check* | #24 |
+| DM §10.1 items 2 and 8's publication refusal: OpenBao partitioned, sealed and paused, a pinned KV version soft-deleted then destroyed, their classifications and alerts and the refused publication | S2 step 6 and negative controls | #24 |
+| DM §10.1 items 2 and 3 across a restore: a deleted Transit key and an OpenBao snapshot older than the database | S7 variants | #29 |
+| DM §10.1 items 1, 4 to 7, 9 to 12, 14 and 15: every classification rule, persistent unknown, metadata-only access, one alert per transition, silence, Transit and KV identity, publication against a transition, logging after a crash, per-dependency staleness, overlapping monitors, the alert log after a database restore | *check* | #24 |
+| DM §10.1 item 8's dispatch half: no dispatch admitted by a retained class | *check* | #26 |
+| DM §10.1 item 13: recovery start records nothing before its entry commits | *check* | #29 |
 | PA §16: approval revocation racing commitment (DS row 003) | S3 negative controls | #25 |
 | PA §10.4: an approval surviving its approver's loss of the role, contrasted with its revocation (choice §17.23) | S3 negative controls | #25 |
 | PA §16: identity revocation racing commitment, with the lock control; its timeline entries on exactly the machines it touches (T5c) | *check* | #25 |
