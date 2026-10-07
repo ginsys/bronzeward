@@ -382,7 +382,7 @@ go_rows() {
     check "$ref" 'a run whose lease lapsed writes nothing: no release, no failure (TestPublishRunLapsed)' go_row TestPublishRunLapsed
     check "$ref" 'a worker whose ownership was superseded writes nothing on commit (TestPublishCommitFenced)' go_row TestPublishCommitFenced
     check 'S2 pass' 'every release table refuses UPDATE and DELETE (TestReleaseImmutableTables)' go_row TestReleaseImmutableTables
-    check 'S2 Go tests' "TestLiveProviderStates ran against this fixture's OpenBao and PostgreSQL and passed, none skipped (go-bao-rows.log)" \
+    check 'S2 Go tests' "TestLiveProviderStates ran against this fixture's OpenBao and go-db's PostgreSQL and passed, none skipped (go-bao-rows.log)" \
       bao_rows_ran
     ref='S2 negative controls (DM §10.1 items 2 and 3)'
     check "$ref" 'a KV version, first retained, soft-deleted: blocked; undeleted: retained; destroyed: lost; alerts blocked then lost, no other' \
@@ -834,23 +834,37 @@ s6_alerts() {
   sql "SELECT coalesce(string_agg(kind || ':' || coalesce(dependency, '-') || ':' || coalesce(reason, '-'), ',' ORDER BY seq), '')
     FROM dependency_alert WHERE seq > $s6_a0"
 }
-# s6_alerted <alerts...>: s6_alerts is one of the lists given, each alert naming s2_release; says
-# what it got otherwise.
+# s6_named: every alert since s6_a0 concerning a dependency names s2_release and exactly the
+# releases referencing that dependency (DM §6.1), as a set; says which otherwise. A
+# `monitor-stalled` alert names none, and the exact alert list its caller checks refuses it.
+s6_named() {
+  local bad
+  bad=$(sql "SELECT coalesce(string_agg(a.seq::text, ',' ORDER BY a.seq), '') FROM dependency_alert a
+    WHERE a.seq > $s6_a0 AND a.dependency IS NOT NULL AND (a.releases IS NULL OR NOT '$s2_release' = ANY (a.releases)
+      OR (SELECT array_agg(DISTINCT r ORDER BY r) FROM unnest(a.releases) r) IS DISTINCT FROM
+        (SELECT array_agg(DISTINCT d.release ORDER BY d.release) FROM dependency d
+          JOIN dependency_status s USING (provider, object, version, created) WHERE s.id = a.dependency))") || return 1
+  [ -z "$bad" ] || {
+    say "s2: alerts $bad since $s6_a0 do not name exactly the releases referencing their dependency, $s2_release among them"
+    return 1
+  }
+}
+# s6_alerted <alerts...>: s6_alerts is one of the lists given, each alert naming the releases
+# s6_named requires; says what it got otherwise.
 s6_alerted() {
   local got want
   got=$(s6_alerts) || return 1
-  [ "$(sql "SELECT count(*) FROM dependency_alert WHERE seq > $s6_a0 AND NOT '$s2_release' = ANY (releases)")" = 0 ] || {
-    say "s2: an alert since $s6_a0 does not name $s2_release"
-    return 1
-  }
+  s6_named || return 1
   for want in "$@"; do [ "$got" != "$want" ] || return 0; done
   say "s2: alerts since $s6_a0: '$got', want one of: $*"
   return 1
 }
-# s6_regressions <reason>: one regression of that reason for each dependency but dep_p, and no other
-# alert: dep_p, lost, raises none on becoming unknown (§6.2).
+# s6_regressions <reason>: one regression of that reason for each dependency but dep_p, each
+# naming the releases s6_named requires, and no other alert: dep_p, lost, raises none on becoming
+# unknown (§6.2).
 s6_regressions() {
   local want
+  s6_named || return 1
   want=$(sql "SELECT coalesce(string_agg('regression:' || id || ':$1', ',' ORDER BY id), '') FROM dependency_status
     WHERE id <> '$dep_p'") || return 1
   [ "$(sql "SELECT coalesce(string_agg(kind || ':' || coalesce(dependency, '-') || ':' || coalesce(reason, '-'), ','
@@ -859,10 +873,15 @@ s6_regressions() {
     return 1
   }
 }
-# s6_served <jq filter>: GET /dependencies as h-author, one page, satisfies the filter.
+# s6_served <jq filter>: GET /dependencies as h-author, one page, serves exactly the database's
+# dependency statuses, at least one, and satisfies the filter.
 s6_served() {
+  local ids
+  ids=$(sql "SELECT coalesce(json_agg(id ORDER BY id), '[]') FROM dependency_status") || return 1
+  [ "$ids" != '[]' ] || { say 's2: no dependency status recorded'; return 1; }
   fresh_author
-  answers_with "(.next == null) and ($1)" 200 - GET '/api/v1/dependencies?limit=500' "$author"
+  answers_with "(.next == null) and (([.items[].id] | sort) == ($ids | sort)) and ($1)" \
+    200 - GET '/api/v1/dependencies?limit=500' "$author"
 }
 # s6_pinned_served <class> <reason> <alert kind>: GET /dependencies/{dep_p} serves that class and
 # reason, not stale, and its alerts route ends with an alert of that kind and reason naming
