@@ -55,3 +55,28 @@ func TestNewGivesAnEmptyDatabase(t *testing.T) {
 		t.Fatal("no DSN returned")
 	}
 }
+
+// A copy is the database as it was when copied: a row written to the source afterwards is not in
+// it, its sequences continue from where the source's were then, and the source keeps working.
+func TestCopyIsABackup(t *testing.T) {
+	db, _ := New(t)
+	for _, q := range []string{`CREATE TABLE t (n bigint GENERATED ALWAYS AS IDENTITY, v text)`,
+		`INSERT INTO t (v) VALUES ('before')`} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restored := Copy(t, db)
+	var after int64
+	if err := db.QueryRow(`INSERT INTO t (v) VALUES ('after') RETURNING n`).Scan(&after); err != nil {
+		t.Fatalf("source after the copy: %v", err)
+	}
+	var vs string
+	if err := restored.QueryRow(`SELECT string_agg(v, ',' ORDER BY n) FROM t`).Scan(&vs); err != nil || vs != "before" {
+		t.Fatalf("copy holds %q, %v; want before", vs, err)
+	}
+	var again int64
+	if err := restored.QueryRow(`INSERT INTO t (v) VALUES ('again') RETURNING n`).Scan(&again); err != nil || again != after {
+		t.Fatalf("copy issued %d, %v; want %d, the number the source issued after the copy", again, err, after)
+	}
+}
