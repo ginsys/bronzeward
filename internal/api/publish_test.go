@@ -50,7 +50,12 @@ var (
 
 func newPublishEnv(t *testing.T) *publishEnv {
 	t.Helper()
-	d := newDraftEnv(t)
+	return publishOn(t, newDraftEnv(t))
+}
+
+// publishOn is newPublishEnv on d's cluster, machine and draft.
+func publishOn(t *testing.T, d *draftEnv) *publishEnv {
+	t.Helper()
 	p := &publishEnv{draftEnv: d}
 	var epoch string
 	if err := d.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {

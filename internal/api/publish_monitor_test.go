@@ -41,11 +41,31 @@ func lockWaits(t *testing.T, db *sql.DB) int {
 	return count(t, db, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)
 }
 
+// trimMeta is the metadata identity's provider once the Transit key's version 1 is trimmed: every
+// KV version is unchanged.
+type trimMeta struct{}
+
+func (trimMeta) KV(context.Context, provider.GenerationPath) (classify.Answer, error) {
+	return metaAnswer(map[string]any{"current_version": 1, "oldest_version": 0, "versions": map[string]any{
+		"1": map[string]any{"created_time": kvCreated.Format(time.RFC3339Nano), "deletion_time": "", "destroyed": false}}}), nil
+}
+
+func (trimMeta) Transit(context.Context, string) (classify.Answer, error) {
+	return metaAnswer(map[string]any{"keys": map[string]any{"1": transitCreated.Unix(), "2": transitCreated.Unix() + 60},
+		"latest_version": 2, "min_available_version": 2, "min_decryption_version": 2, "soft_deleted": false}), nil
+}
+
 // lostAlerts is the lost alerts of the KV version, each with the releases it names.
 func lostAlerts(t *testing.T, p *publishEnv) [][]string {
 	t.Helper()
-	rows, err := p.db.Query(`SELECT array_to_string(releases, ',') FROM dependency_alert
-		WHERE kind = 'lost' AND provider = 'kv' AND object = $1 ORDER BY seq`, p.kvPath)
+	return alerts(t, p.db, "kv", p.kvPath)
+}
+
+// alerts is the lost alerts of a provider's object, each with the releases it names.
+func alerts(t *testing.T, db *sql.DB, prov, object string) [][]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT array_to_string(releases, ',') FROM dependency_alert
+		WHERE kind = 'lost' AND provider = $1 AND object = $2 ORDER BY seq`, prov, object)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,12 +146,99 @@ func TestPublishRacingMonitorNamedByAlert(t *testing.T) {
 	}
 }
 
-// Dependency monitor §10.1 item 10, two publications the first to name the version: the other
-// publication's seed of the version's status is uncommitted when this one's seed meets it, and by
-// the time it commits the monitor has recorded the version's loss after this publication began.
-// The held transaction stands for both, committing the status as the monitor left it. This
-// publication's seed waits, finds the row, and its re-check, locking after the insert, refuses.
-// Control: re-checking before the insert finds no row, and the release commits.
+// otherCluster is a publication of a second cluster in p's database, its own machine and draft:
+// it names p's Transit key version and its own KV version.
+func (p *publishEnv) otherCluster() *publishEnv {
+	p.t.Helper()
+	e := p.env
+	d := &draftEnv{env: e, seed: p.seed}
+	d.cluster = e.createCluster(e.api, e.human("h-author"), "k-cluster-other-0123456")
+	rec := e.do(e.api, call{method: "POST", path: prefix + "/machines", token: e.human("h-author"), key: "k-machine-other-0123456",
+		body: `{"cluster":"` + d.cluster + `","smbiosUuid":"2d7c8e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f","serial":"SN-2",` +
+			`"platform":"container","talosEndpoint":"10.55.0.4"}`})
+	d.machine = decode[machineBody](p.t, rec, http.StatusCreated).ID
+	rec = e.do(e.api, call{method: "POST", path: prefix + "/drafts", token: e.human("h-author"), key: "k-draft-other-0123456",
+		body: `{"cluster":"` + d.cluster + `","title":"workers"}`})
+	d.draft, d.etag = decode[draftBody](p.t, rec, http.StatusCreated).ID, rec.Header().Get("ETag")
+	return publishOn(p.t, d)
+}
+
+// Dependency monitor §10.1 item 10, two publications the first to name the version: two clusters'
+// publications name one Transit key version, which only a key shared across clusters allows, since
+// each publication locks every machine state of its cluster before its seed. The second one's seed
+// waits for the first one's uncommitted status row; the first commits; the second re-checks, and
+// while it holds the row the monitor records the version's loss, waits for its commit and names
+// both releases. Control: the monitor reading the status without its row lock omits the second.
+// The other outcome, the monitor recording between the first's commit and the second's re-check,
+// has no gap to arrange: TestPublishFirstNamedConcurrentlyRefused stands in for it.
+func TestPublishFirstNamedByTwoNamedByAlert(t *testing.T) {
+	first := newPublishEnv(t)
+	second := first.otherCluster()
+	m := monitor.New(first.db, trimMeta{}, monitor.Defaults(), t.Logf, io.Discard)
+	seeded, release := make(chan int, 1), make(chan struct{})
+	first.a = first.buildWith(deps{owner: first.owner}, options{commit: func(tx *sql.Tx) error {
+		var pid int
+		if err := tx.QueryRow(`SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+			return err
+		}
+		seeded <- pid
+		<-release
+		return tx.Commit()
+	}})
+	passed := make(chan error, 1)
+	second.a = second.buildWith(deps{owner: second.owner}, options{commit: func(tx *sql.Tx) error {
+		go func() { passed <- m.Pass(context.Background()) }()
+		for deadline := time.Now().Add(10 * time.Second); lockWaits(t, second.db) == 0; time.Sleep(10 * time.Millisecond) {
+			if len(passed) > 0 || time.Now().After(deadline) {
+				t.Error("the monitor's record never waited for the second publication")
+				break
+			}
+		}
+		return tx.Commit()
+	}})
+	type outcome struct {
+		rel string
+		ref *refusal
+		err error
+	}
+	commit := func(p *publishEnv) <-chan outcome {
+		c := make(chan outcome, 1)
+		go func() {
+			rel, ref, err := p.a.publishCommit(context.Background(), p.job, p.unit)
+			c <- outcome{rel, ref, err}
+		}()
+		return c
+	}
+	firstDone := commit(first)
+	var holder int
+	select {
+	case holder = <-seeded:
+	case o := <-firstDone:
+		t.Fatalf("the first publication ended before its commit: %+v", o)
+	}
+	secondDone := commit(second)
+	waitBlockedBy(t, first.db, holder)
+	close(release)
+	a, b := <-firstDone, <-secondDone
+	if a.err != nil || a.ref != nil || b.err != nil || b.ref != nil {
+		t.Fatalf("first %+v, second %+v; want both committed", a, b)
+	}
+	if err := <-passed; err != nil {
+		t.Fatal(err)
+	}
+	got := alerts(t, first.db, "transit", "bw-artifact")
+	if len(got) != 1 || !slices.Contains(got[0], a.rel) || !slices.Contains(got[0], b.rel) {
+		t.Fatalf("lost alerts %v, want one naming both releases %s and %s", got, a.rel, b.rel)
+	}
+}
+
+// Dependency monitor §10.1 item 10, two publications the first to name the version, refused: the
+// other publication's seed of the version's status is uncommitted when this one's seed meets it,
+// and by the time it commits the monitor has recorded the version's loss after this publication
+// began. The held transaction stands for both, committing the status as the monitor left it: a
+// publication's re-check follows its seed with no step between, so the monitor cannot be placed
+// there. This publication's seed waits, finds the row, and its re-check, locking after the insert,
+// refuses. Control: re-checking before the insert finds no row, and the release commits.
 func TestPublishFirstNamedConcurrentlyRefused(t *testing.T) {
 	p := newPublishEnv(t)
 	p.beginNow()
