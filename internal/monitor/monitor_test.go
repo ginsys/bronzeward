@@ -187,7 +187,8 @@ func exec(t *testing.T, db *sql.DB, q string, args ...any) {
 func advisoryLocks(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	var n int
-	if err := db.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'`).Scan(&n); err != nil {
+	if err := db.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'
+		AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -585,5 +586,42 @@ func TestProgressAfterMonitorLock(t *testing.T) {
 				t.Fatalf("progress %v, the row lock released at %v", progress, released)
 			}
 		})
+	}
+}
+
+// §6.3: a DependencyMonitor lock holder that stops after taking the row has its transaction ended
+// by the server within the bound, so another session takes the row.
+func TestHolderIdleTimeout(t *testing.T) {
+	f := seed(t)
+	tm := Defaults()
+	tm.LockHolder = 300 * time.Millisecond
+	m, _ := monitorFor(f, &fake{}, tm)
+	ctx := context.Background()
+	holder, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback() }()
+	if err := m.holderTimeouts(ctx, holder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(`SELECT 1 FROM dependency_monitor FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	// The holder stops here; another session waits at most 5 seconds for the row.
+	other, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Rollback() }()
+	if _, err := other.Exec(`SET LOCAL lock_timeout = '5s'`); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if _, err := other.Exec(`SELECT 1 FROM dependency_monitor FOR UPDATE`); err != nil {
+		t.Fatalf("the row stayed held: %v", err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("took the row after %v", d)
 	}
 }
