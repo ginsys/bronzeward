@@ -518,7 +518,8 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
 6. **Interruption.** A mark's or a continuation's run that stops, or that
    cannot decrypt the envelope (recorded as for a takeover's, persistence and
    API §8.3), leaves the claim `held` to its lease, with the envelope stored
-   before it: a mark's new
+   before it. An integrity failure in that run (§3.1) abandons the claim and
+   fails its operation as a takeover's does (§3.4). A mark's new
    envelope is stored only as it pauses. A takeover (§3.4) then resumes that
    envelope: a review still `pending` pauses again, without the interrupted
    mark, and a `continued` one runs the draft transaction. Generations an
@@ -1428,16 +1429,16 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
    absolute expiry has not.
 3. The operator requests recovery. The takeover finds no payload, abandons the
    claim and fails its operation `ingestion-abandoned` (§3.4); the operator
-   imports the worker again, and this time A stores the envelope and pauses
-   the claim (§3.6), owner generation 1.
+   imports the worker again, and this time A, restarted, stores the envelope
+   and pauses the claim (§3.6), owner generation 1; A's run stops there.
 4. The operator reads the staged change and sees a machine file whose content
    holds a token, a field the schema list does not cover (§2.4). They mark
    `doc[0]/machine/files/0/content`. Instance B takes the claim (`held`, owner
    generation 2), decrypts the envelope, checks its digest, extracts the file
    content under a new name, guards that value, creates its generation and
    pauses the claim again with the new envelope.
-5. A, restarted with its old state, sends a heartbeat at generation 1; it is
-   refused. The operator continues; B takes the claim at generation 3 and its
+5. A heartbeat that A's stopped run of step 3 sends late, at generation 1, is
+   refused on both the claim's state and its generation. The operator continues; B takes the claim at generation 3 and its
    draft transaction commits the draft, its reference rows and `released`
    together.
 6. Had the provider been unreachable at step 4, B's decryption would fail, the
