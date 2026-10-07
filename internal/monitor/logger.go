@@ -42,6 +42,33 @@ type line struct {
 // errBlocked is a log write that outlasted its batch, or an earlier one still blocked.
 var errBlocked = errors.New("log sink blocked")
 
+// logSoon logs the alerts not yet logged. Once Run has started it only wakes Run's logger, so a
+// backlog of many batches holds up neither a pass nor the watchdog; a wake while the logger is
+// logging makes it log once more, which covers alerts committed meanwhile. Outside Run the caller
+// logs itself.
+func (m *Monitor) logSoon(ctx context.Context) {
+	if m.wake == nil {
+		m.logAlerts(ctx)
+		return
+	}
+	select {
+	case m.wake <- struct{}{}:
+	default:
+	}
+}
+
+// drain is Run's logger: it logs each time it is woken, until ctx ends.
+func (m *Monitor) drain(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.wake:
+		}
+		m.logAlerts(ctx)
+	}
+}
+
 // logAlerts writes the log lines of the alerts not yet logged, one bounded batch at a time, while
 // a batch is full (§7.1). A failure is reported and leaves the rest to the next logger: delivery
 // is at least once. A blocked sink is not reported: the report would go to the same blocked stderr
@@ -67,8 +94,8 @@ func (m *Monitor) logAlerts(ctx context.Context) {
 // so a write that blocks delays only other loggers, until its timeout ends the transaction.
 //
 // A write to out cannot be interrupted, so the instance writes through one writer at a time, and
-// its callers, a pass and the watchdog, wait for it at most the lock-holder timeout: once to take
-// the writer and once for the write. A write that outlasts its batch ends the logger, and writes no
+// its caller, Run's logger or a pass outside Run, waits for it at most the lock-holder timeout:
+// once to take the writer and once for the write. A write that outlasts its batch ends the logger, and writes no
 // further line of that batch once it returns. Run does not wait for such a write: waiting would
 // let a blocked sink hold up shutdown, so at most that one write outlives Run.
 func (m *Monitor) logBatch(ctx context.Context) (int, error) {
