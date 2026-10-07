@@ -278,8 +278,11 @@ database session held from step 1 to step 5, it:
    transaction began, before any wait for the lock, and would date a
    transition before a publication that began during the wait. It then reads
    the releases that reference the dependency, locks the DependencyMonitor
-   row, inserts the alerts of §6.2 a recorded change calls for, naming those
-   releases, and records its progress (§6.3). An alert's recording sequence is
+   row, inserts the alerts of §6.2 that the recorded class, or a release not
+   yet warned of a scheduled deletion, calls for, and records its progress
+   (§6.3). Each alert names every one of those releases, except a
+   `deletion-scheduled` alert, which names only those the version's earlier
+   alerts for the same scheduled time did not (§6.2). An alert's recording sequence is
    allocated under that lock, which is held to commit, so sequences commit in
    order (§7.1). It commits, then releases the advisory lock.
 
