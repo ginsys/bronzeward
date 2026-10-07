@@ -275,17 +275,60 @@ func TestLoggerOneWriter(t *testing.T) {
 	}
 }
 
-// §7.1, §6.3: a batch read delayed by a holder of the DependencyMonitor row, followed by a slow
-// write, outlasts the logger transaction's idle timeout, so advancing the cursor fails. The failure
-// is reported, and a report blocked in the same sink as the lines holds up the logger at most the
-// lock-holder timeout, so neither a pass nor the watchdog waits on it.
+// §7.1 step 3: a batch read delayed by a holder of the DependencyMonitor row for most of the idle
+// timeout leaves the logger's transaction, and the loggers' lock, held for a full timeout from the
+// read, and its write ends before that; another instance logs nothing meanwhile.
+func TestLoggerLockOutlivesRead(t *testing.T) {
+	f := seed(t)
+	stalledAlert(t, f.db)
+	tm := Defaults()
+	tm.LockHolder = 2 * time.Second
+	m, s := withSink(f, &fake{}, tm)
+	gate := make(chan struct{})
+	s.mu.Lock()
+	s.gate = gate
+	s.mu.Unlock()
+	holder, err := f.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback() }()
+	if _, err := holder.Exec(`SELECT 1 FROM dependency_monitor FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { m.logAlerts(context.Background()); close(done) }()
+	defer func() {
+		close(gate)
+		<-done
+	}()
+	dbtest.WaitForLockWait(t, f.db)
+	time.Sleep(1600 * time.Millisecond)
+	if err := holder.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	// Without the restart, the idle timeout has ended the first logger's transaction by now.
+	time.Sleep(time.Second)
+	other, s2 := withSink(f, &fake{}, tm)
+	other.logAlerts(context.Background())
+	s.mu.Lock()
+	writing := s.active
+	s.mu.Unlock()
+	if got := s2.dals(); len(got) != 0 || writing != 1 {
+		t.Fatalf("another instance logged %v while the first wrote (%d writes)", got, writing)
+	}
+}
+
+// §7.1, §6.3: a batch read that waits out the lock-holder timeout behind a holder of the
+// DependencyMonitor row fails, and the failure is reported. A report blocked in the same sink as the
+// lines holds up the logger at most the lock-holder timeout, so neither a pass nor the watchdog
+// waits on it.
 func TestLoggerBlockedReport(t *testing.T) {
 	f := seed(t)
-	dal := stalledAlert(t, f.db)
+	stalledAlert(t, f.db)
 	tm := Defaults()
 	tm.LockHolder = time.Second
 	m, s := withSink(f, &fake{}, tm)
-	s.delay = 700 * time.Millisecond
 	gate := make(chan struct{})
 	defer close(gate)
 	var reports atomic.Int32
@@ -306,24 +349,16 @@ func TestLoggerBlockedReport(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() { m.logAlerts(context.Background()); close(done) }()
-	dbtest.WaitForLockWait(t, f.db)
-	time.Sleep(500 * time.Millisecond)
-	if err := holder.Commit(); err != nil {
-		t.Fatal(err)
-	}
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatalf("the logger waited on a blocked report (%d reports)", reports.Load())
 	}
-	// The batch was read and written, so the cursor's read came first, and advancing the cursor is
-	// what failed.
-	if reports.Load() != 1 || !slices.Equal(s.dals(), []string{dal}) || lastLogged(t, f.db) != 0 {
-		t.Fatalf("%d reports, logged %v, cursor %d: the transaction did not expire after the write",
-			reports.Load(), s.dals(), lastLogged(t, f.db))
+	if reports.Load() != 1 || len(s.dals()) != 0 || lastLogged(t, f.db) != 0 {
+		t.Fatalf("%d reports, logged %v, cursor %d", reports.Load(), s.dals(), lastLogged(t, f.db))
 	}
-	if msg := <-reported; !strings.HasPrefix(msg, "dependency monitor logger: last logged:") {
-		t.Fatalf("reported %q, not the cursor update's failure", msg)
+	if msg := <-reported; !strings.HasPrefix(msg, "dependency monitor logger: monitor row:") {
+		t.Fatalf("reported %q, not the batch read's failure", msg)
 	}
 	// A further report, while that one still blocks, is dropped after the timeout.
 	start := time.Now()
@@ -338,8 +373,10 @@ func TestLoggerBlockedReport(t *testing.T) {
 func TestRunWakeWhileLogging(t *testing.T) {
 	f := seed(t)
 	first := stalledAlert(t, f.db)
-	// Slow answers let the logger read and start writing the first alert before the pass records.
-	p := &fake{delay: 500 * time.Millisecond}
+	// The provider answers only once the logger is writing the first alert, so the pass records the
+	// second alert while that write is in progress.
+	answers := make(chan struct{})
+	p := &fake{gate: answers}
 	deletion := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
 	p.set(kvAnswer(t, f, func(v map[string]any) { v["deletion_time"] = deletion.Format(time.RFC3339Nano) }),
 		transitAnswer(t, f))
@@ -350,17 +387,23 @@ func TestRunWakeWhileLogging(t *testing.T) {
 	s.mu.Lock()
 	s.gate = gate
 	s.mu.Unlock()
+	answered, written := false, false
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { m.Run(ctx); close(done) }()
 	defer func() {
+		if !answered {
+			close(answers)
+		}
+		if !written {
+			close(gate)
+		}
 		cancel()
 		<-done
 	}()
-	// The pass's wake at its start reaches the logger, which is writing the first line before the
-	// pass records the second alert.
+	// The pass's wake at its start reaches the logger.
 	writing := 0
-	for deadline := time.Now().Add(400 * time.Millisecond); writing == 0 && time.Now().Before(deadline); {
+	for deadline := time.Now().Add(5 * time.Second); writing == 0 && time.Now().Before(deadline); {
 		time.Sleep(10 * time.Millisecond)
 		s.mu.Lock()
 		writing = s.active
@@ -369,6 +412,8 @@ func TestRunWakeWhileLogging(t *testing.T) {
 	if writing != 1 || alertCount(t, f.db) != 1 {
 		t.Fatalf("%d writes before the pass recorded, %d alerts", writing, alertCount(t, f.db))
 	}
+	answered = true
+	close(answers)
 	var second string
 	for deadline := time.Now().Add(5 * time.Second); second == "" && time.Now().Before(deadline); {
 		time.Sleep(50 * time.Millisecond)
@@ -386,6 +431,7 @@ func TestRunWakeWhileLogging(t *testing.T) {
 	s.mu.Lock()
 	s.gate = nil
 	s.mu.Unlock()
+	written = true
 	close(gate)
 	for deadline := time.Now().Add(3 * time.Second); len(s.dals()) < 2 && time.Now().Before(deadline); {
 		time.Sleep(50 * time.Millisecond)

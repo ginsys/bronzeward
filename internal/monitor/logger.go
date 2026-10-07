@@ -144,7 +144,14 @@ func (m *Monitor) logBatch(ctx context.Context) (int, error) {
 		}
 		encoded = append(encoded, append(b, '\n'))
 	}
-	wctx, cancel := context.WithTimeout(ctx, m.t.LockHolder)
+	// The batch read can wait most of the idle timeout behind a holder. A statement on the logger's
+	// transaction proves it, and the loggers' lock with it, still held, and restarts that timeout;
+	// no line starts once the timeout could have ended it and let another logger take the lock.
+	expires := time.Now().Add(m.t.LockHolder)
+	if _, err := tx.ExecContext(ctx, `SELECT 1`); err != nil {
+		return 0, fmt.Errorf("logger transaction: %w", err)
+	}
+	wctx, cancel := context.WithDeadline(ctx, expires)
 	defer cancel()
 	done := make(chan error, 1)
 	handed = true
