@@ -880,11 +880,13 @@ s6_regressions() {
 # PostgreSQL, which reads the API's RFC 3339 text. Staleness is the request's own reading; the
 # filter checks that. It then satisfies the filter. A monitor pass rewrites every status's times,
 # so the comparison stands only when no pass committed between the database's first read and its
-# last (the latest recorded-at unchanged); otherwise it is taken again, at most three times.
+# last: every status row the same, compared whole, not by the latest recorded-at, since a pass
+# stamps its rows before it commits and a later commit can carry an earlier time. Otherwise it is
+# taken again, at most three times. A psql error fails it, never reads as no difference.
 s6_served() {
   local want before after bad attempt
   for attempt in 1 2 3; do
-    before=$(sql "SELECT coalesce(max(recorded_at)::text, '-') FROM dependency_status") || return 1
+    before=$(s6_status_rows) || return 1
     want=$(sql "SELECT coalesce(json_agg(json_build_object('id', id, 'provider', provider, 'object', object,
         'version', version, 'created', created, 'class', class, 'reason', reason) ORDER BY id), '[]')
       FROM dependency_status") || return 1
@@ -894,13 +896,17 @@ s6_served() {
         == ($want | sort_by(.id))) and ($1)" \
       200 - GET '/api/v1/dependencies?limit=500' "$author" || return 1
     bad=$(s6_times_differ) || return 1
-    after=$(sql "SELECT coalesce(max(recorded_at)::text, '-') FROM dependency_status") || return 1
+    after=$(s6_status_rows) || return 1
     [ "$before" = "$after" ] || continue
     [ -z "$bad" ] || { say "s2: GET /dependencies serves other times than recorded for $bad"; return 1; }
     return 0
   done
   say 's2: a monitor pass committed during each of three reads of GET /dependencies'
   return 1
+}
+# s6_status_rows: a digest of every dependency_status row, ordered by id.
+s6_status_rows() {
+  sql "SELECT md5(coalesce(string_agg(t::text, ',' ORDER BY t.id), '')) FROM dependency_status t"
 }
 # s6_times_differ: the ids of $EV/last.body's dependencies whose four times are not the same
 # instants as their dependency_status row's, and of any row or item without its counterpart,
@@ -918,7 +924,7 @@ s6_times_differ() {
     WHERE s.id IS NULL OR x.id IS NULL OR x.\"observedFrom\" IS DISTINCT FROM s.observed_from
       OR x.\"recordedAt\" IS DISTINCT FROM s.recorded_at OR x.\"firstRetainedAt\" IS DISTINCT FROM s.first_retained_at
       OR x.\"unknownSince\" IS DISTINCT FROM s.unknown_since" |
-    pg_stdin psql -U bronzeward -d bronzeward -Atq
+    pg_stdin psql -X -v ON_ERROR_STOP=1 -U bronzeward -d bronzeward -Atq
 }
 # s6_pinned_served <class> <reason> <alert kind>: GET /dependencies/{dep_p} serves that class and
 # reason, not stale, and its alerts route ends with an alert of that kind and reason naming
