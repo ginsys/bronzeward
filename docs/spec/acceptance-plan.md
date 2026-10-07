@@ -367,7 +367,7 @@ has no plan but the handover's completed `adopt` plan.
 the baseline's digest, marked adopted by observation; neither node's digest nor resource version
 changed from S1's pre-state, no Talos mutation request appears in any log, and the scan finds no
 synthetic secret outside OpenBao. In the approval part, the plan binds every value ER §2 lists, its expected pre-dispatch digest equal to
-`Applied`'s. The approval names plan revision, approver, role and epoch; the three step 4 approvals
+`Applied`'s. The approval names the plan, approver, role and epoch; the three step 4 approvals
 are marked self-approval with exactly these reason sets, since every reason that holds is recorded
 (PA §10.5): `owned-automation`; `created-plan`, `published` and `authored-change`; and
 `authored-reused`. The plan is `approved`, and no operation exists before commitment.

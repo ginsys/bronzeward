@@ -194,8 +194,10 @@ Internal `bigint` sequence keys may exist for joins and ordering, but never
 appear in an API payload, a URL, a cursor, a provider path or a log line. A
 restore can reissue them; they are compared only inside one database state.
 
-Revision numbers (§4) are counters and do rewind with a restore. Every place a
-revision number leaves the database, it travels with a random token (§4.1).
+Revision numbers (§4) are counters and do rewind with a restore. A request
+presents one as a precondition only inside a strong ETag, beside a random
+token (§4.1); a response body may report one for reading, which no request
+sends back **(choice §17.35)**.
 
 ## 3. Entities and records
 
@@ -243,7 +245,7 @@ statement.
 | Observation | immutable | purpose, read-start basis, machine revision, identity, assignment evidence, running version, configuration digest, health, or what could not be read | execution and recovery §4.1 |
 | Plan | immutable | the binding, creator and role | execution and recovery (plan binding) |
 | PlanState | mutable, revisioned | the plan's state (§8.1) with its reason, and its operation once committed | execution and recovery §2; §8.1 |
-| Approval | immutable | plan, plan revision, approver, role, epoch, self-approval mark | execution and recovery; §10.5 |
+| Approval | immutable | plan (its identifier: the plan is immutable, §4.1), approver, role, epoch, self-approval mark | execution and recovery; §10.5 |
 | Approval revocation, identity revocation, plan cancellation | immutable | what it names, who, role, when, epoch, reason | §10.4; execution and recovery |
 | Operation | mutable projection, fenced | kind, state, owner, owner generation, owner epoch, lease; for `publish` and `ingest`, the last event number | §8; execution and recovery for `apply-config` and `adopt` |
 | TimelineEvent | immutable | append-only entries of a machine scope (plans, operations and machine-scope facts) with the machine revision, or of a `publish` or `ingest` operation with its event number (§5, T7) | execution and recovery §4.1 |
@@ -530,8 +532,9 @@ rows 001–003).
 
 ### 4.1 ETags
 
-A revision number leaves the database only inside a strong ETag that also
-carries a random token, replaced on every write **(choice §17.2)**:
+A revision number a request presents as a precondition is only ever inside a
+strong ETag that also carries a random token, replaced on every write
+**(choice §17.2)**:
 
 ```text
 ETag: "5-m3oxmlfh6phr7aigshdydcb4ji"
@@ -542,6 +545,16 @@ can be issued again with other content (DB §4.7); its token will differ, so an
 ETag issued after the backup never matches a reissued revision. An ETag of the
 revision the backup holds still matches the restored record, whose content it
 describes; the epoch does not enter the ETag.
+
+A response body may also report a revision number on its own: a draft's
+`revision`, a draft entry's `base`, a source's `headRevision`, an operation's
+or a release's `draftRevision`. It describes the record as of that response,
+for reading and for ordering within one database state. No request takes a
+bare revision number, so a restore that reissues one can never make it match
+**(choice §17.35)**. A request that binds an immutable record names the
+record's identifier, which is never reissued (§2): an approval binds its plan
+by the plan's identifier in its path, and the plan's content cannot change
+under it (§9.3).
 
 Mutations of a draft require `If-Match` with the draft's current ETag. A
 mismatch is `412 precondition-failed`; a missing header is
@@ -1579,7 +1592,7 @@ Location: /api/v1/plans/pln_f645lvrsgsehfn6fuboigpcawy
 POST /api/v1/plans/pln_f645lvrsgsehfn6fuboigpcawy/approvals
 Idempotency-Key: 5b8f2c07-3e19-4a6d-b1f4-7d20e8c93a51
 
-{"planRevision": 1}
+{}
 
 HTTP/1.1 201 Created
 Location: /api/v1/approvals/apr_2ztr33rjgnabf5zxbwwf7c47vy
@@ -3163,6 +3176,18 @@ design and evidence do not settle the question. Each is marked in place as
     adds configuration no PoC case tunes apart; a fixed lease with no
     extension, which a compilation of many machines can outlast, letting a
     second worker take a job the first is still building.
+35. **Bodies report revision numbers for reading; a precondition takes the
+    whole ETag or an immutable identifier** (§2, §4.1). A number in a body
+    shows a reader where a record stands, and binding a request to it would
+    let a restore that reissues the number match it falsely. So no request
+    takes one: a draft write takes the draft's ETag, and an approval names its
+    plan by the plan's identifier, never reissued, whose content is
+    immutable. Alternatives: bodies report a number only in the ETag form,
+    which needs a token on every record a body names, heads and plans
+    included, for no request that would use it; an approval bound by the
+    plan's state ETag, which adds nothing, since the approval is checked
+    against the plan's current state under its lock and the plan it approves
+    cannot change.
 
 ## 18. Traceability
 
@@ -3172,7 +3197,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
 | §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32 |
 | §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.13.6); the provider read grant on `secret/data/access/talos/*` not measured (choice §17.29) |
-| §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7 |
+| §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7; bodies and bindings: choice §17.35 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
 | §5 transactions | §7.2, §7.4 | DB §4.2 rows 059, 061; [DB §6.3](../design/research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs); [DB §7](../design/research/20260924-database-semantics.md#7-limits); [DS §7](../design/research/20260925-dispatch-safety.md#7-limits) |
 | §5.1 fences, claims | §7.2, §12.5 | [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions) rows 015–018; [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) rows 019–021; publish job timers: choice §17.34 |
