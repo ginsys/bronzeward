@@ -476,10 +476,11 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    recovery epoch (§3.5): the serving instance becomes its owner at the next
    owner generation with a new lease, and the state is `held`. Its run decrypts
    the envelope, checks its digest and re-enters §2.3 at step 3 on the staged
-   sanitized document with the new marks. A mark whose node holds a reference
-   (a mapping with a `!bwref` member, or the reference itself) has no kind
-   (§5.2, choice §16.16) and is refused: its earlier value is in the provider,
-   which this run cannot read, so it could be neither extracted nor kept.
+   sanitized document with the new marks. A mark on a mapping with a `!bwref`
+   member has no kind (§5.2, choice §16.16) and is refused (`mark-kind`): the
+   member's earlier value is in the provider, which this run cannot read, so it
+   could be neither extracted nor kept. A mark on a `!bwref` node itself is
+   excluded as step 3 states.
    Step 5's guard searches for the
    values this mark extracts. The earlier values are in the provider, which the
    ingestion identity cannot read, so the guard cannot search for them; they

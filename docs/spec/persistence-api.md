@@ -2867,10 +2867,10 @@ each (design §7.7 consequences):
   mark's and a continuation's run that cannot decrypt the envelope writing
   `resume-failed`, the claim `held` to its lease and the operation `running`,
   then resumed by takeover, with a control that fails the operation and must
-  then fail; a mark on a mapping holding an earlier reference refused before
-  any provider write, the claim `paused` with its earlier digest, with a
-  control that extracts the mapping and must then fail by storing the
-  reference name as a value; a mark extracting the sentinel to a new generation
+  then fail; a mark on a mapping holding an earlier reference refused
+  `mark-kind` before any provider write, the claim `paused` with its earlier
+  digest, with a control that reads a reference member as a string and must
+  then fail by refusing under another rule; a mark extracting the sentinel to a new generation
   under the same claim, the claim `paused` again at the next owner
   generation with a new digest and the continuation's draft revision holding
   a reference, not the sentinel, with a control that stores the document
