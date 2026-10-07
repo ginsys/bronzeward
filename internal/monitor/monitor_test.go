@@ -18,11 +18,13 @@ import (
 	"github.com/ginsys/bronzeward/internal/provider"
 )
 
-// fake is the metadata identity's provider: one answer per provider, an optional delay.
+// fake is the metadata identity's provider: one answer per provider, an optional delay, and an
+// optional gate each answer waits for.
 type fake struct {
 	mu          sync.Mutex
 	kv, transit classify.Answer
 	delay       time.Duration
+	gate        chan struct{}
 }
 
 func (p *fake) KV(ctx context.Context, _ provider.GenerationPath) (classify.Answer, error) {
@@ -35,11 +37,18 @@ func (p *fake) Transit(ctx context.Context, _ string) (classify.Answer, error) {
 
 func (p *fake) answer(ctx context.Context, kv bool) classify.Answer {
 	p.mu.Lock()
-	a, delay := p.transit, p.delay
+	a, delay, gate := p.transit, p.delay, p.gate
 	if kv {
 		a = p.kv
 	}
 	p.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return classify.Answer{Unreachable: true}
+		}
+	}
 	if delay > 0 {
 		select {
 		case <-time.After(delay):

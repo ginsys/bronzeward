@@ -411,8 +411,11 @@ block, so no lock a pass or the watchdog needs is held across it:
 2. A separate short transaction locks the DependencyMonitor row `FOR SHARE`,
    reads at most 100 alerts above that sequence in recording order, and
    commits.
-3. With no DependencyMonitor lock held, the logger writes one log line per
-   alert read. Each line has the stable event name `dependency-alert` and the
+3. Step 2 can wait most of the timeout behind a holder, so the logger's
+   transaction first runs a statement, which proves the advisory lock still
+   held and restarts the timeout. With no DependencyMonitor lock held, the
+   logger then writes one log line per alert read, starting no line once the
+   timeout could have ended its transaction. Each line has the stable event name `dependency-alert` and the
    row's fields: the `dal` and `dep` identifiers, kind, class, reason,
    provider object, version and creation time, the releases it names, and,
    for a `deletion-scheduled` alert, the scheduled deletion time it warns of.
