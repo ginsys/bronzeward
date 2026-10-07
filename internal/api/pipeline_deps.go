@@ -122,7 +122,9 @@ func (a *API) dependencyRefusal(j publishJob, reference, prov, object string, ve
 			fmt.Sprintf("Publication refused: the %s dependency %s version %d cannot be used.", prov, object, version)).
 			with("dependency", dep), nil
 	case errors.Is(err, provider.ErrUnavailable):
+		// A provider that cannot be reached leaves the dependency unknown too (PA §6.1).
 		a.o.logf("%s: publication: %v", j.op, err)
+		dep["class"] = string(classify.Unknown)
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable",
 			"Publication refused: the provider could not be reached; nothing was committed.").with("dependency", dep), nil
 	case errors.Is(err, provider.ErrAbsent), errors.Is(err, provider.ErrDenied), errors.Is(err, provider.ErrProtocol),
