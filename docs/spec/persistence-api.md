@@ -650,7 +650,7 @@ The transactions this contract defines or constrains:
 | T5c | Identity revocation | key lock; installation state `FOR SHARE`; every machine row `FOR UPDATE`, in id order, as T9 (rule 5); principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked; an identity revocation entry (T7) on the timeline of each machine with a plan that identity approved whose plan or operation is not terminal, read under those machine locks (execution and recovery §4.1); idempotency record, act |
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6; a commitment also compares the committing process's epoch with the current one (§5.1) | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
-| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, its pause by its owner (compilation §3.6), and its abandonment by the sweep, by a takeover with nothing to decrypt (compilation §3.4, §3.5) or by its owner after a refusal, under the owner check (compilation §2.3) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a job's completion, also its state and terminal event (§8.2); for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, an abandonment fails the operation with its terminal event (§8.2): `ingestion-abandoned` from the sweep or a takeover, the refusal's own problem from its owner; a pause writes the claim `paused` and the operation's `paused` event, and a mark refused before any provider write also its `mark-refused` event (§8.3) |
+| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, its pause by its owner (compilation §3.6), and its abandonment by the sweep, by a takeover with nothing to decrypt (compilation §3.4, §3.5) or by its owner after a refusal, under the owner check (compilation §2.3) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a job's completion, also its state and terminal event (§8.2); for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, an abandonment fails the operation with its terminal event (§8.2): `ingestion-abandoned` from the sweep or a takeover, the refusal's own problem from its owner; a pause writes the claim `paused`, ends the operation's lease with the claim's (§5.1) and writes the operation's `paused` event, and a mark refused before any provider write also its `mark-refused` event (§8.3) |
 | T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE`; the row of each `publish` or `ingest` operation it fails `FOR UPDATE` (T7), in rule 5's order | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
 | T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, continuation, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect. Leaving recovery mode takes installation state `FOR UPDATE` instead, before it checks that every machine scope is released: it waits for an inventory request, which holds that row `FOR SHARE`, and then sees the machine that request inserted | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together, only if the serving process's epoch is the current one (§5.1), after writing abandoned a due claim whose operation holds its draft revision's natural key (§7.3, compilation §3.5); a mark or a continuation takes a `paused` claim (compilation §3.6) and moves its operation's owner fields with it, with its event, only if the serving process's epoch is the current one; an abandonment also fails the claim's `ingest` operation `ingestion-abandoned`, with its terminal event (§8.2) |
@@ -1385,7 +1385,7 @@ without operator action.
 | State | Meaning |
 | --- | --- |
 | `queued` | Accepted; no worker holds it. A `publish` operation only. |
-| `running` | A worker holds it under a fence and lease (§5.1); an `ingest` operation, the owner of its staging claim. |
+| `running` | A worker holds it under a fence and lease (§5.1); an `ingest` operation, the owner of its staging claim. An `ingest` operation whose claim is `paused` (compilation §3.6) is also `running`, with its lease ended and no worker: the pause is not a lapse, and only a mark, a continuation or the claim's abandonment (the operator's, absolute expiry or recovery-mode entry, compilation §3.5) moves it (§5.1). |
 | `succeeded` | Terminal. `result` names the release or draft produced. |
 | `failed` | Terminal. `error` is a problem document (§9.4). |
 
@@ -1918,7 +1918,8 @@ ends (§8.3): `paused` again, `mark-refused` with the claim `paused`,
 `succeeded` after a continuation, `failed`, or `resume-failed` with the claim
 `held` to its lease and the operation `running`, taken over after that lease
 (compilation §3.6 item 6). A continuation whose draft moved fails the operation `412
-precondition-failed` (T1).
+precondition-failed`, and one whose draft is no longer `open` or has a `queued`
+or `running` publication fails it `409 conflict`, each abandoning the claim (T1).
 
 `scopeState` is `normal`, or one of
 execution and recovery's recovery scope states while recovery mode is in
@@ -2881,7 +2882,10 @@ each (design §7.7 consequences):
   under the same claim, the claim `paused` again at the next owner
   generation with a new digest and the continuation's draft revision holding
   a reference, not the sentinel, with a control that stores the document
-  unsubstituted and must then fail; a mark
+  unsubstituted and must then fail; that mark's `202` body, and each mark's
+  and continuation's, holding no mark path, no sentinel and no staged text,
+  with a control that echoes the request's marks in the body and must then
+  fail; a mark
   addressing no node returning the claim `paused` with its earlier digest
   and a `mark-refused` event, with a control that abandons on every refusal
   and must then fail; a refused mark whose path holds an earlier extracted
@@ -2905,6 +2909,11 @@ each (design §7.7 consequences):
   then fail, and the continuation's committing, with a control that records
   `continued` only as its run ends and must then fail by pausing again; a
   continuation after the draft moved failing `412` and abandoning the claim;
+  a continuation after the draft was discarded, and one while a `publish`
+  operation for the draft is `queued`, its revision unchanged in both, each
+  failing `409` and abandoning the claim with the draft unchanged, with a
+  control that compares the bound revision only and must then fail by writing
+  the draft;
   a `paused` claim abandoned by the operator, by the sweep at its absolute
   expiry and by recovery-mode entry, and kept `paused` across a server
   restart;
