@@ -532,6 +532,18 @@ seed_applied() {
     JOIN import_base_revision b ON b.id = rm.import_base_revision AND b.machine = rm.machine
     WHERE s.machine = '$machine_w' AND s.applied_release = '$applied' AND s.applied_digest = b.configuration_digest")" = 1 ]
 }
+# applied_is_node: the digest seeded as Applied's is the worker's machine configuration as the
+# pre-state capture read it from the node (bin/evidence: SHA-256 with trailing newlines made one,
+# as the configuration digest), so the seed describes the node S2 starts from.
+applied_is_node() {
+  local seeded pre
+  seeded=$(sql "SELECT encode(applied_digest, 'hex') FROM machine_state WHERE machine = '$machine_w'") || return 1
+  pre=$(awk -v n="$TALOS_WORKER_IP" '$2 == n { print $1 }' "$EV/pre-talos-config-sha256.txt")
+  [ -n "$seeded" ] && [ "$seeded" = "$pre" ] || {
+    say "s2: seeded Applied digest ${seeded:-none}, the worker's pre-state ${pre:-none}"
+    return 1
+  }
+}
 # applied_reference: the reference the Applied release's review records at the worker's marked file
 # content (WORKER_MARK, extracted when the worker was imported), its name and version in ref_name
 # and ref_version.
@@ -660,13 +672,18 @@ release_sources() {
 }
 # release_stored: the worker's artifact is Transit ciphertext with its digests; its dependency
 # records name exact versions, the label's reference among them from the fragment revision with
-# its effective record (the same object, version and creation, for the release and the worker), an
-# encryption dependency on the artifact key; every one classified retained.
+# its effective record (the same object, version and creation, for the release and the worker),
+# and still from the release's import base revision at the worker's marked file content
+# (WORKER_MARK), the occurrence the reference was taken from; an encryption dependency on the
+# artifact key; every one classified retained.
 release_stored() {
   [ "$(sql "SELECT count(*) FROM release_machine WHERE release = '$s2_release' AND machine = '$machine_w'
     AND ciphertext LIKE 'vault:v%' AND length(configuration_digest) = 32 AND length(ciphertext_digest) = 32")" = 1 ] &&
     [ "$(sql "SELECT count(*) FROM dependency WHERE release = '$s2_release' AND machine = '$machine_w' AND kind = 'reproduction'
       AND reference = '$ref_name' AND source_revision = '$frv' AND version = $ref_version")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM dependency d JOIN release_machine rm ON rm.release = d.release AND rm.machine = d.machine
+      WHERE d.release = '$s2_release' AND d.machine = '$machine_w' AND d.kind = 'reproduction' AND d.reference = '$ref_name'
+      AND d.version = $ref_version AND d.source_revision = rm.import_base_revision AND d.path = '$WORKER_MARK'")" = 1 ] &&
     [ "$(sql "SELECT count(*) FROM dependency e JOIN dependency r ON r.release = e.release AND r.machine = e.machine
       AND r.reference = e.reference AND r.provider = e.provider AND r.object = e.object AND r.version = e.version
       AND r.created = e.created
@@ -737,9 +754,12 @@ s2_steps() {
   check "$ref" "the Applied release's review names one reference at the worker's marked file content" applied_reference "$author"
   [ -n "$ref_name" ] || die "s2: no reference to carry; nothing after it can run"
   evidence_to pre || die "no pre-state: bin/evidence failed"
+  check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean pre
   cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
+  cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"
   check "$ref" "pre-state: the worker has a machine-configuration resource version" \
     counted 1 "^[0-9]+ $TALOS_WORKER_IP\$" "$EV/pre-talos-config-version.txt"
+  check "$ref" "the seeded Applied digest is the worker's configuration as the pre-state read it from the node" applied_is_node
   seq=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s2: cannot read the operations"
   act_seq=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s2: cannot read the acts"
   check 'S2 step 7' 'inject db-snapshot s2-step1' "$bin/inject" db-snapshot "$snap"
@@ -787,7 +807,7 @@ s2_steps() {
 
   # Step 5.
   check 'S2 step 5' "GET the release: step 2's fragment, profile and assignment revisions, the renderer at the node's contract minor" release_sources
-  check 'S2 step 5' 'stored: Transit ciphertext and digests; exact-version dependency records, the label reference from the fragment revision; all retained' \
+  check 'S2 step 5' 'stored: Transit ciphertext and digests; exact-version dependency records, the label reference from the fragment revision and, kept, from the import base at its mark; all retained' \
     release_stored
   check 'S2 pass' 'the release row refuses UPDATE and DELETE' release_immutable
   check 'S2 pass' "the release's machine rows refuse UPDATE and DELETE" immutable release_machine mode
