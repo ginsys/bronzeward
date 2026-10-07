@@ -240,7 +240,7 @@ statement.
 | DependencyStatus | mutable | last classification per provider object version and creation time, and when first seen `retained` | design §7.6, §7.8; [dependency monitor §5](dependency-monitor.md#5-state) |
 | DependencyAlert | immutable | every alert the dependency monitor raises | [dependency monitor §6.2](dependency-monitor.md#62-alert-kinds) |
 | DependencyMonitor | mutable singleton | the monitor's progress, last completed pass, last stall alert and last logged alert | [dependency monitor §5.1](dependency-monitor.md#51-records) |
-| Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload; for a draft entry route, the principal and idempotency key (§7.2) | compilation §3 |
+| Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload, and an encrypted claim's review: `pending` or `continued`, none when not requested (compilation §3.6); for a draft entry route, the principal and idempotency key (§7.2) | compilation §3 |
 | MachineState | mutable, revisioned | Desired, Applied (with source), baseline revision | execution and recovery (Desired, Applied and Observed) |
 | Observation | immutable | purpose, read-start basis, machine revision, identity, assignment evidence, running version, configuration digest, health, or what could not be read | execution and recovery §4.1 |
 | Plan | immutable | the binding, creator and role | execution and recovery (plan binding) |
@@ -650,10 +650,10 @@ The transactions this contract defines or constrains:
 | T5c | Identity revocation | key lock; installation state `FOR SHARE`; every machine row `FOR UPDATE`, in id order, as T9 (rule 5); principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked; an identity revocation entry (T7) on the timeline of each machine with a plan that identity approved whose plan or operation is not terminal, read under those machine locks (execution and recovery §4.1); idempotency record, act |
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6; a commitment also compares the committing process's epoch with the current one (§5.1) | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
-| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, and its abandonment by the sweep, by a takeover with nothing to decrypt (compilation §3.4, §3.5) or by its owner after a refusal, under the owner check (compilation §2.3) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a job's completion, also its state and terminal event (§8.2); for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, and an abandonment fails the operation with its terminal event (§8.2): `ingestion-abandoned` from the sweep or a takeover, the refusal's own problem from its owner |
+| T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, its pause by its owner (compilation §3.6), and its abandonment by the sweep, by a takeover with nothing to decrypt (compilation §3.4, §3.5) or by its owner after a refusal, under the owner check (compilation §2.3) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a job's completion, also its state and terminal event (§8.2); for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, an abandonment fails the operation with its terminal event (§8.2): `ingestion-abandoned` from the sweep or a takeover, the refusal's own problem from its owner; a pause writes the claim `paused` and the operation's `paused` event, and a mark refused before any provider write also its `mark-refused` event (§8.3) |
 | T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE`; the row of each `publish` or `ingest` operation it fails `FOR UPDATE` (T7), in rule 5's order | §12.2 |
 | T10 | Migration | `pg_advisory_xact_lock` | §11 |
-| T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect. Leaving recovery mode takes installation state `FOR UPDATE` instead, before it checks that every machine scope is released: it waits for an inventory request, which holds that row `FOR SHARE`, and then sees the machine that request inserted | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together, only if the serving process's epoch is the current one (§5.1), after writing abandoned a due claim whose operation holds its draft revision's natural key (§7.3, compilation §3.5); an abandonment also fails the claim's `ingest` operation `ingestion-abandoned`, with its terminal event (§8.2) |
+| T11 | Any other API request (§9.2): inventory, draft creation and discard, ingestion start, marks, continuation, takeover and abandonment, plan cancellation, freeze and unfreeze, recovery acts other than entry, accounting decisions, resolutions, takeover requests | key lock; installation state `FOR SHARE` (§12.2); the effect's own locks in rule 5's order, as execution and recovery or compilation define the effect. Leaving recovery mode takes installation state `FOR UPDATE` instead, before it checks that every machine scope is released: it waits for an inventory request, which holds that row `FOR SHARE`, and then sees the machine that request inserted | the effect, idempotency record, act. Ingestion start writes the staging claim and its `ingest` operation `running` together, only if the serving process's epoch is the current one (§5.1), after writing abandoned a due claim whose operation holds its draft revision's natural key (§7.3, compilation §3.5); a mark or a continuation takes a `paused` claim (compilation §3.6) and moves its operation's owner fields with it, with its event, only if the serving process's epoch is the current one; an abandonment also fails the claim's `ingest` operation `ingestion-abandoned`, with its terminal event (§8.2) |
 
 T7 allocates every revision in a machine scope, for a plan, an operation or a
 machine-scope fact alike, from one per-machine counter under the machine row's
@@ -763,6 +763,10 @@ fields to the claim's new owner and generation in the same transaction (T8),
 conditional on the generation the takeover read, and the draft transaction (T1) compares the claim's owner and generation, as
 compilation §3.2 requires. A lapsed `ingest` operation is not re-run:
 compilation's claim rules decide between takeover and abandonment (§8.2).
+While its claim is `paused` (compilation §3.6), the operation stays `running`
+with its lease ended and no process working on it; the pause writes the
+operation's lease with the claim's, and an operator's mark or continuation
+moves its owner fields with the claim's, as a takeover does.
 
 Without the re-check, 309 of 400 jobs were claimed more than once and one was
 completed twice ([DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims),
@@ -1108,21 +1112,21 @@ Handling in the PoC:
   (rule 3 of §5): read apart, a draft transaction committing between the two
   reads would show a generation unreferenced and its claim `released`. It
   reports each listed path that no committed reference row names and whose
-  claim row does not record `held` or `resumed`, with
+  claim row does not record `held`, `resumed` or `paused`, with
   the claim's id and, where its row exists, its state, creation time and
   absolute expiry. The reference rows decide, not the claim's state: a
   `released` claim can leave an orphan (a further mark's generations created
   before an interruption at compilation §2.3 step 8, its earlier payload then
   resumed and released, compilation §3), and recovery-mode entry marks an
   earlier epoch's claims `abandoned` whatever their generations' references
-  (§12.2). A claim recorded `held` or `resumed` gives no orphan because its
-  ingestion may still be in flight, even past its expiry: the report goes by
+  (§12.2). A claim recorded `held`, `resumed` or `paused` gives no orphan because its
+  ingestion may still be in flight or under review (compilation §3.6), even past its expiry: the report goes by
   the state the row records, not by the read-time treatment of compilation
   §3.5, since a draft transaction that passed its owner check before the
   expiry may still release the claim (compilation choice §16.30). A recorded
   `abandoned` is final: the sweep and every other abandonment take the
   claim's row lock first and so follow that draft transaction. The
-  unreferenced paths of a claim recorded `held` or `resumed` that compilation
+  unreferenced paths of a claim recorded `held`, `resumed` or `paused` that compilation
   §3.5 already treats as `abandoned`, past its absolute expiry or, for a
   `transient` claim, past its lease, are listed apart, as expired and not yet
   abandoned, with the same fields plus the claim's mode and lease, and never
@@ -1322,7 +1326,7 @@ plan itself, at the dispatch commitment (§8.1).
 | Kind | Created by | States |
 | --- | --- | --- |
 | `publish` | `POST /drafts/{id}/publications` | job states (§8.2) |
-| `ingest` | `POST /ingestions` (import, drift adoption), `running` with its staging claim (§5.1); a mark or takeover on a staged ingestion answers with that ingestion's operation | job states (§8.2), never `queued` |
+| `ingest` | `POST /ingestions` (import, drift adoption), `running` with its staging claim (§5.1), through any review pause (compilation §3.6); a mark, continuation or takeover answers with that ingestion's operation | job states (§8.2), never `queued` |
 | `apply-config` | the dispatch commitment of an approved plan | execution and recovery's operation states |
 | `adopt` | the commitment of an approved plan with `operation: adopt`, which records the adoption and sends nothing | created directly in `completed`, with the adoption record as its outcome (execution and recovery §6.3) |
 
@@ -1453,7 +1457,13 @@ resumes the claim at owner generation `n`; `{"type": "resume-failed", "code":
 claim left `resumed` to its lease; and one terminal event, `{"type":
 "succeeded", "importBaseRevision": "<ibr identifier>"}` or `{"type": "failed",
 "code": "<problem code>"}`. A takeover with nothing to decrypt writes the
-failure with `"cause": "nothing-to-decrypt"`. No event carries input text. The operation resource shows its stored row: an operation
+failure with `"cause": "nothing-to-decrypt"`. An ingestion under review
+(compilation §3.6) adds `{"type": "paused", "generation": <n>}` each time its
+claim pauses; `{"type": "marked", "generation": <n>, "paths": <count>}` when
+a mark takes it; `{"type": "mark-refused", "generation": <n>, "problem":
+<problem document>}` when a mark is refused before any provider write, the
+problem naming paths and rules only (§9.4); and `{"type": "continued",
+"generation": <n>}` when the operator continues it. No event carries input text. The operation resource shows its stored row: an operation
 whose claim a read already treats as abandoned (compilation §3.5) stays
 `running` here until a sweep writes it: the next periodic sweep, or a later
 one if that sweep fails or waits for a lock. An ingestion start of the same
@@ -1512,8 +1522,9 @@ idempotency and conflict behavior.
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
 | `GET /dependencies[/{id}[/releases\|/alerts]]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
-| `POST /ingestions/{id}/marks`, `/takeovers` (a further mark on a staged ingestion; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation | `author`, human only (§10.3) |
-| `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
+| `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
+| `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation | `author`, human only (§10.3) |
+| `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2, a paused ingestion's included), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3) | 201 | `author`, human only (§10.3) |
 | `POST /machines/{id}/talos-endpoints` (replace a machine's Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
@@ -1536,10 +1547,9 @@ Every `POST`, `PUT` and `DELETE` needs an `Idempotency-Key` (§7). There is no
 route that dispatches, none that issues, rotates or lists automation tokens,
 none that revokes a token except by revoking its service identity (T5c,
 §10.4), and none that grants roles: those requests reach no handler and answer `404` (design
-§13.7 items 1 and 2). How a staged ingestion is reviewed, and when its `ingest`
-operation ends, belong to the operator review pause
-([ginsys/bronzeward#104](https://github.com/ginsys/bronzeward/issues/104)); this
-contract fixes those routes' roles, idempotency and records.
+§13.7 items 1 and 2). The review route is the one read that holds input
+text: it is limited to the roles that may mark, never cached, and answers only
+while the claim is `paused` (compilation §3.6) **(choice §17.36)**.
 
 An adoption approval is requested as a plan with `"operation": "adopt"`, which
 binds what execution and recovery's adoption section lists, is approved by an
@@ -1855,8 +1865,54 @@ answers 200 with the resource; a claim already `released` or `abandoned`, as
 a read treats it, is `409 conflict`. `POST /ingestions/{id}/takeovers` takes
 `{}` and answers 202 with `{"operation": "<op identifier>", "ingestion":
 "<ingestion identifier>"}` and a `Location` at the operation; a claim that is
-transient, ended as a read treats it, still leased or of an earlier epoch is
-`409 conflict`, and nothing changes. `scopeState` is `normal`, or one of
+transient, `paused`, ended as a read treats it, still leased or of an earlier
+epoch is `409 conflict`, and nothing changes.
+
+`POST /ingestions` takes an optional `"review": true` (default `false`), which
+requests the operator review of compilation §3.6; with `"staging":
+"transient"` it is `422 validation-failed` with `"rule":
+"review-needs-encrypted-staging"`, before any claim exists. The ingestion
+resource then carries `"review": "pending"` or `"continued"` (`null` when not
+requested), and its `state` is `paused` while the change awaits the operator:
+
+```http
+GET /api/v1/ingestions/ing_4ycffhy7bf4o2w6pz5b4r75hmu/review
+
+HTTP/1.1 200 OK
+Cache-Control: no-store
+
+{"ingestion": "ing_4ycffhy7bf4o2w6pz5b4r75hmu",
+ "document": "machine:\n  type: worker\n  token: !bwref machine/token\n  files:\n    - path: /var/etc/agent.conf\n      content: <value>\n",
+ "declarations": {"references": {"machine/token": {"kind": "string", "version": 1}},
+                  "embedded": []}}
+
+POST /api/v1/ingestions/ing_4ycffhy7bf4o2w6pz5b4r75hmu/marks
+Idempotency-Key: 00000000-0000-4000-8000-000000000104
+
+{"marks": ["doc[0]/machine/files/0/content"]}
+
+HTTP/1.1 202 Accepted
+Location: /api/v1/operations/op_f6hekztxvswfhzqoe2wbyqnbtq
+
+{"operation": "op_f6hekztxvswfhzqoe2wbyqnbtq",
+ "ingestion": "ing_4ycffhy7bf4o2w6pz5b4r75hmu"}
+```
+
+`<value>` stands for the unmarked text the review shows. The review answers
+the staged sanitized document and its declarations (the draft-update body's
+form), never the baseline, a generation path or the digest. A claim not
+`paused`, as a read treats it, is `409 conflict`; a decryption failure is
+`503 dependency-unavailable` and an integrity failure `500 internal-error`,
+neither changing the claim. A mark takes 1 to 1024 compilation §2.2 paths; a
+path that does not parse is `422 validation-failed` naming it, before any
+change. A mark or a continuation (`{}`) on a claim not `paused`, past its
+absolute expiry or of an earlier epoch is `409 conflict`, and nothing changes;
+otherwise it answers 202 at once, and the ingestion's events show how the run
+ends (§8.3): `paused` again, `mark-refused` with the claim `paused`, or
+`failed`. A continuation whose draft moved fails the operation `412
+precondition-failed` (T1).
+
+`scopeState` is `normal`, or one of
 execution and recovery's recovery scope states while recovery mode is in
 effect.
 
@@ -2786,6 +2842,34 @@ each (design §7.7 consequences):
 - that no request body reaches the database's data directory, write-ahead log
   or backups on the ingestion and draft routes, by the scan compilation §15
   requires;
+- the operator review (compilation §3.6), each step scanned as that scan
+  requires, with a synthetic unmarked sentinel in the reviewed document: a
+  `review: true` request under transient staging refused before any claim,
+  with a control that accepts it and must then fail; a reviewed ingestion
+  `paused` with its envelope stored, its operation `running` and no draft
+  revision written, with a control that runs the draft transaction and must
+  then fail; the pausing run's late heartbeat refused, with a control that
+  checks the owner but not the state and must then fail; the review route
+  answering the document with `no-store` to an `author` only, refused to a
+  service identity and on a claim not `paused`, the sentinel absent from
+  every log, problem and the database, with a control that logs the answer
+  and must then fail; a mark extracting the sentinel to a new generation
+  under the same claim, the claim `paused` again at the next owner
+  generation with a new digest and the continuation's draft revision holding
+  a reference, not the sentinel, with a control that stores the document
+  unsubstituted and must then fail; a mark
+  addressing no node returning the claim `paused` with its earlier digest
+  and a `mark-refused` event, with a control that abandons on every refusal
+  and must then fail; a mark whose provider write fails after one generation
+  abandoning the claim; two marks racing one paused claim, exactly one
+  taking it; a takeover of a `paused` claim refused; a mark's and a
+  continuation's run killed before their next stored state, each resumed by
+  takeover from the stored envelope (pausing again, or committing), with a
+  control that resumes the killed run's unsaved marks and must then fail; a
+  continuation after the draft moved failing `412` and abandoning the claim;
+  a `paused` claim abandoned by the operator, by the sweep at its absolute
+  expiry and by recovery-mode entry, and kept `paused` across a server
+  restart;
 - Talos access (§3.3): the ingestion and executor identities each reading
   `secret/data/access/talos/<cluster id>`, and the compiler, metadata and
   normal API identities refused it, with a control that grants the compiler
@@ -2899,7 +2983,7 @@ each (design §7.7 consequences):
   fail by printing that first generation;
   the report naming an unreferenced generation of an `abandoned` claim, of a
   `released` claim and of a path whose claim row does not exist, and not the
-  generations of a `held` or a `resumed` claim nor a referenced generation of
+  generations of a `held`, a `resumed` or a `paused` claim nor a referenced generation of
   an `abandoned` claim, with a control that selects by claim state alone and
   must then fail; an `abandoned` claim's generations referenced one through an
   import-base reference row and one through a fragment revision's reference
@@ -3188,6 +3272,16 @@ design and evidence do not settle the question. Each is marked in place as
     plan's state ETag, which adds nothing, since the approval is checked
     against the plan's current state under its lock and the plan it approves
     cannot change.
+36. **The review route shows the staged change to the roles that may mark**
+    (§9.2, compilation §3.6): `GET /ingestions/{id}/review` answers the
+    sanitized document of a `paused` claim to an `author`, human only, with
+    `no-store`, and records no act. The document can hold a value nobody has
+    marked yet, which is what the review exists to find. Alternatives: show it
+    to any role, as other reads are, which hands unmarked values to
+    `publisher`, `approver` and automation; record an act per read, which
+    adds a write to a read and keeps nothing a log does not; or return it
+    only in the `POST /ingestions` response, which a reviewing operator on
+    another instance, or after a restart, could not read again.
 
 ## 18. Traceability
 
@@ -3206,7 +3300,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §6.4 orphans | §7.4, §7.8, §13.2 | DB §9; KL case G; PC §4 row 065; the orphan-report identity's grants and the report's selection: §16 check, the pinned OpenBao only (choice §17.30) |
 | §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; DB §4.6 (advisory lock); [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |
 | §8 operations | §11.1, §12.5, §15.2 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2) row 009; DB §4.5 rows 020, 021 |
-| §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5 |
+| §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5; the review route: choice §17.36, compilation §3.6 |
 | §10 authentication, authorization | §13.1, §13.3, §13.6, §13.7 | none: FR §9 item 5; [DS §4.1](../design/research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1) row 003 for approval revocation and its lock |
 | §11 migrations | §7.2, §14.2 | [DB §4.6](../design/research/20260924-database-semantics.md#46-s6-migrations) rows 022–026; [DB §6.2](../design/research/20260924-database-semantics.md#62-criterion-2-intent-ownership-queue-claims-migrations-restored-state) |
 | §12 restored state, epoch | §7.7, §7.8, §14.6 | DB §4.7 row 027; DB §9 (inferred); [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation) items 2, 5; FR §9 item 4 |

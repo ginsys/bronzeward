@@ -270,7 +270,7 @@ Design: [§7.1](../design/Talos_Configuration_and_Machine_Management_Design.md#7
 
 Staging holds a sanitized change (the sanitized document and its references)
 between extraction and the draft transaction, for example while an operator
-reviews an import and marks further paths. A further mark re-enters the
+reviews an import and marks further paths (§3.6). A further mark re-enters the
 pipeline at §2.3 step 3 on the staged document.
 
 ### 3.1 Two modes
@@ -318,7 +318,8 @@ is shorter than the lease and the lease shorter than the absolute expiry.
 
 | State | Meaning |
 | --- | --- |
-| `held` | Owned by the ingestion that created it, including while that ingestion continues after its own review. |
+| `held` | Owned by the ingestion that created it, or by the run an operator's mark or continuation started on a paused claim (§3.6). |
+| `paused` | Staged and awaiting the operator's review: no process owns it, and it holds its payload (encrypted staging with review requested only, §3.6). |
 | `resumed` | Taken over by another ingestion principal (encrypted staging only). |
 | `released` | The draft transaction committed. The payload is cleared to `NULL`; the row stays (E1 §6). |
 | `abandoned` | Terminal without a draft: a refused input, absolute expiry, a lapsed transient claim, a takeover with nothing to decrypt, an operator's abandonment or recovery-mode entry (§3.5). The payload is cleared. |
@@ -327,10 +328,11 @@ Owner identity: for transient staging, the run identity, process id and
 process start token, as in E1; for encrypted staging, the ingestion principal
 and its instance. In both modes the owner string is
 `<instance>/<process id>/<start token>`, its instance named by the deployment's
-configuration. An owner's own transition (lease extension, the draft
-transaction's release) checks owner and owner generation, and a takeover checks
-the generation it read, each in the same conditional `UPDATE` that makes the
-change. That is the shape DB §4.4 measured: a check followed by a separate
+configuration. An owner's own transition (lease extension, storing the
+payload, the pause, the draft transaction's release) checks owner and owner
+generation, and requires the state `held` or `resumed`, and a takeover, a mark
+or a continuation (§3.6) checks the generation it read, each in the same
+conditional `UPDATE` that makes the change. That is the shape DB §4.4 measured: a check followed by a separate
 write recorded a stale attempt in its control row 018
 ([DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions)).
 
@@ -358,12 +360,18 @@ The new state is `resumed`. In E1, `resumed` also marked the original run's own
 continuation after review (E1 5.7), and the run killed inside the draft
 transaction left its own claim `resumed` with its ciphertext; E1's `Resume`
 accepted only `held`, so no one could take that claim over (E1 4.2, §7). Here
-an owner's own continuation leaves the claim `held`, `resumed` means only taken
+a continuation after review (§3.6) leaves the claim `held`, `resumed` means only taken
 over, and both states can be taken over, which removes that stranded case.
 
 A claim whose payload was never written (encrypted staging interrupted before
 the end of §2.3 step 8) has nothing to decrypt: a takeover of it abandons it,
 and the input is ingested again.
+
+A `paused` claim is not taken over: no process owns it, and the operator's mark
+or continuation takes it instead (§3.6). A taken-over claim whose review is
+still pending pauses once its envelope is decrypted and its digest checked, in
+place of the draft transaction; one whose review was continued, or that never
+requested one, goes on to the draft transaction.
 
 The generation fence is the same mechanism DB measured for queue claims, where
 a worker whose lease expired had its late completion refused at the newer fence
@@ -393,8 +401,10 @@ work from being committed.
 ### 3.5 Expiry, abandonment and restoration
 
 At absolute expiry, or when a transient claim's lease lapses, the claim becomes
-`abandoned`, its payload is cleared, and the input must be ingested again. An
-abandoned run's provider generations remain as unused objects (§2.3).
+`abandoned`, its payload is cleared, and the input must be ingested again. A
+`paused` claim is abandoned at its absolute expiry like any other: a review
+never extends it (§3.6). An abandoned run's provider generations remain as
+unused objects (§2.3).
 
 Abandonment is evaluated at read time and written by a sweep
 **(choice §16.8)**: every transition and every read treats a claim past its
@@ -434,6 +444,77 @@ database (DB §4.7). A claim created before the current recovery epoch
 ([execution and recovery §7](execution-recovery.md#7-recovery-after-management-state-restoration))
 is therefore never resumed or committed: recovery-mode entry abandons it, and
 its input is ingested again **(choice §16.9)**.
+
+### 3.6 Operator review
+
+An import or drift adoption under encrypted staging may request review when it
+starts ([persistence and API §9.3](persistence-api.md#93-examples));
+the claim records the review as `pending`. Transient staging cannot request
+one: its change lives only in its process's memory. Review lets an operator
+read the sanitized change before anything of it reaches ordinary persistence,
+and mark a value the schema list missed (§2.4) **(choice §16.35)**.
+
+1. **Pause.** Once its envelope is ready (the end of §2.3 step 8), a run whose
+   claim's review is `pending` does not start the draft transaction. Its owner
+   transition stores the envelope, sets the claim `paused` and ends its lease
+   at the current time, in one transaction, and the run stops. A taken-over
+   claim whose review is `pending` pauses in the same way once its envelope is
+   decrypted and checked (§3.4), its stored envelope unchanged. No process owns
+   a `paused` claim and none extends its lease; its owner transitions (§3.2)
+   all fail, including the pausing run's own late heartbeat.
+2. **Show.** The operator reads the staged change of a `paused` claim. The
+   serving process decrypts the envelope with its ingestion identity, checks
+   its digest and answers the sanitized document and its declarations, never
+   the baseline ciphertext, a generation path or the digest. Nothing of the
+   answer is stored or logged. A decryption failure or an integrity failure
+   (§3.1) refuses the read and leaves the claim unchanged.
+3. **Mark.** An operator's mark takes the claim from `paused` in one conditional
+   `UPDATE`, which requires the state `paused`, the owner generation it read, an
+   absolute expiry still in the future and a claim created in the current
+   recovery epoch (§3.5): the serving instance becomes its owner at the next
+   owner generation with a new lease, and the state is `held`. Its run decrypts
+   the envelope, checks its digest and re-enters §2.3 at step 3 on the staged
+   sanitized document with the new marks. Step 5's guard searches for the
+   values this mark extracts. The earlier values are in the provider, which the
+   ingestion identity cannot read; they were guarded when they were
+   extracted, and substitution only removes text, so that result still holds.
+   Step 6 creates the new generations under the same claim. Step 8 does not run
+   again: the envelope's baseline is already the exact input. The new envelope
+   (the re-substituted document, every reference and the baseline ciphertext)
+   replaces the payload and its digest in the transaction that pauses the claim
+   again (item 1). The marks are held by the serving process only, never
+   stored.
+4. **A refused mark.** A mark refused before any provider write (a mark that
+   addresses no node, a guard hit, a node the machinery cannot load as a null,
+   §2.3 step 3) returns the claim to `paused` with its earlier envelope and
+   digest unchanged, and the refusal, naming paths and rule and never a value,
+   is recorded on the ingestion's operation; the review goes on. A mark refused
+   after a provider write (§2.3 step 6 failing part-way) abandons the claim
+   with that refusal, and the generations it created are unused (§2.3).
+5. **Continue.** The operator's continuation takes the claim as a mark does and
+   records the review as `continued`. Its run decrypts the envelope, checks its
+   digest and runs the draft transaction, which releases the claim (§3.4). A
+   draft that moved while the claim was paused fails the draft transaction as
+   for any ingestion, and the claim is abandoned.
+6. **Interruption.** A mark's or a continuation's run that stops leaves the
+   claim `held` to its lease, with the envelope stored before it: a mark's new
+   envelope is stored only as it pauses. A takeover (§3.4) then resumes that
+   envelope: a review still `pending` pauses again, without the interrupted
+   mark, and a `continued` one runs the draft transaction. Generations an
+   interrupted mark created are referenced by no row and are reported as
+   orphans once the claim ends ([persistence and API §6.4](persistence-api.md#64-orphans)).
+7. **End.** A `paused` claim ends by continuation and release, by the
+   operator's abandonment, at its absolute expiry, which no review extends, or
+   at recovery-mode entry if it is of an earlier epoch (§3.5). A process restart
+   changes nothing: the claim and its envelope are in the database, and any
+   ingestion instance of the current epoch serves the next request.
+
+No step puts plaintext into the database, a log or an error: the envelope stays
+encrypted in the claim, marks are paths, a refusal names paths and rules, and
+the show's answer leaves the server only in the response to the requesting
+operator. That answer can still hold a value no one has marked yet, which is
+why it is shown before the draft transaction and only to the roles that may
+mark ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)).
 
 ## 4. Correlation digests and the extraction guard
 
@@ -1318,22 +1399,31 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 
 ### 12.3 An interrupted, reviewed import under encrypted staging
 
-1. The operator imports a worker, choosing encrypted staging because the review
-   must survive the process, and marks `doc[0]/machine/files/0/content`.
-   Ingestion identifies the bundle's secret fields and the marked path, the guard
-   passes, provider generations are created, and the sanitized change is staged
-   encrypted with a claim `held` by ingestion instance A.
-2. A is killed during review. Its lease lapses; the absolute expiry has not.
-3. The operator requests recovery. Instance B takes the claim over (`resumed`,
-   owner generation 2), decrypts the envelope, checks its digest and continues
-   the review; the guard is not re-run (§3.1).
-4. A, restarted with its old state, sends a heartbeat at generation 1; it is
-   refused. B's draft transaction commits the draft, its reference rows and
-   `released` together.
-5. Had the provider been unreachable at step 3, B's decryption would fail, the
-   claim would stay `resumed` under B until B's lease lapsed, and a later
-   takeover could retry until the absolute expiry, after which the claim is
-   abandoned and the worker is imported again.
+1. The operator imports a worker with encrypted staging and review requested,
+   because the review must survive the process. Ingestion identifies the
+   bundle's secret fields, the guard passes, provider generations are created,
+   and the run of ingestion instance A seals the envelope.
+2. A is killed before it stores the envelope and pauses. Its lease lapses; the
+   absolute expiry has not.
+3. The operator requests recovery. The takeover finds no payload, abandons the
+   claim and fails its operation `ingestion-abandoned` (§3.4); the operator
+   imports the worker again, and this time A stores the envelope and pauses
+   the claim (§3.6), owner generation 1.
+4. The operator reads the staged change and sees a machine file whose content
+   holds a token, a field the schema list does not cover (§2.4). They mark
+   `doc[0]/machine/files/0/content`. Instance B takes the claim (`held`, owner
+   generation 2), decrypts the envelope, checks its digest, extracts the file
+   content under a new name, guards that value, creates its generation and
+   pauses the claim again with the new envelope.
+5. A, restarted with its old state, sends a heartbeat at generation 1; it is
+   refused. The operator continues; B takes the claim at generation 3 and its
+   draft transaction commits the draft, its reference rows and `released`
+   together.
+6. Had the provider been unreachable at step 4, B's decryption would fail, the
+   claim would stay `held` under B until B's lease lapsed, and a takeover
+   would then resume the stored envelope and pause the claim again, until the
+   absolute expiry, after which the claim is abandoned and the worker is
+   imported again.
 
 ### 12.4 A rejected draft update
 
@@ -1391,8 +1481,11 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Ingestion | Crash before the payload is written (end of §2.3 step 8) | Transient: abandoned at lease lapse; encrypted: a takeover finds nothing to decrypt and abandons it | Claim row, no payload; unused generations if past step 6 |
 | Ingestion | Crash after the payload is written, before the draft transaction | Transient: abandoned at lease lapse; encrypted: takeover (§3.4) | Claim row with ciphertext (encrypted); unused generations until the draft commits |
 | Ingestion | Crash inside the draft transaction | Claim unreleased with payload; the named draft unchanged, none of the transaction's entries or revisions committed | Claim row with ciphertext (encrypted) |
-| Ingestion | Stale owner heartbeat, commit or release | Refused by owner generation | Nothing |
-| Ingestion | Absolute expiry, or recovery-mode entry | Claim abandoned; re-ingest | Claim row, payload cleared |
+| Ingestion | A mark on a paused claim refused before any provider write (§3.6) | The claim is `paused` again with its earlier envelope; the refusal is recorded on its operation | Claim row with its earlier ciphertext |
+| Ingestion | A mark refused after a provider write (§3.6) | Refused; claim abandoned | Claim row, no payload; unused provider generations |
+| Ingestion | Crash in a mark's or a continuation's run (§3.6) | Takeover resumes the stored envelope: a pending review pauses again, a continued one runs the draft transaction | Claim row with its stored ciphertext; unused generations of an interrupted mark |
+| Ingestion | Stale owner heartbeat, commit or release, or one after the claim paused | Refused by owner generation or state | Nothing |
+| Ingestion | Absolute expiry, the operator's abandonment, or recovery-mode entry, a paused claim included | Claim abandoned; re-ingest | Claim row, payload cleared |
 | Authoring | Undeclared or unused name, other local tag, tag on a key or sequence, reserved text, bad path | Draft update refused | Nothing |
 | Compilation | Dependency not `retained`, or unreadable by the compiler | Publication refused | Nothing |
 | Compilation | Kind mismatch, or `base64` on a non-string | Publication refused | Nothing |
@@ -1450,6 +1543,11 @@ each:
   claims only after lease lapse; a takeover with nothing to decrypt; a stale
   owner refused after takeover; a crash inside the draft transaction; recovery
   with the provider unreachable;
+- the operator review of §3.6: a pause, a show, a mark that extracts a value,
+  a mark refused before and one after a provider write, a continuation, a
+  crash in a mark's and in a continuation's run, and a paused claim abandoned,
+  expired and kept across a restart, each scanned as the first item requires,
+  as persistence and API §16 lists;
 - the SR and SP matrices through the compiler's own composition path (§10.1),
   with references in the import base as well as in fragments, and SP's oracle
   over the PoC's own log and support formats (§8.4);
@@ -1480,6 +1578,10 @@ Evidence gaps this contract carries rather than closes:
   after the last kill among the surfaces
   ([acceptance plan S2](acceptance-plan.md#s2-publication)). Profile and
   assignment updates ingest no document and hold no claim.
+- **Operator review** (§3.6): specified, not measured. No evidence has run a
+  pause, a show, a mark on a staged claim or a continuation; persistence and
+  API §16 lists the checks the implementation owes, and until they run, the
+  claim that no step leaks plaintext rests on this design only.
 - **Schema detector coverage**: `schema-covers-base-secrets` was never seen to
   fail and ran on control-plane bases only; disk-encryption, installer and disk
   configuration were absent from the environment; the list's precision was not
@@ -1758,6 +1860,17 @@ in place as
     Alternatives: constants kept beside `go.mod` by hand, which can drift from
     what was compiled; or the module's version alone, which does not identify
     the module's content.
+35. **Review pauses the claim, which no process then owns** (§3.6): a claim
+    whose review is `pending` stores its envelope and becomes `paused`, its
+    lease ended; the operator's mark or continuation takes it at the next owner
+    generation, and a mark refused before any provider write returns it to
+    `paused` unchanged. Design §7.1 asks for review that survives the process,
+    which is what encrypted staging is for. Alternatives: review inside the
+    leased run (E1's own continuation, E1 5.7), which ends with its process;
+    a paused claim left `held` with a lapsed lease, continued by takeover,
+    which no reader can tell from a crashed run and whose takeover would skip
+    the review; or abandoning the claim on every refused mark, which discards a
+    review for a mistyped path.
 
 ## 17. Traceability
 
@@ -1771,6 +1884,7 @@ in place as
 | §3.1 staging modes | §7.1 | E1 4.2, §6, §8 item 3; E1 5.16 |
 | §3.2–§3.4 claims, lease, takeover | §7.1 | E1 4.2, 5.15, 5.16, 5.20, §7; [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions), [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) row 021 |
 | §3.5 restoration | §14.6 | DB §4.7; [execution and recovery §7](execution-recovery.md#7-recovery-after-management-state-restoration) |
+| §3.6 operator review | §7.1, §6.9 | none: choice §16.35; E1 5.7, 4.7; [persistence and API §16](persistence-api.md#16-verification-and-evidence-limits) |
 | §4.1 keyed digests | §7.1 | E1 §7, §8 item 7; choice §16.27 |
 | §2.3 step 8, §4.1, §11 whole-configuration digests | §7.1, §12.1 | none: choice §16.26; [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values) |
 | §4.2 guard | §7.1, §6.9 | [E1 5.18](../design/research/20260922-secret-ingress-extraction-before-persistence.md#518-the-fourth-review-and-the-fixes-made-after-the-evidence), [E1 5.19](../design/research/20260922-secret-ingress-extraction-before-persistence.md#519-advisory-rounds-five-to-eighteen-the-prototype-hardened-the-evidence-unchanged) |
