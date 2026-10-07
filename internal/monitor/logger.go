@@ -45,14 +45,14 @@ var errBlocked = errors.New("log sink blocked")
 // logAlerts writes the log lines of the alerts not yet logged, one bounded batch at a time, while
 // a batch is full (§7.1). A failure is reported and leaves the rest to the next logger: delivery
 // is at least once. A blocked sink is not reported: the report would go to the same blocked stderr
-// in serve and hold up the pass or the watchdog that logged; the alerts stay above the last logged
-// sequence, where the record shows them.
+// in serve and take the one report in progress; the alerts stay above the last logged sequence,
+// where the record shows them.
 func (m *Monitor) logAlerts(ctx context.Context) {
 	for {
 		n, err := m.logBatch(ctx)
 		if err != nil {
 			if ctx.Err() == nil && !errors.Is(err, errBlocked) {
-				m.logf("dependency monitor logger: %v", err)
+				m.report(ctx, "dependency monitor logger: %v", err)
 			}
 			return
 		}

@@ -36,12 +36,43 @@ type Monitor struct {
 	out  io.Writer
 	// writer is held by the one write to out in progress (logger.go).
 	writer chan struct{}
+	// reporter is held by the one call to logf in progress.
+	reporter chan struct{}
 }
 
 // New is a monitor asking meta, with the timings t. It reports its own failures through logf and
 // writes each alert's log line (§7.1) to out.
 func New(db *sql.DB, meta Metadata, t Timings, logf func(string, ...any), out io.Writer) *Monitor {
-	return &Monitor{db: db, meta: meta, t: t, logf: logf, out: out, writer: make(chan struct{}, 1)}
+	return &Monitor{db: db, meta: meta, t: t, logf: logf, out: out, writer: make(chan struct{}, 1),
+		reporter: make(chan struct{}, 1)}
+}
+
+// report reports a failure through logf, one report at a time. In serve logf writes to the same
+// stderr as the alert lines, and a call to it cannot be interrupted, so a pass or the watchdog
+// waits for a report at most the lock-holder timeout, once to start it and once for it to return;
+// a report that cannot start in time is dropped, and one that outlasts its wait finishes alone.
+func (m *Monitor) report(ctx context.Context, format string, args ...any) {
+	t := time.NewTimer(m.t.LockHolder)
+	defer t.Stop()
+	select {
+	case m.reporter <- struct{}{}:
+	case <-ctx.Done():
+		return
+	case <-t.C:
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		defer func() { <-m.reporter }()
+		m.logf(format, args...)
+		close(done)
+	}()
+	t.Reset(m.t.LockHolder)
+	select {
+	case <-done:
+	case <-ctx.Done():
+	case <-t.C:
+	}
 }
 
 // Run passes until ctx ends: each starts one interval after the previous one started, or at once
@@ -58,7 +89,7 @@ func (m *Monitor) Run(ctx context.Context) {
 	for {
 		start := time.Now()
 		if err := m.Pass(ctx); err != nil && ctx.Err() == nil {
-			m.logf("dependency monitor: %v", err)
+			m.report(ctx, "dependency monitor: %v", err)
 		}
 		w := time.NewTimer(next(start, time.Now(), m.t.Interval))
 		select {
@@ -92,7 +123,7 @@ func (m *Monitor) Pass(ctx context.Context) error {
 		}
 		alerted, err := m.classifyOne(ctx, d)
 		if err != nil && ctx.Err() == nil {
-			m.logf("dependency monitor: %s not classified this pass: %v", d.id, err)
+			m.report(ctx, "dependency monitor: %s not classified this pass: %v", d.id, err)
 		}
 		if alerted {
 			m.logAlerts(ctx)

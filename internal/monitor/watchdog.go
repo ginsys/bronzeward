@@ -25,7 +25,7 @@ func (m *Monitor) watch(ctx context.Context) {
 		}
 		raised, err := m.watchdog(ctx)
 		if err != nil && ctx.Err() == nil {
-			m.logf("dependency monitor watchdog: %v", err)
+			m.report(ctx, "dependency monitor watchdog: %v", err)
 		}
 		if raised {
 			m.logAlerts(ctx)
