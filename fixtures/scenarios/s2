@@ -875,22 +875,50 @@ s6_regressions() {
   }
 }
 # s6_served <jq filter>: GET /dependencies as h-author, one page, serves exactly the database's
-# dependency statuses, at least one: each one's identity, class and reason, and whether its
-# first-retained and unknown-since times are set, as recorded. The times themselves are not
-# compared (Go and PostgreSQL write them differently), nor is staleness, which is the request's
-# own reading; the filter checks that. It then satisfies the filter.
+# dependency statuses, at least one: each one's identity, class and reason as recorded, and its
+# observed-from, recorded-at, first-retained and unknown-since times the same instants, compared by
+# PostgreSQL, which reads the API's RFC 3339 text. Staleness is the request's own reading; the
+# filter checks that. It then satisfies the filter. A monitor pass rewrites every status's times,
+# so the comparison stands only when no pass committed between the database's first read and its
+# last (the latest recorded-at unchanged); otherwise it is taken again, at most three times.
 s6_served() {
-  local want
-  want=$(sql "SELECT coalesce(json_agg(json_build_object('id', id, 'provider', provider, 'object', object,
-      'version', version, 'created', created, 'class', class, 'reason', reason,
-      'firstRetainedAt', first_retained_at IS NOT NULL, 'unknownSince', unknown_since IS NOT NULL) ORDER BY id), '[]')
-    FROM dependency_status") || return 1
-  [ "$want" != '[]' ] || { say 's2: no dependency status recorded'; return 1; }
-  fresh_author
-  answers_with "(.next == null) and (([.items[] | {id, provider, object, version, created, class, reason,
-      firstRetainedAt: (.firstRetainedAt != null), unknownSince: (.unknownSince != null)}] | sort_by(.id))
-      == ($want | sort_by(.id))) and ($1)" \
-    200 - GET '/api/v1/dependencies?limit=500' "$author"
+  local want before after bad attempt
+  for attempt in 1 2 3; do
+    before=$(sql "SELECT coalesce(max(recorded_at)::text, '-') FROM dependency_status") || return 1
+    want=$(sql "SELECT coalesce(json_agg(json_build_object('id', id, 'provider', provider, 'object', object,
+        'version', version, 'created', created, 'class', class, 'reason', reason) ORDER BY id), '[]')
+      FROM dependency_status") || return 1
+    [ "$want" != '[]' ] || { say 's2: no dependency status recorded'; return 1; }
+    fresh_author
+    answers_with "(.next == null) and (([.items[] | {id, provider, object, version, created, class, reason}] | sort_by(.id))
+        == ($want | sort_by(.id))) and ($1)" \
+      200 - GET '/api/v1/dependencies?limit=500' "$author" || return 1
+    bad=$(s6_times_differ) || return 1
+    after=$(sql "SELECT coalesce(max(recorded_at)::text, '-') FROM dependency_status") || return 1
+    [ "$before" = "$after" ] || continue
+    [ -z "$bad" ] || { say "s2: GET /dependencies serves other times than recorded for $bad"; return 1; }
+    return 0
+  done
+  say 's2: a monitor pass committed during each of three reads of GET /dependencies'
+  return 1
+}
+# s6_times_differ: the ids of $EV/last.body's dependencies whose four times are not the same
+# instants as their dependency_status row's, and of any row or item without its counterpart,
+# comma-separated, empty when none. The body goes to psql on stdin, as data in a dollar-quoted
+# literal: it holds ids, provider paths and times only.
+s6_times_differ() {
+  local items
+  items=$(jq -c '.items' "$EV/last.body") || return 1
+  # shellcheck disable=SC2016  # the dollar-quote delimiter, not a shell expansion
+  case $items in *'$served$'*) say 's2: the served body holds the literal delimiter'; return 1 ;; esac
+  printf '%s' "SELECT coalesce(string_agg(coalesce(s.id, x.id), ',' ORDER BY coalesce(s.id, x.id)), '')
+    FROM json_to_recordset(\$served\$$items\$served\$::json) AS x(id text, \"observedFrom\" timestamptz,
+      \"recordedAt\" timestamptz, \"firstRetainedAt\" timestamptz, \"unknownSince\" timestamptz)
+    FULL JOIN dependency_status s ON s.id = x.id
+    WHERE s.id IS NULL OR x.id IS NULL OR x.\"observedFrom\" IS DISTINCT FROM s.observed_from
+      OR x.\"recordedAt\" IS DISTINCT FROM s.recorded_at OR x.\"firstRetainedAt\" IS DISTINCT FROM s.first_retained_at
+      OR x.\"unknownSince\" IS DISTINCT FROM s.unknown_since" |
+    pg_stdin psql -U bronzeward -d bronzeward -Atq
 }
 # s6_pinned_served <class> <reason> <alert kind>: GET /dependencies/{dep_p} serves that class and
 # reason, not stale, and its alerts route ends with an alert of that kind and reason naming
@@ -924,8 +952,8 @@ s6_outage() {
   check "$ref" "$1: every dependency observed since unknown ($3)" within 300 s6_classes unknown "$3" unknown "$3"
   check "$ref" "$1: one regression for each dependency but the lost one, each naming exactly the releases referencing it, and no other alert" s6_regressions "$3"
   check "$ref" "$1: GET /dependencies serves every one unknown, none stale, each as the database records it" s6_served '[.items[] | select(.class != "unknown" or .stale)] == []'
-  check "$ref" "$1: a publication pinning the version refused 503 dependency-unavailable, nothing released" \
-    s6_refused "$4" 503 dependency-unavailable '.provider == "kv" or .provider == "transit"'
+  check "$ref" "$1: a publication pinning the version refused 503 dependency-unavailable naming a dependency unknown ($3 where a reason is given), nothing released" \
+    s6_refused "$4" 503 dependency-unavailable "(.provider == \"kv\" or .provider == \"transit\") and .class == \"unknown\" and (.reason == null or .reason == \"$3\")"
   check "$ref" "inject $2 openbao" s6_inject "$2" openbao
   check "$ref" "$2: the version lost again, every other dependency retained" within 300 s6_classes lost destroyed retained -
   check "$ref" "$2: one lost alert for the version on its new entry into lost, and no other" s6_alerted "lost:$dep_p:destroyed"
@@ -1047,13 +1075,15 @@ s2_steps() {
   s6_outage pause unpause unreachable step6-pause
 
   # Step 7: from the snapshots taken before step 1, the automation identity repeats steps 1 to 3.
-  # The servers are paused across the database swap and keep running: db-restore ends their
-  # sessions and renames in one transaction, and a pool reconnecting in between makes the rename
-  # fail. Unpaused, they reconnect to the restored database.
+  # The servers are paused across both restores and keep running: db-restore ends their sessions
+  # and renames in one transaction, and a pool reconnecting in between makes the rename fail; and
+  # a monitor pass between the two, or during OpenBao's forced restore, would record the destroyed
+  # version lost, or OpenBao unknown, into the restored database. Unpaused, they reconnect to the
+  # restored database and observe the restored provider.
   check 'S2 step 7' 'inject pause A, B and C' servers pause
   check 'S2 step 7' 'inject db-restore s2-step1' "$bin/inject" db-restore "$snap"
-  check 'S2 step 7' 'inject unpause A, B and C' servers unpause
   check 'S2 step 7' 'inject bao-restore s2-step1' "$bin/inject" bao-restore "$snap"
+  check 'S2 step 7' 'inject unpause A, B and C' servers unpause
   check 'S2 step 7' 'A reads the restored database' within 60 db_reads
   check 'S2 step 7' "restored: no act after the snapshot, step 3's release gone, the worker's Desired and Applied the seeded release" \
     restored
