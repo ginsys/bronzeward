@@ -909,6 +909,20 @@ CREATE TABLE machine_state (
 -- deleted and recreated reissues its version numbers, and the replacement is another dependency
 -- with its own status. Its class and reason are a row of the monitor's §3 table for its provider;
 -- only an unknown one has the time it became unknown.
+CREATE FUNCTION dependency_reason(provider text, class text, reason text) RETURNS boolean
+  LANGUAGE sql IMMUTABLE AS $$
+  -- Dependency monitor §3's table: each provider's classes and reasons.
+  SELECT (class = 'retained' AND (reason IS NULL OR (provider = 'kv' AND reason = 'deletion-scheduled'))) OR
+    (class = 'unknown' AND reason IN ('malformed', 'denied', 'absent', 'unavailable', 'unreachable', 'unreadable',
+      'insufficient-evidence', 'identity-mismatch')) OR
+    (class = 'unknown' AND provider = 'kv' AND reason = 'deletion-time-undecidable') OR
+    (class = 'unknown' AND provider = 'transit' AND reason IN ('soft-delete-unobserved', 'trimmed-unverified',
+      'below-decryption-floor-unverified')) OR
+    (class = 'lost' AND provider = 'kv' AND reason IN ('destroyed', 'pruned')) OR
+    (class = 'lost' AND provider = 'transit' AND reason = 'trimmed') OR
+    (class = 'blocked' AND provider = 'kv' AND reason = 'soft-deleted') OR
+    (class = 'blocked' AND provider = 'transit' AND reason = 'below-decryption-floor')
+$$;
 CREATE TABLE dependency_status (
   id                    text PRIMARY KEY CHECK (id ~ '^dep_[a-z2-7]{26}$'),
   provider              text NOT NULL CHECK (provider IN ('kv', 'transit')),
@@ -926,26 +940,17 @@ CREATE TABLE dependency_status (
   recorded_at           timestamptz NOT NULL,
   answer_date           timestamptz,
   UNIQUE (provider, object, version, created),
+  -- The key an alert names its dependency's identity by (dependency monitor §5.1).
+  UNIQUE (id, provider, object, version, created),
   -- Implications per provider, so a row of an unknown provider is refused by the provider check
   -- alone.
   CONSTRAINT dependency_status_object CHECK (
     (provider <> 'kv' OR object ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$') AND
     (provider <> 'transit' OR (object NOT IN ('.', '..') AND octet_length(object) BETWEEN 1 AND 227
       AND object !~ '[/#?%\\[:space:][:cntrl:]]'))),
-  -- Dependency monitor §3's table, each provider's classes and reasons; a retained version's only
-  -- reason is a KV version's deletion-scheduled, with the scheduled time it observed. A NULL
-  -- comparison is no match, never a pass.
-  CONSTRAINT dependency_status_reason CHECK (COALESCE(
-    (class = 'retained' AND (reason IS NULL OR (provider = 'kv' AND reason = 'deletion-scheduled'))) OR
-    (class = 'unknown' AND reason IN ('malformed', 'denied', 'absent', 'unavailable', 'unreachable', 'unreadable',
-      'insufficient-evidence', 'identity-mismatch')) OR
-    (class = 'unknown' AND provider = 'kv' AND reason = 'deletion-time-undecidable') OR
-    (class = 'unknown' AND provider = 'transit' AND reason IN ('soft-delete-unobserved', 'trimmed-unverified',
-      'below-decryption-floor-unverified')) OR
-    (class = 'lost' AND provider = 'kv' AND reason IN ('destroyed', 'pruned')) OR
-    (class = 'lost' AND provider = 'transit' AND reason = 'trimmed') OR
-    (class = 'blocked' AND provider = 'kv' AND reason = 'soft-deleted') OR
-    (class = 'blocked' AND provider = 'transit' AND reason = 'below-decryption-floor'), false)),
+  -- A retained version's only reason is a KV version's deletion-scheduled, with the scheduled time
+  -- it observed. A NULL comparison is no match, never a pass.
+  CONSTRAINT dependency_status_reason CHECK (COALESCE(dependency_reason(provider, class, reason), false)),
   CONSTRAINT dependency_status_schedule CHECK (reason <> 'deletion-scheduled' OR deletion_observed IS NOT NULL),
   CONSTRAINT dependency_status_unknown_since CHECK ((class = 'unknown') = (unknown_since IS NOT NULL)),
   -- A class is recorded after the request that observed it began (dependency monitor §5.2, §6.1):
@@ -1056,3 +1061,103 @@ END
 $$;
 CREATE CONSTRAINT TRIGGER effective AFTER INSERT ON dependency DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW WHEN (NEW.kind = 'effective') EXECUTE FUNCTION require_effective_occurrence();
+
+-- The dependency monitor's single row (dependency monitor §5.1): its last progress (§6.3), last
+-- completed pass, last monitor-stalled alert and the recording sequence of the last alert logged
+-- (§7.1). It is created with the installation, its progress the installation time, so a monitor
+-- that never runs is stalled after three intervals. Progress and the last logged sequence never
+-- move back: a writer keeps the later value, and one that would not is refused.
+CREATE TABLE dependency_monitor (
+  singleton    boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+  progress     timestamptz NOT NULL,
+  last_pass    timestamptz,
+  last_stalled timestamptz,
+  last_logged  bigint NOT NULL DEFAULT 0 CHECK (last_logged >= 0)
+);
+CREATE FUNCTION refuse_monitor_regression() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.progress < OLD.progress OR NEW.last_logged < OLD.last_logged THEN
+    RAISE EXCEPTION 'dependency_monitor: progress or the last logged sequence moving back is refused'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'dependency_monitor_forward', TABLE = 'dependency_monitor';
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER forward BEFORE UPDATE ON dependency_monitor
+  FOR EACH ROW EXECUTE FUNCTION refuse_monitor_regression();
+
+-- Every alert the dependency monitor raises (dependency monitor §5.1, §6.2), with the class and
+-- reason it recorded, the identity of its dependency, the releases it names, the scheduled
+-- deletion time a deletion-scheduled alert warns of, and the observation it came from. A
+-- monitor-stalled alert concerns no dependency, so all of those are empty. seq is the recording
+-- sequence the logger reads by (§7.1): the insert allocates it only after locking the
+-- DependencyMonitor row, held to commit, so sequences commit in order and a sequence the writer
+-- supplies is replaced.
+CREATE TABLE dependency_alert (
+  id            text PRIMARY KEY CHECK (id ~ '^dal_[a-z2-7]{26}$'),
+  seq           bigint NOT NULL UNIQUE,
+  kind          text NOT NULL,
+  dependency    text,
+  provider      text,
+  object        text,
+  version       bigint,
+  created       text,
+  class         text,
+  reason        text,
+  releases      text[],
+  deletion      timestamptz,
+  observed_from timestamptz,
+  answer_date   timestamptz,
+  epoch         text NOT NULL REFERENCES recovery_epoch (epoch),
+  recorded_at   timestamptz NOT NULL,
+  FOREIGN KEY (dependency, provider, object, version, created)
+    REFERENCES dependency_status (id, provider, object, version, created),
+  -- Each kind's class (§6.2): lost and blocked on entry to that class, regression and persistent
+  -- of an unknown version, deletion-scheduled of a retained version with a scheduled deletion; a
+  -- monitor-stalled alert has none.
+  CONSTRAINT dependency_alert_kind CHECK (COALESCE(
+    (kind = 'monitor-stalled' AND dependency IS NULL AND class IS NULL) OR
+    (kind = 'lost' AND class = 'lost') OR
+    (kind = 'blocked' AND class = 'blocked') OR
+    (kind IN ('regression', 'persistent') AND class = 'unknown') OR
+    (kind = 'deletion-scheduled' AND class = 'retained' AND reason = 'deletion-scheduled'), false)),
+  CONSTRAINT dependency_alert_reason CHECK (
+    kind = 'monitor-stalled' OR COALESCE(dependency_reason(provider, class, reason), false)),
+  CONSTRAINT dependency_alert_shape CHECK (
+    (kind = 'monitor-stalled' OR (dependency IS NOT NULL AND provider IS NOT NULL AND object IS NOT NULL
+      AND version IS NOT NULL AND created IS NOT NULL AND releases IS NOT NULL AND cardinality(releases) > 0
+      AND observed_from IS NOT NULL)) AND
+    (kind <> 'monitor-stalled' OR (dependency IS NULL AND provider IS NULL AND object IS NULL AND version IS NULL
+      AND created IS NULL AND class IS NULL AND reason IS NULL AND releases IS NULL AND observed_from IS NULL
+      AND answer_date IS NULL)) AND
+    (kind = 'deletion-scheduled') = (deletion IS NOT NULL))
+);
+CREATE SEQUENCE dependency_alert_seq AS bigint OWNED BY dependency_alert.seq;
+-- An alert's dependency alerts are served in recording order (dependency monitor §7.2), and §6.2
+-- reads a version's earlier deletion-scheduled alerts.
+CREATE INDEX dependency_alert_dependency ON dependency_alert (dependency, seq);
+CALL make_immutable('dependency_alert');
+
+-- Allocates the recording sequence under the DependencyMonitor row lock (dependency monitor §6.1
+-- step 5, §7.1): a sequence taken before the lock could commit after a higher one, which the logger
+-- would already have passed. The releases an alert names each reference its version, once.
+CREATE FUNCTION record_dependency_alert() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM 1 FROM dependency_monitor FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'dependency_alert: no DependencyMonitor row' USING ERRCODE = 'foreign_key_violation';
+  END IF;
+  NEW.seq := nextval('dependency_alert_seq');
+  IF NEW.releases IS NOT NULL AND NEW.dependency IS NOT NULL AND (
+       (SELECT count(DISTINCT r) FROM unnest(NEW.releases) r) <> cardinality(NEW.releases)
+       OR EXISTS (SELECT FROM unnest(NEW.releases) r WHERE NOT EXISTS (
+         SELECT FROM dependency d WHERE d.release = r AND d.provider = NEW.provider AND d.object = NEW.object
+           AND d.version = NEW.version AND d.created = NEW.created))) THEN
+    RAISE EXCEPTION 'dependency_alert: a release named twice or not referencing the version is refused'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'dependency_alert_releases', TABLE = 'dependency_alert';
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER record BEFORE INSERT ON dependency_alert
+  FOR EACH ROW EXECUTE FUNCTION record_dependency_alert();

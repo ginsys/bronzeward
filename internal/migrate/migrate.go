@@ -309,7 +309,9 @@ func install(ctx context.Context, db *sql.DB, o options) (string, bool, error) {
 				"INSERT INTO installation_state (epoch, schema_version) SELECT $1, max(version) FROM schema_migrations", epoch); err != nil {
 				return err
 			}
-			return nil
+			// The dependency monitor's row, its progress the installation time (dependency monitor §5.1, §6.3).
+			_, err := tx.ExecContext(ctx, "INSERT INTO dependency_monitor (progress) SELECT entered_at FROM recovery_epoch WHERE epoch = $1", epoch)
+			return err
 		case err != nil:
 			return err
 		}
