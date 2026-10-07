@@ -286,9 +286,12 @@ database session held from step 1 to step 5, it:
    allocated under that lock, which is held to commit, so sequences commit in
    order (§7.1). It commits, then releases the advisory lock.
 
-Every other exit from steps 2 to 5 releases the advisory lock too, or ends
-the session: a failed request, an unreadable answer, and a transaction that
-fails, is refused or times out. A session-level lock outlives a rolled-back
+A request that fails, is refused or times out, and an answer that cannot be
+read, are not exits: §3 classifies each `unknown` with its reason, and step 5
+records it like any class, so an outage drives `regression` and `persistent`
+(§6.2). Every other exit from steps 2 to 5 releases the advisory lock too, or
+ends the session: an internal failure that abandons the dependency for this
+pass, and a step 5 transaction that fails, is refused or times out. A session-level lock outlives a rolled-back
 transaction, so a session kept for reuse while still holding it would keep
 every pass from that dependency until the session ended.
 
@@ -335,8 +338,9 @@ read after the row lock (§6.1 step 5), are compared with those named by the
 version's `deletion-scheduled` alerts that warn of that same time. A release committed against a schedule
 already warned, before or while that warning's pass ran, is therefore named
 by the next pass. A deletion that takes effect before a pass records it,
-one only publication saw included (its seeded row carries the schedule for the
-read routes, §5.2), is first recorded as `blocked`, which alerts at once. The
+one only publication saw included (a row publication seeds carries the
+schedule for the read routes; an existing row keeps its own, since T3 inserts
+only missing rows, §5.2), is first recorded as `blocked`, which alerts at once. The
 warning is therefore not guaranteed for a schedule shorter than one interval
 and one pass (§10.2).
 
@@ -398,7 +402,8 @@ block, so no lock a pass or the watchdog needs is held across it:
 3. With no DependencyMonitor lock held, the logger writes one log line per
    alert read. Each line has the stable event name `dependency-alert` and the
    row's fields: the `dal` and `dep` identifiers, kind, class, reason,
-   provider object, version and creation time, and the referencing releases.
+   provider object, version and creation time, the releases it names, and,
+   for a `deletion-scheduled` alert, the scheduled deletion time it warns of.
 4. The logger's transaction advances the last logged sequence to the last
    alert written and commits. While step 2 found 100, the logger repeats
    from step 1, so a backlog advances one bounded batch at a time and a batch
@@ -593,7 +598,9 @@ fail:
     whose transaction fails on a session kept for reuse leaves the
     dependency to the next pass on any instance; control: releasing the
     advisory lock only after a commit, every later pass skips it until the
-    session ends.
+    session ends. A provider request that times out is recorded `unknown`
+    by step 5 and raises `regression` after `retained`; control: treating it
+    as an exit, the status stays `retained` and nothing is raised.
 15. **A database restore** (§9): with alert A recorded before a backup and
     logged after it, and alert B recorded after it, the restored database
     holds A and not B, and the next logger writes A's line again under A's

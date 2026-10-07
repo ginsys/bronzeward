@@ -912,6 +912,25 @@ func TestPublishCommitScheduleNeverRefuses(t *testing.T) {
 			}
 		})
 	}
+
+	// An existing row keeps its own state: T3 inserts only missing rows, so a schedule only
+	// publication observed is left to the next pass (dependency monitor §6.2, §10.2).
+	t.Run("observed on an existing row without one", func(t *testing.T) {
+		p := newPublishEnv(t)
+		p.unit.statuses[0].result.Reason, p.unit.statuses[0].result.Deletion = classify.DeletionScheduled, schedule
+		mustExec(t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class,
+			first_retained_at, observed_from, recorded_at)
+			VALUES ($1, 'kv', $2, 1, '2026-09-26T09:00:00.123456789Z', 'retained', $3, $3, $3)`,
+			id.New(id.Dependency), p.kvPath, began.Add(-time.Hour))
+		if _, ref := p.commit(); ref != nil {
+			t.Fatalf("a scheduled deletion refused: %v", ref)
+		}
+		var deletion sql.NullTime
+		if err := p.db.QueryRow(`SELECT deletion_observed FROM dependency_status WHERE object = $1`, p.kvPath).
+			Scan(&deletion); err != nil || deletion.Valid {
+			t.Fatalf("existing row deletion_observed = %v (err %v), want unchanged NULL", deletion, err)
+		}
+	})
 }
 
 // The re-check holds every named version's status FOR SHARE until the commit (dependency monitor
