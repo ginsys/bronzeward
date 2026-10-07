@@ -64,6 +64,22 @@ func lostAlerts(t *testing.T, p *publishEnv) [][]string {
 	return out
 }
 
+// skipTransit holds the Transit status's dependency lock until the test ends, so a pass skips it
+// (dependency monitor §6.1 step 1) and records the KV status alone: a pass visits statuses in
+// identifier order, which is random, and Transit's record would otherwise wait first.
+func skipTransit(t *testing.T, p *publishEnv) {
+	t.Helper()
+	conn, err := p.db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := conn.ExecContext(context.Background(), `SELECT pg_advisory_lock(hashtextextended(id, 0))
+		FROM dependency_status WHERE provider = 'transit' AND object = 'bw-artifact'`); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // beginNow dates publication's classification of every named version now.
 func (p *publishEnv) beginNow() {
 	now := time.Now()
@@ -83,13 +99,15 @@ func TestPublishRacingMonitorNamedByAlert(t *testing.T) {
 	p := newPublishEnv(t)
 	p.nextDraft()
 	p.beginNow()
+	skipTransit(t, p)
 	m := monitor.New(p.db, lossMeta{}, monitor.Defaults(), t.Logf, io.Discard)
 	passed := make(chan error, 1)
 	p.a = p.buildWith(deps{owner: p.owner}, options{commit: func(tx *sql.Tx) error {
 		go func() { passed <- m.Pass(context.Background()) }()
-		// The pass waits on the held statuses, or, holding none, finishes first.
-		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-			if lockWaits(t, p.db) > 0 || len(passed) > 0 {
+		// The KV status is the one the pass records, so a wait is its record waiting on the held row.
+		for deadline := time.Now().Add(10 * time.Second); lockWaits(t, p.db) == 0; time.Sleep(10 * time.Millisecond) {
+			if len(passed) > 0 || time.Now().After(deadline) {
+				t.Error("the monitor's record never waited for the publication")
 				break
 			}
 		}
