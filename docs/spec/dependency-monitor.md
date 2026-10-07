@@ -670,8 +670,10 @@ controls and S7's variants; the rest run as *checks*
   state, each classified `retained`, and that the identity is refused a value
   read, a list, a decrypt and an encryption under the key it classified and a
   key configuration, each beside a control with the refused grant added,
-  against OpenBao 2.6.1 in dev mode, not the fixture's Raft node. That the
-  monitor sends every request with this token is item 5's, still to show.
+  against OpenBao 2.6.1 in dev mode, not the fixture's Raft node. Item 5's
+  checks show that a pass sends each request as a GET with this token and that
+  serve builds the monitor's client from `metadataTokenFile`, against an HTTP
+  stand-in that records requests, not OpenBao.
 - **A short deletion schedule** can reach `blocked` without a
   `deletion-scheduled` warning (§6.2); `blocked` still alerts at once.
 - **No interval is measured.** 60 seconds, 10 seconds, 15 minutes and three
