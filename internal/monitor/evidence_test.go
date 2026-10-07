@@ -176,3 +176,145 @@ func TestRecordOneAlertAcrossInstances(t *testing.T) {
 		t.Fatalf("status %+v", s)
 	}
 }
+
+// pausing is one instance's view of a shared provider: its first KV request takes the provider's
+// answer at that moment, signals paused, and returns it only once gate is closed, as an instance
+// that asked before a loss and stalled before recording.
+type pausing struct {
+	*fake
+	once   sync.Once
+	paused chan struct{}
+	gate   chan struct{}
+}
+
+func newPausing(p *fake) *pausing {
+	return &pausing{fake: p, paused: make(chan struct{}), gate: make(chan struct{})}
+}
+
+func (p *pausing) KV(ctx context.Context, path provider.GenerationPath) (classify.Answer, error) {
+	a, err := p.fake.KV(ctx, path)
+	first := false
+	p.once.Do(func() { first = true })
+	if first {
+		close(p.paused)
+		select {
+		case <-p.gate:
+		case <-time.After(10 * time.Second):
+		}
+	}
+	return a, err
+}
+
+// Dependency monitor §10.1 item 14: two instances classify one dependency while the provider
+// loses it. The first asks before the loss, holds retained and pauses before recording; the
+// second, asking after the loss, finds the dependency locked and skips it. The first then records
+// retained, and the next pass records lost: the status ends lost with one lost alert. Control:
+// without the advisory lock, the second records lost, the first's older retained overwrites it,
+// and the next pass raises a second lost alert.
+func TestOverlappingMonitors(t *testing.T) {
+	f := seed(t)
+	p := &fake{}
+	p.set(kvAnswer(t, f, nil), transitAnswer(t, f))
+	first := newPausing(p)
+	m1, _ := monitorFor(f, first.fake, Defaults())
+	m1.meta = first
+	m2, _ := monitorFor(f, p, Defaults())
+	done := make(chan error, 1)
+	go func() { done <- m1.Pass(context.Background()) }()
+	select {
+	case <-first.paused:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first instance never asked")
+	}
+	p.set(kvAnswer(t, f, func(v map[string]any) { v["destroyed"] = true }), transitAnswer(t, f))
+	pass(t, m2)
+	close(first.gate)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	pass(t, m2)
+	if s := statusOf(t, f.db, f.depKV); s.class != "lost" {
+		t.Fatalf("status %+v, want lost", s)
+	}
+	if got := kinds(alerts(t, f.db, f.depKV)); !slices.Equal(got, []string{"lost"}) {
+		t.Fatalf("alerts %v, want one lost", got)
+	}
+}
+
+// Dependency monitor §10.1 item 14: the first instance, paused past the idle-session timeout while
+// it holds retained from before the loss, has its session ended with its lock; the second then
+// classifies and records lost, and the first's record is refused, so the status stays lost with
+// one lost alert after the next pass. Control: recording on a new session once the first ended,
+// the older retained overwrites lost and the next pass raises a second lost alert.
+func TestOverlappingMonitorIdleSession(t *testing.T) {
+	f := seed(t)
+	p := &fake{}
+	p.set(kvAnswer(t, f, nil), transitAnswer(t, f))
+	first := newPausing(p)
+	tm := Defaults()
+	tm.IdleSession = 300 * time.Millisecond
+	m1, _ := monitorFor(f, first.fake, tm)
+	m1.meta = first
+	m2, _ := monitorFor(f, p, Defaults())
+	done := make(chan error, 1)
+	go func() { done <- m1.Pass(context.Background()) }()
+	select {
+	case <-first.paused:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first instance never asked")
+	}
+	p.set(kvAnswer(t, f, func(v map[string]any) { v["destroyed"] = true }), transitAnswer(t, f))
+	deadline := time.Now().Add(10 * time.Second)
+	for advisoryLocks(t, f.db) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the paused session kept its lock")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	pass(t, m2)
+	if s := statusOf(t, f.db, f.depKV); s.class != "lost" {
+		t.Fatalf("the second instance recorded %+v, want lost", s)
+	}
+	close(first.gate)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	pass(t, m2)
+	if s := statusOf(t, f.db, f.depKV); s.class != "lost" {
+		t.Fatalf("status %+v, want lost", s)
+	}
+	if got := kinds(alerts(t, f.db, f.depKV)); !slices.Equal(got, []string{"lost"}) {
+		t.Fatalf("alerts %v, want one lost", got)
+	}
+}
+
+// Dependency monitor §10.1 item 14: a provider request that times out, through the real metadata
+// client, is recorded unknown by step 5 and raises regression after retained. Control: treating
+// the timeout as an exit, the status stays retained and nothing is raised.
+func TestPassRequestTimeout(t *testing.T) {
+	f := seed(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	meta, err := provider.NewMetadata(srv.URL, tokenFile(t, "synthetic-metadata-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := Defaults()
+	tm.Request = 200 * time.Millisecond
+	l := &logs{}
+	pass(t, New(f.db, meta, tm, l.logf, io.Discard))
+	for _, dep := range []string{f.depKV, f.depKey} {
+		if s := statusOf(t, f.db, dep); s.class != "unknown" || s.reason.String != "unreachable" {
+			t.Fatalf("%s %+v, want unknown/unreachable", dep, s)
+		}
+		if got := kinds(alerts(t, f.db, dep)); !slices.Equal(got, []string{"regression"}) {
+			t.Fatalf("%s alerts %v, want regression", dep, got)
+		}
+	}
+}
