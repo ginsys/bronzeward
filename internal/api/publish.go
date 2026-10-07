@@ -454,9 +454,8 @@ func checkInputs(j publishJob, u releaseUnit, draftState string, draftRev int, h
 }
 
 // recheckStatuses locks every named version's status FOR SHARE in dep order, rows a concurrent
-// publication inserted included, and refuses one recorded other than retained, or retained with a
-// scheduled deletion other than the one publication observed, not before publication began
-// classifying that version (dependency monitor §5.2).
+// publication inserted included, and refuses one recorded other than retained not before
+// publication began classifying that version (dependency monitor §5.2).
 func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, error) {
 	type key struct {
 		provider, object string
@@ -464,13 +463,8 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 		created          string
 	}
 	began := map[key]time.Time{}
-	schedule := map[key]*time.Time{} // the scheduled deletion publication observed, if any
 	for _, s := range u.statuses {
-		k := key{string(s.provider), s.object, s.version, createdText(s.result.Created)}
-		began[k] = s.began
-		if s.result.Reason == classify.DeletionScheduled {
-			schedule[k] = &s.result.Deletion
-		}
+		began[key{string(s.provider), s.object, s.version, createdText(s.result.Created)}] = s.began
 	}
 	type version struct {
 		provider, object string
@@ -478,7 +472,6 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 	}
 	var providers, objects []string
 	var versions []int64
-	var deletions []*time.Time
 	named := map[version]string{} // the creation time the unit names
 	name := func(provider string, d unitDependency) error {
 		k := key{provider, d.object, d.version, createdText(d.created)}
@@ -491,7 +484,6 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 		} else if !ok {
 			named[v] = k.created
 			providers, objects, versions = append(providers, k.provider), append(objects, k.object), append(versions, k.version)
-			deletions = append(deletions, schedule[k])
 		}
 		return nil
 	}
@@ -505,13 +497,9 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 			return nil, err
 		}
 	}
-	// The schedules compare in the database, so both sides carry its microsecond rounding.
-	rows, err := tx.QueryContext(ctx, `SELECT d.provider, d.object, d.version, d.created, d.class, d.recorded_at,
-			d.deletion_observed IS DISTINCT FROM n.deletion
-		FROM dependency_status d
-		JOIN unnest($1::text[], $2::text[], $3::bigint[], $4::timestamptz[]) AS n(provider, object, version, deletion)
-			ON (d.provider, d.object, d.version) = (n.provider, n.object, n.version)
-		ORDER BY d.id FOR SHARE OF d`, providers, objects, versions, deletions)
+	rows, err := tx.QueryContext(ctx, `SELECT provider, object, version, created, class, recorded_at FROM dependency_status
+		WHERE (provider, object, version) IN (SELECT * FROM unnest($1::text[], $2::text[], $3::bigint[]))
+		ORDER BY id FOR SHARE`, providers, objects, versions)
 	if err != nil {
 		return nil, err
 	}
@@ -521,8 +509,7 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 		var k key
 		var class string
 		var recorded time.Time
-		var rescheduled bool
-		if err := rows.Scan(&k.provider, &k.object, &k.version, &k.created, &class, &recorded, &rescheduled); err != nil {
+		if err := rows.Scan(&k.provider, &k.object, &k.version, &k.created, &class, &recorded); err != nil {
 			return nil, err
 		}
 		if k.created != named[version{k.provider, k.object, k.version}] {
@@ -538,18 +525,10 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 			continue
 		}
 		// Not before: a transition recorded at the instant publication began may follow its request.
-		after := !recorded.Before(began[k])
-		switch {
-		case ref != nil || !after:
-		case class != string(classify.Retained):
+		if ref == nil && class != string(classify.Retained) && !recorded.Before(began[k]) {
 			ref = refuse(http.StatusUnprocessableEntity, "validation-failed",
 				fmt.Sprintf("Publication refused: the %s dependency %s version %d was recorded %s after publication classified it.",
 					k.provider, k.object, k.version, class)).
-				with("dependency", map[string]any{"provider": k.provider, "object": k.object, "version": k.version})
-		case rescheduled:
-			ref = refuse(http.StatusUnprocessableEntity, "validation-failed",
-				fmt.Sprintf("Publication refused: the %s dependency %s version %d had its scheduled deletion recorded after publication classified it.",
-					k.provider, k.object, k.version)).
 				with("dependency", map[string]any{"provider": k.provider, "object": k.object, "version": k.version})
 		}
 	}
