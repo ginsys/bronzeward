@@ -315,19 +315,43 @@ go_tests+='|TestClassify|TestReadPinnedRefuses|TestPublishCommitStatusRecordedAf
 go_tests+='|TestReplay|TestPublicationRequest|TestKeyReusedForAnotherRequest|TestProfileUpdate'
 go_tests+='|TestPublishCommitRetry|TestPublishCommitExistingRelease'
 go_tests+='|TestPublishClaim|TestPublishRunLapsed|TestPublishCommitFenced|TestReleaseImmutableTables'
+# go-db's PostgreSQL, the caller's BW_TEST_PG_DSN when set.
+go_db_dsn=${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}
 # go_rows_ran: those tests, in the clone, against go-db's PostgreSQL (mise run dev-db by default),
 # as go-db runs them: a missing database fails, it does not skip. None of them reads OpenBao: the
 # provider is a stand-in in each. The DSN reaches the tests through the environment (isolated_run's
 # descriptor), never a command line. Passes when go test exited 0 with no test skipped.
 go_rows_ran() {
   (
-    export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
+    # shellcheck disable=SC2030 # each run exports the DSN in its own subshell
+    export BW_TEST_PG_DSN="$go_db_dsn"
     logged go-rows env BW_REQUIRE_PG=1 mise exec -- go test -count=1 -v -run "^($go_tests)\$" \
       ./internal/api ./internal/classify ./internal/compile ./internal/ingest ./internal/migrate
   ) && ! grep --quiet -- '--- SKIP' "$EV/go-rows.log"
 }
 # go_row <test>: the test's own top-level PASS line is in go-rows.log.
 go_row() { grep --quiet -- "^--- PASS: $1 (" "$EV/go-rows.log"; }
+# bao_rows_ran: TestLiveProviderStates (dependency monitor §10.1 items 2 and 3), in the clone,
+# against this fixture's OpenBao and go-db's PostgreSQL: each provider object state classified
+# through the monitor's metadata client, under test-unique copies of the fixture's committed
+# policies (baotest), on objects and keys of its own. The address and the root token reach the
+# test through the environment (isolated_run's descriptor), never a command line. Passes when go
+# test exited 0 with no test skipped: BW_REQUIRE_BAO=1 turns a missing OpenBao into a failure.
+bao_rows_ran() {
+  (
+    # shellcheck disable=SC2031 # each run exports the DSN in its own subshell
+    export BW_TEST_PG_DSN="$go_db_dsn"
+    export BW_TEST_BAO_ADDR="http://127.0.0.1:$OPENBAO_PORT" BW_TEST_BAO_TOKEN="$BW_BAO_ROOT_TOKEN"
+    logged go-bao-rows env BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 mise exec -- go test -count=1 -v \
+      -run '^TestLiveProviderStates$' ./internal/monitor
+  ) && ! grep --quiet -- '--- SKIP' "$EV/go-bao-rows.log"
+}
+# bao_row <subtest>: TestLiveProviderStates/<subtest>'s own PASS line is in go-bao-rows.log, the
+# name as go test prints it (spaces as underscores), compared as text.
+bao_row() {
+  awk -v p="    --- PASS: TestLiveProviderStates/$1 (" 'index($0, p) == 1 { found = 1 } END { exit !found }' \
+    "$EV/go-bao-rows.log"
+}
 # go_rows: the rows, in a clone of the image commit, removed again once they have run.
 go_rows() {
   local ref='S2 negative controls'
@@ -358,6 +382,19 @@ go_rows() {
     check "$ref" 'a run whose lease lapsed writes nothing: no release, no failure (TestPublishRunLapsed)' go_row TestPublishRunLapsed
     check "$ref" 'a worker whose ownership was superseded writes nothing on commit (TestPublishCommitFenced)' go_row TestPublishCommitFenced
     check 'S2 pass' 'every release table refuses UPDATE and DELETE (TestReleaseImmutableTables)' go_row TestReleaseImmutableTables
+    check 'S2 Go tests' "TestLiveProviderStates ran against this fixture's OpenBao and PostgreSQL and passed, none skipped (go-bao-rows.log)" \
+      bao_rows_ran
+    ref='S2 negative controls (DM §10.1 items 2 and 3)'
+    check "$ref" 'a KV version, first retained, soft-deleted: blocked; undeleted: retained; destroyed: lost; alerts blocked then lost, no other' \
+      bao_row 'KV_soft-deleted,_undeleted,_destroyed'
+    check "$ref" 'a KV version pruned past max_versions: lost, one lost alert' bao_row KV_pruned_past_max_versions
+    check "$ref" "a retained version's KV metadata deleted: unknown (absent), regression on that pass and not on the next" \
+      bao_row KV_metadata_deleted_after_retained
+    check "$ref" 'the same 404 on a dependency never retained: no alert until 15 minutes unknown, then persistent (control)' \
+      bao_row KV_metadata_deleted_without_the_seed
+    check "$ref" 'a Transit version below the decryption floor: unknown naming it; the floor lowered: retained; trimmed: unknown naming it; one regression each' \
+      bao_row 'Transit_below_the_decryption_floor,_lowered,_then_trimmed'
+    check "$ref" 'a Transit key deleted: unknown (absent), regression on that pass and not on the next' bao_row Transit_key_deleted
   else
     result FAIL 'S2 Go tests' 'no clone of the image commit (go-rows-clone.log): the Go tests did not run'
   fi
@@ -758,6 +795,114 @@ same_versions() {
     counted 2 '^[0-9]+ ' "$EV/post-talos-config-version.txt"
 }
 
+# Step 6 and its negative controls: the dependency monitors of A, B and C, each passing every 60
+# seconds (dependency monitor §6.1), classify every recorded dependency against the fixture's
+# OpenBao; then the label reference's KV version is soft-deleted, destroyed, and OpenBao partitioned,
+# sealed and paused in turn. Each state is read once every dependency has been observed since it
+# was set (observed_from after the injection), with the alerts recorded since just before it, as
+# DM §6.2 sets them and no other. Step 7's bao-restore puts the version back.
+dep_p='' dep_obj='' dep_ver='' s6_t0='' s6_a0=''
+# s6_pinned: the one dependency status s2_release's reproduction records of the label reference
+# name (the fragment's and the import base's are one KV version); its id, object and version in
+# dep_p, dep_obj and dep_ver.
+s6_pinned() {
+  local rows
+  rows=$(sql "SELECT DISTINCT s.id || ' ' || s.object || ' ' || s.version FROM dependency d
+    JOIN dependency_status s USING (provider, object, version, created)
+    WHERE d.release = '$s2_release' AND d.kind = 'reproduction' AND d.reference = '$ref_name' AND d.provider = 'kv'")
+  [ -n "$rows" ] && [ "$(wc -l <<<"$rows")" = 1 ] || return 1
+  read -r dep_p dep_obj dep_ver <<<"$rows"
+  [ "$dep_ver" = "$ref_version" ]
+}
+# s6_inject <inject args...>: the last alert's sequence in s6_a0, then the injection, then the
+# database's time in s6_t0: the phase's alerts follow s6_a0, its observations postdate s6_t0.
+s6_inject() {
+  s6_a0=$(sql "SELECT coalesce(max(seq), 0) FROM dependency_alert") && [ -n "$s6_a0" ] &&
+    "$bin/inject" "$@" &&
+    s6_t0=$(sql "SELECT statement_timestamp()") && [ -n "$s6_t0" ]
+}
+# s6_classes <class> <reason> <others' class> <others' reason>: every dependency status observed
+# since s6_t0, dep_p's of that class and reason, each other one's of the others' (- for none), and
+# at least one other.
+s6_classes() {
+  [ "$(sql "SELECT count(*) FILTER (WHERE observed_from <= '$s6_t0' OR NOT CASE WHEN id = '$dep_p'
+      THEN class = '$1' AND coalesce(reason, '-') = '$2' ELSE class = '$3' AND coalesce(reason, '-') = '$4' END)
+      || ' ' || (count(*) FILTER (WHERE id <> '$dep_p') > 0) FROM dependency_status")" = '0 true' ]
+}
+# s6_alerts: the alerts recorded since s6_a0 as kind:dependency:reason, in recording order.
+s6_alerts() {
+  sql "SELECT coalesce(string_agg(kind || ':' || coalesce(dependency, '-') || ':' || coalesce(reason, '-'), ',' ORDER BY seq), '')
+    FROM dependency_alert WHERE seq > $s6_a0"
+}
+# s6_alerted <alerts...>: s6_alerts is one of the lists given, each alert naming s2_release; says
+# what it got otherwise.
+s6_alerted() {
+  local got want
+  got=$(s6_alerts) || return 1
+  [ "$(sql "SELECT count(*) FROM dependency_alert WHERE seq > $s6_a0 AND NOT '$s2_release' = ANY (releases)")" = 0 ] || {
+    say "s2: an alert since $s6_a0 does not name $s2_release"
+    return 1
+  }
+  for want in "$@"; do [ "$got" != "$want" ] || return 0; done
+  say "s2: alerts since $s6_a0: '$got', want one of: $*"
+  return 1
+}
+# s6_regressions <reason>: one regression of that reason for each dependency but dep_p, and no other
+# alert: dep_p, lost, raises none on becoming unknown (§6.2).
+s6_regressions() {
+  local want
+  want=$(sql "SELECT coalesce(string_agg('regression:' || id || ':$1', ',' ORDER BY id), '') FROM dependency_status
+    WHERE id <> '$dep_p'") || return 1
+  [ "$(sql "SELECT coalesce(string_agg(kind || ':' || coalesce(dependency, '-') || ':' || coalesce(reason, '-'), ','
+    ORDER BY dependency), '') FROM dependency_alert WHERE seq > $s6_a0")" = "$want" ] || {
+    say "s2: alerts since $s6_a0: '$(s6_alerts)', want $want"
+    return 1
+  }
+}
+# s6_served <jq filter>: GET /dependencies as h-author, one page, satisfies the filter.
+s6_served() {
+  fresh_author
+  answers_with "(.next == null) and ($1)" 200 - GET '/api/v1/dependencies?limit=500' "$author"
+}
+# s6_pinned_served <class> <reason> <alert kind>: GET /dependencies/{dep_p} serves that class and
+# reason, not stale, and its alerts route ends with an alert of that kind and reason naming
+# s2_release.
+s6_pinned_served() {
+  fresh_author
+  answers_with ".class == \"$1\" and .reason == \"$2\" and .stale == false and .object == \"$dep_obj\" and .version == $dep_ver" \
+    200 - GET "/api/v1/dependencies/$dep_p" "$author" &&
+    answers_with "(.items | last | .kind == \"$3\" and .reason == \"$2\" and (.releases | index(\"$s2_release\") != null))" \
+      200 - GET "/api/v1/dependencies/$dep_p/alerts?limit=500" "$author"
+}
+# s6_refused <key name> <status> <problem code> <jq filter on the dependency>: a new draft, changing
+# nothing, published as h-publisher: 202, then the operation failed with that problem, naming a
+# dependency the filter accepts, and nothing released.
+s6_refused() {
+  fresh_author
+  fresh_publisher
+  s2_draft "$author" "$1-draft" || return 1
+  answers 202 - POST "/api/v1/drafts/$draft/publications" "$publisher" '{}' "$(key "$1")" "$etag" || return 1
+  pub_op=$(jq -er '.id' "$EV/last.body") || return 1
+  within 150 pub_is failed 1 queued,claimed,failed || return 1
+  unreleased || return 1
+  answers_with ".state == \"failed\" and .error.status == $2 and .error.type == \"urn:bronzeward:problem:$3\" and (.error.dependency | $4)" \
+    200 - GET "/api/v1/operations/$pub_op" "$author"
+}
+# s6_outage <split> <join> <reason> <key name>: OpenBao made unreachable by inject <split> openbao,
+# then reachable again by <join> openbao, with the checks of each.
+s6_outage() {
+  local ref='S2 negative controls (step 6)'
+  check "$ref" "inject $1 openbao" s6_inject "$1" openbao
+  check "$ref" "$1: every dependency observed since unknown ($3)" within 300 s6_classes unknown "$3" unknown "$3"
+  check "$ref" "$1: one regression for each dependency but the lost one, naming the release, and no other alert" s6_regressions "$3"
+  check "$ref" "$1: GET /dependencies serves every one unknown" s6_served '[.items[] | select(.class != "unknown")] == []'
+  check "$ref" "$1: a publication pinning the version refused 503 dependency-unavailable, nothing released" \
+    s6_refused "$4" 503 dependency-unavailable '.provider == "kv" or .provider == "transit"'
+  check "$ref" "inject $2 openbao" s6_inject "$2" openbao
+  check "$ref" "$2: the version lost again, every other dependency retained" within 300 s6_classes lost destroyed retained -
+  check "$ref" "$2: one lost alert for the version on its new entry into lost, and no other" s6_alerted "lost:$dep_p:destroyed"
+}
+
 s2_steps() {
   local ref seq snap=s2-step1-$run_key
   robot=$(cat -- "$STATE/automation-token") || die "no automation token in $STATE"
@@ -837,6 +982,41 @@ s2_steps() {
   cp -- "$bundle/talos-config-version.txt" "$EV/post-talos-config-version.txt"
   check 'S2 pass' "the worker's machine-configuration resource version unchanged by publication" same_versions
   check 'S2 step 5' 'the post-state bundle: no fixture secret but the scan control' scan_clean post
+
+  # Step 6, then its negative controls on the label reference's KV version.
+  check 'S2 step 6' "the label reference's KV version: one dependency status for the release's reproduction records" s6_pinned
+  [ -n "$dep_p" ] || die "s2: no dependency status for the label reference; step 6 cannot run"
+  s6_t0=$(sql "SELECT published_at FROM release WHERE id = '$s2_release'") || die "s2: cannot read the release"
+  check 'S2 step 6' 'the monitors classify every dependency retained, each observed since the release' \
+    within 180 s6_classes retained - retained -
+  check 'S2 step 6' 'GET /dependencies serves every one retained, none stale' \
+    s6_served '[.items[] | select(.class != "retained" or .stale)] == [] and .lastPass != null'
+  ref='S2 negative controls (step 6)'
+  check "$ref" 'inject bao-soft-delete of the version' s6_inject bao-soft-delete "$dep_obj" "$dep_ver"
+  check "$ref" 'soft-deleted: the version blocked (soft-deleted), every other dependency retained' \
+    within 180 s6_classes blocked soft-deleted retained -
+  # A pass in the deletion's own second cannot order it (§3, deletion-time-undecidable): unknown,
+  # which raises its regression, before the next pass's blocked.
+  check "$ref" 'soft-deleted: one blocked alert for the version, naming the release, after at most a regression of an undecidable deletion time; no other' \
+    s6_alerted "blocked:$dep_p:soft-deleted" "regression:$dep_p:deletion-time-undecidable,blocked:$dep_p:soft-deleted"
+  check "$ref" 'soft-deleted: GET /dependencies/{id} serves it blocked; its alerts route the blocked alert' \
+    s6_pinned_served blocked soft-deleted blocked
+  check "$ref" 'soft-deleted: a publication pinning the version refused 422, naming it blocked, nothing released' \
+    s6_refused step6-blocked 422 validation-failed \
+    ".provider == \"kv\" and .object == \"$dep_obj\" and .version == $dep_ver and .reference == \"$ref_name\" and .class == \"blocked\""
+  check "$ref" 'inject bao-destroy of the version' s6_inject bao-destroy "$dep_obj" "$dep_ver"
+  check "$ref" 'destroyed: the version lost (destroyed), every other dependency retained' \
+    within 180 s6_classes lost destroyed retained -
+  check "$ref" 'destroyed: one lost alert for the version, naming the release, and no other' s6_alerted "lost:$dep_p:destroyed"
+  check "$ref" 'destroyed: GET /dependencies/{id} serves it lost; its alerts route the lost alert' \
+    s6_pinned_served lost destroyed lost
+  check "$ref" 'destroyed: a publication pinning the version refused 422, naming it lost, nothing released' \
+    s6_refused step6-lost 422 validation-failed \
+    ".provider == \"kv\" and .object == \"$dep_obj\" and .version == $dep_ver and .reference == \"$ref_name\" and .class == \"lost\""
+  # Partitioned, sealed, paused: no connection, a 503, no answer within the request timeout.
+  s6_outage netsplit netjoin unreachable step6-netsplit
+  s6_outage seal unseal unavailable step6-seal
+  s6_outage pause unpause unreachable step6-pause
 
   # Step 7: from the snapshots taken before step 1, the automation identity repeats steps 1 to 3.
   # The servers are paused across the database swap and keep running: db-restore ends their
