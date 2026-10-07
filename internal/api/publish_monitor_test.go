@@ -38,7 +38,18 @@ func metaAnswer(data map[string]any) classify.Answer {
 
 // lockWaits counts the sessions of this database waiting on a lock.
 func lockWaits(t *testing.T, db *sql.DB) int {
-	return count(t, db, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)
+	n, err := lockWaiting(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// lockWaiting is lockWaits for a goroutine other than the test's, which must not call t.Fatal.
+func lockWaiting(db *sql.DB) (int, error) {
+	var n int
+	err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n)
+	return n, err
 }
 
 // trimMeta is the metadata identity's provider once the Transit key's version 1 is trimmed: every
@@ -186,9 +197,18 @@ func TestPublishFirstNamedByTwoNamedByAlert(t *testing.T) {
 		return tx.Commit()
 	}})
 	passed := make(chan error, 1)
+	// The commit runs on the second publication's goroutine: a failure returns, never t.Fatal.
 	second.a = second.buildWith(deps{owner: second.owner}, options{commit: func(tx *sql.Tx) error {
 		go func() { passed <- m.Pass(context.Background()) }()
-		for deadline := time.Now().Add(10 * time.Second); lockWaits(t, second.db) == 0; time.Sleep(10 * time.Millisecond) {
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			n, err := lockWaiting(second.db)
+			if err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+			if n > 0 {
+				break
+			}
 			if len(passed) > 0 || time.Now().After(deadline) {
 				t.Error("the monitor's record never waited for the second publication")
 				break
