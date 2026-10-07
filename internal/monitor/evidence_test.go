@@ -179,18 +179,20 @@ func TestRecordOneAlertAcrossInstances(t *testing.T) {
 }
 
 // pausing is one instance's view of a shared provider: its first KV request takes the provider's
-// answer at that moment, signals paused, and returns it only once gate is closed, as an instance
-// that asked before a loss and stalled before recording.
+// answer at that moment, signals paused, and returns it only once the test opens the gate, as an
+// instance that asked before a loss and stalled before recording.
 type pausing struct {
 	*fake
-	once   sync.Once
-	paused chan struct{}
-	gate   chan struct{}
+	once, opened sync.Once
+	paused       chan struct{}
+	gate         chan struct{}
 }
 
 func newPausing(p *fake) *pausing {
 	return &pausing{fake: p, paused: make(chan struct{}), gate: make(chan struct{})}
 }
+
+func (p *pausing) open() { p.opened.Do(func() { close(p.gate) }) }
 
 func (p *pausing) KV(ctx context.Context, path provider.GenerationPath) (classify.Answer, error) {
 	a, err := p.fake.KV(ctx, path)
@@ -200,10 +202,32 @@ func (p *pausing) KV(ctx context.Context, path provider.GenerationPath) (classif
 		close(p.paused)
 		select {
 		case <-p.gate:
-		case <-time.After(10 * time.Second):
+		case <-ctx.Done():
+			return classify.Answer{}, ctx.Err()
 		}
 	}
 	return a, err
+}
+
+// passPaused starts m's pass, whose provider is p, and returns its result once that pass has
+// paused at its first KV request. When the test ends, cleanup opens the gate and waits for the pass.
+func passPaused(t *testing.T, m *Monitor, p *pausing) <-chan error {
+	t.Helper()
+	done, finished := make(chan error, 1), make(chan struct{})
+	go func() {
+		defer close(finished)
+		done <- m.Pass(context.Background())
+	}()
+	t.Cleanup(func() {
+		p.open()
+		<-finished
+	})
+	select {
+	case <-p.paused:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first instance never asked")
+	}
+	return done
 }
 
 // Dependency monitor §10.1 item 14: two instances classify one dependency while the provider
@@ -220,16 +244,10 @@ func TestOverlappingMonitors(t *testing.T) {
 	m1, _ := monitorFor(f, first.fake, Defaults())
 	m1.meta = first
 	m2, _ := monitorFor(f, p, Defaults())
-	done := make(chan error, 1)
-	go func() { done <- m1.Pass(context.Background()) }()
-	select {
-	case <-first.paused:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the first instance never asked")
-	}
+	done := passPaused(t, m1, first)
 	p.set(kvAnswer(t, f, func(v map[string]any) { v["destroyed"] = true }), transitAnswer(t, f))
 	pass(t, m2)
-	close(first.gate)
+	first.open()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
@@ -257,13 +275,7 @@ func TestOverlappingMonitorIdleSession(t *testing.T) {
 	m1, _ := monitorFor(f, first.fake, tm)
 	m1.meta = first
 	m2, _ := monitorFor(f, p, Defaults())
-	done := make(chan error, 1)
-	go func() { done <- m1.Pass(context.Background()) }()
-	select {
-	case <-first.paused:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the first instance never asked")
-	}
+	done := passPaused(t, m1, first)
 	p.set(kvAnswer(t, f, func(v map[string]any) { v["destroyed"] = true }), transitAnswer(t, f))
 	deadline := time.Now().Add(10 * time.Second)
 	for advisoryLocks(t, f.db) != 0 {
@@ -272,11 +284,17 @@ func TestOverlappingMonitorIdleSession(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	// The gate is still closed, so the lock went with the session, not with a finished pass.
+	select {
+	case err := <-done:
+		t.Fatalf("the first instance finished, %v, while paused", err)
+	default:
+	}
 	pass(t, m2)
 	if s := statusOf(t, f.db, f.depKV); s.class != "lost" {
 		t.Fatalf("the second instance recorded %+v, want lost", s)
 	}
-	close(first.gate)
+	first.open()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
