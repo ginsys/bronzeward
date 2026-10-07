@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/classify"
+	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/monitor"
 	"github.com/ginsys/bronzeward/internal/provider"
 )
@@ -104,6 +105,25 @@ func TestPublishRacingMonitorNamedByAlert(t *testing.T) {
 	got := lostAlerts(t, p)
 	if len(got) != 1 || !slices.Contains(got[0], rel) {
 		t.Fatalf("lost alerts %v, want one naming the release %s", got, rel)
+	}
+}
+
+// Dependency monitor §10.1 item 10, two publications the first to name the version: the other
+// publication's seed of the version's status is uncommitted when this one's seed meets it, and by
+// the time it commits the monitor has recorded the version's loss after this publication began.
+// The held transaction stands for both, committing the status as the monitor left it. This
+// publication's seed waits, finds the row, and its re-check, locking after the insert, refuses.
+// Control: re-checking before the insert finds no row, and the release commits.
+func TestPublishFirstNamedConcurrentlyRefused(t *testing.T) {
+	p := newPublishEnv(t)
+	p.beginNow()
+	time.Sleep(20 * time.Millisecond)
+	p.hold(`INSERT INTO dependency_status (id, provider, object, version, created, class, reason, observed_from, recorded_at)
+		VALUES ($1, 'kv', $2, 1, $3, 'blocked', 'soft-deleted', clock_timestamp(), clock_timestamp())`,
+		id.New(id.Dependency), p.kvPath, createdText(kvCreated))
+	ref := p.refused(422, "validation-failed")
+	if dep, _ := ref.extra["dependency"].(map[string]any); dep["object"] != p.kvPath {
+		t.Fatalf("refusal names %v", ref.extra["dependency"])
 	}
 }
 
