@@ -181,6 +181,35 @@ CREATE TABLE machine (
 CREATE UNIQUE INDEX machine_smbios_uuid ON machine (smbios_uuid);
 CREATE UNIQUE INDEX machine_talos_node_id ON machine (talos_node_id);
 
+-- A revision's writer: the transaction that wrote it, set here whatever the INSERT supplies.
+-- pg_current_xact_id() is the top-level transaction's full ID, also inside a savepoint, and is
+-- never reused, unlike a row's 32-bit xmin. make_immutable keeps it from changing.
+CREATE FUNCTION stamp_revision_writer() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.writer := pg_current_xact_id();
+  RETURN NEW;
+END
+$$;
+
+-- A revision's rows are written in the transaction that writes the revision (§3): make_immutable
+-- refuses UPDATE and DELETE, and this refuses an INSERT that would add to a committed revision,
+-- with the same SQLSTATE. TG_ARGV[0] names the revision table; the row names it in `revision`. A
+-- revision this transaction cannot see is refused here as the foreign key would, and at once: the
+-- foreign key runs at the end of the statement and would accept one committed meanwhile.
+CREATE FUNCTION refuse_late_revision_row() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  w xid8;
+BEGIN
+  EXECUTE format('SELECT writer FROM %I WHERE id = $1', TG_ARGV[0]) INTO w USING NEW.revision;
+  IF w IS NULL THEN
+    RAISE EXCEPTION 'table %: no such revision', TG_TABLE_NAME USING ERRCODE = 'foreign_key_violation';
+  ELSIF w <> pg_current_xact_id() THEN
+    RAISE EXCEPTION 'table %: a row of a committed revision is refused', TG_TABLE_NAME USING ERRCODE = 'BW001';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
 -- An import base revision (§3, §3.2; compilation §2.3 step 8, §6): the machine's sanitized
 -- document, its baseline ciphertext, the baseline's keyed digest with the key identity and version
 -- that computed it (compilation §4.1), and its unkeyed configuration digest (choice §16.26 there).
@@ -196,9 +225,11 @@ CREATE TABLE import_base_revision (
   baseline_digest_key  text NOT NULL CHECK (btrim(baseline_digest_key) <> '' AND octet_length(baseline_digest_key) <= 256),
   configuration_digest bytea NOT NULL CHECK (length(configuration_digest) = 32),
   created_at           timestamptz NOT NULL,
+  writer               xid8 NOT NULL,
   UNIQUE (id, machine)
 );
 CALL make_immutable('import_base_revision');
+CREATE TRIGGER writer BEFORE INSERT ON import_base_revision FOR EACH ROW EXECUTE FUNCTION stamp_revision_writer();
 
 -- The import base revision's reference rows: one declaration per name (compilation §5.1, §5.2)
 -- and the provider generation it resolves to, whose path is gen/<cluster>/<claim>/<value id>
@@ -216,6 +247,8 @@ CREATE TABLE import_base_reference (
   CHECK (encoding IS NULL OR kind = 'string')
 );
 CALL make_immutable('import_base_reference');
+CREATE TRIGGER with_revision BEFORE INSERT ON import_base_reference
+  FOR EACH ROW EXECUTE FUNCTION refuse_late_revision_row('import_base_revision');
 
 -- Drafts and ingestion (§3.1, §5, §7.2, §7.3; compilation §2.3, §3) ---------------------------
 
@@ -474,35 +507,6 @@ CREATE DOMAIN source_name AS text
 -- which is the import base (compilation §6).
 CREATE DOMAIN fragment_layer AS text
   CONSTRAINT fragment_layer_known CHECK (VALUE IN ('global', 'site', 'cluster', 'role', 'workload', 'override'));
-
--- A revision's writer: the transaction that wrote it, set here whatever the INSERT supplies.
--- pg_current_xact_id() is the top-level transaction's full ID, also inside a savepoint, and is
--- never reused, unlike a row's 32-bit xmin. make_immutable keeps it from changing.
-CREATE FUNCTION stamp_revision_writer() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  NEW.writer := pg_current_xact_id();
-  RETURN NEW;
-END
-$$;
-
--- A revision's rows are written in the transaction that writes the revision (§3): make_immutable
--- refuses UPDATE and DELETE, and this refuses an INSERT that would add to a committed revision,
--- with the same SQLSTATE. TG_ARGV[0] names the revision table; the row names it in `revision`. A
--- revision this transaction cannot see is refused here as the foreign key would, and at once: the
--- foreign key runs at the end of the statement and would accept one committed meanwhile.
-CREATE FUNCTION refuse_late_revision_row() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE
-  w xid8;
-BEGIN
-  EXECUTE format('SELECT writer FROM %I WHERE id = $1', TG_ARGV[0]) INTO w USING NEW.revision;
-  IF w IS NULL THEN
-    RAISE EXCEPTION 'table %: no such revision', TG_TABLE_NAME USING ERRCODE = 'foreign_key_violation';
-  ELSIF w <> pg_current_xact_id() THEN
-    RAISE EXCEPTION 'table %: a row of a committed revision is refused', TG_TABLE_NAME USING ERRCODE = 'BW001';
-  END IF;
-  RETURN NEW;
-END
-$$;
 
 -- A fragment revision (§3; compilation §2, §5): its sanitized document, written by a draft update,
 -- and the embedded documents it identifies, as compilation §5.2 declares them: a JSON array of

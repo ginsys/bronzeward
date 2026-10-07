@@ -111,12 +111,6 @@ func TestReleaseConstraints(t *testing.T) {
 	// A second machine of the cluster, whose import base declares the same reference.
 	machine2, ibr2 := id.New(id.Machine), id.New(id.ImportBase)
 	mustExec(t, db, insertMachine, machine2, r.cluster, "3e8d9f4b-5c6a-4b8c-9d2e-3f4a5b6c7d8e", nil, "normal")
-	mustExec(t, db, insertImportBase, ibr2, machine2, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2))
-	mustExec(t, db, insertReference, ibr2, "registry/example-pass", "string", 1, nil, kv)
-	mustExec(t, db, insertReference, ibr2, "registry/base-only", "string", 1, nil, kv) // r.ibr does not declare it
-	// Sources r.machine's assignment does not select: the fragment extras, declaring a reference no
-	// other source does, and the profile extras-set pinning it, both of which machine2's assignment
-	// selects; and a workers revision pinning site-dns instead of registries.
 	inTx := func(rows ...stmt) {
 		t.Helper()
 		tx, err := db.Begin()
@@ -131,6 +125,12 @@ func TestReleaseConstraints(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	inTx(stmt{insertImportBase, []any{ibr2, machine2, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2)}},
+		stmt{insertReference, []any{ibr2, "registry/example-pass", "string", 1, nil, kv}},
+		stmt{insertReference, []any{ibr2, "registry/base-only", "string", 1, nil, kv}}) // r.ibr does not declare it
+	// Sources r.machine's assignment does not select: the fragment extras, declaring a reference no
+	// other source does, and the profile extras-set pinning it, both of which machine2's assignment
+	// selects; and a workers revision pinning site-dns instead of registries.
 	frvExtra, frgExtra := id.New(id.FragmentRevision), id.New(id.Fragment)
 	prvExtra, prfExtra, prvSiteOnly := id.New(id.ProfileRevision), id.New(id.Profile), id.New(id.ProfileRevision)
 	asr2, asg2 := id.New(id.AssignmentRevision), id.New(id.Assignment)

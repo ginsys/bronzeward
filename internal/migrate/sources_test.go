@@ -230,7 +230,10 @@ func TestSourcesRevisionRowsWithTheirRevision(t *testing.T) {
 		t.Errorf("pin of no revision: %v; want SQLSTATE 23503", err)
 	}
 
-	unseenRevisionRow(t, db, s)
+	pending := id.New(id.ProfileRevision)
+	unseenRevisionRow(t, db, "profile_revision_fragment", pending,
+		stmt{insertProfileRevision, []any{pending, s.cluster, "pending", s.human}},
+		stmt{insertProfilePin, []any{pending, s.cluster, 0, s.frv1}})
 
 	// The writer is the top-level transaction, also in a savepoint, and whatever an INSERT supplies.
 	tx, err := db.Begin()
@@ -255,14 +258,15 @@ func TestSourcesRevisionRowsWithTheirRevision(t *testing.T) {
 }
 
 // unseenRevisionRow: a revision another transaction has written but not committed is no revision
-// to this one. Its row is refused when it is inserted, never left to the foreign key, which runs at
+// to this one. Its row (row, inserted into table, naming the revision pending that revision
+// writes) is refused when it is inserted, never left to the foreign key, which runs at
 // the end of the statement and would accept it had that transaction committed meanwhile. A
 // test-only trigger on the late row, firing after with_revision (triggers fire in name order),
 // waits on an advisory lock the barrier holds: an intact guard refuses the row before it, a missing
 // one reaches it. The writer commits only once the statement has been refused or waits on the
 // barrier, which is released after the commit. Every statement, cleanup included, runs under a
 // deadline.
-func unseenRevisionRow(t *testing.T, db *sql.DB, s sources) {
+func unseenRevisionRow(t *testing.T, db *sql.DB, table, pending string, revision, row stmt) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -297,7 +301,7 @@ func unseenRevisionRow(t *testing.T, db *sql.DB, s sources) {
 			t.Error(err)
 		}
 	}()
-	exec(db, `CREATE TRIGGER zz_barrier BEFORE INSERT ON profile_revision_fragment FOR EACH ROW EXECUTE FUNCTION test_barrier()`)
+	exec(db, `CREATE TRIGGER zz_barrier BEFORE INSERT ON `+table+` FOR EACH ROW EXECUTE FUNCTION test_barrier()`)
 
 	barrier, err := db.Conn(ctx)
 	if err != nil {
@@ -337,12 +341,11 @@ func unseenRevisionRow(t *testing.T, db *sql.DB, s sources) {
 			return err
 		})
 	}()
-	pending := id.New(id.ProfileRevision)
-	exec(writer, insertProfileRevision, pending, s.cluster, "pending", s.human)
+	exec(writer, revision.q, revision.args...)
 	exec(late, `SELECT set_config('bw.barrier', $1, true)`, pending)
 	done := make(chan error, 1)
 	go func() {
-		_, err := late.ExecContext(ctx, insertProfilePin, pending, s.cluster, 0, s.frv1)
+		_, err := late.ExecContext(ctx, row.q, row.args...)
 		done <- err
 	}()
 	var lateErr error
@@ -379,7 +382,7 @@ func unseenRevisionRow(t *testing.T, db *sql.DB, s sources) {
 		}
 	}
 	if sqlState(lateErr) != "23503" {
-		t.Errorf("pin of a revision committed during the statement: %v; want SQLSTATE 23503", lateErr)
+		t.Errorf("%s row of a revision committed during the statement: %v; want SQLSTATE 23503", table, lateErr)
 	}
 }
 

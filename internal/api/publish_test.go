@@ -61,11 +61,7 @@ func newPublishEnv(t *testing.T) *publishEnv {
 
 	p.ibr = id.New(id.ImportBase)
 	p.kvPath = "gen/" + d.cluster + "/" + id.New(id.Ingestion) + "/pass"
-	mustExec(t, d.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
-		p.ibr, d.machine, make([]byte, 32))
-	mustExec(t, d.db, `INSERT INTO import_base_reference (revision, name, kind, version, generation)
-		VALUES ($1, 'registry/pass', 'string', 1, $2)`, p.ibr, p.kvPath)
+	storeImportBase(t, d.db, p.ibr, d.machine, "string", nil, p.kvPath)
 	mustExec(t, d.db, `INSERT INTO draft_entry (draft, cluster, kind, machine, import_base_revision)
 		VALUES ($1, $2, 'import-base', $3, $4)`, d.draft, d.cluster, d.machine, p.ibr)
 

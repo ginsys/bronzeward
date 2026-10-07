@@ -213,6 +213,26 @@ func mustExec(t *testing.T, db execer, q string, args ...any) {
 	}
 }
 
+// storeImportBase writes import base revision ibr of machine, of the text 'machine: {}', declaring
+// registry/pass as kind with encoding (nil for none) at version 1 in generation, in one
+// transaction: a revision's rows are written with it (refuse_late_revision_row).
+func storeImportBase(t *testing.T, db *sql.DB, ibr, machine, kind string, encoding any, generation string) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(t, tx, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		ibr, machine, make([]byte, 32))
+	mustExec(t, tx, `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
+		VALUES ($1, 'registry/pass', $2, 1, $3, $4)`, ibr, kind, encoding, generation)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // newEpoch records a new current epoch, as a recovery-mode entry does (§12.1).
 func newEpoch(t *testing.T, db *sql.DB) string {
 	t.Helper()

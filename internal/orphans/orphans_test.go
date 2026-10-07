@@ -68,11 +68,11 @@ func (f *fakeLister) Values(_ context.Context, cluster, claim string) (provider.
 }
 
 // world is one database and generation tree: cluster a (recorded) and cluster b (whose rows a
-// restore removed), a machine and an import base revision to reference generations from.
+// restore removed), and a machine whose import base revisions reference generations.
 type world struct {
-	db                  *sql.DB
-	a, b, machine, base string
-	tree                map[string]map[string][]string
+	db            *sql.DB
+	a, b, machine string
+	tree          map[string]map[string][]string
 }
 
 func exec(t *testing.T, db interface {
@@ -97,15 +97,12 @@ func newWorld(t *testing.T) *world {
 	if _, _, err := migrate.Install(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
-	w := &world{db: db, a: id.New(id.Cluster), b: id.New(id.Cluster), machine: id.New(id.Machine), base: id.New(id.ImportBase),
+	w := &world{db: db, a: id.New(id.Cluster), b: id.New(id.Cluster), machine: id.New(id.Machine),
 		tree: map[string]map[string][]string{}}
 	exec(t, db, `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)
 		VALUES ($1, 'office', 'https://cp.example.test:6443', 'v1.13', '8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0=', now())`, w.a)
 	exec(t, db, `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, platform, created_at)
 		VALUES ($1, $2, '0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b', 'SN-1', 'normal', '10.55.0.3:50000', 'metal', now())`, w.machine, w.a)
-	exec(t, db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
-		w.base, w.machine, bytes.Repeat([]byte{1}, 32))
 	return w
 }
 
@@ -130,13 +127,16 @@ func (w *world) gen(cluster, claim string) string {
 	return "gen/" + cluster + "/" + claim + "/" + v
 }
 
-// reference names path from the import base revision.
-func (w *world) reference(t *testing.T, db interface {
-	Exec(string, ...any) (sql.Result, error)
-}, path string) {
+// reference names path from a new import base revision of the machine, written with it in tx, as
+// ingestion's draft transaction writes a revision and its reference rows (PA §3).
+func (w *world) reference(t *testing.T, tx *sql.Tx, path string) {
 	t.Helper()
-	exec(t, db, `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
-		VALUES ($1, $2, 'string', 1, NULL, $3)`, w.base, "n"+strings.ToLower(provider.NewValueID()), path)
+	base := id.New(id.ImportBase)
+	exec(t, tx, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
+		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		base, w.machine, bytes.Repeat([]byte{1}, 32))
+	exec(t, tx, `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
+		VALUES ($1, $2, 'string', 1, NULL, $3)`, base, "n"+strings.ToLower(provider.NewValueID()), path)
 }
 
 func paths(es []Entry) []string {
@@ -163,7 +163,14 @@ func newMatrix(t *testing.T) *matrix {
 	m := &matrix{w: w}
 	ab := w.claim(t, "encrypted", "abandoned", "-1 hour", "-1 minute")
 	m.abandoned, m.referenced = w.gen(w.a, ab), w.gen(w.a, ab)
-	w.reference(t, w.db, m.referenced)
+	tx, err := w.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.reference(t, tx, m.referenced)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	m.released = w.gen(w.a, w.claim(t, "transient", "released", "1 minute", "1 hour"))
 	m.absent = w.gen(w.a, id.New(id.Ingestion))
 	m.held = w.gen(w.a, w.claim(t, "encrypted", "held", "1 minute", "1 hour"))

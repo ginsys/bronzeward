@@ -63,9 +63,18 @@ func adoptionRows(t *testing.T, db *sql.DB) adoption {
 	mustExec(t, db, insertMachine, a.machine, a.cluster, "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b", "SN-1", "normal")
 	mustExec(t, db, insertMachine, a.otherMachine, a.other, "1c6b7d2f-3a4e-4f6a-9b0c-1d2e3f4a5b6c", nil, "normal")
 	mustExec(t, db, insertMachineState, a.machine, nil, nil, nil, nil)
-	mustExec(t, db, insertImportBase, a.ibr, a.machine, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2))
+	// A revision's rows are written in its own transaction (refuse_late_revision_row).
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(t, tx, insertImportBase, a.ibr, a.machine, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2))
+	mustExec(t, tx, insertReference, a.ibr, "registry/example-pass", "string", 1, nil, generation(a.cluster, a.claim))
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	mustExec(t, db, insertImportBase, a.otherIBR, a.otherMachine, "machine:\n  type: worker\n", []byte{1}, digest(1), "transit/baseline-digest:1", digest(2))
-	mustExec(t, db, insertReference, a.ibr, "registry/example-pass", "string", 1, nil, generation(a.cluster, a.claim))
 	mustExec(t, db, insertDraft, a.draft, a.cluster, "import", "open", "m3oxmlfh6phr7aigshdydcb4ji")
 	mustExec(t, db, insertDraft, a.draft2, a.cluster, "second", "open", "m3oxmlfh6phr7aigshdydcb4ji")
 	mustExec(t, db, insertEntry, a.draft, a.cluster, "import-base", a.machine, a.ibr)
@@ -91,6 +100,11 @@ func TestAdoptionConstraints(t *testing.T) {
 		mustExec(t, db, insertClaim, c, "transient", "held", nil, nil, nil)
 	}
 	op := func() string { return id.New(id.Operation) }
+	// A row of a revision is written with it, so the reference cases first insert one, declaring
+	// registry/example-pass, in their transaction.
+	ibrNew := id.New(id.ImportBase)
+	withImportBase := []stmt{{insertImportBase, []any{ibrNew, a.machine, "x", []byte{1}, digest(1), "k:1", digest(2)}},
+		{insertReference, []any{ibrNew, "registry/example-pass", "string", 1, nil, generation(a.cluster, a.claim)}}}
 	for _, c := range []struct {
 		name, q string
 		args    []any
@@ -115,17 +129,17 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"import base of no machine", insertImportBase, []any{id.New(id.ImportBase), id.New(id.Machine), "x", []byte{1}, digest(1), "k:1", digest(2)}, "23503"},
 		{"import base embedded not an array", strings.Replace(insertImportBase, "'[]'", `'{"path": "doc[0]/x"}'`, 1),
 			[]any{id.New(id.ImportBase), a.machine, "x", []byte{1}, digest(1), "k:1", digest(2)}, "23514"},
-		{"reference name with an upper-case letter", insertReference, []any{a.ibr, "Registry/pass", "string", 1, nil, generation(a.cluster, a.claim)}, "23514"},
-		{"reference name ending in a hyphen", insertReference, []any{a.ibr, "registry/pass-", "string", 1, nil, generation(a.cluster, a.claim)}, "23514"},
-		{"reference kind float", insertReference, []any{a.ibr, "registry/other", "float", 1, nil, generation(a.cluster, a.claim)}, "23514"},
-		{"reference version 0", insertReference, []any{a.ibr, "registry/other", "string", 0, nil, generation(a.cluster, a.claim)}, "23514"},
-		{"reference encoding hex", insertReference, []any{a.ibr, "registry/other", "string", 1, "hex", generation(a.cluster, a.claim)}, "23514"},
+		{"reference name with an upper-case letter", insertReference, []any{ibrNew, "Registry/pass", "string", 1, nil, generation(a.cluster, a.claim)}, "23514"},
+		{"reference name ending in a hyphen", insertReference, []any{ibrNew, "registry/pass-", "string", 1, nil, generation(a.cluster, a.claim)}, "23514"},
+		{"reference kind float", insertReference, []any{ibrNew, "registry/other", "float", 1, nil, generation(a.cluster, a.claim)}, "23514"},
+		{"reference version 0", insertReference, []any{ibrNew, "registry/other", "string", 0, nil, generation(a.cluster, a.claim)}, "23514"},
+		{"reference encoding hex", insertReference, []any{ibrNew, "registry/other", "string", 1, "hex", generation(a.cluster, a.claim)}, "23514"},
 		// base64 places a string secret's bytes (compilation §5.2); it modifies no other kind.
-		{"base64 integer reference", insertReference, []any{a.ibr, "registry/b64-integer", "integer", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
-		{"base64 boolean reference", insertReference, []any{a.ibr, "registry/b64-boolean", "boolean", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
-		{"base64 mapping reference", insertReference, []any{a.ibr, "registry/b64-mapping", "mapping", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
-		{"generation path of another shape", insertReference, []any{a.ibr, "registry/other", "string", 1, nil, "secret/registry"}, "23514"},
-		{"second declaration of a name", insertReference, []any{a.ibr, "registry/example-pass", "string", 1, nil, generation(a.cluster, a.claim)}, "23505"},
+		{"base64 integer reference", insertReference, []any{ibrNew, "registry/b64-integer", "integer", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
+		{"base64 boolean reference", insertReference, []any{ibrNew, "registry/b64-boolean", "boolean", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
+		{"base64 mapping reference", insertReference, []any{ibrNew, "registry/b64-mapping", "mapping", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
+		{"generation path of another shape", insertReference, []any{ibrNew, "registry/other", "string", 1, nil, "secret/registry"}, "23514"},
+		{"second declaration of a name", insertReference, []any{ibrNew, "registry/example-pass", "string", 1, nil, generation(a.cluster, a.claim)}, "23505"},
 		{"draft state merged", insertDraft, []any{id.New(id.Draft), a.cluster, "x", "merged", "m3oxmlfh6phr7aigshdydcb4ji"}, "23514"},
 		{"draft ETag token of 25 characters", insertDraft, []any{id.New(id.Draft), a.cluster, "x", "open", "m3oxmlfh6phr7aigshdydcb4j"}, "23514"},
 		{"draft of no cluster", insertDraft, []any{id.New(id.Draft), id.New(id.Cluster), "x", "open", "m3oxmlfh6phr7aigshdydcb4ji"}, "23503"},
@@ -179,9 +193,25 @@ func TestAdoptionConstraints(t *testing.T) {
 			SELECT $1, 'k0123456789abcdeY', $2, $3, epoch, 202, '{}', $4, now() FROM installation_state`,
 			[]any{a.human, digest(4), id.New(id.Request), op()}, "23503"},
 	} {
-		if _, err := db.Exec(c.q, c.args...); sqlState(err) != c.want {
-			t.Errorf("%s: %v; want SQLSTATE %s", c.name, err, c.want)
+		if c.args[0] != ibrNew {
+			if _, err := db.Exec(c.q, c.args...); sqlState(err) != c.want {
+				t.Errorf("%s: %v; want SQLSTATE %s", c.name, err, c.want)
+			}
+			continue
 		}
+		func() {
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			for _, p := range withImportBase {
+				mustExec(t, tx, p.q, p.args...)
+			}
+			if _, err := tx.Exec(c.q, c.args...); sqlState(err) != c.want {
+				t.Errorf("%s: %v; want SQLSTATE %s", c.name, err, c.want)
+			}
+		}()
 	}
 	// Positive controls beside the refusals: a running ingest of another revision, a publish of
 	// the same revision, and a live claim for the key once the first is released.
@@ -199,8 +229,58 @@ func TestAdoptionConstraints(t *testing.T) {
 	mustExec(t, db, "UPDATE staging_claim SET state = 'released' WHERE id = $1", a.claim)
 	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "held", []byte{1}, a.human, "k0123456789abcdef")
 	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "resumed", []byte{1}, nil, nil)
-	mustExec(t, db, insertReference, a.ibr, "pki/extra-ca", "string", 1, "base64", generation(a.cluster, a.claim))
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range withImportBase {
+		mustExec(t, tx, p.q, p.args...)
+	}
+	mustExec(t, tx, insertReference, ibrNew, "pki/extra-ca", "string", 1, "base64", generation(a.cluster, a.claim))
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	// The baseline revision's counter control needs releases, so it is TestReleaseConstraints'.
+}
+
+// PA §3: an import base revision's reference rows are written in the transaction that writes the
+// revision, as a source revision's rows are (TestSourcesRevisionRowsWithTheirRevision).
+func TestImportBaseReferencesWithTheirRevision(t *testing.T) {
+	db, _ := installed(t)
+	a := adoptionRows(t, db)
+	gen := generation(a.cluster, a.claim)
+	if _, err := db.Exec(insertReference, a.ibr, "registry/late", "string", 1, nil, gen); sqlState(err) != ImmutableSQLState {
+		t.Errorf("reference of a committed revision: %v; want SQLSTATE %s", err, ImmutableSQLState)
+	}
+	if _, err := db.Exec(insertReference, id.New(id.ImportBase), "registry/late", "string", 1, nil, gen); sqlState(err) != "23503" {
+		t.Errorf("reference of no revision: %v; want SQLSTATE 23503", err)
+	}
+
+	pending := id.New(id.ImportBase)
+	unseenRevisionRow(t, db, "import_base_reference", pending,
+		stmt{insertImportBase, []any{pending, a.machine, "x", []byte{1}, digest(1), "k:1", digest(2)}},
+		stmt{insertReference, []any{pending, "registry/late", "string", 1, nil, gen}})
+
+	// The writer is the top-level transaction, also in a savepoint, and whatever an INSERT supplies.
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	saved, forged := id.New(id.ImportBase), id.New(id.ImportBase)
+	mustExec(t, tx, `SAVEPOINT s`)
+	mustExec(t, tx, insertImportBase, saved, a.machine, "x", []byte{1}, digest(1), "k:1", digest(2))
+	mustExec(t, tx, `RELEASE SAVEPOINT s`)
+	mustExec(t, tx, `SAVEPOINT ref`)
+	if _, err := tx.Exec(insertReference, saved, "registry/saved", "string", 1, nil, gen); err != nil {
+		t.Errorf("reference of a revision written in a savepoint of this transaction: %v", err)
+		mustExec(t, tx, `ROLLBACK TO SAVEPOINT ref`)
+	}
+	withWriter := strings.Replace(strings.Replace(insertImportBase, "created_at)", "created_at, writer)", 1), "now())", "now(), '3')", 1)
+	mustExec(t, tx, withWriter, forged, a.machine, "x", []byte{1}, digest(1), "k:1", digest(2))
+	if _, err := tx.Exec(insertReference, forged, "registry/forged", "string", 1, nil, gen); err != nil {
+		t.Errorf("reference of a revision whose INSERT supplied a writer: %v", err)
+	}
 }
 
 // The control for the operation fence: with each of its constraints dropped, the row TestAdoptionConstraints
