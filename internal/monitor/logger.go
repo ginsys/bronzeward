@@ -39,14 +39,19 @@ type line struct {
 	seq        int64
 }
 
+// errBlocked is a log write that outlasted its batch, or an earlier one still blocked.
+var errBlocked = errors.New("log sink blocked")
+
 // logAlerts writes the log lines of the alerts not yet logged, one bounded batch at a time, while
 // a batch is full (§7.1). A failure is reported and leaves the rest to the next logger: delivery
-// is at least once.
+// is at least once. A blocked sink is not reported: the report would go to the same blocked stderr
+// in serve and hold up the pass or the watchdog that logged; the alerts stay above the last logged
+// sequence, where the record shows them.
 func (m *Monitor) logAlerts(ctx context.Context) {
 	for {
 		n, err := m.logBatch(ctx)
 		if err != nil {
-			if ctx.Err() == nil {
+			if ctx.Err() == nil && !errors.Is(err, errBlocked) {
 				m.logf("dependency monitor logger: %v", err)
 			}
 			return
@@ -64,7 +69,8 @@ func (m *Monitor) logAlerts(ctx context.Context) {
 // A write to out cannot be interrupted, so the instance writes through one writer at a time, and
 // its callers, a pass and the watchdog, wait for it at most the lock-holder timeout: once to take
 // the writer and once for the write. A write that outlasts its batch ends the logger, and writes no
-// further line of that batch once it returns.
+// further line of that batch once it returns. Run does not wait for such a write: waiting would
+// let a blocked sink hold up shutdown, so at most that one write outlives Run.
 func (m *Monitor) logBatch(ctx context.Context) (int, error) {
 	if err := m.takeWriter(ctx); err != nil {
 		return 0, err
@@ -125,7 +131,10 @@ func (m *Monitor) logBatch(ctx context.Context) (int, error) {
 			return 0, err
 		}
 	case <-wctx.Done():
-		return 0, fmt.Errorf("log write: %w", wctx.Err())
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		return 0, errBlocked
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE dependency_monitor SET last_logged = $1`, lines[len(lines)-1].seq); err != nil {
 		return 0, fmt.Errorf("last logged: %w", err)
@@ -146,7 +155,7 @@ func (m *Monitor) takeWriter(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-t.C:
-		return errors.New("an earlier log write is still blocked")
+		return errBlocked
 	}
 }
 
