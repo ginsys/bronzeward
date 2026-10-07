@@ -363,6 +363,53 @@ go_rows() {
   rm -rf -- "$clone_dir"
 }
 
+# The machinery gate (compilation §10.1, the S2 precondition): SR's and SP's matrices re-run with
+# composition through the compiler's own path, by experiments/c10-machinery-gate/run/all against
+# this fixture. Its output holds the bases' synthetic secrets, so it goes to a directory outside the
+# checkout (mktemp -d, under TMPDIR; run/all refuses one inside), only its result tables are kept,
+# in c10/ (the final bundle's scan covers them), and the directory is removed. It runs on this
+# checkout, not a clone, since it reads this fixture's state; its run.txt names the commit and
+# counts uncommitted inputs, which c10_at_image holds to the image's.
+c10_ran() {
+  local out f rc=0
+  out=$(mktemp -d) || return 1
+  C10_OUT=$out/out "$FIXTURES/../experiments/c10-machinery-gate/run/all" >"$EV/c10-gate.log" 2>&1 || rc=$?
+  printf 'exit %d\n' "$rc" >>"$EV/c10-gate.log"
+  ran c10-gate "$rc" experiments/c10-machinery-gate/run/all
+  mkdir -p -- "$EV/c10"
+  for f in run.txt summary.txt controls.tsv matrix.tsv sp-summary.txt sp-controls.tsv sp-matrix.tsv gate.log; do
+    [ ! -f "$out/out/$f" ] || cp -- "$out/out/$f" "$EV/c10/$f"
+  done
+  rm -rf -- "$out"
+  [ "$rc" -eq 0 ]
+}
+# c10_at_image: the gate ran at the commit up-build records for the image, no input uncommitted.
+c10_at_image() {
+  local commit
+  commit=$(sed -n 's/^commit //p' "$STATE/up-build") && [ -n "$commit" ] || return 1
+  awk -F'\t' -v c="$commit" '$1 == "commit" { m = ($2 == c) } $1 == "uncommitted-inputs" { u = $2 }
+    END { exit !(m && u == "0") }' "$EV/c10/run.txt"
+}
+# c10_matrix <summary>: the matrix has rows, and none is unexpected.
+c10_matrix() {
+  awk -F'\t' '$1 == "rows" { r = $2 } $1 == "unexpected" { u = $2 } END { exit !(r > 0 && u == "0") }' "$EV/c10/$1"
+}
+# c10_controls <controls>: every control on both bases held (pass, or an identical round trip).
+c10_controls() {
+  awk -F'\t' '{ n++; b[$2] = 1 } $4 != "pass" && $4 != "identical" { bad = 1 }
+    END { exit !(n > 0 && !bad && ("fixture" in b) && ("generated" in b)) }' "$EV/c10/$1"
+}
+c10_rows() {
+  local ref='S2 precondition, C §10.1'
+  check "$ref" 'the machinery gate, run/all against this fixture, exited 0 (c10-gate.log)' c10_ran
+  check "$ref" 'it ran at the image commit with no uncommitted input (c10/run.txt)' c10_at_image
+  check "$ref" "SR's matrix through the compiler's path: every case on both bases as expected (c10/summary.txt)" c10_matrix summary.txt
+  check "$ref" "SR's controls: the compiler's round trip and validation of each base (c10/controls.tsv)" c10_controls controls.tsv
+  check "$ref" "SP's matrix through the compiler's path: every case as expected, no value or base secret in any cell (c10/sp-summary.txt)" \
+    c10_matrix sp-summary.txt
+  check "$ref" "SP's controls: paired-diff moves and rotations, the oracle finds a planted value (c10/sp-controls.tsv)" c10_controls sp-controls.tsv
+}
+
 # S2 steps 1 to 5 and 7 (acceptance plan S2), after the matrices, on an Applied state seeded here:
 # the scenario's precondition is S3's handover (ginsys/bronzeward#25), which has not landed, so the
 # worker's Applied is set by SQL to the release last published for it, as an adoption would record
@@ -425,9 +472,15 @@ s2_edit() {
 # unchanged. The second author is the automation identity, which holds author.
 stale_put() {
   local before old=$s2_prior_etag
-  before=$(sql "$4") || return 1
+  before=$(stale_counts "$4") || return 1
   answers 412 precondition-failed PUT "/api/v1/drafts/$draft$1" "$robot" "$2" "$(key "stale-$3")" "$old" || return 1
-  [ "$(sql "$4")" = "$before" ] && draft_etag_is "$etag"
+  [ "$(stale_counts "$4")" = "$before" ] && draft_etag_is "$etag"
+}
+# stale_counts <count query>: what a refused update must not add to: the query's revisions, acts,
+# idempotency records (a refusal is not replayed) and staging claims.
+stale_counts() {
+  sql "SELECT ($1), (SELECT count(*) FROM act), (SELECT count(*) FROM idempotency_record),
+    (SELECT count(*) FROM staging_claim)"
 }
 s2_prior_etag=''
 # s2_publish <token> <key name>: the draft published on A: 202, the operation (pub_op) succeeded
@@ -475,25 +528,45 @@ review_redacted() {
         | length == 1
       end' "$EV/last.body" >/dev/null
 }
+# machinery_pin: the machinery module's version (go.mod) and its go.sum checksum at the commit
+# up-build records for the image, tab-separated.
+machinery_pin() {
+  local commit v
+  commit=$(sed -n 's/^commit //p' "$STATE/up-build") && [ -n "$commit" ] || return 1
+  v=$(fixtures_git show "$commit:go.mod" | awk '$1 == "github.com/siderolabs/talos/pkg/machinery" { print $2 }') &&
+    [ -n "$v" ] || return 1
+  fixtures_git show "$commit:go.sum" |
+    awk -v v="$v" '$1 == "github.com/siderolabs/talos/pkg/machinery" && $2 == v { printf "%s\t%s\n", v, $3 }'
+}
 # release_sources: step 5's release names step 2's fragment, profile and assignment revisions, and
-# its renderer is at the fixture Talos version's contract minor.
+# its renderer record is exactly the pinned one: the fixture Talos version's contract minor, the
+# image's machinery version and go.sum checksum, and the fixture's Kubernetes version.
 release_sources() {
-  local contract=${TALOS_VERSION%.*}
+  local contract=${TALOS_VERSION%.*} mv ms
+  IFS=$'\t' read -r mv ms < <(machinery_pin) && [ -n "$ms" ] || return 1
   answers 200 - GET "/api/v1/releases/$s2_release" "$author" || return 1
-  jq -e --arg f "$frv" --arg p "$prv" --arg a "$arv" --arg c "$contract" '
+  jq -e --arg f "$frv" --arg p "$prv" --arg a "$arv" --arg c "$contract" --arg mv "$mv" --arg ms "$ms" \
+    --arg k "v$KUBERNETES_VERSION" '
     ([.sources[] | select(.kind == "fragment" and .revision == $f)] | length == 1)
     and ([.sources[] | select(.kind == "profile" and .revision == $p)] | length == 1)
     and ([.sources[] | select(.kind == "assignment" and .revision == $a)] | length == 1)
-    and .renderer.contract == $c' "$EV/last.body" >/dev/null
+    and .renderer == {contract: $c, machineryVersion: $mv, machineryChecksum: $ms, kubernetesVersion: $k}' \
+    "$EV/last.body" >/dev/null
 }
 # release_stored: the worker's artifact is Transit ciphertext with its digests; its dependency
-# records name exact versions, the label's reference among them from the fragment revision, an
+# records name exact versions, the label's reference among them from the fragment revision with
+# its effective record (the same object, version and creation, for the release and the worker), an
 # encryption dependency on the artifact key; every one classified retained.
 release_stored() {
   [ "$(sql "SELECT count(*) FROM release_machine WHERE release = '$s2_release' AND machine = '$machine_w'
     AND ciphertext LIKE 'vault:v%' AND length(configuration_digest) = 32 AND length(ciphertext_digest) = 32")" = 1 ] &&
-    [ "$(sql "SELECT count(*) FROM dependency WHERE release = '$s2_release' AND kind = 'reproduction'
+    [ "$(sql "SELECT count(*) FROM dependency WHERE release = '$s2_release' AND machine = '$machine_w' AND kind = 'reproduction'
       AND reference = '$ref_name' AND source_revision = '$frv' AND version = $ref_version")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM dependency e JOIN dependency r ON r.release = e.release AND r.machine = e.machine
+      AND r.reference = e.reference AND r.provider = e.provider AND r.object = e.object AND r.version = e.version
+      AND r.created = e.created
+      WHERE e.release = '$s2_release' AND e.machine = '$machine_w' AND e.kind = 'effective' AND r.kind = 'reproduction'
+      AND e.reference = '$ref_name' AND e.version = $ref_version AND r.source_revision = '$frv'")" = 1 ] &&
     [ "$(sql "SELECT count(*) FROM dependency WHERE release = '$s2_release' AND kind = 'encryption'")" -ge 1 ] &&
     [ "$(sql "SELECT count(*) FROM dependency d JOIN dependency_status s USING (provider, object, version, created)
       WHERE d.release = '$s2_release' AND s.class <> 'retained'")" = 0 ]
@@ -556,6 +629,9 @@ s2_steps() {
   [ -n "$ref_name" ] || die "s2: no reference to carry; nothing after it can run"
   evidence_to pre || die "no pre-state: bin/evidence failed"
   cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
+  # A capture can outlast a token's life: minted again, as after each outcome bundle.
+  fresh_author
+  fresh_publisher
   check "$ref" "pre-state: the worker has a machine-configuration resource version" \
     counted 1 "^[0-9]+ $TALOS_WORKER_IP\$" "$EV/pre-talos-config-version.txt"
   seq=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s2: cannot read the operations"
@@ -609,6 +685,7 @@ s2_steps() {
   check 'S2 pass' 'no plan and no operation but publish since the seed (after step 5)' only_publish_since "$seq"
   evidence_to post || die "no post-state: bin/evidence failed"
   cp -- "$bundle/talos-config-version.txt" "$EV/post-talos-config-version.txt"
+  fresh_author
   check 'S2 pass' "the worker's machine-configuration resource version unchanged by publication" same_versions
   check 'S2 step 5' 'the post-state bundle: no fixture secret but the scan control' scan_clean post
 
@@ -687,6 +764,7 @@ run() {
   # S2 steps 1 to 5 and 7, on the Applied state seeded from the last release.
   s2_steps
   go_rows
+  c10_rows
   check 'S2 backups, C §15' 'inject db-snapshot: a dump of the bronzeward database after the updates, refusals and interruptions' \
     "$bin/inject" db-snapshot "$backup_name"
 }
