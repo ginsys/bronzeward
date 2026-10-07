@@ -507,8 +507,10 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    digest and runs the draft transaction, which releases the claim (§3.4). A
    draft that moved while the claim was paused fails the draft transaction as
    for any ingestion, and the claim is abandoned.
-6. **Interruption.** A mark's or a continuation's run that stops leaves the
-   claim `held` to its lease, with the envelope stored before it: a mark's new
+6. **Interruption.** A mark's or a continuation's run that stops, or that
+   cannot decrypt the envelope (recorded as for a takeover's, persistence and
+   API §8.3), leaves the claim `held` to its lease, with the envelope stored
+   before it: a mark's new
    envelope is stored only as it pauses. A takeover (§3.4) then resumes that
    envelope: a review still `pending` pauses again, without the interrupted
    mark, and a `continued` one runs the draft transaction. Generations an
