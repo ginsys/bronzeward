@@ -361,6 +361,9 @@ func classifyTransit(d Dependency, body []byte) (Result, error) {
 		return Result{Class: Unknown, Reason: SoftDeleteUnobserved}, nil
 	case data.MinAvailableVersion == nil || data.MinDecryptionVersion == nil || data.LatestVersion == nil:
 		return Result{Class: Unknown, Reason: InsufficientEvidence}, nil
+	case d.Version > *data.LatestVersion:
+		// Contradictory metadata: RC never classified a version the key says it has not reached.
+		return Result{Class: Unknown, Reason: InsufficientEvidence}, nil
 	}
 	minAvailable, minDecryption := *data.MinAvailableVersion, *data.MinDecryptionVersion
 	belowAvailable := minAvailable > 0 && d.Version < minAvailable

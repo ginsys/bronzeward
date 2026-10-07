@@ -906,13 +906,14 @@ INSERT INTO dependency_status ... ON CONFLICT DO NOTHING;
                                      -- order (dependency monitor §3, §5.2); a
                                      -- KV version holds one creation time, so
                                      -- another's row is kept, not added to
-SELECT created, class, recorded_at FROM dependency_status
+SELECT created, class, deletion_observed, recorded_at FROM dependency_status
  WHERE (provider_object, version) IN ($named) ORDER BY id FOR SHARE;
   -- every named version's rows, a concurrent publication's included: a KV
   -- row under another creation time refuses the publication 422 (identity
-  -- changed, §6.1); a class other than `retained` recorded after
-  -- publication began that version's classification refuses it, as
-  -- compilation §6 step 3 does (dependency monitor §5.2)
+  -- changed, §6.1); a row recorded not before publication began that
+  -- version's classification refuses it, as compilation §6 step 3 does,
+  -- when its class is not `retained` or its scheduled deletion is not the
+  -- one publication observed (dependency monitor §5.2)
 INSERT INTO release ...;             -- unique (draft_id, draft_revision);
                                      -- published by the principal that
                                      -- requested $op, in its role
@@ -1967,7 +1968,7 @@ counter, not the ETag token, so the token is not named.
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
-| 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). Also a publication refused by T3's re-check: a version's status recorded after publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
+| 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). Also a publication refused by T3's re-check: a version's status recorded not before publication began classifying it is not `retained`, or carries a scheduled deletion other than the one publication observed (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
 | 428 | `precondition-required`, `idempotency-key-required` | `If-Match` or `Idempotency-Key` missing |
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |

@@ -72,10 +72,8 @@ recreated so is refused at publication (§5.1), so it never has one. One provide
 version named by several releases, or by both dependency records of one
 release, is one monitored dependency with one status **(choice §11.2)**. Its
 alerts name every release whose dependency records reference it; §5.2 orders
-a publication against a transition, so no committed release is missing from
-a transition's alert. A `deletion-scheduled` alert is not yet so ordered: a
-release published while a pass records a new schedule for a `retained`
-dependency can be missing from it (§10.2).
+a publication against a transition and against a newly recorded scheduled
+deletion, so no committed release is missing from either's alert.
 
 Each monitored dependency has a `dep` identifier (PA §2), created when its
 first dependency record is committed. The identifier names the status, not the
@@ -119,6 +117,7 @@ One classification is one provider answer to one request:
 | Transit | the recorded version is in the key's `keys` map with a creation time other than the one the dependency record carries (compilation §9) | `unknown` | `identity-mismatch` **(choice §11.10)** |
 | Transit | `soft_deleted` anything but `false` | `unknown` | `soft-delete-unobserved` |
 | Transit | `min_available_version`, `min_decryption_version` or `latest_version` missing | `unknown` | `insufficient-evidence` |
+| Transit | version above `latest_version`, listed in the `keys` map or not | `unknown` | `insufficient-evidence` (contradictory metadata, never classified by RC) |
 | Transit | version absent from the `keys` map, below `min_available_version`, when that is above 0 | `unknown` | `trimmed-unverified` |
 | Transit | version absent from the `keys` map, below `min_decryption_version` | `unknown` | `below-decryption-floor-unverified` (reversible by lowering it, if the key is the recorded one) |
 | Transit | version absent from the `keys` map | `unknown` | `insufficient-evidence` |
@@ -230,17 +229,20 @@ deletion is warned by the next pass (§6.2).
 
 After its inserts, T3 locks the DependencyStatus row of every version it names
 `FOR SHARE`, in `dep` order, rows a concurrent publication inserted included. A
-row whose class is not `retained` and whose `recorded_at` is later than the
-time publication began that version's classification refuses the publication,
-as compilation §6 step 3 refuses a version. The comparison takes the time the
-class was recorded, not the time its request began, since a request that began
-before publication's own can observe a change after it. The monitor reads a
-dependency's referencing releases after taking its row lock (§6.1 step 5). A
-transition and a publication naming the same version are therefore ordered:
-either the publication sees the transition and is refused, or the transition's
-alert names the release. A refusal can be conservative, for a transition
-observed before publication's own request but recorded after it began; the
-retried publication classifies afresh.
+row whose `recorded_at` is not earlier than the time publication began that
+version's classification refuses the publication, as compilation §6 step 3
+refuses a version, when its class is not `retained`, or when it is `retained`
+with a scheduled deletion other than the one publication's classification
+observed, none included. The comparison takes the time the class was recorded,
+not the time its request began, since a request that began before
+publication's own can observe a change after it; a time equal to publication's
+start counts as after it, since a request cannot be shown to precede it. The
+monitor reads a dependency's referencing releases after taking its row lock
+(§6.1 step 5). A transition, or a newly recorded schedule, and a publication
+naming the same version are therefore ordered: either the publication sees it
+and is refused, or its alert names the release. A refusal can be conservative,
+for a change observed before publication's own request but recorded after it
+began; the retried publication classifies afresh.
 
 Without this seed, a dependency lost between publication and the monitor's
 first pass would be a dependency never seen `retained`, alerted after 15
@@ -278,6 +280,12 @@ database session held from step 1 to step 5, it:
    releases, and records its progress (§6.3). An alert's recording sequence is
    allocated under that lock, which is held to commit, so sequences commit in
    order (§7.1). It commits, then releases the advisory lock.
+
+Every other exit from steps 2 to 5 releases the advisory lock too, or ends
+the session: a failed request, an unreadable answer, and a transaction that
+fails, is refused or times out. A session-level lock outlives a rolled-back
+transaction, so a session kept for reuse while still holding it would keep
+every pass from that dependency until the session ended.
 
 The advisory lock serializes steps 2 to 5 per dependency across instances, so
 classifications are recorded in the order their answers were observed, and an
@@ -533,6 +541,14 @@ fail:
     for the row lock while publication begins its classification, then
     records the change; publication is refused. Control: taking
     `recorded_at` from `now()`, the release commits and the alert omits it.
+    A change recorded at exactly the time publication began its
+    classification refuses it; control: comparing "later than", the release
+    commits. A `retained` row recorded not before publication began with a
+    scheduled deletion other than publication's own, none included, refuses
+    it, and one with publication's own schedule does not; controls: without
+    the schedule comparison, the release commits and the
+    `deletion-scheduled` alert omits it; comparing against no schedule, the
+    unchanged one refuses.
 11. **The log after a crash**: a process stopped between an alert's commit
     and its log line has the line written by the next instance to log, and an
     alert whose transaction commits after a later-started one's is logged.
@@ -561,7 +577,11 @@ fail:
     timeout, its session is ended and its record refused, and the second
     records `lost`. Controls: without the advisory lock, the older `retained`
     overwrites `lost` and the next pass raises a second `lost` alert;
-    recording on a new session after the first ended, the same.
+    recording on a new session after the first ended, the same. A step 5
+    whose transaction fails on a session kept for reuse leaves the
+    dependency to the next pass on any instance; control: releasing the
+    advisory lock only after a commit, every later pass skips it until the
+    session ends.
 15. **A database restore** (§9): with alert A recorded before a backup and
     logged after it, and alert B recorded after it, the restored database
     holds A and not B, and the next logger writes A's line again under A's
@@ -595,9 +615,6 @@ controls and S7's variants; the rest run as *checks*
 - **The KV identity** rests on the `created_time` KV metadata gives each
   version; no report deleted a path's metadata and wrote it again, so a
   replacement sharing its original's `created_time` was not ruled out.
-- **A deletion schedule racing a publication** (§2, §6.2): a
-  `deletion-scheduled` alert can omit a release published while it is
-  recorded; ordering it against publication is tracked in ginsys/bronzeward#24.
 - **Read-only policy.** RC's metadata token also held `list`; this contract
   drops it, since the procedure never lists. The implementation's policy tests
   show `read` alone answers a generation's KV metadata and a Transit key's
