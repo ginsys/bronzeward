@@ -77,7 +77,8 @@ func (m *Monitor) report(ctx context.Context, format string, args ...any) {
 
 // Run passes until ctx ends: each starts one interval after the previous one started, or at once
 // if that one took longer (§6.1, choice §11.4). The watchdog runs beside them on its own schedule
-// (§6.3), and Run returns once both have stopped.
+// (§6.3), and Run returns once both have stopped. A log write and a report blocked in their sink
+// cannot be interrupted, and Run does not wait for them, so at most one of each outlives it.
 func (m *Monitor) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Add(1)
