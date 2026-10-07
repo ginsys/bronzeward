@@ -122,8 +122,9 @@ func (l *live) alerted(t *testing.T, dep string, want ...string) {
 
 // Dependency monitor §10.1 items 2 and 3, against a real OpenBao through the metadata client under
 // the fixture's bw-metadata policy: each provider state an object can be put in classifies as §3's
-// table sets, and alerts as §6.2 sets and no other. The whole-server states (sealed, partitioned,
-// paused) are acceptance-plan S2's, on the fixture. Controls: each case first records the object
+// table sets, and alerts as §6.2 sets and no other. Acceptance-plan S2 runs it against the
+// fixture's OpenBao, CI against OpenBao in dev mode; the whole-server states (sealed, partitioned,
+// paused) are S2's own steps. Controls: each case first records the object
 // retained, so a classifier that ignored the change would leave it retained and fail the case.
 func TestLiveProviderStates(t *testing.T) {
 	t.Run("KV soft-deleted, undeleted, destroyed", func(t *testing.T) {
