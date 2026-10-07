@@ -878,6 +878,42 @@ func TestPublishCommitStatusRecordedAfter(t *testing.T) {
 	}
 }
 
+// A scheduled deletion leaves a version retained and never refuses a publication, whenever it was
+// recorded or warned and whichever schedule publication observed: the monitor warns each release
+// committed against it (dependency monitor §5.2, §6.2).
+func TestPublishCommitScheduleNeverRefuses(t *testing.T) {
+	schedule := time.Date(2026, 10, 9, 12, 0, 0, 123456789, time.UTC)
+	for _, c := range []struct {
+		name     string
+		observed bool // publication's own classification observed the schedule
+		warned   bool
+		recorded time.Time
+	}{
+		{"recorded at began, unwarned", false, false, began},
+		{"warned after began", false, true, began.Add(time.Second)},
+		{"observed and warned after began", true, true, began.Add(time.Second)},
+		{"warned before began", true, true, began.Add(-time.Second)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := newPublishEnv(t)
+			if c.observed {
+				p.unit.statuses[0].result.Reason, p.unit.statuses[0].result.Deletion = classify.DeletionScheduled, schedule
+			}
+			var warned sql.NullTime
+			if c.warned {
+				warned = sql.NullTime{Time: schedule, Valid: true}
+			}
+			mustExec(t, p.db, `INSERT INTO dependency_status (id, provider, object, version, created, class, reason,
+				deletion_observed, deletion_warned, first_retained_at, observed_from, recorded_at)
+				VALUES ($1, 'kv', $2, 1, '2026-09-26T09:00:00.123456789Z', 'retained', 'deletion-scheduled', $3, $4, $5, $6, $6)`,
+				id.New(id.Dependency), p.kvPath, schedule, warned, began.Add(-time.Hour), c.recorded)
+			if _, ref := p.commit(); ref != nil {
+				t.Fatalf("a scheduled deletion refused: %v", ref)
+			}
+		})
+	}
+}
+
 // The re-check holds every named version's status FOR SHARE until the commit (dependency monitor
 // §5.2): a monitor transition starting after it waits for the release, then reads it as a
 // referencing release, so the two are ordered. The probe takes the lock a transition's UPDATE
