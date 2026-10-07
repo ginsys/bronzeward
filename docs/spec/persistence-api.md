@@ -1454,8 +1454,9 @@ An `ingest` operation's events are `{"type": "started"}`, written with the
 operation; `{"type": "staged"}` once an encrypted claim's envelope is stored;
 `{"type": "taken-over", "generation": <n>}` when a takeover (compilation §3.4)
 resumes the claim at owner generation `n`; `{"type": "resume-failed", "code":
-"dependency-unavailable"}` when that owner cannot decrypt the envelope, the
-claim left `resumed` to its lease; and one terminal event, `{"type":
+"dependency-unavailable"}` when that owner, or the run of a mark or a
+continuation (compilation §3.6), cannot decrypt the envelope, the claim left
+`resumed` or `held` to its lease; and one terminal event, `{"type":
 "succeeded", "importBaseRevision": "<ibr identifier>"}` or `{"type": "failed",
 "code": "<problem code>"}`. A takeover with nothing to decrypt writes the
 failure with `"cause": "nothing-to-decrypt"`. An ingestion under review
@@ -2877,8 +2878,10 @@ each (design §7.7 consequences):
   abandoning the claim; two marks racing one paused claim, exactly one
   taking it; a takeover of a `paused` claim refused; a mark's and a
   continuation's run killed before their next stored state, each resumed by
-  takeover from the stored envelope (pausing again, or committing), with a
-  control that resumes the killed run's unsaved marks and must then fail; a
+  takeover from the stored envelope: the mark's pausing again without its
+  marks, with a control that resumes the killed run's unsaved marks and must
+  then fail, and the continuation's committing, with a control that records
+  `continued` only as its run ends and must then fail by pausing again; a
   continuation after the draft moved failing `412` and abandoning the claim;
   a `paused` claim abandoned by the operator, by the sweep at its absolute
   expiry and by recovery-mode entry, and kept `paused` across a server
