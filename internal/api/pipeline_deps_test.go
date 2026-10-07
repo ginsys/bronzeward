@@ -214,6 +214,10 @@ func TestReadPinnedRefuses(t *testing.T) {
 			if d, _ := ref.extra["dependency"].(map[string]any); d == nil || d["object"] != p.kvPath || d["reference"] != "registry/pass" {
 				t.Fatalf("refusal names %v", ref.extra["dependency"])
 			}
+			// PA §6.1: a 503 names the dependency with class unknown, an unreachable provider's too.
+			if d, _ := ref.extra["dependency"].(map[string]any); c.status == 503 && d["class"] != string(classify.Unknown) {
+				t.Fatalf("503 refusal names %v without class unknown", d)
+			}
 			if strings.Contains(fmt.Sprint(ref.extra)+ref.detail, pinHeld) || p.logged(pinHeld) {
 				t.Fatal("a refusal or log line quotes the value")
 			}
