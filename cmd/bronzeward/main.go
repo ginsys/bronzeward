@@ -20,6 +20,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/database"
 	"github.com/ginsys/bronzeward/internal/migrate"
+	"github.com/ginsys/bronzeward/internal/monitor"
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/server"
 	"github.com/ginsys/bronzeward/internal/staging"
@@ -165,6 +166,12 @@ func serveContext(ctx context.Context, args []string) error {
 		every = cfg.Ingestion.Sweep
 	}
 	startSweep(startCtx, ctx, db, every, log.Printf)
+	// The dependency monitor passes under the metadata identity until the signal; every instance
+	// runs one, and the per-dependency lock keeps two from classifying the same dependency
+	// (dependency-monitor §6.1).
+	if pub != nil {
+		go monitor.New(db, pub.Meta, monitor.Defaults(), log.Printf).Run(ctx)
+	}
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners and the publish worker stop with the signal; a claim or job left held
