@@ -137,10 +137,12 @@ func Heartbeat(ctx context.Context, db *sql.DB, o Owner, c Claim, lease time.Dur
 // which already holds the claim. A request transaction calls it once its last lock, the act-order
 // lock, is held (persistence-api.md §1.2 rules 4 and 5), so no wait consumes the lease. For a
 // claim the transaction created (fresh), the creation time and the absolute expiry restart too.
-// A claim that is not live is left as it is.
+// A claim whose absolute expiry has passed by then, or that is no longer live, is left as it is
+// and refused ErrEnded: the transaction must not commit its takeover.
 func Restart(ctx context.Context, tx *sql.Tx, claim string, t Timers, fresh bool) error {
 	q := `UPDATE staging_claim SET lease_until = least(c.t + $2::bigint * interval '1 microsecond', expires_at)
-		FROM (SELECT clock_timestamp() AS t) c WHERE id = $1 AND state IN ('held', 'resumed') RETURNING lease_until`
+		FROM (SELECT clock_timestamp() AS t) c WHERE id = $1 AND state IN ('held', 'resumed') AND expires_at > c.t
+		RETURNING lease_until`
 	args := []any{claim, t.Lease.Microseconds()}
 	if fresh {
 		q = `UPDATE staging_claim SET created_at = c.t, lease_until = c.t + $2::bigint * interval '1 microsecond',
@@ -151,7 +153,7 @@ func Restart(ctx context.Context, tx *sql.Tx, claim string, t Timers, fresh bool
 	var until time.Time
 	switch err := tx.QueryRowContext(ctx, q, args...).Scan(&until); {
 	case errors.Is(err, sql.ErrNoRows):
-		return nil
+		return ErrEnded
 	case err != nil:
 		return fmt.Errorf("staging: restart the lease: %w", err)
 	}

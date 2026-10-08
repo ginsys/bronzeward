@@ -305,8 +305,14 @@ func takeOverIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (res
 	}
 	j.resume = &staged{ct: provider.Ciphertext(tk.Payload), sum: tk.Digest}
 	res.afterCommit = func() { a.startRunner(j) }
+	// The absolute expiry passing in the act-order wait refuses the takeover, as it would before its
+	// write.
 	res.atActOrder = func(ctx context.Context, tx *sql.Tx) error {
-		return staging.Restart(ctx, tx, claim, staging.Timers{Lease: a.d.timers.Lease}, false)
+		err := staging.Restart(ctx, tx, claim, staging.Timers{Lease: a.d.timers.Lease}, false)
+		if errors.Is(err, staging.ErrEnded) {
+			_, err = conflict("the ingestion has ended")
+		}
+		return err
 	}
 	return res, nil
 }
