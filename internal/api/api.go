@@ -45,6 +45,12 @@ type Ingester interface {
 	TalosAccess(ctx context.Context, cluster string) (provider.TalosAccess, error)
 }
 
+// Executor is what observations need of *provider.Executor (persistence-api.md §3.3): the
+// executor identity's read of a cluster's Talos access.
+type Executor interface {
+	TalosAccess(ctx context.Context, cluster string) (provider.TalosAccess, error)
+}
+
 // Publishers are publication's provider identities (compilation.md §1): the metadata identity's
 // reads by name, and the compiler identity's pinned reads and encryption under the artifact key.
 type Publishers struct {
@@ -65,14 +71,15 @@ type API struct {
 	o      options
 }
 
-// deps are what ingestion and publication need: the provider clients, the claim timers and this
-// process as the owner of the claims and jobs it takes. With no provider configured, ing and pub
-// are nil and the ingestion and publication routes answer 503. The runners and the publish worker
+// deps are what ingestion, publication and observations need: the provider clients, the claim
+// timers and this process as the owner of the claims and jobs it takes. With no provider
+// configured, ing, pub and exe are nil and the ingestion and publication routes answer 503. The runners and the publish worker
 // live for life, the server's lifetime, and runs counts them; wake tells the worker a job was
 // queued.
 type deps struct {
 	ing    Ingester
 	pub    *publishClients
+	exe    Executor
 	timers config.Ingestion
 	owner  staging.Owner
 	life   context.Context
@@ -127,13 +134,13 @@ type ctxKey struct{}
 
 func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*request) }
 
-// New returns the /api/v1 handler. ing, pub and ic are nil without a provider. epoch is the one
-// this process read at its start: it owns claims and jobs under it, and under no later one
+// New returns the /api/v1 handler. ing, pub, exe and ic are nil without a provider. epoch is the
+// one this process read at its start: it owns claims and jobs under it, and under no later one
 // (§5.1). With a provider, it starts the publish worker. The ingest runners and the worker stop
 // when life ends.
 func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
-	ic *config.Ingestion, epoch string) http.Handler {
-	d := deps{ing: ing, life: life, exec: ex}
+	exe Executor, ic *config.Ingestion, epoch string) http.Handler {
+	d := deps{ing: ing, exe: exe, life: life, exec: ex}
 	if pub != nil {
 		d.pub = &publishClients{meta: pub.Meta, reader: pub.Compiler, encrypter: pub.Compiler}
 	}

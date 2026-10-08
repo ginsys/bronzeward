@@ -150,12 +150,13 @@ func serveContext(ctx context.Context, args []string) error {
 	if err := db.QueryRowContext(startCtx, `SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
 		return fmt.Errorf("installation state: %w", err)
 	}
-	// Without a provider both are nil: the ingestion and publication routes answer 503, and no
+	// Without a provider all three are nil: the ingestion and publication routes answer 503, and no
 	// publish worker runs.
 	var ing api.Ingester
 	var pub *api.Publishers
+	var exe api.Executor
 	if cfg.Provider != nil {
-		if ing, pub, err = providerClients(cfg.Provider); err != nil {
+		if ing, pub, exe, err = providerClients(cfg.Provider); err != nil {
 			return err
 		}
 	}
@@ -176,7 +177,7 @@ func serveContext(ctx context.Context, args []string) error {
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners and the publish worker stop with the signal; a claim or job left held
 	// lapses with its lease.
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, cfg.Ingestion, epoch)))
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, cfg.Ingestion, epoch)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {
@@ -196,9 +197,10 @@ func serveContext(ctx context.Context, args []string) error {
 }
 
 // providerClients builds the server's provider identities, each with its own token (compilation.md
-// §1): ingestion's, and publication's metadata and compiler identities. An unreadable token file
-// is named by its field.
-func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, error) {
+// §1): ingestion's, publication's metadata and compiler identities, and the executor's, which
+// observations read the Talos access under (persistence-api.md §3.3). An unreadable token file is
+// named by its field.
+func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, api.Executor, error) {
 	token := func(field, path string) (provider.Token, error) {
 		tok, err := provider.ReadTokenFile(path)
 		if err != nil {
@@ -209,27 +211,34 @@ func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, error) 
 	k := p.Keys
 	tok, err := token("ingestionTokenFile", p.IngestionTokenFile)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	ing, err := provider.NewIngestion(p.Address, tok, provider.Keys{Baseline: k.Baseline, Staging: k.Staging, Digest: k.Digest})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if tok, err = token("compilerTokenFile", p.CompilerTokenFile); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	compiler, err := provider.NewCompiler(p.Address, tok, k.Artifact)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if tok, err = token("metadataTokenFile", p.MetadataTokenFile); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	meta, err := provider.NewMetadata(p.Address, tok)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return ing, &api.Publishers{Meta: meta, Compiler: compiler}, nil
+	if tok, err = token("executorTokenFile", p.ExecutorTokenFile); err != nil {
+		return nil, nil, nil, err
+	}
+	exe, err := provider.NewExecutor(p.Address, tok)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return ing, &api.Publishers{Meta: meta, Compiler: compiler}, exe, nil
 }
 
 // fallbackSweep is the sweep interval of a server without an ingestion block, which names its

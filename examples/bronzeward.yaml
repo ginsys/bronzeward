@@ -48,8 +48,9 @@ execution:
 # mode 0600, never renewed, named by an absolute path in clean form, and the files are distinct
 # (a symlinked directory or a hard link giving one file two names is not detected here):
 # ingestion's, the compiler's
-# (compilation.md §1) and the metadata identity's (dependency-monitor.md §4), under which every
-# server with this block runs the dependency monitor (alert lines on stderr). `mise run dev-bao`
+# (compilation.md §1), the metadata identity's (dependency-monitor.md §4), under which every
+# server with this block runs the dependency monitor (alert lines on stderr), and the executor's,
+# under which observations read each cluster's Talos access (persistence-api.md §3.3). `mise run dev-bao`
 # starts a dev-mode OpenBao on loopback for tests, without these keys or token files. Each
 # cluster's talosconfig is an operator-written provider secret at access/talos/<cluster id>
 # (persistence-api.md §3.3), not a file named here. reportTokenFile, optional, holds the
@@ -61,6 +62,7 @@ execution:
 #   ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
 #   compilerTokenFile: /etc/bronzeward/openbao-compiler.token
 #   metadataTokenFile: /etc/bronzeward/openbao-metadata.token
+#   executorTokenFile: /etc/bronzeward/openbao-executor.token
 #   reportTokenFile: /etc/bronzeward/openbao-report.token
 # Required with provider, refused without it: the staging claims' timers (compilation.md §3.2
 # requires only heartbeat < lease < absoluteExpiry; the values are open) and this instance's

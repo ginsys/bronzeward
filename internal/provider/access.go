@@ -76,11 +76,16 @@ func (TalosAccess) MarshalYAML() (any, error)    { return nil, errAccessRender }
 // version is ErrAbsent; a policy refusal is ErrDenied; an answer that is not one live version
 // holding a non-empty talosconfig is ErrProtocol. It is the one secret ingestion reads.
 func (i *Ingestion) TalosAccess(ctx context.Context, cluster string) (TalosAccess, error) {
+	return readTalosAccess(ctx, i.c, cluster)
+}
+
+// readTalosAccess is the Talos access read under c's token, for ingestion and the executor alike.
+func readTalosAccess(ctx context.Context, c *client, cluster string) (TalosAccess, error) {
 	p, err := TalosAccessPath(cluster)
 	if err != nil {
 		return TalosAccess{}, err
 	}
-	r, err := i.c.do(ctx, http.MethodGet, "/v1/secret/data/"+p, nil, false)
+	r, err := c.do(ctx, http.MethodGet, "/v1/secret/data/"+p, nil, false)
 	if err != nil {
 		return TalosAccess{}, err
 	}

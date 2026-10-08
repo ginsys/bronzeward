@@ -449,10 +449,18 @@ func TestLiveTalosAccess(t *testing.T) {
 		t.Fatalf("ingestion read version %+v", v)
 	}
 	t.Logf("ingestion read version %d of %s", a.Version().Version, p)
-	if _, err := raw(t, b, b.Token("bw-executor"), http.MethodGet, dataPath, nil); err != nil {
+	ex, err := NewExecutor(b.Addr, tokenOf(b.Token("bw-executor")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ea, err := ex.TalosAccess(t.Context(), cl)
+	if err != nil {
 		t.Fatalf("the executor's read: %v", err)
 	}
-	t.Logf("the executor read it")
+	if string(ea.Talosconfig()) != tc || ea.Version() != a.Version() {
+		t.Fatalf("the executor read version %+v, ingestion %+v", ea.Version(), a.Version())
+	}
+	t.Logf("the executor read the same version")
 
 	read := func(tok string) error { _, err := raw(t, b, tok, http.MethodGet, dataPath, nil); return err }
 	deniedWithout(t, b, "the compiler reading the Talos access", []string{"bw-compiler"}, "access-read", read)

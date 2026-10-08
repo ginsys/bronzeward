@@ -152,10 +152,11 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
 - `server/a/openbao-report.token`, `server/b/openbao-report.token`, `server/c/openbao-report.token`:
   each instance's orphan-report token, under `bw-orphan-report` alone, read as
   `/etc/bronzeward/openbao-report.token` by `bw orphans`. A missing one fails the scan-pattern list.
-- `server/<instance>/openbao-compiler.token` and `server/<instance>/openbao-metadata.token` for
-  instances a, b and c: each instance's compiler and metadata tokens, under `bw-compiler` and
-  `bw-metadata` alone, read as `/etc/bronzeward/openbao-compiler.token` and
-  `/etc/bronzeward/openbao-metadata.token`. A missing one fails the scan-pattern list.
+- `server/<instance>/openbao-compiler.token`, `server/<instance>/openbao-metadata.token` and
+  `server/<instance>/openbao-executor.token` for instances a, b and c: each instance's compiler,
+  metadata and executor tokens, under `bw-compiler`, `bw-metadata` and `bw-executor` alone, read as
+  `/etc/bronzeward/openbao-compiler.token`, `/etc/bronzeward/openbao-metadata.token` and
+  `/etc/bronzeward/openbao-executor.token`. A missing one fails the scan-pattern list.
 - `talos-secrets.yaml`, `controlplane.yaml`, `talosconfig`, `kubeconfig`: the cluster's own
   generated secrets bundle and client configs.
 - `scan-patterns.txt`: every one of the above as a fixed string, the client private keys in
@@ -279,7 +280,7 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 removal of `.state` would take a link and leave the cluster's credentials at the far end. The files `bin/up` generates
 (`lock`, `secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
-node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env`, `up-compose.yaml` and the instances' `openbao-ingestion.token`, `openbao-compiler.token`, `openbao-metadata.token` and `openbao-report.token`) must each be
+node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env`, `up-compose.yaml` and the instances' `openbao-ingestion.token`, `openbao-compiler.token`, `openbao-metadata.token`, `openbao-executor.token` and `openbao-report.token`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the

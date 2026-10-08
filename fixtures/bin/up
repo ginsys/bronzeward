@@ -482,11 +482,11 @@ for policy in "${!policies[@]}"; do
 done
 unset policies policy key
 # Per instance, one token per server identity, each under its one policy alone: ingestion,
-# compiler, metadata and orphan report (no default policy, as the live policy tests issue theirs),
+# compiler, metadata, executor and orphan report (no default policy, as the live policy tests issue theirs),
 # each written whole beside the instance's configuration (mktemp in the directory, then a rename):
 # an instance never reads a cut token.
 for instance in a b c; do
-  for role in ingestion:bw-ingestion compiler:bw-compiler metadata:bw-metadata report:bw-orphan-report; do
+  for role in ingestion:bw-ingestion compiler:bw-compiler metadata:bw-metadata executor:bw-executor report:bw-orphan-report; do
     # Assigned first: a command substitution that is only a printf argument cannot fail the script.
     role_token=$(bao token create -policy="${role#*:}" -no-default-policy -format=json | jq -er .auth.client_token) ||
       die "could not create instance $instance's OpenBao ${role%%:*} token"
