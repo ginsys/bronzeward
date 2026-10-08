@@ -1057,8 +1057,6 @@ CREATE TABLE plan_state (
   updated_at timestamptz NOT NULL,
   FOREIGN KEY (approval, plan) REFERENCES approval (id, plan),
   FOREIGN KEY (operation, plan) REFERENCES operation (id, plan),
-  -- The key an adoption record names its plan's commitment by.
-  UNIQUE (plan, approval, operation),
   CONSTRAINT plan_state_operation CHECK ((state = 'committed') = (operation IS NOT NULL)),
   CHECK ((state IN ('approved', 'committed', 'revoked')) = (approval IS NOT NULL)),
   CONSTRAINT plan_state_reason CHECK (CASE state
@@ -1228,11 +1226,10 @@ CREATE TABLE observation (
 CALL make_immutable('observation');
 
 -- An adoption record (§6.3): an adopt plan's completed operation, the approval it ran under and
--- the observation it relied on. It is one adoption entry on the machine's timeline. The plan's
--- committed state names the same operation and approval, and the record, the operation and the
--- approval share one epoch: the operation is created with its commitment, which an approval of
--- another epoch cannot carry. The state is written later in the transaction, so its key is
--- checked at commit.
+-- the observation it relied on. It is one adoption entry on the machine's timeline. The record,
+-- the operation and the approval share one epoch; the operation is committed under its plan's
+-- approval of that epoch (operation_plan_committed), and a plan has one approval per epoch, so
+-- the record names the approval of the plan's commitment.
 CREATE TABLE adoption_record (
   plan        text PRIMARY KEY,
   plan_kind   text NOT NULL GENERATED ALWAYS AS ('adopt') STORED,
@@ -1249,8 +1246,6 @@ CREATE TABLE adoption_record (
   UNIQUE (machine, revision),
   FOREIGN KEY (operation, plan, epoch) REFERENCES operation (id, plan, epoch),
   FOREIGN KEY (approval, plan, epoch) REFERENCES approval (id, plan, epoch),
-  CONSTRAINT adoption_record_commitment FOREIGN KEY (plan, approval, operation)
-    REFERENCES plan_state (plan, approval, operation) DEFERRABLE INITIALLY DEFERRED,
   FOREIGN KEY (observation, machine) REFERENCES observation (id, machine),
   FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
 );
@@ -1262,11 +1257,13 @@ ALTER TABLE operation ADD CONSTRAINT operation_plan_binding FOREIGN KEY (plan, k
   REFERENCES plan (id, kind, machine, cluster);
 
 -- An operation with a plan is created with its commitment (execution and recovery §3.2): its plan's
--- state names it, and an adopt operation has its adoption record. Both are written later in the
--- operation's transaction, so this is checked at commit.
+-- state names it under an approval of the operation's epoch, and an adopt operation has its
+-- adoption record. Both are written later in the operation's transaction, so this is checked at
+-- commit.
 CREATE FUNCTION require_plan_commitment() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF NEW.plan IS NOT NULL AND (NOT EXISTS (SELECT FROM plan_state WHERE plan = NEW.plan AND operation = NEW.id)
+  IF NEW.plan IS NOT NULL AND (NOT EXISTS (SELECT FROM plan_state s JOIN approval a ON a.id = s.approval
+       WHERE s.plan = NEW.plan AND s.operation = NEW.id AND a.epoch = NEW.epoch)
      OR (NEW.kind = 'adopt' AND NOT EXISTS (SELECT FROM adoption_record WHERE operation = NEW.id))) THEN
     RAISE EXCEPTION 'operation: an operation its plan is not committed to is refused'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'operation_plan_committed', TABLE = 'operation';

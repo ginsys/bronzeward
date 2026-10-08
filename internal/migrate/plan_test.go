@@ -211,6 +211,23 @@ func refused(t *testing.T, db *sql.DB, name, want string, rows ...stmt) {
 	}
 }
 
+// accepted runs rows and the deferred checks, as a commit would, then rolls back: a control that
+// leaves the rows of the test as they were.
+func accepted(t *testing.T, db *sql.DB, name string, rows ...stmt) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, s := range append(rows, stmt{`SET CONSTRAINTS ALL IMMEDIATE`, nil}) {
+		if _, err := tx.Exec(s.q, s.args...); err != nil {
+			t.Errorf("%s: %v; want it accepted", name, err)
+			return
+		}
+	}
+}
+
 // PA §3, §8.1; execution and recovery §2, §3.2, §6.3: what the plan, approval, revocation,
 // cancellation and observation tables refuse.
 func TestPlanConstraints(t *testing.T) {
@@ -336,7 +353,14 @@ func TestPlanConstraints(t *testing.T) {
 	start("observation dialing another endpoint than the plan's route", "23503",
 		p.startRow(100, "evidence", p.apply, nil).with("endpoint", "10.55.0.4:50000"))
 	start("observation for an operation of no plan", "23514", p.startRow(100, "recovery", nil, id.New(id.Operation)))
-	start("observation for another plan's operation", "23503", p.startRow(100, "recovery", p.adopt, id.New(id.Operation)))
+	// An existing operation of p.apply, named for p.adopt, then for its own plan as the control.
+	applyOp := id.New(id.Operation)
+	applyCommitted := []stmt{{insertPlanOperation, []any{applyOp, "apply-config", "committed", owner, p.apply, p.machine, p.cluster}},
+		{`UPDATE plan_state SET state = 'committed', operation = $2, revision = revision + 1 WHERE plan = $1`,
+			[]any{p.apply, applyOp}}, p.entry(p.machine, 100, "observation-started")}
+	refused(t, db, "observation for another plan's operation", "23503/observation_start_operation_plan_fkey",
+		append(applyCommitted, p.startRow(100, "recovery", p.adopt, applyOp).stmt())...)
+	accepted(t, db, "observation for its plan's operation", append(applyCommitted, p.startRow(100, "recovery", p.apply, applyOp).stmt())...)
 	refused(t, db, "observation started on an entry of another kind", "23503", p.entry(p.machine, 100, "observation"),
 		p.startRow(100, "drift", nil, nil).stmt())
 	started := []stmt{p.entry(p.machine, 100, "observation-started"), p.startRow(100, "drift", nil, nil).stmt(),
@@ -458,6 +482,16 @@ func TestPlanOperations(t *testing.T) {
 	refused(t, db, "adopt with a draft revision and no draft", "23514", adoptDraft(nil, 1))
 	refused(t, db, "adopt with a draft and no revision", "23514", adoptDraft(p.draft, nil))
 	refused(t, db, "adopt with a draft revision", "23514", adoptDraft(p.draft, 1))
+	// Execution and recovery §3.2: an operation is committed in its approval's epoch; p.commit below
+	// is the control, in the approval's.
+	stale, staleOp := id.New(id.Epoch), id.New(id.Operation)
+	mustExec(t, db, `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ($1, now())`, stale)
+	refused(t, db, "operation of another epoch than its plan's approval", "23514/operation_plan_committed",
+		stmt{`INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, plan, machine, cluster, created_at)
+			SELECT $1, 'apply-config', 'committed', $2, $3, 1, epoch, $4, $5, $6, now() FROM installation_state`,
+			[]any{staleOp, stale, owner, p.apply, p.machine, p.cluster}},
+		stmt{`UPDATE plan_state SET state = 'committed', operation = $2, revision = revision + 1 WHERE plan = $1`,
+			[]any{p.apply, staleOp}})
 	// PA §3 TimelineEvent: an apply-config operation's entries are on the machine timeline.
 	opID := p.commit(t, db, p.apply)
 	refused(t, db, "event of an apply-config operation", "23514/operation_event_job_kind",
@@ -501,17 +535,16 @@ func TestPlanOperations(t *testing.T) {
 		p.entry(p.machine, 7, "plan"), adopted.stmt())
 	// The record names the commitment its operation was created with: the state's approval, in the
 	// epoch of the operation and of the approval.
-	old, oldApr, oldAct := id.New(id.Epoch), id.New(id.Approval), id.New(id.Act)
-	mustExec(t, db, `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ($1, now())`, old)
+	old, oldApr, oldAct := stale, id.New(id.Approval), id.New(id.Act)
 	commitRows(t, db, p.entry(p.machine, 20, "approval"), p.approvalRow(oldApr, p.adopt, 20, oldAct).with("epoch", old).stmt(),
 		p.act(oldAct, p.human, "approver"))
 	adoption("adoption record relying on an approval of another epoch", "23503", adopted.with("approval", oldApr))
 	adoption("adoption record of another epoch than its operation", "23503", adopted.with("epoch", old))
-	// With the operation, the record and the approval all of that epoch, the state's approval
-	// still differs, and the commitment key alone refuses it.
+	// With the operation, the record and the approval all of that epoch, the state's approval is of
+	// another, so the operation is not committed in its epoch.
 	oldOpRow := stmt{`INSERT INTO operation (id, kind, state, epoch, plan, machine, cluster, created_at)
 		VALUES ($1, 'adopt', 'completed', $2, $3, $4, $5, now())`, []any{adoptOp, old, p.adopt, p.machine, p.cluster}}
-	refused(t, db, "adoption record naming an approval its commitment does not", "23503/adoption_record_commitment",
+	refused(t, db, "adoption record naming an approval its commitment does not", "23514/operation_plan_committed",
 		oldOpRow, committed(p.adopt), p.entry(p.machine, 7, "adoption"), adopted.with("approval", oldApr, "epoch", old).stmt())
 	// The adopt operation is completed: it holds no scope while the apply-config operation does.
 	commitRows(t, db, adoptOpRow, committed(p.adopt), p.entry(p.machine, 7, "adoption"), adopted.stmt())
