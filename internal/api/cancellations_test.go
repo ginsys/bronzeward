@@ -235,3 +235,31 @@ func TestPlanCancellationAfterActOrderWait(t *testing.T) {
 		t.Fatalf("%d cancellations after a refusal", n)
 	}
 }
+
+// Rule 2: a cancelling identity revoked while the cancellation waits on the machine's lock is
+// refused once the cancellation holds its principal, and nothing is written.
+func TestPlanCancellationCancellerRevokedInWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	canceller, recovery := p.human("h-all"), p.human("h-recovery")
+	lock, err := p.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Rollback() }()
+	if _, err := lock.Exec(`SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, p.machine); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- p.cancel(canceller, "k-cancel-0123456789ab", plan.ID, `{"reason":"wrong release"}`) }()
+	waitForLockWaits(t, p.db, 1)
+	revocationOf(t, revoke(p.env, recovery, key, `{"identity":"`+p.principalOf("h-all")+`","reason":"left"}`))
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	wantProblem(t, <-done, http.StatusForbidden, "identity-revoked")
+	if n := count(t, p.db, `SELECT count(*) FROM plan_cancellation`); n != 0 {
+		t.Fatalf("%d cancellations by a revoked identity", n)
+	}
+}
