@@ -102,8 +102,8 @@ func adoptBody(rel, machine, extra string) string {
 // evidence; it is proposed, one plan entry on the machine's timeline, and its act names it. A
 // replay answers the same plan.
 func TestPlanCreation(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	body := applyBody(p.target.rel, p.machine, "")
 	rec := p.plan(p.robot, "k-plan-0123456789ab", body)
 	b := decode[planBody](t, rec, http.StatusCreated)
@@ -167,8 +167,8 @@ func TestPlanCreation(t *testing.T) {
 
 // A request's durations and attempt limit replace the defaults, each bound as given.
 func TestPlanCreationDurations(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	rec := p.plan(p.human("h-publisher"), "k-plan-dur-0123456789", applyBody(p.target.rel, p.machine,
 		`,"expiresInSeconds":7200,"maxObservationAgeSeconds":45,"checkValiditySeconds":90,"transportDeadlineSeconds":300,`+
 			`"verificationDeadlineSeconds":300,"maxAttempts":10`))
@@ -234,13 +234,13 @@ func TestPlanCreationDiffWithheld(t *testing.T) {
 // a base leaf beside a literal is too, since a redacted value may have come from it. A base leaf
 // equal to its target, or one whole token, is shown as it is.
 func TestPlanCreationDiffPaired(t *testing.T) {
+	t.Parallel()
 	esc := string(rune(92)) + "u003c" // an embedded JSON document's escaped angle bracket
 	p := newPlanEnvWith(t,
 		"machine:\n  install:\n    wipe: false\n    disk: /dev/sda\n  certSANs:\n    - 10.0.0.1\n    - 10.0.0.2\n  network:\n    hostname: a\n  token: <redacted:schema>\n"+
 			"  config: |\n    {\"k\": \"plain\"}\n",
 		"machine:\n  install:\n    wipe: <redacted:install/wipe@1>\n    disk: /dev/sdb\n  certSANs:\n    - <redacted:san@1#0>\n    - 10.0.0.2\n  network:\n    hostname: <redacted:value>\n  token: <redacted:schema>\n"+
 			"  config: |\n    {\"k\": \""+esc+"redacted:k@1>\"}\n")
-	t.Parallel()
 	b := decode[planBody](t, p.plan(p.robot, "k-plan-paired-0123456", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	d := b.Evidence.Diff
 	if d == nil || d.Withheld {
@@ -301,10 +301,10 @@ func TestPlanCreationDiffDuplicateKeys(t *testing.T) {
 // A target mapping with a redacted key gives its leaves paths no base leaf shares, so every
 // plaintext base leaf and key under it is paired, except a key the target shows in the same mapping.
 func TestPlanCreationDiffRedactedKey(t *testing.T) {
+	t.Parallel()
 	p := newPlanEnvWith(t,
 		"machine:\n  nodeLabels:\n    enabled: \"false\"\n    zone: east\n    region: west\n  nodeTaints:\n    dedicated: infra\n",
 		"machine:\n  nodeLabels:\n    region: west\n    <redacted:labels@1#0>: <redacted:labels@1#0>\n  nodeTaints:\n    dedicated: edge\n")
-	t.Parallel()
 	b := decode[planBody](t, p.plan(p.robot, "k-plan-redkey-0123456", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	d := b.Evidence.Diff
 	if d == nil || d.Withheld {
@@ -368,12 +368,12 @@ func TestPlanCreationDiffMoved(t *testing.T) {
 // when its base already held another token, and an unchanged one shows no change. A whole token
 // replaced by another, as a new secret version, is shown as itself.
 func TestPlanCreationDiffEmbeddedMixed(t *testing.T) {
+	t.Parallel()
 	p := newPlanEnvWith(t,
 		"machine:\n  files:\n    - contents: |\n        existing: <redacted:existing@1>\n        enabled: false\n"+
 			"    - contents: |\n        keep: same\n        other: <redacted:other@1>\n  rotated: <redacted:rotated@1>\n",
 		"machine:\n  files:\n    - contents: |\n        existing: <redacted:existing@1>\n        enabled: <redacted:enabled@1>\n"+
 			"    - contents: |\n        keep: same\n        other: <redacted:other@1>\n  rotated: <redacted:rotated@2>\n")
-	t.Parallel()
 	b := decode[planBody](t, p.plan(p.robot, "k-plan-embedded-01234", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	d := b.Evidence.Diff
 	if d == nil || d.Withheld {
@@ -410,8 +410,8 @@ func TestPlanCreationDiffUnpairable(t *testing.T) {
 // Applied release's artifact, so the Applied release's redacted form is not what the plan changes:
 // the diff is withheld even though both releases have one.
 func TestPlanCreationDiffPendingConvergence(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	mustExec(t, p.db, `UPDATE machine_state SET applied_digest = $2 WHERE machine = $1`, p.machine, bytes.Repeat([]byte{5}, 32))
 	b := decode[planBody](t, p.plan(p.robot, "k-plan-pending-012345", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	if d := b.Evidence.Diff; d == nil || !d.Withheld || d.Unified != "" || d.From != p.applied.rel || d.To != p.target.rel {
@@ -423,8 +423,8 @@ func TestPlanCreationDiffPendingConvergence(t *testing.T) {
 // creation, or none, and no mode, baseline, expected digest, deadlines or attempts; its evidence
 // names the baseline and whether the release's artifact differs from it (pending convergence).
 func TestPlanCreationAdopt(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	mustExec(t, p.db, `UPDATE machine_state SET applied_release = NULL, applied_digest = NULL, applied_source = NULL,
 		baseline_revision = NULL, desired = NULL WHERE machine = $1`, p.machine)
 	// The target release's artifact is its import base's configuration.
@@ -453,8 +453,8 @@ func TestPlanCreationAdopt(t *testing.T) {
 
 // T4's refusals (persistence-api.md §5, §14; execution-recovery.md §2): each writes nothing.
 func TestPlanCreationRefusals(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	pub := p.robot
 	other := p.target.machine2 // covered by the target release only, no Applied, Desired NULL
 	cases := []struct {
@@ -543,8 +543,8 @@ func TestPlanCreationRefusals(t *testing.T) {
 // GET /plans/{id} and GET /plans (persistence-api.md §9.2, §9.3) answer a plan as its creation
 // did, with its current state and revision; any role reads them.
 func TestPlanReads(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	created := p.plan(p.robot, "k-plan-read-0123456789", applyBody(p.target.rel, p.machine, ""))
 	b := decode[planBody](t, created, http.StatusCreated)
 	viewer := p.human("h-viewer")
@@ -598,8 +598,8 @@ func TestPlanReads(t *testing.T) {
 // A read whose transaction began before a plan's expiry but waited on the installation state past
 // it reads the plan expired: expiry is judged when the plan is read, not when the read began (§8.1).
 func TestPlanReadAfterLockWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	short := decode[planBody](t, p.plan(p.robot, "k-plan-wait-short-0123", applyBody(p.target.rel, p.machine,
 		`,"expiresInSeconds":2`)), http.StatusCreated)
 	lock, err := p.db.Begin()
@@ -630,8 +630,8 @@ func TestPlanReadAfterLockWait(t *testing.T) {
 // A creation whose transaction waited on the machine's row longer than its expiry still creates a
 // plan that reads proposed: its creation time and expiry are read after the locks (PA §5 rule 4).
 func TestPlanCreationAfterLockWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	lock, err := p.db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -706,8 +706,8 @@ func waitForLockWaits(t *testing.T, db *sql.DB, n int) {
 // revocation of that creator, so the plan's reference to it after the lock waits on nothing: the
 // two do not deadlock (PA §5 rule 5).
 func TestPlanCreationRevocationOfCreatorNoDeadlock(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	lock := holdActOrder(t, p.db)
 	created := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -731,8 +731,8 @@ func TestPlanCreationRevocationOfCreatorNoDeadlock(t *testing.T) {
 // The act-order wait is a lock wait too: a creation that waited on it past its expiry still reads
 // proposed, its times read after that lock (PA §5 rule 4).
 func TestPlanCreationAfterActOrderWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	lock := holdActOrder(t, p.db)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -806,8 +806,8 @@ func (p *planEnv) approveAs(t *testing.T, plan, approver string) {
 // approved plan whose approver is revoked reads revoked, by id and in the list, unless it expired
 // before the revocation; a plan whose approver is not revoked reads approved.
 func TestPlanReadRevokedApprover(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	human := func(sub string) string {
 		v := id.New(id.Principal)
 		mustExec(t, p.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', $2, $3, now())`,
@@ -848,8 +848,8 @@ func TestPlanReadRevokedApprover(t *testing.T) {
 // A revocation that waited on the approver's principal row until after the plan's expiry is
 // recorded after it: the plan reads expired, not revoked (PA §5 rule 4).
 func TestPlanReadRevocationAfterLockWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	approver := id.New(id.Principal)
 	mustExec(t, p.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', $2, 'h-approver-held', now())`,
 		approver, p.iss.URL)
@@ -885,8 +885,8 @@ func TestPlanReadRevocationAfterLockWait(t *testing.T) {
 // A revocation that waited on the act-order lock until after the plan's expiry is recorded after
 // it: the plan reads expired, not revoked (PA §5 rule 4).
 func TestPlanReadRevocationAfterActOrderWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	approver := id.New(id.Principal)
 	mustExec(t, p.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', $2, 'h-approver-order', now())`,
 		approver, p.iss.URL)
