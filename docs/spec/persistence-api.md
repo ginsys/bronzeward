@@ -644,7 +644,7 @@ The transactions this contract defines or constrains:
 | T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; the fragment and profile heads a profile's pins or an assignment's selections are checked against (§3.1), `FOR SHARE` in id order, a head created after this step counting as no head; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed`, and a draft no longer `open`, compared before its revision so that a discarded draft is this case, or one with an active publication fails it `409 conflict` (naming that publication), each with its terminal event, in the owner-checked transaction that abandons its claim once the draft transaction has rolled back (§8.2). An import of a machine already in the draft replaces its draft entry. Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
 | T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active `publish` one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
-| T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published and, for an `apply-config` plan, the machine's `Desired` (execution and recovery choice §10.24); execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
+| T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published and covering the machine; for an `apply-config` plan, the release the machine's `Desired` (execution and recovery choice §10.24) and an `Applied` to diff from; for an `adopt` plan, no `Applied` (§9.3); the machine's assignment head `FOR SHARE`, still the revision the release was compiled from for it; execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
 | T5a | Approval | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted; approver's principal `FOR SHARE`, not revoked; plan state `FOR UPDATE`, unexpired, and `proposed`, or `approved` by an approval from an earlier epoch | approval (unique per plan and epoch, with the self-approval mark), plan state `approved`, machine timeline entry, idempotency record, act |
 | T5b | Approval revocation | key lock; installation state `FOR SHARE`; machine row `FOR UPDATE`; approval `FOR UPDATE`, which waits for a commitment or attempt holding it `FOR SHARE` (§1.2 item 3); plan state `FOR UPDATE` | revocation row; plan state `revoked` only when the plan is `approved` by the named approval (an earlier-epoch approval that a current one replaced, or a plan already terminal, keeps its state); machine timeline entry, idempotency record, act |
 | T5c | Identity revocation | key lock; installation state `FOR SHARE`; every machine row `FOR UPDATE`, in id order, as T9 (rule 5); principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked; an identity revocation entry (T7) on the timeline of each machine with a plan that identity approved whose plan or operation is not terminal, read under those machine locks (execution and recovery §4.1); idempotency record, act |
@@ -1635,9 +1635,48 @@ HTTP/1.1 200 OK
  "expiresAt": "2026-09-26T21:14:02Z"}
 ```
 
-`committedOperation` stays `null` until the commitment (§8.1). The plan's
-other bound values and its plan-time evidence (execution and recovery, plan
-binding) are omitted here.
+`committedOperation` stays `null` until the commitment (§8.1). The example
+omits the plan's other bound values and its plan-time evidence (execution and
+recovery, plan binding), which every plan body carries:
+
+- `cluster`; `assignmentRevision`, the machine's assignment revision the
+  release was compiled from, which must still be its assignment head (T4);
+  `desiredRelease`, the machine's `Desired` at creation (`null` if none);
+  `baselineRevision` (`null` for an `adopt` plan); `route`, the Talos
+  endpoint the plan binds (§3.3); `rolloutLimit` `1`; `approvalPolicy`
+  `one-approver`; the `epoch`; `timelineRevision`, the machine revision of its
+  `plan` entry; `createdAt`;
+- the durations, in whole seconds: `maxObservationAgeSeconds`,
+  `checkValiditySeconds` and, for an `apply-config` plan,
+  `transportDeadlineSeconds` and `verificationDeadlineSeconds`, with
+  `maxAttempts` (the last three `null` for an `adopt` plan);
+- `evidence`: for an `apply-config` plan, `diff`, from the release of the
+  machine's `Applied` (`from`) to the plan's (`to`), as a unified line diff of
+  their redacted whole configurations (`unified`), or `"withheld": true` with
+  no text when either has no redacted form (compilation §8.3); for an `adopt`
+  plan, `baseline`, the `importBaseRevision` the release was compiled from and
+  `pendingConvergence`, whether the release's artifact differs from it, which
+  leaves the machine pending convergence (execution and recovery §6.3)
+  **(choice §17.38)**; for both, `validation`, the release's validation at
+  publication (`result`, `at`, `contract`, `kubernetesVersion`,
+  `machineryVersion`, `platformMode`), and `dryRun`, `{"available": false}`
+  with a `reason`, since the API holds no Talos credential.
+
+No plan body carries a digest: the expected pre-dispatch digest and the
+digests behind `pendingConvergence` stay in the database (choice §17.38).
+`state` is the plan's state, `expired` once the server clock passes
+`expiresAt` (§8.1).
+
+The creation request takes `releaseId`, `machine`, `operation` and, for an
+`apply-config` plan, `mode` `no-reboot`. Each duration may be given in whole
+seconds, from 1 to 604800 (seven days): `expiresInSeconds`,
+`maxObservationAgeSeconds`, `checkValiditySeconds` and, for an `apply-config`
+plan, `transportDeadlineSeconds` and `verificationDeadlineSeconds`, with
+`maxAttempts` from 1 to 10. A value left out is the deployment's
+`execution.planDefaults` value. An `adopt` plan takes no `mode`, deadlines or
+attempt limit. A transport deadline above the deployment's maximum transport
+deadline (execution and recovery §7.3) or above the verification deadline is
+`400 invalid-request`, as is any value out of range **(choice §17.37)**.
 
 Creating a draft, and later updating one of its fragments after five other
 updates have taken the draft to revision 6. A request body that can hold a
@@ -2021,7 +2060,7 @@ counter, not the ETag token, so the token is not named.
 
 | Status | Code | When |
 | --- | --- | --- |
-| 400 | `invalid-request`, `cursor-invalid` | malformed body (a Talos endpoint outside §3.3's grammar included), unknown field, bad cursor |
+| 400 | `invalid-request`, `cursor-invalid` | malformed body (a Talos endpoint outside §3.3's grammar included), unknown field, a plan value out of range (§9.3), bad cursor |
 | 401 | `unauthenticated` | no credential, or one that fails §10's token checks (a revoked or denied subject is `403 identity-revoked`); with `WWW-Authenticate: Bearer error="invalid_token"` |
 | 403 | `forbidden` | no qualifying role; the body names the roles that would qualify |
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
@@ -2733,6 +2772,9 @@ equals neither the restored epoch nor the lost one.
 | Publish | New request for a draft already published | `409 conflict` naming the release | nothing |
 | Plan | Second approval of a plan in one epoch | `409 conflict` | nothing |
 | Plan | An `apply-config` plan for a release that is not the machine's `Desired` | `409 conflict` naming the `Desired` release | nothing |
+| Plan | An `apply-config` plan for a machine with no `Applied`; an `adopt` plan for a machine with one; the machine's assignment head moved past the revision the release was compiled from | `409 conflict` | nothing |
+| Plan | A release that does not cover the machine | `422 validation-failed` naming both | nothing |
+| Plan | A duration or attempt limit out of range, or a transport deadline above the maximum or the verification deadline (§9.3) | `400 invalid-request` | nothing |
 | Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
 | Recovery | Plan creation, approval, adoption plan or unfreeze on a scope still pre-restore unaccounted | `409 recovery-mode-active` | nothing |
 | Recovery | Commitment, attempt or adoption record on a scope not released in the current epoch | refused by execution and recovery's scope gate | its refusal entry |
@@ -3344,6 +3386,29 @@ design and evidence do not settle the question. Each is marked in place as
     adds a write to a read and keeps nothing a log does not; or return it
     only in the `POST /ingestions` response, which a reviewing operator on
     another instance, or after a restart, could not read again.
+37. **A plan's durations are whole seconds, each defaulting to the
+    deployment's** (§9.3): a creation request may give any of them, from 1 to
+    604800, and one left out is `execution.planDefaults` (24 hours expiry,
+    5 minutes observation age and check validity, 1 minute transport and
+    10 minutes verification deadline, 3 attempts; the transport default never
+    exceeds the maximum transport deadline). The plan binds the values it was
+    created with; a later configuration change moves no plan. An out-of-range
+    value is `400 invalid-request`, refused before the request is admitted, as
+    any malformed body is. Alternatives: duration strings, a second encoding
+    in an API whose other numbers are integers, with a parser's leniency as
+    part of the contract; every value required, which makes each client carry
+    the deployment's policy; fixed constants, which no deployment could tune
+    to its machines' reboot and verification times.
+38. **An adopt plan's evidence is the import base revision and whether the
+    release differs from it, not a diff or digests** (§9.3, execution and
+    recovery §6.3): `pendingConvergence` is `true` when the release's
+    artifact digest is not the import base's configuration digest. The
+    approver learns that the adoption leaves convergence to a later
+    `apply-config` plan, whose own diff shows the change. Alternatives: the
+    two digests in the body, which no read answers and which would let a
+    reader confirm a guessed configuration offline; a diff from the import
+    base's sanitized document, which is source text with references, not a
+    redacted whole configuration, so the diff would mix two forms.
 
 ## 18. Traceability
 
@@ -3362,7 +3427,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §6.4 orphans | §7.4, §7.8, §13.2 | DB §9; KL case G; PC §4 row 065; the orphan-report identity's grants and the report's selection: §16 check, the pinned OpenBao only (choice §17.30) |
 | §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; DB §4.6 (advisory lock); [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |
 | §8 operations | §11.1, §12.5, §15.2 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2) row 009; DB §4.5 rows 020, 021 |
-| §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5; the review route: choice §17.36, compilation §3.6 |
+| §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5; the review route: choice §17.36, compilation §3.6; plan durations and adopt evidence: choices §17.37, §17.38 |
 | §10 authentication, authorization | §13.1, §13.3, §13.6, §13.7 | none: FR §9 item 5; [DS §4.1](../design/research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1) row 003 for approval revocation and its lock |
 | §11 migrations | §7.2, §14.2 | [DB §4.6](../design/research/20260924-database-semantics.md#46-s6-migrations) rows 022–026; [DB §6.2](../design/research/20260924-database-semantics.md#62-criterion-2-intent-ownership-queue-claims-migrations-restored-state) |
 | §12 restored state, epoch | §7.7, §7.8, §14.6 | DB §4.7 row 027; DB §9 (inferred); [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation) items 2, 5; FR §9 item 4 |
