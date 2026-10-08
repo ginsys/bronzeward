@@ -1654,10 +1654,9 @@ recovery, plan binding), which every plan body carries:
   `maxAttempts` (the last three `null` for an `adopt` plan);
 - `evidence`: for an `apply-config` plan, `diff`, from the release of the
   machine's `Applied` (`from`) to the plan's (`to`), as a unified line diff of
-  their redacted whole configurations (`unified`), a base leaf shown beside a
-  redacted leaf of the plan's release, and a base key under a mapping whose
-  key the plan's release redacts, written `<redacted:paired>`
-  (compilation §8.3), or `"withheld": true` with no text when either has no
+  their redacted whole configurations (`unified`), where the plan's release
+  holds any redaction, every changed base leaf and every base key it does not
+  show written `<redacted:paired>` (compilation §8.3), or `"withheld": true` with no text when either has no
   redacted form or one that does not parse as YAML free of aliases (compilation
   writes none), or when the machine holds a configuration other than its
   `Applied` release's artifact, as an adopted machine pending convergence does

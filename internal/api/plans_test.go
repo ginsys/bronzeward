@@ -123,7 +123,8 @@ func TestPlanCreation(t *testing.T) {
 		b.ExpiresAt.Sub(b.CreatedAt) != 24*time.Hour {
 		t.Fatalf("plan %+v", b)
 	}
-	wantDiff := "@@ -1,3 +1,3 @@\n machine:\n-  type: worker\n+  type: controlplane\n   token: <redacted:schema>\n"
+	// The target holds a token, so the changed base leaf is paired (compilation §8.3).
+	wantDiff := "@@ -1,3 +1,3 @@\n machine:\n-  type: <redacted:paired>\n+  type: controlplane\n   token: <redacted:schema>\n"
 	if d := b.Evidence.Diff; d == nil || d.From != p.applied.rel || d.To != p.target.rel || d.Withheld || d.Unified != wantDiff {
 		t.Fatalf("diff %+v", b.Evidence.Diff)
 	}
@@ -223,9 +224,10 @@ func TestPlanCreationDiffWithheld(t *testing.T) {
 	}
 }
 
-// A base leaf the diff shows beside a redacted target leaf is shown <redacted:paired>, whatever its
-// kind, so that a boolean or a short value cannot be read by elimination (compilation §8.3, §12.2).
-// A base leaf beside a literal, or equal to its target, is shown as it is.
+// Once the target holds a redaction, a changed base leaf is shown <redacted:paired>, whatever its
+// kind, so that a boolean or a short value cannot be read by elimination (compilation §8.3, §12.2);
+// a base leaf beside a literal is too, since a redacted value may have come from it. A base leaf
+// equal to its target, or one whole token, is shown as it is.
 func TestPlanCreationDiffPaired(t *testing.T) {
 	esc := string(rune(92)) + "u003c" // an embedded JSON document's escaped angle bracket
 	p := newPlanEnvWith(t,
@@ -245,12 +247,12 @@ func TestPlanCreationDiffPaired(t *testing.T) {
 			removed[strings.TrimSpace(l[1:])] = true
 		}
 	}
-	want := map[string]bool{"wipe: <redacted:paired>": true, "disk: /dev/sda": true, "- <redacted:paired>": true,
+	want := map[string]bool{"wipe: <redacted:paired>": true, "disk: <redacted:paired>": true, "- <redacted:paired>": true,
 		"hostname: <redacted:paired>": true, "config: <redacted:paired>": true}
 	if !reflect.DeepEqual(removed, want) {
 		t.Fatalf("removed lines %v\ndiff:\n%s", removed, d.Unified)
 	}
-	for _, leak := range []string{"false", "10.0.0.1", "hostname: a", "plain"} {
+	for _, leak := range []string{"false", "10.0.0.1", "hostname: a", "plain", "/dev/sda"} {
 		if strings.Contains(d.Unified, leak) {
 			t.Fatalf("the diff shows %q beside a redacted leaf:\n%s", leak, d.Unified)
 		}
@@ -284,7 +286,7 @@ func TestPlanCreationDiffDuplicateKeys(t *testing.T) {
 				}
 			}
 		}
-		want := map[string]bool{"<redacted:value>: <redacted:paired>": true, "type: worker": true}
+		want := map[string]bool{"<redacted:value>: <redacted:paired>": true, "type: <redacted:paired>": true}
 		if !reflect.DeepEqual(removed, want) {
 			t.Fatalf("base %q: removed lines %v\ndiff:\n%s", tc.base, removed, d.Unified)
 		}
@@ -292,7 +294,7 @@ func TestPlanCreationDiffDuplicateKeys(t *testing.T) {
 }
 
 // A target mapping with a redacted key gives its leaves paths no base leaf shares, so every
-// plaintext base leaf at or under that mapping's path is paired; a sibling mapping is not.
+// plaintext base leaf and key under it is paired, except a key the target shows in the same mapping.
 func TestPlanCreationDiffRedactedKey(t *testing.T) {
 	p := newPlanEnvWith(t,
 		"machine:\n  nodeLabels:\n    enabled: \"false\"\n    zone: east\n    region: west\n  nodeTaints:\n    dedicated: infra\n",
@@ -312,11 +314,48 @@ func TestPlanCreationDiffRedactedKey(t *testing.T) {
 	// The base keys are paired too: the redacted key may resolve to one of them. A key the target
 	// shows itself, in the same mapping, is shown.
 	paired := pairedToken + ": " + pairedToken
-	if want := []string{paired, paired, "dedicated: infra"}; !reflect.DeepEqual(removed, want) {
+	if want := []string{paired, paired, "dedicated: " + pairedToken}; !reflect.DeepEqual(removed, want) {
 		t.Fatalf("removed lines %q\ndiff:\n%s", removed, d.Unified)
 	}
 	if !strings.Contains(d.Unified, "\n     region: west\n") {
 		t.Fatalf("the key both sides show is not shown unchanged:\n%s", d.Unified)
+	}
+}
+
+// Pairing by path misses a base value that moved: a shifted sequence index, a renamed key, a value
+// moved to another mapping. So once the target holds any redaction, every base leaf and key the
+// target does not show unchanged at the same path is paired (compilation §8.3).
+func TestPlanCreationDiffMoved(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, base, target, leak string }{
+		{"shifted index", "machine:\n  certSANs:\n    - s3cret-san\n    - safe\n",
+			"machine:\n  certSANs:\n    - safe\n    - <redacted:san@1#1>\n", "s3cret-san"},
+		{"renamed key", "machine:\n  env:\n    OLD_PASSWORD: s3cret-env\n",
+			"machine:\n  env:\n    NEW_PASSWORD: <redacted:env@1>\n", "s3cret-env"},
+		{"key name", "machine:\n  env:\n    S3CRET_KEY_NAME: x\n  token: <redacted:t@1>\n",
+			"machine:\n  env:\n    OTHER: x\n  token: <redacted:t@1>\n", "S3CRET_KEY_NAME"},
+		{"other mapping", "machine:\n  a:\n    v: s3cret-moved\n  b: {}\n",
+			"machine:\n  a: {}\n  b:\n    w: <redacted:w@1>\n", "s3cret-moved"},
+		{"redacted key only", "machine:\n  env:\n    OLD: s3cret-k\n",
+			"machine:\n  env:\n    <redacted:k@1>: x\n", "s3cret-k"},
+		{"escaped token only", "machine:\n  old: s3cret-json\n  config: |\n    {\"k\": \"v\"}\n",
+			"machine:\n  config: |\n    {\"k\": \"" + string(rune(92)) + "u003credacted:k@1>\"}\n", "s3cret-json"},
+	} {
+		p := newPlanEnvWith(t, tc.base, tc.target)
+		b := decode[planBody](t, p.plan(p.robot, "k-plan-moved-01234567", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+		d := b.Evidence.Diff
+		if d == nil || d.Withheld {
+			t.Fatalf("%s: diff %+v", tc.name, d)
+		}
+		if strings.Contains(d.Unified, tc.leak) {
+			t.Errorf("%s: the diff shows %q:\n%s", tc.name, tc.leak, d.Unified)
+		}
+	}
+	// A target with no redaction pairs nothing.
+	p := newPlanEnvWith(t, "machine:\n  certSANs:\n    - old-san\n    - safe\n", "machine:\n  certSANs:\n    - safe\n    - new-san\n")
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-moved-plain-012", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	if d := b.Evidence.Diff; d == nil || d.Withheld || !strings.Contains(d.Unified, "-    - old-san") || strings.Contains(d.Unified, pairedToken) {
+		t.Fatalf("plain diff %+v", d)
 	}
 }
 
