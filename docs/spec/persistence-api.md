@@ -1655,7 +1655,8 @@ recovery, plan binding), which every plan body carries:
   their redacted whole configurations (`unified`), a base leaf shown beside a
   redacted leaf of the plan's release written `<redacted:paired>`
   (compilation §8.3), or `"withheld": true` with no text when either has no
-  redacted form, or when the machine holds a configuration other than its
+  redacted form or one that does not parse as YAML free of aliases (compilation
+  writes none), or when the machine holds a configuration other than its
   `Applied` release's artifact, as an adopted machine pending convergence does
   (execution and recovery §6.3); for an `adopt`
   plan, `baseline`, the `importBaseRevision` the release was compiled from and

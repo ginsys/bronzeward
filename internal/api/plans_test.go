@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/config"
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
@@ -256,13 +257,34 @@ func TestPlanCreationDiffPaired(t *testing.T) {
 	}
 }
 
+// Redaction can give two keys of one mapping the same token, as two label keys that are copies of
+// values (compilation §8.3). The diff is still shown, and a base leaf under such a key is paired when
+// the target has a redacted leaf there and no leaf of the base leaf's value.
+func TestPlanCreationDiffDuplicateKeys(t *testing.T) {
+	p := newPlanEnvWith(t,
+		"machine:\n  nodeLabels:\n    <redacted:value>: east\n    <redacted:value>: west\n  type: worker\n",
+		"machine:\n  nodeLabels:\n    <redacted:value>: <redacted:zone@1>\n    <redacted:value>: west\n  type: controlplane\n")
+	t.Parallel()
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-dupkeys-012345", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	want := "@@ -1,5 +1,5 @@\n machine:\n   nodeLabels:\n-    <redacted:value>: <redacted:paired>\n+    <redacted:value>: <redacted:zone@1>\n" +
+		"     <redacted:value>: west\n-  type: worker\n+  type: controlplane\n"
+	if d := b.Evidence.Diff; d == nil || d.Withheld || d.Unified != want {
+		t.Fatalf("diff %+v\nwant %s", d, want)
+	}
+}
+
 // A side that paired redaction cannot walk withholds the diff rather than show it unpaired.
 func TestPlanCreationDiffUnpairable(t *testing.T) {
-	p := newPlanEnvWith(t, "machine:\n  wipe: false\n  bad: [\n", "machine:\n  wipe: <redacted:install/wipe@1>\n")
 	t.Parallel()
-	b := decode[planBody](t, p.plan(p.robot, "k-plan-unpaired-01234", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
-	if d := b.Evidence.Diff; d == nil || !d.Withheld || d.Unified != "" {
-		t.Fatalf("diff %+v", b.Evidence.Diff)
+	for _, base := range []string{
+		"machine:\n  wipe: false\n  bad: [\n",              // does not parse
+		"machine:\n  wipe: &w false\n  keep: *w\n  x: 1\n", // an alias, which one path cannot pair
+	} {
+		p := newPlanEnvWith(t, base, "machine:\n  wipe: <redacted:install/wipe@1>\n  keep: <redacted:install/wipe@1>\n  x: 2\n")
+		b := decode[planBody](t, p.plan(p.robot, "k-plan-unpaired-01234", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+		if d := b.Evidence.Diff; d == nil || !d.Withheld || d.Unified != "" {
+			t.Fatalf("base %q: diff %+v", base, b.Evidence.Diff)
+		}
 	}
 }
 
@@ -461,7 +483,7 @@ func TestPlanReadAfterLockWait(t *testing.T) {
 	p := newPlanEnv(t)
 	t.Parallel()
 	short := decode[planBody](t, p.plan(p.robot, "k-plan-wait-short-0123", applyBody(p.target.rel, p.machine,
-		`,"expiresInSeconds":1`)), http.StatusCreated)
+		`,"expiresInSeconds":2`)), http.StatusCreated)
 	lock, err := p.db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -471,11 +493,13 @@ func TestPlanReadAfterLockWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	viewer := p.human("h-viewer")
-	if time.Until(short.ExpiresAt) < 300*time.Millisecond {
-		t.Fatal("the plan expired before the read began; the setup is too slow to show anything")
-	}
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- p.do(p.api, call{method: "GET", path: prefix + "/plans/" + short.ID, token: viewer}) }()
+	// The read's transaction has begun and waits on the installation state before the expiry.
+	dbtest.WaitForLockWait(t, p.db)
+	if !time.Now().Before(short.ExpiresAt) {
+		t.Fatal("the read began waiting only after the plan expired; the setup is too slow to show anything")
+	}
 	time.Sleep(time.Until(short.ExpiresAt.Add(200 * time.Millisecond)))
 	if err := lock.Rollback(); err != nil {
 		t.Fatal(err)
