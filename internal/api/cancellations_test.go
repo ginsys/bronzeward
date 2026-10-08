@@ -159,6 +159,12 @@ func TestPlanCancellationRoles(t *testing.T) {
 	p.commitAs(t, committed)
 	decode[cancellationBody](t, p.cancel(p.robot, "k-cancel-committed-012", committed, reason), http.StatusOK)
 	p.wantCancelled(t, committed, p.robotID, "publisher", "committed", 3)
+	// A committed plan keeps its state, so a second cancellation is refused for the one recorded.
+	if doc := wantProblem(t, p.cancel(approver, "k-cancel-committed-two", committed, reason), http.StatusConflict,
+		"conflict"); doc["plan"] != committed || doc["state"] != "committed" {
+		t.Fatalf("a second cancellation of a committed plan refused with %v", doc)
+	}
+	p.wantCancelled(t, committed, p.robotID, "publisher", "committed", 3)
 }
 
 // A cancellation's refusals (§9.4): a plan that does not exist; a reason missing, blank or longer
