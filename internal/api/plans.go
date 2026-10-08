@@ -304,14 +304,20 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 	if err != nil {
 		return result{}, err
 	}
+	// PA §1.2 rule 4: the plan's creation time, and so its expiry, follow the lock waits above;
+	// now() is fixed when the transaction began.
+	var at time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
+		return result{}, err
+	}
 	if err := tx.QueryRowContext(ctx, `UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1
 		RETURNING revision_counter`, in.Machine).Scan(&b.TimelineRevision); err != nil {
 		return result{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		VALUES ($1, $2, $3, 'plan', jsonb_build_object('plan', $4::text, 'operation', $5::text, 'release', $6::text,
-			'principal', $7::text, 'role', $8::text), now())`,
-		in.Machine, b.TimelineRevision, q.epoch, b.ID, in.Operation, in.ReleaseID, b.CreatedBy.Principal, b.CreatedBy.Role); err != nil {
+			'principal', $7::text, 'role', $8::text), $9)`,
+		in.Machine, b.TimelineRevision, q.epoch, b.ID, in.Operation, in.ReleaseID, b.CreatedBy.Principal, b.CreatedBy.Role, at); err != nil {
 		return result{}, err
 	}
 	if err := tx.QueryRowContext(ctx, `INSERT INTO plan (id, cluster, machine, kind, mode, release, assignment_revision,
@@ -319,16 +325,16 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 			verification_deadline, max_attempts, expires_at, idempotency_key, approval_policy, created_by, created_by_kind,
 			created_role, epoch, created_at, evidence, revision)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, make_interval(secs => $12), make_interval(secs => $13),
-			make_interval(secs => $14), make_interval(secs => $15), $16, now() + make_interval(secs => $17), $18, 'one-approver',
-			$19, $20, 'publisher', $21, now(), $22, $23)
+			make_interval(secs => $14), make_interval(secs => $15), $16, $24::timestamptz + make_interval(secs => $17), $18,
+			'one-approver', $19, $20, 'publisher', $21, $24, $22, $23)
 		RETURNING created_at, expires_at`,
 		b.ID, b.Cluster, in.Machine, in.Operation, in.Mode, in.ReleaseID, b.AssignmentRevision, b.DesiredRelease,
 		b.BaselineRevision, appliedDigest, b.Route, b.MaxObservationAgeSeconds, b.CheckValiditySeconds,
 		b.TransportDeadlineSeconds, b.VerificationDeadlineSeconds, b.MaxAttempts, *in.ExpiresInSeconds, q.key,
-		b.CreatedBy.Principal, string(q.principal.Kind), q.epoch, evidence, b.TimelineRevision).Scan(&b.CreatedAt, &b.ExpiresAt); err != nil {
+		b.CreatedBy.Principal, string(q.principal.Kind), q.epoch, evidence, b.TimelineRevision, at).Scan(&b.CreatedAt, &b.ExpiresAt); err != nil {
 		return result{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO plan_state (plan, state, updated_at) VALUES ($1, 'proposed', now())`, b.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO plan_state (plan, state, updated_at) VALUES ($1, 'proposed', $2)`, b.ID, at); err != nil {
 		return result{}, err
 	}
 	b.CreatedAt, b.ExpiresAt = b.CreatedAt.UTC(), b.ExpiresAt.UTC()
@@ -336,16 +342,21 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 }
 
 // selectPlan reads a plan with its state. A proposed or approved plan past its expiry reads
-// expired by the server clock, before any transaction has written that (§8.1). The clock is read
-// when the plan is, not at the transaction's start, which can precede a wait on the installation
-// state.
+// expired, and an approved plan whose approver is revoked reads revoked, before any transaction
+// has written either (§8.1): whichever came first, a revoked flag with no recorded time counting
+// as before. The clock is read when the plan is, not at the transaction's start, which can
+// precede a wait on the installation state.
 const selectPlan = `SELECT p.id, s.revision,
-		CASE WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= clock_timestamp() THEN 'expired' ELSE s.state END, s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
+		CASE WHEN s.state = 'approved' AND ap.revoked AND (r.at IS NULL OR r.at < p.expires_at) THEN 'revoked'
+			WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= c.t THEN 'expired' ELSE s.state END,
+		s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
 		p.assignment_revision, p.desired_release, p.baseline_revision, p.route, extract(epoch FROM p.max_observation_age)::bigint,
 		extract(epoch FROM p.check_validity)::bigint, extract(epoch FROM p.transport_deadline)::bigint,
 		extract(epoch FROM p.verification_deadline)::bigint, p.max_attempts, p.rollout_limit, p.approval_policy, p.created_by,
 		p.created_role, p.epoch, p.revision, p.created_at, p.expires_at, p.evidence
-	FROM plan p JOIN plan_state s ON s.plan = p.id`
+	FROM plan p JOIN plan_state s ON s.plan = p.id LEFT JOIN approval a ON a.id = s.approval
+		LEFT JOIN principal ap ON ap.id = a.approver LEFT JOIN identity_revocation r ON r.identity = ap.id
+		CROSS JOIN (SELECT clock_timestamp() AS t) c`
 
 func scanPlan(r interface{ Scan(...any) error }) (*planBody, error) {
 	b := &planBody{}
@@ -409,7 +420,8 @@ const pairedToken = "<redacted:paired>"
 // its indexes, so redaction that gives two keys of one mapping the same token gives their leaves
 // one path; every plaintext base leaf there is paired. A target mapping with a redacted key gives
 // its leaves paths no base leaf shares, so every plaintext base leaf at or under that mapping's
-// path is paired. An embedded document is one scalar here, so
+// path is paired, and so is every base key there the target does not show in the same mapping,
+// since the redacted key may resolve to it. An embedded document is one scalar here, so
 // a redacted leaf inside one pairs the whole base document. Both sides are encoded again by the
 // same encoder so that only what differs shows; a side that does not parse, or holds an alias
 // anywhere, mapping keys included, withholds the diff.
@@ -419,6 +431,7 @@ func pairRedacted(base, target string) (string, string, error) {
 		return "", "", err
 	}
 	values, redacted, keyed := map[string][]string{}, map[string]bool{}, map[string]bool{}
+	keys := map[string]map[string]bool{} // the plaintext keys of each target mapping
 	walkScalars(tdocs, func(p string, n *yaml.Node) {
 		values[p] = append(values[p], n.Value)
 		if isRedacted(n.Value) {
@@ -427,6 +440,10 @@ func pairRedacted(base, target string) (string, string, error) {
 	}, func(p string, k *yaml.Node) {
 		if isRedacted(k.Value) {
 			keyed[p] = true
+		} else if keys[p] == nil {
+			keys[p] = map[string]bool{k.Value: true}
+		} else {
+			keys[p][k.Value] = true
 		}
 	})
 	// under reports whether p is at or under a target mapping with a redacted key, whose leaves
@@ -458,7 +475,13 @@ func pairRedacted(base, target string) (string, string, error) {
 		if (redacted[p] || under(p)) && !isToken(n.Value) && !unchanged {
 			*n = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: pairedToken}
 		}
-	}, nil)
+	}, func(p string, k *yaml.Node) {
+		// A redacted target key may resolve to any base key at or under its mapping, so those keys
+		// are paired too, unless one whole token or a key the target shows in the same mapping.
+		if under(p) && !isToken(k.Value) && !keys[p][k.Value] {
+			*k = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: pairedToken}
+		}
+	})
 	paired, err := encodeDocs(bdocs)
 	if err != nil {
 		return "", "", err
@@ -512,7 +535,8 @@ func isRedacted(v string) bool {
 }
 
 // walkScalars calls fn on every scalar leaf of docs with its path, and keyFn, when set, on every
-// scalar mapping key with its mapping's path; yamlDocs has refused aliases.
+// scalar mapping key with its mapping's path, after the key's value has its path, so keyFn may
+// rewrite the key; yamlDocs has refused aliases.
 func walkScalars(docs []*yaml.Node, fn, keyFn func(p string, n *yaml.Node)) {
 	esc := strings.NewReplacer("~", "~0", "/", "~1")
 	var walk func(n *yaml.Node, p string)
