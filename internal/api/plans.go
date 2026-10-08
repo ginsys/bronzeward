@@ -306,8 +306,13 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 	}
 	// PA §1.2 rule 4: the plan's creation time, and so its expiry, follow every lock wait, the
 	// act-order lock's included; now() is fixed when the transaction began. The writes reference
-	// the machine this transaction holds, rows nothing locks FOR UPDATE, and the request's
-	// principal, as the act does (rule 5).
+	// the machine this transaction holds, rows nothing locks FOR UPDATE, and the creator's
+	// principal, held FOR KEY SHARE here, before the act-order lock (rule 5): an identity
+	// revocation of the creator locks it FOR UPDATE and then waits for act-order, so a reference
+	// taken only after that lock would deadlock with it.
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM principal WHERE id = $1 FOR KEY SHARE`, q.principal.ID); err != nil {
+		return result{}, err
+	}
 	write := func(ctx context.Context, tx *sql.Tx) error {
 		var at time.Time
 		if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {

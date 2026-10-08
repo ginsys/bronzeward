@@ -680,6 +680,50 @@ func holdActOrder(t *testing.T, db *sql.DB) *sql.Tx {
 	return lock
 }
 
+// waitForLockWaits polls until n sessions of db's database wait on a lock.
+func waitForLockWaits(t *testing.T, db *sql.DB, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var got int
+		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got >= n {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("fewer than %d sessions waiting on a lock within 10s", n)
+}
+
+// A creation queued on the act-order lock already holds its creator's principal against a
+// revocation of that creator, so the plan's reference to it after the lock waits on nothing: the
+// two do not deadlock (PA §1.2 rule 5).
+func TestPlanCreationRevocationOfCreatorNoDeadlock(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	lock := holdActOrder(t, p.db)
+	created := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		created <- p.plan(p.robot, "k-plan-creator-0123456", applyBody(p.target.rel, p.machine, ""))
+	}()
+	waitForLockWaits(t, p.db, 1)
+	recovery := p.human("h-recovery")
+	revoked := make(chan *httptest.ResponseRecorder, 1)
+	go func() { revoked <- revoke(p.env, recovery, key, `{"identity":"`+p.robotID+`","reason":"left"}`) }()
+	waitForLockWaits(t, p.db, 2)
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	decode[planBody](t, <-created, http.StatusCreated)
+	revocationOf(t, <-revoked)
+	if p.logged("deadlocked") {
+		t.Fatal("the creation and the revocation of its creator deadlocked")
+	}
+}
+
 // The act-order wait is a lock wait too: a creation that waited on it past its expiry still reads
 // proposed, its times read after that lock (PA §1.2 rule 4).
 func TestPlanCreationAfterActOrderWait(t *testing.T) {
