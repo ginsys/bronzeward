@@ -86,8 +86,8 @@ func cancelPlan(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, er
 	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM plan_state WHERE plan = $1 FOR UPDATE`, plan); err != nil {
 		return result{}, err
 	}
-	// cancellable reads the plan's state, refusing one that reads revoked, cancelled or expired, and
-	// the time it was read at.
+	// cancellable reads the plan's state, refusing one that reads revoked, cancelled or expired, or a
+	// committed plan whose cancellation is already recorded, and the time it was read at.
 	cancellable := func(ctx context.Context, tx *sql.Tx) (string, time.Time, error) {
 		var state string
 		var at time.Time
@@ -96,6 +96,14 @@ func cancelPlan(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, er
 		}
 		if state != "proposed" && state != "approved" && state != "committed" {
 			return "", at, refuse(http.StatusConflict, "conflict", "the plan is already "+state).with("plan", plan).with("state", state)
+		}
+		var recorded bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM plan_cancellation WHERE plan = $1)`, plan).Scan(&recorded); err != nil {
+			return "", at, err
+		}
+		if recorded {
+			return "", at, refuse(http.StatusConflict, "conflict", "the plan's cancellation is already recorded").
+				with("plan", plan).with("state", state)
 		}
 		return state, at, nil
 	}
