@@ -17,6 +17,7 @@ type draftEnv struct {
 	*env
 	cluster, machine, draft, etag, seed string
 	publishedBy                         string // d.release's publisher, when set; d.seed otherwise
+	importedBy                          string // d.release's import bases' author, when set; d.seed otherwise
 	keys                                int
 	removedOnly                         bool                 // d.release names only a removed fragment, no fragment revision
 	reproductions                       bool                 // d.release also records two occurrences of reproducedPass in d.machine's import base

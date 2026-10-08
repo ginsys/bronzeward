@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -71,23 +72,43 @@ func approvePlan(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, e
 		return result{}, refuse(http.StatusConflict, "recovery-mode-active",
 			"the machine's scope is still pre-restore unaccounted").with("machine", machine).with("scope", scope)
 	}
-	var revoked bool
-	if err := tx.QueryRowContext(ctx, `SELECT revoked FROM principal WHERE id = $1 FOR SHARE`, q.principal.ID).Scan(&revoked); err != nil {
+	// The approver of the plan's current approval, if any. Every writer of a plan's state holds its
+	// machine first, so the approval this reads is the one the state lock below reads; its
+	// principal is held with the approver's, so a revocation of it either commits before the
+	// projection below reads it or waits for this approval.
+	var held sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT a.approver FROM plan_state s LEFT JOIN approval a ON a.id = s.approval
+		WHERE s.plan = $1`, plan).Scan(&held); err != nil {
 		return result{}, err
 	}
-	if revoked {
-		return result{}, refuse(http.StatusForbidden, "identity-revoked", "")
+	ids := []string{q.principal.ID}
+	if held.Valid {
+		ids = append(ids, held.String)
+	}
+	slices.Sort(ids)
+	for _, p := range slices.Compact(ids) {
+		var revoked bool
+		if err := tx.QueryRowContext(ctx, `SELECT revoked FROM principal WHERE id = $1 FOR SHARE`, p).Scan(&revoked); err != nil {
+			return result{}, err
+		}
+		if revoked && p == q.principal.ID {
+			return result{}, refuse(http.StatusForbidden, "identity-revoked", "")
+		}
 	}
 	// The state as selectPlan reads it, but for the expiry, which is judged after the act-order
 	// wait; an approval of an earlier epoch is void (execution-recovery.md §2).
 	var state string
 	var earlier bool
+	var approver sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN s.state = 'approved' AND ap.revoked AND (r.at IS NULL OR r.at < p.expires_at)
-				THEN 'revoked' ELSE s.state END, a.epoch IS NOT NULL AND a.epoch <> $2
+				THEN 'revoked' ELSE s.state END, a.epoch IS NOT NULL AND a.epoch <> $2, a.approver
 		FROM plan_state s JOIN plan p ON p.id = s.plan LEFT JOIN approval a ON a.id = s.approval
 			LEFT JOIN principal ap ON ap.id = a.approver LEFT JOIN identity_revocation r ON r.identity = ap.id
-		WHERE s.plan = $1 FOR UPDATE OF s`, plan, q.epoch).Scan(&state, &earlier); err != nil {
+		WHERE s.plan = $1 FOR UPDATE OF s`, plan, q.epoch).Scan(&state, &earlier, &approver); err != nil {
 		return result{}, err
+	}
+	if approver != held {
+		return result{}, errors.New("approve: the plan's approval changed under its machine's lock")
 	}
 	if state != "proposed" && (state != "approved" || !earlier) {
 		return result{}, refuse(http.StatusConflict, "conflict",

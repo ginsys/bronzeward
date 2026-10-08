@@ -44,11 +44,15 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 	s.machine2 = decode[machineBody](t, rec, http.StatusCreated).ID
 	ibr1, ibr2 := id.New(id.ImportBase), id.New(id.ImportBase)
 	s.ibr = ibr1
+	importer := d.seed
+	if d.importedBy != "" {
+		importer = d.importedBy
+	}
 	for _, ib := range [][2]string{{ibr1, d.machine}, {ibr2, s.machine2}} {
 		mustExec(t, d.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
 			baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now(),
 			$4)`,
-			ib[0], ib[1], make([]byte, 32), d.seed)
+			ib[0], ib[1], make([]byte, 32), importer)
 	}
 	publisher := d.seed
 	if d.publishedBy != "" {

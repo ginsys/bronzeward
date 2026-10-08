@@ -65,11 +65,13 @@ func TestApprovalSelfApproval(t *testing.T) {
 			approver: "h-all", want: []string{"owned-automation"}},
 		{name: "automation authored", setup: func(d *draftEnv) { d.publishedBy, d.seed = d.seed, d.robotID },
 			creator: "h-publisher", approver: "h-all", want: []string{"owned-automation"}},
+		{name: "automation authored an import base", setup: func(d *draftEnv) { d.importedBy = d.robotID },
+			creator: "h-publisher", approver: "h-all", want: []string{"owned-automation"}},
 		{name: "every reason in order", setup: func(d *draftEnv) {
 			h := d.principalOf("h-all")
-			d.seed, d.publishedBy = h, h
+			d.seed, d.publishedBy, d.importedBy = h, h, d.robotID
 		}, after: introduce, creator: "h-all", approver: "h-all",
-			want: []string{"created-plan", "published", "authored-change", "authored-reused"}},
+			want: []string{"created-plan", "published", "authored-change", "authored-reused", "owned-automation"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -300,6 +302,36 @@ func TestApprovalApproverRevokedInWait(t *testing.T) {
 	}
 	wantProblem(t, <-done, http.StatusForbidden, "identity-revoked")
 	p.wantUnapproved(t, plan.ID, "proposed")
+}
+
+// Rule 2 for the earlier approver: a re-approval holds the principal of the approval it replaces,
+// so a revocation of that approver queued ahead of it commits first and the plan reads revoked.
+func TestApprovalEarlierApproverRevokedInWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	gone := p.principalOf("h-approver-gone")
+	p.approveAs(t, plan.ID, gone)
+	newEpoch(t, p.db)
+	recovery, approver := p.human("h-recovery"), p.human("h-approver")
+
+	lock := holdActOrder(t, p.db)
+	revoked := make(chan *httptest.ResponseRecorder, 1)
+	go func() { revoked <- revoke(p.env, recovery, key, `{"identity":"`+gone+`","reason":"left"}`) }()
+	waitForLockWaits(t, p.db, 1)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- p.approve(approver, "k-approve-0123456789", plan.ID) }()
+	waitForLockWaits(t, p.db, 2)
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	revocationOf(t, <-revoked)
+	if doc := wantProblem(t, <-done, http.StatusConflict, "conflict"); doc["state"] != "revoked" {
+		t.Fatalf("re-approval after the earlier approver's revocation refused with %v", doc)
+	}
+	if n := count(t, p.db, `SELECT count(*) FROM approval WHERE plan = $1`, plan.ID); n != 1 {
+		t.Fatalf("%d approvals of the revoked plan", n)
+	}
 }
 
 // Rule 4: an approval's time and the expiry it is judged against follow the act-order wait. One
