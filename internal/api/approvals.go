@@ -95,13 +95,15 @@ func approvePlan(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, e
 			return result{}, refuse(http.StatusForbidden, "identity-revoked", "")
 		}
 	}
-	// The state as selectPlan reads it, but for the expiry, which is judged after the act-order
-	// wait; an approval of an earlier epoch is void (execution-recovery.md §2).
+	// The state as selectPlan reads it, so a refusal names the state a read names; the expiry is
+	// judged again after the act-order wait. An approval of an earlier epoch is void
+	// (execution-recovery.md §2).
 	var state string
 	var earlier bool
 	var approver sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN s.state = 'approved' AND ap.revoked AND (r.at IS NULL OR r.at < p.expires_at)
-				THEN 'revoked' ELSE s.state END, a.epoch IS NOT NULL AND a.epoch <> $2, a.approver
+				THEN 'revoked' WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= clock_timestamp() THEN 'expired'
+				ELSE s.state END, a.epoch IS NOT NULL AND a.epoch <> $2, a.approver
 		FROM plan_state s JOIN plan p ON p.id = s.plan LEFT JOIN approval a ON a.id = s.approval
 			LEFT JOIN principal ap ON ap.id = a.approver LEFT JOIN identity_revocation r ON r.identity = ap.id
 		WHERE s.plan = $1 FOR UPDATE OF s`, plan, q.epoch).Scan(&state, &earlier, &approver); err != nil {
