@@ -132,6 +132,36 @@ func Heartbeat(ctx context.Context, db *sql.DB, o Owner, c Claim, lease time.Dur
 	return nil
 }
 
+// Restart sets a live claim's lease to t.Lease from the database's clock read now, never past its
+// absolute expiry, and its running ingest operation's lease with it, in the caller's transaction,
+// which already holds the claim. A request transaction calls it once its last lock, the act-order
+// lock, is held (persistence-api.md §1.2 rules 4 and 5), so no wait consumes the lease. For a
+// claim the transaction created (fresh), the creation time and the absolute expiry restart too.
+// A claim that is not live is left as it is.
+func Restart(ctx context.Context, tx *sql.Tx, claim string, t Timers, fresh bool) error {
+	q := `UPDATE staging_claim SET lease_until = least(c.t + $2::bigint * interval '1 microsecond', expires_at)
+		FROM (SELECT clock_timestamp() AS t) c WHERE id = $1 AND state IN ('held', 'resumed') RETURNING lease_until`
+	args := []any{claim, t.Lease.Microseconds()}
+	if fresh {
+		q = `UPDATE staging_claim SET created_at = c.t, lease_until = c.t + $2::bigint * interval '1 microsecond',
+			expires_at = c.t + $3::bigint * interval '1 microsecond'
+			FROM (SELECT clock_timestamp() AS t) c WHERE id = $1 AND state = 'held' RETURNING lease_until`
+		args = append(args, t.AbsoluteExpiry.Microseconds())
+	}
+	var until time.Time
+	switch err := tx.QueryRowContext(ctx, q, args...).Scan(&until); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return fmt.Errorf("staging: restart the lease: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE operation SET lease_until = $2 WHERE ingestion = $1 AND state = 'running'`,
+		claim, until); err != nil {
+		return fmt.Errorf("staging: restart the operation's lease: %w", err)
+	}
+	return nil
+}
+
 // StorePayload writes an encrypted claim's envelope ciphertext and its plaintext's SHA-256
 // (compilation §3: after step 8). A transient claim never holds one: the schema refuses it
 // whatever mode the caller's Claim names. It runs in the caller's transaction.

@@ -304,21 +304,33 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 	if err != nil {
 		return result{}, err
 	}
-	// PA §1.2 rule 4: the plan's creation time, and so its expiry, follow the lock waits above;
-	// now() is fixed when the transaction began.
-	var at time.Time
-	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
-		return result{}, err
+	// PA §1.2 rule 4: the plan's creation time, and so its expiry, follow every lock wait, the
+	// act-order lock's included; now() is fixed when the transaction began. The writes reference
+	// the machine this transaction holds, rows nothing locks FOR UPDATE, and the request's
+	// principal, as the act does (rule 5).
+	write := func(ctx context.Context, tx *sql.Tx) error {
+		var at time.Time
+		if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
+			return err
+		}
+		return insertPlan(ctx, tx, q, in, &b, appliedDigest, evidence, at)
 	}
+	return result{status: http.StatusCreated, location: prefix + "/plans/" + b.ID, body: &b, subjects: []string{b.ID, in.Machine},
+		atActOrder: write}, nil
+}
+
+// insertPlan writes b, created at at, as one plan entry on its machine's timeline, proposed.
+func insertPlan(ctx context.Context, tx *sql.Tx, q *request, in *planInput, b *planBody, appliedDigest, evidence []byte,
+	at time.Time) error {
 	if err := tx.QueryRowContext(ctx, `UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1
 		RETURNING revision_counter`, in.Machine).Scan(&b.TimelineRevision); err != nil {
-		return result{}, err
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		VALUES ($1, $2, $3, 'plan', jsonb_build_object('plan', $4::text, 'operation', $5::text, 'release', $6::text,
 			'principal', $7::text, 'role', $8::text), $9)`,
 		in.Machine, b.TimelineRevision, q.epoch, b.ID, in.Operation, in.ReleaseID, b.CreatedBy.Principal, b.CreatedBy.Role, at); err != nil {
-		return result{}, err
+		return err
 	}
 	if err := tx.QueryRowContext(ctx, `INSERT INTO plan (id, cluster, machine, kind, mode, release, assignment_revision,
 			desired_release, baseline_revision, expected_digest, route, max_observation_age, check_validity, transport_deadline,
@@ -332,13 +344,13 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 		b.BaselineRevision, appliedDigest, b.Route, b.MaxObservationAgeSeconds, b.CheckValiditySeconds,
 		b.TransportDeadlineSeconds, b.VerificationDeadlineSeconds, b.MaxAttempts, *in.ExpiresInSeconds, q.key,
 		b.CreatedBy.Principal, string(q.principal.Kind), q.epoch, evidence, b.TimelineRevision, at).Scan(&b.CreatedAt, &b.ExpiresAt); err != nil {
-		return result{}, err
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO plan_state (plan, state, updated_at) VALUES ($1, 'proposed', $2)`, b.ID, at); err != nil {
-		return result{}, err
+		return err
 	}
 	b.CreatedAt, b.ExpiresAt = b.CreatedAt.UTC(), b.ExpiresAt.UTC()
-	return result{status: http.StatusCreated, location: prefix + "/plans/" + b.ID, body: b, subjects: []string{b.ID, in.Machine}}, nil
+	return nil
 }
 
 // selectPlan reads a plan with its state. A proposed or approved plan past its expiry reads

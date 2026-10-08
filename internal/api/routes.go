@@ -42,6 +42,10 @@ type result struct {
 	body           any
 	subjects       []string // the act's subject identifiers
 	operation      string   // a 202's operation, recorded with the idempotency record (§7.1)
+	// atActOrder runs once the act-order lock, the transaction's last (§5 rule 5), is held, before
+	// body is encoded: the writes whose recorded time must follow every lock wait (rule 4). It may
+	// complete body, and writes only rows whose references the effect already holds locked.
+	atActOrder func(ctx context.Context, tx *sql.Tx) error
 	// afterCommit runs once, after this request's own COMMIT is confirmed, outside the
 	// transaction; never for a rolled-back attempt or a replay.
 	afterCommit func()

@@ -620,14 +620,21 @@ Rules for every transaction:
    compares with that expiry (§8.1), and a publish job's lease,
    when claimed, extended and checked at completion (§5.1), is the database's `clock_timestamp()`
    read after the lock is held, since `now()` is fixed when the transaction
-   began.
+   began. In a request's transaction that means after the act-order lock, its
+   last wait (rule 5).
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation
    state, machine rows by id (each with its MachineState), heads by id, the
    draft, principals by id, approvals by id, plan states by id, then operations
    by id. The act-order lock comes last, just before the act is written, and is
    held to the end of the transaction, so acts become visible in recording
    order and a `GET /acts` cursor never passes an act that commits later
-   (§10.5). A read of an immutable row needs no lock and may come first, for
+   (§10.5). The writes that carry a rule-4 time (a plan's creation, an
+   identity revocation, a staging claim's lease when a request creates or
+   takes over the claim) come after that lock and before the act. They update
+   only rows the transaction already holds. Their inserts reference those
+   rows, rows no transaction locks `FOR UPDATE`, or the request's principal,
+   which the act references too, so no new wait follows the act-order lock.
+   A read of an immutable row needs no lock and may come first, for
    example the plan binding that names the machine to lock. A detected
    deadlock aborts the transaction, which is retried whole, at most three
    times, then fails `503 transient-conflict` **(choice §17.7)**.
