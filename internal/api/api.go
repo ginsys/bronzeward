@@ -78,6 +78,7 @@ type deps struct {
 	life   context.Context
 	runs   *sync.WaitGroup
 	wake   chan struct{}
+	exec   config.Execution // the plan defaults and the transport maximum (execution-recovery.md §5.2)
 }
 
 // options are nil or false in production; tests set them.
@@ -130,8 +131,9 @@ func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*
 // this process read at its start: it owns claims and jobs under it, and under no later one
 // (§5.1). With a provider, it starts the publish worker. The ingest runners and the worker stop
 // when life ends.
-func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ing Ingester, pub *Publishers, ic *config.Ingestion, epoch string) http.Handler {
-	d := deps{ing: ing, life: life}
+func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
+	ic *config.Ingestion, epoch string) http.Handler {
+	d := deps{ing: ing, life: life, exec: ex}
 	if pub != nil {
 		d.pub = &publishClients{meta: pub.Meta, reader: pub.Compiler, encrypter: pub.Compiler}
 	}

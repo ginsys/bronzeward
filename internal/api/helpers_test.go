@@ -79,6 +79,9 @@ func (e *env) buildWith(d deps, o options) *API {
 	if o.logf == nil {
 		o.logf = e.logf
 	}
+	if d.exec.MaxTransportDeadline == 0 {
+		d.exec = testExecution()
+	}
 	return newAPI(e.db, auth.NewVerifier(e.cfg, e.db, auth.Discover(e.cfg.OIDC)), e.cfg, d, o)
 }
 

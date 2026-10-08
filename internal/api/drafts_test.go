@@ -17,8 +17,12 @@ type draftEnv struct {
 	*env
 	cluster, machine, draft, etag, seed string
 	keys                                int
-	removedOnly                         bool // d.release names only a removed fragment, no fragment revision
-	reproductions                       bool // d.release also records two occurrences of reproducedPass in d.machine's import base
+	removedOnly                         bool                 // d.release names only a removed fragment, no fragment revision
+	reproductions                       bool                 // d.release also records two occurrences of reproducedPass in d.machine's import base
+	assigned                            bool                 // d.release binds each machine's assignment head, d.assignment creating it
+	redacted                            string               // d.release's redacted configuration of d.machine, when set
+	artifact                            []byte               // d.release's artifact configuration digest, when set
+	heads                               map[string][2]string // a machine's assignment and its head revision, by d.assignment
 }
 
 func newDraftEnv(t *testing.T) *draftEnv {

@@ -102,7 +102,7 @@ func routes() []*route {
 	rs = append(rs,
 		draftDiscard().on(ifm(m(post, "/drafts/{id}/discard", author))),
 		publicationRequest().on(ifm(m(post, "/drafts/{id}/publications", publisher))),
-		m(post, "/plans", publisher),
+		planCreation().on(m(post, "/plans", publisher)),
 		// The creator is a publisher (choice §17.22); whether this one created the plan is the
 		// handler's check, in its transaction (§10.3).
 		m(post, "/plans/{id}/cancellations", publisher, approver, recovery),

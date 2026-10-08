@@ -176,7 +176,7 @@ func serveContext(ctx context.Context, args []string) error {
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners and the publish worker stop with the signal; a claim or job left held
 	// lapses with its lease.
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, ing, pub, cfg.Ingestion, epoch)))
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, cfg.Ingestion, epoch)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {
