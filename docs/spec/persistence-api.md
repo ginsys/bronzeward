@@ -1628,14 +1628,14 @@ Location: /api/v1/approvals/apr_2ztr33rjgnabf5zxbwwf7c47vy
  "plan": "pln_f645lvrsgsehfn6fuboigpcawy",
  "approver": {"principal": "idn_6woutisn7uensexh3kk2qlz6ma", "role": "approver"},
  "epoch": "ep_bqeknkmarvikuy7ofil2okekgi",
- "selfApproval": {"marked": true, "reasons": ["owned-automation", "authored-change"]}}
+ "selfApproval": {"marked": true, "reasons": ["authored-change", "owned-automation"]}}
 
 GET /api/v1/plans/pln_f645lvrsgsehfn6fuboigpcawy
 
 HTTP/1.1 200 OK
 
 {"id": "pln_f645lvrsgsehfn6fuboigpcawy",
- "revision": 1,
+ "revision": 2,
  "state": "approved",
  "committedOperation": null,
  "release": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
@@ -1646,7 +1646,10 @@ HTTP/1.1 200 OK
  "expiresAt": "2026-09-26T21:14:02Z"}
 ```
 
-`committedOperation` stays `null` until the commitment (§8.1). The example
+`GET /approvals/{id}` answers an approval in the form its creation answered,
+without an ETag: an approval is immutable. The approval moved the plan's state
+to its next revision, 2. `committedOperation` stays `null` until the
+commitment (§8.1). The example
 omits the plan's other bound values and its plan-time evidence (execution and
 recovery, plan binding), which every plan body carries:
 
@@ -2086,7 +2089,7 @@ counter, not the ETag token, so the token is not named.
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch; a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID or Talos node ID already recorded, naming its machine, or for a Talos cluster ID already recorded, naming its cluster (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2); a publish operation whose draft is no longer `open` at the revision it bound, naming the draft, or whose draft revision has a release with other content, naming it (§6.2)) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch, or whose expiry passed before the approval's time, the body naming the plan and its state (`expired` for the latter); a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID or Talos node ID already recorded, naming its machine, or for a Talos cluster ID already recorded, naming its cluster (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2); a publish operation whose draft is no longer `open` at the revision it bound, naming the draft, or whose draft revision has a release with other content, naming it (§6.2)) |
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose identity key is not the machine record's or whose Talos cluster ID is not its cluster record's, whose identity read failed, or whose SMBIOS UUID is absent for a machine recorded by one or present for a machine recorded by node ID (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
@@ -2345,6 +2348,17 @@ is recorded **(choice §17.21)**:
 | `authored-change` | authored a revision the release's draft introduced | design §13.7 item 3, derived rule |
 | `authored-reused` | authored a revision the release uses unchanged from an earlier release | edge case (a), left to this contract |
 | `owned-automation` | is the responsible human (§10.2) of an automation identity that authored, published or planned it | edge case (b), left to this contract |
+
+The reasons are derived from the plan's records **(choice §17.39)**. A
+release contains the revisions its sources name, changed or unchanged, and the
+import base revision of each machine it covers; its draft introduced the
+revisions its own entries name. A contained revision the approving identity
+authored is `authored-change` when the draft introduced it and
+`authored-reused` otherwise, however long ago it was written (execution and
+recovery choice §10.4). `owned-automation` counts an automation identity that
+created the plan, published the release or authored a contained revision. The
+reasons are recorded in the table's order, on the approval and on its timeline
+entry.
 
 Both unsettled cases are marked as self-approval, the conservative reading: a
 mark never blocks an approval (design §13.7 item 3 allows self-approval), and
@@ -3435,6 +3449,16 @@ design and evidence do not settle the question. Each is marked in place as
     reader confirm a guessed configuration offline; a diff from the import
     base's sanitized document, which is source text with references, not a
     redacted whole configuration, so the diff would mix two forms.
+39. **Self-approval reasons come from the release's own records, recorded in
+    §10.5's table order** (§10.5): a release contains its sources' revisions
+    and its machines' import base revisions, and its draft's entries name the
+    revisions it introduced. An approval reads them in its transaction without
+    a lock: each is immutable or, once the draft is published, no longer
+    written. Alternatives: count as introduced every revision the cluster's
+    previous release did not contain, which turns on which release is
+    "previous" and reads a revision reverted to as reused although the draft
+    chose it again; record the reasons in the order found, which lets two
+    equal marks differ.
 
 ## 18. Traceability
 
@@ -3454,7 +3478,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; DB §4.6 (advisory lock); [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |
 | §8 operations | §11.1, §12.5, §15.2 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2) row 009; DB §4.5 rows 020, 021 |
 | §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5; the review route: choice §17.36, compilation §3.6; plan durations and adopt evidence: choices §17.37, §17.38 |
-| §10 authentication, authorization | §13.1, §13.3, §13.6, §13.7 | none: FR §9 item 5; [DS §4.1](../design/research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1) row 003 for approval revocation and its lock |
+| §10 authentication, authorization | §13.1, §13.3, §13.6, §13.7 | none: FR §9 item 5; [DS §4.1](../design/research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1) row 003 for approval revocation and its lock; self-approval reasons: choice §17.39 |
 | §11 migrations | §7.2, §14.2 | [DB §4.6](../design/research/20260924-database-semantics.md#46-s6-migrations) rows 022–026; [DB §6.2](../design/research/20260924-database-semantics.md#62-criterion-2-intent-ownership-queue-claims-migrations-restored-state) |
 | §12 restored state, epoch | §7.7, §7.8, §14.6 | DB §4.7 row 027; DB §9 (inferred); [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation) items 2, 5; FR §9 item 4 |
 | §16 gaps | §18.1, §18.2 | [FR §9](../design/research/20260925-feasibility-evidence-review.md#9-gaps), FR §10 |

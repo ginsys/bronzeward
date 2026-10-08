@@ -304,7 +304,7 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 	if err != nil {
 		return result{}, err
 	}
-	// PA §1.2 rule 4: the plan's creation time, and so its expiry, follow every lock wait, the
+	// PA §5 rule 4: the plan's creation time, and so its expiry, follow every lock wait, the
 	// act-order lock's included; now() is fixed when the transaction began. The writes reference
 	// the machine this transaction holds, rows nothing locks FOR UPDATE, and the creator's
 	// principal, held FOR KEY SHARE here, before the act-order lock (rule 5): an identity

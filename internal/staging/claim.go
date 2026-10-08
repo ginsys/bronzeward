@@ -135,7 +135,7 @@ func Heartbeat(ctx context.Context, db *sql.DB, o Owner, c Claim, lease time.Dur
 // Restart sets a live claim's lease to t.Lease from the database's clock read now, never past its
 // absolute expiry, and its running ingest operation's lease with it, in the caller's transaction,
 // which already holds the claim. A request transaction calls it once its last lock, the act-order
-// lock, is held (persistence-api.md §1.2 rules 4 and 5), so no wait consumes the lease. For a
+// lock, is held (persistence-api.md §5 rules 4 and 5), so no wait consumes the lease. For a
 // claim the transaction created (fresh), the creation time and the absolute expiry restart too.
 // A claim whose absolute expiry has passed by then, or that is no longer live, is left as it is
 // and refused ErrEnded: the transaction must not commit its takeover.
