@@ -207,8 +207,9 @@ func (p *planEnv) wantUnapproved(t *testing.T, plan, state string) {
 }
 
 // T5a's refusals (§9.4): a plan that does not exist; a second approval in one epoch; a plan that
-// is cancelled, or past its expiry though its state was never written; a machine whose scope is
-// pre-restore unaccounted. None writes anything.
+// is cancelled, or past its expiry though its state was never written, proposed or approved, and
+// named expired as a read names it; a machine whose scope is pre-restore unaccounted. None writes
+// anything.
 func TestApprovalRefusals(t *testing.T) {
 	p := newPlanEnv(t)
 	t.Parallel()
@@ -238,6 +239,17 @@ func TestApprovalRefusals(t *testing.T) {
 		t.Fatalf("expired plan refused with %v", doc)
 	}
 	p.wantUnapproved(t, expired.ID, "proposed")
+
+	lapsed := decode[planBody](t, p.plan(p.robot, "k-plan-lapsed-01234567", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
+		http.StatusCreated)
+	approved := decode[approvalBody](t, p.approve(approver, "k-approve-lapsed-01234", lapsed.ID), http.StatusCreated)
+	time.Sleep(time.Until(lapsed.ExpiresAt.Add(100 * time.Millisecond)))
+	if doc := wantProblem(t, p.approve(p.human("h-all"), "k-approve-lapsed-again", lapsed.ID), http.StatusConflict, "conflict"); doc["state"] != "expired" {
+		t.Fatalf("expired approved plan refused with %v", doc)
+	}
+	if n := count(t, p.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND approval = $2 AND revision = 2`, lapsed.ID, approved.ID); n != 1 {
+		t.Fatal("the refused approval changed the expired plan's state")
+	}
 
 	scoped := plan("k-plan-scoped-01234567", "")
 	mustExec(t, p.db, `UPDATE machine SET scope_state = 'pre-restore-unaccounted' WHERE id = $1`, p.machine)
