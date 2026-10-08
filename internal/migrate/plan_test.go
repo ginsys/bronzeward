@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -290,6 +291,13 @@ func TestPlanConstraints(t *testing.T) {
 	approve("approval on another machine's timeline", "23503", approval.with("machine", m2))
 	refused(t, db, "approval with no act", "23503", approvalAt, approval.stmt())
 	refused(t, db, "approval on an entry of another kind", "23503", p.entry(p.machine, 100, "plan"), approval.stmt(), approvalAct)
+	// Each record is its own timeline entry (execution and recovery §4.1).
+	act2 := id.New(id.Act)
+	refused(t, db, "two approvals on one entry", "23505/approval_machine_revision_key", p.entry(p.machine, 99, "plan"),
+		apply.with("revision", 99).stmt(), state(apply), approvalAt, approval.stmt(), approvalAct,
+		p.approvalRow(id.New(id.Approval), apply.vals["id"].(string), 100, act2).stmt(), p.act(act2, p.human, "approver"))
+	refused(t, db, "two plans on one entry", "23505/plan_machine_revision_key", at, apply.stmt(), state(apply),
+		adopt.with("idempotency_key", "plan-second-entry").stmt(), state(adopt))
 
 	// Revocations (T5b) and cancellations (T11), each its own timeline entry.
 	ract := id.New(id.Act)
@@ -377,7 +385,10 @@ func TestPlanStateTransitions(t *testing.T) {
 	refused(t, db, "approved with another plan's approval", "23503", set(p.adopt, "state = 'approved', approval = $2", p.approval))
 	refused(t, db, "cancelled with no reason", "23514", set(p.adopt, "state = 'cancelled'"))
 	refused(t, db, "expired for a revocation", "23514", set(p.adopt, "state = 'expired', reason = 'approval-revoked'"))
-	refused(t, db, "approved with a reason", "23514", set(p.apply, "reason = 'expired'"))
+	apr0, act0 := id.New(id.Approval), id.New(id.Act)
+	refused(t, db, "approved with a reason", "23514/plan_state_reason", p.entry(p.machine, 4, "approval"),
+		p.approvalRow(apr0, p.adopt, 4, act0).stmt(), p.act(act0, p.human, "approver"),
+		set(p.adopt, "state = 'approved', approval = $2, reason = 'expired'", apr0))
 	refused(t, db, "state deleted", ImmutableSQLState, stmt{`DELETE FROM plan_state WHERE plan = $1`, []any{p.adopt}})
 	refused(t, db, "states truncated", ImmutableSQLState, stmt{`TRUNCATE plan_state CASCADE`, nil})
 	// A terminal state is final.
@@ -385,13 +396,22 @@ func TestPlanStateTransitions(t *testing.T) {
 	for _, to := range []string{"proposed", "approved", "cancelled"} {
 		refused(t, db, "expired to "+to, "23514/plan_state_transition", set(p.adopt, "state = $2", to))
 	}
-	// Positive controls: an approval in a later epoch replaces the current one, and a revocation
-	// of the current approval revokes the plan.
+	// A restore enters a new epoch (§2): the earlier epoch's approval no longer commits the plan.
 	epoch := id.New(id.Epoch)
 	mustExec(t, db, `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ($1, now())`, epoch)
+	mustExec(t, db, `UPDATE installation_state SET epoch = $1`, epoch)
+	stale := id.New(id.Operation)
+	refused(t, db, "committed under an approval of an earlier epoch", "23514/plan_state_approval_epoch",
+		stmt{insertPlanOperation, []any{stale, "apply-config", "committed", owner, p.apply, p.machine, p.cluster}},
+		set(p.apply, "state = 'committed', operation = $2", stale))
+	// Positive controls: an approval in the new epoch replaces the earlier one, and a revocation of
+	// the current approval revokes the plan.
 	apr, act := id.New(id.Approval), id.New(id.Act)
 	commitRows(t, db, p.entry(p.machine, 4, "approval"), p.approvalRow(apr, p.apply, 4, act).with("epoch", epoch).stmt(),
 		p.act(act, p.human, "approver"), set(p.apply, "approval = $2", apr))
+	// The earlier approval never returns.
+	refused(t, db, "approval of an earlier epoch restored", "23514/plan_state_approval_epoch",
+		set(p.apply, "approval = $2", p.approval))
 	commitRows(t, db, set(p.apply, "state = 'revoked', reason = 'approval-revoked'"))
 }
 
@@ -444,6 +464,20 @@ func TestPlanOperations(t *testing.T) {
 		stmt{insertEvent, []any{opID, 1, `{}`, "apply-config"}})
 	refused(t, db, "apply-config event named an ingest", "23503", stmt{insertEvent, []any{opID, 1, `{}`, "ingest"}})
 	refused(t, db, "second operation of a plan", "23505", op("apply-config", "committed", owner, p.apply, p.machine))
+	// What an operation is and was created for is fixed: an UPDATE cannot turn the release's
+	// publish operation into an adopt operation of a proposed plan, or move an operation's scope.
+	rebind := func(name, which, set string, args ...any) {
+		t.Helper()
+		refused(t, db, name, "BW001", stmt{`UPDATE operation SET ` + set + ` WHERE id = $1`, append([]any{which}, args...)})
+	}
+	rebind("publish operation rebound to an adopt plan", p.publish, `kind = 'adopt', state = 'completed', draft = NULL,
+		draft_revision = NULL, created_by = NULL, created_by_kind = NULL, created_role = NULL, owner = NULL, owner_gen = 0,
+		owner_epoch = NULL, lease_until = NULL, plan = $2, machine = $3, cluster = $4`, p.adopt, p.machine, p.cluster)
+	rebind("operation moved to another plan", opID, "plan = $2", p.adopt)
+	rebind("operation moved to another machine", opID, "machine = $2", p.otherMachine)
+	rebind("operation moved to another cluster", opID, "cluster = $2", p.other)
+	rebind("operation given another creator", p.publish, "created_by = $2", p.bob)
+	rebind("operation redated", p.publish, "created_at = created_at - interval '1 second'")
 
 	// The adopt plan's commitment: approved, observed, then its operation completed with its record.
 	apr := p.approve(t, db, p.adopt, 4)
@@ -465,6 +499,20 @@ func TestPlanOperations(t *testing.T) {
 	refused(t, db, "adopt operation with no adoption record", "23514/operation_plan_committed", adoptOpRow, committed(p.adopt))
 	refused(t, db, "adoption record on an entry of another kind", "23503", adoptOpRow, committed(p.adopt),
 		p.entry(p.machine, 7, "plan"), adopted.stmt())
+	// The record names the commitment its operation was created with: the state's approval, in the
+	// epoch of the operation and of the approval.
+	old, oldApr, oldAct := id.New(id.Epoch), id.New(id.Approval), id.New(id.Act)
+	mustExec(t, db, `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ($1, now())`, old)
+	commitRows(t, db, p.entry(p.machine, 20, "approval"), p.approvalRow(oldApr, p.adopt, 20, oldAct).with("epoch", old).stmt(),
+		p.act(oldAct, p.human, "approver"))
+	adoption("adoption record relying on an approval of another epoch", "23503", adopted.with("approval", oldApr))
+	adoption("adoption record of another epoch than its operation", "23503", adopted.with("epoch", old))
+	// With the operation, the record and the approval all of that epoch, the state's approval
+	// still differs, and the commitment key alone refuses it.
+	oldOpRow := stmt{`INSERT INTO operation (id, kind, state, epoch, plan, machine, cluster, created_at)
+		VALUES ($1, 'adopt', 'completed', $2, $3, $4, $5, now())`, []any{adoptOp, old, p.adopt, p.machine, p.cluster}}
+	refused(t, db, "adoption record naming an approval its commitment does not", "23503/adoption_record_commitment",
+		oldOpRow, committed(p.adopt), p.entry(p.machine, 7, "adoption"), adopted.with("approval", oldApr, "epoch", old).stmt())
 	// The adopt operation is completed: it holds no scope while the apply-config operation does.
 	commitRows(t, db, adoptOpRow, committed(p.adopt), p.entry(p.machine, 7, "adoption"), adopted.stmt())
 	refused(t, db, "event of an adopt operation", "23514/operation_event_job_kind",
@@ -577,6 +625,13 @@ func TestPlanConstraintControl(t *testing.T) {
 			{insertPlanOperation, []any{"op_aaaaaaaaaaaaaaaaaaaaaaaaaa", "apply-config", "committed", owner, p.apply, p.machine, p.cluster}},
 			{`UPDATE plan_state SET state = 'committed', operation = 'op_aaaaaaaaaaaaaaaaaaaaaaaaaa' WHERE plan = $1`, []any{p.apply}},
 			{insertEvent, []any{"op_aaaaaaaaaaaaaaaaaaaaaaaaaa", 1, `{}`, "apply-config"}}}},
+		{"ALTER TABLE plan_state DROP CONSTRAINT plan_state_reason", []stmt{p.entry(p.machine, 100, "approval"),
+			p.approvalRow("apr_aaaaaaaaaaaaaaaaaaaaaaaaaa", p.adopt, 100, "act_aaaaaaaaaaaaaaaaaaaaaaaaaa").stmt(),
+			p.act("act_aaaaaaaaaaaaaaaaaaaaaaaaaa", p.human, "approver"),
+			{`UPDATE plan_state SET state = 'approved', approval = 'apr_aaaaaaaaaaaaaaaaaaaaaaaaaa', reason = 'expired'
+				WHERE plan = $1`, []any{p.adopt}}}},
+		{"DROP TRIGGER binding ON operation", []stmt{{`UPDATE operation SET created_at = created_at - interval '1 second'
+			WHERE id = $1`, []any{p.publish}}}},
 		{"DROP TRIGGER plan_committed ON operation", []stmt{
 			{insertPlanOperation, []any{id.New(id.Operation), "apply-config", "committed", owner, p.apply, p.machine, p.cluster}}}},
 		{"DROP TRIGGER identity ON machine", []stmt{{`UPDATE machine SET smbios_uuid = NULL, talos_node_id = 'node-1' WHERE id = $1`,
@@ -602,5 +657,41 @@ func TestPlanConstraintControl(t *testing.T) {
 				t.Errorf("after %s: deferred checks: %v", c.drop, err)
 			}
 		}()
+	}
+}
+
+// Execution and recovery §4.1: every table whose rows are machine timeline entries (an
+// entry_kind column) holds at most one row per entry, so no two records share one.
+func TestPlanEntriesUnique(t *testing.T) {
+	db, _ := migrated(t)
+	rows, err := db.Query(`SELECT c.relname, EXISTS (SELECT FROM pg_constraint k WHERE k.conrelid = c.oid
+		AND k.contype IN ('p', 'u') AND (SELECT array_agg(attname::text ORDER BY attname) FROM pg_attribute
+		WHERE attrelid = c.oid AND attnum = ANY (k.conkey)) = ARRAY['machine', 'revision'])
+		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid
+		WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attname = 'entry_kind' ORDER BY c.relname`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var tables []string
+	for rows.Next() {
+		var name string
+		var unique bool
+		if err := rows.Scan(&name, &unique); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+		if !unique {
+			t.Errorf("%s: no key on (machine, revision)", name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	// The query found the tables it is about, so a renamed column cannot make it pass empty.
+	want := []string{"adoption_record", "approval", "approval_revocation", "observation", "observation_start", "plan",
+		"plan_cancellation"}
+	if !slices.Equal(tables, want) {
+		t.Errorf("timeline record tables %v; want %v", tables, want)
 	}
 }

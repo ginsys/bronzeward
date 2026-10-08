@@ -44,6 +44,14 @@ const (
 	created   = "2026-09-26T09:12:40.123456789Z"
 )
 
+// insertOperationRole is insertOperation with the requester's role given ($12): an operation's
+// role is fixed once inserted.
+const insertOperationRole = `INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, lease_until,
+	draft, draft_revision, ingestion, created_by, created_by_kind, created_role, created_at, result, error)
+	SELECT $1, $2, $3, epoch, $4, $5, CASE WHEN $4::text IS NULL THEN NULL ELSE epoch END,
+	CASE WHEN $4::text IS NULL THEN NULL ELSE now() + interval '1 minute' END,
+	$6, $7, $8, $9, 'human', $12, now(), $10::jsonb, $11::jsonb FROM installation_state`
+
 // release holds one published release over sourceRows' draft, inserted by releaseRows.
 type release struct {
 	sources
@@ -243,8 +251,8 @@ func TestReleaseConstraints(t *testing.T) {
 		// Each operation differs from the release's in one column of the key alone.
 		{"release of an ingest operation", []stmt{
 			{insertClaim, []any{claim2, "transient", "held", nil, nil, nil}},
-			{insertOperation, []any{op3, "ingest", "running", "run-1/4242/start-2", 1, r.draft2, 1, claim2, r.human, nil, nil}},
-			{`UPDATE operation SET created_role = 'publisher' WHERE id = $1`, []any{op3}},
+			{insertOperationRole, []any{op3, "ingest", "running", "run-1/4242/start-2", 1, r.draft2, 1, claim2, r.human, nil, nil,
+				"publisher"}},
 		}, insertRelease, newRelease(9, op3), "23503"},
 		{"release of another draft's publish operation", []stmt{{insertOperation, []any{op3, "publish", "queued", nil, 0,
 			r.draft, 1, nil, r.human, nil, nil}}}, insertRelease, newRelease(9, op3), "23503"},
@@ -253,8 +261,8 @@ func TestReleaseConstraints(t *testing.T) {
 		{"release published by no principal", nil, insertRelease, newRelease(10, id.New(id.Principal)), "23503"},
 		// The publisher is the principal that requested the publish operation, in its role.
 		{"release published by another principal than its operation's", nil, insertRelease, newRelease(10, bob), "23503"},
-		{"release of a publish operation requested in another role", []stmt{{`UPDATE operation SET created_role = 'approver'
-			WHERE id = $1`, []any{op2}}}, insertRelease, newRelease(), "23503"},
+		{"release of a publish operation requested in another role", []stmt{{insertOperationRole, []any{op3, "publish", "failed",
+			nil, 0, r.draft2, 1, nil, r.human, nil, `{"code": "conflict"}`, "approver"}}}, insertRelease, newRelease(9, op3), "23503"},
 		{"release published under the author role", nil, insertRelease, newRelease(11, "author"), "release_published_role_check"},
 		{"release with an id of another kind", nil, insertRelease, newRelease(0, id.New(id.Draft)), "release_id_check"},
 		// release_machine
