@@ -208,6 +208,73 @@ func TestAdopterRetriesUnread(t *testing.T) {
 	}
 }
 
+// A plan waiting for its retry keeps its time while its scope is closed for a pass: reopening the
+// scope does not observe it again before a lease has passed.
+func TestAdopterRetryOutlivesClosedScope(t *testing.T) {
+	t.Parallel()
+	le := newLoopEnv(t, "")
+	le.node.Fail(talostest.IdentityType, codes.Internal)
+	le.approveIt(t)
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	lease := 2 * time.Second
+	a := le.adopter(t, life, config.Ingestion{Heartbeat: 20 * time.Millisecond, Lease: lease}, idle)
+	start := time.Now()
+	a.startAdopter()
+	defer stopping(a, stop)
+	waitIdle(t, idle, 2)
+	mustExec(t, le.db, `UPDATE installation_state SET recovery_mode = true`)
+	waitIdle(t, idle, 3)
+	mustExec(t, le.db, `UPDATE installation_state SET recovery_mode = false`)
+	waitIdle(t, idle, 3)
+	if time.Since(start) >= lease {
+		t.Skip("the passes took longer than a lease")
+	}
+	if s, r := le.starts(t); s != 1 || r != 0 {
+		t.Fatalf("within a lease: %d observations and %d refusal entries", s, r)
+	}
+}
+
+// A refusal whose refusal entry could not be recorded is retried no sooner than a lease later,
+// and recorded once the entry can be.
+func TestAdopterUnrecordedRefusal(t *testing.T) {
+	t.Parallel()
+	le := newLoopEnv(t, "")
+	le.node.SetSMBIOSUUID(t, "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b", true) // another machine at the route
+	mustExec(t, le.db, `CREATE FUNCTION test_fail_refusal() RETURNS trigger LANGUAGE plpgsql AS
+		$$ BEGIN RAISE EXCEPTION 'refusal entries fail in this test'; END $$`)
+	mustExec(t, le.db, `CREATE TRIGGER test_fail_refusal BEFORE INSERT ON machine_event FOR EACH ROW
+		WHEN (NEW.kind = 'refusal') EXECUTE FUNCTION test_fail_refusal()`)
+	le.approveIt(t)
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	lease := 2 * time.Second
+	a := le.adopter(t, life, config.Ingestion{Heartbeat: 20 * time.Millisecond, Lease: lease}, idle)
+	start := time.Now()
+	a.startAdopter()
+	defer stopping(a, stop)
+	waitIdle(t, idle, 5)
+	if time.Since(start) < lease {
+		if s, r := le.starts(t); s != 1 || r != 0 {
+			t.Fatalf("within a lease: %d observations and %d refusal entries", s, r)
+		}
+	}
+	mustExec(t, le.db, `DROP TRIGGER test_fail_refusal ON machine_event`)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, r := le.starts(t); r == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the refusal was not recorded after its entry could be")
+		}
+		waitIdle(t, idle, 1)
+	}
+	if s, r := le.starts(t); s != 2 || r != 1 {
+		t.Fatalf("%d observations and %d refusal entries", s, r)
+	}
+}
+
 // The loop observes no plan it cannot adopt now, and records no refusal for it: an expired plan,
 // one whose approver's identity is revoked, one approved in an earlier epoch, a plan of another
 // kind, or one whose machine's scope is closed by an operation holding it or by recovery mode

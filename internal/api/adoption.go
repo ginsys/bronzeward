@@ -21,6 +21,11 @@ func (r *adoptionRefused) Error() string {
 	return fmt.Sprintf("adoption refused by requirement %s: %s", r.Comparison, r.Cause)
 }
 
+// errEvidenceUnread is an adoption record not attempted because the observation it relies on left
+// the identity, the configuration or the assignment evidence unread: no evidence either way, so no
+// refusal (§6.3 step 4, choice §10.27).
+var errEvidenceUnread = errors.New("the observation relied on left evidence unread")
+
 func refuseAdoption(comparison, cause string) error {
 	return &adoptionRefused{Comparison: comparison, Cause: cause}
 }
@@ -57,7 +62,8 @@ func (a *API) commitAdoption(ctx context.Context, plan string) (adopted, error) 
 		return r, err
 	}
 	if rerr := a.recordRefusal(ctx, machine, plan, refused); rerr != nil {
-		return adopted{}, errors.Join(err, rerr)
+		// Only a recorded refusal answers *adoptionRefused: an unrecorded one is attempted again.
+		return adopted{}, fmt.Errorf("%v, but its refusal entry was not recorded: %w", err, rerr)
 	}
 	return adopted{}, err
 }
@@ -181,14 +187,18 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	// 4.4: the recorded observation with the highest basis, of any purpose: begun after the
 	// approval, no older than the plan binds (measured from its start entry, when the read began),
 	// showing the machine's identity, the baseline's configuration digest and the bound assignment
-	// revision. A start with no recorded observation does not count.
+	// revision. A start with no recorded observation does not count; one that left any of those
+	// three values unread is no evidence either way, so the record is not attempted and nothing is
+	// refused (choice §10.27).
 	var obs sql.NullString
 	var basis int64
 	var startedAt time.Time
 	var identityMatches, digestMatches bool
-	var evidence sql.NullString
+	var evidence, unread sql.NullString
 	var baseline []byte
 	err = tx.QueryRowContext(ctx, `SELECT o.id, o.basis, se.at,
+			(SELECT string_agg(k, ', ' ORDER BY k) FROM jsonb_object_keys(o.unread) k
+				WHERE k IN ('identity', 'configuration', 'assignmentEvidence')),
 			CASE WHEN m.smbios_uuid IS NOT NULL THEN o.smbios_uuid IS NOT DISTINCT FROM m.smbios_uuid
 				ELSE o.talos_node_id IS NOT DISTINCT FROM m.talos_node_id AND o.smbios_uuid IS NULL END
 			AND o.talos_cluster_id IS NOT DISTINCT FROM c.talos_cluster_id,
@@ -197,7 +207,7 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 			JOIN machine m ON m.id = o.machine JOIN cluster c ON c.id = m.cluster
 			JOIN release_machine rm ON rm.release = $2 AND rm.machine = o.machine
 			JOIN import_base_revision b ON b.id = rm.import_base_revision
-		WHERE o.machine = $1 ORDER BY o.basis DESC LIMIT 1`, machine, release).Scan(&obs, &basis, &startedAt,
+		WHERE o.machine = $1 ORDER BY o.basis DESC LIMIT 1`, machine, release).Scan(&obs, &basis, &startedAt, &unread,
 		&identityMatches, &digestMatches, &evidence, &baseline)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return r, machine, err
@@ -209,6 +219,9 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 		return r, machine, refuseAdoption("4.4", "the latest observation began before the approval")
 	case at.Sub(startedAt) > maxAge:
 		return r, machine, refuseAdoption("4.4", "the latest observation is older than the plan allows")
+	case unread.Valid: // no evidence either way: rolled back without a refusal entry
+		return r, machine, fmt.Errorf("adoption of plan %s: observation %s did not read the %s: %w", plan, obs.String,
+			unread.String, errEvidenceUnread)
 	case !identityMatches:
 		return r, machine, refuseAdoption("4.4", "the latest observation shows another machine identity")
 	case !digestMatches:
