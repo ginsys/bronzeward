@@ -8,10 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/textdiff"
 )
 
@@ -36,31 +40,20 @@ type planInput struct {
 	MaxAttempts                 *int64  `json:"maxAttempts"`
 }
 
-func (in *planInput) check(a *API) error {
+// check validates what the request alone fixes. The defaults and the deployment's maximum are
+// applied by resolve, after the key is looked up (§7.2), so a committed request replays whatever
+// the deployment says now.
+func (in *planInput) check(*API) error {
 	if err := id.MustHave(in.ReleaseID, id.Release); err != nil {
 		return errors.New("releaseId must be a release id")
 	}
 	if err := id.MustHave(in.Machine, id.Machine); err != nil {
 		return errors.New("machine must be a machine id")
 	}
-	def := a.d.exec.PlanDefaults
 	switch in.Operation {
 	case "apply-config":
 		if in.Mode == nil || *in.Mode != "no-reboot" {
 			return errors.New(`an apply-config plan takes mode "no-reboot"`)
-		}
-		for _, d := range []struct {
-			v   **int64
-			def time.Duration
-		}{{&in.TransportDeadlineSeconds, def.TransportDeadline}, {&in.VerificationDeadlineSeconds, def.VerificationDeadline}} {
-			if *d.v == nil {
-				s := int64(d.def / time.Second)
-				*d.v = &s
-			}
-		}
-		if in.MaxAttempts == nil {
-			n := int64(def.MaxAttempts)
-			in.MaxAttempts = &n
 		}
 	case "adopt":
 		if in.Mode != nil || in.TransportDeadlineSeconds != nil || in.VerificationDeadlineSeconds != nil || in.MaxAttempts != nil {
@@ -71,36 +64,55 @@ func (in *planInput) check(a *API) error {
 	}
 	for _, d := range []struct {
 		name string
-		v    **int64
-		def  time.Duration
+		v    *int64
 	}{
-		{"expiresInSeconds", &in.ExpiresInSeconds, def.Expiry},
-		{"maxObservationAgeSeconds", &in.MaxObservationAgeSeconds, def.MaxObservationAge},
-		{"checkValiditySeconds", &in.CheckValiditySeconds, def.CheckValidity},
-		{"transportDeadlineSeconds", &in.TransportDeadlineSeconds, 0},
-		{"verificationDeadlineSeconds", &in.VerificationDeadlineSeconds, 0},
+		{"expiresInSeconds", in.ExpiresInSeconds},
+		{"maxObservationAgeSeconds", in.MaxObservationAgeSeconds},
+		{"checkValiditySeconds", in.CheckValiditySeconds},
+		{"transportDeadlineSeconds", in.TransportDeadlineSeconds},
+		{"verificationDeadlineSeconds", in.VerificationDeadlineSeconds},
 	} {
-		if *d.v == nil {
-			if d.def == 0 {
-				continue // an adopt plan's deadline
-			}
-			s := int64(d.def / time.Second)
-			*d.v = &s
-		}
-		if s := **d.v; s < 1 || s > int64(config.MaxPlanDuration/time.Second) {
+		if d.v != nil && (*d.v < 1 || *d.v > int64(config.MaxPlanDuration/time.Second)) {
 			return fmt.Errorf("%s must be from 1 to %d", d.name, int64(config.MaxPlanDuration/time.Second))
 		}
 	}
 	if in.MaxAttempts != nil && (*in.MaxAttempts < 1 || *in.MaxAttempts > config.MaxPlanAttempts) {
 		return fmt.Errorf("maxAttempts must be from 1 to %d", config.MaxPlanAttempts)
 	}
-	if in.TransportDeadlineSeconds != nil {
-		if limit := int64(a.d.exec.MaxTransportDeadline / time.Second); *in.TransportDeadlineSeconds > limit {
-			return fmt.Errorf("transportDeadlineSeconds must be at most the deployment's maximum, %d", limit)
+	if t, v := in.TransportDeadlineSeconds, in.VerificationDeadlineSeconds; t != nil && v != nil && *t > *v {
+		return errors.New("transportDeadlineSeconds must be at most verificationDeadlineSeconds")
+	}
+	return nil
+}
+
+// resolve fills what the request leaves out from the deployment's defaults and holds the transport
+// deadline to the deployment's maximum and the verification deadline (choice §17.37). It runs in
+// T4, so only a request with no record meets it.
+func (in *planInput) resolve(exec config.Execution) error {
+	def := exec.PlanDefaults
+	fill := func(v **int64, d time.Duration) {
+		if *v == nil {
+			s := int64(d / time.Second)
+			*v = &s
 		}
-		if *in.TransportDeadlineSeconds > *in.VerificationDeadlineSeconds {
-			return errors.New("transportDeadlineSeconds must be at most verificationDeadlineSeconds")
-		}
+	}
+	fill(&in.ExpiresInSeconds, def.Expiry)
+	fill(&in.MaxObservationAgeSeconds, def.MaxObservationAge)
+	fill(&in.CheckValiditySeconds, def.CheckValidity)
+	if in.Operation != "apply-config" {
+		return nil
+	}
+	fill(&in.TransportDeadlineSeconds, def.TransportDeadline)
+	fill(&in.VerificationDeadlineSeconds, def.VerificationDeadline)
+	if in.MaxAttempts == nil {
+		n := int64(def.MaxAttempts)
+		in.MaxAttempts = &n
+	}
+	if limit := int64(exec.MaxTransportDeadline / time.Second); *in.TransportDeadlineSeconds > limit {
+		return fmt.Errorf("transportDeadlineSeconds must be at most the deployment's maximum, %d", limit)
+	}
+	if *in.TransportDeadlineSeconds > *in.VerificationDeadlineSeconds {
+		return errors.New("transportDeadlineSeconds must be at most verificationDeadlineSeconds")
 	}
 	return nil
 }
@@ -191,6 +203,9 @@ type planBody struct {
 // the release was compiled from. The plan is one plan entry on the machine's timeline, proposed.
 func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*planInput)
+	if err := in.resolve(a.d.exec); err != nil {
+		return result{}, refuse(http.StatusBadRequest, "invalid-request", err.Error())
+	}
 	b := planBody{ID: id.New(id.Plan), Revision: 1, State: "proposed", Machine: in.Machine, Release: in.ReleaseID,
 		Operation: in.Operation, Mode: in.Mode, MaxObservationAgeSeconds: *in.MaxObservationAgeSeconds,
 		CheckValiditySeconds: *in.CheckValiditySeconds, TransportDeadlineSeconds: in.TransportDeadlineSeconds,
@@ -256,7 +271,7 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 				"the machine has no Applied configuration to plan an apply-config from; adopt it first").with("machine", in.Machine)
 		}
 		b.BaselineRevision = &baselineRev.Int64
-		d, err := planDiffFrom(ctx, tx, in.Machine, appliedRelease.String, in.ReleaseID, redacted)
+		d, err := planDiffFrom(ctx, tx, in.Machine, appliedRelease.String, in.ReleaseID, appliedDigest, redacted)
 		if err != nil {
 			return result{}, err
 		}
@@ -319,9 +334,11 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 }
 
 // selectPlan reads a plan with its state. A proposed or approved plan past its expiry reads
-// expired by the server clock, before any transaction has written that (§8.1).
+// expired by the server clock, before any transaction has written that (§8.1). The clock is read
+// when the plan is, not at the transaction's start, which can precede a wait on the installation
+// state.
 const selectPlan = `SELECT p.id, s.revision,
-		CASE WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= now() THEN 'expired' ELSE s.state END, s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
+		CASE WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= clock_timestamp() THEN 'expired' ELSE s.state END, s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
 		p.assignment_revision, p.desired_release, p.baseline_revision, p.route, extract(epoch FROM p.max_observation_age)::bigint,
 		extract(epoch FROM p.check_validity)::bigint, extract(epoch FROM p.transport_deadline)::bigint,
 		extract(epoch FROM p.verification_deadline)::bigint, p.max_attempts, p.rollout_limit, p.approval_policy, p.created_by,
@@ -356,18 +373,59 @@ var getPlan = item(id.Plan, func(ctx context.Context, tx *sql.Tx, v string) (str
 })
 
 // planDiffFrom is the unified diff from Applied's redacted configuration to the target's, or a
-// withheld diff when either has none.
-func planDiffFrom(ctx context.Context, tx *sql.Tx, machine, from, to string, target sql.NullString) (*planDiff, error) {
+// withheld diff when either has none, or when the machine holds a configuration other than its
+// Applied release's artifact (pending convergence, execution-recovery.md §6.3), which has no
+// redacted form.
+func planDiffFrom(ctx context.Context, tx *sql.Tx, machine, from, to string, appliedDigest []byte, target sql.NullString) (*planDiff, error) {
 	d := &planDiff{From: from, To: to}
 	var applied sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT redacted FROM release_machine WHERE release = $1 AND machine = $2`,
-		from, machine).Scan(&applied); err != nil {
+	var artifact []byte
+	if err := tx.QueryRowContext(ctx, `SELECT redacted, configuration_digest FROM release_machine WHERE release = $1 AND machine = $2`,
+		from, machine).Scan(&applied, &artifact); err != nil {
 		return nil, err
 	}
-	if !applied.Valid || !target.Valid {
+	if !applied.Valid || !target.Valid || !bytes.Equal(artifact, appliedDigest) {
 		d.Withheld = true
 		return d, nil
 	}
-	d.Unified = textdiff.Unified(applied.String, target.String)
+	base, shown, err := pairRedacted(applied.String, target.String)
+	if err != nil {
+		d.Withheld = true
+		return d, nil
+	}
+	d.Unified = textdiff.Unified(base, shown)
 	return d, nil
+}
+
+// pairedToken stands for a base leaf shown beside a redacted target leaf (compilation §8.3).
+const pairedToken = "<redacted:paired>"
+
+// pairRedacted applies paired redaction to a diff's two sides (compilation §8.3, §12.2): a base
+// scalar at the path of a target scalar holding a redaction token, and different from it, becomes
+// <redacted:paired>, whatever its kind, so that a boolean or a short value cannot be read by
+// elimination. An embedded document is one scalar here, so a redacted leaf inside one pairs the
+// whole base document; an embedded JSON document writes its token's angle bracket escaped, matched
+// without the backslash. Both sides are encoded again by the same encoder so that only what differs
+// shows; a side that does not walk withholds the diff.
+func pairRedacted(base, target string) (string, string, error) {
+	redacted := map[string]string{}
+	shown, err := ingest.RewriteLeaves([]byte(target), nil, func(p ingest.Path, n *yaml.Node) error {
+		if n.Kind == yaml.ScalarNode && (strings.Contains(n.Value, "<redacted") || strings.Contains(n.Value, "u003credacted")) {
+			redacted[p.String()] = n.Value
+		}
+		return nil
+	}, nil)
+	if err != nil {
+		return "", "", err
+	}
+	paired, err := ingest.RewriteLeaves([]byte(base), nil, func(p ingest.Path, n *yaml.Node) error {
+		if v, ok := redacted[p.String()]; ok && n.Kind == yaml.ScalarNode && n.Value != v {
+			*n = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: pairedToken}
+		}
+		return nil
+	}, nil)
+	if err != nil {
+		return "", "", err
+	}
+	return string(paired), string(shown), nil
 }

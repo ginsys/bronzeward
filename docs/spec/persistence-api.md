@@ -1652,8 +1652,12 @@ recovery, plan binding), which every plan body carries:
   `maxAttempts` (the last three `null` for an `adopt` plan);
 - `evidence`: for an `apply-config` plan, `diff`, from the release of the
   machine's `Applied` (`from`) to the plan's (`to`), as a unified line diff of
-  their redacted whole configurations (`unified`), or `"withheld": true` with
-  no text when either has no redacted form (compilation §8.3); for an `adopt`
+  their redacted whole configurations (`unified`), a base leaf shown beside a
+  redacted leaf of the plan's release written `<redacted:paired>`
+  (compilation §8.3), or `"withheld": true` with no text when either has no
+  redacted form, or when the machine holds a configuration other than its
+  `Applied` release's artifact, as an adopted machine pending convergence does
+  (execution and recovery §6.3); for an `adopt`
   plan, `baseline`, the `importBaseRevision` the release was compiled from and
   `pendingConvergence`, whether the release's artifact differs from it, which
   leaves the machine pending convergence (execution and recovery §6.3)
@@ -1674,9 +1678,13 @@ seconds, from 1 to 604800 (seven days): `expiresInSeconds`,
 plan, `transportDeadlineSeconds` and `verificationDeadlineSeconds`, with
 `maxAttempts` from 1 to 10. A value left out is the deployment's
 `execution.planDefaults` value. An `adopt` plan takes no `mode`, deadlines or
-attempt limit. A transport deadline above the deployment's maximum transport
-deadline (execution and recovery §7.3) or above the verification deadline is
-`400 invalid-request`, as is any value out of range **(choice §17.37)**.
+attempt limit. A value out of range is `400 invalid-request` before the request
+is admitted. A transport deadline above the deployment's maximum transport
+deadline (execution and recovery §7.3) or above the verification deadline, once
+the defaults are filled, is `400 invalid-request` from the creation
+transaction, after the key is looked up, so that a repeated request replays its
+recorded answer whatever the deployment's values are now (§7.2)
+**(choice §17.37)**.
 
 Creating a draft, and later updating one of its fragments after five other
 updates have taken the draft to revision 6. A request body that can hold a
@@ -3394,7 +3402,10 @@ design and evidence do not settle the question. Each is marked in place as
     exceeds the maximum transport deadline). The plan binds the values it was
     created with; a later configuration change moves no plan. An out-of-range
     value is `400 invalid-request`, refused before the request is admitted, as
-    any malformed body is. Alternatives: duration strings, a second encoding
+    any malformed body is; what depends on the deployment (the defaults, the
+    maximum transport deadline) is applied in the creation transaction, after
+    the key lookup, so that a configuration change never turns a committed
+    request's replay into a refusal. Alternatives: duration strings, a second encoding
     in an API whose other numbers are integers, with a parser's leniency as
     part of the contract; every value required, which makes each client carry
     the deployment's policy; fixed constants, which no deployment could tune
@@ -3404,7 +3415,10 @@ design and evidence do not settle the question. Each is marked in place as
     recovery §6.3): `pendingConvergence` is `true` when the release's
     artifact digest is not the import base's configuration digest. The
     approver learns that the adoption leaves convergence to a later
-    `apply-config` plan, whose own diff shows the change. Alternatives: the
+    `apply-config` plan. That plan's diff is withheld while the node holds
+    the import base's configuration, which has no redacted whole form; its
+    approver relies on the release's validation and this plan's evidence.
+    Alternatives: the
     two digests in the body, which no read answers and which would let a
     reader confirm a guessed configuration offline; a diff from the import
     base's sanitized document, which is source text with references, not a

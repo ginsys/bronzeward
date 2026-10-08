@@ -51,11 +51,20 @@ type planEnv struct {
 
 func newPlanEnv(t *testing.T) *planEnv {
 	t.Helper()
+	return newPlanEnvWith(t, "machine:\n  type: worker\n  token: <redacted:schema>\n",
+		"machine:\n  type: controlplane\n  token: <redacted:schema>\n")
+}
+
+// newPlanEnvWith is newPlanEnv with the Applied and target releases' redacted configurations.
+func newPlanEnvWith(t *testing.T, applied, target string) *planEnv {
+	t.Helper()
 	p := &planEnv{draftEnv: newDraftEnv(t), appliedDigest: bytes.Repeat([]byte{7}, 32)}
 	p.assigned = true
-	p.redacted = "machine:\n  type: worker\n  token: <redacted:schema>\n"
+	p.redacted = applied
+	p.artifact = p.appliedDigest // the node holds the Applied release's artifact
 	p.applied = p.release(p.draft, 1, releaseProvenance)
-	p.redacted = "machine:\n  type: controlplane\n  token: <redacted:schema>\n"
+	p.artifact = nil
+	p.redacted = target
 	p.target = p.release(p.secondDraft("k-draft2-0123456789"), 1, releaseProvenance)
 	mustExec(t, p.db, `UPDATE machine_state SET desired = $2, applied_release = $3, applied_digest = $4, applied_source = 'adoption',
 		baseline_revision = 4 WHERE machine = $1`, p.machine, p.target.rel, p.applied.rel, p.appliedDigest)
@@ -167,6 +176,37 @@ func TestPlanCreationDurations(t *testing.T) {
 	}
 }
 
+// A committed creation replays whatever the deployment's defaults and maximum are now (§7.2): the
+// checks that depend on them run after the key lookup, so only a new request meets them.
+func TestPlanCreationReplayAfterConfigChange(t *testing.T) {
+	p := newPlanEnv(t)
+	for _, c := range []struct {
+		name, key, extra string
+		change           func(*config.Execution)
+	}{
+		{"transport default above the request's verification", "k-plan-cfg-default-012", `,"verificationDeadlineSeconds":90`,
+			func(e *config.Execution) { e.PlanDefaults.TransportDeadline = 120 * time.Second }},
+		{"maximum below the request's transport", "k-plan-cfg-maximum-012", `,"transportDeadlineSeconds":240`,
+			func(e *config.Execution) {
+				e.MaxTransportDeadline = time.Minute
+				e.PlanDefaults.TransportDeadline = time.Minute
+			}},
+	} {
+		p.api.d.exec = testExecution()
+		body := applyBody(p.target.rel, p.machine, c.extra)
+		first := p.plan(p.robot, c.key, body)
+		if first.Code != http.StatusCreated {
+			t.Fatalf("%s: first %d %s", c.name, first.Code, first.Body)
+		}
+		c.change(&p.api.d.exec)
+		replay := p.plan(p.robot, c.key, body)
+		if replay.Code != http.StatusCreated || replay.Header().Get("Idempotent-Replayed") != "true" || replay.Body.String() != first.Body.String() {
+			t.Errorf("%s: replay %d %q %s", c.name, replay.Code, replay.Header().Get("Idempotent-Replayed"), replay.Body)
+		}
+		wantProblem(t, p.plan(p.robot, c.key+"-new", body), http.StatusBadRequest, "invalid-request")
+	}
+}
+
 // An apply-config plan whose Applied or target configuration could not be redacted shows no diff
 // and says so (compilation §8.3).
 func TestPlanCreationDiffWithheld(t *testing.T) {
@@ -182,6 +222,63 @@ func TestPlanCreationDiffWithheld(t *testing.T) {
 	}
 }
 
+// A base leaf the diff shows beside a redacted target leaf is shown <redacted:paired>, whatever its
+// kind, so that a boolean or a short value cannot be read by elimination (compilation §8.3, §12.2).
+// A base leaf beside a literal, or equal to its target, is shown as it is.
+func TestPlanCreationDiffPaired(t *testing.T) {
+	esc := string(rune(92)) + "u003c" // an embedded JSON document's escaped angle bracket
+	p := newPlanEnvWith(t,
+		"machine:\n  install:\n    wipe: false\n    disk: /dev/sda\n  certSANs:\n    - 10.0.0.1\n    - 10.0.0.2\n  network:\n    hostname: a\n  token: <redacted:schema>\n"+
+			"  config: |\n    {\"k\": \"plain\"}\n",
+		"machine:\n  install:\n    wipe: <redacted:install/wipe@1>\n    disk: /dev/sdb\n  certSANs:\n    - <redacted:san@1#0>\n    - 10.0.0.2\n  network:\n    hostname: <redacted:value>\n  token: <redacted:schema>\n"+
+			"  config: |\n    {\"k\": \""+esc+"redacted:k@1>\"}\n")
+	t.Parallel()
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-paired-0123456", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	d := b.Evidence.Diff
+	if d == nil || d.Withheld {
+		t.Fatalf("diff %+v", d)
+	}
+	removed := map[string]bool{}
+	for _, l := range strings.Split(d.Unified, "\n") {
+		if strings.HasPrefix(l, "-") {
+			removed[strings.TrimSpace(l[1:])] = true
+		}
+	}
+	want := map[string]bool{"wipe: <redacted:paired>": true, "disk: /dev/sda": true, "- <redacted:paired>": true,
+		"hostname: <redacted:paired>": true, "config: <redacted:paired>": true}
+	if !reflect.DeepEqual(removed, want) {
+		t.Fatalf("removed lines %v\ndiff:\n%s", removed, d.Unified)
+	}
+	for _, leak := range []string{"false", "10.0.0.1", "hostname: a", "plain"} {
+		if strings.Contains(d.Unified, leak) {
+			t.Fatalf("the diff shows %q beside a redacted leaf:\n%s", leak, d.Unified)
+		}
+	}
+}
+
+// A side that paired redaction cannot walk withholds the diff rather than show it unpaired.
+func TestPlanCreationDiffUnpairable(t *testing.T) {
+	p := newPlanEnvWith(t, "machine:\n  wipe: false\n  bad: [\n", "machine:\n  wipe: <redacted:install/wipe@1>\n")
+	t.Parallel()
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-unpaired-01234", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	if d := b.Evidence.Diff; d == nil || !d.Withheld || d.Unified != "" {
+		t.Fatalf("diff %+v", b.Evidence.Diff)
+	}
+}
+
+// A machine pending convergence (execution-recovery.md §6.3) holds a configuration that is not its
+// Applied release's artifact, so the Applied release's redacted form is not what the plan changes:
+// the diff is withheld even though both releases have one.
+func TestPlanCreationDiffPendingConvergence(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	mustExec(t, p.db, `UPDATE machine_state SET applied_digest = $2 WHERE machine = $1`, p.machine, bytes.Repeat([]byte{5}, 32))
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-pending-012345", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	if d := b.Evidence.Diff; d == nil || !d.Withheld || d.Unified != "" || d.From != p.applied.rel || d.To != p.target.rel {
+		t.Fatalf("diff %+v", b.Evidence.Diff)
+	}
+}
+
 // An adopt plan (execution-recovery.md §6.3) for a machine with no Applied binds its Desired at
 // creation, or none, and no mode, baseline, expected digest, deadlines or attempts; its evidence
 // names the baseline and whether the release's artifact differs from it (pending convergence).
@@ -190,11 +287,12 @@ func TestPlanCreationAdopt(t *testing.T) {
 	t.Parallel()
 	mustExec(t, p.db, `UPDATE machine_state SET applied_release = NULL, applied_digest = NULL, applied_source = NULL,
 		baseline_revision = NULL, desired = NULL WHERE machine = $1`, p.machine)
-	rec := p.plan(p.robot, "k-adopt-0123456789", adoptBody(p.applied.rel, p.machine, `,"maxObservationAgeSeconds":60`))
+	// The target release's artifact is its import base's configuration.
+	rec := p.plan(p.robot, "k-adopt-0123456789", adoptBody(p.target.rel, p.machine, `,"maxObservationAgeSeconds":60`))
 	b := decode[planBody](t, rec, http.StatusCreated)
 	if b.Operation != "adopt" || b.Mode != nil || b.DesiredRelease != nil || b.BaselineRevision != nil || b.TransportDeadlineSeconds != nil ||
 		b.VerificationDeadlineSeconds != nil || b.MaxAttempts != nil || b.MaxObservationAgeSeconds != 60 || b.Evidence.Diff != nil ||
-		b.Evidence.Baseline == nil || b.Evidence.Baseline.ImportBaseRevision != p.applied.ibr || b.Evidence.Baseline.PendingConvergence {
+		b.Evidence.Baseline == nil || b.Evidence.Baseline.ImportBaseRevision != p.target.ibr || b.Evidence.Baseline.PendingConvergence {
 		t.Fatalf("adopt %+v %+v", b, b.Evidence.Baseline)
 	}
 	if n := count(t, p.db, `SELECT count(*) FROM plan WHERE id = $1 AND kind = 'adopt' AND expected_digest IS NULL
@@ -355,4 +453,34 @@ func TestPlanReads(t *testing.T) {
 	wantProblem(t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + id.New(id.Plan), token: viewer}), http.StatusNotFound, "not-found")
 	wantProblem(t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + b.ID + "?x=1", token: viewer}), http.StatusBadRequest,
 		"invalid-request")
+}
+
+// A read whose transaction began before a plan's expiry but waited on the installation state past
+// it reads the plan expired: expiry is judged when the plan is read, not when the read began (§8.1).
+func TestPlanReadAfterLockWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	short := decode[planBody](t, p.plan(p.robot, "k-plan-wait-short-0123", applyBody(p.target.rel, p.machine,
+		`,"expiresInSeconds":1`)), http.StatusCreated)
+	lock, err := p.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Rollback() }()
+	if _, err := lock.Exec(`SELECT 1 FROM installation_state FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	viewer := p.human("h-viewer")
+	if time.Until(short.ExpiresAt) < 300*time.Millisecond {
+		t.Fatal("the plan expired before the read began; the setup is too slow to show anything")
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- p.do(p.api, call{method: "GET", path: prefix + "/plans/" + short.ID, token: viewer}) }()
+	time.Sleep(time.Until(short.ExpiresAt.Add(200 * time.Millisecond)))
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if got := decode[planBody](t, <-done, http.StatusOK); got.State != "expired" {
+		t.Fatalf("read after waiting past expiry: state %q, want expired", got.State)
+	}
 }
