@@ -417,8 +417,10 @@ CREATE TABLE operation (
   CONSTRAINT operation_id_kind UNIQUE (id, kind),
   -- The key a release names its publish operation by (§6.2).
   CONSTRAINT operation_publication UNIQUE (id, kind, draft, draft_revision, created_by, created_role),
-  -- The key a plan state, an observation and an adoption record name their plan's operation by.
-  CONSTRAINT operation_id_plan UNIQUE (id, plan)
+  -- The key a plan state, an observation and an adoption record name their plan's operation by;
+  -- an adoption record also names the epoch it was created in.
+  CONSTRAINT operation_id_plan UNIQUE (id, plan),
+  CONSTRAINT operation_id_plan_epoch UNIQUE (id, plan, epoch)
 );
 -- Execution and recovery §3.2 comparison 4: one committed, sending, verifying or unresolved
 -- apply-config operation per machine scope; comparison 5: one per rollout scope, the machine's
@@ -997,6 +999,8 @@ CREATE TABLE plan (
   UNIQUE (id, machine),
   UNIQUE (id, created_by),
   UNIQUE (id, machine, route),
+  -- Each record is its own timeline entry (execution and recovery §4.1).
+  UNIQUE (machine, revision),
   FOREIGN KEY (machine, cluster) REFERENCES machine (id, cluster),
   FOREIGN KEY (release, cluster) REFERENCES release (id, cluster),
   FOREIGN KEY (release, machine) REFERENCES release_machine (release, machine),
@@ -1032,6 +1036,8 @@ CREATE TABLE approval (
   entry_kind    text NOT NULL GENERATED ALWAYS AS ('approval') STORED,
   UNIQUE (plan, epoch),
   UNIQUE (id, plan),
+  UNIQUE (id, plan, epoch),
+  UNIQUE (machine, revision),
   FOREIGN KEY (plan, machine) REFERENCES plan (id, machine),
   FOREIGN KEY (approver, approver_kind) REFERENCES principal (id, kind),
   FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
@@ -1051,6 +1057,8 @@ CREATE TABLE plan_state (
   updated_at timestamptz NOT NULL,
   FOREIGN KEY (approval, plan) REFERENCES approval (id, plan),
   FOREIGN KEY (operation, plan) REFERENCES operation (id, plan),
+  -- The key an adoption record names its plan's commitment by.
+  UNIQUE (plan, approval, operation),
   CONSTRAINT plan_state_operation CHECK ((state = 'committed') = (operation IS NOT NULL)),
   CHECK ((state IN ('approved', 'committed', 'revoked')) = (approval IS NOT NULL)),
   CONSTRAINT plan_state_reason CHECK (CASE state
@@ -1064,9 +1072,16 @@ CREATE TABLE plan_state (
 -- A plan's state is created proposed and moves only along execution and recovery §2's
 -- transitions: proposed to approved, cancelled or expired; approved to a later approval,
 -- committed, revoked, cancelled or expired, keeping its approval into committed and revoked.
--- Committed, revoked, cancelled and expired are final.
+-- Committed, revoked, cancelled and expired are final. An approval is valid only in its epoch
+-- (§2): a plan becomes approved or committed only under an approval of the current epoch, so a
+-- restore's new epoch voids the approvals before it and none of them returns.
 CREATE FUNCTION refuse_plan_state_transition() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+  IF NEW.state IN ('approved', 'committed') AND EXISTS (SELECT FROM approval a, installation_state s
+       WHERE a.id = NEW.approval AND a.epoch <> s.epoch) THEN
+    RAISE EXCEPTION 'plan_state: an approval of an earlier epoch is refused'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'plan_state_approval_epoch', TABLE = 'plan_state';
+  END IF;
   IF TG_OP = 'INSERT' THEN
     IF NEW.state = 'proposed' THEN
       RETURN NEW;
@@ -1115,6 +1130,7 @@ CREATE TABLE approval_revocation (
   at              timestamptz NOT NULL,
   revision        bigint NOT NULL,
   entry_kind      text NOT NULL GENERATED ALWAYS AS ('approval-revocation') STORED,
+  UNIQUE (machine, revision),
   FOREIGN KEY (approval, plan) REFERENCES approval (id, plan),
   FOREIGN KEY (plan, machine) REFERENCES plan (id, machine),
   FOREIGN KEY (revoked_by, revoked_by_kind) REFERENCES principal (id, kind),
@@ -1139,6 +1155,7 @@ CREATE TABLE plan_cancellation (
   revision          bigint NOT NULL,
   entry_kind        text NOT NULL GENERATED ALWAYS AS ('plan-cancellation') STORED,
   CHECK (role = 'publisher' OR cancelled_by_kind = 'human'),
+  UNIQUE (machine, revision),
   FOREIGN KEY (plan, creator) REFERENCES plan (id, created_by),
   FOREIGN KEY (plan, machine) REFERENCES plan (id, machine),
   FOREIGN KEY (cancelled_by, cancelled_by_kind) REFERENCES principal (id, kind),
@@ -1203,6 +1220,7 @@ CREATE TABLE observation (
     AND talos_node_id IS NULL AND talos_cluster_id IS NULL AND assignment_evidence IS NULL AND running_version IS NULL
     AND configuration_digest IS NULL AND resource_version IS NULL AND health IS NULL)),
   UNIQUE (machine, basis),
+  UNIQUE (machine, revision),
   UNIQUE (id, machine),
   FOREIGN KEY (machine, basis) REFERENCES observation_start (machine, revision),
   FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
@@ -1210,7 +1228,11 @@ CREATE TABLE observation (
 CALL make_immutable('observation');
 
 -- An adoption record (§6.3): an adopt plan's completed operation, the approval it ran under and
--- the observation it relied on. It is one adoption entry on the machine's timeline.
+-- the observation it relied on. It is one adoption entry on the machine's timeline. The plan's
+-- committed state names the same operation and approval, and the record, the operation and the
+-- approval share one epoch: the operation is created with its commitment, which an approval of
+-- another epoch cannot carry. The state is written later in the transaction, so its key is
+-- checked at commit.
 CREATE TABLE adoption_record (
   plan        text PRIMARY KEY,
   plan_kind   text NOT NULL GENERATED ALWAYS AS ('adopt') STORED,
@@ -1224,8 +1246,11 @@ CREATE TABLE adoption_record (
   revision    bigint NOT NULL,
   entry_kind  text NOT NULL GENERATED ALWAYS AS ('adoption') STORED,
   FOREIGN KEY (plan, plan_kind, machine, cluster) REFERENCES plan (id, kind, machine, cluster),
-  FOREIGN KEY (operation, plan) REFERENCES operation (id, plan),
-  FOREIGN KEY (approval, plan) REFERENCES approval (id, plan),
+  UNIQUE (machine, revision),
+  FOREIGN KEY (operation, plan, epoch) REFERENCES operation (id, plan, epoch),
+  FOREIGN KEY (approval, plan, epoch) REFERENCES approval (id, plan, epoch),
+  CONSTRAINT adoption_record_commitment FOREIGN KEY (plan, approval, operation)
+    REFERENCES plan_state (plan, approval, operation) DEFERRABLE INITIALLY DEFERRED,
   FOREIGN KEY (observation, machine) REFERENCES observation (id, machine),
   FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
 );
@@ -1251,6 +1276,16 @@ END
 $$;
 CREATE CONSTRAINT TRIGGER plan_committed AFTER INSERT ON operation DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION require_plan_commitment();
+
+-- What an operation is and was created for is fixed once written: its kind, creation epoch, plan,
+-- scopes, draft revision, staging claim and creator. Only its state, owner, lease, events and
+-- outcome change, so the commitment checked at creation holds for its lifetime.
+CREATE TRIGGER binding BEFORE UPDATE ON operation FOR EACH ROW
+  WHEN ((NEW.id, NEW.kind, NEW.epoch, NEW.plan, NEW.machine, NEW.cluster, NEW.draft, NEW.draft_revision, NEW.ingestion,
+         NEW.created_by, NEW.created_by_kind, NEW.created_role, NEW.created_at)
+    IS DISTINCT FROM (OLD.id, OLD.kind, OLD.epoch, OLD.plan, OLD.machine, OLD.cluster, OLD.draft, OLD.draft_revision,
+         OLD.ingestion, OLD.created_by, OLD.created_by_kind, OLD.created_role, OLD.created_at))
+  EXECUTE FUNCTION refuse_identity_change();
 
 -- The last classification of each provider object version a release depends on (dependency
 -- monitor §5.1): the only mutable dependency table, updated under its row lock. Its object is a
