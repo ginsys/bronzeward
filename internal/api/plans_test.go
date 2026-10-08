@@ -211,15 +211,15 @@ func TestPlanCreationReplayAfterConfigChange(t *testing.T) {
 // An apply-config plan whose Applied or target configuration could not be redacted shows no diff
 // and says so (compilation §8.3).
 func TestPlanCreationDiffWithheld(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
-	// machine2 of each release has no redacted configuration.
-	m2 := p.target.machine2
-	mustExec(t, p.db, `UPDATE machine_state SET desired = $2, applied_release = $2, applied_digest = $3, applied_source = 'adoption',
-		baseline_revision = 1 WHERE machine = $1`, m2, p.target.rel, p.appliedDigest)
-	b := decode[planBody](t, p.plan(p.robot, "k-plan-withheld-0123", applyBody(p.target.rel, m2, "")), http.StatusCreated)
-	if d := b.Evidence.Diff; d == nil || !d.Withheld || d.Unified != "" || d.From != p.target.rel || d.To != p.target.rel {
-		t.Fatalf("diff %+v", b.Evidence.Diff)
+	// The node holds the Applied release's artifact, so only the missing redacted form withholds.
+	ok := "machine:\n  type: worker\n"
+	for side, forms := range map[string][2]string{"applied": {noRedacted, ok}, "target": {ok, noRedacted}} {
+		p := newPlanEnvWith(t, forms[0], forms[1])
+		b := decode[planBody](t, p.plan(p.robot, "k-plan-withheld-0123", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+		if d := b.Evidence.Diff; d == nil || !d.Withheld || d.Unified != "" || d.From != p.applied.rel || d.To != p.target.rel {
+			t.Fatalf("%s without a redacted form: diff %+v", side, b.Evidence.Diff)
+		}
 	}
 }
 
@@ -288,6 +288,30 @@ func TestPlanCreationDiffDuplicateKeys(t *testing.T) {
 		if !reflect.DeepEqual(removed, want) {
 			t.Fatalf("base %q: removed lines %v\ndiff:\n%s", tc.base, removed, d.Unified)
 		}
+	}
+}
+
+// A target mapping with a redacted key gives its leaves paths no base leaf shares, so every
+// plaintext base leaf at or under that mapping's path is paired; a sibling mapping is not.
+func TestPlanCreationDiffRedactedKey(t *testing.T) {
+	p := newPlanEnvWith(t,
+		"machine:\n  nodeLabels:\n    enabled: \"false\"\n    zone: east\n  nodeTaints:\n    dedicated: infra\n",
+		"machine:\n  nodeLabels:\n    <redacted:labels@1#0>: <redacted:labels@1#0>\n  nodeTaints:\n    dedicated: edge\n")
+	t.Parallel()
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-redkey-0123456", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	d := b.Evidence.Diff
+	if d == nil || d.Withheld {
+		t.Fatalf("diff %+v", d)
+	}
+	removed := map[string]bool{}
+	for _, l := range strings.Split(d.Unified, "\n") {
+		if strings.HasPrefix(l, "-") {
+			removed[strings.TrimSpace(l[1:])] = true
+		}
+	}
+	want := map[string]bool{"enabled: " + pairedToken: true, "zone: " + pairedToken: true, "dedicated: infra": true}
+	if !reflect.DeepEqual(removed, want) {
+		t.Fatalf("removed lines %v\ndiff:\n%s", removed, d.Unified)
 	}
 }
 

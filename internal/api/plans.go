@@ -407,7 +407,9 @@ const pairedToken = "<redacted:paired>"
 // its kind, so that a boolean or a short value cannot be read by elimination, unless it is one
 // whole token or the unchanged one leaf of its path on both sides. A path is its keys' text and
 // its indexes, so redaction that gives two keys of one mapping the same token gives their leaves
-// one path; every plaintext base leaf there is paired. An embedded document is one scalar here, so
+// one path; every plaintext base leaf there is paired. A target mapping with a redacted key gives
+// its leaves paths no base leaf shares, so every plaintext base leaf at or under that mapping's
+// path is paired. An embedded document is one scalar here, so
 // a redacted leaf inside one pairs the whole base document. Both sides are encoded again by the
 // same encoder so that only what differs shows; a side that does not parse, or holds an alias
 // anywhere, mapping keys included, withholds the diff.
@@ -416,29 +418,47 @@ func pairRedacted(base, target string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	values, redacted := map[string][]string{}, map[string]bool{}
+	values, redacted, keyed := map[string][]string{}, map[string]bool{}, map[string]bool{}
 	walkScalars(tdocs, func(p string, n *yaml.Node) {
 		values[p] = append(values[p], n.Value)
 		if isRedacted(n.Value) {
 			redacted[p] = true
 		}
+	}, func(p string, k *yaml.Node) {
+		if isRedacted(k.Value) {
+			keyed[p] = true
+		}
 	})
+	// under reports whether p is at or under a target mapping with a redacted key, whose leaves
+	// therefore have paths no base leaf shares.
+	under := func(p string) bool {
+		for {
+			if keyed[p] {
+				return true
+			}
+			i := strings.LastIndexByte(p, '/')
+			if i < 0 {
+				return false
+			}
+			p = p[:i]
+		}
+	}
 	bdocs, err := yamlDocs(base)
 	if err != nil {
 		return "", "", err
 	}
 	count := map[string]int{}
-	walkScalars(bdocs, func(p string, _ *yaml.Node) { count[p]++ })
+	walkScalars(bdocs, func(p string, _ *yaml.Node) { count[p]++ }, nil)
 	walkScalars(bdocs, func(p string, n *yaml.Node) {
 		// A base leaf that is one whole token shows nothing, nor does the one leaf of a path on both
 		// sides when unchanged. Where a path holds several leaves, which one a token replaced is
 		// unknown, so an equal target leaf exempts none; an embedded document holding a token is
 		// not a token.
 		unchanged := count[p] == 1 && len(values[p]) == 1 && values[p][0] == n.Value
-		if redacted[p] && !isToken(n.Value) && !unchanged {
+		if (redacted[p] || under(p)) && !isToken(n.Value) && !unchanged {
 			*n = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: pairedToken}
 		}
-	})
+	}, nil)
 	paired, err := encodeDocs(bdocs)
 	if err != nil {
 		return "", "", err
@@ -491,8 +511,9 @@ func isRedacted(v string) bool {
 	return strings.Contains(v, "<redacted") || strings.Contains(v, "u003credacted")
 }
 
-// walkScalars calls fn on every scalar leaf of docs with its path; yamlDocs has refused aliases.
-func walkScalars(docs []*yaml.Node, fn func(p string, n *yaml.Node)) {
+// walkScalars calls fn on every scalar leaf of docs with its path, and keyFn, when set, on every
+// scalar mapping key with its mapping's path; yamlDocs has refused aliases.
+func walkScalars(docs []*yaml.Node, fn, keyFn func(p string, n *yaml.Node)) {
 	esc := strings.NewReplacer("~", "~0", "/", "~1")
 	var walk func(n *yaml.Node, p string)
 	walk = func(n *yaml.Node, p string) {
@@ -506,6 +527,9 @@ func walkScalars(docs []*yaml.Node, fn func(p string, n *yaml.Node)) {
 				k := "?" // a key that is not a scalar names no path of its own
 				if n.Content[i].Kind == yaml.ScalarNode {
 					k = esc.Replace(n.Content[i].Value)
+					if keyFn != nil {
+						keyFn(p, n.Content[i])
+					}
 				}
 				walk(n.Content[i+1], p+"/"+k)
 			}

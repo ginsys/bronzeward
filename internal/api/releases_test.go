@@ -70,8 +70,12 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 			kubernetes_version, operation, published_by, published_role, epoch, published_at)
 		SELECT $1, $2, $3, $4, $5, 'v1.13', 'v1.13.6', 'h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=', 'v1.36.0', $6, $7,
 			'publisher', epoch, '2026-09-26T09:14:05Z' FROM installation_state`, s.rel, d.cluster, draft, revision, make([]byte, 32), s.op, d.seed)
-	redacted := "machine:\n  type: worker\n  token: <redacted:schema>\n"
-	if d.redacted != "" {
+	var redacted any = "machine:\n  type: worker\n  token: <redacted:schema>\n"
+	switch d.redacted {
+	case "":
+	case noRedacted:
+		redacted = nil
+	default:
 		redacted = d.redacted
 	}
 	artifact := make([]byte, 32) // each artifact's configuration digest, the import bases' unless d.artifact is set
