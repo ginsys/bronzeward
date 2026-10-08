@@ -476,7 +476,7 @@ func TestNewStartsPublisher(t *testing.T) {
 	}
 	life, stop := context.WithCancel(t.Context())
 	h := New(life, b.db, auth.NewVerifier(b.cfg, b.db, auth.Discover(b.cfg.OIDC)), b.cfg, testExecution(), nil,
-		&Publishers{Meta: b.held, Compiler: b.held},
+		&Publishers{Meta: b.held, Compiler: b.held}, nil,
 		&config.Ingestion{Instance: "a", Heartbeat: 20 * time.Millisecond, Lease: time.Minute}, epoch)
 	defer stopping(h.(*API), stop)
 	op := b.queuePublish(1)

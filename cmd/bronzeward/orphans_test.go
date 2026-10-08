@@ -124,6 +124,7 @@ func newOrphanEnv(t *testing.T) *orphanEnv {
 		"  ingestionTokenFile: "+filepath.Join(dir, "openbao-ingestion.token")+"\n  reportTokenFile: "+e.tokenFile+"\n"+
 		"  compilerTokenFile: "+filepath.Join(dir, "openbao-compiler.token")+"\n"+
 		"  metadataTokenFile: "+filepath.Join(dir, "openbao-metadata.token")+"\n"+
+		"  executorTokenFile: "+filepath.Join(dir, "openbao-executor.token")+"\n"+
 		"ingestion: {instance: a, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}\n", 0o600)
 	mustDB(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'alice', now())`, e.user)
 	mustDB(t, db, `INSERT INTO cluster (id, name, endpoint, contract, talos_cluster_id, created_at)

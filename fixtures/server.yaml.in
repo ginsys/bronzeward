@@ -21,8 +21,8 @@ auth:
 execution:
   settleFloor: 30s
   maxTransportDeadline: 5m
-# The fixture's OpenBao, by its service name, and the keys and the ingestion, compiler, metadata
-# and orphan-report tokens bin/up made for this instance (openbao-<role>.token sit beside this
+# The fixture's OpenBao, by its service name, and the keys and the ingestion, compiler, metadata,
+# executor and orphan-report tokens bin/up made for this instance (openbao-<role>.token sit beside this
 # file, mode 0600, one of each per instance; bw orphans reads A's).
 provider:
   address: http://openbao:8200
@@ -31,6 +31,7 @@ provider:
   ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
   compilerTokenFile: /etc/bronzeward/openbao-compiler.token
   metadataTokenFile: /etc/bronzeward/openbao-metadata.token
+  executorTokenFile: /etc/bronzeward/openbao-executor.token
   reportTokenFile: /etc/bronzeward/openbao-report.token
 # The staging claims' and publish jobs' timers (compilation.md §3.2, persistence-api.md §5.1:
 # only heartbeat < lease < absolute expiry is required) and this instance's name, which starts

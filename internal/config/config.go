@@ -88,6 +88,10 @@ type Provider struct {
 	// MetadataTokenFile holds the metadata identity's static token (dependency-monitor.md §4),
 	// under the same rules: it reads KV and Transit metadata by name, nothing else.
 	MetadataTokenFile string `yaml:"metadataTokenFile"`
+	// ExecutorTokenFile holds the executor identity's static token (compilation.md §1,
+	// persistence-api.md §3.3), under the same rules: observations read each cluster's Talos
+	// access with it.
+	ExecutorTokenFile string `yaml:"executorTokenFile"`
 	// ReportTokenFile holds the orphan-report identity's static token (persistence-api.md §6.4),
 	// under the same rules. The server does not use it; `bronzeward orphans` requires it.
 	ReportTokenFile string `yaml:"reportTokenFile"`
@@ -287,14 +291,15 @@ func (p *Provider) validate() error {
 		}
 	}
 	// Each identity authenticates with its own token and no other (compilation.md §1,
-	// dependency-monitor.md §4, persistence-api.md §6.4). The report's is optional: only
+	// dependency-monitor.md §4, persistence-api.md §3.3, §6.4). The report's is optional: only
 	// `bronzeward orphans` uses it. Each path is absolute and in clean form, so one file has one
 	// spelling here: folding `.`, `..` or a relative path by text would equate files a directory
 	// symlink keeps apart. A symlinked directory or a hard link can still give one file two
 	// spellings; that is not detectable without opening the files.
 	files := []struct{ field, path string }{
 		{"ingestionTokenFile", p.IngestionTokenFile}, {"compilerTokenFile", p.CompilerTokenFile},
-		{"metadataTokenFile", p.MetadataTokenFile}, {"reportTokenFile", p.ReportTokenFile},
+		{"metadataTokenFile", p.MetadataTokenFile}, {"executorTokenFile", p.ExecutorTokenFile},
+		{"reportTokenFile", p.ReportTokenFile},
 	}
 	for i, f := range files {
 		if f.path == "" {

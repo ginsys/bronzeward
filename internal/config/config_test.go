@@ -281,6 +281,7 @@ const providerBlock = `provider:
   ingestionTokenFile: /etc/bronzeward/openbao-ingestion.token
   compilerTokenFile: /etc/bronzeward/openbao-compiler.token
   metadataTokenFile: /etc/bronzeward/openbao-metadata.token
+  executorTokenFile: /etc/bronzeward/openbao-executor.token
 `
 
 func TestProviderBlock(t *testing.T) {
@@ -299,7 +300,8 @@ func TestProviderBlock(t *testing.T) {
 	if p == nil || p.Address != "https://bao.example.test:8200" || p.Keys.Baseline != "bw-baseline" ||
 		p.Keys.Staging != "bw-staging" || p.Keys.Digest != "bw-digest" || p.Keys.Artifact != "bw-artifact" ||
 		p.IngestionTokenFile != "/etc/bronzeward/openbao-ingestion.token" ||
-		p.CompilerTokenFile != "/etc/bronzeward/openbao-compiler.token" || p.MetadataTokenFile != "/etc/bronzeward/openbao-metadata.token" {
+		p.CompilerTokenFile != "/etc/bronzeward/openbao-compiler.token" || p.MetadataTokenFile != "/etc/bronzeward/openbao-metadata.token" ||
+		p.ExecutorTokenFile != "/etc/bronzeward/openbao-executor.token" {
 		t.Fatalf("%+v", p)
 	}
 	if p.ReportTokenFile != "" {
@@ -350,6 +352,10 @@ func TestProviderBlock(t *testing.T) {
 		"compiler shares ingestion's": {strings.Replace(providerBlock, "openbao-compiler.token", "openbao-ingestion.token", 1), "provider.ingestionTokenFile and provider.compilerTokenFile name the same file"},
 		"metadata shares compiler's":  {strings.Replace(providerBlock, "openbao-metadata.token", "openbao-compiler.token", 1), "provider.compilerTokenFile and provider.metadataTokenFile name the same file"},
 		"report shares metadata's":    {providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-metadata.token\n", "provider.metadataTokenFile and provider.reportTokenFile name the same file"},
+		"no executor token":           {strings.Replace(providerBlock, "  executorTokenFile: /etc/bronzeward/openbao-executor.token\n", "", 1), "provider.executorTokenFile is required"},
+		"executor shares metadata's":  {strings.Replace(providerBlock, "openbao-executor.token", "openbao-metadata.token", 1), "provider.metadataTokenFile and provider.executorTokenFile name the same file"},
+		"report shares executor's":    {providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-executor.token\n", "provider.executorTokenFile and provider.reportTokenFile name the same file"},
+		"executor relative":           {strings.Replace(providerBlock, "/etc/bronzeward/openbao-executor.token", "openbao-executor.token", 1), "provider.executorTokenFile must be an absolute path in clean form"},
 	} {
 		_, err := Load(strings.NewReader(base + authBlock + c.block))
 		if err == nil || !strings.Contains(err.Error(), c.want) {
