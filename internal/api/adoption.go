@@ -95,6 +95,13 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	if err := tx.QueryRowContext(ctx, `SELECT scope_state FROM machine WHERE id = $1 FOR UPDATE`, machine).Scan(&scope); err != nil {
 		return r, machine, err
 	}
+	// The machine state is written below; a publication holds every machine state of its cluster
+	// (publish.go), so it is taken here, before the time is read, not at the write.
+	var applied, msDesired sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT applied_release, desired FROM machine_state WHERE machine = $1 FOR UPDATE`,
+		machine).Scan(&applied, &msDesired); err != nil {
+		return r, machine, err
+	}
 	var head sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT head_revision_id FROM assignment WHERE machine = $1 FOR SHARE`, machine).Scan(&head)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -107,10 +114,8 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 		WHERE s.plan = $1`, plan).Scan(&approval, &approver); err != nil {
 		return r, machine, err
 	}
-	var approverRevoked bool
 	if approver.Valid {
-		if err := tx.QueryRowContext(ctx, `SELECT revoked FROM principal WHERE id = $1 FOR SHARE`,
-			approver.String).Scan(&approverRevoked); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT FROM principal WHERE id = $1 FOR SHARE`, approver.String); err != nil {
 			return r, machine, err
 		}
 	}
@@ -128,21 +133,22 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 		&operation); err != nil {
 		return r, machine, err
 	}
-	var applied, msDesired sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT applied_release, desired FROM machine_state WHERE machine = $1`,
-		machine).Scan(&applied, &msDesired); err != nil {
-		return r, machine, err
-	}
 	var holding bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT FROM operation WHERE machine = $1
 		AND state IN ('committed', 'sending', 'verifying', 'unresolved'))`, machine).Scan(&holding); err != nil {
 		return r, machine, err
 	}
 	// PA §5 rule 4: the record's time, and the expiry and age judged against it, follow every lock.
+	// The plan's state is the one §8.1 reads at that time, so a refusal names what a reader sees.
 	var at time.Time
-	var expired bool
-	if err := tx.QueryRowContext(ctx, `SELECT c.t, p.expires_at <= c.t FROM plan p, (SELECT clock_timestamp() AS t) c
-		WHERE p.id = $1`, plan).Scan(&at, &expired); err != nil {
+	var reads string
+	if err := tx.QueryRowContext(ctx, `SELECT c.t,
+			CASE WHEN s.state = 'approved' AND ap.revoked AND (r.at IS NULL OR r.at < p.expires_at) THEN 'revoked'
+				WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= c.t THEN 'expired' ELSE s.state END
+		FROM plan p CROSS JOIN (SELECT clock_timestamp() AS t) c JOIN plan_state s ON s.plan = p.id
+			LEFT JOIN approval a ON a.id = s.approval LEFT JOIN principal ap ON ap.id = a.approver
+			LEFT JOIN identity_revocation r ON r.identity = ap.id
+		WHERE p.id = $1`, plan).Scan(&at, &reads); err != nil {
 		return r, machine, err
 	}
 
@@ -153,12 +159,12 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	// 4.2: the approval passes comparison 1: approved, unexpired, not revoked, its identity not
 	// revoked, and recorded in the current epoch.
 	switch {
-	case state != "approved":
-		return r, machine, refuseAdoption("4.2", "the plan is "+state)
-	case expired:
+	case reads == "expired":
 		return r, machine, refuseAdoption("4.2", "the plan has expired")
-	case approverRevoked:
+	case reads == "revoked" && state == "approved":
 		return r, machine, refuseAdoption("4.2", "the approver's identity is revoked")
+	case reads != "approved":
+		return r, machine, refuseAdoption("4.2", "the plan is "+reads)
 	case approvalEpoch != current:
 		return r, machine, refuseAdoption("4.2", "the approval is of an earlier epoch")
 	}
@@ -184,7 +190,7 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	var baseline []byte
 	err = tx.QueryRowContext(ctx, `SELECT o.id, o.basis, se.at,
 			CASE WHEN m.smbios_uuid IS NOT NULL THEN o.smbios_uuid IS NOT DISTINCT FROM m.smbios_uuid
-				ELSE o.talos_node_id IS NOT DISTINCT FROM m.talos_node_id END
+				ELSE o.talos_node_id IS NOT DISTINCT FROM m.talos_node_id AND o.smbios_uuid IS NULL END
 			AND o.talos_cluster_id IS NOT DISTINCT FROM c.talos_cluster_id,
 			o.configuration_digest IS NOT DISTINCT FROM b.configuration_digest, o.assignment_evidence, b.configuration_digest
 		FROM observation o JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis
