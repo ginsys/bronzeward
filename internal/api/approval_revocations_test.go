@@ -24,8 +24,8 @@ func (p *planEnv) revokeApproval(token, k, approval, body string) *httptest.Resp
 // still naming the approval, at its next revision, and the act names the approval, the plan and
 // the machine. A replay answers the same revocation.
 func TestApprovalRevocation(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	apr := decode[approvalBody](t, p.approve(p.human("h-approver"), "k-approve-0123456789", plan.ID), http.StatusCreated)
 	bearer := p.human("h-recovery")
@@ -83,8 +83,8 @@ func TestApprovalRevocation(t *testing.T) {
 	}
 }
 
-// wantRevocation fails unless approval has one revocation and its plan's stored state is still
-// state, naming approval, at revision rev.
+// wantRevocation fails unless approval has one revocation and its plan's stored state is state,
+// naming the approval named ("" for none), at revision rev.
 func (p *planEnv) wantRevocation(t *testing.T, approval, plan, state, named string, rev int) {
 	t.Helper()
 	if n := count(t, p.db, `SELECT count(*) FROM approval_revocation WHERE approval = $1`, approval); n != 1 {
@@ -96,12 +96,20 @@ func (p *planEnv) wantRevocation(t *testing.T, approval, plan, state, named stri
 	}
 }
 
+// wantReason fails unless plan's stored state records reason.
+func (p *planEnv) wantReason(t *testing.T, plan, reason string) {
+	t.Helper()
+	if n := count(t, p.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND reason = $2`, plan, reason); n != 1 {
+		t.Fatalf("plan %s does not record reason %q", plan, reason)
+	}
+}
+
 // T5b's refusals (§9.4): an approval that does not exist; a reason missing, blank or longer than
 // 1024 bytes; a role other than approver or recovery admin; a second revocation of one approval.
 // None writes anything.
 func TestApprovalRevocationRefusals(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	approver := p.human("h-approver")
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	apr := decode[approvalBody](t, p.approve(approver, "k-approve-0123456789", plan.ID), http.StatusCreated)
@@ -133,12 +141,12 @@ func TestApprovalRevocationRefusals(t *testing.T) {
 }
 
 // T5b records a revocation of any approval (execution-recovery.md §2) but revokes the plan only
-// while the approval authorizes it: an approval of an earlier epoch that a current one replaced,
-// a plan already cancelled, a plan whose approver's identity is revoked and a plan past its expiry
-// each keep their state.
+// while the approval authorizes it: an approval of an earlier epoch that a current one replaced
+// and a plan already cancelled keep their state, and a plan whose approver's identity is revoked
+// or past its expiry is written as it reads, revoked for the identity or expired (PA §8.1).
 func TestApprovalRevocationKeepsState(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := func(k, extra string) planBody {
 		return decode[planBody](t, p.plan(p.robot, k, applyBody(p.target.rel, p.machine, extra)), http.StatusCreated)
 	}
@@ -175,11 +183,13 @@ func TestApprovalRevocationKeepsState(t *testing.T) {
 		t.Fatal(err)
 	}
 	revoked("k-revoke-orphan-012345", orphaned)
-	p.wantRevocation(t, orphaned, orphan, "approved", orphaned, 2)
+	p.wantRevocation(t, orphaned, orphan, "revoked", orphaned, 3)
+	p.wantReason(t, orphan, "identity-revoked")
 
 	time.Sleep(time.Until(lapsed.ExpiresAt.Add(100 * time.Millisecond)))
 	revoked("k-revoke-lapsed-012345", late.ID)
-	p.wantRevocation(t, late.ID, lapsed.ID, "approved", late.ID, 2)
+	p.wantRevocation(t, late.ID, lapsed.ID, "expired", "", 3)
+	p.wantReason(t, lapsed.ID, "expired")
 	read := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + lapsed.ID, token: p.human("h-viewer")}),
 		http.StatusOK)
 	if read.State != "expired" {
@@ -188,11 +198,11 @@ func TestApprovalRevocationKeepsState(t *testing.T) {
 }
 
 // Rule 4: whether the approval still authorizes the plan is judged after the act-order wait. A
-// revocation queued there past the plan's expiry is recorded and the plan keeps its state, read
-// expired.
+// revocation queued there past the plan's expiry is recorded and the plan is written expired, not
+// revoked.
 func TestApprovalRevocationAfterActOrderWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
 		http.StatusCreated)
 	apr := decode[approvalBody](t, p.approve(p.human("h-approver"), "k-approve-0123456789", plan.ID), http.StatusCreated)
@@ -211,14 +221,14 @@ func TestApprovalRevocationAfterActOrderWait(t *testing.T) {
 	if !b.At.After(released) {
 		t.Fatalf("revocation at %s, lock released %s", b.At, released)
 	}
-	p.wantRevocation(t, apr.ID, plan.ID, "approved", apr.ID, 2)
+	p.wantRevocation(t, apr.ID, plan.ID, "expired", "", 3)
 }
 
 // T5b takes the approval FOR UPDATE (PA §5), so it waits for a commitment or attempt holding the
 // approval FOR SHARE (§1.2 item 3) and is recorded once that ends.
 func TestApprovalRevocationWaitsForApproval(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	apr := decode[approvalBody](t, p.approve(p.human("h-approver"), "k-approve-0123456789", plan.ID), http.StatusCreated)
 	lock, err := p.db.Begin()
@@ -244,8 +254,8 @@ func TestApprovalRevocationWaitsForApproval(t *testing.T) {
 // Rule 2: a revoking human revoked while the revocation waits on the machine's lock is refused
 // once the revocation holds its principal, and nothing is written.
 func TestApprovalRevocationRevokerRevokedInWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	apr := decode[approvalBody](t, p.approve(p.human("h-approver"), "k-approve-0123456789", plan.ID), http.StatusCreated)
 	revoker, recovery := p.human("h-all"), p.human("h-recovery")
