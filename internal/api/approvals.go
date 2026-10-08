@@ -138,6 +138,23 @@ func approvePlan(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, e
 		subjects: []string{b.ID, plan, machine}, atActOrder: write}, nil
 }
 
+// getApproval reads approval v as T5a answered it (§9.3). An approval is immutable, so it carries
+// no ETag.
+var getApproval = item(id.Approval, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
+	b := approvalBody{SelfApproval: selfApproval{Reasons: []string{}}}
+	var reasons string
+	if err := tx.QueryRowContext(ctx, `SELECT id, plan, approver, role, epoch, array_to_string(self_approval, ',')
+		FROM approval WHERE id = $1`, v).Scan(&b.ID, &b.Plan, &b.Approver.Principal, &b.Approver.Role, &b.Epoch,
+		&reasons); err != nil {
+		return "", nil, err
+	}
+	if reasons != "" {
+		b.SelfApproval.Reasons = strings.Split(reasons, ",")
+	}
+	b.SelfApproval.Marked = len(b.SelfApproval.Reasons) > 0
+	return "", b, nil
+})
+
 // selfApprovalReasons are the §10.5 reasons that hold for approver on plan, in the table's order
 // (choice §17.39). The plan's release contains its sources' revisions and its machines' import
 // base revisions; its draft introduced the revisions of the draft's own entries. An authored
