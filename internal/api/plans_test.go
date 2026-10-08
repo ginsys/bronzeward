@@ -291,6 +291,32 @@ func TestPlanCreationDiffDuplicateKeys(t *testing.T) {
 	}
 }
 
+// An embedded document holding a token is not itself a token: a changed one is paired whole even
+// when its base already held another token, and an unchanged one shows no change. A whole token
+// replaced by another, as a new secret version, is shown as itself.
+func TestPlanCreationDiffEmbeddedMixed(t *testing.T) {
+	p := newPlanEnvWith(t,
+		"machine:\n  files:\n    - contents: |\n        existing: <redacted:existing@1>\n        enabled: false\n"+
+			"    - contents: |\n        keep: same\n        other: <redacted:other@1>\n  rotated: <redacted:rotated@1>\n",
+		"machine:\n  files:\n    - contents: |\n        existing: <redacted:existing@1>\n        enabled: <redacted:enabled@1>\n"+
+			"    - contents: |\n        keep: same\n        other: <redacted:other@1>\n  rotated: <redacted:rotated@2>\n")
+	t.Parallel()
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-embedded-01234", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	d := b.Evidence.Diff
+	if d == nil || d.Withheld {
+		t.Fatalf("diff %+v", d)
+	}
+	var removed []string
+	for _, l := range strings.Split(d.Unified, "\n") {
+		if strings.HasPrefix(l, "-") {
+			removed = append(removed, strings.TrimSpace(l[1:]))
+		}
+	}
+	if want := []string{"- contents: " + pairedToken, "rotated: <redacted:rotated@1>"}; !reflect.DeepEqual(removed, want) {
+		t.Fatalf("removed lines %q, want %q\ndiff:\n%s", removed, want, d.Unified)
+	}
+}
+
 // A side that paired redaction cannot walk withholds the diff rather than show it unpaired.
 func TestPlanCreationDiffUnpairable(t *testing.T) {
 	t.Parallel()
