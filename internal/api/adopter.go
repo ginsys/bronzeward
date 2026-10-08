@@ -56,7 +56,7 @@ func (a *API) adoptLoop(ctx context.Context) {
 // adoptPass attempts every candidate not waiting for its retry time, and answers false when the
 // loop ends. An observation that left a value unread, or any other failure short of a refusal,
 // waits a lease before the plan is attempted again; a refusal is recorded by its refusal entry,
-// which ends the attempts for the plan.
+// which ends the attempts for the plan, as does an adoption another instance recorded first.
 func (a *API) adoptPass(ctx context.Context, retry map[string]time.Time) bool {
 	cs, err := a.adoptCandidates(ctx)
 	switch {
@@ -84,6 +84,9 @@ func (a *API) adoptPass(ctx context.Context, retry map[string]time.Time) bool {
 			return false
 		case errors.As(err, &refused):
 			a.o.logf("adoption of plan %s: %v", c.plan, err)
+		case errors.Is(err, errAlreadyAdopted):
+			// Another instance's loop recorded it first; the plan is no longer a candidate.
+			a.o.logf("%v", err)
 		case err != nil:
 			a.o.logf("adoption of plan %s: %v; retried after %s", c.plan, err, a.d.timers.Lease)
 			retry[c.plan] = time.Now().Add(a.d.timers.Lease)
@@ -140,7 +143,8 @@ func (a *API) adoptCandidates(ctx context.Context) ([]adoptCandidate, error) {
 // adoptOne takes an evidence observation of c's machine for its plan, at the plan's route, then
 // records the adoption (T6), which relies on the recorded observation with the highest basis. T6
 // answers errEvidenceUnread, not a refusal, when that observation left the identity, the
-// configuration or the assignment evidence unread.
+// configuration or the assignment evidence unread, and errAlreadyAdopted when another attempt
+// recorded the plan's adoption first.
 func (a *API) adoptOne(ctx context.Context, c adoptCandidate) error {
 	if _, err := a.observe(ctx, c.machine, observeFor{purpose: "evidence", plan: c.plan}); err != nil {
 		return err

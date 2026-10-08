@@ -1085,7 +1085,11 @@ state is being accepted (design §12.1).
    took it, the transaction rolls back without a refusal entry and the plan
    is observed again later. A refused
    record ends the attempts for that plan, so a mismatch is recorded once and
-   not on every period: a new plan is the retry **(choice §10.27)**.
+   not on every period: a new plan is the retry **(choice §10.27)**. An adopt
+   plan's only operation is its adoption, so an attempt that finds one
+   (requirement 1), such as a second controller instance's racing for the
+   same plan, finds the plan adopted: it rolls back without a refusal entry,
+   which would follow the success on the timeline.
 
 The record compares the observed digest with the **baseline's** digest, the
 bytes read from the node, not with the recompiled release's artifact
@@ -2056,7 +2060,8 @@ conservative option; those that do not say so. Each is marked in place as
     holds the scope or recovery mode closes it, since those clear without a
     new plan, and observes again when the node could not be read, including
     when the observation the record relies on is another reader's that left a
-    value unread, so an unread value never records a refusal. A refusal
+    value unread, so an unread value never records a refusal, and an attempt
+    that finds the plan already adopted by another records nothing. A refusal
     ends the attempts: a digest, identity or assignment mismatch does not heal
     by repeating the comparison, and repeating it would append a refusal entry
     every period until the plan expires. Agent decision, 2026-10-08
