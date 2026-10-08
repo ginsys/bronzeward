@@ -1074,6 +1074,17 @@ state is being accepted (design §12.1).
    as its outcome. It is never `committed`, `sending`, `verifying` or
    `unresolved`, so it never counts against comparison 4.
 
+   The controller records it unasked: for each adopt plan whose approval
+   reads approved and whose machine's scope admits it now (requirement 4.5),
+   it takes an observation for the plan (purpose `evidence`, at the plan's
+   route) and then attempts the record, which relies on whichever recorded
+   observation has the highest basis. It does so after each approval and
+   periodically. An observation that could not read the identity, the
+   configuration or the assignment evidence is no evidence either way, so no
+   record is attempted on it and the plan is observed again later. A refused
+   record ends the attempts for that plan, so a mismatch is recorded once and
+   not on every period: a new plan is the retry **(choice §10.27)**.
+
 The record compares the observed digest with the **baseline's** digest, the
 bytes read from the node, not with the recompiled release's artifact
 **(choice §10.15)**. Whether an artifact compiled from an unchanged import base
@@ -2036,6 +2047,18 @@ conservative option; those that do not say so. Each is marked in place as
       Bronzeward-issued per-machine marker written into the configuration,
       stronger against clones but a new mechanism with no evidence; or
       disclosure only.
+27. **The controller records an adoption unasked, once per plan** (§6.3 step
+    4). The record needs an observation begun after the approval, so the
+    controller takes one for each approved adopt plan, after each approval and
+    periodically, and attempts the record on it. It waits while an operation
+    holds the scope or recovery mode closes it, since those clear without a
+    new plan, and observes again when the node could not be read. A refusal
+    ends the attempts: a digest, identity or assignment mismatch does not heal
+    by repeating the comparison, and repeating it would append a refusal entry
+    every period until the plan expires. Agent decision, 2026-10-08
+    (ginsys/bronzeward#25). Alternatives: an operator route that requests the
+    record (one more route and role decision, and the operator would still
+    need a fresh observation first); retrying refused plans until they expire.
 
 ## 11. Traceability
 
