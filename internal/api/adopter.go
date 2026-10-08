@@ -84,8 +84,8 @@ func (a *API) adoptPass(ctx context.Context, retry map[string]time.Time) bool {
 			return false
 		case errors.As(err, &refused):
 			a.o.logf("adoption of plan %s: %v", c.plan, err)
-		case errors.Is(err, errAlreadyAdopted):
-			// Another instance's loop recorded it first; the plan is no longer a candidate.
+		case errors.Is(err, errAlreadyAdopted), errors.Is(err, errAlreadyRefused):
+			// Another instance's loop recorded its outcome first; the plan is no longer a candidate.
 			a.o.logf("%v", err)
 		case err != nil:
 			a.o.logf("adoption of plan %s: %v; retried after %s", c.plan, err, a.d.timers.Lease)
@@ -144,7 +144,7 @@ func (a *API) adoptCandidates(ctx context.Context) ([]adoptCandidate, error) {
 // records the adoption (T6), which relies on the recorded observation with the highest basis. T6
 // answers errNoEvidence, not a refusal, when that observation began before the approval, is older
 // than the plan allows or left the identity, the configuration or the assignment evidence unread,
-// and errAlreadyAdopted when another attempt recorded the plan's adoption first.
+// and errAlreadyAdopted or errAlreadyRefused when another attempt recorded the plan's outcome first.
 func (a *API) adoptOne(ctx context.Context, c adoptCandidate) error {
 	if _, err := a.observe(ctx, c.machine, observeFor{purpose: "evidence", plan: c.plan}); err != nil {
 		return err

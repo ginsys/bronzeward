@@ -1090,7 +1090,9 @@ state is being accepted (design §12.1).
    not on every period: a new plan is the retry **(choice §10.27)**. The
    refusal entry's own transaction (§4.1), under the machine lock, appends
    nothing when the plan was adopted or refused since the refused attempt
-   rolled back, so racing attempts record one outcome. An adopt
+   rolled back, so racing attempts record one outcome; likewise the record
+   finds a refusal entry naming the plan under the machine lock and writes
+   nothing, so a refused plan is never adopted afterwards. An adopt
    plan's only operation is its adoption, so an attempt that finds one
    (requirement 1), such as a second controller instance's racing for the
    same plan, finds the plan adopted: it rolls back without a refusal entry,
