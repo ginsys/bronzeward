@@ -129,9 +129,27 @@ type OIDC struct {
 type Execution struct {
 	SettleFloor          time.Duration `yaml:"settleFloor"`          // default and minimum 30s
 	MaxTransportDeadline time.Duration `yaml:"maxTransportDeadline"` // required, no default
+	PlanDefaults         PlanDefaults  `yaml:"planDefaults"`
 }
 
-const minSettleFloor = 30 * time.Second
+// PlanDefaults are the values a plan binds when its creation request leaves them out
+// (persistence-api.md choice §17.37). Plans state durations in whole seconds, so these must be too.
+type PlanDefaults struct {
+	Expiry               time.Duration `yaml:"expiry"`               // default 24h
+	MaxObservationAge    time.Duration `yaml:"maxObservationAge"`    // default 5m
+	CheckValidity        time.Duration `yaml:"checkValidity"`        // default 5m
+	TransportDeadline    time.Duration `yaml:"transportDeadline"`    // default 1m, or maxTransportDeadline if lower
+	VerificationDeadline time.Duration `yaml:"verificationDeadline"` // default 10m
+	MaxAttempts          int           `yaml:"maxAttempts"`          // default 3
+}
+
+const (
+	minSettleFloor = 30 * time.Second
+	// MaxPlanDuration and MaxPlanAttempts bound a plan's durations and attempt limit, in the
+	// defaults and in a request alike.
+	MaxPlanDuration = 7 * 24 * time.Hour
+	MaxPlanAttempts = 10
+)
 
 func (e *Execution) validate() error {
 	switch {
@@ -142,6 +160,37 @@ func (e *Execution) validate() error {
 	}
 	if e.MaxTransportDeadline <= 0 {
 		return errors.New("config: execution.maxTransportDeadline is required and must be positive")
+	}
+	return e.PlanDefaults.validate(e.MaxTransportDeadline)
+}
+
+func (p *PlanDefaults) validate(maxTransport time.Duration) error {
+	for _, d := range []struct {
+		name string
+		v    *time.Duration
+		def  time.Duration
+	}{
+		{"expiry", &p.Expiry, 24 * time.Hour},
+		{"maxObservationAge", &p.MaxObservationAge, 5 * time.Minute},
+		{"checkValidity", &p.CheckValidity, 5 * time.Minute},
+		{"transportDeadline", &p.TransportDeadline, min(time.Minute, maxTransport)},
+		{"verificationDeadline", &p.VerificationDeadline, 10 * time.Minute},
+	} {
+		if *d.v == 0 {
+			*d.v = d.def
+		}
+		if *d.v < time.Second || *d.v > MaxPlanDuration || *d.v%time.Second != 0 {
+			return fmt.Errorf("config: execution.planDefaults.%s must be whole seconds from 1s to %s", d.name, MaxPlanDuration)
+		}
+	}
+	if p.MaxAttempts == 0 {
+		p.MaxAttempts = 3
+	}
+	if p.MaxAttempts < 1 || p.MaxAttempts > MaxPlanAttempts {
+		return fmt.Errorf("config: execution.planDefaults.maxAttempts must be from 1 to %d", MaxPlanAttempts)
+	}
+	if p.TransportDeadline > maxTransport || p.TransportDeadline > p.VerificationDeadline {
+		return errors.New("config: execution.planDefaults.transportDeadline must not exceed maxTransportDeadline or the verification deadline")
 	}
 	return nil
 }

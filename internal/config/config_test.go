@@ -212,6 +212,56 @@ func TestExecution(t *testing.T) {
 	}
 }
 
+// A plan's durations and attempt limit default from execution.planDefaults (persistence-api.md
+// choice §17.37). The transport deadline's default never exceeds the maximum transport deadline,
+// which plan creation enforces (execution-recovery.md §7.3 step 1).
+func TestPlanDefaults(t *testing.T) {
+	c, err := Load(strings.NewReader(base + authBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := PlanDefaults{Expiry: 24 * time.Hour, MaxObservationAge: 5 * time.Minute, CheckValidity: 5 * time.Minute,
+		TransportDeadline: time.Minute, VerificationDeadline: 10 * time.Minute, MaxAttempts: 3}
+	if c.Execution.PlanDefaults != want {
+		t.Fatalf("defaults: %+v", c.Execution.PlanDefaults)
+	}
+	noExec := strings.Replace(base, execBlock, "", 1)
+	c, err = Load(strings.NewReader(noExec + "execution: {maxTransportDeadline: 20s}\n" + authBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Execution.PlanDefaults.TransportDeadline != 20*time.Second {
+		t.Fatalf("transport default above the maximum: %s", c.Execution.PlanDefaults.TransportDeadline)
+	}
+	c, err = Load(strings.NewReader(noExec + `execution:
+  maxTransportDeadline: 5m
+  planDefaults: {expiry: 2h, maxObservationAge: 1m, checkValidity: 2m, transportDeadline: 30s, verificationDeadline: 30s, maxAttempts: 1}
+` + authBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = PlanDefaults{Expiry: 2 * time.Hour, MaxObservationAge: time.Minute, CheckValidity: 2 * time.Minute,
+		TransportDeadline: 30 * time.Second, VerificationDeadline: 30 * time.Second, MaxAttempts: 1}
+	if c.Execution.PlanDefaults != want {
+		t.Fatalf("set: %+v", c.Execution.PlanDefaults)
+	}
+	for name, cs := range map[string]struct{ set, want string }{
+		"transport above maximum":      {"transportDeadline: 6m", "planDefaults.transportDeadline"},
+		"transport above verification": {"transportDeadline: 2m, verificationDeadline: 1m", "planDefaults.transportDeadline"},
+		"fraction of a second":         {"expiry: 1500ms", "planDefaults.expiry"},
+		"negative":                     {"maxObservationAge: -1s", "planDefaults.maxObservationAge"},
+		"above a week":                 {"checkValidity: 169h", "planDefaults.checkValidity"},
+		"verification fraction":        {"verificationDeadline: 90500ms", "planDefaults.verificationDeadline"},
+		"attempts above ten":           {"maxAttempts: 11", "planDefaults.maxAttempts"},
+		"attempts negative":            {"maxAttempts: -1", "planDefaults.maxAttempts"},
+	} {
+		in := noExec + "execution:\n  maxTransportDeadline: 5m\n  planDefaults: {" + cs.set + "}\n" + authBlock
+		if _, err := Load(strings.NewReader(in)); err == nil || !strings.Contains(err.Error(), cs.want) {
+			t.Errorf("%s: %v; want an error naming %q", name, err, cs.want)
+		}
+	}
+}
+
 // providerBlock is the smallest valid provider block; each refusal below changes one thing.
 const providerBlock = `provider:
   address: https://bao.example.test:8200
