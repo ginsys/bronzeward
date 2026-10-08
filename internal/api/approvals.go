@@ -49,7 +49,7 @@ type approvalBody struct {
 // state FOR UPDATE, proposed, or approved by an approval of an earlier epoch, and unexpired once
 // the act-order lock is held (rule 4). The approval is one approval entry on the machine's
 // timeline, and the plan becomes approved under it.
-func approvePlan(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
+func approvePlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	plan := q.r.PathValue("id")
 	if id.MustHave(plan, id.Plan) != nil {
 		return result{}, refuse(http.StatusNotFound, "not-found", "no such plan")
@@ -158,7 +158,7 @@ func approvePlan(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, e
 		return err
 	}
 	return result{status: http.StatusCreated, location: prefix + "/approvals/" + b.ID, body: &b,
-		subjects: []string{b.ID, plan, machine}, atActOrder: write}, nil
+		subjects: []string{b.ID, plan, machine}, atActOrder: write, afterCommit: a.wakeAdopter}, nil
 }
 
 // getApproval reads approval v as T5a answered it (§9.3). An approval is immutable, so it carries

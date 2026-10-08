@@ -75,7 +75,7 @@ type API struct {
 // timers and this process as the owner of the claims and jobs it takes. With no provider
 // configured, ing, pub and exe are nil and the ingestion and publication routes answer 503. The runners and the publish worker
 // live for life, the server's lifetime, and runs counts them; wake tells the worker a job was
-// queued.
+// queued, and adopt tells the adoption loop a plan was approved.
 type deps struct {
 	ing    Ingester
 	pub    *publishClients
@@ -85,6 +85,7 @@ type deps struct {
 	life   context.Context
 	runs   *sync.WaitGroup
 	wake   chan struct{}
+	adopt  chan struct{}
 	exec   config.Execution // the plan defaults and the transport maximum (execution-recovery.md §5.2)
 }
 
@@ -104,6 +105,7 @@ type options struct {
 	onRunner       func(job)                                                                            // takes each job instead of the runner
 	onPublish      func()                                                                               // runs instead of waking the publish worker
 	onIdle         func()                                                                               // runs when the publish worker found no job, before it waits
+	onAdoptIdle    func()                                                                               // runs after each pass of the adoption loop, before it waits
 	afterStage     func()                                                                               // runs when a job is staged, before T1
 	beforeT1       func()                                                                               // runs before T1 begins
 	stopAt         func(step string) bool                                                               // a draft update's ingestion stops at step, as a killed process would
@@ -136,8 +138,8 @@ func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*
 
 // New returns the /api/v1 handler. ing, pub, exe and ic are nil without a provider. epoch is the
 // one this process read at its start: it owns claims and jobs under it, and under no later one
-// (§5.1). With a provider, it starts the publish worker. The ingest runners and the worker stop
-// when life ends.
+// (§5.1). With a provider, it starts the publish worker and the adoption loop. The ingest
+// runners, the worker and the loop stop when life ends.
 func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
 	exe Executor, ic *config.Ingestion, epoch string) http.Handler {
 	d := deps{ing: ing, exe: exe, life: life, exec: ex}
@@ -150,6 +152,7 @@ func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex 
 	}
 	api := newAPI(db, a, cfg, d, options{})
 	api.startPublisher()
+	api.startAdopter()
 	return api
 }
 
@@ -171,6 +174,9 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 	}
 	if d.wake == nil {
 		d.wake = make(chan struct{}, 1)
+	}
+	if d.adopt == nil {
+		d.adopt = make(chan struct{}, 1)
 	}
 	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, mux: http.NewServeMux(), d: d, o: o}
 	for _, rt := range append(routes(), o.extra...) {
