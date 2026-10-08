@@ -108,10 +108,10 @@ func TestIdentityRevocationHoldsInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovery, author := p.human("h-recovery"), p.human("h-author")
-	revoked := make(chan revocationBody, 1)
+	revokedID := p.principalOf("h-approver")
+	revoked := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		revoked <- revocationOf(t, revoke(p.env, recovery, "k-revoke-inventory-012",
-			`{"identity":"`+p.principalOf("h-approver")+`","reason":"left"}`))
+		revoked <- revoke(p.env, recovery, "k-revoke-inventory-012", `{"identity":"`+revokedID+`","reason":"left"}`)
 	}()
 	waitForLockWaits(t, p.db, 1)
 	inventoried := make(chan *httptest.ResponseRecorder, 1)
@@ -122,7 +122,7 @@ func TestIdentityRevocationHoldsInventory(t *testing.T) {
 	if err := hold.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	<-revoked
+	revocationOf(t, <-revoked)
 	decode[machineBody](t, <-inventoried, http.StatusCreated)
 }
 
@@ -155,14 +155,14 @@ func TestIdentityRevocationMachineEntriesAfterLockWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovery, revokedID := p.human("h-recovery"), p.principalOf("h-approver")
-	done := make(chan revocationBody, 1)
+	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		done <- revocationOf(t, revoke(p.env, recovery, "k-revoke-held-01234567", `{"identity":"`+revokedID+`","reason":"left"}`))
+		done <- revoke(p.env, recovery, "k-revoke-held-01234567", `{"identity":"`+revokedID+`","reason":"left"}`)
 	}()
 	waitForLockWaits(t, p.db, 1)
 	if err := hold.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	b := <-done
+	b := revocationOf(t, <-done)
 	p.wantIdentityEntries(t, p.machine, revokedID, b.RevokedBy, committed)
 }

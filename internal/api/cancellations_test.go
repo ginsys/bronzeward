@@ -259,10 +259,9 @@ func TestPlanCancellationCancellerRevokedInWait(t *testing.T) {
 	}
 	// T5c locks every machine row too, so the revocation queues on the row first and the
 	// cancellation behind it; row-lock waiters are granted in order.
+	revokedID := p.principalOf("h-all")
 	revoked := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		revoked <- revoke(p.env, recovery, key, `{"identity":"`+p.principalOf("h-all")+`","reason":"left"}`)
-	}()
+	go func() { revoked <- revoke(p.env, recovery, key, `{"identity":"`+revokedID+`","reason":"left"}`) }()
 	waitForLockWaits(t, p.db, 1)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- p.cancel(canceller, "k-cancel-0123456789ab", plan.ID, `{"reason":"wrong release"}`) }()
