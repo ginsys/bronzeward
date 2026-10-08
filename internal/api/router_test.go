@@ -242,12 +242,12 @@ func TestForbidden(t *testing.T) {
 func TestNotImplemented(t *testing.T) {
 	e := newEnv(t, options{})
 	pub := e.human("h-publisher")
-	cancel := path("/plans/{id}/cancellations")
-	wantProblem(t, e.do(e.api, call{method: "POST", path: cancel, token: pub}), http.StatusPreconditionRequired, "idempotency-key-required")
-	wantProblem(t, e.do(e.api, call{method: "POST", path: cancel, token: pub, key: "short"}), http.StatusBadRequest, "invalid-request")
+	freeze := path("/machines/{id}/freezes")
+	wantProblem(t, e.do(e.api, call{method: "POST", path: freeze, token: pub}), http.StatusPreconditionRequired, "idempotency-key-required")
+	wantProblem(t, e.do(e.api, call{method: "POST", path: freeze, token: pub, key: "short"}), http.StatusBadRequest, "invalid-request")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: path("/drafts/{id}/publications"), token: pub, key: "k0123456789abcdef"}),
 		http.StatusPreconditionRequired, "precondition-required")
-	wantProblem(t, e.do(e.api, call{method: "POST", path: cancel, token: pub, key: key, body: `{}`}),
+	wantProblem(t, e.do(e.api, call{method: "POST", path: freeze, token: pub, key: key, body: `{}`}),
 		http.StatusNotImplemented, "not-implemented")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: path("/machines/{id}/timeline"), token: e.human("h-viewer")}),
 		http.StatusNotImplemented, "not-implemented")
