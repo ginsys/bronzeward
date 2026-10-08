@@ -167,15 +167,17 @@ func TestImmutableTriggerControl(t *testing.T) {
 // migration's table fails this test until its author decides which it is.
 func TestEveryTableClassified(t *testing.T) {
 	db, _ := migrated(t)
-	immutable := []string{"act", "assignment_revision", "assignment_revision_fragment", "assignment_revision_profile",
-		"dependency_alert",
+	immutable := []string{"act", "adoption_record", "approval", "approval_revocation", "assignment_revision",
+		"assignment_revision_fragment", "assignment_revision_profile", "dependency_alert",
 		"dependency", "fragment_reference", "fragment_revision", "identity_revocation", "idempotency_record",
-		"import_base_reference", "import_base_revision", "machine_endpoint_change", "machine_event", "operation_event",
+		"import_base_reference", "import_base_revision", "machine_endpoint_change", "machine_event", "observation",
+		"observation_start", "operation_event", "plan", "plan_cancellation",
 		"profile_revision", "profile_revision_fragment", "recovery_epoch", "release", "release_machine", "release_source",
 		"schema_migrations"}
+	// plan_state is updated only along its transitions and never deleted (TestPlanStateTransitions).
 	mutable := []string{"assignment", "automation_token", "cluster", "dependency_monitor", "dependency_status", "draft", "draft_entry",
-		"draft_source_entry", "fragment", "installation_state", "machine", "machine_state", "operation", "principal",
-		"profile", "staging_claim"}
+		"draft_source_entry", "fragment", "installation_state", "machine", "machine_state", "operation", "plan_state",
+		"principal", "profile", "staging_claim"}
 	rows, err := db.Query("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
 	if err != nil {
 		t.Fatal(err)

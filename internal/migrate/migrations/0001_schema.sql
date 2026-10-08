@@ -1,8 +1,8 @@
 -- 0001 schema (persistence-api.md §3, §11). Bronzeward is unreleased: until a first release the
 -- schema is this one migration, edited in place, and a database migrated from an earlier version of
 -- it is refused at startup and recreated (§11 rules 2 and 6). Tables are created in dependency
--- order; the one cycle, a draft and the release that published it, is closed by the ALTER after
--- the release table.
+-- order; the two cycles, a draft and the release that published it, and an operation and the plan
+-- it executes, are each closed by an ALTER after the later table.
 
 -- An immutable table refuses UPDATE, DELETE and TRUNCATE (§3, choice §17.3), with SQLSTATE BW001
 -- so a test can tell this refusal from any other error.
@@ -181,6 +181,23 @@ CREATE TABLE machine (
 CREATE UNIQUE INDEX machine_smbios_uuid ON machine (smbios_uuid);
 CREATE UNIQUE INDEX machine_talos_node_id ON machine (talos_node_id);
 
+-- A machine's identity and cluster, and a cluster's Talos cluster ID, are fixed when recorded
+-- (choice §10.26 of execution and recovery), so a plan binds them by naming its machine (its §2):
+-- an UPDATE that changes one is refused like a write to an immutable table. The endpoint, the
+-- scope state and the counter stay mutable.
+CREATE FUNCTION refuse_identity_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'table %: its identity is fixed: UPDATE refused', TG_TABLE_NAME USING ERRCODE = 'BW001';
+END
+$$;
+CREATE TRIGGER identity BEFORE UPDATE ON machine FOR EACH ROW
+  WHEN ((NEW.id, NEW.cluster, NEW.smbios_uuid, NEW.talos_node_id)
+    IS DISTINCT FROM (OLD.id, OLD.cluster, OLD.smbios_uuid, OLD.talos_node_id))
+  EXECUTE FUNCTION refuse_identity_change();
+CREATE TRIGGER identity BEFORE UPDATE ON cluster FOR EACH ROW
+  WHEN ((NEW.id, NEW.talos_cluster_id) IS DISTINCT FROM (OLD.id, OLD.talos_cluster_id))
+  EXECUTE FUNCTION refuse_identity_change();
+
 -- A revision's writer: the transaction that wrote it, set here whatever the INSERT supplies.
 -- pg_current_xact_id() is the top-level transaction's full ID, also inside a savepoint, and is
 -- never reused, unlike a row's 32-bit xmin. make_immutable keeps it from changing.
@@ -338,8 +355,10 @@ CREATE INDEX staging_claim_live_expiry ON staging_claim (expires_at) WHERE state
 -- publish and ingest (§8.2; an ingest is never queued) and execution and recovery's for
 -- apply-config (its §4); an adopt operation is created completed. A publish or ingest operation
 -- binds a draft revision and has a creator; an ingest operation is its staging claim's, one to
--- one. seq orders the publish job claim (§5.1). The columns an apply-config or adopt operation
--- adds (its plan, machine and scope) arrive with plans.
+-- one. seq orders the publish job claim (§5.1). An apply-config or adopt operation is its plan's
+-- one operation (execution and recovery §3.2 comparison 0), on the plan's machine and cluster,
+-- which are its machine and rollout scopes (comparisons 4 and 5); the key naming the plan is added
+-- after the plan table.
 CREATE TABLE operation (
   id              text PRIMARY KEY CHECK (id ~ '^op_[a-z2-7]{26}$'),
   seq             bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
@@ -361,7 +380,12 @@ CREATE TABLE operation (
   created_at      timestamptz NOT NULL,
   result          jsonb,
   error           jsonb,
+  plan            text UNIQUE,
+  machine         text,
+  cluster         text,
   FOREIGN KEY (created_by, created_by_kind) REFERENCES principal (id, kind),
+  CONSTRAINT operation_plan CHECK ((kind IN ('apply-config', 'adopt')) = (plan IS NOT NULL)
+    AND (plan IS NULL) = (machine IS NULL) AND (plan IS NULL) = (cluster IS NULL)),
   CHECK (CASE kind
            WHEN 'publish' THEN state IN ('queued', 'running', 'succeeded', 'failed')
            WHEN 'ingest' THEN state IN ('running', 'succeeded', 'failed')
@@ -392,8 +416,18 @@ CREATE TABLE operation (
   -- The key operation events name their operation's kind by.
   CONSTRAINT operation_id_kind UNIQUE (id, kind),
   -- The key a release names its publish operation by (§6.2).
-  CONSTRAINT operation_publication UNIQUE (id, kind, draft, draft_revision, created_by, created_role)
+  CONSTRAINT operation_publication UNIQUE (id, kind, draft, draft_revision, created_by, created_role),
+  -- The key a plan state, an observation and an adoption record name their plan's operation by.
+  CONSTRAINT operation_id_plan UNIQUE (id, plan)
 );
+-- Execution and recovery §3.2 comparison 4: one committed, sending, verifying or unresolved
+-- apply-config operation per machine scope; comparison 5: one per rollout scope, the machine's
+-- cluster, at the PoC's rollout limit of one (choice §10.5). An adopt operation is created
+-- completed and holds neither (§6.3).
+CREATE UNIQUE INDEX operation_machine_scope ON operation (machine)
+  WHERE kind = 'apply-config' AND state IN ('committed', 'sending', 'verifying', 'unresolved');
+CREATE UNIQUE INDEX operation_rollout_scope ON operation (cluster)
+  WHERE kind = 'apply-config' AND state IN ('committed', 'sending', 'verifying', 'unresolved');
 -- §7.3: at most one running ingest per draft revision it binds.
 CREATE UNIQUE INDEX operation_running_ingest ON operation (draft, draft_revision)
   WHERE kind = 'ingest' AND state = 'running';
@@ -463,12 +497,16 @@ CALL make_immutable('identity_revocation');
 
 -- A machine's timeline: its plans, operations and machine-scope facts, each at a revision T7
 -- allocates from the machine's revision counter under its row lock, with the epoch it was appended
--- in. Kinds are added with the issues that write them; an endpoint change is the first.
+-- in. Kinds are added with the issues that write them: an endpoint change, then a plan's entries
+-- from creation to commitment or a terminal state, observations and their starts, adoption records
+-- and Applied changes (execution and recovery §4.1). A record of one entry is keyed by it.
 CREATE TABLE machine_event (
   machine  text NOT NULL REFERENCES machine (id),
   revision bigint NOT NULL CHECK (revision >= 1),
   epoch    text NOT NULL REFERENCES recovery_epoch (epoch),
-  kind     text NOT NULL CONSTRAINT machine_event_kind CHECK (kind IN ('endpoint-change')),
+  kind     text NOT NULL CONSTRAINT machine_event_kind CHECK (kind IN ('endpoint-change', 'plan', 'approval',
+             'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
+             'observation', 'adoption', 'applied-change')),
   -- A JSON object: JSON null is not SQL NULL, and an immutable entry cannot be corrected later.
   entry    jsonb NOT NULL CHECK (jsonb_typeof(entry) = 'object'),
   at       timestamptz NOT NULL,
@@ -903,6 +941,316 @@ CREATE TABLE machine_state (
   FOREIGN KEY (desired, machine) REFERENCES release_machine (release, machine),
   FOREIGN KEY (applied_release, machine) REFERENCES release_machine (release, machine)
 );
+
+-- Plans and approvals (§3, §8.1; execution and recovery §2, §3, §4.1, §6.3) ----------------------
+
+-- A plan (execution and recovery §2): an immutable binding of one machine to one release, created
+-- by a publisher, approved once per epoch, and committed to at most one operation. What it binds
+-- that an immutable record already holds (the release's machine digests and key, its import base,
+-- its contract, the machine's identity and cluster) it names by reference; what can change later
+-- (the endpoint, the assignment revision, the desired release, the baseline revision and the
+-- expected pre-dispatch configuration digest) it copies. An apply-config plan carries its mode,
+-- its deadlines and attempt limit, and the baseline it was planned against; an adopt plan (§6.3)
+-- carries none of them. The PoC's approval policy is one approver and its rollout limit one
+-- (choice §10.5). Each plan is exactly one plan entry on its machine's timeline.
+CREATE TABLE plan (
+  id                    text PRIMARY KEY CHECK (id ~ '^pln_[a-z2-7]{26}$'),
+  cluster               text NOT NULL,
+  machine               text NOT NULL,
+  kind                  text NOT NULL CHECK (kind IN ('apply-config', 'adopt')),
+  mode                  text CHECK (mode = 'no-reboot'),
+  release               text NOT NULL,
+  assignment_revision   text NOT NULL,
+  desired_release       text,
+  baseline_revision     integer CHECK (baseline_revision >= 1),
+  expected_digest       bytea CHECK (length(expected_digest) = 32),
+  route                 talos_endpoint NOT NULL,
+  max_observation_age   interval NOT NULL CHECK (max_observation_age > interval '0'),
+  check_validity        interval NOT NULL CHECK (check_validity > interval '0'),
+  transport_deadline    interval CHECK (transport_deadline > interval '0'),
+  verification_deadline interval CHECK (verification_deadline > interval '0'),
+  max_attempts          integer CHECK (max_attempts >= 1),
+  rollout_limit         integer NOT NULL DEFAULT 1 CHECK (rollout_limit = 1),
+  expires_at            timestamptz NOT NULL,
+  idempotency_key       text NOT NULL CHECK (idempotency_key ~ '^[A-Za-z0-9_-]{16,128}$'),
+  approval_policy       text NOT NULL CHECK (approval_policy = 'one-approver'),
+  created_by            text NOT NULL,
+  created_by_kind       text NOT NULL,
+  created_role          text NOT NULL CHECK (created_role = 'publisher'),
+  epoch                 text NOT NULL REFERENCES recovery_epoch (epoch),
+  created_at            timestamptz NOT NULL,
+  -- The evidence the plan was created on: a JSON object, never JSON null.
+  evidence              jsonb NOT NULL CHECK (jsonb_typeof(evidence) = 'object'),
+  revision              bigint NOT NULL,
+  entry_kind            text NOT NULL GENERATED ALWAYS AS ('plan') STORED,
+  CHECK (expires_at > created_at),
+  -- IS NOT NULL is spelled out: a CHECK passes when its expression is NULL.
+  CONSTRAINT plan_kind_bindings CHECK (
+    (kind <> 'apply-config' OR (mode IS NOT NULL AND desired_release IS NOT NULL AND desired_release = release
+      AND baseline_revision IS NOT NULL AND expected_digest IS NOT NULL AND transport_deadline IS NOT NULL
+      AND verification_deadline IS NOT NULL AND transport_deadline <= verification_deadline
+      AND max_attempts IS NOT NULL)) AND
+    (kind <> 'adopt' OR (mode IS NULL AND baseline_revision IS NULL AND expected_digest IS NULL
+      AND transport_deadline IS NULL AND verification_deadline IS NULL AND max_attempts IS NULL))),
+  UNIQUE (created_by, idempotency_key),
+  UNIQUE (id, kind, machine, cluster),
+  UNIQUE (id, machine),
+  UNIQUE (id, created_by),
+  UNIQUE (id, machine, route),
+  FOREIGN KEY (machine, cluster) REFERENCES machine (id, cluster),
+  FOREIGN KEY (release, cluster) REFERENCES release (id, cluster),
+  FOREIGN KEY (release, machine) REFERENCES release_machine (release, machine),
+  FOREIGN KEY (desired_release, machine) REFERENCES release_machine (release, machine),
+  FOREIGN KEY (assignment_revision, cluster, machine) REFERENCES assignment_revision (id, cluster, machine),
+  FOREIGN KEY (created_by, created_by_kind) REFERENCES principal (id, kind),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('plan');
+
+-- The self-approval reasons an approval records (§8.1, choice §17.21), each at most once.
+CREATE FUNCTION self_approval_reasons(r text[]) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
+  SELECT r <@ ARRAY['created-plan', 'published', 'authored-change', 'authored-reused', 'owned-automation']::text[]
+    AND cardinality(r) = (SELECT count(DISTINCT x) FROM unnest(r) x)
+$$;
+
+-- An approval (T5a): one per plan and epoch, by a human in the approver role, with every
+-- self-approval reason that held (§8.1). It is one approval entry on the plan's machine's timeline.
+-- The act is written after the effect in the same transaction, so its reference is checked at
+-- commit.
+CREATE TABLE approval (
+  id            text PRIMARY KEY CHECK (id ~ '^apr_[a-z2-7]{26}$'),
+  plan          text NOT NULL,
+  machine       text NOT NULL,
+  approver      text NOT NULL,
+  approver_kind text NOT NULL GENERATED ALWAYS AS ('human') STORED,
+  role          text NOT NULL CHECK (role = 'approver'),
+  epoch         text NOT NULL REFERENCES recovery_epoch (epoch),
+  self_approval text[] NOT NULL CONSTRAINT approval_self_approval CHECK (self_approval_reasons(self_approval)),
+  act           text NOT NULL UNIQUE REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  at            timestamptz NOT NULL,
+  revision      bigint NOT NULL,
+  entry_kind    text NOT NULL GENERATED ALWAYS AS ('approval') STORED,
+  UNIQUE (plan, epoch),
+  UNIQUE (id, plan),
+  FOREIGN KEY (plan, machine) REFERENCES plan (id, machine),
+  FOREIGN KEY (approver, approver_kind) REFERENCES principal (id, kind),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('approval');
+
+-- A plan's state (execution and recovery §2): the one mutable plan table. An approved, committed
+-- or revoked plan names its current approval; a committed plan names its one operation; a revoked,
+-- cancelled or expired plan names why. Its rows are never deleted.
+CREATE TABLE plan_state (
+  plan       text PRIMARY KEY REFERENCES plan (id),
+  state      text NOT NULL CHECK (state IN ('proposed', 'approved', 'committed', 'revoked', 'cancelled', 'expired')),
+  approval   text,
+  operation  text UNIQUE,
+  reason     text,
+  revision   integer NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  updated_at timestamptz NOT NULL,
+  FOREIGN KEY (approval, plan) REFERENCES approval (id, plan),
+  FOREIGN KEY (operation, plan) REFERENCES operation (id, plan),
+  CONSTRAINT plan_state_operation CHECK ((state = 'committed') = (operation IS NOT NULL)),
+  CHECK ((state IN ('approved', 'committed', 'revoked')) = (approval IS NOT NULL)),
+  CONSTRAINT plan_state_reason CHECK (CASE state
+           WHEN 'revoked' THEN reason IS NOT NULL AND reason IN ('approval-revoked', 'identity-revoked')
+           WHEN 'cancelled' THEN reason IS NOT NULL AND reason = 'cancelled'
+           WHEN 'expired' THEN reason IS NOT NULL AND reason = 'expired'
+           ELSE reason IS NULL
+         END)
+);
+
+-- A plan's state is created proposed and moves only along execution and recovery §2's
+-- transitions: proposed to approved, cancelled or expired; approved to a later approval,
+-- committed, revoked, cancelled or expired, keeping its approval into committed and revoked.
+-- Committed, revoked, cancelled and expired are final.
+CREATE FUNCTION refuse_plan_state_transition() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.state = 'proposed' THEN
+      RETURN NEW;
+    END IF;
+  ELSIF NEW.plan = OLD.plan AND (
+       (OLD.state = 'proposed' AND NEW.state IN ('approved', 'cancelled', 'expired'))
+    OR (OLD.state = 'approved' AND NEW.state = 'approved' AND NEW.approval IS DISTINCT FROM OLD.approval)
+    OR (OLD.state = 'approved' AND NEW.state IN ('committed', 'revoked') AND NEW.approval IS NOT DISTINCT FROM OLD.approval)
+    OR (OLD.state = 'approved' AND NEW.state IN ('cancelled', 'expired'))) THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'plan_state: % to % refused', CASE WHEN TG_OP = 'INSERT' THEN 'none' ELSE OLD.state END, NEW.state
+    USING ERRCODE = 'check_violation', CONSTRAINT = 'plan_state_transition', TABLE = 'plan_state';
+END
+$$;
+CREATE TRIGGER transition BEFORE INSERT OR UPDATE ON plan_state
+  FOR EACH ROW EXECUTE FUNCTION refuse_plan_state_transition();
+CREATE TRIGGER no_delete BEFORE DELETE ON plan_state FOR EACH ROW EXECUTE FUNCTION refuse_mutation();
+CREATE TRIGGER no_truncate BEFORE TRUNCATE ON plan_state FOR EACH STATEMENT EXECUTE FUNCTION refuse_mutation();
+
+-- Each plan has its state, written later in the plan's transaction, so this is checked at commit.
+CREATE FUNCTION require_plan_state() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM plan_state WHERE plan = NEW.id) THEN
+    RAISE EXCEPTION 'plan: a plan without its state is refused'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'plan_state_required', TABLE = 'plan';
+  END IF;
+  RETURN NULL;
+END
+$$;
+CREATE CONSTRAINT TRIGGER plan_state_required AFTER INSERT ON plan DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION require_plan_state();
+
+-- An approval's revocation (T5b), by an approver or a recovery admin, with its reason; allowed
+-- after the plan was committed. It is one approval-revocation entry on the machine's timeline.
+CREATE TABLE approval_revocation (
+  approval        text PRIMARY KEY,
+  plan            text NOT NULL,
+  machine         text NOT NULL,
+  revoked_by      text NOT NULL,
+  revoked_by_kind text NOT NULL GENERATED ALWAYS AS ('human') STORED,
+  role            text NOT NULL CHECK (role IN ('approver', 'recovery-admin')),
+  reason          text NOT NULL CHECK (btrim(reason) <> '' AND octet_length(reason) <= 1024),
+  act             text NOT NULL UNIQUE REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  epoch           text NOT NULL REFERENCES recovery_epoch (epoch),
+  at              timestamptz NOT NULL,
+  revision        bigint NOT NULL,
+  entry_kind      text NOT NULL GENERATED ALWAYS AS ('approval-revocation') STORED,
+  FOREIGN KEY (approval, plan) REFERENCES approval (id, plan),
+  FOREIGN KEY (plan, machine) REFERENCES plan (id, machine),
+  FOREIGN KEY (revoked_by, revoked_by_kind) REFERENCES principal (id, kind),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('approval_revocation');
+
+-- A plan's cancellation (T11): by its creator as publisher, or by a human approver or recovery
+-- admin, with its reason. It is one plan-cancellation entry on the machine's timeline.
+CREATE TABLE plan_cancellation (
+  plan              text PRIMARY KEY,
+  machine           text NOT NULL,
+  cancelled_by      text NOT NULL,
+  cancelled_by_kind text NOT NULL,
+  role              text NOT NULL CHECK (role IN ('publisher', 'approver', 'recovery-admin')),
+  -- A publisher cancels only the plan it created: the key below names the creator.
+  creator           text GENERATED ALWAYS AS (CASE WHEN role = 'publisher' THEN cancelled_by END) STORED,
+  reason            text NOT NULL CHECK (btrim(reason) <> '' AND octet_length(reason) <= 1024),
+  act               text NOT NULL UNIQUE REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  epoch             text NOT NULL REFERENCES recovery_epoch (epoch),
+  at                timestamptz NOT NULL,
+  revision          bigint NOT NULL,
+  entry_kind        text NOT NULL GENERATED ALWAYS AS ('plan-cancellation') STORED,
+  CHECK (role = 'publisher' OR cancelled_by_kind = 'human'),
+  FOREIGN KEY (plan, creator) REFERENCES plan (id, created_by),
+  FOREIGN KEY (plan, machine) REFERENCES plan (id, machine),
+  FOREIGN KEY (cancelled_by, cancelled_by_kind) REFERENCES principal (id, kind),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('plan_cancellation');
+
+-- An observation's start (execution and recovery §4.1): the entry recorded before the machine is
+-- read, which its observation names as its basis, with the endpoint it dials and the controller
+-- that dials it. A plan's observation dials the plan's route. Evidence is for a plan, completion
+-- for an operation, drift and restoration for neither; recovery may name either.
+CREATE TABLE observation_start (
+  machine    text NOT NULL,
+  revision   bigint NOT NULL,
+  entry_kind text NOT NULL GENERATED ALWAYS AS ('observation-started') STORED,
+  purpose    text NOT NULL CHECK (purpose IN ('evidence', 'completion', 'recovery', 'drift', 'restoration')),
+  plan       text,
+  operation  text,
+  endpoint   talos_endpoint NOT NULL,
+  controller text NOT NULL CHECK (btrim(controller) <> '' AND octet_length(controller) <= 512),
+  PRIMARY KEY (machine, revision),
+  CHECK (operation IS NULL OR plan IS NOT NULL),
+  CONSTRAINT observation_start_purpose CHECK (CASE purpose
+    WHEN 'evidence' THEN plan IS NOT NULL
+    WHEN 'completion' THEN operation IS NOT NULL
+    WHEN 'recovery' THEN true
+    ELSE plan IS NULL AND operation IS NULL
+  END),
+  FOREIGN KEY (plan, machine, endpoint) REFERENCES plan (id, machine, route),
+  FOREIGN KEY (operation, plan) REFERENCES operation (id, plan),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('observation_start');
+
+-- An observation (execution and recovery §4.1): what one read of the machine returned, recorded
+-- after its start. The Talos access version it read (§3.3) is its path, version and creation time;
+-- a failed access read or connection reads no value, and unread names each value not read and
+-- why. It is one observation entry on the machine's timeline.
+CREATE TABLE observation (
+  id                   text PRIMARY KEY CHECK (id ~ '^obs_[a-z2-7]{26}$'),
+  machine              text NOT NULL,
+  basis                bigint NOT NULL,
+  revision             bigint NOT NULL,
+  entry_kind           text NOT NULL GENERATED ALWAYS AS ('observation') STORED,
+  access_path          text CHECK (access_path ~ '^access/talos/cl_[a-z2-7]{26}$'),
+  access_version       bigint CHECK (access_version >= 1),
+  access_created       timestamptz,
+  smbios_uuid          uuid,
+  talos_node_id        text CHECK (talos_node_id ~ '^[!-~]{1,128}$'),
+  talos_cluster_id     text CHECK (talos_cluster_id ~ '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]=$'),
+  assignment_evidence  text CHECK (btrim(assignment_evidence) <> '' AND octet_length(assignment_evidence) <= 1024),
+  running_version      text CHECK (running_version ~ '^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(-[0-9A-Za-z.-]{1,64})?$'),
+  configuration_digest bytea CHECK (length(configuration_digest) = 32),
+  resource_version     text CHECK (resource_version ~ '^[!-~]{1,64}$'),
+  health               jsonb CHECK (jsonb_typeof(health) = 'object'),
+  unread               jsonb NOT NULL CHECK (jsonb_typeof(unread) = 'object'),
+  at                   timestamptz NOT NULL,
+  CHECK (basis < revision),
+  CONSTRAINT observation_access CHECK ((access_path IS NULL) = (access_version IS NULL)
+    AND (access_path IS NULL) = (access_created IS NULL)),
+  CONSTRAINT observation_unavailable CHECK (access_version IS NOT NULL OR (smbios_uuid IS NULL
+    AND talos_node_id IS NULL AND talos_cluster_id IS NULL AND assignment_evidence IS NULL AND running_version IS NULL
+    AND configuration_digest IS NULL AND resource_version IS NULL AND health IS NULL)),
+  UNIQUE (machine, basis),
+  UNIQUE (id, machine),
+  FOREIGN KEY (machine, basis) REFERENCES observation_start (machine, revision),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('observation');
+
+-- An adoption record (§6.3): an adopt plan's completed operation, the approval it ran under and
+-- the observation it relied on. It is one adoption entry on the machine's timeline.
+CREATE TABLE adoption_record (
+  plan        text PRIMARY KEY,
+  plan_kind   text NOT NULL GENERATED ALWAYS AS ('adopt') STORED,
+  machine     text NOT NULL,
+  cluster     text NOT NULL,
+  operation   text NOT NULL UNIQUE,
+  approval    text NOT NULL,
+  observation text NOT NULL,
+  epoch       text NOT NULL REFERENCES recovery_epoch (epoch),
+  at          timestamptz NOT NULL,
+  revision    bigint NOT NULL,
+  entry_kind  text NOT NULL GENERATED ALWAYS AS ('adoption') STORED,
+  FOREIGN KEY (plan, plan_kind, machine, cluster) REFERENCES plan (id, kind, machine, cluster),
+  FOREIGN KEY (operation, plan) REFERENCES operation (id, plan),
+  FOREIGN KEY (approval, plan) REFERENCES approval (id, plan),
+  FOREIGN KEY (observation, machine) REFERENCES observation (id, machine),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('adoption_record');
+
+-- The second cycle: an apply-config or adopt operation names its plan, of its kind, on its machine
+-- and cluster, and the plan's state names the operation.
+ALTER TABLE operation ADD CONSTRAINT operation_plan_binding FOREIGN KEY (plan, kind, machine, cluster)
+  REFERENCES plan (id, kind, machine, cluster);
+
+-- An operation with a plan is created with its commitment (execution and recovery §3.2): its plan's
+-- state names it, and an adopt operation has its adoption record. Both are written later in the
+-- operation's transaction, so this is checked at commit.
+CREATE FUNCTION require_plan_commitment() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.plan IS NOT NULL AND (NOT EXISTS (SELECT FROM plan_state WHERE plan = NEW.plan AND operation = NEW.id)
+     OR (NEW.kind = 'adopt' AND NOT EXISTS (SELECT FROM adoption_record WHERE operation = NEW.id))) THEN
+    RAISE EXCEPTION 'operation: an operation its plan is not committed to is refused'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'operation_plan_committed', TABLE = 'operation';
+  END IF;
+  RETURN NULL;
+END
+$$;
+CREATE CONSTRAINT TRIGGER plan_committed AFTER INSERT ON operation DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION require_plan_commitment();
 
 -- The last classification of each provider object version a release depends on (dependency
 -- monitor §5.1): the only mutable dependency table, updated under its row lock. Its object is a

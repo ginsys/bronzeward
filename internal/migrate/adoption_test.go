@@ -51,15 +51,14 @@ const (
 
 // adoption holds one of each inventory, draft and operation row, inserted by adoptionRows.
 type adoption struct {
-	human, cluster, other, machine, otherMachine, ibr, otherIBR, draft, draft2, claim, ingest, applyConfig, adopt string
+	human, cluster, other, machine, otherMachine, ibr, otherIBR, draft, draft2, claim, ingest string
 }
 
 func adoptionRows(t *testing.T, db *sql.DB) adoption {
 	t.Helper()
 	a := adoption{human: id.New(id.Principal), cluster: id.New(id.Cluster), other: id.New(id.Cluster),
 		machine: id.New(id.Machine), otherMachine: id.New(id.Machine), ibr: id.New(id.ImportBase), otherIBR: id.New(id.ImportBase),
-		draft: id.New(id.Draft), draft2: id.New(id.Draft), claim: id.New(id.Ingestion), ingest: id.New(id.Operation),
-		applyConfig: id.New(id.Operation), adopt: id.New(id.Operation)}
+		draft: id.New(id.Draft), draft2: id.New(id.Draft), claim: id.New(id.Ingestion), ingest: id.New(id.Operation)}
 	mustExec(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'alice', now())`, a.human)
 	mustExec(t, db, insertCluster, a.cluster, "office", "https://cp.example.test:6443", "v1.13")
 	mustExec(t, db, insertCluster, a.other, "lab", "https://lab.example.test:6443", "v1.13")
@@ -84,8 +83,6 @@ func adoptionRows(t *testing.T, db *sql.DB) adoption {
 	mustExec(t, db, insertClaim, a.claim, "transient", "held", nil, a.human, "k0123456789abcdef")
 	mustExec(t, db, insertOperation, a.ingest, "ingest", "running", "run-1/4242/start-1", 1, a.draft, 1, a.claim, a.human, nil, nil)
 	mustExec(t, db, insertEvent, a.ingest, 1, `{"type":"started"}`, "ingest")
-	mustExec(t, db, insertOperation, a.applyConfig, "apply-config", "committed", "run-1/4242/start-1", 1, nil, nil, nil, nil, nil, nil)
-	mustExec(t, db, insertOperation, a.adopt, "adopt", "completed", nil, 0, nil, nil, nil, nil, nil, nil)
 	return a
 }
 
@@ -164,9 +161,6 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"operation kind import", insertOperation, []any{op(), "import", "running", "o", 1, a.draft, 2, claim2, a.human, nil, nil}, "23514"},
 		{"queued ingest", insertOperation, []any{op(), "ingest", "queued", nil, 0, a.draft, 2, claim2, a.human, nil, nil}, "23514"},
 		{"publish in an execution state", insertOperation, []any{op(), "publish", "sending", "o", 1, a.draft, 2, nil, a.human, nil, nil}, "23514"},
-		{"adopt not completed", insertOperation, []any{op(), "adopt", "committed", "o", 1, nil, nil, nil, nil, nil, nil}, "23514"},
-		{"adopt with a draft revision and no draft", insertOperation, []any{op(), "adopt", "completed", nil, 0, nil, 1, nil, nil, nil, nil}, "23514"},
-		{"adopt with a draft and no revision", insertOperation, []any{op(), "adopt", "completed", nil, 0, a.draft, nil, nil, nil, nil, nil}, "23514"},
 		{"ingest with no claim", insertOperation, []any{op(), "ingest", "running", "o", 1, a.draft, 2, nil, a.human, nil, nil}, "23514"},
 		{"publish with a claim", insertOperation, []any{op(), "publish", "running", "o", 1, a.draft, 2, claim2, a.human, nil, nil}, "23514"},
 		{"ingest with no draft revision", insertOperation, []any{op(), "ingest", "running", "o", 1, a.draft, nil, claim2, a.human, nil, nil}, "23514"},
@@ -184,18 +178,8 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"event of no operation", insertEvent, []any{op(), 1, `{}`, "ingest"}, "23503"},
 		{"event with a JSON null entry", insertEvent, []any{a.ingest, 2, "null", "ingest"}, "23514"},
 		{"event with an array entry", insertEvent, []any{a.ingest, 3, "[]", "ingest"}, "23514"},
-		// Issue ginsys/bronzeward#71: execution and recovery §3.2 commits an apply-config
-		// operation owned, and §3.4's takeover fence compares that owner, in every state up to a
-		// terminal one.
-		{"committed apply-config with no owner", insertOperation, []any{op(), "apply-config", "committed", nil, 0, nil, nil, nil, nil, nil, nil}, "23514"},
-		{"sending apply-config with no owner", insertOperation, []any{op(), "apply-config", "sending", nil, 0, nil, nil, nil, nil, nil, nil}, "23514"},
-		{"verifying apply-config with no owner", insertOperation, []any{op(), "apply-config", "verifying", nil, 0, nil, nil, nil, nil, nil, nil}, "23514"},
-		{"unresolved apply-config with no owner", insertOperation, []any{op(), "apply-config", "unresolved", nil, 0, nil, nil, nil, nil, nil, nil}, "23514"},
-		// PA §3 TimelineEvent: apply-config and adopt operations are on the machine timeline, so
-		// operation_event holds a publish or ingest operation's entries only, under its true kind.
-		{"event of an apply-config operation", insertEvent, []any{a.applyConfig, 1, `{}`, "apply-config"}, "23514"},
-		{"event of an adopt operation", insertEvent, []any{a.adopt, 1, `{}`, "adopt"}, "23514"},
-		{"apply-config event named an ingest", insertEvent, []any{a.applyConfig, 2, `{}`, "ingest"}, "23503"},
+		// The apply-config owner fence (issue ginsys/bronzeward#71) and the apply-config and adopt
+		// event refusals need a plan: TestPlanOperations.
 		{"ingest event named a publish", insertEvent, []any{a.ingest, 2, `{}`, "publish"}, "23503"},
 		{"record naming no operation", `INSERT INTO idempotency_record (principal, key, fingerprint, request_id, epoch, status, body, operation_id, created_at)
 			SELECT $1, 'k0123456789abcdeY', $2, $3, epoch, 202, '{}', $4, now() FROM installation_state`,
@@ -227,13 +211,9 @@ func TestAdoptionConstraints(t *testing.T) {
 	publish := op()
 	mustExec(t, db, insertOperation, publish, "publish", "queued", nil, 0, a.draft, 1, nil, a.human, nil, nil)
 	mustExec(t, db, insertEvent, publish, 1, `{"type":"queued"}`, "publish")
-	// Owned apply-config operations in each fenced state commit; the fence ends at a terminal state.
-	for _, state := range []string{"sending", "verifying", "unresolved"} {
-		mustExec(t, db, insertOperation, op(), "apply-config", state, "run-1/4242/start-1", 2, nil, nil, nil, nil, nil, nil)
-	}
-	mustExec(t, db, insertOperation, op(), "apply-config", "failed", nil, 0, nil, nil, nil, nil, nil, nil)
+	// Owned apply-config operations in each fenced state, and an adopt operation, need a plan:
+	// TestPlanOperations.
 	mustExec(t, db, insertOperation, op(), "ingest", "failed", nil, 0, a.draft, 1, claim3, a.human, nil, `{"type":"urn:bronzeward:problem:x"}`)
-	mustExec(t, db, insertOperation, op(), "adopt", "completed", nil, 0, nil, nil, nil, nil, nil, nil)
 	mustExec(t, db, "UPDATE staging_claim SET state = 'released' WHERE id = $1", a.claim)
 	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "held", []byte{1}, a.human, "k0123456789abcdef")
 	mustExec(t, db, insertClaim, id.New(id.Ingestion), "encrypted", "resumed", []byte{1}, nil, nil)
@@ -300,10 +280,7 @@ func TestOperationFenceControl(t *testing.T) {
 		drop, q string
 		args    []any
 	}{
-		{"ALTER TABLE operation DROP CONSTRAINT operation_apply_config_owned", insertOperation,
-			[]any{id.New(id.Operation), "apply-config", "sending", nil, 0, nil, nil, nil, nil, nil, nil}},
-		{"ALTER TABLE operation_event DROP CONSTRAINT operation_event_job_kind", insertEvent,
-			[]any{a.applyConfig, 1, `{}`, "apply-config"}},
+		// The apply-config halves of the fence need a plan: TestPlanConstraintControl.
 		{"ALTER TABLE operation_event DROP CONSTRAINT operation_event_operation_kind", insertEvent,
 			[]any{a.ingest, 2, `{}`, "publish"}},
 	} {
