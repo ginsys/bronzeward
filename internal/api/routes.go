@@ -111,7 +111,7 @@ func routes() []*route {
 		// handler's check, in its transaction (§10.3).
 		m(post, "/plans/{id}/cancellations", publisher, approver, recovery),
 		planApproval().on(human(m(post, "/plans/{id}/approvals", approver))),
-		m(post, "/approvals/{id}/revocations", approver, recovery),
+		approvalRevocation().on(m(post, "/approvals/{id}/revocations", approver, recovery)),
 		m(post, "/machines/{id}/freezes", author, publisher, approver, recovery),
 		m(post, "/machines/{id}/unfreezes", approver),
 		human(m(post, "/recovery/entries", recovery)), human(m(post, "/recovery/exits", recovery)),
