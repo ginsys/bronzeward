@@ -657,7 +657,7 @@ The transactions this contract defines or constrains:
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
 | T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published and covering the machine; for an `apply-config` plan, the release the machine's `Desired` (execution and recovery choice §10.24) and an `Applied` to diff from; for an `adopt` plan, no `Applied` (§9.3); the machine's assignment head `FOR SHARE`, still the revision the release was compiled from for it; execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
 | T5a | Approval | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted; approver's principal, and that of the approval it replaces, `FOR SHARE` in id order, the approver not revoked; plan state `FOR UPDATE`, unexpired, and `proposed`, or `approved` by an approval from an earlier epoch | approval (unique per plan and epoch, with the self-approval mark), plan state `approved`, machine timeline entry, idempotency record, act |
-| T5b | Approval revocation | key lock; installation state `FOR SHARE`; machine row `FOR UPDATE`; approval `FOR UPDATE`, which waits for a commitment or attempt holding it `FOR SHARE` (§1.2 item 3); plan state `FOR UPDATE` | revocation row; plan state `revoked` only when the plan is `approved` by the named approval (an earlier-epoch approval that a current one replaced, or a plan already terminal, keeps its state); machine timeline entry, idempotency record, act |
+| T5b | Approval revocation | key lock; installation state `FOR SHARE`; machine row `FOR UPDATE`; the revoking human's principal `FOR SHARE`, not revoked; approval `FOR UPDATE`, which waits for a commitment or attempt holding it `FOR SHARE` (§1.2 item 3), not already revoked; plan state `FOR UPDATE` | revocation row, for any approval, after the commitment too (execution and recovery §2); plan state `revoked` only when the plan is `approved` by the named approval and, at the time read after the act-order lock (rule 4), reads neither `expired` nor `revoked` (§8.1); a plan that then reads `expired`, or `revoked` by its approver's identity, is written as it reads (§8.1), and an earlier-epoch approval that a current one replaced, or a plan already terminal, keeps its state; machine timeline entry, idempotency record, act |
 | T5c | Identity revocation | key lock; installation state `FOR SHARE`; every machine row `FOR UPDATE`, in id order, as T9 (rule 5); principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked; an identity revocation entry (T7) on the timeline of each machine with a plan that identity approved whose plan or operation is not terminal, read under those machine locks (execution and recovery §4.1); idempotency record, act |
 | T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6; a commitment also compares the committing process's epoch with the current one (§5.1) | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
@@ -1372,7 +1372,8 @@ A cancellation and an approval revocation write the projection in their own
 transaction. Expiry and a revocation of the approving identity are evaluated
 by the server clock and the principal's `revoked` flag whenever the plan is
 read or locked, and are written by the next transaction that locks the plan
-state; execution and recovery's comparison 1 refuses such a plan either way.
+state and commits (a refused request writes nothing); execution and recovery's
+comparison 1 refuses such a plan either way.
 An `approved` plan whose approval is from an earlier epoch stays `approved`
 but cannot commit until an `approver` approves it again in the current epoch
 (execution and recovery §2; T5a). After `committed`, the operation carries the
@@ -2054,6 +2055,53 @@ The identity is named by `identity` (an `idn` identifier) or by `iss` and
 `sub`, never both; `reason` is required. A second revocation of one identity is
 `409 conflict`: a revocation is permanent.
 
+Revoking the approval of the planning example, then cancelling another plan
+that its creating automation identity no longer wants (T5b, T11):
+
+```http
+POST /api/v1/approvals/apr_2ztr33rjgnabf5zxbwwf7c47vy/revocations
+Idempotency-Key: 00000000-0000-4000-8000-000000000251
+
+{"reason": "wrong release"}
+
+HTTP/1.1 201 Created
+Bronzeward-Epoch: ep_bqeknkmarvikuy7ofil2okekgi
+
+{"approval": "apr_2ztr33rjgnabf5zxbwwf7c47vy",
+ "plan": "pln_f645lvrsgsehfn6fuboigpcawy",
+ "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+ "revokedBy": "idn_vrvke5r5apullj3n5t3dhiwbpm", "role": "recovery-admin",
+ "reason": "wrong release", "act": "act_q3o7vyzlgxk4bhwdj2ma5tnc6e",
+ "epoch": "ep_bqeknkmarvikuy7ofil2okekgi", "at": "2026-09-26T20:31:47Z"}
+
+POST /api/v1/plans/pln_n7gx2cbqkw4ewzr5tdvyl3oh6a/cancellations
+Authorization: Bearer <automation token>
+Idempotency-Key: 00000000-0000-4000-8000-000000000252
+
+{"reason": "superseded by a newer release"}
+
+HTTP/1.1 200 OK
+Bronzeward-Epoch: ep_bqeknkmarvikuy7ofil2okekgi
+
+{"plan": "pln_n7gx2cbqkw4ewzr5tdvyl3oh6a",
+ "machine": "mch_tqhcznunhyle4hnxru5hkt35uq",
+ "cancelledBy": "idn_5u4k6llt7jsktfhcfv35xmdetu", "role": "publisher",
+ "reason": "superseded by a newer release", "act": "act_w5ufk2hn6yjs3dqc7lxbor4mze",
+ "epoch": "ep_bqeknkmarvikuy7ofil2okekgi", "at": "2026-09-26T20:33:05Z"}
+```
+
+Both bodies carry only `reason`, required, not blank and at most 1024 bytes;
+anything else is `400 invalid-request`. Neither act has a read route of its
+own: the revocation answers no `Location`, and both are read through the plan
+(§8.1) and the machine's timeline. The revocation is recorded for any approval
+not already revoked, a second one being `409 conflict`, and moves the plan to
+`revoked` only as T5b says (§5); the first plan above now reads `revoked` at
+revision 3. A cancellation is recorded for a plan that reads `proposed`,
+`approved` or `committed`: the first two become `cancelled`, the approval
+cleared, while a committed plan keeps its state and the cancellation reaches
+its operation as execution and recovery §3.3 says. `role` is the role the act
+was recorded under (§10.3).
+
 ### 9.4 Errors
 
 Errors are `application/problem+json` (RFC 9457) **(choice §17.14)**. `type`
@@ -2085,11 +2133,11 @@ counter, not the ETag token, so the token is not named.
 | --- | --- | --- |
 | 400 | `invalid-request`, `cursor-invalid` | malformed body (a Talos endpoint outside §3.3's grammar included), unknown field, a plan value out of range (§9.3), bad cursor |
 | 401 | `unauthenticated` | no credential, or one that fails §10's token checks (a revoked or denied subject is `403 identity-revoked`); with `WWW-Authenticate: Bearer error="invalid_token"` |
-| 403 | `forbidden` | no qualifying role; the body names the roles that would qualify |
+| 403 | `forbidden` | no qualifying role; the body names the roles that would qualify, and for a plan's cancellation by a `publisher` that did not create it, the plan (§10.3) |
 | 403 | `identity-revoked` | the principal was revoked (§10.4) |
 | 404 | `not-found` | no such resource or route |
 | 409 | `stale-input` | a publication input moved, or a name the draft introduces was introduced first (§4.2) |
-| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch, or whose expiry passed before the approval's time, the body naming the plan and its state (`expired` for the latter); a second approval in one epoch; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID or Talos node ID already recorded, naming its machine, or for a Talos cluster ID already recorded, naming its cluster (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2); a publish operation whose draft is no longer `open` at the revision it bound, naming the draft, or whose draft revision has a release with other content, naming it (§6.2)) |
+| 409 | `conflict` | the resource is in a state that refuses the act (a published draft, whose release the body names; an update or discard of a draft with a `queued` or `running` publish operation, which the body names (§3.1); a plan that is not `proposed` and not awaiting re-approval in the current epoch, or whose expiry passed before the approval's time, the body naming the plan and its state (`expired` for the latter); a second approval in one epoch; a revocation of an approval already revoked, naming the approval; a cancellation of a plan that reads `revoked`, `cancelled` or `expired` at the time read after the act-order lock, naming the plan and that state; a draft entry retry while the first request's claim is live (§7.2); an ingestion for a draft revision that has one `running` (§7.3); an inventory request for an SMBIOS UUID or Talos node ID already recorded, naming its machine, or for a Talos cluster ID already recorded, naming its cluster (§7.3); a key whose record is from an earlier epoch (§7.2); an entry whose key has a record from before this recovery start (§12.4); a second entry in one recovery start (§12.2); a publish operation whose draft is no longer `open` at the revision it bound, naming the draft, or whose draft revision has a release with other content, naming it (§6.2)) |
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose identity key is not the machine record's or whose Talos cluster ID is not its cluster record's, whose identity read failed, or whose SMBIOS UUID is absent for a machine recorded by one or present for a machine recorded by node ID (§3.3); its claim is abandoned and nothing read is kept |
 | 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
@@ -2253,7 +2301,9 @@ token of an identity that `deniedSubjects` lists is refused
 Each route names its roles (§9.2). The check runs in the request handler
 before any transaction, and again inside the transaction for acts whose
 validity the database must hold: an approval checks that the approver is not
-revoked, with the principal row read `FOR SHARE` (T5a).
+revoked, with the principal row read `FOR SHARE` (T5a), and an approval
+revocation and a plan's cancellation check the same of the acting principal
+(T5b, T11).
 
 When a principal holds several roles that qualify for a route, the act is
 recorded under the first qualifying role in the route's listed order
@@ -2274,7 +2324,12 @@ approves it, as design §13.7 item 3 already says.
 A plan's cancellation is checked before any transaction against `publisher`,
 `approver` and `recovery-admin`, since every plan's creator is a `publisher`
 (choice §17.22). Whether a `publisher` created the plan is the handler's
-check, inside its transaction.
+check, inside its transaction: `publisher` qualifies only for the plan's
+creator, and the act is recorded under the first role in the route's order
+that qualifies so (choice §17.20). A principal holding `publisher` and
+`approver` therefore cancels a plan it created as `publisher` and any other as
+`approver`; one that only holds `publisher` and did not create the plan is
+refused `403 forbidden`, naming the plan.
 
 Drift **Ignore** is outside PoC scope (execution and recovery, supported
 values) and has no route.

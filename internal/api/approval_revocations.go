@@ -48,7 +48,8 @@ type approvalRevocationBody struct {
 // approval-revocation entry on the machine's timeline, recorded for any approval, after the
 // commitment too (execution-recovery.md §2). The plan becomes revoked only while the approval
 // authorizes it: its state approved by this approval, and neither expired nor revoked once the
-// act-order lock is held (rule 4, §8.1).
+// act-order lock is held (rule 4). A plan that then reads expired, or revoked by its approver's
+// identity, is written as it reads, as by any transaction that locks its state (§8.1).
 func revokeApproval(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*reasonInput)
 	approval := q.r.PathValue("id")
@@ -84,18 +85,17 @@ func revokeApproval(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result
 		return result{}, refuse(http.StatusConflict, "conflict", "the approval is already revoked; a revocation is permanent").
 			with("approval", approval)
 	}
+	var stored string
 	var current bool
-	if err := tx.QueryRowContext(ctx, `SELECT state = 'approved' AND approval = $2 FROM plan_state WHERE plan = $1 FOR UPDATE`,
-		b.Plan, approval).Scan(&current); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT state, state = 'approved' AND approval = $2 FROM plan_state WHERE plan = $1 FOR UPDATE`,
+		b.Plan, approval).Scan(&stored, &current); err != nil {
 		return result{}, err
 	}
-	// PA §5 rule 4: the revocation's time, and whether the plan still reads approved by it, follow
-	// every lock wait, the act-order lock's included.
+	// PA §5 rule 4: the revocation's time, and how the plan reads, follow every lock wait, the
+	// act-order lock's included.
 	write := func(ctx context.Context, tx *sql.Tx) error {
-		var authorizes bool
-		if err := tx.QueryRowContext(ctx, `SELECT c.t, p.expires_at > c.t AND NOT ap.revoked
-			FROM plan p JOIN approval a ON a.plan = p.id JOIN principal ap ON ap.id = a.approver, (SELECT clock_timestamp() AS t) c
-			WHERE a.id = $1`, approval).Scan(&b.At, &authorizes); err != nil {
+		var reads string
+		if err := tx.QueryRowContext(ctx, projectedState, b.Plan).Scan(&b.At, &reads); err != nil {
 			return err
 		}
 		var rev int64
@@ -114,11 +114,23 @@ func revokeApproval(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result
 			approval, b.Plan, b.Machine, b.RevokedBy, b.Role, b.Reason, q.actID, q.epoch, b.At, rev); err != nil {
 			return err
 		}
-		if !current || !authorizes {
-			return nil
+		// §8.1: a plan this approval authorizes becomes revoked by it; one that reads expired, or
+		// revoked by its approver's identity, is written so, as by any transaction locking its state.
+		var state, reason string
+		switch {
+		case reads == stored:
+			if !current {
+				return nil
+			}
+			state, reason = "revoked", "approval-revoked"
+		case reads == "revoked":
+			state, reason = "revoked", "identity-revoked"
+		default:
+			state, reason = reads, reads
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE plan_state SET state = 'revoked', reason = 'approval-revoked',
-			revision = revision + 1, updated_at = $2 WHERE plan = $1`, b.Plan, b.At)
+		_, err := tx.ExecContext(ctx, `UPDATE plan_state SET state = $2, reason = $3,
+			approval = CASE WHEN $2 = 'revoked' THEN approval END, revision = revision + 1, updated_at = $4 WHERE plan = $1`,
+			b.Plan, state, reason, b.At)
 		return err
 	}
 	return result{status: http.StatusCreated, body: &b, subjects: []string{approval, b.Plan, b.Machine}, atActOrder: write}, nil
