@@ -115,8 +115,8 @@ func mustJSON(t *testing.T, v any) string {
 // mark; the plan reads approved, naming it, at its next revision, and the act names the approval,
 // the plan and the machine. A replay answers the same approval.
 func TestApproval(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	bearer := p.human("h-approver")
 	rec := p.approve(bearer, "k-approve-0123456789", plan.ID)
@@ -172,8 +172,8 @@ func TestApproval(t *testing.T) {
 // GET /approvals/{id} (§9.2): any role reads an approval as T5a answered it, its self-approval
 // reasons in order, with no ETag (an approval is immutable); another identifier is 404.
 func TestApprovalRead(t *testing.T) {
-	p := newPlanEnv(t, func(d *draftEnv) { d.seed = d.principalOf("h-all") })
 	t.Parallel()
+	p := newPlanEnv(t, func(d *draftEnv) { d.seed = d.principalOf("h-all") })
 	all := p.human("h-all")
 	plan := decode[planBody](t, p.plan(all, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	b := decode[approvalBody](t, p.approve(all, "k-approve-0123456789", plan.ID), http.StatusCreated)
@@ -211,8 +211,8 @@ func (p *planEnv) wantUnapproved(t *testing.T, plan, state string) {
 // named expired as a read names it; a machine whose scope is pre-restore unaccounted. None writes
 // anything.
 func TestApprovalRefusals(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	approver := p.human("h-approver")
 	plan := func(k, extra string) string {
 		return decode[planBody](t, p.plan(p.robot, k, applyBody(p.target.rel, p.machine, extra)), http.StatusCreated).ID
@@ -262,8 +262,8 @@ func TestApprovalRefusals(t *testing.T) {
 // in the current epoch, at its next revision, unless its earlier approver is revoked, when it reads
 // revoked and is refused.
 func TestApprovalAfterEpochChange(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := func(k string) string {
 		return decode[planBody](t, p.plan(p.robot, k, applyBody(p.target.rel, p.machine, "")), http.StatusCreated).ID
 	}
@@ -292,8 +292,8 @@ func TestApprovalAfterEpochChange(t *testing.T) {
 // Rule 2: an approver revoked while the approval waits on the machine's lock is refused once the
 // approval holds its principal, and nothing is written.
 func TestApprovalApproverRevokedInWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	approver, recovery := p.human("h-approver"), p.human("h-recovery")
 	id := p.principalOf("h-approver")
@@ -319,8 +319,8 @@ func TestApprovalApproverRevokedInWait(t *testing.T) {
 // Rule 2 for the earlier approver: a re-approval holds the principal of the approval it replaces,
 // so a revocation of that approver queued ahead of it commits first and the plan reads revoked.
 func TestApprovalEarlierApproverRevokedInWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	gone := p.principalOf("h-approver-gone")
 	p.approveAs(t, plan.ID, gone)
@@ -350,8 +350,8 @@ func TestApprovalEarlierApproverRevokedInWait(t *testing.T) {
 // queued there past its plan's expiry is refused and writes nothing; one released in time is
 // recorded at a time after the release.
 func TestApprovalAfterActOrderWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	approver := p.human("h-approver")
 	late := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
 		http.StatusCreated)

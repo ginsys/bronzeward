@@ -46,8 +46,8 @@ func (p *planEnv) commitAs(t *testing.T, plan string) {
 // the plan's machine's timeline under the current epoch; the plan reads cancelled at its next
 // revision, and the act names the plan and the machine. A replay answers the same cancellation.
 func TestPlanCancellation(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	rec := p.cancel(p.robot, "k-cancel-0123456789ab", plan.ID, `{"reason":"superseded"}`)
 	b := decode[cancellationBody](t, rec, http.StatusOK)
@@ -120,8 +120,8 @@ func (p *planEnv) wantCancelled(t *testing.T, plan, principal, role, state strin
 // every role cancels its own plan as publisher and another's as approver; a committed plan's
 // cancellation is recorded and the plan stays committed (execution-recovery.md §2).
 func TestPlanCancellationRoles(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := func(creator, k string) string {
 		return decode[planBody](t, p.plan(creator, k, applyBody(p.target.rel, p.machine, "")), http.StatusCreated).ID
 	}
@@ -165,8 +165,8 @@ func TestPlanCancellationRoles(t *testing.T) {
 // than 1024 bytes; a publisher that did not create the plan, and a role that cannot cancel; a
 // plan that reads revoked, cancelled or expired, named as a read names it. None writes anything.
 func TestPlanCancellationRefusals(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := func(k, extra string) planBody {
 		return decode[planBody](t, p.plan(p.robot, k, applyBody(p.target.rel, p.machine, extra)), http.StatusCreated)
 	}
@@ -216,8 +216,8 @@ func TestPlanCancellationRefusals(t *testing.T) {
 // Rule 4: a cancellation's time, and the expiry it is judged against, follow the act-order wait.
 // One queued there past its plan's expiry is refused naming the plan expired and writes nothing.
 func TestPlanCancellationAfterActOrderWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
 		http.StatusCreated)
 	lock := holdActOrder(t, p.db)
@@ -239,8 +239,8 @@ func TestPlanCancellationAfterActOrderWait(t *testing.T) {
 // Rule 2: a cancelling identity revoked while the cancellation waits on the machine's lock is
 // refused once the cancellation holds its principal, and nothing is written.
 func TestPlanCancellationCancellerRevokedInWait(t *testing.T) {
-	p := newPlanEnv(t)
 	t.Parallel()
+	p := newPlanEnv(t)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	canceller, recovery := p.human("h-all"), p.human("h-recovery")
 	lock, err := p.db.Begin()
