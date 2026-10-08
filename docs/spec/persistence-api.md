@@ -633,7 +633,9 @@ Rules for every transaction:
    takes over the claim) come after that lock and before the act. They update
    only rows the transaction already holds. Their inserts reference those
    rows, rows no transaction locks `FOR UPDATE`, or the request's principal,
-   which the act references too, so no new wait follows the act-order lock.
+   held `FOR KEY SHARE` before the act-order lock since an identity
+   revocation locks it `FOR UPDATE` and then waits for that lock. No new wait
+   follows the act-order lock.
    A read of an immutable row needs no lock and may come first, for
    example the plan binding that names the machine to lock. A detected
    deadlock aborts the transaction, which is retried whole, at most three
