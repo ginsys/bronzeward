@@ -404,38 +404,35 @@ const pairedToken = "<redacted:paired>"
 
 // pairRedacted applies paired redaction to a diff's two sides (compilation §8.3, §12.2): a base
 // scalar at the path of a target scalar holding a redaction token becomes <redacted:paired>, whatever
-// its kind, so that a boolean or a short value cannot be read by elimination, unless the target has a
-// scalar of the base's value at that path. A path is its keys' text and its indexes, so redaction
-// that gives two keys of one mapping the same token gives their leaves one path, compared with
-// every target leaf there. An embedded document is one scalar here, so a redacted leaf inside one
-// pairs the whole base document; an embedded JSON document writes its token's angle bracket
-// escaped, matched without the backslash. Both sides are encoded again by the same encoder so that
-// only what differs shows; a side that does not parse, or holds an alias, withholds the diff.
+// its kind, so that a boolean or a short value cannot be read by elimination, unless it is itself a
+// token (an unchanged redacted leaf). A path is its keys' text and
+// its indexes, so redaction that gives two keys of one mapping the same token gives their leaves
+// one path; every plaintext base leaf there is paired. An embedded document is one scalar here, so
+// a redacted leaf inside one pairs the whole base document. Both sides are encoded again by the
+// same encoder so that only what differs shows; a side that does not parse, or holds an alias
+// anywhere, mapping keys included, withholds the diff.
 func pairRedacted(base, target string) (string, string, error) {
 	tdocs, err := yamlDocs(target)
 	if err != nil {
 		return "", "", err
 	}
-	values, redacted := map[string][]string{}, map[string]bool{}
-	if err := walkScalars(tdocs, func(p string, n *yaml.Node) {
-		values[p] = append(values[p], n.Value)
-		if strings.Contains(n.Value, "<redacted") || strings.Contains(n.Value, "u003credacted") {
+	redacted := map[string]bool{}
+	walkScalars(tdocs, func(p string, n *yaml.Node) {
+		if isRedacted(n.Value) {
 			redacted[p] = true
 		}
-	}); err != nil {
-		return "", "", err
-	}
+	})
 	bdocs, err := yamlDocs(base)
 	if err != nil {
 		return "", "", err
 	}
-	if err := walkScalars(bdocs, func(p string, n *yaml.Node) {
-		if redacted[p] && !slices.Contains(values[p], n.Value) {
+	walkScalars(bdocs, func(p string, n *yaml.Node) {
+		// A plaintext base leaf never equals a token, so it is a change; where a path holds several
+		// leaves, which one a token replaced is unknown, and an equal target leaf exempts none.
+		if redacted[p] && !isRedacted(n.Value) {
 			*n = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: pairedToken}
 		}
-	}); err != nil {
-		return "", "", err
-	}
+	})
 	paired, err := encodeDocs(bdocs)
 	if err != nil {
 		return "", "", err
@@ -460,21 +457,36 @@ func yamlDocs(s string) ([]*yaml.Node, error) {
 		} else if err != nil {
 			return nil, err
 		}
+		if hasAlias(&n) {
+			return nil, errPairAlias
+		}
 		docs = append(docs, &n)
 	}
 }
 
-// walkScalars calls fn on every scalar leaf of docs with its path.
-func walkScalars(docs []*yaml.Node, fn func(p string, n *yaml.Node)) error {
+// hasAlias reports whether n or any node under it, mapping keys included, is an alias.
+func hasAlias(n *yaml.Node) bool {
+	if n.Kind == yaml.AliasNode {
+		return true
+	}
+	return slices.ContainsFunc(n.Content, hasAlias)
+}
+
+// isRedacted reports whether a scalar holds a redaction token, in an embedded JSON document with
+// its angle bracket escaped, matched without the backslash.
+func isRedacted(v string) bool {
+	return strings.Contains(v, "<redacted") || strings.Contains(v, "u003credacted")
+}
+
+// walkScalars calls fn on every scalar leaf of docs with its path; yamlDocs has refused aliases.
+func walkScalars(docs []*yaml.Node, fn func(p string, n *yaml.Node)) {
 	esc := strings.NewReplacer("~", "~0", "/", "~1")
-	var walk func(n *yaml.Node, p string) error
-	walk = func(n *yaml.Node, p string) error {
+	var walk func(n *yaml.Node, p string)
+	walk = func(n *yaml.Node, p string) {
 		switch n.Kind {
 		case yaml.DocumentNode:
 			for _, c := range n.Content {
-				if err := walk(c, p); err != nil {
-					return err
-				}
+				walk(c, p)
 			}
 		case yaml.MappingNode:
 			for i := 0; i+1 < len(n.Content); i += 2 {
@@ -482,29 +494,19 @@ func walkScalars(docs []*yaml.Node, fn func(p string, n *yaml.Node)) error {
 				if n.Content[i].Kind == yaml.ScalarNode {
 					k = esc.Replace(n.Content[i].Value)
 				}
-				if err := walk(n.Content[i+1], p+"/"+k); err != nil {
-					return err
-				}
+				walk(n.Content[i+1], p+"/"+k)
 			}
 		case yaml.SequenceNode:
 			for i, c := range n.Content {
-				if err := walk(c, p+"/"+strconv.Itoa(i)); err != nil {
-					return err
-				}
+				walk(c, p+"/"+strconv.Itoa(i))
 			}
 		case yaml.ScalarNode:
 			fn(p, n)
-		case yaml.AliasNode:
-			return errPairAlias
 		}
-		return nil
 	}
 	for i, d := range docs {
-		if err := walk(d, "doc"+strconv.Itoa(i)); err != nil {
-			return err
-		}
+		walk(d, "doc"+strconv.Itoa(i))
 	}
-	return nil
 }
 
 // encodeDocs writes docs as the redacted configuration is written: two-space indentation.
