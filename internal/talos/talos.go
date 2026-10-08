@@ -222,6 +222,15 @@ func (c Config) Bytes() []byte {
 // ResourceVersion is the COSI resource version the configuration was read at.
 func (c Config) ResourceVersion() string { return c.rv }
 
+// Digest is the configuration's ConfigurationDigest, for a caller that records the digest and
+// never needs the bytes (an observation, execution-recovery.md §4.1).
+func (c Config) Digest() [32]byte {
+	if c.s == nil {
+		return ConfigurationDigest(nil)
+	}
+	return ConfigurationDigest([]byte(*c.s))
+}
+
 const placeholder = "[talos machine configuration]"
 
 var errRender = errors.New("talos: a machine configuration is not marshalled")

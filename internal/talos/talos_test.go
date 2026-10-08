@@ -181,3 +181,18 @@ func TestConfigurationDigest(t *testing.T) {
 		t.Fatal("the digest wrote into its argument's spare capacity")
 	}
 }
+
+// A read configuration's digest is ConfigurationDigest over its bytes, so a caller outside this
+// package records it without the bytes (execution and recovery §4.1).
+func TestConfigDigest(t *testing.T) {
+	c := newConfig([]byte(secret), "1")
+	if c.Digest() != ConfigurationDigest([]byte(secret)) {
+		t.Fatal("Config.Digest is not the configuration digest of its bytes")
+	}
+	if newConfig([]byte(secret+"\n\n"), "1").Digest() != c.Digest() {
+		t.Fatal("Config.Digest does not normalise trailing newlines")
+	}
+	if newConfig([]byte("a: 1\n"), "1").Digest() == c.Digest() {
+		t.Fatal("two configurations share a digest")
+	}
+}
