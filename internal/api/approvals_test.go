@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
@@ -164,4 +165,113 @@ func TestApproval(t *testing.T) {
 	if again := decode[approvalBody](t, p.approve(bearer, "k-approve-0123456789", plan.ID), http.StatusCreated); !reflect.DeepEqual(again, b) {
 		t.Fatalf("replay %+v, want %+v", again, b)
 	}
+}
+
+// wantUnapproved fails unless plan has no approval and its stored state is still state.
+func (p *planEnv) wantUnapproved(t *testing.T, plan, state string) {
+	t.Helper()
+	if n := count(t, p.db, `SELECT count(*) FROM approval WHERE plan = $1`, plan); n != 0 {
+		t.Fatalf("%d approvals of %s", n, plan)
+	}
+	if n := count(t, p.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND state = $2 AND approval IS NULL`, plan, state); n != 1 {
+		t.Fatalf("plan %s is no longer %s", plan, state)
+	}
+}
+
+// T5a's refusals (§9.4): a plan that does not exist; a second approval in one epoch; a plan that
+// is cancelled, or past its expiry though its state was never written; a machine whose scope is
+// pre-restore unaccounted. None writes anything.
+func TestApprovalRefusals(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	approver := p.human("h-approver")
+	plan := func(k, extra string) string {
+		return decode[planBody](t, p.plan(p.robot, k, applyBody(p.target.rel, p.machine, extra)), http.StatusCreated).ID
+	}
+	wantProblem(t, p.approve(approver, "k-approve-unknown-0123", pln), http.StatusNotFound, "not-found")
+	wantProblem(t, p.approve(approver, "k-approve-malformed-01", "pln_x"), http.StatusNotFound, "not-found")
+
+	once := plan("k-plan-once-0123456789", "")
+	first := decode[approvalBody](t, p.approve(approver, "k-approve-first-012345", once), http.StatusCreated)
+	wantProblem(t, p.approve(p.human("h-all"), "k-approve-second-01234", once), http.StatusConflict, "conflict")
+	if n := count(t, p.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND approval = $2 AND revision = 2`, once, first.ID); n != 1 {
+		t.Fatal("the second approval changed the plan's state")
+	}
+
+	cancelled := plan("k-plan-cancelled-012345", "")
+	mustExec(t, p.db, `UPDATE plan_state SET state = 'cancelled', reason = 'cancelled', revision = 2 WHERE plan = $1`, cancelled)
+	wantProblem(t, p.approve(approver, "k-approve-cancelled-01", cancelled), http.StatusConflict, "conflict")
+	p.wantUnapproved(t, cancelled, "cancelled")
+
+	expired := decode[planBody](t, p.plan(p.robot, "k-plan-expired-0123456", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
+		http.StatusCreated)
+	time.Sleep(time.Until(expired.ExpiresAt.Add(100 * time.Millisecond)))
+	if doc := wantProblem(t, p.approve(approver, "k-approve-expired-0123", expired.ID), http.StatusConflict, "conflict"); doc["state"] != "expired" {
+		t.Fatalf("expired plan refused with %v", doc)
+	}
+	p.wantUnapproved(t, expired.ID, "proposed")
+
+	scoped := plan("k-plan-scoped-01234567", "")
+	mustExec(t, p.db, `UPDATE machine SET scope_state = 'pre-restore-unaccounted' WHERE id = $1`, p.machine)
+	wantProblem(t, p.approve(approver, "k-approve-scoped-01234", scoped), http.StatusConflict, "recovery-mode-active")
+	mustExec(t, p.db, `UPDATE machine SET scope_state = 'normal' WHERE id = $1`, p.machine)
+	p.wantUnapproved(t, scoped, "proposed")
+}
+
+// An approval of an earlier epoch is void (execution-recovery.md §2): the plan is approved again
+// in the current epoch, at its next revision, unless its earlier approver is revoked, when it reads
+// revoked and is refused.
+func TestApprovalAfterEpochChange(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	plan := func(k string) string {
+		return decode[planBody](t, p.plan(p.robot, k, applyBody(p.target.rel, p.machine, "")), http.StatusCreated).ID
+	}
+	again, revoked := plan("k-plan-again-012345678"), plan("k-plan-revoked-01234567")
+	approver := p.human("h-approver")
+	before := decode[approvalBody](t, p.approve(approver, "k-approve-before-01234", again), http.StatusCreated)
+	gone := p.principalOf("h-approver-gone")
+	p.approveAs(t, revoked, gone)
+	ep := newEpoch(t, p.db)
+	revocationOf(t, revoke(p.env, p.human("h-recovery"), key, `{"identity":"`+gone+`","reason":"left"}`))
+
+	after := decode[approvalBody](t, p.approve(approver, "k-approve-after-012345", again), http.StatusCreated)
+	if after.ID == before.ID || after.Epoch != ep {
+		t.Fatalf("re-approval %+v after %+v", after, before)
+	}
+	read := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + again, token: p.human("h-viewer")}),
+		http.StatusOK)
+	if read.State != "approved" || read.Approval == nil || *read.Approval != after.ID || read.Revision != 3 {
+		t.Fatalf("plan after re-approval: state %q, approval %v, revision %d", read.State, read.Approval, read.Revision)
+	}
+	if doc := wantProblem(t, p.approve(approver, "k-approve-revoked-0123", revoked), http.StatusConflict, "conflict"); doc["state"] != "revoked" {
+		t.Fatalf("plan with a revoked approver refused with %v", doc)
+	}
+}
+
+// Rule 2: an approver revoked while the approval waits on the machine's lock is refused once the
+// approval holds its principal, and nothing is written.
+func TestApprovalApproverRevokedInWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	approver, recovery := p.human("h-approver"), p.human("h-recovery")
+	id := p.principalOf("h-approver")
+	lock, err := p.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Rollback() }()
+	if _, err := lock.Exec(`SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, p.machine); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- p.approve(approver, "k-approve-0123456789", plan.ID) }()
+	dbtest.WaitForLockWait(t, p.db)
+	revocationOf(t, revoke(p.env, recovery, key, `{"identity":"`+id+`","reason":"left"}`))
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	wantProblem(t, <-done, http.StatusForbidden, "identity-revoked")
+	p.wantUnapproved(t, plan.ID, "proposed")
 }
