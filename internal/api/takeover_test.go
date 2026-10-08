@@ -204,6 +204,45 @@ func TestTakeoverAfterActOrderWait(t *testing.T) {
 	leaseLiveAfter(t, ie.db, j.claim.ID, released)
 }
 
+// A takeover whose claim reaches its absolute expiry while it waits on the act-order lock is
+// refused as ended, as the expiry passing before its write would be: nothing is taken and no run
+// starts (PA §1.2 rule 4, compilation §3.4).
+func TestTakeoverExpiredInActOrderWait(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	op, j := ie.stagedJob(t)
+	mustExec(t, ie.db, `UPDATE staging_claim SET expires_at = clock_timestamp() + interval '1 second' WHERE id = $1`, j.claim.ID)
+	d := ie.d
+	d.owner = staging.Owner{ID: "b/2/" + rand.Text(), Epoch: ie.d.owner.Epoch}
+	started := make(chan job, 1)
+	b := ie.buildWith(d, options{onRunner: func(j job) { started <- j }})
+	lock := holdActOrder(t, ie.db)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- ie.do(b, takeoverCall(ie.human("h-author"), "k-takeover-expiry-012", j.claim.ID)) }()
+	dbtest.WaitForLockWait(t, ie.db)
+	time.Sleep(1200 * time.Millisecond)
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	wantProblem(t, <-done, http.StatusConflict, "conflict")
+	var gen int64
+	var owner, state string
+	if err := ie.db.QueryRow(`SELECT owner_gen, owner, state FROM staging_claim WHERE id = $1`, j.claim.ID).Scan(&gen, &owner, &state); err != nil {
+		t.Fatal(err)
+	}
+	if gen != j.claim.Gen || owner != ie.d.owner.ID || state != "held" {
+		t.Fatalf("claim generation %d owner %s state %s after a refused takeover", gen, owner, state)
+	}
+	var opGen int64
+	if err := ie.db.QueryRow(`SELECT owner_gen FROM operation WHERE id = $1`, op).Scan(&opGen); err != nil || opGen != j.claim.Gen {
+		t.Fatalf("operation generation %d, %v", opGen, err)
+	}
+	select {
+	case j := <-started:
+		t.Fatalf("a refused takeover started %+v", j)
+	default:
+	}
+}
+
 // PA §9.2, C §3.4: each refusal answers its problem and leaves the claim and its operation as they
 // were. The route is for human authors only.
 func TestTakeoverRefusals(t *testing.T) {
