@@ -103,6 +103,9 @@ func newWorld(t *testing.T) *world {
 		VALUES ($1, 'office', 'https://cp.example.test:6443', 'v1.13', '8TMwqXnWOTdw7xFDHSn-f6JMbBQrSWAuyzCfGIRVSL0=', now())`, w.a)
 	exec(t, db, `INSERT INTO machine (id, cluster, smbios_uuid, serial, scope_state, talos_endpoint, platform, created_at)
 		VALUES ($1, $2, '0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b', 'SN-1', 'normal', '10.55.0.3:50000', 'metal', now())`, w.machine, w.a)
+	// The author reference's import base revisions name.
+	exec(t, db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'alice', now())`,
+		id.New(id.Principal))
 	return w
 }
 
@@ -133,7 +136,8 @@ func (w *world) reference(t *testing.T, tx *sql.Tx, path string) {
 	t.Helper()
 	base := id.New(id.ImportBase)
 	exec(t, tx, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now(),
+		(SELECT min(id) FROM principal))`,
 		base, w.machine, bytes.Repeat([]byte{1}, 32))
 	exec(t, tx, `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
 		VALUES ($1, $2, 'string', 1, NULL, $3)`, base, "n"+strings.ToLower(provider.NewValueID()), path)

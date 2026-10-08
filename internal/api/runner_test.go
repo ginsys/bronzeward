@@ -236,6 +236,12 @@ func TestIngestTransientToDraft(t *testing.T) {
 		FROM import_base_revision WHERE id = $1`, ibr).Scan(&machine, &doc, &ct, &digest, &digestKey, &conf); err != nil {
 		t.Fatal(err)
 	}
+	// The revision's author is the ingestion's creator (execution and recovery §2).
+	var author, creator string
+	if err := ie.db.QueryRow(`SELECT i.author, o.created_by FROM import_base_revision i, operation o WHERE i.id = $1 AND o.id = $2`,
+		ibr, op).Scan(&author, &creator); err != nil || author != creator {
+		t.Fatalf("import base author %q, ingestion creator %q: %v", author, creator, err)
+	}
 	in := []byte(twoSecrets)
 	m := hmac.New(sha256.New, []byte("1"))
 	m.Write(in)

@@ -224,7 +224,8 @@ func storeImportBase(t *testing.T, db *sql.DB, ibr, machine, kind string, encodi
 	}
 	defer func() { _ = tx.Rollback() }()
 	mustExec(t, tx, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now(),
+		(SELECT min(id) FROM principal))`,
 		ibr, machine, make([]byte, 32))
 	mustExec(t, tx, `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
 		VALUES ($1, 'registry/pass', $2, 1, $3, $4)`, ibr, kind, encoding, generation)

@@ -149,7 +149,8 @@ func TestReadPinnedNone(t *testing.T) {
 	p := newPublishEnv(t)
 	ibr := id.New(id.ImportBase)
 	mustExec(t, p.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now(),
+		(SELECT min(id) FROM principal))`,
 		ibr, p.machine, make([]byte, 32))
 	mustExec(t, p.db, `UPDATE draft_entry SET import_base_revision = $1 WHERE draft = $2 AND machine = $3`, ibr, p.draft, p.machine)
 	var metaCalls, reads int

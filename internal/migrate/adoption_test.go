@@ -20,8 +20,11 @@ const (
 		VALUES ($1, $2, $3, $4, $5, '10.55.0.3:50000', 'metal', now())`
 	insertMachineState = `INSERT INTO machine_state (machine, applied_release, applied_digest, applied_source, baseline_revision)
 		VALUES ($1, $2, $3, $4, $5)`
+	// Its author is the first principal: these rows test the revision, not who wrote it.
 	insertImportBase = `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, $3, '[]', $4, $5, $6, $7, now())`
+		baseline_digest_key, configuration_digest, created_at, author)
+		VALUES ($1, $2, $3, '[]', $4, $5, $6, $7, now(), ` + firstAuthor + `)`
+	firstAuthor     = `(SELECT min(id) FROM principal)`
 	insertReference = `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
 		VALUES ($1, $2, $3, $4, $5, $6)`
 	insertDraft = `INSERT INTO draft (id, cluster, title, state, revision, etag_token, created_at)
@@ -127,6 +130,11 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"31-byte configuration digest", insertImportBase, []any{id.New(id.ImportBase), a.machine, "x", []byte{1}, digest(1), "k:1", digest(2)[:31]}, "23514"},
 		{"import base with no key identity", insertImportBase, []any{id.New(id.ImportBase), a.machine, "x", []byte{1}, digest(1), "", digest(2)}, "23514"},
 		{"import base of no machine", insertImportBase, []any{id.New(id.ImportBase), id.New(id.Machine), "x", []byte{1}, digest(1), "k:1", digest(2)}, "23503"},
+		// Self-approval names an import base's author (execution and recovery §2; §10.5).
+		{"import base with no author", strings.Replace(insertImportBase, firstAuthor, "NULL", 1),
+			[]any{id.New(id.ImportBase), a.machine, "x", []byte{1}, digest(1), "k:1", digest(2)}, "23502"},
+		{"import base by no principal", strings.Replace(insertImportBase, firstAuthor, "'"+id.New(id.Principal)+"'", 1),
+			[]any{id.New(id.ImportBase), a.machine, "x", []byte{1}, digest(1), "k:1", digest(2)}, "23503"},
 		{"import base embedded not an array", strings.Replace(insertImportBase, "'[]'", `'{"path": "doc[0]/x"}'`, 1),
 			[]any{id.New(id.ImportBase), a.machine, "x", []byte{1}, digest(1), "k:1", digest(2)}, "23514"},
 		{"reference name with an upper-case letter", insertReference, []any{ibrNew, "Registry/pass", "string", 1, nil, generation(a.cluster, a.claim)}, "23514"},

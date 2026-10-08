@@ -287,11 +287,17 @@ func (a *API) commitImport(ctx context.Context, j job, imp imported) (*refusal, 
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext,
-			baseline_digest, baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())`,
+		// The ingestion's creator authors the revision (execution and recovery §2's self-approval).
+		res, err := tx.ExecContext(ctx, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext,
+			baseline_digest, baseline_digest_key, configuration_digest, created_at, author)
+			SELECT $1, $2, $3, $4, $5, $6, $7, $8, now(), created_by FROM operation WHERE id = $9`,
 			ibr, j.claim.Machine, string(imp.sanitized.Documents()), emb, []byte(b.Ciphertext), b.Digest[:], b.DigestKey,
-			b.Configuration[:]); err != nil {
+			b.Configuration[:], j.op)
+		if err != nil {
 			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			return fmt.Errorf("import base revision of operation %s: %d rows written: %v", j.op, n, err)
 		}
 		for name, r := range imp.sanitized.Declarations().References {
 			gen, ok := imp.gens[name]
