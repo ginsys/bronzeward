@@ -29,7 +29,7 @@ auth:
 # Execution timing (execution-recovery.md §5.2). maxTransportDeadline has no default: the longest
 # a machine-facing call may take, which the deployment knows. settleFloor defaults to 30s.
 # planDefaults are what a plan binds when its creation request leaves a value out
-# (persistence-api.md choice §17.37), in whole seconds; shown here at their defaults. The
+# (persistence-api.md choice §17.37), each a whole number of seconds; shown here at their defaults. The
 # transport deadline defaults to 1m, or to maxTransportDeadline if that is lower.
 execution:
   maxTransportDeadline: 5m
