@@ -69,13 +69,15 @@ type obsSeed struct {
 	clusterID, evidence string
 	digest              []byte
 	startOnly           bool
+	unread              string // the observation's unread object, "{}" when empty
 }
 
 // observed records an observation of the machine showing its identity, the baseline's digest and
 // the bound assignment revision, as change leaves them, and answers its id ("" for a start only).
 func (ae *adoptEnv) observed(t *testing.T, change func(*obsSeed)) string {
 	t.Helper()
-	s := obsSeed{uuid: ae.uuid, nodeID: ae.nodeID, clusterID: ae.clusterID, evidence: ae.assignment, digest: ae.baseline}
+	s := obsSeed{uuid: ae.uuid, nodeID: ae.nodeID, clusterID: ae.clusterID, evidence: ae.assignment, digest: ae.baseline,
+		unread: "{}"}
 	if change != nil {
 		change(&s)
 	}
@@ -108,8 +110,8 @@ func (ae *adoptEnv) observed(t *testing.T, change func(*obsSeed)) string {
 			FROM installation_state`, ae.machine, rev, obs, basis)
 		mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created,
 				smbios_uuid, talos_node_id, talos_cluster_id, assignment_evidence, configuration_digest, unread, at)
-			VALUES ($1, $2, $3, $4, 'access/talos/' || $5, 3, '2026-10-01T00:00:00Z', $6::uuid, $10, $7, $8, $9, '{}', now())`,
-			obs, ae.machine, basis, rev, ae.cluster, s.uuid, s.clusterID, s.evidence, s.digest, s.nodeID)
+			VALUES ($1, $2, $3, $4, 'access/talos/' || $5, 3, '2026-10-01T00:00:00Z', $6::uuid, $10, $7, NULLIF($8, ''), $9, $11::jsonb, now())`,
+			obs, ae.machine, basis, rev, ae.cluster, s.uuid, s.clusterID, s.evidence, s.digest, s.nodeID, s.unread)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
@@ -400,6 +402,45 @@ func TestAdoptionSecondCommitment(t *testing.T) {
 	}
 	_, err := ae.a.commitAdoption(context.Background(), ae.pid)
 	ae.wantRefused(t, err, 1, "4.1", "the plan already has an operation")
+}
+
+// An observation the record relies on that left the identity, the configuration or the assignment
+// evidence unread is no evidence either way (§6.3 step 4, choice §10.27): the record rolls back
+// without a refusal entry, even when an earlier observation was complete, and a later complete
+// observation commits it.
+func TestAdoptionUnreadEvidence(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name   string
+		change func(*obsSeed)
+	}{
+		{"identity", func(s *obsSeed) { s.uuid, s.nodeID, s.unread = nil, nil, `{"identity":{"cause":"identity-read"}}` }},
+		{"configuration", func(s *obsSeed) { s.digest, s.unread = nil, `{"configuration":{"cause":"machine-config"}}` }},
+		{"assignmentEvidence", func(s *obsSeed) { s.evidence, s.unread = "", `{"assignmentEvidence":{"cause":"denied"}}` }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ae := newAdoptEnv(t, "")
+			ae.approveIt(t)
+			ae.observed(t, nil)
+			ae.observed(t, c.change)
+			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+			var refused *adoptionRefused
+			if !errors.Is(err, errEvidenceUnread) || errors.As(err, &refused) {
+				t.Fatalf("got %v, want the evidence unread and no refusal", err)
+			}
+			if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'refusal'`, ae.machine); n != 0 {
+				t.Fatalf("%d refusal entries", n)
+			}
+			if n := count(t, ae.db, `SELECT count(*) FROM operation WHERE plan = $1`, ae.pid); n != 0 {
+				t.Fatalf("%d operations for the plan", n)
+			}
+			ae.observed(t, nil)
+			if _, err := ae.a.commitAdoption(context.Background(), ae.pid); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 // An apply-config operation holding the machine scope refuses the adoption by 4.5.

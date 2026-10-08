@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -70,9 +69,7 @@ func (a *API) adoptPass(ctx context.Context, retry map[string]time.Time) bool {
 		a.o.logf("adoption: the candidates: %v", err)
 		return true
 	}
-	listed := map[string]bool{}
 	for _, c := range cs {
-		listed[c.plan] = true
 		if time.Now().Before(retry[c.plan]) {
 			continue
 		}
@@ -92,8 +89,9 @@ func (a *API) adoptPass(ctx context.Context, retry map[string]time.Time) bool {
 			retry[c.plan] = time.Now().Add(a.d.timers.Lease)
 		}
 	}
-	for p := range retry { // a plan no longer listed waits for nothing
-		if !listed[p] {
+	// A plan left out of this pass, its scope closed for now, keeps its time until it passes.
+	for p, at := range retry {
+		if !time.Now().Before(at) {
 			delete(retry, p)
 		}
 	}
@@ -140,18 +138,12 @@ func (a *API) adoptCandidates(ctx context.Context) ([]adoptCandidate, error) {
 }
 
 // adoptOne takes an evidence observation of c's machine for its plan, at the plan's route, then
-// records the adoption relying on it (T6). An observation that left the identity, the
-// configuration or the assignment evidence unread is no evidence either way, so no record is
-// attempted on it.
+// records the adoption (T6), which relies on the recorded observation with the highest basis. T6
+// answers errEvidenceUnread, not a refusal, when that observation left the identity, the
+// configuration or the assignment evidence unread.
 func (a *API) adoptOne(ctx context.Context, c adoptCandidate) error {
-	obs, err := a.observe(ctx, c.machine, observeFor{purpose: "evidence", plan: c.plan})
-	if err != nil {
+	if _, err := a.observe(ctx, c.machine, observeFor{purpose: "evidence", plan: c.plan}); err != nil {
 		return err
-	}
-	for _, v := range []string{"identity", "configuration", "assignmentEvidence"} {
-		if u, ok := obs.Unread[v]; ok {
-			return fmt.Errorf("observation %s did not read the %s: %s", obs.ID, v, u.Cause)
-		}
 	}
 	r, err := a.commitAdoption(ctx, c.plan)
 	if err != nil {
