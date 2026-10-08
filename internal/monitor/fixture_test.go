@@ -25,7 +25,8 @@ const (
 	insertMachineState = `INSERT INTO machine_state (machine, applied_release, applied_digest, applied_source, baseline_revision)
 		VALUES ($1, $2, $3, $4, $5)`
 	insertImportBase = `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, $3, '[]', $4, $5, $6, $7, now())`
+		baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, $3, '[]', $4, $5, $6, $7, now(),
+		(SELECT min(id) FROM principal))`
 	insertDraft = `INSERT INTO draft (id, cluster, title, state, revision, etag_token, created_at)
 		VALUES ($1, $2, $3, $4, 1, $5, now())`
 	insertOperation = `INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, lease_until,

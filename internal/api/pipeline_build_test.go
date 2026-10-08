@@ -181,7 +181,8 @@ func (b *buildEnv) importBase(machine, text string) string {
 	ibr := id.New(id.ImportBase)
 	src := b.ingested(text)
 	b.store(`INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, $3, $4, '\x01', $5, 'transit/baseline-digest:1', $5, now())`,
+		baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, $3, $4, '\x01', $5, 'transit/baseline-digest:1', $5, now(),
+		(SELECT min(id) FROM principal))`,
 		"import_base_reference", src, ibr, machine, src.document, src.embedded, make([]byte, 32))
 	mustExec(b.t, b.db, `DELETE FROM draft_entry WHERE draft = $1 AND machine = $2`, b.draft, machine)
 	mustExec(b.t, b.db, `INSERT INTO draft_entry (draft, cluster, kind, machine, import_base_revision)

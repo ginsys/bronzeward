@@ -793,7 +793,8 @@ func TestPublishCommitAppliedImportBaseChanged(t *testing.T) {
 	p.nextDraft()
 	other := id.New(id.ImportBase)
 	mustExec(t, p.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now(),
+		(SELECT min(id) FROM principal))`,
 		other, p.machine, make([]byte, 32))
 	p.unit.machines[0].importBase = other
 	p.unit.machines[0].reproduction[0].source = other
@@ -810,7 +811,8 @@ func (p *publishEnv) coveredMachine() (string, string, string) {
 	m := decode[machineBody](p.t, rec, http.StatusCreated).ID
 	ibr := id.New(id.ImportBase)
 	mustExec(p.t, p.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`,
+		baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now(),
+		(SELECT min(id) FROM principal))`,
 		ibr, m, make([]byte, 32))
 	return m, ibr, `WITH s AS (UPDATE machine_state SET revision = revision + 1 WHERE machine = $3 RETURNING machine)
 		INSERT INTO draft_entry (draft, cluster, kind, machine, import_base_revision) SELECT $1, $2, 'import-base', machine, $4 FROM s`

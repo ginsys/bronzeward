@@ -214,7 +214,9 @@ $$;
 -- document, its baseline ciphertext, the baseline's keyed digest with the key identity and version
 -- that computed it (compilation §4.1), and its unkeyed configuration digest (choice §16.26 there).
 -- embedded holds the embedded documents the import identified (compilation §5.2), as a fragment
--- revision's does, so publication rebuilds the stored document with the authoring checks.
+-- revision's does, so publication rebuilds the stored document with the authoring checks. Its
+-- author is the human whose ingestion wrote it, whom an approval's self-approval mark names like a
+-- fragment revision's author (execution and recovery §2; §10.5).
 CREATE TABLE import_base_revision (
   id                   text PRIMARY KEY CHECK (id ~ '^ibr_[a-z2-7]{26}$'),
   machine              text NOT NULL REFERENCES machine (id),
@@ -226,6 +228,7 @@ CREATE TABLE import_base_revision (
   configuration_digest bytea NOT NULL CHECK (length(configuration_digest) = 32),
   created_at           timestamptz NOT NULL,
   writer               xid8 NOT NULL,
+  author               text NOT NULL REFERENCES principal (id),
   UNIQUE (id, machine)
 );
 CALL make_immutable('import_base_revision');

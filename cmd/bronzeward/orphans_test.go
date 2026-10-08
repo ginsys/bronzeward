@@ -193,7 +193,8 @@ func (e *orphanEnv) reference(t *testing.T, path string) {
 		args []any
 	}{
 		{`INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
-		baseline_digest_key, configuration_digest, created_at) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now())`, []any{base, e.machine, bytes.Repeat([]byte{1}, 32)}},
+		baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now(),
+		(SELECT min(id) FROM principal))`, []any{base, e.machine, bytes.Repeat([]byte{1}, 32)}},
 		{`INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
 		VALUES ($1, $2, 'string', 1, NULL, $3)`, []any{base, "n" + strings.ToLower(provider.NewValueID()), path}},
 	} {
