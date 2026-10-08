@@ -28,12 +28,18 @@ type querier interface {
 // lookup reads the record of q's principal and key, if there is one, with the installation state
 // FOR SHARE: a recovery-mode entry commits before the statement reads or after it, so the record's
 // epoch is judged against the epoch it sets on q, and a service token is rechecked against it.
-func lookup(ctx context.Context, db querier, q *request) (*record, error) {
+// exclusive takes it FOR UPDATE instead, for a route whose effect must wait for every request
+// holding it, and hold off new ones, an inventory among them (§5 T5c).
+func lookup(ctx context.Context, db querier, q *request, exclusive bool) (*record, error) {
 	var rec record
 	var rid sql.NullString
 	var cur sql.NullBool
+	strength := "SHARE"
+	if exclusive {
+		strength = "UPDATE"
+	}
 	err := db.QueryRowContext(ctx, `SELECT s.epoch, s.recovery_mode, r.fingerprint, coalesce(r.fingerprint_key, ''), r.epoch = s.epoch, coalesce(r.epoch, ''), r.request_id, coalesce(r.status, 0), r.location, r.etag, r.body
-		FROM installation_state s LEFT JOIN idempotency_record r ON r.principal = $1 AND r.key = $2 FOR SHARE OF s`,
+		FROM installation_state s LEFT JOIN idempotency_record r ON r.principal = $1 AND r.key = $2 FOR `+strength+` OF s`,
 		q.principal.ID, q.key).Scan(&q.epoch, &q.recovery, &rec.fingerprint, &rec.fpKey, &cur, &rec.epoch, &rid, &rec.status, &rec.location, &rec.etag, &rec.body)
 	if err != nil {
 		return nil, err

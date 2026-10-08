@@ -94,7 +94,7 @@ func prepareFragment(ctx context.Context, a *API, q *request) error {
 		if err := a.lockKey(ctx, tx, q); err != nil {
 			return err
 		}
-		rec, err := lookup(ctx, tx, q)
+		rec, err := lookup(ctx, tx, q, false)
 		if err != nil || rec != nil {
 			replay = rec != nil // the transaction answers it
 			return err

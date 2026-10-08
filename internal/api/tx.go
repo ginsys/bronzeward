@@ -61,7 +61,7 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 		return
 	}
 	// §7.2: before running anything, look the key up.
-	rec, err := lookup(ctx, a.db, q)
+	rec, err := lookup(ctx, a.db, q, false)
 	if err != nil {
 		a.fail(w, q, fmt.Errorf("%w: %w", errUnavailable, err))
 		return
@@ -187,11 +187,12 @@ func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, er
 	}
 	defer func() { _ = tx.Rollback() }() // a no-op once committed
 	// §7.2: the key's lock is the first statement (rule 5's order), then the lookup again under it,
-	// which takes the installation state FOR SHARE for the rest of the transaction.
+	// which takes the installation state FOR SHARE, or FOR UPDATE for an exclusive route, for the
+	// rest of the transaction.
 	if err := a.lockKey(ctx, tx, q); err != nil {
 		return nil, false, err
 	}
-	if rec, err := lookup(ctx, tx, q); err != nil || rec != nil {
+	if rec, err := lookup(ctx, tx, q, q.route.exclusive); err != nil || rec != nil {
 		return rec, false, err
 	}
 	q.actID = id.New(id.Act)

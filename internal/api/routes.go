@@ -14,6 +14,7 @@ type route struct {
 	roles           []auth.Role // the qualifying roles, in the route's listed order (§10.3, choice §17.20)
 	humanOnly       bool        // automation is refused whatever its roles (§10.3)
 	ifMatch         bool        // If-Match is required
+	exclusive       bool        // the transaction takes the installation state FOR UPDATE (§5)
 	action          string      // the act's action (§10.5)
 	// keyed names the body member that carries unextracted input: the request is fingerprinted
 	// with the digest key (§7.1), its input implements documentInput, and that member is left out
