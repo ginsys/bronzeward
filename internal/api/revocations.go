@@ -82,14 +82,16 @@ type revocationBody struct {
 	Note                 string    `json:"note"`
 }
 
-// revokeIdentity is T5c (§5, §10.4), after the key lock and the installation state. Principals
-// are locked in id order (rule 5): the identity FOR UPDATE by auth.RevokeIdentity, and the
-// revoking human FOR SHARE, refused if revoked by then (rule 2). T5c's machine locks and timeline
-// entries join here with the plans and the machine timeline: the entries go on the machines with
-// a plan the identity approved, and neither table exists yet. Acceptance plan §7.1 assigns their
-// check to ginsys/bronzeward#25.
+// revokeIdentity is T5c (§5, §10.4), after the key lock and the installation state. Every machine
+// row is locked FOR UPDATE in id order before the principals (rule 5), so the machines whose
+// timelines take an entry are read under those locks. Principals are locked in id order: the
+// identity FOR UPDATE by auth.RevokeIdentity, and the revoking human FOR SHARE, refused if revoked
+// by then (rule 2).
 func revokeIdentity(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*revocationInput)
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM machine ORDER BY id FOR UPDATE`); err != nil {
+		return result{}, err
+	}
 	ids := []string{in.target, q.principal.ID}
 	slices.Sort(ids)
 	for _, p := range slices.Compact(ids) {
@@ -133,9 +135,56 @@ func revokeIdentity(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	// PA §5 rule 4: the time follows every lock wait, the principals' and the act-order lock's,
 	// so a plan read can tell whether the revocation came before its approved plan's expiry (§8.1).
 	write := func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `INSERT INTO identity_revocation (identity, revoked_by, role, reason, act, epoch, at)
+		if err := tx.QueryRowContext(ctx, `INSERT INTO identity_revocation (identity, revoked_by, role, reason, act, epoch, at)
 			VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp()) RETURNING at`,
-			in.target, q.principal.ID, string(q.role), in.Reason, q.actID, q.epoch).Scan(&b.At)
+			in.target, q.principal.ID, string(q.role), in.Reason, q.actID, q.epoch).Scan(&b.At); err != nil {
+			return err
+		}
+		return identityEntries(ctx, tx, &b)
 	}
 	return result{status: http.StatusCreated, body: &b, subjects: []string{in.target}, atActOrder: write}, nil
+}
+
+// identityEntries appends an identity revocation entry (T7) to the timeline of each machine with
+// a plan the revoked identity approved whose plan or operation is not terminal at the revocation's
+// time: a plan approved by that identity's approval and not past its expiry, or committed under it
+// with an operation not yet terminal (§5 T5c, §8.1; execution-recovery.md §4.1). The entry names
+// those plans. The caller holds every machine row, so the plans are read under those locks.
+func identityEntries(ctx context.Context, tx *sql.Tx, b *revocationBody) error {
+	rows, err := tx.QueryContext(ctx, `SELECT p.machine, jsonb_agg(p.id ORDER BY p.id)
+		FROM plan_state s JOIN approval a ON a.id = s.approval JOIN plan p ON p.id = s.plan
+		LEFT JOIN operation o ON o.id = s.operation
+		WHERE a.approver = $1 AND ((s.state = 'approved' AND p.expires_at > $2)
+			OR (s.state = 'committed' AND o.state IN ('committed', 'sending', 'verifying', 'unresolved')))
+		GROUP BY p.machine ORDER BY p.machine`, b.Identity, b.At)
+	if err != nil {
+		return err
+	}
+	type entry struct{ machine, plans string }
+	var entries []entry
+	for rows.Next() {
+		var e entry
+		if err := rows.Scan(&e.machine, &e.plans); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if _, err := tx.ExecContext(ctx, `WITH m AS (UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1
+				RETURNING revision_counter)
+			INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+			SELECT $1, m.revision_counter, $2, 'identity-revocation', jsonb_build_object('identity', $3::text, 'plans', $4::jsonb,
+				'principal', $5::text, 'role', $6::text, 'reason', $7::text), $8 FROM m`,
+			e.machine, b.Epoch, b.Identity, e.plans, b.RevokedBy, string(b.Role), b.Reason, b.At); err != nil {
+			return err
+		}
+	}
+	return nil
 }

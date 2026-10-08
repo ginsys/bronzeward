@@ -305,13 +305,18 @@ func TestApprovalApproverRevokedInWait(t *testing.T) {
 	if _, err := lock.Exec(`SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, p.machine); err != nil {
 		t.Fatal(err)
 	}
+	// T5c locks every machine row too, so the revocation queues on the row first and the approval
+	// behind it; row-lock waiters are granted in order.
+	revoked := make(chan *httptest.ResponseRecorder, 1)
+	go func() { revoked <- revoke(p.env, recovery, key, `{"identity":"`+id+`","reason":"left"}`) }()
+	waitForLockWaits(t, p.db, 1)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- p.approve(approver, "k-approve-0123456789", plan.ID) }()
-	dbtest.WaitForLockWait(t, p.db)
-	revocationOf(t, revoke(p.env, recovery, key, `{"identity":"`+id+`","reason":"left"}`))
+	waitForLockWaits(t, p.db, 2)
 	if err := lock.Rollback(); err != nil {
 		t.Fatal(err)
 	}
+	revocationOf(t, <-revoked)
 	wantProblem(t, <-done, http.StatusForbidden, "identity-revoked")
 	p.wantUnapproved(t, plan.ID, "proposed")
 }
