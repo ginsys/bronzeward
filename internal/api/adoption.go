@@ -33,6 +33,11 @@ var errNoEvidence = errors.New("no evidence for the adoption")
 // refusal (§6.3 step 4 requirement 1, choice §10.27).
 var errAlreadyAdopted = errors.New("the plan's adoption is already recorded")
 
+// errAlreadyRefused is an adoption record not attempted because the plan's refusal entry is already
+// recorded: a refusal is the plan's outcome, so a later attempt on matching evidence writes nothing
+// (§6.3 step 4, choice §10.27).
+var errAlreadyRefused = errors.New("the plan's adoption was refused")
+
 func refuseAdoption(comparison, cause string) error {
 	return &adoptionRefused{Comparison: comparison, Cause: cause}
 }
@@ -149,9 +154,12 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 		&operation); err != nil {
 		return r, machine, err
 	}
-	var holding bool
+	// A refusal entry, appended under the machine's lock held here, is the plan's outcome too.
+	var holding, refusedBefore bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT FROM operation WHERE machine = $1
-		AND state IN ('committed', 'sending', 'verifying', 'unresolved'))`, machine).Scan(&holding); err != nil {
+			AND state IN ('committed', 'sending', 'verifying', 'unresolved')),
+		EXISTS (SELECT FROM machine_event WHERE machine = $1 AND kind = 'refusal' AND entry->>'plan' = $2)`,
+		machine, plan).Scan(&holding, &refusedBefore); err != nil {
 		return r, machine, err
 	}
 	// PA §5 rule 4: the record's time, and the expiry and age judged against it, follow every lock.
@@ -173,6 +181,9 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	// machine's lock first: rolled back without a refusal entry, which would follow a success.
 	if operation.Valid || state == "committed" {
 		return r, machine, fmt.Errorf("adoption of plan %s: %w", plan, errAlreadyAdopted)
+	}
+	if refusedBefore { // refused by an earlier attempt: a new plan is the retry
+		return r, machine, fmt.Errorf("adoption of plan %s: %w", plan, errAlreadyRefused)
 	}
 	// 4.2: the approval passes comparison 1: approved, unexpired, not revoked, its identity not
 	// revoked, and recorded in the current epoch.

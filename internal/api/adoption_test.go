@@ -195,11 +195,13 @@ func TestAdoptionRecoveryModeReleased(t *testing.T) {
 func TestAdoptionNodeIdentity(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
-		name   string
-		change func(*obsSeed)
+		name    string
+		change  func(*obsSeed)
+		refused bool
 	}{
-		{"another node ID", func(s *obsSeed) { s.nodeID = "node-b" }},
-		{"a UUID reported", func(s *obsSeed) { s.uuid = "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b" }},
+		{"the registered node ID", nil, false},
+		{"another node ID", func(s *obsSeed) { s.nodeID = "node-b" }, true},
+		{"a UUID reported", func(s *obsSeed) { s.uuid = "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b" }, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -211,9 +213,9 @@ func TestAdoptionNodeIdentity(t *testing.T) {
 			ae.approveIt(t)
 			ae.observed(t, c.change)
 			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
-			ae.wantRefused(t, err, 0, "4.4", "the latest observation shows another machine identity")
-			ae.observed(t, nil)
-			if _, err := ae.a.commitAdoption(context.Background(), ae.pid); err != nil {
+			if c.refused {
+				ae.wantRefused(t, err, 0, "4.4", "the latest observation shows another machine identity")
+			} else if err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -436,7 +438,8 @@ func TestAdoptionRefusalAfterAdoption(t *testing.T) {
 }
 
 // A plan is refused once: a second refused attempt, sequential or racing, finds the first one's
-// refusal entry under the machine's lock and appends none.
+// refusal entry under the machine's lock, in the record or in its refusal entry's transaction, and
+// appends none.
 func TestAdoptionRefusalRecordedOnce(t *testing.T) {
 	t.Parallel()
 	const cause = "the latest observation's configuration digest is not the baseline's"
@@ -445,10 +448,13 @@ func TestAdoptionRefusalRecordedOnce(t *testing.T) {
 		ae := newAdoptEnv(t, "")
 		ae.approveIt(t)
 		ae.observed(t, func(s *obsSeed) { s.digest = bytes.Repeat([]byte{9}, 32) })
-		for range 2 {
-			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
-			ae.wantRefused(t, err, 0, "4.4", cause)
+		_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+		ae.wantRefused(t, err, 0, "4.4", cause)
+		_, err = ae.a.commitAdoption(context.Background(), ae.pid)
+		if !errors.Is(err, errAlreadyRefused) {
+			t.Fatalf("got %v, want the refusal already recorded", err)
 		}
+		ae.wantRefused(t, &adoptionRefused{Comparison: "4.4", Cause: cause}, 0, "4.4", cause)
 	})
 	t.Run("racing", func(t *testing.T) {
 		t.Parallel()
@@ -462,10 +468,35 @@ func TestAdoptionRefusalRecordedOnce(t *testing.T) {
 				errs <- err
 			}()
 		}
-		for range 2 {
-			ae.wantRefused(t, <-errs, 0, "4.4", cause)
+		for range 2 { // the later attempt's record finds the entry, or its own entry's transaction does
+			if err := <-errs; !errors.Is(err, errAlreadyRefused) {
+				ae.wantRefused(t, err, 0, "4.4", cause)
+			}
 		}
+		ae.wantRefused(t, &adoptionRefused{Comparison: "4.4", Cause: cause}, 0, "4.4", cause)
 	})
+}
+
+// A refused plan is not adopted afterwards, even on matching evidence a racing attempt saw later:
+// the record finds the refusal entry under the machine's lock and writes nothing.
+func TestAdoptionAfterRefusal(t *testing.T) {
+	t.Parallel()
+	ae := newAdoptEnv(t, "")
+	ae.approveIt(t)
+	ae.observed(t, func(s *obsSeed) { s.digest = bytes.Repeat([]byte{9}, 32) })
+	_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+	ae.wantRefused(t, err, 0, "4.4", "the latest observation's configuration digest is not the baseline's")
+	ae.observed(t, nil)
+	_, err = ae.a.commitAdoption(context.Background(), ae.pid)
+	var refused *adoptionRefused
+	if !errors.Is(err, errAlreadyRefused) || errors.As(err, &refused) {
+		t.Fatalf("got %v, want the refusal already recorded", err)
+	}
+	ae.wantRefused(t, &adoptionRefused{Comparison: "4.4", Cause: "the latest observation's configuration digest is not the baseline's"},
+		0, "4.4", "the latest observation's configuration digest is not the baseline's")
+	if n := count(t, ae.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND state = 'committed'`, ae.pid); n != 0 {
+		t.Fatal("the refused plan was committed")
+	}
 }
 
 // wantAlreadyAdopted checks that err found the plan's adoption already recorded: not a refusal, no
