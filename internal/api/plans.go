@@ -318,7 +318,10 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 	return result{status: http.StatusCreated, location: prefix + "/plans/" + b.ID, body: b, subjects: []string{b.ID, in.Machine}}, nil
 }
 
-const selectPlan = `SELECT p.id, s.revision, s.state, s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
+// selectPlan reads a plan with its state. A proposed or approved plan past its expiry reads
+// expired by the server clock, before any transaction has written that (§8.1).
+const selectPlan = `SELECT p.id, s.revision,
+		CASE WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= now() THEN 'expired' ELSE s.state END, s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
 		p.assignment_revision, p.desired_release, p.baseline_revision, p.route, extract(epoch FROM p.max_observation_age)::bigint,
 		extract(epoch FROM p.check_validity)::bigint, extract(epoch FROM p.transport_deadline)::bigint,
 		extract(epoch FROM p.verification_deadline)::bigint, p.max_attempts, p.rollout_limit, p.approval_policy, p.created_by,
