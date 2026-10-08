@@ -695,9 +695,50 @@ func TestPlanReadRevokedApprover(t *testing.T) {
 		}
 	}
 	list := decode[listPage[planBody]](t, p.do(p.api, call{method: "GET", path: prefix + "/plans", token: viewer}), http.StatusOK)
+	listed := map[string]string{}
 	for _, it := range list.Items {
-		if state, ok := want[it.ID]; ok && it.State != state {
-			t.Errorf("%s listed: state %q, want %q", it.ID, it.State, state)
+		if _, ok := want[it.ID]; ok {
+			listed[it.ID] = it.State
 		}
+	}
+	if !reflect.DeepEqual(listed, want) {
+		t.Errorf("listed %v, want %v", listed, want)
+	}
+}
+
+// A revocation that waited on the approver's principal row until after the plan's expiry is
+// recorded after it: the plan reads expired, not revoked (PA §1.2 rule 4).
+func TestPlanReadRevocationAfterLockWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	approver := id.New(id.Principal)
+	mustExec(t, p.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', $2, 'h-approver-held', now())`,
+		approver, p.iss.URL)
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-held-012345678", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":2`)),
+		http.StatusCreated)
+	p.approveAs(t, b.ID, approver)
+	lock, err := p.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Rollback() }()
+	if _, err := lock.Exec(`SELECT 1 FROM principal WHERE id = $1 FOR SHARE`, approver); err != nil {
+		t.Fatal(err)
+	}
+	recovery := p.human("h-recovery")
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- revoke(p.env, recovery, key, `{"identity":"`+approver+`","reason":"left"}`) }()
+	dbtest.WaitForLockWait(t, p.db)
+	if !time.Now().Before(b.ExpiresAt) {
+		t.Fatal("the revocation began waiting only after the plan expired; the setup is too slow to show anything")
+	}
+	time.Sleep(time.Until(b.ExpiresAt.Add(200 * time.Millisecond)))
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	revocationOf(t, <-done)
+	if got := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + b.ID, token: p.human("h-viewer")}),
+		http.StatusOK); got.State != "expired" {
+		t.Fatalf("revoked after the expiry: state %q, want expired", got.State)
 	}
 }

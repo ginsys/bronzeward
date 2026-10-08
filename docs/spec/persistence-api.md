@@ -616,7 +616,8 @@ Rules for every transaction:
    `recorded_at` (dependency monitor §6.1), the DependencyMonitor row's
    progress (dependency monitor §6.3), a staging claim's lease and expiry,
    when created and when checked (compilation §3.5), a plan's creation time and
-   so its expiry (T4), and a publish job's lease,
+   so its expiry (T4), an identity revocation's time (T5c), which a plan read
+   compares with that expiry (§8.1), and a publish job's lease,
    when claimed, extended and checked at completion (§5.1), is the database's `clock_timestamp()`
    read after the lock is held, since `now()` is fixed when the transaction
    began.
