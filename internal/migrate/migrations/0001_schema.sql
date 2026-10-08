@@ -1200,7 +1200,7 @@ CREATE TABLE observation (
   entry_kind           text NOT NULL GENERATED ALWAYS AS ('observation') STORED,
   access_path          text CHECK (access_path ~ '^access/talos/cl_[a-z2-7]{26}$'),
   access_version       bigint CHECK (access_version >= 1),
-  access_created       timestamptz,
+  access_created       text CHECK (access_created ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$'),
   smbios_uuid          uuid,
   talos_node_id        text CHECK (talos_node_id ~ '^[!-~]{1,128}$'),
   talos_cluster_id     text CHECK (talos_cluster_id ~ '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]=$'),

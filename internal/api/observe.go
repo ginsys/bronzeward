@@ -227,7 +227,7 @@ func (a *API) recordObservation(ctx context.Context, machine string, f observeFo
 	var path, version, created, smbios, nodeID, clusterID any
 	var digest []byte
 	if o.Access != nil {
-		path, version, created = o.Access.Path, int64(o.Access.Version), o.Access.CreatedTime
+		path, version, created = o.Access.Path, int64(o.Access.Version), o.Access.CreatedTime.UTC().Format(time.RFC3339Nano)
 	}
 	if o.Identity != nil {
 		smbios, nodeID, clusterID = nullable(o.Identity.SMBIOSUUID), o.Identity.NodeID, o.Identity.ClusterID

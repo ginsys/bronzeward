@@ -99,7 +99,7 @@ func readObs(t *testing.T, db *sql.DB, machine string) obsRow {
 	var r obsRow
 	var unread, startEntry, obsEntry []byte
 	err := db.QueryRow(`SELECT o.id, o.basis, o.revision, s.purpose, s.endpoint, s.controller, s.plan, s.operation,
-			o.access_path, to_char(o.access_created AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), o.access_version,
+			o.access_path, o.access_created, o.access_version,
 			o.smbios_uuid::text, o.talos_node_id, o.talos_cluster_id, o.assignment_evidence, o.running_version, o.resource_version,
 			o.configuration_digest, o.health::text, o.unread, se.kind, oe.kind, se.entry, oe.entry, se.epoch, oe.epoch, i.epoch
 		FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis

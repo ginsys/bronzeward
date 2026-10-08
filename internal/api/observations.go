@@ -41,9 +41,9 @@ type observationBody struct {
 // accessVersionBody is the Talos access version an observation read (persistence-api.md §3.3):
 // its provider path, version and creation time, never the talosconfig.
 type accessVersionBody struct {
-	Path    string    `json:"path"`
-	Version int       `json:"version"`
-	Created time.Time `json:"created"`
+	Path    string `json:"path"`
+	Version int    `json:"version"`
+	Created string `json:"created"`
 }
 
 // machineNamed refuses with 404 unless v is a machine the database holds.
@@ -81,9 +81,8 @@ func listObservations(a *API, w http.ResponseWriter, q *request) {
 
 func scanObservation(r *sql.Rows) (observationBody, string, error) {
 	var b observationBody
-	var plan, operation, path sql.NullString
+	var plan, operation, path, created sql.NullString
 	var version sql.NullInt64
-	var created sql.NullTime
 	var health, unread []byte
 	err := r.Scan(&b.ID, &b.Machine, &b.Basis, &b.Revision, &b.Purpose, &plan, &operation, &b.Endpoint, &b.Controller,
 		&b.StartedAt, &b.At, &path, &version, &created, &b.SMBIOSUUID, &b.TalosNodeID, &b.TalosClusterID,
@@ -98,7 +97,7 @@ func scanObservation(r *sql.Rows) (observationBody, string, error) {
 		b.Operation = &operation.String
 	}
 	if path.Valid {
-		b.Access = &accessVersionBody{Path: path.String, Version: int(version.Int64), Created: created.Time}
+		b.Access = &accessVersionBody{Path: path.String, Version: int(version.Int64), Created: created.String}
 	}
 	if health != nil {
 		b.Health = health
