@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -298,4 +300,45 @@ func TestPlanCreationRefusals(t *testing.T) {
 	}
 	// The cases ran in order; the last left the machine as it was, so a valid request is accepted.
 	decode[planBody](t, p.plan(pub, "k-plan-after-0123456", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+}
+
+// GET /plans/{id} and GET /plans (persistence-api.md §9.2, §9.3) answer a plan as its creation
+// did, with its current state and revision; any role reads them.
+func TestPlanReads(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	created := p.plan(p.robot, "k-plan-read-0123456789", applyBody(p.target.rel, p.machine, ""))
+	b := decode[planBody](t, created, http.StatusCreated)
+	viewer := p.human("h-viewer")
+	got := p.do(p.api, call{method: "GET", path: prefix + "/plans/" + b.ID, token: viewer})
+	if got.Code != http.StatusOK || got.Body.String() != created.Body.String() {
+		t.Fatalf("read %d %s\nwant %s", got.Code, got.Body, created.Body)
+	}
+	adopt := decode[planBody](t, p.plan(p.robot, "k-plan-read-adopt-0123", adoptBody(p.target.rel, p.target.machine2, "")),
+		http.StatusCreated)
+	mustExec(t, p.db, `UPDATE plan_state SET state = 'cancelled', reason = 'cancelled', revision = 2, updated_at = now() WHERE plan = $1`,
+		adopt.ID)
+	adopt.State, adopt.Revision = "cancelled", 2
+	list := decode[listPage[planBody]](t, p.do(p.api, call{method: "GET", path: prefix + "/plans?limit=1", token: viewer}), http.StatusOK)
+	if len(list.Items) != 1 || list.Next == "" {
+		t.Fatalf("first page %+v", list)
+	}
+	rest := decode[listPage[planBody]](t, p.do(p.api, call{method: "GET",
+		path: prefix + "/plans?cursor=" + url.QueryEscape(list.Next), token: viewer}), http.StatusOK)
+	all := append(list.Items, rest.Items...)
+	if len(all) != 2 || rest.Next != "" || all[0].ID >= all[1].ID {
+		t.Fatalf("pages %+v %+v", list, rest)
+	}
+	for _, it := range all {
+		want := b
+		if it.ID == adopt.ID {
+			want = adopt
+		}
+		if !reflect.DeepEqual(it, want) {
+			t.Fatalf("listed %+v\nwant %+v", it, want)
+		}
+	}
+	wantProblem(t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + id.New(id.Plan), token: viewer}), http.StatusNotFound, "not-found")
+	wantProblem(t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + b.ID + "?x=1", token: viewer}), http.StatusBadRequest,
+		"invalid-request")
 }

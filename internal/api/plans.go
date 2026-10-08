@@ -160,7 +160,7 @@ type planBody struct {
 	Revision                    int64        `json:"revision"`
 	State                       string       `json:"state"`
 	CommittedOperation          *string      `json:"committedOperation"`
-	Approval                    *struct{}    `json:"approval"`
+	Approval                    *string      `json:"approval"`
 	Cluster                     string       `json:"cluster"`
 	Machine                     string       `json:"machine"`
 	Release                     string       `json:"release"`
@@ -317,6 +317,40 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 	b.CreatedAt, b.ExpiresAt = b.CreatedAt.UTC(), b.ExpiresAt.UTC()
 	return result{status: http.StatusCreated, location: prefix + "/plans/" + b.ID, body: b, subjects: []string{b.ID, in.Machine}}, nil
 }
+
+const selectPlan = `SELECT p.id, s.revision, s.state, s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
+		p.assignment_revision, p.desired_release, p.baseline_revision, p.route, extract(epoch FROM p.max_observation_age)::bigint,
+		extract(epoch FROM p.check_validity)::bigint, extract(epoch FROM p.transport_deadline)::bigint,
+		extract(epoch FROM p.verification_deadline)::bigint, p.max_attempts, p.rollout_limit, p.approval_policy, p.created_by,
+		p.created_role, p.epoch, p.revision, p.created_at, p.expires_at, p.evidence
+	FROM plan p JOIN plan_state s ON s.plan = p.id`
+
+func scanPlan(r interface{ Scan(...any) error }) (*planBody, error) {
+	b := &planBody{}
+	var evidence []byte
+	if err := r.Scan(&b.ID, &b.Revision, &b.State, &b.CommittedOperation, &b.Approval, &b.Cluster, &b.Machine, &b.Release,
+		&b.Operation, &b.Mode, &b.AssignmentRevision, &b.DesiredRelease, &b.BaselineRevision, &b.Route,
+		&b.MaxObservationAgeSeconds, &b.CheckValiditySeconds, &b.TransportDeadlineSeconds, &b.VerificationDeadlineSeconds,
+		&b.MaxAttempts, &b.RolloutLimit, &b.ApprovalPolicy, &b.CreatedBy.Principal, &b.CreatedBy.Role, &b.Epoch,
+		&b.TimelineRevision, &b.CreatedAt, &b.ExpiresAt, &evidence); err != nil {
+		return nil, err
+	}
+	b.CreatedAt, b.ExpiresAt = b.CreatedAt.UTC(), b.ExpiresAt.UTC()
+	return b, json.Unmarshal(evidence, &b.Evidence)
+}
+
+var listPlans = listed(id.Plan, selectPlan+` WHERE p.id > $1 ORDER BY p.id LIMIT $2`, func(r *sql.Rows) (*planBody, string, error) {
+	b, err := scanPlan(r)
+	if err != nil {
+		return nil, "", err
+	}
+	return b, b.ID, nil
+})
+
+var getPlan = item(id.Plan, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
+	b, err := scanPlan(tx.QueryRowContext(ctx, selectPlan+` WHERE p.id = $1`, v))
+	return "", b, err
+})
 
 // planDiffFrom is the unified diff from Applied's redacted configuration to the target's, or a
 // withheld diff when either has none.
