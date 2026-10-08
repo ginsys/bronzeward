@@ -213,3 +213,61 @@ func TestApprovalRevocationAfterActOrderWait(t *testing.T) {
 	}
 	p.wantRevocation(t, apr.ID, plan.ID, "approved", apr.ID, 2)
 }
+
+// T5b takes the approval FOR UPDATE (PA §5), so it waits for a commitment or attempt holding the
+// approval FOR SHARE (§1.2 item 3) and is recorded once that ends.
+func TestApprovalRevocationWaitsForApproval(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	apr := decode[approvalBody](t, p.approve(p.human("h-approver"), "k-approve-0123456789", plan.ID), http.StatusCreated)
+	lock, err := p.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Rollback() }()
+	if _, err := lock.Exec(`SELECT 1 FROM approval WHERE id = $1 FOR SHARE`, apr.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- p.revokeApproval(p.human("h-recovery"), "k-revoke-0123456789ab", apr.ID, `{"reason":"wrong release"}`)
+	}()
+	dbtest.WaitForLockWait(t, p.db)
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	decode[approvalRevocationBody](t, <-done, http.StatusCreated)
+	p.wantRevocation(t, apr.ID, plan.ID, "revoked", apr.ID, 3)
+}
+
+// Rule 2: a revoking human revoked while the revocation waits on the machine's lock is refused
+// once the revocation holds its principal, and nothing is written.
+func TestApprovalRevocationRevokerRevokedInWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	apr := decode[approvalBody](t, p.approve(p.human("h-approver"), "k-approve-0123456789", plan.ID), http.StatusCreated)
+	revoker, recovery := p.human("h-all"), p.human("h-recovery")
+	lock, err := p.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Rollback() }()
+	if _, err := lock.Exec(`SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, p.machine); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- p.revokeApproval(revoker, "k-revoke-0123456789ab", apr.ID, `{"reason":"wrong release"}`)
+	}()
+	dbtest.WaitForLockWait(t, p.db)
+	revocationOf(t, revoke(p.env, recovery, key, `{"identity":"`+p.principalOf("h-all")+`","reason":"left"}`))
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	wantProblem(t, <-done, http.StatusForbidden, "identity-revoked")
+	if n := count(t, p.db, `SELECT count(*) FROM approval_revocation`); n != 0 {
+		t.Fatalf("%d revocations by a revoked identity", n)
+	}
+}
