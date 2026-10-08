@@ -501,16 +501,20 @@ CALL make_immutable('identity_revocation');
 -- allocates from the machine's revision counter under its row lock, with the epoch it was appended
 -- in. Kinds are added with the issues that write them: an endpoint change, then a plan's entries
 -- from creation to commitment or a terminal state, observations and their starts, adoption records
--- and Applied changes (execution and recovery §4.1). A record of one entry is keyed by it.
+-- and Applied changes, and refusals (execution and recovery §4.1). A record of one entry is keyed
+-- by it. A refusal names the transaction and the comparison that failed.
 CREATE TABLE machine_event (
   machine  text NOT NULL REFERENCES machine (id),
   revision bigint NOT NULL CHECK (revision >= 1),
   epoch    text NOT NULL REFERENCES recovery_epoch (epoch),
   kind     text NOT NULL CONSTRAINT machine_event_kind CHECK (kind IN ('endpoint-change', 'plan', 'approval',
              'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
-             'observation', 'adoption', 'applied-change')),
+             'observation', 'adoption', 'applied-change', 'refusal')),
   -- A JSON object: JSON null is not SQL NULL, and an immutable entry cannot be corrected later.
   entry    jsonb NOT NULL CHECK (jsonb_typeof(entry) = 'object'),
+  CONSTRAINT machine_event_refusal CHECK (kind <> 'refusal'
+    OR (jsonb_typeof(entry->'transaction') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'comparison') IS NOT DISTINCT FROM 'string')),
   at       timestamptz NOT NULL,
   PRIMARY KEY (machine, revision),
   UNIQUE (machine, revision, kind)
@@ -1241,6 +1245,8 @@ CREATE TABLE adoption_record (
   epoch       text NOT NULL REFERENCES recovery_epoch (epoch),
   at          timestamptz NOT NULL,
   revision    bigint NOT NULL,
+  -- The baseline's configuration digest the observation was compared with (persistence §3).
+  baseline_digest bytea NOT NULL CHECK (octet_length(baseline_digest) = 32),
   entry_kind  text NOT NULL GENERATED ALWAYS AS ('adoption') STORED,
   FOREIGN KEY (plan, plan_kind, machine, cluster) REFERENCES plan (id, kind, machine, cluster),
   UNIQUE (machine, revision),
