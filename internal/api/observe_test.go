@@ -433,6 +433,18 @@ func TestObserveRefusesStaleOwner(t *testing.T) {
 	if len(oe.x.reads) != 0 || len(oe.node.Seen()) != 0 {
 		t.Fatalf("read the access %d times, the node %d", len(oe.x.reads), len(oe.node.Seen()))
 	}
+
+	// A new epoch during the read (a restore) ends this process's ownership: the start stays, as
+	// the earlier epoch's entry, and nothing is recorded under the new one.
+	a := observer(t, oe.env, oe.x, options{})
+	oe.x.onRead = func() { newEpoch(t, oe.db) }
+	if _, err := a.observe(t.Context(), oe.machine, observeFor{purpose: "drift"}); !errors.Is(err, errNotController) {
+		t.Fatalf("observed across an epoch change: %v", err)
+	}
+	if s, o := count(t, oe.db, `SELECT count(*) FROM observation_start WHERE machine = $1`, oe.machine),
+		count(t, oe.db, `SELECT count(*) FROM observation WHERE machine = $1`, oe.machine); s != 1 || o != 0 {
+		t.Fatalf("%d starts and %d observations recorded", s, o)
+	}
 }
 
 // PA §3.3 and its §16 check (AP §7.1, #25): after the machine's endpoint is replaced from A to
@@ -466,6 +478,13 @@ func TestObservePlanRoute(t *testing.T) {
 	}
 	if stored != nodeA.Endpoint || storedPlan != plan.ID {
 		t.Fatalf("start records %s for %s", stored, storedPlan)
+	}
+	// The read route answers the start's plan (PA §9.2).
+	read := decode[listPage[observationBody]](t, p.do(a, call{method: "GET", path: prefix + "/machines/" + p.machine + "/observations",
+		token: p.human("h-viewer")}), 200)
+	if len(read.Items) != 1 || read.Items[0].Plan == nil || *read.Items[0].Plan != plan.ID || read.Items[0].Operation != nil ||
+		read.Items[0].Purpose != "evidence" || read.Items[0].Endpoint != nodeA.Endpoint {
+		t.Fatalf("observations %+v", read)
 	}
 	seenA := len(nodeA.Seen())
 	drift, err := a.observe(t.Context(), p.machine, observeFor{purpose: "drift"})
