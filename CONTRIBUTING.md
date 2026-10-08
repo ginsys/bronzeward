@@ -92,7 +92,7 @@ Write documentation for GitHub, as before; the site needs no edits of its own:
 
 ## Go code
 
-The implementation is the root Go module (`cmd/`, `internal/`); the Go version comes from `mise.toml`. Its `go.mod` ignores `experiments/`, whose modules are Phase-0 evidence and are checked separately. From the repository root:
+The implementation is the root Go module (`cmd/`, `internal/`); the Go version comes from `mise.toml`. Its `go.mod` ignores `experiments/`, whose modules are Phase-0 evidence and are checked separately, and the generated `site/`, which `mise run verify` rebuilds while the Go checks run. From the repository root:
 
 ```sh
 mise run go                                        # format, go.mod tidiness, build, vet and test checks (per module, as mise.toml lists them); database tests skip
