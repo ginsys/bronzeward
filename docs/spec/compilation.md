@@ -1082,12 +1082,15 @@ with the stand-in format **(choice §16.22)**.
   its document only. A path that does
   not parse, or any path of a compilation whose pinned values do not all
   decode, is written `<redacted>` whole.
-- **Paired diffs.** Where a diff shows a base leaf beside a redacted output
-  leaf, the base side is redacted as `<redacted:paired>`, whatever its kind; a
-  boolean could otherwise be read by elimination (SP §2, §4.4). A base key at
-  or under a mapping whose output key is redacted is paired too, since the
-  redacted key may resolve to it, unless the output shows that key in the same
-  mapping.
+- **Paired diffs.** Once a diff's output side holds a redaction token
+  anywhere, every base leaf the output does not show unchanged at the same
+  path is redacted as `<redacted:paired>`, whatever its kind; a boolean could
+  otherwise be read by elimination (SP §2, §4.4), and a redacted value may
+  have come from a base value at another path (a shifted index, a renamed key,
+  a moved value). Every base key the output does not show in the same mapping
+  is paired too. A whole token is shown as itself. An output with no token
+  pairs nothing. The base values stay readable in the base release's own
+  redacted configuration.
 - **Messages.** A renderer message is redacted by template: the same step on
   the trace pass gives a message whose stand-in quotes mark where the real one
   quotes a value, and each is replaced by its token. The text around the

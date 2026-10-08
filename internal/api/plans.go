@@ -413,53 +413,38 @@ func planDiffFrom(ctx context.Context, tx *sql.Tx, machine, from, to string, app
 // pairedToken stands for a base leaf shown beside a redacted target leaf (compilation §8.3).
 const pairedToken = "<redacted:paired>"
 
-// pairRedacted applies paired redaction to a diff's two sides (compilation §8.3, §12.2): a base
-// scalar at the path of a target scalar holding a redaction token becomes <redacted:paired>, whatever
-// its kind, so that a boolean or a short value cannot be read by elimination, unless it is one
-// whole token or the unchanged one leaf of its path on both sides. A path is its keys' text and
-// its indexes, so redaction that gives two keys of one mapping the same token gives their leaves
-// one path; every plaintext base leaf there is paired. A target mapping with a redacted key gives
-// its leaves paths no base leaf shares, so every plaintext base leaf at or under that mapping's
-// path is paired, and so is every base key there the target does not show in the same mapping,
-// since the redacted key may resolve to it. An embedded document is one scalar here, so
-// a redacted leaf inside one pairs the whole base document. Both sides are encoded again by the
-// same encoder so that only what differs shows; a side that does not parse, or holds an alias
-// anywhere, mapping keys included, withholds the diff.
+// pairRedacted applies paired redaction to a diff's two sides (compilation §8.3, §12.2). A redacted
+// target value may have come from any base value, not only the one at its path: an index shifts, a
+// key is renamed, a value moves to another mapping. So once the target holds a redaction token
+// anywhere, every base scalar becomes <redacted:paired>, whatever its kind, so that a boolean or a
+// short value cannot be read by elimination, unless it is one whole token or the unchanged one leaf
+// of its path on both sides; and every base key becomes <redacted:paired> unless it is one whole
+// token or the target shows it in the same mapping. A path is its keys' text and its indexes, so
+// redaction that gives two keys of one mapping the same token gives their leaves one path; every
+// plaintext base leaf there is paired. An embedded document is one scalar here, so a changed one
+// is paired whole. A target with no token pairs nothing. Both sides are encoded again by the same
+// encoder so that only what differs shows; a side that does not parse, or holds an alias anywhere,
+// mapping keys included, withholds the diff.
 func pairRedacted(base, target string) (string, string, error) {
 	tdocs, err := yamlDocs(target)
 	if err != nil {
 		return "", "", err
 	}
-	values, redacted, keyed := map[string][]string{}, map[string]bool{}, map[string]bool{}
+	values := map[string][]string{}
 	keys := map[string]map[string]bool{} // the plaintext keys of each target mapping
+	secret := false                      // the target holds a redaction token
 	walkScalars(tdocs, func(p string, n *yaml.Node) {
 		values[p] = append(values[p], n.Value)
-		if isRedacted(n.Value) {
-			redacted[p] = true
-		}
+		secret = secret || isRedacted(n.Value)
 	}, func(p string, k *yaml.Node) {
 		if isRedacted(k.Value) {
-			keyed[p] = true
+			secret = true
 		} else if keys[p] == nil {
 			keys[p] = map[string]bool{k.Value: true}
 		} else {
 			keys[p][k.Value] = true
 		}
 	})
-	// under reports whether p is at or under a target mapping with a redacted key, whose leaves
-	// therefore have paths no base leaf shares.
-	under := func(p string) bool {
-		for {
-			if keyed[p] {
-				return true
-			}
-			i := strings.LastIndexByte(p, '/')
-			if i < 0 {
-				return false
-			}
-			p = p[:i]
-		}
-	}
 	bdocs, err := yamlDocs(base)
 	if err != nil {
 		return "", "", err
@@ -472,13 +457,13 @@ func pairRedacted(base, target string) (string, string, error) {
 		// unknown, so an equal target leaf exempts none; an embedded document holding a token is
 		// not a token.
 		unchanged := count[p] == 1 && len(values[p]) == 1 && values[p][0] == n.Value
-		if (redacted[p] || under(p)) && !isToken(n.Value) && !unchanged {
+		if secret && !isToken(n.Value) && !unchanged {
 			*n = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: pairedToken}
 		}
 	}, func(p string, k *yaml.Node) {
-		// A redacted target key may resolve to any base key at or under its mapping, so those keys
-		// are paired too, unless one whole token or a key the target shows in the same mapping.
-		if under(p) && !isToken(k.Value) && !keys[p][k.Value] {
+		// A redacted target leaf or key may hold a base key's text, so a base key the target does not
+		// show in the same mapping is paired too.
+		if secret && !isToken(k.Value) && !keys[p][k.Value] {
 			*k = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: pairedToken}
 		}
 	})
