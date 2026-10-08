@@ -275,3 +275,50 @@ func TestApprovalApproverRevokedInWait(t *testing.T) {
 	wantProblem(t, <-done, http.StatusForbidden, "identity-revoked")
 	p.wantUnapproved(t, plan.ID, "proposed")
 }
+
+// Rule 4: an approval's time and the expiry it is judged against follow the act-order wait. One
+// queued there past its plan's expiry is refused and writes nothing; one released in time is
+// recorded at a time after the release.
+func TestApprovalAfterActOrderWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	approver := p.human("h-approver")
+	late := decode[planBody](t, p.plan(p.robot, "k-plan-late-0123456789", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`)),
+		http.StatusCreated)
+	timely := decode[planBody](t, p.plan(p.robot, "k-plan-timely-01234567", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+
+	lock := holdActOrder(t, p.db)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- p.approve(approver, "k-approve-late-012345", late.ID) }()
+	dbtest.WaitForLockWait(t, p.db)
+	time.Sleep(time.Until(late.ExpiresAt.Add(200 * time.Millisecond)))
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if doc := wantProblem(t, <-done, http.StatusConflict, "conflict"); doc["state"] != "expired" {
+		t.Fatalf("approval queued past expiry refused with %v", doc)
+	}
+	p.wantUnapproved(t, late.ID, "proposed")
+	if n := count(t, p.db, `SELECT count(*) FROM act WHERE action = 'plan.approve'`); n != 0 {
+		t.Fatalf("%d approval acts after a refusal", n)
+	}
+
+	lock = holdActOrder(t, p.db)
+	go func() { done <- p.approve(approver, "k-approve-timely-0123", timely.ID) }()
+	dbtest.WaitForLockWait(t, p.db)
+	time.Sleep(300 * time.Millisecond)
+	released := time.Now()
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	b := decode[approvalBody](t, <-done, http.StatusCreated)
+	var at, event, updated time.Time
+	if err := p.db.QueryRow(`SELECT a.at, e.at, s.updated_at FROM approval a
+		JOIN machine_event e ON e.machine = a.machine AND e.revision = a.revision JOIN plan_state s ON s.plan = a.plan
+		WHERE a.id = $1`, b.ID).Scan(&at, &event, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if !at.After(released) || !event.Equal(at) || !updated.Equal(at) {
+		t.Fatalf("approval at %s, entry %s, state %s, lock released %s", at, event, updated, released)
+	}
+}
