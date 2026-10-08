@@ -28,8 +28,18 @@ auth:
   deniedSubjects: []
 # Execution timing (execution-recovery.md §5.2). maxTransportDeadline has no default: the longest
 # a machine-facing call may take, which the deployment knows. settleFloor defaults to 30s.
+# planDefaults are what a plan binds when its creation request leaves a value out
+# (persistence-api.md choice §17.37), in whole seconds; shown here at their defaults. The
+# transport deadline defaults to 1m, or to maxTransportDeadline if that is lower.
 execution:
   maxTransportDeadline: 5m
+  planDefaults:
+    expiry: 24h
+    maxObservationAge: 5m
+    checkValidity: 5m
+    transportDeadline: 1m
+    verificationDeadline: 10m
+    maxAttempts: 3
 # The secret provider (compilation.md §4.1), optional: without it an ingestion start answers
 # 503. The key
 # names are the fixture's; the four keys are distinct, and artifact is the key artifacts are
