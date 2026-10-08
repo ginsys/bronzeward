@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"bytes"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -522,7 +523,8 @@ func TestPlanOperations(t *testing.T) {
 		p.entry(p.machine, 6, "observation"), p.observationRow(obs, 5, 6).stmt())
 	adoptOp := id.New(id.Operation)
 	adopted := newRecord("adoption_record", "plan", p.adopt, "machine", p.machine, "cluster", p.cluster,
-		"operation", adoptOp, "approval", apr, "observation", obs, "revision", 7, "epoch", p.epoch, "at", time.Now())
+		"operation", adoptOp, "approval", apr, "observation", obs, "revision", 7, "epoch", p.epoch, "at", time.Now(),
+		"baseline_digest", bytes.Repeat([]byte{7}, 32))
 	adoptOpRow := stmt{insertPlanOperation, []any{adoptOp, "adopt", "completed", nil, p.adopt, p.machine, p.cluster}}
 	adoption := func(name, want string, r record) {
 		t.Helper()
@@ -532,6 +534,8 @@ func TestPlanOperations(t *testing.T) {
 	adoption("adoption record of another plan's operation", "23503", adopted.with("operation", opID))
 	adoption("adoption record relying on another plan's approval", "23503", adopted.with("approval", p.approval))
 	adoption("adoption record relying on no observation", "23503", adopted.with("observation", id.New(id.Observation)))
+	adoption("adoption record naming no baseline digest", "23502", adopted.with("baseline_digest", nil))
+	adoption("adoption record with a short baseline digest", "23514", adopted.with("baseline_digest", bytes.Repeat([]byte{7}, 31)))
 	refused(t, db, "adopt operation with no adoption record", "23514/operation_plan_committed", adoptOpRow, committed(p.adopt))
 	refused(t, db, "adoption record on an entry of another kind", "23503", adoptOpRow, committed(p.adopt),
 		p.entry(p.machine, 7, "plan"), adopted.stmt())
@@ -552,6 +556,13 @@ func TestPlanOperations(t *testing.T) {
 	commitRows(t, db, adoptOpRow, committed(p.adopt), p.entry(p.machine, 7, "adoption"), adopted.stmt())
 	refused(t, db, "event of an adopt operation", "23514/operation_event_job_kind",
 		stmt{insertEvent, []any{adoptOp, 1, `{}`, "adopt"}})
+	// A refused commitment's entry names the transaction and the comparison that failed (§4.1).
+	refusal := func(entry string) stmt {
+		return stmt{insertMachineEvent, []any{p.machine, 90, "refusal", entry}}
+	}
+	refused(t, db, "refusal entry naming no comparison", "23514/machine_event_refusal", refusal(`{"transaction": "T6"}`))
+	refused(t, db, "refusal entry naming no transaction", "23514/machine_event_refusal", refusal(`{"comparison": "4.4"}`))
+	commitRows(t, db, refusal(`{"transaction": "T6", "comparison": "4.4", "plan": "`+p.adopt+`"}`))
 
 	// Comparisons 4 and 5: a second plan of the machine cannot commit while the first holds it;
 	// each index refuses it alone.
