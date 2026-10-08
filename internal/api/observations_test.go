@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/provider"
@@ -58,7 +59,7 @@ func TestObservationsRead(t *testing.T) {
 		t.Fatalf("observation %+v", r)
 	}
 	if r.Access == nil || r.Access.Path != oe.accessOf.Path || r.Access.Version != oe.accessOf.Version ||
-		!r.Access.Created.Equal(oe.accessOf.CreatedTime) {
+		r.Access.Created != oe.accessOf.CreatedTime.Format(time.RFC3339Nano) {
 		t.Fatalf("access %+v; want %+v", r.Access, oe.accessOf)
 	}
 	is := func(p *string, v string) bool { return p != nil && *p == v }
@@ -137,4 +138,23 @@ func unreadOf(b observationBody) map[string]map[string]string {
 		out[k] = m
 	}
 	return out
+}
+
+// PA §3.3: a KV version is identified by its created_time too, which the provider gives to the
+// nanosecond; an observation records and answers it exactly, not rounded to microseconds.
+func TestObservationAccessCreatedExact(t *testing.T) {
+	t.Parallel()
+	oe := newObsEnv(t)
+	v := oe.accessOf
+	v.CreatedTime = time.Date(2026, 10, 8, 10, 11, 12, 123456789, time.UTC)
+	oe.x.access = provider.NewTalosAccess(v, oe.pki.Talosconfig("", "", ""))
+	a := observer(t, oe.env, oe.x, options{})
+	if _, err := a.observe(t.Context(), oe.machine, observeFor{purpose: "drift"}); err != nil {
+		t.Fatal(err)
+	}
+	pg := decode[listPage[observationBody]](t, oe.do(a, call{method: "GET", path: prefix + "/machines/" + oe.machine + "/observations",
+		token: oe.human("h-viewer")}), http.StatusOK)
+	if len(pg.Items) != 1 || pg.Items[0].Access == nil || pg.Items[0].Access.Created != "2026-10-08T10:11:12.123456789Z" {
+		t.Fatalf("observations %+v", pg)
+	}
 }
