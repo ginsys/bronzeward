@@ -401,7 +401,49 @@ func TestAdoptionSecondCommitment(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := ae.a.commitAdoption(context.Background(), ae.pid)
-	ae.wantRefused(t, err, 1, "4.1", "the plan already has an operation")
+	ae.wantAlreadyAdopted(t, err)
+}
+
+// Two attempts racing on one plan, as two controller instances' loops do: the machine's lock orders
+// them, one records the adoption and the other finds it recorded, so no refusal follows it.
+func TestAdoptionConcurrentCommitment(t *testing.T) {
+	t.Parallel()
+	ae := newAdoptEnv(t, "")
+	ae.approveIt(t)
+	ae.observed(t, nil)
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+			errs <- err
+		}()
+	}
+	var failed error
+	for range 2 {
+		if err := <-errs; err != nil {
+			if failed != nil {
+				t.Fatalf("both attempts failed: %v; %v", failed, err)
+			}
+			failed = err
+		}
+	}
+	ae.wantAlreadyAdopted(t, failed)
+}
+
+// wantAlreadyAdopted checks that err found the plan's adoption already recorded: not a refusal, no
+// refusal entry, and the one adopt operation left.
+func (ae *adoptEnv) wantAlreadyAdopted(t *testing.T, err error) {
+	t.Helper()
+	var refused *adoptionRefused
+	if !errors.Is(err, errAlreadyAdopted) || errors.As(err, &refused) {
+		t.Fatalf("got %v, want the adoption already recorded", err)
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'refusal'`, ae.machine); n != 0 {
+		t.Fatalf("%d refusal entries", n)
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM operation WHERE plan = $1`, ae.pid); n != 1 {
+		t.Fatalf("%d operations", n)
+	}
 }
 
 // An observation the record relies on that left the identity, the configuration or the assignment

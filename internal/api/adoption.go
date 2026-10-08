@@ -12,7 +12,8 @@ import (
 )
 
 // adoptionRefused is an adoption record refused by one of execution-recovery.md §6.3's step-4
-// requirements, named by its number ("4.1" to "4.5"), with what failed.
+// requirements, named by its number ("4.2" to "4.5"), with what failed. Requirement 4.1 fails only on
+// an adoption already recorded, which is not a refusal (errAlreadyAdopted).
 type adoptionRefused struct {
 	Comparison, Cause string
 }
@@ -25,6 +26,11 @@ func (r *adoptionRefused) Error() string {
 // the identity, the configuration or the assignment evidence unread: no evidence either way, so no
 // refusal (§6.3 step 4, choice §10.27).
 var errEvidenceUnread = errors.New("the observation relied on left evidence unread")
+
+// errAlreadyAdopted is an adoption record not attempted because the plan's adoption is already
+// recorded, by another attempt that took the machine's lock first: the plan's outcome, not a
+// refusal (§6.3 step 4 requirement 1, choice §10.27).
+var errAlreadyAdopted = errors.New("the plan's adoption is already recorded")
 
 func refuseAdoption(comparison, cause string) error {
 	return &adoptionRefused{Comparison: comparison, Cause: cause}
@@ -158,9 +164,11 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 		return r, machine, err
 	}
 
-	// 4.1: no operation exists for the plan (§3.2 comparison 0).
+	// 4.1: no operation exists for the plan (§3.2 comparison 0). An adopt plan's only operation is
+	// its adoption, so one that exists is the plan's outcome, recorded by an attempt that took the
+	// machine's lock first: rolled back without a refusal entry, which would follow a success.
 	if operation.Valid || state == "committed" {
-		return r, machine, refuseAdoption("4.1", "the plan already has an operation")
+		return r, machine, fmt.Errorf("adoption of plan %s: %w", plan, errAlreadyAdopted)
 	}
 	// 4.2: the approval passes comparison 1: approved, unexpired, not revoked, its identity not
 	// revoked, and recorded in the current epoch.
