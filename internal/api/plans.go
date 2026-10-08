@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,7 +18,6 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
-	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/textdiff"
 )
 
@@ -401,31 +403,122 @@ func planDiffFrom(ctx context.Context, tx *sql.Tx, machine, from, to string, app
 const pairedToken = "<redacted:paired>"
 
 // pairRedacted applies paired redaction to a diff's two sides (compilation §8.3, §12.2): a base
-// scalar at the path of a target scalar holding a redaction token, and different from it, becomes
-// <redacted:paired>, whatever its kind, so that a boolean or a short value cannot be read by
-// elimination. An embedded document is one scalar here, so a redacted leaf inside one pairs the
-// whole base document; an embedded JSON document writes its token's angle bracket escaped, matched
-// without the backslash. Both sides are encoded again by the same encoder so that only what differs
-// shows; a side that does not walk withholds the diff.
+// scalar at the path of a target scalar holding a redaction token becomes <redacted:paired>, whatever
+// its kind, so that a boolean or a short value cannot be read by elimination, unless the target has a
+// scalar of the base's value at that path. A path is its keys' text and its indexes, so redaction
+// that gives two keys of one mapping the same token gives their leaves one path, compared with
+// every target leaf there. An embedded document is one scalar here, so a redacted leaf inside one
+// pairs the whole base document; an embedded JSON document writes its token's angle bracket
+// escaped, matched without the backslash. Both sides are encoded again by the same encoder so that
+// only what differs shows; a side that does not parse, or holds an alias, withholds the diff.
 func pairRedacted(base, target string) (string, string, error) {
-	redacted := map[string]string{}
-	shown, err := ingest.RewriteLeaves([]byte(target), nil, func(p ingest.Path, n *yaml.Node) error {
-		if n.Kind == yaml.ScalarNode && (strings.Contains(n.Value, "<redacted") || strings.Contains(n.Value, "u003credacted")) {
-			redacted[p.String()] = n.Value
-		}
-		return nil
-	}, nil)
+	tdocs, err := yamlDocs(target)
 	if err != nil {
 		return "", "", err
 	}
-	paired, err := ingest.RewriteLeaves([]byte(base), nil, func(p ingest.Path, n *yaml.Node) error {
-		if v, ok := redacted[p.String()]; ok && n.Kind == yaml.ScalarNode && n.Value != v {
+	values, redacted := map[string][]string{}, map[string]bool{}
+	if err := walkScalars(tdocs, func(p string, n *yaml.Node) {
+		values[p] = append(values[p], n.Value)
+		if strings.Contains(n.Value, "<redacted") || strings.Contains(n.Value, "u003credacted") {
+			redacted[p] = true
+		}
+	}); err != nil {
+		return "", "", err
+	}
+	bdocs, err := yamlDocs(base)
+	if err != nil {
+		return "", "", err
+	}
+	if err := walkScalars(bdocs, func(p string, n *yaml.Node) {
+		if redacted[p] && !slices.Contains(values[p], n.Value) {
 			*n = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: pairedToken}
 		}
-		return nil
-	}, nil)
+	}); err != nil {
+		return "", "", err
+	}
+	paired, err := encodeDocs(bdocs)
 	if err != nil {
 		return "", "", err
 	}
-	return string(paired), string(shown), nil
+	shown, err := encodeDocs(tdocs)
+	if err != nil {
+		return "", "", err
+	}
+	return paired, shown, nil
+}
+
+var errPairAlias = errors.New("api: a redacted configuration holds an alias")
+
+// yamlDocs parses every document of a YAML stream into nodes, duplicate keys included.
+func yamlDocs(s string) ([]*yaml.Node, error) {
+	dec := yaml.NewDecoder(strings.NewReader(s))
+	var docs []*yaml.Node
+	for {
+		var n yaml.Node
+		if err := dec.Decode(&n); errors.Is(err, io.EOF) {
+			return docs, nil
+		} else if err != nil {
+			return nil, err
+		}
+		docs = append(docs, &n)
+	}
+}
+
+// walkScalars calls fn on every scalar leaf of docs with its path.
+func walkScalars(docs []*yaml.Node, fn func(p string, n *yaml.Node)) error {
+	esc := strings.NewReplacer("~", "~0", "/", "~1")
+	var walk func(n *yaml.Node, p string) error
+	walk = func(n *yaml.Node, p string) error {
+		switch n.Kind {
+		case yaml.DocumentNode:
+			for _, c := range n.Content {
+				if err := walk(c, p); err != nil {
+					return err
+				}
+			}
+		case yaml.MappingNode:
+			for i := 0; i+1 < len(n.Content); i += 2 {
+				k := "?" // a key that is not a scalar names no path of its own
+				if n.Content[i].Kind == yaml.ScalarNode {
+					k = esc.Replace(n.Content[i].Value)
+				}
+				if err := walk(n.Content[i+1], p+"/"+k); err != nil {
+					return err
+				}
+			}
+		case yaml.SequenceNode:
+			for i, c := range n.Content {
+				if err := walk(c, p+"/"+strconv.Itoa(i)); err != nil {
+					return err
+				}
+			}
+		case yaml.ScalarNode:
+			fn(p, n)
+		case yaml.AliasNode:
+			return errPairAlias
+		}
+		return nil
+	}
+	for i, d := range docs {
+		if err := walk(d, "doc"+strconv.Itoa(i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// encodeDocs writes docs as the redacted configuration is written: two-space indentation.
+func encodeDocs(docs []*yaml.Node) (string, error) {
+	var b strings.Builder
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	for _, d := range docs {
+		if err := enc.Encode(d); err != nil {
+			return "", err
+		}
+	}
+	if err := enc.Close(); err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }
