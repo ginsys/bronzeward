@@ -47,16 +47,21 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 	for _, ib := range [][2]string{{ibr1, d.machine}, {ibr2, s.machine2}} {
 		mustExec(t, d.db, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext, baseline_digest,
 			baseline_digest_key, configuration_digest, created_at, author) VALUES ($1, $2, 'machine: {}', '[]', '\x01', $3, 'transit/baseline-digest:1', $3, now(),
-			(SELECT min(id) FROM principal))`,
-			ib[0], ib[1], make([]byte, 32))
+			$4)`,
+			ib[0], ib[1], make([]byte, 32), d.seed)
+	}
+	publisher := d.seed
+	if d.publishedBy != "" {
+		publisher = d.publishedBy
 	}
 	s.frv = d.fragmentRevision(d.cluster, "registries-"+draft[4:8], "override")
 	s.frg = d.fragmentHead("registries-"+draft[4:8], "override", s.frv, 1)
 	s.gone = d.fragmentHead("gone-"+draft[4:8], "site", nil, 2)
 	mustExec(t, d.db, `INSERT INTO operation (id, kind, state, owner, owner_gen, owner_epoch, lease_until, draft, draft_revision,
 			created_by, created_by_kind, created_role, epoch, created_at)
-		SELECT $1, 'publish', 'running', 'run-1/4242/publish', 1, epoch, now() + interval '1 minute', $2, $3, $4, 'human', 'publisher', epoch, now()
-		FROM installation_state`, s.op, draft, revision, d.seed)
+		SELECT $1, 'publish', 'running', 'run-1/4242/publish', 1, epoch, now() + interval '1 minute', $2, $3, $4,
+			(SELECT kind FROM principal WHERE id = $4), 'publisher', epoch, now()
+		FROM installation_state`, s.op, draft, revision, publisher)
 	tx, err := d.db.Begin() // a release's rows are written with it (PA §3)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +74,7 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 	mustExec(t, tx, `INSERT INTO release (id, cluster, draft, draft_revision, digest, contract, machinery_version, machinery_checksum,
 			kubernetes_version, operation, published_by, published_role, epoch, published_at)
 		SELECT $1, $2, $3, $4, $5, 'v1.13', 'v1.13.6', 'h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=', 'v1.36.0', $6, $7,
-			'publisher', epoch, '2026-09-26T09:14:05Z' FROM installation_state`, s.rel, d.cluster, draft, revision, make([]byte, 32), s.op, d.seed)
+			'publisher', epoch, '2026-09-26T09:14:05Z' FROM installation_state`, s.rel, d.cluster, draft, revision, make([]byte, 32), s.op, publisher)
 	var redacted any = "machine:\n  type: worker\n  token: <redacted:schema>\n"
 	switch d.redacted {
 	case "":

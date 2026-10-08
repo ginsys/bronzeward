@@ -93,6 +93,10 @@ func approvePlan(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, e
 		return result{}, refuse(http.StatusConflict, "conflict",
 			"the plan is neither proposed nor awaiting approval in the current epoch").with("plan", plan).with("state", state)
 	}
+	if b.SelfApproval.Reasons, err = selfApprovalReasons(ctx, tx, plan, q.principal.ID); err != nil {
+		return result{}, err
+	}
+	b.SelfApproval.Marked = len(b.SelfApproval.Reasons) > 0
 	mark, err := json.Marshal(b.SelfApproval)
 	if err != nil {
 		return result{}, err
@@ -132,4 +136,46 @@ func approvePlan(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, e
 	}
 	return result{status: http.StatusCreated, location: prefix + "/approvals/" + b.ID, body: &b,
 		subjects: []string{b.ID, plan, machine}, atActOrder: write}, nil
+}
+
+// selfApprovalReasons are the §10.5 reasons that hold for approver on plan, in the table's order
+// (choice §17.39). The plan's release contains its sources' revisions and its machines' import
+// base revisions; its draft introduced the revisions of the draft's own entries. An authored
+// revision the draft introduced is a change, any other one is reused, however long ago it was
+// written (execution-recovery.md choice §10.4). The rows read take no lock: each is immutable, a
+// published draft's entries are no longer written, and a service identity's responsible human is
+// set when the token tool creates it.
+func selfApprovalReasons(ctx context.Context, tx *sql.Tx, plan, approver string) ([]string, error) {
+	var holds [5]bool
+	err := tx.QueryRowContext(ctx, `WITH pr AS (SELECT p.created_by, r.id AS release, r.draft, r.published_by
+			FROM plan p JOIN release r ON r.id = p.release WHERE p.id = $1),
+		contained (revision, author) AS (
+			SELECT f.id, f.author FROM pr JOIN release_source s ON s.release = pr.release JOIN fragment_revision f ON f.id = s.fragment_revision
+			UNION ALL SELECT v.id, v.author FROM pr JOIN release_source s ON s.release = pr.release
+				JOIN profile_revision v ON v.id = s.profile_revision
+			UNION ALL SELECT a.id, a.author FROM pr JOIN release_source s ON s.release = pr.release
+				JOIN assignment_revision a ON a.id = s.assignment_revision
+			UNION ALL SELECT i.id, i.author FROM pr JOIN release_machine m ON m.release = pr.release
+				JOIN import_base_revision i ON i.id = m.import_base_revision),
+		introduced (revision) AS (
+			SELECT coalesce(e.fragment_revision, e.profile_revision, e.assignment_revision) FROM pr
+				JOIN draft_source_entry e ON e.draft = pr.draft
+			UNION ALL SELECT e.import_base_revision FROM pr JOIN draft_entry e ON e.draft = pr.draft)
+		SELECT pr.created_by = $2, pr.published_by = $2,
+			EXISTS (SELECT FROM contained c WHERE c.author = $2 AND c.revision IN (SELECT revision FROM introduced)),
+			EXISTS (SELECT FROM contained c WHERE c.author = $2
+				AND NOT EXISTS (SELECT FROM introduced i WHERE i.revision = c.revision)),
+			EXISTS (SELECT FROM principal s WHERE s.kind = 'service' AND s.responsible = $2
+				AND (s.id IN (pr.created_by, pr.published_by) OR s.id IN (SELECT author FROM contained)))
+		FROM pr`, plan, approver).Scan(&holds[0], &holds[1], &holds[2], &holds[3], &holds[4])
+	if err != nil {
+		return nil, err
+	}
+	reasons := []string{}
+	for i, r := range []string{"created-plan", "published", "authored-change", "authored-reused", "owned-automation"} {
+		if holds[i] {
+			reasons = append(reasons, r)
+		}
+	}
+	return reasons, nil
 }

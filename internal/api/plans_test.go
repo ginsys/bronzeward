@@ -51,16 +51,20 @@ type planEnv struct {
 	appliedDigest   []byte
 }
 
-func newPlanEnv(t *testing.T) *planEnv {
+func newPlanEnv(t *testing.T, setup ...func(*draftEnv)) *planEnv {
 	t.Helper()
 	return newPlanEnvWith(t, "machine:\n  type: worker\n  token: <redacted:schema>\n",
-		"machine:\n  type: controlplane\n  token: <redacted:schema>\n")
+		"machine:\n  type: controlplane\n  token: <redacted:schema>\n", setup...)
 }
 
-// newPlanEnvWith is newPlanEnv with the Applied and target releases' redacted configurations.
-func newPlanEnvWith(t *testing.T, applied, target string) *planEnv {
+// newPlanEnvWith is newPlanEnv with the Applied and target releases' redacted configurations. Each
+// setup runs on the draft environment before the releases are written.
+func newPlanEnvWith(t *testing.T, applied, target string, setup ...func(*draftEnv)) *planEnv {
 	t.Helper()
 	p := &planEnv{draftEnv: newDraftEnv(t), appliedDigest: bytes.Repeat([]byte{7}, 32)}
+	for _, s := range setup {
+		s(p.draftEnv)
+	}
 	p.assigned = true
 	p.redacted = applied
 	p.artifact = p.appliedDigest // the node holds the Applied release's artifact
