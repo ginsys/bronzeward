@@ -185,7 +185,7 @@ func TestIngestionStart(t *testing.T) {
 }
 
 // leaseLiveAfter checks that claim's lease, and its running operation's, were set after released
-// and are still live: the request's last lock wait did not consume them (PA §1.2 rule 4).
+// and are still live: the request's last lock wait did not consume them (PA §5 rule 4).
 func leaseLiveAfter(t *testing.T, db *sql.DB, claim string, released time.Time) (lease, expires time.Time) {
 	t.Helper()
 	var live bool
@@ -202,7 +202,7 @@ func leaseLiveAfter(t *testing.T, db *sql.DB, claim string, released time.Time) 
 }
 
 // T11's claim lease and expiry run from after the act-order lock, its last wait: a start that
-// waited on it longer than the lease commits a live claim (PA §1.2 rules 4 and 5).
+// waited on it longer than the lease commits a live claim (PA §5 rules 4 and 5).
 func TestIngestionStartAfterActOrderWait(t *testing.T) {
 	ie := setupIngestEnv(t)
 	ie.d.timers.Lease = time.Second

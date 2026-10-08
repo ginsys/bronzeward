@@ -628,7 +628,7 @@ func TestPlanReadAfterLockWait(t *testing.T) {
 }
 
 // A creation whose transaction waited on the machine's row longer than its expiry still creates a
-// plan that reads proposed: its creation time and expiry are read after the locks (PA §1.2 rule 4).
+// plan that reads proposed: its creation time and expiry are read after the locks (PA §5 rule 4).
 func TestPlanCreationAfterLockWait(t *testing.T) {
 	p := newPlanEnv(t)
 	t.Parallel()
@@ -670,7 +670,7 @@ func TestPlanCreationAfterLockWait(t *testing.T) {
 }
 
 // holdActOrder takes the act-order lock (auth.actOrderKey) in a transaction of its own, so a
-// request's transaction waits on it last, after its effect (PA §1.2 rule 5).
+// request's transaction waits on it last, after its effect (PA §5 rule 5).
 func holdActOrder(t *testing.T, db *sql.DB) *sql.Tx {
 	t.Helper()
 	lock, err := db.Begin()
@@ -704,7 +704,7 @@ func waitForLockWaits(t *testing.T, db *sql.DB, n int) {
 
 // A creation queued on the act-order lock already holds its creator's principal against a
 // revocation of that creator, so the plan's reference to it after the lock waits on nothing: the
-// two do not deadlock (PA §1.2 rule 5).
+// two do not deadlock (PA §5 rule 5).
 func TestPlanCreationRevocationOfCreatorNoDeadlock(t *testing.T) {
 	p := newPlanEnv(t)
 	t.Parallel()
@@ -729,7 +729,7 @@ func TestPlanCreationRevocationOfCreatorNoDeadlock(t *testing.T) {
 }
 
 // The act-order wait is a lock wait too: a creation that waited on it past its expiry still reads
-// proposed, its times read after that lock (PA §1.2 rule 4).
+// proposed, its times read after that lock (PA §5 rule 4).
 func TestPlanCreationAfterActOrderWait(t *testing.T) {
 	p := newPlanEnv(t)
 	t.Parallel()
@@ -846,7 +846,7 @@ func TestPlanReadRevokedApprover(t *testing.T) {
 }
 
 // A revocation that waited on the approver's principal row until after the plan's expiry is
-// recorded after it: the plan reads expired, not revoked (PA §1.2 rule 4).
+// recorded after it: the plan reads expired, not revoked (PA §5 rule 4).
 func TestPlanReadRevocationAfterLockWait(t *testing.T) {
 	p := newPlanEnv(t)
 	t.Parallel()
@@ -883,7 +883,7 @@ func TestPlanReadRevocationAfterLockWait(t *testing.T) {
 }
 
 // A revocation that waited on the act-order lock until after the plan's expiry is recorded after
-// it: the plan reads expired, not revoked (PA §1.2 rule 4).
+// it: the plan reads expired, not revoked (PA §5 rule 4).
 func TestPlanReadRevocationAfterActOrderWait(t *testing.T) {
 	p := newPlanEnv(t)
 	t.Parallel()

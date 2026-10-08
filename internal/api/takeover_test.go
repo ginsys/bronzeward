@@ -180,7 +180,7 @@ func TestTakeoverResumesToT1(t *testing.T) {
 }
 
 // A takeover's new lease runs from after the act-order lock, its last wait: a takeover that waited
-// on it longer than the lease commits a live claim (PA §1.2 rules 4 and 5).
+// on it longer than the lease commits a live claim (PA §5 rules 4 and 5).
 func TestTakeoverAfterActOrderWait(t *testing.T) {
 	ie := newIngestEnv(t, options{})
 	op, j := ie.stagedJob(t)
@@ -206,7 +206,7 @@ func TestTakeoverAfterActOrderWait(t *testing.T) {
 
 // A takeover whose claim reaches its absolute expiry while it waits on the act-order lock is
 // refused as ended, as the expiry passing before its write would be: nothing is taken and no run
-// starts (PA §1.2 rule 4, compilation §3.4).
+// starts (PA §5 rule 4, compilation §3.4).
 func TestTakeoverExpiredInActOrderWait(t *testing.T) {
 	ie := newIngestEnv(t, options{})
 	op, j := ie.stagedJob(t)
