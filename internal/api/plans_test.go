@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -664,6 +665,57 @@ func TestPlanCreationAfterLockWait(t *testing.T) {
 	}
 }
 
+// holdActOrder takes the act-order lock (auth.actOrderKey) in a transaction of its own, so a
+// request's transaction waits on it last, after its effect (PA §1.2 rule 5).
+func holdActOrder(t *testing.T, db *sql.DB) *sql.Tx {
+	t.Helper()
+	lock, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Rollback() })
+	if _, err := lock.Exec(`SELECT pg_advisory_xact_lock($1, 0)`, 0x62776163); err != nil {
+		t.Fatal(err)
+	}
+	return lock
+}
+
+// The act-order wait is a lock wait too: a creation that waited on it past its expiry still reads
+// proposed, its times read after that lock (PA §1.2 rule 4).
+func TestPlanCreationAfterActOrderWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	lock := holdActOrder(t, p.db)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- p.plan(p.robot, "k-plan-wait-order-01", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`))
+	}()
+	dbtest.WaitForLockWait(t, p.db)
+	time.Sleep(1200 * time.Millisecond)
+	released := time.Now()
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	b := decode[planBody](t, <-done, http.StatusCreated)
+	if !b.ExpiresAt.After(released) || b.ExpiresAt.Sub(b.CreatedAt) != time.Second {
+		t.Fatalf("created %s, expires %s, lock released %s", b.CreatedAt, b.ExpiresAt, released)
+	}
+	var at, updated time.Time
+	if err := p.db.QueryRow(`SELECT e.at, s.updated_at FROM machine_event e JOIN plan p ON p.machine = e.machine
+		JOIN plan_state s ON s.plan = p.id WHERE p.id = $1 AND e.kind = 'plan' AND e.entry->>'plan' = p.id`, b.ID).Scan(&at,
+		&updated); err != nil {
+		t.Fatal(err)
+	}
+	if !at.Equal(b.CreatedAt) || !updated.Equal(b.CreatedAt) {
+		t.Fatalf("timeline entry at %s, state at %s, plan created %s", at, updated, b.CreatedAt)
+	}
+	got := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + b.ID, token: p.human("h-viewer")}),
+		http.StatusOK)
+	if got.State != "proposed" {
+		t.Fatalf("read at once: state %q, want proposed", got.State)
+	}
+}
+
 // approveAs records the approval of plan by approver as T5a does, which no route makes yet, and
 // moves the plan to approved.
 func (p *planEnv) approveAs(t *testing.T, plan, approver string) {
@@ -776,6 +828,39 @@ func TestPlanReadRevocationAfterLockWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	revocationOf(t, <-done)
+	if got := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + b.ID, token: p.human("h-viewer")}),
+		http.StatusOK); got.State != "expired" {
+		t.Fatalf("revoked after the expiry: state %q, want expired", got.State)
+	}
+}
+
+// A revocation that waited on the act-order lock until after the plan's expiry is recorded after
+// it: the plan reads expired, not revoked (PA §1.2 rule 4).
+func TestPlanReadRevocationAfterActOrderWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	approver := id.New(id.Principal)
+	mustExec(t, p.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', $2, 'h-approver-order', now())`,
+		approver, p.iss.URL)
+	b := decode[planBody](t, p.plan(p.robot, "k-plan-order-012345678", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":2`)),
+		http.StatusCreated)
+	p.approveAs(t, b.ID, approver)
+	lock := holdActOrder(t, p.db)
+	recovery := p.human("h-recovery")
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- revoke(p.env, recovery, key, `{"identity":"`+approver+`","reason":"left"}`) }()
+	dbtest.WaitForLockWait(t, p.db)
+	if !time.Now().Before(b.ExpiresAt) {
+		t.Fatal("the revocation began waiting only after the plan expired; the setup is too slow to show anything")
+	}
+	time.Sleep(time.Until(b.ExpiresAt.Add(200 * time.Millisecond)))
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	r := revocationOf(t, <-done)
+	if !r.At.After(b.ExpiresAt) {
+		t.Fatalf("revocation answered at %s, plan expires %s", r.At, b.ExpiresAt)
+	}
 	if got := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + b.ID, token: p.human("h-viewer")}),
 		http.StatusOK); got.State != "expired" {
 		t.Fatalf("revoked after the expiry: state %q, want expired", got.State)

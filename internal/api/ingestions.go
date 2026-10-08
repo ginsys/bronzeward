@@ -192,7 +192,8 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	}
 	return result{status: http.StatusAccepted, location: prefix + "/operations/" + op,
 		body: map[string]string{"operation": op, "ingestion": c.ID}, subjects: []string{op, c.ID, in.Draft, in.Machine},
-		operation: op, afterCommit: func() { a.startRunner(j) }}, nil
+		operation: op, afterCommit: func() { a.startRunner(j) },
+		atActOrder: func(ctx context.Context, tx *sql.Tx) error { return staging.Restart(ctx, tx, c.ID, timers, true) }}, nil
 }
 
 // ingestionBody is the ingestion resource (§9.2): its staging claim as every read treats it
@@ -304,6 +305,9 @@ func takeOverIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (res
 	}
 	j.resume = &staged{ct: provider.Ciphertext(tk.Payload), sum: tk.Digest}
 	res.afterCommit = func() { a.startRunner(j) }
+	res.atActOrder = func(ctx context.Context, tx *sql.Tx) error {
+		return staging.Restart(ctx, tx, claim, staging.Timers{Lease: a.d.timers.Lease}, false)
+	}
 	return res, nil
 }
 

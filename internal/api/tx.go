@@ -199,14 +199,19 @@ func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, er
 	if err != nil {
 		return nil, false, err
 	}
-	body, err := json.Marshal(res.body)
-	if err != nil {
-		return nil, false, err
-	}
 	if !a.o.noActOrder { // the last lock (rule 5), so acts commit in seq order
 		if err := auth.LockActOrder(ctx, tx); err != nil {
 			return nil, false, err
 		}
+	}
+	if res.atActOrder != nil {
+		if err := res.atActOrder(ctx, tx); err != nil {
+			return nil, false, err
+		}
+	}
+	body, err := json.Marshal(res.body)
+	if err != nil {
+		return nil, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO act (id, principal, principal_kind, via, role, action, subjects, idempotency_key, request_id, epoch, at)
 		VALUES ($1, $2, $3, 'api', $4, $5, string_to_array($6, ','), $7, $8, $9, now())`,

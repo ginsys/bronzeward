@@ -130,12 +130,12 @@ func revokeIdentity(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	} else {
 		b.DeniedSubjectsListed = a.denied.Service(in.target)
 	}
-	// PA §1.2 rule 4: the time follows the principals' lock waits, so a plan read can tell whether
-	// the revocation came before its approved plan's expiry (§8.1).
-	if err := tx.QueryRowContext(ctx, `INSERT INTO identity_revocation (identity, revoked_by, role, reason, act, epoch, at)
-		VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp()) RETURNING at`,
-		in.target, q.principal.ID, string(q.role), in.Reason, q.actID, q.epoch).Scan(&b.At); err != nil {
-		return result{}, err
+	// PA §1.2 rule 4: the time follows every lock wait, the principals' and the act-order lock's,
+	// so a plan read can tell whether the revocation came before its approved plan's expiry (§8.1).
+	write := func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `INSERT INTO identity_revocation (identity, revoked_by, role, reason, act, epoch, at)
+			VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp()) RETURNING at`,
+			in.target, q.principal.ID, string(q.role), in.Reason, q.actID, q.epoch).Scan(&b.At)
 	}
-	return result{status: http.StatusCreated, body: b, subjects: []string{in.target}}, nil
+	return result{status: http.StatusCreated, body: &b, subjects: []string{in.target}, atActOrder: write}, nil
 }

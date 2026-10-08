@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
@@ -176,6 +177,31 @@ func TestTakeoverResumesToT1(t *testing.T) {
 	if rec.Code != http.StatusAccepted || len(b.taken(t)) != 1 {
 		t.Fatalf("replay: %d, %d jobs", rec.Code, len(b.taken(t)))
 	}
+}
+
+// A takeover's new lease runs from after the act-order lock, its last wait: a takeover that waited
+// on it longer than the lease commits a live claim (PA §1.2 rules 4 and 5).
+func TestTakeoverAfterActOrderWait(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	op, j := ie.stagedJob(t)
+	d := ie.d
+	d.owner = staging.Owner{ID: "b/2/" + rand.Text(), Epoch: ie.d.owner.Epoch}
+	d.timers.Lease = time.Second
+	b := ie.buildWith(d, options{onRunner: func(job) {}})
+	lock := holdActOrder(t, ie.db)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- ie.do(b, takeoverCall(ie.human("h-author"), "k-takeover-order-0123", j.claim.ID)) }()
+	dbtest.WaitForLockWait(t, ie.db)
+	time.Sleep(1200 * time.Millisecond)
+	released := time.Now()
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	rec := <-done
+	if got := decode[map[string]string](t, rec, http.StatusAccepted); got["operation"] != op {
+		t.Fatalf("body %v", got)
+	}
+	leaseLiveAfter(t, ie.db, j.claim.ID, released)
 }
 
 // PA §9.2, C §3.4: each refusal answers its problem and leaves the claim and its operation as they

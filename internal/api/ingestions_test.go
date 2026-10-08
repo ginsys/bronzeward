@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/ginsys/bronzeward/internal/config"
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/staging"
 )
 
@@ -180,6 +181,53 @@ func TestIngestionStart(t *testing.T) {
 	}
 	if claims, ops := ie.rowCounts(t); claims != 1 || ops != 1 || len(ie.runs()) != 1 {
 		t.Fatalf("after the replay: %d claims, %d operations, %d jobs", claims, ops, len(ie.runs()))
+	}
+}
+
+// leaseLiveAfter checks that claim's lease, and its running operation's, were set after released
+// and are still live: the request's last lock wait did not consume them (PA §1.2 rule 4).
+func leaseLiveAfter(t *testing.T, db *sql.DB, claim string, released time.Time) (lease, expires time.Time) {
+	t.Helper()
+	var live bool
+	var opLease time.Time
+	if err := db.QueryRow(`SELECT c.lease_until, c.expires_at, c.lease_until > clock_timestamp(), o.lease_until
+		FROM staging_claim c JOIN operation o ON o.ingestion = c.id AND o.state = 'running' WHERE c.id = $1`, claim).Scan(
+		&lease, &expires, &live, &opLease); err != nil {
+		t.Fatal(err)
+	}
+	if !live || !lease.After(released) || !opLease.Equal(lease) {
+		t.Fatalf("claim lease %s (live %v), operation lease %s, lock released %s", lease, live, opLease, released)
+	}
+	return lease, expires
+}
+
+// T11's claim lease and expiry run from after the act-order lock, its last wait: a start that
+// waited on it longer than the lease commits a live claim (PA §1.2 rules 4 and 5).
+func TestIngestionStartAfterActOrderWait(t *testing.T) {
+	ie := setupIngestEnv(t)
+	ie.d.timers.Lease = time.Second
+	ie.api = ie.build(options{onRunner: func(job) {}})
+	author := ie.human("h-author")
+	lock := holdActOrder(t, ie.db)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- ie.do(ie.api, ingestCall(author, key, ie.etag, ie.body(nil))) }()
+	dbtest.WaitForLockWait(t, ie.db)
+	time.Sleep(1200 * time.Millisecond)
+	released := time.Now()
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if rec := <-done; rec.Code != http.StatusAccepted {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var claim string
+	var created time.Time
+	if err := ie.db.QueryRow(`SELECT id, created_at FROM staging_claim`).Scan(&claim, &created); err != nil {
+		t.Fatal(err)
+	}
+	lease, expires := leaseLiveAfter(t, ie.db, claim, released)
+	if lease.Sub(created) != time.Second || expires.Sub(created) != testTimers.AbsoluteExpiry {
+		t.Fatalf("created %s, lease %s, expires %s", created, lease, expires)
 	}
 }
 
