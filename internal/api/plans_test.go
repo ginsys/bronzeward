@@ -259,17 +259,35 @@ func TestPlanCreationDiffPaired(t *testing.T) {
 
 // Redaction can give two keys of one mapping the same token, as two label keys that are copies of
 // values (compilation §8.3). The diff is still shown, and a base leaf under such a key is paired when
-// the target has a redacted leaf there and no leaf of the base leaf's value.
+// the target has a redacted leaf there. Which base leaf a redacted one replaced cannot be told
+// apart, so every plaintext base leaf at such a path is paired, even one equal to a target leaf.
 func TestPlanCreationDiffDuplicateKeys(t *testing.T) {
-	p := newPlanEnvWith(t,
-		"machine:\n  nodeLabels:\n    <redacted:value>: east\n    <redacted:value>: west\n  type: worker\n",
-		"machine:\n  nodeLabels:\n    <redacted:value>: <redacted:zone@1>\n    <redacted:value>: west\n  type: controlplane\n")
 	t.Parallel()
-	b := decode[planBody](t, p.plan(p.robot, "k-plan-dupkeys-012345", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
-	want := "@@ -1,5 +1,5 @@\n machine:\n   nodeLabels:\n-    <redacted:value>: <redacted:paired>\n+    <redacted:value>: <redacted:zone@1>\n" +
-		"     <redacted:value>: west\n-  type: worker\n+  type: controlplane\n"
-	if d := b.Evidence.Diff; d == nil || d.Withheld || d.Unified != want {
-		t.Fatalf("diff %+v\nwant %s", d, want)
+	for _, tc := range []struct{ base, leak string }{
+		{"machine:\n  nodeLabels:\n    <redacted:value>: east\n    <redacted:value>: west\n  token: <redacted:t@1>\n  type: worker\n", "east"},
+		{"machine:\n  nodeLabels:\n    <redacted:value>: west\n    <redacted:value>: west\n  token: <redacted:t@1>\n  type: worker\n", "west"},
+	} {
+		// token is redacted and unchanged on both sides, so it shows no change.
+		p := newPlanEnvWith(t, tc.base,
+			"machine:\n  nodeLabels:\n    <redacted:value>: <redacted:zone@1>\n    <redacted:value>: west\n  token: <redacted:t@1>\n  type: controlplane\n")
+		b := decode[planBody](t, p.plan(p.robot, "k-plan-dupkeys-012345", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+		d := b.Evidence.Diff
+		if d == nil || d.Withheld {
+			t.Fatalf("base %q: diff %+v", tc.base, d)
+		}
+		removed := map[string]bool{}
+		for _, l := range strings.Split(d.Unified, "\n") {
+			if strings.HasPrefix(l, "-") {
+				removed[strings.TrimSpace(l[1:])] = true
+				if strings.Contains(l, tc.leak) {
+					t.Fatalf("base %q: removed line %q shows the replaced value\n%s", tc.base, l, d.Unified)
+				}
+			}
+		}
+		want := map[string]bool{"<redacted:value>: <redacted:paired>": true, "type: worker": true}
+		if !reflect.DeepEqual(removed, want) {
+			t.Fatalf("base %q: removed lines %v\ndiff:\n%s", tc.base, removed, d.Unified)
+		}
 	}
 }
 
@@ -279,6 +297,7 @@ func TestPlanCreationDiffUnpairable(t *testing.T) {
 	for _, base := range []string{
 		"machine:\n  wipe: false\n  bad: [\n",              // does not parse
 		"machine:\n  wipe: &w false\n  keep: *w\n  x: 1\n", // an alias, which one path cannot pair
+		"machine:\n  wipe: &w false\n  *w : old\n  x: 1\n", // an alias as a mapping key
 	} {
 		p := newPlanEnvWith(t, base, "machine:\n  wipe: <redacted:install/wipe@1>\n  keep: <redacted:install/wipe@1>\n  x: 2\n")
 		b := decode[planBody](t, p.plan(p.robot, "k-plan-unpaired-01234", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
