@@ -274,10 +274,12 @@ func TestPlanConstraints(t *testing.T) {
 	plan("route by DNS name", "23514", apply.with("route", "cp.example.test:50000"))
 	plan("idempotency key of 15 characters", "23514", apply.with("idempotency_key", strings.Repeat("k", 15)))
 	plan("machine of another cluster", "23503", apply.with("cluster", p.other))
-	plan("release not covering the machine", "23503",
-		apply.with("machine", m2, "assignment_revision", asr2, "desired_release", nil, "kind", "adopt", "mode", nil,
-			"baseline_revision", nil, "expected_digest", nil, "transport_deadline", nil, "verification_deadline", nil,
-			"max_attempts", nil))
+	// m2 has its own timeline entry, so only the release's coverage can refuse the row.
+	uncovered := apply.with("machine", m2, "assignment_revision", asr2, "desired_release", nil, "kind", "adopt",
+		"mode", nil, "baseline_revision", nil, "expected_digest", nil, "transport_deadline", nil,
+		"verification_deadline", nil, "max_attempts", nil)
+	refused(t, db, "release not covering the machine", "23503/plan_release_machine_fkey",
+		p.entry(m2, 100, "plan"), uncovered.stmt(), state(uncovered))
 	plan("assignment revision of another machine", "23503", apply.with("assignment_revision", asr2))
 	plan("creator who is no principal", "23503", apply.with("created_by", id.New(id.Principal)))
 	plan("creator of another kind", "23503", apply.with("created_by_kind", "service"))
