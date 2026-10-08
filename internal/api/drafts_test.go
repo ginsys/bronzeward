@@ -20,10 +20,13 @@ type draftEnv struct {
 	removedOnly                         bool                 // d.release names only a removed fragment, no fragment revision
 	reproductions                       bool                 // d.release also records two occurrences of reproducedPass in d.machine's import base
 	assigned                            bool                 // d.release binds each machine's assignment head, d.assignment creating it
-	redacted                            string               // d.release's redacted configuration of d.machine, when set
+	redacted                            string               // d.release's redacted configuration of d.machine, when set; noRedacted for none
 	artifact                            []byte               // d.release's artifact configuration digest, when set
 	heads                               map[string][2]string // a machine's assignment and its head revision, by d.assignment
 }
+
+// noRedacted as draftEnv.redacted seeds d.machine's release row without a redacted configuration.
+const noRedacted = "\x00none"
 
 func newDraftEnv(t *testing.T) *draftEnv {
 	t.Helper()
