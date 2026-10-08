@@ -345,16 +345,6 @@ func TestAdoptionRefusals(t *testing.T) {
 			mustExec(t, ae.db, `UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'adoption',
 				baseline_revision = 1 WHERE machine = $1`, ae.machine, ae.applied.rel, ae.appliedDigest)
 		}},
-		{"no observation", "", "4.4", "the machine has no recorded observation", func(t *testing.T, ae *adoptEnv) { ae.approveIt(t) }},
-		{"start only", "", "4.4", "the machine has no recorded observation",
-			obsWith(func(s *obsSeed) { s.startOnly = true })},
-		{"observed before the approval", "", "4.4", "the latest observation began before the approval",
-			func(t *testing.T, ae *adoptEnv) {
-				ae.observed(t, nil)
-				ae.approveIt(t)
-			}},
-		{"too old", "", "4.4", "the latest observation is older than the plan allows",
-			obsWith(func(s *obsSeed) { s.age = 2 * time.Minute })},
 		{"another machine", "", "4.4", "the latest observation shows another machine identity",
 			obsWith(func(s *obsSeed) { s.uuid = "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b" })},
 		{"no identity", "", "4.4", "the latest observation shows another machine identity",
@@ -430,6 +420,54 @@ func TestAdoptionConcurrentCommitment(t *testing.T) {
 	ae.wantAlreadyAdopted(t, failed)
 }
 
+// A refusal whose attempt rolled back before another attempt recorded the adoption is not recorded
+// after it: the refusal entry's transaction finds the plan adopted under the machine's lock.
+func TestAdoptionRefusalAfterAdoption(t *testing.T) {
+	t.Parallel()
+	ae := newAdoptEnv(t, "")
+	ae.approveIt(t)
+	ae.observed(t, nil)
+	if _, err := ae.a.commitAdoption(context.Background(), ae.pid); err != nil {
+		t.Fatal(err)
+	}
+	err := ae.a.recordRefusal(context.Background(), ae.machine, ae.pid,
+		&adoptionRefused{Comparison: "4.4", Cause: "the latest observation's configuration digest is not the baseline's"})
+	ae.wantAlreadyAdopted(t, err)
+}
+
+// A plan is refused once: a second refused attempt, sequential or racing, finds the first one's
+// refusal entry under the machine's lock and appends none.
+func TestAdoptionRefusalRecordedOnce(t *testing.T) {
+	t.Parallel()
+	const cause = "the latest observation's configuration digest is not the baseline's"
+	t.Run("sequential", func(t *testing.T) {
+		t.Parallel()
+		ae := newAdoptEnv(t, "")
+		ae.approveIt(t)
+		ae.observed(t, func(s *obsSeed) { s.digest = bytes.Repeat([]byte{9}, 32) })
+		for range 2 {
+			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+			ae.wantRefused(t, err, 0, "4.4", cause)
+		}
+	})
+	t.Run("racing", func(t *testing.T) {
+		t.Parallel()
+		ae := newAdoptEnv(t, "")
+		ae.approveIt(t)
+		ae.observed(t, func(s *obsSeed) { s.digest = bytes.Repeat([]byte{9}, 32) })
+		errs := make(chan error, 2)
+		for range 2 {
+			go func() {
+				_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+				errs <- err
+			}()
+		}
+		for range 2 {
+			ae.wantRefused(t, <-errs, 0, "4.4", cause)
+		}
+	})
+}
+
 // wantAlreadyAdopted checks that err found the plan's adoption already recorded: not a refusal, no
 // refusal entry, and the one adopt operation left.
 func (ae *adoptEnv) wantAlreadyAdopted(t *testing.T, err error) {
@@ -443,6 +481,59 @@ func (ae *adoptEnv) wantAlreadyAdopted(t *testing.T, err error) {
 	}
 	if n := count(t, ae.db, `SELECT count(*) FROM operation WHERE plan = $1`, ae.pid); n != 1 {
 		t.Fatalf("%d operations", n)
+	}
+}
+
+// No recorded observation, or one that began before the approval or is older than the plan allows,
+// is no evidence (§6.3 step 4, choice §10.27): the record rolls back without a refusal entry, and a
+// fresh observation commits it.
+func TestAdoptionNoEvidence(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name  string
+		setup func(*testing.T, *adoptEnv)
+	}{
+		{"no observation", func(t *testing.T, ae *adoptEnv) { ae.approveIt(t) }},
+		{"start only", func(t *testing.T, ae *adoptEnv) {
+			ae.approveIt(t)
+			ae.observed(t, func(s *obsSeed) { s.startOnly = true })
+		}},
+		{"observed before the approval", func(t *testing.T, ae *adoptEnv) {
+			ae.observed(t, nil)
+			ae.approveIt(t)
+		}},
+		{"too old", func(t *testing.T, ae *adoptEnv) {
+			ae.approveIt(t)
+			ae.observed(t, func(s *obsSeed) { s.age = 2 * time.Minute })
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ae := newAdoptEnv(t, "")
+			c.setup(t, ae)
+			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+			ae.wantNoEvidence(t, err)
+			ae.observed(t, nil)
+			if _, err := ae.a.commitAdoption(context.Background(), ae.pid); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// wantNoEvidence checks that err rolled the record back for want of evidence: not a refusal, no
+// refusal entry and no operation for the plan.
+func (ae *adoptEnv) wantNoEvidence(t *testing.T, err error) {
+	t.Helper()
+	var refused *adoptionRefused
+	if !errors.Is(err, errNoEvidence) || errors.As(err, &refused) {
+		t.Fatalf("got %v, want no evidence and no refusal", err)
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'refusal'`, ae.machine); n != 0 {
+		t.Fatalf("%d refusal entries", n)
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM operation WHERE plan = $1`, ae.pid); n != 0 {
+		t.Fatalf("%d operations for the plan", n)
 	}
 }
 
@@ -470,16 +561,7 @@ func TestAdoptionUnreadEvidence(t *testing.T) {
 			ae.observed(t, nil)
 			ae.observed(t, c.change)
 			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
-			var refused *adoptionRefused
-			if !errors.Is(err, errEvidenceUnread) || errors.As(err, &refused) {
-				t.Fatalf("got %v, want the evidence unread and no refusal", err)
-			}
-			if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'refusal'`, ae.machine); n != 0 {
-				t.Fatalf("%d refusal entries", n)
-			}
-			if n := count(t, ae.db, `SELECT count(*) FROM operation WHERE plan = $1`, ae.pid); n != 0 {
-				t.Fatalf("%d operations for the plan", n)
-			}
+			ae.wantNoEvidence(t, err)
 			ae.observed(t, nil)
 			if _, err := ae.a.commitAdoption(context.Background(), ae.pid); err != nil {
 				t.Fatal(err)

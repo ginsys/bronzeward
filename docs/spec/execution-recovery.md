@@ -1079,13 +1079,18 @@ state is being accepted (design §12.1).
    it takes an observation for the plan (purpose `evidence`, at the plan's
    route) and then attempts the record, which relies on whichever recorded
    observation has the highest basis. It does so after each approval and
-   periodically. An observation that could not read the identity, the
-   configuration or the assignment evidence is no evidence either way: when
-   the observation the record relies on left one of them unread, whoever
-   took it, the transaction rolls back without a refusal entry and the plan
-   is observed again later. A refused
+   periodically. Requirement 4 fails in two ways. Missing evidence: no
+   recorded observation, or the one the record relies on (whoever took it)
+   began before the approval, is older than the plan allows, or could not
+   read the identity, the configuration or the assignment evidence. Then the
+   transaction rolls back without a refusal entry and the plan is observed
+   again later. Contradicting evidence, an observation showing another value,
+   is refused. A refused
    record ends the attempts for that plan, so a mismatch is recorded once and
-   not on every period: a new plan is the retry **(choice §10.27)**. An adopt
+   not on every period: a new plan is the retry **(choice §10.27)**. The
+   refusal entry's own transaction (§4.1), under the machine lock, appends
+   nothing when the plan was adopted or refused since the refused attempt
+   rolled back, so racing attempts record one outcome. An adopt
    plan's only operation is its adoption, so an attempt that finds one
    (requirement 1), such as a second controller instance's racing for the
    same plan, finds the plan adopted: it rolls back without a refusal entry,
@@ -2058,10 +2063,11 @@ conservative option; those that do not say so. Each is marked in place as
     controller takes one for each approved adopt plan, after each approval and
     periodically, and attempts the record on it. It waits while an operation
     holds the scope or recovery mode closes it, since those clear without a
-    new plan, and observes again when the node could not be read, including
-    when the observation the record relies on is another reader's that left a
-    value unread, so an unread value never records a refusal, and an attempt
-    that finds the plan already adopted by another records nothing. A refusal
+    new plan, and observes again when the evidence is missing: no observation,
+    or the one the record relies on (another reader's included) began before
+    the approval, is too old or left a value unread, so missing evidence never
+    records a refusal. An attempt that finds the plan already adopted or
+    refused by another records nothing. A refusal
     ends the attempts: a digest, identity or assignment mismatch does not heal
     by repeating the comparison, and repeating it would append a refusal entry
     every period until the plan expires. Agent decision, 2026-10-08

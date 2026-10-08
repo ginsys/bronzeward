@@ -22,10 +22,11 @@ func (r *adoptionRefused) Error() string {
 	return fmt.Sprintf("adoption refused by requirement %s: %s", r.Comparison, r.Cause)
 }
 
-// errEvidenceUnread is an adoption record not attempted because the observation it relies on left
-// the identity, the configuration or the assignment evidence unread: no evidence either way, so no
-// refusal (§6.3 step 4, choice §10.27).
-var errEvidenceUnread = errors.New("the observation relied on left evidence unread")
+// errNoEvidence is an adoption record not attempted for want of evidence: the machine has no
+// recorded observation, or the one the record relies on began before the approval, is older than
+// the plan allows or left the identity, the configuration or the assignment evidence unread. A
+// fresh observation can supply it, so nothing is refused (§6.3 step 4, choice §10.27).
+var errNoEvidence = errors.New("no evidence for the adoption")
 
 // errAlreadyAdopted is an adoption record not attempted because the plan's adoption is already
 // recorded, by another attempt that took the machine's lock first: the plan's outcome, not a
@@ -67,7 +68,10 @@ func (a *API) commitAdoption(ctx context.Context, plan string) (adopted, error) 
 	if !errors.As(err, &refused) || machine == "" {
 		return r, err
 	}
-	if rerr := a.recordRefusal(ctx, machine, plan, refused); rerr != nil {
+	switch rerr := a.recordRefusal(ctx, machine, plan, refused); {
+	case errors.Is(rerr, errAlreadyAdopted): // adopted by another attempt since this one rolled back
+		return adopted{}, rerr
+	case rerr != nil:
 		// Only a recorded refusal answers *adoptionRefused: an unrecorded one is attempted again.
 		return adopted{}, fmt.Errorf("%v, but its refusal entry was not recorded: %w", err, rerr)
 	}
@@ -195,9 +199,10 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	// 4.4: the recorded observation with the highest basis, of any purpose: begun after the
 	// approval, no older than the plan binds (measured from its start entry, when the read began),
 	// showing the machine's identity, the baseline's configuration digest and the bound assignment
-	// revision. A start with no recorded observation does not count; one that left any of those
-	// three values unread is no evidence either way, so the record is not attempted and nothing is
-	// refused (choice §10.27).
+	// revision. A start with no recorded observation does not count. An observation that is
+	// missing, begun before the approval, too old or left any of those three values unread is no
+	// evidence, so the record is not attempted and nothing is refused; only one that shows another
+	// value is (choice §10.27).
 	var obs sql.NullString
 	var basis int64
 	var startedAt time.Time
@@ -220,17 +225,20 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return r, machine, err
 	}
+	// No evidence rolls back without a refusal entry, whatever else the observation shows: a fresh
+	// one decides. Only evidence that contradicts the plan is refused.
 	switch {
 	case !obs.Valid:
-		return r, machine, refuseAdoption("4.4", "the machine has no recorded observation")
-	case unread.Valid: // no evidence either way: rolled back without a refusal entry,
-		// whatever its age or basis: the next observation decides
+		return r, machine, fmt.Errorf("adoption of plan %s: the machine has no recorded observation: %w", plan, errNoEvidence)
+	case unread.Valid:
 		return r, machine, fmt.Errorf("adoption of plan %s: observation %s did not read the %s: %w", plan, obs.String,
-			unread.String, errEvidenceUnread)
+			unread.String, errNoEvidence)
 	case basis <= approvalRevision:
-		return r, machine, refuseAdoption("4.4", "the latest observation began before the approval")
+		return r, machine, fmt.Errorf("adoption of plan %s: observation %s began before the approval: %w", plan, obs.String,
+			errNoEvidence)
 	case at.Sub(startedAt) > maxAge:
-		return r, machine, refuseAdoption("4.4", "the latest observation is older than the plan allows")
+		return r, machine, fmt.Errorf("adoption of plan %s: observation %s is older than the plan allows: %w", plan,
+			obs.String, errNoEvidence)
 	case !identityMatches:
 		return r, machine, refuseAdoption("4.4", "the latest observation shows another machine identity")
 	case !digestMatches:
@@ -300,6 +308,21 @@ func (a *API) recordRefusal(ctx context.Context, machine, plan string, refused *
 		}
 		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, machine); err != nil {
 			return err
+		}
+		// The attempt rolled back before this lock, so another may have adopted or refused the plan
+		// since: every adoption and refusal entry holds the machine first, so both are read here.
+		var adoptedSince, refusedSince bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT FROM plan_state WHERE plan = $2
+				AND (operation IS NOT NULL OR state = 'committed')),
+			EXISTS (SELECT FROM machine_event WHERE machine = $1 AND kind = 'refusal' AND entry->>'plan' = $2)`,
+			machine, plan).Scan(&adoptedSince, &refusedSince); err != nil {
+			return err
+		}
+		switch {
+		case adoptedSince:
+			return fmt.Errorf("adoption of plan %s: %w", plan, errAlreadyAdopted)
+		case refusedSince: // recorded once, by whichever attempt locked first
+			return nil
 		}
 		var rev int64
 		at, err := nextEntry(ctx, tx, machine, &rev)
