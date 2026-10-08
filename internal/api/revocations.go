@@ -16,7 +16,7 @@ import (
 
 func identityRevocations() *route {
 	return &route{method: http.MethodPost, pattern: "/identity-revocations", roles: []auth.Role{auth.RecoveryAdmin}, humanOnly: true,
-		action: "identity.revoke", input: func() input { return &revocationInput{} }, prepare: prepareRevocation, effect: revokeIdentity}
+		exclusive: true, action: "identity.revoke", input: func() input { return &revocationInput{} }, prepare: prepareRevocation, effect: revokeIdentity}
 }
 
 const maxReason = 1024
@@ -82,9 +82,11 @@ type revocationBody struct {
 	Note                 string    `json:"note"`
 }
 
-// revokeIdentity is T5c (§5, §10.4), after the key lock and the installation state. Every machine
-// row is locked FOR UPDATE in id order before the principals (rule 5), so the machines whose
-// timelines take an entry are read under those locks. Principals are locked in id order: the
+// revokeIdentity is T5c (§5, §10.4), after the key lock and the installation state, which the
+// route takes FOR UPDATE: every request holding it FOR SHARE, an inventory among them, has
+// committed, and none starts before this one does, so no machine appears that the next statement
+// does not lock. Every machine row is locked FOR UPDATE in id order before the principals
+// (rule 5), so the machines whose timelines take an entry are read under those locks. Principals are locked in id order: the
 // identity FOR UPDATE by auth.RevokeIdentity, and the revoking human FOR SHARE, refused if revoked
 // by then (rule 2).
 func revokeIdentity(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 	"time"
@@ -90,6 +91,39 @@ func TestIdentityRevocationMachineEntries(t *testing.T) {
 		allID); n != 0 {
 		t.Fatalf("%d identity revocation entries for an identity whose plans are all terminal", n)
 	}
+}
+
+// T5c takes the installation state FOR UPDATE before the machine rows, so no machine is inserted
+// between its machine locks and its commit: an inventory started while it waits on a machine row
+// waits for it, rather than adding a machine whose plans the revocation reads but never locked.
+func TestIdentityRevocationHoldsInventory(t *testing.T) {
+	t.Parallel()
+	p := newPlanEnv(t)
+	hold, err := p.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = hold.Rollback() }()
+	if _, err := hold.Exec(`SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, p.machine); err != nil {
+		t.Fatal(err)
+	}
+	recovery, author := p.human("h-recovery"), p.human("h-author")
+	revoked := make(chan revocationBody, 1)
+	go func() {
+		revoked <- revocationOf(t, revoke(p.env, recovery, "k-revoke-inventory-012",
+			`{"identity":"`+p.principalOf("h-approver")+`","reason":"left"}`))
+	}()
+	waitForLockWaits(t, p.db, 1)
+	inventoried := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		inventoried <- p.do(p.api, machineCall(author, "k-machine-during-0123", p.cluster, "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5d"))
+	}()
+	waitForLockWaits(t, p.db, 2)
+	if err := hold.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	<-revoked
+	decode[machineBody](t, <-inventoried, http.StatusCreated)
 }
 
 // T5c reads which plans an entry names under the machine locks: a revocation queued behind a
