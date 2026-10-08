@@ -187,23 +187,63 @@ func TestAdoptionRecoveryModeReleased(t *testing.T) {
 	}
 }
 
-// A machine registered by its Talos node ID (choice §10.26) is identified by it: an observation
-// showing another node ID is refused by 4.4, one showing its own is adopted.
+// A machine registered by its Talos node ID (choice §10.26) is identified by it and no SMBIOS UUID
+// (execution-recovery.md §3.2 comparison 3): an observation showing another node ID, or a UUID
+// beside its own node ID, is refused by 4.4; one showing its own node ID alone is adopted.
 func TestAdoptionNodeIdentity(t *testing.T) {
 	t.Parallel()
-	ae := newAdoptEnv(t, "", func(p *planEnv) { // the machine as registered by node ID, before any plan names it
-		mustExec(t, p.db, `ALTER TABLE machine DISABLE TRIGGER identity`)
-		mustExec(t, p.db, `UPDATE machine SET smbios_uuid = NULL, talos_node_id = 'node-a' WHERE id = $1`, p.machine)
-		mustExec(t, p.db, `ALTER TABLE machine ENABLE TRIGGER identity`)
-	})
+	for _, c := range []struct {
+		name   string
+		change func(*obsSeed)
+	}{
+		{"another node ID", func(s *obsSeed) { s.nodeID = "node-b" }},
+		{"a UUID reported", func(s *obsSeed) { s.uuid = "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b" }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ae := newAdoptEnv(t, "", func(p *planEnv) { // the machine as registered by node ID, before any plan names it
+				mustExec(t, p.db, `ALTER TABLE machine DISABLE TRIGGER identity`)
+				mustExec(t, p.db, `UPDATE machine SET smbios_uuid = NULL, talos_node_id = 'node-a' WHERE id = $1`, p.machine)
+				mustExec(t, p.db, `ALTER TABLE machine ENABLE TRIGGER identity`)
+			})
+			ae.approveIt(t)
+			ae.observed(t, c.change)
+			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+			ae.wantRefused(t, err, 0, "4.4", "the latest observation shows another machine identity")
+			ae.observed(t, nil)
+			if _, err := ae.a.commitAdoption(context.Background(), ae.pid); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// T6 reads the time after every lock, its machine state's included (persistence-api.md §5 rule
+// 4): a commitment that waited on a publication holding every machine state of the cluster judges
+// the plan's expiry when it resumes.
+func TestAdoptionWaitsForMachineState(t *testing.T) {
+	t.Parallel()
+	ae := newAdoptEnv(t, `,"expiresInSeconds":3`)
 	ae.approveIt(t)
-	ae.observed(t, func(s *obsSeed) { s.nodeID = "node-b" })
-	_, err := ae.a.commitAdoption(context.Background(), ae.pid)
-	ae.wantRefused(t, err, 0, "4.4", "the latest observation shows another machine identity")
 	ae.observed(t, nil)
-	if _, err := ae.a.commitAdoption(context.Background(), ae.pid); err != nil {
+	tx, err := ae.db.Begin()
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(t, tx, `SELECT 1 FROM machine_state s JOIN machine m ON m.id = s.machine WHERE m.cluster = $1
+		ORDER BY s.machine FOR UPDATE OF s`, ae.cluster)
+	done := make(chan error, 1)
+	go func() {
+		_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+		done <- err
+	}()
+	waitForLockWaits(t, ae.db, 1)
+	time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	ae.wantRefused(t, <-done, 0, "4.2", "the plan has expired")
 }
 
 // wantRefused holds err to a refusal by requirement comparison with cause, recorded as one
@@ -269,6 +309,23 @@ func TestAdoptionRefusals(t *testing.T) {
 		{"expired", `,"expiresInSeconds":1`, "4.2", "the plan has expired", func(t *testing.T, ae *adoptEnv) {
 			ready(t, ae)
 			time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+		}},
+		{"expired unapproved", `,"expiresInSeconds":1`, "4.2", "the plan has expired", func(t *testing.T, ae *adoptEnv) {
+			ae.observed(t, nil)
+			time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+		}},
+		{"approver revoked before expiry", `,"expiresInSeconds":2`, "4.2", "the approver's identity is revoked",
+			func(t *testing.T, ae *adoptEnv) {
+				ready(t, ae)
+				revocationOf(t, revoke(ae.env, ae.human("h-recovery"), ae.key(),
+					`{"identity":"`+ae.principalOf("h-approver")+`","reason":"left"}`))
+				time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+			}},
+		{"approver revoked after expiry", `,"expiresInSeconds":1`, "4.2", "the plan has expired", func(t *testing.T, ae *adoptEnv) {
+			ready(t, ae)
+			time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+			revocationOf(t, revoke(ae.env, ae.human("h-recovery"), ae.key(),
+				`{"identity":"`+ae.principalOf("h-approver")+`","reason":"left"}`))
 		}},
 		{"assignment changed", "", "4.3", "the machine's assignment revision changed", func(t *testing.T, ae *adoptEnv) {
 			ready(t, ae)
@@ -439,16 +496,18 @@ func TestAdoptionRevocationsWait(t *testing.T) {
 				t.Fatal(err)
 			}
 			rec := <-done
-			if rec.Code == http.StatusCreated {
-				var adoptedAt time.Time
-				if err := ae.db.QueryRow(`SELECT at FROM adoption_record WHERE plan = $1`, ae.pid).Scan(&adoptedAt); err != nil {
-					t.Fatal(err)
-				}
-				if b := decode[struct {
-					At time.Time `json:"at"`
-				}](t, rec, http.StatusCreated); !b.At.After(adoptedAt) {
-					t.Fatalf("revocation at %s, adoption at %s", b.At, adoptedAt)
-				}
+			var adoptedAt time.Time
+			if err := ae.db.QueryRow(`SELECT at FROM adoption_record WHERE plan = $1`, ae.pid).Scan(&adoptedAt); err != nil {
+				t.Fatal(err)
+			}
+			if b := decode[struct {
+				At time.Time `json:"at"`
+			}](t, rec, http.StatusCreated); !b.At.After(adoptedAt) {
+				t.Fatalf("revocation at %s, adoption at %s", b.At, adoptedAt)
+			}
+			if n := count(t, ae.db, `SELECT (SELECT count(*) FROM approval_revocation WHERE approval = $1)
+				+ (SELECT count(*) FROM identity_revocation WHERE identity = $2)`, ae.approval, ae.principalOf("h-approver")); n != 1 {
+				t.Fatalf("%d revocation records", n)
 			}
 			if n := count(t, ae.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND state = 'committed'`, ae.pid); n != 1 {
 				t.Fatalf("plan not committed after the revocation (%d %s)", rec.Code, rec.Body)
