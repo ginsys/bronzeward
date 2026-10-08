@@ -338,6 +338,20 @@ func TestPlanReads(t *testing.T) {
 			t.Fatalf("listed %+v\nwant %+v", it, want)
 		}
 	}
+	// §8.1: expiry is evaluated by the server clock whenever the plan is read; a terminal state stays.
+	short := decode[planBody](t, p.plan(p.robot, "k-plan-read-short-0123", applyBody(p.target.rel, p.machine,
+		`,"expiresInSeconds":1`)), http.StatusCreated)
+	gone := decode[planBody](t, p.plan(p.robot, "k-plan-read-gone-01234", applyBody(p.target.rel, p.machine,
+		`,"expiresInSeconds":1`)), http.StatusCreated)
+	mustExec(t, p.db, `UPDATE plan_state SET state = 'cancelled', reason = 'cancelled', revision = 2, updated_at = now() WHERE plan = $1`,
+		gone.ID)
+	time.Sleep(time.Until(short.ExpiresAt.Add(100 * time.Millisecond)))
+	for _, c := range []struct{ id, state string }{{short.ID, "expired"}, {gone.ID, "cancelled"}, {b.ID, "proposed"}} {
+		got := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + c.id, token: viewer}), http.StatusOK)
+		if got.State != c.state {
+			t.Errorf("%s read after its expiry: state %q, want %q", c.id, got.State, c.state)
+		}
+	}
 	wantProblem(t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + id.New(id.Plan), token: viewer}), http.StatusNotFound, "not-found")
 	wantProblem(t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + b.ID + "?x=1", token: viewer}), http.StatusBadRequest,
 		"invalid-request")
