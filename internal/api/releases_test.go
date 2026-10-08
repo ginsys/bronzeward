@@ -62,19 +62,39 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	var heads [2][2]string
+	if d.assigned {
+		heads = [2][2]string{d.assignment(d.machine), d.assignment(s.machine2)}
+	}
 	mustExec(t, tx, `INSERT INTO release (id, cluster, draft, draft_revision, digest, contract, machinery_version, machinery_checksum,
 			kubernetes_version, operation, published_by, published_role, epoch, published_at)
 		SELECT $1, $2, $3, $4, $5, 'v1.13', 'v1.13.6', 'h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=', 'v1.36.0', $6, $7,
 			'publisher', epoch, '2026-09-26T09:14:05Z' FROM installation_state`, s.rel, d.cluster, draft, revision, make([]byte, 32), s.op, d.seed)
-	for _, m := range []struct {
+	redacted := "machine:\n  type: worker\n  token: <redacted:schema>\n"
+	if d.redacted != "" {
+		redacted = d.redacted
+	}
+	artifact := make([]byte, 32) // each artifact's configuration digest, the import bases' unless d.artifact is set
+	if d.artifact != nil {
+		artifact = d.artifact
+	}
+	for i, m := range []struct {
 		machine, ibr string
 		redacted     any
-	}{{d.machine, ibr1, "machine:\n  type: worker\n  token: <redacted:schema>\n"}, {s.machine2, ibr2, nil}} {
-		mustExec(t, tx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision, mode, ciphertext,
-				ciphertext_digest, configuration_digest, redacted, provenance, key_name)
-			VALUES ($1, $2, $3, $4, 'container', $5, $6, $6, $7, $8::jsonb, 'bw-artifact')`,
+	}{{d.machine, ibr1, redacted}, {s.machine2, ibr2, nil}} {
+		var asr any
+		if d.assigned {
+			asr = heads[i][1]
+		}
+		mustExec(t, tx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision, assignment_revision, mode,
+				ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name)
+			VALUES ($1, $2, $3, $4, $9, 'container', $5, $6, $10, $7, $8::jsonb, 'bw-artifact')`,
 			s.rel, d.cluster, m.machine, m.ibr, releaseCipher, make([]byte, 32), m.redacted,
-			strings.NewReplacer("{ibr}", m.ibr, "{ibr2}", ibr2, "{frv}", s.frv).Replace(provenance))
+			strings.NewReplacer("{ibr}", m.ibr, "{ibr2}", ibr2, "{frv}", s.frv).Replace(provenance), asr, artifact)
+		if d.assigned {
+			mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, assignment, machine, assignment_revision, head_revision)
+				VALUES ($1, $2, 'assignment', $3, $4, $5, 1)`, s.rel, d.cluster, heads[i][0], m.machine, heads[i][1])
+		}
 	}
 	if d.removedOnly {
 		mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, fragment, name, fragment_revision, head_revision)
