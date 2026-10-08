@@ -417,6 +417,9 @@ func TestAdoptionUnreadEvidence(t *testing.T) {
 		{"identity", func(s *obsSeed) { s.uuid, s.nodeID, s.unread = nil, nil, `{"identity":{"cause":"identity-read"}}` }},
 		{"configuration", func(s *obsSeed) { s.digest, s.unread = nil, `{"configuration":{"cause":"machine-config"}}` }},
 		{"assignmentEvidence", func(s *obsSeed) { s.evidence, s.unread = "", `{"assignmentEvidence":{"cause":"denied"}}` }},
+		{"identity older than the plan allows", func(s *obsSeed) { // a read that waited out the node's timeout
+			s.uuid, s.nodeID, s.unread, s.age = nil, nil, `{"identity":{"cause":"node-unreachable"}}`, 2*time.Minute
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

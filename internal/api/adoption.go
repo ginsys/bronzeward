@@ -215,13 +215,14 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	switch {
 	case !obs.Valid:
 		return r, machine, refuseAdoption("4.4", "the machine has no recorded observation")
+	case unread.Valid: // no evidence either way: rolled back without a refusal entry,
+		// whatever its age or basis: the next observation decides
+		return r, machine, fmt.Errorf("adoption of plan %s: observation %s did not read the %s: %w", plan, obs.String,
+			unread.String, errEvidenceUnread)
 	case basis <= approvalRevision:
 		return r, machine, refuseAdoption("4.4", "the latest observation began before the approval")
 	case at.Sub(startedAt) > maxAge:
 		return r, machine, refuseAdoption("4.4", "the latest observation is older than the plan allows")
-	case unread.Valid: // no evidence either way: rolled back without a refusal entry
-		return r, machine, fmt.Errorf("adoption of plan %s: observation %s did not read the %s: %w", plan, obs.String,
-			unread.String, errEvidenceUnread)
 	case !identityMatches:
 		return r, machine, refuseAdoption("4.4", "the latest observation shows another machine identity")
 	case !digestMatches:
