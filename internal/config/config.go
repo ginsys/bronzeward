@@ -158,8 +158,10 @@ func (e *Execution) validate() error {
 	case e.SettleFloor < minSettleFloor:
 		return fmt.Errorf("config: execution.settleFloor must be at least %s", minSettleFloor)
 	}
-	if e.MaxTransportDeadline <= 0 {
-		return errors.New("config: execution.maxTransportDeadline is required and must be positive")
+	// A plan states its transport deadline in whole seconds, so a maximum it cannot reach exactly is
+	// refused here, not through the default derived from it.
+	if e.MaxTransportDeadline < time.Second || e.MaxTransportDeadline%time.Second != 0 {
+		return errors.New("config: execution.maxTransportDeadline is required, in whole seconds of at least 1s")
 	}
 	return e.PlanDefaults.validate(e.MaxTransportDeadline)
 }

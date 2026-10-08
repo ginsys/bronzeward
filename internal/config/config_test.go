@@ -210,6 +210,18 @@ func TestExecution(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
+	// A maximum a plan's whole-second deadline cannot reach is refused under its own name, not
+	// under the default derived from it.
+	for name, set := range map[string]string{
+		"under a second":           "maxTransportDeadline: 500ms",
+		"fraction, default":        "maxTransportDeadline: 30500ms",
+		"fraction, explicit value": "maxTransportDeadline: 30500ms, planDefaults: {transportDeadline: 30s}",
+	} {
+		_, err := Load(strings.NewReader(noExec + "execution: {" + set + "}\n" + authBlock))
+		if err == nil || !strings.Contains(err.Error(), "execution.maxTransportDeadline") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
 }
 
 // A plan's durations and attempt limit default from execution.planDefaults (persistence-api.md
