@@ -615,7 +615,8 @@ Rules for every transaction:
    claims. A time that must follow a lock wait, a DependencyStatus row's
    `recorded_at` (dependency monitor §6.1), the DependencyMonitor row's
    progress (dependency monitor §6.3), a staging claim's lease and expiry,
-   when created and when checked (compilation §3.5), and a publish job's lease,
+   when created and when checked (compilation §3.5), a plan's creation time and
+   so its expiry (T4), and a publish job's lease,
    when claimed, extended and checked at completion (§5.1), is the database's `clock_timestamp()`
    read after the lock is held, since `now()` is fixed when the transaction
    began.
@@ -1653,7 +1654,8 @@ recovery, plan binding), which every plan body carries:
 - `evidence`: for an `apply-config` plan, `diff`, from the release of the
   machine's `Applied` (`from`) to the plan's (`to`), as a unified line diff of
   their redacted whole configurations (`unified`), a base leaf shown beside a
-  redacted leaf of the plan's release written `<redacted:paired>`
+  redacted leaf of the plan's release, and a base key under a mapping whose
+  key the plan's release redacts, written `<redacted:paired>`
   (compilation §8.3), or `"withheld": true` with no text when either has no
   redacted form or one that does not parse as YAML free of aliases (compilation
   writes none), or when the machine holds a configuration other than its

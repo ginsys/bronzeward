@@ -295,23 +295,28 @@ func TestPlanCreationDiffDuplicateKeys(t *testing.T) {
 // plaintext base leaf at or under that mapping's path is paired; a sibling mapping is not.
 func TestPlanCreationDiffRedactedKey(t *testing.T) {
 	p := newPlanEnvWith(t,
-		"machine:\n  nodeLabels:\n    enabled: \"false\"\n    zone: east\n  nodeTaints:\n    dedicated: infra\n",
-		"machine:\n  nodeLabels:\n    <redacted:labels@1#0>: <redacted:labels@1#0>\n  nodeTaints:\n    dedicated: edge\n")
+		"machine:\n  nodeLabels:\n    enabled: \"false\"\n    zone: east\n    region: west\n  nodeTaints:\n    dedicated: infra\n",
+		"machine:\n  nodeLabels:\n    region: west\n    <redacted:labels@1#0>: <redacted:labels@1#0>\n  nodeTaints:\n    dedicated: edge\n")
 	t.Parallel()
 	b := decode[planBody](t, p.plan(p.robot, "k-plan-redkey-0123456", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
 	d := b.Evidence.Diff
 	if d == nil || d.Withheld {
 		t.Fatalf("diff %+v", d)
 	}
-	removed := map[string]bool{}
+	var removed []string
 	for _, l := range strings.Split(d.Unified, "\n") {
-		if strings.HasPrefix(l, "-") {
-			removed[strings.TrimSpace(l[1:])] = true
+		if strings.HasPrefix(l, "-") && !strings.HasPrefix(l, "---") {
+			removed = append(removed, strings.TrimSpace(l[1:]))
 		}
 	}
-	want := map[string]bool{"enabled: " + pairedToken: true, "zone: " + pairedToken: true, "dedicated: infra": true}
-	if !reflect.DeepEqual(removed, want) {
-		t.Fatalf("removed lines %v\ndiff:\n%s", removed, d.Unified)
+	// The base keys are paired too: the redacted key may resolve to one of them. A key the target
+	// shows itself, in the same mapping, is shown.
+	paired := pairedToken + ": " + pairedToken
+	if want := []string{paired, paired, "dedicated: infra"}; !reflect.DeepEqual(removed, want) {
+		t.Fatalf("removed lines %q\ndiff:\n%s", removed, d.Unified)
+	}
+	if !strings.Contains(d.Unified, "\n     region: west\n") {
+		t.Fatalf("the key both sides show is not shown unchanged:\n%s", d.Unified)
 	}
 }
 
@@ -575,5 +580,124 @@ func TestPlanReadAfterLockWait(t *testing.T) {
 	}
 	if got := decode[planBody](t, <-done, http.StatusOK); got.State != "expired" {
 		t.Fatalf("read after waiting past expiry: state %q, want expired", got.State)
+	}
+}
+
+// A creation whose transaction waited on the machine's row longer than its expiry still creates a
+// plan that reads proposed: its creation time and expiry are read after the locks (PA §1.2 rule 4).
+func TestPlanCreationAfterLockWait(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	lock, err := p.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Rollback() }()
+	if _, err := lock.Exec(`SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, p.machine); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- p.plan(p.robot, "k-plan-wait-create-01", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`))
+	}()
+	dbtest.WaitForLockWait(t, p.db)
+	time.Sleep(1200 * time.Millisecond)
+	released := time.Now()
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	b := decode[planBody](t, <-done, http.StatusCreated)
+	if !b.ExpiresAt.After(released) || b.ExpiresAt.Sub(b.CreatedAt) != time.Second {
+		t.Fatalf("created %s, expires %s, lock released %s", b.CreatedAt, b.ExpiresAt, released)
+	}
+	var at time.Time
+	if err := p.db.QueryRow(`SELECT e.at FROM machine_event e JOIN plan p ON p.machine = e.machine
+		WHERE p.id = $1 AND e.kind = 'plan' AND e.entry->>'plan' = p.id`, b.ID).Scan(&at); err != nil {
+		t.Fatal(err)
+	}
+	if !at.Equal(b.CreatedAt) {
+		t.Fatalf("timeline entry at %s, plan created %s", at, b.CreatedAt)
+	}
+	got := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + b.ID, token: p.human("h-viewer")}),
+		http.StatusOK)
+	if got.State != "proposed" {
+		t.Fatalf("read at once: state %q, want proposed", got.State)
+	}
+}
+
+// approveAs records the approval of plan by approver as T5a does, which no route makes yet, and
+// moves the plan to approved.
+func (p *planEnv) approveAs(t *testing.T, plan, approver string) {
+	t.Helper()
+	tx, err := p.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var rev int64
+	if err := tx.QueryRow(`UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1 RETURNING revision_counter`,
+		p.machine).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	apr, act := id.New(id.Approval), id.New(id.Act)
+	for _, s := range []struct {
+		q    string
+		args []any
+	}{
+		{`INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+			SELECT $1, $2, epoch, 'approval', '{}', now() FROM installation_state`, []any{p.machine, rev}},
+		{`INSERT INTO act (id, principal, principal_kind, via, role, action, subjects, request_id, epoch, at)
+			SELECT $1, $2, 'human', 'api', 'approver', 'plan', ARRAY[$3], $4, epoch, now() FROM installation_state`,
+			[]any{act, approver, plan, id.New(id.Request)}},
+		{`INSERT INTO approval (id, plan, machine, approver, role, epoch, self_approval, act, at, revision)
+			SELECT $1, $2, $3, $4, 'approver', epoch, '{}', $5, now(), $6 FROM installation_state`,
+			[]any{apr, plan, p.machine, approver, act, rev}},
+		{`UPDATE plan_state SET state = 'approved', approval = $2, revision = revision + 1 WHERE plan = $1`, []any{plan, apr}},
+	} {
+		if _, err := tx.Exec(s.q, s.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// PA §8.1: a revocation of the approving identity is evaluated whenever the plan is read. An
+// approved plan whose approver is revoked reads revoked, by id and in the list, unless it expired
+// before the revocation; a plan whose approver is not revoked reads approved.
+func TestPlanReadRevokedApprover(t *testing.T) {
+	p := newPlanEnv(t)
+	t.Parallel()
+	human := func(sub string) string {
+		v := id.New(id.Principal)
+		mustExec(t, p.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', $2, $3, now())`,
+			v, p.iss.URL, sub)
+		return v
+	}
+	plan := func(k, extra string) planBody {
+		return decode[planBody](t, p.plan(p.robot, k, applyBody(p.target.rel, p.machine, extra)), http.StatusCreated)
+	}
+	revoked, kept, late := plan("k-plan-revoked-012345", ""), plan("k-plan-kept-012345678", ""),
+		plan("k-plan-late-012345678", `,"expiresInSeconds":1`)
+	gone, stays := human("h-approver-gone"), human("h-approver-stays")
+	p.approveAs(t, revoked.ID, gone)
+	p.approveAs(t, late.ID, gone)
+	p.approveAs(t, kept.ID, stays)
+	time.Sleep(time.Until(late.ExpiresAt.Add(100 * time.Millisecond)))
+	revocationOf(t, revoke(p.env, p.human("h-recovery"), key, `{"identity":"`+gone+`","reason":"left"}`))
+	want := map[string]string{revoked.ID: "revoked", kept.ID: "approved", late.ID: "expired"}
+	viewer := p.human("h-viewer")
+	for plan, state := range want {
+		if got := decode[planBody](t, p.do(p.api, call{method: "GET", path: prefix + "/plans/" + plan, token: viewer}),
+			http.StatusOK); got.State != state {
+			t.Errorf("%s read by id: state %q, want %q", plan, got.State, state)
+		}
+	}
+	list := decode[listPage[planBody]](t, p.do(p.api, call{method: "GET", path: prefix + "/plans", token: viewer}), http.StatusOK)
+	for _, it := range list.Items {
+		if state, ok := want[it.ID]; ok && it.State != state {
+			t.Errorf("%s listed: state %q, want %q", it.ID, it.State, state)
+		}
 	}
 }

@@ -1084,7 +1084,10 @@ with the stand-in format **(choice §16.22)**.
   decode, is written `<redacted>` whole.
 - **Paired diffs.** Where a diff shows a base leaf beside a redacted output
   leaf, the base side is redacted as `<redacted:paired>`, whatever its kind; a
-  boolean could otherwise be read by elimination (SP §2, §4.4).
+  boolean could otherwise be read by elimination (SP §2, §4.4). A base key at
+  or under a mapping whose output key is redacted is paired too, since the
+  redacted key may resolve to it, unless the output shows that key in the same
+  mapping.
 - **Messages.** A renderer message is redacted by template: the same step on
   the trace pass gives a message whose stand-in quotes mark where the real one
   quotes a value, and each is replaced by its token. The text around the
