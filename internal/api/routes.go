@@ -109,7 +109,7 @@ func routes() []*route {
 		planCreation().on(m(post, "/plans", publisher)),
 		// The creator is a publisher (choice §17.22); whether this one created the plan is the
 		// handler's check, in its transaction (§10.3).
-		m(post, "/plans/{id}/cancellations", publisher, approver, recovery),
+		planCancellation().on(m(post, "/plans/{id}/cancellations", publisher, approver, recovery)),
 		planApproval().on(human(m(post, "/plans/{id}/approvals", approver))),
 		approvalRevocation().on(m(post, "/approvals/{id}/revocations", approver, recovery)),
 		m(post, "/machines/{id}/freezes", author, publisher, approver, recovery),
