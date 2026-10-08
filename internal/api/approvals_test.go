@@ -167,6 +167,32 @@ func TestApproval(t *testing.T) {
 	}
 }
 
+// GET /approvals/{id} (§9.2): any role reads an approval as T5a answered it, its self-approval
+// reasons in order, with no ETag (an approval is immutable); another identifier is 404.
+func TestApprovalRead(t *testing.T) {
+	p := newPlanEnv(t, func(d *draftEnv) { d.seed = d.principalOf("h-all") })
+	t.Parallel()
+	all := p.human("h-all")
+	plan := decode[planBody](t, p.plan(all, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), http.StatusCreated)
+	b := decode[approvalBody](t, p.approve(all, "k-approve-0123456789", plan.ID), http.StatusCreated)
+	if len(b.SelfApproval.Reasons) < 2 {
+		t.Fatalf("fixture approval has reasons %v, want several", b.SelfApproval.Reasons)
+	}
+	get := func(v string) *httptest.ResponseRecorder {
+		return p.do(p.api, call{method: "GET", path: prefix + "/approvals/" + v, token: p.human("h-viewer")})
+	}
+	rec := get(b.ID)
+	if got := decode[approvalBody](t, rec, http.StatusOK); !reflect.DeepEqual(got, b) {
+		t.Fatalf("read %+v, want %+v", got, b)
+	}
+	if etag := rec.Header().Get("ETag"); etag != "" {
+		t.Fatalf("approval read carries ETag %q", etag)
+	}
+	for _, v := range []string{id.New(id.Approval), "apr_x", plan.ID} {
+		wantProblem(t, get(v), http.StatusNotFound, "not-found")
+	}
+}
+
 // wantUnapproved fails unless plan has no approval and its stored state is still state.
 func (p *planEnv) wantUnapproved(t *testing.T, plan, state string) {
 	t.Helper()
