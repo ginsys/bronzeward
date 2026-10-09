@@ -462,7 +462,8 @@ the absolute transport and verification deadlines derived from the plan. An
 owner that lost ownership before its attempt transaction records no attempt
 and sends nothing (DS row 007). The first attempt transaction may be the
 commitment transaction itself. Reading the approval or the ownership and
-recording the attempt later is not sufficient.
+recording the attempt later is not sufficient. The attempt's time is read
+after comparison 7's write **(choice §10.30)**.
 
 The controller sends only after its attempt transaction has committed. E4
 established this for its own executor only: its one send follows a successful
@@ -2108,6 +2109,25 @@ conservative option; those that do not say so. Each is marked in place as
     is read, which commits a plan that expired during the wait; reading the
     time again after the insert, which the operation's fixed creation time
     cannot follow.
+30. **An attempt reads its time after comparison 7's write, and its refusal
+    settles the operation separately** (§3.3, §4). The attempt transaction
+    takes §3.2's locks except the rollout scope, then makes comparison 7's
+    conditional `UPDATE` on the operation's row, the last lock it takes, and
+    only then reads its time (persistence and API §5 rule 4). The comparisons
+    are still judged in their numbered order, and any refusal rolls the write
+    back. A first attempt compares the observation its commitment recorded,
+    at the attempt's time, and any newer observation that contradicts it on a
+    value it read. A refused attempt is recorded by a separate transaction
+    under the same epoch check and machine lock. After a refusal by 1, 2, 3
+    or 6, that transaction moves a `committed` operation its controller still
+    owns to `unresolved`, and an `unresolved` one it owns, so moved now or by
+    an earlier refusal, on to `cancelled` when no attempt exists and
+    comparison 1, re-read there, still fails. A refusal by 7 or 9, or by a
+    controller that no longer owns the operation, records the refusal only.
+    Agent decision, 2026-10-09 (ginsys/bronzeward#25). Alternatives: reading
+    the time before the operation's lock, which judges expiry and evidence age
+    before a takeover holding that row has committed; settling inside the
+    refused transaction, which its rollback would undo.
 
 ## 11. Traceability
 
