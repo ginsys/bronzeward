@@ -79,6 +79,8 @@ func TestAttempts(t *testing.T) {
 		refused(t, db, "unresolved to "+state+" with no attempt", "23514/operation_apply_config_attempt", a.state(state))
 	}
 	accepted(t, db, "unresolved to cancelled with no attempt", a.state("cancelled"))
+	refused(t, db, "attempt after cancellation", "23514/attempt_operation_cancelled",
+		append([]stmt{a.state("cancelled")}, a.attempted(r, "cancelled")[:2]...)...)
 	refused(t, db, "unresolved to verifying", "23514/operation_apply_config_transition", a.state("verifying"))
 	refused(t, db, "unresolved to committed", "23514/operation_apply_config_transition", a.state("committed"))
 
@@ -105,6 +107,65 @@ func TestAttempts(t *testing.T) {
 	}
 	if count(t, db, "attempt") != 1 {
 		t.Error("a refused statement changed the attempts")
+	}
+}
+
+// Execution and recovery §3.2, §4: an apply-config operation is created committed, and reaches every
+// later state along §4's transitions.
+func TestApplyConfigCreatedCommitted(t *testing.T) {
+	db, _ := installed(t)
+	p := planRows(t, db)
+	created := func(state string) []stmt {
+		return []stmt{{insertPlanOperation, []any{id.New(id.Operation), "apply-config", state, owner, p.apply, p.machine, p.cluster}},
+			{`UPDATE plan_state SET state = 'committed', operation = (SELECT id FROM operation WHERE plan = $1),
+				revision = revision + 1 WHERE plan = $1`, []any{p.apply}}}
+	}
+	for _, state := range []string{"sending", "verifying", "unresolved", "completed", "failed", "rejected", "cancelled"} {
+		refused(t, db, "apply-config created "+state, "23514/operation_apply_config_transition", created(state)...)
+	}
+	accepted(t, db, "apply-config created committed", created("committed")...)
+	// The control: with the trigger dropped, an operation created sending with no attempt commits.
+	accepted(t, db, "after DROP TRIGGER created ON operation",
+		append([]stmt{{"DROP TRIGGER created ON operation", nil}}, created("sending")...)...)
+}
+
+// A cancellation and an attempt racing on one operation: the attempt waits for the cancellation's
+// operation lock and then sees it cancelled (execution and recovery §4: cancelled only with no attempt).
+func TestAttemptWaitsForCancellation(t *testing.T) {
+	db, _ := installed(t)
+	a := attemptRows(t, db)
+	commitRows(t, db, a.state("unresolved"))
+	cancel, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cancel.Rollback() }()
+	mustExec(t, cancel, a.state("cancelled").q, a.state("cancelled").args...)
+	done := make(chan error, 1)
+	go func() {
+		tx, err := db.Begin()
+		if err != nil {
+			done <- err
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+		for _, s := range a.attempted(a.attemptRow(1, 6), "sending")[:2] {
+			if _, err := tx.Exec(s.q, s.args...); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- tx.Commit()
+	}()
+	time.Sleep(500 * time.Millisecond)
+	if err := cancel.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; sqlState(err) != "23514" {
+		t.Errorf("attempt racing a cancellation: %v; want SQLSTATE 23514", err)
+	}
+	if count(t, db, "attempt") != 0 {
+		t.Error("a cancelled operation has an attempt")
 	}
 }
 
@@ -138,6 +199,8 @@ func TestAttemptConstraintControl(t *testing.T) {
 			a.attempted(r.with("transport_deadline", time.Now().Add(10*time.Minute)), "sending")},
 		{"DROP TRIGGER attempted ON operation", []stmt{a.state("sending")}},
 		{"DROP TRIGGER transition ON operation", []stmt{a.state("cancelled")}},
+		{"DROP TRIGGER cancelled ON attempt", append([]stmt{a.state("unresolved"), a.state("cancelled")},
+			a.attempted(r, "cancelled")[:2]...)},
 		{"ALTER TABLE machine_event DROP CONSTRAINT machine_event_operation_state",
 			[]stmt{{insertMachineEvent, []any{a.machine, 6, "operation-state", `{}`}}}},
 	} {
