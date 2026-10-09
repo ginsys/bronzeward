@@ -282,7 +282,10 @@ func (a *API) remark(ctx context.Context, j job, st ingest.Staged) (*refusal, er
 		return a.markProblem(j, "envelope", err, abandoned), nil
 	}
 	ct, err := a.d.ing.EncryptStaging(ctx, plain)
-	if err != nil {
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return nil, ctx.Err()
+	case err != nil:
 		return a.markProblem(j, "envelope encryption", err, abandoned), nil
 	}
 	if err := a.inTx(ctx, func(tx *sql.Tx) error {
