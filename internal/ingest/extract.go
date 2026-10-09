@@ -534,7 +534,10 @@ func (c *Candidate) Commit(ctx context.Context, create func(ctx context.Context,
 		return Sanitized{}, errors.New("ingest: the candidate was already committed")
 	}
 	c.committed = true
-	for _, v := range c.values {
+	for i, v := range c.values {
+		if i == 1 {
+			seam.At("generation-first") // step 6 part done: the first generation created, more to come
+		}
 		if err := create(ctx, v.name, v.value); err != nil {
 			return Sanitized{}, newCreateError(v.name, err)
 		}
