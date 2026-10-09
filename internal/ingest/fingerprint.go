@@ -32,6 +32,22 @@ func FingerprintRequest(ctx context.Context, h HMAC, material []byte, version in
 	return fingerprint(ctx, h, material, nil, version)
 }
 
+// FingerprintMarks is the fingerprint of a request on a keyed route whose marks are its
+// unextracted input (a mark on a paused ingestion, compilation §3.6): a mark path can spell an
+// extracted value, so the marks are HMACed, each length-prefixed, in place of a document.
+func FingerprintMarks(ctx context.Context, h HMAC, material []byte, marks []string, version int) (provider.Digest, error) {
+	if len(marks) == 0 {
+		return provider.Digest{}, ErrEmptyInput
+	}
+	var enc []byte
+	for _, m := range marks {
+		enc = binary.BigEndian.AppendUint64(enc, uint64(len(m)))
+		enc = append(enc, m...)
+	}
+	defer clear(enc)
+	return fingerprint(ctx, h, material, enc, version)
+}
+
 func fingerprint(ctx context.Context, h HMAC, material, doc []byte, version int) (provider.Digest, error) {
 	in := make([]byte, 0, len(material)+8+len(doc))
 	in = append(in, material...)

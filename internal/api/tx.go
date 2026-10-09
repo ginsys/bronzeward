@@ -46,7 +46,13 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 		err = q.input.check(a)
 	}
 	if err != nil {
-		a.problem(w, q, refuse(http.StatusBadRequest, "invalid-request", err.Error()))
+		// An input's own refusal stands (a mark path that does not parse is 422); anything else is
+		// a malformed request.
+		var ref *refusal
+		if !errors.As(err, &ref) {
+			ref = refuse(http.StatusBadRequest, "invalid-request", err.Error())
+		}
+		a.problem(w, q, ref)
 		return
 	}
 	q.material = material(q, canon)
@@ -103,18 +109,12 @@ func (a *API) keyedFingerprint(ctx context.Context, q *request, version int) *re
 	if a.d.ing == nil {
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "no provider is configured; nothing was committed")
 	}
-	in, ok := q.input.(documentInput)
+	in, ok := q.input.(keyedInput)
 	if !ok {
-		a.o.logf("%s: route %s %s is keyed, but its input carries no document", q.id, q.route.method, q.route.pattern)
+		a.o.logf("%s: route %s %s is keyed, but its input carries no keyed member", q.id, q.route.method, q.route.pattern)
 		return refuse(http.StatusInternalServerError, "internal-error", "nothing was committed")
 	}
-	var d provider.Digest
-	var err error
-	if n, ok := in.(interface{ withoutDocument() bool }); ok && n.withoutDocument() {
-		d, err = ingest.FingerprintRequest(ctx, a.d.ing.Digest, q.material, version)
-	} else {
-		d, err = ingest.Fingerprint(ctx, a.d.ing.Digest, q.material, in.document(), version)
-	}
+	d, err := in.keyedDigest(ctx, a.d.ing.Digest, q.material, version)
 	switch {
 	case errors.Is(err, ingest.ErrEmptyInput):
 		return refuse(http.StatusBadRequest, "invalid-request", "the document is empty")
