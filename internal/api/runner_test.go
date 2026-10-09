@@ -549,7 +549,39 @@ func assertAbsent(t *testing.T, ie *ingestEnv, s string) {
 	if ie.logged(s) {
 		t.Error("the log holds the input")
 	}
-	rows, err := ie.db.Query(`SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'`)
+	for _, hit := range tablesHolding(t, ie.db, s) {
+		t.Errorf("%s holds the input", hit)
+	}
+}
+
+// tablesHolding names each table with a row holding s in its text form, and each bytea column
+// holding s's bytes: a row's text form writes bytea in hex, which never matches the text.
+func tablesHolding(t *testing.T, db *sql.DB, s string) []string {
+	t.Helper()
+	var hits []string
+	cols, err := db.Query(`SELECT table_name, column_name FROM information_schema.columns
+		WHERE table_schema = current_schema() AND data_type = 'bytea'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bytea [][2]string
+	for cols.Next() {
+		var tb, col string
+		if err := cols.Scan(&tb, &col); err != nil {
+			t.Fatal(err)
+		}
+		bytea = append(bytea, [2]string{tb, col})
+	}
+	cols.Close()
+	if len(bytea) == 0 {
+		t.Fatal("no bytea column to scan")
+	}
+	for _, c := range bytea {
+		if n := count(t, db, `SELECT count(*) FROM "`+c[0]+`" WHERE position(convert_to($1, 'UTF8') IN "`+c[1]+`") > 0`, s); n != 0 {
+			hits = append(hits, fmt.Sprintf("%d rows of %s.%s", n, c[0], c[1]))
+		}
+	}
+	rows, err := db.Query(`SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,10 +598,11 @@ func assertAbsent(t *testing.T, ie *ingestEnv, s string) {
 		t.Fatalf("scanned only %d tables", len(tables))
 	}
 	for _, tb := range tables {
-		if n := count(t, ie.db, `SELECT count(*) FROM "`+tb+`" AS r WHERE r::text LIKE '%' || $1 || '%'`, s); n != 0 {
-			t.Errorf("%d rows of %s hold the input", n, tb)
+		if n := count(t, db, `SELECT count(*) FROM "`+tb+`" AS r WHERE r::text LIKE '%' || $1 || '%'`, s); n != 0 {
+			hits = append(hits, fmt.Sprintf("%d rows of %s", n, tb))
 		}
 	}
+	return hits
 }
 
 // Keys holding "/", "~" and ".", a whole marked URL carrying credentials and a second document:
