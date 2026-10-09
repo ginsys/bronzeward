@@ -27,7 +27,7 @@ func (f fixture) markWith(t *testing.T, o Owner, claim string, opts takeoverOpti
 	var tk Taken
 	err := inTx(t.Context(), f.db, func(tx *sql.Tx) error {
 		var err error
-		tk, err = mark(t.Context(), tx, o, timers.Lease, claim, opts)
+		tk, err = mark(t.Context(), tx, o, timers.Lease, claim, "pending", opts)
 		return err
 	})
 	return tk, err

@@ -26,10 +26,19 @@ const markable = `state = 'paused' AND owner_gen = $5 AND expires_at > clock_tim
 // reason. The payload and its digest come back for the run to decrypt: a paused claim always
 // holds them.
 func Mark(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, claim string) (Taken, error) {
-	return mark(ctx, tx, o, lease, claim, takeoverOptions{})
+	return mark(ctx, tx, o, lease, claim, "pending", takeoverOptions{})
 }
 
-func mark(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, claim string, opts takeoverOptions) (Taken, error) {
+// Continue takes a paused claim for the operator's continuation (compilation §3.6 item 4) as
+// Mark does, and records its review as continued: the run that follows decrypts the envelope and
+// runs the draft transaction, and a takeover of the claim does the same instead of pausing again.
+func Continue(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, claim string) (Taken, error) {
+	return mark(ctx, tx, o, lease, claim, "continued", takeoverOptions{})
+}
+
+// mark is Mark and Continue: review is the review the taken claim records, pending for a mark
+// and continued for a continuation.
+func mark(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, claim, review string, opts takeoverOptions) (Taken, error) {
 	if o.ID == "" || o.Epoch == "" || lease <= 0 {
 		return Taken{}, errors.New("staging: a mark needs an owner with its epoch and a positive lease")
 	}
@@ -49,11 +58,11 @@ func mark(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, claim s
 	tk := Taken{Claim: Claim{ID: claim, Kind: "import", Mode: "encrypted"}} // only an import stages encrypted, and only encrypted pauses
 	var until time.Time
 	var digest []byte
-	err := tx.QueryRowContext(ctx, `UPDATE staging_claim SET owner = $2, owner_gen = owner_gen + 1, owner_epoch = $3, state = 'held',
+	err := tx.QueryRowContext(ctx, `UPDATE staging_claim SET owner = $2, owner_gen = owner_gen + 1, owner_epoch = $3, state = 'held', review = $6,
 		lease_until = least(clock_timestamp() + $4::bigint * interval '1 microsecond', expires_at)
 		WHERE id = $1 AND $3 = (SELECT epoch FROM installation_state) AND `+markable+`
 		RETURNING owner_gen, cluster, machine, review, lease_until, payload, payload_digest`,
-		claim, o.ID, o.Epoch, lease.Microseconds(), gen).Scan(&tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine, &tk.Claim.Review,
+		claim, o.ID, o.Epoch, lease.Microseconds(), gen, review).Scan(&tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine, &tk.Claim.Review,
 		&until, &tk.Payload, &digest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Taken{}, notMarkable(ctx, tx, o, claim)
