@@ -235,6 +235,10 @@ func (a *API) resume(ctx context.Context, j job) (imported, *refusal, error) {
 		return imported{}, refuse(http.StatusInternalServerError, "internal-error",
 			"the staged envelope is incomplete or does not match its digest; the claim is abandoned"), nil
 	}
+	if j.marks != nil {
+		ref, err := a.remark(ctx, j, st)
+		return imported{}, ref, err
+	}
 	if j.claim.Review == "pending" {
 		if err := a.inTx(ctx, func(tx *sql.Tx) error {
 			if err := staging.Pause(ctx, tx, a.d.owner, j.claim, nil, [32]byte{}); err != nil {
@@ -247,6 +251,84 @@ func (a *API) resume(ctx context.Context, j job) (imported, *refusal, error) {
 		return imported{}, nil, errPaused
 	}
 	return imported{sanitized: st.Sanitized, gens: st.Generations, baseline: st.Baseline}, nil, nil
+}
+
+// remark is a mark's run once its envelope is opened (compilation §3.6 items 3-4): the staged
+// document re-extracted with the marks, their values created under the claim, and the new
+// envelope, every earlier generation and the baseline carried over, stored as the claim pauses
+// again. A mark refused before any provider write, or whose first generation the provider
+// refuses, pauses the claim with its earlier envelope and the mark-refused event; a failure after
+// a generation was created is the refusal returned, which abandons the claim. Either pause ends
+// the run with errPaused.
+func (a *API) remark(ctx context.Context, j job, st ingest.Staged) (*refusal, error) {
+	const goesOn, abandoned = "the review goes on", "the claim is abandoned"
+	c, err := ingest.Remark(st, j.marks)
+	if err != nil {
+		return nil, a.markRefused(ctx, j, a.markProblem(j, "extraction", err, goesOn))
+	}
+	created := map[string]string{}
+	s, err := c.Commit(ctx, a.createGeneration(j.claim, created))
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return nil, ctx.Err()
+	case err != nil && len(created) == 0:
+		// A generation the failed request may have created is referenced by no row: an orphan.
+		return nil, a.markRefused(ctx, j, a.markProblem(j, "generation create", err, goesOn))
+	case err != nil:
+		return a.markProblem(j, "generation create", err, abandoned), nil
+	}
+	plain, sum, err := st.Remarked(s, created).Seal()
+	if err != nil {
+		return a.markProblem(j, "envelope", err, abandoned), nil
+	}
+	ct, err := a.d.ing.EncryptStaging(ctx, plain)
+	if err != nil {
+		return a.markProblem(j, "envelope encryption", err, abandoned), nil
+	}
+	if err := a.inTx(ctx, func(tx *sql.Tx) error {
+		if err := staging.Pause(ctx, tx, a.d.owner, j.claim, []byte(ct), sum); err != nil {
+			return err
+		}
+		return a.event(ctx, tx, j, map[string]any{"type": "paused", "generation": j.claim.Gen})
+	}); err != nil {
+		return nil, fmt.Errorf("pausing after the mark: %w", err)
+	}
+	return nil, errPaused
+}
+
+// markRefused returns a mark's claim to paused with its stored envelope unchanged and records
+// ref on the operation as the mark-refused event (compilation §3.6 item 4).
+func (a *API) markRefused(ctx context.Context, j job, ref *refusal) error {
+	if err := a.inTx(ctx, func(tx *sql.Tx) error {
+		if err := staging.Pause(ctx, tx, a.d.owner, j.claim, nil, [32]byte{}); err != nil {
+			return err
+		}
+		if err := a.event(ctx, tx, j, map[string]any{"type": "mark-refused", "generation": j.claim.Gen,
+			"problem": problemDoc(j.op, ref)}); err != nil {
+			return err
+		}
+		return a.event(ctx, tx, j, map[string]any{"type": "paused", "generation": j.claim.Gen})
+	}); err != nil {
+		return fmt.Errorf("recording the refused mark: %w", err)
+	}
+	return errPaused
+}
+
+// markProblem is the problem a mark's failed step leaves, ending with outcome. A compilation
+// refusal names its rule and the mark by its position, never a path: an operator's path, or a
+// staged path, can spell an earlier extracted value the run no longer holds (compilation §3.6
+// item 4). Every other cause is logged by its step alone.
+func (a *API) markProblem(j job, step string, err error, outcome string) *refusal {
+	var r *ingest.Refusal
+	switch {
+	case errors.As(err, &r):
+		return refuse(http.StatusUnprocessableEntity, "validation-failed", "compilation refused the mark; "+outcome).
+			with("rule", string(r.Rule)).with("position", r.Position)
+	case errors.Is(err, provider.ErrUnavailable):
+		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the provider is unavailable; "+outcome)
+	}
+	a.o.logf("ingestion %s: %s: %v", j.claim.ID, step, err)
+	return refuse(http.StatusInternalServerError, "internal-error", "the mark failed at its "+step+"; "+outcome)
 }
 
 // failure is the problem a failed step leaves on the operation. A compilation refusal carries its

@@ -476,7 +476,10 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    `UPDATE`, which requires the state `paused`, the owner generation it read, an
    absolute expiry still in the future and a claim created in the current
    recovery epoch (§3.5): the serving instance becomes its owner at the next
-   owner generation with a new lease, and the state is `held`. Its run decrypts
+   owner generation with a new lease, and the state is `held`. The mark is an
+   owner transition: it takes the claim's row lock before that `UPDATE`
+   (§3.5), so an absolute expiry that passes while it waits for the lock
+   refuses it. Its run decrypts
    the envelope, checks its digest and re-enters §2.3 at step 3 on the staged
    sanitized document with the new marks. A mark whose target holds an
    existing reference is refused (`mark-kind`): a mapping with a `!bwref`
