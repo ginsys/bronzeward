@@ -172,12 +172,15 @@ func TestMarkThenContinuationRecordsBaseline(t *testing.T) {
 		Scan(&doc, &ct, &digest, &key, &conf, &refs); err != nil {
 		t.Fatal(err)
 	}
-	if string(ct) != string(old.Baseline.Ciphertext) || fmt.Sprintf("%x", digest) != fmt.Sprintf("%x", old.Baseline.Digest) ||
-		key != old.Baseline.DigestKey || fmt.Sprintf("%x", conf) != fmt.Sprintf("%x", old.Baseline.Configuration) {
-		t.Fatalf("import base baseline %q %x %q %x, first envelope's %+v", ct, digest, key, conf, old.Baseline)
+	// Failure messages say which column differs, never its bytes or the document.
+	ctOK, digestOK := string(ct) == string(old.Baseline.Ciphertext), fmt.Sprintf("%x", digest) == fmt.Sprintf("%x", old.Baseline.Digest)
+	keyOK, confOK := key == old.Baseline.DigestKey, fmt.Sprintf("%x", conf) == fmt.Sprintf("%x", old.Baseline.Configuration)
+	if !ctOK || !digestOK || !keyOK || !confOK {
+		t.Fatalf("import base baseline equals the first envelope's: ciphertext %v, digest %v, digest key %v, configuration %v",
+			ctOK, digestOK, keyOK, confOK)
 	}
-	if strings.Contains(doc, markSentinel) || !strings.Contains(doc, "zone: !bwref") || refs != 3 {
-		t.Fatalf("import base document %q, %d references", doc, refs)
+	if sentinel, ref := strings.Contains(doc, markSentinel), strings.Contains(doc, "zone: !bwref"); sentinel || !ref || refs != 3 {
+		t.Fatalf("import base document holds the sentinel %v, the zone reference %v; %d references", sentinel, ref, refs)
 	}
 	assertAbsent(t, ie, markSentinel)
 }
@@ -202,16 +205,17 @@ func TestMarkRefusedReturnsPaused(t *testing.T) {
 	}
 	evs := events(t, ie.db, op)
 	if !slices.Equal(eventTypes(evs), []string{"started", "staged", "paused", "marked", "mark-refused", "paused"}) {
-		t.Fatalf("events %v", evs)
+		t.Fatalf("events %v", eventTypes(evs))
 	}
 	ref := evs[4]
 	p, _ := ref["problem"].(map[string]any)
 	if ref["generation"] != float64(2) || p["rule"] != string(ingest.RuleMarkUnaddressed) || p["position"] != float64(1) ||
 		p["type"] != "urn:bronzeward:problem:validation-failed" || p["status"] != float64(http.StatusUnprocessableEntity) {
-		t.Fatalf("mark-refused %v", ref)
+		t.Fatalf("mark-refused generation %v rule %v position %v type %v status %v",
+			ref["generation"], p["rule"], p["position"], p["type"], p["status"])
 	}
 	if _, ok := p["paths"]; ok {
-		t.Fatalf("the problem names paths: %v", p)
+		t.Fatal("the problem names paths")
 	}
 	if strings.Contains(fmt.Sprint(evs), markSentinel) || ie.logged(markSentinel) {
 		t.Fatal("the refused path is in an event or the log")
@@ -264,10 +268,10 @@ func TestMarkCompilationRefusalsReturnPaused(t *testing.T) {
 			}
 			evs := events(t, ie.db, op)
 			if !slices.Equal(eventTypes(evs), []string{"started", "staged", "paused", "marked", "mark-refused", "paused"}) {
-				t.Fatalf("events %v", evs)
+				t.Fatalf("events %v", eventTypes(evs))
 			}
 			if p, _ := evs[4]["problem"].(map[string]any); p["rule"] != string(c.rule) || p["position"] != float64(0) {
-				t.Fatalf("mark-refused %v", evs[4])
+				t.Fatalf("mark-refused rule %v position %v", p["rule"], p["position"])
 			}
 			assertAbsent(t, ie, markSentinel)
 		})
@@ -308,22 +312,23 @@ func TestMarkRefusalNamesNoPath(t *testing.T) {
 }
 
 // wantMarkRefused checks claim paused with op's events after the first pause equal to tail, the
-// last mark-refused naming rule at position 0 and no paths.
+// last mark-refused naming rule at position 0 and no paths. Its failure messages print event types,
+// the rule and the position only: a path the refusal names may spell the value it guards.
 func (ie *ingestEnv) wantMarkRefused(t *testing.T, op, claim string, rule ingest.Rule, tail ...string) {
 	t.Helper()
 	if r := ie.pausedRow(t, claim); r.state != "paused" || r.opState != "running" {
-		t.Fatalf("claim %+v", r)
+		t.Fatalf("claim %v", r)
 	}
 	evs := events(t, ie.db, op)
 	if !slices.Equal(eventTypes(evs), append([]string{"started", "staged", "paused"}, tail...)) {
-		t.Fatalf("events %v", evs)
+		t.Fatalf("events %v", eventTypes(evs))
 	}
 	p, _ := evs[len(evs)-2]["problem"].(map[string]any)
 	if p["rule"] != string(rule) || p["position"] != float64(0) {
-		t.Fatalf("mark-refused %v", evs[len(evs)-2])
+		t.Fatalf("mark-refused rule %v position %v", p["rule"], p["position"])
 	}
 	if _, ok := p["paths"]; ok {
-		t.Fatalf("the problem names paths: %v", p)
+		t.Fatal("the problem names paths")
 	}
 }
 
