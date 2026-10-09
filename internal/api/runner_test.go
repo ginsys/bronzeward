@@ -572,6 +572,9 @@ func tablesHolding(t *testing.T, db *sql.DB, s string) []string {
 		}
 		bytea = append(bytea, [2]string{tb, col})
 	}
+	if err := cols.Err(); err != nil {
+		t.Fatal(err)
+	}
 	cols.Close()
 	if len(bytea) == 0 {
 		t.Fatal("no bytea column to scan")
@@ -592,6 +595,9 @@ func tablesHolding(t *testing.T, db *sql.DB, s string) []string {
 			t.Fatal(err)
 		}
 		tables = append(tables, n)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	rows.Close()
 	if len(tables) < 10 {
