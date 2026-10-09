@@ -24,7 +24,7 @@ func abandonCall(tok, k, claim string) call {
 // ingestionMembers are the members of the ingestion resource: never the owner string, the
 // payload or its digest.
 var ingestionMembers = []string{"createdAt", "draft", "expiresAt", "id", "kind", "leaseUntil", "machine", "mode", "operation",
-	"ownerGeneration", "state"}
+	"ownerGeneration", "review", "state"}
 
 func (ie *ingestEnv) wantIngestion(t *testing.T, b map[string]any, j job, op, state string) {
 	t.Helper()
@@ -32,7 +32,7 @@ func (ie *ingestEnv) wantIngestion(t *testing.T, b map[string]any, j job, op, st
 		t.Fatalf("members %v", got)
 	}
 	want := map[string]any{"id": j.claim.ID, "kind": "import", "mode": j.claim.Mode, "state": state, "machine": ie.machine,
-		"draft": ie.draft, "operation": op, "ownerGeneration": float64(1)}
+		"draft": ie.draft, "operation": op, "ownerGeneration": float64(1), "review": nil}
 	for k, v := range want {
 		if b[k] != v {
 			t.Errorf("%s = %v, want %v", k, b[k], v)

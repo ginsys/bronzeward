@@ -778,7 +778,10 @@ compilation's claim rules decide between takeover and abandonment (§8.2).
 While its claim is `paused` (compilation §3.6), the operation stays `running`
 with its lease ended and no process working on it; the pause writes the
 operation's lease with the claim's, and an operator's mark or continuation
-moves its owner fields with the claim's, as a takeover does.
+moves its owner fields with the claim's, as a takeover does. The pause keeps
+the claim's and the operation's owner fields and writes both leases to the
+pause instant: the ended lease, not a cleared owner, is what leaves it unowned,
+and the state fence refuses every later transition of that owner.
 
 Without the re-check, 309 of 400 jobs were claimed more than once and one was
 completed twice ([DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims),

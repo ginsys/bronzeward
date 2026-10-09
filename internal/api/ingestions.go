@@ -34,6 +34,7 @@ type ingestionInput struct {
 	Draft        string              `json:"draft"`
 	Source       string              `json:"source"`
 	Staging      string              `json:"staging"`
+	Review       bool                `json:"review"`
 	Marks        []string            `json:"marks"`
 	Document     ingest.Unresolved   `json:"document"`
 	Declarations ingest.Declarations `json:"declarations"`
@@ -111,6 +112,12 @@ type node struct {
 
 func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*ingestionInput)
+	// The operator review keeps the staged input until it is continued (compilation §3.6), so only
+	// an encrypted claim, which holds its envelope, can pause.
+	if in.Review && in.Staging != "encrypted" {
+		return result{}, refuse(http.StatusUnprocessableEntity, "validation-failed", "a review needs encrypted staging").
+			with("rule", "review-needs-encrypted-staging")
+	}
 	if a.d.owner.ID == "" || a.d.ing == nil {
 		return result{}, refuse(http.StatusServiceUnavailable, "dependency-unavailable", "ingestion is not configured; nothing was committed")
 	}
@@ -165,6 +172,9 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 		return result{}, err
 	}
 	c := staging.Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: in.Staging, Cluster: cluster, Machine: in.Machine, Gen: 1}
+	if in.Review {
+		c.Review = "pending"
+	}
 	timers := staging.Timers{Lease: a.d.timers.Lease, AbsoluteExpiry: a.d.timers.AbsoluteExpiry}
 	owner := a.d.owner
 	if a.o.noEpochTerm { // the control: the process takes the current epoch as its own, so the term always holds
@@ -198,8 +208,9 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 
 // ingestionBody is the ingestion resource (§9.2): its staging claim as every read treats it
 // (compilation §3.5) and its ingest operation. An import's claim names its machine; a draft
-// update's names its draft and has no operation, so both are null. The owner string, the payload
-// and its digest are never answered.
+// update's names its draft and has no operation, so both are null. Review is the operator review's
+// state (compilation §3.6), null when none was requested. The owner string, the payload and its
+// digest are never answered.
 type ingestionBody struct {
 	ID              string    `json:"id"`
 	Kind            string    `json:"kind"`
@@ -208,6 +219,7 @@ type ingestionBody struct {
 	Machine         *string   `json:"machine"`
 	Draft           string    `json:"draft"`
 	Operation       *string   `json:"operation"`
+	Review          *string   `json:"review"`
 	OwnerGeneration int64     `json:"ownerGeneration"`
 	LeaseUntil      time.Time `json:"leaseUntil"`
 	ExpiresAt       time.Time `json:"expiresAt"`
@@ -227,17 +239,17 @@ func (b ingestionBody) subjects() []string {
 }
 
 // An import's claim has exactly one ingest operation; a draft update's has none.
-const selectIngestion = `SELECT c.id, c.kind, c.mode, c.state, c.machine, COALESCE(o.draft, c.draft), o.id, c.owner_gen, c.lease_until,
-		c.expires_at, c.created_at
-	FROM (SELECT id, kind, mode, ` + staging.EffectiveStateSQL + ` AS state, machine, draft, owner_gen, lease_until, expires_at,
-		created_at FROM staging_claim) c
+const selectIngestion = `SELECT c.id, c.kind, c.mode, c.state, c.machine, COALESCE(o.draft, c.draft), o.id, c.review, c.owner_gen,
+		c.lease_until, c.expires_at, c.created_at
+	FROM (SELECT id, kind, mode, ` + staging.EffectiveStateSQL + ` AS state, machine, draft, review, owner_gen, lease_until,
+		expires_at, created_at FROM staging_claim) c
 	LEFT JOIN operation o ON o.ingestion = c.id
 	WHERE c.id = $1`
 
 func readIngestion(ctx context.Context, tx *sql.Tx, claim string) (ingestionBody, error) {
 	var b ingestionBody
 	err := tx.QueryRowContext(ctx, selectIngestion, claim).Scan(&b.ID, &b.Kind, &b.Mode, &b.State, &b.Machine, &b.Draft, &b.Operation,
-		&b.OwnerGeneration, &b.LeaseUntil, &b.ExpiresAt, &b.CreatedAt)
+		&b.Review, &b.OwnerGeneration, &b.LeaseUntil, &b.ExpiresAt, &b.CreatedAt)
 	return b, err
 }
 
@@ -278,6 +290,8 @@ func takeOverIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (res
 		return result{}, notFound
 	case errors.Is(err, staging.ErrNotEncrypted):
 		return conflict("only an encrypted claim is taken over")
+	case errors.Is(err, staging.ErrPaused):
+		return conflict("the ingestion is paused for the operator's review")
 	case errors.Is(err, staging.ErrEnded):
 		return conflict("the ingestion has ended")
 	case errors.Is(err, staging.ErrLeaseLive):
@@ -339,7 +353,7 @@ func abandonIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (resu
 	var live bool
 	// The state as read (compilation §3.5): a claim a read treats as abandoned has ended, and the
 	// sweep writes it.
-	switch err := tx.QueryRowContext(ctx, `SELECT `+staging.EffectiveStateSQL+` IN ('held', 'resumed') FROM staging_claim
+	switch err := tx.QueryRowContext(ctx, `SELECT `+staging.EffectiveStateSQL+` IN ('held', 'paused', 'resumed') FROM staging_claim
 		WHERE id = $1 FOR UPDATE`, claim).Scan(&live); {
 	case errors.Is(err, sql.ErrNoRows):
 		return result{}, notFound

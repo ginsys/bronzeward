@@ -101,7 +101,7 @@ func prepareFragment(ctx context.Context, a *API, q *request) error {
 		}
 		var live string
 		switch err := tx.QueryRowContext(ctx, `SELECT id FROM staging_claim WHERE principal = $1 AND idempotency_key = $2
-			AND state IN ('held', 'resumed')`, q.principal.ID, q.key).Scan(&live); {
+			AND state IN ('held', 'paused', 'resumed')`, q.principal.ID, q.key).Scan(&live); {
 		case err == nil:
 			abandoned, err := staging.AbandonDue(ctx, tx, live, q.epoch)
 			if err != nil {
