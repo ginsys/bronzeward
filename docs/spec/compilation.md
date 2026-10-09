@@ -179,7 +179,11 @@ give a node a path that reads as an embedded document's.
    hold a schema secret; list-element overrides by selector are not run (§15).
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
-   candidate sanitized document. Names are minted as §5.1 states.
+   candidate sanitized document. Names are minted as §5.1 states. The
+   candidate is the pinned encoder's output written again from its own parse
+   until it no longer changes: the encoder moves a blank line inside a run of
+   comments, as talosctl writes them, and a later mark (§3.6 item 3) refuses
+   any text its re-encoding changes. The guard searches that final text.
 5. **Guard** (§4.2). A guard hit refuses the input; no provider object has been
    created yet.
 6. **Create** one provider generation per extracted value, create-only (`cas=0`)
