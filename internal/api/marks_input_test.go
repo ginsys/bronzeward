@@ -35,7 +35,7 @@ func TestMarkInputRefusals(t *testing.T) {
 	e := newEnvWith(t, deps{ing: &fakeIngester{latest: 1}}, options{extra: []*route{markTestRoute()}})
 	tok := e.human("h-author")
 	many := `{"marks":["doc[0]/a"` + strings.Repeat(`,"doc[0]/a"`, maxMarks) + `]}`
-	for _, body := range []string{`{"marks":[]}`, `{}`, many, `{"marks":null}`} {
+	for _, body := range []string{`{"marks":[]}`, `{}`, many, `{"marks":null}`, `{"marks":["doc[0]/a",1]}`, `{"marks":[null]}`} {
 		wantProblem(t, e.do(e.api, postMarks(tok, key, body)), http.StatusBadRequest, "invalid-request")
 	}
 	rec := e.do(e.api, postMarks(tok, key, `{"marks":["doc[0]/a","doc[0]/`+sentinel+`~2"]}`))
@@ -52,6 +52,35 @@ func TestMarkInputRefusals(t *testing.T) {
 	}
 	if acts, records := rows(t, e); acts != 0 || records != 0 {
 		t.Fatalf("acts %d, records %d; want none", acts, records)
+	}
+}
+
+// PA §9.3: a mark must be the text that was sent. encoding/json turns a lone surrogate escape or
+// malformed UTF-8 into U+FFFD, and marks bypass the canonical transform that refuses both
+// elsewhere, so each is 422 naming its position, as are U+FFFD and U+0000 written out; a valid
+// non-ASCII mark is taken.
+func TestMarkInputUnicode(t *testing.T) {
+	e := newEnvWith(t, deps{ing: &fakeIngester{latest: 1}}, options{extra: []*route{markTestRoute()}})
+	tok := e.human("h-author")
+	for name, mark := range map[string]string{
+		"lone surrogate": `doc[0]/\ud800`,
+		"malformed":      "doc[0]/\xff",
+		"replacement":    "doc[0]/�",
+		"NUL":            `doc[0]/\u0000`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := wantProblem(t, e.do(e.api, postMarks(tok, key, `{"marks":["doc[0]/a","`+mark+`"]}`)),
+				http.StatusUnprocessableEntity, "validation-failed")
+			if p["position"] != float64(1) {
+				t.Fatalf("position %v, want 1", p["position"])
+			}
+		})
+	}
+	if acts, records := rows(t, e); acts != 0 || records != 0 {
+		t.Fatalf("acts %d, records %d; want none", acts, records)
+	}
+	if rec := e.do(e.api, postMarks(tok, key, `{"marks":["doc[0]/a","doc[0]/hôte"]}`)); rec.Code != http.StatusAccepted {
+		t.Fatalf("a valid non-ASCII mark: %d %s", rec.Code, rec.Body)
 	}
 }
 

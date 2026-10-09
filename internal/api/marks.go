@@ -3,9 +3,12 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/ingest"
@@ -15,8 +18,11 @@ import (
 
 // markInput is a mark's body (§9.3): 1 to maxMarks compilation §2.2 paths. A path can spell an
 // extracted value, so it is never quoted back: one that does not parse is named by its position.
+// The marks are the keyed member, which skips the canonical transform that refuses malformed
+// text in every other member, so each is kept raw and checked here.
 type markInput struct {
-	Marks []string `json:"marks"`
+	Marks []json.RawMessage `json:"marks"`
+	texts []string
 	marks []ingest.Path
 }
 
@@ -24,21 +30,31 @@ func (in *markInput) check(*API) error {
 	if len(in.Marks) == 0 || len(in.Marks) > maxMarks {
 		return fmt.Errorf("marks must hold 1 to %d paths", maxMarks)
 	}
+	in.texts = make([]string, len(in.Marks))
 	in.marks = make([]ingest.Path, len(in.Marks))
-	for i, s := range in.Marks {
+	for i, raw := range in.Marks {
+		if len(raw) == 0 || raw[0] != '"' {
+			return errors.New("marks must be strings")
+		}
+		bad := refuse(http.StatusUnprocessableEntity, "validation-failed", "a mark is not a compilation §2.2 path").with("position", i)
+		// encoding/json decodes malformed UTF-8 and a lone surrogate escape as U+FFFD, which
+		// would make the mark differ from what was sent; U+0000 cannot be stored.
+		var s string
+		if json.Unmarshal(raw, &s) != nil || strings.ContainsRune(s, utf8.RuneError) || strings.ContainsRune(s, 0) {
+			return bad
+		}
 		p, err := ingest.ParsePath(s)
 		if err != nil {
-			return refuse(http.StatusUnprocessableEntity, "validation-failed", "a mark is not a compilation §2.2 path").
-				with("position", i)
+			return bad
 		}
-		in.marks[i] = p
+		in.texts[i], in.marks[i] = s, p
 	}
 	return nil
 }
 
 // keyedDigest covers the marks, which are the request's unextracted input (§7.1).
 func (in *markInput) keyedDigest(ctx context.Context, h ingest.HMAC, material []byte, version int) (provider.Digest, error) {
-	return ingest.FingerprintMarks(ctx, h, material, in.Marks, version)
+	return ingest.FingerprintMarks(ctx, h, material, in.texts, version)
 }
 
 // POST /ingestions/{id}/marks is an operator's mark (§9.3, compilation §3.6 item 3), T11: the

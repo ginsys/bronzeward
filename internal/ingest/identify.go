@@ -106,29 +106,44 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 }
 
 // unloadableSources is what a document i that does not load with its targets stored arises from:
-// the paths of every target in it that alone keeps it from loading, or of every target in it when
-// only their combination does.
+// the paths in it of the target whose storing first stops it loading, its targets stored one by
+// one in identification order. The document loads with none stored and not with all, so such a
+// target exists, and bisection finds one in log2 of the targets' number of loads, however many
+// marks the request carries. When only a combination stops it loading, that is the combination's
+// last target.
 func unloadableSources(doc *yaml.Node, i int, out []*target) []Path {
-	var all, alone []Path
+	var in [][]Path
+	var nodes []*yaml.Node
 	for _, t := range out {
-		var in []Path
+		var ps []Path
 		for _, p := range t.paths {
 			if p.Doc == i {
-				in = append(in, p)
+				ps = append(ps, p)
 			}
 		}
-		if len(in) == 0 {
-			continue
+		if ps != nil {
+			in = append(in, ps)
+			nodes = append(nodes, t.node)
 		}
-		if _, err := schemaPointers(doc, i, map[*yaml.Node]bool{t.node: true}); err != nil {
-			alone = append(alone, in...)
+	}
+	// The first lo targets stored, the document loads; the first hi, it does not.
+	lo, hi := 0, len(nodes)
+	for hi-lo > 1 {
+		mid := (lo + hi) / 2
+		stored := map[*yaml.Node]bool{}
+		for _, n := range nodes[:mid] {
+			stored[n] = true
 		}
-		all = append(all, in...)
+		if _, err := schemaPointers(doc, i, stored); err != nil {
+			hi = mid
+		} else {
+			lo = mid
+		}
 	}
-	if alone != nil {
-		return alone
+	if hi == 0 {
+		return nil
 	}
-	return all
+	return in[hi-1]
 }
 
 // plainDeletes reports whether every delete directive under n holds nothing but itself and stands
@@ -175,6 +190,10 @@ type schemaPointer struct {
 	value   string
 }
 
+// machineryLoaded, when set (only by tests), is called once per machinery load: what a request
+// can make the server spend.
+var machineryLoaded func()
+
 // schemaPointers loads one document on its own with the pinned machinery and returns the leaves
 // whose encoding RedactSecrets changes, in pointer order. !bwref nodes, and the nodes in nulled,
 // are loaded as nulls (the machinery redacts only non-empty fields). Machinery errors are
@@ -187,6 +206,9 @@ func schemaPointers(doc *yaml.Node, i int, nulled map[*yaml.Node]bool) ([]schema
 	}
 	if !plainDeletes(top) {
 		return nil, unloadable
+	}
+	if machineryLoaded != nil {
+		machineryLoaded()
 	}
 	text, err := yaml.Marshal(copyWithoutReferences(top, map[*yaml.Node]*yaml.Node{}, nulled))
 	if err != nil {

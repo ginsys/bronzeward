@@ -1977,9 +1977,13 @@ the staged sanitized document and its declarations (the draft-update body's
 form), never the baseline, a generation path or the digest. A claim not
 `paused`, as a read treats it, is `409 conflict`; a decryption failure is
 `503 dependency-unavailable` and an integrity failure `500 internal-error`,
-neither changing the claim. A mark takes 1 to 1024 compilation §2.2 paths; a
-path that does not parse is `422 validation-failed` naming its position in
-`marks`, never its text, before any change. A mark or a continuation (`{}`) on a claim not `paused`, past its
+neither changing the claim. A mark takes 1 to 1024 compilation §2.2 paths, each
+a JSON string; a path that does not parse, or is not the text that was sent
+(a lone surrogate escape or malformed UTF-8, which a JSON decoder turns into
+U+FFFD), or holds U+FFFD or U+0000, is `422 validation-failed` naming its
+position in `marks`, never its text, before any change. `marks` is the keyed
+member (§7.1), which the canonical transform that refuses such text in other
+members never sees. A mark or a continuation (`{}`) on a claim not `paused`, past its
 absolute expiry or of an earlier epoch is `409 conflict`, and nothing changes;
 otherwise it answers 202 at once, a mark's body naming the owner generation it
 took, which its run's events carry, and the ingestion's events show how the run

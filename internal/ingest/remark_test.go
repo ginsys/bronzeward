@@ -196,6 +196,9 @@ func TestRemarkRefusalPosition(t *testing.T) {
 		{"unloadable later document first", three, []string{"doc[2]/kind", "doc[1]/kind"}, RuleSchemaUnloadable, 0},
 		{"bad path second", st, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/nodeLabels/b|yaml/x"}, RuleBadPath, 1},
 		{"guard first", st, []string{"doc[0]/machine/nodeLabels/host", "doc[0]/machine/nodeLabels/a"}, RuleGuardValue, 0},
+		// Substitution puts a reference at that document's root, which validation refuses after
+		// the marks are gone from the stream: the refusal is still the second mark's.
+		{"root of a later scalar-only mapping second", two, []string{"doc[0]/machine/nodeLabels/a", "doc[1]"}, RuleTagPlacement, 1},
 		{"rewrites second", embedded, []string{"doc[0]/cluster/inlineManifests/0/name", manifestPath + "|yaml/stringData/password"},
 			RuleMarkRewritesText, 1},
 	} {

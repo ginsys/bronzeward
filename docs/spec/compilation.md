@@ -514,7 +514,13 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    an operator's path, or a staged document's path whose tokens together
    spell it (a guard hit's), can hold an earlier extracted value, which the
    redaction of refusals (§8.3) cannot recognise once the run no longer holds
-   it. A provider failure on the mark's first generation, before any
+   it. Several marks at fault name the first in the request. A document that
+   does not load with its nodes stored as nulls names the mark whose node,
+   stored after those identified before it, first stops it loading: found by
+   bisection, in a number of machinery loads logarithmic in that document's
+   nodes rather than one per mark. A refusal of the document after
+   substitution (a reference at a document's root) names the mark whose node
+   was substituted there. A provider failure on the mark's first generation, before any
    generation was created, is refused the same way: the claim returns to
    `paused` with its earlier envelope, and a generation the failed request may
    have created is referenced by no row and reported as an orphan once the
