@@ -100,7 +100,8 @@ func validate(docs []*yaml.Node, d Declarations) error { return validateRefs(doc
 // misplaced by name instead of ending the walk, and the first such refusal is returned once
 // the walk is done: the refusal of a substituted stream is that of every mark whose reference
 // substitution put out of place, which a path cannot tell (an alias key is refused at its
-// mapping's path).
+// mapping's path). An identified document left unvalidated is then refused at every such
+// holder's path.
 func validateRefs(docs []*yaml.Node, d Declarations, misplaced map[string]bool) error {
 	embedded, err := checkDeclarations(d)
 	if err != nil {
@@ -167,8 +168,14 @@ func validateRefs(docs []*yaml.Node, d Declarations, misplaced map[string]bool) 
 	if err := walkStream(docs, check); first != nil || err != nil {
 		return cmp.Or(first, err)
 	}
-	for path := range embedded {
-		return refuse(RuleEmbedded, path)
+	if len(embedded) > 0 {
+		// Every identified document left unvalidated is named when attributing (a mark on its
+		// holder put a reference there), the first in path order otherwise.
+		left := slices.Sorted(maps.Keys(embedded))
+		if misplaced == nil {
+			left = left[:1]
+		}
+		return refuse(RuleEmbedded, left...)
 	}
 	for name := range d.References {
 		if !used[name] {
