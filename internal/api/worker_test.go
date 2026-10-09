@@ -443,12 +443,14 @@ func TestPublishClaimAfterLockWait(t *testing.T) {
 }
 
 // The run's heartbeat keeps its lease while a compilation outlasts it, so a polling worker in
-// another process never takes the job over: one claim, at generation 1.
+// another process never takes the job over: one claim, at generation 1. The compilation outlasts
+// two leases, and a heartbeat may run late by most of a lease before it lapses, so the check is
+// about the heartbeat and not a loaded runner's latency.
 func TestPublishWorkerHeartbeat(t *testing.T) {
 	b := newBuildEnv(t)
 	mustExec(t, b.db, `DELETE FROM operation WHERE id = $1`, b.job.op)
-	b.held.slow = 400 * time.Millisecond
-	timers := config.Ingestion{Heartbeat: 20 * time.Millisecond, Lease: 150 * time.Millisecond}
+	b.held.slow = 2500 * time.Millisecond
+	timers := config.Ingestion{Heartbeat: 50 * time.Millisecond, Lease: time.Second}
 	life, stop := context.WithCancel(t.Context())
 	a := b.worker("run-1/1/a", life, timers)
 	other := b.worker("run-1/2/b", life, timers)
