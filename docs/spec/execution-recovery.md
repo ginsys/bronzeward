@@ -2118,7 +2118,10 @@ conservative option; those that do not say so. Each is marked in place as
     back. A first attempt compares the observation its commitment recorded,
     at the attempt's time, and any newer observation that contradicts it on a
     value it read. A refused attempt is recorded by a separate transaction
-    under the same epoch check and machine lock. After a refusal by 1, 2, 3
+    under the same epoch check and machine lock, followed, after a refusal it
+    may settle, by the operation's lock, all before it reads its time; the
+    entry names the controller and the owner generation it submitted. After a
+    refusal by 1, 2, 3
     or 6, that transaction moves a `committed` operation its controller still
     owns to `unresolved`, and an `unresolved` one it owns, so moved now or by
     an earlier refusal, on to `cancelled` when no attempt exists and

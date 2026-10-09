@@ -20,6 +20,7 @@ type attemptEnv struct {
 	*commitEnv
 	op, obs string
 	seeded  int
+	gen     int64 // the owner generation the attempt submitted; 0 is 1
 }
 
 func newAttemptEnv(t *testing.T, extra string) *attemptEnv {
@@ -175,20 +176,25 @@ func (ae *attemptEnv) wantAttemptRefused(t *testing.T, err error, comparison, ca
 	if observation != "" {
 		obs = observation
 	}
+	gen := ae.gen
+	if gen == 0 {
+		gen = 1
+	}
 	var rev int64
 	if err := ae.db.QueryRow(`SELECT revision FROM machine_event WHERE machine = $1 AND kind = 'refusal'
 			AND epoch = (SELECT epoch FROM installation_state)
 			AND entry = jsonb_strip_nulls(jsonb_build_object('transaction', 'T6', 'comparison', $2::text, 'plan', $3::text,
-				'operation', $4::text, 'cause', $5::text, 'controller', $6::text, 'observation', $7::text))`,
-		ae.machine, comparison, ae.pid, ae.op, cause, ae.a.d.owner.ID, obs).Scan(&rev); err != nil {
+				'operation', $4::text, 'cause', $5::text, 'controller', $6::text, 'generation', $8::bigint,
+				'observation', $7::text))`,
+		ae.machine, comparison, ae.pid, ae.op, cause, ae.a.d.owner.ID, obs, gen).Scan(&rev); err != nil {
 		t.Fatalf("no refusal entry: %v", err)
 	}
 	for i, s := range states {
 		if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND revision = $2 AND kind = 'operation-state'
 				AND epoch = (SELECT epoch FROM installation_state)
 				AND entry = jsonb_build_object('operation', $3::text, 'from', $4::text, 'to', $5::text, 'controller', $6::text,
-					'generation', 1, 'comparison', $7::text, 'cause', $8::text)`,
-			ae.machine, rev+int64(i)+1, ae.op, from, s.to, ae.a.d.owner.ID, s.comparison, s.cause); n != 1 {
+					'generation', $9::bigint, 'comparison', $7::text, 'cause', $8::text)`,
+			ae.machine, rev+int64(i)+1, ae.op, from, s.to, ae.a.d.owner.ID, s.comparison, s.cause, gen); n != 1 {
 			t.Fatalf("no operation state entry %s to %s at revision %d", from, s.to, rev+int64(i)+1)
 		}
 		from = s.to
@@ -358,6 +364,7 @@ func TestAttemptRefusals(t *testing.T) {
 			if from == "" {
 				from = "committed"
 			}
+			ae.gen = gen
 			_, err := ae.a.recordAttempt(context.Background(), ae.op, gen)
 			ae.wantAttemptRefused(t, err, c.comparison, c.cause, named, from, c.states...)
 		})
@@ -518,6 +525,35 @@ func TestAttemptTimeFollowsLocks(t *testing.T) {
 	}
 	ae.wantAttemptRefused(t, <-errs, "1", "the plan has expired", "", "committed",
 		settled{"unresolved", "1", "the plan has expired"}, settled{"cancelled", "1", "the plan has expired"})
+}
+
+// Settling reads its time after the operation lock (PA §5 rule 4): a refusal settled just before
+// the plan expires, whose settle waits for the operation past expiry, cancels the operation.
+func TestAttemptSettleTimeFollowsLocks(t *testing.T) {
+	t.Parallel()
+	ae := newAttemptEnv(t, `,"expiresInSeconds":4`)
+	stand, err := ae.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stand.Rollback() }()
+	mustExec(t, stand, `SELECT FROM operation WHERE id = $1 FOR UPDATE`, ae.op)
+	if time.Until(ae.expires) <= 0 {
+		t.Fatal("the plan expired before the settle began")
+	}
+	refused := &attemptRefused{Comparison: "6", Cause: "the machine scope is frozen"}
+	errs := make(chan error, 1)
+	go func() { errs <- ae.a.settleAttemptRefusal(context.Background(), ae.machine, ae.pid, ae.op, 1, refused) }()
+	waitForLockWaits(t, ae.db, 1)
+	time.Sleep(time.Until(ae.expires.Add(100 * time.Millisecond)))
+	if err := stand.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	ae.wantAttemptRefused(t, refused, "6", "the machine scope is frozen", "", "committed",
+		settled{"unresolved", "6", "the machine scope is frozen"}, settled{"cancelled", "1", "the plan has expired"})
 }
 
 // The attempt reads the machine under its lock: a freeze that holds the machine when the attempt
