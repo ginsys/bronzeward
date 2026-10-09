@@ -290,7 +290,8 @@ func finalPlanCause(ctx context.Context, tx *sql.Tx, plan, current string, at ti
 }
 
 // settleAttemptRefusal records a refused attempt (§4.1) after its transaction rolled back, and
-// settles the operation (persistence-api.md §8.1), under the same epoch check and machine lock:
+// settles the operation (persistence-api.md §8.1), under the same epoch check and machine lock and,
+// for a refusal that may settle, the operation's lock, all taken before its time is read:
 // the refusal entry; after a refusal by 1, 2, 3 or 6, an operation still committed under this
 // process's token moves to unresolved; and an unresolved one it owns, so moved or left unresolved
 // by an earlier refusal, with no attempt and whose plan fails comparison 1, re-read here, moves on
@@ -309,6 +310,22 @@ func (a *API) settleAttemptRefusal(ctx context.Context, machine, plan, operation
 		if _, err := tx.ExecContext(ctx, `SELECT FROM machine WHERE id = $1 FOR UPDATE`, machine); err != nil {
 			return err
 		}
+		// A refusal that may settle takes the operation's lock before the time is read (rule 4), so
+		// comparison 1's expiry is judged after any wait for it.
+		settles := false
+		switch refused.Comparison {
+		case "1", "2", "3", "6":
+			settles = true
+		}
+		var owned bool
+		var state string
+		if settles {
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(owner = $2 AND owner_gen = $3 AND owner_epoch = $4, false),
+				state FROM operation WHERE id = $1 FOR UPDATE`, operation, a.d.owner.ID, generation, current).Scan(&owned,
+				&state); err != nil {
+				return err
+			}
+		}
 		var rev int64
 		at, err := nextEntry(ctx, tx, machine, &rev)
 		if err != nil {
@@ -317,24 +334,12 @@ func (a *API) settleAttemptRefusal(ctx context.Context, machine, plan, operation
 		if _, err := tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 			VALUES ($1, $2, $3, 'refusal', jsonb_strip_nulls(jsonb_build_object('transaction', 'T6', 'comparison', $4::text,
 				'plan', $5::text, 'operation', $6::text, 'cause', $7::text, 'controller', $8::text,
-				'observation', NULLIF($9::text, ''))), $10)`,
+				'generation', $11::bigint, 'observation', NULLIF($9::text, ''))), $10)`,
 			machine, rev, current, refused.Comparison, plan, operation, refused.Cause, a.d.owner.ID, refused.Observation,
-			at); err != nil {
+			at, generation); err != nil {
 			return err
 		}
-		switch refused.Comparison {
-		case "1", "2", "3", "6":
-		default:
-			return nil
-		}
-		var owned bool
-		var state string
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(owner = $2 AND owner_gen = $3 AND owner_epoch = $4, false), state
-			FROM operation WHERE id = $1 FOR UPDATE`, operation, a.d.owner.ID, generation, current).Scan(&owned,
-			&state); err != nil {
-			return err
-		}
-		if !owned || (state != "committed" && state != "unresolved") {
+		if !settles || !owned || (state != "committed" && state != "unresolved") {
 			return nil
 		}
 		move := func(from, to, comparison, cause string) error {
