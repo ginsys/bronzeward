@@ -9,8 +9,8 @@ import (
 
 // DueSQL is a live claim past its absolute expiry, or a transient claim past its lease (compilation
 // §3.5). An encrypted claim whose lease lapsed stays live until its expiry: a takeover may resume
-// it (§3.4).
-const DueSQL = `state IN ('held', 'resumed') AND (expires_at <= clock_timestamp() OR (mode = 'transient' AND lease_until <= clock_timestamp()))`
+// it (§3.4), and a paused one, whose lease the pause ended, awaits its review (§3.6).
+const DueSQL = `state IN ('held', 'paused', 'resumed') AND (expires_at <= clock_timestamp() OR (mode = 'transient' AND lease_until <= clock_timestamp()))`
 
 // EffectiveStateSQL is a claim's state as every read and transition treats it (compilation
 // §3.5): abandoned once due, whether or not a sweep has written it yet; the stored state otherwise.

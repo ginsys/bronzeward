@@ -70,8 +70,14 @@ func newEpoch(t *testing.T, db *sql.DB) {
 // its own (one running ingest per draft revision), in one transaction as T11 does.
 func (f fixture) create(t *testing.T, mode string) (Owner, Claim) {
 	t.Helper()
+	return f.createWith(t, mode, "")
+}
+
+// createWith is create, the claim recording review (compilation §3.6) unless it is empty.
+func (f fixture) createWith(t *testing.T, mode, review string) (Owner, Claim) {
+	t.Helper()
 	o := Owner{ID: "a/4242/start-1", Epoch: currentEpoch(t, f.db)}
-	c := Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: mode, Cluster: f.cluster, Machine: f.machine, Gen: 1}
+	c := Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: mode, Cluster: f.cluster, Machine: f.machine, Gen: 1, Review: review}
 	draft := id.New(id.Draft)
 	exec(t, f.db, `INSERT INTO draft (id, cluster, title, state, revision, etag_token, created_at)
 		VALUES ($1, $2, 'import', 'open', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaa', now())`, draft, f.cluster)

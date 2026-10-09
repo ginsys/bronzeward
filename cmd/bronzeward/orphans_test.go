@@ -278,7 +278,7 @@ func (p printing) Values(ctx context.Context, cluster, claim string) (provider.G
 
 // TestOrphansSelects: walking every cluster directory, the command reports the unreferenced
 // generations of an abandoned and a released claim, of a claim without a row and of a cluster a
-// restore removed, and not a referenced generation or a held or resumed claim's.
+// restore removed, and not a referenced generation or a held, resumed or paused claim's.
 func TestOrphansSelects(t *testing.T) {
 	e := newOrphanEnv(t)
 	ab := e.claim(t, "encrypted", "abandoned", "-1 hour", "-1 minute")
@@ -288,6 +288,11 @@ func TestOrphansSelects(t *testing.T) {
 	absent := e.gen(t, e.a, id.New(id.Ingestion))
 	held := e.gen(t, e.a, e.claim(t, "encrypted", "held", "1 minute", "1 hour"))
 	resumed := e.gen(t, e.a, e.claim(t, "encrypted", "resumed", "1 minute", "1 hour"))
+	// A paused claim is live with its lease ended (compilation §3.6).
+	pc := e.claim(t, "encrypted", "held", "1 minute", "1 hour")
+	mustDB(t, e.db, `UPDATE staging_claim SET state = 'paused', review = 'pending', lease_until = now() - interval '1 minute',
+		payload = '\x01', payload_digest = decode(repeat('00', 32), 'hex') WHERE id = $1`, pc)
+	paused := e.gen(t, e.a, pc)
 	removed := e.gen(t, id.New(id.Cluster), id.New(id.Ingestion))
 	out, _, err := e.run()
 	if err != nil {
@@ -298,12 +303,12 @@ func TestOrphansSelects(t *testing.T) {
 			t.Fatalf("not reported: %s", p)
 		}
 	}
-	for _, p := range []string{referenced, held, resumed} {
+	for _, p := range []string{referenced, held, resumed, paused} {
 		if strings.Contains(out, p) {
 			t.Fatalf("reported: %s", p)
 		}
 	}
-	t.Logf("reported abandoned, released, absent-row and restore-removed generations; not referenced, held or resumed")
+	t.Logf("reported abandoned, released, absent-row and restore-removed generations; not referenced, held, resumed or paused")
 }
 
 // TestOrphansClusterScope: --cluster lists and reports only that cluster's subtree, and never

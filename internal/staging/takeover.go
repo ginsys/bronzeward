@@ -25,6 +25,9 @@ var (
 	ErrEnded        = fmt.Errorf("%w: the ingestion has ended", ErrNotEligible)
 	ErrLeaseLive    = fmt.Errorf("%w: the claim's lease has not lapsed", ErrNotEligible)
 	ErrClaimEpoch   = fmt.Errorf("%w: the claim predates the current epoch", ErrNotEligible)
+	// ErrPaused refuses a takeover of a paused claim: the operator's mark or continuation takes it
+	// (compilation §3.4, §3.6).
+	ErrPaused = fmt.Errorf("%w: the claim is paused for the operator's review", ErrNotEligible)
 )
 
 // eligible is a takeover's predicate (compilation §3.4): an encrypted claim, held or resumed,
@@ -80,8 +83,9 @@ func takeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, cla
 		state = CASE WHEN payload IS NULL THEN 'abandoned' ELSE 'resumed' END,
 		lease_until = least(clock_timestamp() + $4::bigint * interval '1 microsecond', expires_at)
 		WHERE id = $1 AND $3 = (SELECT epoch FROM installation_state) AND `+pred+`
-		RETURNING owner_gen, cluster, machine, lease_until, payload, payload_digest`,
-		claim, o.ID, o.Epoch, lease.Microseconds()).Scan(&tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine, &until, &tk.Payload, &digest)
+		RETURNING owner_gen, cluster, machine, coalesce(review, ''), lease_until, payload, payload_digest`,
+		claim, o.ID, o.Epoch, lease.Microseconds()).Scan(&tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine, &tk.Claim.Review, &until,
+		&tk.Payload, &digest)
 	if opts.afterWrite != nil {
 		opts.afterWrite()
 	}
@@ -135,6 +139,8 @@ func notEligible(ctx context.Context, tx *sql.Tx, o Owner, claim string) error {
 		return ErrEpochSuperseded
 	case mode != "encrypted":
 		return ErrNotEncrypted
+	case state == "paused" && !expired:
+		return ErrPaused
 	case state != "held" && state != "resumed", expired:
 		return ErrEnded
 	case !claimEpoch:
