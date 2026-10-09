@@ -87,19 +87,29 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 		}
 	}
 	slices.Sort(withTargets)
+	// The refusal is the first document's, and arises from every document that does not load:
+	// it names the first mark in the request among them, not the one in the first document.
+	var unloadable error
+	var sources []Path
 	for _, i := range withTargets {
 		if _, err := schemaPointers(docs[i], i, stored); err != nil {
-			return nil, from(err, unloadableSources(docs[i], i, out))
+			if unloadable == nil {
+				unloadable = err
+			}
+			sources = append(sources, unloadableSources(docs[i], i, out)...)
 		}
+	}
+	if unloadable != nil {
+		return nil, from(unloadable, sources)
 	}
 	return out, nil
 }
 
 // unloadableSources is what a document i that does not load with its targets stored arises from:
-// the paths of the first target in it, in out's order, that alone keeps it from loading, or
-// every target in it when only their combination does.
+// the paths of every target in it that alone keeps it from loading, or of every target in it when
+// only their combination does.
 func unloadableSources(doc *yaml.Node, i int, out []*target) []Path {
-	var all []Path
+	var all, alone []Path
 	for _, t := range out {
 		var in []Path
 		for _, p := range t.paths {
@@ -111,9 +121,12 @@ func unloadableSources(doc *yaml.Node, i int, out []*target) []Path {
 			continue
 		}
 		if _, err := schemaPointers(doc, i, map[*yaml.Node]bool{t.node: true}); err != nil {
-			return in
+			alone = append(alone, in...)
 		}
 		all = append(all, in...)
+	}
+	if alone != nil {
+		return alone
 	}
 	return all
 }
