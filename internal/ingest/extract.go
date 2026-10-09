@@ -125,13 +125,9 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	for _, ex := range exs {
 		decl.References[ex.name] = Reference{Kind: ex.kind, Version: 1}
 	}
-	out, err := encodeStream(docs)
+	out, back, err := encodeStable(docs)
 	if err != nil {
 		return nil, err
-	}
-	back, err := parseStream(out)
-	if err != nil {
-		return nil, errors.New("ingest: the sanitized stream does not parse back")
 	}
 	seam.At("substitute") // step 4 done: the candidate document and its declarations built, not guarded
 	if guarded {
@@ -493,6 +489,33 @@ func encodeStream(docs []*yaml.Node) ([]byte, error) {
 		return nil, errors.New("ingest: the sanitized stream could not be encoded")
 	}
 	return b.Bytes(), nil
+}
+
+// encodeStable writes the documents as encodeStream does, then writes their parse again until the
+// text no longer changes, and returns that text and its parse. The encoder moves a blank line
+// inside a run of comments when it writes a parsed document (talosctl writes such runs), so its
+// first output is not always what it writes for that output's own parse; a staged document must
+// be, since a mark re-encodes it and refuses any other change (compilation.md §3.6 item 3).
+func encodeStable(docs []*yaml.Node) ([]byte, []*yaml.Node, error) {
+	out, err := encodeStream(docs)
+	if err != nil {
+		return nil, nil, err
+	}
+	for range 3 {
+		back, err := parseStream(out)
+		if err != nil {
+			return nil, nil, errors.New("ingest: the sanitized stream does not parse back")
+		}
+		again, err := encodeStream(back)
+		if err != nil {
+			return nil, nil, err
+		}
+		if bytes.Equal(again, out) {
+			return out, back, nil
+		}
+		out = again
+	}
+	return nil, nil, errors.New("ingest: the sanitized stream has no stable encoding")
 }
 
 // CreateError is a create callback's failure for one reference. It names the reference and

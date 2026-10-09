@@ -72,6 +72,29 @@ func TestRemarkExtractsNewMark(t *testing.T) {
 	}
 }
 
+// Compilation §3.6 item 3 on a configuration as talosctl writes one: a blank line inside a run of
+// comments, which the encoder moves when it writes the parsed document. The staged document must
+// already be what the encoder writes, or every mark on it is refused mark-rewrites-text.
+func TestRemarkCommentedConfig(t *testing.T) {
+	text := "machine:\n  kubelet:\n    image: k # The image.\n    defaultRuntimeSeccompProfileEnabled: true # Seccomp.\n    \n" +
+		"    # # The DNS list.\n    # clusterDNS:\n    #     - 10.96.0.10\n\n" +
+		"    # # The extra args.\n    # extraArgs:\n    #     key: value\n" +
+		"  files:\n    - content: " + otherSecret + "\n      path: /var/f\n"
+	st := stagedFrom(t, request(t, text))
+	before := string(st.Sanitized.Documents())
+	c, err := Remark(st, paths(t, "doc[0]/machine/files/0/content"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, calls := commitAll(t, c)
+	if len(calls) != 1 {
+		t.Fatalf("%d creates", len(calls))
+	}
+	if got, want := string(s.Documents()), strings.Replace(before, otherSecret, refTag+" "+calls[0].name, 1); got != want {
+		t.Fatalf("the remark changed other text:\n%s\nwant\n%s", got, want)
+	}
+}
+
 // Compilation §3.6 item 3: a mapping holding a reference has no kind, and the reference's earlier
 // value is in the provider: the mark is refused mark-kind.
 func TestRemarkMappingWithReference(t *testing.T) {
