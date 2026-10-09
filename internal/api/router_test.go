@@ -31,7 +31,7 @@ var specRoutes = []string{
 	"GET /operations/{id}/events any", "GET /acts any", "GET /recovery any",
 	"GET /dependencies any", "GET /dependencies/{id} any", "GET /dependencies/{id}/releases any",
 	"GET /dependencies/{id}/alerts any", "GET /dependency-alerts any",
-	"POST /ingestions author human if-match",
+	"POST /ingestions author human if-match", "GET /ingestions/{id}/review author human",
 	"POST /ingestions/{id}/marks author human", "POST /ingestions/{id}/takeovers author human",
 	"POST /ingestions/{id}/abandonments author human",
 	"POST /clusters author human", "POST /machines author human", "POST /machines/{id}/talos-endpoints author human",

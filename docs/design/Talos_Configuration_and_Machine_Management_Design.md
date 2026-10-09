@@ -767,7 +767,7 @@ The product requires a proper web API independent of machine transport. UI, auto
 
 - Explicit approval resources instead of hidden boolean flags.
 
-- Redacted diffs and plans in API responses; secrets never appear in normal API payloads.
+- Redacted diffs and plans in API responses; secrets never appear in normal API payloads. The one exception is the operator review of a paused ingestion: it shows a human author the staged sanitized document, which can still hold a value no one has marked yet, under `no-store` ([persistence contract §9.1](../spec/persistence-api.md#91-conventions), [compilation contract §3.6](../spec/compilation.md#36-operator-review)).
 
 This request shape is illustrative. A client creates a plan against an exact release and records an approval of it; neither request dispatches anything, and no role may request dispatch (§13.7). The controller then dispatches the approved plan (§12.7), and the client follows the operation it creates. The approval binds the immutable plan its path names; plan identifiers are never reissued, so no revision number is sent with it (§12.7).
 

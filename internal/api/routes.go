@@ -88,6 +88,7 @@ func routes() []*route {
 		read(g("/dependencies/{id}/releases"), dependencyReleases), read(g("/dependencies/{id}/alerts"), listAlerts(true)),
 		read(g("/dependency-alerts"), listAlerts(false)),
 		ingestionStart().on(ifm(human(m(post, "/ingestions", author)))),
+		read(human(m(http.MethodGet, "/ingestions/{id}/review", author)), getIngestionReview),
 		human(m(post, "/ingestions/{id}/marks", author)),
 		ingestionTakeover().on(human(m(post, "/ingestions/{id}/takeovers", author))),
 		ingestionAbandonment().on(human(m(post, "/ingestions/{id}/abandonments", author))),
