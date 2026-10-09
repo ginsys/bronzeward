@@ -158,6 +158,7 @@ func TestRemarkGuardsNewValues(t *testing.T) {
 // rule refuses it, a guard hit's included (the guard knows only the node it hit). When several
 // marks are at fault, the first in the request is named.
 func TestRemarkRefusalPosition(t *testing.T) {
+	const holder1 = "doc[0]/cluster/inlineManifests/1/contents"
 	const a, b = "remark-alpha-7c1e", "remark-beta-2d9f"
 	st := stagedFrom(t, request(t, "machine:\n  token: "+secretText+"\n  nodeLabels:\n    host: "+otherSecret+"\n    note: "+otherSecret+
 		"\n    a: "+a+"\n    b: "+b+"\n    c: "+b+"\n", "doc[0]/machine/token"))
@@ -179,6 +180,12 @@ func TestRemarkRefusalPosition(t *testing.T) {
 	roots := stagedFrom(t, request(t, "apiVersion: v1alpha1\nkind: HostnameConfig\nhostname: node-1\n---\n"+
 		"apiVersion: v1alpha1\nkind: ExtensionServiceConfig\nname: ext\n"))
 	aliasKey := stagedFrom(t, embeddedRequest(t, manifestStream("safe: harmless-5839\npassword: &pw sensitive-9284\nlookup:\n  *pw : visible-3741\n"), "yaml"))
+	// Two identified embedded documents beside a harmless value: a mark on a holder replaces it
+	// with a reference, so the embedded document it held is not there to validate.
+	holdersReq := request(t, "cluster:\n  inlineManifests:\n    - name: m\n      contents: |\n        password: sensitive-9284\n"+
+		"    - name: n\n      contents: |\n        token: sensitive-4417\nmachine:\n  nodeLabels:\n    safe: harmless-5839\n")
+	holdersReq.Declarations.Embedded = []Embedded{{Path: manifestPath, Format: "yaml"}, {Path: holder1, Format: "yaml"}}
+	holders := stagedFrom(t, holdersReq)
 	for _, tc := range []struct {
 		name  string
 		st    Staged
@@ -206,6 +213,10 @@ func TestRemarkRefusalPosition(t *testing.T) {
 		{"two roots, the later document first", roots, []string{"doc[1]", "doc[0]"}, RuleTagPlacement, 0},
 		// The alias key is refused at its mapping's path, which no mark names.
 		{"embedded alias key second", aliasKey, []string{manifestPath + "|yaml/safe", manifestPath + "|yaml/password"}, RuleTagPlacement, 1},
+		// The refusal is at the holder's path, where the mark stands.
+		{"embedded holder second", holders, []string{"doc[0]/machine/nodeLabels/safe", manifestPath}, RuleEmbedded, 1},
+		// Either holder alone is refused: the first marked is named, whichever validation meets first.
+		{"two embedded holders, the later first", holders, []string{"doc[0]/machine/nodeLabels/safe", holder1, manifestPath}, RuleEmbedded, 1},
 		{"rewrites second", embedded, []string{"doc[0]/cluster/inlineManifests/0/name", manifestPath + "|yaml/stringData/password"},
 			RuleMarkRewritesText, 1},
 	} {
