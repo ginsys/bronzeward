@@ -30,9 +30,10 @@ const (
 	RuleTagPlacement     Rule = "tag-placement"     // !bwref on a mapping key or a sequence
 	RuleUndeclaredName   Rule = "undeclared-name"   // a !bwref name with no declaration
 	RuleUnusedName       Rule = "unused-declaration"
-	RuleBadName          Rule = "bad-name"        // a name outside the grammar of §5.1
-	RuleBadDeclaration   Rule = "bad-declaration" // a kind, version or encoding outside §5.2
-	RuleEmbedded         Rule = "embedded"        // an identified embedded document is not a string or does not parse
+	RuleBadName          Rule = "bad-name"           // a name outside the grammar of §5.1
+	RuleBadDeclaration   Rule = "bad-declaration"    // a kind, version or encoding outside §5.2
+	RuleEmbedded         Rule = "embedded"           // an identified embedded document is not a string or does not parse
+	RuleMarkRewritesText Rule = "mark-rewrites-text" // a mark on a paused claim would change text other than the nodes it replaces
 )
 
 func (r *Refusal) Error() string {
