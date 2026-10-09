@@ -89,6 +89,9 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseReferenceHolders(docs, targets, declared); err != nil {
+		return nil, err
+	}
 	inner, embedded, err := identifyEmbedded(docs, innerMarks, declared, targets)
 	if err != nil {
 		return nil, err
@@ -204,6 +207,51 @@ func knownSecrets(docs []*yaml.Node, marks []Path) (texts []string, complete boo
 		collect(n)
 	}
 	return searchTexts(values), complete
+}
+
+// refuseReferenceHolders refuses mark-kind a target that is, or holds as a member, an identified
+// embedded document with a reference inside it (compilation.md §3.6 item 3): its value would
+// carry the reference's name, never the value the name stands for.
+func refuseReferenceHolders(docs []*yaml.Node, targets []*target, declared map[string]string) error {
+	holders := map[*yaml.Node]bool{}
+	for key := range declared {
+		p, err := ParsePath(key)
+		if err != nil {
+			continue
+		}
+		n, ok := resolve(docs, p.Doc, p.Pointer)
+		if !ok {
+			continue
+		}
+		if inner, err := embeddedDocument(n); err == nil && holdsReference(inner) {
+			holders[n] = true
+		}
+	}
+	for _, t := range targets {
+		n := deref(t.node)
+		held := holders[n]
+		for i := 1; n.Kind == yaml.MappingNode && i < len(n.Content); i += 2 {
+			held = held || holders[deref(n.Content[i])]
+		}
+		if held {
+			return refuse(RuleMarkKind, t.paths[0].String())
+		}
+	}
+	return nil
+}
+
+// holdsReference reports whether n or any node under it is a !bwref. An alias needs no visit: its
+// anchored node is visited where it stands.
+func holdsReference(n *yaml.Node) bool {
+	if n.Tag == refTag {
+		return true
+	}
+	for _, c := range n.Content {
+		if holdsReference(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // embeddedDoc is an identified embedded document with marks inside it: the outer string scalar

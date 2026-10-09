@@ -53,6 +53,7 @@ func TestRefusalSweep(t *testing.T) {
 		marks  []string
 		decl   Declarations
 		secret string // what must not appear; secretText when empty
+		remark string // "author" or "widened": the text is staged unmarked (re-indented when widened) and the marks re-mark it
 	}{
 		{rule: RuleParse, text: "machine:\n  token: *" + s + "\n"},
 		{rule: RuleSchemaUnloadable, text: "apiVersion: v1alpha1\nkind: Nope\nx: " + s + "\n"},
@@ -100,6 +101,11 @@ func TestRefusalSweep(t *testing.T) {
 		{rule: RuleUnusedName, text: "machine:\n  token: " + s + "\n", decl: decl("s-x", str(provider.KindString))},
 		{rule: RuleBadName, text: "machine:\n  token: !bwref " + s + "_\n"},
 		{rule: RuleBadDeclaration, text: "machine:\n  token: !bwref s-x\n  type: " + s + "\n", decl: decl("s-x", Reference{Kind: "list", Version: 1})},
+		{rule: RuleMarkRewritesText, remark: "author", text: manifestStream(secretManifest), marks: []string{manifestPath + "|yaml/stringData/password"},
+			decl: Declarations{Embedded: []Embedded{{Path: manifestPath, Format: "yaml"}}}},
+		// The refusal names the first mark, whose key is a value the second extracts.
+		{rule: RuleMarkRewritesText, remark: "widened", text: "machine:\n  nodeLabels:\n    a: " + s + "\n    " + s + ": x\n",
+			marks: []string{"doc[0]/machine/nodeLabels/" + s, "doc[0]/machine/nodeLabels/a"}},
 		{rule: RuleEmbedded, text: "machine:\n  nodeLabels:\n    k: " + s + "\n",
 			decl: Declarations{Embedded: []Embedded{{Path: "doc[0]/machine/nodeLabels", Format: "yaml"}}}},
 	}
@@ -116,7 +122,18 @@ func TestRefusalSweep(t *testing.T) {
 			}
 			req := request(t, tc.text, tc.marks...)
 			req.Declarations = tc.decl
-			c, err := Extract(req)
+			var c *Candidate
+			var err error
+			if tc.remark == "" {
+				c, err = Extract(req)
+			} else {
+				st := stagedFrom(t, Request{Input: req.Input, Declarations: tc.decl})
+				if tc.remark == "widened" {
+					wide := strings.ReplaceAll(string(st.Sanitized.Documents()), "\n  ", "\n    ")
+					st.Sanitized = newSanitized([]byte(wide), st.Sanitized.Declarations())
+				}
+				c, err = Remark(st, req.Marks)
+			}
 			var r *Refusal
 			if !errors.As(err, &r) || r.Rule != tc.rule || c != nil {
 				t.Fatalf("got %v, want a %s refusal and no candidate", err, tc.rule)
