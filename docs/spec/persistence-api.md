@@ -1545,7 +1545,7 @@ idempotency and conflict behavior.
 | `GET /dependencies[/{id}[/releases\|/alerts]]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
-| `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation | `author`, human only (§10.3) |
+| `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation; a mark's also the owner generation it took (§9.3) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2, a paused ingestion's included), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3) | 201 | `author`, human only (§10.3) |
 | `POST /machines/{id}/talos-endpoints` (replace a machine's Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
@@ -1968,7 +1968,8 @@ HTTP/1.1 202 Accepted
 Location: /api/v1/operations/op_f6hekztxvswfhzqoe2wbyqnbtq
 
 {"operation": "op_f6hekztxvswfhzqoe2wbyqnbtq",
- "ingestion": "ing_4ycffhy7bf4o2w6pz5b4r75hmu"}
+ "ingestion": "ing_4ycffhy7bf4o2w6pz5b4r75hmu",
+ "generation": 2}
 ```
 
 `<value>` stands for the unmarked text the review shows. The review answers
@@ -1980,7 +1981,8 @@ neither changing the claim. A mark takes 1 to 1024 compilation §2.2 paths; a
 path that does not parse is `422 validation-failed` naming its position in
 `marks`, never its text, before any change. A mark or a continuation (`{}`) on a claim not `paused`, past its
 absolute expiry or of an earlier epoch is `409 conflict`, and nothing changes;
-otherwise it answers 202 at once, and the ingestion's events show how the run
+otherwise it answers 202 at once, a mark's body naming the owner generation it
+took, which its run's events carry, and the ingestion's events show how the run
 ends (§8.3): `paused` again, `mark-refused` with the claim `paused`,
 `succeeded` after a continuation, `failed`, or `resume-failed` with the claim
 `held` to its lease and the operation `running`, taken over after that lease
@@ -3049,7 +3051,16 @@ each (design §7.7 consequences):
   fail; a mark path that does not parse and holds the sentinel answering `422`
   by position with the claim and its digest unchanged, the sentinel absent
   from the problem, the logs and every surface the scan above names, with a
-  control that echoes the path in the problem and must then fail; two marks racing one paused claim, exactly one
+  control that echoes the path in the problem and must then fail; a mark
+  request's stored fingerprint equal to the digest key's HMAC-SHA-256 over the
+  request without its marks, then the marks, each length-prefixed (§7.1), its
+  record naming the key and version, a retry with the same marks replayed and
+  one with other marks or another order refused `422
+  idempotency-key-reused`, with a control that compares the stored
+  fingerprint with an unkeyed SHA-256 of the body and must then fail; a mark's
+  `202`, its `marked` event and the `paused` or `mark-refused` event that
+  ends its run naming the owner generation the mark took, with a control that
+  answers without it and must then fail; two marks racing one paused claim, exactly one
   taking it; a takeover of a `paused` claim refused; a mark's run killed at
   each of the steps it re-enters (§2.3 steps 3 to 7, step 6 after its first
   generation and before its last) and before it stores its new envelope, and
