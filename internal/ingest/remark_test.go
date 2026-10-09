@@ -171,6 +171,9 @@ func TestRemarkRefusalPosition(t *testing.T) {
 	// document order: neither order may name a later mark when an earlier one is at fault too.
 	mixed := stagedFrom(t, embeddedRequest(t, manifestStream(secretManifest+"    note: "+a+"\n")+
 		"machine:\n  nodeLabels:\n    x: "+b+"\n    y: "+b+"\n    z: "+a+"\n", "yaml", manifestPath+"|yaml/stringData/password"))
+	// a remains only inside z, b exactly in y: the guard-value refusal is b's mark alone.
+	mixedRule := stagedFrom(t, embeddedRequest(t, manifestStream(secretManifest+"    note: "+a+"\n")+
+		"machine:\n  nodeLabels:\n    x: "+b+"\n    y: "+b+"\n    z: pre-"+a+"-post\n", "yaml", manifestPath+"|yaml/stringData/password"))
 	three := stagedFrom(t, request(t, "machine:\n  token: "+secretText+
 		"\n---\napiVersion: v1alpha1\nkind: HostnameConfig\nhostname: node-1\n---\n"+wireguardDoc, "doc[0]/machine/token"))
 	for _, tc := range []struct {
@@ -189,6 +192,7 @@ func TestRemarkRefusalPosition(t *testing.T) {
 		{"unloadable in a marked document", two, []string{"doc[1]/hostname", "doc[1]/kind"}, RuleSchemaUnloadable, 1},
 		{"guard beside a minted prefix", prefix, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/nodeLabels/b"}, RuleGuardValue, 1},
 		{"guard embedded first", mixed, []string{manifestPath + "|yaml/stringData/note", "doc[0]/machine/nodeLabels/x"}, RuleGuardValue, 0},
+		{"guard rule's own mark", mixedRule, []string{manifestPath + "|yaml/stringData/note", "doc[0]/machine/nodeLabels/x"}, RuleGuardValue, 1},
 		{"unloadable later document first", three, []string{"doc[2]/kind", "doc[1]/kind"}, RuleSchemaUnloadable, 0},
 		{"bad path second", st, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/nodeLabels/b|yaml/x"}, RuleBadPath, 1},
 		{"guard first", st, []string{"doc[0]/machine/nodeLabels/host", "doc[0]/machine/nodeLabels/a"}, RuleGuardValue, 0},

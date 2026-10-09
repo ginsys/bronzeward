@@ -135,7 +135,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	seam.At("substitute") // step 4 done: the candidate document and its declarations built, not guarded
 	if guarded {
 		if err := guard(back, exs, declared); err != nil {
-			return nil, from(err, guardSources(back, exs, declared))
+			return nil, from(err, guardSources(back, exs, declared, err))
 		}
 	}
 	if err := validate(back, decl); err != nil {
@@ -152,14 +152,20 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	return c, nil
 }
 
-// guardSources is the paths of every extraction whose value alone the guard refuses, or nil: the
-// extractions a guard refusal arises from, of which the refusal names the first mark in the
-// request (exs is not in request order). Every reference of the run is skipped as the guard skips
-// it, since a short value can be part of a generated name.
-func guardSources(docs []*yaml.Node, exs []extraction, embedded map[string]string) []Path {
+// guardSources is the paths of every extraction whose value alone the guard refuses by refused's
+// rule, or nil: the extractions refused arises from, of which it names the first mark in the
+// request (exs is not in request order). The rule is the same alone as together, since an equal
+// copy of any value outranks a copy within. Every reference of the run is skipped as the guard
+// skips it, since a short value can be part of a generated name.
+func guardSources(docs []*yaml.Node, exs []extraction, embedded map[string]string, refused error) []Path {
+	var r *Refusal
+	if !errors.As(refused, &r) {
+		return nil
+	}
 	var out []Path
 	for _, ex := range exs {
-		if guardValues(docs, []extraction{ex}, exs, embedded) != nil {
+		var alone *Refusal
+		if errors.As(guardValues(docs, []extraction{ex}, exs, embedded), &alone) && alone.Rule == r.Rule {
 			out = append(out, ex.paths...)
 		}
 	}
