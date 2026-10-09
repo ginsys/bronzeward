@@ -3,6 +3,7 @@ package ingest
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -315,6 +316,36 @@ func TestIdentifyRefusesMarkTheStoredFormCannotLoad(t *testing.T) {
 	}
 	if _, err := identifyText(t, text, "doc[0]/hostname"); err != nil {
 		t.Errorf("doc[0]/hostname: %v", err)
+	}
+}
+
+// Naming the mark a document cannot load without costs a number of machinery loads bounded
+// independently of the marks: a request of the most marks, every one in that document, still
+// names the one at fault.
+func TestUnloadableAttributionLoads(t *testing.T) {
+	const n, culprit = 1024, 500
+	var text strings.Builder
+	text.WriteString("apiVersion: v1alpha1\nkind: ExtensionServiceConfig\nname: ext\nenvironment:\n")
+	var marks []string
+	for i := range n - 1 {
+		fmt.Fprintf(&text, "  - E%04d=env-value-%04d\n", i, i)
+		if i == culprit {
+			marks = append(marks, "doc[0]/kind")
+		}
+		marks = append(marks, fmt.Sprintf("doc[0]/environment/%d", i))
+	}
+	loads := 0
+	machineryLoaded = func() { loads++ }
+	t.Cleanup(func() { machineryLoaded = nil })
+	_, err := Extract(request(t, text.String(), marks...))
+	wantRule(t, err, RuleSchemaUnloadable)
+	if r := err.(*Refusal); r.Position != culprit {
+		t.Errorf("position %d, want %d", r.Position, culprit)
+	}
+	// One load to find the secrets, one with the targets stored, and at most log2(n) to bisect;
+	// knownSecrets loads the document once more before identification.
+	if loads > 3+10 {
+		t.Errorf("%d machinery loads for %d marks", loads, n)
 	}
 }
 
