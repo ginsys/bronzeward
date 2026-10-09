@@ -164,20 +164,20 @@ func TestContinuationEarlierEpoch(t *testing.T) {
 func TestContinuationDraftChecks(t *testing.T) {
 	cases := []struct {
 		name   string
-		move   func(ie *ingestEnv, op string)
+		move   func(t *testing.T, ie *ingestEnv, op string)
 		status int
 		code   string
 	}{
-		{"moved", func(ie *ingestEnv, _ string) {
+		{"moved", func(t *testing.T, ie *ingestEnv, _ string) {
 			mustExec(t, ie.db, `UPDATE draft SET revision = revision + 1 WHERE id = $1`, ie.draft)
 		}, http.StatusPreconditionFailed, "precondition-failed"},
-		{"discarded", func(ie *ingestEnv, _ string) {
+		{"discarded", func(t *testing.T, ie *ingestEnv, _ string) {
 			mustExec(t, ie.db, `UPDATE draft SET state = 'discarded', revision = revision + 1 WHERE id = $1`, ie.draft)
 		}, http.StatusConflict, "conflict"},
-		{"queued publication", func(ie *ingestEnv, op string) {
+		{"queued publication", func(t *testing.T, ie *ingestEnv, op string) {
 			publication(t, ie, op, "queued", "NULL::text, 0, NULL::text, NULL::timestamptz")
 		}, http.StatusConflict, "conflict"},
-		{"running publication", func(ie *ingestEnv, op string) {
+		{"running publication", func(t *testing.T, ie *ingestEnv, op string) {
 			publication(t, ie, op, "running", "'b/1/x', 1, epoch, now() + interval '1 minute'")
 		}, http.StatusConflict, "conflict"},
 	}
@@ -185,7 +185,7 @@ func TestContinuationDraftChecks(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			ie := newIngestEnv(t, options{})
 			op, j, _ := ie.pausedForContinue(t)
-			c.move(ie, op)
+			c.move(t, ie, op)
 			moved := ie.currentETag(t)
 			cj := ie.continueReview(t, "k-continue-draft-012", j.claim.ID, op, 2)
 			ie.runWith(t, options{}, cj)
@@ -249,14 +249,14 @@ func TestContinuationDecryptFailureThenTakeover(t *testing.T) {
 func TestContinuationIntegrityFailureAbandons(t *testing.T) {
 	for _, c := range []struct {
 		name    string
-		corrupt func(ie *ingestEnv, claim string, ct provider.Ciphertext)
+		corrupt func(t *testing.T, ie *ingestEnv, claim string, ct provider.Ciphertext)
 	}{
-		{"digest mismatch", func(ie *ingestEnv, _ string, ct provider.Ciphertext) {
+		{"digest mismatch", func(_ *testing.T, ie *ingestEnv, _ string, ct provider.Ciphertext) {
 			ie.f.mu.Lock()
 			defer ie.f.mu.Unlock()
 			ie.f.staged[ct] = append(append([]byte(nil), ie.f.staged[ct]...), ' ')
 		}},
-		{"malformed envelope", func(ie *ingestEnv, claim string, ct provider.Ciphertext) {
+		{"malformed envelope", func(t *testing.T, ie *ingestEnv, claim string, ct provider.Ciphertext) {
 			malformed := []byte(`{"version":1,"documents":"machine:\n  hostname: x\n"}`)
 			digest := sha256.Sum256(malformed)
 			ie.f.mu.Lock()
@@ -270,7 +270,7 @@ func TestContinuationIntegrityFailureAbandons(t *testing.T) {
 			before := ie.currentETag(t)
 			op, j, _ := ie.pausedForContinue(t)
 			ct, _ := ie.stagedPayload(t, j.claim.ID)
-			c.corrupt(ie, j.claim.ID, ct)
+			c.corrupt(t, ie, j.claim.ID, ct)
 			cj := ie.continueReview(t, "k-continue-integrity", j.claim.ID, op, 2)
 			ie.runWith(t, options{beforeT1: func() { t.Error("the run reached the draft transaction") }}, cj)
 			r := readOp(t, ie.db, op)
@@ -325,9 +325,10 @@ func TestContinuationActOrderWait(t *testing.T) {
 		d := ie.d
 		d.timers.Lease = time.Second
 		b := ie.buildWith(d, options{onRunner: func(job) {}})
+		c := continueCall(ie.human("h-author"), "k-continue-order-01", j.claim.ID)
 		lock := holdActOrder(t, ie.db)
 		done := make(chan *httptest.ResponseRecorder, 1)
-		go func() { done <- ie.do(b, continueCall(ie.human("h-author"), "k-continue-order-01", j.claim.ID)) }()
+		go func() { done <- ie.do(b, c) }()
 		dbtest.WaitForLockWait(t, ie.db)
 		time.Sleep(1200 * time.Millisecond)
 		released := time.Now()
@@ -345,9 +346,10 @@ func TestContinuationActOrderWait(t *testing.T) {
 		mustExec(t, ie.db, `UPDATE staging_claim SET expires_at = clock_timestamp() + interval '1 second' WHERE id = $1`, j.claim.ID)
 		started := make(chan job, 1)
 		b := ie.buildWith(ie.d, options{onRunner: func(j job) { started <- j }})
+		c := continueCall(ie.human("h-author"), "k-continue-expiry-0", j.claim.ID)
 		lock := holdActOrder(t, ie.db)
 		done := make(chan *httptest.ResponseRecorder, 1)
-		go func() { done <- ie.do(b, continueCall(ie.human("h-author"), "k-continue-expiry-0", j.claim.ID)) }()
+		go func() { done <- ie.do(b, c) }()
 		dbtest.WaitForLockWait(t, ie.db)
 		time.Sleep(1200 * time.Millisecond)
 		if err := lock.Rollback(); err != nil {
