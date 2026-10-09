@@ -501,20 +501,26 @@ CALL make_immutable('identity_revocation');
 -- allocates from the machine's revision counter under its row lock, with the epoch it was appended
 -- in. Kinds are added with the issues that write them: an endpoint change, then a plan's entries
 -- from creation to commitment or a terminal state, observations and their starts, adoption records
--- and Applied changes, and refusals (execution and recovery §4.1). A record of one entry is keyed
--- by it. A refusal names the transaction and the comparison that failed.
+-- and Applied changes, commitments, and refusals (execution and recovery §4.1). A record of one
+-- entry is keyed by it. A refusal names the transaction and the comparison that failed.
 CREATE TABLE machine_event (
   machine  text NOT NULL REFERENCES machine (id),
   revision bigint NOT NULL CHECK (revision >= 1),
   epoch    text NOT NULL REFERENCES recovery_epoch (epoch),
   kind     text NOT NULL CONSTRAINT machine_event_kind CHECK (kind IN ('endpoint-change', 'plan', 'approval',
              'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
-             'observation', 'adoption', 'applied-change', 'refusal')),
+             'observation', 'adoption', 'applied-change', 'commitment', 'refusal')),
   -- A JSON object: JSON null is not SQL NULL, and an immutable entry cannot be corrected later.
   entry    jsonb NOT NULL CHECK (jsonb_typeof(entry) = 'object'),
   CONSTRAINT machine_event_refusal CHECK (kind <> 'refusal'
     OR (jsonb_typeof(entry->'transaction') IS NOT DISTINCT FROM 'string'
       AND jsonb_typeof(entry->'comparison') IS NOT DISTINCT FROM 'string')),
+  -- A commitment names the operation it created, its plan and the evidence observation it links
+  -- (execution and recovery §3.2, §4.1).
+  CONSTRAINT machine_event_commitment CHECK (kind <> 'commitment'
+    OR (jsonb_typeof(entry->'operation') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'plan') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'observation') IS NOT DISTINCT FROM 'string')),
   at       timestamptz NOT NULL,
   PRIMARY KEY (machine, revision),
   UNIQUE (machine, revision, kind)
