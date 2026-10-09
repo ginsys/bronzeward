@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -24,12 +25,26 @@ func dueClaim(t *testing.T, db *sql.DB, human, cluster, machine string) string {
 // in the past, so the claim is due.
 func insertClaim(t *testing.T, db *sql.DB, human, cluster, machine string, lapsed bool) string {
 	t.Helper()
+	return insertClaimAs(t, db, human, cluster, machine, "transient", "", lapsed)
+}
+
+// pausedClaim inserts an encrypted claim with its review pending, paused with a stored envelope
+// (compilation §3.6): its lease ended at the pause, its absolute expiry ahead.
+func pausedClaim(t *testing.T, db *sql.DB, human, cluster, machine string) string {
+	t.Helper()
+	return insertClaimAs(t, db, human, cluster, machine, "encrypted", "pending", false)
+}
+
+// insertClaimAs inserts a claim in mode with its running ingest operation; a pending review
+// pauses it with an envelope, and lapsed sets its lease in the past.
+func insertClaimAs(t *testing.T, db *sql.DB, human, cluster, machine, mode, review string, lapsed bool) string {
+	t.Helper()
 	var epoch string
 	if err := db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
 		t.Fatal(err)
 	}
 	o := staging.Owner{ID: "a/4242/start-1", Epoch: epoch}
-	c := staging.Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: "transient", Cluster: cluster, Machine: machine, Gen: 1}
+	c := staging.Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: mode, Cluster: cluster, Machine: machine, Review: review, Gen: 1}
 	draft := id.New(id.Draft)
 	tx, err := db.Begin()
 	if err != nil {
@@ -49,6 +64,12 @@ func insertClaim(t *testing.T, db *sql.DB, human, cluster, machine string, lapse
 		SELECT $1, 'ingest', 'running', owner_epoch, owner, 1, owner_epoch, lease_until, $2, 1, $3, $4, 'human', 'author', now()
 		FROM staging_claim WHERE id = $3`, id.New(id.Operation), draft, c.ID, human); err != nil {
 		t.Fatal(err)
+	}
+	if review != "" {
+		envelope := []byte("vault:v1:staged-envelope")
+		if err := staging.Pause(t.Context(), tx, o, c, envelope, sha256.Sum256(envelope)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if lapsed {
 		if _, err := tx.Exec(`UPDATE staging_claim SET lease_until = now() - interval '1 second' WHERE id = $1`, c.ID); err != nil {
@@ -128,6 +149,42 @@ func TestStartSweep(t *testing.T) {
 			t.Fatal("no periodic sweep abandoned the second claim")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// persistence-api §16 item 27, restart half: a server restart runs the startup sweep and then the
+// periodic one, the only startup path that touches claims. A paused claim's lease ended at the
+// pause and its absolute expiry is ahead (compilation §3.6), so both sweeps leave it paused with
+// its envelope, while the same sweeps abandon a lapsed claim beside it (the control).
+func TestStartSweepKeepsPausedClaim(t *testing.T) {
+	db, human, cluster, machine := sweepFixture(t)
+	paused := pausedClaim(t, db, human, cluster, machine)
+	first := dueClaim(t, db, human, cluster, machine)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	startSweep(t.Context(), ctx, db, 20*time.Millisecond, func(string, ...any) {})
+	if s := claimState(t, db, first); s != "abandoned" {
+		t.Fatalf("after the startup sweep the lapsed claim is %s", s)
+	}
+	second := dueClaim(t, db, human, cluster, machine)
+	waitAbandoned(t, db, second, "the second lapsed claim")
+	var (
+		state, review string
+		payload       []byte
+	)
+	if err := db.QueryRow(`SELECT state, review, payload FROM staging_claim WHERE id = $1`, paused).
+		Scan(&state, &review, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if state != "paused" || review != "pending" || string(payload) != "vault:v1:staged-envelope" {
+		t.Fatalf("after both sweeps the paused claim is %s, review %s, payload %q", state, review, payload)
+	}
+	var op string
+	if err := db.QueryRow(`SELECT state FROM operation WHERE ingestion = $1`, paused).Scan(&op); err != nil {
+		t.Fatal(err)
+	}
+	if op != "running" {
+		t.Fatalf("the paused claim's operation is %s", op)
 	}
 }
 

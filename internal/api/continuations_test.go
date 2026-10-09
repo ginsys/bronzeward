@@ -247,24 +247,7 @@ func TestContinuationDecryptFailureThenTakeover(t *testing.T) {
 // operation 500 internal-error, writing nothing to the draft. Control: pausing again instead
 // leaves the claim held or paused and fails each case.
 func TestContinuationIntegrityFailureAbandons(t *testing.T) {
-	for _, c := range []struct {
-		name    string
-		corrupt func(t *testing.T, ie *ingestEnv, claim string, ct provider.Ciphertext)
-	}{
-		{"digest mismatch", func(_ *testing.T, ie *ingestEnv, _ string, ct provider.Ciphertext) {
-			ie.f.mu.Lock()
-			defer ie.f.mu.Unlock()
-			ie.f.staged[ct] = append(append([]byte(nil), ie.f.staged[ct]...), ' ')
-		}},
-		{"malformed envelope", func(t *testing.T, ie *ingestEnv, claim string, ct provider.Ciphertext) {
-			malformed := []byte(`{"version":1,"documents":"machine:\n  hostname: x\n"}`)
-			digest := sha256.Sum256(malformed)
-			ie.f.mu.Lock()
-			ie.f.staged[ct] = malformed
-			ie.f.mu.Unlock()
-			mustExec(t, ie.db, `UPDATE staging_claim SET payload_digest = $2 WHERE id = $1`, claim, digest[:])
-		}},
-	} {
+	for _, c := range envelopeCorruptions {
 		t.Run(c.name, func(t *testing.T) {
 			ie := newIngestEnv(t, options{})
 			before := ie.currentETag(t)
@@ -273,19 +256,47 @@ func TestContinuationIntegrityFailureAbandons(t *testing.T) {
 			c.corrupt(t, ie, j.claim.ID, ct)
 			cj := ie.continueReview(t, "k-continue-integrity", j.claim.ID, op, 2)
 			ie.runWith(t, options{beforeT1: func() { t.Error("the run reached the draft transaction") }}, cj)
-			r := readOp(t, ie.db, op)
-			if r.state != "failed" || r.error["type"] != "urn:bronzeward:problem:internal-error" ||
-				r.error["status"] != float64(http.StatusInternalServerError) {
-				t.Fatalf("operation %+v", r)
-			}
-			if got := eventTypes(events(t, ie.db, op)); !slices.Equal(got, []string{"started", "staged", "paused", "continued", "failed"}) {
-				t.Fatalf("events %v", got)
-			}
-			if st, _, payload := claimRow(t, ie.db, j.claim.ID); st != "abandoned" || payload {
-				t.Fatalf("claim %s, payload %v", st, payload)
-			}
+			ie.wantIntegrityFailure(t, op, j.claim.ID, "continued")
 			ie.draftUnchanged(t, before)
 		})
+	}
+}
+
+// envelopeCorruptions are the stored envelopes a run that opens one must refuse as integrity
+// failures (PA §16): one not matching its digest, and a malformed one stored with its digest.
+var envelopeCorruptions = []struct {
+	name    string
+	corrupt func(t *testing.T, ie *ingestEnv, claim string, ct provider.Ciphertext)
+}{
+	{"digest mismatch", func(_ *testing.T, ie *ingestEnv, _ string, ct provider.Ciphertext) {
+		ie.f.mu.Lock()
+		defer ie.f.mu.Unlock()
+		ie.f.staged[ct] = append(append([]byte(nil), ie.f.staged[ct]...), ' ')
+	}},
+	{"malformed envelope", func(t *testing.T, ie *ingestEnv, claim string, ct provider.Ciphertext) {
+		malformed := []byte(`{"version":1,"documents":"machine:\n  hostname: x\n"}`)
+		digest := sha256.Sum256(malformed)
+		ie.f.mu.Lock()
+		ie.f.staged[ct] = malformed
+		ie.f.mu.Unlock()
+		mustExec(t, ie.db, `UPDATE staging_claim SET payload_digest = $2 WHERE id = $1`, claim, digest[:])
+	}},
+}
+
+// wantIntegrityFailure checks that the run taken by act (continued or marked) failed op 500
+// internal-error and abandoned claim without its payload.
+func (ie *ingestEnv) wantIntegrityFailure(t *testing.T, op, claim, act string) {
+	t.Helper()
+	r := readOp(t, ie.db, op)
+	if r.state != "failed" || r.error["type"] != "urn:bronzeward:problem:internal-error" ||
+		r.error["status"] != float64(http.StatusInternalServerError) {
+		t.Fatalf("operation %+v", r)
+	}
+	if got := eventTypes(events(t, ie.db, op)); !slices.Equal(got, []string{"started", "staged", "paused", act, "failed"}) {
+		t.Fatalf("events %v", got)
+	}
+	if st, _, payload := claimRow(t, ie.db, claim); st != "abandoned" || payload {
+		t.Fatalf("claim %s, payload %v", st, payload)
 	}
 }
 
