@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // commitRefused is a commitment refused by one of execution-recovery.md §3.2's comparisons, named
@@ -42,10 +41,11 @@ type committed struct {
 // commitPlan commits an approved apply-config plan (T6, execution-recovery.md §3.2,
 // persistence-api.md §5) as this process, the controller of the current epoch. It holds, in
 // persistence-api.md §5 rule 5's order, the installation state FOR SHARE, the machine FOR UPDATE,
-// its assignment head, the approver's principal and the approval FOR SHARE and the plan's state FOR
-// UPDATE; reads the time after the last lock (rule 4); compares 0 to 6 in order; and creates the
-// plan's apply-config operation in committed, owned by this process at generation 1 in the current
-// epoch, commits the plan to it and appends the commitment entry. A refusal rolls back and is
+// its assignment head, the approver's principal and the approval FOR SHARE, the plan's state FOR
+// UPDATE and the cluster's rollout lock (choice §10.29); reads the time after the last lock (rule
+// 4); compares 0 to 6 in order; and creates the plan's apply-config operation in committed, owned
+// by this process at generation 1 in the current epoch, commits the plan to it and appends the
+// commitment entry. A refusal rolls back and is
 // recorded as a refusal entry by a separate transaction (§4.1). It sends nothing: §3.1 item 2's
 // use-time check and the attempt are the dispatch's (ginsys/bronzeward#26).
 func (a *API) commitPlan(ctx context.Context, plan string) (committed, error) {
@@ -149,6 +149,13 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	var operation sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT state, operation FROM plan_state WHERE plan = $1 FOR UPDATE`, plan).Scan(&state,
 		&operation); err != nil {
+		return r, machine, err
+	}
+	// The cluster's rollout lock, which only commitments take, last: another machine's commitment
+	// holding the rollout scope uncommitted is waited for here, before the time is read, not at the
+	// operation's insert after it.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`, rolloutLockClass,
+		cluster); err != nil {
 		return r, machine, err
 	}
 	// PA §5 rule 4: the commitment's time, and the expiry and age judged against it, follow every
@@ -258,8 +265,8 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 		return r, machine, refused("a newer observation contradicts the evidence", newer.String)
 	}
 	// 4 and 5: no operation holds the machine scope or the cluster's rollout scope. The machine's
-	// lock orders 4; another machine's commitment is ordered by the rollout scope's unique index at
-	// the insert below.
+	// lock orders 4 and the rollout lock 5. Only a commitment enters the rollout scope, so the scope's
+	// unique index, which still refuses a second holder, is not reached.
 	var machineHeld, rolloutHeld bool
 	if err := tx.QueryRowContext(ctx, `SELECT
 			EXISTS (SELECT FROM operation WHERE machine = $1 AND kind = 'apply-config'
@@ -290,10 +297,6 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 			cluster, created_at)
 		VALUES ($1, 'apply-config', 'committed', $2, $3, 1, $2, $4, $5, $6, $7)`,
 		r.Operation, current, a.d.owner.ID, plan, machine, cluster, at)
-	var pe *pgconn.PgError
-	if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "operation_rollout_scope" {
-		return r, machine, refuseCommitment("5", rolloutCause)
-	}
 	if err != nil {
 		return r, machine, err
 	}
@@ -314,6 +317,10 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 }
 
 const rolloutCause = "an operation holds the cluster's rollout scope"
+
+// rolloutLockClass is the rollout lock's class in the two-int4 advisory key space; the cluster's
+// hashed id is its object. Two clusters whose ids hash alike only share a lock.
+const rolloutLockClass = 0x62777273 // "bwrs"
 
 // identityMatch and minorMatch compare an observation o of machine m in cluster c with what they
 // bind (§3.2 comparison 3, choice §10.26): the identity under the machine's identity key and the

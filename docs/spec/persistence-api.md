@@ -625,7 +625,8 @@ Rules for every transaction:
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation
    state, machine rows by id (each with its MachineState), heads by id, the
    draft, principals by id, approvals by id, plan states by id, then operations
-   by id. The act-order lock comes last, just before the act is written, and is
+   by id. A commitment then takes its cluster's rollout lock, which only
+   commitments take (execution and recovery choice §10.29). The act-order lock comes last, just before the act is written, and is
    held to the end of the transaction, so acts become visible in recording
    order and a `GET /acts` cursor never passes an act that commits later
    (§10.5). The writes that carry a rule-4 time (a plan's creation, an
