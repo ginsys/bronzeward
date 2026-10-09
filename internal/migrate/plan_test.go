@@ -591,7 +591,13 @@ func TestPlanOperations(t *testing.T) {
 		refused(t, db, "after "+c.drop, c.want, append([]stmt{{c.drop, nil}}, commitSecond...)...)
 	}
 	// Issue ginsys/bronzeward#71: an owned operation moves through each fenced state, and the fence
-	// and the scopes end at a terminal state, which may drop the owner.
+	// and the scopes end at a terminal state, which may drop the owner. Its attempt is what lets it
+	// reach sending (execution and recovery §4).
+	now := time.Now()
+	commitRows(t, db, p.entry(p.machine, 30, "attempt"), newRecord("attempt", "id", id.New(id.Attempt), "operation", opID,
+		"plan", p.apply, "machine", p.machine, "number", 1, "owner", owner, "owner_gen", 1, "owner_epoch", p.epoch,
+		"route", "10.55.0.3:50000", "observation", obs, "transport_deadline", now.Add(time.Minute),
+		"verification_deadline", now.Add(5*time.Minute), "at", now, "revision", 30).stmt())
 	for _, state := range []string{"sending", "verifying", "unresolved"} {
 		mustExec(t, db, `UPDATE operation SET state = $2 WHERE id = $1`, opID, state)
 	}
@@ -748,7 +754,7 @@ func TestPlanEntriesUnique(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The query found the tables it is about, so a renamed column cannot make it pass empty.
-	want := []string{"adoption_record", "approval", "approval_revocation", "observation", "observation_start", "plan",
+	want := []string{"adoption_record", "approval", "approval_revocation", "attempt", "observation", "observation_start", "plan",
 		"plan_cancellation"}
 	if !slices.Equal(tables, want) {
 		t.Errorf("timeline record tables %v; want %v", tables, want)

@@ -501,7 +501,8 @@ CALL make_immutable('identity_revocation');
 -- allocates from the machine's revision counter under its row lock, with the epoch it was appended
 -- in. Kinds are added with the issues that write them: an endpoint change, then a plan's entries
 -- from creation to commitment or a terminal state, observations and their starts, adoption records
--- and Applied changes, commitments, and refusals (execution and recovery §4.1). A record of one
+-- and Applied changes, commitments, refusals, attempts and operation state changes (execution and
+-- recovery §4.1). A record of one
 -- entry is keyed by it. A refusal names the transaction and the comparison that failed.
 CREATE TABLE machine_event (
   machine  text NOT NULL REFERENCES machine (id),
@@ -509,7 +510,7 @@ CREATE TABLE machine_event (
   epoch    text NOT NULL REFERENCES recovery_epoch (epoch),
   kind     text NOT NULL CONSTRAINT machine_event_kind CHECK (kind IN ('endpoint-change', 'plan', 'approval',
              'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
-             'observation', 'adoption', 'applied-change', 'commitment', 'refusal')),
+             'observation', 'adoption', 'applied-change', 'commitment', 'refusal', 'attempt', 'operation-state')),
   -- A JSON object: JSON null is not SQL NULL, and an immutable entry cannot be corrected later.
   entry    jsonb NOT NULL CHECK (jsonb_typeof(entry) = 'object'),
   CONSTRAINT machine_event_refusal CHECK (kind <> 'refusal'
@@ -521,6 +522,11 @@ CREATE TABLE machine_event (
     OR (jsonb_typeof(entry->'operation') IS NOT DISTINCT FROM 'string'
       AND jsonb_typeof(entry->'plan') IS NOT DISTINCT FROM 'string'
       AND jsonb_typeof(entry->'observation') IS NOT DISTINCT FROM 'string')),
+  -- An operation's state change names the operation and the states it moved between (§4, §4.1).
+  CONSTRAINT machine_event_operation_state CHECK (kind <> 'operation-state'
+    OR (jsonb_typeof(entry->'operation') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'from') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'to') IS NOT DISTINCT FROM 'string')),
   at       timestamptz NOT NULL,
   PRIMARY KEY (machine, revision),
   UNIQUE (machine, revision, kind)
@@ -1295,6 +1301,77 @@ CREATE TRIGGER binding BEFORE UPDATE ON operation FOR EACH ROW
     IS DISTINCT FROM (OLD.id, OLD.kind, OLD.epoch, OLD.plan, OLD.machine, OLD.cluster, OLD.draft, OLD.draft_revision,
          OLD.ingestion, OLD.created_by, OLD.created_by_kind, OLD.created_role, OLD.created_at))
   EXECUTE FUNCTION refuse_identity_change();
+
+-- An apply-config operation's attempt (execution and recovery §3.3, §4.1): recorded by its owner's
+-- attempt transaction before any request is sent, numbered from 1 within the operation, with the
+-- owner token it was recorded under, its plan's route, the evidence observation it relied on and
+-- its absolute transport and verification deadlines. It is one attempt entry on the machine's
+-- timeline.
+CREATE TABLE attempt (
+  id                    text PRIMARY KEY CHECK (id ~ '^att_[a-z2-7]{26}$'),
+  operation             text NOT NULL,
+  operation_kind        text NOT NULL GENERATED ALWAYS AS ('apply-config') STORED,
+  plan                  text NOT NULL,
+  machine               text NOT NULL,
+  number                integer NOT NULL CHECK (number >= 1),
+  owner                 text NOT NULL,
+  owner_gen             bigint NOT NULL CHECK (owner_gen >= 1),
+  owner_epoch           text NOT NULL REFERENCES recovery_epoch (epoch),
+  route                 talos_endpoint NOT NULL,
+  observation           text NOT NULL,
+  transport_deadline    timestamptz NOT NULL,
+  verification_deadline timestamptz NOT NULL,
+  at                    timestamptz NOT NULL,
+  revision              bigint NOT NULL,
+  entry_kind            text NOT NULL GENERATED ALWAYS AS ('attempt') STORED,
+  CONSTRAINT attempt_deadlines CHECK (at < transport_deadline AND transport_deadline <= verification_deadline),
+  UNIQUE (operation, number),
+  UNIQUE (machine, revision),
+  FOREIGN KEY (operation, operation_kind) REFERENCES operation (id, kind),
+  FOREIGN KEY (operation, plan) REFERENCES operation (id, plan),
+  -- The plan's machine and its route: the attempt dials what the plan bound (persistence §3.3).
+  FOREIGN KEY (plan, machine, route) REFERENCES plan (id, machine, route),
+  FOREIGN KEY (observation, machine) REFERENCES observation (id, machine),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('attempt');
+
+-- An apply-config operation's state moves only along execution and recovery §4's transitions;
+-- a terminal state is final. An operation that has recorded an attempt never becomes cancelled:
+-- cancelled is never proof that nothing was sent, but it may be recorded only when no attempt is.
+-- A takeover keeps an unresolved operation's state and is not a transition.
+CREATE FUNCTION refuse_operation_transition() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF (OLD.state = 'committed' AND NEW.state IN ('sending', 'unresolved'))
+    OR (OLD.state = 'sending' AND NEW.state IN ('verifying', 'rejected', 'unresolved'))
+    OR (OLD.state = 'verifying' AND NEW.state IN ('completed', 'failed', 'unresolved'))
+    OR (OLD.state = 'unresolved' AND NEW.state IN ('completed', 'failed', 'rejected', 'sending'))
+    OR (OLD.state = 'unresolved' AND NEW.state = 'cancelled' AND NOT EXISTS (SELECT FROM attempt WHERE operation = NEW.id)) THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'operation: apply-config % to % refused', OLD.state, NEW.state
+    USING ERRCODE = 'check_violation', CONSTRAINT = 'operation_apply_config_transition', TABLE = 'operation';
+END
+$$;
+CREATE TRIGGER transition BEFORE UPDATE OF state ON operation FOR EACH ROW
+  WHEN (NEW.kind = 'apply-config' AND NEW.state IS DISTINCT FROM OLD.state)
+  EXECUTE FUNCTION refuse_operation_transition();
+
+-- A state that follows a sent request is reached only by an operation with a recorded attempt
+-- (§4): sending is entered by the attempt transaction, which records the attempt after the
+-- operation's conditional write (§3.3 comparison 7), so this is checked at commit.
+CREATE FUNCTION require_attempt() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM attempt WHERE operation = NEW.id) THEN
+    RAISE EXCEPTION 'operation: apply-config % without an attempt refused', NEW.state
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'operation_apply_config_attempt', TABLE = 'operation';
+  END IF;
+  RETURN NULL;
+END
+$$;
+CREATE CONSTRAINT TRIGGER attempted AFTER UPDATE OF state ON operation DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW WHEN (NEW.kind = 'apply-config' AND NEW.state IN ('sending', 'verifying', 'rejected', 'completed', 'failed'))
+  EXECUTE FUNCTION require_attempt();
 
 -- The last classification of each provider object version a release depends on (dependency
 -- monitor §5.1): the only mutable dependency table, updated under its row lock. Its object is a
