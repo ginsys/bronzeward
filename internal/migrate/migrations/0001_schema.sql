@@ -1336,12 +1336,18 @@ CREATE TABLE attempt (
 );
 CALL make_immutable('attempt');
 
--- An apply-config operation's state moves only along execution and recovery §4's transitions;
--- a terminal state is final. An operation that has recorded an attempt never becomes cancelled:
--- cancelled is never proof that nothing was sent, but it may be recorded only when no attempt is.
--- A takeover keeps an unresolved operation's state and is not a transition.
+-- An apply-config operation is created `committed` (§3.2) and its state moves only along execution
+-- and recovery §4's transitions; a terminal state is final. An operation that has recorded an
+-- attempt never becomes cancelled: cancelled is never proof that nothing was sent, but it may be
+-- recorded only when no attempt is. The transition reads the attempts holding the operation's row
+-- lock, and an attempt reads the operation's state under a share lock (below), so neither commits
+-- past the other. A takeover keeps an unresolved operation's state and is not a transition.
 CREATE FUNCTION refuse_operation_transition() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+  IF TG_OP = 'INSERT' THEN
+    RAISE EXCEPTION 'operation: apply-config created % refused', NEW.state
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'operation_apply_config_transition', TABLE = 'operation';
+  END IF;
   IF (OLD.state = 'committed' AND NEW.state IN ('sending', 'unresolved'))
     OR (OLD.state = 'sending' AND NEW.state IN ('verifying', 'rejected', 'unresolved'))
     OR (OLD.state = 'verifying' AND NEW.state IN ('completed', 'failed', 'unresolved'))
@@ -1353,9 +1359,25 @@ BEGIN
     USING ERRCODE = 'check_violation', CONSTRAINT = 'operation_apply_config_transition', TABLE = 'operation';
 END
 $$;
+CREATE TRIGGER created BEFORE INSERT ON operation FOR EACH ROW
+  WHEN (NEW.kind = 'apply-config' AND NEW.state <> 'committed')
+  EXECUTE FUNCTION refuse_operation_transition();
 CREATE TRIGGER transition BEFORE UPDATE OF state ON operation FOR EACH ROW
   WHEN (NEW.kind = 'apply-config' AND NEW.state IS DISTINCT FROM OLD.state)
   EXECUTE FUNCTION refuse_operation_transition();
+CREATE FUNCTION refuse_cancelled_attempt() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  current text;
+BEGIN
+  SELECT state INTO current FROM operation WHERE id = NEW.operation FOR SHARE;
+  IF current = 'cancelled' THEN
+    RAISE EXCEPTION 'attempt: operation % is cancelled', NEW.operation
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'attempt_operation_cancelled', TABLE = 'attempt';
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER cancelled BEFORE INSERT ON attempt FOR EACH ROW EXECUTE FUNCTION refuse_cancelled_attempt();
 
 -- A state that follows a sent request is reached only by an operation with a recorded attempt
 -- (§4): sending is entered by the attempt transaction, which records the attempt after the

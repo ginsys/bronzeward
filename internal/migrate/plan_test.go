@@ -471,9 +471,17 @@ func TestPlanOperations(t *testing.T) {
 		op("apply-config", "committed", owner, p.apply, id.New(id.Machine)))
 	refused(t, db, "operation whose plan is not committed to it", "23514/operation_plan_committed",
 		op("apply-config", "committed", owner, p.apply, p.machine))
-	for _, state := range []string{"committed", "sending", "verifying", "unresolved"} {
-		refused(t, db, state+" apply-config with no owner", "23514/operation_apply_config_owned",
-			op("apply-config", state, "", p.apply, p.machine), committed(p.apply))
+	refused(t, db, "committed apply-config with no owner", "23514/operation_apply_config_owned",
+		op("apply-config", "committed", "", p.apply, p.machine), committed(p.apply))
+	// The other states are reached along §4's transitions, never created.
+	for _, path := range [][]string{{"sending"}, {"sending", "verifying"}, {"unresolved"}} {
+		rows := []stmt{op("apply-config", "committed", owner, p.apply, p.machine), committed(p.apply)}
+		for _, state := range path[:len(path)-1] {
+			rows = append(rows, stmt{`UPDATE operation SET state = $2 WHERE plan = $1`, []any{p.apply, state}})
+		}
+		rows = append(rows, stmt{`UPDATE operation SET state = $2, owner = NULL, owner_epoch = NULL WHERE plan = $1`,
+			[]any{p.apply, path[len(path)-1]}})
+		refused(t, db, path[len(path)-1]+" apply-config with no owner", "23514/operation_apply_config_owned", rows...)
 	}
 	// §6.3: an adopt operation is created completed, and binds no draft revision.
 	refused(t, db, "adopt not completed", "23514", op("adopt", "committed", owner, p.adopt, p.machine))
@@ -683,7 +691,7 @@ func TestPlanConstraintControl(t *testing.T) {
 		{"ALTER TABLE operation DROP CONSTRAINT operation_plan", []stmt{
 			{insertPlanOperation, []any{id.New(id.Operation), "apply-config", "committed", owner, nil, nil, nil}}}},
 		{"ALTER TABLE operation DROP CONSTRAINT operation_apply_config_owned", []stmt{
-			{insertPlanOperation, []any{id.New(id.Operation), "apply-config", "sending", nil, p.apply, p.machine, p.cluster}},
+			{insertPlanOperation, []any{id.New(id.Operation), "apply-config", "committed", nil, p.apply, p.machine, p.cluster}},
 			{`UPDATE plan_state SET state = 'committed', operation = (SELECT id FROM operation WHERE plan = $1) WHERE plan = $1`,
 				[]any{p.apply}}}},
 		{"ALTER TABLE operation_event DROP CONSTRAINT operation_event_job_kind", []stmt{
