@@ -563,6 +563,19 @@ func TestPlanOperations(t *testing.T) {
 	refused(t, db, "refusal entry naming no comparison", "23514/machine_event_refusal", refusal(`{"transaction": "T6"}`))
 	refused(t, db, "refusal entry naming no transaction", "23514/machine_event_refusal", refusal(`{"comparison": "4.4"}`))
 	commitRows(t, db, refusal(`{"transaction": "T6", "comparison": "4.4", "plan": "`+p.adopt+`"}`))
+	// A commitment's entry names the operation it created, its plan and the evidence it links (§4.1).
+	commitment := func(entry string) stmt {
+		return stmt{insertMachineEvent, []any{p.machine, 91, "commitment", entry}}
+	}
+	for name, entry := range map[string]string{
+		"no operation":   `{"plan": "pln_x", "observation": "obs_x"}`,
+		"no plan":        `{"operation": "op_x", "observation": "obs_x"}`,
+		"no observation": `{"operation": "op_x", "plan": "pln_x"}`,
+		"a number":       `{"operation": "op_x", "plan": "pln_x", "observation": 1}`,
+	} {
+		refused(t, db, "commitment entry naming "+name, "23514/machine_event_commitment", commitment(entry))
+	}
+	commitRows(t, db, commitment(`{"operation": "op_x", "plan": "pln_x", "observation": "obs_x"}`))
 
 	// Comparisons 4 and 5: a second plan of the machine cannot commit while the first holds it;
 	// each index refuses it alone.
