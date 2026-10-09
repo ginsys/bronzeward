@@ -59,7 +59,9 @@ func (in *fragmentInput) check(*API) error {
 	return nil
 }
 
-func (in *fragmentInput) document() ingest.Unresolved { return in.Document }
+func (in *fragmentInput) keyedDigest(ctx context.Context, h ingest.HMAC, material []byte, version int) (provider.Digest, error) {
+	return ingest.Fingerprint(ctx, h, material, in.Document, version)
+}
 
 // draftIngest is a draft update's ingestion as T1 takes it: the claim, the sanitized stream and
 // the generation of each name it minted, or the refusal T1 records. It holds no input.

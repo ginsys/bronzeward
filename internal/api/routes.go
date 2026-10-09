@@ -17,7 +17,7 @@ type route struct {
 	exclusive       bool        // the transaction takes the installation state FOR UPDATE (§5)
 	action          string      // the act's action (§10.5)
 	// keyed names the body member that carries unextracted input: the request is fingerprinted
-	// with the digest key (§7.1), its input implements documentInput, and that member is left out
+	// with the digest key (§7.1), its input implements keyedInput, and that member is left out
 	// of the canonical body the rest of the fingerprint covers. Empty for SHA-256.
 	keyed string
 	input func() input

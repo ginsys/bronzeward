@@ -75,11 +75,14 @@ func (in *ingestionInput) check(*API) error {
 	return nil
 }
 
-func (in *ingestionInput) document() ingest.Unresolved { return in.Document }
-
-// withoutDocument: a source machine request carries no document; its fingerprint is still keyed
-// (§7.1), over the request alone.
-func (in *ingestionInput) withoutDocument() bool { return in.Source == "machine" }
+// keyedDigest covers the document. A source machine request carries none; its fingerprint is
+// still keyed (§7.1), over the request alone.
+func (in *ingestionInput) keyedDigest(ctx context.Context, h ingest.HMAC, material []byte, version int) (provider.Digest, error) {
+	if in.Source == "machine" {
+		return ingest.FingerprintRequest(ctx, h, material, version)
+	}
+	return ingest.Fingerprint(ctx, h, material, in.Document, version)
+}
 
 // job is one ingestion as the runner takes it from T11: the claim at its generation, the
 // operation, the draft revision it binds and the request's input, held in memory only. A source

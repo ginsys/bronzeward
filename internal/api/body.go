@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
@@ -18,16 +19,18 @@ import (
 	"github.com/gowebpki/jcs"
 
 	"github.com/ginsys/bronzeward/internal/ingest"
+	"github.com/ginsys/bronzeward/internal/provider"
 )
 
 // input is a mutating route's body, decoded strictly (§9.1) and checked before any transaction.
 type input interface{ check(a *API) error }
 
-// documentInput is a keyed route's input: its document is the unextracted input the digest key's
-// HMAC covers in place of the canonical body's member (§7.1).
-type documentInput interface {
+// keyedInput is a keyed route's input: keyedDigest is the digest key's HMAC over material
+// followed by the unextracted input its keyed member carries, in place of that member in the
+// canonical body (§7.1).
+type keyedInput interface {
 	input
-	document() ingest.Unresolved
+	keyedDigest(ctx context.Context, h ingest.HMAC, material []byte, version int) (provider.Digest, error)
 }
 
 const maxBody = 1 << 20

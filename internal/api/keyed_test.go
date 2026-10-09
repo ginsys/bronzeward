@@ -165,7 +165,9 @@ func (d *docInput) check(*API) error {
 	}
 	return nil
 }
-func (d *docInput) document() ingest.Unresolved { return d.Document }
+func (d *docInput) keyedDigest(ctx context.Context, h ingest.HMAC, material []byte, version int) (provider.Digest, error) {
+	return ingest.Fingerprint(ctx, h, material, d.Document, version)
+}
 
 func keyedRoute() *route {
 	return &route{method: http.MethodPost, pattern: "/test-documents", roles: []auth.Role{auth.Author}, keyed: "document",

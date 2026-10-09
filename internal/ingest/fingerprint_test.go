@@ -63,6 +63,47 @@ func TestFingerprint(t *testing.T) {
 	}
 }
 
+// PA §7.1: a mark request's fingerprint is keyed and covers its marks (a mark path can spell an
+// extracted value), each length-prefixed after the request's material.
+func TestFingerprintMarks(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeHMAC{}
+	a, err := FingerprintMarks(ctx, f.hmac, []byte("m"), []string{"doc[0]/a", "doc[0]/b"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []byte
+	want = append(want, 'm')
+	want = append(want, 0, 0, 0, 0, 0, 0, 0, 32)
+	want = append(want, 0, 0, 0, 0, 0, 0, 0, 8)
+	want = append(want, "doc[0]/a"...)
+	want = append(want, 0, 0, 0, 0, 0, 0, 0, 8)
+	want = append(want, "doc[0]/b"...)
+	if !bytes.Equal(f.inputs[0], want) {
+		t.Fatalf("HMAC input %q, want %q", f.inputs[0], want)
+	}
+	for _, other := range [][]string{
+		{"doc[0]/b", "doc[0]/a"}, // order
+		{"doc[0]/adoc[0]/b"},     // the boundary between marks
+		{"doc[0]/a", "doc[0]/c"}, // another mark
+		{"doc[0]/a"},             // fewer marks
+	} {
+		d, err := FingerprintMarks(ctx, f.hmac, []byte("m"), other, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Sum == a.Sum {
+			t.Errorf("%q fingerprints as the first request", other)
+		}
+	}
+	if d, _ := FingerprintMarks(ctx, f.hmac, []byte("m"), []string{"doc[0]/a", "doc[0]/b"}, 3); d.Version != 3 || d.Sum == a.Sum {
+		t.Fatalf("version 3 not honoured: %+v", d)
+	}
+	if _, err := FingerprintMarks(ctx, f.hmac, []byte("m"), nil, 0); !errors.Is(err, ErrEmptyInput) {
+		t.Fatalf("no marks: %v, want ErrEmptyInput", err)
+	}
+}
+
 // Through the provider: the fingerprint is Transit hmac under bw-digest.
 func TestFingerprintLive(t *testing.T) {
 	b := baotest.New(t)
