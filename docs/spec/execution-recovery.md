@@ -360,7 +360,7 @@ persistence's (see `persistence-api.md`).
 3. the evidence recorded under §3.1 was recorded for this plan by this
    controller instance, satisfies the plan's preconditions, is inside its bound
    maximum age or validity window, and no newer observation of the machine
-   contradicts it. The observed identity must match the bound one under the
+   contradicts it **(choice §10.28)**. The observed identity must match the bound one under the
    machine's identity key: the bound SMBIOS UUID, or, for a machine recorded
    by Talos node ID, that node ID and no SMBIOS UUID; and the node's Talos
    cluster ID must equal the bound cluster's. A node reached at the target's
@@ -2076,6 +2076,25 @@ conservative option; those that do not say so. Each is marked in place as
     (ginsys/bronzeward#25). Alternatives: an operator route that requests the
     record (one more route and role decision, and the operator would still
     need a fresh observation first); retrying refused plans until they expire.
+28. **A commitment reads its evidence as an adoption does, and its refusal is
+    not the plan's outcome** (§3.2). The evidence is the latest observation
+    recorded with purpose `evidence` for the plan by the committing controller.
+    None, one begun before the approval, one older than the plan allows, or
+    one that left the identity, the configuration or the running version
+    unread is missing evidence, not a comparison-3 failure: nothing is
+    committed or refused, and fresh evidence decides. A newer observation
+    contradicts the evidence only on a value it read. The observed assignment
+    evidence is not compared, since comparison 2 compares the assignment head
+    itself. A refusal entry names the observation that showed a mismatch, never
+    the digest (persistence and API choice §17.38). Each refused commitment
+    records its own refusal entry: a freeze lifted, a scope released or another
+    operation finished lets the same plan commit, so a refusal does not end
+    the plan as an adoption's does (choice §10.27). Until drift records exist
+    (ginsys/bronzeward#27), a digest refusal applies no §6.1 step. Agent
+    decision, 2026-10-09 (ginsys/bronzeward#25). Alternatives: refusing on
+    missing evidence, which appends a refusal on every attempt that precedes
+    its observation; one refusal per plan, which leaves a plan refused by a
+    freeze unable to commit once the freeze is lifted.
 
 ## 11. Traceability
 

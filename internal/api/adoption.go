@@ -307,8 +307,19 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 }
 
 // recordRefusal is a refused adoption's refusal entry (execution-recovery.md §4.1), recorded after
-// the refused transaction rolled back, under the same epoch check and machine lock (T7).
+// the refused transaction rolled back. An adoption's refusal is the plan's outcome, so it is recorded
+// once, by whichever attempt locks first (choice §10.27).
 func (a *API) recordRefusal(ctx context.Context, machine, plan string, refused *adoptionRefused) error {
+	return a.recordRefusalEntry(ctx, machine, plan, "adoption", refused.Comparison, refused.Cause, "",
+		errAlreadyAdopted, true)
+}
+
+// recordRefusalEntry records a refused T6's refusal entry (execution-recovery.md §4.1) after the
+// refused transaction rolled back, under the same epoch check and machine lock (T7). The entry names
+// the comparison, its cause, this controller and, when one showed it, the observation. A plan given
+// its operation since answers already; once records at most one refusal entry for the plan.
+func (a *API) recordRefusalEntry(ctx context.Context, machine, plan, what, comparison, cause, observation string,
+	already error, once bool) error {
 	return a.inTx(ctx, func(tx *sql.Tx) error {
 		var current string
 		if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&current); err != nil {
@@ -320,19 +331,19 @@ func (a *API) recordRefusal(ctx context.Context, machine, plan string, refused *
 		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, machine); err != nil {
 			return err
 		}
-		// The attempt rolled back before this lock, so another may have adopted or refused the plan
-		// since: every adoption and refusal entry holds the machine first, so both are read here.
-		var adoptedSince, refusedSince bool
+		// The attempt rolled back before this lock, so another may have committed or refused the plan
+		// since: every T6 and refusal entry holds the machine first, so both are read here.
+		var committedSince, refusedSince bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT FROM plan_state WHERE plan = $2
 				AND (operation IS NOT NULL OR state = 'committed')),
 			EXISTS (SELECT FROM machine_event WHERE machine = $1 AND kind = 'refusal' AND entry->>'plan' = $2)`,
-			machine, plan).Scan(&adoptedSince, &refusedSince); err != nil {
+			machine, plan).Scan(&committedSince, &refusedSince); err != nil {
 			return err
 		}
 		switch {
-		case adoptedSince:
-			return fmt.Errorf("adoption of plan %s: %w", plan, errAlreadyAdopted)
-		case refusedSince: // recorded once, by whichever attempt locked first
+		case committedSince:
+			return fmt.Errorf("%s of plan %s: %w", what, plan, already)
+		case once && refusedSince: // recorded once, by whichever attempt locked first
 			return nil
 		}
 		var rev int64
@@ -341,9 +352,9 @@ func (a *API) recordRefusal(ctx context.Context, machine, plan string, refused *
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
-			VALUES ($1, $2, $3, 'refusal', jsonb_build_object('transaction', 'T6', 'comparison', $4::text, 'plan', $5::text,
-				'cause', $6::text, 'controller', $7::text), $8)`,
-			machine, rev, current, refused.Comparison, plan, refused.Cause, a.d.owner.ID, at)
+			VALUES ($1, $2, $3, 'refusal', jsonb_strip_nulls(jsonb_build_object('transaction', 'T6', 'comparison', $4::text,
+				'plan', $5::text, 'cause', $6::text, 'controller', $7::text, 'observation', NULLIF($8::text, ''))), $9)`,
+			machine, rev, current, comparison, plan, cause, a.d.owner.ID, observation, at)
 		return err
 	})
 }
