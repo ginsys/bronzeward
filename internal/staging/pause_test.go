@@ -193,7 +193,7 @@ func TestPauseSchema(t *testing.T) {
 	f := setup(t)
 	for name, q := range map[string]string{
 		"review on transient":    `UPDATE staging_claim SET review = 'pending' WHERE id = $1 AND mode = 'transient'`,
-		"paused without payload": `UPDATE staging_claim SET state = 'paused' WHERE id = $1 AND mode = 'encrypted'`,
+		"paused without payload": `UPDATE staging_claim SET state = 'paused', review = 'pending' WHERE id = $1 AND mode = 'encrypted'`,
 		"paused without review": `UPDATE staging_claim SET state = 'paused', payload = '\x01', payload_digest = sha256('\x01')
 			WHERE id = $1 AND mode = 'encrypted'`,
 		"unknown review": `UPDATE staging_claim SET review = 'done' WHERE id = $1`,
