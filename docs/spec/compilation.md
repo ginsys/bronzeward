@@ -515,14 +515,18 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    spell it (a guard hit's), can hold an earlier extracted value, which the
    redaction of refusals (§8.3) cannot recognise once the run no longer holds
    it. Several marks at fault name the first in the request. A document that
-   does not load with its nodes stored as nulls names the mark whose node,
-   stored after those identified before it, first stops it loading: found by
-   bisection, in a number of machinery loads logarithmic in that document's
-   nodes rather than one per mark. A refusal of the stream after
+   does not load with its nodes stored as nulls names a mark whose node,
+   stored after those identified before it, stops it loading while those
+   before it load: found by bisection, in a number of machinery loads
+   logarithmic in that document's nodes rather than one per mark. A node
+   under another marked node is stored with it and its mark is never named.
+   Where storing more nodes lets the document load again, the mark named is
+   such a mark, not necessarily the first. A refusal of the stream after
    substitution (a reference at a document's root, or used as a key through
    an alias) arises from every mark whose reference stands out of place; with
-   none, a refusal of an identified embedded document whose holder a mark
-   replaced arises from every such mark. A provider failure on the mark's first generation, before any
+   none, a refusal of an identified embedded document arises from every mark
+   that took its holder out, marking it, an alias of it or a node above it. A
+   provider failure on the mark's first generation, before any
    generation was created, is refused the same way: the claim returns to
    `paused` with its earlier envelope, and a generation the failed request may
    have created is referenced by no row and reported as an orphan once the

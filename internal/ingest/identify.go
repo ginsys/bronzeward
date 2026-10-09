@@ -112,9 +112,26 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 // marks the request carries. When only a combination stops it loading, that is the combination's
 // last target.
 func unloadableSources(doc *yaml.Node, i int, out []*target) []Path {
+	// A node under another target's is stored with it: nulled or not, it is not there.
+	under := map[*yaml.Node]bool{}
+	for _, t := range out {
+		var walk func(n *yaml.Node)
+		walk = func(n *yaml.Node) {
+			for _, c := range n.Content {
+				if !under[c] {
+					under[c] = true
+					walk(c)
+				}
+			}
+		}
+		walk(t.node)
+	}
 	var in [][]Path
 	var nodes []*yaml.Node
 	for _, t := range out {
+		if under[t.node] {
+			continue
+		}
 		var ps []Path
 		for _, p := range t.paths {
 			if p.Doc == i {
