@@ -21,13 +21,19 @@ const redacted = "<redacted>"
 // embedded document is checked as its parsed nodes, as validate checks it, so this run's
 // references inside it are skipped like those outside.
 func guard(docs []*yaml.Node, exs []extraction, embedded map[string]string) error {
+	return guardValues(docs, exs, exs, embedded)
+}
+
+// guardValues is guard searching for the values of exs only, while skipping the references of
+// every extraction of the run, run: a refusal's attribution searches one extraction at a time.
+func guardValues(docs []*yaml.Node, exs, run []extraction, embedded map[string]string) error {
 	values := extractedScalars(exs)
 	texts := searchTexts(values)
 	if len(texts) == 0 {
 		return nil
 	}
 	minted := map[string]bool{}
-	for _, ex := range exs {
+	for _, ex := range run {
 		minted[ex.name] = true
 	}
 	// A mapping's key is searched for as a whole token (ContainsToken): key names are common words,

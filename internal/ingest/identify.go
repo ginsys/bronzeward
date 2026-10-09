@@ -89,18 +89,33 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 	slices.Sort(withTargets)
 	for _, i := range withTargets {
 		if _, err := schemaPointers(docs[i], i, stored); err != nil {
-			var sources []Path
-			for _, t := range out {
-				for _, p := range t.paths {
-					if p.Doc == i {
-						sources = append(sources, p)
-					}
-				}
-			}
-			return nil, from(err, sources)
+			return nil, from(err, unloadableSources(docs[i], i, out))
 		}
 	}
 	return out, nil
+}
+
+// unloadableSources is what a document i that does not load with its targets stored arises from:
+// the paths of the first target in it, in out's order, that alone keeps it from loading, or
+// every target in it when only their combination does.
+func unloadableSources(doc *yaml.Node, i int, out []*target) []Path {
+	var all []Path
+	for _, t := range out {
+		var in []Path
+		for _, p := range t.paths {
+			if p.Doc == i {
+				in = append(in, p)
+			}
+		}
+		if len(in) == 0 {
+			continue
+		}
+		if _, err := schemaPointers(doc, i, map[*yaml.Node]bool{t.node: true}); err != nil {
+			return in
+		}
+		all = append(all, in...)
+	}
+	return all
 }
 
 // plainDeletes reports whether every delete directive under n holds nothing but itself and stands
