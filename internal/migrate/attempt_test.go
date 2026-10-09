@@ -2,9 +2,11 @@ package migrate
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
@@ -133,31 +135,10 @@ func TestApplyConfigCreatedCommitted(t *testing.T) {
 // operation lock and then sees it cancelled (execution and recovery §4: cancelled only with no attempt).
 func TestAttemptWaitsForCancellation(t *testing.T) {
 	db, _ := installed(t)
-	a := attemptRows(t, db)
-	commitRows(t, db, a.state("unresolved"))
-	cancel, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = cancel.Rollback() }()
-	mustExec(t, cancel, a.state("cancelled").q, a.state("cancelled").args...)
+	a, cancel := cancelling(t, db)
 	done := make(chan error, 1)
-	go func() {
-		tx, err := db.Begin()
-		if err != nil {
-			done <- err
-			return
-		}
-		defer func() { _ = tx.Rollback() }()
-		for _, s := range a.attempted(a.attemptRow(1, 6), "sending")[:2] {
-			if _, err := tx.Exec(s.q, s.args...); err != nil {
-				done <- err
-				return
-			}
-		}
-		done <- tx.Commit()
-	}()
-	time.Sleep(500 * time.Millisecond)
+	go func() { done <- recordAttempt(db, a) }()
+	dbtest.WaitForLockWait(t, db)
 	if err := cancel.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +148,59 @@ func TestAttemptWaitsForCancellation(t *testing.T) {
 	if count(t, db, "attempt") != 0 {
 		t.Error("a cancelled operation has an attempt")
 	}
+
+	// The control: with the operation read without its share lock, the attempt does not wait, and
+	// both it and the cancellation commit.
+	db, _ = installed(t)
+	var def string
+	if err := db.QueryRow(`SELECT pg_get_functiondef('refuse_cancelled_attempt'::regproc)`).Scan(&def); err != nil {
+		t.Fatal(err)
+	}
+	unlocked := strings.Replace(def, " FOR SHARE", "", 1)
+	if unlocked == def {
+		t.Fatal("refuse_cancelled_attempt takes no share lock to remove")
+	}
+	mustExec(t, db, unlocked)
+	a, cancel = cancelling(t, db)
+	if err := recordAttempt(db, a); err != nil {
+		t.Fatalf("control: attempt during the cancellation: %v; want it committed", err)
+	}
+	if err := cancel.Commit(); err != nil {
+		t.Fatalf("control: cancellation: %v; want it committed", err)
+	}
+	if count(t, db, "attempt") != 1 {
+		t.Error("control: the cancelled operation has no attempt")
+	}
+}
+
+// cancelling is attemptRows' operation moved to unresolved, with an open transaction that has
+// cancelled it and holds its row lock.
+func cancelling(t *testing.T, db *sql.DB) (attempts, *sql.Tx) {
+	t.Helper()
+	a := attemptRows(t, db)
+	commitRows(t, db, a.state("unresolved"))
+	cancel, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cancel.Rollback() })
+	mustExec(t, cancel, a.state("cancelled").q, a.state("cancelled").args...)
+	return a, cancel
+}
+
+// recordAttempt commits attempt 1 of a's operation with its entry, leaving the state as it is.
+func recordAttempt(db *sql.DB, a attempts) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, s := range a.attempted(a.attemptRow(1, 6), "sending")[:2] {
+		if _, err := tx.Exec(s.q, s.args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // An operation-state entry names its operation and both states (execution and recovery §4.1).
