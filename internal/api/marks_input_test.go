@@ -35,7 +35,7 @@ func TestMarkInputRefusals(t *testing.T) {
 	e := newEnvWith(t, deps{ing: &fakeIngester{latest: 1}}, options{extra: []*route{markTestRoute()}})
 	tok := e.human("h-author")
 	many := `{"marks":["doc[0]/a"` + strings.Repeat(`,"doc[0]/a"`, maxMarks) + `]}`
-	for _, body := range []string{`{"marks":[]}`, `{}`, many, `{"marks":null}`, `{"marks":["doc[0]/a",1]}`, `{"marks":[null]}`} {
+	for _, body := range []string{`{"marks":[]}`, `{}`, many, `{"marks":null}`, `{"marks":["doc[0]/a",1]}`, `{"marks":[null]}`, `{"marks":["nope",1]}`} {
 		wantProblem(t, e.do(e.api, postMarks(tok, key, body)), http.StatusBadRequest, "invalid-request")
 	}
 	rec := e.do(e.api, postMarks(tok, key, `{"marks":["doc[0]/a","doc[0]/`+sentinel+`~2"]}`))

@@ -138,8 +138,9 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 			return nil, from(err, guardSources(back, exs, declared, err))
 		}
 	}
-	if err := validate(back, decl); err != nil {
-		return nil, from(err, validateSources(exs, err))
+	misplaced := map[string]bool{}
+	if err := validateRefs(back, decl, misplaced); err != nil {
+		return nil, from(err, misplacedSources(exs, misplaced))
 	}
 	c := &Candidate{docs: out, decl: decl}
 	for _, ex := range exs {
@@ -172,18 +173,14 @@ func guardSources(docs []*yaml.Node, exs []extraction, embedded map[string]strin
 	return out
 }
 
-// validateSources is the paths of every extraction standing at a path validation refused, or nil:
-// the input passed the same checks as authored, so a refusal of the substituted stream arises
-// from what substitution put there (a reference at a document's root). An alias in a key, the
-// other place a reference is refused, never gets here: no such document loads.
-func validateSources(exs []extraction, refused error) []Path {
-	var r *Refusal
-	if !errors.As(refused, &r) {
-		return nil
-	}
+// misplacedSources is the paths of every extraction whose reference validation found out of
+// place (misplaced, by name): the input passed the same checks as authored, so a refusal of the
+// substituted stream arises from where substitution put a reference (a document's root, or an
+// anchored node an alias uses as a key).
+func misplacedSources(exs []extraction, misplaced map[string]bool) []Path {
 	var out []Path
 	for _, ex := range exs {
-		if slices.ContainsFunc(ex.paths, func(p Path) bool { return slices.Contains(r.Paths, p.String()) }) {
+		if misplaced[ex.name] {
 			out = append(out, ex.paths...)
 		}
 	}
