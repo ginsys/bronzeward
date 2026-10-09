@@ -241,14 +241,8 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	// The evidence's identity, digest and running minor, then any later observation, of any purpose
 	// and by any process, that read one of them otherwise. A refusal names the observation that
 	// showed it, not the digest: no read answers a digest (choice §17.38).
-	var newer sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT o.id FROM observation o JOIN machine m ON m.id = o.machine
-			JOIN cluster c ON c.id = m.cluster JOIN plan p ON p.id = $2 JOIN release rl ON rl.id = p.release
-		WHERE o.machine = $1 AND o.basis > $3 AND (
-			(o.unread->'identity' IS NULL AND NOT (`+identityMatch+`))
-			OR (o.unread->'configuration' IS NULL AND o.configuration_digest IS DISTINCT FROM p.expected_digest)
-			OR (o.unread->'runningVersion' IS NULL AND NOT `+minorMatch+`))
-		ORDER BY o.basis LIMIT 1`, machine, plan, basis).Scan(&newer); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	newer, err := newerContradiction(ctx, tx, machine, plan, basis)
+	if err != nil {
 		return r, machine, err
 	}
 	refused := func(cause, observation string) error {
@@ -282,14 +276,9 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	case rolloutHeld:
 		return r, machine, refuseCommitment("5", rolloutCause)
 	}
-	// 6: the scope gate. No drift record exists before ginsys/bronzeward#27, so its terms hold.
-	switch {
-	case frozen:
-		return r, machine, refuseCommitment("6", "the machine scope is frozen")
-	case scope != "normal" && scope != "released":
-		return r, machine, refuseCommitment("6", "the machine scope is "+scope)
-	case recovery && scope != "released":
-		return r, machine, refuseCommitment("6", "recovery mode is in effect and the scope is not released")
+	// 6: the scope gate.
+	if cause := scopeGate(frozen, scope, recovery); cause != "" {
+		return r, machine, refuseCommitment("6", cause)
 	}
 
 	r.Operation, r.Observation = id.New(id.Operation), obs.String
@@ -331,6 +320,38 @@ const (
 		AND o.talos_cluster_id IS NOT DISTINCT FROM c.talos_cluster_id)`
 	minorMatch = `(substring(o.running_version FROM '^v[0-9]+\.[0-9]+') IS NOT DISTINCT FROM rl.contract)`
 )
+
+// newerContradiction answers the first observation of machine after basis, of any purpose and by
+// any process, that read the identity, the configuration digest or the running minor otherwise
+// than plan binds (§3.2 and §3.3 comparison 3).
+func newerContradiction(ctx context.Context, tx *sql.Tx, machine, plan string, basis int64) (sql.NullString, error) {
+	var newer sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT o.id FROM observation o JOIN machine m ON m.id = o.machine
+			JOIN cluster c ON c.id = m.cluster JOIN plan p ON p.id = $2 JOIN release rl ON rl.id = p.release
+		WHERE o.machine = $1 AND o.basis > $3 AND (
+			(o.unread->'identity' IS NULL AND NOT (`+identityMatch+`))
+			OR (o.unread->'configuration' IS NULL AND o.configuration_digest IS DISTINCT FROM p.expected_digest)
+			OR (o.unread->'runningVersion' IS NULL AND NOT `+minorMatch+`))
+		ORDER BY o.basis LIMIT 1`, machine, plan, basis).Scan(&newer)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
+	return newer, err
+}
+
+// scopeGate is §3.2 and §3.3 comparison 6's cause, or "" when the gate passes. No drift record
+// exists before ginsys/bronzeward#27, so its terms hold.
+func scopeGate(frozen bool, scope string, recovery bool) string {
+	switch {
+	case frozen:
+		return "the machine scope is frozen"
+	case scope != "normal" && scope != "released":
+		return "the machine scope is " + scope
+	case recovery && scope != "released":
+		return "recovery mode is in effect and the scope is not released"
+	}
+	return ""
+}
 
 // recordCommitRefusal is a refused commitment's refusal entry (execution-recovery.md §4.1),
 // recorded after the refused transaction rolled back. Unlike an adoption's, a commitment's refusal
