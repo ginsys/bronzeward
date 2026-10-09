@@ -19,8 +19,9 @@ type Taken struct {
 var (
 	// ErrNoClaim refuses a takeover of a claim that does not exist.
 	ErrNoClaim = errors.New("staging: no such claim")
-	// ErrNotEligible is wrapped by every reason a claim cannot be taken over (compilation §3.4).
-	ErrNotEligible  = errors.New("staging: the claim cannot be taken over")
+	// ErrNotEligible is wrapped by every reason a claim cannot be taken over (compilation §3.4) or
+	// taken by a mark (§3.6).
+	ErrNotEligible  = errors.New("staging: the claim cannot be taken")
 	ErrNotEncrypted = fmt.Errorf("%w: only an encrypted claim is taken over", ErrNotEligible)
 	ErrEnded        = fmt.Errorf("%w: the ingestion has ended", ErrNotEligible)
 	ErrLeaseLive    = fmt.Errorf("%w: the claim's lease has not lapsed", ErrNotEligible)
@@ -100,26 +101,43 @@ func takeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, cla
 	if err != nil {
 		return Taken{}, fmt.Errorf("staging: take over: %w", err)
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE operation SET owner = $2, owner_gen = $3, owner_epoch = $4, lease_until = $5
-		WHERE ingestion = $1 AND state = 'running' AND owner_gen = $3 - 1`, claim, o.ID, tk.Claim.Gen, o.Epoch, until)
-	if err != nil {
-		return Taken{}, fmt.Errorf("staging: take over: move the operation: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return Taken{}, fmt.Errorf("staging: take over: move the operation: %w", err)
-	}
-	if n != 1 {
-		return Taken{}, errors.New("staging: take over: the claim's running operation is not at the generation taken over")
+	if err := moveOperation(ctx, tx, o, tk.Claim, until); err != nil {
+		return Taken{}, fmt.Errorf("staging: take over: %w", err)
 	}
 	if tk.Payload == nil {
 		return tk, nil
 	}
+	if err := tk.setDigest(digest); err != nil {
+		return Taken{}, fmt.Errorf("staging: take over: %w", err)
+	}
+	return tk, nil
+}
+
+// moveOperation moves the claim's running ingest operation's owner fields to o at c's generation
+// from the generation before it, with the claim's lease until (persistence-api §8.2, T8). An
+// operation at another generation refuses the take whole.
+func moveOperation(ctx context.Context, tx *sql.Tx, o Owner, c Claim, until time.Time) error {
+	res, err := tx.ExecContext(ctx, `UPDATE operation SET owner = $2, owner_gen = $3, owner_epoch = $4, lease_until = $5
+		WHERE ingestion = $1 AND state = 'running' AND owner_gen = $3 - 1`, c.ID, o.ID, c.Gen, o.Epoch, until)
+	if err != nil {
+		return fmt.Errorf("move the operation: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("move the operation: %w", err)
+	}
+	if n != 1 {
+		return errors.New("the claim's running operation is not at the generation taken")
+	}
+	return nil
+}
+
+func (tk *Taken) setDigest(digest []byte) error {
 	if len(digest) != len(tk.Digest) {
-		return Taken{}, errors.New("staging: take over: the payload digest is not a SHA-256")
+		return errors.New("the payload digest is not a SHA-256")
 	}
 	copy(tk.Digest[:], digest)
-	return tk, nil
+	return nil
 }
 
 // notEligible names why claim cannot be taken over by o now, or returns nil when it can. It
