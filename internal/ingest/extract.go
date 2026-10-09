@@ -102,6 +102,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 		return nil, err
 	}
 	seam.At("identify")
+	removed := holdersRemoved(docs, all, declared)
 	exs, err := substitute(all, req.Declarations.References)
 	if err != nil {
 		return nil, err
@@ -140,7 +141,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	}
 	misplaced := map[string]bool{}
 	if err := validateRefs(back, decl, misplaced); err != nil {
-		return nil, from(err, validateSources(exs, misplaced, err))
+		return nil, from(err, validateSources(exs, removed, misplaced, err))
 	}
 	c := &Candidate{docs: out, decl: decl}
 	for _, ex := range exs {
@@ -177,18 +178,49 @@ func guardSources(docs []*yaml.Node, exs []extraction, embedded map[string]strin
 // from: the input passed the same checks as authored, so it arises from what substitution put
 // in. Those are the extractions whose reference validation found out of place (misplaced, by
 // name: a document's root, or an anchored node an alias uses as a key), or, with none, those
-// standing at a path refused (the holder of an identified embedded document).
-func validateSources(exs []extraction, misplaced map[string]bool, refused error) []Path {
+// that took out the holder of an identified embedded document refused (removed[k], extraction
+// k's).
+func validateSources(exs []extraction, removed [][]string, misplaced map[string]bool, refused error) []Path {
 	var r *Refusal
 	if !errors.As(refused, &r) {
 		return nil
 	}
 	var out []Path
-	for _, ex := range exs {
-		at := slices.ContainsFunc(ex.paths, func(p Path) bool { return slices.Contains(r.Paths, p.String()) })
-		if misplaced[ex.name] || len(misplaced) == 0 && at {
+	for k, ex := range exs {
+		took := slices.ContainsFunc(removed[k], func(h string) bool { return slices.Contains(r.Paths, h) })
+		if misplaced[ex.name] || len(misplaced) == 0 && took {
 			out = append(out, ex.paths...)
 		}
+	}
+	return out
+}
+
+// holdersRemoved is, for each target, the paths of the identified embedded documents whose
+// holder its substitution takes out of the stream: the holder itself, however the mark reached
+// it (an alias included), or a node the holder lies under.
+func holdersRemoved(docs []*yaml.Node, ts []*target, declared map[string]string) [][]string {
+	out := make([][]string, len(ts))
+	holders := map[*yaml.Node][]string{}
+	for key := range declared {
+		if p, err := ParsePath(key); err == nil {
+			if n, ok := resolve(docs, p.Doc, p.Pointer); ok {
+				holders[n] = append(holders[n], key)
+			}
+		}
+	}
+	if len(holders) == 0 {
+		return out
+	}
+	for k, t := range ts {
+		// An alias in the subtree is not followed: substitution leaves the node it names.
+		var walk func(n *yaml.Node)
+		walk = func(n *yaml.Node) {
+			out[k] = append(out[k], holders[n]...)
+			for _, c := range n.Content {
+				walk(c)
+			}
+		}
+		walk(t.node)
 	}
 	return out
 }

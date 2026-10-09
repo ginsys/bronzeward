@@ -186,6 +186,18 @@ func TestRemarkRefusalPosition(t *testing.T) {
 		"    - name: n\n      contents: |\n        token: sensitive-4417\nmachine:\n  nodeLabels:\n    safe: harmless-5839\n")
 	holdersReq.Declarations.Embedded = []Embedded{{Path: manifestPath, Format: "yaml"}, {Path: holder1, Format: "yaml"}}
 	holders := stagedFrom(t, holdersReq)
+	// A holder taken out with the mapping above it, or through an alias of it.
+	nestedReq := request(t, "machine:\n  nodeLabels:\n    payload: &h |\n      password: sensitive-9284\n    other: *h\n"+
+		"  install:\n    image: harmless-5839\n")
+	nestedReq.Declarations.Embedded = []Embedded{{Path: "doc[0]/machine/nodeLabels/payload", Format: "yaml"}}
+	nested := stagedFrom(t, nestedReq)
+	parentReq := request(t, "machine:\n  nodeLabels:\n    payload: |\n      password: sensitive-9284\n"+
+		"  install:\n    image: harmless-5839\n")
+	parentReq.Declarations.Embedded = nestedReq.Declarations.Embedded
+	parent := stagedFrom(t, parentReq)
+	// A delete directive's value stored as null does not load; its mapping stored as null does.
+	deletes := stagedFrom(t, request(t, "machine:\n  nodeLabels:\n    first:\n      $patch: delete\n    safe: harmless-5839\n"+
+		"    last:\n      $patch: delete\n"))
 	for _, tc := range []struct {
 		name  string
 		st    Staged
@@ -217,6 +229,11 @@ func TestRemarkRefusalPosition(t *testing.T) {
 		{"embedded holder second", holders, []string{"doc[0]/machine/nodeLabels/safe", manifestPath}, RuleEmbedded, 1},
 		// Either holder alone is refused: the first marked is named, whichever validation meets first.
 		{"two embedded holders, the later first", holders, []string{"doc[0]/machine/nodeLabels/safe", holder1, manifestPath}, RuleEmbedded, 1},
+		{"embedded holder's mapping second", parent, []string{"doc[0]/machine/install/image", "doc[0]/machine/nodeLabels"}, RuleEmbedded, 1},
+		{"embedded holder's alias second", nested, []string{"doc[0]/machine/install/image", "doc[0]/machine/nodeLabels/other"}, RuleEmbedded, 1},
+		// The first mark's node is stored with the fourth's, which loads: the third is at fault.
+		{"unloadable under a later marked mapping", deletes, []string{"doc[0]/machine/nodeLabels/first/$patch",
+			"doc[0]/machine/nodeLabels/safe", "doc[0]/machine/nodeLabels/last/$patch", "doc[0]/machine/nodeLabels/first"}, RuleSchemaUnloadable, 2},
 		{"rewrites second", embedded, []string{"doc[0]/cluster/inlineManifests/0/name", manifestPath + "|yaml/stringData/password"},
 			RuleMarkRewritesText, 1},
 	} {
