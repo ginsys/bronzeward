@@ -329,7 +329,7 @@ func (a *API) settleAttemptRefusal(ctx context.Context, machine, plan, operation
 		}
 		var owned bool
 		var state string
-		if err := tx.QueryRowContext(ctx, `SELECT owner = $2 AND owner_gen = $3 AND owner_epoch = $4, state
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(owner = $2 AND owner_gen = $3 AND owner_epoch = $4, false), state
 			FROM operation WHERE id = $1 FOR UPDATE`, operation, a.d.owner.ID, generation, current).Scan(&owned,
 			&state); err != nil {
 			return err

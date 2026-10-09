@@ -324,6 +324,15 @@ func TestAttemptRefusals(t *testing.T) {
 				decode[cancellationBody](t, ae.cancel(ae.human("h-approver"), ae.key(), ae.pid, `{"reason":"not now"}`), http.StatusOK)
 				return ""
 			}},
+		// A terminal operation's owner may be cleared; settling still records the refusal.
+		{name: "cancelled operation with no owner", from: "cancelled", comparison: "1", cause: "the plan is cancelled",
+			setup: func(t *testing.T, ae *attemptEnv) string {
+				mustExec(t, ae.db, `UPDATE operation SET state = 'unresolved' WHERE id = $1`, ae.op)
+				mustExec(t, ae.db, `UPDATE operation SET state = 'cancelled' WHERE id = $1`, ae.op)
+				mustExec(t, ae.db, `UPDATE operation SET owner = NULL, owner_epoch = NULL WHERE id = $1`, ae.op)
+				decode[cancellationBody](t, ae.cancel(ae.human("h-approver"), ae.key(), ae.pid, `{"reason":"not now"}`), http.StatusOK)
+				return ""
+			}},
 		{name: "another generation, then cancelled", gen: 2, comparison: "1", cause: "the plan is cancelled",
 			setup: func(t *testing.T, ae *attemptEnv) string {
 				decode[cancellationBody](t, ae.cancel(ae.human("h-approver"), ae.key(), ae.pid, `{"reason":"not now"}`), http.StatusOK)
