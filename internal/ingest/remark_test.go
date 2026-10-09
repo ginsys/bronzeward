@@ -167,6 +167,12 @@ func TestRemarkRefusalPosition(t *testing.T) {
 	// a's value is the prefix of every minted name: the guard skips this run's references, and so
 	// must its attribution, or b's reference is blamed on a.
 	prefix := stagedFrom(t, request(t, "machine:\n  nodeLabels:\n    a: s-\n    b: "+b+"\n    c: "+b+"\n"))
+	// Embedded marks are identified after outer ones and cross-document loading is checked in
+	// document order: neither order may name a later mark when an earlier one is at fault too.
+	mixed := stagedFrom(t, embeddedRequest(t, manifestStream(secretManifest+"    note: "+a+"\n")+
+		"machine:\n  nodeLabels:\n    x: "+b+"\n    y: "+b+"\n    z: "+a+"\n", "yaml", manifestPath+"|yaml/stringData/password"))
+	three := stagedFrom(t, request(t, "machine:\n  token: "+secretText+
+		"\n---\napiVersion: v1alpha1\nkind: HostnameConfig\nhostname: node-1\n---\n"+wireguardDoc, "doc[0]/machine/token"))
 	for _, tc := range []struct {
 		name  string
 		st    Staged
@@ -182,6 +188,8 @@ func TestRemarkRefusalPosition(t *testing.T) {
 		{"unloadable second", two, []string{"doc[0]/machine/nodeLabels/a", "doc[1]/kind", "doc[1]/apiVersion"}, RuleSchemaUnloadable, 1},
 		{"unloadable in a marked document", two, []string{"doc[1]/hostname", "doc[1]/kind"}, RuleSchemaUnloadable, 1},
 		{"guard beside a minted prefix", prefix, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/nodeLabels/b"}, RuleGuardValue, 1},
+		{"guard embedded first", mixed, []string{manifestPath + "|yaml/stringData/note", "doc[0]/machine/nodeLabels/x"}, RuleGuardValue, 0},
+		{"unloadable later document first", three, []string{"doc[2]/kind", "doc[1]/kind"}, RuleSchemaUnloadable, 0},
 		{"bad path second", st, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/nodeLabels/b|yaml/x"}, RuleBadPath, 1},
 		{"guard first", st, []string{"doc[0]/machine/nodeLabels/host", "doc[0]/machine/nodeLabels/a"}, RuleGuardValue, 0},
 		{"rewrites second", embedded, []string{"doc[0]/cluster/inlineManifests/0/name", manifestPath + "|yaml/stringData/password"},
