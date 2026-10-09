@@ -28,6 +28,7 @@ func Remark(st Staged, marks []Path) (_ *Candidate, err error) {
 	}
 	known, complete := knownSecrets(old, marks)
 	defer func() {
+		err = position(err, marks)
 		if complete {
 			err = redactRefusal(err, known)
 		} else {
@@ -61,7 +62,7 @@ func Remark(st Staged, marks []Path) (_ *Candidate, err error) {
 	for i := range old {
 		if bad := changedBesides(old[i], next[i], minted); bad != nil {
 			if m, ok := holders[bad]; ok {
-				return nil, refuse(RuleMarkRewritesText, m.String())
+				return nil, refuseAt(RuleMarkRewritesText, []Path{m}, m.String())
 			}
 			return nil, refuse(RuleMarkRewritesText, marks[0].String())
 		}

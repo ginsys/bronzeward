@@ -64,6 +64,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	// load a document its secret fields are unknown, and a refusal names documents only.
 	known, complete := knownSecrets(docs, req.Marks)
 	defer func() {
+		err = position(err, req.Marks)
 		if complete {
 			err = redactRefusal(err, known)
 		} else {
@@ -134,7 +135,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	seam.At("substitute") // step 4 done: the candidate document and its declarations built, not guarded
 	if guarded {
 		if err := guard(back, exs, declared); err != nil {
-			return nil, err
+			return nil, from(err, guardSources(back, exs, declared))
 		}
 	}
 	if err := validate(back, decl); err != nil {
@@ -144,11 +145,23 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	for _, ex := range exs {
 		v, err := provider.NewValue(ex.kind, ex.plain)
 		if err != nil {
-			return nil, refuse(RuleMarkKind, ex.paths[0].String())
+			return nil, refuseAt(RuleMarkKind, ex.paths, ex.paths[0].String())
 		}
 		c.values = append(c.values, namedValue{ex.name, v})
 	}
 	return c, nil
+}
+
+// guardSources is the paths of the first extraction, in exs order, whose value alone the guard
+// refuses, or nil: the extraction a guard refusal arises from. The other references of the run
+// hold only their generated names, which no extracted value can match.
+func guardSources(docs []*yaml.Node, exs []extraction, embedded map[string]string) []Path {
+	for _, ex := range exs {
+		if guard(docs, []extraction{ex}, embedded) != nil {
+			return ex.paths
+		}
+	}
+	return nil
 }
 
 // knownSecrets is the text of every value the request would extract that can be found before
@@ -234,7 +247,7 @@ func refuseReferenceHolders(docs []*yaml.Node, targets []*target, declared map[s
 			held = held || holders[deref(n.Content[i])]
 		}
 		if held {
-			return refuse(RuleMarkKind, t.paths[0].String())
+			return refuseAt(RuleMarkKind, t.paths, t.paths[0].String())
 		}
 	}
 	return nil
@@ -277,17 +290,17 @@ func identifyEmbedded(docs []*yaml.Node, marks []Path, declared map[string]strin
 		holder := Path{Doc: m.Doc, Pointer: m.Pointer}
 		key := holder.String()
 		if format, ok := declared[key]; !ok || format != m.Format {
-			return nil, nil, refuse(RuleBadPath, m.String())
+			return nil, nil, refuseAt(RuleBadPath, []Path{m}, m.String())
 		}
 		e, ok := parsed[key]
 		if !ok {
 			n, found := resolve(docs, m.Doc, m.Pointer)
 			if !found || extracted[n] {
-				return nil, nil, refuse(RuleEmbedded, key)
+				return nil, nil, refuseAt(RuleEmbedded, []Path{m}, key)
 			}
 			doc, err := embeddedDocument(n)
 			if err != nil {
-				return nil, nil, refuse(RuleEmbedded, key)
+				return nil, nil, refuseAt(RuleEmbedded, []Path{m}, key)
 			}
 			e = &embeddedDoc{outer: n, doc: doc}
 			parsed[key] = e
@@ -295,7 +308,7 @@ func identifyEmbedded(docs []*yaml.Node, marks []Path, declared map[string]strin
 		}
 		n, found := resolveIn(root(e.doc), m.Inner)
 		if !found {
-			return nil, nil, refuse(RuleMarkUnaddressed, m.String())
+			return nil, nil, refuseAt(RuleMarkUnaddressed, []Path{m}, m.String())
 		}
 		if n.Tag == refTag {
 			continue
@@ -305,7 +318,7 @@ func identifyEmbedded(docs []*yaml.Node, marks []Path, declared map[string]strin
 			continue
 		}
 		if _, _, err := valueOf(n); err != nil {
-			return nil, nil, refuse(RuleMarkKind, m.String())
+			return nil, nil, refuseAt(RuleMarkKind, []Path{m}, m.String())
 		}
 		t := &target{node: n, paths: []Path{m}}
 		byNode[n] = t
@@ -352,7 +365,7 @@ func coalesce(ts []*target) ([]*target, error) {
 				continue
 			}
 			if m.Kind == yaml.AliasNode || !reachedOnlyThrough(c.paths, p.paths) {
-				return nil, refuse(RuleMarkKind, p.paths[0].String())
+				return nil, refuseAt(RuleMarkKind, p.paths, p.paths[0].String())
 			}
 			inside[c] = true
 		}
@@ -389,7 +402,7 @@ func substitute(targets []*target, taken map[string]Reference) ([]extraction, er
 	for _, t := range targets {
 		kind, plain, err := valueOf(t.node)
 		if err != nil {
-			return nil, refuse(RuleMarkKind, t.paths[0].String())
+			return nil, refuseAt(RuleMarkKind, t.paths, t.paths[0].String())
 		}
 		name := "s-" + provider.NewValueID()
 		if _, dup := taken[name]; dup || minted[name] {

@@ -1,16 +1,25 @@
 package ingest
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
 // Refusal is an input refused by a rule (compilation.md §13). It names the rule and the paths
 // involved, never a value: a path token holding an extracted value is already shown as
-// <redacted> when the refusal is made.
+// <redacted> when the refusal is made. Position is the index in the request's marks of the mark
+// the refusal arises from, 0 when no single mark does: a refused mark on a paused claim is named
+// by it alone (§3.6 item 4).
 type Refusal struct {
-	Rule  Rule
-	Paths []string
+	Rule     Rule
+	Paths    []string
+	Position int
+	// sources are the paths of the marks or the extraction the refusal arises from, as written:
+	// they can hold a value, so they are turned into Position and dropped when the refusal is
+	// redacted, and never rendered.
+	sources []Path
 }
 
 // Rule names why an input was refused.
@@ -44,3 +53,35 @@ func (r *Refusal) Error() string {
 }
 
 func refuse(rule Rule, paths ...string) error { return &Refusal{Rule: rule, Paths: paths} }
+
+// refuseAt is refuse for a refusal arising from the marks or the extraction at sources.
+func refuseAt(rule Rule, sources []Path, paths ...string) error {
+	return &Refusal{Rule: rule, Paths: paths, sources: slices.Clone(sources)}
+}
+
+// from gives a refusal the sources it arises from. Other errors pass unchanged.
+func from(err error, sources []Path) error {
+	var r *Refusal
+	if errors.As(err, &r) {
+		r.sources = slices.Clone(sources)
+	}
+	return err
+}
+
+// position sets a refusal's Position from its sources, before they are dropped: the first mark
+// in marks equal to one of them. A refusal without sources keeps its Position. Other errors pass
+// unchanged.
+func position(err error, marks []Path) error {
+	var r *Refusal
+	if !errors.As(err, &r) || len(r.sources) == 0 {
+		return err
+	}
+	for i, m := range marks {
+		if slices.ContainsFunc(r.sources, m.equal) {
+			r.Position = i
+			break
+		}
+	}
+	r.sources = nil
+	return err
+}

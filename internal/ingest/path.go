@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -105,6 +106,11 @@ func pointerTokens(s string) ([]string, bool) {
 		parts[i] = b.String()
 	}
 	return parts, true
+}
+
+// equal reports whether p and q address the same node by the same tokens.
+func (p Path) equal(q Path) bool {
+	return p.Doc == q.Doc && p.Format == q.Format && slices.Equal(p.Pointer, q.Pointer) && slices.Equal(p.Inner, q.Inner)
 }
 
 func (p Path) String() string {

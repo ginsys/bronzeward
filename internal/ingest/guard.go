@@ -320,7 +320,7 @@ func redactRefusal(err error, texts []string) error {
 	if !errors.As(err, &r) {
 		return err
 	}
-	out := &Refusal{Rule: r.Rule}
+	out := &Refusal{Rule: r.Rule, Position: r.Position}
 	for _, s := range r.Paths {
 		if p, perr := ParsePath(s); perr == nil {
 			out.Paths = append(out.Paths, redactPath(p, texts))
@@ -341,7 +341,7 @@ func documentsOnly(err error) error {
 	if !errors.As(err, &r) {
 		return err
 	}
-	out := &Refusal{Rule: r.Rule}
+	out := &Refusal{Rule: r.Rule, Position: r.Position}
 	for _, s := range r.Paths {
 		d := redacted
 		if p, perr := ParsePath(s); perr == nil {
