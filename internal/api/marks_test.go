@@ -348,6 +348,30 @@ func TestMarkInterruptedTakeoverPausesWithoutMarks(t *testing.T) {
 	}
 }
 
+// A mark's run stopped while its new envelope is encrypted leaves the claim held with its earlier
+// envelope and the operation running, for a takeover: the stop is no failed step.
+func TestMarkStoppedAtEncryptionHolds(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	op, j, first := ie.pausedForMark(t)
+	mj := ie.mark(t, "k-mark-stop-enc-012", j.claim.ID, op, 2, zoneMark)
+	ctx, cancel := context.WithCancel(t.Context())
+	ie.f.onEncrypt = func(context.Context) error {
+		cancel()
+		return context.Canceled
+	}
+	ie.build(options{}).runIngest(ctx, mj)
+	r := ie.pausedRow(t, j.claim.ID)
+	if r.state != "held" || r.gen != 2 || string(r.digest) != string(first.digest) || r.opState != "running" {
+		t.Fatalf("after the stop: claim %+v", r)
+	}
+	if ie.logged("envelope encryption") {
+		t.Fatal("the stop was handled as a failed envelope encryption")
+	}
+	if evs := events(t, ie.db, op); !slices.Equal(eventTypes(evs), []string{"started", "staged", "paused", "marked"}) {
+		t.Fatalf("events %v", evs)
+	}
+}
+
 // Compilation §3.6 item 6, PA §8.3: a mark's run that cannot decrypt the envelope records
 // resume-failed and leaves the claim held to its lease, the operation running.
 func TestMarkDecryptFailureLeavesHeld(t *testing.T) {
