@@ -176,6 +176,9 @@ func TestRemarkRefusalPosition(t *testing.T) {
 		"machine:\n  nodeLabels:\n    x: "+b+"\n    y: "+b+"\n    z: pre-"+a+"-post\n", "yaml", manifestPath+"|yaml/stringData/password"))
 	three := stagedFrom(t, request(t, "machine:\n  token: "+secretText+
 		"\n---\napiVersion: v1alpha1\nkind: HostnameConfig\nhostname: node-1\n---\n"+wireguardDoc, "doc[0]/machine/token"))
+	roots := stagedFrom(t, request(t, "apiVersion: v1alpha1\nkind: HostnameConfig\nhostname: node-1\n---\n"+
+		"apiVersion: v1alpha1\nkind: ExtensionServiceConfig\nname: ext\n"))
+	aliasKey := stagedFrom(t, embeddedRequest(t, manifestStream("safe: harmless-5839\npassword: &pw sensitive-9284\nlookup:\n  *pw : visible-3741\n"), "yaml"))
 	for _, tc := range []struct {
 		name  string
 		st    Staged
@@ -199,6 +202,10 @@ func TestRemarkRefusalPosition(t *testing.T) {
 		// Substitution puts a reference at that document's root, which validation refuses after
 		// the marks are gone from the stream: the refusal is still the second mark's.
 		{"root of a later scalar-only mapping second", two, []string{"doc[0]/machine/nodeLabels/a", "doc[1]"}, RuleTagPlacement, 1},
+		// Validation stops at the first document; the refusal is still the first mark's.
+		{"two roots, the later document first", roots, []string{"doc[1]", "doc[0]"}, RuleTagPlacement, 0},
+		// The alias key is refused at its mapping's path, which no mark names.
+		{"embedded alias key second", aliasKey, []string{manifestPath + "|yaml/safe", manifestPath + "|yaml/password"}, RuleTagPlacement, 1},
 		{"rewrites second", embedded, []string{"doc[0]/cluster/inlineManifests/0/name", manifestPath + "|yaml/stringData/password"},
 			RuleMarkRewritesText, 1},
 	} {

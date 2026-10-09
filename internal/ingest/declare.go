@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"cmp"
 	"maps"
 	"regexp"
 	"slices"
@@ -93,19 +94,38 @@ func checkDeclarations(d Declarations) (map[string]string, error) {
 // tag is !bwref or a core tag; !bwref stands only on a scalar that is a mapping value or a list
 // element, names a declared name, and every declared name is used; no other string holds the
 // reserved text. Identified embedded documents are checked as parsed documents, not as text.
-func validate(docs []*yaml.Node, d Declarations) error {
+func validate(docs []*yaml.Node, d Declarations) error { return validateRefs(docs, d, nil) }
+
+// validateRefs is validate. With misplaced set, a reference at a place refused goes on into
+// misplaced by name instead of ending the walk, and the first such refusal is returned once
+// the walk is done: the refusal of a substituted stream is that of every mark whose reference
+// substitution put out of place, which a path cannot tell (an alias key is refused at its
+// mapping's path).
+func validateRefs(docs []*yaml.Node, d Declarations, misplaced map[string]bool) error {
 	embedded, err := checkDeclarations(d)
 	if err != nil {
 		return err
 	}
 	used := map[string]bool{}
+	var first error
+	place := func(name string, p Path) error {
+		r := refuse(RuleTagPlacement, p.String())
+		if misplaced == nil {
+			return r
+		}
+		misplaced[name] = true
+		if first == nil {
+			first = r
+		}
+		return nil
+	}
 	var check visit
 	check = func(n *yaml.Node, p Path, key bool, parent *yaml.Node) error {
 		if n.Kind == yaml.AliasNode {
 			// The anchored node was checked where it stands; an alias puts it in another
 			// position, which must be allowed too.
 			if t := deref(n); key && t != nil && t.Tag == refTag {
-				return refuse(RuleTagPlacement, p.String())
+				return place(t.Value, p)
 			}
 			return nil
 		}
@@ -113,7 +133,7 @@ func validate(docs []*yaml.Node, d Declarations) error {
 			// Only a mapping value or a list element: never a key, a collection, or a whole
 			// document (which has no parent).
 			if key || n.Kind != yaml.ScalarNode || parent == nil {
-				return refuse(RuleTagPlacement, p.String())
+				return place(n.Value, p)
 			}
 			if !validName(n.Value) {
 				return refuse(RuleBadName, p.String())
@@ -143,8 +163,9 @@ func validate(docs []*yaml.Node, d Declarations) error {
 		}
 		return nil
 	}
-	if err := walkStream(docs, check); err != nil {
-		return err
+	// A misplaced reference was met before any refusal that ended the walk.
+	if err := walkStream(docs, check); first != nil || err != nil {
+		return cmp.Or(first, err)
 	}
 	for path := range embedded {
 		return refuse(RuleEmbedded, path)

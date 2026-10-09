@@ -30,12 +30,15 @@ func (in *markInput) check(*API) error {
 	if len(in.Marks) == 0 || len(in.Marks) > maxMarks {
 		return fmt.Errorf("marks must hold 1 to %d paths", maxMarks)
 	}
-	in.texts = make([]string, len(in.Marks))
-	in.marks = make([]ingest.Path, len(in.Marks))
-	for i, raw := range in.Marks {
+	// A member that is not a string is a malformed body, whichever mark before it is refused.
+	for _, raw := range in.Marks {
 		if len(raw) == 0 || raw[0] != '"' {
 			return errors.New("marks must be strings")
 		}
+	}
+	in.texts = make([]string, len(in.Marks))
+	in.marks = make([]ingest.Path, len(in.Marks))
+	for i, raw := range in.Marks {
 		bad := refuse(http.StatusUnprocessableEntity, "validation-failed", "a mark is not a compilation §2.2 path").with("position", i)
 		// encoding/json decodes malformed UTF-8 and a lone surrogate escape as U+FFFD, which
 		// would make the mark differ from what was sent; U+0000 cannot be stored.
