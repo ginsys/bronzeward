@@ -37,8 +37,14 @@ func markCall(tok, k, claim string, marks ...string) call {
 // pausedForMark starts a reviewed import of reviewedMarkable and runs it to its pause.
 func (ie *ingestEnv) pausedForMark(t *testing.T) (string, job, pausedRow) {
 	t.Helper()
-	op, j := ie.startJob(t, map[string]any{"staging": "encrypted", "review": true, "document": reviewedMarkable,
-		"marks": []string{labelMark}})
+	return ie.pausedWith(t, map[string]any{"document": reviewedMarkable, "marks": []string{labelMark}})
+}
+
+// pausedWith starts a reviewed, encrypted import with over and runs it to its pause.
+func (ie *ingestEnv) pausedWith(t *testing.T, over map[string]any) (string, job, pausedRow) {
+	t.Helper()
+	over["staging"], over["review"] = "encrypted", true
+	op, j := ie.startJob(t, over)
 	ie.runWith(t, options{}, j)
 	r := ie.pausedRow(t, j.claim.ID)
 	if r.state != "paused" || r.gen != 1 {
@@ -139,6 +145,43 @@ func TestMarkRepausesWithNewEnvelope(t *testing.T) {
 	}
 }
 
+// PA §16, compilation §3.6 items 3-4: a mark on an import carries the baseline ciphertext and
+// both its digests over to its new envelope, and the continuation's import base revision records
+// them, its document holding the mark's reference and not the sentinel; across the pause, the
+// mark and the continuation the sentinel is in no body, log or row. Control: the revision's
+// columns are compared with the first envelope's baseline, so a rebuilt envelope that dropped or
+// recomputed them fails.
+func TestMarkThenContinuationRecordsBaseline(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	before := ie.currentETag(t)
+	op, j, first := ie.pausedForMark(t)
+	old := ie.opened(t, first)
+	ie.runWith(t, options{}, ie.mark(t, "k-mark-baseline-012", j.claim.ID, op, 2, zoneMark))
+	if r := ie.pausedRow(t, j.claim.ID); r.state != "paused" || r.gen != 2 {
+		t.Fatalf("after the mark: claim %+v", r)
+	}
+	cj := ie.continueReview(t, "k-continue-baseline", j.claim.ID, op, 3)
+	ie.runWith(t, options{}, cj)
+	ie.wantContinuedSucceeded(t, op, j.claim.ID, before, "started", "staged", "paused", "marked", "paused", "continued", "succeeded")
+	var doc, key string
+	var ct, digest, conf []byte
+	var refs int
+	if err := ie.db.QueryRow(`SELECT r.document, r.baseline_ciphertext, r.baseline_digest, r.baseline_digest_key, r.configuration_digest,
+			(SELECT count(*) FROM import_base_reference WHERE revision = r.id)
+		FROM import_base_revision r WHERE r.machine = $1 ORDER BY r.created_at DESC LIMIT 1`, ie.machine).
+		Scan(&doc, &ct, &digest, &key, &conf, &refs); err != nil {
+		t.Fatal(err)
+	}
+	if string(ct) != string(old.Baseline.Ciphertext) || fmt.Sprintf("%x", digest) != fmt.Sprintf("%x", old.Baseline.Digest) ||
+		key != old.Baseline.DigestKey || fmt.Sprintf("%x", conf) != fmt.Sprintf("%x", old.Baseline.Configuration) {
+		t.Fatalf("import base baseline %q %x %q %x, first envelope's %+v", ct, digest, key, conf, old.Baseline)
+	}
+	if strings.Contains(doc, markSentinel) || !strings.Contains(doc, "zone: !bwref") || refs != 3 {
+		t.Fatalf("import base document %q, %d references", doc, refs)
+	}
+	assertAbsent(t, ie, markSentinel)
+}
+
 // Compilation §3.6 item 4, PA §8.3: a mark refused before any provider write returns the claim to
 // paused with its earlier envelope and digest, with the mark-refused event naming the rule and
 // the mark's position, never a path. The second mark addresses no node, so its position is 1.
@@ -172,6 +215,115 @@ func TestMarkRefusedReturnsPaused(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprint(evs), markSentinel) || ie.logged(markSentinel) {
 		t.Fatal("the refused path is in an event or the log")
+	}
+}
+
+// PA §16, compilation §3.6 items 3-4: a mark on a mapping holding an earlier reference, or on the
+// string of an embedded document holding one, is refused mark-kind, and a mark inside an embedded
+// JSON document whose re-encoding would assemble an earlier value from separate scalars is
+// refused mark-rewrites-text: each before any provider write, the claim paused with its earlier
+// envelope and digest and a mark-refused event naming the rule and position. The ingest package's
+// remark tests hold each rule's control; here a run that wrote first, or abandoned, fails.
+func TestMarkCompilationRefusalsReturnPaused(t *testing.T) {
+	const manifest = "doc[0]/cluster/inlineManifests/0/contents"
+	embedded := func(format string) map[string]any {
+		return map[string]any{"embedded": []map[string]string{{"path": manifest, "format": format}}}
+	}
+	for _, c := range []struct {
+		name string
+		over map[string]any
+		mark string
+		rule ingest.Rule
+	}{
+		{"mapping holding a reference", map[string]any{"document": reviewedMarkable, "marks": []string{labelMark}},
+			"doc[0]/machine/nodeLabels", ingest.RuleMarkKind},
+		{"embedded document holding a reference", map[string]any{
+			"document": "machine:\n  token: " + runToken + "\ncluster:\n  inlineManifests:\n    - name: s\n      contents: |\n" +
+				"        kind: Secret\n        stringData:\n            password: " + markSentinel + "\n            user: admin\n",
+			"marks": []string{manifest + "|yaml/stringData/password"}, "declarations": embedded("yaml")},
+			manifest, ingest.RuleMarkKind},
+		{"embedded JSON re-encoded", map[string]any{
+			"document": "machine:\n  token: " + runToken + "\ncluster:\n  inlineManifests:\n    - name: s\n" +
+				`      contents: '{"public": "visible", "password": "` + markSentinel + `"}'` + "\n",
+			"marks": []string{}, "declarations": embedded("json")},
+			manifest + "|json/password", ingest.RuleMarkRewritesText},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ie := newIngestEnv(t, options{})
+			op, j, first := ie.pausedWith(t, c.over)
+			made, _ := ie.f.paths()
+			mj := ie.mark(t, "k-mark-compile-0123", j.claim.ID, op, 2, c.mark)
+			ie.runWith(t, options{}, mj)
+			r := ie.pausedRow(t, j.claim.ID)
+			if r.state != "paused" || r.gen != 2 || string(r.payload) != string(first.payload) || string(r.digest) != string(first.digest) ||
+				r.opState != "running" {
+				t.Fatalf("claim %+v", r)
+			}
+			if calls, _ := ie.f.paths(); calls != made {
+				t.Fatalf("%d creates after %d: the refused mark wrote to the provider", calls, made)
+			}
+			evs := events(t, ie.db, op)
+			if !slices.Equal(eventTypes(evs), []string{"started", "staged", "paused", "marked", "mark-refused", "paused"}) {
+				t.Fatalf("events %v", evs)
+			}
+			if p, _ := evs[4]["problem"].(map[string]any); p["rule"] != string(c.rule) || p["position"] != float64(0) {
+				t.Fatalf("mark-refused %v", evs[4])
+			}
+			assertAbsent(t, ie, markSentinel)
+		})
+	}
+}
+
+// PA §16, compilation §3.6 item 4: a refused mark whose path holds a value an earlier mark
+// extracted, and a guard hit at a staged path that spells a distinctive string, leave neither in
+// the mark-refused event, its problem, a body, the log or a row: the refusal names its rule and
+// the mark's position only. A staged key cannot equal an extracted value (the guard refuses it at
+// extraction), so the guard row's path spells a string the run never extracted, which a refusal
+// naming its path would leak alike. Control (mutation): a refusal that names its paths fails the
+// scan.
+func TestMarkRefusalNamesNoPath(t *testing.T) {
+	t.Run("earlier extracted value in the path", func(t *testing.T) {
+		ie := newIngestEnv(t, options{})
+		op, j, _ := ie.pausedForMark(t)
+		ie.runWith(t, options{}, ie.mark(t, "k-mark-extract-0123", j.claim.ID, op, 2, zoneMark))
+		r := ie.pausedRow(t, j.claim.ID)
+		if r.state != "paused" || !strings.Contains(string(ie.opened(t, r).Sanitized.Documents()), "zone: !bwref") {
+			t.Fatalf("control: the first mark did not extract the sentinel: claim %+v", r)
+		}
+		spelled := "doc[0]/machine/nodeLabels/" + markSentinel
+		ie.runWith(t, options{}, ie.mark(t, "k-mark-spelled-0123", j.claim.ID, op, 3, spelled))
+		ie.wantMarkRefused(t, op, j.claim.ID, ingest.RuleMarkUnaddressed, "marked", "paused", "marked", "mark-refused", "paused")
+		assertAbsent(t, ie, markSentinel)
+	})
+	t.Run("guard hit at a path spelling a string", func(t *testing.T) {
+		const spelling, repeated = "bw-guard-path-6e0f21", "bw-mark-repeated-41c9a7"
+		ie := newIngestEnv(t, options{})
+		op, j, _ := ie.pausedWith(t, map[string]any{"marks": []string{labelMark},
+			"document": twoSecrets + "    zone: " + repeated + "\n    " + spelling + ": " + repeated + "\n"})
+		ie.runWith(t, options{}, ie.mark(t, "k-mark-guard-012345", j.claim.ID, op, 2, zoneMark))
+		ie.wantMarkRefused(t, op, j.claim.ID, ingest.RuleGuardValue, "marked", "mark-refused", "paused")
+		assertAbsent(t, ie, spelling)
+		assertAbsent(t, ie, repeated)
+	})
+}
+
+// wantMarkRefused checks claim paused with op's events after the first pause equal to tail, the
+// last mark-refused naming rule at position 0 and no paths.
+func (ie *ingestEnv) wantMarkRefused(t *testing.T, op, claim string, rule ingest.Rule, tail ...string) {
+	t.Helper()
+	if r := ie.pausedRow(t, claim); r.state != "paused" || r.opState != "running" {
+		t.Fatalf("claim %+v", r)
+	}
+	evs := events(t, ie.db, op)
+	if !slices.Equal(eventTypes(evs), append([]string{"started", "staged", "paused"}, tail...)) {
+		t.Fatalf("events %v", evs)
+	}
+	p, _ := evs[len(evs)-2]["problem"].(map[string]any)
+	if p["rule"] != string(rule) || p["position"] != float64(0) {
+		t.Fatalf("mark-refused %v", evs[len(evs)-2])
+	}
+	if _, ok := p["paths"]; ok {
+		t.Fatalf("the problem names paths: %v", p)
 	}
 }
 
@@ -386,6 +538,27 @@ func TestMarkDecryptFailureLeavesHeld(t *testing.T) {
 	evs := events(t, ie.db, op)
 	if !slices.Equal(eventTypes(evs), []string{"started", "staged", "paused", "marked", "resume-failed"}) {
 		t.Fatalf("events %v", evs)
+	}
+}
+
+// PA §16, compilation §3.1: a mark's run that finds the envelope not matching its digest, or a
+// malformed envelope stored with its matching digest, abandons the claim and fails the operation
+// 500 internal-error before any provider write. Control: pausing again instead leaves the claim
+// paused and fails each case.
+func TestMarkIntegrityFailureAbandons(t *testing.T) {
+	for _, c := range envelopeCorruptions {
+		t.Run(c.name, func(t *testing.T) {
+			ie := newIngestEnv(t, options{})
+			op, j, _ := ie.pausedForMark(t)
+			ct, _ := ie.stagedPayload(t, j.claim.ID)
+			c.corrupt(t, ie, j.claim.ID, ct)
+			mj := ie.mark(t, "k-mark-integrity-01", j.claim.ID, op, 2, zoneMark)
+			ie.runWith(t, options{}, mj)
+			ie.wantIntegrityFailure(t, op, j.claim.ID, "marked")
+			if calls, _ := ie.f.paths(); calls != 2 {
+				t.Fatalf("%d creates: the mark wrote to the provider", calls)
+			}
+		})
 	}
 }
 
