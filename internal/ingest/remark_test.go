@@ -154,6 +154,44 @@ func TestRemarkGuardsNewValues(t *testing.T) {
 	wantRule(t, err, RuleGuardValue)
 }
 
+// Compilation §3.6 item 4: a refused mark is named by its position in the request, whichever
+// rule refuses it, a guard hit's included (the guard knows only the node it hit). When several
+// marks are at fault, the first in the request is named.
+func TestRemarkRefusalPosition(t *testing.T) {
+	const a, b = "remark-alpha-7c1e", "remark-beta-2d9f"
+	st := stagedFrom(t, request(t, "machine:\n  token: "+secretText+"\n  nodeLabels:\n    host: "+otherSecret+"\n    note: "+otherSecret+
+		"\n    a: "+a+"\n    b: "+b+"\n    c: "+b+"\n", "doc[0]/machine/token"))
+	two := stagedFrom(t, request(t, "machine:\n  token: "+secretText+"\n  nodeLabels:\n    a: "+a+
+		"\n---\napiVersion: v1alpha1\nkind: HostnameConfig\nhostname: node-1\n", "doc[0]/machine/token"))
+	embedded := stagedFrom(t, embeddedRequest(t, strings.Replace(manifestStream(secretManifest), "name: m\n", "name: manifest-5d2a\n", 1), "yaml"))
+	for _, tc := range []struct {
+		name  string
+		st    Staged
+		marks []string
+		rule  Rule
+		want  int
+	}{
+		{"unaddressed second", st, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/missing"}, RuleMarkUnaddressed, 1},
+		{"unaddressed first", st, []string{"doc[0]/machine/missing", "doc[0]/machine/nodeLabels/a"}, RuleMarkUnaddressed, 0},
+		{"kind third", st, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/nodeLabels/b", "doc[0]/machine"}, RuleMarkKind, 2},
+		{"guard second", st, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/nodeLabels/host", "doc[0]/machine/nodeLabels/b"},
+			RuleGuardValue, 1},
+		{"unloadable second", two, []string{"doc[0]/machine/nodeLabels/a", "doc[1]/kind", "doc[1]/apiVersion"}, RuleSchemaUnloadable, 1},
+		{"bad path second", st, []string{"doc[0]/machine/nodeLabels/a", "doc[0]/machine/nodeLabels/b|yaml/x"}, RuleBadPath, 1},
+		{"guard first", st, []string{"doc[0]/machine/nodeLabels/host", "doc[0]/machine/nodeLabels/a"}, RuleGuardValue, 0},
+		{"rewrites second", embedded, []string{"doc[0]/cluster/inlineManifests/0/name", manifestPath + "|yaml/stringData/password"},
+			RuleMarkRewritesText, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Remark(tc.st, paths(t, tc.marks...))
+			wantRule(t, err, tc.rule)
+			if r := err.(*Refusal); r.Position != tc.want {
+				t.Errorf("position %d, want %d", r.Position, tc.want)
+			}
+		})
+	}
+}
+
 // A remark carries at least one mark: without one it would re-stage the same document.
 func TestRemarkNeedsAMark(t *testing.T) {
 	st := stagedFrom(t, request(t, "machine:\n  token: "+secretText+"\n"))

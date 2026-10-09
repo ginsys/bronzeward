@@ -61,17 +61,17 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 	}
 	for _, m := range marks {
 		if m.Format != "" {
-			return nil, refuse(RuleBadPath, m.String())
+			return nil, refuseAt(RuleBadPath, []Path{m}, m.String())
 		}
 		n, ok := resolve(docs, m.Doc, m.Pointer)
 		if !ok {
-			return nil, refuse(RuleMarkUnaddressed, m.String())
+			return nil, refuseAt(RuleMarkUnaddressed, []Path{m}, m.String())
 		}
 		add(n, m)
 	}
 	for _, t := range out {
 		if _, _, err := valueOf(t.node); err != nil {
-			return nil, refuse(RuleMarkKind, t.paths[0].String())
+			return nil, refuseAt(RuleMarkKind, t.paths, t.paths[0].String())
 		}
 	}
 	// Each target is stored as a reference, which a later ingestion loads as a null: a document
@@ -89,7 +89,15 @@ func identify(docs []*yaml.Node, marks []Path) ([]*target, error) {
 	slices.Sort(withTargets)
 	for _, i := range withTargets {
 		if _, err := schemaPointers(docs[i], i, stored); err != nil {
-			return nil, err
+			var sources []Path
+			for _, t := range out {
+				for _, p := range t.paths {
+					if p.Doc == i {
+						sources = append(sources, p)
+					}
+				}
+			}
+			return nil, from(err, sources)
 		}
 	}
 	return out, nil
