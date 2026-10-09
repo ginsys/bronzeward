@@ -1633,10 +1633,15 @@ Evidence gaps this contract carries rather than closes:
   after the last kill among the surfaces
   ([acceptance plan S2](acceptance-plan.md#s2-publication)). Profile and
   assignment updates ingest no document and hold no claim.
-- **Operator review** (§3.6): specified, not measured. No evidence has run a
-  pause, a show, a mark on a staged claim or a continuation; persistence and
-  API §16 lists the checks the implementation owes, and until they run, the
-  claim that no step leaks plaintext rests on this design only.
+- **Operator review** (§3.6): measured on the fixture and in Go checks. S1
+  pauses a reviewed import, shows it, keeps it paused across a restart,
+  refuses a mark before and after a provider write, kills a mark's run at each
+  point it re-enters and a continuation's run before its draft transaction,
+  each resumed by takeover, and abandons a claim by request and by its
+  absolute expiry, every outcome scanned
+  ([acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)).
+  Not measured: entering recovery mode with a paused claim, since no route
+  enters recovery mode before the recovery work.
 - **Schema detector coverage**: `schema-covers-base-secrets` was never seen to
   fail and ran on control-plane bases only; disk-encryption, installer and disk
   configuration were absent from the environment; the list's precision was not

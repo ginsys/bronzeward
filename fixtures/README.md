@@ -83,8 +83,10 @@ go run ./fixtures/oidc defects   # every defect mint can put in a token
 Instance C runs `/bronzeward-interrupt`, the server built with the `fixtureinterrupt` tag, from the
 same image and configuration shape as A and B; A and B never run it. The tag compiles in
 [`internal/seam`](../internal/seam)'s `At(step)`, which ingestion calls at each of its steps
-(`claim`, `read`, `parse`, `identify`, `substitute`, `guard`, `generation`, `construct`,
-`baseline`, `staged`), and the publish worker at each of a publication's interruption points
+(`claim`, `read`, `parse`, `identify`, `substitute`, `guard`, `generation-first` after the first of
+several generations, `generation`, `construct`, `baseline`, `staged`, and `draft` before the draft
+transaction), a mark's run at those it re-enters (`parse` to `construct`, then `envelope` once its
+new envelope is encrypted and before it is stored), and the publish worker at each of a publication's interruption points
 (`publish-claim`, `publish-snapshot`, `publish-pins`, `publish-compile`, `publish-encrypt`,
 `publish-commit`, the last inside the commit transaction before its `COMMIT`). Without the tag
 `At` is empty, and `up` refuses an image whose `bronzeward` holds the seam.
@@ -447,6 +449,12 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   unchanged after it; its output is kept as `orphan-report.txt`. It runs against instance A's
   configuration only, on cluster scope, and the Go tests in `cmd/bronzeward` and
   `internal/orphans` carry the report's other checks.
+- S1's operator review rows (`scenarios/review.sh`; `scenarios/s1 review` runs them alone) read
+  the review route's answer into the shell only, never into a file: its transcript records the
+  status, and the answer's document is matched for the worker's synthetic file secret in memory.
+  A mark failing after a provider write is produced by partitioning OpenBao while the mark's run
+  stalls after its first generation. Recovery-mode entry with a paused claim is not run: no route
+  enters recovery mode before ginsys/bronzeward#29.
 - S1's interruptions are at the points `internal/seam` names. A kill between two of them, inside
   a database transaction, is covered by the Go test `TestCrashInsideT1LeavesDraft`, which S1 runs.
 - Talos node volumes are anonymous. `bin/up` records their names in `.state/` once the cluster

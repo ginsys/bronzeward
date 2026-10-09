@@ -225,6 +225,17 @@ configuration digest, equal to the pre-state; the executor identity's decryption
   `talos-access-unavailable` and each node-ID or cluster-ID mismatch the fixture can produce, as PA §16 lists them, each ending the
   ingestion with its claim abandoned and nothing read kept.
 - Automation on `POST /ingestions`: `403`.
+- Operator review ([C §3.6](compilation.md#36-operator-review)), on imports of the worker with
+  `review: true`: transient staging refused `422`; the run pauses with its envelope, its lease
+  ended; the review route shows the unmarked file secret to the author only, `no-store`, and
+  refuses automation `403`; the claim stays paused across a restart. A mark refused before any
+  provider write names its rule and position, the envelope unchanged; a mark's run killed at each
+  point it re-enters, and a continuation's run killed before its draft transaction, each resumed by
+  takeover after lease lapse, the generations made kept. A mark extracting the file secret pauses
+  with a new envelope, after which the review no longer shows it, and the continuation commits.
+  A mark whose second provider write fails abandons the claim with its first generation kept. A
+  paused claim abandoned by the author, and one left until its absolute expiry, are abandoned with
+  their generations listed by the orphan report.
 
 **Retained evidence.** Pre- and post-state digests and resource versions; one scan bundle per
 success, refusal and interruption point; claim rows and the orphan report.
@@ -865,7 +876,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: machine revisions allocated in commit order under concurrent writers, with the unlocked control | *check* | #26 |
 | PA §16: an event stream ended by its token's `exp`, resumption refused after revocation | S8 step 3 | #26 |
 | PA §16: no request body in the data directory, write-ahead log or backups | S1, S2 scans | #22, #23 |
-| PA §16 and C §15: the operator review (C §3.6): transient review refused, pause and its lease end, an owner heartbeat on a paused claim, the review route's roles, `no-store`, states and decryption and integrity failures, a mark extracting a sentinel, a mark on a mapping or an identified embedded document holding a reference refused, a malformed mark path holding a sentinel, a mark preserving the baseline digests, a mark's or continuation's decryption and integrity failures, a mark refused before, at and after its first provider write, a refusal naming the mark by position, a mark that would rewrite other text refused, racing marks, a paused claim's takeover refused, a mark's run killed at each step it re-enters and a continuation's run killed, each resumed, a mark's and continuation's 202 body holding no path or sentinel, a continuation on a moved, discarded or publishing draft, abandonment, expiry, recovery-mode entry and restart, an expired paused claim in the orphan report, each with its control and every surface scanned | *check* | #125 |
+| PA §16 and C §15: the operator review (C §3.6): transient review refused, pause and its lease end, an owner heartbeat on a paused claim, the review route's roles, `no-store`, states and decryption and integrity failures, a mark extracting a sentinel, a mark on a mapping or an identified embedded document holding a reference refused, a malformed mark path holding a sentinel, a mark preserving the baseline digests, a mark's or continuation's decryption and integrity failures, a mark refused before, at and after its first provider write, a refusal naming the mark by position, a mark that would rewrite other text refused, racing marks, a paused claim's takeover refused, a mark's run killed at each step it re-enters and a continuation's run killed, each resumed, a mark's and continuation's 202 body holding no path or sentinel, a continuation on a moved, discarded or publishing draft, abandonment, expiry, recovery-mode entry and restart, an expired paused claim in the orphan report, each with its control and every surface scanned | S1 review rows plus *check* | #125 |
 
 ## 8. Not covered by the PoC
 

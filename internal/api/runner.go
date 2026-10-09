@@ -104,6 +104,7 @@ func (a *API) runIngest(ctx context.Context, j job) {
 	if a.o.beforeT1 != nil {
 		a.o.beforeT1()
 	}
+	seam.At("draft") // everything staged or resumed, the draft transaction not begun
 	switch ref, err := a.commitImport(ctx, j, imp); {
 	case err != nil:
 		a.o.logf("ingestion %s: the draft transaction: %v", j.claim.ID, err)
@@ -266,6 +267,7 @@ func (a *API) remark(ctx context.Context, j job, st ingest.Staged) (*refusal, er
 	if err != nil {
 		return nil, a.markRefused(ctx, j, a.markProblem(j, "extraction", err, goesOn))
 	}
+	seam.At("guard") // step 5 done: the marks' values extracted and guarded, none created
 	created := map[string]string{}
 	s, err := c.Commit(ctx, a.createGeneration(j.claim, created))
 	switch {
@@ -281,6 +283,7 @@ func (a *API) remark(ctx context.Context, j job, st ingest.Staged) (*refusal, er
 	if err != nil {
 		return a.markProblem(j, "envelope", err, abandoned), nil
 	}
+	seam.At("construct") // step 7 done: the new envelope sealed, not encrypted
 	ct, err := a.d.ing.EncryptStaging(ctx, plain)
 	switch {
 	case err != nil && ctx.Err() != nil:
@@ -288,6 +291,7 @@ func (a *API) remark(ctx context.Context, j job, st ingest.Staged) (*refusal, er
 	case err != nil:
 		return a.markProblem(j, "envelope encryption", err, abandoned), nil
 	}
+	seam.At("envelope") // the new envelope encrypted, not stored: the claim holds the earlier one
 	if err := a.inTx(ctx, func(tx *sql.Tx) error {
 		if err := staging.Pause(ctx, tx, a.d.owner, j.claim, []byte(ct), sum); err != nil {
 			return err
