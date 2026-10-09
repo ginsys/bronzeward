@@ -90,6 +90,7 @@ func routes() []*route {
 		ingestionStart().on(ifm(human(m(post, "/ingestions", author)))),
 		read(human(m(http.MethodGet, "/ingestions/{id}/review", author)), getIngestionReview),
 		ingestionMark().on(human(m(post, "/ingestions/{id}/marks", author))),
+		ingestionContinuation().on(human(m(post, "/ingestions/{id}/continuations", author))),
 		ingestionTakeover().on(human(m(post, "/ingestions/{id}/takeovers", author))),
 		ingestionAbandonment().on(human(m(post, "/ingestions/{id}/abandonments", author))),
 		clusterCreation().on(human(m(post, "/clusters", author))),
