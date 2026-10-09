@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -32,6 +33,13 @@ func reviewCall(tok, claim string) call {
 	return call{method: "GET", path: prefix + "/ingestions/" + claim + "/review", token: tok}
 }
 
+// refused makes a call expected to be refused and keeps its body for assertAbsent.
+func (ie *ingestEnv) refused(c call) *httptest.ResponseRecorder {
+	rec := ie.do(ie.api, c)
+	ie.bodies = append(ie.bodies, rec.Body.String())
+	return rec
+}
+
 // stagedPayload is a claim's stored ciphertext and digest.
 func (ie *ingestEnv) stagedPayload(t *testing.T, claim string) (provider.Ciphertext, []byte) {
 	t.Helper()
@@ -52,6 +60,7 @@ func TestReviewRouteAnswersPaused(t *testing.T) {
 	ie := newIngestEnv(t, options{})
 	claim := ie.pausedReview(t)
 	before := ie.pausedRow(t, claim)
+	ct, _ := ie.stagedPayload(t, claim)
 	acts := count(t, ie.db, "SELECT count(*) FROM act")
 	rec := ie.do(ie.api, reviewCall(ie.human("h-author"), claim))
 	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Bronzeward-Epoch") == "" {
@@ -78,7 +87,27 @@ func TestReviewRouteAnswersPaused(t *testing.T) {
 		!after.lease.Equal(before.lease) || after.gen != before.gen || count(t, ie.db, "SELECT count(*) FROM act") != acts {
 		t.Fatalf("the review changed the claim or recorded an act: %+v", after)
 	}
+	if got, _ := ie.stagedPayload(t, claim); got != ct {
+		t.Fatalf("the review replaced the staged payload")
+	}
 	assertAbsent(t, ie, reviewSentinel)
+}
+
+// Control for assertAbsent's bytea scan: a payload holding the sentinel's bytes is named, which a
+// scan of rows' text forms (bytea in hex) would miss.
+func TestReviewRouteLeakScanSeesBytes(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	claim := ie.pausedReview(t)
+	if hits := tablesHolding(t, ie.db, reviewSentinel); len(hits) != 0 {
+		t.Fatalf("before: %v", hits)
+	}
+	mustExec(t, ie.db, `UPDATE staging_claim SET payload = convert_to('x ' || $2 || ' x', 'UTF8') WHERE id = $1`, claim, reviewSentinel)
+	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim AS r WHERE r::text LIKE '%' || $1 || '%'`, reviewSentinel); n != 0 {
+		t.Fatalf("control: the row's text form holds the sentinel (%d), so the bytea scan is not what finds it", n)
+	}
+	if hits := tablesHolding(t, ie.db, reviewSentinel); len(hits) != 1 || !strings.Contains(hits[0], "staging_claim.payload") {
+		t.Fatalf("the scan missed the payload's bytes: %v", hits)
+	}
 }
 
 // PA §9.2, §10.3: the review is for an author, human only: a service identity holding author and
@@ -87,7 +116,7 @@ func TestReviewRouteRoles(t *testing.T) {
 	ie := newIngestEnv(t, options{})
 	claim := ie.pausedReview(t)
 	for name, tok := range map[string]string{"service": ie.robot, "viewer": ie.human("h-viewer")} {
-		if p := wantProblem(t, ie.do(ie.api, reviewCall(tok, claim)), http.StatusForbidden, "forbidden"); strings.Contains(p["detail"].(string), reviewSentinel) {
+		if p := wantProblem(t, ie.refused(reviewCall(tok, claim)), http.StatusForbidden, "forbidden"); strings.Contains(p["detail"].(string), reviewSentinel) {
 			t.Fatalf("%s: problem %v", name, p)
 		}
 	}
@@ -103,7 +132,7 @@ func TestReviewRouteNotPaused(t *testing.T) {
 	ie := newIngestEnv(t, options{})
 	_, held := ie.reviewedJob(t)
 	author := ie.human("h-author")
-	if p := wantProblem(t, ie.do(ie.api, reviewCall(author, held.claim.ID)), http.StatusConflict, "conflict"); p["ingestion"] != held.claim.ID {
+	if p := wantProblem(t, ie.refused(reviewCall(author, held.claim.ID)), http.StatusConflict, "conflict"); p["ingestion"] != held.claim.ID {
 		t.Fatalf("held: problem %v", p)
 	}
 	if ie.f.decrypts != 0 {
@@ -115,12 +144,12 @@ func TestReviewRouteNotPaused(t *testing.T) {
 	claim := ie.pausedReview(t)
 	mustExec(t, ie.db, `UPDATE staging_claim SET expires_at = now() - interval '1 second', lease_until = now() - interval '2 seconds'
 		WHERE id = $1`, claim)
-	wantProblem(t, ie.do(ie.api, reviewCall(author, claim)), http.StatusConflict, "conflict")
+	wantProblem(t, ie.refused(reviewCall(author, claim)), http.StatusConflict, "conflict")
 	// An item read takes no query (§9.1), before any lookup.
-	wantProblem(t, ie.do(ie.api, call{method: "GET", path: prefix + "/ingestions/" + claim + "/review?x=1", token: author}),
+	wantProblem(t, ie.refused(call{method: "GET", path: prefix + "/ingestions/" + claim + "/review?x=1", token: author}),
 		http.StatusBadRequest, "invalid-request")
-	wantProblem(t, ie.do(ie.api, reviewCall(author, id.New(id.Ingestion))), http.StatusNotFound, "not-found")
-	wantProblem(t, ie.do(ie.api, reviewCall(author, ie.draft)), http.StatusNotFound, "not-found")
+	wantProblem(t, ie.refused(reviewCall(author, id.New(id.Ingestion))), http.StatusNotFound, "not-found")
+	wantProblem(t, ie.refused(reviewCall(author, ie.draft)), http.StatusNotFound, "not-found")
 	if ie.f.decrypts != 0 {
 		t.Fatalf("%d decryptions for refused reads", ie.f.decrypts)
 	}
@@ -190,7 +219,7 @@ func TestReviewRouteFailuresLeaveClaim(t *testing.T) {
 	ie.f.mu.Lock()
 	ie.f.decryptErr = provider.ErrUnavailable
 	ie.f.mu.Unlock()
-	wantProblem(t, ie.do(ie.api, reviewCall(author, claim)), http.StatusServiceUnavailable, "dependency-unavailable")
+	wantProblem(t, ie.refused(reviewCall(author, claim)), http.StatusServiceUnavailable, "dependency-unavailable")
 	unchanged("key unavailable", sum)
 
 	ie.f.mu.Lock()
@@ -198,7 +227,7 @@ func TestReviewRouteFailuresLeaveClaim(t *testing.T) {
 	envelope := ie.f.staged[ct]
 	ie.f.staged[ct] = append(append([]byte(nil), envelope...), ' ')
 	ie.f.mu.Unlock()
-	wantProblem(t, ie.do(ie.api, reviewCall(author, claim)), http.StatusInternalServerError, "internal-error")
+	wantProblem(t, ie.refused(reviewCall(author, claim)), http.StatusInternalServerError, "internal-error")
 	unchanged("digest mismatch", sum)
 
 	malformed := []byte(`{"version":1,"documents":"machine:\n  hostname: ` + reviewSentinel + `\n"}`)
@@ -207,7 +236,7 @@ func TestReviewRouteFailuresLeaveClaim(t *testing.T) {
 	ie.f.staged[ct] = malformed
 	ie.f.mu.Unlock()
 	mustExec(t, ie.db, `UPDATE staging_claim SET payload_digest = $2 WHERE id = $1`, claim, digest[:])
-	wantProblem(t, ie.do(ie.api, reviewCall(author, claim)), http.StatusInternalServerError, "internal-error")
+	wantProblem(t, ie.refused(reviewCall(author, claim)), http.StatusInternalServerError, "internal-error")
 	unchanged("malformed envelope", digest[:])
 
 	if ie.f.decrypts != 3 {
