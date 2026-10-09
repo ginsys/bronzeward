@@ -18,24 +18,12 @@ import (
 // token and the epoch answered is the one read. The transaction ends before the response is
 // written (§5 rule 1).
 func readIn(a *API, w http.ResponseWriter, q *request, fn func(ctx context.Context, tx *sql.Tx) (etag string, body any, err error)) {
-	if a.o.beforeRead != nil {
-		a.o.beforeRead()
-	}
-	etag, body, err := func() (string, any, error) {
-		ctx := q.r.Context()
-		tx, err := a.db.BeginTx(ctx, nil)
-		if err != nil {
-			return "", nil, fmt.Errorf("%w: %w", errUnavailable, err)
-		}
-		defer func() { _ = tx.Rollback() }() // it writes nothing
-		if err := tx.QueryRowContext(ctx, `SELECT epoch, recovery_mode FROM installation_state FOR SHARE`).Scan(&q.epoch, &q.recovery); err != nil {
-			return "", nil, err
-		}
-		if ref := staleToken(q); ref != nil {
-			return "", nil, ref
-		}
-		return fn(ctx, tx)
-	}()
+	var etag string
+	var body any
+	err := readTx(a, q, func(ctx context.Context, tx *sql.Tx) (err error) {
+		etag, body, err = fn(ctx, tx)
+		return err
+	})
 	setEpoch(w, q) // the epoch the read held; a 401 drops it again
 	if err != nil {
 		a.fail(w, q, err)
@@ -45,6 +33,27 @@ func readIn(a *API, w http.ResponseWriter, q *request, fn func(ctx context.Conte
 		w.Header().Set("ETag", etag)
 	}
 	writeJSON(w, "application/json", http.StatusOK, body)
+}
+
+// readTx is readIn's transaction: fn runs while it holds the installation state FOR SHARE, and
+// the transaction ends, writing nothing, before readTx returns.
+func readTx(a *API, q *request, fn func(ctx context.Context, tx *sql.Tx) error) error {
+	if a.o.beforeRead != nil {
+		a.o.beforeRead()
+	}
+	ctx := q.r.Context()
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errUnavailable, err)
+	}
+	defer func() { _ = tx.Rollback() }() // it writes nothing
+	if err := tx.QueryRowContext(ctx, `SELECT epoch, recovery_mode FROM installation_state FOR SHARE`).Scan(&q.epoch, &q.recovery); err != nil {
+		return err
+	}
+	if ref := staleToken(q); ref != nil {
+		return ref
+	}
+	return fn(ctx, tx)
 }
 
 // listPage is a collection's answer (§9.1).

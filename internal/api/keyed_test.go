@@ -37,9 +37,11 @@ type fakeIngester struct {
 	created  []string
 	envelope []byte
 	// staged maps each staging ciphertext to its envelope; decryptErr fails every decryption.
+	// onDecrypt, when set, runs before each decryption without the lock held.
 	staged     map[provider.Ciphertext][]byte
 	decryptErr error
 	decrypts   int
+	onDecrypt  func(ctx context.Context)
 	// access is the cluster's Talos access TalosAccess answers, or accessErr; accessReads
 	// records the clusters asked for.
 	access      provider.TalosAccess
@@ -120,7 +122,13 @@ func (f *fakeIngester) EncryptStaging(_ context.Context, envelope []byte) (provi
 
 // DecryptStaging answers the envelope EncryptStaging encrypted to ct, or decryptErr, and counts
 // the calls.
-func (f *fakeIngester) DecryptStaging(_ context.Context, ct provider.Ciphertext) ([]byte, error) {
+func (f *fakeIngester) DecryptStaging(ctx context.Context, ct provider.Ciphertext) ([]byte, error) {
+	f.mu.Lock()
+	hook := f.onDecrypt
+	f.mu.Unlock()
+	if hook != nil {
+		hook(ctx)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.decrypts++
