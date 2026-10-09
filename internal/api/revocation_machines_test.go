@@ -43,7 +43,7 @@ func (p *planEnv) wantIdentityEntries(t *testing.T, machine, identity, revoker s
 // T5c's machine part: an identity revocation appends one entry to the timeline of each machine
 // with a plan that identity approved whose plan or operation is not terminal, naming those plans,
 // and none to a machine without one (PA §5 T5c). An approved plan past its expiry, a committed
-// one whose operation completed, a cancelled one and one another identity approved are not named.
+// one whose operation ended, a cancelled one and one another identity approved are not named.
 // A replay writes nothing more.
 func TestIdentityRevocationMachineEntries(t *testing.T) {
 	t.Parallel()
@@ -60,7 +60,9 @@ func TestIdentityRevocationMachineEntries(t *testing.T) {
 	completed := plan("k-plan-completed-01234", "").ID
 	decode[approvalBody](t, p.approve(approver, "k-approve-completed-01", completed), http.StatusCreated)
 	p.commitAs(t, completed)
-	mustExec(t, p.db, `UPDATE operation SET state = 'completed' WHERE plan = $1`, completed)
+	// The operation ends along execution and recovery §4's path without an attempt.
+	mustExec(t, p.db, `UPDATE operation SET state = 'unresolved' WHERE plan = $1`, completed)
+	mustExec(t, p.db, `UPDATE operation SET state = 'cancelled' WHERE plan = $1`, completed)
 	committed := plan("k-plan-committed-01234", "").ID
 	decode[approvalBody](t, p.approve(approver, "k-approve-committed-01", committed), http.StatusCreated)
 	p.commitAs(t, committed)

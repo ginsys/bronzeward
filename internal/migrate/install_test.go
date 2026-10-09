@@ -167,7 +167,7 @@ func TestImmutableTriggerControl(t *testing.T) {
 // migration's table fails this test until its author decides which it is.
 func TestEveryTableClassified(t *testing.T) {
 	db, _ := migrated(t)
-	immutable := []string{"act", "adoption_record", "approval", "approval_revocation", "assignment_revision",
+	immutable := []string{"act", "adoption_record", "approval", "approval_revocation", "assignment_revision", "attempt",
 		"assignment_revision_fragment", "assignment_revision_profile", "dependency_alert",
 		"dependency", "fragment_reference", "fragment_revision", "identity_revocation", "idempotency_record",
 		"import_base_reference", "import_base_revision", "machine_endpoint_change", "machine_event", "observation",
