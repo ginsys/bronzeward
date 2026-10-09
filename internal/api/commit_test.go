@@ -777,8 +777,7 @@ func TestCommitmentPublicationRace(t *testing.T) {
 }
 
 // Comparison 5 at the PoC limit of one (choice §10.5): two commitments on two machines of one
-// cluster, neither seeing the other's uncommitted operation, are ordered by the rollout scope's
-// unique index; the later one is refused by comparison 5.
+// cluster are ordered by the cluster's rollout lock; the later one is refused by comparison 5.
 func TestCommitmentRolloutRace(t *testing.T) {
 	t.Parallel()
 	ce := newCommitEnv(t, "")
@@ -798,4 +797,35 @@ func TestCommitmentRolloutRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	ce.wantRefused(t, <-done, "5", "an operation holds the cluster's rollout scope", "")
+}
+
+// A commitment that waits for another machine's uncommitted commitment in the cluster reads its
+// time after that wait (PA §5 rule 4): when the other rolls back after the plan expired, the plan
+// is refused as expired, not committed at the time before the wait.
+func TestCommitmentRolloutWaitPrecedesTime(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, `,"expiresInSeconds":4`)
+	ce.ready(t)
+	ce.second(t)
+	done := make(chan error, 1)
+	first := observer(t, ce.env, &fakeExecutor{}, options{commit: func(tx *sql.Tx) error {
+		if time.Until(ce.expires) <= 0 {
+			t.Error("the plan expired before the commitment began")
+		}
+		go func() {
+			_, err := ce.a.commitPlan(context.Background(), ce.pid)
+			done <- err
+		}()
+		waitForLockWaits(t, ce.db, 1)
+		time.Sleep(time.Until(ce.expires.Add(100 * time.Millisecond)))
+		if err := tx.Rollback(); err != nil {
+			return err
+		}
+		return errors.New("rolled back")
+	}})
+	ce.evidence(t, ce.plan2, func(s *evSeed) { s.controller = first.d.owner.ID })
+	if _, err := first.commitPlan(context.Background(), ce.plan2); err == nil {
+		t.Fatal("the stand-in commitment committed")
+	}
+	ce.wantRefused(t, <-done, "1", "the plan has expired", "")
 }

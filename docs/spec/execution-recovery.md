@@ -381,8 +381,9 @@ persistence's (see `persistence-api.md`).
    `unresolved` against the bound rollout limit. The machine row's lock does
    not cover other machines' operations, so at the PoC limit of one the slot
    is a partial unique index on the rollout scope over those states, as
-   comparison 4's is on the machine scope; a limit above one needs a counted
-   lock, which is open (choice §10.5); and
+   comparison 4's is on the machine scope, and the commitment waits for the
+   scope's lock before it reads its time (choice §10.29); a limit above one
+   needs a counted lock, which is open (choice §10.5); and
 6. the **scope gate** is open: the machine scope is not frozen (§6.2), no
    drift record is open on the machine other than one the plan binds, a drift
    record the plan binds is still open (§6.4; a revert whose record has closed
@@ -2095,6 +2096,18 @@ conservative option; those that do not say so. Each is marked in place as
     missing evidence, which appends a refusal on every attempt that precedes
     its observation; one refusal per plan, which leaves a plan refused by a
     freeze unable to commit once the freeze is lifted.
+29. **A commitment waits for the rollout scope before it reads its time**
+    (§3.2 comparison 5). Each commitment takes a transaction-level lock on its
+    cluster's rollout scope after its other locks and before it reads the time
+    (persistence and API §5 rules 4 and 5). Another machine's commitment that
+    holds the slot uncommitted is waited for there, so expiry and evidence age
+    are judged at a time after the wait, and the slot it took is seen by
+    comparison 5. Only a commitment enters the rollout scope, so the partial
+    unique index is never waited on. Agent decision, 2026-10-09
+    (ginsys/bronzeward#25). Alternatives: waiting at the index after the time
+    is read, which commits a plan that expired during the wait; reading the
+    time again after the insert, which the operation's fixed creation time
+    cannot follow.
 
 ## 11. Traceability
 
