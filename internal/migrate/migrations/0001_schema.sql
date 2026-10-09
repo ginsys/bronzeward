@@ -315,7 +315,7 @@ CREATE TABLE draft_entry (
 CREATE TABLE staging_claim (
   id              text PRIMARY KEY CHECK (id ~ '^ing_[a-z2-7]{26}$'),
   mode            text NOT NULL CHECK (mode IN ('transient', 'encrypted')),
-  state           text NOT NULL CHECK (state IN ('held', 'resumed', 'released', 'abandoned')),
+  state           text NOT NULL CHECK (state IN ('held', 'paused', 'resumed', 'released', 'abandoned')),
   owner           text NOT NULL CHECK (btrim(owner) <> '' AND octet_length(owner) <= 512),
   owner_gen       bigint NOT NULL CHECK (owner_gen >= 1),
   owner_epoch     text NOT NULL REFERENCES recovery_epoch (epoch),
@@ -331,7 +331,13 @@ CREATE TABLE staging_claim (
   kind            text NOT NULL CONSTRAINT staging_claim_kind CHECK (kind IN ('import', 'draft-update')),
   payload_digest  bytea CHECK (octet_length(payload_digest) = 32),
   draft           text,
-  CHECK (payload IS NULL OR (mode = 'encrypted' AND state IN ('held', 'resumed'))),
+  -- The operator review (compilation §3.6): requested at the start, `continued` once the operator
+  -- continues it. Only encrypted staging can request one; a paused claim holds its envelope and
+  -- awaits a pending review.
+  review          text CHECK (review IN ('pending', 'continued')),
+  CHECK (payload IS NULL OR (mode = 'encrypted' AND state IN ('held', 'paused', 'resumed'))),
+  CHECK (review IS NULL OR mode = 'encrypted'),
+  CHECK (state <> 'paused' OR (review IS NOT DISTINCT FROM 'pending' AND payload IS NOT NULL)),
   -- Only an encrypted claim can be taken over (§3.2, §3.4): transient staging has no recovery owner.
   CHECK (state <> 'resumed' OR mode = 'encrypted'),
   CHECK ((principal IS NULL) = (idempotency_key IS NULL)),
@@ -345,9 +351,9 @@ CREATE TABLE staging_claim (
   CONSTRAINT staging_claim_draft_update_transient CHECK (kind <> 'draft-update' OR mode = 'transient')
 );
 CREATE UNIQUE INDEX staging_claim_live_key ON staging_claim (principal, idempotency_key)
-  WHERE state IN ('held', 'resumed');
+  WHERE state IN ('held', 'paused', 'resumed');
 -- The sweep's scan (compilation §3.5): the live claims, by the time they become due.
-CREATE INDEX staging_claim_live_expiry ON staging_claim (expires_at) WHERE state IN ('held', 'resumed');
+CREATE INDEX staging_claim_live_expiry ON staging_claim (expires_at) WHERE state IN ('held', 'paused', 'resumed');
 
 -- Operations (§8; execution-recovery.md §3.2, §3.4) --------------------------------------------
 

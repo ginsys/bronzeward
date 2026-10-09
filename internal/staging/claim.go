@@ -24,10 +24,11 @@ type Owner struct {
 type Timers struct{ Lease, AbsoluteExpiry time.Duration }
 
 // Claim is one claim as its owner knows it. Kind is import, with its Machine, or draft-update,
-// with its Draft (persistence-api §9.3).
+// with its Draft (persistence-api §9.3). Review is the operator review its creation requests,
+// pending, or empty (compilation §3.6).
 type Claim struct {
-	ID, Kind, Mode, Cluster, Machine, Draft string
-	Gen                                     int64
+	ID, Kind, Mode, Cluster, Machine, Draft, Review string
+	Gen                                             int64
 }
 
 var (
@@ -79,12 +80,12 @@ func Create(ctx context.Context, tx *sql.Tx, o Owner, t Timers, c Claim, princip
 		return errors.New("staging: the lease must be positive and shorter than the absolute expiry")
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until,
-		expires_at, principal, idempotency_key, cluster, machine, draft, kind, created_at)
+		expires_at, principal, idempotency_key, cluster, machine, draft, kind, review, created_at)
 		SELECT $1, $2, 'held', $3, 1, $4, at.t + $5::bigint * interval '1 microsecond',
-		at.t + $6::bigint * interval '1 microsecond', $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, at.t
+		at.t + $6::bigint * interval '1 microsecond', $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), at.t
 		FROM installation_state, (SELECT clock_timestamp() AS t) at WHERE epoch = $4`,
 		c.ID, c.Mode, o.ID, o.Epoch, t.Lease.Microseconds(), t.AbsoluteExpiry.Microseconds(), principal, key, c.Cluster, c.Machine,
-		c.Draft, c.Kind)
+		c.Draft, c.Kind, c.Review)
 	if err != nil {
 		return fmt.Errorf("staging: create the claim: %w", err)
 	}
@@ -180,6 +181,37 @@ func StorePayload(ctx context.Context, tx *sql.Tx, o Owner, c Claim, ct []byte, 
 		return fmt.Errorf("staging: store the payload: %w", err)
 	}
 	return affected(ctx, tx, o, res)
+}
+
+// Pause is the owner's pause for the operator review (compilation §3.6 item 1), in the caller's
+// transaction: the claim, whose review must be pending, set paused with ct and sum stored as its
+// envelope (or, with ct nil, its stored envelope unchanged, as a taken-over claim pauses), and its
+// lease and its running ingest operation's ended at the current time. The owner fields stay; no
+// process owns a paused claim, and every owner transition on it is refused by the fence.
+func Pause(ctx context.Context, tx *sql.Tx, o Owner, c Claim, ct []byte, sum [32]byte) error {
+	if ct != nil && (c.Mode != "encrypted" || len(ct) == 0) {
+		return errors.New("staging: only an encrypted claim holds a payload, and it is not empty")
+	}
+	if err := lock(ctx, tx, c.ID); err != nil {
+		return fmt.Errorf("staging: pause: %w", err)
+	}
+	var digest []byte
+	if ct != nil {
+		digest = sum[:]
+	}
+	var n int
+	err := tx.QueryRowContext(ctx, `WITH c AS (
+		UPDATE staging_claim SET state = 'paused', lease_until = clock_timestamp(),
+			payload = coalesce($5, payload), payload_digest = coalesce($6, payload_digest)
+		WHERE `+fence+` AND review = 'pending' RETURNING id, lease_until),
+	op AS (
+		UPDATE operation SET lease_until = c.lease_until FROM c
+		WHERE operation.ingestion = c.id AND operation.state = 'running' AND operation.owner = $2 RETURNING 1)
+	SELECT count(*) FROM c`, c.ID, o.ID, c.Gen, o.Epoch, ct, digest).Scan(&n)
+	if err != nil {
+		return fmt.Errorf("staging: pause: %w", err)
+	}
+	return refused(ctx, tx, o, n)
 }
 
 // Hold confirms the claim is still this owner's, in the caller's transaction, and keeps it

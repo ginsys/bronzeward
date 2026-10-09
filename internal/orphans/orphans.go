@@ -1,5 +1,6 @@
 // Package orphans is the orphan report of persistence-api.md §6.4: the provider generations under
-// gen/ that no committed reference row names and whose claim is not recorded held or resumed. It
+// gen/ that no committed reference row names and whose claim is not recorded live (held, paused or
+// resumed). It
 // lists the provider through the orphan-report identity, outside any transaction, then reads the
 // reference rows and the claims in one statement inside a read-only transaction, and changes
 // nothing in either.
@@ -34,7 +35,7 @@ type Entry struct {
 }
 
 // Report is one run's result. Orphans are the generations §6.4 reports; Expired are the
-// unreferenced generations of claims recorded held or resumed that compilation §3.5 already
+// unreferenced generations of claims recorded live (held, paused or resumed) that compilation §3.5 already
 // treats as abandoned, listed apart and never counted as orphans. Listed counts the generation
 // paths listed; Skipped the names under gen/ not of Bronzeward's form.
 type Report struct {
@@ -95,7 +96,7 @@ func Collect(ctx context.Context, l Lister, db *sql.DB, cluster string) (Report,
 type options struct {
 	stateOnly       bool   // select by claim state alone, ignoring reference rows
 	readTimeAbandon bool   // treat a due claim as abandoned (an orphan) at read time
-	omitLive        bool   // omit every held or resumed claim's generations
+	omitLive        bool   // omit every live claim's generations
 	lapsedLease     bool   // treat every lapsed lease as abandonment, encrypted claims included
 	dbClusters      bool   // walk only the clusters the database records
 	split           bool   // read references and claims in two statements
@@ -190,7 +191,7 @@ type row struct {
 func read(ctx context.Context, db *sql.DB, listed []string, o options) ([]row, error) {
 	due := staging.DueSQL
 	if o.lapsedLease {
-		due = `state IN ('held', 'resumed') AND (expires_at <= clock_timestamp() OR lease_until <= clock_timestamp())`
+		due = `state IN ('held', 'paused', 'resumed') AND (expires_at <= clock_timestamp() OR lease_until <= clock_timestamp())`
 	}
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
