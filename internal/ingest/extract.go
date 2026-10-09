@@ -153,11 +153,11 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 }
 
 // guardSources is the paths of the first extraction, in exs order, whose value alone the guard
-// refuses, or nil: the extraction a guard refusal arises from. The other references of the run
-// hold only their generated names, which no extracted value can match.
+// refuses, or nil: the extraction a guard refusal arises from. Every reference of the run is
+// skipped as the guard skips it, since a short value can be part of a generated name.
 func guardSources(docs []*yaml.Node, exs []extraction, embedded map[string]string) []Path {
 	for _, ex := range exs {
-		if guard(docs, []extraction{ex}, embedded) != nil {
+		if guardValues(docs, []extraction{ex}, exs, embedded) != nil {
 			return ex.paths
 		}
 	}
