@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 	"testing"
@@ -27,6 +28,13 @@ type pausedRow struct {
 	opLease         time.Time
 	opOwner, owner  string
 	opGen           int64
+}
+
+// String is the row as a failure message prints it: the envelope by length only, never its
+// ciphertext or digest.
+func (r pausedRow) String() string {
+	return fmt.Sprintf("{state:%s review:%s gen:%d payload:%d bytes opState:%s opGen:%d}",
+		r.state, r.review, r.gen, len(r.payload), r.opState, r.opGen)
 }
 
 func (ie *ingestEnv) pausedRow(t *testing.T, claim string) pausedRow {
