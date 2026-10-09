@@ -49,6 +49,10 @@ type imported struct {
 // the run's last write is unknown. The lease decides what happens next.
 var errStop = errors.New("the run stops")
 
+// errPaused ends a run whose claim paused for the operator's review (compilation §3.6): the
+// envelope is stored and the operation stays running until a mark or a continuation takes it.
+var errPaused = errors.New("the run paused for the operator's review")
+
 // runIngest runs j to its end, heartbeating the claim every timers.Heartbeat until it returns.
 func (a *API) runIngest(ctx context.Context, j job) {
 	ctx, cancel := context.WithCancel(ctx)
@@ -81,6 +85,9 @@ func (a *API) runIngest(ctx context.Context, j job) {
 	}
 	j.input = ingest.Unresolved{} // step 8 was the last to read it
 	switch {
+	case errors.Is(err, errPaused):
+		a.o.logf("ingestion %s: paused for the operator's review", j.claim.ID)
+		return
 	case ctx.Err() != nil:
 		a.o.logf("ingestion %s: stopped before the draft transaction", j.claim.ID)
 		return
@@ -130,7 +137,8 @@ func (a *API) heartbeat(ctx context.Context, stop context.CancelFunc, j job) {
 }
 
 // stage runs steps 2-8 and, for an encrypted claim, stores the sealed envelope with the staged
-// event. A refusal is the operation's outcome; an error stops the run.
+// event. A claim whose review is pending pauses in the same transaction (compilation §3.6) and the
+// run ends with errPaused. A refusal is the operation's outcome; an error stops the run.
 func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 	c, err := ingest.Extract(ingest.Request{Input: j.input, Marks: j.marks, Declarations: j.decl})
 	if err != nil {
@@ -160,15 +168,26 @@ func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 	if err != nil {
 		return imported{}, a.failure(j, "envelope encryption", err), nil
 	}
+	review := j.claim.Review == "pending"
 	if err := a.inTx(ctx, func(tx *sql.Tx) error {
-		if err := staging.StorePayload(ctx, tx, a.d.owner, j.claim, []byte(ct), sum); err != nil {
+		store := staging.StorePayload
+		if review {
+			store = staging.Pause
+		}
+		if err := store(ctx, tx, a.d.owner, j.claim, []byte(ct), sum); err != nil {
 			return err
 		}
-		return a.event(ctx, tx, j, map[string]any{"type": "staged"})
+		if err := a.event(ctx, tx, j, map[string]any{"type": "staged"}); err != nil || !review {
+			return err
+		}
+		return a.event(ctx, tx, j, map[string]any{"type": "paused", "generation": j.claim.Gen})
 	}); err != nil {
 		return imported{}, nil, fmt.Errorf("storing the envelope: %w", err)
 	}
 	seam.At("staged")
+	if review {
+		return imported{}, nil, errPaused
+	}
 	return imp, nil, nil
 }
 
@@ -194,7 +213,8 @@ func (a *API) createGeneration(claim staging.Claim, gens map[string]string) func
 // takeover. A decryption failure leaves the claim resumed under this owner with a resume-failed
 // event, and the run stops: another takeover may retry once the lease lapses, until the absolute
 // expiry. An envelope that does not match its digest, or does not decode, is an integrity
-// failure and the refusal returned.
+// failure and the refusal returned. A claim whose review is still pending pauses again with its
+// stored envelope (compilation §3.4, §3.6), and the run ends with errPaused.
 func (a *API) resume(ctx context.Context, j job) (imported, *refusal, error) {
 	plain, err := a.d.ing.DecryptStaging(ctx, j.resume.ct)
 	if err != nil {
@@ -214,6 +234,17 @@ func (a *API) resume(ctx context.Context, j job) (imported, *refusal, error) {
 		a.o.logf("ingestion %s: opening the staged envelope: %v", j.claim.ID, err)
 		return imported{}, refuse(http.StatusInternalServerError, "internal-error",
 			"the staged envelope is incomplete or does not match its digest; the claim is abandoned"), nil
+	}
+	if j.claim.Review == "pending" {
+		if err := a.inTx(ctx, func(tx *sql.Tx) error {
+			if err := staging.Pause(ctx, tx, a.d.owner, j.claim, nil, [32]byte{}); err != nil {
+				return err
+			}
+			return a.event(ctx, tx, j, map[string]any{"type": "paused", "generation": j.claim.Gen})
+		}); err != nil {
+			return imported{}, nil, fmt.Errorf("pausing for the review: %w", err)
+		}
+		return imported{}, nil, errPaused
 	}
 	return imported{sanitized: st.Sanitized, gens: st.Generations, baseline: st.Baseline}, nil, nil
 }
