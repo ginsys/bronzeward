@@ -352,6 +352,16 @@ refused() {
 
 # The cluster's Talos cluster ID as its nodes report it, and one no node has.
 talos_cid='' wrong_cid=''
+# cluster_id_set <Talos cluster ID>: the cluster's recorded Talos cluster ID rewritten. The schema
+# refuses that UPDATE (trigger identity on cluster), and no registration reaches the state either:
+# node IDs are unique and compared before the cluster ID, so a second cluster cannot record the
+# worker. The fault therefore lifts the trigger for its one statement, in one transaction, as a
+# record written wrong by hand or restored from elsewhere would be.
+cluster_id_set() {
+  sql "ALTER TABLE cluster DISABLE TRIGGER identity;
+    UPDATE cluster SET talos_cluster_id = '$1' WHERE id = '$cluster';
+    ALTER TABLE cluster ENABLE TRIGGER identity" >/dev/null
+}
 # fault <name> on|off: the fault an access case puts in place, then takes away. A value written to
 # the access path holds the canary, so a problem or a log that quoted it fails the scan; it goes
 # over stdin.
@@ -364,8 +374,7 @@ fault() {
     absent-off | garbage-off | malformed-off) put_access "$cluster" ;;
     silent-on) "$bin/inject" linksplit A worker >/dev/null ;;
     silent-off) "$bin/inject" linkjoin A worker >/dev/null ;;
-    cluster-id-on) sql "UPDATE cluster SET talos_cluster_id = '$wrong_cid' WHERE id = '$cluster'" >/dev/null ;;
-    cluster-id-off) sql "UPDATE cluster SET talos_cluster_id = '$talos_cid' WHERE id = '$cluster'" >/dev/null ;;
+    cluster-id-on | cluster-id-off) cluster_id_set "$([ "$2" = on ] && printf '%s' "$wrong_cid" || printf '%s' "$talos_cid")" ;;
     node-id-on | node-id-off) ;;
     *) return 1 ;;
   esac
