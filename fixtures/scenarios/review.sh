@@ -221,6 +221,32 @@ mark_kill_case() {
   case_gen=$((gen + 2)) case_gens=$((before + made))
 }
 
+# renew_short <seconds> <key name>: when tk_ing's absolute expiry is less than that many seconds
+# away, its author abandons it and a new reviewed import of the worker on C, paused at generation 1,
+# takes its place for the rows after; returns 1 when the claim had time enough. The fixture's
+# absolute expiry (10 minutes) is shorter than the rows on one claim: the sweep would abandon it in
+# the middle of a case. The abandoned claim's generations go to the orphan report. Leaves the new
+# claim's envelope digest and generation count in rv_digest and rv_gens.
+rv_digest='' rv_gens=''
+renew_short() {
+  local left gens
+  left=$(sql "SELECT floor(extract(epoch FROM expires_at - clock_timestamp())) FROM staging_claim WHERE id = '$tk_ing'") ||
+    die "s1: cannot read the reviewed claim's absolute expiry"
+  [ "$left" -lt "$1" ] || return 1
+  say "s1: $left s left before the reviewed claim's absolute expiry; the rows continue on a new one"
+  gens=$(claim_generations) || die "s1: cannot list the claim's generations"
+  fresh_author
+  check 'S1 review, PA §16' 'near its absolute expiry, the author abandons the paused claim: 200' \
+    answers 200 - POST "/api/v1/ingestions/$tk_ing/abandonments" "$author" '{}' "$(key "abandon-$2")"
+  check 'S1 review, PA §16' 'the claim abandoned without a payload, the operation failed ingestion-abandoned' abandoned_failed
+  interrupted+=("$tk_ing $gens")
+  check 'S1 review, PA §16' 'a new reviewed import of the worker on C: 202' review_import "$2" C
+  [ -n "$tk_op" ] || die "s1: the reviewed import on C was not accepted; nothing after it can run"
+  check 'S1 review, PA §16' 'the new import pauses at generation 1' within 60 eval 'paused_at 1 && events_are "$paused_events"'
+  rv_digest=$(digest_now) || die "s1: cannot read the claim's envelope digest"
+  rv_gens=$(claim_generations) || die "s1: cannot list the claim's generations"
+}
+
 # review_rows: the operator review on one reviewed import of the worker, then its failure cases on
 # two more.
 review_rows() {
@@ -266,13 +292,16 @@ review_rows() {
   # A mark's run killed at each step it re-enters, each resumed by A's takeover.
   gen=2
   for step in $mark_points; do
+    # One case takes about 80 seconds, most of it the lapse of C's lease.
+    if renew_short 180 "kill-$step"; then gen=1 gens=$rv_gens digest=$rv_digest; fi
     mark_kill_case "$step" "$gen" "$gens" "$digest"
     gen=$case_gen gens=$case_gens
   done
   fresh_author
   check 'S1 review kill, PA §16' 'after the killed marks, the review still shows the unmarked file secret' shown present
 
-  # The mark that extracts the file secret.
+  # The mark that extracts the file secret, then the continuation: about two minutes.
+  if renew_short 240 secret; then gen=1 gens=$rv_gens digest=$rv_digest; fi
   check 'S1 review, PA §16' "a mark of the file secret: 202 at generation $((gen + 1))" mark "$SECRET_MARKS" secret "$((gen + 1))"
   check 'S1 review, PA §16' "the mark's run pauses again at generation $((gen + 1)) with a new envelope, one more generation" \
     within 60 eval 'paused_at "$((gen + 1))" && events_end "marked paused" && ! digest_is "$digest" && generations_are "$((gens + 1))"'
