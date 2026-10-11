@@ -85,8 +85,10 @@ func TestWatchdogSlowPass(t *testing.T) {
 	f := seed(t)
 	p := &fake{delay: time.Minute}
 	tm := Defaults()
-	tm.Interval = 200 * time.Millisecond
-	tm.Request = 400 * time.Millisecond
+	// Two dependencies time out in turn: the pass spans about 4 s, past the 3 s stall threshold,
+	// while each progress record follows the last by one 2 s timeout plus the database work.
+	tm.Interval = time.Second
+	tm.Request = 2 * time.Second
 	m, _ := monitorFor(f, p, tm)
 	completed(t, m)
 	done := make(chan error, 1)
