@@ -162,7 +162,9 @@ continued_marked() {
 }
 
 # expiry_start: a reviewed import on A that nothing marks or continues; it pauses, and the sweep
-# abandons it at its absolute expiry (expiry_rows, after the rows that run meanwhile).
+# abandons it at its absolute expiry (expiry_rows, after the rows that run meanwhile). Its
+# generations are counted while it is paused, before anything can abandon it.
+expiry_gens=''
 expiry_start() {
   fresh_author
   check 'S1 review, PA §16' 'expiry claim: a reviewed import of the worker on A: 202' review_import expiry A
@@ -170,20 +172,31 @@ expiry_start() {
   check 'S1 review, PA §16' "expiry claim: paused at generation 1 with its envelope, its lease ended, the operation running" \
     within 60 paused_at 1
   expiry_ing=$tk_ing expiry_op=$tk_op
+  expiry_gens=$(claim_generations) || die "s1: cannot list the expiry claim's generations"
+  check 'S1 review, PA §16' "expiry claim: control, it made $expiry_gens generation(s) for the orphan report" differ "$expiry_gens" 0
+}
+# abandoned_after_expiry: tk_ing abandoned, its abandonment committed at or after its absolute
+# expiry: the abandoning transaction's own commit time (compose.yaml: track_commit_timestamp), not
+# when a poll saw it, as swept_after_lapse reads it. The abandonment is the last write to the row,
+# so its xmin is that transaction; no commit time recorded fails, as an unknown.
+abandoned_after_expiry() {
+  local row
+  row=$(sql "SELECT state || ' ' || coalesce((pg_xact_commit_timestamp(xmin) >= expires_at)::text, 'unknown')
+    FROM staging_claim WHERE id = '$tk_ing'") || return 1
+  [ "$row" = 'abandoned true' ] || {
+    say "s1: the expiry claim is '$row' (state, abandonment committed at or after the absolute expiry)"
+    return 1
+  }
 }
 # expiry_rows: the expiry claim, still paused until its absolute expiry, abandoned by the sweep after
 # it; its generations kept, for the orphan report (interrupted).
 expiry_rows() {
-  local gens expires
+  local gens=$expiry_gens
   tk_ing=$expiry_ing tk_op=$expiry_op
-  gens=$(claim_generations) || die "s1: cannot list the expiry claim's generations"
-  expires=$(sql "SELECT extract(epoch FROM expires_at) FROM staging_claim WHERE id = '$tk_ing'") ||
-    die "s1: cannot read the expiry claim's absolute expiry"
-  check 'S1 review, PA §16' "expiry claim: control, it made $gens generation(s) for the orphan report" differ "$gens" 0
   # The fixture's absolute expiry is 10 minutes and its sweep runs every 15 seconds.
   check 'S1 review, PA §16' 'expiry claim: the sweep abandons it after its absolute expiry, the operation failed ingestion-abandoned' \
     within 720 abandoned_failed
-  check 'S1 review, PA §16' 'expiry claim: abandoned only after its absolute expiry passed' past "$expires"
+  check 'S1 review, PA §16' 'expiry claim: its abandonment committed at or after its absolute expiry' abandoned_after_expiry
   check 'S1 review, PA §16' 'expiry claim: its generations still listed, none deleted' generations_are "$gens"
   interrupted+=("$tk_ing $gens")
   outcome_bundle 'S1 review, PA §16' review-expired
@@ -239,6 +252,7 @@ renew_short() {
   check 'S1 review, PA §16' 'near its absolute expiry, the author abandons the paused claim: 200' \
     answers 200 - POST "/api/v1/ingestions/$tk_ing/abandonments" "$author" '{}' "$(key "abandon-$2")"
   check 'S1 review, PA §16' 'the claim abandoned without a payload, the operation failed ingestion-abandoned' abandoned_failed
+  check 'S1 review, PA §16' "the abandoned claim's $gens generation(s) kept, none deleted" generations_are "$gens"
   interrupted+=("$tk_ing $gens")
   check 'S1 review, PA §16' 'a new reviewed import of the worker on C: 202' review_import "$2" C
   [ -n "$tk_op" ] || die "s1: the reviewed import on C was not accepted; nothing after it can run"
@@ -363,11 +377,12 @@ review_rows() {
   check 'S1 review, PA §16' 'a third reviewed import of the worker on A: 202' review_import abandon A
   [ -n "$tk_op" ] || die "s1: the reviewed import on A was not accepted; nothing after it can run"
   check 'S1 review, PA §16' 'the third import pauses at generation 1' within 60 paused_at 1
+  gens=$(claim_generations) || die "s1: cannot list the claim's generations"
+  check 'S1 review, PA §16' "control: the paused claim made $gens generation(s) for the orphan report" differ "$gens" 0
   check 'S1 review, PA §16' "the author abandons the paused claim: 200" \
     answers 200 - POST "/api/v1/ingestions/$tk_ing/abandonments" "$author" '{}' "$(key abandon-review)"
   check 'S1 review, PA §16' 'the claim abandoned without a payload, the operation failed ingestion-abandoned' abandoned_failed
-  gens=$(claim_generations) || die "s1: cannot list the claim's generations"
-  check 'S1 review, PA §16' "the abandoned claim's $gens generation(s) kept for the orphan report" differ "$gens" 0
+  check 'S1 review, PA §16' "the abandoned claim's $gens generation(s) kept, none deleted" generations_are "$gens"
   interrupted+=("$tk_ing $gens")
   outcome_bundle 'S1 review, PA §16' review-abandoned
 }
