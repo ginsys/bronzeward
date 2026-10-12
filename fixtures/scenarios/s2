@@ -9,7 +9,8 @@
 # directory and write-ahead log, the backups, and the instances' writable layers. Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it
 # checked to s2.tsv in the evidence directory and to stdout; the directory is then scanned by
 # bin/evidence. Exit 1 on any FAIL.
-# Usage: scenarios/s2 run   (after scenarios/s1 run on the same fixtures/bin/up: S2's precondition)
+# Usage: scenarios/s2 run   (after scenarios/s1 run and scenarios/s3 handover on the same
+# fixtures/bin/up: S2's precondition, the worker adopted)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -544,39 +545,42 @@ c10_rows() {
   check "$ref" "SP's controls: paired-diff moves and rotations, the oracle finds a planted value (c10/sp-controls.tsv)" c10_controls sp-controls.tsv
 }
 
-# S2 steps 1 to 7 (acceptance plan S2), after the matrices, on an Applied state seeded here:
-# the scenario's precondition is S3's handover (ginsys/bronzeward#25), which has not landed, so the
-# worker's Applied is set by SQL to the release last published for it, as an adoption would record
-# it (owner decision, 2026-10-03). The step-1 draft imports nothing: its import base is that
-# Applied release's.
+# S2 steps 1 to 7 (acceptance plan S2), after the matrices, on the state S3's handover left
+# (scenarios/s3 handover): the worker's Applied is the release adopted from its import base, by a
+# completed adopt operation, source adoption and baseline revision 1, with the configuration digest
+# of that import base as the adoption recorded it (execution and recovery §6.3, choice §10.15).
+# The step-1 draft imports nothing: its import base is that Applied release's.
 S2_LABEL=bw-s2
-applied='' ref_name='' ref_version='' frv='' prv='' arv='' s2_release='' robot='' robot_id=''
-# seed_applied: the worker's Applied set to its Desired release, source adoption and baseline
-# revision 1, with the baseline's digest as an adoption records it (execution and recovery §6.3,
-# choice §10.15): the configuration digest of the release's import base revision, computed when
-# the worker's configuration was read from the node, not the recompiled artifact's, which a
-# re-encoding renderer may change. The release id in applied.
-seed_applied() {
-  applied=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'") || return 1
+applied='' desired0='' ref_name='' ref_version='' frv='' prv='' arv='' s2_release='' robot='' robot_id=''
+# handover_applied: the worker's Applied is the release its adoption recorded: its adopt plan
+# committed to a completed adopt operation, the plan of that release, Applied's source adoption,
+# baseline revision 1 and digest the digest of the release's import base revision, which the
+# adoption record names as its baseline. The release id in applied, and the worker's Desired (the
+# last release the matrices published, or the same) in desired0.
+handover_applied() {
+  applied=$(sql "SELECT applied_release FROM machine_state WHERE machine = '$machine_w'") || return 1
   [ -n "$applied" ] || return 1
-  sql "UPDATE machine_state SET applied_release = desired, applied_source = 'adoption', baseline_revision = 1,
-    applied_digest = (SELECT b.configuration_digest FROM release_machine rm
+  desired0=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'") || return 1
+  [ -n "$desired0" ] || return 1
+  [ "$(sql "SELECT count(*) FROM machine_state s
+      JOIN adoption_record a ON a.machine = s.machine
+      JOIN operation o ON o.id = a.operation AND o.kind = 'adopt' AND o.state = 'completed'
+      JOIN plan_state ps ON ps.plan = a.plan AND ps.state = 'committed' AND ps.operation = o.id
+      JOIN plan pl ON pl.id = a.plan AND pl.release = s.applied_release
+      JOIN release_machine rm ON rm.release = s.applied_release AND rm.machine = s.machine
       JOIN import_base_revision b ON b.id = rm.import_base_revision AND b.machine = rm.machine
-      WHERE rm.release = '$applied' AND rm.machine = '$machine_w')
-    WHERE machine = '$machine_w'" >/dev/null || return 1
-  [ "$(sql "SELECT count(*) FROM machine_state s JOIN release_machine rm ON rm.release = s.applied_release AND rm.machine = s.machine
-    JOIN import_base_revision b ON b.id = rm.import_base_revision AND b.machine = rm.machine
-    WHERE s.machine = '$machine_w' AND s.applied_release = '$applied' AND s.applied_digest = b.configuration_digest")" = 1 ]
+    WHERE s.machine = '$machine_w' AND s.applied_source = 'adoption' AND s.baseline_revision = 1
+      AND s.applied_digest = b.configuration_digest AND a.baseline_digest = s.applied_digest")" = 1 ]
 }
-# applied_is_node: the digest seeded as Applied's is the worker's machine configuration as the
-# pre-state capture read it from the node (bin/evidence: SHA-256 with trailing newlines made one,
-# as the configuration digest), so the seed describes the node S2 starts from.
+# applied_is_node: the digest the adoption recorded as Applied's is the worker's machine
+# configuration as the pre-state capture read it from the node (bin/evidence: SHA-256 with trailing
+# newlines made one, as the configuration digest), so Applied describes the node S2 starts from.
 applied_is_node() {
-  local seeded pre
-  seeded=$(sql "SELECT encode(applied_digest, 'hex') FROM machine_state WHERE machine = '$machine_w'") || return 1
+  local recorded pre
+  recorded=$(sql "SELECT encode(applied_digest, 'hex') FROM machine_state WHERE machine = '$machine_w'") || return 1
   pre=$(awk -v n="$TALOS_WORKER_IP" '$2 == n { print $1 }' "$EV/pre-talos-config-sha256.txt")
-  [ -n "$seeded" ] && [ "$seeded" = "$pre" ] || {
-    say "s2: seeded Applied digest ${seeded:-none}, the worker's pre-state ${pre:-none}"
+  [ -n "$recorded" ] && [ "$recorded" = "$pre" ] || {
+    say "s2: Applied digest ${recorded:-none}, the worker's pre-state ${pre:-none}"
     return 1
   }
 }
@@ -646,7 +650,7 @@ s2_publish() {
   s2_release=$(sql "SELECT id FROM release WHERE operation = '$pub_op'")
   [ -n "$s2_release" ]
 }
-# desired_is_release: the worker's Desired is s2_release; its Applied is still the seeded release.
+# desired_is_release: the worker's Desired is s2_release; its Applied is still the adopted release.
 desired_is_release() {
   [ "$(sql "SELECT desired || ' ' || applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$s2_release $applied" ]
 }
@@ -775,15 +779,15 @@ robot_acts() {
     'author draft.create,author draft.fragment.update,author draft.profile.update,author draft.assignment.update,publisher draft.publish' ]
 }
 # restored: the database is the snapshot's: no act after it, step 3's release absent, the worker's
-# Desired and Applied the seeded release.
+# Desired and Applied what they were when the snapshots were taken.
 restored() {
   [ "$(sql "SELECT coalesce(max(seq), 0) FROM act")" = "$act_seq" ] &&
     [ "$(sql "SELECT count(*) FROM release WHERE id = '$s2_release'")" = 0 ] &&
-    [ "$(sql "SELECT desired || ' ' || applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$applied $applied" ]
+    [ "$(sql "SELECT desired || ' ' || applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$desired0 $applied" ]
 }
 # db_reads: A answers a database read again (after a restore swapped the database under it): the
-# seeded Applied release, which the snapshot holds. The token is minted again if old: a restore
-# can outlast its life.
+# Applied release, which the snapshot holds. The token is minted again if old: a restore can
+# outlast its life.
 db_reads() {
   fresh_author
   [ "$(call GET "/api/v1/releases/$applied" "$author")" = 200 ]
@@ -973,9 +977,9 @@ s2_steps() {
   [ -n "$robot_id" ] || die "s2: no automation identity in $STATE"
   fresh_author
   fresh_publisher
-  ref='S2 precondition (seeded, Q2)'
-  check "$ref" "seed: the worker's Applied set by SQL to its Desired release, source adoption, the configuration digest of its import base as read from the node (an adoption's record)" seed_applied
-  [ -n "$applied" ] || die "s2: no Applied seeded; nothing after it can run"
+  ref='S2 precondition (S3 handover)'
+  check "$ref" "after the matrices the worker's Applied is still the release its adoption recorded (completed adopt operation, source adoption, baseline revision 1, its import base's configuration digest); its Desired in desired0" handover_applied
+  [ -n "$applied" ] || die "s2: no Applied release; nothing after it can run"
   check "$ref" "the Applied release's review names one reference at the worker's marked file content" applied_reference "$author"
   [ -n "$ref_name" ] || die "s2: no reference to carry; nothing after it can run"
   evidence_to pre || die "no pre-state: bin/evidence failed"
@@ -984,7 +988,7 @@ s2_steps() {
   cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"
   check "$ref" "pre-state: the worker has a machine-configuration resource version" \
     counted 1 "^[0-9]+ $TALOS_WORKER_IP\$" "$EV/pre-talos-config-version.txt"
-  check "$ref" "the seeded Applied digest is the worker's configuration as the pre-state read it from the node" applied_is_node
+  check "$ref" "the adopted Applied digest is the worker's configuration as the pre-state read it from the node" applied_is_node
   seq=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s2: cannot read the operations"
   act_seq=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s2: cannot read the acts"
   check 'S2 step 7' 'inject db-snapshot s2-step1' "$bin/inject" db-snapshot "$snap"
@@ -1022,8 +1026,8 @@ s2_steps() {
   check 'S2 step 3' 'POST /publications as h-publisher: 202; the publish operation succeeded with one release, the draft published' \
     s2_publish "$publisher" step3-publication
   [ -n "$s2_release" ] || die "s2: step 3 published no release; nothing after it can run"
-  check 'S2 pass' "the release is the worker's Desired; Applied still the seeded release" desired_is_release
-  check 'S2 pass' 'no plan and no operation but publish since the seed' only_publish_since "$seq"
+  check 'S2 pass' "the release is the worker's Desired; Applied still the adopted release" desired_is_release
+  check 'S2 pass' 'no operation but publish since the precondition' only_publish_since "$seq"
 
   # Step 4.
   fresh_author
@@ -1039,7 +1043,7 @@ s2_steps() {
   check 'S2 pass' "the release's machine rows refuse UPDATE and DELETE" immutable release_machine mode
   check 'S2 pass' "the release's source rows refuse UPDATE and DELETE" immutable release_source head_revision
   check 'S2 pass' "the release's dependency records refuse UPDATE and DELETE" immutable dependency kind
-  check 'S2 pass' 'no plan and no operation but publish since the seed (after step 5)' only_publish_since "$seq"
+  check 'S2 pass' 'no operation but publish since the precondition (after step 5)' only_publish_since "$seq"
   evidence_to post || die "no post-state: bin/evidence failed"
   cp -- "$bundle/talos-config-version.txt" "$EV/post-talos-config-version.txt"
   check 'S2 pass' "the worker's machine-configuration resource version unchanged by publication" same_versions
@@ -1091,12 +1095,12 @@ s2_steps() {
   check 'S2 step 7' 'inject bao-restore s2-step1' "$bin/inject" bao-restore "$snap"
   check 'S2 step 7' 'inject unpause A, B and C' servers unpause
   check 'S2 step 7' 'A reads the restored database' within 60 db_reads
-  check 'S2 step 7' "restored: no act after the snapshot, step 3's release gone, the worker's Desired and Applied the seeded release" \
+  check 'S2 step 7' "restored: no act after the snapshot, step 3's release gone, the worker's Desired and Applied what they were at the snapshot" \
     restored
   check 'S2 step 7' 'the automation identity repeats steps 1 and 2 as itself' s2_edit "$robot" step7
   check 'S2 step 7' 'the automation identity publishes: one release, the draft published' s2_publish "$robot" step7-publication
   check 'S2 step 7' "the automation identity's acts: steps 1 and 2 under author, the publication under publisher" robot_acts
-  check 'S2 step 7' 'no plan and no operation but publish since the seed' only_publish_since "$seq"
+  check 'S2 step 7' 'no operation but publish since the precondition' only_publish_since "$seq"
   outcome_bundle 'S2 step 7' step7
 }
 
@@ -1108,8 +1112,15 @@ run() {
   # Preconditions: S1's run on this fixture, its cluster recorded, every instance answering.
   cluster=$(sql "SELECT id FROM cluster WHERE name = 'bw-fixture'") || die "s2: cannot read the cluster"
   [ -n "$cluster" ] || die "s2: no cluster bw-fixture: run scenarios/s1 run first"
+  machine_w=$(sql "SELECT id FROM machine WHERE cluster = '$cluster' AND talos_endpoint::text = '$TALOS_WORKER_IP:50000'") ||
+    die "s2: cannot read the worker's machine"
+  [ -n "$machine_w" ] && [ "$(wc -l <<<"$machine_w")" = 1 ] || die "s2: not one machine at the worker's endpoint: run scenarios/s1 run first"
   interrupt - || die "cannot remove C's control file"
   check 'S2 precondition' 'A answers /livez' answers 204 - GET /livez ''
+  # S3's handover: the worker is adopted. A fresh up that skipped it has no Applied, and S2 stops.
+  check 'S2 precondition (S3 handover)' "the worker's Applied is the release its adoption recorded: completed adopt operation, source adoption, baseline revision 1, its import base's configuration digest" \
+    handover_applied
+  [ -n "$applied" ] || die "s2: the worker is not adopted: run scenarios/s3 handover first"
   check 'S2 precondition' 'C (the interruption build, no interruption named) answers /livez' c_live
   # The machinery gate first (acceptance plan S2's precondition): no release is made and no
   # evidence captured on a compiler it has not accepted.
@@ -1142,9 +1153,6 @@ run() {
   # The publications on C (C §15): one that succeeds, one the compilation refuses, then one killed
   # at each interruption point; a bundle after each.
   local ref='S2 negative controls, C §15' p
-  machine_w=$(sql "SELECT id FROM machine WHERE cluster = '$cluster' AND talos_endpoint::text = '$TALOS_WORKER_IP:50000'") ||
-    die "s2: cannot read the worker's machine"
-  [ -n "$machine_w" ] && [ "$(wc -l <<<"$machine_w")" = 1 ] || die "s2: not one machine at the worker's endpoint: run scenarios/s1 run first"
   pub_case_start success
   check "$ref" 'inject pause A and B' both pause
   check "$ref" 'publication on C: 202' publish_on_c success 202
@@ -1164,7 +1172,7 @@ run() {
   outcome_bundle "$ref" publication-refusal
   for p in $pub_points; do pub_kill_case "$p"; done
 
-  # S2 steps 1 to 7, on the Applied state seeded from the last release.
+  # S2 steps 1 to 7, on the Applied state S3's handover left.
   s2_steps
   go_rows
   check 'S2 backups, C §15' 'inject db-snapshot: a dump of the bronzeward database after the updates, refusals and interruptions' \
