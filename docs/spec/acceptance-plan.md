@@ -482,8 +482,9 @@ resource version unchanged (DS row 022). The ownership check moved out of the at
 stale attempt is recorded (DB row 018).
 
 The commitment-level controls of the approval part (S3 keeps those before commitment), each from
-a restore of S3's step 4 snapshots with the S2 release planned as in S3 step 2 and approved as in
-step 3. The worker's assignment changed after planning: commitment refused by comparison 2. A later
+a restore of S3's step 4 snapshots with the S2 release planned as in S3 step 2. Each approves the
+plan as in S3 step 3 before the change it names, except the two that say the approval follows it.
+The worker's assignment changed after planning: commitment refused by comparison 2. A later
 release published for the worker from a draft opened for it (as in S3 step 4), then the plan
 approved, which does not compare `Desired`: commitment refused by comparison 2, since `Desired`
 changed, and nothing sent; this step's commitment of the same plan with no publication between is
@@ -494,7 +495,7 @@ approval waits for it, and the control that inserts without the lock does not wa
 The approver's identity revoked before commitment, and after it with no attempt: the plan cannot
 commit; or its operation goes `unresolved` with its scope held, each transition on the timeline,
 then `cancelled`, and nothing is sent (ER §3.3). OpenBao paused (`bin/inject pause openbao`) so that
-the executor's use-time check (ER §3.1 item 2) holds commitment, the plan approved, then
+the executor's use-time check (ER §3.1 item 2) holds commitment, the plan then approved, then
 `h-approver`'s `approver` group removed at the issuer and `h-approver`'s next approval, under a
 fresh token without the role, `403`; with no operation yet on the timeline, `bin/inject unpause
 openbao`: the plan commits and its attempt is admitted (PA choice §17.23); S3's approval revocation
