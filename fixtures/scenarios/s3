@@ -273,6 +273,13 @@ digest_patch() {
   rm -f -- "$patch"
   return "$rc"
 }
+# mutations_are <n> <log before> <log now>: the log holds exactly n mutating requests past the log
+# before; no count (a dropped prefix, a failed matcher) is not n.
+mutations_are() {
+  local got
+  got=$(run_mutations "$2" "$3") || return 1
+  [ "$got" = "$1" ]
+}
 # refused_once <machine> <plan> <comparison> <cause>: one refusal entry names the plan, of T6, the
 # comparison and the cause, and the plan is still approved. The cause tells the comparison's three
 # contradictions apart (identity, configuration digest, assignment revision).
@@ -327,13 +334,15 @@ controls() {
 
   # The digest control: the worker's configuration changed out of band before its plan. The
   # evidence shows another configuration digest than the baseline's: refused 4.4, once. The
-  # publication's interval is checked first: the baseline below follows the patch, whose own
-  # requests are no controller's.
-  local w_published
-  w_published=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
-  no_mutation 'the worker, after the publication' "$TALOS_WORKER_IP" "$w_log" "$w_published"
+  # baseline w_log precedes the publication; the patch is the one mutating request the worker's
+  # log may hold past it (measured: a no-reboot patch leaves one ApplyConfiguration), so the
+  # count is exact and nothing else, the controller's included, is hidden by the patch.
   check "$ref" "the worker's configuration changed out of band (a node label, no reboot)" digest_patch
-  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  local w_patched
+  w_patched=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  check "$ref" "since before the publication the worker's apid log holds one mutating request, the patch's" \
+    mutations_are 1 "$w_log" "$w_patched"
+  w_log=$w_patched
   check "$ref" 'an adopt plan for the worker as h-publisher: 201' make_plan "$machine_w" worker-digest
   plan_w=$plan_id
   [ -n "$plan_w" ] || die "s3: no worker plan; nothing after it can run"
