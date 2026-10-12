@@ -134,9 +134,11 @@ plans_committed() {
 # adopted_plans: the plans whose adoption the run recorded; the dump's control looks for the first.
 adopted_plans=()
 # adoption_recorded <machine> <node ip> <plan>: the plan committed to one completed adopt operation
-# with one adoption record, and the machine's Desired and Applied the release, source adoption,
-# baseline revision 1, Applied's digest the import base's and the pre-state's read from the node,
-# the adoption and the Applied change each on the machine's timeline once.
+# with one adoption record, the record's observation an evidence observation of that plan begun
+# after the plan's approval on the machine's timeline, and the machine's Desired and Applied the
+# release, source adoption, baseline revision 1, Applied's digest the import base's and the
+# pre-state's read from the node, the adoption and the Applied change each on the machine's
+# timeline once.
 adoption_recorded() {
   local m=$1 ip=$2 p=$3 want
   want=$(digest_of "$EV/pre-talos-config-sha256.txt" "$ip")
@@ -144,6 +146,11 @@ adoption_recorded() {
   [ "$(sql "SELECT s.state || ' ' || o.kind || ' ' || o.state FROM plan_state s JOIN operation o ON o.id = s.operation
       WHERE s.plan = '$p'")" = 'committed adopt completed' ] &&
     [ "$(sql "SELECT count(*) FROM adoption_record WHERE plan = '$p' AND machine = '$m'")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM adoption_record r
+      JOIN approval a ON a.id = r.approval AND a.plan = r.plan
+      JOIN observation o ON o.id = r.observation AND o.machine = r.machine
+      JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+      WHERE r.plan = '$p' AND r.machine = '$m' AND s.plan = r.plan AND s.purpose = 'evidence' AND s.revision > a.revision")" = 1 ] &&
     [ "$(sql "SELECT desired || ' ' || applied_release || ' ' || applied_source || ' ' || baseline_revision
       FROM machine_state WHERE machine = '$m'")" = "$release $release adoption 1" ] &&
     [ "$(sql "SELECT s.applied_digest = b.configuration_digest AND encode(s.applied_digest, 'hex') = '$want'
