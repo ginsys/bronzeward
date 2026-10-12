@@ -491,13 +491,16 @@ approve_by() {
   approval_reasons=$(jq -ce '.selfApproval.reasons' "$EV/last.body")
 }
 # approval_names <approver human> <plan>: the approval the 201 answered names the plan, the
-# approver, its role and an epoch (the last approve_by's), and is the plan's only approval.
+# approver, its role and an epoch (the last approve_by's), and is the plan's only approval; its
+# act is the approver's plan.approve under that role, naming the approval, the plan and the machine.
 approval_names() {
   local p
   p=$(who_id "$1") || return 1
   [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$2' AND id = '$approval_id' AND approver = '$p'
       AND role = 'approver' AND epoch IS NOT NULL")" = 1 ] &&
     [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$2'")" = 1 ] &&
+    [ "$(sql "SELECT a.principal || ' ' || a.role || ' ' || a.action || ' ' || array_to_string(a.subjects, ',')
+      FROM approval v JOIN act a ON a.id = v.act WHERE v.id = '$approval_id'")" = "$p approver plan.approve $approval_id,$2,$machine_w" ] &&
     [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
       AND entry->>'approval' = '$approval_id' AND entry->>'plan' = '$2' AND entry->>'principal' = '$p'
       AND entry->>'role' = 'approver'")" = 1 ]
@@ -537,9 +540,13 @@ no_dispatch_since() { [ "$(sql "SELECT count(*) FROM operation WHERE seq > $1 AN
 # kind and mode, the release (the S2 release, the worker's Desired), the assignment revision the
 # release was compiled from, the baseline revision and the expected pre-dispatch digest Applied's,
 # the machine's own route, the deadlines, the attempt limit, the expiry and the age bounds; created
-# as h-publisher.
+# as h-publisher, on the machine and its cluster, in the current epoch, under the request's
+# idempotency key, with the PoC's rollout limit and approval policy.
 plan_bound() {
-  [ "$(sql "SELECT p.kind || ' ' || p.mode || ' ' || (p.release = '$s2_rel') || ' ' || (p.desired_release = '$s2_rel')
+  [ "$(sql "SELECT p.kind || ' ' || p.mode || ' ' || (p.machine = '$machine_w') || ' ' || (p.cluster = '$cluster')
+      || ' ' || (p.epoch = (SELECT epoch FROM installation_state)) || ' ' || (p.idempotency_key = '$(key plan-step2)')
+      || ' ' || (p.rollout_limit = 1) || ' ' || (p.approval_policy = 'one-approver')
+      || ' ' || (p.release = '$s2_rel') || ' ' || (p.desired_release = '$s2_rel')
       || ' ' || (p.assignment_revision = rm.assignment_revision) || ' ' || (p.baseline_revision = s.baseline_revision)
       || ' ' || (p.expected_digest = s.applied_digest) || ' ' || (p.route::text = m.talos_endpoint::text)
       || ' ' || (p.transport_deadline = interval '120 seconds') || ' ' || (p.verification_deadline = interval '300 seconds')
@@ -548,17 +555,26 @@ plan_bound() {
       || ' ' || (p.created_by = '$(who_id h-publisher)') || ' ' || (p.created_role = 'publisher')
       FROM plan p JOIN machine_state s ON s.machine = p.machine JOIN machine m ON m.id = p.machine
         JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine
-      WHERE p.id = '$1'")" = 'apply-config no-reboot true true true true true true true true true true true true true true' ]
+      WHERE p.id = '$1'")" = 'apply-config no-reboot true true true true true true true true true true true true true true true true true true true true' ]
 }
 # plan_served <plan>: a viewer reads the plan as step 2 asks: proposed, the S2 release, the diff
 # from Applied's release to it withheld (the worker holds the import base's configuration, which
-# has no redacted form; persistence-api §17.38), no digest answered.
+# has no redacted form; persistence-api §17.38), no digest answered. The release's validation the
+# plan relies on (passed at publication, under the release's contract and versions and the
+# machine's platform mode) and the unavailable dry run are read as stored.
 plan_served() {
+  local c k m pm
+  read -r c k m pm < <(sql "SELECT r.contract || ' ' || r.kubernetes_version || ' ' || r.machinery_version || ' ' || coalesce(rm.mode, '')
+    FROM release r JOIN release_machine rm ON rm.release = r.id AND rm.machine = '$machine_w' WHERE r.id = '$s2_rel'") || return 1
+  [ -n "$c" ] && [ -n "$k" ] && [ -n "$m" ] || return 1
   fresh h-viewer
   answers_with ".id == \"$1\" and .state == \"proposed\" and .operation == \"apply-config\" and .mode == \"no-reboot\"
       and .release == \"$s2_rel\" and .desiredRelease == \"$s2_rel\" and .evidence.diff.withheld == true
       and .evidence.diff.from == \"$applied_rel\" and .evidence.diff.to == \"$s2_rel\"
-      and (.evidence.diff.unified // \"\") == \"\" and (tostring | test(\"expected|digest\") | not)" \
+      and (.evidence.diff.unified // \"\") == \"\" and (tostring | test(\"expected|digest\") | not)
+      and .evidence.validation == {result: \"passed\", at: \"publication\", contract: \"$c\", kubernetesVersion: \"$k\",
+        machineryVersion: \"$m\", platformMode: \"$pm\"}
+      and .evidence.dryRun == {available: false, reason: \"no dry run is available for this operation\"}" \
     200 - GET "/api/v1/plans/$1" "$tok"
 }
 # refused_approval <who> <plan> <name>: 403 forbidden for want of the approver role (the
@@ -605,8 +621,13 @@ expiry_cases() {
   within 30 plan_reads "$e_approved" expired || return 1
   fresh h-approver
   answers_with '.state == "expired"' 409 conflict POST "/api/v1/plans/$e_proposed/approvals" "$tok" '{}' "$(key approval-expired)" || return 1
+  # The approved plan's second request is refused as expired, not as a duplicate of its approval.
+  answers_with ".plan == \"$e_approved\" and .state == \"expired\"" 409 conflict POST "/api/v1/plans/$e_approved/approvals" "$tok" '{}' \
+    "$(key approval-expired-approved)" || return 1
   [ "$(sql "SELECT count(*) FROM operation WHERE plan IN ('$e_proposed', '$e_approved')")" = 0 ] &&
-    [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$e_proposed'")" = 0 ]
+    [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$e_proposed'")" = 0 ] &&
+    [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$e_approved' AND id = '$approval_id'")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$e_approved'")" = 1 ]
 }
 # cancelled_as <canceller> <role> <name>: plan_id cancelled as that identity, which the plan's
 # route permits under that role: 201, the plan cancelled with no approval and no operation, the
@@ -691,9 +712,10 @@ draft_by() {
   [ -n "$etag" ]
 }
 # fragment_by <who> <name> <fragment> [layer]: a fragment of one node label, under the draft's ETag:
-# 200, the ETag replaced; its revision in frag_rev. A cluster fragment is selected by nothing, so a
-# release compiled later does not carry it: it is an unrelated change. A role fragment is one a
-# profile lists (profile_by).
+# 200, the ETag replaced; its revision in frag_rev. A cluster fragment is selected by no machine's
+# profile, so the release compiled from its draft names it as a changed head and no machine's
+# configuration changes: it is an unrelated change. A role fragment is one a profile lists
+# (profile_by).
 frag_rev=''
 fragment_by() {
   local body
@@ -772,7 +794,7 @@ restored_to_step3() {
 
 step4_approval=''
 approval_part() {
-  local ref='S3 step 1' p2 pa pb pc apb apc pcancel pu
+  local ref='S3 step 1' p2 pa pb pc apb apc pcancel pu case3_frag
   robot=$(cat -- "$STATE/automation-token") || die "no automation token in $STATE"
   redact_automation_token "$robot"
   robot_id=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$STATE/automation-identity")
@@ -787,12 +809,13 @@ approval_part() {
   check 'S3 precondition' "the S2 release holds a revision the automation identity authored: owned-automation holds for h-all on every plan of this part" \
     release_holds_automation_revision
 
-  # Step 1: the controller has polled the worker three heartbeats (5 s) since S2 ended, and has made
-  # no plan and no operation. A scheduled drift observation is S5's (ginsys/bronzeward#27). The
+  # Step 1: three heartbeats (5 s) of the controller's loop have passed since S2 ended, and it has
+  # made no plan and no operation. A pass with no candidate records nothing, so the interval is the
+  # evidence, not a pass marker; a scheduled drift observation is S5's (ginsys/bronzeward#27). The
   # pre-state and the apid log baselines come first, so the no-mutation checks cover this interval.
   pre_state
   sleep 16
-  check "$ref" "three heartbeats after S2: no plan but the handover's, no operation but its adopt: publication alone dispatched nothing" \
+  check "$ref" "sixteen seconds (three heartbeats) after S2: no plan but the handover's, no operation but its adopt: publication alone dispatched nothing" \
     worker_has_only_the_handover
   check "$ref" 'no apply-config plan and no apply-config operation exist' \
     same "$(sql "SELECT (SELECT count(*) FROM plan WHERE kind = 'apply-config') || ' ' || (SELECT count(*) FROM operation WHERE kind = 'apply-config')")" '0 0'
@@ -913,11 +936,20 @@ approval_part() {
   # 3: a later release by others reuses h-all's fragment revision unchanged.
   check "$ref" 'case 3: h-author opens a draft: 201' draft_by h-author case3
   check "$ref" 'case 3: h-author drafts an unrelated change, a fragment: 200' fragment_by h-author case3 other
+  case3_frag=$frag_rev
   check "$ref" 'case 3: h-publisher publishes it as a later release: 202, one release, the worker'"'"'s Desired' publish_by h-publisher case3
   check "$ref" "case 3: that release reuses h-all's fragment revision unchanged" \
     same "$(sql "SELECT count(*) FROM release_source s JOIN fragment_revision f ON f.id = s.fragment_revision
       WHERE s.release = '$new_release' AND f.author = '$(who_id h-all)'
         AND NOT EXISTS (SELECT FROM draft_source_entry e JOIN release r ON r.id = s.release WHERE e.draft = r.draft AND e.fragment_revision = f.id)")" 1
+  check "$ref" "case 3: h-author's unrelated fragment revision is a changed head of that release, its own draft entry, not the reused one" \
+    same "$(sql "SELECT count(*) FROM release_source s JOIN release r ON r.id = s.release
+      JOIN draft_source_entry e ON e.draft = r.draft AND e.fragment_revision = s.fragment_revision
+      WHERE s.release = '$new_release' AND s.fragment_revision = '$case3_frag'")" 1
+  check "$ref" "case 3: no machine selects it: the worker's configuration digest in that release is case 2's release's" \
+    same "$(sql "SELECT (SELECT configuration_digest FROM release_machine WHERE release = '$new_release' AND machine = '$machine_w')
+      = (SELECT rm.configuration_digest FROM plan p JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine
+        WHERE p.id = '$pb')")" t
   check "$ref" 'case 3: h-publisher creates a plan of that release: 201' plan_by h-publisher case3
   pc=$plan_id
   check "$ref" "case 3: h-all approves h-publisher's plan: 201, naming the plan, the approver, its role and the epoch" approve_by h-all "$pc" case3
