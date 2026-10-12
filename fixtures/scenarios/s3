@@ -208,11 +208,13 @@ start() {
     counted 2 '^[0-9a-f]{64} ' "$EV/pre-talos-config-sha256.txt"
   check "$ref" 'pre-state: both nodes have a machine-configuration resource version' \
     counted 2 '^[0-9]+ ' "$EV/pre-talos-config-version.txt"
+  # The baselines precede the publication: a Talos request the publication sent is inside the
+  # interval the no-mutation checks cover.
+  cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
   check 'S3 step 1' "the S1 import draft, both machines imported, published as one release covering both: 202, the operation succeeded" \
     publish_import
   [ -n "$release" ] || die "s3: no release; nothing after it can run"
-  cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
-  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
 }
 
 handover() {
@@ -234,7 +236,9 @@ handover() {
   check "$ref" "the worker's adoption recorded: Desired and Applied the release, source adoption, baseline revision 1, Applied's digest the import base's and the pre-state's" \
     adoption_recorded "$machine_w" "$TALOS_WORKER_IP" "$plan_w"
   adopted_plans+=("$plan_cp" "$plan_w")
-  check "$ref" 'no operation but adopt since the publication' only_adoptions_since "$(sql "SELECT max(seq) FROM operation WHERE kind = 'publish'")"
+  # Anchored to this run's own publication, not to the latest publish: a later one is itself a
+  # forbidden operation.
+  check "$ref" 'no operation but adopt since the publication' only_adoptions_since "$(sql "SELECT seq FROM operation WHERE id = '$pub_op'")"
   check "$ref" 'an adopt plan for an adopted machine refused: 409 conflict, nothing written' \
     adopted_again "$machine_w"
   evidence_to post || die "no post-state: bin/evidence failed"
@@ -269,12 +273,13 @@ digest_patch() {
   rm -f -- "$patch"
   return "$rc"
 }
-# refused_once <machine> <plan> <comparison>: one refusal entry names the plan, of T6 and the
-# comparison, and the plan is still approved.
+# refused_once <machine> <plan> <comparison> <cause>: one refusal entry names the plan, of T6, the
+# comparison and the cause, and the plan is still approved. The cause tells the comparison's three
+# contradictions apart (identity, configuration digest, assignment revision).
 refused_once() {
   [ "$(refusals "$2")" = 1 ] &&
-    [ "$(sql "SELECT entry->>'transaction' || ' ' || (entry->>'comparison') FROM machine_event
-      WHERE machine = '$1' AND kind = 'refusal' AND entry->>'plan' = '$2'")" = "T6 $3" ] &&
+    [ "$(sql "SELECT entry->>'transaction' || ' ' || (entry->>'comparison') || ' ' || (entry->>'cause')
+      FROM machine_event WHERE machine = '$1' AND kind = 'refusal' AND entry->>'plan' = '$2'")" = "T6 $3 $4" ] &&
     plan_state_is "$2" approved
 }
 # refusal_seen <plan>: a refusal entry names the plan.
@@ -330,9 +335,11 @@ controls() {
   check "$ref" 'the worker plan approved as h-approver: 201' approve_plan "$plan_w" worker-digest
   check "$ref" "the worker's plan is refused: one refusal entry of T6, comparison 4.4, the plan still approved" \
     within 90 refusal_seen "$plan_w"
-  # The loop's heartbeat is 5 s: three passes later the plan has still one refusal entry.
+  # The loop's heartbeat is 5 s: three passes later the plan has still one refusal entry, and its
+  # cause is the digest's (adoption.go: the identity and assignment contradictions have their own).
   sleep 16
-  check "$ref" 'three heartbeats later: still one refusal entry, T6 4.4, the plan approved' refused_once "$machine_w" "$plan_w" 4.4
+  check "$ref" 'three heartbeats later: still one refusal entry, T6 4.4 for the configuration digest, the plan approved' \
+    refused_once "$machine_w" "$plan_w" 4.4 "the latest observation's configuration digest is not the baseline's"
   check "$ref" 'the worker is not adopted: no Applied, no adopt operation, no adoption record' unadopted "$machine_w"
   outcome_bundle "$ref" refusal-digest
   check "$ref" "control: the worker's configuration digest in the bundle is not the pre-state's" \
