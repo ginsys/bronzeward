@@ -386,3 +386,108 @@ ingest() {
   }
   etag=$next
 }
+
+# The Talos mutation matcher (S1, S3): whether a node's apid log records a mutating request.
+# Every Talos API method and its class (internal/talos's TestTalosAPIMethods holds the file to the
+# pinned modules and to the read-only guard). MUTATIONS: the mutating ones, one per line.
+# mutation_ref: the acceptance-plan reference no_mutation's rows carry, set by the scenario.
+METHODS=$(dirname -- "${BASH_SOURCE[0]}")/../talos-api-methods.tsv
+MUTATIONS=$(awk -F '\t' '$2 == "mutating" { print $1 }' "$METHODS")
+[ -n "$MUTATIONS" ] || die "no mutating method in $METHODS"
+mutation_ref=''
+
+# node_talos <node ip> <talosctl args...>: talosctl against one node, through that node.
+node_talos() { talosctl_timed 20 -e "$1" -n "$1" "${@:2}"; }
+# digest_of <bundle file> <node ip>: the first field of that node's line.
+digest_of() { awk -v n="$2" '$2 == n {print $1}' "$1"; }
+# apid_log <node ip>: that node's apid log, as its buffer holds it now.
+apid_log() { node_talos "$1" logs apid; }
+# run_mutations <log before> <log now>: how many Talos mutation requests the log now records past
+# the log before. That must be its prefix: a buffer that has dropped its oldest lines since may
+# have dropped one of the run's as well, so then there is no count (status 1). A failed extraction
+# or count is no count either (status 2), never a count of 0.
+run_mutations() {
+  [[ "$2" == "$1"* ]] || return 1
+  local methods n
+  methods=$(log_methods <<<"${2:${#1}}") || return 2
+  # grep's status 1 is "no line matched", its count 0; anything above is an error.
+  n=$(grep --count --fixed-strings --line-regexp -- "$MUTATIONS" <<<"$methods") || [ $? -eq 1 ] || return 2
+  printf '%s\n' "$n"
+}
+# log_methods: the method each request line names, one per line, from apid lines read on stdin
+# (`... OK [/machine.MachineService/Version] 1.3ms stream Success (...)`, whatever the status).
+# Whole names, matched whole: EtcdRemoveMember would not match EtcdRemoveMemberByID. Fails when
+# grep or sed does; no request line is an empty answer.
+log_methods() {
+  local lines
+  lines=$(grep --only-matching --extended-regexp -- '\[/[A-Za-z0-9_.]+/[A-Za-z0-9_]+\]') || [ $? -eq 1 ] || return 2
+  [ -z "$lines" ] || sed 's/^\[\///; s/\]$//' <<<"$lines"
+}
+# matcher_fails_closed: the matcher's control for its own failure. With grep failing at the
+# extraction, and then at the count, a log holding a mutation gives status 2, not a count.
+matcher_fails_closed() {
+  local line='10.0.0.1: 2026/01/01 00:00:00.000000 log.go:98: OK [/machine.MachineService/MetaWrite] 1ms (runtime=Talos)'
+  local which rc out wrong=()
+  [ "$(run_mutations '' "$line")" = 1 ] || wrong+=('MetaWrite not counted with grep working')
+  for which in --only-matching --count; do
+    rc=0
+    # shellcheck disable=SC2329 # grep is the shim run_mutations calls, in this subshell only
+    out=$(
+      grep() { if [[ " $* " == *" $which "* ]]; then return 2; fi; command grep "$@"; }
+      run_mutations '' "$line"
+    ) || rc=$?
+    [ "$rc" -eq 2 ] || wrong+=("grep failing at $which: status $rc, output '$out'")
+  done
+  [ "${#wrong[@]}" -eq 0 ] || {
+    say "$scenario: the matcher did not fail closed: ${wrong[*]}"
+    return 1
+  }
+}
+# methods_counted: the matcher's control for every kind. One apid line per classified method, in
+# the format the log records, is counted once when the method is mutating and not at all when it is
+# a read; FAIL names each method counted otherwise.
+methods_counted() {
+  local m class n wrong=()
+  while IFS=$'\t' read -r m class; do
+    case $m in '' | '#'*) continue ;; esac
+    n=$(run_mutations '' "10.0.0.1: 2026/01/01 00:00:00.000000 log.go:98: OK [/$m] 1ms stream Success (runtime=Talos)") ||
+      n="no count, status $?"
+    case $class:$n in mutating:1 | read:0) ;; *) wrong+=("$m ($class, counted $n)") ;; esac
+  done <"$METHODS"
+  [ "${#wrong[@]}" -eq 0 ] || {
+    say "$scenario: miscounted: ${wrong[*]}"
+    return 1
+  }
+}
+# no_mutation <label> <node ip> <log before> <log after>: the pass row that the node's apid log
+# recorded no mutation request past the log read before the run, written only once a dry-run apply
+# on that node, made after the read, appears past it too; FAIL otherwise. Entries are compared,
+# not totals, so a run's mutation cannot hide behind an old entry the buffer dropped.
+no_mutation() {
+  local run ctl log rc=0
+  # A pass criterion (acceptance plan S1): unshown is not passed.
+  run=$(run_mutations "$3" "$4") || rc=$?
+  case $rc in
+  0) ;;
+  1)
+    result FAIL "$mutation_ref" "no Talos mutation in $1's apid log: not shown, the log no longer begins with the one read before the run (its buffer dropped lines)"
+    return 0
+    ;;
+  *)
+    result FAIL "$mutation_ref" "no Talos mutation in $1's apid log: not shown, the mutation matcher failed on it"
+    return 0
+    ;;
+  esac
+  node_talos "$2" apply-config --dry-run \
+    --file <(node_talos "$2" get machineconfig v1alpha1 -o jsonpath='{.spec}') >/dev/null 2>&1 ||
+    die "the dry-run apply control did not run on $1"
+  log=$(apid_log "$2") || die "cannot read $1's apid log"
+  rc=0
+  ctl=$(run_mutations "$3" "$log") || rc=$?
+  if [ "$rc" -eq 0 ] && [ "$ctl" -gt "$run" ]; then
+    check "$mutation_ref" "no Talos mutation request in $1's apid log past the entries read before the run (control: the dry-run apply there is found past them)" \
+      same "$run" 0
+  else
+    result FAIL "$mutation_ref" "no Talos mutation in $1's apid log: not shown, the dry-run apply control is not found past the entries read before the run (matcher status $rc)"
+  fi
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/ginsys/bronzeward/internal/seam"
 )
 
 // adoptCandidate is an approved adopt plan the adoption loop may record, and its machine.
@@ -149,6 +151,7 @@ func (a *API) adoptOne(ctx context.Context, c adoptCandidate) error {
 	if _, err := a.observe(ctx, c.machine, observeFor{purpose: "evidence", plan: c.plan}); err != nil {
 		return err
 	}
+	seam.At("adoption") // the evidence observation recorded, the adoption not yet committed
 	r, err := a.commitAdoption(ctx, c.plan)
 	if err != nil {
 		return err

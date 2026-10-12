@@ -1,0 +1,454 @@
+#!/usr/bin/env bash
+# Acceptance plan S3, the handover, against the fixture. `handover`: the S1 import draft published
+# as one release, then an adopt plan for each of S1's two machines, created as h-publisher and
+# approved as h-approver; each is adopted without a single Talos mutation, Applied the import base's
+# digest, source adoption, baseline revision 1, the nodes' configuration digests and resource
+# versions what the pre-state read, and a second adopt plan for an adopted machine refused. This is
+# the state S2 starts from. `handover-controls`: the controls that refuse or hold an adoption
+# before it commits, on the same precondition: the worker's configuration changed out of band, so
+# its adopt plan is refused (4.4) once and the machine stays unadopted; and, on instance C with A
+# and B paused, the evidence observation of the control plane stalled past the age its plan binds,
+# so that its adoption is not recorded from it, nothing is refused, and it is recorded from a later
+# observation. Each case gets its evidence bundle, scanned for every fixture secret. Each check
+# writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s3.tsv in the
+# evidence directory and to stdout. Exit 1 on any FAIL.
+# Usage: scenarios/s3 handover|handover-controls   (each after scenarios/s1 run on a fresh
+# fixtures/bin/up: the handover is S2's precondition, the controls are their own run)
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+s3_mode=${1:-}
+case $s3_mode in handover | handover-controls) ;; *) die "usage: scenarios/s3 handover|handover-controls" ;; esac
+need docker curl jq timeout id sleep date awk wc
+need_state
+# No fixture lock of its own: inject and evidence each take the one they need.
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+EV=$STATE/evidence/s3-$s3_mode-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV" "$EV/http"
+scenario=s3
+# shellcheck source-path=SCRIPTDIR source=common.sh
+. "$here/common.sh"
+run_key=$(date -u +%s%N)
+mutation_ref='S3 handover pass'
+
+cluster='' machine_cp='' machine_w='' import_draft='' release='' pub_op=''
+# h-publisher's and h-approver's tokens, minted again as the author's is (common.sh).
+publisher='' publisher_at=0 approver='' approver_at=0
+fresh_publisher() {
+  [ -z "$publisher" ] || [ $((SECONDS - publisher_at)) -ge 180 ] || return 0
+  publisher=$(mint h-publisher) || die "cannot mint a publisher token"
+  keep_secret "$publisher"
+  publisher_at=$SECONDS
+}
+fresh_approver() {
+  [ -z "$approver" ] || [ $((SECONDS - approver_at)) -ge 180 ] || return 0
+  approver=$(mint h-approver) || die "cannot mint an approver token"
+  keep_secret "$approver"
+  approver_at=$SECONDS
+}
+# c_live: instance C answers /livez.
+c_live() {
+  local got
+  call_port=$SERVER_C_PORT
+  got=$(call GET /livez '')
+  call_port=$SERVER_A_PORT
+  [ "$got" = 204 ]
+}
+both() { "$bin/inject" "$1" A && "$bin/inject" "$1" B; }
+
+# The machines S1 recorded, by their Talos endpoints. S1's node-ID case also leaves a stranger at
+# the control plane's endpoint, with a node ID no node has; it is no machine of the cluster's.
+machine_at() {
+  sql "SELECT id FROM machine WHERE cluster = '$cluster' AND talos_endpoint::text = '$1:50000'
+    AND talos_node_id NOT LIKE 's1-no-such-node-%'"
+}
+# one_line <value>: a single non-empty line.
+one_line() { [ -n "$1" ] && [ "$(wc -l <<<"$1")" = 1 ]; }
+
+# publish_import: the S1 import draft, both machines imported into it, published as h-publisher
+# under its current ETag; the release in $release, which covers both machines.
+pub_succeeded() {
+  [ "$(sql "SELECT state FROM operation WHERE id = '$pub_op'")" = succeeded ] &&
+    [ "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" = 1 ]
+}
+publish_import() {
+  fresh_author
+  fresh_publisher
+  answers 200 - GET "/api/v1/drafts/$import_draft" "$author" || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ] || return 1
+  # An adopt plan binds the machine's assignment head as the release compiled it, so each machine
+  # has an assignment, and an assignment must select something: one cluster-layer fragment, a
+  # single node label, which the release then carries beyond the import (pending convergence).
+  local m body
+  body=$(jq -nc '{layer: "cluster", document: "machine:\n  nodeLabels:\n    bw-s3-handover: \"yes\"\n", marks: []}') || return 1
+  answers 200 - PUT "/api/v1/drafts/$import_draft/fragments/s3-handover" "$author" "$body" "$(key fragment-s3-handover)" "$etag" || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ] || return 1
+  for m in "$machine_cp" "$machine_w"; do
+    answers 200 - PUT "/api/v1/drafts/$import_draft/assignments/$m" "$author" \
+      '{"profiles": [], "fragments": {"cluster": ["s3-handover"]}}' "$(key "assignment-$m")" "$etag" || return 1
+    etag=$(etag_of_last)
+    [ -n "$etag" ] || return 1
+  done
+  answers 202 - POST "/api/v1/drafts/$import_draft/publications" "$publisher" '{}' "$(key publication)" "$etag" || return 1
+  pub_op=$(jq -er '.id' "$EV/last.body") || return 1
+  within 120 pub_succeeded || return 1
+  release=$(sql "SELECT id FROM release WHERE operation = '$pub_op'")
+  [ -n "$release" ] &&
+    [ "$(sql "SELECT state FROM draft WHERE id = '$import_draft'")" = published ] &&
+    [ "$(sql "SELECT count(*) FROM release_machine WHERE release = '$release'")" = 2 ]
+}
+
+# make_plan <machine> <name> [extra body fields as a JSON object]: an adopt plan of the release for
+# the machine, created as h-publisher; 201, its id in plan_id.
+plan_id=''
+make_plan() {
+  local body extra=${3:-'{}'}
+  plan_id=''
+  fresh_publisher
+  body=$(jq -nc --arg r "$release" --arg m "$1" --argjson x "$extra" \
+    '{releaseId: $r, machine: $m, operation: "adopt"} + $x') || return 1
+  answers 201 - POST /api/v1/plans "$publisher" "$body" "$(key "plan-$2")" || return 1
+  plan_id=$(jq -er '.id' "$EV/last.body")
+}
+# approve_plan <plan> <name>: the plan approved as h-approver: 201.
+approve_plan() {
+  fresh_approver
+  answers 201 - POST "/api/v1/plans/$1/approvals" "$approver" '{}' "$(key "approval-$2")"
+}
+# plan_state_is <plan> <state>
+plan_state_is() { [ "$(sql "SELECT state FROM plan_state WHERE plan = '$1'")" = "$2" ]; }
+# plans_committed <n> <plan>...: exactly n of the plans are committed.
+plans_committed() {
+  local n=$1 ids
+  shift
+  ids=$(printf "'%s'," "$@")
+  [ "$(sql "SELECT count(*) FROM plan_state WHERE state = 'committed' AND plan IN (${ids%,})")" = "$n" ]
+}
+# adopted_plans: the plans whose adoption the run recorded; the dump's control looks for the first.
+adopted_plans=()
+# adoption_recorded <machine> <node ip> <plan>: the plan committed to one completed adopt operation
+# with one adoption record, and the machine's Desired and Applied the release, source adoption,
+# baseline revision 1, Applied's digest the import base's and the pre-state's read from the node,
+# the adoption and the Applied change each on the machine's timeline once.
+adoption_recorded() {
+  local m=$1 ip=$2 p=$3 want
+  want=$(digest_of "$EV/pre-talos-config-sha256.txt" "$ip")
+  [ -n "$want" ] || return 1
+  [ "$(sql "SELECT s.state || ' ' || o.kind || ' ' || o.state FROM plan_state s JOIN operation o ON o.id = s.operation
+      WHERE s.plan = '$p'")" = 'committed adopt completed' ] &&
+    [ "$(sql "SELECT count(*) FROM adoption_record WHERE plan = '$p' AND machine = '$m'")" = 1 ] &&
+    [ "$(sql "SELECT desired || ' ' || applied_release || ' ' || applied_source || ' ' || baseline_revision
+      FROM machine_state WHERE machine = '$m'")" = "$release $release adoption 1" ] &&
+    [ "$(sql "SELECT s.applied_digest = b.configuration_digest AND encode(s.applied_digest, 'hex') = '$want'
+      FROM machine_state s JOIN release_machine rm ON rm.release = s.applied_release AND rm.machine = s.machine
+        JOIN import_base_revision b ON b.id = rm.import_base_revision AND b.machine = rm.machine
+      WHERE s.machine = '$m'")" = t ] &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$m' AND kind = 'adoption' AND entry->>'plan' = '$p'")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$m' AND kind = 'applied-change'
+      AND entry->>'plan' = '$p' AND entry->>'source' = 'adoption'")" = 1 ]
+}
+# unadopted <machine>: the machine has no Applied, no operation and no adoption record.
+unadopted() {
+  [ "$(sql "SELECT (SELECT applied_release IS NULL FROM machine_state WHERE machine = '$1') || ' '
+    || (SELECT count(*) FROM operation WHERE machine = '$1' AND kind = 'adopt') || ' '
+    || (SELECT count(*) FROM adoption_record WHERE machine = '$1')")" = 't 0 0' ]
+}
+# refusals <plan>: how many refusal entries name the plan.
+refusals() { sql "SELECT count(*) FROM machine_event WHERE kind = 'refusal' AND entry->>'plan' = '$1'"; }
+# unchanged_node <ip>: the node's configuration digest and resource version in the latest bundle
+# are the pre-state's.
+unchanged_node() {
+  [ "$(digest_of "$bundle/talos-config-sha256.txt" "$1")" = "$(digest_of "$EV/pre-talos-config-sha256.txt" "$1")" ] &&
+    [ -n "$(digest_of "$EV/pre-talos-config-sha256.txt" "$1")" ] &&
+    [ "$(digest_of "$bundle/talos-config-version.txt" "$1")" = "$(digest_of "$EV/pre-talos-config-version.txt" "$1")" ] &&
+    [ -n "$(digest_of "$EV/pre-talos-config-version.txt" "$1")" ]
+}
+# only_adoptions_since <operation seq>: no operation but adopt since that sequence number (the
+# publication is the one other kind this run makes, before it).
+only_adoptions_since() { [ "$(sql "SELECT count(*) FROM operation WHERE seq > $1 AND kind <> 'adopt'")" = 0 ]; }
+
+preconditions() {
+  local ref='S3 precondition'
+  cluster=$(sql "SELECT id FROM cluster WHERE name = 'bw-fixture'") || die "s3: cannot read the cluster"
+  [ -n "$cluster" ] || die "s3: no cluster bw-fixture: run scenarios/s1 run first"
+  machine_cp=$(machine_at "$TALOS_CONTROLPLANE_IP") || die "s3: cannot read the control plane's machine"
+  one_line "$machine_cp" || die "s3: not one machine at the control plane's endpoint: run scenarios/s1 run first"
+  machine_w=$(machine_at "$TALOS_WORKER_IP") || die "s3: cannot read the worker's machine"
+  one_line "$machine_w" || die "s3: not one machine at the worker's endpoint: run scenarios/s1 run first"
+  import_draft=$(sql "SELECT id FROM draft WHERE cluster = '$cluster' AND title = 'S1 import' AND state = 'open'")
+  one_line "$import_draft" || die "s3: not one open S1 import draft: run scenarios/s1 run on a fresh up first"
+  interrupt - || die "cannot remove C's control file"
+  check "$ref" 'A answers /livez' answers 204 - GET /livez ''
+  check "$ref" 'C (the interruption build, no interruption named) answers /livez' c_live
+  check "$ref" 'no plan and no Applied release yet: the machines are not adopted' \
+    same "$(sql "SELECT (SELECT count(*) FROM plan) || ' ' || (SELECT count(*) FROM machine_state WHERE applied_release IS NOT NULL)")" '0 0'
+  check "$ref" "the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all ($(grep -c . <<<"$MUTATIONS") mutating, talos-api-methods.tsv)" \
+    methods_counted
+  check "$ref" 'the mutation matcher gives no count, not 0, when grep fails extracting the methods or counting them' \
+    matcher_fails_closed
+}
+
+# The pre-state, both nodes' apid logs, the S1 import draft published: what both modes start from.
+cp_log='' w_log=''
+start() {
+  local ref='S3 precondition'
+  fresh_author
+  evidence_to pre || die "no pre-state: bin/evidence failed"
+  cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"
+  cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
+  check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean pre
+  check "$ref" 'pre-state: both nodes have a configuration digest' \
+    counted 2 '^[0-9a-f]{64} ' "$EV/pre-talos-config-sha256.txt"
+  check "$ref" 'pre-state: both nodes have a machine-configuration resource version' \
+    counted 2 '^[0-9]+ ' "$EV/pre-talos-config-version.txt"
+  check 'S3 step 1' "the S1 import draft, both machines imported, published as one release covering both: 202, the operation succeeded" \
+    publish_import
+  [ -n "$release" ] || die "s3: no release; nothing after it can run"
+  cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+}
+
+handover() {
+  local ref='S3 handover' plan_cp plan_w
+  start
+  check "$ref" 'an adopt plan for the control plane as h-publisher: 201' make_plan "$machine_cp" cp
+  plan_cp=$plan_id
+  check "$ref" 'an adopt plan for the worker as h-publisher: 201' make_plan "$machine_w" worker
+  plan_w=$plan_id
+  [ -n "$plan_cp" ] && [ -n "$plan_w" ] || die "s3: no plans; nothing after them can run"
+  check "$ref" 'both plans proposed, not yet adopted' \
+    same "$(sql "SELECT count(*) FROM plan_state WHERE plan IN ('$plan_cp', '$plan_w') AND state = 'proposed'")" 2
+  check "$ref" 'the control plane plan approved as h-approver: 201' approve_plan "$plan_cp" cp
+  check "$ref" 'the worker plan approved as h-approver: 201' approve_plan "$plan_w" worker
+  check "$ref" 'both plans committed, each to a completed adopt operation' \
+    within 90 plans_committed 2 "$plan_cp" "$plan_w"
+  check "$ref" "the control plane's adoption recorded: Desired and Applied the release, source adoption, baseline revision 1, Applied's digest the import base's and the pre-state's" \
+    adoption_recorded "$machine_cp" "$TALOS_CONTROLPLANE_IP" "$plan_cp"
+  check "$ref" "the worker's adoption recorded: Desired and Applied the release, source adoption, baseline revision 1, Applied's digest the import base's and the pre-state's" \
+    adoption_recorded "$machine_w" "$TALOS_WORKER_IP" "$plan_w"
+  adopted_plans+=("$plan_cp" "$plan_w")
+  check "$ref" 'no operation but adopt since the publication' only_adoptions_since "$(sql "SELECT max(seq) FROM operation WHERE kind = 'publish'")"
+  check "$ref" 'an adopt plan for an adopted machine refused: 409 conflict, nothing written' \
+    adopted_again "$machine_w"
+  evidence_to post || die "no post-state: bin/evidence failed"
+  check "$ref" 'the post-state bundle: complete, no fixture secret but the scan control' scan_clean post
+  check "$ref" "the control plane's configuration digest and machine-configuration resource version are the pre-state's" \
+    unchanged_node "$TALOS_CONTROLPLANE_IP"
+  check "$ref" "the worker's configuration digest and machine-configuration resource version are the pre-state's" \
+    unchanged_node "$TALOS_WORKER_IP"
+  local cp_after w_after
+  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
+  no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_log" "$w_after"
+}
+# adopted_again <machine>: a second adopt plan for an adopted machine: 409, no plan added.
+adopted_again() {
+  local before
+  before=$(sql "SELECT count(*) FROM plan") || return 1
+  fresh_publisher
+  answers 409 conflict POST /api/v1/plans "$publisher" \
+    "$(jq -nc --arg r "$release" --arg m "$1" '{releaseId: $r, machine: $m, operation: "adopt"}')" "$(key plan-again)" || return 1
+  [ "$(sql "SELECT count(*) FROM plan")" = "$before" ]
+}
+
+# digest_patch: the worker's configuration changed out of band: a node label, no reboot. Nothing
+# of the patch is kept: the node's answer is a status only.
+digest_patch() {
+  local patch=$STATE/s3-label-patch rc=0
+  printf '[{"op": "add", "path": "/machine/nodeLabels", "value": {"bw-s3-control": "digest"}}]\n' >"$patch"
+  node_talos "$TALOS_WORKER_IP" patch machineconfig --mode no-reboot --patch "@$patch" >/dev/null 2>&1 || rc=$?
+  rm -f -- "$patch"
+  return "$rc"
+}
+# refused_once <machine> <plan> <comparison>: one refusal entry names the plan, of T6 and the
+# comparison, and the plan is still approved.
+refused_once() {
+  [ "$(refusals "$2")" = 1 ] &&
+    [ "$(sql "SELECT entry->>'transaction' || ' ' || (entry->>'comparison') FROM machine_event
+      WHERE machine = '$1' AND kind = 'refusal' AND entry->>'plan' = '$2'")" = "T6 $3" ] &&
+    plan_state_is "$2" approved
+}
+# refusal_seen <plan>: a refusal entry names the plan.
+refusal_seen() { [ "$(refusals "$1")" -ge 1 ]; }
+
+# The age control's pieces. started_at: the plan's first evidence observation's start entry time.
+obs_started() {
+  [ -n "$(sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    WHERE s.plan = '$1' AND s.purpose = 'evidence'")" ]
+}
+# first_observation <plan>: the id of the plan's first recorded observation.
+first_observation() {
+  sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    WHERE s.plan = '$1' ORDER BY o.basis LIMIT 1"
+}
+# observation_stale <plan> <seconds>: the plan's first observation began more than that long ago,
+# by the database's clock.
+observation_stale() {
+  [ "$(sql "SELECT clock_timestamp() > e.at + interval '$2 seconds' FROM observation o
+    JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    JOIN machine_event e ON e.machine = s.machine AND e.revision = s.revision
+    WHERE s.plan = '$1' ORDER BY o.basis LIMIT 1")" = t ]
+}
+# relied_on_later <plan> <stalled observation> <instant>: the adoption relied on another
+# observation than the stalled one, whose start entry is after the instant.
+relied_on_later() {
+  [ "$(sql "SELECT r.observation <> '$2' AND e.at > '$3'::timestamptz FROM adoption_record r
+    JOIN observation o ON o.id = r.observation
+    JOIN machine_event e ON e.machine = o.machine AND e.revision = o.basis
+    WHERE r.plan = '$1'")" = t ]
+}
+# stalled_unrecorded <plan>: the stalled evidence observation is recorded, and the plan is still
+# approved with no adoption record and no refusal entry.
+stalled_unrecorded() {
+  plan_state_is "$1" approved &&
+    [ "$(sql "SELECT count(*) FROM adoption_record WHERE plan = '$1'")" = 0 ] &&
+    [ "$(refusals "$1")" = 0 ]
+}
+# c_says_older: C's log records the stalled observation as no evidence, retried.
+c_says_older() { c_says 'is older than the plan allows: .*retried after'; }
+
+controls() {
+  local ref='S3 handover negative controls' plan_w plan_cp stalled released_at age=10
+  start
+
+  # The digest control: the worker's configuration changed out of band before its plan. The
+  # evidence shows another configuration digest than the baseline's: refused 4.4, once.
+  check "$ref" "the worker's configuration changed out of band (a node label, no reboot)" digest_patch
+  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  check "$ref" 'an adopt plan for the worker as h-publisher: 201' make_plan "$machine_w" worker-digest
+  plan_w=$plan_id
+  [ -n "$plan_w" ] || die "s3: no worker plan; nothing after it can run"
+  check "$ref" 'the worker plan approved as h-approver: 201' approve_plan "$plan_w" worker-digest
+  check "$ref" "the worker's plan is refused: one refusal entry of T6, comparison 4.4, the plan still approved" \
+    within 90 refusal_seen "$plan_w"
+  # The loop's heartbeat is 5 s: three passes later the plan has still one refusal entry.
+  sleep 16
+  check "$ref" 'three heartbeats later: still one refusal entry, T6 4.4, the plan approved' refused_once "$machine_w" "$plan_w" 4.4
+  check "$ref" 'the worker is not adopted: no Applied, no adopt operation, no adoption record' unadopted "$machine_w"
+  outcome_bundle "$ref" refusal-digest
+  check "$ref" "control: the worker's configuration digest in the bundle is not the pre-state's" \
+    differ "$(digest_of "$bundle/talos-config-sha256.txt" "$TALOS_WORKER_IP")" "$(digest_of "$EV/pre-talos-config-sha256.txt" "$TALOS_WORKER_IP")"
+  check "$ref" "the control plane's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
+  local w_after
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  no_mutation 'the worker, after the out-of-band change' "$TALOS_WORKER_IP" "$w_log" "$w_after"
+
+  # The age control: C alone runs, its adoption loop stalled between the evidence observation and
+  # the adoption record. Once the observation is older than the plan binds, the stall is released:
+  # the stalled observation is no evidence (nothing refused), the loop observes again after its
+  # lease, and the adoption relies on that observation.
+  fresh_author
+  check "$ref" 'inject pause A and B' both pause
+  check "$ref" 'C told to stall at the adoption' interrupt adoption stall
+  # A and B are paused: the plan is created and approved on C, whose loop is woken by the approval.
+  call_port=$SERVER_C_PORT
+  check "$ref" "an adopt plan for the control plane as h-publisher on C, its evidence at most $age s old: 201" \
+    make_plan "$machine_cp" cp-age "$(jq -nc --argjson s "$age" '{maxObservationAgeSeconds: $s}')"
+  plan_cp=$plan_id
+  [ -n "$plan_cp" ] || die "s3: no control plane plan; nothing after it can run"
+  check "$ref" 'the control plane plan approved as h-approver on C: 201' approve_plan "$plan_cp" cp-age
+  call_port=$SERVER_A_PORT
+  check "$ref" "C stalled after the plan's evidence observation was recorded" within 60 obs_started "$plan_cp"
+  stalled=$(first_observation "$plan_cp")
+  [ -n "$stalled" ] || die "s3: no stalled observation; nothing after it can run"
+  check "$ref" "the stalled observation is older than the plan binds ($age s)" within 60 observation_stale "$plan_cp" "$((age + 3))"
+  check "$ref" 'while stalled: the plan approved, no adoption record, no refusal entry' stalled_unrecorded "$plan_cp"
+  released_at=$(sql "SELECT clock_timestamp()") || die "s3: cannot read the database clock"
+  check "$ref" "C's control file removed" interrupt -
+  check "$ref" 'the plan committed, from a later observation' within 90 plan_state_is "$plan_cp" committed
+  check "$ref" "C's log records the stalled observation as older than the plan allows, retried after the lease" c_says_older
+  check "$ref" 'the adoption relied on another observation, begun after the stall was released' \
+    relied_on_later "$plan_cp" "$stalled" "$released_at"
+  check "$ref" 'no refusal entry names the plan' same "$(refusals "$plan_cp")" 0
+  check "$ref" "the control plane's adoption recorded: Desired and Applied the release, source adoption, baseline revision 1, Applied's digest the import base's and the pre-state's" \
+    adoption_recorded "$machine_cp" "$TALOS_CONTROLPLANE_IP" "$plan_cp"
+  adopted_plans+=("$plan_cp")
+  check "$ref" 'inject unpause A and B' both unpause
+  check "$ref" 'the worker is still not adopted' unadopted "$machine_w"
+  outcome_bundle "$ref" adoption-age
+  check "$ref" "the control plane's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
+  local cp_after
+  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
+}
+
+# The database dump taken after every case, for the final bundle to expand and scan (C §15:
+# backups).
+backup_name=s3-$run_key
+
+run() {
+  preconditions
+  withheld+=("$BW_CANARY")
+  case $s3_mode in
+    handover) handover ;;
+    handover-controls) controls ;;
+  esac
+  check 'S3 backups' 'inject db-snapshot: a dump of the bronzeward database after the adoptions' \
+    "$bin/inject" db-snapshot "$backup_name"
+}
+
+run
+rm -f -- "$EV/last.body" "$EV/last.headers"
+# The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
+ev_log=$(mktemp)
+if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
+  cat -- "$ev_log" >&2
+  if grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$ev_log"; then
+    result PASS 'S3 evidence' 'bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret'
+  else
+    result FAIL 'S3 evidence' "the leak scan reports fixture secrets: $final/leak-scan.txt"
+  fi
+  if [ -e "$final/unavailable.txt" ]; then
+    result FAIL 'S3 evidence' "the bundle is incomplete: $final/unavailable.txt names what was not captured"
+  else
+    result PASS 'S3 evidence' 'the bundle is complete: bin/evidence captured every source'
+  fi
+  # The scan above covers the dump only if the bundle holds it expanded, with the database's rows
+  # in it: an adoption record's own row inside the adoption_record COPY block.
+  if [ "${#adopted_plans[@]}" -gt 0 ] &&
+    awk -v id="${adopted_plans[0]}" '
+      /^COPY public\.adoption_record / { block = 1; next }
+      block && /^\\\.$/ { block = 0 }
+      block && index($0, id "\t") == 1 { found = 1 }
+      END { exit !found }' "$final/backups/pg-$backup_name.dump.sql"; then
+    result PASS 'S3 backups' 'the scanned bundle holds the database dump expanded, an adoption record among its rows (control)'
+  else
+    result FAIL 'S3 backups' 'the scanned bundle does not hold the database dump expanded with the run'"'"'s rows: the backup went unscanned'
+  fi
+  # The tokens this run minted, searched in the run directory, the final bundle and every bundle the
+  # run captured before it, with a control holding the last of them that must be the one file
+  # listed (as s1 and s2 do).
+  local_ctl=$STATE/s3-token-control
+  trap 'rm -f -- "$local_ctl"' EXIT
+  # An empty array has no [-1], with or without a default: the FAIL below must stay reachable.
+  if [ "${#secrets[@]}" -gt 0 ]; then printf 'x %s x\n' "${secrets[-1]}" >"$local_ctl"; else : >"$local_ctl"; fi
+  earlier=()
+  for f in "$EV"/*-bundle; do
+    [ -e "$f" ] || continue
+    earlier+=("$(cat -- "$f")")
+  done
+  hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
+    "$EV" "$final" "${earlier[@]}" "$local_ctl") || hits=
+  rm -f -- "$local_ctl"
+  trap - EXIT
+  if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
+    result PASS 'S3 evidence' "none of the ${#secrets[@]} tokens this run minted is in any bundle of the run or the run directory (control found)"
+  else
+    printf 's3: files holding a token of this run: %s\n' "${hits:-none, not even the control}" >&2
+    result FAIL 'S3 evidence' "the tokens this run minted: ${#secrets[@]} searched, the listing is not the control alone"
+  fi
+else
+  cat -- "$ev_log" >&2
+  result FAIL 'S3 evidence' 'bin/evidence failed'
+fi
+rm -f -- "$ev_log"
+say "s3 $s3_mode: $failed failed; evidence in $EV, bundle ${final:-none}"
+[ "$failed" -eq 0 ]
