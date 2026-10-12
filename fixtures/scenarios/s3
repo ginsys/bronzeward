@@ -326,7 +326,12 @@ controls() {
   start
 
   # The digest control: the worker's configuration changed out of band before its plan. The
-  # evidence shows another configuration digest than the baseline's: refused 4.4, once.
+  # evidence shows another configuration digest than the baseline's: refused 4.4, once. The
+  # publication's interval is checked first: the baseline below follows the patch, whose own
+  # requests are no controller's.
+  local w_published
+  w_published=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  no_mutation 'the worker, after the publication' "$TALOS_WORKER_IP" "$w_log" "$w_published"
   check "$ref" "the worker's configuration changed out of band (a node label, no reboot)" digest_patch
   w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
   check "$ref" 'an adopt plan for the worker as h-publisher: 201' make_plan "$machine_w" worker-digest
