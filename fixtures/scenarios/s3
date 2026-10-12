@@ -156,9 +156,9 @@ adoption_recorded() {
 }
 # unadopted <machine>: the machine has no Applied, no operation and no adoption record.
 unadopted() {
-  [ "$(sql "SELECT (SELECT applied_release IS NULL FROM machine_state WHERE machine = '$1') || ' '
+  [ "$(sql "SELECT (SELECT count(*) FROM machine_state WHERE machine = '$1' AND applied_release IS NULL) || ' '
     || (SELECT count(*) FROM operation WHERE machine = '$1' AND kind = 'adopt') || ' '
-    || (SELECT count(*) FROM adoption_record WHERE machine = '$1')")" = 't 0 0' ]
+    || (SELECT count(*) FROM adoption_record WHERE machine = '$1')")" = '1 0 0' ]
 }
 # refusals <plan>: how many refusal entries name the plan.
 refusals() { sql "SELECT count(*) FROM machine_event WHERE kind = 'refusal' AND entry->>'plan' = '$1'"; }
