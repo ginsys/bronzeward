@@ -881,8 +881,8 @@ s6_regressions() {
 # s6_served <jq filter>: GET /dependencies as h-author, one page, serves exactly the database's
 # dependency statuses, at least one: each one's identity, class and reason as recorded, and its
 # observed-from, recorded-at, first-retained and unknown-since times the same instants, compared by
-# PostgreSQL, which reads the API's RFC 3339 text. Staleness is the request's own reading; the
-# filter checks that. It then satisfies the filter. A monitor pass rewrites every status's times,
+# PostgreSQL, which reads the API's RFC 3339 text, and its stale the one that observed-from makes
+# it (s6_times_differ). It then satisfies the filter. A monitor pass rewrites every status's times,
 # so the comparison stands only when no pass committed between the database's first read and its
 # last: every status row the same, compared whole, not by the latest recorded-at, since a pass
 # stamps its rows before it commits and a later commit can carry an earlier time. Otherwise it is
@@ -913,9 +913,11 @@ s6_status_rows() {
   sql "SELECT md5(coalesce(string_agg(t::text, ',' ORDER BY t.id), '')) FROM dependency_status t"
 }
 # s6_times_differ: the ids of $EV/last.body's dependencies whose four times are not the same
-# instants as their dependency_status row's, and of any row or item without its counterpart,
-# comma-separated, empty when none. The body goes to psql on stdin, as data in a dollar-quoted
-# literal: it holds ids, provider paths and times only.
+# instants as their dependency_status row's, or whose stale is not what that row's observed-from
+# makes it (more than three 60 s intervals before the read, dependency monitor §6.3; an age within
+# 2 s of that bound may read either way, the database being read after the request), and of any row
+# or item without its counterpart, comma-separated, empty when none. The body goes to psql on
+# stdin, as data in a dollar-quoted literal: it holds ids, provider paths, times and stale only.
 s6_times_differ() {
   local items
   items=$(jq -c '.items' "$EV/last.body") || return 1
@@ -923,11 +925,13 @@ s6_times_differ() {
   case $items in *'$served$'*) say 's2: the served body holds the literal delimiter'; return 1 ;; esac
   printf '%s' "SELECT coalesce(string_agg(coalesce(s.id, x.id), ',' ORDER BY coalesce(s.id, x.id)), '')
     FROM json_to_recordset(\$served\$$items\$served\$::json) AS x(id text, \"observedFrom\" timestamptz,
-      \"recordedAt\" timestamptz, \"firstRetainedAt\" timestamptz, \"unknownSince\" timestamptz)
+      \"recordedAt\" timestamptz, \"firstRetainedAt\" timestamptz, \"unknownSince\" timestamptz, stale boolean)
     FULL JOIN dependency_status s ON s.id = x.id
     WHERE s.id IS NULL OR x.id IS NULL OR x.\"observedFrom\" IS DISTINCT FROM s.observed_from
       OR x.\"recordedAt\" IS DISTINCT FROM s.recorded_at OR x.\"firstRetainedAt\" IS DISTINCT FROM s.first_retained_at
-      OR x.\"unknownSince\" IS DISTINCT FROM s.unknown_since" |
+      OR x.\"unknownSince\" IS DISTINCT FROM s.unknown_since
+      OR (x.stale IS DISTINCT FROM (s.observed_from < statement_timestamp() - interval '180 seconds')
+        AND abs(extract(epoch FROM statement_timestamp() - s.observed_from) - 180) > 2)" |
     pg_stdin psql -X -v ON_ERROR_STOP=1 -U bronzeward -d bronzeward -Atq
 }
 # s6_pinned_served <class> <reason> <alert kind>: GET /dependencies/{dep_p} serves that class and
@@ -961,7 +965,11 @@ s6_outage() {
   check "$ref" "inject $1 openbao" s6_inject "$1" openbao
   check "$ref" "$1: every dependency observed since unknown ($3)" within 300 s6_classes unknown "$3" unknown "$3"
   check "$ref" "$1: one regression for each dependency but the lost one, each naming exactly the releases referencing it, and no other alert" s6_regressions "$3"
-  check "$ref" "$1: GET /dependencies serves every one unknown, none stale, each as the database records it" s6_served '[.items[] | select(.class != "unknown" or .stale)] == []'
+  # An unreachable dependency takes its whole 10 s request, one after another, so a pass over more
+  # than about 18 of them outlasts three intervals and its earliest classifications are served
+  # stale, by the spec's own rule; s6_served compares stale with the recorded observed-from.
+  check "$ref" "$1: GET /dependencies serves every one unknown, each stale exactly when its observation is over three intervals old, each as the database records it" \
+    s6_served '[.items[] | select(.class != "unknown")] == []'
   check "$ref" "$1: a publication pinning the version refused 503 dependency-unavailable naming a dependency unknown ($3 where a reason is given), nothing released" \
     s6_refused "$4" 503 dependency-unavailable "(.provider == \"kv\" or .provider == \"transit\") and .class == \"unknown\" and (.reason == null or .reason == \"$3\")"
   check "$ref" "inject $2 openbao" s6_inject "$2" openbao
