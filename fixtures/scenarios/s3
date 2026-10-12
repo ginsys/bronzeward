@@ -297,18 +297,18 @@ obs_started() {
   [ -n "$(sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
     WHERE s.plan = '$1' AND s.purpose = 'evidence'")" ]
 }
-# first_observation <plan>: the id of the plan's first recorded observation.
+# first_observation <plan>: the id of the plan's first recorded evidence observation.
 first_observation() {
   sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
-    WHERE s.plan = '$1' ORDER BY o.basis LIMIT 1"
+    WHERE s.plan = '$1' AND s.purpose = 'evidence' ORDER BY o.basis LIMIT 1"
 }
-# observation_stale <plan> <seconds>: the plan's first observation began more than that long ago,
-# by the database's clock.
+# observation_stale <plan> <seconds>: the plan's first evidence observation began more than that
+# long ago, by the database's clock.
 observation_stale() {
   [ "$(sql "SELECT clock_timestamp() > e.at + interval '$2 seconds' FROM observation o
     JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
     JOIN machine_event e ON e.machine = s.machine AND e.revision = s.revision
-    WHERE s.plan = '$1' ORDER BY o.basis LIMIT 1")" = t ]
+    WHERE s.plan = '$1' AND s.purpose = 'evidence' ORDER BY o.basis LIMIT 1")" = t ]
 }
 # relied_on_later <plan> <stalled observation> <instant>: the adoption relied on another
 # observation than the stalled one, whose start entry is after the instant.
