@@ -12,8 +12,16 @@
 # observation. Each case gets its evidence bundle, scanned for every fixture secret. Each check
 # writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s3.tsv in the
 # evidence directory and to stdout. Exit 1 on any FAIL.
+# `run`: the approval part, on the state S2 leaves. The worker has no plan but the handover's: an
+# apply-config plan of the S2 release is created, read redacted and approved (steps 1 to 3); the
+# controls that refuse or end a plan before its commitment (approval by the wrong identities, a
+# second approval, the superseded release, expiry, cancellation by each role that may, revocation
+# of an approval) leave no operation; and from a restore of the snapshots taken before step 2, the
+# three self-approval cases of step 4, each approval with the reasons that hold. Nothing commits an
+# apply-config plan before S4 (ginsys/bronzeward#26): the commitment-level controls are S4's.
 # Usage: scenarios/s3 handover|handover-controls   (each after scenarios/s1 run on a fresh
 # fixtures/bin/up: the handover is S2's precondition, the controls are their own run)
+#        scenarios/s3 run   (after scenarios/s1 run, s3 handover and s2 run on the same up)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -21,7 +29,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s3_mode=${1:-}
-case $s3_mode in handover | handover-controls) ;; *) die "usage: scenarios/s3 handover|handover-controls" ;; esac
+case $s3_mode in handover | handover-controls | run) ;; *) die "usage: scenarios/s3 handover|handover-controls|run" ;; esac
 need docker curl jq timeout id sleep date awk wc
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -35,6 +43,7 @@ scenario=s3
 . "$here/common.sh"
 run_key=$(date -u +%s%N)
 mutation_ref='S3 handover pass'
+[ "$s3_mode" != run ] || mutation_ref='S3 approval pass'
 
 cluster='' machine_cp='' machine_w='' import_draft='' release='' pub_op=''
 # h-publisher's and h-approver's tokens, minted again as the author's is (common.sh).
@@ -189,22 +198,26 @@ preconditions() {
   one_line "$machine_cp" || die "s3: not one machine at the control plane's endpoint: run scenarios/s1 run first"
   machine_w=$(machine_at "$TALOS_WORKER_IP") || die "s3: cannot read the worker's machine"
   one_line "$machine_w" || die "s3: not one machine at the worker's endpoint: run scenarios/s1 run first"
-  import_draft=$(sql "SELECT id FROM draft WHERE cluster = '$cluster' AND title = 'S1 import' AND state = 'open'")
-  one_line "$import_draft" || die "s3: not one open S1 import draft: run scenarios/s1 run on a fresh up first"
   interrupt - || die "cannot remove C's control file"
   check "$ref" 'A answers /livez' answers 204 - GET /livez ''
   check "$ref" 'C (the interruption build, no interruption named) answers /livez' c_live
-  check "$ref" 'no plan and no Applied release yet: the machines are not adopted' \
-    same "$(sql "SELECT (SELECT count(*) FROM plan) || ' ' || (SELECT count(*) FROM machine_state WHERE applied_release IS NOT NULL)")" '0 0'
+  if [ "$s3_mode" != run ]; then
+    import_draft=$(sql "SELECT id FROM draft WHERE cluster = '$cluster' AND title = 'S1 import' AND state = 'open'")
+    one_line "$import_draft" || die "s3: not one open S1 import draft: run scenarios/s1 run on a fresh up first"
+    check "$ref" 'no plan and no Applied release yet: the machines are not adopted' \
+      same "$(sql "SELECT (SELECT count(*) FROM plan) || ' ' || (SELECT count(*) FROM machine_state WHERE applied_release IS NOT NULL)")" '0 0'
+  fi
   check "$ref" "the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all ($(grep -c . <<<"$MUTATIONS") mutating, talos-api-methods.tsv)" \
     methods_counted
   check "$ref" 'the mutation matcher gives no count, not 0, when grep fails extracting the methods or counting them' \
     matcher_fails_closed
 }
 
-# The pre-state, both nodes' apid logs, the S1 import draft published: what both modes start from.
+# The pre-state and both nodes' apid logs: what every mode starts from. The baselines precede
+# whatever the mode sends: a Talos request it caused is inside the interval the no-mutation checks
+# cover.
 cp_log='' w_log=''
-start() {
+pre_state() {
   local ref='S3 precondition'
   fresh_author
   evidence_to pre || die "no pre-state: bin/evidence failed"
@@ -215,10 +228,12 @@ start() {
     counted 2 '^[0-9a-f]{64} ' "$EV/pre-talos-config-sha256.txt"
   check "$ref" 'pre-state: both nodes have a machine-configuration resource version' \
     counted 2 '^[0-9]+ ' "$EV/pre-talos-config-version.txt"
-  # The baselines precede the publication: a Talos request the publication sent is inside the
-  # interval the no-mutation checks cover.
   cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
   w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+}
+# The pre-state, the S1 import draft published: what both handover modes start from.
+start() {
+  pre_state
   check 'S3 step 1' "the S1 import draft, both machines imported, published as one release covering both: 202, the operation succeeded" \
     publish_import
   [ -n "$release" ] || die "s3: no release; nothing after it can run"
@@ -409,6 +424,472 @@ controls() {
   no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
 }
 
+# The approval part (mode run). Every identity's token is minted again once the last is three
+# minutes old (the issuer's tokens live five); the automation identity's is bin/seed's.
+declare -A tok_val=() tok_at=()
+tok=''
+robot='' robot_id='' s2_rel='' applied_rel='' ops0=0 act_seq=0 snap=s3-step4
+# fresh <human|robot>: the identity's token in tok. Not a command substitution: the cache and the
+# secrets list it updates would be lost with its subshell.
+fresh() {
+  local h=$1
+  if [ "$h" = robot ]; then
+    tok=$robot
+    return 0
+  fi
+  if [ -z "${tok_val[$h]:-}" ] || [ $((SECONDS - tok_at[$h])) -ge 180 ]; then
+    tok_val[$h]=$(mint "$h") || die "cannot mint a $h token"
+    keep_secret "${tok_val[$h]}"
+    tok_at[$h]=$SECONDS
+  fi
+  tok=${tok_val[$h]}
+}
+# who_id <human|robot>: the identity's principal ID.
+who_id() {
+  if [ "$1" = robot ]; then printf '%s\n' "$robot_id"; else sql "SELECT id FROM principal WHERE kind = 'human' AND sub = '$1'"; fi
+}
+# plan_body [extra JSON object]: an apply-config plan of the worker's Desired: no-reboot, a route
+# (the machine's own), the deadlines, the attempt limit, the expiry and the age bound.
+plan_body() {
+  local extra=${1:-}
+  [ -n "$extra" ] || extra='{}'
+  jq -nc --arg r "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" --arg m "$machine_w" --argjson x "$extra" \
+    '{releaseId: $r, machine: $m, operation: "apply-config", mode: "no-reboot", expiresInSeconds: 3600,
+      maxObservationAgeSeconds: 300, checkValiditySeconds: 600, transportDeadlineSeconds: 120,
+      verificationDeadlineSeconds: 300, maxAttempts: 2} + $x'
+}
+# plan_by <who> <name> [extra JSON]: an apply-config plan of the worker's Desired created as that
+# identity: 201, its id in plan_id.
+plan_by() {
+  local body
+  plan_id=''
+  fresh "$1"
+  body=$(plan_body "${3:-}") || return 1
+  answers 201 - POST /api/v1/plans "$tok" "$body" "$(key "plan-$2")" || return 1
+  plan_id=$(jq -er '.id' "$EV/last.body")
+}
+# approve_by <who> <plan> <name>: 201; the approval in approval_id, its self-approval reasons as a
+# JSON array in approval_reasons.
+approval_id='' approval_reasons=''
+approve_by() {
+  approval_id='' approval_reasons=''
+  fresh "$1"
+  answers 201 - POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
+  approval_id=$(jq -er '.id' "$EV/last.body") || return 1
+  approval_reasons=$(jq -ce '.selfApproval.reasons' "$EV/last.body")
+}
+# approval_names <approver human> <plan>: the approval the 201 answered names the plan, the
+# approver, its role and an epoch (the last approve_by's), and is the plan's only approval.
+approval_names() {
+  local p
+  p=$(who_id "$1") || return 1
+  [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$2' AND id = '$approval_id' AND approver = '$p'
+      AND role = 'approver' AND epoch IS NOT NULL")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$2'")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
+      AND entry->>'approval' = '$approval_id' AND entry->>'plan' = '$2' AND entry->>'principal' = '$p'
+      AND entry->>'role' = 'approver'")" = 1 ]
+}
+# reasons_are <comma-separated reasons or empty> <marked: true|false>: the last approval carries
+# exactly these self-approval reasons, in the table's order, in the 201 it answered, in its row, in
+# its timeline entry and as a viewer reads it back.
+reasons_are() {
+  local want entry
+  want=$(jq -nc --arg r "$1" 'if $r == "" then [] else $r | split(",") end') || return 1
+  [ "$approval_reasons" = "$want" ] || return 1
+  [ "$(sql "SELECT array_to_string(self_approval, ',') FROM approval WHERE id = '$approval_id'")" = "$1" ] || return 1
+  entry=$(sql "SELECT entry->'selfApproval' FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
+    AND entry->>'approval' = '$approval_id'") || return 1
+  [ "$(jq -c '[.marked, .reasons]' <<<"$entry")" = "$(jq -nc --argjson w "$want" --argjson m "$2" '[$m, $w]')" ] || return 1
+  fresh h-viewer
+  answers_with ".id == \"$approval_id\" and .selfApproval == {marked: $2, reasons: $want}" 200 - GET "/api/v1/approvals/$approval_id" "$tok"
+}
+# plan_is_stored <plan> <state> <approval or none>: the plan's stored state and approval, and no
+# operation.
+plan_is_stored() {
+  [ "$(sql "SELECT s.state || ' ' || coalesce(s.approval, 'none') || ' ' || coalesce(s.operation, 'none')
+    FROM plan_state s WHERE s.plan = '$1'")" = "$2 $3 none" ] &&
+    [ "$(sql "SELECT count(*) FROM operation WHERE plan = '$1'")" = 0 ]
+}
+# plan_reads <plan> <state>: a viewer reads the plan in that state.
+plan_reads() {
+  fresh h-viewer
+  answers_with ".id == \"$1\" and .state == \"$2\" and .committedOperation == null" 200 - GET "/api/v1/plans/$1" "$tok"
+}
+# no_dispatch_since <operation seq>: no apply-config operation exists since that sequence number
+# (a publication, which step 4 makes, is an operation of another kind).
+no_dispatch_since() { [ "$(sql "SELECT count(*) FROM operation WHERE seq > $1 AND kind = 'apply-config'")" = 0 ]; }
+# plan_bound <plan>: step 2's plan binds every value of execution-recovery §2 as created: the
+# kind and mode, the release (the S2 release, the worker's Desired), the assignment revision the
+# release was compiled from, the baseline revision and the expected pre-dispatch digest Applied's,
+# the machine's own route, the deadlines, the attempt limit, the expiry and the age bounds; created
+# as h-publisher.
+plan_bound() {
+  [ "$(sql "SELECT p.kind || ' ' || p.mode || ' ' || (p.release = '$s2_rel') || ' ' || (p.desired_release = '$s2_rel')
+      || ' ' || (p.assignment_revision = rm.assignment_revision) || ' ' || (p.baseline_revision = s.baseline_revision)
+      || ' ' || (p.expected_digest = s.applied_digest) || ' ' || (p.route::text = m.talos_endpoint::text)
+      || ' ' || (p.transport_deadline = interval '120 seconds') || ' ' || (p.verification_deadline = interval '300 seconds')
+      || ' ' || (p.max_attempts = 2) || ' ' || (p.expires_at - p.created_at = interval '3600 seconds')
+      || ' ' || (p.max_observation_age = interval '300 seconds') || ' ' || (p.check_validity = interval '600 seconds')
+      || ' ' || (p.created_by = '$(who_id h-publisher)') || ' ' || (p.created_role = 'publisher')
+      FROM plan p JOIN machine_state s ON s.machine = p.machine JOIN machine m ON m.id = p.machine
+        JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine
+      WHERE p.id = '$1'")" = 'apply-config no-reboot true true true true true true true true true true true true true true' ]
+}
+# plan_served <plan>: a viewer reads the plan as step 2 asks: proposed, the S2 release, the diff
+# from Applied's release to it withheld (the worker holds the import base's configuration, which
+# has no redacted form; persistence-api §17.38), no digest answered.
+plan_served() {
+  fresh h-viewer
+  answers_with ".id == \"$1\" and .state == \"proposed\" and .operation == \"apply-config\" and .mode == \"no-reboot\"
+      and .release == \"$s2_rel\" and .desiredRelease == \"$s2_rel\" and .evidence.diff.withheld == true
+      and .evidence.diff.from == \"$applied_rel\" and .evidence.diff.to == \"$s2_rel\"
+      and (.evidence.diff.unified // \"\") == \"\" and (tostring | test(\"expected|digest\") | not)" \
+    200 - GET "/api/v1/plans/$1" "$tok"
+}
+# refused_approval <who> <plan> <name>: 403, the plan still proposed with no approval.
+refused_approval() {
+  fresh "$1"
+  answers 403 - POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
+  [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$2'")" = 0 ] && plan_is_stored "$2" proposed none
+}
+# second_approval <who> <plan> <name>: 409 conflict, the plan's one approval still the first.
+second_approval() {
+  local first
+  first=$(sql "SELECT approval FROM plan_state WHERE plan = '$2'") || return 1
+  fresh "$1"
+  answers 409 conflict POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
+  [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$2'")" = 1 ] && plan_is_stored "$2" approved "$first"
+}
+# superseded_refused: a plan of the import release the handover published, which S2 superseded as
+# the worker's Desired: 409 conflict naming the S2 release as the Desired, no plan created.
+superseded_refused() {
+  local before
+  before=$(sql "SELECT count(*) FROM plan") || return 1
+  fresh h-publisher
+  answers_with ".desired == \"$s2_rel\"" 409 conflict POST /api/v1/plans "$tok" \
+    "$(plan_body "$(jq -nc --arg r "$applied_rel" '{releaseId: $r}')")" "$(key plan-superseded)" || return 1
+  [ "$(sql "SELECT count(*) FROM plan")" = "$before" ]
+}
+# expiry_cases: two plans that live eight seconds, one approved at once and one never approved:
+# past it each reads expired, an approval of either is 409 naming the state, no operation.
+expiry_cases() {
+  local e_proposed e_approved
+  fresh h-publisher
+  fresh h-approver
+  plan_by h-publisher expiry-proposed '{"expiresInSeconds": 8}' || return 1
+  e_proposed=$plan_id
+  plan_by h-publisher expiry-approved '{"expiresInSeconds": 8}' || return 1
+  e_approved=$plan_id
+  approve_by h-approver "$e_approved" expiry-approved || return 1
+  within 30 plan_reads "$e_proposed" expired || return 1
+  within 30 plan_reads "$e_approved" expired || return 1
+  fresh h-approver
+  answers_with '.state == "expired"' 409 conflict POST "/api/v1/plans/$e_proposed/approvals" "$tok" '{}' "$(key approval-expired)" || return 1
+  [ "$(sql "SELECT count(*) FROM operation WHERE plan IN ('$e_proposed', '$e_approved')")" = 0 ] &&
+    [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$e_proposed'")" = 0 ]
+}
+# cancelled_as <canceller> <role> <name>: plan_id cancelled as that identity, which the plan's
+# route permits under that role: 201, the plan cancelled with no approval and no operation, the
+# cancellation and its act recorded under the role.
+cancelled_as() {
+  local p=$plan_id c
+  fresh "$1"
+  answers 200 - POST "/api/v1/plans/$p/cancellations" "$tok" '{"reason": "S3 negative control"}' "$(key "cancel-$3")" || return 1
+  # After the request: a principal's row is made by its first authenticated one.
+  c=$(who_id "$1") && [ -n "$c" ] || return 1
+  [ "$(sql "SELECT cancelled_by || ' ' || role FROM plan_cancellation WHERE plan = '$p'")" = "$c $2" ] ||
+    { echo "s3: $p: its cancellation is not recorded as $c under $2" >&2; return 1; }
+  [ "$(sql "SELECT a.principal || ' ' || a.role || ' ' || a.action FROM plan_cancellation c JOIN act a ON a.id = c.act
+      WHERE c.plan = '$p'")" = "$c $2 plan.cancel" ] ||
+    { echo "s3: $p: its act is not $c under $2 plan.cancel" >&2; return 1; }
+  [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'plan-cancellation'
+      AND entry->>'plan' = '$p' AND entry->>'role' = '$2'")" = 1 ] ||
+    { echo "s3: $p: its timeline entry does not name $2 exactly once" >&2; return 1; }
+  plan_is_stored "$p" cancelled none ||
+    { echo "s3: $p: stored as $(sql "SELECT state || ' ' || coalesce(approval, 'none') || ' ' || coalesce(operation, 'none') FROM plan_state WHERE plan = '$p'")" >&2; return 1; }
+  plan_reads "$p" cancelled
+}
+# cancel_forbidden <canceller> <name>: plan_id is not the identity's to cancel: 403 forbidden, the
+# plan unchanged, no cancellation recorded.
+cancel_forbidden() {
+  local p=$plan_id before
+  before=$(sql "SELECT state || ' ' || revision FROM plan_state WHERE plan = '$p'") || return 1
+  fresh "$1"
+  answers 403 forbidden POST "/api/v1/plans/$p/cancellations" "$tok" '{"reason": "S3 negative control"}' "$(key "cancel-$2")" || return 1
+  [ "$(sql "SELECT state || ' ' || revision FROM plan_state WHERE plan = '$p'")" = "$before" ] &&
+    [ "$(sql "SELECT count(*) FROM plan_cancellation WHERE plan = '$p'")" = 0 ] &&
+    plan_is_stored "$p" proposed none
+}
+# revoked_as <revoker> <role> <name>: approval_id of plan_id revoked as that identity before any
+# commitment: 201, the plan revoked with its approval, no operation, the revocation recorded
+# under the role and its act, the approval itself unchanged.
+revoked_as() {
+  local p=$plan_id a=$approval_id r
+  r=$(who_id "$1") || return 1
+  fresh "$1"
+  answers 201 - POST "/api/v1/approvals/$a/revocations" "$tok" '{"reason": "S3 negative control"}' "$(key "revoke-$3")" || return 1
+  [ "$(sql "SELECT revoked_by || ' ' || role FROM approval_revocation WHERE approval = '$a'")" = "$r $2" ] &&
+    [ "$(sql "SELECT a.principal || ' ' || a.role || ' ' || a.action FROM approval_revocation v JOIN act a ON a.id = v.act
+      WHERE v.approval = '$a'")" = "$r $2 approval.revoke" ] &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval-revocation'
+      AND entry->>'approval' = '$a' AND entry->>'role' = '$2'")" = 1 ] &&
+    [ "$(sql "SELECT s.state || ' ' || coalesce(s.reason, '-') || ' ' || coalesce(s.operation, 'none') FROM plan_state s
+      WHERE s.plan = '$p'")" = 'revoked approval-revoked none' ] &&
+    [ "$(sql "SELECT count(*) FROM approval WHERE id = '$a' AND plan = '$p'")" = 1 ] &&
+    plan_reads "$p" revoked
+}
+# deps_classified: the monitors hold at least one dependency, and every one retained.
+deps_classified() {
+  [ "$(sql "SELECT count(*) FILTER (WHERE class <> 'retained') || ' ' || (count(*) > 0) FROM dependency_status")" = '0 true' ]
+}
+# deps_retained: every dependency the monitors classified is retained and none stale, served.
+deps_retained() {
+  fresh h-viewer
+  answers_with '(.items | length) > 0 and ([.items[] | select(.class != "retained" or .stale)] == [])' \
+    200 - GET '/api/v1/dependencies?limit=500' "$tok"
+}
+# worker_has_only_the_handover: the worker has no plan but the handover's, committed, and no
+# operation but its adopt operation.
+worker_has_only_the_handover() {
+  [ "$(sql "SELECT count(*) || ' ' || count(*) FILTER (WHERE p.kind = 'adopt' AND s.state = 'committed' AND p.release = '$applied_rel')
+      FROM plan p JOIN plan_state s ON s.plan = p.id WHERE p.machine = '$machine_w'")" = '1 1' ] &&
+    [ "$(sql "SELECT count(*) FROM operation WHERE machine = '$machine_w' AND kind <> 'adopt'")" = 0 ]
+}
+# release_holds_automation_revision: the S2 release holds a revision the automation identity
+# authored (S2 step 7's), as does every release published after it: the reason owned-automation
+# holds for its responsible human on every plan of this part.
+release_holds_automation_revision() {
+  [ "$(sql "SELECT count(*) FROM release_source s JOIN fragment_revision f ON f.id = s.fragment_revision
+    WHERE s.release = '$s2_rel' AND f.author = '$robot_id'")" -ge 1 ]
+}
+# draft_by <who> <name>: POST /drafts as that identity; draft, etag.
+draft_by() {
+  fresh "$1"
+  answers 201 - POST /api/v1/drafts "$tok" "$(jq -nc --arg c "$cluster" --arg t "S3 $2" '{cluster: $c, title: $t}')" "$(key "draft-$2")" || return 1
+  draft=$(jq -er '.id' "$EV/last.body") || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ]
+}
+# fragment_by <who> <name> <fragment> [layer]: a fragment of one node label, under the draft's ETag:
+# 200, the ETag replaced; its revision in frag_rev. A cluster fragment is selected by nothing, so a
+# release compiled later does not carry it: it is an unrelated change. A role fragment is one a
+# profile lists (profile_by).
+frag_rev=''
+fragment_by() {
+  local body
+  fresh "$1"
+  body=$(jq -nc --arg n "$3" --arg l "${4:-cluster}" \
+    '{layer: $l, document: ("machine:\n  nodeLabels:\n    bw-s3-" + $n + ": \"yes\"\n"), marks: []}') || return 1
+  answers 200 - PUT "/api/v1/drafts/$draft/fragments/s3-$3" "$tok" "$body" "$(key "fragment-$2")" "$etag" || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
+  frag_rev=$(jq -er '.entry.revision' "$EV/last.body")
+}
+# profile_by <who> <name>: the workers profile, under the draft's ETag, listing the fragment
+# revisions its head lists and frag_rev: the release compiled from the draft selects that fragment
+# through the worker's assignment, and a later release carries it unchanged.
+profile_by() {
+  local body
+  fresh "$1"
+  body=$(sql "SELECT coalesce(jsonb_agg(f.fragment_revision ORDER BY f.position), '[]'::jsonb)
+    FROM profile p JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
+    WHERE p.cluster = '$cluster' AND p.name = 'workers'") || return 1
+  body=$(jq -nc --argjson l "$body" --arg f "$frag_rev" '{fragments: ($l + [$f])}') || return 1
+  answers 200 - PUT "/api/v1/drafts/$draft/profiles/workers" "$tok" "$body" "$(key "profile-$2")" "$etag" || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
+}
+# publish_by <who> <name>: the draft published under its current ETag: 202, the operation
+# succeeded with one release, which is then the worker's Desired; its id in new_release.
+new_release=''
+publish_by() {
+  new_release=''
+  fresh "$1"
+  answers 202 - POST "/api/v1/drafts/$draft/publications" "$tok" '{}' "$(key "publication-$2")" "$etag" || return 1
+  pub_op=$(jq -er '.id' "$EV/last.body") || return 1
+  within 120 pub_succeeded || return 1
+  new_release=$(sql "SELECT id FROM release WHERE operation = '$pub_op'")
+  [ -n "$new_release" ] &&
+    [ "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" = "$new_release" ]
+}
+# servers pause|unpause: A, B and C.
+servers() { both "$1" && "$bin/inject" "$1" C; }
+# db_reads: A answers a database read again after a restore swapped the database under it.
+db_reads() {
+  fresh_author
+  [ "$(call GET "/api/v1/releases/$applied_rel" "$author")" = 200 ]
+}
+# restored: the database is the snapshot's: no act after it, step 2's plan gone, the worker's
+# Desired and Applied what they were when the snapshots were taken.
+restored() {
+  [ "$(sql "SELECT coalesce(max(seq), 0) FROM act")" = "$act_seq" ] &&
+    [ "$(sql "SELECT count(*) FROM plan WHERE machine = '$machine_w' AND kind = 'apply-config'")" = 0 ] &&
+    [ "$(sql "SELECT desired || ' ' || applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$s2_rel $applied_rel" ]
+}
+# approved_idle <plan>: the plan approved by the last approval, no operation for it, and no
+# apply-config operation since the baseline.
+approved_idle() {
+  plan_is_stored "$1" approved "$approval_id" && plan_reads "$1" approved && no_dispatch_since "$ops0"
+}
+
+step4_approval=''
+approval_part() {
+  local ref='S3 step 1' p2 pa pb pc pcancel pu
+  robot=$(cat -- "$STATE/automation-token") || die "no automation token in $STATE"
+  redact_automation_token "$robot"
+  robot_id=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$STATE/automation-identity")
+  [ -n "$robot_id" ] || die "s3: no automation identity in $STATE"
+  s2_rel=$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'") || die "s3: cannot read the worker's Desired"
+  applied_rel=$(sql "SELECT applied_release FROM machine_state WHERE machine = '$machine_w'") || die "s3: cannot read the worker's Applied"
+  [ -n "$s2_rel" ] && [ -n "$applied_rel" ] || die "s3: the worker has no Desired or no Applied release: run s1, s3 handover and s2 first"
+  ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s3: cannot read the operations"
+  check 'S3 precondition' "the worker's Desired is a release S2 published, not the one its adoption recorded as Applied" differ "$s2_rel" "$applied_rel"
+  check 'S3 precondition' 'the worker has no plan but the handover'"'"'s completed adopt plan, and no operation but its adopt operation' \
+    worker_has_only_the_handover
+  check 'S3 precondition' "the S2 release holds a revision the automation identity authored: owned-automation holds for h-all on every plan of this part" \
+    release_holds_automation_revision
+
+  # Step 1: the controller has polled the worker three heartbeats (5 s) since S2 ended, and has made
+  # no plan and no operation. A scheduled drift observation is S5's (ginsys/bronzeward#27).
+  sleep 16
+  check "$ref" "three heartbeats after S2: no plan but the handover's, no operation but its adopt: publication alone dispatched nothing" \
+    worker_has_only_the_handover
+  check "$ref" 'no apply-config plan and no apply-config operation exist' \
+    same "$(sql "SELECT (SELECT count(*) FROM plan WHERE kind = 'apply-config') || ' ' || (SELECT count(*) FROM operation WHERE kind = 'apply-config')")" '0 0'
+  pre_state
+  act_seq=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s3: cannot read the acts"
+  check 'S3 step 4' 'inject db-snapshot s3-step4, before step 2' "$bin/inject" db-snapshot "$snap"
+  check 'S3 step 4' 'inject bao-snapshot s3-step4, before step 2' "$bin/inject" bao-snapshot "$snap"
+  fresh_author
+
+  # Steps 2 and 3.
+  ref='S3 step 2'
+  check "$ref" 'an apply-config plan of the S2 release as h-publisher (no-reboot, deadlines, attempts, expiry, age): 201' plan_by h-publisher step2
+  p2=$plan_id
+  [ -n "$p2" ] || die "s3: no plan; nothing after it can run"
+  check "$ref" "the plan binds every value of execution-recovery §2: its expected digest is Applied's, its route the worker's own" plan_bound "$p2"
+  check "$ref" "h-viewer reads the plan: proposed, the S2 release, the whole-configuration diff withheld (the worker holds the import base's configuration), no digest answered" \
+    plan_served "$p2"
+  check "$ref" 'the plan is proposed and no operation exists for it' plan_is_stored "$p2" proposed none
+  ref='S3 step 3'
+  check "$ref" 'h-approver approves it: 201, the approval naming the plan, the approver, its role and the epoch' approve_by h-approver "$p2" step3
+  check "$ref" "the approval is the plan's one, on the machine's timeline once, with the approver's role" approval_names h-approver "$p2"
+  check "$ref" 'not marked as self-approval: no reason holds' reasons_are '' false
+  check "$ref" 'the plan is approved by it and no operation exists before commitment' approved_idle "$p2"
+  outcome_bundle "$ref" step3
+  check "$ref" "the control plane's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
+  check "$ref" "the worker's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_WORKER_IP"
+
+  # The controls that end a plan before its commitment, on the live database (P2 stays approved).
+  ref='S3 negative controls'
+  plan_by h-publisher approval-controls || die "s3: no plan for the approval controls"
+  pcancel=$plan_id
+  check "$ref" 'the automation identity approving: 403, no approval, the plan proposed' refused_approval robot "$pcancel" robot
+  check "$ref" 'h-recovery alone approving: 403, no approval, the plan proposed' refused_approval h-recovery "$pcancel" recovery
+  check "$ref" 'h-viewer approving: 403' refused_approval h-viewer "$pcancel" viewer
+  check "$ref" 'a second approval of the approved plan, by h-approver: 409 conflict, its one approval unchanged' \
+    second_approval h-approver "$p2" second
+  check "$ref" 'a second approval by h-all, another approver: 409 conflict' second_approval h-all "$p2" second-all
+  check "$ref" "a plan of the import release the handover published, which S2 superseded: 409 conflict naming the S2 release as Desired, no plan created" \
+    superseded_refused
+  check "$ref" 'a plan past its expiry reads expired, approved or not: an approval is 409, no operation' expiry_cases
+
+  plan_by h-publisher cancel-creator || die "s3: no plan to cancel"
+  check "$ref" 'a plan cancelled before commitment by its creator h-publisher: cancelled, no operation, recorded under publisher' \
+    cancelled_as h-publisher publisher creator
+  plan_by robot cancel-automation || die "s3: no plan to cancel"
+  check "$ref" 'a plan cancelled before commitment by its creator, the automation identity: cancelled, no operation, recorded under publisher' \
+    cancelled_as robot publisher automation
+  plan_by h-publisher cancel-approver || die "s3: no plan to cancel"
+  approve_by h-approver "$plan_id" cancel-approver || die "s3: no approval to cancel under"
+  check "$ref" 'an approved plan cancelled before commitment by h-approver: cancelled, no approval kept, no operation, recorded under approver' \
+    cancelled_as h-approver approver approver
+  plan_by h-publisher cancel-recovery || die "s3: no plan to cancel"
+  check "$ref" 'a plan cancelled before commitment by h-recovery: cancelled, no operation, recorded under recovery-admin' \
+    cancelled_as h-recovery recovery-admin recovery
+  plan_by robot cancel-forbidden || die "s3: no plan for the forbidden cancellation"
+  check "$ref" 'h-publisher cancelling a plan the automation identity created: 403 forbidden, the plan unchanged, no cancellation' \
+    cancel_forbidden h-publisher publisher
+
+  plan_by h-publisher revoke-approver || die "s3: no plan to revoke under"
+  approve_by h-approver "$plan_id" revoke-approver || die "s3: no approval to revoke"
+  check "$ref" 'an approval revoked before commitment by h-approver: the plan revoked, nothing dispatched, recorded under approver' \
+    revoked_as h-approver approver approver
+  plan_by h-publisher revoke-recovery || die "s3: no plan to revoke under"
+  approve_by h-approver "$plan_id" revoke-recovery || die "s3: no approval to revoke"
+  check "$ref" 'an approval revoked before commitment by h-recovery: the plan revoked, nothing dispatched, recorded under recovery-admin' \
+    revoked_as h-recovery recovery-admin recovery
+
+  plan_by h-publisher unapproved || die "s3: no unapproved plan"
+  pu=$plan_id
+  # The monitors pass every 60 s: S2's last restore put OpenBao back, and each status is read again.
+  check "$ref" 'the monitors classify every dependency retained' within 240 deps_classified
+  check "$ref" 'every dependency retained, none stale, as served' deps_retained
+  sleep 16
+  check "$ref" 'every dependency retained and a plan unapproved, three heartbeats on: no operation, the plan still proposed' \
+    same "$(sql "SELECT (SELECT state FROM plan_state WHERE plan = '$pu') || ' ' || (SELECT count(*) FROM operation WHERE seq > $ops0 AND kind = 'apply-config')")" 'proposed 0'
+  check "$ref" 'no operation exists for any plan of this part: every one proposed, approved, expired, cancelled or revoked' \
+    same "$(sql "SELECT count(*) FROM plan p JOIN operation o ON o.plan = p.id WHERE p.kind = 'apply-config'")" 0
+  outcome_bundle "$ref" controls
+  check "$ref" 'inject db-snapshot of the controls, for the bundle to expand and scan' "$bin/inject" db-snapshot "$backup_name-controls"
+
+  # Step 4, from one restore of the snapshots taken before step 2. The servers are paused across
+  # both restores (as S2 step 7's are) and keep running.
+  ref='S3 step 4'
+  check "$ref" 'inject pause A, B and C' servers pause
+  check "$ref" 'inject db-restore s3-step4' "$bin/inject" db-restore "$snap"
+  check "$ref" 'inject bao-restore s3-step4' "$bin/inject" bao-restore "$snap"
+  check "$ref" 'inject unpause A, B and C' servers unpause
+  check "$ref" 'A reads the restored database' within 60 db_reads
+  check "$ref" "restored: no act after the snapshot, no apply-config plan, the worker's Desired and Applied what they were" restored
+  ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s3: cannot read the operations"
+  fresh_author
+  # 1: the automation identity's responsible human approves a plan the automation identity created
+  # from the S2 release.
+  check "$ref" 'case 1: the automation identity creates a plan of the S2 release: 201' plan_by robot case1
+  pa=$plan_id
+  check "$ref" "case 1: h-all, the automation identity's responsible human, approves it: 201, self-approval marked with owned-automation alone" \
+    approve_by h-all "$pa" case1
+  check "$ref" 'case 1: the approval carries exactly owned-automation' reasons_are owned-automation true
+  step4_approval=$approval_id
+  check "$ref" 'case 1: the plan is approved by it, no operation' approved_idle "$pa"
+  # 2: h-all authors, publishes, plans and approves a change.
+  check "$ref" 'case 2: h-all opens a draft: 201' draft_by h-all case2
+  check "$ref" 'case 2: h-all authors a fragment in it: 200, the ETag replaced' fragment_by h-all case2 all role
+  check "$ref" 'case 2: h-all lists it in the workers profile the worker'"'"'s assignment selects: 200, the ETag replaced' profile_by h-all case2
+  check "$ref" 'case 2: h-all publishes it: 202, one release, the worker'"'"'s Desired' publish_by h-all case2
+  check "$ref" 'case 2: h-all creates a plan of that release: 201' plan_by h-all case2
+  pb=$plan_id
+  check "$ref" 'case 2: h-all approves it: 201' approve_by h-all "$pb" case2
+  check "$ref" 'case 2: the approval carries created-plan, published and authored-change, and owned-automation (the automation identity'"'"'s S2 revisions are in every release)' \
+    reasons_are created-plan,published,authored-change,owned-automation true
+  check "$ref" 'case 2: the plan is approved by it, no operation' approved_idle "$pb"
+  # 3: a later release by others reuses h-all's fragment revision unchanged.
+  check "$ref" 'case 3: h-author opens a draft: 201' draft_by h-author case3
+  check "$ref" 'case 3: h-author drafts an unrelated change, a fragment: 200' fragment_by h-author case3 other
+  check "$ref" 'case 3: h-publisher publishes it as a later release: 202, one release, the worker'"'"'s Desired' publish_by h-publisher case3
+  check "$ref" "case 3: that release reuses h-all's fragment revision unchanged" \
+    same "$(sql "SELECT count(*) FROM release_source s JOIN fragment_revision f ON f.id = s.fragment_revision
+      WHERE s.release = '$new_release' AND f.author = '$(who_id h-all)'
+        AND NOT EXISTS (SELECT FROM draft_source_entry e JOIN release r ON r.id = s.release WHERE e.draft = r.draft AND e.fragment_revision = f.id)")" 1
+  check "$ref" 'case 3: h-publisher creates a plan of that release: 201' plan_by h-publisher case3
+  pc=$plan_id
+  check "$ref" "case 3: h-all approves h-publisher's plan: 201" approve_by h-all "$pc" case3
+  check "$ref" 'case 3: the approval carries authored-reused and owned-automation' reasons_are authored-reused,owned-automation true
+  check "$ref" 'case 3: the plan is approved by it, no operation' approved_idle "$pc"
+  check "$ref" 'the three plans were each made from the worker'"'"'s Desired at that moment, one release apart' \
+    same "$(sql "SELECT count(DISTINCT release) FROM plan WHERE id IN ('$pa', '$pb', '$pc')")" 3
+  outcome_bundle "$ref" step4
+  check "$ref" "the control plane's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
+  check "$ref" "the worker's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_WORKER_IP"
+  local cp_after w_after
+  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
+  no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_log" "$w_after"
+}
+
 # The database dump taken after every case, for the final bundle to expand and scan (C §15:
 # backups).
 backup_name=s3-$run_key
@@ -419,6 +900,7 @@ run() {
   case $s3_mode in
     handover) handover ;;
     handover-controls) controls ;;
+    run) approval_part ;;
   esac
   check 'S3 backups' 'inject db-snapshot: a dump of the bronzeward database after the adoptions' \
     "$bin/inject" db-snapshot "$backup_name"
@@ -441,14 +923,17 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
     result PASS 'S3 evidence' 'the bundle is complete: bin/evidence captured every source'
   fi
   # The scan above covers the dump only if the bundle holds it expanded, with the database's rows
-  # in it: an adoption record's own row inside the adoption_record COPY block.
-  if [ "${#adopted_plans[@]}" -gt 0 ] &&
-    awk -v id="${adopted_plans[0]}" '
-      /^COPY public\.adoption_record / { block = 1; next }
+  # in it: an adoption record's (the handover's) or an approval's (run's) own row inside its COPY
+  # block, whose first column is the ID.
+  dump_table=adoption_record dump_id=${adopted_plans[0]:-} dump_row='an adoption record'
+  if [ "$s3_mode" = run ]; then dump_table=approval dump_id=$step4_approval dump_row='a step 4 approval'; fi
+  if [ -n "$dump_id" ] &&
+    awk -v id="$dump_id" -v table="$dump_table" '
+      index($0, "COPY public." table " ") == 1 { block = 1; next }
       block && /^\\\.$/ { block = 0 }
       block && index($0, id "\t") == 1 { found = 1 }
       END { exit !found }' "$final/backups/pg-$backup_name.dump.sql"; then
-    result PASS 'S3 backups' 'the scanned bundle holds the database dump expanded, an adoption record among its rows (control)'
+    result PASS 'S3 backups' "the scanned bundle holds the database dump expanded, $dump_row among its rows (control)"
   else
     result FAIL 'S3 backups' 'the scanned bundle does not hold the database dump expanded with the run'"'"'s rows: the backup went unscanned'
   fi
