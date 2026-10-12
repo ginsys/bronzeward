@@ -468,13 +468,25 @@ plan_by() {
   answers 201 - POST /api/v1/plans "$tok" "$body" "$(key "plan-$2")" || return 1
   plan_id=$(jq -er '.id' "$EV/last.body")
 }
-# approve_by <who> <plan> <name>: 201; the approval in approval_id, its self-approval reasons as a
-# JSON array in approval_reasons.
-approval_id='' approval_reasons=''
+# approve_by <who> <plan> <name>: 201 naming the plan, the approver, its role and the current
+# epoch; the approval in approval_id, its self-approval reasons as a JSON array in
+# approval_reasons, the values it was checked against in approval_plan, approval_by and
+# approval_epoch.
+approval_id='' approval_reasons='' approval_plan='' approval_by='' approval_epoch=''
 approve_by() {
-  approval_id='' approval_reasons=''
+  approval_id='' approval_reasons='' approval_plan='' approval_by='' approval_epoch=''
   fresh "$1"
   answers 201 - POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
+  # After the request: a principal's row is made by its first authenticated one.
+  approval_by=$(who_id "$1") && [ -n "$approval_by" ] || return 1
+  approval_epoch=$(sql "SELECT epoch FROM installation_state") && [ -n "$approval_epoch" ] || return 1
+  approval_plan=$2
+  jq -e --arg p "$approval_plan" --arg a "$approval_by" --arg e "$approval_epoch" \
+    '.plan == $p and .approver.principal == $a and .approver.role == "approver" and .epoch == $e
+      and .selfApproval.marked == ((.selfApproval.reasons | length) > 0)' "$EV/last.body" >/dev/null || {
+    echo "s3: $2: the approval answered does not name the plan, the approver, its role and the current epoch" >&2
+    return 1
+  }
   approval_id=$(jq -er '.id' "$EV/last.body") || return 1
   approval_reasons=$(jq -ce '.selfApproval.reasons' "$EV/last.body")
 }
@@ -502,7 +514,9 @@ reasons_are() {
     AND entry->>'approval' = '$approval_id'") || return 1
   [ "$(jq -c '[.marked, .reasons]' <<<"$entry")" = "$(jq -nc --argjson w "$want" --argjson m "$2" '[$m, $w]')" ] || return 1
   fresh h-viewer
-  answers_with ".id == \"$approval_id\" and .selfApproval == {marked: $2, reasons: $want}" 200 - GET "/api/v1/approvals/$approval_id" "$tok"
+  answers_with ".id == \"$approval_id\" and .plan == \"$approval_plan\" and .approver.principal == \"$approval_by\"
+      and .approver.role == \"approver\" and .epoch == \"$approval_epoch\" and .selfApproval == {marked: $2, reasons: $want}" \
+    200 - GET "/api/v1/approvals/$approval_id" "$tok"
 }
 # plan_is_stored <plan> <state> <approval or none>: the plan's stored state and approval, and no
 # operation.
@@ -547,18 +561,23 @@ plan_served() {
       and (.evidence.diff.unified // \"\") == \"\" and (tostring | test(\"expected|digest\") | not)" \
     200 - GET "/api/v1/plans/$1" "$tok"
 }
-# refused_approval <who> <plan> <name>: 403, the plan still proposed with no approval.
+# refused_approval <who> <plan> <name>: 403 forbidden for want of the approver role (the
+# automation identity: because the route is for humans only), not for another reason a 403 can
+# carry; the plan still proposed with no approval.
 refused_approval() {
+  local why='(has("humanOnly") | not)'
+  [ "$1" != robot ] || why='.humanOnly == true'
   fresh "$1"
-  answers 403 - POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
+  answers_with ".roles == [\"approver\"] and $why" 403 forbidden POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
   [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$2'")" = 0 ] && plan_is_stored "$2" proposed none
 }
-# second_approval <who> <plan> <name>: 409 conflict, the plan's one approval still the first.
+# second_approval <who> <plan> <name>: 409 conflict naming the plan as approved (not expired, which
+# a refused request does not store), the plan's one approval still the first.
 second_approval() {
   local first
   first=$(sql "SELECT approval FROM plan_state WHERE plan = '$2'") || return 1
   fresh "$1"
-  answers 409 conflict POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
+  answers_with ".plan == \"$2\" and .state == \"approved\"" 409 conflict POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
   [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$2'")" = 1 ] && plan_is_stored "$2" approved "$first"
 }
 # superseded_refused: a plan of the import release the handover published, which S2 superseded as
@@ -733,9 +752,27 @@ approved_idle() {
   plan_is_stored "$1" approved "$approval_id" && plan_reads "$1" approved && no_dispatch_since "$ops0"
 }
 
+# plans_approved <plan:approval>...: each plan stored approved by its own approval, and no
+# apply-config operation exists.
+plans_approved() {
+  local x
+  for x; do plan_is_stored "${x%%:*}" approved "${x#*:}" || return 1; done
+  no_dispatch_since 0
+}
+# restored_to_step3: the database is the snapshot taken after step 3: no act after it, step 3's plan
+# the only apply-config plan, approved by its approval, the worker's Desired the S2 release, and no
+# apply-config operation: the state S4 starts from.
+step3_plan='' step3_approval='' act_seq3=0
+restored_to_step3() {
+  [ "$(sql "SELECT coalesce(max(seq), 0) FROM act")" = "$act_seq3" ] &&
+    [ "$(sql "SELECT count(*) FROM plan WHERE kind = 'apply-config'")" = 1 ] &&
+    [ "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" = "$s2_rel" ] &&
+    plan_is_stored "$step3_plan" approved "$step3_approval" && plan_reads "$step3_plan" approved && no_dispatch_since 0
+}
+
 step4_approval=''
 approval_part() {
-  local ref='S3 step 1' p2 pa pb pc pcancel pu
+  local ref='S3 step 1' p2 pa pb pc apb apc pcancel pu
   robot=$(cat -- "$STATE/automation-token") || die "no automation token in $STATE"
   redact_automation_token "$robot"
   robot_id=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$STATE/automation-identity")
@@ -780,6 +817,12 @@ approval_part() {
   outcome_bundle "$ref" step3
   check "$ref" "the control plane's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
   check "$ref" "the worker's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_WORKER_IP"
+  # What S4 starts from: step 3's plan approved and nothing after it. The run ends restored to this.
+  step3_plan=$p2
+  step3_approval=$approval_id
+  act_seq3=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s3: cannot read the acts"
+  check "$ref" 'inject db-snapshot s3-step3, after step 3' "$bin/inject" db-snapshot s3-step3
+  check "$ref" 'inject bao-snapshot s3-step3, after step 3' "$bin/inject" bao-snapshot s3-step3
 
   # The controls that end a plan before its commitment, on the live database (P2 stays approved).
   ref='S3 negative controls'
@@ -861,7 +904,8 @@ approval_part() {
   check "$ref" 'case 2: h-all publishes it: 202, one release, the worker'"'"'s Desired' publish_by h-all case2
   check "$ref" 'case 2: h-all creates a plan of that release: 201' plan_by h-all case2
   pb=$plan_id
-  check "$ref" 'case 2: h-all approves it: 201' approve_by h-all "$pb" case2
+  check "$ref" 'case 2: h-all approves it: 201, naming the plan, the approver, its role and the epoch' approve_by h-all "$pb" case2
+  apb=$approval_id
   check "$ref" 'case 2: the approval carries created-plan, published and authored-change, and owned-automation (the automation identity'"'"'s S2 revisions are in every release)' \
     reasons_are created-plan,published,authored-change,owned-automation true
   check "$ref" 'case 2: the plan is approved by it, no operation' approved_idle "$pb"
@@ -875,11 +919,14 @@ approval_part() {
         AND NOT EXISTS (SELECT FROM draft_source_entry e JOIN release r ON r.id = s.release WHERE e.draft = r.draft AND e.fragment_revision = f.id)")" 1
   check "$ref" 'case 3: h-publisher creates a plan of that release: 201' plan_by h-publisher case3
   pc=$plan_id
-  check "$ref" "case 3: h-all approves h-publisher's plan: 201" approve_by h-all "$pc" case3
+  check "$ref" "case 3: h-all approves h-publisher's plan: 201, naming the plan, the approver, its role and the epoch" approve_by h-all "$pc" case3
+  apc=$approval_id
   check "$ref" 'case 3: the approval carries authored-reused and owned-automation' reasons_are authored-reused,owned-automation true
   check "$ref" 'case 3: the plan is approved by it, no operation' approved_idle "$pc"
   check "$ref" 'the three plans were each made from the worker'"'"'s Desired at that moment, one release apart' \
     same "$(sql "SELECT count(DISTINCT release) FROM plan WHERE id IN ('$pa', '$pb', '$pc')")" 3
+  check "$ref" 'after the last publication, all three plans are still approved, each by its own approval, and no apply-config operation exists' \
+    plans_approved "$pa:$step4_approval" "$pb:$apb" "$pc:$apc"
   outcome_bundle "$ref" step4
   check "$ref" "the control plane's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
   check "$ref" "the worker's configuration digest and resource version are the pre-state's" unchanged_node "$TALOS_WORKER_IP"
@@ -888,6 +935,19 @@ approval_part() {
   w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
   no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
   no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_log" "$w_after"
+
+  # The dump comes first, holding every case; then the integrated run's state is put back to what S4
+  # starts from: step 3's approved plan, with none of the controls' or step 4's plans and releases.
+  ref='S3 backups'
+  check "$ref" 'inject db-snapshot: a dump of the bronzeward database after the adoptions and every case' "$bin/inject" db-snapshot "$backup_name"
+  ref='S3 handoff'
+  check "$ref" 'inject pause A, B and C' servers pause
+  check "$ref" 'inject db-restore s3-step3' "$bin/inject" db-restore s3-step3
+  check "$ref" 'inject bao-restore s3-step3' "$bin/inject" bao-restore s3-step3
+  check "$ref" 'inject unpause A, B and C' servers unpause
+  check "$ref" 'A reads the restored database' within 60 db_reads
+  check "$ref" "restored to step 3: step 3's plan approved by its approval and the only apply-config plan, the worker's Desired the S2 release, no operation" \
+    restored_to_step3
 }
 
 # The database dump taken after every case, for the final bundle to expand and scan (C §15:
@@ -902,8 +962,11 @@ run() {
     handover-controls) controls ;;
     run) approval_part ;;
   esac
-  check 'S3 backups' 'inject db-snapshot: a dump of the bronzeward database after the adoptions' \
-    "$bin/inject" db-snapshot "$backup_name"
+  # The approval part takes its dump before its final restore.
+  if [ "$s3_mode" != run ]; then
+    check 'S3 backups' 'inject db-snapshot: a dump of the bronzeward database after the adoptions' \
+      "$bin/inject" db-snapshot "$backup_name"
+  fi
 }
 
 run
