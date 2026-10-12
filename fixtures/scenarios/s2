@@ -551,7 +551,7 @@ c10_rows() {
 # of that import base as the adoption recorded it (execution and recovery §6.3, choice §10.15).
 # The step-1 draft imports nothing: its import base is that Applied release's.
 S2_LABEL=bw-s2
-applied='' desired0='' ref_name='' ref_version='' frv='' prv='' arv='' s2_release='' robot='' robot_id=''
+applied='' desired0='' plans0='' ref_name='' ref_version='' frv='' prv='' arv='' s2_release='' robot='' robot_id=''
 # handover_applied: the worker's Applied is the release its adoption recorded: its adopt plan
 # committed to a completed adopt operation, the plan of that release, Applied's source adoption,
 # baseline revision 1 and digest the digest of the release's import base revision, which the
@@ -654,10 +654,12 @@ s2_publish() {
 desired_is_release() {
   [ "$(sql "SELECT desired || ' ' || applied_release FROM machine_state WHERE machine = '$machine_w'")" = "$s2_release $applied" ]
 }
-# only_publish_since <operation seq>: no operation but publish created after that sequence number
-# (no plan exists before ginsys/bronzeward#25: an apply-config or adopt operation is how one would
-# show).
-only_publish_since() { [ "$(sql "SELECT count(*) FROM operation WHERE seq > $1 AND kind <> 'publish'")" = 0 ]; }
+# only_publish_since <operation seq>: no operation but publish created after that sequence number,
+# and no plan created since the precondition: the handover's adopt plans are the plans0 there are,
+# so an apply-config plan that is only proposed or approved shows in the count, not as an operation.
+only_publish_since() {
+  [ "$(sql "SELECT (SELECT count(*) FROM operation WHERE seq > $1 AND kind <> 'publish') || ' ' || (SELECT count(*) FROM plan)")" = "0 $plans0" ]
+}
 # review_redacted: step 4's review of the worker: the label present with its value redacted as the
 # reference at its declared version, the provenance of that reference and version naming the
 # fragment revision at exactly doc[N]/machine/nodeLabels/<label>. The label's line is then looked
@@ -998,6 +1000,8 @@ s2_steps() {
     counted 1 "^[0-9]+ $TALOS_WORKER_IP\$" "$EV/pre-talos-config-version.txt"
   check "$ref" "the adopted Applied digest is the worker's configuration as the pre-state read it from the node" applied_is_node
   seq=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s2: cannot read the operations"
+  plans0=$(sql "SELECT count(*) FROM plan") || die "s2: cannot read the plans"
+  [ -n "$plans0" ] || die "s2: no plan count"
   act_seq=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s2: cannot read the acts"
   check 'S2 step 7' 'inject db-snapshot s2-step1' "$bin/inject" db-snapshot "$snap"
   check 'S2 step 7' 'inject bao-snapshot s2-step1' "$bin/inject" bao-snapshot "$snap"
