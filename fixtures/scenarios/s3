@@ -788,13 +788,14 @@ approval_part() {
     release_holds_automation_revision
 
   # Step 1: the controller has polled the worker three heartbeats (5 s) since S2 ended, and has made
-  # no plan and no operation. A scheduled drift observation is S5's (ginsys/bronzeward#27).
+  # no plan and no operation. A scheduled drift observation is S5's (ginsys/bronzeward#27). The
+  # pre-state and the apid log baselines come first, so the no-mutation checks cover this interval.
+  pre_state
   sleep 16
   check "$ref" "three heartbeats after S2: no plan but the handover's, no operation but its adopt: publication alone dispatched nothing" \
     worker_has_only_the_handover
   check "$ref" 'no apply-config plan and no apply-config operation exist' \
     same "$(sql "SELECT (SELECT count(*) FROM plan WHERE kind = 'apply-config') || ' ' || (SELECT count(*) FROM operation WHERE kind = 'apply-config')")" '0 0'
-  pre_state
   act_seq=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s3: cannot read the acts"
   check 'S3 step 4' 'inject db-snapshot s3-step4, before step 2' "$bin/inject" db-snapshot "$snap"
   check 'S3 step 4' 'inject bao-snapshot s3-step4, before step 2' "$bin/inject" bao-snapshot "$snap"
