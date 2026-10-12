@@ -380,9 +380,11 @@ has no plan but the handover's completed `adopt` plan.
    `h-all` approves `h-publisher`'s plan for that release.
    Each of the two publications starts from a draft opened for it (`POST /drafts`), whose
    returned ETag every mutation sends in `If-Match` and replaces, as in S2 step 1. These plans
-   stay out of the integrated run, where the controller could commit them before S4. Every plan
-   of the approval part stays `approved` and uncommitted: `apply-config` has no committer before
-   S4, and the commitment-level controls are S4's.
+   stay out of the integrated run, where the controller could commit them before S4: the approval
+   part takes snapshots after step 3 (`s3-step3`) and ends restored to them, leaving step 3's
+   plan `approved` as S4's precondition and none of the controls' or step 4's plans or releases.
+   Every plan of the approval part stays `approved` or ends before commitment, and uncommitted:
+   `apply-config` has no committer before S4, and the commitment-level controls are S4's.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding)
 (the plan states before commitment, approval and its refusals, revocation and cancellation) and, in
