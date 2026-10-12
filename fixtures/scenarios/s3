@@ -259,11 +259,12 @@ adopted_again() {
   [ "$(sql "SELECT count(*) FROM plan")" = "$before" ]
 }
 
-# digest_patch: the worker's configuration changed out of band: a node label, no reboot. Nothing
-# of the patch is kept: the node's answer is a status only.
+# digest_patch: the worker's configuration changed out of band: a node label, no reboot, as a
+# strategic merge patch (the node's configuration is multi-document, which refuses a JSON6902
+# patch). Nothing of the patch is kept: the node's answer is a status only.
 digest_patch() {
   local patch=$STATE/s3-label-patch rc=0
-  printf '[{"op": "add", "path": "/machine/nodeLabels", "value": {"bw-s3-control": "digest"}}]\n' >"$patch"
+  printf 'machine:\n  nodeLabels:\n    bw-s3-control: digest\n' >"$patch"
   node_talos "$TALOS_WORKER_IP" patch machineconfig --mode no-reboot --patch "@$patch" >/dev/null 2>&1 || rc=$?
   rm -f -- "$patch"
   return "$rc"
