@@ -124,7 +124,7 @@ outcome needs that route's handler, state S0 does not create, or both: the adopt
 in S3's handover part; the automation identity's publication in S2; the automation identity's plan, a human
 approver's approval, the self-approval cases, cancellation by each role that may cancel and a
 `publisher`'s refused cancellation of another identity's plan, revocation before commitment by each
-role that may revoke, the revoked-identity approval and unapproved dispatch in S3; the controller's
+role that may revoke and unapproved dispatch in S3; the revoked-identity approval, the controller's
 dispatch and revocation after commitment or attempt (DS rows 002 to 005) in S4; freezing by each
 role that may freeze and unfreezing in S5; resolving an `unresolved` operation in S6.1 step 7;
 entry and scope release in S7. The OpenBao administrator's and break-glass rows are outside
@@ -355,71 +355,74 @@ has no plan but the handover's completed `adopt` plan.
 
 **Steps.**
 
-1. After at least one `drift` observation of the worker following S2, confirm that no plan and no
-   operation but `publish` exists for it besides the handover's completed `adopt` plan and
-   operation: publication alone dispatches nothing.
+1. After the adoption controller has observed the worker at least three times following S2 (its
+   heartbeat is the fixture's 5 s), confirm that no plan and no operation but `publish` exists
+   for it besides the handover's completed `adopt` plan and operation: publication alone
+   dispatches nothing. No caller schedules a `drift` observation before S5
+   ([ginsys/bronzeward#27](https://github.com/ginsys/bronzeward/issues/27)), which joins it to
+   this check.
 2. `h-publisher` creates an `apply-config` plan from the S2 release: `no-reboot`, a bound route,
-   deadlines, maximum attempts, expiry and maximum observation age; `h-viewer` reads its redacted
-   whole-configuration diff.
+   deadlines, maximum attempts, expiry and maximum observation age; `h-viewer` reads its
+   evidence. The worker holds the import base's configuration, which has no redacted whole form,
+   so the diff is served from `Applied`'s release to the plan's release with `withheld: true` and
+   no text (PA choice §17.38); what the approver relies on is the release's validation and the
+   plan's bound values.
 3. `h-approver` approves it.
 4. From one restore of snapshots taken before step 2 (`bin/inject db-snapshot s3-step4`,
    `bao-snapshot s3-step4`; restored with `db-restore s3-step4`, `bao-restore s3-step4`),
    running these three cases in order, so each plan is made from the worker's `Desired` at that
    moment (ER §2) and the third reuses the second's fragment revision: as the automation
    identity's responsible human, `h-all` approves a plan the automation identity created from the
-   S2 release; `h-all` authors, publishes, plans and approves a change; and, after `h-author`
-   drafts an unrelated change and `h-publisher` publishes it as a later release that reuses
-   `h-all`'s fragment revision unchanged, `h-all` approves `h-publisher`'s plan for that release.
+   S2 release; `h-all` authors a fragment, lists it in the profile the worker's assignment
+   selects, publishes, plans and approves that change; and, after `h-author` drafts an unrelated
+   change and `h-publisher` publishes it as a later release that carries `h-all`'s fragment
+   revision unchanged (a release carries the heads its compilation uses, not every fragment),
+   `h-all` approves `h-publisher`'s plan for that release.
    Each of the two publications starts from a draft opened for it (`POST /drafts`), whose
    returned ETag every mutation sends in `If-Match` and replaces, as in S2 step 1. These plans
-   stay out of the integrated run, where the controller could commit them before S4.
+   stay out of the integrated run, where the controller could commit them before S4. Every plan
+   of the approval part stays `approved` and uncommitted: `apply-config` has no committer before
+   S4, and the commitment-level controls are S4's.
 
-**Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding),
-[§3.2](execution-recovery.md#32-the-commitment-transaction) comparisons 1 and 2,
-[§8.1](execution-recovery.md#81-revocation-racing-commitment),
-[§8.5](execution-recovery.md#85-identity-revocation), and, in the handover part,
-[§6.3](execution-recovery.md#63-adopt) (existing-cluster handover); PA
+**Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding)
+(the plan states before commitment, approval and its refusals, revocation and cancellation) and, in
+the handover part, [§6.3](execution-recovery.md#63-adopt) (existing-cluster handover); PA
 [§8.1](persistence-api.md#81-plans-and-their-operations), [§10.4](persistence-api.md#104-revocation),
-[§10.5](persistence-api.md#105-recording-every-act).
+[§10.5](persistence-api.md#105-recording-every-act). The controls that need the commitment or
+attempt transaction (ER [§3.2](execution-recovery.md#32-the-commitment-transaction) comparison 2,
+[§8.1](execution-recovery.md#81-revocation-racing-commitment),
+[§8.5](execution-recovery.md#85-identity-revocation)) are S4's, below.
 
 **Pass criteria.** In the handover part, each adopt operation is `completed`, and `Applied` holds
 the baseline's digest, marked adopted by observation; neither node's digest nor resource version
 changed from S1's pre-state, no Talos mutation request appears in any log, and the scan finds no
-synthetic secret outside OpenBao. In the approval part, the plan binds every value ER §2 lists, its expected pre-dispatch digest equal to
-`Applied`'s. The approval names the plan, approver, role and epoch; the three step 4 approvals
-are marked self-approval with exactly these reason sets, since every reason that holds is recorded
-(PA §10.5): `owned-automation`; `created-plan`, `published` and `authored-change`; and
-`authored-reused`. The plan is `approved`, and no operation exists before commitment.
+synthetic secret outside OpenBao. In the approval part, the plan binds every value ER §2 lists, its
+expected pre-dispatch digest equal to `Applied`'s. The approval names the plan, approver, role and epoch; step 3's approval is not
+marked self-approval. The three step 4 approvals are marked with exactly these reason sets, since
+every reason that holds is recorded (PA §10.5): `owned-automation`; `created-plan`, `published`,
+`authored-change` and `owned-automation`; and `authored-reused` and `owned-automation`.
+`owned-automation` is in every set because every release contains the S2 release's
+automation-authored revision, which `h-all` answers for. Each plan is `approved`, and no operation
+exists before commitment.
 
-**Negative controls.** An adoption record whose latest observation is older than the bound age, or
-shows another digest: refused, and `Applied` stays unset. Automation, and `h-recovery` alone,
-approving: `403`; a second approval: `409`. The worker's assignment changed after planning:
-commitment refused by comparison 2. A plan from the import release the handover published, which
-S2 superseded as the worker's `Desired`: `409 conflict` naming the
-S2 release, no plan created. From a restore of the step 4 snapshots, the S2 release planned as in
-step 2, a later release published for the worker from a draft opened for it (as in step 4), then
-the plan approved, which does not compare
-`Desired`: commitment refused by comparison 2, since `Desired` changed, and nothing sent; S4's
-commitment of the same plan with no publication between is the control (ER choice §10.24). The
-publication racing the commitment itself is a *check* (§7.1). A plan
-past its expiry: `expired`, no operation. A plan cancelled before commitment, once each by its
-creator `h-publisher`, by its creator the automation identity, by `h-approver` and by
-`h-recovery`: `cancelled`, no operation, the act
-recorded under the role that permits it; `h-publisher` cancelling a plan the automation identity
-created: `403 forbidden`, the plan unchanged (design §13.7 item 6); one cancelled after commitment
-with no attempt: the operation goes `unresolved`, then `cancelled`, and nothing is sent (ER §9.2).
-An approval revoked before commitment, once by `h-approver` and once by `h-recovery`: `revoked`,
-nothing sent; a revocation started while a commitment holds the approval waits for it, and the control that
-inserts without the lock does not wait (DS row 003). The approver's identity revoked before
-commitment, and after it with no attempt: the plan cannot commit; or its operation goes
-`unresolved` with its scope held, each transition on the timeline, then `cancelled`, and nothing is
-sent (ER §3.3). From a restore of the step 4 snapshots, the S2 release planned as in step 2,
-OpenBao paused (`bin/inject pause openbao`) so that the executor's use-time check (ER §3.1 item 2)
-holds commitment, the plan approved as in step 3, then `h-approver`'s `approver` group removed at
-the issuer and `h-approver`'s next approval, under a fresh token without the role, `403`; with no
-operation yet on the timeline, `bin/inject unpause openbao`: the plan commits and its attempt is
-admitted (PA choice §17.23); the approval-revocation control above, which refuses, is the contrast. Every
-dependency `retained` and the plan unapproved: nothing dispatched.
+**Negative controls.** Every control of the approval part acts before commitment, and none can
+commit: `apply-config` has no committer before S4, which owns the controls that need the commitment
+or attempt transaction (S4's negative controls). In the handover part, from a separate `bin/up`
+(§2): an adoption whose evidence observation is older than the plan's bound age is no evidence, so
+nothing is refused and no refusal entry is written; the controller observes again after its lease
+and the adoption relies on that later observation, `Applied` staying unset until it commits. An
+adoption whose latest observation shows another digest than the baseline's: refused once, by
+comparison 4.4, and `Applied` stays unset. Automation, `h-recovery` and `h-viewer` approving:
+`403`; a second approval, by `h-approver` and by `h-all`: `409`. A plan from the import release the
+handover published, which S2 superseded as the worker's `Desired`: `409 conflict` naming the S2
+release, no plan created. A plan past its expiry: `expired`, an approval of it `409`, no
+operation. A plan cancelled before commitment, once each by its creator `h-publisher`, by its
+creator the automation identity, by `h-approver` and by `h-recovery`: `cancelled`, no operation,
+the act recorded under the role that permits it; `h-publisher` cancelling a plan the automation
+identity created: `403 forbidden`, the plan unchanged (design §13.7 item 6). An approval revoked
+before commitment, once by `h-approver` and once by `h-recovery`: `revoked`, nothing sent, the act
+recorded under its role. Every dependency `retained` and the plan unapproved, across several
+heartbeats of the controller: nothing dispatched.
 
 **Retained evidence.** The handover's post-state digests, resource versions and scan bundle, and
 its adopt plans, approvals and adoption records; plan and approval records, the diff as served, and
@@ -455,7 +458,9 @@ of [ER §3.5](execution-recovery.md#35-talos-client-and-route) and the first ite
 [§3.5](execution-recovery.md#35-talos-client-and-route),
 [§4](execution-recovery.md#4-operation-timeline-and-states),
 [§5.1](execution-recovery.md#51-evidence-per-outcome),
-[§8](execution-recovery.md#8-invariants-and-worked-interleavings) invariants 1 to 5; PA
+[§8](execution-recovery.md#8-invariants-and-worked-interleavings) invariants 1 to 5,
+[§8.1](execution-recovery.md#81-revocation-racing-commitment) and
+[§8.5](execution-recovery.md#85-identity-revocation); PA
 [§8.3](persistence-api.md#83-the-resource-and-its-progress).
 
 **Pass criteria.** The worker's digest equals the artifact's under the ER §1 normalization, and its
@@ -473,6 +478,25 @@ without the unique index both commit (DS row 011). An assignment change while th
 and a frozen scope: refused. An artifact failing node validation: `InvalidArgument`, `rejected`,
 resource version unchanged (DS row 022). The ownership check moved out of the attempt's `UPDATE`: a
 stale attempt is recorded (DB row 018).
+
+The commitment-level controls of the approval part (S3 keeps those before commitment), each from
+a restore of S3's step 4 snapshots with the S2 release planned as in S3 step 2 and approved as in
+step 3. The worker's assignment changed after planning: commitment refused by comparison 2. A later
+release published for the worker from a draft opened for it (as in S3 step 4), then the plan
+approved, which does not compare `Desired`: commitment refused by comparison 2, since `Desired`
+changed, and nothing sent; this step's commitment of the same plan with no publication between is
+the control (ER choice §10.24); the publication racing the commitment itself is a *check* (§7.1).
+A plan cancelled after commitment with no attempt: the operation goes `unresolved`, then
+`cancelled`, and nothing is sent (ER §9.2). A revocation started while a commitment holds the
+approval waits for it, and the control that inserts without the lock does not wait (DS row 003).
+The approver's identity revoked before commitment, and after it with no attempt: the plan cannot
+commit; or its operation goes `unresolved` with its scope held, each transition on the timeline,
+then `cancelled`, and nothing is sent (ER §3.3). OpenBao paused (`bin/inject pause openbao`) so that
+the executor's use-time check (ER §3.1 item 2) holds commitment, the plan approved, then
+`h-approver`'s `approver` group removed at the issuer and `h-approver`'s next approval, under a
+fresh token without the role, `403`; with no operation yet on the timeline, `bin/inject unpause
+openbao`: the plan commits and its attempt is admitted (PA choice §17.23); S3's approval revocation
+before commitment, which refuses, is the contrast.
 
 **Retained evidence.** The operation and its timeline, observation records, the node's digest and
 resource version per step, and the DS re-run table.
@@ -833,16 +857,16 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | C §15: SR and SP matrices through the compiler's path, with import-base references and SP's oracle over Bronzeward's own log and support formats; fidelity check | S2 precondition and negative controls | #23 |
 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | the scenario of each clause's issue, plus *check* for the rest | #21 to #29 |
 | ER §9.2: DS rows 001–023 through the implementation over the worker's endpoint, with controls 006, 008, 011 and row 013's early accounting refused; if the executor's fallback is taken, the rows through it and the leak scan of its channel | S4 precondition plus *check* for the scan | #26 |
-| ER §9.2: sending only after the attempt commits; each §3.2 and §3.3 lock with its unlocked control | S4, S3 (DS row 003), S4 negative controls (DS row 011) plus *check* | #25, #26 |
+| ER §9.2: sending only after the attempt commits; each §3.2 and §3.3 lock with its unlocked control | S4 and its negative controls (DS rows 003 and 011) plus *check* | #25, #26 |
 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing; the bound exhausted after a lost response leaves no further attempt and ends `failed` | S3, S4 negative controls; *check* for the last two | #25, #26, #28 |
-| ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls | #25 |
-| ER §9.2: a plan for a release that is not the machine's `Desired` refused at creation; a commitment refused after a publication that changed `Desired`, with S4's commitment as the control; a publication racing the commitment waits for it or precedes it, with the unlocked control; a publication after commitment leaves the attempt admitted (ER §3.3) | S3 negative controls plus *check* for the race and the attempt | #25 |
+| ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls (before), S4 negative controls (after) | #25, #26 |
+| ER §9.2: a plan for a release that is not the machine's `Desired` refused at creation; a commitment refused after a publication that changed `Desired`, with S4's commitment as the control; a publication racing the commitment waits for it or precedes it, with the unlocked control; a publication after commitment leaves the attempt admitted (ER §3.3) | S3 negative controls (the refusal at creation), S4 negative controls (the refused commitment) plus *check* for the race and the attempt | #25, #26 |
 | ER §9.2: a bound health check failing before the verification deadline then passing: `completed`; failing at or after it: `failed`; unreadable at it: `unresolved`; a contradicting digest before it: `failed` at once, the same transaction opening a drift record (ER §4) | *check* | #26 |
 | ER §9.2: the fixture's nodes each reporting a distinct Talos node ID, no SMBIOS UUID and one Talos cluster ID through the application's read-only Talos client; a commitment and a retry's attempt refused, nothing sent, when the evidence shows another identity key, an SMBIOS UUID absent for a machine recorded by one or present for one recorded by node ID, or another Talos cluster ID, or a failed identity read (a failed `systeminformation` read included), with the controls that a machine recorded by node ID whose `systeminformation` read returns no resource is admitted and that a machine recorded by SMBIOS UUID showing another node ID but a matching UUID and cluster ID is admitted, each SMBIOS case against a stubbed Talos response; a scope left `blocked`, not `ready`, by a `restoration` observation with another identity, then `ready` after a matching one (ER choice §10.26) | *check* | #26, #29 |
 | ER §9.2: an `apply-config` operation with no attempt not completed by a completion observation of its artifact applied out of band | *check* | #28 |
 | ER §9.2: assignment change refused while the scope is held; comparison 6 under a freeze and under recovery mode before release | S4, S7 negative controls | #26, #29 |
 | ER §9.2: takeover at start; the §5 precedence; PA §16: a takeover keeps `unresolved` and refuses a terminal operation | S6.1 plus *check* | #28 |
-| ER §9.2: identity revocation before commitment, after it with no attempt, after an attempt with its retry refused | S3 negative controls; *check* for the last | #25, #28 |
+| ER §9.2: identity revocation before commitment, after it with no attempt, after an attempt with its retry refused | S4 negative controls; *check* for the last | #25, #26, #28 |
 | ER §9.2: observation ordering, contradicting higher-basis reads, confirmed reads, the late-read residual | *check* | #28, #27 (adoption read) |
 | ER §9.2: plan and commitment refusals on undetected drift; drift detection, freeze, adoption record and revert cases, with the leak screen (a record opened with a `failed` operation is the health-check *check* above) | S5 and its negative controls | #27 |
 | ER §9.2: recovery-mode entry after a restore older than a takeover, an approval, a revocation and an attempt | S7 | #29 |
@@ -861,8 +885,8 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | DM §10.1 items 1, 4 to 7, 9 to 12, 14 and 15: every classification rule, persistent unknown, metadata-only access, one alert per transition, silence, Transit and KV identity, publication against a transition, logging after a crash, per-dependency staleness, overlapping monitors, the alert log after a database restore | *check* | #24 |
 | DM §10.1 item 8's dispatch half: no dispatch admitted by a retained class | *check* | #26 |
 | DM §10.1 item 13: recovery start records nothing before its entry commits | *check* | #29 |
-| PA §16: approval revocation racing commitment (DS row 003) | S3 negative controls | #25 |
-| PA §10.4: an approval surviving its approver's loss of the role, contrasted with its revocation (choice §17.23) | S3 negative controls | #25 |
+| PA §16: approval revocation racing commitment (DS row 003) | S4 negative controls | #25, #26 |
+| PA §10.4: an approval surviving its approver's loss of the role, contrasted with its revocation (choice §17.23) | S4 negative controls, contrasted with S3's approval revocation | #25, #26 |
 | PA §16: identity revocation racing commitment, with the lock control; its timeline entries on exactly the machines it touches (T5c) | *check* | #25 |
 | PA §16: a lapsed `publish` job claimed again | S2 negative controls | #23 |
 | PA §16: leaving recovery mode racing an inventory request, with the `FOR SHARE` control | *check* | #29 |
