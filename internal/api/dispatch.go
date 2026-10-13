@@ -23,6 +23,10 @@ type useTime struct {
 // errUseTime is a use-time check one dependency failed: nothing was committed and nothing sent.
 var errUseTime = errors.New("the use-time check failed")
 
+// errAccessMoved is a retry whose Talos access, unreadable when the loop looked, was read at another
+// version than its observation's: nothing was sent, and the next pass observes the machine again.
+var errAccessMoved = errors.New("the Talos access moved since the retry's observation")
+
 // dispatchPlan takes an approved apply-config plan to its sent attempt (execution-recovery.md
 // §3.1 to §3.5): the Talos access read once and the bound artifact decrypted, recorded as the
 // use-time check; an evidence observation taken with that access; the commitment; and the attempt.
@@ -53,14 +57,14 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 			return err
 		}
 	}
-	switch {
-	case op.state == "committed" || (op.state == "unresolved" && op.retry):
+	switch op.state {
+	case "committed":
 		u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, nil)
 		if err != nil {
 			return err
 		}
 		return a.attemptAndSend(ctx, op.id, op.gen, op.machine, op.plan, u)
-	case op.state == "verifying":
+	case "verifying":
 		return a.verify(ctx, op.id, op.gen, op.machine, op.plan, "completion")
 	}
 	// Unresolved: the access is read once for the observation and, if it classifies the operation
@@ -71,6 +75,18 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 	var have *provider.TalosAccess
 	if err == nil {
 		have = &acc
+	}
+	if op.retry && (have == nil || have.Version().Version == op.retryAccess) {
+		// A classified retry rests on its observation, which read this access version; one made
+		// against another version is observed and classified again below.
+		u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, have)
+		if err != nil {
+			return err
+		}
+		if u.access.Version().Version != op.retryAccess {
+			return fmt.Errorf("operation %s: %w", op.id, errAccessMoved)
+		}
+		return a.attemptAndSend(ctx, op.id, op.gen, op.machine, op.plan, u)
 	}
 	purpose := "recovery"
 	if op.sent {
