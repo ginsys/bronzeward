@@ -32,6 +32,12 @@ var errAccessMoved = errors.New("the Talos access moved since the retry's observ
 // use-time check; an evidence observation taken with that access; the commitment; and the attempt.
 // An operation another loop committed first is that loop's.
 func (a *API) dispatchPlan(ctx context.Context, c dispatchCandidate) error {
+	// The candidate list is a pass old: it is read again before any protected resource is, so a plan
+	// revoked, expired or closed by an earlier dispatch while it queued gets neither (§3.1).
+	now, err := a.dispatchCandidates(ctx, c.plan)
+	if err != nil || len(now) == 0 {
+		return err
+	}
 	u, err := a.useTimeCheck(ctx, c.machine, c.cluster, c.plan, "", nil, time.Time{})
 	if err != nil {
 		return err
@@ -66,6 +72,11 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 		return a.attemptAndSend(ctx, op.id, op.gen, op.machine, op.plan, u)
 	case "verifying":
 		return a.verify(ctx, op.id, op.gen, op.machine, op.plan, "completion")
+	}
+	// An attempt nobody accounted for is accounted by a decision (§5.2) before any observation can
+	// settle the operation (row 020): the loop takes none meanwhile.
+	if op.unaccounted {
+		return nil
 	}
 	// Unresolved: the access is read once for the observation and, if it classifies the operation
 	// safe to retry, for the attempt made on it (§3.3). An operation with a recorded attempt is

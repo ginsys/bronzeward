@@ -14,13 +14,14 @@ type dispatchCandidate struct {
 }
 
 // heldOperation is an apply-config operation this process owns and the loop may advance: its state,
-// the owner generation it holds, whether an attempt was recorded for it, and whether its latest
-// classification is a retry this token may attempt (execution-recovery.md §3.3 comparison 8).
+// the owner generation it holds, whether an attempt was recorded for it, whether one of its
+// attempts is not accounted for, and whether its latest classification is a retry this token may
+// attempt (execution-recovery.md §3.3 comparison 8).
 type heldOperation struct {
 	id, machine, cluster, plan, state string
 	gen                               int64
 	retryAccess                       int
-	sent, retry                       bool
+	sent, unaccounted, retry          bool
 }
 
 // executorState is what the loop keeps between passes: whether the controller-start read of the
@@ -100,11 +101,13 @@ func (a *API) executorPass(ctx context.Context, st *executorState) bool {
 			a.o.logf("executor: %v", err)
 		case errors.As(err, &refused):
 			a.o.logf("dispatch of %s: %v", key, err)
-			// A plan whose approval, bindings or evidence a refusal showed is dead for this process;
+			// A plan whose approval, bindings or evidence a refusal showed is dead for this process
+			// (§3.2: a refused record ends the attempts for that plan, and a new plan is the retry);
 			// a held scope or a gate is retried.
-			if refused.Comparison <= "3" {
+			switch refused.Comparison {
+			case "1", "2", "3":
 				st.ended[key] = true
-			} else {
+			default:
 				st.retry[key] = time.Now().Add(a.d.timers.Lease)
 			}
 		default:
@@ -155,7 +158,7 @@ func (a *API) executorPass(ctx context.Context, st *executorState) bool {
 			return false
 		}
 	}
-	cs, err := a.dispatchCandidates(ctx)
+	cs, err := a.dispatchCandidates(ctx, "")
 	if err != nil {
 		return step("candidates", err)
 	}
@@ -227,6 +230,8 @@ func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 	}
 	rows, err := a.db.QueryContext(ctx, `SELECT o.id, o.machine, o.cluster, o.plan, o.state, o.owner_gen,
 			EXISTS (SELECT FROM attempt WHERE operation = o.id),
+			EXISTS (SELECT FROM attempt t WHERE t.operation = o.id
+				AND NOT EXISTS (SELECT FROM attempt_accounting c WHERE c.attempt = t.id)),
 			(SELECT ob.access_version FROM operation_classification c JOIN observation ob ON ob.id = c.observation
 					JOIN machine_event se ON se.machine = ob.machine AND se.revision = ob.basis
 				WHERE c.operation = o.id AND c.outcome = 'safe-to-retry'
@@ -247,7 +252,8 @@ func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 	for rows.Next() {
 		var op heldOperation
 		var retryAccess sql.NullInt64
-		if err := rows.Scan(&op.id, &op.machine, &op.cluster, &op.plan, &op.state, &op.gen, &op.sent, &retryAccess); err != nil {
+		if err := rows.Scan(&op.id, &op.machine, &op.cluster, &op.plan, &op.state, &op.gen, &op.sent, &op.unaccounted,
+			&retryAccess); err != nil {
 			return nil, err
 		}
 		op.retry, op.retryAccess = retryAccess.Valid, int(retryAccess.Int64)
@@ -259,8 +265,10 @@ func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 // dispatchCandidates are the apply-config plans the loop may commit now, read at the database's
 // current time: approved in the current epoch and unexpired, the approval and its approver not
 // revoked, the machine's scope open and no operation holding it or the cluster's rollout scope,
-// which the loop waits for rather than have refused.
-func (a *API) dispatchCandidates(ctx context.Context) ([]dispatchCandidate, error) {
+// which the loop waits for rather than have refused. A plan names the one candidate to read again
+// immediately before its dispatch: an earlier dispatch in the pass, or a revocation, may have
+// closed it since the list was read.
+func (a *API) dispatchCandidates(ctx context.Context, plan string) ([]dispatchCandidate, error) {
 	current, err := a.currentEpoch(ctx)
 	if err != nil {
 		return nil, err
@@ -274,7 +282,8 @@ func (a *API) dispatchCandidates(ctx context.Context) ([]dispatchCandidate, erro
 			AND m.scope_state IN ('normal', 'released') AND NOT m.frozen AND NOT (i.recovery_mode AND m.scope_state <> 'released')
 			AND NOT EXISTS (SELECT FROM operation o WHERE o.kind = 'apply-config'
 				AND o.state IN ('committed', 'sending', 'verifying', 'unresolved') AND (o.machine = p.machine OR o.cluster = p.cluster))
-		ORDER BY p.id`, current)
+			AND ($2 = '' OR p.id = $2)
+		ORDER BY p.id`, current, plan)
 	if err != nil {
 		return nil, err
 	}
