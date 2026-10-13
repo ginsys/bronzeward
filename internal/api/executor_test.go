@@ -432,6 +432,41 @@ func TestExecutorReclassifiesExpiredRetryEvidence(t *testing.T) {
 	}
 }
 
+// ER §3.1 and §3.3: a retry is made with the access its evidence read. When the access moved to
+// another version while the retry was held back, the operation is observed and classified again
+// with the new one, and the attempt rests on that observation.
+func TestExecutorRetryFollowsAccessRotation(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.ready(t)
+	if _, err := xe.a.commitPlan(context.Background(), xe.pid); err != nil {
+		t.Fatal(err)
+	}
+	xe.x.mu.Lock()
+	xe.x.decryptErr = fmt.Errorf("sealed: %w", provider.ErrUnavailable)
+	xe.x.mu.Unlock()
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{})
+	a.startExecutor()
+	defer stopping(a, stop)
+	until(t, a, idle, "a retry held back by a sealed provider", func() bool {
+		return xe.entries(t, "use-time-check") > 0 && count(t, xe.db, `SELECT count(*) FROM operation_classification
+			WHERE outcome = 'safe-to-retry'`) > 0
+	})
+	xe.x.mu.Lock()
+	v := xe.x.access.Version()
+	v.Version++
+	xe.x.access = provider.NewTalosAccess(v, xe.x.access.Talosconfig())
+	xe.x.decryptErr = nil
+	xe.x.mu.Unlock()
+	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation WHERE o.access_version = $1`,
+		v.Version); n != 1 {
+		t.Fatalf("the attempt does not rest on an observation read with access version %d", v.Version)
+	}
+}
+
 // ER §4 (unresolved to cancelled): an operation taken over with no attempt, whose approval can no
 // longer pass comparison 1, is cancelled and releases its scope, whatever the observation shows.
 func TestExecutorCancelsATakenOverOperationWhosePlanIsDead(t *testing.T) {
