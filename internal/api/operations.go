@@ -184,6 +184,10 @@ func scanEvent(epoch string) func(*sql.Rows) (eventBody, string, error) {
 // when the request accepts text/event-stream (§8.3).
 func getOperationEvents(a *API, w http.ResponseWriter, q *request) {
 	if strings.Contains(q.r.Header.Get("Accept"), "text/event-stream") {
+		if q.r.URL.RawQuery != "" {
+			a.fail(w, q, refuse(http.StatusBadRequest, "invalid-request", "an event stream takes no query; it resumes with Last-Event-ID"))
+			return
+		}
 		streamEvents(a, w, q)
 		return
 	}

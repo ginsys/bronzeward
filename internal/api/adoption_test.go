@@ -164,8 +164,8 @@ func TestAdoption(t *testing.T) {
 	}
 	if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND revision = $2 AND kind = 'applied-change'
 		AND epoch = $3 AND at = $4 AND entry = jsonb_build_object('from', NULL::text, 'to', $5::text, 'digest', $6::text,
-			'source', 'adoption', 'plan', $7::text)`,
-		ae.machine, r.Revision+1, ep, at, ae.target.rel, hex.EncodeToString(ae.baseline), ae.pid); n != 1 {
+			'source', 'adoption', 'plan', $7::text, 'operation', $8::text)`,
+		ae.machine, r.Revision+1, ep, at, ae.target.rel, hex.EncodeToString(ae.baseline), ae.pid, r.Operation); n != 1 {
 		t.Fatalf("%d Applied-change entries", n)
 	}
 	if n := count(t, ae.db, `SELECT count(*) FROM machine WHERE id = $1 AND revision_counter = $2`, ae.machine, r.Revision+1); n != 1 {

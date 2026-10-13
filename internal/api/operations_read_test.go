@@ -418,6 +418,44 @@ func TestEventStreamEndsAtTokenExpiry(t *testing.T) {
 	}
 }
 
+// §9.1: an event stream takes no query (it resumes with Last-Event-ID), and an operation is read
+// whole: its row is locked FOR SHARE before its attempts are read, so a transaction that holds it
+// is waited for and never seen between its statements.
+func TestOperationReadFollowsItsLock(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	op := xe.completedOperation(t)
+
+	req := httptest.NewRequest(http.MethodGet, prefix+"/operations/"+op+"/events?limit=5", nil)
+	req.Header.Set("Authorization", "Bearer "+xe.robot)
+	req.Header.Set("Accept", "text/event-stream")
+	rec := httptest.NewRecorder()
+	xe.env.api.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid-request") {
+		t.Fatalf("an event stream with a query: %d %s", rec.Code, rec.Body)
+	}
+
+	tx, err := xe.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	if _, err := tx.Exec(`SELECT 1 FROM operation WHERE id = $1 FOR UPDATE`, op); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan int, 1)
+	go func() { done <- xe.get(t, "/operations/"+op).Code }()
+	select {
+	case code := <-done:
+		t.Fatalf("the read returned %d while the operation row was held", code)
+	case <-time.After(500 * time.Millisecond):
+	}
+	_ = tx.Rollback()
+	if code := <-done; code != http.StatusOK {
+		t.Fatalf("the read after the lock: %d", code)
+	}
+}
+
 // The first read of a stream is bounded by the token's expiry too: held behind a lock, it ends
 // with the token and not with the lock.
 func TestEventStreamFirstReadEndsAtTokenExpiry(t *testing.T) {

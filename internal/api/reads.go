@@ -365,9 +365,11 @@ func scanOperation(r interface{ Scan(...any) error }) (operationBody, error) {
 	return finishOperation(b, draft, revision, principal, role, res, fail), nil
 }
 
-// readOperation reads operation v as §8.3 shows it.
+// readOperation reads operation v as §8.3 shows it. The row is locked FOR SHARE before its
+// attempts are read: a transaction that moves the operation and records an attempt or its
+// accounting commits whole either before or after this read, never between its two statements.
 func readOperation(ctx context.Context, tx *sql.Tx, v string) (operationBody, error) {
-	b, err := scanOperation(tx.QueryRowContext(ctx, selectOperation+` WHERE id = $1`, v))
+	b, err := scanOperation(tx.QueryRowContext(ctx, selectOperation+` WHERE id = $1 FOR SHARE`, v))
 	if err != nil || b.Subject == nil || b.Subject.Plan == "" {
 		return b, err
 	}
