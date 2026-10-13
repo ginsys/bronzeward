@@ -135,20 +135,27 @@ func (a *API) classify(ctx context.Context, tx *sql.Tx, l operationLock, outcome
 	return rev, err
 }
 
-// classifyObserved classifies on a recorded observation: what it relied on is the observation's
-// entry and every response and accounting entry of the operation's attempts, which is what makes
-// each attempt's outcome known to the classification.
-func (a *API) classifyObserved(ctx context.Context, tx *sql.Tx, l operationLock, outcome, observation string, revision int64,
-	generation int64) (int64, error) {
+// reliedEntries is the revisions, ascending, a classification of the operation relies on: every
+// response and accounting entry of its attempts, which makes each attempt's outcome known to it,
+// and the entry of the observation it rests on, when it has one.
+func reliedEntries(ctx context.Context, tx *sql.Tx, operation string, observation sql.NullInt64) ([]int64, error) {
 	var reliedDoc string
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(x.r ORDER BY x.r), '[]')::text FROM (
 			SELECT p.revision r FROM attempt_response p JOIN attempt a ON a.id = p.attempt WHERE a.operation = $1
 			UNION SELECT k.revision FROM attempt_accounting k JOIN attempt a ON a.id = k.attempt WHERE a.operation = $1
-			UNION SELECT $2::bigint) x`, l.id, revision).Scan(&reliedDoc); err != nil {
-		return 0, err
+			UNION SELECT $2::bigint WHERE $2::bigint IS NOT NULL) x`, operation, observation).Scan(&reliedDoc); err != nil {
+		return nil, err
 	}
 	var relied []int64
-	if err := json.Unmarshal([]byte(reliedDoc), &relied); err != nil {
+	err := json.Unmarshal([]byte(reliedDoc), &relied)
+	return relied, err
+}
+
+// classifyObserved classifies on a recorded observation, whose entry is at revision.
+func (a *API) classifyObserved(ctx context.Context, tx *sql.Tx, l operationLock, outcome, observation string, revision int64,
+	generation int64) (int64, error) {
+	relied, err := reliedEntries(ctx, tx, l.id, sql.NullInt64{Int64: revision, Valid: true})
+	if err != nil {
 		return 0, err
 	}
 	return a.classify(ctx, tx, l, outcome, sql.NullString{String: observation, Valid: true}, relied, generation)
@@ -313,15 +320,10 @@ func (a *API) recordResponse(ctx context.Context, attempt string, resp talos.Res
 			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM attempt WHERE operation = $1`, operation).Scan(&attempts); err != nil {
 				return err
 			}
-			// The rejection rests on every attempt's response (§5.1), this one included, and on no
-			// observation; its classification precedes the state entry.
-			var reliedDoc string
-			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(p.revision ORDER BY p.revision), '[]')::text
-				FROM attempt_response p JOIN attempt a ON a.id = p.attempt WHERE a.operation = $1`, operation).Scan(&reliedDoc); err != nil {
-				return err
-			}
-			var relied []int64
-			if err := json.Unmarshal([]byte(reliedDoc), &relied); err != nil {
+			// The rejection rests on every attempt's response (§5.1), this one included, and on any
+			// accounting of a lost one, but on no observation; its classification precedes the state entry.
+			relied, err := reliedEntries(ctx, tx, operation, sql.NullInt64{})
+			if err != nil {
 				return err
 			}
 			if _, err := a.classify(ctx, tx, l, "rejected", sql.NullString{}, relied, gen); err != nil {
