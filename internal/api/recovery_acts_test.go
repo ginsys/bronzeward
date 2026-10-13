@@ -85,6 +85,19 @@ func TestAccountingRequest(t *testing.T) {
 	if n := count(t, ae.db, `SELECT count(*) FROM attempt_accounting`); n != 0 {
 		t.Fatal("an unexplained version change was accounted")
 	}
+	// An observation of another machine is not the operation's: the otherwise eligible decision is
+	// refused before any accounting.
+	ae.second(t)
+	own := ae.machine
+	ae.machine = ae.machine2
+	foreign := ae.observed(t, func(c *cobs) { c.purpose = "drift" })
+	ae.machine = own
+	elsewhere := fmt.Sprintf(`{"start":%q,"end":%q,"facts":{"explanation":"the abandoned apply landed"}}`, start, foreign)
+	wantProblem(t, ae.post(next, "acc-x2", path, elsewhere), http.StatusNotFound, "not-found")
+	if n := count(t, ae.db, `SELECT count(*) FROM attempt_accounting`) + count(t, ae.db,
+		`SELECT count(*) FROM act WHERE action = 'attempt.account'`); n != 0 {
+		t.Fatal("a refused cross-object request was accounted")
+	}
 	b := decode[accountingBody](t, ae.post(next, "acc-2", path, body(`{"explanation":"the abandoned apply landed"}`)), http.StatusCreated)
 	if b.Operation != ae.op || b.Attempt != att.Attempt || b.DecidedBy != ae.principalOf("h-recovery") || b.Role != "recovery-admin" ||
 		b.Start != start || b.End != end {
@@ -105,6 +118,32 @@ func TestAccountingRequest(t *testing.T) {
 	unknown := fmt.Sprintf(`{"start":%q,"end":"obs_aaaaaaaaaaaaaaaaaaaaaaaaaa"}`, start)
 	wantProblem(t, ae.post(next, "acc-5", path, unknown), http.StatusNotFound, "not-found")
 	wantProblem(t, ae.post(next, "acc-6", path, `{"start":"x","end":"y"}`), http.StatusBadRequest, "invalid-request")
+}
+
+// An attempt named under an operation it is not of is not found: the first operation's attempt,
+// rejected, under the cluster's next operation.
+func TestAccountingRequestOtherOperation(t *testing.T) {
+	t.Parallel()
+	ae := newAttemptEnv(t, "")
+	att := ae.sent(t)
+	if _, err := ae.a.recordResponse(context.Background(), att.Attempt, answer(talos.ClassRejected)); err != nil {
+		t.Fatal(err)
+	}
+	ae.second(t)
+	ae.evidence(t, ae.plan2, nil)
+	r, err := ae.a.commitPlan(context.Background(), ae.plan2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow })
+	end := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow+time.Minute })
+	rec := ae.do(ae.a, call{method: "POST", path: prefix + "/operations/" + r.Operation + "/attempts/" + att.Attempt + "/accountings",
+		token: ae.human("h-recovery"), key: "k-recovery-acc-other-0123456789",
+		body: fmt.Sprintf(`{"start":%q,"end":%q}`, start, end)})
+	wantProblem(t, rec, http.StatusNotFound, "not-found")
+	if n := count(t, ae.db, `SELECT count(*) FROM act WHERE action = 'attempt.account'`); n != 0 {
+		t.Fatal("a refused request recorded an act")
+	}
 }
 
 // A resolution (execution-recovery.md §4): an unresolved operation that recorded no attempt becomes
