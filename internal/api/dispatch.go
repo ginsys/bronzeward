@@ -1,0 +1,233 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/seam"
+	"github.com/ginsys/bronzeward/internal/talos"
+)
+
+// useTime is what a passed use-time check holds for the dispatch that made it: the Talos access
+// read once, and the bound artifact decrypted. Neither is stored or logged.
+type useTime struct {
+	access   provider.TalosAccess
+	artifact provider.Artifact
+}
+
+// errUseTime is a use-time check one dependency failed: nothing was committed and nothing sent.
+var errUseTime = errors.New("the use-time check failed")
+
+// dispatchPlan takes an approved apply-config plan to its sent attempt (execution-recovery.md
+// §3.1 to §3.5): the Talos access read once and the bound artifact decrypted, recorded as the
+// use-time check; an evidence observation taken with that access; the commitment; and the attempt.
+// An operation another loop committed first is that loop's.
+func (a *API) dispatchPlan(ctx context.Context, c dispatchCandidate) error {
+	u, err := a.useTimeCheck(ctx, c.machine, c.cluster, c.plan, "", nil)
+	if err != nil {
+		return err
+	}
+	if _, err := a.observe(ctx, c.machine, observeFor{purpose: "evidence", plan: c.plan, access: &u.access}); err != nil {
+		return err
+	}
+	seam.At("dispatch-evidence") // the use-time check and the evidence recorded, nothing committed
+	cm, err := a.commitPlan(ctx, c.plan)
+	if err != nil {
+		return err
+	}
+	seam.At("dispatch-committed") // the operation committed, no attempt recorded
+	return a.attemptAndSend(ctx, cm.Operation, 1, c.machine, c.plan, u)
+}
+
+// advance carries one operation this process owns a step on: a committed one to its attempt; a
+// verifying one to its completion observation; an unresolved one to a recovery observation, and,
+// classified safe to retry, to a new attempt.
+func (a *API) advance(ctx context.Context, op heldOperation) error {
+	switch {
+	case op.state == "committed" || (op.state == "unresolved" && op.retry):
+		u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, nil)
+		if err != nil {
+			return err
+		}
+		return a.attemptAndSend(ctx, op.id, op.gen, op.machine, op.plan, u)
+	case op.state == "verifying":
+		return a.verify(ctx, op.id, op.gen, op.machine, op.plan, "completion")
+	}
+	// Unresolved: the access is read once for the recovery observation and, if it classifies the
+	// operation safe to retry, for the attempt made on it (§3.3).
+	acc, err := a.d.exe.TalosAccess(ctx, op.cluster)
+	var have *provider.TalosAccess
+	if err == nil {
+		have = &acc
+	}
+	o, err := a.observe(ctx, op.machine, observeFor{purpose: "recovery", plan: op.plan, operation: op.id, access: have})
+	if err != nil {
+		return err
+	}
+	s, err := a.settleOperation(ctx, op.id, op.gen, o.ID)
+	if err != nil {
+		return err
+	}
+	a.o.logf("operation %s: recovery observation %s: %s: %s", op.id, o.ID, s.Outcome, s.Cause)
+	if s.Outcome != "safe-to-retry" || have == nil {
+		return nil
+	}
+	u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, have)
+	if err != nil {
+		return err
+	}
+	return a.attemptAndSend(ctx, op.id, op.gen, op.machine, op.plan, u)
+}
+
+// useTimeCheck is §3.1 item 2: the cluster's Talos access, unless the caller read it, and the
+// decryption of the bound artifact under the bound key identity and version, recorded with their
+// results and the time as one use-time check entry on the machine's timeline, never the values. A
+// failed dependency fails the check: errUseTime, with nothing committed or sent.
+func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operation string, have *provider.TalosAccess) (useTime, error) {
+	var u useTime
+	deps := map[string]any{}
+	failed := false
+	fail := func(name, cause string) {
+		deps[name] = map[string]any{"result": "failed", "cause": cause}
+		failed = true
+	}
+	if have != nil {
+		u.access = *have
+	} else if acc, err := a.d.exe.TalosAccess(ctx, cluster); err != nil {
+		if ctx.Err() != nil {
+			return u, ctx.Err()
+		}
+		fail("access", accessCause(err))
+	} else {
+		u.access = acc
+	}
+	if !failed {
+		v := u.access.Version()
+		deps["access"] = map[string]any{"result": "passed", "path": v.Path, "version": v.Version,
+			"created": v.CreatedTime.UTC().Format(time.RFC3339Nano)}
+	}
+	var ct, key string
+	var version int
+	if err := a.db.QueryRowContext(ctx, `SELECT rm.ciphertext, rm.key_version, rm.key_name FROM plan p
+		JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine WHERE p.id = $1`, plan).Scan(&ct, &version,
+		&key); err != nil {
+		return u, err
+	}
+	switch {
+	case key != a.d.exe.ArtifactKey():
+		fail("artifact", "key-mismatch") // the bound key is not the one the executor decrypts under
+	default:
+		art, err := a.d.exe.DecryptArtifact(ctx, provider.Ciphertext(ct), version)
+		switch {
+		case err == nil:
+			u.artifact = art
+			deps["artifact"] = map[string]any{"result": "passed", "key": key, "version": version}
+		case ctx.Err() != nil:
+			return u, ctx.Err()
+		case errors.Is(err, provider.ErrUnavailable):
+			fail("artifact", "provider-unavailable")
+		default:
+			c := accessCause(err)
+			if c == "provider-unavailable" { // not a provider status: the ciphertext or the version was refused
+				c = "refused"
+			}
+			fail("artifact", c)
+		}
+	}
+	result := "passed"
+	if failed {
+		result = "failed"
+	}
+	entry := map[string]any{"plan": plan, "controller": a.d.owner.ID, "result": result, "dependencies": deps}
+	if operation != "" {
+		entry["operation"] = operation
+	}
+	if err := a.recordUseTimeCheck(ctx, machine, entry); err != nil {
+		return useTime{}, err
+	}
+	if failed {
+		return useTime{}, fmt.Errorf("plan %s: %w", plan, errUseTime)
+	}
+	return u, nil
+}
+
+// recordUseTimeCheck appends the use-time check entry under the same epoch check and machine lock
+// as an observation's.
+func (a *API) recordUseTimeCheck(ctx context.Context, machine string, entry map[string]any) error {
+	body, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	return a.inTx(ctx, func(tx *sql.Tx) error {
+		var current string
+		if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&current); err != nil {
+			return err
+		}
+		if current != a.d.owner.Epoch {
+			return errNotController
+		}
+		var rev int64
+		at, err := nextEntry(ctx, tx, machine, &rev)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+			VALUES ($1, $2, $3, 'use-time-check', $4::jsonb, $5)`, machine, rev, current, string(body), at)
+		return err
+	})
+}
+
+// attemptAndSend records the operation's attempt and, only if it is recorded, makes its one
+// request under the attempt's absolute transport deadline; records the response; and, when the
+// node accepted, takes the completion observation. An attempt that is refused sent nothing, and
+// its refusal is recorded and settled by the attempt itself.
+func (a *API) attemptAndSend(ctx context.Context, operation string, gen int64, machine, plan string, u useTime) error {
+	at, err := a.recordAttempt(ctx, operation, gen)
+	if err != nil {
+		return err
+	}
+	seam.At("dispatch-attempted") // the attempt recorded, nothing sent
+	var route string
+	var deadline time.Time
+	if err := a.db.QueryRowContext(ctx, `SELECT route::text, transport_deadline FROM attempt WHERE id = $1`, at.Attempt).Scan(&route,
+		&deadline); err != nil {
+		return err
+	}
+	sctx, cancel := context.WithDeadline(ctx, deadline)
+	resp := a.send(sctx, u.access.Talosconfig(), route, u.artifact)
+	cancel()
+	seam.At("dispatch-sent") // the request made, no response recorded
+	return a.respond(ctx, at.Attempt, operation, gen, machine, plan, resp)
+}
+
+// respond records the attempt's response. An in-process failure to record it leaves the operation
+// sending until a controller start takes it over (§3.4): no timer does.
+func (a *API) respond(ctx context.Context, attempt, operation string, gen int64, machine, plan string, resp talos.Response) error {
+	r, err := a.recordResponse(ctx, attempt, resp)
+	if err != nil {
+		return err
+	}
+	if r.State != "verifying" {
+		return nil
+	}
+	return a.verify(ctx, operation, gen, machine, plan, "completion")
+}
+
+// verify takes an observation for operation of the given purpose and settles the operation on it.
+func (a *API) verify(ctx context.Context, operation string, gen int64, machine, plan, purpose string) error {
+	o, err := a.observe(ctx, machine, observeFor{purpose: purpose, plan: plan, operation: operation})
+	if err != nil {
+		return err
+	}
+	s, err := a.settleOperation(ctx, operation, gen, o.ID)
+	if err != nil {
+		return err
+	}
+	a.o.logf("operation %s: %s observation %s: %s: %s", operation, purpose, o.ID, s.Outcome, s.Cause)
+	return nil
+}

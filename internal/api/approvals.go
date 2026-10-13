@@ -158,7 +158,7 @@ func approvePlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, e
 		return err
 	}
 	return result{status: http.StatusCreated, location: prefix + "/approvals/" + b.ID, body: &b,
-		subjects: []string{b.ID, plan, machine}, atActOrder: write, afterCommit: a.wakeAdopter}, nil
+		subjects: []string{b.ID, plan, machine}, atActOrder: write, afterCommit: a.wakeLoops}, nil
 }
 
 // getApproval reads approval v as T5a answered it (§9.3). An approval is immutable, so it carries

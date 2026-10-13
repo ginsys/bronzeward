@@ -147,7 +147,7 @@ var surface = []string{
 	"Identity.NodeID", "Identity.SMBIOSUUID",
 	"ParseEndpoint",
 	"Reader", "Reader.Close", "Reader.Identity", "Reader.MachineConfig", "Reader.Version",
-	"Response", "Response.Accounts", "Response.Class", "Response.Code", "Response.Text",
+	"Response", "Response.Accounts", "Response.Class", "Response.Code", "Response.Text", "TransportFailure",
 	"applier.ApplyNoReboot", "applier.Close",
 	"reader.Close", "reader.Identity", "reader.MachineConfig", "reader.Version",
 	"requestError.Error", "requestError.GRPCStatus", "requestError.Unwrap",

@@ -75,6 +75,13 @@ const (
 	noticeUnrecognised    = "the node's answer is not a recognisable acceptance; its content is withheld"
 )
 
+// TransportFailure is the response of an attempt whose request could not be made: no client could
+// be dialled, so nothing was sent. It is the transport outcome, which accounts for nothing
+// (execution-recovery.md §5.1): §5.2 draws no conclusion from a dial failure.
+func TransportFailure() Response {
+	return Response{Class: ClassTransport, Code: codes.Unavailable, Text: noticeTransport}
+}
+
 // ErrNoDeadline refuses a send whose context has no deadline: the transport deadline is recorded
 // with the attempt, and an unbounded send cannot be accounted (execution-recovery.md §3.3).
 var ErrNoDeadline = errors.New("talos: a send needs a transport deadline")
