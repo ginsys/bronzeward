@@ -32,7 +32,7 @@ var errAccessMoved = errors.New("the Talos access moved since the retry's observ
 // use-time check; an evidence observation taken with that access; the commitment; and the attempt.
 // An operation another loop committed first is that loop's.
 func (a *API) dispatchPlan(ctx context.Context, c dispatchCandidate) error {
-	u, err := a.useTimeCheck(ctx, c.machine, c.cluster, c.plan, "", nil)
+	u, err := a.useTimeCheck(ctx, c.machine, c.cluster, c.plan, "", nil, time.Time{})
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 	}
 	switch op.state {
 	case "committed":
-		u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, nil)
+		u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, nil, time.Time{})
 		if err != nil {
 			return err
 		}
@@ -70,7 +70,11 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 	// Unresolved: the access is read once for the observation and, if it classifies the operation
 	// safe to retry, for the attempt made on it (§3.3). An operation with a recorded attempt is
 	// observed for its completion, which alone can complete or fail it (§4); one with none, for
-	// recovery.
+	// recovery. The check made on that access runs its window from before this read.
+	began, err := a.dbClock(ctx)
+	if err != nil {
+		return err
+	}
 	acc, err := a.d.exe.TalosAccess(ctx, op.cluster)
 	var have *provider.TalosAccess
 	if err == nil {
@@ -79,7 +83,7 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 	if op.retry && (have == nil || have.Version().Version == op.retryAccess) {
 		// A classified retry rests on its observation, which read this access version; one made
 		// against another version is observed and classified again below.
-		u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, have)
+		u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, have, began)
 		if err != nil {
 			return err
 		}
@@ -104,7 +108,7 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 	if s.Outcome != "safe-to-retry" || have == nil {
 		return nil
 	}
-	u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, have)
+	u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, have, began)
 	if err != nil {
 		return err
 	}
@@ -114,12 +118,17 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 // useTimeCheck is §3.1 item 2: the cluster's Talos access, unless the caller read it, and the
 // decryption of the bound artifact under the bound key identity and version, recorded with their
 // results and the time as one use-time check entry on the machine's timeline, never the values. A
-// failed dependency fails the check: errUseTime, with nothing committed or sent.
-func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operation string, have *provider.TalosAccess) (useTime, error) {
+// failed dependency fails the check: errUseTime, with nothing committed or sent. The check's window
+// runs from started, the database time before the first dependency read: the zero time when the
+// check itself makes every read, the caller's own when it read the access first.
+func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operation string, have *provider.TalosAccess,
+	started time.Time) (useTime, error) {
 	var u useTime
-	var started time.Time // the check's window runs from here, before any dependency is read
-	if err := a.db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&started); err != nil {
-		return u, err
+	if started.IsZero() {
+		var err error
+		if started, err = a.dbClock(ctx); err != nil {
+			return u, err
+		}
 	}
 	deps := map[string]any{}
 	failed := false
@@ -186,6 +195,14 @@ func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operatio
 		return useTime{}, fmt.Errorf("plan %s: %w", plan, errUseTime)
 	}
 	return u, nil
+}
+
+// dbClock is the database's current time, the one clock the use-time check, the evidence and every
+// timeline entry are compared on.
+func (a *API) dbClock(ctx context.Context) (time.Time, error) {
+	var t time.Time
+	err := a.db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&t)
+	return t, err
 }
 
 // useTimeCheckCause is why the latest use-time check this controller recorded for the plan does not
