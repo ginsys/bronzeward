@@ -246,7 +246,7 @@ func (a *API) settleOperation(ctx context.Context, operation string, generation 
 		contradicted := (identity.Valid && !identity.Bool) || (digest.Valid && !digest.Bool) || (assignment.Valid && !assignment.Bool)
 		established := identity.Valid && identity.Bool && digest.Valid && digest.Bool && assignment.Valid && assignment.Bool
 		if established && purpose == "completion" && attempts > 0 {
-			return a.complete(ctx, tx, &l, plan, observation, &r)
+			return a.complete(ctx, tx, &l, plan, observation, revision, generation, &r)
 		}
 		if !contradicted && attempts > 0 {
 			// Neither, or established by a read that completes nothing (a recovery observation). A
@@ -269,16 +269,9 @@ func (a *API) settleOperation(ctx context.Context, operation string, generation 
 			return err
 		}
 		if retry {
-			rev, _, err := a.appendEntry(ctx, tx, l, "classification", map[string]any{"operation": operation, "outcome": "safe-to-retry",
-				"observation": observation, "relied": []int64{revision}, "controller": a.d.owner.ID, "generation": generation})
+			rev, err := a.classify(ctx, tx, l, "safe-to-retry", sql.NullString{String: observation, Valid: true},
+				[]int64{revision}, generation)
 			if err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO operation_classification (operation, machine, revision, outcome, observation,
-					owner, owner_gen, owner_epoch, relied, at)
-				SELECT $1, $2, $3, 'safe-to-retry', $4, $5, $6, $7, to_jsonb(ARRAY[$8::bigint]), at FROM machine_event
-				WHERE machine = $2 AND revision = $3`, operation, l.machine, rev, observation, a.d.owner.ID, generation, l.current,
-				revision); err != nil {
 				return err
 			}
 			if l.state == "verifying" {
@@ -293,6 +286,10 @@ func (a *API) settleOperation(ctx context.Context, operation string, generation 
 			return stay("pending", "the observation does not fail the operation: "+why)
 		}
 		cause := "a completion observation contradicts the postconditions"
+		if _, err := a.classify(ctx, tx, l, "failed", sql.NullString{String: observation, Valid: true}, []int64{revision},
+			generation); err != nil {
+			return err
+		}
 		if err := a.moveOperation(ctx, tx, &l, "failed", cause, nil, map[string]any{"outcome": "failed", "cause": cause,
 			"observation": observation, "attempts": attempts}); err != nil {
 			return err
@@ -350,7 +347,8 @@ func (a *API) safeToRetry(ctx context.Context, tx *sql.Tx, l operationLock, plan
 // complete records a completed operation (execution-recovery.md §4): its result, `Applied` set to
 // the plan's release and the artifact's digest from source operation with the baseline revision
 // advanced, and one `Applied` change entry, as one transaction with the state's own entry.
-func (a *API) complete(ctx context.Context, tx *sql.Tx, l *operationLock, plan, observation string, r *settlement) error {
+func (a *API) complete(ctx context.Context, tx *sql.Tx, l *operationLock, plan, observation string, revision, generation int64,
+	r *settlement) error {
 	var release string
 	var digest []byte
 	var from sql.NullString
@@ -360,6 +358,10 @@ func (a *API) complete(ctx context.Context, tx *sql.Tx, l *operationLock, plan, 
 		return err
 	}
 	cause := "the observation establishes the bound postconditions"
+	if _, err := a.classify(ctx, tx, *l, "completed", sql.NullString{String: observation, Valid: true}, []int64{revision},
+		generation); err != nil {
+		return err
+	}
 	if err := a.moveOperation(ctx, tx, l, "completed", cause, map[string]any{"appliedRelease": release,
 		"digest": fmt.Sprintf("%x", digest), "observation": observation}, nil); err != nil {
 		return err
