@@ -45,15 +45,18 @@ func (e *Executor) TalosAccess(ctx context.Context, cluster string) (TalosAccess
 // an error or a response body cannot carry it by accident; ArtifactBytes is the one way out. The
 // way out is a function, not a method: no interface the value satisfies or is asserted to can then
 // yield the plaintext, and a source guard holds every reference to the function to the dispatch
-// sender.
-type Artifact struct{ b *[]byte }
+// sender. The plaintext is held in a closure, not a field of slice or pointer-to-slice type: fmt
+// walks the unexported field of a caller's own struct by reflection, where it cannot call Format,
+// and renders such a field's bytes (and a pointer to them under %s or %q); a func renders as its
+// address under every verb and reflection reaches nothing inside it.
+type Artifact struct{ get func() []byte }
 
 // ArtifactBytes is a's plaintext. The caller owns the copy it makes; the value is not retained.
 func ArtifactBytes(a Artifact) []byte {
-	if a.b == nil {
+	if a.get == nil {
 		return nil
 	}
-	return *a.b
+	return a.get()
 }
 
 const artifactPlaceholder = "[artifact: not rendered]"
@@ -110,5 +113,5 @@ func (e *Executor) DecryptArtifact(ctx context.Context, ct Ciphertext, keyVersio
 	if err != nil {
 		return Artifact{}, r.bad("the plaintext is not base64")
 	}
-	return Artifact{b: &plain}, nil
+	return Artifact{get: func() []byte { return plain }}, nil
 }

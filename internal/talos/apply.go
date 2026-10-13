@@ -50,7 +50,7 @@ type Response struct {
 	Class Class
 	// Code is the gRPC code of the answer: OK for an acceptance and for an unrecognised answer
 	// without an error, the node's code otherwise, and for a transport outcome the status code the
-	// client saw (Unavailable, DeadlineExceeded, Canceled, ResourceExhausted, Internal or Unknown).
+	// client saw (clientCodes).
 	Code codes.Code
 	Text string
 }
@@ -131,13 +131,19 @@ func (a *applier) Close() error { return a.api.Close() }
 // recognised as validation, so it cannot make an operation `rejected`.
 var validationShape = regexp.MustCompile(`^\d+ errors? occurred: \* v1alpha1\.Config: `)
 
-// clientCodes are the codes the gRPC client itself produces for what never reached, or could not be
-// read from, the node: a connection or transport failure, a deadline, a cancellation, a response over
-// its receive limit (ResourceExhausted), one it could not decode (Internal) and a malformed status
-// from the other end (Unknown). A status error of one of them that is not a node's message does not
-// show the node answered, so it accounts for nothing.
+// clientCodes are the codes the gRPC client itself produces, from something other than a status the
+// node sent: a connection or transport failure, a deadline, a cancellation, a response over its
+// receive limit (ResourceExhausted), one it could not decode (Internal), a malformed status from the
+// other end (Unknown), and the codes it derives from a stream reset or an HTTP status when no gRPC
+// status arrived: INADEQUATE_SECURITY and HTTP 403 become PermissionDenied, HTTP 401 Unauthenticated,
+// HTTP 404 Unimplemented (grpc-go internal/transport/http_util.go, http2ErrConvTab and
+// HTTPStatusConvTab). A plain status error of one of them cannot be told from the node's own, so it
+// does not show the node answered and accounts for nothing; the same code in a response message's
+// error is the node's (a NodeError). A node's genuine refusal with one of these codes is therefore
+// left to a completion observation, which is the safe side of the two.
 var clientCodes = []codes.Code{
 	codes.Unavailable, codes.DeadlineExceeded, codes.Canceled, codes.ResourceExhausted, codes.Internal, codes.Unknown,
+	codes.PermissionDenied, codes.Unauthenticated, codes.Unimplemented,
 }
 
 // classifyApply reads one send's outcome. It reads the node's message only to classify it and never
