@@ -754,9 +754,9 @@ Required entries:
 | Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 and §6.5 to that evidence (§3.2) |
 | Attempt | attempt id, owner token, route, transport and verification deadlines; for a retry, the classification revision it is bound to |
 | Response | attempt id, class (acceptance, gRPC code, transport outcome), redacted text or the withheld notice (§3.5) |
-| Ownership transition | from and to owner, generation, epoch, reason |
+| Ownership transition | the operation, from and to owner, the generation and epoch it moved from and to, reason |
 | Accounting | attempt id, basis (a response, or a §5.2 decision with its recorded facts), decider and role |
-| Classification | the outcome of §5 and the entries relied on, by revision |
+| Classification | the operation, the outcome of §5, the observation it rests on and the entries relied on, by revision |
 | `Applied` change | from, to, digest, source (operation or adoption record) |
 | Endpoint change | previous and new Talos endpoint, who, role ([persistence and API §3.3](persistence-api.md#33-talos-access)) |
 

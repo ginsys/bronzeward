@@ -39,8 +39,10 @@ type attempted struct {
 // SHARE, and the operation's row through comparison 7's write; reads the time after the last lock
 // (rule 4); compares 1, 2, 3, 6, 7 and 9 in order; and records the attempt, its identity, owner
 // token, route and absolute deadlines, as one attempt entry, before anything is sent. A refusal
-// rolls back and is recorded, and settled, by a separate transaction (§4.1, PA §8.1). The first
-// attempt only: comparison 8 and retries are ginsys/bronzeward#26's, and nothing here sends.
+// rolls back and is recorded, and settled, by a separate transaction (§4.1, PA §8.1). A retry of an
+// unresolved operation classified safe to retry by this token passes 7 on that classification,
+// relies on its observation at 3 and follows it at 8, naming its revision on the entry and the
+// record. Nothing here sends.
 func (a *API) recordAttempt(ctx context.Context, operation string, generation int64) (attempted, error) {
 	if a.d.owner.ID == "" {
 		return attempted{}, errNotController
@@ -151,8 +153,11 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 			}
 		}
 	} else {
+		// Committed, or unresolved and classified safe to retry by this token (comparison 7).
 		res, err := tx.ExecContext(ctx, `UPDATE operation SET state = 'sending'
-			WHERE id = $1 AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4 AND state = 'committed'`,
+			WHERE id = $1 AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4 AND (state = 'committed' OR (state = 'unresolved'
+				AND EXISTS (SELECT FROM operation_classification c WHERE c.operation = $1 AND c.outcome = 'safe-to-retry'
+					AND c.owner = $2 AND c.owner_gen = $3 AND c.owner_epoch = $4)))`,
 			operation, a.d.owner.ID, generation, current)
 		if err != nil {
 			return r, machine, plan, err
@@ -187,8 +192,20 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 	}
 	// 3: the commitment's evidence, still within the plan's age at this attempt's time, and no later
 	// observation that read the identity, the configuration or the running minor otherwise.
+	// A retry relies on its classification's observation instead (execution-recovery.md §3.3); the
+	// operation's row is locked by 7's write, so its latest classification is the one read here.
+	var cls sql.NullInt64
+	var clsOutcome, clsObs, clsOwner, clsEpoch sql.NullString
+	var clsGen sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT revision, outcome, observation, owner, owner_gen, owner_epoch FROM operation_classification
+		WHERE operation = $1 ORDER BY revision DESC LIMIT 1`, operation).Scan(&cls, &clsOutcome, &clsObs, &clsOwner, &clsGen, &clsEpoch)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return r, machine, plan, err
+	}
 	var obs string
-	if err := tx.QueryRowContext(ctx, `SELECT entry->>'observation' FROM machine_event
+	if cls.Valid && clsObs.Valid {
+		obs = clsObs.String
+	} else if err := tx.QueryRowContext(ctx, `SELECT entry->>'observation' FROM machine_event
 		WHERE machine = $1 AND kind = 'commitment' AND entry->>'operation' = $2`, machine, operation).Scan(&obs); err != nil {
 		return r, machine, plan, fmt.Errorf("attempt of operation %s: its commitment entry: %w", operation, err)
 	}
@@ -239,6 +256,25 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 		}
 		return r, machine, plan, refuseAttempt("7", "the operation is "+state.String)
 	}
+	// 8: a retry follows its classification: safe to retry, this token's, and since then no response,
+	// ownership transition, reclassification or other attempt on the operation's timeline. One
+	// classification admits one attempt.
+	if cls.Valid {
+		if clsOutcome.String != "safe-to-retry" || clsOwner.String != a.d.owner.ID || clsGen.Int64 != generation ||
+			clsEpoch.String != current {
+			return r, machine, plan, refuseAttempt("8", "the operation's latest classification is not this controller's to retry")
+		}
+		var later sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT kind FROM machine_event WHERE machine = $1 AND revision > $2
+				AND kind IN ('response', 'ownership-transition', 'classification', 'attempt') AND entry->>'operation' = $3
+			ORDER BY revision LIMIT 1`, machine, cls.Int64, operation).Scan(&later)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return r, machine, plan, err
+		}
+		if later.Valid {
+			return r, machine, plan, refuseAttempt("8", "a "+later.String+" entry follows the classification")
+		}
+	}
 	// 9: attempts remain. Every attempt is recorded under the machine's lock, so the count is current.
 	var made int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM attempt WHERE operation = $1`, operation).Scan(&made); err != nil {
@@ -254,20 +290,21 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 		return r, machine, plan, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
-		SELECT $1, $2, $3, 'attempt', jsonb_build_object('attempt', $4::text, 'operation', $5::text, 'number', $6::integer,
-			'controller', $7::text, 'generation', $8::bigint, 'route', p.route::text,
+		SELECT $1, $2, $3, 'attempt', jsonb_strip_nulls(jsonb_build_object('attempt', $4::text, 'operation', $5::text,
+			'number', $6::integer, 'controller', $7::text, 'generation', $8::bigint, 'route', p.route::text,
 			'transportDeadline', $9::timestamptz + p.transport_deadline,
-			'verificationDeadline', $9::timestamptz + p.verification_deadline, 'observation', $10::text), $9
+			'verificationDeadline', $9::timestamptz + p.verification_deadline, 'observation', $10::text,
+			'classification', $12::bigint)), $9
 		FROM plan p WHERE p.id = $11`,
-		machine, r.Revision, current, r.Attempt, operation, r.Number, a.d.owner.ID, generation, at, obs, plan); err != nil {
+		machine, r.Revision, current, r.Attempt, operation, r.Number, a.d.owner.ID, generation, at, obs, plan, cls); err != nil {
 		return r, machine, plan, err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO attempt (id, operation, plan, machine, number, owner, owner_gen, owner_epoch, route,
-			observation, transport_deadline, verification_deadline, at, revision)
+			observation, transport_deadline, verification_deadline, at, revision, classification)
 		SELECT $1, $2, p.id, p.machine, $3, $4, $5, $6, p.route, $7, $8::timestamptz + p.transport_deadline,
-			$8::timestamptz + p.verification_deadline, $8, $9
+			$8::timestamptz + p.verification_deadline, $8, $9, $11
 		FROM plan p WHERE p.id = $10`,
-		r.Attempt, operation, r.Number, a.d.owner.ID, generation, current, obs, at, r.Revision, plan)
+		r.Attempt, operation, r.Number, a.d.owner.ID, generation, current, obs, at, r.Revision, plan, cls)
 	return r, machine, plan, err
 }
 

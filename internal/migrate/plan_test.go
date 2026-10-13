@@ -602,14 +602,18 @@ func TestPlanOperations(t *testing.T) {
 	// and the scopes end at a terminal state, which may drop the owner. Its attempt is what lets it
 	// reach sending (execution and recovery §4).
 	now := time.Now()
-	commitRows(t, db, p.entry(p.machine, 30, "attempt"), newRecord("attempt", "id", id.New(id.Attempt), "operation", opID,
+	attemptID := id.New(id.Attempt)
+	commitRows(t, db, p.entry(p.machine, 30, "attempt"), newRecord("attempt", "id", attemptID, "operation", opID,
 		"plan", p.apply, "machine", p.machine, "number", 1, "owner", owner, "owner_gen", 1, "owner_epoch", p.epoch,
 		"route", "10.55.0.3:50000", "observation", obs, "transport_deadline", now.Add(time.Minute),
 		"verification_deadline", now.Add(5*time.Minute), "at", now, "revision", 30).stmt())
 	for _, state := range []string{"sending", "verifying", "unresolved"} {
 		mustExec(t, db, `UPDATE operation SET state = $2 WHERE id = $1`, opID, state)
 	}
-	mustExec(t, db, `UPDATE operation SET state = 'failed', owner = NULL, owner_gen = 0, owner_epoch = NULL WHERE id = $1`, opID)
+	// Failed names its error and follows the accounting of every attempt (§8 invariant 5).
+	commitRows(t, db, answered(p.machine, opID, p.epoch, attemptID, 31, "accepted")...)
+	mustExec(t, db, `UPDATE operation SET state = 'failed', error = '{"code": "conflict"}', owner = NULL, owner_gen = 0,
+		owner_epoch = NULL WHERE id = $1`, opID)
 	commitRows(t, db, commitSecond...)
 }
 
@@ -762,8 +766,8 @@ func TestPlanEntriesUnique(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The query found the tables it is about, so a renamed column cannot make it pass empty.
-	want := []string{"adoption_record", "approval", "approval_revocation", "attempt", "observation", "observation_start", "plan",
-		"plan_cancellation"}
+	want := []string{"adoption_record", "approval", "approval_revocation", "attempt", "attempt_accounting", "attempt_response",
+		"observation", "observation_start", "operation_classification", "plan", "plan_cancellation"}
 	if !slices.Equal(tables, want) {
 		t.Errorf("timeline record tables %v; want %v", tables, want)
 	}

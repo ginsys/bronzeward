@@ -1,0 +1,461 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/talos"
+)
+
+// cobs is one observation of the operation's machine as a controller records it, by default a
+// completion observation showing what a completed apply leaves: the machine's identity, the release's
+// artifact digest, the plan's assignment revision and the contract minor.
+type cobs struct {
+	purpose    string
+	operation  any    // the operation the observation's start names; the operation under test for a completion
+	digest     []byte // nil is the artifact's digest
+	assignment any    // nil is the plan's assignment revision
+	version    string
+	resource   string
+	unread     string
+	shift      time.Duration // the observation's start and record, from now
+	atPlan     bool          // a start naming the plan though its purpose needs none
+}
+
+// observed records o's observation and answers its id.
+func (ae *attemptEnv) observed(t *testing.T, change func(*cobs)) string {
+	t.Helper()
+	s := cobs{purpose: "completion", operation: ae.op, version: "v1.13.6", resource: "rv1", unread: "{}"}
+	if change != nil {
+		change(&s)
+	}
+	var route string
+	var uuid, nodeID sql.NullString
+	var cluster string
+	var artifact []byte
+	var assignment string
+	if err := ae.db.QueryRow(`SELECT p.route::text, m.smbios_uuid::text, m.talos_node_id, c.talos_cluster_id, rm.configuration_digest,
+			p.assignment_revision
+		FROM plan p JOIN machine m ON m.id = p.machine JOIN cluster c ON c.id = p.cluster
+			JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine WHERE p.id = $1`, ae.pid).Scan(&route,
+		&uuid, &nodeID, &cluster, &artifact, &assignment); err != nil {
+		t.Fatal(err)
+	}
+	if s.digest == nil {
+		s.digest = artifact
+	}
+	var asg any = assignment
+	if s.assignment != nil {
+		asg = s.assignment
+	}
+	var startPlan any
+	switch s.purpose {
+	case "evidence", "completion", "recovery":
+		startPlan = ae.pid
+	}
+	var startOperation any
+	if s.purpose == "completion" || s.purpose == "recovery" {
+		startOperation = s.operation
+	}
+	tx, err := ae.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var basis, rev int64
+	if err := tx.QueryRow(`UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1 RETURNING revision_counter`,
+		ae.machine).Scan(&basis); err != nil {
+		t.Fatal(err)
+	}
+	secs := s.shift.Seconds()
+	mustExec(t, tx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+		SELECT $1, $2, epoch, 'observation-started', jsonb_build_object('purpose', $3::text, 'plan', $4::text, 'endpoint', $5::text,
+			'controller', $6::text), now() + make_interval(secs => $7)
+		FROM installation_state`, ae.machine, basis, s.purpose, startPlan, route, ae.a.d.owner.ID, secs)
+	mustExec(t, tx, `INSERT INTO observation_start (machine, revision, purpose, plan, operation, endpoint, controller)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`, ae.machine, basis, s.purpose, startPlan, startOperation, route, ae.a.d.owner.ID)
+	obs := id.New(id.Observation)
+	if err := tx.QueryRow(`UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1 RETURNING revision_counter`,
+		ae.machine).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, tx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+		SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', $4::text, 'basis', $5::bigint),
+			now() + make_interval(secs => $6)
+		FROM installation_state`, ae.machine, rev, obs, s.purpose, basis, secs)
+	mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created, smbios_uuid,
+			talos_node_id, talos_cluster_id, assignment_evidence, running_version, configuration_digest, resource_version, unread, at)
+		SELECT $1, $2, $3, $4, 'access/talos/' || cluster, 3, '2026-10-01T00:00:00Z', $5::uuid, $6, $7, $8, $9, $10, $11, $12::jsonb,
+			now() + make_interval(secs => $13)
+		FROM machine WHERE id = $2`, obs, ae.machine, basis, rev, uuid, nodeID, cluster, asg, s.version, s.digest, s.resource, s.unread, secs)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return obs
+}
+
+// takenOverBy answers a second controller that took the operation over from generation 1.
+func (ae *attemptEnv) takenOverBy(t *testing.T) *API {
+	t.Helper()
+	next := observer(t, ae.env, &fakeExecutor{}, options{})
+	if _, err := next.takeOver(context.Background(), ae.op, 1, "controller-start"); err != nil {
+		t.Fatal(err)
+	}
+	return next
+}
+
+// decide records a recovery-admin's decision accounting attempt, by the human h-approver, as the
+// effect of its request: the act is written after the effect in the transaction.
+func (ae *attemptEnv) decide(t *testing.T, a *API, attempt, start, end string, facts map[string]any) (accounted, error) {
+	t.Helper()
+	var human string
+	if err := ae.db.QueryRow(`SELECT id FROM principal WHERE sub = 'h-approver'`).Scan(&human); err != nil {
+		t.Fatal(err)
+	}
+	var r accounted
+	err := a.inTx(context.Background(), func(tx *sql.Tx) error {
+		act := id.New(id.Act)
+		var err error
+		r, err = a.accountByDecision(context.Background(), tx, accountingDecision{Attempt: attempt, DecidedBy: human, Act: act,
+			Start: start, End: end, Facts: facts})
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(context.Background(), `INSERT INTO act (id, principal, principal_kind, via, action, subjects, epoch, at)
+			SELECT $1, $2, 'human', 'tool', 'account-attempt', '{}', epoch, now() FROM installation_state`, act, human)
+		return err
+	})
+	return r, err
+}
+
+// settleWindow is long enough after an attempt's transport deadline (60 s) for the settle floor (30 s).
+const settleWindow = 2 * time.Minute
+
+// The accounting decision (execution-recovery.md §5.2): a lost response is accounted only once its
+// executor is taken over, the settle floor has elapsed since the latest of the transport deadline
+// and the takeover, a recovery observation read the machine-configuration resource version at both
+// ends of the settle, and a change of that version is explained. It is one accounting entry and
+// record by decision and changes no state.
+func TestAccountByDecision(t *testing.T) {
+	t.Parallel()
+	setup := func(t *testing.T) (*attemptEnv, *API, string) {
+		ae := newAttemptEnv(t, "")
+		att := ae.sent(t)
+		if _, err := ae.a.recordResponse(context.Background(), att.Attempt, answer(talos.ClassTransport)); err != nil {
+			t.Fatal(err)
+		}
+		return ae, ae.takenOverBy(t), att.Attempt
+	}
+	t.Run("accounted", func(t *testing.T) {
+		t.Parallel()
+		ae, next, att := setup(t)
+		start := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow })
+		end := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow+time.Minute })
+		r, err := ae.decide(t, next, att, start, end, map[string]any{"basis": "the executor was taken over"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM attempt_accounting c JOIN machine_event e ON e.machine = c.machine
+				AND e.revision = c.revision AND e.kind = 'accounting'
+			WHERE c.attempt = $1 AND c.basis = 'decision' AND c.role = 'recovery-admin' AND c.start_observation = $2
+				AND c.end_observation = $3 AND c.revision = $4 AND c.facts->>'judgement' = 'true'
+				AND c.facts->>'startVersion' = 'rv1' AND c.facts->>'endVersion' = 'rv1' AND c.facts ? 'settleFloor'
+				AND e.entry->>'attempt' = $1 AND e.entry->>'basis' = 'decision'`, att, start, end, r.Revision); n != 1 {
+			t.Fatal("no decision accounting record and entry as recorded")
+		}
+		if state, _, _ := ae.state(t); state != "unresolved" {
+			t.Fatalf("the operation is %s", state)
+		}
+		if _, err := ae.decide(t, next, att, start, end, nil); err == nil {
+			t.Fatal("a second accounting of the attempt was recorded")
+		}
+	})
+	t.Run("version moved and explained", func(t *testing.T) {
+		t.Parallel()
+		ae, next, att := setup(t)
+		start := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow })
+		end := ae.observed(t, func(c *cobs) { c.purpose, c.shift, c.resource = "recovery", settleWindow+time.Minute, "rv2" })
+		var refused *outcomeRefused
+		if _, err := ae.decide(t, next, att, start, end, nil); !errors.As(err, &refused) {
+			t.Fatalf("a moved version with no explanation: %v; want a refusal", err)
+		}
+		if _, err := ae.decide(t, next, att, start, end, map[string]any{"explanation": "the landed apply of the abandoned request"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, c := range []struct {
+		name       string
+		start, end time.Duration
+		purpose    string
+		owner      bool // the attempt's own executor decides
+		cause      string
+	}{
+		{"floor not elapsed", time.Minute + 5*time.Second, time.Minute + 20*time.Second, "recovery", false, "floor"},
+		{"not a recovery observation", settleWindow, settleWindow + time.Minute, "completion", false, "recovery observation"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ae, next, att := setup(t)
+			start := ae.observed(t, func(o *cobs) { o.purpose, o.shift = "recovery", c.start })
+			end := ae.observed(t, func(o *cobs) { o.purpose, o.shift = c.purpose, c.end })
+			var refused *outcomeRefused
+			if _, err := ae.decide(t, next, att, start, end, nil); !errors.As(err, &refused) {
+				t.Fatalf("%s: %v; want a refusal", c.name, err)
+			}
+			if n := count(t, ae.db, `SELECT count(*) FROM attempt_accounting`); n != 0 {
+				t.Fatal("an accounting was recorded")
+			}
+		})
+	}
+	t.Run("executor not taken over", func(t *testing.T) {
+		t.Parallel()
+		ae := newAttemptEnv(t, "")
+		att := ae.sent(t)
+		start := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow })
+		end := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow+time.Minute })
+		var refused *outcomeRefused
+		if _, err := ae.decide(t, ae.a, att.Attempt, start, end, nil); !errors.As(err, &refused) {
+			t.Fatalf("a decision while the executor runs: %v; want a refusal", err)
+		}
+	})
+}
+
+// The completion observation's decision (execution-recovery.md §4, §5, §5.1, choice §10.10).
+func TestSettle(t *testing.T) {
+	t.Parallel()
+	// verifying: the controller sent, the node accepted. unresolved: the response was lost, the
+	// executor taken over and the attempt accounted by a decision, as its new owner at generation 2.
+	verifying := func(t *testing.T) (*attemptEnv, *API, int64) {
+		ae := newAttemptEnv(t, "")
+		ae.reach(t, "verifying")
+		return ae, ae.a, 1
+	}
+	lost := func(t *testing.T) (*attemptEnv, *API, int64) {
+		ae := newAttemptEnv(t, "")
+		att := ae.sent(t)
+		if _, err := ae.a.recordResponse(context.Background(), att.Attempt, answer(talos.ClassTransport)); err != nil {
+			t.Fatal(err)
+		}
+		next := ae.takenOverBy(t)
+		start := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow })
+		end := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow+time.Minute })
+		if _, err := ae.decide(t, next, att.Attempt, start, end, nil); err != nil {
+			t.Fatal(err)
+		}
+		return ae, next, 2
+	}
+	t.Run("completed", func(t *testing.T) {
+		t.Parallel()
+		for name, setup := range map[string]func(*testing.T) (*attemptEnv, *API, int64){"verifying": verifying, "unresolved": lost} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				ae, a, gen := setup(t)
+				obs := ae.observed(t, nil)
+				r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if r.State != "completed" || r.Outcome != "completed" {
+					t.Fatalf("settled %+v", r)
+				}
+				if n := count(t, ae.db, `SELECT count(*) FROM operation o JOIN plan p ON p.id = o.plan
+						JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine
+					WHERE o.id = $1 AND o.state = 'completed' AND o.error IS NULL AND o.result->>'appliedRelease' = p.release
+						AND o.result->>'observation' = $2 AND o.result->>'digest' = encode(rm.configuration_digest, 'hex')`,
+					ae.op, obs); n != 1 {
+					t.Fatal("no completed operation with its result")
+				}
+				if n := count(t, ae.db, `SELECT count(*) FROM machine_state ms JOIN plan p ON p.machine = ms.machine
+						JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine
+					WHERE p.id = $1 AND ms.applied_release = p.release AND ms.applied_digest = rm.configuration_digest
+						AND ms.applied_source = 'operation' AND ms.baseline_revision = p.baseline_revision + 1
+						AND ms.desired IS NOT DISTINCT FROM p.desired_release`, ae.pid); n != 1 {
+					t.Fatal("Applied is not the plan's release and digest, the baseline advanced")
+				}
+				if n := count(t, ae.db, `SELECT count(*) FROM machine_event e JOIN machine m ON m.id = e.machine
+						AND m.revision_counter = e.revision JOIN plan p ON p.id = $2
+					WHERE e.machine = $1 AND e.kind = 'applied-change' AND e.entry->>'source' = 'operation'
+						AND e.entry->>'plan' = p.id AND e.entry->>'to' = p.release`, ae.machine, ae.pid); n != 1 {
+					t.Fatal("the applied change entry is not the machine's last")
+				}
+			})
+		}
+	})
+	t.Run("unaccounted attempt", func(t *testing.T) {
+		t.Parallel()
+		ae := newAttemptEnv(t, "")
+		ae.seedAttempt(t)
+		mustExec(t, ae.db, `UPDATE operation SET state = 'sending' WHERE id = $1`, ae.op)
+		mustExec(t, ae.db, `UPDATE operation SET state = 'verifying' WHERE id = $1`, ae.op)
+		r, err := ae.a.settleOperation(context.Background(), ae.op, 1, ae.observed(t, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.State != "unresolved" || r.Outcome != "unresolved" {
+			t.Fatalf("settled %+v", r)
+		}
+		if state, _, _ := ae.state(t); state != "unresolved" {
+			t.Fatalf("the operation is %s", state)
+		}
+	})
+	t.Run("contradicted", func(t *testing.T) {
+		t.Parallel()
+		ae, a, gen := verifying(t)
+		obs := ae.observed(t, func(c *cobs) { c.digest = bytes.Repeat([]byte{0xee}, 32) })
+		r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.State != "failed" || r.Outcome != "failed" {
+			t.Fatalf("settled %+v", r)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM operation WHERE id = $1 AND state = 'failed' AND result IS NULL
+			AND error->>'outcome' = 'failed' AND error->>'observation' = $2`, ae.op, obs); n != 1 {
+			t.Fatal("no failed operation with its error")
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM machine_state ms JOIN plan p ON p.machine = ms.machine
+			WHERE p.id = $1 AND ms.applied_release IS NOT DISTINCT FROM (SELECT applied_release FROM machine_state WHERE machine = $2)
+				AND ms.baseline_revision = p.baseline_revision`, ae.pid, ae.machine); n != 1 {
+			t.Fatal("Applied changed")
+		}
+	})
+	t.Run("safe to retry", func(t *testing.T) {
+		t.Parallel()
+		ae, a, gen := lost(t)
+		obs := ae.observed(t, func(c *cobs) {
+			var d []byte
+			if err := ae.db.QueryRow(`SELECT expected_digest FROM plan WHERE id = $1`, ae.pid).Scan(&d); err != nil {
+				t.Fatal(err)
+			}
+			c.digest = d
+		})
+		r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.State != "unresolved" || r.Outcome != "safe-to-retry" || r.Revision == 0 {
+			t.Fatalf("settled %+v", r)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM operation_classification c JOIN machine_event e ON e.machine = c.machine
+				AND e.revision = c.revision AND e.kind = 'classification'
+			WHERE c.operation = $1 AND c.outcome = 'safe-to-retry' AND c.observation = $2 AND c.revision = $3
+				AND c.owner_gen = 2 AND e.entry->>'outcome' = 'safe-to-retry'`, ae.op, obs, r.Revision); n != 1 {
+			t.Fatal("no classification record and entry as recorded")
+		}
+	})
+	t.Run("safe to retry on a recovery observation", func(t *testing.T) {
+		t.Parallel()
+		ae, a, gen := lost(t)
+		obs := ae.observed(t, func(c *cobs) {
+			c.purpose = "recovery"
+			if err := ae.db.QueryRow(`SELECT expected_digest FROM plan WHERE id = $1`, ae.pid).Scan(&c.digest); err != nil {
+				t.Fatal(err)
+			}
+		})
+		r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Outcome != "safe-to-retry" {
+			t.Fatalf("settled %+v", r)
+		}
+	})
+	t.Run("a recovery observation fails nothing", func(t *testing.T) {
+		t.Parallel()
+		ae, a, gen := lost(t)
+		obs := ae.observed(t, func(c *cobs) { c.purpose, c.digest = "recovery", bytes.Repeat([]byte{0xee}, 32) })
+		r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Outcome != "pending" || r.State != "unresolved" {
+			t.Fatalf("settled %+v", r)
+		}
+	})
+	t.Run("pending", func(t *testing.T) {
+		t.Parallel()
+		for _, c := range []struct {
+			name   string
+			change func(*cobs)
+		}{
+			{"unread configuration", func(c *cobs) { c.unread = `{"configuration": {"cause": "unreadable"}}` }},
+			{"another purpose", func(c *cobs) { c.purpose = "evidence" }},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				t.Parallel()
+				ae, a, gen := verifying(t)
+				r, err := a.settleOperation(context.Background(), ae.op, gen, ae.observed(t, c.change))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if r.Outcome != "pending" || r.State != "verifying" {
+					t.Fatalf("settled %+v", r)
+				}
+				if state, _, _ := ae.state(t); state != "verifying" {
+					t.Fatalf("the operation is %s", state)
+				}
+			})
+		}
+		t.Run("ordered before the last accounting", func(t *testing.T) {
+			t.Parallel()
+			ae := newAttemptEnv(t, "")
+			att := ae.sent(t)
+			obs := ae.observed(t, nil)
+			if _, err := ae.a.recordResponse(context.Background(), att.Attempt, answer(talos.ClassAccepted)); err != nil {
+				t.Fatal(err)
+			}
+			r, err := ae.a.settleOperation(context.Background(), ae.op, 1, obs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Outcome != "pending" || r.State != "verifying" {
+				t.Fatalf("settled %+v", r)
+			}
+		})
+		t.Run("a later observation disagrees", func(t *testing.T) {
+			t.Parallel()
+			ae, a, gen := verifying(t)
+			obs := ae.observed(t, nil)
+			ae.observed(t, func(c *cobs) { c.purpose, c.digest = "drift", bytes.Repeat([]byte{0xee}, 32) })
+			r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Outcome != "pending" || r.State != "verifying" {
+				t.Fatalf("settled %+v", r)
+			}
+		})
+	})
+	t.Run("past the verification deadline", func(t *testing.T) {
+		t.Parallel()
+		ae, a, gen := verifying(t)
+		obs := ae.observed(t, func(c *cobs) {
+			c.shift, c.unread = 11*time.Minute, `{"configuration": {"cause": "unreadable"}}`
+		})
+		r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Outcome != "unresolved" || r.State != "unresolved" {
+			t.Fatalf("settled %+v", r)
+		}
+	})
+	t.Run("refusals", func(t *testing.T) {
+		t.Parallel()
+		ae, _, _ := verifying(t)
+		next := observer(t, ae.env, &fakeExecutor{}, options{})
+		obs := ae.observed(t, nil)
+		var refused *outcomeRefused
+		if _, err := next.settleOperation(context.Background(), ae.op, 1, obs); !errors.As(err, &refused) {
+			t.Fatalf("settle by a process that does not own the operation: %v", err)
+		}
+		if _, err := ae.a.settleOperation(context.Background(), ae.op, 2, obs); !errors.As(err, &refused) {
+			t.Fatalf("settle naming another generation: %v", err)
+		}
+	})
+}
