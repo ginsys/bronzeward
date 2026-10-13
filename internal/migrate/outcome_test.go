@@ -73,7 +73,17 @@ func TestOutcomeRecords(t *testing.T) {
 	// and a rejection on responses alone; cancelled and unresolved are recorded by the operation's
 	// state entry, not here.
 	refused(t, db, "classification entry naming no operation", "23514/machine_event_operation_entry",
-		a.entryOf(10, "classification", `{}`))
+		a.entryOf(10, "classification", `{"outcome": "rejected", "observation": null, "relied": []}`))
+	for name, e := range map[string]string{
+		"no outcome":        `{"operation": "` + a.op + `", "observation": null, "relied": []}`,
+		"a number outcome":  `{"operation": "` + a.op + `", "outcome": 1, "observation": null, "relied": []}`,
+		"no relied entries": `{"operation": "` + a.op + `", "outcome": "rejected", "observation": null}`,
+		"an object relied":  `{"operation": "` + a.op + `", "outcome": "rejected", "observation": null, "relied": {}}`,
+		"no observation":    `{"operation": "` + a.op + `", "outcome": "rejected", "relied": []}`,
+		"a number observed": `{"operation": "` + a.op + `", "outcome": "rejected", "observation": 3, "relied": []}`,
+	} {
+		refused(t, db, "classification entry naming "+name, "23514", a.entryOf(10, "classification", e))
+	}
 	for _, outcome := range []string{"safe-to-retry", "completed", "failed"} {
 		refused(t, db, outcome+" on no observation", "23514", a.classified(10, outcome, nil)...)
 	}
@@ -127,6 +137,8 @@ func TestOutcomeRecords(t *testing.T) {
 			append(a.classified(15, "safe-to-retry", a.obs), retry(14, 15)...)},
 		{"machine_event_attempt_entry", "ALTER TABLE machine_event DROP CONSTRAINT machine_event_attempt_entry",
 			[]stmt{a.entryOf(13, "accounting", `{"operation": "`+a.op+`"}`)}},
+		{"machine_event_classification", "ALTER TABLE machine_event DROP CONSTRAINT machine_event_classification",
+			[]stmt{a.entryOf(18, "classification", `{"operation": "`+a.op+`"}`)}},
 		{"operation_classification_outcome", "ALTER TABLE operation_classification DROP CONSTRAINT operation_classification_outcome",
 			a.classified(16, "unresolved", a.obs)},
 		{"operation_classification_observed", "ALTER TABLE operation_classification DROP CONSTRAINT operation_classification_observed",

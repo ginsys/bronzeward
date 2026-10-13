@@ -70,7 +70,12 @@ func (a attempts) entryOf(rev int, kind, entry string) stmt {
 func (a attempts) classified(rev int, outcome string, observation any) []stmt {
 	r := newRecord("operation_classification", "operation", a.op, "machine", a.machine, "revision", rev, "outcome", outcome,
 		"observation", observation, "owner", owner, "owner_gen", 1, "owner_epoch", a.epoch, "relied", `[]`, "at", time.Now())
-	return []stmt{a.entryOf(rev, "classification", `{"operation": "`+a.op+`", "outcome": "`+outcome+`"}`), r.stmt()}
+	obs := `null`
+	if s, ok := observation.(string); ok {
+		obs = `"` + s + `"`
+	}
+	return []stmt{a.entryOf(rev, "classification", `{"operation": "`+a.op+`", "outcome": "`+outcome+`", "observation": `+obs+
+		`, "relied": []}`), r.stmt()}
 }
 
 // answered is attempt att's response of class at revision rev, from the target, and the accounting
