@@ -342,6 +342,22 @@ func TestAttemptRefusesAnExpiredUseTimeCheck(t *testing.T) {
 		settled{"unresolved", "3", "the use-time check is older than the plan allows"})
 }
 
+// ER §3.1 item 2: a caller that read the access itself passes the time its reads began, and the
+// check's window runs from that time, not from the check's own start.
+func TestUseTimeCheckWindowStartsWhereTheCallersReadsBegan(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	began := time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond)
+	acc := xe.x.access
+	if _, err := xe.a.useTimeCheck(context.Background(), xe.machine, xe.cluster, xe.pid, "", &acc, began); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'use-time-check'
+		AND (entry->>'started')::timestamptz = $2`, xe.machine, began); n != 1 {
+		t.Fatalf("%d use-time checks start at %s", n, began.Format(time.RFC3339Nano))
+	}
+}
+
 // ER §3.1 item 2: the check's validity runs from before its dependency reads, so a check recorded
 // late, after slow reads, does not make the earlier values fresh.
 func TestAttemptMeasuresCheckValidityFromBeforeItsReads(t *testing.T) {
