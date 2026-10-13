@@ -146,6 +146,11 @@ func TestLiveApply(t *testing.T) {
 	}
 	got := send(bogus)
 	t.Logf("validation refusal answered %+v", got)
+	if got.Class != ClassRejected {
+		// Not refused: the node may hold the corrupted document, and later live tests share it. Put
+		// the original back before failing.
+		t.Logf("restoring the original configuration: %+v", send(before.Bytes()))
+	}
 	if got.Class != ClassRejected || !got.Accounts() {
 		t.Fatalf("an unknown machine type: %+v; want a rejection", got)
 	}
