@@ -189,9 +189,13 @@ unchanged_cp() {
 # one_apply <log before> <log now>: exactly one mutating request past the log before, and it is
 # ApplyConfiguration.
 one_apply() {
+  local methods
   [[ "$2" == "$1"* ]] || return 1
-  [ "$(run_mutations "$1" "$2")" = 1 ] &&
-    log_methods <<<"${2:${#1}}" | grep --quiet --fixed-strings --line-regexp -- machine.MachineService/ApplyConfiguration
+  [ "$(run_mutations "$1" "$2")" = 1 ] || return 1
+  # Read whole first: grep --quiet stops at its match, and under pipefail a writer still writing
+  # into the pipe would fail the check.
+  methods=$(log_methods <<<"${2:${#1}}") || return 1
+  grep --quiet --fixed-strings --line-regexp -- machine.MachineService/ApplyConfiguration <<<"$methods"
 }
 # keep <name> <path>: h-viewer's read of the path, kept in the evidence directory.
 keep() {
