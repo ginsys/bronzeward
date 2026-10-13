@@ -900,7 +900,8 @@ accounted only by a `recovery-admin` decision (DS §8), which may be recorded
 only when all of these hold and are recorded with it:
 
 1. the attempt's executor is stopped or taken over, so it can record no further
-   attempt (§3.4);
+   attempt (§3.4). Evidence of a stop is the takeover, which `recovery-admin`
+   may request explicitly; this contract keeps no separate stop record;
 2. at least the **settle floor** has elapsed since the latest of the attempt's
    transport deadline, the executor's stop or takeover, and the first
    successful read of the machine after that deadline. The settle floor is a

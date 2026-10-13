@@ -264,10 +264,11 @@ func TestRecordResponse(t *testing.T) {
 				wantClass = 1
 				if n := count(t, ae.db, `SELECT count(*) FROM operation_classification c JOIN machine_event e ON e.machine = c.machine
 						AND e.revision = c.revision AND e.kind = 'classification'
-					WHERE c.operation = $1 AND c.outcome = 'rejected' AND c.observation IS NULL AND c.relied = jsonb_build_array($2::bigint)
+					WHERE c.operation = $1 AND c.outcome = 'rejected' AND c.observation IS NULL
+							AND c.relied = jsonb_build_array($2::bigint, $2::bigint + 1)
 						AND c.owner = $3 AND c.owner_gen = 1 AND c.owner_epoch = $4 AND c.revision = $5 AND e.at = c.at
 						AND e.entry = jsonb_build_object('operation', $1::text, 'outcome', 'rejected', 'observation', NULL,
-							'relied', jsonb_build_array($2::bigint), 'controller', $3::text, 'generation', 1)`,
+							'relied', jsonb_build_array($2::bigint, $2::bigint + 1), 'controller', $3::text, 'generation', 1)`,
 					ae.op, r.Revision, ae.a.d.owner.ID, ep, r.Revision+2); n != 1 {
 					t.Fatal("no rejected classification record and entry as recorded")
 				}
