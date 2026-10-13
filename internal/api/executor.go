@@ -13,18 +13,20 @@ type dispatchCandidate struct {
 }
 
 // heldOperation is an apply-config operation this process owns and the loop may advance: its state,
-// the owner generation it holds and whether its latest classification is a retry this token may
-// attempt (execution-recovery.md §3.3 comparison 8).
+// the owner generation it holds, whether an attempt was recorded for it, and whether its latest
+// classification is a retry this token may attempt (execution-recovery.md §3.3 comparison 8).
 type heldOperation struct {
 	id, machine, cluster, plan, state string
 	gen                               int64
-	retry                             bool
+	sent, retry                       bool
 }
 
-// executorState is what the loop keeps between passes: the controller-start takeover still owed,
-// the retry times of what failed short of a refusal, and the plans a refusal ended.
+// executorState is what the loop keeps between passes: whether the controller-start read of the
+// operations to take over is still owed, the ones read and not yet taken over, the retry times of
+// what failed short of a refusal, and the plans a refusal ended.
 type executorState struct {
 	takeover bool
+	owed     []heldOperation
 	retry    map[string]time.Time
 	ended    map[string]bool
 }
@@ -114,18 +116,30 @@ func (a *API) executorPass(ctx context.Context, st *executorState) bool {
 		if err != nil {
 			return step("takeover", err) // the first pass is repeated until it has read them
 		}
-		st.takeover = false
-		for _, op := range ops {
-			_, err := a.takeOver(ctx, op.id, op.gen, "controller-start")
-			var refused *outcomeRefused
-			if errors.As(err, &refused) { // another process took it over first, or it ended
-				continue
-			}
-			if !step(op.id, err) {
-				return false
-			}
+		st.takeover, st.owed = false, ops
+	}
+	// A takeover that failed short of a refusal is kept, with the generation read, and retried after
+	// the lease: the operation is not this process's until it has been taken over.
+	var kept []heldOperation
+	for _, op := range st.owed {
+		if time.Now().Before(st.retry[op.id]) {
+			kept = append(kept, op)
+			continue
+		}
+		delete(st.retry, op.id)
+		_, err := a.takeOver(ctx, op.id, op.gen, "controller-start")
+		var refused *outcomeRefused
+		if errors.As(err, &refused) { // another process took it over first, or it ended
+			continue
+		}
+		if err != nil {
+			kept = append(kept, op)
+		}
+		if !step(op.id, err) {
+			return false
 		}
 	}
+	st.owed = kept
 	held, err := a.heldOperations(ctx)
 	if err != nil {
 		return step("operations", err)
@@ -199,21 +213,28 @@ func (a *API) foreignOperations(ctx context.Context) ([]heldOperation, error) {
 
 // heldOperations are the operations this process owns that the loop advances: committed (its
 // attempt not yet recorded), verifying and unresolved. A sending one is not: only a takeover moves
-// it, as no timer does (§3.4). retry marks an unresolved operation whose latest classification is
-// this token's safe-to-retry with no attempt, response, takeover or classification since.
+// it, as no timer does (§3.4). sent marks an operation with a recorded attempt. retry marks an
+// unresolved operation whose latest classification is this token's safe-to-retry, its observation
+// still within the plan's age, with no attempt, response, takeover or classification since: one
+// that has aged out is observed and classified again.
 func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 	current, err := a.currentEpoch(ctx)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := a.db.QueryContext(ctx, `SELECT o.id, o.machine, o.cluster, o.plan, o.state, o.owner_gen,
-			EXISTS (SELECT FROM operation_classification c WHERE c.operation = o.id AND c.outcome = 'safe-to-retry'
-				AND c.owner = o.owner AND c.owner_gen = o.owner_gen AND c.owner_epoch = o.owner_epoch
-				AND c.revision = (SELECT max(revision) FROM operation_classification WHERE operation = o.id)
-				AND NOT EXISTS (SELECT FROM machine_event e WHERE e.machine = o.machine AND e.revision > c.revision
-					AND e.kind IN ('attempt', 'response', 'ownership-transition', 'classification') AND e.entry->>'operation' = o.id))
-		FROM operation o WHERE o.kind = 'apply-config' AND o.state IN ('committed', 'verifying', 'unresolved')
-			AND o.owner = $1 AND o.owner_epoch = $2 ORDER BY o.created_at, o.id`, a.d.owner.ID, current)
+			EXISTS (SELECT FROM attempt WHERE operation = o.id),
+			EXISTS (SELECT FROM operation_classification c JOIN observation ob ON ob.id = c.observation
+					JOIN machine_event se ON se.machine = ob.machine AND se.revision = ob.basis
+				WHERE c.operation = o.id AND c.outcome = 'safe-to-retry'
+					AND c.owner = o.owner AND c.owner_gen = o.owner_gen AND c.owner_epoch = o.owner_epoch
+					AND c.revision = (SELECT max(revision) FROM operation_classification WHERE operation = o.id)
+					AND clock_timestamp() - se.at <= p.max_observation_age
+					AND NOT EXISTS (SELECT FROM machine_event e WHERE e.machine = o.machine AND e.revision > c.revision
+						AND e.kind IN ('attempt', 'response', 'ownership-transition', 'classification') AND e.entry->>'operation' = o.id))
+		FROM operation o JOIN plan p ON p.id = o.plan WHERE o.kind = 'apply-config'
+				AND o.state IN ('committed', 'verifying', 'unresolved')
+				AND o.owner = $1 AND o.owner_epoch = $2 ORDER BY o.created_at, o.id`, a.d.owner.ID, current)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +242,7 @@ func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 	var ops []heldOperation
 	for rows.Next() {
 		var op heldOperation
-		if err := rows.Scan(&op.id, &op.machine, &op.cluster, &op.plan, &op.state, &op.gen, &op.retry); err != nil {
+		if err := rows.Scan(&op.id, &op.machine, &op.cluster, &op.plan, &op.state, &op.gen, &op.sent, &op.retry); err != nil {
 			return nil, err
 		}
 		ops = append(ops, op)

@@ -238,6 +238,13 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 		return r, machine, fmt.Errorf("commitment of plan %s: evidence %s is older than the plan allows: %w", plan,
 			obs.String, errNoEvidence)
 	}
+	// The use-time check recorded with the evidence holds for the plan's validity window at this
+	// commitment, or the dispatch checks again.
+	if cause, err := a.useTimeCheckCause(ctx, tx, machine, plan, at); err != nil {
+		return r, machine, err
+	} else if cause != "" {
+		return r, machine, fmt.Errorf("commitment of plan %s: %s: %w", plan, cause, errNoEvidence)
+	}
 	// The evidence's identity, digest and running minor, then any later observation, of any purpose
 	// and by any process, that read one of them otherwise. A refusal names the observation that
 	// showed it, not the digest: no read answers a digest (choice §17.38).

@@ -48,6 +48,11 @@ func (a *API) dispatchPlan(ctx context.Context, c dispatchCandidate) error {
 // verifying one to its completion observation; an unresolved one to a recovery observation, and,
 // classified safe to retry, to a new attempt.
 func (a *API) advance(ctx context.Context, op heldOperation) error {
+	if !op.sent && op.state != "verifying" {
+		if done, err := a.cancelUnattempted(ctx, op); done || err != nil {
+			return err
+		}
+	}
 	switch {
 	case op.state == "committed" || (op.state == "unresolved" && op.retry):
 		u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, nil)
@@ -58,14 +63,20 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 	case op.state == "verifying":
 		return a.verify(ctx, op.id, op.gen, op.machine, op.plan, "completion")
 	}
-	// Unresolved: the access is read once for the recovery observation and, if it classifies the
-	// operation safe to retry, for the attempt made on it (§3.3).
+	// Unresolved: the access is read once for the observation and, if it classifies the operation
+	// safe to retry, for the attempt made on it (§3.3). An operation with a recorded attempt is
+	// observed for its completion, which alone can complete or fail it (§4); one with none, for
+	// recovery.
 	acc, err := a.d.exe.TalosAccess(ctx, op.cluster)
 	var have *provider.TalosAccess
 	if err == nil {
 		have = &acc
 	}
-	o, err := a.observe(ctx, op.machine, observeFor{purpose: "recovery", plan: op.plan, operation: op.id, access: have})
+	purpose := "recovery"
+	if op.sent {
+		purpose = "completion"
+	}
+	o, err := a.observe(ctx, op.machine, observeFor{purpose: purpose, plan: op.plan, operation: op.id, access: have})
 	if err != nil {
 		return err
 	}
@@ -73,7 +84,7 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 	if err != nil {
 		return err
 	}
-	a.o.logf("operation %s: recovery observation %s: %s: %s", op.id, o.ID, s.Outcome, s.Cause)
+	a.o.logf("operation %s: %s observation %s: %s: %s", op.id, purpose, o.ID, s.Outcome, s.Cause)
 	if s.Outcome != "safe-to-retry" || have == nil {
 		return nil
 	}
@@ -154,6 +165,23 @@ func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operatio
 		return useTime{}, fmt.Errorf("plan %s: %w", plan, errUseTime)
 	}
 	return u, nil
+}
+
+// useTimeCheckCause is why the latest use-time check this controller recorded for the plan does not
+// hold at time at, or "" when it does (§3.2 comparison 3, §3.3 comparison 3): the check failed, or
+// the plan's validity window has run out. A dispatch always records its check before its evidence,
+// so a plan with none is not one this controller dispatched, and nothing here refuses it.
+func (a *API) useTimeCheckCause(ctx context.Context, tx *sql.Tx, machine, plan string, at time.Time) (string, error) {
+	var cause string
+	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN e.entry->>'result' <> 'passed' THEN 'the use-time check failed'
+				WHEN $4::timestamptz - e.at > p.check_validity THEN 'the use-time check is older than the plan allows' ELSE '' END
+			FROM machine_event e JOIN plan p ON p.id = $2
+			WHERE e.machine = $1 AND e.kind = 'use-time-check' AND e.entry->>'plan' = $2 AND e.entry->>'controller' = $3
+			ORDER BY e.revision DESC LIMIT 1`, machine, plan, a.d.owner.ID, at).Scan(&cause)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return cause, err
 }
 
 // recordUseTimeCheck appends the use-time check entry under the same epoch check and machine lock
