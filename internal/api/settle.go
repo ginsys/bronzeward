@@ -137,7 +137,7 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 		return r, err
 	}
 	rev, at, err := a.appendEntry(ctx, tx, l, "accounting", map[string]any{"operation": operation, "attempt": d.Attempt,
-		"basis": "decision", "decidedBy": d.DecidedBy, "role": "recovery-admin"})
+		"basis": "decision", "decidedBy": d.DecidedBy, "role": "recovery-admin", "start": d.Start, "end": d.End, "facts": facts})
 	if err != nil {
 		return r, err
 	}
@@ -239,9 +239,13 @@ func (a *API) settleOperation(ctx context.Context, operation string, generation 
 		}
 		var blocking sql.NullString
 		if err := tx.QueryRowContext(ctx, `SELECT o2.id FROM observation c JOIN observation o2 ON o2.machine = c.machine AND o2.basis > c.basis
+			JOIN machine m ON m.id = c.machine
 			WHERE c.id = $1 AND (
-				(c.unread->'identity' IS NULL AND o2.unread->'identity' IS NULL AND (o2.smbios_uuid IS DISTINCT FROM c.smbios_uuid
-					OR o2.talos_node_id IS DISTINCT FROM c.talos_node_id OR o2.talos_cluster_id IS DISTINCT FROM c.talos_cluster_id))
+				(c.unread->'identity' IS NULL AND o2.unread->'identity' IS NULL AND (
+					CASE WHEN m.smbios_uuid IS NOT NULL THEN o2.smbios_uuid IS DISTINCT FROM c.smbios_uuid
+						ELSE o2.talos_node_id IS DISTINCT FROM c.talos_node_id
+							OR (o2.smbios_uuid IS NULL) <> (c.smbios_uuid IS NULL) END
+					OR o2.talos_cluster_id IS DISTINCT FROM c.talos_cluster_id))
 				OR (c.unread->'configuration' IS NULL AND o2.unread->'configuration' IS NULL
 					AND o2.configuration_digest IS DISTINCT FROM c.configuration_digest)
 				OR (c.unread->'assignmentEvidence' IS NULL AND o2.unread->'assignmentEvidence' IS NULL

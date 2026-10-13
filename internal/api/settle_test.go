@@ -27,6 +27,7 @@ type cobs struct {
 	began      time.Duration // the observation's start alone, from now, when it is not shift
 	atPlan     bool          // a start naming the plan though its purpose needs none
 	unreached  bool          // access was obtained but no node value was read
+	node       string        // the Talos node ID the observation read, when it is not the machine's
 }
 
 // observed records o's observation and answers its id.
@@ -77,6 +78,9 @@ func (ae *attemptEnv) observed(t *testing.T, change func(*cobs)) string {
 	secs, began := s.shift.Seconds(), s.shift.Seconds()
 	if s.began != 0 {
 		began = s.began.Seconds()
+	}
+	if s.node != "" {
+		nodeID = sql.NullString{String: s.node, Valid: true}
 	}
 	vals := []any{uuid, nodeID, cluster, asg, s.version, s.digest, s.resource}
 	if s.unreached {
@@ -177,7 +181,8 @@ func TestAccountByDecision(t *testing.T) {
 			WHERE c.attempt = $1 AND c.basis = 'decision' AND c.role = 'recovery-admin' AND c.start_observation = $2
 				AND c.end_observation = $3 AND c.revision = $4 AND c.facts->>'judgement' = 'true'
 				AND c.facts->>'startVersion' = 'rv1' AND c.facts->>'endVersion' = 'rv1' AND c.facts ? 'settleFloor'
-				AND e.entry->>'attempt' = $1 AND e.entry->>'basis' = 'decision'`, att, start, end, r.Revision); n != 1 {
+				AND e.entry->>'attempt' = $1 AND e.entry->>'basis' = 'decision'
+				AND e.entry->'facts' = c.facts AND e.entry->>'start' = $2 AND e.entry->>'end' = $3`, att, start, end, r.Revision); n != 1 {
 			t.Fatal("no decision accounting record and entry as recorded")
 		}
 		if state, _, _ := ae.state(t); state != "unresolved" {
@@ -594,6 +599,23 @@ func TestSettle(t *testing.T) {
 				t.Fatalf("settled %+v", r)
 			}
 		})
+	})
+	// A later observation disagrees on the identity under the machine's own key (§3.3 comparison 3):
+	// a machine keyed by its SMBIOS UUID is not another machine for reading another Talos node ID.
+	t.Run("a later observation of another node ID under the SMBIOS key", func(t *testing.T) {
+		t.Parallel()
+		ae, a, gen := verifying(t)
+		mustExec(t, ae.db, `UPDATE machine SET smbios_uuid = COALESCE(smbios_uuid, gen_random_uuid()), talos_node_id = NULL
+			WHERE id = $1`, ae.machine)
+		obs := ae.observed(t, nil)
+		ae.observed(t, func(c *cobs) { c.purpose, c.node = "drift", "another-node" })
+		r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Outcome != "completed" || r.State != "completed" {
+			t.Fatalf("settled %+v; a later observation of the same machine blocked the completion", r)
+		}
 	})
 	t.Run("past the verification deadline", func(t *testing.T) {
 		t.Parallel()
