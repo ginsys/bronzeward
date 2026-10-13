@@ -122,9 +122,9 @@ func routes() []*route {
 		human(m(post, "/recovery/scopes/{machine}/marks", recovery)),
 		human(m(post, "/recovery/scopes/{machine}/releases", recovery)),
 		human(m(post, "/recovery/accountings", recovery)),
-		human(m(post, "/operations/{id}/attempts/{attempt}/accountings", recovery)),
-		human(m(post, "/operations/{id}/takeovers", recovery)),
-		human(m(post, "/operations/{id}/resolutions", recovery)),
+		accountingDecisionRoute().on(human(m(post, "/operations/{id}/attempts/{attempt}/accountings", recovery))),
+		operationTakeover().on(human(m(post, "/operations/{id}/takeovers", recovery))),
+		operationResolution().on(human(m(post, "/operations/{id}/resolutions", recovery))),
 		identityRevocations(),
 	)
 	return rs
