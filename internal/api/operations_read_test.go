@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -211,11 +212,23 @@ func TestMachineTimelineAndObserved(t *testing.T) {
 
 	p := decode[struct {
 		Items []struct {
-			Revision int64  `json:"revision"`
-			Kind     string `json:"kind"`
+			Revision int64                      `json:"revision"`
+			Kind     string                     `json:"kind"`
+			Entry    map[string]json.RawMessage `json:"entry"`
 		} `json:"items"`
 		Next string `json:"next"`
 	}](t, xe.get(t, "/machines/"+xe.machine+"/timeline?limit=500"), http.StatusOK)
+	// The control: the stored entries hold both values, so the redaction is what removes them.
+	for _, k := range []string{"text", "digest"} {
+		if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND entry ? $2`, xe.machine, k); n == 0 {
+			t.Fatalf("no stored entry holds %s: the redaction is not exercised", k)
+		}
+		for _, e := range p.Items {
+			if _, has := e.Entry[k]; has {
+				t.Fatalf("timeline entry %d (%s) carries %s", e.Revision, e.Kind, k)
+			}
+		}
+	}
 	n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE machine = $1`, xe.machine)
 	if len(p.Items) != n || p.Next != "" {
 		t.Fatalf("%d entries of %d", len(p.Items), n)
@@ -249,6 +262,68 @@ func TestMachineTimelineAndObserved(t *testing.T) {
 	if m.Desired == nil || m.Applied == nil || m.Observed == nil || m.Observed.Release == nil || m.Observed.Observation == "" ||
 		*m.Desired != xe.target.rel || m.Applied.Release != xe.target.rel || *m.Observed.Release != xe.target.rel {
 		t.Fatalf("machine %+v", m)
+	}
+}
+
+// Execution and recovery §4.1: of two observations the one of the higher basis decides, whichever
+// was recorded last. B's read began after A's but was recorded before it, and shows another
+// configuration: Observed is B's, matching no release.
+func TestMachineObservedHighestBasis(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.completedOperation(t)
+
+	tx, err := xe.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	next := func() int64 {
+		var n int64
+		if err := tx.QueryRow(`UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1 RETURNING revision_counter`,
+			xe.machine).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	startA, startB := next(), next()
+	for _, s := range []int64{startA, startB} {
+		mustExec(t, tx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+			SELECT $1, $2, i.epoch, 'observation-started', jsonb_build_object('purpose', 'drift'::text, 'plan', NULL::text,
+				'endpoint', s.endpoint, 'controller', s.controller), now()
+			FROM installation_state i, LATERAL (SELECT endpoint, controller FROM observation_start WHERE machine = $1
+				ORDER BY revision DESC LIMIT 1) s`, xe.machine, s)
+		mustExec(t, tx, `INSERT INTO observation_start (machine, revision, purpose, endpoint, controller)
+			SELECT $1, $2, 'drift', endpoint, controller FROM observation_start WHERE machine = $1
+			ORDER BY revision DESC LIMIT 1`, xe.machine, s)
+	}
+	record := func(basis int64, digest string) string {
+		rev, obs := next(), id.New(id.Observation)
+		mustExec(t, tx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+			SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', 'drift'::text, 'basis', $4::bigint),
+				now() FROM installation_state`, xe.machine, rev, obs, basis)
+		mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created,
+				smbios_uuid, talos_node_id, talos_cluster_id, assignment_evidence, running_version, configuration_digest,
+				resource_version, unread, at)
+			SELECT $1, machine, $3, $4, access_path, access_version, access_created, smbios_uuid, talos_node_id, talos_cluster_id,
+				assignment_evidence, running_version, decode($5, 'hex'), resource_version, unread, now()
+			FROM observation WHERE machine = $2 ORDER BY revision DESC LIMIT 1`, obs, xe.machine, basis, rev, digest)
+		return obs
+	}
+	b := record(startB, strings.Repeat("ab", 32))
+	record(startA, strings.Repeat("cd", 32))
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	m := decode[struct {
+		Observed *struct {
+			Release     *string `json:"release"`
+			Observation string  `json:"observation"`
+		} `json:"observed"`
+	}](t, xe.get(t, "/machines/"+xe.machine), http.StatusOK)
+	if m.Observed == nil || m.Observed.Observation != b || m.Observed.Release != nil {
+		t.Fatalf("observed %+v, want observation %s with no release", m.Observed, b)
 	}
 }
 
@@ -340,5 +415,35 @@ func TestEventStreamEndsAtTokenExpiry(t *testing.T) {
 	}
 	if resp := open(fresh.Token, ids[0]); resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("resumption after revocation: %d", resp.StatusCode)
+	}
+}
+
+// A read that finishes after the token's expiry writes no frame: the stream ends as the token does.
+func TestEventStreamWritesNothingAfterTokenExpiry(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, "")
+	ce.ready(t)
+	r, err := ce.a.commitPlan(t.Context(), ce.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slow := observer(t, ce.env, &fakeExecutor{}, options{beforeRead: func() { time.Sleep(1500 * time.Millisecond) }})
+	srv := httptest.NewServer(slow)
+	t.Cleanup(srv.Close)
+	short, err := auth.NewStore(ce.db, ce.cfg).Issue(t.Context(), "watch", []auth.Role{auth.Viewer}, 1*time.Second, "h-all", "h-all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+prefix+"/operations/"+r.Operation+"/events", nil)
+	req.Header.Set("Authorization", "Bearer "+short.Token)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return // the connection ended at the write deadline before any byte: nothing was written
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "event: commitment") {
+		t.Fatalf("a frame was written after the token expired: %q", body)
 	}
 }
