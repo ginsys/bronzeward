@@ -69,19 +69,26 @@ func TestOutcomeRecords(t *testing.T) {
 	commitRows(t, db, entry(8), decision.stmt(), a.act(actID, a.human, "recovery-admin"))
 	refused(t, db, "second accounting of the attempt", "23505", entry(9), decision.with("revision", 9, "act", id.New(id.Act)).stmt())
 
-	// A classification names its operation; safe-to-retry rests on an observation; cancelled is
-	// recorded by the operation's state entry, not here.
+	// A classification names its operation; every outcome but a rejection rests on an observation
+	// and a rejection on responses alone; cancelled and unresolved are recorded by the operation's
+	// state entry, not here.
 	refused(t, db, "classification entry naming no operation", "23514/machine_event_operation_entry",
 		a.entryOf(10, "classification", `{}`))
-	refused(t, db, "safe-to-retry on no observation", "23514", a.classified(10, "safe-to-retry", nil)...)
-	refused(t, db, "a cancelled classification", "23514", a.classified(10, "cancelled", nil)...)
-	commitRows(t, db, a.classified(10, "unresolved", nil)...)
+	for _, outcome := range []string{"safe-to-retry", "completed", "failed"} {
+		refused(t, db, outcome+" on no observation", "23514", a.classified(10, outcome, nil)...)
+	}
+	refused(t, db, "a rejection on an observation", "23514", a.classified(10, "rejected", a.obs)...)
+	for _, outcome := range []string{"cancelled", "unresolved"} {
+		refused(t, db, "a "+outcome+" classification", "23514", a.classified(10, outcome, a.obs)...)
+		refused(t, db, "a "+outcome+" classification on no observation", "23514", a.classified(10, outcome, nil)...)
+	}
+	commitRows(t, db, a.classified(10, "rejected", nil)...)
 
 	// A retry names a safe-to-retry classification earlier on the timeline.
 	retry := func(rev, classification int) []stmt {
 		return a.attempted(a.attemptRow(2, rev).with("classification", classification), "sending")[:2]
 	}
-	refused(t, db, "retry under an unresolved classification", "23503", retry(11, 10)...)
+	refused(t, db, "retry under a rejected classification", "23503", retry(11, 10)...)
 	refused(t, db, "retry recorded before the classification that admits it", "23514/attempt_classified_before",
 		append(a.classified(12, "safe-to-retry", a.obs), retry(11, 12)...)...)
 	accepted(t, db, "retry under a safe-to-retry classification",
@@ -120,6 +127,10 @@ func TestOutcomeRecords(t *testing.T) {
 			append(a.classified(15, "safe-to-retry", a.obs), retry(14, 15)...)},
 		{"machine_event_attempt_entry", "ALTER TABLE machine_event DROP CONSTRAINT machine_event_attempt_entry",
 			[]stmt{a.entryOf(13, "accounting", `{"operation": "`+a.op+`"}`)}},
+		{"operation_classification_outcome", "ALTER TABLE operation_classification DROP CONSTRAINT operation_classification_outcome",
+			a.classified(16, "unresolved", a.obs)},
+		{"operation_classification_observed", "ALTER TABLE operation_classification DROP CONSTRAINT operation_classification_observed",
+			a.classified(17, "completed", nil)},
 		{"machine_event_ownership_transition", "ALTER TABLE machine_event DROP CONSTRAINT machine_event_ownership_transition",
 			[]stmt{transition(`{"operation": "x"}`)}},
 	} {
