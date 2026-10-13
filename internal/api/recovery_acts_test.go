@@ -161,6 +161,15 @@ func TestResolutionRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantProblem(t, ae.post(next, "res-2", "/resolutions", `{"to":"completed","reason":"it landed"}`), http.StatusBadRequest, "invalid-request")
+	// A process that is not the serving controller resolves nothing.
+	id := next.d.owner.ID
+	next.d.owner.ID = ""
+	wantProblem(t, ae.post(next, "res-nc", "/resolutions", `{"to":"cancelled","reason":"not mine"}`), http.StatusServiceUnavailable,
+		"epoch-superseded")
+	next.d.owner.ID = id
+	if state, _, _ := ae.state(t); state != "unresolved" {
+		t.Fatalf("a process that is not the controller left the operation %s", state)
+	}
 	b := decode[resolutionBody](t, ae.post(next, "res-3", "/resolutions", `{"to":"cancelled","reason":"the plan was withdrawn"}`),
 		http.StatusCreated)
 	if b.Operation != ae.op || b.State != "cancelled" || b.ResolvedBy != ae.principalOf("h-recovery") || b.Role != "recovery-admin" {

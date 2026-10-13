@@ -258,6 +258,9 @@ type resolutionBody struct {
 // attempt into cancelled, on a recorded reason (execution-recovery.md §4). The operation keeps its
 // owner token; the operation state entry names who resolved it and why.
 func resolveByDecision(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
+	if a.d.owner.ID == "" {
+		return result{}, errNotController
+	}
 	in := q.input.(*resolutionRequest)
 	operation := q.r.PathValue("id")
 	machine, err := operationMachine(ctx, tx, operation)
