@@ -135,6 +135,8 @@ func TestAccountingRequestOtherOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The observations are the next operation's machine's, so only the attempt's operation differs.
+	ae.machine, ae.pid, ae.op = ae.machine2, ae.plan2, r.Operation
 	start := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow })
 	end := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow+time.Minute })
 	rec := ae.do(ae.a, call{method: "POST", path: prefix + "/operations/" + r.Operation + "/attempts/" + att.Attempt + "/accountings",
