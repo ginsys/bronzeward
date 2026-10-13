@@ -265,17 +265,24 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 	hd.Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)
+	// The token's expiry bounds every read and write of the stream: its context ends the reads, its
+	// write deadline a blocked write, and each frame is checked before it is written.
+	ctx := q.r.Context()
+	if exp := q.principal.Expiry; !exp.IsZero() {
+		_ = rc.SetWriteDeadline(exp)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, exp)
+		defer cancel()
+		q.r = q.r.WithContext(ctx)
+	}
 	if reset {
 		_, _ = fmt.Fprint(w, "event: reset\ndata: {}\n\n")
 	}
-	var expired <-chan time.Time
-	if exp := q.principal.Expiry; !exp.IsZero() {
-		t := time.NewTimer(time.Until(exp))
-		defer t.Stop()
-		expired = t.C
-	}
 	for {
 		for i, e := range batch {
+			if ctx.Err() != nil {
+				return
+			}
 			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", e.ID, e.Type, e.Data); err != nil {
 				return
 			}
@@ -287,9 +294,7 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 				return
 			}
 			select {
-			case <-q.r.Context().Done():
-				return
-			case <-expired:
+			case <-ctx.Done():
 				return
 			case <-time.After(streamPoll):
 			}

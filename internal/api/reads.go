@@ -152,7 +152,8 @@ var (
 	})
 )
 
-// Observed is the latest observation that read the configuration, matched by digest against the
+// Observed is the observation of the highest basis (execution-recovery §4.1) that read the
+// configuration, matched by digest against the
 // Applied artifact's and then the Desired release's; the digest is compared here and never served.
 const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.talos_node_id, m.serial, m.platform, m.talos_endpoint, m.frozen, m.scope_state, s.desired,
 		s.applied_release, s.applied_source, ob.id, ob.at,
@@ -161,7 +162,7 @@ const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.talos_node
 	FROM machine m JOIN machine_state s ON s.machine = m.id
 	LEFT JOIN release_machine rd ON rd.release = s.desired AND rd.machine = m.id
 	LEFT JOIN LATERAL (SELECT o.id, o.at, o.configuration_digest FROM observation o
-		WHERE o.machine = m.id AND o.configuration_digest IS NOT NULL ORDER BY o.revision DESC LIMIT 1) ob ON true`
+		WHERE o.machine = m.id AND o.configuration_digest IS NOT NULL ORDER BY o.basis DESC LIMIT 1) ob ON true`
 
 func scanMachine(r interface{ Scan(...any) error }) (machineBody, error) {
 	var b machineBody
