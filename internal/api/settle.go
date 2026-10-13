@@ -82,9 +82,11 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 	// unreachable is not one.
 	// It is also where the settle starts: a start observation later than it would hide a change of the
 	// version between the two.
-	if err := tx.QueryRowContext(ctx, `SELECT o.at, o.id FROM observation o WHERE o.machine = $1 AND o.at > $2
+	// Observations are ordered by their start (basis), not by when they were recorded.
+	if err := tx.QueryRowContext(ctx, `SELECT o.at, o.id FROM observation o
+		JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis WHERE o.machine = $1 AND se.at > $2
 		AND (o.unread->'identity' IS NULL OR o.unread->'runningVersion' IS NULL OR o.unread->'configuration' IS NULL)
-		ORDER BY o.at, o.basis LIMIT 1`, l.machine, transport).Scan(&firstRead, &firstReadID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		ORDER BY o.basis LIMIT 1`, l.machine, transport).Scan(&firstRead, &firstReadID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return r, err
 	}
 	if firstReadID.Valid && d.Start != firstReadID.String {

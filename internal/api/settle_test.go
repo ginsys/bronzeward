@@ -278,6 +278,24 @@ func TestAccountByDecision(t *testing.T) {
 			t.Fatalf("the first read as the start: %v", err)
 		}
 	})
+	// The first read is the first begun, not the first recorded (§4.1 orders observations by their
+	// start): one begun first and recorded after a later one is still the settle's start.
+	t.Run("first read recorded after a later one", func(t *testing.T) {
+		t.Parallel()
+		ae, next, att := setup(t)
+		first := ae.observed(t, func(c *cobs) {
+			c.purpose, c.began, c.shift = "recovery", 65*time.Second, settleWindow
+		})
+		later := ae.observed(t, func(c *cobs) { c.purpose, c.shift, c.resource = "recovery", 80*time.Second, "rv2" })
+		end := ae.observed(t, func(c *cobs) { c.purpose, c.shift, c.resource = "recovery", settleWindow+time.Minute, "rv2" })
+		var refused *outcomeRefused
+		if _, err := ae.decide(t, next, att, later, end, nil); !errors.As(err, &refused) {
+			t.Fatalf("a read begun after the first as the start: %v; want a refusal", err)
+		}
+		if _, err := ae.decide(t, next, att, first, end, map[string]any{"explanation": "the landed apply of the abandoned request"}); err != nil {
+			t.Fatalf("the first read begun, recorded last, as the start: %v", err)
+		}
+	})
 	// The two ends of the settle are two observations, the end begun after the start was recorded:
 	// one observation as both ends reads a version against itself and can never show it moved.
 	t.Run("one observation at both ends", func(t *testing.T) {
