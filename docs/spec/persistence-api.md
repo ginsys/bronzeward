@@ -1462,7 +1462,10 @@ reconnects with `Last-Event-ID` and a fresh token, verified as any request
 effect on a stream within the token's lifetime. Epochs are compared by equality only; the entry
 time of each `RecoveryEpoch` row orders them for display. A plan operation's
 events begin at its commitment and link its plan and approval, whose entries
-are on the machine's timeline (`GET /machines/{id}/timeline`). Polling the
+are on the machine's timeline (`GET /machines/{id}/timeline`). They continue
+with its attempt, response, accounting, classification, ownership-transition
+and operation-state entries and, when it completes, the `Applied` change
+(execution and recovery §4.1). Polling the
 resource is always supported (design §11.1). WebSocket is not offered in the
 PoC **(choice §17.14)**.
 

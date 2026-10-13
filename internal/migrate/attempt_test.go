@@ -32,7 +32,7 @@ func (a attempts) attemptRow(n, rev int) record {
 	now := time.Now()
 	return newRecord("attempt", "id", id.New(id.Attempt), "operation", a.op, "plan", a.apply, "machine", a.machine,
 		"number", n, "owner", owner, "owner_gen", 1, "owner_epoch", a.epoch, "route", "10.55.0.3:50000",
-		"observation", a.obs, "transport_deadline", now.Add(time.Minute), "verification_deadline", now.Add(5*time.Minute),
+		"observation", a.obs, "classification", nil, "transport_deadline", now.Add(time.Minute), "verification_deadline", now.Add(5*time.Minute),
 		"at", now, "revision", rev)
 }
 
@@ -43,6 +43,53 @@ func (a attempts) attempted(r record, state string) []stmt {
 
 func (a attempts) state(state string) stmt {
 	return stmt{`UPDATE operation SET state = $2 WHERE id = $1`, []any{a.op, state}}
+}
+
+// completed moves the operation to completed with the result an apply-config operation names.
+func (a attempts) completed() stmt {
+	return stmt{`UPDATE operation SET state = 'completed', result = '{"appliedRelease": "rel"}' WHERE id = $1`, []any{a.op}}
+}
+
+// finish moves the operation to a state ending it, with the result or error that state names.
+func (a attempts) finish(state string) stmt {
+	switch state {
+	case "completed":
+		return a.completed()
+	case "failed", "rejected":
+		return stmt{`UPDATE operation SET state = $2, error = '{"code": "conflict"}' WHERE id = $1`, []any{a.op, state}}
+	}
+	return a.state(state)
+}
+
+// entryOf is the machine timeline entry of kind at revision rev with the given JSON entry.
+func (a attempts) entryOf(rev int, kind, entry string) stmt {
+	return stmt{insertMachineEvent, []any{a.machine, rev, kind, entry}}
+}
+
+// classified is the operation's classification at revision rev: its entry and its record.
+func (a attempts) classified(rev int, outcome string, observation any) []stmt {
+	r := newRecord("operation_classification", "operation", a.op, "machine", a.machine, "revision", rev, "outcome", outcome,
+		"observation", observation, "owner", owner, "owner_gen", 1, "owner_epoch", a.epoch, "relied", `[]`, "at", time.Now())
+	return []stmt{a.entryOf(rev, "classification", `{"operation": "`+a.op+`", "outcome": "`+outcome+`"}`), r.stmt()}
+}
+
+// answered is attempt att's response of class at revision rev, from the target, and the accounting
+// it gives at rev+1.
+func (a attempts) answered(att string, rev int, class string) []stmt {
+	return answered(a.machine, a.op, a.epoch, att, rev, class)
+}
+
+func answered(machine, op, epoch, att string, rev int, class string) []stmt {
+	resp := newRecord("attempt_response", "attempt", att, "machine", machine, "class", class, "code", 0,
+		"text", "the node accepted the configuration in no-reboot mode", "owner", owner, "owner_gen", 1,
+		"owner_epoch", epoch, "at", time.Now(), "revision", rev)
+	acc := newRecord("attempt_accounting", "attempt", att, "machine", machine, "basis", "response",
+		"response_from_target", true, "epoch", epoch, "at", time.Now(), "revision", rev+1)
+	entry := func(rev int, kind, basis string) stmt {
+		return stmt{insertMachineEvent, []any{machine, rev, kind,
+			`{"operation": "` + op + `", "attempt": "` + att + `", "class": "` + class + `", "basis": "` + basis + `"}`}}
+	}
+	return []stmt{entry(rev, "response", ""), resp.stmt(), entry(rev+1, "accounting", "response"), acc.stmt()}
 }
 
 // Execution and recovery §3.3, §4, §4.1: an attempt binds its operation's plan, the plan's machine
@@ -78,7 +125,7 @@ func TestAttempts(t *testing.T) {
 	refused(t, db, "sending with no attempt", "23514/operation_apply_config_attempt", a.state("sending"))
 	commitRows(t, db, a.state("unresolved"))
 	for _, state := range []string{"completed", "failed", "rejected", "sending"} {
-		refused(t, db, "unresolved to "+state+" with no attempt", "23514/operation_apply_config_attempt", a.state(state))
+		refused(t, db, "unresolved to "+state+" with no attempt", "23514/operation_apply_config_attempt", a.finish(state))
 	}
 	accepted(t, db, "unresolved to cancelled with no attempt", a.state("cancelled"))
 	refused(t, db, "attempt after cancellation", "23514/attempt_operation_cancelled",
@@ -88,14 +135,27 @@ func TestAttempts(t *testing.T) {
 
 	commitRows(t, db, a.attempted(r, "sending")...)
 	refused(t, db, "attempt number taken", "23505", a.attempted(a.attemptRow(1, 7), "sending")[:2]...)
-	accepted(t, db, "attempt 2", a.attempted(a.attemptRow(2, 7), "sending")[:2]...)
+	// An attempt after the first names the safe-to-retry classification, earlier on the timeline,
+	// that admitted it (§3.3 comparison 8).
+	retry := a.attemptRow(2, 8)
+	refused(t, db, "retry with no classification", "23514/attempt_retry_classified", a.attempted(retry, "sending")[:2]...)
+	refused(t, db, "retry naming no classification", "23503", a.attempted(retry.with("classification", 7), "sending")[:2]...)
+	accepted(t, db, "attempt 2", append(a.classified(7, "safe-to-retry", a.obs),
+		a.attempted(retry.with("classification", 7), "sending")[:2]...)...)
+	commitRows(t, db, append(a.classified(7, "safe-to-retry", a.obs),
+		a.attempted(retry.with("classification", 7), "sending")[:2]...)...)
 	refused(t, db, "sending to committed", "23514/operation_apply_config_transition", a.state("committed"))
 	refused(t, db, "sending to completed", "23514/operation_apply_config_transition", a.state("completed"))
 	commitRows(t, db, a.state("unresolved"))
 	refused(t, db, "unresolved to cancelled with an attempt", "23514/operation_apply_config_transition", a.state("cancelled"))
-	for _, step := range []string{"sending", "verifying", "completed"} {
+	for _, step := range []string{"sending", "verifying"} {
 		mustExec(t, db, `UPDATE operation SET state = $2 WHERE id = $1`, a.op, step)
 	}
+	// Completed names what it applied, and every attempt is accounted for (§4, §8 invariant 5).
+	refused(t, db, "completed with no result", "23514/operation_apply_outcome", a.state("completed"))
+	refused(t, db, "completed with unaccounted attempts", "23514/operation_apply_config_accounted", a.completed())
+	commitRows(t, db, append(append(a.answered(r.vals["id"].(string), 9, "accepted"),
+		a.answered(retry.vals["id"].(string), 11, "accepted")...), a.completed())...)
 	for _, state := range []string{"unresolved", "failed", "cancelled", "sending"} {
 		refused(t, db, "completed to "+state, "23514/operation_apply_config_transition", a.state(state))
 	}
@@ -107,7 +167,7 @@ func TestAttempts(t *testing.T) {
 			t.Errorf("%s: %v; want SQLSTATE %s", q, err, ImmutableSQLState)
 		}
 	}
-	if count(t, db, "attempt") != 1 {
+	if count(t, db, "attempt") != 2 {
 		t.Error("a refused statement changed the attempts")
 	}
 }

@@ -408,6 +408,11 @@ CREATE TABLE operation (
   CHECK (kind NOT IN ('publish', 'ingest') OR created_by IS NOT NULL),
   CHECK (kind NOT IN ('publish', 'ingest')
       OR ((result IS NOT NULL) = (state = 'succeeded') AND (error IS NOT NULL) = (state = 'failed'))),
+  -- An apply-config operation's outcome (execution and recovery §4): a completed one names what it
+  -- applied, a rejected or failed one why.
+  CONSTRAINT operation_apply_outcome
+    CHECK (kind <> 'apply-config'
+      OR ((result IS NOT NULL) = (state = 'completed') AND (error IS NOT NULL) = (state IN ('rejected', 'failed')))),
   -- An outcome is a JSON object (a result, a problem document), never JSON null, which is not SQL
   -- NULL and would pass the check above with nothing to answer.
   CHECK ((result IS NULL OR jsonb_typeof(result) = 'object') AND (error IS NULL OR jsonb_typeof(error) = 'object')),
@@ -426,7 +431,9 @@ CREATE TABLE operation (
   -- The key a plan state, an observation and an adoption record name their plan's operation by;
   -- an adoption record also names the epoch it was created in.
   CONSTRAINT operation_id_plan UNIQUE (id, plan),
-  CONSTRAINT operation_id_plan_epoch UNIQUE (id, plan, epoch)
+  CONSTRAINT operation_id_plan_epoch UNIQUE (id, plan, epoch),
+  -- The key a classification names its operation's machine by.
+  CONSTRAINT operation_id_machine UNIQUE (id, machine)
 );
 -- Execution and recovery §3.2 comparison 4: one committed, sending, verifying or unresolved
 -- apply-config operation per machine scope; comparison 5: one per rollout scope, the machine's
@@ -516,7 +523,8 @@ CREATE TABLE machine_event (
   epoch    text NOT NULL REFERENCES recovery_epoch (epoch),
   kind     text NOT NULL CONSTRAINT machine_event_kind CHECK (kind IN ('endpoint-change', 'plan', 'approval',
              'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
-             'observation', 'adoption', 'applied-change', 'commitment', 'refusal', 'attempt', 'operation-state')),
+             'observation', 'adoption', 'applied-change', 'commitment', 'refusal', 'attempt', 'operation-state',
+             'response', 'accounting', 'classification', 'ownership-transition')),
   -- A JSON object: JSON null is not SQL NULL, and an immutable entry cannot be corrected later.
   entry    jsonb NOT NULL CHECK (jsonb_typeof(entry) = 'object'),
   CONSTRAINT machine_event_refusal CHECK (kind <> 'refusal'
@@ -533,6 +541,19 @@ CREATE TABLE machine_event (
     OR (jsonb_typeof(entry->'operation') IS NOT DISTINCT FROM 'string'
       AND jsonb_typeof(entry->'from') IS NOT DISTINCT FROM 'string'
       AND jsonb_typeof(entry->'to') IS NOT DISTINCT FROM 'string')),
+  -- What follows a recorded attempt names its operation (execution and recovery §4.1), and a
+  -- response or an accounting the attempt it is for. A comparison 8 read of the timeline finds an
+  -- operation's entries by that name.
+  CONSTRAINT machine_event_operation_entry CHECK (kind NOT IN ('response', 'accounting', 'classification',
+      'ownership-transition') OR jsonb_typeof(entry->'operation') IS NOT DISTINCT FROM 'string'),
+  CONSTRAINT machine_event_attempt_entry CHECK (kind NOT IN ('response', 'accounting')
+    OR jsonb_typeof(entry->'attempt') IS NOT DISTINCT FROM 'string'),
+  -- An ownership transition names the owner token it moved from and to and why.
+  CONSTRAINT machine_event_ownership_transition CHECK (kind <> 'ownership-transition'
+    OR (jsonb_typeof(entry->'from') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'to') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'generation') IS NOT DISTINCT FROM 'number'
+      AND jsonb_typeof(entry->'reason') IS NOT DISTINCT FROM 'string')),
   at       timestamptz NOT NULL,
   PRIMARY KEY (machine, revision),
   UNIQUE (machine, revision, kind)
@@ -1308,11 +1329,41 @@ CREATE TRIGGER binding BEFORE UPDATE ON operation FOR EACH ROW
          OLD.ingestion, OLD.created_by, OLD.created_by_kind, OLD.created_role, OLD.created_at))
   EXECUTE FUNCTION refuse_identity_change();
 
+-- An apply-config operation's classification (execution and recovery §4.1, §5): the outcome the
+-- controller decided from the entries and the completion or recovery observation it relied on, by
+-- revision, under the owner token that decided it. A retry binds to the revision of the
+-- safe-to-retry classification it was admitted under (§3.3 comparison 8). Cancelled is not
+-- recorded here: its operation-state entry names its cause. It is one classification entry on the
+-- machine's timeline.
+CREATE TABLE operation_classification (
+  operation   text NOT NULL,
+  machine     text NOT NULL,
+  revision    bigint NOT NULL,
+  entry_kind  text NOT NULL GENERATED ALWAYS AS ('classification') STORED,
+  outcome     text NOT NULL CHECK (outcome IN ('completed', 'safe-to-retry', 'unresolved', 'rejected', 'failed')),
+  observation text,
+  owner       text NOT NULL CHECK (btrim(owner) <> '' AND octet_length(owner) <= 512),
+  owner_gen   bigint NOT NULL CHECK (owner_gen >= 1),
+  owner_epoch text NOT NULL REFERENCES recovery_epoch (epoch),
+  relied      jsonb NOT NULL CHECK (jsonb_typeof(relied) = 'array'),
+  at          timestamptz NOT NULL,
+  PRIMARY KEY (machine, revision),
+  UNIQUE (operation, revision),
+  UNIQUE (operation, revision, outcome),
+  -- A safe-to-retry classification rests on an observation of the machine (§5.1).
+  CHECK (outcome <> 'safe-to-retry' OR observation IS NOT NULL),
+  FOREIGN KEY (operation, machine) REFERENCES operation (id, machine),
+  FOREIGN KEY (observation, machine) REFERENCES observation (id, machine),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('operation_classification');
+
 -- An apply-config operation's attempt (execution and recovery §3.3, §4.1): recorded by its owner's
 -- attempt transaction before any request is sent, numbered from 1 within the operation, with the
 -- owner token it was recorded under, its plan's route, the evidence observation it relied on and
--- its absolute transport and verification deadlines. It is one attempt entry on the machine's
--- timeline.
+-- its absolute transport and verification deadlines. A retry, any attempt after the first, names
+-- the safe-to-retry classification, earlier on the timeline, that admitted it, and the observation
+-- it relied on is that classification's. It is one attempt entry on the machine's timeline.
 CREATE TABLE attempt (
   id                    text PRIMARY KEY CHECK (id ~ '^att_[a-z2-7]{26}$'),
   operation             text NOT NULL,
@@ -1330,9 +1381,16 @@ CREATE TABLE attempt (
   at                    timestamptz NOT NULL,
   revision              bigint NOT NULL,
   entry_kind            text NOT NULL GENERATED ALWAYS AS ('attempt') STORED,
+  classification        bigint,
+  classification_outcome text GENERATED ALWAYS AS (CASE WHEN classification IS NOT NULL THEN 'safe-to-retry' END) STORED,
   CONSTRAINT attempt_deadlines CHECK (at < transport_deadline AND transport_deadline <= verification_deadline),
+  CONSTRAINT attempt_retry_classified CHECK (number = 1 OR classification IS NOT NULL),
+  CONSTRAINT attempt_classified_before CHECK (classification IS NULL OR classification < revision),
   UNIQUE (operation, number),
   UNIQUE (machine, revision),
+  UNIQUE (id, machine),
+  FOREIGN KEY (operation, classification, classification_outcome)
+    REFERENCES operation_classification (operation, revision, outcome),
   FOREIGN KEY (operation, operation_kind) REFERENCES operation (id, kind),
   FOREIGN KEY (operation, plan) REFERENCES operation (id, plan),
   -- The plan's machine and its route: the attempt dials what the plan bound (persistence §3.3).
@@ -1400,6 +1458,87 @@ $$;
 CREATE CONSTRAINT TRIGGER attempted AFTER UPDATE OF state ON operation DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW WHEN (NEW.kind = 'apply-config' AND NEW.state IN ('sending', 'verifying', 'rejected', 'completed', 'failed'))
   EXECUTE FUNCTION require_attempt();
+
+-- A response one attempt's request was answered with (execution and recovery §3.5, §4.1, §5.1),
+-- recorded once by the controller that sent it, under its owner token: its class, the gRPC code the
+-- client saw and a fixed notice, never a word the node said. Only a response from the target
+-- accounts for its attempt; a transport outcome or an unrecognised answer does not. It is one
+-- response entry on the machine's timeline.
+CREATE TABLE attempt_response (
+  attempt     text PRIMARY KEY,
+  machine     text NOT NULL,
+  class       text NOT NULL CHECK (class IN ('accepted', 'rejected', 'invalid-argument', 'grpc-code', 'transport',
+                'unrecognised')),
+  code        integer NOT NULL CHECK (code BETWEEN 0 AND 16),
+  text        text NOT NULL CHECK (btrim(text) <> '' AND octet_length(text) <= 512),
+  from_target boolean NOT NULL GENERATED ALWAYS AS (class IN ('accepted', 'rejected', 'invalid-argument', 'grpc-code')) STORED,
+  owner       text NOT NULL CHECK (btrim(owner) <> '' AND octet_length(owner) <= 512),
+  owner_gen   bigint NOT NULL CHECK (owner_gen >= 1),
+  owner_epoch text NOT NULL REFERENCES recovery_epoch (epoch),
+  at          timestamptz NOT NULL,
+  revision    bigint NOT NULL,
+  entry_kind  text NOT NULL GENERATED ALWAYS AS ('response') STORED,
+  UNIQUE (machine, revision),
+  UNIQUE (attempt, from_target),
+  FOREIGN KEY (attempt, machine) REFERENCES attempt (id, machine),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('attempt_response');
+
+-- What accounts for an attempt (execution and recovery §4, §5.1, §5.2), once: a response from the
+-- target, or a recovery-admin's decision with the facts it holds (§5.2): the observation read at
+-- the start and at the end of the settle, and the settle floor, its instants and how a change of
+-- the machine-configuration resource version is explained. The act is written after the effect in
+-- the same transaction, so its reference is checked at commit. It is one accounting entry on the
+-- machine's timeline.
+CREATE TABLE attempt_accounting (
+  attempt              text PRIMARY KEY,
+  machine              text NOT NULL,
+  basis                text NOT NULL CHECK (basis IN ('response', 'decision')),
+  response_from_target boolean CHECK (response_from_target),
+  decided_by           text,
+  decided_by_kind      text GENERATED ALWAYS AS (CASE WHEN decided_by IS NOT NULL THEN 'human' END) STORED,
+  role                 text CHECK (role = 'recovery-admin'),
+  act                  text UNIQUE REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  start_observation    text,
+  end_observation      text,
+  facts                jsonb CHECK (jsonb_typeof(facts) = 'object'),
+  epoch                text NOT NULL REFERENCES recovery_epoch (epoch),
+  at                   timestamptz NOT NULL,
+  revision             bigint NOT NULL,
+  entry_kind           text NOT NULL GENERATED ALWAYS AS ('accounting') STORED,
+  CONSTRAINT attempt_accounting_basis CHECK (CASE basis
+    WHEN 'response' THEN response_from_target IS NOT NULL AND decided_by IS NULL AND role IS NULL AND act IS NULL
+      AND start_observation IS NULL AND end_observation IS NULL AND facts IS NULL
+    ELSE response_from_target IS NULL AND decided_by IS NOT NULL AND role IS NOT NULL AND act IS NOT NULL
+      AND start_observation IS NOT NULL AND end_observation IS NOT NULL AND facts IS NOT NULL END),
+  UNIQUE (machine, revision),
+  FOREIGN KEY (attempt, machine) REFERENCES attempt (id, machine),
+  FOREIGN KEY (attempt, response_from_target) REFERENCES attempt_response (attempt, from_target),
+  FOREIGN KEY (decided_by, decided_by_kind) REFERENCES principal (id, kind),
+  FOREIGN KEY (start_observation, machine) REFERENCES observation (id, machine),
+  FOREIGN KEY (end_observation, machine) REFERENCES observation (id, machine),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('attempt_accounting');
+
+-- The scope and rollout slot are released only on a terminal state, and never while a recorded
+-- attempt is unaccounted for (execution and recovery §8 invariant 5): an operation reaches
+-- completed, failed or rejected only with every attempt accounted. The accounting is written in
+-- the same transaction as the state, so this is checked at commit.
+CREATE FUNCTION require_accounted() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF EXISTS (SELECT FROM attempt a WHERE a.operation = NEW.id
+             AND NOT EXISTS (SELECT FROM attempt_accounting c WHERE c.attempt = a.id)) THEN
+    RAISE EXCEPTION 'operation: apply-config % with an unaccounted attempt refused', NEW.state
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'operation_apply_config_accounted', TABLE = 'operation';
+  END IF;
+  RETURN NULL;
+END
+$$;
+CREATE CONSTRAINT TRIGGER accounted AFTER UPDATE OF state ON operation DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW WHEN (NEW.kind = 'apply-config' AND NEW.state IN ('completed', 'failed', 'rejected'))
+  EXECUTE FUNCTION require_accounted();
 
 -- The last classification of each provider object version a release depends on (dependency
 -- monitor §5.1): the only mutable dependency table, updated under its row lock. Its object is a
