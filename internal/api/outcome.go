@@ -99,8 +99,10 @@ func (a *API) moveOperation(ctx context.Context, tx *sql.Tx, l *operationLock, t
 		l.id, to, res, fail); err != nil {
 		return err
 	}
+	// The entry names the operation's own token; a late response moves an operation another process
+	// owns, so the process that wrote it is named apart.
 	if _, _, err := a.appendEntry(ctx, tx, *l, "operation-state", map[string]any{"operation": l.id, "from": l.state, "to": to,
-		"controller": a.d.owner.ID, "generation": l.gen, "cause": cause}); err != nil {
+		"controller": l.owner.String, "generation": l.gen, "decidedBy": a.d.owner.ID, "cause": cause}); err != nil {
 		return err
 	}
 	l.state = to

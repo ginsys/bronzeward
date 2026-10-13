@@ -87,18 +87,17 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 		anchor = firstRead.Time
 	}
 	floor := a.d.exec.SettleFloor
-	var startAt, endBegan, endAt time.Time
+	var startRecorded, endBegan time.Time
 	var startVersion, endVersion sql.NullString
 	var purpose string
-	if err := tx.QueryRowContext(ctx, `SELECT se.at, o.resource_version FROM observation o
-		JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis WHERE o.id = $1 AND o.machine = $2`,
-		d.Start, l.machine).Scan(&startAt, &startVersion); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT o.at, o.resource_version FROM observation o WHERE o.id = $1 AND o.machine = $2`,
+		d.Start, l.machine).Scan(&startRecorded, &startVersion); err != nil {
 		return r, fmt.Errorf("accounting of attempt %s: its start observation: %w", d.Attempt, err)
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT se.at, o.at, o.resource_version, s.purpose FROM observation o
+	if err := tx.QueryRowContext(ctx, `SELECT se.at, o.resource_version, s.purpose FROM observation o
 		JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis
 		JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis WHERE o.id = $1 AND o.machine = $2`,
-		d.End, l.machine).Scan(&endBegan, &endAt, &endVersion, &purpose); err != nil {
+		d.End, l.machine).Scan(&endBegan, &endVersion, &purpose); err != nil {
 		return r, fmt.Errorf("accounting of attempt %s: its end observation: %w", d.Attempt, err)
 	}
 	switch {
@@ -106,8 +105,8 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 		return refuse("the end observation is not a recovery observation")
 	case !startVersion.Valid || !endVersion.Valid:
 		return refuse("the machine-configuration resource version was not read at both ends of the settle")
-	case !endAt.After(startAt):
-		return refuse("the end observation does not follow the start observation")
+	case d.Start == d.End || !endBegan.After(startRecorded):
+		return refuse("the end observation did not begin after the start observation was recorded")
 	case endBegan.Before(anchor.Add(floor)):
 		return refuse(fmt.Sprintf("the end observation began before the settle floor of %s had elapsed since %s", floor,
 			anchor.UTC().Format(time.RFC3339Nano)))
