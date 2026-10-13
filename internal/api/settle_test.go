@@ -262,6 +262,35 @@ func TestAccountByDecision(t *testing.T) {
 			t.Fatalf("a floor counted from an unreachable observation: %v; want a refusal", err)
 		}
 	})
+	// The two ends of the settle are two observations, the end begun after the start was recorded:
+	// one observation as both ends reads a version against itself and can never show it moved.
+	t.Run("one observation at both ends", func(t *testing.T) {
+		t.Parallel()
+		ae, next, att := setup(t)
+		ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow-20*time.Second })
+		both := ae.observed(t, func(c *cobs) {
+			c.purpose, c.began, c.shift = "recovery", settleWindow+30*time.Second, settleWindow+time.Minute
+		})
+		var refused *outcomeRefused
+		if _, err := ae.decide(t, next, att, both, both, nil); !errors.As(err, &refused) {
+			t.Fatalf("one observation as both ends: %v; want a refusal", err)
+		}
+	})
+	t.Run("end begun before the start was recorded", func(t *testing.T) {
+		t.Parallel()
+		ae, next, att := setup(t)
+		ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow-20*time.Second })
+		start := ae.observed(t, func(c *cobs) {
+			c.purpose, c.began, c.shift = "recovery", settleWindow-10*time.Second, settleWindow+80*time.Second
+		})
+		end := ae.observed(t, func(c *cobs) {
+			c.purpose, c.began, c.shift = "recovery", settleWindow+30*time.Second, settleWindow+2*time.Minute
+		})
+		var refused *outcomeRefused
+		if _, err := ae.decide(t, next, att, start, end, nil); !errors.As(err, &refused) {
+			t.Fatalf("an end begun before the start was recorded: %v; want a refusal", err)
+		}
+	})
 	t.Run("executor not taken over", func(t *testing.T) {
 		t.Parallel()
 		ae := newAttemptEnv(t, "")

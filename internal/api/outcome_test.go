@@ -333,6 +333,13 @@ func TestRecordResponseRefusalsAndLateResponses(t *testing.T) {
 		if r.State != "rejected" {
 			t.Fatalf("late rejection left the operation %s", r.State)
 		}
+		// The state entry names the operation's real token (the new owner, generation 2) and, apart,
+		// the controller that wrote it: never the old controller with the new generation.
+		if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'operation-state'
+			AND entry->>'to' = 'rejected' AND entry->>'controller' = $2 AND (entry->>'generation')::bigint = 2
+			AND entry->>'decidedBy' = $3`, ae.machine, next.d.owner.ID, ae.a.d.owner.ID); n != 1 {
+			t.Fatal("the state entry does not name the operation's token and the controller that decided")
+		}
 	})
 }
 
