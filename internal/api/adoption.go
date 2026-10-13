@@ -301,8 +301,8 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		VALUES ($1, $2, $3, 'applied-change', jsonb_build_object('from', NULL::text, 'to', $4::text, 'digest', $5::text,
-			'source', 'adoption', 'plan', $6::text), $7)`,
-		machine, r.Revision+1, current, release, hex.EncodeToString(baseline), plan, at)
+			'source', 'adoption', 'plan', $6::text, 'operation', $8::text), $7)`,
+		machine, r.Revision+1, current, release, hex.EncodeToString(baseline), plan, at, r.Operation)
 	return r, machine, err
 }
 
