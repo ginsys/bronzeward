@@ -755,7 +755,7 @@ Required entries:
 | Attempt | attempt id, owner token, route, transport and verification deadlines; for a retry, the classification revision it is bound to, which admits that one attempt and whose observation the retry rests on |
 | Response | attempt id, class (acceptance, gRPC code, transport outcome), redacted text or the withheld notice (§3.5) |
 | Ownership transition | the operation, from and to owner, the generation and epoch it moved from and to, reason |
-| Accounting | attempt id, basis (a response, or a §5.2 decision with its recorded facts), decider and role |
+| Accounting | attempt id, basis (a response, or a §5.2 decision with its start and end observations and its recorded facts), decider and role |
 | Classification | the operation, the outcome of §5 that ends the operation or admits a retry (completed, rejected, failed, safe to retry), the observation it rests on (none for a rejection, which rests on responses) and the entries relied on, by revision (the observation's entry and every response and accounting entry of the operation's attempts); an unresolved or cancelled operation names its cause on its state entry |
 | `Applied` change | from, to, digest, source (operation or adoption record) |
 | Endpoint change | previous and new Talos endpoint, who, role ([persistence and API §3.3](persistence-api.md#33-talos-access)) |
@@ -914,7 +914,10 @@ only when all of these hold and are recorded with it:
    machine-configuration resource version read at the start and end of the
    settle. The settle starts at the first successful read of condition 2, which
    is the start observation, so a change between that read and the end cannot
-   be hidden by a later start. That version moved on every landed apply in E4
+   be hidden by a later start. Only recorded observations count: a read begun
+   and not yet recorded is no evidence, and no entry marks a begun read as
+   abandoned, so the decision rests on the observations recorded when it is
+   taken. That version moved on every landed apply in E4
    (DS §2.3); a change during the settle is recorded, and the decision states
    how it is explained.
 
