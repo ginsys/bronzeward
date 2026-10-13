@@ -548,6 +548,12 @@ CREATE TABLE machine_event (
       'ownership-transition') OR jsonb_typeof(entry->'operation') IS NOT DISTINCT FROM 'string'),
   CONSTRAINT machine_event_attempt_entry CHECK (kind NOT IN ('response', 'accounting')
     OR jsonb_typeof(entry->'attempt') IS NOT DISTINCT FROM 'string'),
+  -- A classification entry names its outcome, the observation it rests on or null, and the entries
+  -- it relied on (§4.1).
+  CONSTRAINT machine_event_classification CHECK (kind <> 'classification'
+    OR (jsonb_typeof(entry->'outcome') IS NOT DISTINCT FROM 'string'
+      AND COALESCE(jsonb_typeof(entry->'observation'), '') IN ('string', 'null')
+      AND jsonb_typeof(entry->'relied') IS NOT DISTINCT FROM 'array')),
   -- An ownership transition names the owner token it moved from and to, the generation and epoch
   -- it moved from and to, and why (§4.1).
   CONSTRAINT machine_event_ownership_transition CHECK (kind <> 'ownership-transition'
