@@ -18,8 +18,9 @@ import (
 // resetNode is a TLS endpoint that reads one complete HTTP/2 request and answers it with nothing but
 // a RST_STREAM carrying code: no HEADERS, no trailers, no gRPC status. It is what a middlebox or a
 // failing proxy in front of apid can do, and the gRPC client then synthesises a status of its own
-// from the HTTP/2 error code. received is the request body bytes it read before it reset.
-func resetNode(t *testing.T, p talostest.PKI, code http2.ErrCode) (endpoint string, received *atomic.Int64) {
+// from the HTTP/2 error code. The counts are the request body bytes it read and the number of
+// complete requests it saw: a client that replays a refused stream sends a second one.
+func resetNode(t *testing.T, p talostest.PKI, code http2.ErrCode) (endpoint string, received *resetCounts) {
 	t.Helper()
 	l, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
 		Certificates: []tls.Certificate{p.Server}, ClientCAs: p.Pool, ClientAuth: tls.RequireAndVerifyClientCert,
@@ -29,7 +30,7 @@ func resetNode(t *testing.T, p talostest.PKI, code http2.ErrCode) (endpoint stri
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.Close() })
-	received = new(atomic.Int64)
+	received = new(resetCounts)
 	go func() {
 		for {
 			c, err := l.Accept()
@@ -42,7 +43,12 @@ func resetNode(t *testing.T, p talostest.PKI, code http2.ErrCode) (endpoint stri
 	return l.Addr().String(), received
 }
 
-func serveReset(c net.Conn, code http2.ErrCode, received *atomic.Int64) {
+type resetCounts struct {
+	bytes    atomic.Int64
+	requests atomic.Int64
+}
+
+func serveReset(c net.Conn, code http2.ErrCode, received *resetCounts) {
 	defer c.Close()
 	c.SetDeadline(time.Now().Add(30 * time.Second)) //nolint:errcheck // a test stand-in
 	preface := make([]byte, len(http2.ClientPreface))
@@ -72,8 +78,9 @@ func serveReset(c net.Conn, code http2.ErrCode, received *atomic.Int64) {
 				}
 			}
 		case *http2.DataFrame:
-			received.Add(int64(len(f.Data())))
+			received.bytes.Add(int64(len(f.Data())))
 			if f.StreamEnded() {
+				received.requests.Add(1)
 				if fr.WriteRSTStream(f.StreamID, code) != nil {
 					return
 				}
@@ -85,7 +92,9 @@ func serveReset(c net.Conn, code http2.ErrCode, received *atomic.Int64) {
 // A stream reset after the whole request was received is no answer from the node: the client
 // synthesises a gRPC status from the HTTP/2 error code (INADEQUATE_SECURITY becomes PermissionDenied,
 // ENHANCE_YOUR_CALM ResourceExhausted, REFUSED_STREAM Unavailable, others Internal), and none of them
-// shows what the node did with the configuration. Each accounts for nothing.
+// shows what the node did with the configuration. Each accounts for nothing, and each is sent once:
+// grpc-go replays a stream reset with REFUSED_STREAM on its own, as unprocessed, whatever the dial
+// options say, which would put two mutating requests under one recorded attempt.
 func TestApplyStreamResetIsNoAnswer(t *testing.T) {
 	cases := []struct {
 		name string
@@ -112,8 +121,11 @@ func TestApplyStreamResetIsNoAnswer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if received.Load() < int64(len(applyConfig)) {
-				t.Fatalf("the node read %d request bytes, want the whole request (%d): the control that the reset followed a complete request failed", received.Load(), len(applyConfig))
+			if got := received.bytes.Load(); got < int64(len(applyConfig)) {
+				t.Fatalf("the node read %d request bytes, want the whole request (%d): the control that the reset followed a complete request failed", got, len(applyConfig))
+			}
+			if got := received.requests.Load(); got != 1 {
+				t.Fatalf("the node saw %d complete requests, want exactly 1: the client replayed the apply", got)
 			}
 			if r.Class != ClassTransport || r.Accounts() || r.Code != c.want {
 				t.Fatalf("%+v; want a transport outcome with %s, accounting for nothing", r, c.want)

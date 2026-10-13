@@ -550,9 +550,12 @@ func typedMachineryViolations(t *testing.T, srcs map[string][]byte) []string {
 
 // applierShapeViolations holds the one file that sends a request to its shape: exactly one
 // ApplyConfiguration call, exactly one request literal, whose only keys are Data and Mode, the mode
-// being the no-reboot constant. The policy check bounds what the file may name; this bounds what it
-// may send with it (a dry run, a try-mode timeout and another mode are all fields or constants of
-// the allowed request type).
+// being the no-reboot constant, and the call's one option `grpc.MaxRetryRPCBufferSize(0)`, which
+// commits the attempt when the request is sent so grpc-go cannot replay it (it re-sends a first
+// attempt whose stream was reset with REFUSED_STREAM, and the dial option that disables retry does
+// not stop that). The policy check bounds what the file may name; this bounds what it may send
+// with it (a dry run, a try-mode timeout and another mode are all fields or constants of the
+// allowed request type).
 func applierShapeViolations(t *testing.T, name string, src []byte) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -582,6 +585,16 @@ func applierShapeViolations(t *testing.T, name string, src []byte) []string {
 		lit, ok := u.X.(*ast.CompositeLit)
 		return ok && isSel(lit.Type, "machine", "ApplyConfigurationRequest")
 	}
+	// noReplay is the call option `grpc.MaxRetryRPCBufferSize(0)`: any other size leaves the request
+	// in the replay buffer, where a refused stream is sent again.
+	noReplay := func(e ast.Expr) bool {
+		c, ok := e.(*ast.CallExpr)
+		if !ok || !isSel(c.Fun, "grpc", "MaxRetryRPCBufferSize") || len(c.Args) != 1 {
+			return false
+		}
+		lit, ok := c.Args[0].(*ast.BasicLit)
+		return ok && lit.Kind == token.INT && lit.Value == "0"
+	}
 	selections, calls, literals := 0, 0, 0
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch n := n.(type) {
@@ -596,8 +609,8 @@ func applierShapeViolations(t *testing.T, name string, src []byte) []string {
 			if !ok || s.Sel.Name != "ApplyConfiguration" {
 				return true
 			}
-			if x, ok := s.X.(*ast.SelectorExpr); !ok || x.Sel.Name != "api" || len(n.Args) != 2 || !inline(n.Args[1]) {
-				flag(n, "ApplyConfiguration is called other than as `x.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{…})`")
+			if x, ok := s.X.(*ast.SelectorExpr); !ok || x.Sel.Name != "api" || len(n.Args) != 3 || !inline(n.Args[1]) || !noReplay(n.Args[2]) {
+				flag(n, "ApplyConfiguration is called other than as `x.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{…}, grpc.MaxRetryRPCBufferSize(0))`")
 				return true
 			}
 			calls++
@@ -660,9 +673,10 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 	}
 
 	// Controls for the applier's file: each is a body of apply.go the real one must not become.
-	applierHead := "package talos\nimport (\n\t\"context\"\n\t\"github.com/siderolabs/talos/pkg/machinery/api/machine\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n)\n" +
-		"var _ = context.Background\nvar _ machine.ApplyConfigurationRequest\ntype applier struct{ api *client.Client }\n"
-	okBody := "func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}) }\n"
+	applierHead := "package talos\nimport (\n\t\"context\"\n\t\"github.com/siderolabs/talos/pkg/machinery/api/machine\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n\t\"google.golang.org/grpc\"\n)\n" +
+		"var _ = context.Background\nvar _ = grpc.MaxRetryRPCBufferSize\nvar _ machine.ApplyConfigurationRequest\ntype applier struct{ api *client.Client }\n"
+	const noReplay = ", grpc.MaxRetryRPCBufferSize(0)"
+	okBody := "func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}" + noReplay + ") }\n"
 	if got := append(policyViolations(t, applyFile, []byte(applierHead+okBody), applierPolicy), applierShapeViolations(t, applyFile, []byte(applierHead+okBody))...); len(got) != 0 {
 		t.Errorf("the clean applier control is flagged: %q", got)
 	}
@@ -670,21 +684,24 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 		body string
 		want string
 	}{
-		"dry run":       {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT, DryRun: true}) }\n", "a field other than Data and Mode"},
-		"try mode":      {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_TRY}) }\n", "is not machine.ApplyConfigurationRequest_NO_REBOOT"},
-		"reboot mode":   {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_REBOOT}) }\n", "is not machine.ApplyConfigurationRequest_NO_REBOOT"},
-		"mode left out": {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b}) }\n", "does not set both Data and Mode"},
-		"positional":    {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{}) }\n", "does not set both Data and Mode"},
+		"dry run":       {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT, DryRun: true}" + noReplay + ") }\n", "a field other than Data and Mode"},
+		"try mode":      {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_TRY}" + noReplay + ") }\n", "is not machine.ApplyConfigurationRequest_NO_REBOOT"},
+		"reboot mode":   {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_REBOOT}" + noReplay + ") }\n", "is not machine.ApplyConfigurationRequest_NO_REBOOT"},
+		"mode left out": {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b}" + noReplay + ") }\n", "does not set both Data and Mode"},
+		"positional":    {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{}" + noReplay + ") }\n", "does not set both Data and Mode"},
 		"a second call": {okBody + strings.Replace(okBody, "f(", "g(", 1), "2 ApplyConfiguration selections"},
 		"a method value sent twice": {"func (a *applier) f(ctx context.Context, b []byte) {\n\tsend := a.api.ApplyConfiguration\n" +
 			"\treq := &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}\n\treq.DryRun = true\n\tsend(ctx, req)\n\tsend(ctx, req)\n}\n", "0 direct calls"},
 		"a request held in a variable": {"func (a *applier) f(ctx context.Context, b []byte) {\n" +
-			"\treq := &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}\n\treq.TryModeTimeout = nil\n\ta.api.ApplyConfiguration(ctx, req)\n}\n", "is called other than as"},
-		"a reboot":       {okBody + "func (a *applier) r(ctx context.Context) { a.api.Reboot(ctx) }\n", "Reboot is denied"},
-		"a reset":        {okBody + "func (a *applier) r(ctx context.Context) { a.api.Reset(ctx, false) }\n", "Reset is denied"},
-		"a read":         {okBody + "func (a *applier) r(ctx context.Context) { a.api.Version(ctx) }\n", "api.Version is not allowlisted"},
-		"a sub-client":   {okBody + "func (a *applier) r() { _ = a.api.MachineClient }\n", "MachineClient is denied"},
-		"client escapes": {okBody + "func g(a *applier) any { return a.api }\n", "the api field is used bare"},
+			"\treq := &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}\n\treq.TryModeTimeout = nil\n\ta.api.ApplyConfiguration(ctx, req" + noReplay + ")\n}\n", "is called other than as"},
+		"no replay guard":          {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}) }\n", "is called other than as"},
+		"a retry buffer left open": {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}, grpc.MaxRetryRPCBufferSize(1024)) }\n", "is called other than as"},
+		"another call option":      {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}, grpc.WaitForReady(true)) }\n", "is called other than as"},
+		"a reboot":                 {okBody + "func (a *applier) r(ctx context.Context) { a.api.Reboot(ctx) }\n", "Reboot is denied"},
+		"a reset":                  {okBody + "func (a *applier) r(ctx context.Context) { a.api.Reset(ctx, false) }\n", "Reset is denied"},
+		"a read":                   {okBody + "func (a *applier) r(ctx context.Context) { a.api.Version(ctx) }\n", "api.Version is not allowlisted"},
+		"a sub-client":             {okBody + "func (a *applier) r() { _ = a.api.MachineClient }\n", "MachineClient is denied"},
+		"client escapes":           {okBody + "func g(a *applier) any { return a.api }\n", "the api field is used bare"},
 	} {
 		src := []byte(applierHead + c.body)
 		got := strings.Join(append(policyViolations(t, applyFile, src, applierPolicy), applierShapeViolations(t, applyFile, src)...), "\n")
