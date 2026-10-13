@@ -528,6 +528,58 @@ func TestExecutorCancelsATakenOverOperationWhosePlanIsDead(t *testing.T) {
 	}
 }
 
+// ER §3.1: a queued plan is checked as approved, unexpired and with its scope open immediately
+// before its dependencies are read, so a plan cancelled while it waited for an earlier dispatch
+// gets neither the Talos access nor the decrypted artifact.
+func TestDispatchOfAPlanCancelledWhileQueuedReadsNoDependency(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.ready(t)
+	decode[cancellationBody](t, xe.cancel(xe.human("h-approver"), xe.key(), xe.pid, `{"reason":"not now"}`), http.StatusOK)
+	life, stop := context.WithCancel(t.Context())
+	defer stop()
+	a := xe.executor(t, life, make(chan struct{}), options{})
+	if err := a.dispatchPlan(context.Background(), dispatchCandidate{plan: xe.pid, machine: xe.machine, cluster: xe.cluster}); err != nil {
+		t.Fatal(err)
+	}
+	xe.x.mu.Lock()
+	defer xe.x.mu.Unlock()
+	if len(xe.x.reads) != 0 || xe.x.decrypts != 0 {
+		t.Fatalf("%d access reads and %d decryptions for a cancelled plan", len(xe.x.reads), xe.x.decrypts)
+	}
+	xe.wantNothingSent(t)
+}
+
+// ER §3.4, §5.2 and row 020: an operation unresolved with an attempt nobody accounted for waits for
+// its accounting decision, which refuses a completion observation until then, so the loop takes
+// none on any pass.
+func TestExecutorTakesNoObservationWhileAnAttemptIsUnaccounted(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.ready(t)
+	cm, err := xe.a.commitPlan(context.Background(), xe.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := xe.a.recordAttempt(context.Background(), cm.Operation, 1); err != nil {
+		t.Fatal(err)
+	}
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{})
+	a.startExecutor()
+	defer stopping(a, stop)
+	until(t, a, idle, "the taken-over operation is unresolved", func() bool { return xe.opState(t) == "unresolved" })
+	before := xe.entries(t, "observation-started")
+	for range 3 {
+		a.wakeExecutor()
+		waitIdle(t, idle, 1)
+	}
+	if after := xe.entries(t, "observation-started"); after != before {
+		t.Fatalf("%d observations started while the attempt was unaccounted", after-before)
+	}
+}
+
 // ER §3.4: a starting controller takes over an operation another controller committed and did
 // not send, which is unresolved; its recovery observation shows the pre-dispatch configuration, so
 // the operation is classified safe to retry, attempted once and completed.
