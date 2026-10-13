@@ -30,6 +30,8 @@ type attempted struct {
 	Attempt, Operation string
 	Number             int
 	Revision           int64
+	Route              string    // the route the attempt is sent to
+	Deadline           time.Time // the attempt's absolute transport deadline
 }
 
 // recordAttempt is T6's attempt transaction (execution-recovery.md §3.3, persistence-api.md §5) for
@@ -312,6 +314,13 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 			$8::timestamptz + p.verification_deadline, $8, $9, $11
 		FROM plan p WHERE p.id = $10`,
 		r.Attempt, operation, r.Number, a.d.owner.ID, generation, current, obs, at, r.Revision, plan, cls)
+	if err != nil {
+		return r, machine, plan, err
+	}
+	// Read in the attempt's own transaction: a failure after it commits would leave the operation
+	// sending with nothing in this process to take it over (§3.4).
+	err = tx.QueryRowContext(ctx, `SELECT route::text, transport_deadline FROM attempt WHERE id = $1`, r.Attempt).Scan(&r.Route,
+		&r.Deadline)
 	return r, machine, plan, err
 }
 
