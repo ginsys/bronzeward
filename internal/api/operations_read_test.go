@@ -418,6 +418,45 @@ func TestEventStreamEndsAtTokenExpiry(t *testing.T) {
 	}
 }
 
+// The first read of a stream is bounded by the token's expiry too: held behind a lock, it ends
+// with the token and not with the lock.
+func TestEventStreamFirstReadEndsAtTokenExpiry(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, "")
+	ce.ready(t)
+	r, err := ce.a.commitPlan(t.Context(), ce.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(ce.a)
+	t.Cleanup(srv.Close)
+	short, err := auth.NewStore(ce.db, ce.cfg).Issue(t.Context(), "watch", []auth.Role{auth.Viewer}, 1*time.Second, "h-all", "h-all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := ce.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	if _, err := tx.Exec(`SELECT 1 FROM installation_state FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	time.AfterFunc(4*time.Second, func() { _ = tx.Rollback() })
+
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+prefix+"/operations/"+r.Operation+"/events", nil)
+	req.Header.Set("Authorization", "Bearer "+short.Token)
+	req.Header.Set("Accept", "text/event-stream")
+	started := time.Now()
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+	if d := time.Since(started); d > 3*time.Second {
+		t.Fatalf("the stream's first read lasted %s on a token of 1s", d)
+	}
+}
+
 // A read that finishes after the token's expiry writes no frame: the stream ends as the token does.
 func TestEventStreamWritesNothingAfterTokenExpiry(t *testing.T) {
 	t.Parallel()
