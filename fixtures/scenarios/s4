@@ -102,26 +102,31 @@ completed() {
     WHERE s.plan = '$plan' AND s.state = 'committed' AND o.kind = 'apply-config' AND o.state = 'completed'")
   [ -n "$op" ]
 }
-# use_time_passed: the last use-time check of the plan before its commitment passed, the access and
-# the artifact each passed, and an evidence observation of the plan was begun after it.
+# A, B and C each run the controller's loop, so the checks and observations of the plan may come from
+# several of them: each ordering is read among the committing controller's own entries.
+# use_time_passed: that controller's last use-time check of the plan before its commitment passed,
+# the access and the artifact each passed.
 use_time_passed() {
   [ "$(sql "SELECT u.entry->>'result' || ' ' || (u.entry->'dependencies'->'access'->>'result')
       || ' ' || (u.entry->'dependencies'->'artifact'->>'result')
       FROM machine_event u, machine_event c
       WHERE u.machine = '$machine_w' AND c.machine = u.machine AND c.kind = 'commitment' AND c.entry->>'plan' = '$plan'
         AND u.kind = 'use-time-check' AND u.entry->>'plan' = '$plan' AND u.revision < c.revision
+        AND u.entry->>'controller' = c.entry->>'controller'
       ORDER BY u.revision DESC LIMIT 1")" = 'passed passed passed' ]
 }
-# evidence_committed: the commitment names the operation and an evidence observation of the plan,
-# read with the access (not unread), begun after the passed use-time check and before the commitment.
+# evidence_committed: the commitment names the operation and an evidence observation of the plan by
+# the same controller, read with the access (not unread), begun after that controller's last
+# use-time check of the plan and before the commitment.
 evidence_committed() {
   [ "$(sql "SELECT count(*) FROM machine_event c
       JOIN observation o ON o.id = c.entry->>'observation' AND o.machine = c.machine
       JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
       WHERE c.machine = '$machine_w' AND c.kind = 'commitment' AND c.entry->>'plan' = '$plan' AND c.entry->>'operation' = '$op'
-        AND s.purpose = 'evidence' AND s.plan = '$plan' AND o.revision < c.revision AND o.configuration_digest IS NOT NULL
+        AND s.purpose = 'evidence' AND s.plan = '$plan' AND s.controller = c.entry->>'controller'
+        AND o.revision < c.revision AND o.configuration_digest IS NOT NULL
         AND s.revision > (SELECT max(u.revision) FROM machine_event u WHERE u.machine = c.machine AND u.kind = 'use-time-check'
-          AND u.entry->>'plan' = '$plan' AND u.revision < c.revision)")" = 1 ]
+          AND u.entry->>'plan' = '$plan' AND u.entry->>'controller' = c.entry->>'controller' AND u.revision < c.revision)")" = 1 ]
 }
 # one_attempt: one attempt, number 1, after the commitment, on the plan's route, resting on the
 # commitment's observation; its response accepted, recorded after it.
