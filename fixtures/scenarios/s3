@@ -17,8 +17,10 @@
 # controls that refuse or end a plan before its commitment (approval by the wrong identities, a
 # second approval, the superseded release, expiry, cancellation by each role that may, revocation
 # of an approval) leave no operation; and from a restore of the snapshots taken before step 2, the
-# three self-approval cases of step 4, each approval with the reasons that hold. Nothing commits an
-# apply-config plan before S4 (ginsys/bronzeward#26): the commitment-level controls are S4's.
+# three self-approval cases of step 4, each approval with the reasons that hold. The controller
+# dispatches an approved plan, so the part first cuts A's, B's and C's links to the worker and
+# leaves them cut: the executor's evidence observation fails and nothing commits; S4 joins them
+# again. The commitment-level controls are S4's.
 # Usage: scenarios/s3 handover|handover-controls   (each after scenarios/s1 run on a fresh
 # fixtures/bin/up: the handover is S2's precondition, the controls are their own run)
 #        scenarios/s3 run   (after scenarios/s1 run, s3 handover and s2 run on the same up)
@@ -808,6 +810,9 @@ approval_part() {
     worker_has_only_the_handover
   check 'S3 precondition' "the S2 release holds a revision the automation identity authored: owned-automation holds for h-all on every plan of this part" \
     release_holds_automation_revision
+  # The controller dispatches an approved plan: with every instance cut from the worker, its
+  # evidence observation fails and nothing commits. S4 joins the links again.
+  check 'S3 precondition' 'inject linksplit A, B and C from the worker: no approved plan of this part commits' worker_links linksplit
 
   # Step 1: three heartbeats (5 s) of the controller's loop have passed since S2 ended, and it has
   # made no plan and no operation. A pass with no candidate records nothing, so the interval is the
