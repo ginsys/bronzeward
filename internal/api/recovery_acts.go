@@ -14,9 +14,10 @@ import (
 // A recovery-admin's acts on one apply-config operation (persistence-api.md §9.2; execution-recovery.md
 // §3.4, §4, §5.2): a takeover request, an accounting decision and a resolution. Each is T11 (§5): the
 // key lock, the installation state FOR SHARE, then as the effect's locks the operation's machine FOR
-// UPDATE and the deciding identity's principal FOR SHARE, not revoked (rule 2). The transaction itself
-// runs once the act-order lock is held, so the entry's time follows every lock wait (rule 4); the
-// transaction takes the operation's own locks, which the machine's already orders.
+// UPDATE, the deciding identity's principal FOR SHARE, not revoked (rule 2), and the operation FOR
+// UPDATE. Every one is taken before the act-order lock, the transaction's last (rule 5): a request
+// waiting on an operation read while holding it would stall every other act. The writes run once the
+// act-order lock is held, so the entry's time follows every lock wait (rule 4).
 
 func operationTakeover() effectRoute {
 	return effectRoute{action: "operation.takeover", input: func() input { return &takeoverRequest{} }, effect: requestTakeover}
@@ -47,19 +48,20 @@ func operationMachine(ctx context.Context, tx *sql.Tx, operation string) (string
 	return machine, nil
 }
 
-// lockRecoveryAct takes the machine FOR UPDATE and the requesting identity's principal FOR SHARE.
-func lockRecoveryAct(ctx context.Context, tx *sql.Tx, q *request, machine string) error {
+// lockRecoveryAct takes the machine FOR UPDATE, the requesting identity's principal FOR SHARE and
+// then the operation FOR UPDATE, answering the operation's lock.
+func (a *API) lockRecoveryAct(ctx context.Context, tx *sql.Tx, q *request, operation, machine string) (operationLock, error) {
 	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, machine); err != nil {
-		return err
+		return operationLock{}, err
 	}
 	var revoked bool
 	if err := tx.QueryRowContext(ctx, `SELECT revoked FROM principal WHERE id = $1 FOR SHARE`, q.principal.ID).Scan(&revoked); err != nil {
-		return err
+		return operationLock{}, err
 	}
 	if revoked {
-		return refuse(http.StatusForbidden, "identity-revoked", "")
+		return operationLock{}, refuse(http.StatusForbidden, "identity-revoked", "")
 	}
-	return nil
+	return a.lockOperation(ctx, tx, operation)
 }
 
 // conflictOf answers a transaction's refusal as 409 conflict naming the transaction.
@@ -110,7 +112,7 @@ func requestTakeover(ctx context.Context, a *API, tx *sql.Tx, q *request) (resul
 	if err != nil {
 		return result{}, err
 	}
-	if err := lockRecoveryAct(ctx, tx, q, machine); err != nil {
+	if _, err := a.lockRecoveryAct(ctx, tx, q, operation, machine); err != nil {
 		return result{}, err
 	}
 	b := &takeoverBody{Operation: operation, RequestedBy: q.principal.ID, Role: string(q.role), Reason: in.Reason, Act: q.actID,
@@ -201,7 +203,7 @@ func decideAccounting(ctx context.Context, a *API, tx *sql.Tx, q *request) (resu
 		return result{}, refuse(http.StatusNotFound, "not-found", "no such observation of the operation's machine").
 			with("operation", operation)
 	}
-	if err := lockRecoveryAct(ctx, tx, q, machine); err != nil {
+	if _, err := a.lockRecoveryAct(ctx, tx, q, operation, machine); err != nil {
 		return result{}, err
 	}
 	b := &accountingBody{Operation: operation, Attempt: attempt, DecidedBy: q.principal.ID, Role: string(q.role), Start: in.Start,
@@ -262,16 +264,13 @@ func resolveByDecision(ctx context.Context, a *API, tx *sql.Tx, q *request) (res
 	if err != nil {
 		return result{}, err
 	}
-	if err := lockRecoveryAct(ctx, tx, q, machine); err != nil {
+	l, err := a.lockRecoveryAct(ctx, tx, q, operation, machine)
+	if err != nil {
 		return result{}, err
 	}
 	b := &resolutionBody{Operation: operation, State: "cancelled", ResolvedBy: q.principal.ID, Role: string(q.role), Reason: in.Reason,
 		Act: q.actID, Epoch: q.epoch}
 	write := func(ctx context.Context, tx *sql.Tx) error {
-		l, err := a.lockOperation(ctx, tx, operation)
-		if err != nil {
-			return err
-		}
 		if l.state != "unresolved" {
 			return conflictOf(refuseOutcome("resolution", "the operation is "+l.state))
 		}
