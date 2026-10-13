@@ -201,6 +201,11 @@ func TestExecutorCompletes(t *testing.T) {
 	if strings.Contains(entry, "hostname") || strings.Contains(entry, "cluster:") {
 		t.Fatalf("the check holds a value: %s", entry)
 	}
+	// The check's window starts before its dependency reads, not at the time it is recorded.
+	if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'use-time-check'
+		AND (entry->>'started')::timestamptz <= at`, xe.machine); n != 1 {
+		t.Fatalf("use-time check %s names no start at or before its entry", entry)
+	}
 	// One decryption, one access read for the dispatch and one for the completion observation.
 	xe.x.mu.Lock()
 	defer xe.x.mu.Unlock()
@@ -331,6 +336,25 @@ func TestAttemptRefusesAnExpiredUseTimeCheck(t *testing.T) {
 	mustExec(t, ae.db, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		SELECT $1, $2, epoch, 'use-time-check', jsonb_build_object('plan', $3::text, 'controller', $4::text, 'result', 'passed',
 			'dependencies', '{}'::jsonb), now() - interval '1 hour'
+		FROM installation_state`, ae.machine, rev, ae.pid, ae.a.d.owner.ID)
+	_, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
+	ae.wantAttemptRefused(t, err, "3", "the use-time check is older than the plan allows", ae.obs, "committed",
+		settled{"unresolved", "3", "the use-time check is older than the plan allows"})
+}
+
+// ER §3.1 item 2: the check's validity runs from before its dependency reads, so a check recorded
+// late, after slow reads, does not make the earlier values fresh.
+func TestAttemptMeasuresCheckValidityFromBeforeItsReads(t *testing.T) {
+	t.Parallel()
+	ae := newAttemptEnv(t, "")
+	var rev int64
+	if err := ae.db.QueryRow(`UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1 RETURNING revision_counter`,
+		ae.machine).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, ae.db, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+		SELECT $1, $2, epoch, 'use-time-check', jsonb_build_object('plan', $3::text, 'controller', $4::text, 'result', 'passed',
+			'started', to_char(now() - interval '1 hour', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'dependencies', '{}'::jsonb), now()
 		FROM installation_state`, ae.machine, rev, ae.pid, ae.a.d.owner.ID)
 	_, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
 	ae.wantAttemptRefused(t, err, "3", "the use-time check is older than the plan allows", ae.obs, "committed",

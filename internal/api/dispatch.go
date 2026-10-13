@@ -117,6 +117,10 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 // failed dependency fails the check: errUseTime, with nothing committed or sent.
 func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operation string, have *provider.TalosAccess) (useTime, error) {
 	var u useTime
+	var started time.Time // the check's window runs from here, before any dependency is read
+	if err := a.db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&started); err != nil {
+		return u, err
+	}
 	deps := map[string]any{}
 	failed := false
 	fail := func(name, cause string) {
@@ -170,7 +174,8 @@ func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operatio
 	if failed {
 		result = "failed"
 	}
-	entry := map[string]any{"plan": plan, "controller": a.d.owner.ID, "result": result, "dependencies": deps}
+	entry := map[string]any{"plan": plan, "controller": a.d.owner.ID, "result": result, "dependencies": deps,
+		"started": started.UTC().Format(time.RFC3339Nano)}
 	if operation != "" {
 		entry["operation"] = operation
 	}
@@ -185,12 +190,13 @@ func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operatio
 
 // useTimeCheckCause is why the latest use-time check this controller recorded for the plan does not
 // hold at time at, or "" when it does (§3.2 comparison 3, §3.3 comparison 3): the check failed, or
-// the plan's validity window has run out. A dispatch always records its check before its evidence,
+// the plan's validity window, measured from before its dependency reads, has run out. A dispatch
+// always records its check before its evidence,
 // so a plan with none is not one this controller dispatched, and nothing here refuses it.
 func (a *API) useTimeCheckCause(ctx context.Context, tx *sql.Tx, machine, plan string, at time.Time) (string, error) {
 	var cause string
 	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN e.entry->>'result' <> 'passed' THEN 'the use-time check failed'
-				WHEN $4::timestamptz - e.at > p.check_validity THEN 'the use-time check is older than the plan allows' ELSE '' END
+				WHEN $4::timestamptz - LEAST(e.at, (e.entry->>'started')::timestamptz) > p.check_validity THEN 'the use-time check is older than the plan allows' ELSE '' END
 			FROM machine_event e JOIN plan p ON p.id = $2
 			WHERE e.machine = $1 AND e.kind = 'use-time-check' AND e.entry->>'plan' = $2 AND e.entry->>'controller' = $3
 			ORDER BY e.revision DESC LIMIT 1`, machine, plan, a.d.owner.ID, at).Scan(&cause)
@@ -236,14 +242,8 @@ func (a *API) attemptAndSend(ctx context.Context, operation string, gen int64, m
 		return err
 	}
 	seam.At("dispatch-attempted") // the attempt recorded, nothing sent
-	var route string
-	var deadline time.Time
-	if err := a.db.QueryRowContext(ctx, `SELECT route::text, transport_deadline FROM attempt WHERE id = $1`, at.Attempt).Scan(&route,
-		&deadline); err != nil {
-		return err
-	}
-	sctx, cancel := context.WithDeadline(ctx, deadline)
-	resp := a.send(sctx, u.access.Talosconfig(), route, u.artifact)
+	sctx, cancel := context.WithDeadline(ctx, at.Deadline)
+	resp := a.send(sctx, u.access.Talosconfig(), at.Route, u.artifact)
 	cancel()
 	seam.At("dispatch-sent") // the request made, no response recorded
 	return a.respond(ctx, at.Attempt, operation, gen, machine, plan, resp)
