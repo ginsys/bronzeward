@@ -1346,7 +1346,8 @@ CREATE TABLE operation_classification (
   machine     text NOT NULL,
   revision    bigint NOT NULL,
   entry_kind  text NOT NULL GENERATED ALWAYS AS ('classification') STORED,
-  outcome     text NOT NULL CHECK (outcome IN ('completed', 'safe-to-retry', 'unresolved', 'rejected', 'failed')),
+  outcome     text NOT NULL CONSTRAINT operation_classification_outcome
+                CHECK (outcome IN ('completed', 'safe-to-retry', 'rejected', 'failed')),
   observation text,
   owner       text NOT NULL CHECK (btrim(owner) <> '' AND octet_length(owner) <= 512),
   owner_gen   bigint NOT NULL CHECK (owner_gen >= 1),
@@ -1356,8 +1357,9 @@ CREATE TABLE operation_classification (
   PRIMARY KEY (machine, revision),
   UNIQUE (operation, revision),
   UNIQUE (operation, revision, outcome),
-  -- A safe-to-retry classification rests on an observation of the machine (§5.1).
-  CHECK (outcome <> 'safe-to-retry' OR observation IS NOT NULL),
+  -- Completed, failed and safe to retry rest on an observation of the machine (§5.1); a rejection
+  -- rests on the responses alone.
+  CONSTRAINT operation_classification_observed CHECK ((outcome = 'rejected') = (observation IS NULL)),
   FOREIGN KEY (operation, machine) REFERENCES operation (id, machine),
   FOREIGN KEY (observation, machine) REFERENCES observation (id, machine),
   FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
