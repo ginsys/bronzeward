@@ -87,20 +87,27 @@ func TestOutcomeRecords(t *testing.T) {
 	accepted(t, db, "retry under a safe-to-retry classification",
 		append(a.classified(11, "safe-to-retry", a.obs), retry(12, 11)...)...)
 
-	// An ownership transition names its operation, the tokens it moved between, the generation it
-	// reached and why.
+	// An ownership transition names its operation, the tokens it moved between, the generation and
+	// epoch it moved from and to, and why (§4.1).
 	transition := func(entry string) stmt { return a.entryOf(13, "ownership-transition", entry) }
+	const moved = `"from": "a", "to": "b", "generation": 2, "fromGeneration": 1, "fromEpoch": "e1", "epoch": "e2", "reason": "lease"`
 	for name, e := range map[string]string{
-		"no operation":  `{"from": "a", "to": "b", "generation": 2, "reason": "lease"}`,
-		"no from":       `{"operation": "x", "to": "b", "generation": 2, "reason": "lease"}`,
-		"no generation": `{"operation": "x", "from": "a", "to": "b", "reason": "lease"}`,
-		"a number from": `{"operation": "x", "from": 1, "to": "b", "generation": 2, "reason": "lease"}`,
-		"no reason":     `{"operation": "x", "from": "a", "to": "b", "generation": 2}`,
+		"no operation":       `{"from": "a", "to": "b", "generation": 2, "fromGeneration": 1, "fromEpoch": "e1", "epoch": "e2", "reason": "lease"}`,
+		"no from":            `{"operation": "x", "to": "b", "generation": 2, "fromGeneration": 1, "fromEpoch": "e1", "epoch": "e2", "reason": "lease"}`,
+		"no generation":      `{"operation": "x", "from": "a", "to": "b", "fromGeneration": 1, "fromEpoch": "e1", "epoch": "e2", "reason": "lease"}`,
+		"a number from":      `{"operation": "x", "from": 1, "to": "b", "generation": 2, "fromGeneration": 1, "fromEpoch": "e1", "epoch": "e2", "reason": "lease"}`,
+		"no reason":          `{"operation": "x", "from": "a", "to": "b", "generation": 2, "fromGeneration": 1, "fromEpoch": "e1", "epoch": "e2"}`,
+		"no from generation": `{"operation": "x", "from": "a", "to": "b", "generation": 2, "fromEpoch": "e1", "epoch": "e2", "reason": "lease"}`,
+		"a string from generation": `{"operation": "x", "from": "a", "to": "b", "generation": 2, "fromGeneration": "1", "fromEpoch": "e1",
+			"epoch": "e2", "reason": "lease"}`,
+		"no from epoch": `{"operation": "x", "from": "a", "to": "b", "generation": 2, "fromGeneration": 1, "epoch": "e2", "reason": "lease"}`,
+		"no epoch":      `{"operation": "x", "from": "a", "to": "b", "generation": 2, "fromGeneration": 1, "fromEpoch": "e1", "reason": "lease"}`,
+		"a number epoch": `{"operation": "x", "from": "a", "to": "b", "generation": 2, "fromGeneration": 1, "fromEpoch": "e1", "epoch": 2,
+			"reason": "lease"}`,
 	} {
 		refused(t, db, "ownership transition entry naming "+name, "23514", transition(e))
 	}
-	accepted(t, db, "ownership transition entry",
-		transition(`{"operation": "x", "from": "a", "to": "b", "generation": 2, "reason": "lease"}`))
+	accepted(t, db, "ownership transition entry", transition(`{"operation": "x", `+moved+`}`))
 
 	// The controls: without each constraint, the row it refuses commits.
 	for _, c := range []struct {

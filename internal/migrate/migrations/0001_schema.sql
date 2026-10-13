@@ -548,11 +548,15 @@ CREATE TABLE machine_event (
       'ownership-transition') OR jsonb_typeof(entry->'operation') IS NOT DISTINCT FROM 'string'),
   CONSTRAINT machine_event_attempt_entry CHECK (kind NOT IN ('response', 'accounting')
     OR jsonb_typeof(entry->'attempt') IS NOT DISTINCT FROM 'string'),
-  -- An ownership transition names the owner token it moved from and to and why.
+  -- An ownership transition names the owner token it moved from and to, the generation and epoch
+  -- it moved from and to, and why (§4.1).
   CONSTRAINT machine_event_ownership_transition CHECK (kind <> 'ownership-transition'
     OR (jsonb_typeof(entry->'from') IS NOT DISTINCT FROM 'string'
       AND jsonb_typeof(entry->'to') IS NOT DISTINCT FROM 'string'
       AND jsonb_typeof(entry->'generation') IS NOT DISTINCT FROM 'number'
+      AND jsonb_typeof(entry->'fromGeneration') IS NOT DISTINCT FROM 'number'
+      AND jsonb_typeof(entry->'fromEpoch') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'epoch') IS NOT DISTINCT FROM 'string'
       AND jsonb_typeof(entry->'reason') IS NOT DISTINCT FROM 'string')),
   at       timestamptz NOT NULL,
   PRIMARY KEY (machine, revision),
@@ -1332,9 +1336,11 @@ CREATE TRIGGER binding BEFORE UPDATE ON operation FOR EACH ROW
 -- An apply-config operation's classification (execution and recovery §4.1, §5): the outcome the
 -- controller decided from the entries and the completion or recovery observation it relied on, by
 -- revision, under the owner token that decided it. A retry binds to the revision of the
--- safe-to-retry classification it was admitted under (§3.3 comparison 8). Cancelled is not
--- recorded here: its operation-state entry names its cause. It is one classification entry on the
--- machine's timeline.
+-- safe-to-retry classification it was admitted under (§3.3 comparison 8). The controller records
+-- the outcomes that end an operation (completed, rejected, failed) and the one that admits a retry;
+-- a rejection rests on responses and names no observation. Cancelled is not recorded here, and an
+-- unresolved operation is the state itself: its operation-state entry names its cause. It is one
+-- classification entry on the machine's timeline.
 CREATE TABLE operation_classification (
   operation   text NOT NULL,
   machine     text NOT NULL,

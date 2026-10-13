@@ -362,6 +362,13 @@ func TestSettle(t *testing.T) {
 						AND e.entry->>'plan' = p.id AND e.entry->>'to' = p.release`, ae.machine, ae.pid); n != 1 {
 					t.Fatal("the applied change entry is not the machine's last")
 				}
+				if n := count(t, ae.db, `SELECT count(*) FROM operation_classification c JOIN machine_event e ON e.machine = c.machine
+							AND e.revision = c.revision AND e.kind = 'classification' JOIN observation o ON o.id = c.observation
+						WHERE c.operation = $1 AND c.outcome = 'completed' AND c.observation = $2 AND c.relied = jsonb_build_array(o.revision)
+							AND c.owner_gen = $3 AND e.entry->>'outcome' = 'completed' AND e.entry->>'observation' = $2`,
+					ae.op, obs, gen); n != 1 {
+					t.Fatal("no completed classification record and entry as recorded")
+				}
 			})
 		}
 	})
@@ -396,6 +403,12 @@ func TestSettle(t *testing.T) {
 		if n := count(t, ae.db, `SELECT count(*) FROM operation WHERE id = $1 AND state = 'failed' AND result IS NULL
 			AND error->>'outcome' = 'failed' AND error->>'observation' = $2`, ae.op, obs); n != 1 {
 			t.Fatal("no failed operation with its error")
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM operation_classification c JOIN machine_event e ON e.machine = c.machine
+				AND e.revision = c.revision AND e.kind = 'classification' JOIN observation o ON o.id = c.observation
+			WHERE c.operation = $1 AND c.outcome = 'failed' AND c.observation = $2 AND c.relied = jsonb_build_array(o.revision)
+				AND c.owner_gen = $3 AND e.entry->>'outcome' = 'failed'`, ae.op, obs, gen); n != 1 {
+			t.Fatal("no failed classification record and entry as recorded")
 		}
 		if n := count(t, ae.db, `SELECT count(*) FROM machine_state ms JOIN plan p ON p.machine = ms.machine
 			WHERE p.id = $1 AND ms.applied_release IS NOT DISTINCT FROM (SELECT applied_release FROM machine_state WHERE machine = $2)

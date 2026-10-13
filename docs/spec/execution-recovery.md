@@ -756,7 +756,7 @@ Required entries:
 | Response | attempt id, class (acceptance, gRPC code, transport outcome), redacted text or the withheld notice (§3.5) |
 | Ownership transition | the operation, from and to owner, the generation and epoch it moved from and to, reason |
 | Accounting | attempt id, basis (a response, or a §5.2 decision with its recorded facts), decider and role |
-| Classification | the operation, the outcome of §5, the observation it rests on and the entries relied on, by revision |
+| Classification | the operation, the outcome of §5 that ends the operation or admits a retry (completed, rejected, failed, safe to retry), the observation it rests on (none for a rejection, which rests on responses) and the entries relied on, by revision; an unresolved or cancelled operation names its cause on its state entry |
 | `Applied` change | from, to, digest, source (operation or adoption record) |
 | Endpoint change | previous and new Talos endpoint, who, role ([persistence and API §3.3](persistence-api.md#33-talos-access)) |
 

@@ -109,6 +109,32 @@ func (a *API) moveOperation(ctx context.Context, tx *sql.Tx, l *operationLock, t
 	return nil
 }
 
+// classify records the §5 outcome the controller decided as one classification entry and its record,
+// under the token of the process that decided it at generation: the observation it rests on, if
+// any, and the revisions of the entries it relied on. It precedes the state entry the outcome moves
+// the operation by. A rejection rests on responses alone, so it names no observation.
+func (a *API) classify(ctx context.Context, tx *sql.Tx, l operationLock, outcome string, observation sql.NullString,
+	relied []int64, generation int64) (int64, error) {
+	var obs any
+	if observation.Valid {
+		obs = observation.String
+	}
+	rev, _, err := a.appendEntry(ctx, tx, l, "classification", map[string]any{"operation": l.id, "outcome": outcome,
+		"observation": obs, "relied": relied, "controller": a.d.owner.ID, "generation": generation})
+	if err != nil {
+		return 0, err
+	}
+	reliedDoc, err := json.Marshal(relied)
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO operation_classification (operation, machine, revision, outcome, observation,
+			owner, owner_gen, owner_epoch, relied, at)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, at FROM machine_event WHERE machine = $2 AND revision = $3`,
+		l.id, l.machine, rev, outcome, obs, a.d.owner.ID, generation, l.current, string(reliedDoc))
+	return rev, err
+}
+
 // takenOver is what a takeover recorded: the operation, the owner generation it now holds and its
 // state, and the ownership transition entry's revision.
 type takenOver struct {
@@ -266,6 +292,20 @@ func (a *API) recordResponse(ctx context.Context, attempt string, resp talos.Res
 		case "rejected":
 			var attempts int
 			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM attempt WHERE operation = $1`, operation).Scan(&attempts); err != nil {
+				return err
+			}
+			// The rejection rests on every attempt's response (§5.1), this one included, and on no
+			// observation; its classification precedes the state entry.
+			var reliedDoc string
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(p.revision ORDER BY p.revision), '[]')::text
+				FROM attempt_response p JOIN attempt a ON a.id = p.attempt WHERE a.operation = $1`, operation).Scan(&reliedDoc); err != nil {
+				return err
+			}
+			var relied []int64
+			if err := json.Unmarshal([]byte(reliedDoc), &relied); err != nil {
+				return err
+			}
+			if _, err := a.classify(ctx, tx, l, "rejected", sql.NullString{}, relied, gen); err != nil {
 				return err
 			}
 			if err := a.moveOperation(ctx, tx, &l, to, cause, nil, map[string]any{"outcome": "rejected", "cause": cause,

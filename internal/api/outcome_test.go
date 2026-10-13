@@ -257,6 +257,24 @@ func TestRecordResponse(t *testing.T) {
 				AND ($2 = false OR error->>'outcome' = 'rejected')`, ae.op, c.failure); n != 1 {
 				t.Fatal("the operation's error is not as the outcome needs")
 			}
+			// A definitive rejection of every attempt is a classification: its entry and record rest on
+			// the responses, not an observation, and precede the state entry.
+			wantClass := 0
+			if c.state == "rejected" {
+				wantClass = 1
+				if n := count(t, ae.db, `SELECT count(*) FROM operation_classification c JOIN machine_event e ON e.machine = c.machine
+						AND e.revision = c.revision AND e.kind = 'classification'
+					WHERE c.operation = $1 AND c.outcome = 'rejected' AND c.observation IS NULL AND c.relied = jsonb_build_array($2::bigint)
+						AND c.owner = $3 AND c.owner_gen = 1 AND c.owner_epoch = $4 AND c.revision = $5 AND e.at = c.at
+						AND e.entry = jsonb_build_object('operation', $1::text, 'outcome', 'rejected', 'observation', NULL,
+							'relied', jsonb_build_array($2::bigint), 'controller', $3::text, 'generation', 1)`,
+					ae.op, r.Revision, ae.a.d.owner.ID, ep, r.Revision+2); n != 1 {
+					t.Fatal("no rejected classification record and entry as recorded")
+				}
+			}
+			if n := count(t, ae.db, `SELECT count(*) FROM operation_classification WHERE operation = $1`, ae.op); n != wantClass {
+				t.Fatalf("%d classification records, want %d", n, wantClass)
+			}
 			if c.state != "" && c.state != "sending" {
 				if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'operation-state'
 						AND entry->>'operation' = $2 AND entry->>'from' = 'sending' AND entry->>'to' = $3`,
@@ -340,6 +358,11 @@ func TestRecordResponseRefusalsAndLateResponses(t *testing.T) {
 			AND entry->>'decidedBy' = $3`, ae.machine, next.d.owner.ID, ae.a.d.owner.ID); n != 1 {
 			t.Fatal("the state entry does not name the operation's token and the controller that decided")
 		}
+		// The classification is the deciding controller's, under the attempt's token.
+		if n := count(t, ae.db, `SELECT count(*) FROM operation_classification WHERE operation = $1 AND outcome = 'rejected'
+			AND owner = $2 AND owner_gen = 1`, ae.op, ae.a.d.owner.ID); n != 1 {
+			t.Fatal("no rejected classification under the attempt's token")
+		}
 	})
 }
 
@@ -422,7 +445,7 @@ func TestAttemptRetryRefusals(t *testing.T) {
 		mustExec(t, ae.db, `UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1`, ae.machine)
 		mustExec(t, ae.db, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 			SELECT m.id, m.revision_counter, i.epoch, 'ownership-transition', jsonb_build_object('operation', $2::text, 'from', 'a',
-				'to', 'b', 'generation', 2, 'reason', 'test'), now()
+				'to', 'b', 'generation', 2, 'fromGeneration', 1, 'fromEpoch', i.epoch, 'epoch', i.epoch, 'reason', 'test'), now()
 			FROM machine m, installation_state i WHERE m.id = $1`, ae.machine, ae.op)
 		_, err := next.recordAttempt(context.Background(), ae.op, 2)
 		var refused *attemptRefused
