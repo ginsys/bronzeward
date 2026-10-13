@@ -118,6 +118,21 @@ func readActs(a *API, q *request) (actsPage, error) {
 // (§9.1: unknown fields are refused); the route reads its filters. The cursor names the last item
 // listed, an identifier of p.
 func page(q *request, p id.Prefix, filters ...string) (limit int, after string, ref *refusal) {
+	return pageBy(q, func(last string) bool { return id.MustHave(last, p) == nil }, filters...)
+}
+
+// pageSeq is page for a collection ordered by a number, an entry's revision or an event's number:
+// the cursor names the last number listed, and the first page starts after 0.
+func pageSeq(q *request, filters ...string) (limit int, after string, ref *refusal) {
+	limit, after, ref = pageBy(q, func(last string) bool { n, err := strconv.ParseInt(last, 10, 64); return err == nil && n >= 1 }, filters...)
+	if after == "" {
+		after = "0"
+	}
+	return limit, after, ref
+}
+
+// pageBy is page for a cursor whose last item valid accepts.
+func pageBy(q *request, valid func(last string) bool, filters ...string) (limit int, after string, ref *refusal) {
 	vals, err := url.ParseQuery(q.r.URL.RawQuery)
 	if err != nil {
 		return 0, "", refuse(http.StatusBadRequest, "invalid-request", "the query does not parse")
@@ -136,7 +151,7 @@ func page(q *request, p id.Prefix, filters ...string) (limit int, after string, 
 		limit = n
 	}
 	if vals.Has("cursor") {
-		ep, last, err := parseCursor(vals.Get("cursor"), p)
+		ep, last, err := parseCursor(vals.Get("cursor"), valid)
 		if err != nil || ep != q.epoch {
 			return 0, "", refuse(http.StatusBadRequest, "cursor-invalid", "")
 		}
@@ -152,13 +167,13 @@ func makeCursor(epoch, last string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(epoch + "." + last))
 }
 
-func parseCursor(c string, p id.Prefix) (epoch, last string, err error) {
+func parseCursor(c string, valid func(last string) bool) (epoch, last string, err error) {
 	b, err := base64.RawURLEncoding.DecodeString(c)
 	if err != nil {
 		return "", "", err
 	}
 	epoch, last, ok := strings.Cut(string(b), ".")
-	if !ok || id.MustHave(epoch, id.Epoch) != nil || id.MustHave(last, p) != nil {
+	if !ok || id.MustHave(epoch, id.Epoch) != nil || !valid(last) {
 		return "", "", errors.New("not a cursor")
 	}
 	return epoch, last, nil

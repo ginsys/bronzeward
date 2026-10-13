@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/internal/id"
@@ -245,18 +246,29 @@ type applied struct {
 	Source  string `json:"source"`
 }
 
+// observedBody is the Observed value of a machine (execution-recovery.md §1): the latest
+// observation that read the configuration, and the release among Applied and Desired whose
+// artifact it matched, null when it matched neither. The digest itself stays in the database
+// (choice §17.38).
+type observedBody struct {
+	Observation string    `json:"observation"`
+	At          time.Time `json:"at"`
+	Release     *string   `json:"release"`
+}
+
 // machineBody is §9.3's machine resource. openDrift stays null until drift records exist.
 type machineBody struct {
-	ID            string    `json:"id"`
-	Cluster       string    `json:"cluster"`
-	Hardware      hardware  `json:"hardware"`
-	Platform      string    `json:"platform"`
-	TalosEndpoint string    `json:"talosEndpoint"`
-	Desired       *string   `json:"desired"`
-	Applied       *applied  `json:"applied"`
-	Frozen        bool      `json:"frozen"`
-	ScopeState    string    `json:"scopeState"`
-	OpenDrift     *struct{} `json:"openDrift"`
+	ID            string        `json:"id"`
+	Cluster       string        `json:"cluster"`
+	Hardware      hardware      `json:"hardware"`
+	Platform      string        `json:"platform"`
+	TalosEndpoint string        `json:"talosEndpoint"`
+	Desired       *string       `json:"desired"`
+	Applied       *applied      `json:"applied"`
+	Observed      *observedBody `json:"observed"`
+	Frozen        bool          `json:"frozen"`
+	ScopeState    string        `json:"scopeState"`
+	OpenDrift     *struct{}     `json:"openDrift"`
 }
 
 // inventoryMachine records a machine with its MachineState. The unique indexes on the SMBIOS UUID and

@@ -152,16 +152,31 @@ var (
 	})
 )
 
+// Observed is the latest observation that read the configuration, matched by digest against the
+// Applied artifact's and then the Desired release's; the digest is compared here and never served.
 const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.talos_node_id, m.serial, m.platform, m.talos_endpoint, m.frozen, m.scope_state, s.desired,
-		s.applied_release, s.applied_source
-	FROM machine m JOIN machine_state s ON s.machine = m.id`
+		s.applied_release, s.applied_source, ob.id, ob.at,
+		CASE WHEN ob.configuration_digest = s.applied_digest THEN s.applied_release
+			WHEN ob.configuration_digest = rd.configuration_digest THEN s.desired END
+	FROM machine m JOIN machine_state s ON s.machine = m.id
+	LEFT JOIN release_machine rd ON rd.release = s.desired AND rd.machine = m.id
+	LEFT JOIN LATERAL (SELECT o.id, o.at, o.configuration_digest FROM observation o
+		WHERE o.machine = m.id AND o.configuration_digest IS NOT NULL ORDER BY o.revision DESC LIMIT 1) ob ON true`
 
 func scanMachine(r interface{ Scan(...any) error }) (machineBody, error) {
 	var b machineBody
-	var rel, source sql.NullString
-	err := r.Scan(&b.ID, &b.Cluster, &b.Hardware.SMBIOSUUID, &b.Hardware.TalosNodeID, &b.Hardware.Serial, &b.Platform, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source)
+	var rel, source, obs, observedRelease sql.NullString
+	var observedAt sql.NullTime
+	err := r.Scan(&b.ID, &b.Cluster, &b.Hardware.SMBIOSUUID, &b.Hardware.TalosNodeID, &b.Hardware.Serial, &b.Platform, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source,
+		&obs, &observedAt, &observedRelease)
 	if rel.Valid {
 		b.Applied = &applied{Release: rel.String, Source: source.String}
+	}
+	if obs.Valid {
+		b.Observed = &observedBody{Observation: obs.String, At: observedAt.Time.UTC()}
+		if observedRelease.Valid {
+			b.Observed.Release = &observedRelease.String
+		}
 	}
 	return b, err
 }
@@ -293,9 +308,13 @@ func getDraft(a *API, w http.ResponseWriter, q *request) {
 	})(a, w, q)
 }
 
+// operationSubject is what the operation acts on: a draft revision for a publish or ingest, a plan
+// and its machine for an apply-config or adopt operation.
 type operationSubject struct {
-	Draft         string `json:"draft"`
-	DraftRevision int    `json:"draftRevision"`
+	Draft         string `json:"draft,omitempty"`
+	DraftRevision int    `json:"draftRevision,omitempty"`
+	Plan          string `json:"plan,omitempty"`
+	Machine       string `json:"machine,omitempty"`
 }
 
 type createdBy struct {
@@ -315,6 +334,8 @@ type operationBody struct {
 	CreatedAt time.Time         `json:"createdAt"`
 	Result    json.RawMessage   `json:"result"`
 	Error     json.RawMessage   `json:"error"`
+	// Attempts is the resource's own: the attempts of an apply-config operation, by number.
+	Attempts []attemptBody `json:"attempts,omitempty"`
 }
 
 var getOperation = item(id.Operation, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
@@ -322,18 +343,39 @@ var getOperation = item(id.Operation, func(ctx context.Context, tx *sql.Tx, v st
 	return "", b, err
 })
 
-// readOperation reads operation v as §8.3 shows it.
-func readOperation(ctx context.Context, tx *sql.Tx, v string) (operationBody, error) {
+// selectOperation never selects a digest: an operation's result names what it applied, and the
+// artifact's digest stays in the database (choice §17.38).
+const selectOperation = `SELECT id, kind, state, epoch, last_event, draft, draft_revision, plan, machine, created_by, created_role,
+		created_at, (result - 'digest')::text, error::text
+	FROM operation`
+
+func scanOperation(r interface{ Scan(...any) error }) (operationBody, error) {
 	var b operationBody
-	var draft, principal, role, res, fail sql.NullString
+	var draft, plan, machine, principal, role, res, fail sql.NullString
 	var revision sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT id, kind, state, epoch, last_event, draft, draft_revision, created_by, created_role,
-			created_at, result::text, error::text
-		FROM operation WHERE id = $1`, v).Scan(&b.ID, &b.Kind, &b.State, &b.Epoch, &b.LastEvent, &draft, &revision,
+	err := r.Scan(&b.ID, &b.Kind, &b.State, &b.Epoch, &b.LastEvent, &draft, &revision, &plan, &machine,
 		&principal, &role, &b.CreatedAt, &res, &fail)
 	if err != nil {
 		return b, err
 	}
+	if plan.Valid {
+		b.Subject = &operationSubject{Plan: plan.String, Machine: machine.String}
+	}
+	return finishOperation(b, draft, revision, principal, role, res, fail), nil
+}
+
+// readOperation reads operation v as §8.3 shows it.
+func readOperation(ctx context.Context, tx *sql.Tx, v string) (operationBody, error) {
+	b, err := scanOperation(tx.QueryRowContext(ctx, selectOperation+` WHERE id = $1`, v))
+	if err != nil || b.Subject == nil || b.Subject.Plan == "" {
+		return b, err
+	}
+	b.Attempts, err = readAttempts(ctx, tx, v)
+	return b, err
+}
+
+// finishOperation completes an operation row's body from its nullable columns.
+func finishOperation(b operationBody, draft sql.NullString, revision sql.NullInt64, principal, role, res, fail sql.NullString) operationBody {
 	// A NULL result or error stays a nil RawMessage, which marshals as null (§8.3).
 	if res.Valid {
 		b.Result = json.RawMessage(res.String)
@@ -348,5 +390,5 @@ func readOperation(ctx context.Context, tx *sql.Tx, v string) (operationBody, er
 		b.CreatedBy = &createdBy{Principal: principal.String, Role: role.String}
 	}
 	b.CreatedAt = b.CreatedAt.UTC()
-	return b, nil
+	return b
 }

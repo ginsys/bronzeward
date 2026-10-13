@@ -250,7 +250,7 @@ func TestNotImplemented(t *testing.T) {
 		http.StatusPreconditionRequired, "precondition-required")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: freeze, token: pub, key: key, body: `{}`}),
 		http.StatusNotImplemented, "not-implemented")
-	wantProblem(t, e.do(e.api, call{method: "GET", path: path("/machines/{id}/timeline"), token: e.human("h-viewer")}),
+	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/recovery", token: e.human("h-viewer")}),
 		http.StatusNotImplemented, "not-implemented")
 	if n := count(t, e.db, "SELECT count(*) FROM principal WHERE sub = 'h-publisher'"); n != 0 {
 		t.Fatal("an unbuilt route created a principal row")
