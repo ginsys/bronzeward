@@ -71,7 +71,7 @@ func routes() []*route {
 	rs := []*route{
 		read(g("/clusters"), listClusters), read(g("/clusters/{id}"), getCluster),
 		read(g("/machines"), listMachines), read(g("/machines/{id}"), getMachine),
-		read(g("/machines/{id}/observations"), listObservations), g("/machines/{id}/timeline"),
+		read(g("/machines/{id}/observations"), listObservations), read(g("/machines/{id}/timeline"), listTimeline),
 	}
 	for _, kind := range []string{"fragment", "profile", "assignment"} {
 		for _, p := range []string{"/" + kind + "s", "/" + kind + "s/{id}", "/" + kind + "s/{id}/revisions", "/" + kind + "-revisions/{id}"} {
@@ -82,8 +82,9 @@ func routes() []*route {
 		read(g("/drafts"), listDrafts), read(g("/drafts/{id}"), getDraft),
 		read(g("/ingestions/{id}"), getIngestion), read(g("/releases"), listReleases), read(g("/releases/{id}"), getRelease),
 		read(g("/releases/{id}/machines/{m}/review"), getReview),
-		read(g("/plans"), listPlans), read(g("/plans/{id}"), getPlan), read(g("/approvals/{id}"), getApproval), g("/operations"), read(g("/operations/{id}"), getOperation),
-		g("/operations/{id}/events"), read(g("/acts"), listActs), g("/recovery"),
+		read(g("/plans"), listPlans), read(g("/plans/{id}"), getPlan), read(g("/approvals/{id}"), getApproval), read(g("/operations"), listOperations),
+		read(g("/operations/{id}"), getOperation), read(g("/operations/{id}/events"), getOperationEvents),
+		read(g("/acts"), listActs), g("/recovery"),
 		read(g("/dependencies"), listDependencies), read(g("/dependencies/{id}"), getDependency),
 		read(g("/dependencies/{id}/releases"), dependencyReleases), read(g("/dependencies/{id}/alerts"), listAlerts(true)),
 		read(g("/dependency-alerts"), listAlerts(false)),

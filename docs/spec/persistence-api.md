@@ -1465,8 +1465,22 @@ events begin at its commitment and link its plan and approval, whose entries
 are on the machine's timeline (`GET /machines/{id}/timeline`). They continue
 with its attempt, response, accounting, classification, ownership-transition
 and operation-state entries and, when it completes, the `Applied` change
-(execution and recovery §4.1). Polling the
-resource is always supported (design §11.1). WebSocket is not offered in the
+(execution and recovery §4.1). Each JSON event is `{"id": "<epoch>:<number>",
+"type", "at", "data"}`: the epoch is the one the read held, so a client's
+resumption within it is by number and an id of another epoch cannot be
+resumed; `type` is the entry's kind (a publish or ingest event's own type) and
+`data` is the entry. A response's text and an artifact digest are not served on
+the events, the machine timeline or the operation's result (choice §17.38);
+the entry in the database holds them. A stream also ends once the operation is
+terminal and its events are written; `unresolved` is not terminal. The
+resource of an apply-config operation also lists its `attempts`, each with its
+response class and code and its accounting basis once recorded, and the
+operation's `subject` names its `plan` and `machine`. A machine resource's
+`observed` is the latest observation that read its configuration, with the
+release among its Applied and Desired whose artifact the observation matched
+(`null` for neither), so Desired, Applied and Observed are three values that
+agree once an operation completed. Polling the resource is always supported
+(design §11.1). WebSocket is not offered in the
 PoC **(choice §17.14)**.
 
 An `ingest` operation's events are `{"type": "started"}`, written with the
