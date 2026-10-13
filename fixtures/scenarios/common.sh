@@ -290,6 +290,11 @@ within() {
   done
   "${@:2}"
 }
+# worker_links linksplit|linkjoin: A's, B's and C's links to the worker cut, or joined again.
+worker_links() {
+  local i
+  for i in A B C; do "$bin/inject" "$1" "$i" worker || return 1; done
+}
 
 # The claim under test.
 tk_ing=''

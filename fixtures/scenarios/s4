@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+# Acceptance plan S4, the safe apply, against the fixture. `run`: on the state S3's approval part
+# leaves (step 3's plan approved, A's, B's and C's links to the worker cut), the links are joined
+# again and the controller dispatches the plan: the use-time check and an evidence observation, the
+# commitment, one attempt sending apply-config (no-reboot) over the worker's own route, the
+# acceptance, a completion observation, and the operation completed with Applied the release. The
+# timeline orders each of them, the worker's digest becomes the artifact's and its resource version
+# moves, the control plane is untouched, and Desired, Applied and Observed agree only at the end.
+# Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s4.tsv
+# in the evidence directory and to stdout. Exit 1 on any FAIL.
+# Usage: scenarios/s4 run   (after scenarios/s1 run, s3 handover, s2 run and s3 run on the same up)
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+s4_mode=${1:-}
+case $s4_mode in run) ;; *) die "usage: scenarios/s4 run" ;; esac
+need docker curl jq timeout id sleep date awk wc
+need_state
+# No fixture lock of its own: inject and evidence each take the one they need.
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+EV=$STATE/evidence/s4-$s4_mode-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV" "$EV/http"
+scenario=s4
+# shellcheck source-path=SCRIPTDIR source=common.sh
+. "$here/common.sh"
+run_key=$(date -u +%s%N)
+mutation_ref='S4 pass'
+
+cluster='' machine_cp='' machine_w='' plan='' rel='' was='' baseline='' op=''
+viewer='' viewer_at=0
+fresh_viewer() {
+  [ -z "$viewer" ] || [ $((SECONDS - viewer_at)) -ge 180 ] || return 0
+  viewer=$(mint h-viewer) || die "cannot mint a viewer token"
+  keep_secret "$viewer"
+  viewer_at=$SECONDS
+}
+machine_at() {
+  sql "SELECT id FROM machine WHERE cluster = '$cluster' AND talos_endpoint::text = '$1:50000'
+    AND talos_node_id NOT LIKE 's1-no-such-node-%'"
+}
+one_line() { [ -n "$1" ] && [ "$(wc -l <<<"$1")" = 1 ]; }
+# worker_cut: .state/linksplits records A's, B's and C's links to the worker cut.
+worker_cut() { counted 3 '^[ABC] worker$' "$STATE/linksplits"; }
+worker_joined() { [ ! -f "$STATE/linksplits" ] || counted 0 '^[ABC] worker$' "$STATE/linksplits"; }
+# served <jq filter>: h-viewer reads the worker and the body satisfies the filter.
+served() {
+  fresh_viewer
+  answers_with "$1" 200 - GET "/api/v1/machines/$machine_w" "$viewer"
+}
+# rev <SQL predicate on machine_event e>: the revision of the one worker entry it selects.
+rev() { sql "SELECT e.revision FROM machine_event e WHERE e.machine = '$machine_w' AND $1"; }
+
+preconditions() {
+  local ref='S4 precondition'
+  cluster=$(sql "SELECT id FROM cluster WHERE name = 'bw-fixture'") || die "s4: cannot read the cluster"
+  machine_cp=$(machine_at "$TALOS_CONTROLPLANE_IP") || die "s4: cannot read the control plane's machine"
+  one_line "$machine_cp" || die "s4: not one machine at the control plane's endpoint: run scenarios/s1 run first"
+  machine_w=$(machine_at "$TALOS_WORKER_IP") || die "s4: cannot read the worker's machine"
+  one_line "$machine_w" || die "s4: not one machine at the worker's endpoint: run scenarios/s1 run first"
+  plan=$(sql "SELECT id FROM plan WHERE kind = 'apply-config'") || die "s4: cannot read the plans"
+  one_line "$plan" || die "s4: not one apply-config plan: run scenarios/s3 run first"
+  rel=$(sql "SELECT release FROM plan WHERE id = '$plan'")
+  was=$(sql "SELECT applied_release FROM machine_state WHERE machine = '$machine_w'")
+  baseline=$(sql "SELECT baseline_revision FROM machine_state WHERE machine = '$machine_w'")
+  check "$ref" "S3's step 3 plan: the worker's, approved, no operation, no-reboot, unexpired for ten minutes more" \
+    same "$(sql "SELECT p.machine || ' ' || s.state || ' ' || coalesce(s.operation, 'none') || ' ' || p.mode
+      || ' ' || (p.expires_at > now() + interval '10 minutes') FROM plan p JOIN plan_state s ON s.plan = p.id
+      WHERE p.id = '$plan'")" "$machine_w approved none no-reboot true"
+  check "$ref" "its release is the worker's Desired and not its Applied" \
+    same "$(sql "SELECT (desired = '$rel') || ' ' || (applied_release <> '$rel') FROM machine_state WHERE machine = '$machine_w'")" 'true true'
+  check "$ref" 'no apply-config operation exists' same "$(sql "SELECT count(*) FROM operation WHERE kind = 'apply-config'")" 0
+  check "$ref" "A's, B's and C's links to the worker are cut (S3 step 4)" worker_cut
+  check "$ref" 'A answers /livez' answers 204 - GET /livez ''
+  check "$ref" "the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all" \
+    methods_counted
+  check "$ref" "Desired, Applied and Observed served as three values: Desired the plan's release, Applied and Observed not" \
+    served ".desired == \"$rel\" and .applied.release == \"$was\" and .applied.source == \"adoption\"
+      and (.observed.release // \"none\") != \"$rel\""
+}
+
+cp_log='' w_log=''
+pre_state() {
+  local ref='S4 precondition'
+  evidence_to pre || die "no pre-state: bin/evidence failed"
+  cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"
+  cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
+  check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean pre
+  check "$ref" 'pre-state: both nodes have a configuration digest and a resource version' \
+    same "$(grep -c -E '^[0-9a-f]{64} ' "$EV/pre-talos-config-sha256.txt") $(grep -c -E '^[0-9]+ ' "$EV/pre-talos-config-version.txt")" '2 2'
+  cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+}
+
+# completed: the plan committed to an apply-config operation that completed; its id in op.
+completed() {
+  op=$(sql "SELECT o.id FROM plan_state s JOIN operation o ON o.id = s.operation
+    WHERE s.plan = '$plan' AND s.state = 'committed' AND o.kind = 'apply-config' AND o.state = 'completed'")
+  [ -n "$op" ]
+}
+# use_time_passed: the last use-time check of the plan before its commitment passed, the access and
+# the artifact each passed, and an evidence observation of the plan was begun after it.
+use_time_passed() {
+  [ "$(sql "SELECT u.entry->>'result' || ' ' || (u.entry->'dependencies'->'access'->>'result')
+      || ' ' || (u.entry->'dependencies'->'artifact'->>'result')
+      FROM machine_event u, machine_event c
+      WHERE u.machine = '$machine_w' AND c.machine = u.machine AND c.kind = 'commitment' AND c.entry->>'plan' = '$plan'
+        AND u.kind = 'use-time-check' AND u.entry->>'plan' = '$plan' AND u.revision < c.revision
+      ORDER BY u.revision DESC LIMIT 1")" = 'passed passed passed' ]
+}
+# evidence_committed: the commitment names the operation and an evidence observation of the plan,
+# read with the access (not unread), begun after the passed use-time check and before the commitment.
+evidence_committed() {
+  [ "$(sql "SELECT count(*) FROM machine_event c
+      JOIN observation o ON o.id = c.entry->>'observation' AND o.machine = c.machine
+      JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+      WHERE c.machine = '$machine_w' AND c.kind = 'commitment' AND c.entry->>'plan' = '$plan' AND c.entry->>'operation' = '$op'
+        AND s.purpose = 'evidence' AND s.plan = '$plan' AND o.revision < c.revision AND o.configuration_digest IS NOT NULL
+        AND s.revision > (SELECT max(u.revision) FROM machine_event u WHERE u.machine = c.machine AND u.kind = 'use-time-check'
+          AND u.entry->>'plan' = '$plan' AND u.revision < c.revision)")" = 1 ]
+}
+# one_attempt: one attempt, number 1, after the commitment, on the plan's route, resting on the
+# commitment's observation; its response accepted, recorded after it.
+one_attempt() {
+  local c
+  c=$(rev "e.kind = 'commitment' AND e.entry->>'operation' = '$op'") && [ -n "$c" ] || return 1
+  [ "$(sql "SELECT count(*) || ' ' || bool_and(a.number = 1 AND a.revision > $c AND a.route::text = p.route::text
+      AND a.observation = (SELECT entry->>'observation' FROM machine_event WHERE machine = '$machine_w' AND revision = $c)
+      AND r.class = 'accepted' AND r.revision > a.revision)
+      FROM attempt a JOIN plan p ON p.id = a.plan LEFT JOIN attempt_response r ON r.attempt = a.id
+      WHERE a.operation = '$op'")" = '1 true' ]
+}
+# states_in_order: the operation's state entries, by revision: sending, verifying, completed.
+states_in_order() {
+  [ "$(sql "SELECT string_agg(entry->>'to', ',' ORDER BY revision) FROM machine_event
+    WHERE machine = '$machine_w' AND kind = 'operation-state' AND entry->>'operation' = '$op'")" = 'sending,verifying,completed' ]
+}
+# completion_after_response: a completion observation of the operation, begun after the response,
+# reading the release's configuration digest, and the operation's result naming it.
+completion_after_response() {
+  [ "$(sql "SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+      JOIN plan p ON p.id = s.plan JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine
+      WHERE s.machine = '$machine_w' AND s.operation = '$op' AND s.purpose = 'completion'
+        AND o.configuration_digest = rm.configuration_digest
+        AND s.revision > (SELECT r.revision FROM attempt a JOIN attempt_response r ON r.attempt = a.id WHERE a.operation = '$op')
+        AND o.id = (SELECT result->>'observation' FROM operation WHERE id = '$op')")" = 1 ]
+}
+# applied_moved: Applied is the release from source operation, its digest the artifact's, the
+# baseline revision one more, and one Applied change entry names the plan and the operation.
+applied_moved() {
+  [ "$(sql "SELECT s.applied_release || ' ' || s.applied_source || ' ' || s.baseline_revision || ' ' || (s.applied_digest = rm.configuration_digest)
+      FROM machine_state s JOIN release_machine rm ON rm.release = s.applied_release AND rm.machine = s.machine
+      WHERE s.machine = '$machine_w'")" = "$rel operation $((baseline + 1)) true" ] &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'applied-change'
+      AND entry->>'plan' = '$plan' AND entry->>'operation' = '$op' AND entry->>'source' = 'operation'
+      AND entry->>'from' = '$was' AND entry->>'to' = '$rel'")" = 1 ]
+}
+# scope_released: no committed, sending, verifying or unresolved apply-config operation holds the
+# worker's scope or the cluster's rollout slot.
+scope_released() {
+  [ "$(sql "SELECT count(*) FROM operation WHERE kind = 'apply-config' AND state IN ('committed', 'sending', 'verifying', 'unresolved')
+    AND (machine = '$machine_w' OR cluster = '$cluster')")" = 0 ]
+}
+# node_applied: in the latest bundle the worker's digest is the artifact's and its resource version
+# moved; the control plane's digest and resource version are the pre-state's.
+node_applied() {
+  local want
+  want=$(sql "SELECT encode(configuration_digest, 'hex') FROM release_machine WHERE release = '$rel' AND machine = '$machine_w'")
+  [ -n "$want" ] &&
+    [ "$(digest_of "$bundle/talos-config-sha256.txt" "$TALOS_WORKER_IP")" = "$want" ] &&
+    [ "$(digest_of "$EV/pre-talos-config-sha256.txt" "$TALOS_WORKER_IP")" != "$want" ] &&
+    differ "$(digest_of "$bundle/talos-config-version.txt" "$TALOS_WORKER_IP")" "$(digest_of "$EV/pre-talos-config-version.txt" "$TALOS_WORKER_IP")"
+}
+unchanged_cp() {
+  local ip=$TALOS_CONTROLPLANE_IP
+  [ -n "$(digest_of "$EV/pre-talos-config-sha256.txt" "$ip")" ] &&
+    [ "$(digest_of "$bundle/talos-config-sha256.txt" "$ip")" = "$(digest_of "$EV/pre-talos-config-sha256.txt" "$ip")" ] &&
+    [ "$(digest_of "$bundle/talos-config-version.txt" "$ip")" = "$(digest_of "$EV/pre-talos-config-version.txt" "$ip")" ]
+}
+# one_apply <log before> <log now>: exactly one mutating request past the log before, and it is
+# ApplyConfiguration.
+one_apply() {
+  [[ "$2" == "$1"* ]] || return 1
+  [ "$(run_mutations "$1" "$2")" = 1 ] &&
+    log_methods <<<"${2:${#1}}" | grep --quiet --fixed-strings --line-regexp -- machine.MachineService/ApplyConfiguration
+}
+# keep <name> <path>: h-viewer's read of the path, kept in the evidence directory.
+keep() {
+  fresh_viewer
+  answers 200 - GET "$2" "$viewer" && cp -- "$EV/last.body" "$EV/$1.json"
+}
+
+safe_apply() {
+  local ref='S4 step 1' w_after cp_after
+  pre_state
+  check "$ref" "inject linkjoin A, B and C to the worker: the controller may dispatch S3's step 3 plan" worker_links linkjoin
+  check "$ref" 'no link to the worker is recorded cut' worker_joined
+  check "$ref" "the plan's operation completed within four minutes" within 240 completed
+  [ -n "$op" ] || die "s4: the plan's operation did not complete; nothing after it can run"
+  check "$ref" "the use-time check before the commitment passed, its access and artifact each passed" use_time_passed
+  ref='S4 step 2'
+  check "$ref" "the commitment names the operation and an evidence observation of the plan, read after the use-time check and before the commitment" \
+    evidence_committed
+  ref='S4 step 3'
+  check "$ref" "one attempt, number 1, after the commitment, on the plan's route, on the commitment's observation, its response accepted after it" \
+    one_attempt
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  check "$ref" "the worker's apid log records exactly one mutating request past the pre-state, ApplyConfiguration" \
+    one_apply "$w_log" "$w_after"
+  ref='S4 step 4'
+  check "$ref" 'the operation went sending, verifying, completed, in that order on the timeline' states_in_order
+  check "$ref" "a completion observation begun after the response read the release's digest, and the result names it" \
+    completion_after_response
+  ref='S4 step 5'
+  check "$ref" "Applied the release from source operation, its digest the artifact's, the baseline revision one more, one Applied change entry" \
+    applied_moved
+  ref='S4 pass'
+  evidence_to post || die "no post-state: bin/evidence failed"
+  check "$ref" 'the post-state bundle: complete, no fixture secret but the scan control' scan_clean post
+  check "$ref" "the worker's digest is the artifact's and its resource version moved" node_applied
+  check "$ref" "the control plane's digest and resource version are the pre-state's" unchanged_cp
+  no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
+  check "$ref" 'Desired, Applied and Observed served as one value, the release, after completion' \
+    served ".desired == \"$rel\" and .applied.release == \"$rel\" and .applied.source == \"operation\" and .observed.release == \"$rel\""
+  check "$ref" "scope and rollout slot released: no live apply-config operation for the worker or the cluster" scope_released
+  ref='S4 retained evidence'
+  check "$ref" 'the operation, its attempt and response, as served' keep operation "/api/v1/operations/$op"
+  check "$ref" "the worker's timeline, as served" keep timeline "/api/v1/machines/$machine_w/timeline?limit=500"
+  check "$ref" "the worker's observation records, as served" keep observations "/api/v1/machines/$machine_w/observations?limit=500"
+}
+
+backup_name=s4-$run_key
+run() {
+  preconditions
+  withheld+=("$BW_CANARY")
+  safe_apply
+  check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the apply' "$bin/inject" db-snapshot "$backup_name"
+}
+
+run
+rm -f -- "$EV/last.body" "$EV/last.headers"
+# The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
+ev_log=$(mktemp)
+if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
+  cat -- "$ev_log" >&2
+  if grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$ev_log"; then
+    result PASS 'S4 evidence' 'bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret'
+  else
+    result FAIL 'S4 evidence' "the leak scan reports fixture secrets: $final/leak-scan.txt"
+  fi
+  if [ -e "$final/unavailable.txt" ]; then
+    result FAIL 'S4 evidence' "the bundle is incomplete: $final/unavailable.txt names what was not captured"
+  else
+    result PASS 'S4 evidence' 'the bundle is complete: bin/evidence captured every source'
+  fi
+  # The scan above covers the dump only if the bundle holds it expanded: the attempt's own row
+  # inside its COPY block, whose first column is the ID.
+  dump_id=$(sql "SELECT id FROM attempt WHERE operation = '${op:-none}'") || dump_id=
+  if [ -n "$dump_id" ] &&
+    awk -v id="$dump_id" '
+      index($0, "COPY public.attempt ") == 1 { block = 1; next }
+      block && /^\\\.$/ { block = 0 }
+      block && index($0, id "\t") == 1 { found = 1 }
+      END { exit !found }' "$final/backups/pg-$backup_name.dump.sql"; then
+    result PASS 'S4 backups' "the scanned bundle holds the database dump expanded, the attempt among its rows (control)"
+  else
+    result FAIL 'S4 backups' 'the scanned bundle does not hold the database dump expanded with the run'"'"'s rows: the backup went unscanned'
+  fi
+  # The tokens this run minted, searched in the run directory, the final bundle and every bundle the
+  # run captured before it, with a control holding the last of them that must be the one file
+  # listed (as s1, s2 and s3 do).
+  local_ctl=$STATE/s4-token-control
+  trap 'rm -f -- "$local_ctl"' EXIT
+  if [ "${#secrets[@]}" -gt 0 ]; then printf 'x %s x\n' "${secrets[-1]}" >"$local_ctl"; else : >"$local_ctl"; fi
+  earlier=()
+  for f in "$EV"/*-bundle; do
+    [ -e "$f" ] || continue
+    earlier+=("$(cat -- "$f")")
+  done
+  hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
+    "$EV" "$final" "${earlier[@]}" "$local_ctl") || hits=
+  rm -f -- "$local_ctl"
+  trap - EXIT
+  if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
+    result PASS 'S4 evidence' "none of the ${#secrets[@]} tokens this run minted is in any bundle of the run or the run directory (control found)"
+  else
+    printf 's4: files holding a token of this run: %s\n' "${hits:-none, not even the control}" >&2
+    result FAIL 'S4 evidence' "the tokens this run minted: ${#secrets[@]} searched, the listing is not the control alone"
+  fi
+else
+  cat -- "$ev_log" >&2
+  result FAIL 'S4 evidence' 'bin/evidence failed'
+fi
+rm -f -- "$ev_log"
+say "s4 $s4_mode: $failed failed; evidence in $EV, bundle ${final:-none}"
+[ "$failed" -eq 0 ]

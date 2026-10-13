@@ -384,7 +384,10 @@ has no plan but the handover's completed `adopt` plan.
    part takes snapshots after step 3 (`s3-step3`) and ends restored to them, leaving step 3's
    plan `approved` as S4's precondition and none of the controls' or step 4's plans or releases.
    Every plan of the approval part stays `approved` or ends before commitment, and uncommitted:
-   `apply-config` has no committer before S4, and the commitment-level controls are S4's.
+   the controller dispatches an approved plan, so the approval part first cuts each instance's
+   link to the worker (`bin/inject linksplit A|B|C worker`, §2) and keeps them cut. The executor's
+   `evidence` observation then fails and nothing commits; S4 starts by joining them again, and
+   the commitment-level controls are S4's.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding)
 (the plan states before commitment, approval and its refusals, revocation and cancellation) and, in
@@ -408,8 +411,8 @@ automation-authored revision, which `h-all` answers for. Each plan is `approved`
 exists before commitment.
 
 **Negative controls.** Every control of the approval part acts before commitment, and none can
-commit: `apply-config` has no committer before S4, which owns the controls that need the commitment
-or attempt transaction (S4's negative controls). In the handover part, from a separate `bin/up`
+commit while the worker's links are cut (step 4); S4 owns the controls that need the commitment or
+attempt transaction (S4's negative controls). In the handover part, from a separate `bin/up`
 (§2): an adoption whose evidence observation is older than the plan's bound age is no evidence, so
 nothing is refused and no refusal entry is written; the controller observes again after its lease
 and the adoption relies on that later observation, `Applied` staying unset until it commits. An
@@ -443,7 +446,8 @@ after the settle floor (the proxy's late landings are S6.2's): the condition
 of [ER §3.5](execution-recovery.md#35-talos-client-and-route) and the first item of
 [ER §9.2](execution-recovery.md#92-required-verification).
 
-**Steps.**
+**Steps.** They start when S3's links to the worker are joined again (`bin/inject linkjoin
+A|B|C worker`); the controller then dispatches S3's step 3 plan.
 
 1. The controller checks the plan and gate, then records an `evidence` observation and the use-time
    check of the artifact key and operation credentials.
