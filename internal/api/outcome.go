@@ -135,6 +135,25 @@ func (a *API) classify(ctx context.Context, tx *sql.Tx, l operationLock, outcome
 	return rev, err
 }
 
+// classifyObserved classifies on a recorded observation: what it relied on is the observation's
+// entry and every response and accounting entry of the operation's attempts, which is what makes
+// each attempt's outcome known to the classification.
+func (a *API) classifyObserved(ctx context.Context, tx *sql.Tx, l operationLock, outcome, observation string, revision int64,
+	generation int64) (int64, error) {
+	var reliedDoc string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(x.r ORDER BY x.r), '[]')::text FROM (
+			SELECT p.revision r FROM attempt_response p JOIN attempt a ON a.id = p.attempt WHERE a.operation = $1
+			UNION SELECT k.revision FROM attempt_accounting k JOIN attempt a ON a.id = k.attempt WHERE a.operation = $1
+			UNION SELECT $2::bigint) x`, l.id, revision).Scan(&reliedDoc); err != nil {
+		return 0, err
+	}
+	var relied []int64
+	if err := json.Unmarshal([]byte(reliedDoc), &relied); err != nil {
+		return 0, err
+	}
+	return a.classify(ctx, tx, l, outcome, sql.NullString{String: observation, Valid: true}, relied, generation)
+}
+
 // takenOver is what a takeover recorded: the operation, the owner generation it now holds and its
 // state, and the ownership transition entry's revision.
 type takenOver struct {

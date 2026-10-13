@@ -1349,6 +1349,7 @@ CREATE TRIGGER binding BEFORE UPDATE ON operation FOR EACH ROW
 -- classification entry on the machine's timeline.
 CREATE TABLE operation_classification (
   operation   text NOT NULL,
+  operation_kind text NOT NULL GENERATED ALWAYS AS ('apply-config') STORED,
   machine     text NOT NULL,
   revision    bigint NOT NULL,
   entry_kind  text NOT NULL GENERATED ALWAYS AS ('classification') STORED,
@@ -1361,12 +1362,14 @@ CREATE TABLE operation_classification (
   relied      jsonb NOT NULL CHECK (jsonb_typeof(relied) = 'array'),
   at          timestamptz NOT NULL,
   PRIMARY KEY (machine, revision),
-  UNIQUE (operation, revision),
-  UNIQUE (operation, revision, outcome),
+  -- The key an attempt's retry binds to: the classification, its outcome and the observation it
+  -- rests on.
+  UNIQUE (operation, revision, outcome, observation),
   -- Completed, failed and safe to retry rest on an observation of the machine (§5.1); a rejection
   -- rests on the responses alone.
   CONSTRAINT operation_classification_observed CHECK ((outcome = 'rejected') = (observation IS NULL)),
   FOREIGN KEY (operation, machine) REFERENCES operation (id, machine),
+  FOREIGN KEY (operation, operation_kind) REFERENCES operation (id, kind),
   FOREIGN KEY (observation, machine) REFERENCES observation (id, machine),
   FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
 );
@@ -1401,10 +1404,13 @@ CREATE TABLE attempt (
   CONSTRAINT attempt_retry_classified CHECK (number = 1 OR classification IS NOT NULL),
   CONSTRAINT attempt_classified_before CHECK (classification IS NULL OR classification < revision),
   UNIQUE (operation, number),
+  -- One classification admits one attempt.
+  UNIQUE (operation, classification),
   UNIQUE (machine, revision),
   UNIQUE (id, machine),
-  FOREIGN KEY (operation, classification, classification_outcome)
-    REFERENCES operation_classification (operation, revision, outcome),
+  -- A retry rests on the observation of the classification that admitted it.
+  FOREIGN KEY (operation, classification, classification_outcome, observation)
+    REFERENCES operation_classification (operation, revision, outcome, observation),
   FOREIGN KEY (operation, operation_kind) REFERENCES operation (id, kind),
   FOREIGN KEY (operation, plan) REFERENCES operation (id, plan),
   -- The plan's machine and its route: the attempt dials what the plan bound (persistence §3.3).

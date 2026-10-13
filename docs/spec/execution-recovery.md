@@ -752,11 +752,11 @@ Required entries:
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |
 | Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 and §6.5 to that evidence (§3.2) |
-| Attempt | attempt id, owner token, route, transport and verification deadlines; for a retry, the classification revision it is bound to |
+| Attempt | attempt id, owner token, route, transport and verification deadlines; for a retry, the classification revision it is bound to, which admits that one attempt and whose observation the retry rests on |
 | Response | attempt id, class (acceptance, gRPC code, transport outcome), redacted text or the withheld notice (§3.5) |
 | Ownership transition | the operation, from and to owner, the generation and epoch it moved from and to, reason |
 | Accounting | attempt id, basis (a response, or a §5.2 decision with its recorded facts), decider and role |
-| Classification | the operation, the outcome of §5 that ends the operation or admits a retry (completed, rejected, failed, safe to retry), the observation it rests on (none for a rejection, which rests on responses) and the entries relied on, by revision; an unresolved or cancelled operation names its cause on its state entry |
+| Classification | the operation, the outcome of §5 that ends the operation or admits a retry (completed, rejected, failed, safe to retry), the observation it rests on (none for a rejection, which rests on responses) and the entries relied on, by revision (the observation's entry and every response and accounting entry of the operation's attempts); an unresolved or cancelled operation names its cause on its state entry |
 | `Applied` change | from, to, digest, source (operation or adoption record) |
 | Endpoint change | previous and new Talos endpoint, who, role ([persistence and API §3.3](persistence-api.md#33-talos-access)) |
 
@@ -911,8 +911,11 @@ only when all of these hold and are recorded with it:
    landing does; and
 3. a recovery observation taken after the floor, with the
    machine-configuration resource version read at the start and end of the
-   settle. That version moved on every landed apply in E4 (DS §2.3); a change
-   during the settle is recorded, and the decision states how it is explained.
+   settle. The settle starts at the first successful read of condition 2, which
+   is the start observation, so a change between that read and the end cannot
+   be hidden by a later start. That version moved on every landed apply in E4
+   (DS §2.3); a change during the settle is recorded, and the decision states
+   how it is explained.
 
 The decision records that it is a judgement, not evidence that the request can
 no longer land. The residual is explicit: if the request lands after the
