@@ -105,6 +105,59 @@ func TestLiveRead(t *testing.T) {
 	t.Logf("node %s: Talos %s, resource version %s, %d bytes, digest %s", ep, v, a.ResourceVersion(), len(a.Bytes()), digest(a.Bytes()))
 }
 
+// TestLiveApply sends the worker's own configuration back to it in no-reboot mode: an accepted
+// apply of an unchanged document, after which the read is byte-identical. It then sends the same
+// document with an unknown machine type, which the node refuses as validation (E4 row 022): the
+// class is a rejection, and the read is unchanged again. The unrecognised-InvalidArgument and
+// transport classes have no live trigger and stay on the stand-in node.
+func TestLiveApply(t *testing.T) {
+	tc, ep := liveTarget(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	r, err := Dial(ctx, tc, ep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	before, err := r.MachineConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := DialApplier(ctx, tc, ep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	send := func(b []byte) Response {
+		sctx, scancel := context.WithTimeout(ctx, 30*time.Second)
+		defer scancel()
+		resp, err := a.ApplyNoReboot(sctx, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	if got := send(before.Bytes()); got.Class != ClassAccepted || !got.Accounts() {
+		t.Fatalf("an unchanged configuration: %+v", got)
+	}
+	bogus := bytes.Replace(before.Bytes(), []byte("type: worker"), []byte("type: bogus"), 1)
+	if bytes.Equal(bogus, before.Bytes()) {
+		t.Fatal("control: the configuration holds no `type: worker` to corrupt")
+	}
+	got := send(bogus)
+	t.Logf("validation refusal answered %+v", got)
+	if got.Class != ClassRejected || !got.Accounts() {
+		t.Fatalf("an unknown machine type: %+v; want a rejection", got)
+	}
+	after, err := r.MachineConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before.Bytes(), after.Bytes()) {
+		t.Fatalf("the node's configuration changed: digest %s, then %s", digest(before.Bytes()), digest(after.Bytes()))
+	}
+}
+
 func TestLiveUnreachable(t *testing.T) {
 	tc, _ := liveTarget(t)
 	// 192.0.2.1 is TEST-NET-1 (RFC 5737): nothing answers there.

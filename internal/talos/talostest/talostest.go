@@ -144,6 +144,8 @@ type Node struct {
 	mu       sync.Mutex
 	metadata []metadata.MD
 	failures map[resource.Type]codes.Code
+	applied  []Applied
+	onApply  func(context.Context, *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error)
 }
 
 // Serve runs a node behind mutual TLS with p's CA until the test ends. It reports no resource
@@ -168,20 +170,57 @@ func Serve(t testing.TB, p PKI) *Node {
 		}),
 		grpc.UnknownServiceHandler(func(any, grpc.ServerStream) error { return status.Error(codes.Unimplemented, "stand-in") }),
 	)
-	machine.RegisterMachineServiceServer(srv, versionServer{})
+	machine.RegisterMachineServiceServer(srv, machineServer{n: n})
 	v1alpha1.RegisterStateServer(srv, server.NewState(failing{n}))
 	go srv.Serve(l) //nolint:errcheck // ends with Stop
 	t.Cleanup(srv.Stop)
 	return n
 }
 
-// versionServer answers Version for the node itself, as apid does without routing metadata.
-type versionServer struct {
+// machineServer answers Version for the node itself, as apid does without routing metadata, and
+// ApplyConfiguration as the test sets (OnApply).
+type machineServer struct {
 	machine.UnimplementedMachineServiceServer
+	n *Node
 }
 
-func (versionServer) Version(context.Context, *emptypb.Empty) (*machine.VersionResponse, error) {
+func (machineServer) Version(context.Context, *emptypb.Empty) (*machine.VersionResponse, error) {
 	return &machine.VersionResponse{Messages: []*machine.Version{{Version: &machine.VersionInfo{Tag: "v1.13.6"}}}}, nil
+}
+
+func (s machineServer) ApplyConfiguration(ctx context.Context, req *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error) {
+	s.n.mu.Lock()
+	s.n.applied = append(s.n.applied, Applied{Data: append([]byte(nil), req.GetData()...), Mode: req.GetMode().String(),
+		DryRun: req.GetDryRun(), TryModeTimeout: req.GetTryModeTimeout() != nil})
+	h := s.n.onApply
+	s.n.mu.Unlock()
+	if h == nil {
+		return nil, status.Error(codes.Unimplemented, "stand-in: no apply behaviour set")
+	}
+	return h(ctx, req)
+}
+
+// Applied is one ApplyConfiguration request that reached the node.
+type Applied struct {
+	Data           []byte
+	Mode           string // the machinery's name of the mode, "NO_REBOOT" for a no-reboot apply
+	DryRun         bool
+	TryModeTimeout bool // the request carried a try-mode timeout
+}
+
+// OnApply sets how the node answers ApplyConfiguration; until it is set the node answers
+// Unimplemented. The handler's context ends with the request.
+func (n *Node) OnApply(h func(context.Context, *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error)) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.onApply = h
+}
+
+// AppliedRequests are the ApplyConfiguration requests that reached the node, in order.
+func (n *Node) AppliedRequests() []Applied {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]Applied(nil), n.applied...)
 }
 
 // failing is the node's state, a Get or List of a type set to fail answering that code.
