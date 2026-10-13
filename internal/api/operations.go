@@ -226,6 +226,18 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 		}
 		lastEpoch, last = ep, num
 	}
+	// The token's expiry bounds every read and write of the stream, the first read included: its
+	// context ends the reads, its write deadline a blocked write, and each frame is checked before
+	// it is written.
+	rc := http.NewResponseController(w)
+	ctx := q.r.Context()
+	if exp := q.principal.Expiry; !exp.IsZero() {
+		_ = rc.SetWriteDeadline(exp)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, exp)
+		defer cancel()
+		q.r = q.r.WithContext(ctx)
+	}
 	var reset bool
 	pass := func(first bool) (h opHead, batch []eventBody, seqs []int64, err error) {
 		err = readTx(a, q, func(ctx context.Context, tx *sql.Tx) error {
@@ -264,17 +276,6 @@ func streamEvents(a *API, w http.ResponseWriter, q *request) {
 	hd.Set("Content-Type", "text/event-stream")
 	hd.Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	rc := http.NewResponseController(w)
-	// The token's expiry bounds every read and write of the stream: its context ends the reads, its
-	// write deadline a blocked write, and each frame is checked before it is written.
-	ctx := q.r.Context()
-	if exp := q.principal.Expiry; !exp.IsZero() {
-		_ = rc.SetWriteDeadline(exp)
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, exp)
-		defer cancel()
-		q.r = q.r.WithContext(ctx)
-	}
 	if reset {
 		_, _ = fmt.Fprint(w, "event: reset\ndata: {}\n\n")
 	}
