@@ -9,6 +9,7 @@ import (
 
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/client"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -117,10 +118,14 @@ func (a *applier) ApplyNoReboot(ctx context.Context, configuration []byte) (Resp
 	if _, ok := ctx.Deadline(); !ok {
 		return Response{}, ErrNoDeadline
 	}
+	// A zero retry buffer commits the attempt as soon as the request is sent, so the client cannot
+	// replay it: grpc-go transparently re-sends a first attempt whose stream the node reset with
+	// REFUSED_STREAM, which WithDisableRetry does not stop (grpc-go stream.go shouldRetry), and that
+	// would put two mutating requests under one recorded attempt.
 	resp, err := a.api.ApplyConfiguration(direct(ctx), &machine.ApplyConfigurationRequest{
 		Data: configuration,
 		Mode: machine.ApplyConfigurationRequest_NO_REBOOT,
-	})
+	}, grpc.MaxRetryRPCBufferSize(0))
 	return classifyApply(ctx, resp, err), nil
 }
 
