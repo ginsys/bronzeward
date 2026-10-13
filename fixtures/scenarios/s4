@@ -139,10 +139,14 @@ one_attempt() {
       FROM attempt a JOIN plan p ON p.id = a.plan LEFT JOIN attempt_response r ON r.attempt = a.id
       WHERE a.operation = '$op'")" = '1 true' ]
 }
-# states_in_order: the operation's state entries, by revision: sending, verifying, completed.
+# states_in_order: the operation's entries, by revision: the commitment, the attempt (which moves
+# it from committed to sending), the response, sending to verifying, verifying to completed, and
+# the Applied change.
 states_in_order() {
-  [ "$(sql "SELECT string_agg(entry->>'to', ',' ORDER BY revision) FROM machine_event
-    WHERE machine = '$machine_w' AND kind = 'operation-state' AND entry->>'operation' = '$op'")" = 'sending,verifying,completed' ]
+  [ "$(sql "SELECT string_agg(CASE WHEN kind = 'operation-state' THEN (entry->>'from') || '>' || (entry->>'to') ELSE kind END,
+      ',' ORDER BY revision) FROM machine_event
+    WHERE machine = '$machine_w' AND kind IN ('commitment', 'attempt', 'response', 'operation-state', 'applied-change')
+      AND entry->>'operation' = '$op'")" = 'commitment,attempt,response,sending>verifying,verifying>completed,applied-change' ]
 }
 # completion_after_response: a completion observation of the operation, begun after the response,
 # reading the release's configuration digest, and the operation's result naming it.
@@ -222,7 +226,7 @@ safe_apply() {
   check "$ref" "the worker's apid log records exactly one mutating request past the pre-state, ApplyConfiguration" \
     one_apply "$w_log" "$w_after"
   ref='S4 step 4'
-  check "$ref" 'the operation went sending, verifying, completed, in that order on the timeline' states_in_order
+  check "$ref" 'on the timeline, in order: the commitment, the attempt (committed to sending), the response, sending to verifying, verifying to completed, the Applied change' states_in_order
   check "$ref" "a completion observation begun after the response read the release's digest, and the result names it" \
     completion_after_response
   ref='S4 step 5'
