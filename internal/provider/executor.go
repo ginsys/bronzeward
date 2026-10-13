@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -51,7 +52,8 @@ func (e *Executor) TalosAccess(ctx context.Context, cluster string) (TalosAccess
 // address under every verb and reflection reaches nothing inside it.
 type Artifact struct{ get func() []byte }
 
-// ArtifactBytes is a's plaintext. The caller owns the copy it makes; the value is not retained.
+// ArtifactBytes is a copy of a's plaintext, one per call: the caller owns it, and editing or
+// zeroing it changes nothing a later call returns.
 func ArtifactBytes(a Artifact) []byte {
 	if a.get == nil {
 		return nil
@@ -113,5 +115,5 @@ func (e *Executor) DecryptArtifact(ctx context.Context, ct Ciphertext, keyVersio
 	if err != nil {
 		return Artifact{}, r.bad("the plaintext is not base64")
 	}
-	return Artifact{get: func() []byte { return plain }}, nil
+	return Artifact{get: func() []byte { return bytes.Clone(plain) }}, nil
 }
