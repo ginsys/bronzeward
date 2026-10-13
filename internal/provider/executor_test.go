@@ -128,6 +128,26 @@ func TestExecutorDecryptArtifact(t *testing.T) {
 	}
 }
 
+// ArtifactBytes hands out a copy: a caller that edits or zeroes what it got changes nothing another
+// caller, or a later call, gets.
+func TestArtifactBytesAreACopy(t *testing.T) {
+	e, _ := executorStandIn(t, func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, 200, data(map[string]any{"plaintext": base64.StdEncoding.EncodeToString([]byte(artifactText))}))
+	})
+	a, err := e.DecryptArtifact(t.Context(), artifactCiphertext, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := ArtifactBytes(a)
+	clear(first)
+	if got := string(ArtifactBytes(a)); got != artifactText {
+		t.Fatalf("a later call returned %q after the first result was zeroed", got)
+	}
+	if ArtifactBytes(Artifact{}) != nil {
+		t.Fatal("the zero Artifact has bytes")
+	}
+}
+
 // A decrypted artifact does not render when it is the unexported field of a caller's own type, where
 // fmt cannot call its Format method and walks it by reflection: under every verb, in a value, a
 // pointer, a slice, a map and a struct nested in a struct, whatever the verb, the output carries
