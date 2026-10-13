@@ -262,6 +262,22 @@ func TestAccountByDecision(t *testing.T) {
 			t.Fatalf("a floor counted from an unreachable observation: %v; want a refusal", err)
 		}
 	})
+	// The settle starts at the first successful read after the deadline: a start that is a later read
+	// would hide a change of the version between that read and itself.
+	t.Run("start is not the first successful read", func(t *testing.T) {
+		t.Parallel()
+		ae, next, att := setup(t)
+		first := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", 70*time.Second })
+		start := ae.observed(t, func(c *cobs) { c.purpose, c.shift, c.resource = "recovery", settleWindow, "rv2" })
+		end := ae.observed(t, func(c *cobs) { c.purpose, c.shift, c.resource = "recovery", settleWindow+time.Minute, "rv2" })
+		var refused *outcomeRefused
+		if _, err := ae.decide(t, next, att, start, end, nil); !errors.As(err, &refused) {
+			t.Fatalf("a start later than the first read hid a version move: %v; want a refusal", err)
+		}
+		if _, err := ae.decide(t, next, att, first, end, map[string]any{"explanation": "the landed apply of the abandoned request"}); err != nil {
+			t.Fatalf("the first read as the start: %v", err)
+		}
+	})
 	// The two ends of the settle are two observations, the end begun after the start was recorded:
 	// one observation as both ends reads a version against itself and can never show it moved.
 	t.Run("one observation at both ends", func(t *testing.T) {
@@ -303,6 +319,13 @@ func TestAccountByDecision(t *testing.T) {
 		}
 	})
 }
+
+// reliedSQL is the classification's relied set a settle records for the observation row o: the
+// revisions of the operation's attempt responses and accountings and of the observation, ascending.
+const reliedSQL = `(SELECT jsonb_agg(x.r ORDER BY x.r) FROM (
+		SELECT p.revision r FROM attempt_response p JOIN attempt a ON a.id = p.attempt WHERE a.operation = c.operation
+		UNION SELECT k.revision FROM attempt_accounting k JOIN attempt a ON a.id = k.attempt WHERE a.operation = c.operation
+		UNION SELECT o.revision) x)`
 
 // The completion observation's decision (execution-recovery.md §4, §5, §5.1, choice §10.10).
 func TestSettle(t *testing.T) {
@@ -364,7 +387,8 @@ func TestSettle(t *testing.T) {
 				}
 				if n := count(t, ae.db, `SELECT count(*) FROM operation_classification c JOIN machine_event e ON e.machine = c.machine
 							AND e.revision = c.revision AND e.kind = 'classification' JOIN observation o ON o.id = c.observation
-						WHERE c.operation = $1 AND c.outcome = 'completed' AND c.observation = $2 AND c.relied = jsonb_build_array(o.revision)
+						WHERE c.operation = $1 AND c.outcome = 'completed' AND c.observation = $2 AND c.relied = `+reliedSQL+`
+								AND e.entry->'relied' = c.relied AND jsonb_array_length(c.relied) >= 2
 							AND c.owner_gen = $3 AND e.entry->>'outcome' = 'completed' AND e.entry->>'observation' = $2`,
 					ae.op, obs, gen); n != 1 {
 					t.Fatal("no completed classification record and entry as recorded")
@@ -406,7 +430,8 @@ func TestSettle(t *testing.T) {
 		}
 		if n := count(t, ae.db, `SELECT count(*) FROM operation_classification c JOIN machine_event e ON e.machine = c.machine
 				AND e.revision = c.revision AND e.kind = 'classification' JOIN observation o ON o.id = c.observation
-			WHERE c.operation = $1 AND c.outcome = 'failed' AND c.observation = $2 AND c.relied = jsonb_build_array(o.revision)
+			WHERE c.operation = $1 AND c.outcome = 'failed' AND c.observation = $2 AND c.relied = `+reliedSQL+`
+				AND e.entry->'relied' = c.relied AND jsonb_array_length(c.relied) >= 2
 				AND c.owner_gen = $3 AND e.entry->>'outcome' = 'failed'`, ae.op, obs, gen); n != 1 {
 			t.Fatal("no failed classification record and entry as recorded")
 		}
@@ -434,8 +459,9 @@ func TestSettle(t *testing.T) {
 			t.Fatalf("settled %+v", r)
 		}
 		if n := count(t, ae.db, `SELECT count(*) FROM operation_classification c JOIN machine_event e ON e.machine = c.machine
-				AND e.revision = c.revision AND e.kind = 'classification'
+				AND e.revision = c.revision AND e.kind = 'classification' JOIN observation o ON o.id = c.observation
 			WHERE c.operation = $1 AND c.outcome = 'safe-to-retry' AND c.observation = $2 AND c.revision = $3
+				AND c.relied = `+reliedSQL+` AND e.entry->'relied' = c.relied AND jsonb_array_length(c.relied) >= 3
 				AND c.owner_gen = 2 AND e.entry->>'outcome' = 'safe-to-retry'`, ae.op, obs, r.Revision); n != 1 {
 			t.Fatal("no classification record and entry as recorded")
 		}

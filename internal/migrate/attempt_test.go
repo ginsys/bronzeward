@@ -145,10 +145,28 @@ func TestAttempts(t *testing.T) {
 	retry := a.attemptRow(2, 8)
 	refused(t, db, "retry with no classification", "23514/attempt_retry_classified", a.attempted(retry, "sending")[:2]...)
 	refused(t, db, "retry naming no classification", "23503", a.attempted(retry.with("classification", 7), "sending")[:2]...)
+	// A classification is an apply-config operation's: an adopt operation of the machine has none.
+	adopted := a
+	adopted.op = id.New(id.Operation)
+	refused(t, db, "a classification of an adopt operation", "23503",
+		append([]stmt{{insertPlanOperation, []any{adopted.op, "adopt", "completed", nil, a.adopt, a.machine, a.cluster}}},
+			adopted.classified(7, "safe-to-retry", a.obs)...)...)
 	accepted(t, db, "attempt 2", append(a.classified(7, "safe-to-retry", a.obs),
 		a.attempted(retry.with("classification", 7), "sending")[:2]...)...)
 	commitRows(t, db, append(a.classified(7, "safe-to-retry", a.obs),
 		a.attempted(retry.with("classification", 7), "sending")[:2]...)...)
+	// One classification admits one attempt, and the retry rests on the observation the
+	// classification does (§3.3 comparison 8).
+	refused(t, db, "a second attempt on one classification", "23505",
+		a.attempted(a.attemptRow(3, 9).with("classification", 7), "sending")[:2]...)
+	later := id.New(id.Observation)
+	admitted := append([]stmt{a.entry(a.machine, 9, "observation-started"), a.startRow(9, "drift", nil, nil).stmt(),
+		a.entry(a.machine, 10, "observation"), a.observationRow(later, 9, 10).stmt()},
+		a.classified(11, "safe-to-retry", later)...)
+	refused(t, db, "a retry on another observation than its classification's", "23503",
+		append(admitted, a.attempted(a.attemptRow(3, 12).with("classification", 11), "sending")[:2]...)...)
+	accepted(t, db, "a retry on its classification's observation",
+		append(admitted, a.attempted(a.attemptRow(3, 12).with("classification", 11).with("observation", later), "sending")[:2]...)...)
 	refused(t, db, "sending to committed", "23514/operation_apply_config_transition", a.state("committed"))
 	refused(t, db, "sending to completed", "23514/operation_apply_config_transition", a.state("completed"))
 	commitRows(t, db, a.state("unresolved"))
@@ -164,10 +182,11 @@ func TestAttempts(t *testing.T) {
 	for _, state := range []string{"unresolved", "failed", "cancelled", "sending"} {
 		refused(t, db, "completed to "+state, "23514/operation_apply_config_transition", a.state(state))
 	}
-	// A terminal operation takes no attempt: a third, unaccounted one naming the old classification
-	// would leave a completed operation with an attempt not accounted for (§8 invariant 5).
+	// A terminal operation takes no attempt: a third, unaccounted one, admitted by a classification of
+	// its own, would leave a completed operation with an attempt not accounted for (§8 invariant 5).
 	refused(t, db, "attempt after completion", "23514/attempt_operation_terminal",
-		a.attempted(a.attemptRow(3, 20).with("classification", 7), "completed")[:2]...)
+		append(a.classified(19, "safe-to-retry", a.obs),
+			a.attempted(a.attemptRow(3, 20).with("classification", 19), "completed")[:2]...)...)
 	// A terminal operation's owner may still be cleared: no state changes.
 	mustExec(t, db, `UPDATE operation SET owner = NULL, owner_gen = 0, owner_epoch = NULL WHERE id = $1`, a.op)
 

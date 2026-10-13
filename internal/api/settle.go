@@ -33,7 +33,8 @@ type accounted struct {
 // is no longer the operation's); at least the settle floor from the latest of the attempt's transport
 // deadline and the takeover, and the first successful read of the machine after that deadline (one
 // that read a node value), to the start of the end observation, a recovery observation of this
-// machine that read the machine-configuration resource version at both its start and end; and,
+// machine; the settle starts at that first read, which is the start observation, and both read the
+// machine-configuration resource version; and,
 // when that version moved, a nonblank explanation among the facts. The act is written after this
 // effect in the same transaction.
 func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDecision) (accounted, error) {
@@ -69,6 +70,7 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 	// successful read after the deadline, to the end observation's start.
 	anchor := transport
 	var takeover, firstRead sql.NullTime
+	var firstReadID sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT max(e.at) FROM machine_event e WHERE e.machine = $1 AND e.kind = 'ownership-transition'
 		AND e.entry->>'operation' = $2`, l.machine, operation).Scan(&takeover); err != nil {
 		return r, err
@@ -78,10 +80,15 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 	}
 	// A successful read of the machine is one that read a node value; access obtained and the node
 	// unreachable is not one.
-	if err := tx.QueryRowContext(ctx, `SELECT min(o.at) FROM observation o WHERE o.machine = $1 AND o.at > $2
-		AND (o.unread->'identity' IS NULL OR o.unread->'runningVersion' IS NULL OR o.unread->'configuration' IS NULL)`,
-		l.machine, transport).Scan(&firstRead); err != nil {
+	// It is also where the settle starts: a start observation later than it would hide a change of the
+	// version between the two.
+	if err := tx.QueryRowContext(ctx, `SELECT o.at, o.id FROM observation o WHERE o.machine = $1 AND o.at > $2
+		AND (o.unread->'identity' IS NULL OR o.unread->'runningVersion' IS NULL OR o.unread->'configuration' IS NULL)
+		ORDER BY o.at, o.basis LIMIT 1`, l.machine, transport).Scan(&firstRead, &firstReadID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return r, err
+	}
+	if firstReadID.Valid && d.Start != firstReadID.String {
+		return refuse("the start observation is not the first successful read of the machine after the transport deadline")
 	}
 	if firstRead.Valid && firstRead.Time.After(anchor) {
 		anchor = firstRead.Time
@@ -269,8 +276,7 @@ func (a *API) settleOperation(ctx context.Context, operation string, generation 
 			return err
 		}
 		if retry {
-			rev, err := a.classify(ctx, tx, l, "safe-to-retry", sql.NullString{String: observation, Valid: true},
-				[]int64{revision}, generation)
+			rev, err := a.classifyObserved(ctx, tx, l, "safe-to-retry", observation, revision, generation)
 			if err != nil {
 				return err
 			}
@@ -286,8 +292,7 @@ func (a *API) settleOperation(ctx context.Context, operation string, generation 
 			return stay("pending", "the observation does not fail the operation: "+why)
 		}
 		cause := "a completion observation contradicts the postconditions"
-		if _, err := a.classify(ctx, tx, l, "failed", sql.NullString{String: observation, Valid: true}, []int64{revision},
-			generation); err != nil {
+		if _, err := a.classifyObserved(ctx, tx, l, "failed", observation, revision, generation); err != nil {
 			return err
 		}
 		if err := a.moveOperation(ctx, tx, &l, "failed", cause, nil, map[string]any{"outcome": "failed", "cause": cause,
@@ -358,8 +363,7 @@ func (a *API) complete(ctx context.Context, tx *sql.Tx, l *operationLock, plan, 
 		return err
 	}
 	cause := "the observation establishes the bound postconditions"
-	if _, err := a.classify(ctx, tx, *l, "completed", sql.NullString{String: observation, Valid: true}, []int64{revision},
-		generation); err != nil {
+	if _, err := a.classifyObserved(ctx, tx, *l, "completed", observation, revision, generation); err != nil {
 		return err
 	}
 	if err := a.moveOperation(ctx, tx, l, "completed", cause, map[string]any{"appliedRelease": release,
