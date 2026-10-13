@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/talos"
@@ -162,11 +163,12 @@ func (a *API) classifyObserved(ctx context.Context, tx *sql.Tx, l operationLock,
 }
 
 // takenOver is what a takeover recorded: the operation, the owner generation it now holds and its
-// state, and the ownership transition entry's revision.
+// state, and the ownership transition entry's revision and time.
 type takenOver struct {
 	Operation, State string
 	Generation       int64
 	Revision         int64
+	At               time.Time
 }
 
 // takeOver is T8's takeover of an apply-config operation (execution-recovery.md §3.4, persistence-api.md
@@ -177,46 +179,56 @@ type takenOver struct {
 // classifies nothing. The ownership transition is one entry, followed by an operation state entry
 // when the state moved.
 func (a *API) takeOver(ctx context.Context, operation string, generation int64, reason string) (takenOver, error) {
-	if a.d.owner.ID == "" {
-		return takenOver{}, errNotController
-	}
-	r := takenOver{Operation: operation}
-	err := a.inTx(ctx, func(tx *sql.Tx) error {
-		l, err := a.lockOperation(ctx, tx, operation)
-		if err != nil {
-			return err
-		}
-		switch l.state {
-		case "committed", "sending", "verifying", "unresolved":
-		default:
-			return refuseOutcome("takeover", "the operation is "+l.state)
-		}
-		from, fromEpoch := l.owner.String, l.ownerEpoch.String
-		res, err := tx.ExecContext(ctx, `UPDATE operation SET state = 'unresolved', owner = $2, owner_gen = owner_gen + 1,
-				owner_epoch = $3
-			WHERE id = $1 AND owner_gen = $4 AND state IN ('committed', 'sending', 'verifying', 'unresolved')`,
-			operation, a.d.owner.ID, l.current, generation)
-		if err != nil {
-			return err
-		}
-		if n, err := res.RowsAffected(); err != nil {
-			return err
-		} else if n != 1 {
-			return refuseOutcome("takeover", "the operation's owner generation is not "+fmt.Sprint(generation))
-		}
-		r.Generation, r.State = generation+1, "unresolved"
-		if r.Revision, _, err = a.appendEntry(ctx, tx, l, "ownership-transition", map[string]any{"operation": operation,
-			"from": from, "to": a.d.owner.ID, "generation": r.Generation, "fromGeneration": generation, "fromEpoch": fromEpoch,
-			"epoch": l.current, "reason": reason}); err != nil {
-			return err
-		}
-		if l.state == "unresolved" {
-			return nil
-		}
-		_, _, err = a.appendEntry(ctx, tx, l, "operation-state", map[string]any{"operation": operation, "from": l.state,
-			"to": "unresolved", "controller": a.d.owner.ID, "generation": r.Generation, "cause": "takeover"})
+	var r takenOver
+	err := a.inTx(ctx, func(tx *sql.Tx) (err error) {
+		r, err = a.takeOverTx(ctx, tx, operation, generation, reason, nil)
 		return err
 	})
+	return r, err
+}
+
+// takeOverTx is takeOver's transaction body, which a recovery-admin's request runs as its effect
+// (persistence-api.md §9.2); by names that request's identity, role and act in the transition entry.
+func (a *API) takeOverTx(ctx context.Context, tx *sql.Tx, operation string, generation int64, reason string,
+	by map[string]any) (takenOver, error) {
+	r := takenOver{Operation: operation}
+	if a.d.owner.ID == "" {
+		return r, errNotController
+	}
+	l, err := a.lockOperation(ctx, tx, operation)
+	if err != nil {
+		return r, err
+	}
+	switch l.state {
+	case "committed", "sending", "verifying", "unresolved":
+	default:
+		return r, refuseOutcome("takeover", "the operation is "+l.state)
+	}
+	from, fromEpoch := l.owner.String, l.ownerEpoch.String
+	res, err := tx.ExecContext(ctx, `UPDATE operation SET state = 'unresolved', owner = $2, owner_gen = owner_gen + 1,
+			owner_epoch = $3
+		WHERE id = $1 AND owner_gen = $4 AND state IN ('committed', 'sending', 'verifying', 'unresolved')`,
+		operation, a.d.owner.ID, l.current, generation)
+	if err != nil {
+		return r, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return r, err
+	} else if n != 1 {
+		return r, refuseOutcome("takeover", "the operation's owner generation is not "+fmt.Sprint(generation))
+	}
+	r.Generation, r.State = generation+1, "unresolved"
+	entry := map[string]any{"operation": operation, "from": from, "to": a.d.owner.ID, "generation": r.Generation,
+		"fromGeneration": generation, "fromEpoch": fromEpoch, "epoch": l.current, "reason": reason}
+	maps.Copy(entry, by)
+	if r.Revision, r.At, err = a.appendEntry(ctx, tx, l, "ownership-transition", entry); err != nil {
+		return r, err
+	}
+	if l.state == "unresolved" {
+		return r, nil
+	}
+	_, _, err = a.appendEntry(ctx, tx, l, "operation-state", map[string]any{"operation": operation, "from": l.state,
+		"to": "unresolved", "controller": a.d.owner.ID, "generation": r.Generation, "cause": "takeover"})
 	return r, err
 }
 

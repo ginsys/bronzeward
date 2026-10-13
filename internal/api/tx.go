@@ -301,7 +301,7 @@ func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 	var ref *refusal
 	switch {
 	case errors.As(err, &ref):
-	case errors.Is(err, staging.ErrEpochSuperseded):
+	case errors.Is(err, staging.ErrEpochSuperseded), errors.Is(err, errNotController):
 		ref = refuse(http.StatusServiceUnavailable, "epoch-superseded", "this server started before the current recovery epoch and may issue no ownership; nothing was committed")
 	case errors.Is(err, errTransient):
 		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the request deadlocked on every attempt; nothing was committed")

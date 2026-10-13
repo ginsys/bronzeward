@@ -1590,6 +1590,27 @@ none that revokes a token except by revoking its service identity (T5c,
 text: it is limited to the roles that may mark, never cached, and answers only
 while the claim is `paused` (compilation §3.6) **(choice §17.36)**.
 
+The three operation recovery requests act as the serving controller, in one
+transaction that takes T11's locks in rule 5's order and writes its entry and
+the act together:
+
+- `POST /operations/{id}/takeovers` takes `generation` (the owner generation the
+  requester read, at least 1) and `reason`. It performs execution and recovery
+  §3.4's takeover for the serving controller: `409 conflict` when the generation
+  has moved or the operation ended, `503 epoch-superseded` when the process is no
+  controller. The entry names the requester, its role and the act.
+- `POST /operations/{id}/attempts/{attempt}/accountings` takes `start` and `end`
+  (recovery observation ids) and `facts` (at most 16 string members; `explanation`
+  accounts for a changed machine-configuration resource version). It records
+  §5.2's decision accounting by the requester; any condition of §5.2 that does
+  not hold, and a second accounting of the attempt, is `409 conflict`.
+- `POST /operations/{id}/resolutions` takes `to` and `reason`. `to` is
+  `cancelled` only, and only an `unresolved` operation with no recorded attempt
+  qualifies (§4): any other state or an attempt is `409 conflict`. Completing or
+  failing an operation by decision is not a request this API accepts, since
+  absence of evidence classifies nothing (execution and recovery invariants 6
+  and 11).
+
 An adoption approval is requested as a plan with `"operation": "adopt"`, which
 binds what execution and recovery's adoption section lists, is approved by an
 `approver` like any plan, and whose commitment records the adoption, creating
