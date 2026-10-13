@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 )
 
@@ -30,10 +31,11 @@ type accounted struct {
 // and changes no state. It requires, as recorded facts and reading them under the operation's and
 // machine's locks: the attempt's executor is stopped or taken over (its owner generation or epoch
 // is no longer the operation's); at least the settle floor from the latest of the attempt's transport
-// deadline and the takeover, and the first successful read of the machine after that deadline, to the
-// end observation, a recovery observation of this machine that read the machine-configuration
-// resource version at both its start and end; and, when that version moved, an explanation among
-// the facts. The act is written after this effect in the same transaction.
+// deadline and the takeover, and the first successful read of the machine after that deadline (one
+// that read a node value), to the start of the end observation, a recovery observation of this
+// machine that read the machine-configuration resource version at both its start and end; and,
+// when that version moved, a nonblank explanation among the facts. The act is written after this
+// effect in the same transaction.
 func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDecision) (accounted, error) {
 	r := accounted{Attempt: d.Attempt}
 	refuse := func(cause string) (accounted, error) { return r, refuseOutcome("accounting", cause) }
@@ -74,15 +76,18 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 	if takeover.Valid && takeover.Time.After(anchor) {
 		anchor = takeover.Time
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT min(o.at) FROM observation o WHERE o.machine = $1 AND o.access_version IS NOT NULL
-		AND o.at > $2`, l.machine, transport).Scan(&firstRead); err != nil {
+	// A successful read of the machine is one that read a node value; access obtained and the node
+	// unreachable is not one.
+	if err := tx.QueryRowContext(ctx, `SELECT min(o.at) FROM observation o WHERE o.machine = $1 AND o.at > $2
+		AND (o.unread->'identity' IS NULL OR o.unread->'runningVersion' IS NULL OR o.unread->'configuration' IS NULL)`,
+		l.machine, transport).Scan(&firstRead); err != nil {
 		return r, err
 	}
 	if firstRead.Valid && firstRead.Time.After(anchor) {
 		anchor = firstRead.Time
 	}
 	floor := a.d.exec.SettleFloor
-	var startAt, endAt time.Time
+	var startAt, endBegan, endAt time.Time
 	var startVersion, endVersion sql.NullString
 	var purpose string
 	if err := tx.QueryRowContext(ctx, `SELECT se.at, o.resource_version FROM observation o
@@ -93,7 +98,7 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 	if err := tx.QueryRowContext(ctx, `SELECT se.at, o.at, o.resource_version, s.purpose FROM observation o
 		JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis
 		JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis WHERE o.id = $1 AND o.machine = $2`,
-		d.End, l.machine).Scan(new(time.Time), &endAt, &endVersion, &purpose); err != nil {
+		d.End, l.machine).Scan(&endBegan, &endAt, &endVersion, &purpose); err != nil {
 		return r, fmt.Errorf("accounting of attempt %s: its end observation: %w", d.Attempt, err)
 	}
 	switch {
@@ -103,12 +108,13 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 		return refuse("the machine-configuration resource version was not read at both ends of the settle")
 	case !endAt.After(startAt):
 		return refuse("the end observation does not follow the start observation")
-	case endAt.Before(anchor.Add(floor)):
-		return refuse(fmt.Sprintf("the settle floor of %s has not elapsed since %s", floor, anchor.UTC().Format(time.RFC3339Nano)))
+	case endBegan.Before(anchor.Add(floor)):
+		return refuse(fmt.Sprintf("the end observation began before the settle floor of %s had elapsed since %s", floor,
+			anchor.UTC().Format(time.RFC3339Nano)))
 	}
 	moved := startVersion.String != endVersion.String
 	if moved {
-		if _, ok := d.Facts["explanation"].(string); !ok {
+		if text, ok := d.Facts["explanation"].(string); !ok || strings.TrimSpace(text) == "" {
 			return refuse("the machine-configuration resource version changed during the settle and no explanation is recorded")
 		}
 	}
@@ -243,10 +249,10 @@ func (a *API) settleOperation(ctx context.Context, operation string, generation 
 		if established && purpose == "completion" && attempts > 0 {
 			return a.complete(ctx, tx, &l, plan, observation, &r)
 		}
-		if !contradicted {
-			// Neither, or established by a read that completes nothing (a recovery observation, or an
-			// operation that sent nothing). A verifying operation past its recorded verification
-			// deadline is unresolved.
+		if !contradicted && attempts > 0 {
+			// Neither, or established by a read that completes nothing (a recovery observation). A
+			// verifying operation past its recorded verification deadline is unresolved. An operation
+			// with no attempt (taken over before its first) goes on: the observation may admit it.
 			if l.state == "verifying" && lastDeadline.Valid && obsAt.After(lastDeadline.Time) {
 				if err := a.moveOperation(ctx, tx, &l, "unresolved", "no completion observation by the verification deadline",
 					nil, nil); err != nil {
