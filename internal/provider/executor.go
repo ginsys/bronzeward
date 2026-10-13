@@ -52,6 +52,13 @@ func (e *Executor) TalosAccess(ctx context.Context, cluster string) (TalosAccess
 // address under every verb and reflection reaches nothing inside it.
 type Artifact struct{ get func() []byte }
 
+// NewArtifact wraps plaintext, as DecryptArtifact does a decrypted one. It exists for the
+// executor's stand-ins in tests; it copies plaintext, so the caller keeps its own.
+func NewArtifact(plaintext []byte) Artifact {
+	plain := bytes.Clone(plaintext)
+	return Artifact{get: func() []byte { return bytes.Clone(plain) }}
+}
+
 // ArtifactBytes is a copy of a's plaintext, one per call: the caller owns it, and editing or
 // zeroing it changes nothing a later call returns.
 func ArtifactBytes(a Artifact) []byte {

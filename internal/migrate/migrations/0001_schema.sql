@@ -524,7 +524,11 @@ CREATE TABLE machine_event (
   kind     text NOT NULL CONSTRAINT machine_event_kind CHECK (kind IN ('endpoint-change', 'plan', 'approval',
              'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
              'observation', 'adoption', 'applied-change', 'commitment', 'refusal', 'attempt', 'operation-state',
-             'response', 'accounting', 'classification', 'ownership-transition')),
+             'response', 'accounting', 'classification', 'ownership-transition', 'use-time-check')),
+  -- A use-time check names the plan it was made for and the result of each dependency (§3.1, §4.1).
+  CONSTRAINT machine_event_use_time_check CHECK (kind <> 'use-time-check'
+    OR (jsonb_typeof(entry->'plan') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'dependencies') IS NOT DISTINCT FROM 'object')),
   -- A JSON object: JSON null is not SQL NULL, and an immutable entry cannot be corrected later.
   entry    jsonb NOT NULL CHECK (jsonb_typeof(entry) = 'object'),
   CONSTRAINT machine_event_refusal CHECK (kind <> 'refusal'

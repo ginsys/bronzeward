@@ -216,6 +216,15 @@ func (n *Node) OnApply(h func(context.Context, *machine.ApplyConfigurationReques
 	n.onApply = h
 }
 
+// AcceptApply makes the node accept every apply as the mode it asked for and report the
+// configuration it carried as its own from then on, as a node that applied it does.
+func (n *Node) AcceptApply(t testing.TB) {
+	n.OnApply(func(_ context.Context, req *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error) {
+		n.SetMachineConfig(t, req.GetData())
+		return &machine.ApplyConfigurationResponse{Messages: []*machine.ApplyConfiguration{{Mode: req.GetMode()}}}, nil
+	})
+}
+
 // AppliedRequests are the ApplyConfiguration requests that reached the node, in order.
 func (n *Node) AppliedRequests() []Applied {
 	n.mu.Lock()

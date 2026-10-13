@@ -45,10 +45,13 @@ type Ingester interface {
 	TalosAccess(ctx context.Context, cluster string) (provider.TalosAccess, error)
 }
 
-// Executor is what observations need of *provider.Executor (persistence-api.md §3.3): the
-// executor identity's read of a cluster's Talos access.
+// Executor is what observations and dispatch need of *provider.Executor (persistence-api.md §3.3,
+// execution-recovery.md §3.1): the executor identity's read of a cluster's Talos access, and its
+// decryption of a bound artifact under the artifact key.
 type Executor interface {
 	TalosAccess(ctx context.Context, cluster string) (provider.TalosAccess, error)
+	DecryptArtifact(ctx context.Context, ct provider.Ciphertext, keyVersion int) (provider.Artifact, error)
+	ArtifactKey() string
 }
 
 // Publishers are publication's provider identities (compilation.md §1): the metadata identity's
@@ -77,16 +80,17 @@ type API struct {
 // live for life, the server's lifetime, and runs counts them; wake tells the worker a job was
 // queued, and adopt tells the adoption loop a plan was approved.
 type deps struct {
-	ing    Ingester
-	pub    *publishClients
-	exe    Executor
-	timers config.Ingestion
-	owner  staging.Owner
-	life   context.Context
-	runs   *sync.WaitGroup
-	wake   chan struct{}
-	adopt  chan struct{}
-	exec   config.Execution // the plan defaults and the transport maximum (execution-recovery.md §5.2)
+	ing      Ingester
+	pub      *publishClients
+	exe      Executor
+	timers   config.Ingestion
+	owner    staging.Owner
+	life     context.Context
+	runs     *sync.WaitGroup
+	wake     chan struct{}
+	adopt    chan struct{}
+	dispatch chan struct{}    // tells the executor loop a plan was approved
+	exec     config.Execution // the plan defaults and the transport maximum (execution-recovery.md §5.2)
 }
 
 // options are nil or false in production; tests set them.
@@ -108,6 +112,8 @@ type options struct {
 	onPublish      func()                                                                               // runs instead of waking the publish worker
 	onIdle         func()                                                                               // runs when the publish worker found no job, before it waits
 	onAdoptIdle    func()                                                                               // runs after each pass of the adoption loop, before it waits
+	onExecIdle     func()                                                                               // runs after each pass of the executor loop, before it waits
+	dialApply      applyDialer                                                                          // talos.DialApplier by default (sender.go)
 	afterStage     func()                                                                               // runs when a job is staged, before T1
 	beforeT1       func()                                                                               // runs before T1 begins
 	stopAt         func(step string) bool                                                               // a draft update's ingestion stops at step, as a killed process would
@@ -155,6 +161,7 @@ func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex 
 	api := newAPI(db, a, cfg, d, options{})
 	api.startPublisher()
 	api.startAdopter()
+	api.startExecutor()
 	return api
 }
 
@@ -179,6 +186,9 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 	}
 	if d.adopt == nil {
 		d.adopt = make(chan struct{}, 1)
+	}
+	if d.dispatch == nil {
+		d.dispatch = make(chan struct{}, 1)
 	}
 	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, mux: http.NewServeMux(), d: d, o: o}
 	for _, rt := range append(routes(), o.extra...) {

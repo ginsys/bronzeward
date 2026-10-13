@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -29,7 +30,28 @@ type fakeExecutor struct {
 	err    error
 	reads  []string
 	onRead func()
+	// artifact is the plaintext DecryptArtifact answers, under the key keyName (artifactKeyName if
+	// empty); decryptErr, when set, is its failure; decrypts counts its calls.
+	artifact   []byte
+	keyName    string
+	decryptErr error
+	decrypts   int
 }
+
+// artifactKeyName is the artifact key the fixtures' releases are encrypted under.
+const artifactKeyName = "bw-artifact"
+
+func (x *fakeExecutor) DecryptArtifact(_ context.Context, _ provider.Ciphertext, _ int) (provider.Artifact, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.decrypts++
+	if x.decryptErr != nil {
+		return provider.Artifact{}, x.decryptErr
+	}
+	return provider.NewArtifact(x.artifact), nil
+}
+
+func (x *fakeExecutor) ArtifactKey() string { return cmp.Or(x.keyName, artifactKeyName) }
 
 func (x *fakeExecutor) TalosAccess(_ context.Context, cluster string) (provider.TalosAccess, error) {
 	x.mu.Lock()

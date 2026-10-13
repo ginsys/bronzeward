@@ -16,9 +16,11 @@ import (
 )
 
 // observeFor is what an observation is taken for (execution-recovery.md §4.1): its purpose, and
-// the plan and operation it is taken for, if any.
+// the plan and operation it is taken for, if any. access, when set, is the Talos access a dispatch
+// read once for this observation and the attempt made on it (§3.1 item 2); it is not read again.
 type observeFor struct {
 	purpose, plan, operation string
+	access                   *provider.TalosAccess
 }
 
 // observed is what observe recorded: the observation's id, its basis (the start entry's revision)
@@ -80,20 +82,18 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 		return observed{}, err
 	}
 
-	acc, err := a.d.exe.TalosAccess(ctx, cluster)
+	var acc provider.TalosAccess
+	var err error
+	if f.access != nil {
+		acc = *f.access
+	} else {
+		acc, err = a.d.exe.TalosAccess(ctx, cluster)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return observed{}, ctx.Err()
 		}
-		cause := "provider-unavailable" // sealed, silent, or a status the client does not classify
-		switch {
-		case errors.Is(err, provider.ErrAbsent):
-			cause = "absent"
-		case errors.Is(err, provider.ErrDenied):
-			cause = "denied"
-		case errors.Is(err, provider.ErrProtocol):
-			cause = "malformed"
-		}
+		cause := accessCause(err)
 		a.quoteObservation(o.ID, cause, err)
 		o.unreadAll(cause, "identity", "runningVersion", "configuration", "assignmentEvidence")
 		return o, a.recordObservation(ctx, machine, f, &o)
@@ -169,6 +169,19 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 		o.unreadAll(rd.cause, rd.name)
 	}
 	return o, a.recordObservation(ctx, machine, f, &o)
+}
+
+// accessCause names why a provider read failed, as an observation and a use-time check record it.
+func accessCause(err error) string {
+	switch {
+	case errors.Is(err, provider.ErrAbsent):
+		return "absent"
+	case errors.Is(err, provider.ErrDenied):
+		return "denied"
+	case errors.Is(err, provider.ErrProtocol):
+		return "malformed"
+	}
+	return "provider-unavailable" // sealed, silent, or a status the client does not classify
 }
 
 // startObservation is the start entry's transaction (T7): the installation's epoch, which must be
