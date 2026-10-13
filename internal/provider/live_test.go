@@ -414,6 +414,23 @@ func TestLiveIngestionCannotDecryptArtifact(t *testing.T) {
 		t.Fatalf("control: the executor's decrypt: %v", err)
 	}
 	t.Logf("control: the executor decrypted it")
+	// The role type, not a raw request: DecryptArtifact under the executor's token at the version
+	// the ciphertext names, and the version check refusing before a request when it differs.
+	ex, err := NewExecutor(b.Addr, tokenOf(b.Token("bw-executor")), "bw-artifact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := art.KeyVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := ex.DecryptArtifact(t.Context(), art, n)
+	if err != nil || string(ArtifactBytes(a)) != "artifact" {
+		t.Fatalf("the executor role type's decrypt: %v", err)
+	}
+	if _, err := ex.DecryptArtifact(t.Context(), art, n+1); err == nil {
+		t.Fatal("the executor decrypted an artifact as a key version it was not encrypted at")
+	}
 	if got, err := decrypt(t, b, b.Token("bw-ingestion", "decrypt-artifact"), "bw-artifact", art); err != nil || string(got) != "artifact" {
 		t.Fatalf("mechanism removed: ingestion plus decrypt on bw-artifact: %v", err)
 	}
@@ -449,7 +466,7 @@ func TestLiveTalosAccess(t *testing.T) {
 		t.Fatalf("ingestion read version %+v", v)
 	}
 	t.Logf("ingestion read version %d of %s", a.Version().Version, p)
-	ex, err := NewExecutor(b.Addr, tokenOf(b.Token("bw-executor")))
+	ex, err := NewExecutor(b.Addr, tokenOf(b.Token("bw-executor")), "bw-artifact")
 	if err != nil {
 		t.Fatal(err)
 	}

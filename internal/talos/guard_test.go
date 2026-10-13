@@ -139,11 +139,16 @@ func exportedSurface(t *testing.T, files map[string][]byte) []string {
 }
 
 var surface = []string{
+	"Applier", "Applier.ApplyNoReboot", "Applier.Close", "Class", "ClassAccepted", "ClassCode",
+	"ClassInvalidArgument", "ClassRejected", "ClassTransport", "ClassUnrecognised",
 	"Config", "Config.Bytes", "Config.Digest", "Config.Format", "Config.GoString", "Config.MarshalJSON",
 	"Config.MarshalText", "Config.MarshalYAML", "Config.ResourceVersion", "Config.String",
-	"ConfigurationDigest", "Dial", "Identity", "Identity.ClusterID", "Identity.NodeID", "Identity.SMBIOSUUID",
+	"ConfigurationDigest", "Dial", "DialApplier", "ErrNoDeadline", "Identity", "Identity.ClusterID",
+	"Identity.NodeID", "Identity.SMBIOSUUID",
 	"ParseEndpoint",
 	"Reader", "Reader.Close", "Reader.Identity", "Reader.MachineConfig", "Reader.Version",
+	"Response", "Response.Accounts", "Response.Class", "Response.Code", "Response.Text",
+	"applier.ApplyNoReboot", "applier.Close",
 	"reader.Close", "reader.Identity", "reader.MachineConfig", "reader.Version",
 	"requestError.Error", "requestError.GRPCStatus", "requestError.Unwrap",
 }
@@ -193,9 +198,48 @@ var allowedSelectors = map[string][]string{
 // clientMembers are the only members of the stored client (the `api` field) this package uses.
 var clientMembers = []string{"COSI", "Close", "Version"}
 
-// machineryViolations reports every use of the machinery client outside the allowlist in one
+// policy is what one source file may use of the machinery: per imported package the selectors, of
+// the stored client (the `api` field of holder) the members, and which denied names it is exempt
+// from. Reader's file has readerPolicy; the one file that sends a request has applierPolicy, and no
+// other file may use ApplyConfiguration (the denied list still names it there).
+type policy struct {
+	selectors map[string][]string
+	members   []string
+	holder    string
+	exempt    []string
+}
+
+var readerPolicy = policy{selectors: allowedSelectors, members: clientMembers, holder: "reader"}
+
+const (
+	machineryMachine = "github.com/siderolabs/talos/pkg/machinery/api/machine"
+	applyFile        = "apply.go"
+)
+
+// applierMembers are the only members of the Applier's stored client.
+var applierMembers = []string{"ApplyConfiguration", "Close"}
+
+// applierPolicy is apply.go's: the client constructed as Reader's is, the one request type with its
+// no-reboot mode constant, and the one call. applierShapeViolations holds the request to its shape.
+var applierPolicy = policy{
+	selectors: map[string][]string{
+		machineryClient:  {"Client", "New", "NodeError", "WithConfigContext", "WithEndpoints"},
+		machineryMachine: {"ApplyConfigurationRequest", "ApplyConfigurationRequest_NO_REBOOT", "ApplyConfigurationResponse"},
+	},
+	members: applierMembers,
+	holder:  "applier",
+	exempt:  []string{"ApplyConfiguration"},
+}
+
+// machineryViolations reports every use of the machinery client outside the reader allowlist in one
 // source file.
 func machineryViolations(t *testing.T, name string, src []byte) []string {
+	t.Helper()
+	return policyViolations(t, name, src, readerPolicy)
+}
+
+// policyViolations reports every use of the machinery client outside pol in one source file.
+func policyViolations(t *testing.T, name string, src []byte, pol policy) []string {
 	t.Helper()
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, name, src, 0) // object resolution: idents bound from client.New
@@ -212,7 +256,7 @@ func machineryViolations(t *testing.T, name string, src []byte) []string {
 		if !strings.HasPrefix(p, "github.com/siderolabs/") && !strings.HasPrefix(p, "github.com/cosi-project/") {
 			continue
 		}
-		if _, ok := allowedSelectors[p]; !ok {
+		if _, ok := pol.selectors[p]; !ok {
 			flag(im, "import %s is not allowlisted", p)
 			continue
 		}
@@ -268,7 +312,7 @@ func machineryViolations(t *testing.T, name string, src []byte) []string {
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.Ident:
-			if slices.Contains(denied, n.Name) {
+			if slices.Contains(denied, n.Name) && !slices.Contains(pol.exempt, n.Name) {
 				flag(n, "%s is denied", n.Name)
 			}
 			if n.Obj != nil && bound[n.Obj] {
@@ -277,16 +321,16 @@ func machineryViolations(t *testing.T, name string, src []byte) []string {
 				}
 				switch p := parents[n].(type) {
 				case *ast.SelectorExpr:
-					if p.X == n && slices.Contains(clientMembers, p.Sel.Name) && p.Sel.Name != "COSI" {
+					if p.X == n && slices.Contains(pol.members, p.Sel.Name) && p.Sel.Name != "COSI" {
 						break
 					}
 					flag(n, "the client from client.New is used as %s.%s", n.Name, p.Sel.Name)
 				case *ast.KeyValueExpr:
 					lit, _ := parents[p].(*ast.CompositeLit)
-					if k, ok := p.Key.(*ast.Ident); ok && k.Name == "api" && p.Value == n && lit != nil && isIdent(lit.Type, "reader") {
+					if k, ok := p.Key.(*ast.Ident); ok && k.Name == "api" && p.Value == n && lit != nil && isIdent(lit.Type, pol.holder) {
 						break
 					}
-					flag(n, "the client from client.New is stored other than in reader's api field")
+					flag(n, "the client from client.New is stored other than in %s's api field", pol.holder)
 				default:
 					flag(n, "the client from client.New escapes (%T)", p)
 				}
@@ -294,7 +338,7 @@ func machineryViolations(t *testing.T, name string, src []byte) []string {
 		case *ast.SelectorExpr:
 			if x, ok := n.X.(*ast.Ident); ok {
 				if p, ok := local[x.Name]; ok {
-					if !slices.Contains(allowedSelectors[p], n.Sel.Name) {
+					if !slices.Contains(pol.selectors[p], n.Sel.Name) {
 						flag(n, "%s.%s is not allowlisted", x.Name, n.Sel.Name)
 					}
 					break
@@ -306,7 +350,7 @@ func machineryViolations(t *testing.T, name string, src []byte) []string {
 					flag(n, "the api field is used bare")
 					break
 				}
-				if !slices.Contains(clientMembers, outer.Sel.Name) {
+				if !slices.Contains(pol.members, outer.Sel.Name) {
 					flag(outer, "api.%s is not allowlisted", outer.Sel.Name)
 				}
 			}
@@ -444,7 +488,10 @@ func typeCheck(t *testing.T, fset *token.FileSet, path string, files []*ast.File
 		}
 		return gc.Import(path)
 	})}
-	info := &types.Info{Selections: map[*ast.SelectorExpr]*types.Selection{}}
+	info := &types.Info{
+		Selections: map[*ast.SelectorExpr]*types.Selection{},
+		Uses:       map[*ast.Ident]types.Object{},
+	}
 	pkg, err := conf.Check(path, fset, files, info)
 	if err != nil {
 		t.Fatalf("type-checking %s: %v", path, err)
@@ -489,7 +536,11 @@ func typedMachineryViolations(t *testing.T, srcs map[string][]byte) []string {
 		if obj.Pkg() == nil {
 			continue
 		}
-		if allowed, ok := memberAllowlist[obj.Pkg().Path()]; ok && !slices.Contains(allowed, obj.Name()) {
+		allowed, ok := memberAllowlist[obj.Pkg().Path()]
+		if ok && obj.Pkg().Path() == machineryClient && filepath.Base(fset.Position(sel.Pos()).Filename) == applyFile {
+			allowed = applierMembers
+		}
+		if ok && !slices.Contains(allowed, obj.Name()) {
 			out = append(out, fmt.Sprintf("%s: %s member %s is not allowlisted", fset.Position(sel.Sel.Pos()), obj.Pkg().Path(), obj.Name()))
 		}
 	}
@@ -497,14 +548,161 @@ func typedMachineryViolations(t *testing.T, srcs map[string][]byte) []string {
 	return out
 }
 
+// applierShapeViolations holds the one file that sends a request to its shape: exactly one
+// ApplyConfiguration call, exactly one request literal, whose only keys are Data and Mode, the mode
+// being the no-reboot constant. The policy check bounds what the file may name; this bounds what it
+// may send with it (a dry run, a try-mode timeout and another mode are all fields or constants of
+// the allowed request type).
+func applierShapeViolations(t *testing.T, name string, src []byte) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	flag := func(n ast.Node, format string, args ...any) {
+		out = append(out, fset.Position(n.Pos()).String()+": "+fmt.Sprintf(format, args...))
+	}
+	isSel := func(e ast.Expr, pkg, sel string) bool {
+		s, ok := e.(*ast.SelectorExpr)
+		if !ok || s.Sel.Name != sel {
+			return false
+		}
+		x, ok := s.X.(*ast.Ident)
+		return ok && x.Name == pkg
+	}
+	// inline is the request literal of a call's second argument: `&machine.ApplyConfigurationRequest{…}`
+	// written in the call, so no variable holds the request between its construction and the send.
+	inline := func(e ast.Expr) bool {
+		u, ok := e.(*ast.UnaryExpr)
+		if !ok || u.Op != token.AND {
+			return false
+		}
+		lit, ok := u.X.(*ast.CompositeLit)
+		return ok && isSel(lit.Type, "machine", "ApplyConfigurationRequest")
+	}
+	selections, calls, literals := 0, 0, 0
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.SelectorExpr:
+			if n.Sel.Name == "ApplyConfiguration" {
+				selections++
+			}
+		case *ast.CallExpr:
+			// The one send: the member called directly on the stored client (`a.api.ApplyConfiguration`),
+			// never a method value that is called later or twice, with the request built in the call.
+			s, ok := n.Fun.(*ast.SelectorExpr)
+			if !ok || s.Sel.Name != "ApplyConfiguration" {
+				return true
+			}
+			if x, ok := s.X.(*ast.SelectorExpr); !ok || x.Sel.Name != "api" || len(n.Args) != 2 || !inline(n.Args[1]) {
+				flag(n, "ApplyConfiguration is called other than as `x.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{…})`")
+				return true
+			}
+			calls++
+		case *ast.CompositeLit:
+			if !isSel(n.Type, "machine", "ApplyConfigurationRequest") {
+				return true
+			}
+			literals++
+			keys := map[string]bool{}
+			for _, e := range n.Elts {
+				kv, ok := e.(*ast.KeyValueExpr)
+				k, isIdent := ast.Expr(nil), false
+				if ok {
+					k, isIdent = kv.Key, true
+				}
+				id, ok2 := k.(*ast.Ident)
+				if !isIdent || !ok2 || (id.Name != "Data" && id.Name != "Mode") {
+					flag(e, "the request sets a field other than Data and Mode")
+					continue
+				}
+				keys[id.Name] = true
+				if id.Name == "Mode" && !isSel(kv.Value, "machine", "ApplyConfigurationRequest_NO_REBOOT") {
+					flag(e, "the request's mode is not machine.ApplyConfigurationRequest_NO_REBOOT")
+				}
+			}
+			if !keys["Data"] || !keys["Mode"] {
+				flag(n, "the request does not set both Data and Mode")
+			}
+		}
+		return true
+	})
+	if selections != 1 || calls != 1 {
+		out = append(out, fmt.Sprintf("%s: %d ApplyConfiguration selections and %d direct calls with an inline request; want exactly one of each", name, selections, calls))
+	}
+	if literals != 1 {
+		out = append(out, fmt.Sprintf("%s: %d request literals; want exactly one", name, literals))
+	}
+	return out
+}
+
 func TestMachineryCallsAllowlisted(t *testing.T) {
+	sawApplier := false
 	for name, src := range parsePackage(t) {
+		if name == applyFile {
+			sawApplier = true
+			for _, v := range append(policyViolations(t, name, src, applierPolicy), applierShapeViolations(t, name, src)...) {
+				t.Error(v)
+			}
+			continue
+		}
 		for _, v := range machineryViolations(t, name, src) {
 			t.Error(v)
 		}
 	}
+	if !sawApplier {
+		t.Errorf("%s is not in the package: the applier guard checked nothing", applyFile)
+	}
 	for _, v := range typedMachineryViolations(t, parsePackage(t)) {
 		t.Error(v)
+	}
+
+	// Controls for the applier's file: each is a body of apply.go the real one must not become.
+	applierHead := "package talos\nimport (\n\t\"context\"\n\t\"github.com/siderolabs/talos/pkg/machinery/api/machine\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n)\n" +
+		"var _ = context.Background\nvar _ machine.ApplyConfigurationRequest\ntype applier struct{ api *client.Client }\n"
+	okBody := "func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}) }\n"
+	if got := append(policyViolations(t, applyFile, []byte(applierHead+okBody), applierPolicy), applierShapeViolations(t, applyFile, []byte(applierHead+okBody))...); len(got) != 0 {
+		t.Errorf("the clean applier control is flagged: %q", got)
+	}
+	for name, c := range map[string]struct {
+		body string
+		want string
+	}{
+		"dry run":       {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT, DryRun: true}) }\n", "a field other than Data and Mode"},
+		"try mode":      {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_TRY}) }\n", "is not machine.ApplyConfigurationRequest_NO_REBOOT"},
+		"reboot mode":   {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_REBOOT}) }\n", "is not machine.ApplyConfigurationRequest_NO_REBOOT"},
+		"mode left out": {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{Data: b}) }\n", "does not set both Data and Mode"},
+		"positional":    {"func (a *applier) f(ctx context.Context, b []byte) { a.api.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{}) }\n", "does not set both Data and Mode"},
+		"a second call": {okBody + strings.Replace(okBody, "f(", "g(", 1), "2 ApplyConfiguration selections"},
+		"a method value sent twice": {"func (a *applier) f(ctx context.Context, b []byte) {\n\tsend := a.api.ApplyConfiguration\n" +
+			"\treq := &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}\n\treq.DryRun = true\n\tsend(ctx, req)\n\tsend(ctx, req)\n}\n", "0 direct calls"},
+		"a request held in a variable": {"func (a *applier) f(ctx context.Context, b []byte) {\n" +
+			"\treq := &machine.ApplyConfigurationRequest{Data: b, Mode: machine.ApplyConfigurationRequest_NO_REBOOT}\n\treq.TryModeTimeout = nil\n\ta.api.ApplyConfiguration(ctx, req)\n}\n", "is called other than as"},
+		"a reboot":       {okBody + "func (a *applier) r(ctx context.Context) { a.api.Reboot(ctx) }\n", "Reboot is denied"},
+		"a reset":        {okBody + "func (a *applier) r(ctx context.Context) { a.api.Reset(ctx, false) }\n", "Reset is denied"},
+		"a read":         {okBody + "func (a *applier) r(ctx context.Context) { a.api.Version(ctx) }\n", "api.Version is not allowlisted"},
+		"a sub-client":   {okBody + "func (a *applier) r() { _ = a.api.MachineClient }\n", "MachineClient is denied"},
+		"client escapes": {okBody + "func g(a *applier) any { return a.api }\n", "the api field is used bare"},
+	} {
+		src := []byte(applierHead + c.body)
+		got := strings.Join(append(policyViolations(t, applyFile, src, applierPolicy), applierShapeViolations(t, applyFile, src)...), "\n")
+		if !strings.Contains(got, c.want) {
+			t.Errorf("applier control %s: no violation %q in:\n%s", name, c.want, got)
+		}
+		t.Logf("applier control %s: flagged", name)
+	}
+	// The exemption is the file's name: the same sending body anywhere else is the denied call, and
+	// a typed selection of the call in another file is outside the reader's members.
+	if got := machineryViolations(t, "other.go", []byte(applierHead+okBody)); len(got) == 0 {
+		t.Error("control: a sender outside apply.go is not flagged")
+	}
+	if got := typedMachineryViolations(t, map[string][]byte{"control.go": []byte("package talos\nimport (\n\t\"context\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n)\nfunc f(ctx context.Context, c *client.Client) { c.ApplyConfiguration(ctx, nil) }\n")}); len(got) != 1 {
+		t.Errorf("typed control: ApplyConfiguration outside apply.go: %q, want one violation", got)
+	}
+	if got := typedMachineryViolations(t, map[string][]byte{applyFile: []byte("package talos\nimport (\n\t\"context\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n)\nfunc f(ctx context.Context, c *client.Client) { c.RebootWithResponse(ctx) }\n")}); len(got) != 1 {
+		t.Errorf("typed control: another member in apply.go: %q, want one violation", got)
 	}
 	// Typed controls: each type-checks, and reaches a member outside the allowlist by a spelling
 	// the syntactic checks do not resolve.
@@ -683,6 +881,56 @@ func bytesViolations(fset *token.FileSet, path string, info *types.Info) []strin
 	return out
 }
 
+// senderFile reports whether pos is in internal/api's dispatch sender, the one file outside
+// internal/talos and internal/provider that may send a mutating request or read the artifact.
+func senderFile(fset *token.FileSet, path string, pos token.Pos) bool {
+	return path == modulePath+"/internal/api" && filepath.Base(fset.Position(pos).Filename) == "sender.go"
+}
+
+// artifactBytesViolations reports every reference to provider.ArtifactBytes — the one way out of a
+// decrypted artifact, a function so that no interface can reach it — by any spelling (a call, a
+// function value, an alias of the package), in the package at path, unless it is that package or
+// the dispatch sender's file in internal/api: the plaintext reaches a request only there.
+func artifactBytesViolations(fset *token.FileSet, path string, info *types.Info) []string {
+	providerPkg := modulePath + "/internal/provider"
+	if path == providerPkg {
+		return nil
+	}
+	var out []string
+	for id, obj := range info.Uses {
+		f, ok := obj.(*types.Func)
+		if !ok || f.Pkg() == nil || f.Pkg().Path() != providerPkg || f.Name() != "ArtifactBytes" {
+			continue
+		}
+		if senderFile(fset, path, id.Pos()) {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s: provider.ArtifactBytes in %s", fset.Position(id.Pos()), path))
+	}
+	return out
+}
+
+// applyNoRebootViolations reports every selection of a method named ApplyNoReboot — a call, a
+// method value or a method expression, on Applier, its implementation or any interface or type
+// that mirrors it — in the package at path, unless it is internal/talos (and its tests) or the
+// dispatch sender's file in internal/api. Constructing an Applier is already held to the sender
+// (dialApplierViolations); this holds the use of one, which a value passed on would otherwise
+// reach from anywhere. The name is matched, not the package, so a local interface with the same
+// method cannot stand in for the real one.
+func applyNoRebootViolations(fset *token.FileSet, path string, info *types.Info) []string {
+	if path == thisPackage || strings.HasPrefix(path, thisPackage+"/") {
+		return nil
+	}
+	var out []string
+	for sel, s := range info.Selections {
+		if s.Obj().Name() != "ApplyNoReboot" || senderFile(fset, path, sel.Sel.Pos()) {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s: ApplyNoReboot in %s", fset.Position(sel.Sel.Pos()), path))
+	}
+	return out
+}
+
 // packageViolations type-checks a listed package, with its in-package tests, and its external test
 // package, reading imports from exports, and reports their references to Config.Bytes. The
 // external test imports the `p [p.test]` variant when the listing has one (go list -test makes it
@@ -710,6 +958,8 @@ func packageViolations(t *testing.T, exports map[string]string, p listedPackage)
 		}
 		_, info := typeCheck(t, fset, path, parseSources(t, fset, srcs), exports, under, nil)
 		out = append(out, bytesViolations(fset, p.ImportPath, info)...)
+		out = append(out, artifactBytesViolations(fset, p.ImportPath, info)...)
+		out = append(out, applyNoRebootViolations(fset, p.ImportPath, info)...)
 	}
 	return out
 }
@@ -781,4 +1031,123 @@ func TestConfigBytesCallers(t *testing.T) {
 		t.Errorf("internal/ingest flagged: %q", got)
 	}
 	t.Logf("checked %d packages; controls: an external test with and without in-package tests, an alias in another file, a method expression and an embedded Config from another package are flagged; internal/ingest is not", n)
+
+	// Controls for provider.ArtifactBytes and ApplyNoReboot: the decrypted artifact's bytes leave
+	// provider, and a mutating request is sent, only in the dispatch sender's file. Each control
+	// type-checks against the real provider and talos packages.
+	providerPkg := modulePath + "/internal/provider"
+	typed := func(path string, files map[string]string, check func(*token.FileSet, string, *types.Info) []string) []string {
+		srcs := map[string][]byte{}
+		for name, s := range files {
+			srcs[name] = []byte(s)
+		}
+		fset := token.NewFileSet()
+		_, info := typeCheck(t, fset, path, parseSources(t, fset, srcs), exports, nil, nil)
+		return check(fset, path, info)
+	}
+	use := "package api\nimport \"" + providerPkg + "\"\nfunc Send(a provider.Artifact) []byte { return provider.ArtifactBytes(a) }\n"
+	if got := typed(api, map[string]string{"sender.go": use}, artifactBytesViolations); len(got) != 0 {
+		t.Errorf("control: internal/api's sender.go is flagged: %q", got)
+	}
+	for name, files := range map[string]map[string]string{
+		"another file in internal/api": {"other.go": use},
+		"a function value":             {"other.go": "package api\nimport \"" + providerPkg + "\"\nvar leak = provider.ArtifactBytes\n"},
+		"an aliased import":            {"other.go": "package api\nimport p \"" + providerPkg + "\"\nfunc leak(a p.Artifact) []byte { return p.ArtifactBytes(a) }\n"},
+		"an aliased type":              {"sender.go": "package api\n", "other.go": "package api\nimport \"" + providerPkg + "\"\ntype a2 = provider.Artifact\nfunc leak(a a2) []byte { return provider.ArtifactBytes(a) }\n"},
+	} {
+		if got := typed(api, files, artifactBytesViolations); len(got) != 1 {
+			t.Errorf("control %s: %q, want one violation", name, got)
+		}
+	}
+	if got := typed(modulePath+"/internal/ingest", map[string]string{"sender.go": strings.Replace(use, "package api", "package ingest", 1)}, artifactBytesViolations); len(got) != 1 {
+		t.Errorf("control: a file named sender.go outside internal/api: %q, want one violation", got)
+	}
+
+	// An Applier's use: the sender's file only; any other file, a function that takes one, a method
+	// value or expression, and an interface that mirrors it are flagged.
+	send := "package api\nimport (\n\t\"context\"\n\t\"" + thisPackage + "\"\n)\nvar _ = context.Background\n"
+	sendCall := send + "func Send(ctx context.Context, a talos.Applier, b []byte) (talos.Response, error) { return a.ApplyNoReboot(ctx, b) }\n"
+	if got := typed(api, map[string]string{"sender.go": sendCall}, applyNoRebootViolations); len(got) != 0 {
+		t.Errorf("control: internal/api's sender.go is flagged for ApplyNoReboot: %q", got)
+	}
+	for name, files := range map[string]map[string]string{
+		"a function that takes an Applier": {"sender.go": "package api\n", "adopter.go": sendCall},
+		"a method value":                   {"adopter.go": send + "func leak(a talos.Applier) any { return a.ApplyNoReboot }\n"},
+		"a method expression":              {"adopter.go": send + "var leak = talos.Applier.ApplyNoReboot\n"},
+		"a mirroring interface": {"adopter.go": send + "type sink interface {\n\tApplyNoReboot(context.Context, []byte) (talos.Response, error)\n}\n" +
+			"func leak(ctx context.Context, s sink) { s.ApplyNoReboot(ctx, nil) }\n"},
+	} {
+		if got := typed(api, files, applyNoRebootViolations); len(got) != 1 {
+			t.Errorf("control %s: %q, want one violation", name, got)
+		}
+	}
+	if got := typed(thisPackage, map[string]string{"x.go": "package talos\nimport \"context\"\ntype sender interface{ ApplyNoReboot(context.Context, []byte) error }\nfunc leak(ctx context.Context, a sender) { a.ApplyNoReboot(ctx, nil) }\n"}, applyNoRebootViolations); len(got) != 0 {
+		t.Errorf("control: internal/talos is flagged: %q", got)
+	}
+}
+
+// dialApplierViolations reports every reference to this package's DialApplier — the one way to
+// obtain a client that sends a mutating request — outside internal/talos and the dispatch sender's
+// file, and every dot-import of this package outside internal/talos (which would hide the
+// qualifier).
+func dialApplierViolations(t *testing.T, rel string, src []byte) []string {
+	t.Helper()
+	if strings.HasPrefix(rel, "internal/talos/") || rel == "internal/api/sender.go" {
+		return nil
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, rel, src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := ""
+	var out []string
+	for _, im := range f.Imports {
+		if p, _ := strconv.Unquote(im.Path.Value); p != thisPackage {
+			continue
+		}
+		local = "talos"
+		if im.Name != nil {
+			local = im.Name.Name
+		}
+		if local == "." {
+			out = append(out, rel+" dot-imports "+thisPackage)
+		}
+	}
+	if local == "" {
+		return out
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		if s, ok := n.(*ast.SelectorExpr); ok && s.Sel.Name == "DialApplier" {
+			out = append(out, fmt.Sprintf("%s: DialApplier outside internal/api/sender.go", fset.Position(s.Sel.Pos())))
+		}
+		return true
+	})
+	return out
+}
+
+func TestDialApplierCallers(t *testing.T) {
+	walkGo(t, moduleRoot(t), func(rel string, src []byte) {
+		for _, v := range dialApplierViolations(t, rel, src) {
+			t.Error(v)
+		}
+	})
+	call := "package api\nimport \"" + thisPackage + "\"\nvar _ = talos.DialApplier\n"
+	for name, c := range map[string]struct{ rel, src string }{
+		"another file in internal/api": {"internal/api/adopter.go", call},
+		"a command":                    {"cmd/bronzeward/main.go", strings.Replace(call, "package api", "package main", 1)},
+		"an aliased import":            {"internal/ingest/x.go", "package ingest\nimport tc \"" + thisPackage + "\"\nvar _ = tc.DialApplier\n"},
+		"a dot import":                 {"internal/ingest/x.go", "package ingest\nimport . \"" + thisPackage + "\"\n"},
+		"a test file":                  {"internal/api/sender_test.go", call},
+	} {
+		if got := dialApplierViolations(t, c.rel, []byte(c.src)); len(got) == 0 {
+			t.Errorf("control %s: not flagged", name)
+		}
+	}
+	if got := dialApplierViolations(t, "internal/api/sender.go", []byte(call)); len(got) != 0 {
+		t.Errorf("control: the sender's file is flagged: %q", got)
+	}
+	if got := dialApplierViolations(t, "internal/api/adopter.go", []byte("package api\nimport \""+thisPackage+"\"\nvar _ = talos.Dial\n")); len(got) != 0 {
+		t.Errorf("control: Dial is flagged: %q", got)
+	}
 }

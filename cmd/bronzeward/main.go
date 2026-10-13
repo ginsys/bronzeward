@@ -234,7 +234,7 @@ func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, api.Exe
 	if tok, err = token("executorTokenFile", p.ExecutorTokenFile); err != nil {
 		return nil, nil, nil, err
 	}
-	exe, err := provider.NewExecutor(p.Address, tok)
+	exe, err := provider.NewExecutor(p.Address, tok, k.Artifact)
 	if err != nil {
 		return nil, nil, nil, err
 	}
