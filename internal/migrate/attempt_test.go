@@ -159,6 +159,10 @@ func TestAttempts(t *testing.T) {
 	for _, state := range []string{"unresolved", "failed", "cancelled", "sending"} {
 		refused(t, db, "completed to "+state, "23514/operation_apply_config_transition", a.state(state))
 	}
+	// A terminal operation takes no attempt: a third, unaccounted one naming the old classification
+	// would leave a completed operation with an attempt not accounted for (§8 invariant 5).
+	refused(t, db, "attempt after completion", "23514/attempt_operation_terminal",
+		a.attempted(a.attemptRow(3, 20).with("classification", 7), "completed")[:2]...)
 	// A terminal operation's owner may still be cleared: no state changes.
 	mustExec(t, db, `UPDATE operation SET owner = NULL, owner_gen = 0, owner_epoch = NULL WHERE id = $1`, a.op)
 

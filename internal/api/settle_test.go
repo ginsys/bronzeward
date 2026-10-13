@@ -24,7 +24,9 @@ type cobs struct {
 	resource   string
 	unread     string
 	shift      time.Duration // the observation's start and record, from now
+	began      time.Duration // the observation's start alone, from now, when it is not shift
 	atPlan     bool          // a start naming the plan though its purpose needs none
+	unreached  bool          // access was obtained but no node value was read
 }
 
 // observed records o's observation and answers its id.
@@ -72,11 +74,20 @@ func (ae *attemptEnv) observed(t *testing.T, change func(*cobs)) string {
 		ae.machine).Scan(&basis); err != nil {
 		t.Fatal(err)
 	}
-	secs := s.shift.Seconds()
+	secs, began := s.shift.Seconds(), s.shift.Seconds()
+	if s.began != 0 {
+		began = s.began.Seconds()
+	}
+	vals := []any{uuid, nodeID, cluster, asg, s.version, s.digest, s.resource}
+	if s.unreached {
+		vals = make([]any, len(vals))
+		s.unread = `{"identity":{"cause":"node-unreachable"},"runningVersion":{"cause":"node-unreachable"},` +
+			`"configuration":{"cause":"node-unreachable"},"health":{"cause":"none-bound"}}`
+	}
 	mustExec(t, tx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		SELECT $1, $2, epoch, 'observation-started', jsonb_build_object('purpose', $3::text, 'plan', $4::text, 'endpoint', $5::text,
 			'controller', $6::text), now() + make_interval(secs => $7)
-		FROM installation_state`, ae.machine, basis, s.purpose, startPlan, route, ae.a.d.owner.ID, secs)
+		FROM installation_state`, ae.machine, basis, s.purpose, startPlan, route, ae.a.d.owner.ID, began)
 	mustExec(t, tx, `INSERT INTO observation_start (machine, revision, purpose, plan, operation, endpoint, controller)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`, ae.machine, basis, s.purpose, startPlan, startOperation, route, ae.a.d.owner.ID)
 	obs := id.New(id.Observation)
@@ -92,7 +103,8 @@ func (ae *attemptEnv) observed(t *testing.T, change func(*cobs)) string {
 			talos_node_id, talos_cluster_id, assignment_evidence, running_version, configuration_digest, resource_version, unread, at)
 		SELECT $1, $2, $3, $4, 'access/talos/' || cluster, 3, '2026-10-01T00:00:00Z', $5::uuid, $6, $7, $8, $9, $10, $11, $12::jsonb,
 			now() + make_interval(secs => $13)
-		FROM machine WHERE id = $2`, obs, ae.machine, basis, rev, uuid, nodeID, cluster, asg, s.version, s.digest, s.resource, s.unread, secs)
+		FROM machine WHERE id = $2`, obs, ae.machine, basis, rev, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6],
+		s.unread, secs)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +196,11 @@ func TestAccountByDecision(t *testing.T) {
 		if _, err := ae.decide(t, next, att, start, end, nil); !errors.As(err, &refused) {
 			t.Fatalf("a moved version with no explanation: %v; want a refusal", err)
 		}
+		for _, blank := range []any{"", " \t\n", 7, nil} {
+			if _, err := ae.decide(t, next, att, start, end, map[string]any{"explanation": blank}); !errors.As(err, &refused) {
+				t.Fatalf("a moved version explained by %#v: %v; want a refusal", blank, err)
+			}
+		}
 		if _, err := ae.decide(t, next, att, start, end, map[string]any{"explanation": "the landed apply of the abandoned request"}); err != nil {
 			t.Fatal(err)
 		}
@@ -212,6 +229,39 @@ func TestAccountByDecision(t *testing.T) {
 			}
 		})
 	}
+	// The end observation must be taken after the floor: one begun inside it and only recorded after
+	// it does not satisfy §5.2 condition 3.
+	t.Run("end observation begun inside the floor", func(t *testing.T) {
+		t.Parallel()
+		ae, next, att := setup(t)
+		start := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow })
+		end := ae.observed(t, func(c *cobs) {
+			c.purpose, c.began, c.shift = "recovery", settleWindow+5*time.Second, settleWindow+time.Minute
+		})
+		var refused *outcomeRefused
+		if _, err := ae.decide(t, next, att, start, end, nil); !errors.As(err, &refused) {
+			t.Fatalf("an end observation begun 5 s after the first read: %v; want a refusal", err)
+		}
+		late := ae.observed(t, func(c *cobs) {
+			c.purpose, c.began, c.shift = "recovery", settleWindow+time.Minute, settleWindow+90*time.Second
+		})
+		if _, err := ae.decide(t, next, att, start, late, nil); err != nil {
+			t.Fatalf("an end observation begun after the floor: %v", err)
+		}
+	})
+	// The first successful read of the machine after the deadline starts the floor: an observation
+	// that obtained access but reached no node value is not one.
+	t.Run("an unreachable observation starts no floor", func(t *testing.T) {
+		t.Parallel()
+		ae, next, att := setup(t)
+		ae.observed(t, func(c *cobs) { c.purpose, c.shift, c.unreached = "recovery", 70*time.Second, true })
+		start := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow })
+		end := ae.observed(t, func(c *cobs) { c.purpose, c.shift = "recovery", settleWindow+5*time.Second })
+		var refused *outcomeRefused
+		if _, err := ae.decide(t, next, att, start, end, nil); !errors.As(err, &refused) {
+			t.Fatalf("a floor counted from an unreachable observation: %v; want a refusal", err)
+		}
+	})
 	t.Run("executor not taken over", func(t *testing.T) {
 		t.Parallel()
 		ae := newAttemptEnv(t, "")
@@ -363,6 +413,34 @@ func TestSettle(t *testing.T) {
 		}
 		if r.Outcome != "safe-to-retry" {
 			t.Fatalf("settled %+v", r)
+		}
+	})
+	// A takeover before the first attempt moves a committed operation to unresolved with no attempt;
+	// a plan whose artifact digest is its pre-dispatch digest is then neither contradicted nor
+	// completed by a recovery observation, and its first attempt is admitted by a classification.
+	t.Run("safe to retry before the first attempt", func(t *testing.T) {
+		t.Parallel()
+		ae := newAttemptEnv(t, "")
+		mustExec(t, ae.db, `ALTER TABLE release_machine DISABLE TRIGGER immutable_rows`)
+		mustExec(t, ae.db, `UPDATE release_machine SET configuration_digest = p.expected_digest FROM plan p
+			WHERE p.id = $1 AND release_machine.release = p.release AND release_machine.machine = p.machine`, ae.pid)
+		next := ae.takenOverBy(t)
+		obs := ae.observed(t, func(c *cobs) {
+			c.purpose = "recovery"
+			if err := ae.db.QueryRow(`SELECT expected_digest FROM plan WHERE id = $1`, ae.pid).Scan(&c.digest); err != nil {
+				t.Fatal(err)
+			}
+		})
+		r, err := next.settleOperation(context.Background(), ae.op, 2, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.State != "unresolved" || r.Outcome != "safe-to-retry" || r.Revision == 0 {
+			t.Fatalf("settled %+v", r)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM operation_classification WHERE operation = $1 AND observation = $2
+			AND outcome = 'safe-to-retry'`, ae.op, obs); n != 1 {
+			t.Fatal("no classification recorded")
 		}
 	})
 	t.Run("a recovery observation fails nothing", func(t *testing.T) {

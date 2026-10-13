@@ -1437,6 +1437,10 @@ BEGIN
   IF current = 'cancelled' THEN
     RAISE EXCEPTION 'attempt: operation % is cancelled', NEW.operation
       USING ERRCODE = 'check_violation', CONSTRAINT = 'attempt_operation_cancelled', TABLE = 'attempt';
+  ELSIF current IN ('completed', 'failed', 'rejected') THEN
+    -- An attempt recorded after the end would be one nothing accounts for (§8 invariant 5).
+    RAISE EXCEPTION 'attempt: operation % is %', NEW.operation, current
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'attempt_operation_terminal', TABLE = 'attempt';
   END IF;
   RETURN NEW;
 END
