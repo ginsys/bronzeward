@@ -105,7 +105,11 @@ func TestApplyClasses(t *testing.T) {
 		{"unrecognised invalid argument", codes.InvalidArgument, "something " + nodeSecret, outcome{ClassInvalidArgument, true}, outcome{ClassInvalidArgument, true}},
 		{"validation prefix elsewhere in the text", codes.InvalidArgument, "x " + validationText, outcome{ClassInvalidArgument, true}, outcome{ClassInvalidArgument, true}},
 		{"failed precondition", codes.FailedPrecondition, nodeSecret, answered, answered},
-		{"permission denied", codes.PermissionDenied, nodeSecret, answered, answered},
+		// The codes the client derives from an HTTP/2 error code or an HTTP status, as well as from a
+		// node's status: a status error of one of them does not show the node answered.
+		{"permission denied", codes.PermissionDenied, nodeSecret, outcome{ClassTransport, false}, answered},
+		{"unauthenticated", codes.Unauthenticated, nodeSecret, outcome{ClassTransport, false}, answered},
+		{"unimplemented", codes.Unimplemented, nodeSecret, outcome{ClassTransport, false}, answered},
 		{"internal", codes.Internal, nodeSecret, outcome{ClassTransport, false}, answered},
 		{"resource exhausted", codes.ResourceExhausted, nodeSecret, outcome{ClassTransport, false}, answered},
 		{"unknown", codes.Unknown, nodeSecret, outcome{ClassTransport, false}, answered},

@@ -74,7 +74,7 @@ func TestArtifactExposesNoPlaintextMethod(t *testing.T) {
 	if got := methodNames(reflect.TypeFor[Artifact]()); !slices.Equal(got, want) {
 		t.Fatalf("Artifact exports %q, want exactly %q", got, want)
 	}
-	var a any = Artifact{b: &[]byte{'x'}}
+	var a any = Artifact{}
 	if _, ok := a.(interface{ Bytes() []byte }); ok {
 		t.Fatal("an artifact satisfies interface{ Bytes() []byte }")
 	}
@@ -125,6 +125,78 @@ func TestExecutorDecryptArtifact(t *testing.T) {
 	}
 	if _, err := json.Marshal(struct{ A Artifact }{a}); err == nil {
 		t.Fatal("an artifact in a struct marshals to JSON")
+	}
+}
+
+// A decrypted artifact does not render when it is the unexported field of a caller's own type, where
+// fmt cannot call its Format method and walks it by reflection: under every verb, in a value, a
+// pointer, a slice, a map and a struct nested in a struct, whatever the verb, the output carries
+// neither the plaintext nor its decimal or hexadecimal bytes. The control proves the forms searched
+// for are the ones fmt renders a byte slice in.
+func TestArtifactDoesNotRenderThroughAnUnexportedField(t *testing.T) {
+	e, _ := executorStandIn(t, func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, 200, data(map[string]any{"plaintext": base64.StdEncoding.EncodeToString([]byte(artifactText))}))
+	})
+	a, err := e.DecryptArtifact(t.Context(), artifactCiphertext, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := []byte(artifactText)[:12]
+	forbidden := []string{
+		string([]byte(artifactText)[:12]),
+		strings.TrimSuffix(fmt.Sprintf("%d", head), "]"),
+		fmt.Sprintf("%x", head),
+		fmt.Sprintf("%X", head),
+		fmt.Sprintf("% x", head),
+		base64.StdEncoding.EncodeToString(head)[:12],
+	}
+	// Control: a bare byte slice, its pointer and a struct holding it do render in those forms.
+	plain := []byte(artifactText)
+	for _, v := range []any{plain, &plain, struct{ b []byte }{plain}, struct{ b *[]byte }{&plain}} {
+		var hit bool
+		for _, verb := range []string{"%v", "%s", "%q", "%x", "%+v"} {
+			s := fmt.Sprintf(verb, v)
+			for _, f := range forbidden {
+				hit = hit || strings.Contains(s, f)
+			}
+		}
+		if !hit {
+			t.Fatalf("control: %T renders none of the forbidden forms", v)
+		}
+	}
+	type inner struct{ held Artifact }
+	type outer struct {
+		n int
+		i inner
+	}
+	values := map[string]any{
+		"struct":          struct{ a Artifact }{a},
+		"pointer":         &struct{ a Artifact }{a},
+		"nested":          outer{1, inner{a}},
+		"nested pointer":  &outer{1, inner{a}},
+		"slice of struct": []struct{ a Artifact }{{a}},
+		"map of struct":   map[string]struct{ a Artifact }{"k": {a}},
+		"array":           [1]struct{ a Artifact }{{a}},
+		"interface field": struct{ a any }{a},
+		"error wrapper":   fmt.Errorf("apply: %v", struct{ a Artifact }{a}),
+	}
+	verbs := []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "% x", "%d", "%t", "%c", "%U", "%e", "%p", "%T", "%10s", "%-8q"}
+	for name, v := range values {
+		for _, verb := range verbs {
+			s := fmt.Sprintf(verb, v)
+			for _, f := range forbidden {
+				if strings.Contains(s, f) {
+					t.Errorf("%s under %s renders %q: %.80q", name, verb, f, s)
+				}
+			}
+		}
+		for _, s := range []string{fmt.Sprint(v), fmt.Sprintln(v), fmt.Sprintf("%v", []any{v})} {
+			for _, f := range forbidden {
+				if strings.Contains(s, f) {
+					t.Errorf("%s renders %q: %.80q", name, f, s)
+				}
+			}
+		}
 	}
 }
 
