@@ -224,12 +224,19 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 	if err != nil {
 		return r, machine, plan, err
 	}
+	// The use-time check this dispatch recorded holds for the plan's validity window.
+	checkCause, err := a.useTimeCheckCause(ctx, tx, machine, plan, at)
+	if err != nil {
+		return r, machine, plan, err
+	}
 	refused := func(cause, observation string) error {
 		return &attemptRefused{Comparison: "3", Cause: cause, Observation: observation}
 	}
 	switch {
 	case at.Sub(startedAt) > maxAge:
 		return r, machine, plan, refused("the evidence is older than the plan allows", obs)
+	case checkCause != "":
+		return r, machine, plan, refused(checkCause, obs)
 	case !identityMatches:
 		return r, machine, plan, refused("the evidence shows another machine identity", obs)
 	case !digestMatches:
@@ -324,6 +331,31 @@ func finalPlanCause(ctx context.Context, tx *sql.Tx, plan, current string, at ti
 			JOIN principal ap ON ap.id = a.approver
 		WHERE p.id = $1`, plan, at, current).Scan(&cause)
 	return cause, err
+}
+
+// cancelUnattempted ends an operation this process owns that has no attempt and whose approval can
+// never pass comparison 1 again (§4, unresolved to cancelled), however the machine reads and whether
+// or not the provider is reachable. It answers whether the plan was dead: the cancellation is then
+// settled under the epoch, machine and operation locks, as a refusal by comparison 1 of the attempt
+// the operation can no longer make (settleAttemptRefusal).
+func (a *API) cancelUnattempted(ctx context.Context, op heldOperation) (bool, error) {
+	current, err := a.currentEpoch(ctx)
+	if err != nil {
+		return false, err
+	}
+	var cause string
+	if err := a.inTx(ctx, func(tx *sql.Tx) error {
+		var at time.Time
+		if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
+			return err
+		}
+		var err error
+		cause, err = finalPlanCause(ctx, tx, op.plan, current, at)
+		return err
+	}); err != nil || cause == "" {
+		return false, err
+	}
+	return true, a.settleAttemptRefusal(ctx, op.machine, op.plan, op.id, op.gen, &attemptRefused{Comparison: "1", Cause: cause})
 }
 
 // settleAttemptRefusal records a refused attempt (§4.1) after its transaction rolled back, and

@@ -294,6 +294,165 @@ func TestExecutorAttemptNotRecordedSendsNothing(t *testing.T) {
 	}
 }
 
+// ER §3.2 comparison 3: a use-time check older than the plan's validity window at the commitment is
+// no check: nothing is committed or sent, and a new check, once the window holds, is dispatched.
+func TestExecutorCheckValidityBoundsDispatch(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	setCheckValidity := func(d string) {
+		mustExec(t, xe.db, `ALTER TABLE plan DISABLE TRIGGER immutable_rows`)
+		mustExec(t, xe.db, `UPDATE plan SET check_validity = $2::interval WHERE id = $1`, xe.pid, d)
+		mustExec(t, xe.db, `ALTER TABLE plan ENABLE TRIGGER immutable_rows`)
+	}
+	setCheckValidity("1 millisecond")
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{})
+	a.startExecutor()
+	defer stopping(a, stop)
+	waitIdle(t, idle, 1)
+	xe.approveThrough(t, a)
+	until(t, a, idle, "three checks that expired before the commitment", func() bool { return xe.entries(t, "use-time-check") >= 3 })
+	xe.wantNothingSent(t)
+	setCheckValidity("1 hour")
+	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+}
+
+// ER §3.3: an attempt whose use-time check is older than the plan's validity window at its time is
+// refused by comparison 3 and sends nothing.
+func TestAttemptRefusesAnExpiredUseTimeCheck(t *testing.T) {
+	t.Parallel()
+	ae := newAttemptEnv(t, "")
+	var rev int64
+	if err := ae.db.QueryRow(`UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1 RETURNING revision_counter`,
+		ae.machine).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, ae.db, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+		SELECT $1, $2, epoch, 'use-time-check', jsonb_build_object('plan', $3::text, 'controller', $4::text, 'result', 'passed',
+			'dependencies', '{}'::jsonb), now() - interval '1 hour'
+		FROM installation_state`, ae.machine, rev, ae.pid, ae.a.d.owner.ID)
+	_, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
+	ae.wantAttemptRefused(t, err, "3", "the use-time check is older than the plan allows", ae.obs, "committed",
+		settled{"unresolved", "3", "the use-time check is older than the plan allows"})
+}
+
+// ER §3.4 and §4: an operation whose attempt another controller recorded and whose response it
+// recorded as accepted is taken over at start, unresolved, and a completion observation of the
+// artifact completes it: nothing is sent again.
+func TestExecutorCompletesATakenOverAcceptedAttempt(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.ready(t)
+	cm, err := xe.a.commitPlan(context.Background(), xe.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at, err := xe.a.recordAttempt(context.Background(), cm.Operation, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := xe.a.recordResponse(context.Background(), at.Attempt, answer(talos.ClassAccepted)); err != nil {
+		t.Fatal(err)
+	}
+	xe.node.SetMachineConfig(t, xe.artifact)
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{})
+	a.startExecutor()
+	defer stopping(a, stop)
+	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+	if n := len(xe.node.AppliedRequests()); n != 0 {
+		t.Fatalf("%d requests after an attempt this process did not make", n)
+	}
+}
+
+// ER §3.4: a takeover that failed at start is retried after the lease, from the generation the
+// loop read, and the operation is then carried to its outcome.
+func TestExecutorRetriesAFailedStartupTakeover(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.ready(t)
+	if _, err := xe.a.commitPlan(context.Background(), xe.pid); err != nil {
+		t.Fatal(err)
+	}
+	var armed atomic.Bool
+	armed.Store(true)
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{commit: func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRow(`SELECT count(*) FROM machine_event WHERE kind = 'ownership-transition'`).Scan(&n); err == nil && n > 0 &&
+			armed.CompareAndSwap(true, false) {
+			_ = tx.Rollback()
+			return errors.New("the takeover's commit failed")
+		}
+		return tx.Commit()
+	}})
+	a.startExecutor()
+	defer stopping(a, stop)
+	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+	if armed.Load() {
+		t.Fatal("no takeover failed")
+	}
+}
+
+// ER §3.3: a retry's evidence is the classification's observation, bound by the plan's age. One
+// that expired while the retry was held back is not relied on: the operation is observed again,
+// reclassified and then attempted.
+func TestExecutorReclassifiesExpiredRetryEvidence(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.ready(t)
+	if _, err := xe.a.commitPlan(context.Background(), xe.pid); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, xe.db, `ALTER TABLE plan DISABLE TRIGGER immutable_rows`)
+	mustExec(t, xe.db, `UPDATE plan SET max_observation_age = interval '2 seconds' WHERE id = $1`, xe.pid)
+	mustExec(t, xe.db, `ALTER TABLE plan ENABLE TRIGGER immutable_rows`)
+	xe.x.mu.Lock()
+	xe.x.decryptErr = fmt.Errorf("sealed: %w", provider.ErrUnavailable)
+	xe.x.mu.Unlock()
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{})
+	a.startExecutor()
+	defer stopping(a, stop)
+	until(t, a, idle, "a retry held back by a sealed provider", func() bool {
+		return xe.entries(t, "use-time-check") > 0 && count(t, xe.db, `SELECT count(*) FROM operation_classification
+			WHERE outcome = 'safe-to-retry'`) > 0
+	})
+	time.Sleep(2200 * time.Millisecond)
+	xe.x.mu.Lock()
+	xe.x.decryptErr = nil
+	xe.x.mu.Unlock()
+	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+	if n := count(t, xe.db, `SELECT count(*) FROM operation_classification WHERE outcome = 'safe-to-retry'`); n < 2 {
+		t.Fatalf("%d safe-to-retry classifications: the expired one was relied on", n)
+	}
+}
+
+// ER §4 (unresolved to cancelled): an operation taken over with no attempt, whose approval can no
+// longer pass comparison 1, is cancelled and releases its scope, whatever the observation shows.
+func TestExecutorCancelsATakenOverOperationWhosePlanIsDead(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.ready(t)
+	if _, err := xe.a.commitPlan(context.Background(), xe.pid); err != nil {
+		t.Fatal(err)
+	}
+	decode[cancellationBody](t, xe.cancel(xe.human("h-approver"), xe.key(), xe.pid, `{"reason":"not now"}`), http.StatusOK)
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{})
+	a.startExecutor()
+	defer stopping(a, stop)
+	until(t, a, idle, "the operation is cancelled", func() bool { return xe.opState(t) == "cancelled" })
+	if n := len(xe.node.AppliedRequests()); n != 0 {
+		t.Fatalf("%d requests", n)
+	}
+}
+
 // ER §3.4: a starting controller takes over an operation another controller committed and did
 // not send, which is unresolved; its recovery observation shows the pre-dispatch configuration, so
 // the operation is classified safe to retry, attempted once and completed.
