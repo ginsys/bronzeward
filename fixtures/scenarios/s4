@@ -281,14 +281,16 @@ cancel_step3() {
   answers 200 - POST "/api/v1/plans/$plan/cancellations" "$tok" '{"reason": "S4 negative controls"}' "$(key cancel-step3)" &&
     plan_state_is "$plan" cancelled
 }
-# check_failed <plan> <revision>: past the revision, a use-time check of the plan failed with its
+# check_failed <plan> <instant>: a use-time check of the plan begun after the instant failed with its
 # access provider-unavailable, none passed, and no apply-config operation exists since the start.
+# By its start, not its revision: a check begun before OpenBao changed state may be recorded after.
 check_failed() {
   local got
   got=$(sql "SELECT count(*) FILTER (WHERE entry->>'result' = 'failed'
       AND entry->'dependencies'->'access'->>'cause' = 'provider-unavailable')
       || ' ' || count(*) FILTER (WHERE entry->>'result' = 'passed')
-    FROM machine_event WHERE machine = '$machine_w' AND kind = 'use-time-check' AND entry->>'plan' = '$1' AND revision > $2") || return 1
+    FROM machine_event WHERE machine = '$machine_w' AND kind = 'use-time-check' AND entry->>'plan' = '$1'
+      AND (entry->>'started')::timestamptz > '$2'::timestamptz") || return 1
   [[ $got =~ ^[1-9][0-9]*\ 0$ ]] && nothing_since "$ops0"
 }
 # nothing_since <operation seq>: no apply-config operation exists since that sequence number.
@@ -373,7 +375,7 @@ restored() {
 }
 
 controls() {
-  local ref='S4 negative controls' pa second sa rev n stalled released_at w_after cp_after
+  local ref='S4 negative controls' pa second sa rev since n stalled released_at w_after cp_after
   approval0=$(sql "SELECT approval FROM plan_state WHERE plan = '$plan'") || die "s4: cannot read step 3's approval"
   act0=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s4: cannot read the acts"
   ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s4: cannot read the operations"
@@ -400,20 +402,20 @@ controls() {
   result PASS "$ref" 'C told to stall once the evidence is recorded'
   check "$ref" 'inject linkjoin C worker: C alone may dispatch' "$bin/inject" linkjoin C worker
   check "$ref" 'inject seal openbao' "$bin/inject" seal openbao
-  rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
+  since=$(sql "SELECT clock_timestamp()") || die "s4: cannot read the database clock"
   check "$ref" "an apply-config plan of the worker's Desired as h-publisher on C, its evidence at most $age s old: 201" \
     plan_by h-publisher age "{\"maxObservationAgeSeconds\": $age}"
   pa=$plan_id
   [ -n "$pa" ] || die "s4: no age plan; nothing after it can run"
   check "$ref" 'approved as h-approver on C: 201' approve_by h-approver "$pa" age
   check "$ref" "OpenBao sealed: C's use-time check of the plan fails, recorded with its access provider-unavailable; none passes, no operation" \
-    within 90 check_failed "$pa" "$rev"
+    within 90 check_failed "$pa" "$since"
   sleep 16
-  check "$ref" 'three heartbeats on, still sealed: no passed check, no operation' check_failed "$pa" "$rev"
-  rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
+  check "$ref" 'three heartbeats on, still sealed: no passed check, no operation' check_failed "$pa" "$since"
   check "$ref" 'inject kill openbao' "$bin/inject" kill openbao
-  check "$ref" "OpenBao stopped: a later use-time check fails, recorded with its access provider-unavailable; none passes, no operation" \
-    within 90 check_failed "$pa" "$rev"
+  since=$(sql "SELECT clock_timestamp()") || die "s4: cannot read the database clock"
+  check "$ref" "OpenBao stopped: a use-time check begun after the stop fails, recorded with its access provider-unavailable; none passes, no operation" \
+    within 90 check_failed "$pa" "$since"
   # Read before the start: C may pass its check and stall before the start returns.
   n=$(stalls_at dispatch-evidence)
   rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
