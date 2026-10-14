@@ -103,7 +103,7 @@ type options struct {
 	noDraftLock    bool                                                                                 // the draft read-lock control (GET /drafts)
 	noEpochTerm    bool                                                                                 // the epoch-term control at ingestion start (§5.1, §16)
 	noMachineLock  bool                                                                                 // the machine-lock control at commitment (choice §10.24, §3.2 comparison 2)
-	noReadLock     string                                                                               // the named lock's control at commitment and attempt (§3.2, §9.2): "installation state", "assignment head", "plan state" or "rollout"
+	noReadLock     string                                                                               // the named lock's control at commitment and attempt (§3.2, §9.2): "installation state", "assignment head", "plan state", "rollout" or, at an attempt, "machine"
 	readThenWrite  bool                                                                                 // the owner-token control at an attempt (§3.3 comparison 7, DS row 018)
 	noPlanCheck    bool                                                                                 // the in-transaction plan-check control at an attempt (§3.3 comparison 1, DS row 006)
 	latestAccess   bool                                                                                 // the control that sends with the Talos access read again at send (PA §16)

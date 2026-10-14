@@ -97,7 +97,11 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 	maxAge := time.Duration(maxAgeMicros) * time.Microsecond
 	var scope string
 	var frozen bool
-	if err := tx.QueryRowContext(ctx, `SELECT scope_state, frozen FROM machine WHERE id = $1 FOR UPDATE`, machine).Scan(&scope,
+	lock := ` FOR UPDATE`
+	if a.o.noReadLock == "machine" {
+		lock = ``
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT scope_state, frozen FROM machine WHERE id = $1`+lock, machine).Scan(&scope,
 		&frozen); err != nil {
 		return r, machine, plan, err
 	}
