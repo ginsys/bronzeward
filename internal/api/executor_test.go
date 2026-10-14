@@ -108,6 +108,14 @@ func until(t *testing.T, a *API, idle <-chan struct{}, what string, cond func() 
 	t.Fatalf("never reached: %s", what)
 }
 
+// passEnds waits for the end of a pass that started no earlier than now, so the pass in which an
+// until condition came to hold has ended too: its idle signal blocks until received.
+func passEnds(t *testing.T, a *API, idle <-chan struct{}) {
+	t.Helper()
+	a.wakeExecutor()
+	waitIdle(t, idle, 1)
+}
+
 // approveThrough approves the plan through a's T5a route, which wakes a's loops.
 func (xe *execEnv) approveThrough(t *testing.T, a *API) {
 	t.Helper()
@@ -358,6 +366,7 @@ func TestExecutorCommitmentIdentityKeys(t *testing.T) {
 			return count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine
 				AND s.revision = o.basis WHERE o.machine = $1 AND s.purpose = 'evidence' AND o.unread ? 'identity'`, xe.machine) > 0
 		})
+		passEnds(t, a, idle)
 		xe.wantNothingSent(t)
 		if xe.entries(t, "commitment") != 0 {
 			t.Fatal("a commitment on evidence with the identity unread")
@@ -398,6 +407,7 @@ func TestExecutorNodeSideAccessFailure(t *testing.T) {
 					AND s.revision = o.basis WHERE o.machine = $1 AND s.purpose = 'evidence' AND o.unread::text LIKE '%' || $2 || '%'`,
 					xe.machine, c.cause) > 0
 			})
+			passEnds(t, a, idle)
 			xe.wantNothingSent(t)
 			if xe.entries(t, "commitment") != 0 {
 				t.Fatal("a commitment after a failed observation")
