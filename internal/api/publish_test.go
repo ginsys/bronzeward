@@ -853,6 +853,40 @@ func TestPublishCommitRecoveryMode(t *testing.T) {
 	}
 }
 
+// heldScope is an apply-config operation holding the machine's scope, as a commitment records it
+// under the machine's lock (execution-recovery §3.2); no plan backs it, so its plan checks are off.
+func (p *publishEnv) heldScope() (string, string) {
+	p.t.Helper()
+	mustExec(p.t, p.db, `ALTER TABLE operation DROP CONSTRAINT operation_plan_binding`)
+	mustExec(p.t, p.db, `ALTER TABLE operation DISABLE TRIGGER plan_committed`)
+	return `WITH m AS (SELECT id, cluster FROM machine WHERE id = $2 FOR UPDATE)
+		INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, created_at, plan, machine, cluster)
+		SELECT $1, 'apply-config', 'committed', i.epoch, 'test-owner', 1, i.epoch, now(), 'pln_held', m.id, m.cluster
+		FROM installation_state i, m`, id.New(id.Operation)
+}
+
+// Invariant 9 (execution-recovery §8, persistence-api §6.2): an assignment change while an
+// operation holds the machine's scope is refused, naming the scope and the operation.
+func TestPublishCommitScopeHeld(t *testing.T) {
+	p := newPublishEnv(t)
+	stmt, op := p.heldScope()
+	mustExec(t, p.db, stmt, op, p.machine)
+	if ref := p.refused(409, "scope-busy"); ref.extra["scope"] != p.machine || ref.extra["operation"] != op {
+		t.Fatalf("refusal %v", ref.extra)
+	}
+}
+
+// A commitment that holds the machine while the commit waits on it is read once it commits
+// (persistence-api §1.2 item 2): the commit's machine read serializes with it.
+func TestPublishCommitScopeHeldConcurrently(t *testing.T) {
+	p := newPublishEnv(t)
+	stmt, op := p.heldScope()
+	p.hold(stmt, op, p.machine)
+	if ref := p.refused(409, "scope-busy"); ref.extra["operation"] != op {
+		t.Fatalf("refusal %v", ref.extra)
+	}
+}
+
 // A status of a named version recorded other than retained after publication began classifying
 // it refuses the publication (dependency monitor §5.2); one recorded before it does not.
 func TestPublishCommitStatusRecordedAfter(t *testing.T) {
