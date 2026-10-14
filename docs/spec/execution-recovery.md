@@ -923,8 +923,10 @@ only when all of these hold and are recorded with it:
 
 The owner of an operation with an unaccounted attempt takes these recovery
 observations: none before the attempts' latest transport deadline, then one,
-and one more each time a settle floor has passed since its last. They settle
-nothing, since the attempt is unaccounted (§4); the decision names two of them.
+and one more each time a settle floor has passed since its last was recorded
+(or, while it is still being read, began), as condition 2 measures it. They
+settle nothing, since the attempt is unaccounted (§4); the decision names two of
+them.
 
 The decision records that it is a judgement, not evidence that the request can
 no longer land. The residual is explicit: if the request lands after the

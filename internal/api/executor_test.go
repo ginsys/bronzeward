@@ -798,12 +798,22 @@ func TestExecutorPacesRecoveryReadsWhileAnAttemptIsUnaccounted(t *testing.T) {
 		t.Fatalf("%d recovery observations before the transport deadline", n)
 	}
 	mustExec(t, xe.db, `ALTER TABLE attempt DISABLE TRIGGER immutable_rows`)
-	mustExec(t, xe.db, `UPDATE attempt SET at = clock_timestamp() - interval '2 seconds',
-		transport_deadline = clock_timestamp() - interval '1 second' WHERE id = $1`, at.Attempt)
+	mustExec(t, xe.db, `UPDATE attempt SET at = clock_timestamp() - interval '11 seconds',
+		transport_deadline = clock_timestamp() - interval '10 seconds' WHERE id = $1`, at.Attempt)
 	mustExec(t, xe.db, `ALTER TABLE attempt ENABLE TRIGGER immutable_rows`)
 	passes()
 	if n := reads(); n != 1 {
 		t.Fatalf("%d recovery observations after the transport deadline, within one settle floor; want 1", n)
+	}
+	// A read that took longer than the floor: begun before it, recorded within it. The floor runs
+	// from the recorded read, as the decision measures it.
+	mustExec(t, xe.db, `ALTER TABLE machine_event DISABLE TRIGGER immutable_rows`)
+	mustExec(t, xe.db, `UPDATE machine_event e SET at = clock_timestamp() - interval '5 seconds' FROM observation_start s
+		WHERE e.machine = s.machine AND e.revision = s.revision AND s.operation = $1 AND s.purpose = 'recovery'`, cm.Operation)
+	mustExec(t, xe.db, `ALTER TABLE machine_event ENABLE TRIGGER immutable_rows`)
+	passes()
+	if n := reads(); n != 1 {
+		t.Fatalf("%d recovery observations within a settle floor of the last recorded read; want 1", n)
 	}
 	time.Sleep(floor)
 	passes()
