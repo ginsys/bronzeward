@@ -5,8 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -462,28 +464,49 @@ func TestCommitmentSecond(t *testing.T) {
 		_, err := ce.a.commitPlan(context.Background(), ce.pid)
 		ce.wantAlreadyCommitted(t, err)
 	})
+	// The first commitment holds its transaction open until the second waits on the machine row
+	// it locked: the second executor is inside the first's commitment, whatever the scheduler does.
 	t.Run("racing", func(t *testing.T) {
 		t.Parallel()
 		ce := newCommitEnv(t, "")
 		ce.ready(t)
-		errs := make(chan error, 2)
-		for range 2 {
-			go func() {
-				_, err := ce.a.commitPlan(context.Background(), ce.pid)
-				errs <- err
-			}()
-		}
-		var failed error
-		for range 2 {
-			if err := <-errs; err != nil {
-				if failed != nil {
-					t.Fatalf("both commitments failed: %v; %v", failed, err)
-				}
-				failed = err
+		var armed atomic.Bool
+		armed.Store(true)
+		second, waited := make(chan error, 1), make(chan error, 1)
+		var a *API
+		a = ce.env.buildWith(ce.a.d, options{commit: func(tx *sql.Tx) error {
+			if armed.CompareAndSwap(true, false) {
+				go func() {
+					_, err := a.commitPlan(context.Background(), ce.pid)
+					second <- err
+				}()
+				waited <- queryWaits(ce.db, `SELECT scope_state, frozen FROM machine WHERE id = $1 FOR UPDATE`)
 			}
+			return tx.Commit()
+		}})
+		if _, err := a.commitPlan(context.Background(), ce.pid); err != nil {
+			t.Fatal(err)
 		}
-		ce.wantAlreadyCommitted(t, failed)
+		if err := <-waited; err != nil {
+			t.Fatal(err)
+		}
+		ce.wantAlreadyCommitted(t, <-second)
 	})
+}
+
+// queryWaits is nil once one session of this test's database waits for a lock while running query.
+func queryWaits(db *sql.DB, query string) error {
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+			AND wait_event_type = 'Lock' AND query = $1`, query).Scan(&n); err != nil {
+			return err
+		}
+		if n == 1 {
+			return nil
+		}
+	}
+	return fmt.Errorf("no session waited on a lock running %q within 10s", query)
 }
 
 // A refusal whose commitment rolled back before another committed the plan is not recorded after
