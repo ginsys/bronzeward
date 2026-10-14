@@ -889,7 +889,7 @@ retried_by_taker() {
 # The rows no request reaches, as their Go checks prove them, run in a clone of the image commit
 # against go-db's PostgreSQL and OpenBao, one package at a time.
 ds_go_tests='TestCommitmentRevocationsWait|TestCommitmentRefusals|TestAttemptStaleOwner|TestCommitmentSecond'
-ds_go_tests+='|TestCommitmentRolloutRace|TestPlanOperations|TestAttemptRetry|TestAttemptRetryRefusals|TestAttemptRevokedControl'
+ds_go_tests+='|TestCommitmentRolloutRace|TestPlanOperations|TestAttemptRetry|TestAttemptRetryRefusals|TestExecutorRevokedControl'
 ds_go_ran() {
   (
     export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
@@ -1043,8 +1043,8 @@ ds() {
   rm -rf -- "$clone_dir"
   [ "$failed" = "$before_go" ] && go_ok=1
   ds_failed=$failed # the suite's failures are carried into each Go row by go_ok
-  ds_go 003 TestCommitmentRevocationsWait 'a revocation started while the commitment holds the approval waits for it (no unlocked control: PA §16)'
-  ds_go 006 TestAttemptRevokedControl 'control: an attempt without comparison 1 is recorded after the revocation'
+  ds_go 003 TestCommitmentRevocationsWait 'a revocation started while the commitment holds the approval waits for it (no unlocked control: ER choice 10.31)'
+  ds_go 006 TestExecutorRevokedControl 'control: without comparison 1 the executor sends the artifact to a Talos node after the revocation'
   ds_go 008 TestAttemptStaleOwner "control: the owner read outside the attempt's write records an attempt under the replaced token"
   ds_go 009 TestCommitmentSecond 'a second commitment of the plan finds its operation (comparison 0), nothing recorded'
   ds_go 010 'TestCommitmentRefusals TestCommitmentRolloutRace' 'a second plan refused by the machine scope (comparison 4) and the rollout slot (comparison 5)'
