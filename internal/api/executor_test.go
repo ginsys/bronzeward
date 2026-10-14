@@ -310,6 +310,7 @@ func revokeAtCommitment(t *testing.T, held, control bool) {
 	var armed atomic.Bool
 	armed.Store(true)
 	revoked := make(chan int, 1)
+	waited := make(chan error, 1)
 	life, stop := context.WithCancel(t.Context())
 	idle := make(chan struct{})
 	a := xe.executor(t, life, idle, options{noPlanCheck: control, commit: func(tx *sql.Tx) error {
@@ -323,7 +324,7 @@ func revokeAtCommitment(t *testing.T, held, control bool) {
 		revoke := func() { revoked <- xe.revokeApproval(token, k, approval.String, `{"reason":"wrong"}`).Code }
 		if held {
 			go revoke()
-			waitForLockWaits(t, xe.db, 1)
+			waited <- revocationWaits(xe.db)
 			return tx.Commit()
 		}
 		if err := tx.Commit(); err != nil {
@@ -337,9 +338,14 @@ func revokeAtCommitment(t *testing.T, held, control bool) {
 	waitIdle(t, idle, 1)
 	xe.approveThrough(t, a)
 	if control {
-		until(t, a, idle, "the artifact is sent", func() bool { return len(xe.node.AppliedRequests()) == 1 })
+		until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
 	} else {
 		until(t, a, idle, "the operation is cancelled", func() bool { return xe.opState(t) == "cancelled" })
+	}
+	if held {
+		if err := <-waited; err != nil {
+			t.Fatal(err)
+		}
 	}
 	if code := <-revoked; code != http.StatusCreated {
 		t.Fatalf("revocation %d", code)
@@ -350,6 +356,9 @@ func revokeAtCommitment(t *testing.T, held, control bool) {
 	}
 	if control {
 		got := xe.node.AppliedRequests()
+		if len(got) != 1 {
+			t.Fatalf("control: %d requests", len(got))
+		}
 		if got[0].Mode != "NO_REBOOT" || got[0].DryRun || !bytes.Equal(got[0].Data, xe.artifact) {
 			t.Fatalf("control: request %+v", got[0])
 		}
@@ -374,6 +383,23 @@ func revokeAtCommitment(t *testing.T, held, control bool) {
 		states.String != "unresolved,cancelled" {
 		t.Fatalf("states after comparison 1's refusal %q: %v", states.String, err)
 	}
+}
+
+// revocationWaits is nil once the approval revocation waits on the machine row the commitment holds
+// (T5b's first lock), in this test's own database. It reports, not fails: it runs on the executor's
+// goroutine.
+func revocationWaits(db *sql.DB) error {
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+			AND wait_event_type = 'Lock' AND query LIKE 'SELECT 1 FROM machine WHERE id = $1 FOR UPDATE'`).Scan(&n); err != nil {
+			return err
+		}
+		if n == 1 {
+			return nil
+		}
+	}
+	return errors.New("the revocation did not wait on the machine row within 10s")
 }
 
 // DS row 003 through the executor and a Talos node: a revocation started while the commitment holds
