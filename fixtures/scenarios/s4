@@ -522,6 +522,7 @@ from_step4() {
   check "$ref" "restored to S3's step-4 snapshots: no apply-config plan or operation, the worker's Desired the S2 release, the first restore's last act" \
     restored_step4
   ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s4: cannot read the operations"
+  plan_id='' # the last case's plan must not stand in for a plan that failed
   check "$ref" "an apply-config plan of the S2 release as h-publisher on C: 201" plan_by h-publisher "$1"
   [ -n "$plan_id" ] || die "s4: no plan for $1; nothing after it can run"
 }
@@ -588,7 +589,9 @@ restores() {
     die "s4: step 3's plan expires within 25 minutes; run scenarios/s3 run again on a fresh up"
   pre_state
   # C alone dispatches from here on; each case kills it, so a stall left by the last one ends there.
-  check "$ref" 'inject pause A and B' both pause
+  # A prerequisite: A or B would dispatch the cases' plans with no stall.
+  both pause || die "s4: A and B not paused; C cannot dispatch alone"
+  result PASS "$ref" 'inject pause A and B'
   call_port=$SERVER_C_PORT
 
   # The assignment changed after planning and the approval: comparison 2.
