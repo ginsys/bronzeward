@@ -6,9 +6,21 @@
 # acceptance, a completion observation, and the operation completed with Applied the release. The
 # timeline orders each of them, the worker's digest becomes the artifact's and its resource version
 # moves, the control plane is untouched, and Desired, Applied and Observed agree only at the end.
+# `controls`: S4's negative controls on the same starting state, with nothing sent. A plan body
+# naming a route is refused at creation. Step 3's plan is cancelled and a plan with a 10 s age bound
+# approved in its place; A and B are paused and C alone is joined to the worker, told to stall once
+# its evidence is recorded. With OpenBao sealed, then stopped, C's use-time check fails and is
+# recorded, and nothing commits; started again, the check passes and the evidence is recorded. Once
+# that evidence is older than the plan binds, C is told to stall after the commitment instead: the
+# stale evidence is no evidence (nothing refused), and the commitment rests on a later observation.
+# Its operation then holds the worker's scope, with no attempt: with A and B running, a second
+# approved plan waits, and a publication changing the worker's assignment fails 409 scope-busy. The
+# database is dumped, then both s3-step3 snapshots are restored with C's link cut again: the state
+# `run` starts from.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s4.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s4 run   (after scenarios/s1 run, s3 handover, s2 run and s3 run on the same up)
+# Usage: scenarios/s4 controls|run   (after scenarios/s1 run, s3 handover, s2 run and s3 run on the
+# same up; controls, when run, before run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -16,7 +28,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s4_mode=${1:-}
-case $s4_mode in run) ;; *) die "usage: scenarios/s4 run" ;; esac
+case $s4_mode in controls | run) ;; *) die "usage: scenarios/s4 controls|run" ;; esac
 need docker curl jq timeout id sleep date awk wc
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -30,6 +42,7 @@ scenario=s4
 . "$here/common.sh"
 run_key=$(date -u +%s%N)
 mutation_ref='S4 pass'
+[ "$s4_mode" = run ] || mutation_ref='S4 negative controls'
 
 cluster='' machine_cp='' machine_w='' plan='' rel='' was='' baseline='' op=''
 viewer='' viewer_at=0
@@ -184,8 +197,9 @@ node_applied() {
     [ "$(digest_of "$EV/pre-talos-config-sha256.txt" "$TALOS_WORKER_IP")" != "$want" ] &&
     differ "$(digest_of "$bundle/talos-config-version.txt" "$TALOS_WORKER_IP")" "$(digest_of "$EV/pre-talos-config-version.txt" "$TALOS_WORKER_IP")"
 }
-unchanged_cp() {
-  local ip=$TALOS_CONTROLPLANE_IP
+# unchanged_node <ip>: in the latest bundle the node's digest and resource version are the pre-state's.
+unchanged_node() {
+  local ip=$1
   [ -n "$(digest_of "$EV/pre-talos-config-sha256.txt" "$ip")" ] &&
     [ "$(digest_of "$bundle/talos-config-sha256.txt" "$ip")" = "$(digest_of "$EV/pre-talos-config-sha256.txt" "$ip")" ] &&
     [ "$(digest_of "$bundle/talos-config-version.txt" "$ip")" = "$(digest_of "$EV/pre-talos-config-version.txt" "$ip")" ]
@@ -236,7 +250,7 @@ safe_apply() {
   evidence_to post || die "no post-state: bin/evidence failed"
   check "$ref" 'the post-state bundle: complete, no fixture secret but the scan control' scan_clean post
   check "$ref" "the worker's digest is the artifact's and its resource version moved" node_applied
-  check "$ref" "the control plane's digest and resource version are the pre-state's" unchanged_cp
+  check "$ref" "the control plane's digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
   no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
   check "$ref" 'Desired, Applied and Observed served as one value, the release, after completion' \
     served ".desired == \"$rel\" and .applied.release == \"$rel\" and .applied.source == \"operation\" and .observed.release == \"$rel\""
@@ -247,12 +261,223 @@ safe_apply() {
   check "$ref" "the worker's observation records, as served" keep observations "/api/v1/machines/$machine_w/observations?limit=500"
 }
 
+# The controls (mode controls). act0 and approval0: the last act and step 3's approval at the start,
+# which the restore puts back; held: the operation the age plan commits, which holds the scope.
+act0=0 approval0='' ops0=0 held='' pub_op='' age=10
+worker_rev() { sql "SELECT coalesce(max(revision), 0) FROM machine_event WHERE machine = '$machine_w'"; }
+# route_refused: a plan body naming the control plane's endpoint as the worker's route: 400
+# invalid-request, no plan created. A plan binds its machine's own endpoint; the body has no route.
+route_refused() {
+  local before body
+  before=$(sql "SELECT count(*) FROM plan") || return 1
+  body=$(plan_body "$(jq -nc --arg r "$TALOS_CONTROLPLANE_IP:50000" '{route: $r}')") || return 1
+  fresh h-publisher
+  answers 400 invalid-request POST /api/v1/plans "$tok" "$body" "$(key plan-route)" || return 1
+  [ "$(sql "SELECT count(*) FROM plan")" = "$before" ]
+}
+# cancel_step3: step 3's plan cancelled by its creator, h-publisher.
+cancel_step3() {
+  fresh h-publisher
+  answers 200 - POST "/api/v1/plans/$plan/cancellations" "$tok" '{"reason": "S4 negative controls"}' "$(key cancel-step3)" &&
+    plan_state_is "$plan" cancelled
+}
+# check_failed <plan> <revision>: past the revision, a use-time check of the plan failed with its
+# access provider-unavailable, none passed, and no apply-config operation exists since the start.
+check_failed() {
+  local got
+  got=$(sql "SELECT count(*) FILTER (WHERE entry->>'result' = 'failed'
+      AND entry->'dependencies'->'access'->>'cause' = 'provider-unavailable')
+      || ' ' || count(*) FILTER (WHERE entry->>'result' = 'passed')
+    FROM machine_event WHERE machine = '$machine_w' AND kind = 'use-time-check' AND entry->>'plan' = '$1' AND revision > $2") || return 1
+  [[ $got =~ ^[1-9][0-9]*\ 0$ ]] && nothing_since "$ops0"
+}
+# nothing_since <operation seq>: no apply-config operation exists since that sequence number.
+nothing_since() { [ "$(sql "SELECT count(*) FROM operation WHERE seq > $1 AND kind = 'apply-config'")" = 0 ]; }
+# stalls_at <step>: how many times C's log says the seam stalled it at the step.
+stalls_at() { c_log | grep --count --line-regexp --fixed-strings -- "fixture interrupt: stall at $1" || true; }
+# evidence_stalled <plan> <revision> <stalls before>: past the revision a use-time check of the plan
+# passed and its evidence is recorded, C stalled there once more, and nothing committed.
+evidence_stalled() {
+  [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'use-time-check'
+    AND entry->>'plan' = '$1' AND entry->>'result' = 'passed' AND revision > $2")" -ge 1 ] &&
+    obs_started "$1" && [ "$(stalls_at dispatch-evidence)" -gt "$3" ] && nothing_since "$ops0"
+}
+# idle <plan> <approval>: the plan approved by the approval, no operation and no refusal entry.
+idle() { plan_is_stored "$1" approved "$2" && [ "$(refusals "$1")" = 0 ]; }
+# committed_held <plan> <stalls before>: the plan committed to an apply-config operation that is
+# still committed with no attempt, its id in held, and C stalled after the commitment once more.
+committed_held() {
+  held=$(sql "SELECT o.id FROM plan_state s JOIN operation o ON o.id = s.operation WHERE s.plan = '$1'
+    AND s.state = 'committed' AND o.kind = 'apply-config'") || return 1
+  [ -n "$held" ] && still_held && [ "$(stalls_at dispatch-committed)" -gt "$2" ]
+}
+# still_held: held is committed, with no attempt.
+still_held() {
+  [ "$(sql "SELECT o.state || ' ' || count(a.id) FROM operation o LEFT JOIN attempt a ON a.operation = o.id
+    WHERE o.id = '$held' GROUP BY o.state")" = 'committed 0' ]
+}
+# older_logged <plan>: C's log says the plan's evidence was older than it allows, retried after a lease.
+older_logged() { c_says "commitment of plan $1: evidence [a-z0-9_]+ is older than the plan allows: .*retried after"; }
+# committed_on_later <plan> <stalled observation> <instant>: the commitment names another
+# observation than the stalled one, whose start entry is after the instant.
+committed_on_later() {
+  [ "$(sql "SELECT (c.entry->>'observation') <> '$2' AND e.at > '$3'::timestamptz FROM machine_event c
+    JOIN observation o ON o.id = c.entry->>'observation' AND o.machine = c.machine
+    JOIN machine_event e ON e.machine = o.machine AND e.revision = o.basis
+    WHERE c.machine = '$machine_w' AND c.kind = 'commitment' AND c.entry->>'plan' = '$1'")" = t ]
+}
+# waits <plan> <approval>: the plan approved by the approval with no operation, and no use-time
+# check, commitment or refusal entry names it: the controller never takes it up.
+waits() {
+  plan_is_stored "$1" approved "$2" &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND entry->>'plan' = '$1'
+      AND kind IN ('use-time-check', 'commitment', 'refusal')")" = 0 ]
+}
+# reassign: the worker's assignment in the draft changed to the handover's cluster fragment alone,
+# under the draft's ETag: 200.
+reassign() {
+  fresh h-author
+  answers 200 - PUT "/api/v1/drafts/$draft/assignments/$machine_w" "$tok" \
+    '{"profiles": [], "fragments": {"cluster": ["s3-handover"]}}' "$(key assignment-busy)" "$etag" || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ]
+}
+# publish_busy: the draft published as h-publisher under its ETag: 202, its operation in pub_op.
+publish_busy() {
+  fresh h-publisher
+  answers 202 - POST "/api/v1/drafts/$draft/publications" "$tok" '{}' "$(key publication-busy)" "$etag" || return 1
+  pub_op=$(jq -er '.id' "$EV/last.body")
+}
+# busy_refused: the publication failed with the problem scope-busy naming the worker as the scope
+# and held as the operation, with no release; the worker's Desired is still the plan's release.
+busy_refused() {
+  [ "$(sql "SELECT state || ' ' || (error->>'type') || ' ' || (error->>'status') || ' ' || (error->>'scope')
+      || ' ' || (error->>'operation') FROM operation WHERE id = '$pub_op'")" = \
+    "failed urn:bronzeward:problem:scope-busy 409 $machine_w $held" ] &&
+    [ "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" = 0 ] &&
+    [ "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" = "$rel" ]
+}
+# db_reads: A answers a database read again after a restore swapped the database under it.
+db_reads() {
+  fresh h-viewer
+  [ "$(call GET "/api/v1/plans/$plan" "$tok")" = 200 ]
+}
+# restored: the database is the snapshot's: no act after the controls began, step 3's plan the only
+# apply-config plan, approved by its approval, and no apply-config operation.
+restored() {
+  [ "$(sql "SELECT coalesce(max(seq), 0) FROM act")" = "$act0" ] &&
+    [ "$(sql "SELECT count(*) FROM plan WHERE kind = 'apply-config'")" = 1 ] &&
+    plan_is_stored "$plan" approved "$approval0" && nothing_since 0
+}
+
+controls() {
+  local ref='S4 negative controls' pa second sa rev n stalled released_at w_after cp_after
+  approval0=$(sql "SELECT approval FROM plan_state WHERE plan = '$plan'") || die "s4: cannot read step 3's approval"
+  act0=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s4: cannot read the acts"
+  ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s4: cannot read the operations"
+  pre_state
+  check "$ref" "a plan body naming the control plane's endpoint as the worker's route: 400 invalid-request, no plan created (ER §10.9: a plan binds its machine's own endpoint)" \
+    route_refused
+  # Step 3's plan is set aside, with every link still cut: the restore at the end puts it back.
+  check "$ref" "step 3's plan cancelled by its creator, h-publisher" cancel_step3
+
+  # C alone dispatches, told to stall once its evidence is recorded, so nothing is ever sent.
+  check "$ref" 'inject pause A and B' both pause
+  call_port=$SERVER_C_PORT
+  check "$ref" 'C told to stall once the evidence is recorded' interrupt dispatch-evidence stall
+  check "$ref" 'inject linkjoin C worker: C alone may dispatch' "$bin/inject" linkjoin C worker
+  check "$ref" 'inject seal openbao' "$bin/inject" seal openbao
+  rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
+  check "$ref" "an apply-config plan of the worker's Desired as h-publisher on C, its evidence at most $age s old: 201" \
+    plan_by h-publisher age "{\"maxObservationAgeSeconds\": $age}"
+  pa=$plan_id
+  [ -n "$pa" ] || die "s4: no age plan; nothing after it can run"
+  check "$ref" 'approved as h-approver on C: 201' approve_by h-approver "$pa" age
+  check "$ref" "OpenBao sealed: C's use-time check of the plan fails, recorded with its access provider-unavailable; none passes, no operation" \
+    within 90 check_failed "$pa" "$rev"
+  sleep 16
+  check "$ref" 'three heartbeats on, still sealed: no passed check, no operation' check_failed "$pa" "$rev"
+  check "$ref" 'inject kill openbao' "$bin/inject" kill openbao
+  rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
+  check "$ref" "OpenBao stopped: a later use-time check fails, recorded with its access provider-unavailable; none passes, no operation" \
+    within 90 check_failed "$pa" "$rev"
+  n=$(stalls_at dispatch-evidence)
+  check "$ref" 'inject start openbao: started and unsealed' "$bin/inject" start openbao
+  rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
+  check "$ref" 'OpenBao started: the use-time check passes and the evidence is recorded; C stalls there, nothing committed' \
+    within 120 evidence_stalled "$pa" "$rev" "$n"
+
+  # The age control (ruling: stale evidence is no evidence, nothing refused; ER choice §10.28).
+  stalled=$(first_observation "$pa")
+  [ -n "$stalled" ] || die "s4: no stalled observation; nothing after it can run"
+  check "$ref" "the stalled evidence is older than the plan binds ($age s)" within 60 observation_stale "$pa" "$((age + 3))"
+  check "$ref" 'while stalled: the plan approved, no operation, no refusal entry' idle "$pa" "$approval_id"
+  released_at=$(sql "SELECT clock_timestamp()") || die "s4: cannot read the database clock"
+  n=$(stalls_at dispatch-committed)
+  check "$ref" 'C told to stall after the commitment instead' interrupt dispatch-committed stall
+  check "$ref" 'the plan committed, its operation committed with no attempt; C stalls there' within 120 committed_held "$pa" "$n"
+  check "$ref" "C's log records the stalled evidence as older than the plan allows, retried after a lease" older_logged "$pa"
+  check "$ref" 'the commitment names another observation than the stalled one, begun after its release' \
+    committed_on_later "$pa" "$stalled" "$released_at"
+  check "$ref" 'no refusal entry names the plan' same "$(refusals "$pa")" 0
+
+  # The held scope, with A and B running again (their links stay cut).
+  check "$ref" 'inject unpause A and B' both unpause
+  call_port=$SERVER_A_PORT
+  check "$ref" 'A answers /livez' within 30 answers 204 - GET /livez ''
+  check "$ref" 'a second apply-config plan for the worker as h-publisher while the first holds the scope: 201' plan_by h-publisher second
+  second=$plan_id
+  [ -n "$second" ] || die "s4: no second plan; nothing after it can run"
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$second" second
+  sa=$approval_id
+  sleep 16
+  check "$ref" 'three heartbeats on, the second plan waits: approved, no operation, no use-time check, commitment or refusal entry names it (comparison 4 refusing it is the Go check TestCommitmentRefusals)' \
+    waits "$second" "$sa"
+  check "$ref" 'the first operation still holds the scope: committed, no attempt' still_held
+  check "$ref" 'h-author opens a draft: 201' draft_by h-author busy
+  check "$ref" "h-author changes the worker's assignment in it: 200" reassign
+  check "$ref" 'h-publisher publishes it: 202' publish_busy
+  check "$ref" "the publication fails 409 scope-busy naming the worker and the holding operation, no release, the worker's Desired unchanged" \
+    within 120 busy_refused
+  check "$ref" 'the first operation still holds the scope: committed, no attempt' still_held
+  result SKIP "$ref" 'a frozen scope refused: the freeze route is ginsys/bronzeward#27'"'"'s; the Go check TestCommitmentRefusals "frozen" covers it until then'
+  result SKIP "$ref" "without the unique index both commit (DS row 011), node validation's InvalidArgument (DS row 022), the ownership check outside the attempt's UPDATE (DB row 018): the DS re-run's"
+
+  outcome_bundle "$ref" controls
+  check "$ref" "the worker's digest and resource version are the pre-state's" unchanged_node "$TALOS_WORKER_IP"
+  check "$ref" "the control plane's digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_log" "$w_after"
+  no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
+  check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the controls' "$bin/inject" db-snapshot "$backup_name"
+
+  # Back to what run starts from. C's stall is released only once the database under it is the
+  # snapshot's and its link is cut again: its attempt then finds no operation and nothing is sent.
+  ref='S4 controls handoff'
+  check "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
+  check "$ref" 'inject pause A, B and C' servers pause
+  check "$ref" 'inject db-restore s3-step3' "$bin/inject" db-restore s3-step3
+  check "$ref" 'inject bao-restore s3-step3' "$bin/inject" bao-restore s3-step3
+  check "$ref" "C's control file removed" interrupt -
+  check "$ref" 'inject unpause A, B and C' servers unpause
+  check "$ref" 'A reads the restored database' within 60 db_reads
+  check "$ref" "restored: no act after the controls began, step 3's plan the only apply-config plan and approved by its approval, no apply-config operation" \
+    restored
+  check "$ref" "A's, B's and C's links to the worker are cut" worker_cut
+}
+
 backup_name=s4-$run_key
 run() {
   preconditions
   withheld+=("$BW_CANARY")
-  safe_apply
-  check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the apply' "$bin/inject" db-snapshot "$backup_name"
+  case $s4_mode in
+    controls) controls ;;
+    run)
+      safe_apply
+      check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the apply' "$bin/inject" db-snapshot "$backup_name"
+      ;;
+  esac
 }
 
 run
@@ -271,16 +496,22 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   else
     result PASS 'S4 evidence' 'the bundle is complete: bin/evidence captured every source'
   fi
-  # The scan above covers the dump only if the bundle holds it expanded: the attempt's own row
-  # inside its COPY block, whose first column is the ID.
-  dump_id=$(sql "SELECT id FROM attempt WHERE operation = '${op:-none}'") || dump_id=
+  # The scan above covers the dump only if the bundle holds it expanded: the attempt's (run's) or
+  # the held operation's (controls') own row inside its COPY block, whose first column is the ID.
+  # The controls' row is in the dump only: the restore after it removed it from the database.
+  if [ "$s4_mode" = run ]; then
+    dump_table=attempt dump_row='the attempt'
+    dump_id=$(sql "SELECT id FROM attempt WHERE operation = '${op:-none}'") || dump_id=
+  else
+    dump_table=operation dump_row='the held operation' dump_id=$held
+  fi
   if [ -n "$dump_id" ] &&
-    awk -v id="$dump_id" '
-      index($0, "COPY public.attempt ") == 1 { block = 1; next }
+    awk -v id="$dump_id" -v table="$dump_table" '
+      index($0, "COPY public." table " ") == 1 { block = 1; next }
       block && /^\\\.$/ { block = 0 }
       block && index($0, id "\t") == 1 { found = 1 }
       END { exit !found }' "$final/backups/pg-$backup_name.dump.sql"; then
-    result PASS 'S4 backups' "the scanned bundle holds the database dump expanded, the attempt among its rows (control)"
+    result PASS 'S4 backups' "the scanned bundle holds the database dump expanded, $dump_row among its rows (control)"
   else
     result FAIL 'S4 backups' 'the scanned bundle does not hold the database dump expanded with the run'"'"'s rows: the backup went unscanned'
   fi

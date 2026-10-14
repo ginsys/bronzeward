@@ -478,10 +478,14 @@ released on `completed`.
 **Negative controls.** A plan binding the control plane's proxied route: refused at creation (ER
 §10.9). OpenBao running but sealed (`bin/inject seal openbao`, §2), and OpenBao stopped
 (`bin/inject kill openbao`): the use-time check fails and is recorded with its result, and no
-operation commits and nothing is sent until OpenBao is unsealed or started. An observation older than the plan's maximum age: commitment
-refused. A second plan for the worker while the first holds the scope: refused by comparison 4;
-without the unique index both commit (DS row 011). An assignment change while the scope is held,
-and a frozen scope: refused. An artifact failing node validation: `InvalidArgument`, `rejected`,
+operation commits and nothing is sent until OpenBao is unsealed or started. An observation older than the plan's maximum age: no
+evidence, so no commitment rests on it and no refusal is recorded; the commitment rests on a later
+observation (ER choice §10.28). A second plan for the worker while the first holds the scope: the
+controller does not take it up while the scope is held, and comparison 4 refuses it when its
+transaction runs anyway (a Go check, since the controller never reaches it); without the unique
+index both commit (DS row 011). An assignment change while the scope is held: its publication fails
+`409 scope-busy`. A frozen scope: refused (the freeze route is S5's; a Go check until it lands).
+An artifact failing node validation: `InvalidArgument`, `rejected`,
 resource version unchanged (DS row 022). The ownership check moved out of the attempt's `UPDATE`: a
 stale attempt is recorded (DB row 018).
 

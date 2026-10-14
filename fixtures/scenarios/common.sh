@@ -496,3 +496,117 @@ no_mutation() {
     result FAIL "$mutation_ref" "no Talos mutation in $1's apid log: not shown, the dry-run apply control is not found past the entries read before the run (matcher status $rc)"
   fi
 }
+
+# The plan helpers s3's approval part and s4's controls share, on the worker ($machine_w). Every
+# identity's token is minted again once the last is three minutes old (the issuer's tokens live
+# five); the automation identity's is bin/seed's, which s3 reads into robot.
+declare -A tok_val=() tok_at=()
+tok='' robot='' robot_id='' plan_id=''
+# fresh <human|robot>: the identity's token in tok. Not a command substitution: the cache and the
+# secrets list it updates would be lost with its subshell.
+fresh() {
+  local h=$1
+  if [ "$h" = robot ]; then
+    tok=$robot
+    return 0
+  fi
+  if [ -z "${tok_val[$h]:-}" ] || [ $((SECONDS - tok_at[$h])) -ge 180 ]; then
+    tok_val[$h]=$(mint "$h") || die "cannot mint a $h token"
+    keep_secret "${tok_val[$h]}"
+    tok_at[$h]=$SECONDS
+  fi
+  tok=${tok_val[$h]}
+}
+# who_id <human|robot>: the identity's principal ID.
+who_id() {
+  if [ "$1" = robot ]; then printf '%s\n' "$robot_id"; else sql "SELECT id FROM principal WHERE kind = 'human' AND sub = '$1'"; fi
+}
+# both pause|unpause: A and B. servers pause|unpause: A, B and C.
+both() { "$bin/inject" "$1" A && "$bin/inject" "$1" B; }
+servers() { both "$1" && "$bin/inject" "$1" C; }
+# plan_body [extra JSON object]: an apply-config plan of the worker's Desired: no-reboot, a route
+# (the machine's own), the deadlines, the attempt limit, the expiry and the age bound.
+plan_body() {
+  local extra=${1:-}
+  [ -n "$extra" ] || extra='{}'
+  jq -nc --arg r "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" --arg m "$machine_w" --argjson x "$extra" \
+    '{releaseId: $r, machine: $m, operation: "apply-config", mode: "no-reboot", expiresInSeconds: 3600,
+      maxObservationAgeSeconds: 300, checkValiditySeconds: 600, transportDeadlineSeconds: 120,
+      verificationDeadlineSeconds: 300, maxAttempts: 2} + $x'
+}
+# plan_by <who> <name> [extra JSON]: an apply-config plan of the worker's Desired created as that
+# identity: 201, its id in plan_id.
+plan_by() {
+  local body
+  plan_id=''
+  fresh "$1"
+  body=$(plan_body "${3:-}") || return 1
+  answers 201 - POST /api/v1/plans "$tok" "$body" "$(key "plan-$2")" || return 1
+  plan_id=$(jq -er '.id' "$EV/last.body")
+}
+# approve_by <who> <plan> <name>: 201 naming the plan, the approver, its role and the current
+# epoch; the approval in approval_id, its self-approval reasons as a JSON array in
+# approval_reasons, the values it was checked against in approval_plan, approval_by and
+# approval_epoch.
+approval_id='' approval_reasons='' approval_plan='' approval_by='' approval_epoch=''
+approve_by() {
+  approval_id='' approval_reasons='' approval_plan='' approval_by='' approval_epoch=''
+  fresh "$1"
+  answers 201 - POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
+  # After the request: a principal's row is made by its first authenticated one.
+  approval_by=$(who_id "$1") && [ -n "$approval_by" ] || return 1
+  approval_epoch=$(sql "SELECT epoch FROM installation_state") && [ -n "$approval_epoch" ] || return 1
+  approval_plan=$2
+  jq -e --arg p "$approval_plan" --arg a "$approval_by" --arg e "$approval_epoch" \
+    '.plan == $p and .approver.principal == $a and .approver.role == "approver" and .epoch == $e
+      and .selfApproval.marked == ((.selfApproval.reasons | length) > 0)' "$EV/last.body" >/dev/null || {
+    echo "$scenario: $2: the approval answered does not name the plan, the approver, its role and the current epoch" >&2
+    return 1
+  }
+  approval_id=$(jq -er '.id' "$EV/last.body") || return 1
+  approval_reasons=$(jq -ce '.selfApproval.reasons' "$EV/last.body")
+}
+# plan_is_stored <plan> <state> <approval or none>: the plan's stored state and approval, and no
+# operation.
+plan_is_stored() {
+  [ "$(sql "SELECT s.state || ' ' || coalesce(s.approval, 'none') || ' ' || coalesce(s.operation, 'none')
+    FROM plan_state s WHERE s.plan = '$1'")" = "$2 $3 none" ] &&
+    [ "$(sql "SELECT count(*) FROM operation WHERE plan = '$1'")" = 0 ]
+}
+# plan_reads <plan> <state>: a viewer reads the plan in that state.
+plan_reads() {
+  fresh h-viewer
+  answers_with ".id == \"$1\" and .state == \"$2\" and .committedOperation == null" 200 - GET "/api/v1/plans/$1" "$tok"
+}
+# plan_state_is <plan> <state>
+plan_state_is() { [ "$(sql "SELECT state FROM plan_state WHERE plan = '$1'")" = "$2" ]; }
+# refusals <plan>: how many refusal entries name the plan.
+refusals() { sql "SELECT count(*) FROM machine_event WHERE kind = 'refusal' AND entry->>'plan' = '$1'"; }
+# draft_by <who> <name>: POST /drafts as that identity; draft, etag.
+draft_by() {
+  fresh "$1"
+  answers 201 - POST /api/v1/drafts "$tok" "$(jq -nc --arg c "$cluster" --arg t "$scenario $2" '{cluster: $c, title: $t}')" "$(key "draft-$2")" || return 1
+  draft=$(jq -er '.id' "$EV/last.body") || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ]
+}
+
+# The age control's pieces, for an adopt or an apply-config plan alike.
+# obs_started <plan>: the plan's evidence observation is recorded.
+obs_started() {
+  [ -n "$(sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    WHERE s.plan = '$1' AND s.purpose = 'evidence'")" ]
+}
+# first_observation <plan>: the id of the plan's first recorded evidence observation.
+first_observation() {
+  sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    WHERE s.plan = '$1' AND s.purpose = 'evidence' ORDER BY o.basis LIMIT 1"
+}
+# observation_stale <plan> <seconds>: the plan's first evidence observation began more than that
+# long ago, by the database's clock.
+observation_stale() {
+  [ "$(sql "SELECT clock_timestamp() > e.at + interval '$2 seconds' FROM observation o
+    JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    JOIN machine_event e ON e.machine = s.machine AND e.revision = s.revision
+    WHERE s.plan = '$1' AND s.purpose = 'evidence' ORDER BY o.basis LIMIT 1")" = t ]
+}
