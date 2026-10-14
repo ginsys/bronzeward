@@ -916,13 +916,17 @@ func TestExecutorSendsWithTheObservedAccess(t *testing.T) {
 					xe.x.mu.Unlock()
 				})
 			}
+			// The first attempt's dial records the talosconfig it was given and fails as a transport
+			// failure: what is sent is the configuration, not the apply.
 			var mu sync.Mutex
 			var sent []byte
-			dial := func(ctx context.Context, tc []byte, endpoint string) (talos.Applier, error) {
+			dial := func(_ context.Context, tc []byte, _ string) (talos.Applier, error) {
 				mu.Lock()
-				sent = bytes.Clone(tc)
-				mu.Unlock()
-				return talos.DialApplier(ctx, old.Talosconfig(), endpoint)
+				defer mu.Unlock()
+				if sent == nil {
+					sent = bytes.Clone(tc)
+				}
+				return nil, errors.New("not dialled")
 			}
 			life, stop := context.WithCancel(t.Context())
 			idle := make(chan struct{})
@@ -931,10 +935,14 @@ func TestExecutorSendsWithTheObservedAccess(t *testing.T) {
 			defer stopping(a, stop)
 			waitIdle(t, idle, 1)
 			xe.approveThrough(t, a)
-			until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+			until(t, a, idle, "the first attempt dials", func() bool {
+				mu.Lock()
+				defer mu.Unlock()
+				return sent != nil
+			})
 			if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
-				WHERE a.plan = $1 AND o.access_version = $2`, xe.pid, old.Version().Version); n != 1 {
-				t.Fatalf("the attempt does not rest on an observation read with access version %d", old.Version().Version)
+				WHERE a.plan = $1 AND a.number = 1 AND o.access_version = $2`, xe.pid, old.Version().Version); n != 1 {
+				t.Fatalf("the first attempt does not rest on an observation read with access version %d", old.Version().Version)
 			}
 			mu.Lock()
 			defer mu.Unlock()
