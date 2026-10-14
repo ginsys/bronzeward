@@ -610,6 +610,20 @@ fragment_by() {
   etag=$(etag_of_last)
   frag_rev=$(jq -er '.entry.revision' "$EV/last.body")
 }
+# profile_by <who> <name>: the workers profile, under the draft's ETag, listing the fragment
+# revisions its head lists and frag_rev: the release compiled from the draft selects that fragment
+# through the worker's assignment, and a later release carries it unchanged.
+profile_by() {
+  local body
+  fresh "$1"
+  body=$(sql "SELECT coalesce(jsonb_agg(f.fragment_revision ORDER BY f.position), '[]'::jsonb)
+    FROM profile p JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
+    WHERE p.cluster = '$cluster' AND p.name = 'workers'") || return 1
+  body=$(jq -nc --argjson l "$body" --arg f "$frag_rev" '{fragments: ($l + [$f])}') || return 1
+  answers 200 - PUT "/api/v1/drafts/$draft/profiles/workers" "$tok" "$body" "$(key "profile-$2")" "$etag" || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
+}
 # publish_by <who> <name>: the draft published under its current ETag: 202, the operation
 # succeeded with one release, which is then the worker's Desired; its id in new_release.
 new_release='' pub_op=''

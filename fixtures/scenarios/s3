@@ -609,20 +609,6 @@ release_holds_automation_revision() {
   [ "$(sql "SELECT count(*) FROM release_source s JOIN fragment_revision f ON f.id = s.fragment_revision
     WHERE s.release = '$s2_rel' AND f.author = '$robot_id'")" -ge 1 ]
 }
-# profile_by <who> <name>: the workers profile, under the draft's ETag, listing the fragment
-# revisions its head lists and frag_rev: the release compiled from the draft selects that fragment
-# through the worker's assignment, and a later release carries it unchanged.
-profile_by() {
-  local body
-  fresh "$1"
-  body=$(sql "SELECT coalesce(jsonb_agg(f.fragment_revision ORDER BY f.position), '[]'::jsonb)
-    FROM profile p JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
-    WHERE p.cluster = '$cluster' AND p.name = 'workers'") || return 1
-  body=$(jq -nc --argjson l "$body" --arg f "$frag_rev" '{fragments: ($l + [$f])}') || return 1
-  answers 200 - PUT "/api/v1/drafts/$draft/profiles/workers" "$tok" "$body" "$(key "profile-$2")" "$etag" || return 1
-  differ "$(etag_of_last)" "$etag" || return 1
-  etag=$(etag_of_last)
-}
 # db_reads: A answers a database read again after a restore swapped the database under it.
 db_reads() {
   fresh_author

@@ -26,10 +26,20 @@
 # refuses it. OpenBao paused while C checks the plan, h-approver's next approval under a token
 # without the approver group 403, then OpenBao unpaused: the plan commits and its attempt is
 # admitted. The run ends restored to the s3-step3 snapshots, as controls does.
+# `ds`: the dispatch-safety rows S4's preconditions name, re-run after `run` on C alone (A and B
+# paused), each completing row on a release of its own that changes the worker's configuration. 001
+# completes. The approval revoked once the evidence is recorded (002): comparison 1 refuses the
+# commitment; once committed with no attempt (004): the attempt is refused, the operation cancelled;
+# once the attempt is recorded (005): it is sent anyway and completes. Taken over by A on a
+# recovery-admin's request while C holds it committed (007): C's attempt is refused by comparison 7,
+# and A retries and completes. C killed once its evidence is recorded (018): no operation, and C
+# started again runs the plan; killed after the commitment (019): C started again takes it over,
+# retries and completes. The rows no request reaches are their Go checks, run in a clone. The table
+# is ds.tsv: row, result, source, outcome.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s4.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s4 controls|restores|run   (after scenarios/s1 run, s3 handover, s2 run and s3 run
-# on the same up; controls and restores, when run, before run)
+# Usage: scenarios/s4 controls|restores|run|ds   (after scenarios/s1 run, s3 handover, s2 run and s3
+# run on the same up; controls and restores, when run, before run; ds after run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -37,7 +47,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s4_mode=${1:-}
-case $s4_mode in controls | restores | run) ;; *) die "usage: scenarios/s4 controls|restores|run" ;; esac
+case $s4_mode in controls | restores | run | ds) ;; *) die "usage: scenarios/s4 controls|restores|run|ds" ;; esac
 need docker curl jq timeout id sleep date awk wc
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -50,8 +60,7 @@ scenario=s4
 # shellcheck source-path=SCRIPTDIR source=common.sh
 . "$here/common.sh"
 run_key=$(date -u +%s%N)
-mutation_ref='S4 pass'
-[ "$s4_mode" = run ] || mutation_ref='S4 negative controls'
+case $s4_mode in run) mutation_ref='S4 pass' ;; ds) mutation_ref='S4 DS re-run' ;; *) mutation_ref='S4 negative controls' ;; esac
 
 cluster='' machine_cp='' machine_w='' plan='' rel='' was='' baseline='' op=''
 viewer='' viewer_at=0
@@ -77,13 +86,17 @@ served() {
 # rev <SQL predicate on machine_event e>: the revision of the one worker entry it selects.
 rev() { sql "SELECT e.revision FROM machine_event e WHERE e.machine = '$machine_w' AND $1"; }
 
-preconditions() {
-  local ref='S4 precondition'
+machines() {
   cluster=$(sql "SELECT id FROM cluster WHERE name = 'bw-fixture'") || die "s4: cannot read the cluster"
   machine_cp=$(machine_at "$TALOS_CONTROLPLANE_IP") || die "s4: cannot read the control plane's machine"
   one_line "$machine_cp" || die "s4: not one machine at the control plane's endpoint: run scenarios/s1 run first"
   machine_w=$(machine_at "$TALOS_WORKER_IP") || die "s4: cannot read the worker's machine"
   one_line "$machine_w" || die "s4: not one machine at the worker's endpoint: run scenarios/s1 run first"
+}
+
+preconditions() {
+  local ref='S4 precondition'
+  machines
   plan=$(sql "SELECT id FROM plan WHERE kind = 'apply-config'") || die "s4: cannot read the plans"
   one_line "$plan" || die "s4: not one apply-config plan: run scenarios/s3 run first"
   rel=$(sql "SELECT release FROM plan WHERE id = '$plan'")
@@ -729,14 +742,329 @@ restores() {
   check "$ref" "A's, B's and C's links to the worker are cut" worker_cut
 }
 
+# The DS re-run (mode ds). before: the bundle captured before the row; taker: the owner token that
+# took the row's operation over; ds_failed: the failure count at the table's last line.
+before='' taker='' ds_failed=0
+ds_preconditions() {
+  local ref='S4 DS precondition'
+  machines
+  check "$ref" "S4's safe apply done: no apply-config operation holds the worker's scope or the cluster's rollout slot" scope_released
+  check "$ref" "the worker's Desired is its Applied" \
+    same "$(sql "SELECT desired = applied_release FROM machine_state WHERE machine = '$machine_w'")" t
+  check "$ref" 'no link to the worker is recorded cut' worker_joined
+  check "$ref" 'A answers /livez' answers 204 - GET /livez ''
+  check "$ref" "the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all" \
+    methods_counted
+}
+# ds_row <row> <source> <outcome>: the table's line for the row, PASS when no check failed since the
+# last line.
+ds_row() {
+  local r=PASS
+  [ "$failed" = "$ds_failed" ] || r=FAIL
+  ds_failed=$failed
+  printf '%s\t%s\t%s\t%s\n' "$1" "$r" "$2" "$3" >>"$EV/ds-rows.tsv"
+}
+# changes_worker: the worker's configuration digest in rel is not its Applied one.
+changes_worker() {
+  [ "$(sql "SELECT rm.configuration_digest <> s.applied_digest FROM release_machine rm
+    JOIN machine_state s ON s.machine = rm.machine WHERE rm.release = '$rel' AND rm.machine = '$machine_w'")" = t ]
+}
+# ds_publish <row>: h-author drafts a role fragment, a node label of the row's own, and lists it in
+# the workers profile; h-publisher publishes it: a release changing the worker's configuration, its
+# Desired, in rel. Each step is a prerequisite.
+ds_publish() {
+  local ref="S4 DS row $1"
+  must "$ref" 'h-author opens a draft: 201' draft_by h-author "ds$1"
+  must "$ref" "h-author drafts a role fragment, a node label of the row's own: 200" fragment_by h-author "ds$1" "ds$1" role
+  must "$ref" 'h-author lists it in the workers profile: 200' profile_by h-author "ds$1"
+  must "$ref" "h-publisher publishes it: 202, one release, the worker's Desired" publish_by h-publisher "ds$1"
+  rel=$new_release
+  must "$ref" "the release changes the worker's configuration digest" changes_worker
+}
+# ds_plan <row>: the worker's baseline revision and apid log, the last operation and the last
+# bundle, read; then a plan of the worker's Desired as h-publisher, its id in plan.
+ds_plan() {
+  baseline=$(sql "SELECT baseline_revision FROM machine_state WHERE machine = '$machine_w'") || die "s4: cannot read the worker's state"
+  ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s4: cannot read the operations"
+  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  before=$bundle
+  plan_id=''
+  must "S4 DS row $1" 'a plan of the release as h-publisher: 201' plan_by h-publisher "ds$1"
+  plan=$plan_id
+}
+# ds_completed <attempts>: the plan's operation completed, its id in op, with that many attempts, one
+# accepted; Applied the release from the operation, the baseline revision one more.
+ds_completed() {
+  completed || return 1
+  [ "$(sql "SELECT count(*) || ' ' || bool_or(r.class = 'accepted') FROM attempt a
+    LEFT JOIN attempt_response r ON r.attempt = a.id WHERE a.operation = '$op'")" = "$1 true" ] &&
+    [ "$(sql "SELECT applied_release || ' ' || applied_source || ' ' || baseline_revision FROM machine_state
+      WHERE machine = '$machine_w'")" = "$rel operation $((baseline + 1))" ]
+}
+# ds_landed: in the latest bundle the worker's digest is the release's artifact, and its resource
+# version is not the one in the bundle before the row.
+ds_landed() {
+  local want
+  want=$(sql "SELECT encode(configuration_digest, 'hex') FROM release_machine WHERE release = '$rel' AND machine = '$machine_w'")
+  [ -n "$want" ] && [ "$(digest_of "$bundle/talos-config-sha256.txt" "$TALOS_WORKER_IP")" = "$want" ] &&
+    differ "$(digest_of "$bundle/talos-config-version.txt" "$TALOS_WORKER_IP")" \
+      "$(digest_of "$before/talos-config-version.txt" "$TALOS_WORKER_IP")"
+}
+# none_sent: no mutating request in the worker's apid log since the row began.
+none_sent() {
+  local w
+  w=$(apid_log "$TALOS_WORKER_IP") && [[ "$w" == "$w_log"* ]] && [ "$(run_mutations "$w_log" "$w")" = 0 ]
+}
+# ds_done <row> <attempts>: the row's operation completed with that many attempts, one
+# ApplyConfiguration on the worker since the row began, and its bundle: clean, the worker's digest
+# the artifact's and its resource version moved.
+ds_done() {
+  local ref="S4 DS row $1" w_after
+  check "$ref" "the plan's operation completed within four minutes with $2 attempt(s), one accepted; Applied the release from the operation, the baseline revision one more" \
+    within 240 ds_completed "$2"
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  check "$ref" "the worker's apid log records exactly one mutating request since the row began, ApplyConfiguration" \
+    one_apply "$w_log" "$w_after"
+  outcome_bundle "$ref" "ds-$1"
+  check "$ref" "the worker's digest is the release's artifact and its resource version moved" ds_landed
+}
+# revoke_approval <row>: h-approver revokes approval_id: 201.
+revoke_approval() {
+  fresh h-approver
+  answers 201 - POST "/api/v1/approvals/$approval_id/revocations" "$tok" '{"reason": "S4 DS re-run"}' "$(key "revoke-$1")"
+}
+# revoked_in_flight: the approval's revocation entry lies between the attempt and its response.
+revoked_in_flight() {
+  [ "$(sql "SELECT count(*) FROM machine_event v, attempt a JOIN attempt_response r ON r.attempt = a.id
+    WHERE a.operation = '$op' AND v.machine = '$machine_w' AND v.kind = 'approval-revocation'
+      AND v.entry->>'approval' = '$approval_id' AND v.revision > a.revision AND v.revision < r.revision")" = 1 ]
+}
+# take_over: h-recovery asks A to take held over at generation 1: 201, unresolved at generation 2;
+# the new owner token in taker.
+take_over() {
+  fresh h-recovery
+  answers 201 - POST "/api/v1/operations/$held/takeovers" "$tok" '{"generation": 1, "reason": "S4 DS row 007"}' \
+    "$(key takeover-007)" || return 1
+  jq -e '.state == "unresolved" and .generation == 2' "$EV/last.body" >/dev/null || return 1
+  taker=$(sql "SELECT owner FROM operation WHERE id = '$held'")
+  [ -n "$taker" ]
+}
+# owner_refused: one refusal of held by comparison 7, the owner token not the refusing controller's,
+# by another controller than taker, and no attempt.
+owner_refused() {
+  [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'refusal'
+    AND entry->>'operation' = '$held' AND entry->>'comparison' = '7' AND entry->>'controller' <> '$taker'
+    AND entry->>'cause' = 'the operation''s owner token is not this controller''s'")" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM attempt WHERE operation = '$held'")" = 0 ]
+}
+# killed_committed: the plan committed, its operation, in held, committed with no attempt.
+killed_committed() {
+  held=$(sql "SELECT operation FROM plan_state WHERE plan = '$plan' AND state = 'committed'") && [ -n "$held" ] && still_held
+}
+# started_takeover: one ownership transition of op, a controller's start, to generation 2; its new
+# owner token in taker.
+started_takeover() {
+  taker=$(sql "SELECT entry->>'to' FROM machine_event WHERE machine = '$machine_w' AND kind = 'ownership-transition'
+    AND entry->>'operation' = '$op' AND entry->>'reason' = 'controller-start' AND entry->>'generation' = '2'")
+  one_line "$taker" && [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w'
+    AND kind = 'ownership-transition' AND entry->>'operation' = '$op'")" = 1 ]
+}
+# retried_by_taker: op's one attempt, number 1, is taker's at generation 2, after a classification
+# safe to retry by the same token, the operation's latest before it.
+retried_by_taker() {
+  [ "$(sql "SELECT count(*) || ' ' || bool_and(a.number = 1 AND a.owner = '$taker' AND a.owner_gen = 2
+      AND c.outcome = 'safe-to-retry' AND c.owner = '$taker' AND c.owner_gen = 2)
+    FROM attempt a JOIN operation_classification c ON c.operation = a.operation
+    WHERE a.operation = '$op' AND c.revision = (SELECT max(revision) FROM operation_classification
+      WHERE operation = a.operation AND revision < a.revision)")" = '1 true' ]
+}
+# The rows no request reaches, as their Go checks prove them, run in a clone of the image commit
+# against go-db's PostgreSQL and OpenBao, one package at a time.
+ds_go_tests='TestCommitmentRevocationsWait|TestCommitmentRefusals|TestAttemptStaleOwner|TestCommitmentSecond'
+ds_go_tests+='|TestCommitmentRolloutRace|TestPlanOperations|TestAttemptRetry|TestAttemptRetryRefusals'
+ds_go_ran() {
+  (
+    export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
+    export BW_TEST_BAO_ADDR="${BW_TEST_BAO_ADDR:-http://127.0.0.1:58201}"
+    export BW_TEST_BAO_TOKEN="${BW_TEST_BAO_TOKEN:-bw-dev-root-token}"
+    logged ds-go env BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 mise exec -- go test -count=1 -p 1 -v -run "^($ds_go_tests)\$" \
+      ./internal/api ./internal/migrate
+  ) && ! grep --quiet -- '--- SKIP' "$EV/ds-go.log"
+}
+# go_passed <test>: the test's own top-level PASS line is in ds-go.log.
+go_passed() { grep --quiet -- "^--- PASS: $1 (" "$EV/ds-go.log"; }
+# ds_go <row> <tests> <outcome>: the row's table line, each test passed.
+ds_go() {
+  local t
+  for t in $2; do check "S4 DS row $1" "$t passed" go_passed "$t"; done
+  ds_row "$1" "Go: ${2// /, }" "$3"
+}
+
+ds() {
+  local ref n k cp_after
+  pre_state
+  ds_failed=$failed
+  # C alone dispatches; A and B would dispatch each row's plan with no interruption.
+  must 'S4 DS' 'inject pause A and B' both pause
+  call_port=$SERVER_C_PORT
+
+  ref='S4 DS row 001'
+  ds_publish 001
+  ds_plan 001
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds001
+  ds_done 001 1
+  ds_row 001 'live, C' 'completed, 1 attempt, 1 landing'
+
+  # One release for 002, 004 and 005: only 005 sends it.
+  ref='S4 DS row 002'
+  ds_publish 002
+  ds_plan 002
+  n=$(stalls_at dispatch-evidence)
+  must "$ref" 'C told to stall once the evidence is recorded' interrupt dispatch-evidence stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds002
+  check "$ref" 'the use-time check passes and the evidence is recorded; C stalls there, nothing committed' \
+    within 120 evidence_stalled "$plan" 0 "$n"
+  check "$ref" 'h-approver revokes the approval: 201' revoke_approval ds002
+  must "$ref" 'C released, told to stall after an attempt instead' interrupt dispatch-attempted stall
+  check "$ref" 'the commitment refused by comparison 1, the plan is revoked; no operation' \
+    within 90 commit_refused "$plan" 1 'the plan is revoked'
+  check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
+  outcome_bundle "$ref" ds-002
+  ds_row 002 'live, C' 'commitment refused by comparison 1, no operation, nothing sent'
+
+  ref='S4 DS row 004'
+  ds_plan 004
+  n=$(stalls_at dispatch-committed)
+  must "$ref" 'C told to stall after the commitment' interrupt dispatch-committed stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds004
+  check "$ref" 'the plan committed, its operation committed with no attempt; C stalls there' within 120 committed_held "$plan" "$n"
+  check "$ref" 'h-approver revokes the approval: 201' revoke_approval ds004
+  must "$ref" 'C released, told to stall after an attempt instead' interrupt dispatch-attempted stall
+  check "$ref" 'the attempt refused by comparison 1, the approval is revoked; the operation committed to unresolved, then cancelled; no attempt' \
+    within 90 settled_cancelled 'the approval is revoked'
+  check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
+  outcome_bundle "$ref" ds-004
+  ds_row 004 'live, C' 'attempt refused by comparison 1, cancelled, nothing sent'
+
+  ref='S4 DS row 005'
+  ds_plan 005
+  n=$(stalls_at dispatch-attempted)
+  must "$ref" 'C told to stall after an attempt' interrupt dispatch-attempted stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds005
+  check "$ref" 'the plan commits and its attempt is recorded, no response; C stalls before sending' \
+    within 120 attempt_admitted "$plan" "$n"
+  check "$ref" 'h-approver revokes the approval: 201' revoke_approval ds005
+  must "$ref" "C released, its control file removed" interrupt -
+  ds_done 005 1
+  check "$ref" "the approval's revocation is on the timeline between the attempt and its response" revoked_in_flight
+  ds_row 005 'live, C' 'the attempt recorded before the revocation sent anyway: completed, 1 attempt, 1 landing'
+
+  ref='S4 DS row 007'
+  ds_publish 007
+  ds_plan 007
+  n=$(stalls_at dispatch-committed)
+  must "$ref" 'C told to stall after the commitment' interrupt dispatch-committed stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds007
+  check "$ref" 'the plan committed, its operation committed with no attempt; C stalls there' within 120 committed_held "$plan" "$n"
+  # A takes it over with its own link cut, so that C's attempt comes first.
+  must "$ref" 'inject linksplit A worker' "$bin/inject" linksplit A worker
+  must "$ref" 'inject unpause A' "$bin/inject" unpause A
+  call_port=$SERVER_A_PORT
+  check "$ref" 'A answers /livez' within 30 answers 204 - GET /livez ''
+  check "$ref" 'h-recovery asks A to take the operation over at generation 1: 201, unresolved at generation 2' take_over
+  must "$ref" "C released, its control file removed" interrupt -
+  check "$ref" "C's attempt refused by comparison 7, the owner token not C's; no attempt" within 90 owner_refused
+  check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
+  check "$ref" 'inject linkjoin A worker' "$bin/inject" linkjoin A worker
+  ds_done 007 1
+  check "$ref" "the one attempt is A's at generation 2, after A's classification safe to retry" retried_by_taker
+  must "$ref" 'inject pause A' "$bin/inject" pause A
+  call_port=$SERVER_C_PORT
+  ds_row 007 'live, C, then A' "C refused by comparison 7 after A's takeover, nothing sent; A retried: completed, 1 attempt, 1 landing"
+
+  ref='S4 DS row 018'
+  ds_publish 018
+  ds_plan 018
+  k=$(kills_at dispatch-evidence)
+  must "$ref" 'C told to stop once the evidence is recorded' interrupt dispatch-evidence kill
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds018
+  check "$ref" 'C killed once the evidence is recorded: not running, its log names one more kill there' \
+    within 120 c_killed_at dispatch-evidence "$((k + 1))"
+  check "$ref" 'the plan approved, no operation' plan_is_stored "$plan" approved "$approval_id"
+  check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
+  must "$ref" "C's control file removed" interrupt -
+  must "$ref" 'inject start C' "$bin/inject" start C
+  check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
+  ds_done 018 1
+  ds_row 018 'live, C killed, then started' 'no operation left; C started again ran the plan: completed, 1 attempt, 1 landing'
+
+  ref='S4 DS row 019'
+  ds_publish 019
+  ds_plan 019
+  k=$(kills_at dispatch-committed)
+  must "$ref" 'C told to stop after the commitment' interrupt dispatch-committed kill
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds019
+  check "$ref" 'C killed after the commitment: not running, its log names one more kill there' \
+    within 120 c_killed_at dispatch-committed "$((k + 1))"
+  check "$ref" 'its operation committed with no attempt' killed_committed
+  check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
+  must "$ref" "C's control file removed" interrupt -
+  must "$ref" 'inject start C' "$bin/inject" start C
+  check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
+  ds_done 019 1
+  check "$ref" "C's start took the operation over, one ownership transition to generation 2" started_takeover
+  check "$ref" "the one attempt is the new process's at generation 2, after its classification safe to retry" retried_by_taker
+  ds_row 019 'live, C killed, then started' 'C started again took it over and retried: completed, 1 attempt, 1 landing'
+
+  ref='S4 DS'
+  check "$ref" 'inject unpause A and B' both unpause
+  call_port=$SERVER_A_PORT
+  if clone_made ds-go-clone; then
+    check "$ref" "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's (clone HEAD $clone_head)" go_env_clean
+    check "$ref" 'the Go checks below ran against PostgreSQL and OpenBao and passed, none skipped (ds-go.log)' ds_go_ran
+  else
+    result FAIL "$ref" 'no clone of the image commit (ds-go-clone.log): the Go checks did not run'
+  fi
+  rm -rf -- "$clone_dir"
+  ds_failed=$failed # a failed clone or run fails each Go row through its own checks
+  ds_go 003 TestCommitmentRevocationsWait 'a revocation started while the commitment holds the approval waits for it'
+  ds_go 006 TestCommitmentRefusals "control: the prototype without the transactions' comparisons has no counterpart; comparison 1 inside the commitment refuses a revoked approval or approver (row 002)"
+  ds_go 008 TestAttemptStaleOwner "control: the owner read outside the attempt's write records an attempt under the replaced token"
+  ds_go 009 TestCommitmentSecond 'a second commitment of the plan finds its operation (comparison 0), nothing recorded'
+  ds_go 010 'TestCommitmentRefusals TestCommitmentRolloutRace' 'a second plan refused by the machine scope (comparison 4) and the rollout slot (comparison 5)'
+  ds_go 011 TestPlanOperations 'control: without both scope indexes a second plan commits'
+  ds_go 023 'TestAttemptRetry TestAttemptRetryRefusals' 'a retry follows its classification; refused by comparisons 7 and 8 otherwise'
+  for n in 012 013 014 015 016 017 020 021 022; do
+    printf '%s\tSKIP\tnot yet re-run\ttransport, database and response faults, kills at the response and the completion, node validation\n' \
+      "$n" >>"$EV/ds-rows.tsv"
+  done
+  result SKIP "$ref" 'DS rows 012-017 and 020-022: not yet re-run'
+  { printf 'row\tresult\tsource\toutcome\n' && sort -- "$EV/ds-rows.tsv"; } >"$EV/ds.tsv"
+  rm -f -- "$EV/ds-rows.tsv"
+
+  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
+  check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the re-run' "$bin/inject" db-snapshot "$backup_name"
+}
+
 backup_name=s4-$run_key
 run() {
-  preconditions
   withheld+=("$BW_CANARY")
   case $s4_mode in
-    controls) controls ;;
-    restores) restores ;;
+    controls)
+      preconditions
+      controls
+      ;;
+    restores)
+      preconditions
+      restores
+      ;;
+    ds)
+      ds_preconditions
+      ds
+      ;;
     run)
+      preconditions
       safe_apply
       check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the apply' "$bin/inject" db-snapshot "$backup_name"
       ;;
@@ -759,10 +1087,11 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   else
     result PASS 'S4 evidence' 'the bundle is complete: bin/evidence captured every source'
   fi
-  # The scan above covers the dump only if the bundle holds it expanded: the attempt's (run's) or
-  # the held operation's (controls' or restores') own row inside its COPY block, whose first column
-  # is the ID. That row is in the dump only: the restore after it removed it from the database.
-  if [ "$s4_mode" = run ]; then
+  # The scan above covers the dump only if the bundle holds it expanded: the attempt's (run's, or the
+  # last row's of ds) or the held operation's (controls' or restores') own row inside its COPY block,
+  # whose first column is the ID. The held operation's row is in the dump only: the restore after it
+  # removed it from the database.
+  if [ "$s4_mode" = run ] || [ "$s4_mode" = ds ]; then
     dump_table=attempt dump_row='the attempt'
     dump_id=$(sql "SELECT id FROM attempt WHERE operation = '${op:-none}'") || dump_id=
   else
