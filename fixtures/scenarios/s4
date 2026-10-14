@@ -490,7 +490,7 @@ controls() {
     within 120 busy_refused
   check "$ref" 'the first operation still holds the scope: committed, no attempt' still_held
   result SKIP "$ref" 'a frozen scope refused: the freeze route is ginsys/bronzeward#27'"'"'s; the Go check TestCommitmentRefusals "frozen" covers it until then'
-  result SKIP "$ref" "without the unique index both commit (DS row 011), node validation's InvalidArgument (DS row 022), the ownership check outside the attempt's UPDATE (DB row 018): the DS re-run's"
+  result SKIP "$ref" "with both scope indexes dropped a second plan's rows insert (DS row 011, the schema's control), node validation's InvalidArgument (DS row 022), the ownership check outside the attempt's UPDATE (DB row 018): the DS re-run's"
 
   outcome_bundle "$ref" controls
   check "$ref" "the worker's digest and resource version are the pre-state's" unchanged_node "$TALOS_WORKER_IP"
