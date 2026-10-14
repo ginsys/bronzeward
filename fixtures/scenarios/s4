@@ -893,9 +893,12 @@ ds_go_ran() {
 }
 # go_passed <test>: the test's own top-level PASS line is in ds-go.log.
 go_passed() { grep --quiet -- "^--- PASS: $1 (" "$EV/ds-go.log"; }
-# ds_go <row> <tests> <outcome>: the row's table line, each test passed.
+# ds_go <row> <tests> <outcome>: the row's table line: the suite ran clean (go_ok) and each test
+# passed.
+go_ok=0
 ds_go() {
   local t
+  check "S4 DS row $1" 'the Go checks ran in a clone of the image commit, clean and none skipped' same "$go_ok" 1
   for t in $2; do check "S4 DS row $1" "$t passed" go_passed "$t"; done
   ds_row "$1" "Go: ${2// /, }" "$3"
 }
@@ -925,6 +928,7 @@ ds() {
   check "$ref" 'the use-time check passes and the evidence is recorded; C stalls there, nothing committed' \
     within 120 evidence_stalled "$plan" 0 "$n"
   check "$ref" 'h-approver revokes the approval: 201' revoke_approval ds002
+  check "$ref" 'the plan is stored revoked' plan_state_is "$plan" revoked
   must "$ref" 'C released, told to stall after an attempt instead' interrupt dispatch-attempted stall
   check "$ref" 'the commitment refused by comparison 1, the plan is revoked; no operation' \
     within 90 commit_refused "$plan" 1 'the plan is revoked'
@@ -1021,6 +1025,7 @@ ds() {
   ref='S4 DS'
   check "$ref" 'inject unpause A and B' both unpause
   call_port=$SERVER_A_PORT
+  local before_go=$failed
   if clone_made ds-go-clone; then
     check "$ref" "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's (clone HEAD $clone_head)" go_env_clean
     check "$ref" 'the Go checks below ran against PostgreSQL and OpenBao and passed, none skipped (ds-go.log)' ds_go_ran
@@ -1028,19 +1033,20 @@ ds() {
     result FAIL "$ref" 'no clone of the image commit (ds-go-clone.log): the Go checks did not run'
   fi
   rm -rf -- "$clone_dir"
-  ds_failed=$failed # a failed clone or run fails each Go row through its own checks
-  ds_go 003 TestCommitmentRevocationsWait 'a revocation started while the commitment holds the approval waits for it'
+  [ "$failed" = "$before_go" ] && go_ok=1
+  ds_failed=$failed # the suite's failures are carried into each Go row by go_ok
   ds_go 008 TestAttemptStaleOwner "control: the owner read outside the attempt's write records an attempt under the replaced token"
   ds_go 009 TestCommitmentSecond 'a second commitment of the plan finds its operation (comparison 0), nothing recorded'
   ds_go 010 'TestCommitmentRefusals TestCommitmentRolloutRace' 'a second plan refused by the machine scope (comparison 4) and the rollout slot (comparison 5)'
   ds_go 011 TestPlanOperations 'control: without both scope indexes a second plan commits'
   ds_go 023 'TestAttemptRetry TestAttemptRetryRefusals' 'a retry follows its classification; refused by comparisons 7 and 8 otherwise'
+  printf '003\tSKIP\tnot yet re-run\twith its control: a revocation inserted without the lock does not wait\n' >>"$EV/ds-rows.tsv"
   printf '006\tSKIP\tnot yet re-run\tcontrol: an attempt without comparison 1 sends after the revocation\n' >>"$EV/ds-rows.tsv"
   for n in 012 013 014 015 016 017 020 021 022; do
     printf '%s\tSKIP\tnot yet re-run\ttransport, database and response faults, kills at the response and the completion, node validation\n' \
       "$n" >>"$EV/ds-rows.tsv"
   done
-  result SKIP "$ref" 'DS rows 006 (its control), 012-017 and 020-022: not yet re-run'
+  result SKIP "$ref" 'DS rows 003 and 006 (their controls), 012-017 and 020-022: not yet re-run'
   { printf 'row\tresult\tsource\toutcome\n' && sort -- "$EV/ds-rows.tsv"; } >"$EV/ds.tsv"
   rm -f -- "$EV/ds-rows.tsv"
 
