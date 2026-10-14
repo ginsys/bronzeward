@@ -598,6 +598,9 @@ func TestPlanOperations(t *testing.T) {
 	} {
 		refused(t, db, "after "+c.drop, c.want, append([]stmt{{c.drop, nil}}, commitSecond...)...)
 	}
+	// The control (dispatch-safety row 011): without both indexes the second plan commits.
+	accepted(t, db, "after dropping both scope indexes", append([]stmt{{`DROP INDEX operation_machine_scope`, nil},
+		{`DROP INDEX operation_rollout_scope`, nil}}, commitSecond...)...)
 	// Issue ginsys/bronzeward#71: an owned operation moves through each fenced state, and the fence
 	// and the scopes end at a terminal state, which may drop the owner. Its attempt is what lets it
 	// reach sending (execution and recovery §4).
