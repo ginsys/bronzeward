@@ -506,7 +506,8 @@ restored_step4() {
 }
 # from_step4 <case> <stall step>: C, its link cut and A and B paused, killed; S3's step-4 snapshots
 # restored; C told to stall at the step and started; then an apply-config plan of the S2 release as
-# h-publisher on C, its id in plan_id. The stall is a prerequisite: nothing after it may send.
+# h-publisher on C, its id in plan_id. The stall is a prerequisite: nothing after it may send. The
+# snapshots hold no apply-config plan, so C has nothing to dispatch before its split is back.
 from_step4() {
   local ref="S4 negative controls, $1"
   check "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
@@ -630,12 +631,14 @@ restores() {
 
   # The approver's identity revoked before the commitment: comparison 1. Revoked before the
   # controller reads the plan, it is no candidate at all, so the revocation comes once the evidence is.
+  # The link is joined before the approval, the stall holding the commitment: the seam is reached
+  # after an observation that could not read the node too, and the evidence must be a real read.
   from_step4 identity-before dispatch-evidence
   p=$plan_id
-  check "$ref, identity before" 'approved as h-approver: 201' approve_by h-approver "$p" identity-before
   n=$(stalls_at dispatch-evidence)
   rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
   check "$ref, identity before" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
+  check "$ref, identity before" 'approved as h-approver: 201' approve_by h-approver "$p" identity-before
   check "$ref, identity before" 'the use-time check passes and the evidence is recorded; C stalls there, nothing committed' \
     within 120 evidence_stalled "$p" "$rev" "$n"
   check "$ref, identity before" "h-recovery revokes h-approver's identity: 201" revoke_approver identity-before
@@ -686,15 +689,21 @@ restores() {
   check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the restores' "$bin/inject" db-snapshot "$backup_name"
 
   # Back to what run starts from. C, stalled after its attempt, is killed with its link cut: the
-  # attempt is never sent, and the restore removes it.
+  # attempt is never sent. A start puts the split back only once the instance answers, so C starts
+  # on S3's step-4 snapshots, with no approved plan, and is paused while step 3's are restored under
+  # it, its split kept: started on step 3's, C could dispatch its plan before the split is back.
   ref='S4 restores handoff'
   check "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
   check "$ref" 'inject kill C' "$bin/inject" kill C
-  check "$ref" 'inject db-restore s3-step3' "$bin/inject" db-restore s3-step3
-  check "$ref" 'inject bao-restore s3-step3' "$bin/inject" bao-restore s3-step3
+  check "$ref" 'inject db-restore s3-step4' "$bin/inject" db-restore s3-step4
+  check "$ref" 'inject bao-restore s3-step4' "$bin/inject" bao-restore s3-step4
   check "$ref" "C's control file removed" interrupt -
   check "$ref" 'inject start C, its link to the worker cut' "$bin/inject" start C
-  check "$ref" 'inject unpause A and B' both unpause
+  check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
+  check "$ref" 'inject pause C' "$bin/inject" pause C
+  check "$ref" 'inject db-restore s3-step3' "$bin/inject" db-restore s3-step3
+  check "$ref" 'inject bao-restore s3-step3' "$bin/inject" bao-restore s3-step3
+  check "$ref" 'inject unpause A, B and C' servers unpause
   call_port=$SERVER_A_PORT
   check "$ref" 'A reads the restored database' within 60 db_reads
   check "$ref" "restored: no act after the restores began, step 3's plan the only apply-config plan, approved by its approval and unexpired for ten minutes more, no apply-config operation" \
