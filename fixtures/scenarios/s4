@@ -504,19 +504,27 @@ restored_step4() {
     [ "$(sql "SELECT count(*) FROM plan WHERE kind = 'apply-config'")" = 0 ] && nothing_since 0 &&
     [ "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" = "$rel" ]
 }
+# must <ref> <what> <command...>: a prerequisite of what follows: the command succeeds, recorded
+# PASS, or the run stops (check records a FAIL and goes on).
+must() {
+  local ref=$1 what=$2
+  shift 2
+  "$@" || die "s4: $ref: $what failed; nothing after it can run"
+  result PASS "$ref" "$what"
+}
 # from_step4 <case> <stall step>: C, its link cut and A and B paused, killed; S3's step-4 snapshots
 # restored; C told to stall at the step and started; then an apply-config plan of the S2 release as
-# h-publisher on C, its id in plan_id. The stall is a prerequisite: nothing after it may send. The
-# snapshots hold no apply-config plan, so C has nothing to dispatch before its split is back.
+# h-publisher on C, its id in plan_id. Each step up to the start is a prerequisite: the stall, so
+# that nothing after it may send, and the restore, whose snapshots hold no apply-config plan, so
+# that C has nothing to dispatch before its split is back.
 from_step4() {
   local ref="S4 negative controls, $1"
-  check "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
-  check "$ref" 'inject kill C' "$bin/inject" kill C
-  check "$ref" 'inject db-restore s3-step4' "$bin/inject" db-restore s3-step4
-  check "$ref" 'inject bao-restore s3-step4' "$bin/inject" bao-restore s3-step4
-  interrupt "$2" stall || die "s4: C's stall not installed; nothing after it can run"
-  result PASS "$ref" "C told to stall at $2"
-  check "$ref" 'inject start C, its link to the worker cut' "$bin/inject" start C
+  must "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
+  must "$ref" 'inject kill C' "$bin/inject" kill C
+  must "$ref" 'inject db-restore s3-step4' "$bin/inject" db-restore s3-step4
+  must "$ref" 'inject bao-restore s3-step4' "$bin/inject" bao-restore s3-step4
+  must "$ref" "C told to stall at $2" interrupt "$2" stall
+  must "$ref" 'inject start C, its link to the worker cut' "$bin/inject" start C
   check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
   check "$ref" 'C reads the restored database' within 60 db_reads
   check "$ref" "restored to S3's step-4 snapshots: no apply-config plan or operation, the worker's Desired the S2 release, the first restore's last act" \
@@ -590,9 +598,9 @@ restores() {
   pre_state
   # C alone dispatches from here on; each case kills it, so a stall left by the last one ends there.
   # A prerequisite: A or B would dispatch the cases' plans with no stall.
-  both pause || die "s4: A and B not paused; C cannot dispatch alone"
-  result PASS "$ref" 'inject pause A and B'
+  must "$ref" 'inject pause A and B' both pause
   call_port=$SERVER_C_PORT
+  # Each case's bundle is captured before the next restore removes its timeline.
 
   # The assignment changed after planning and the approval: comparison 2.
   from_step4 assignment dispatch-attempted
@@ -604,6 +612,7 @@ restores() {
   check "$ref, assignment" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
   check "$ref, assignment" "the commitment refused by comparison 2, the machine's assignment revision changed; no operation" \
     within 90 commit_refused "$p" 2 "the machine's assignment revision changed"
+  outcome_bundle "$ref, assignment" restores-assignment
 
   # A later release, then the approval, which does not compare Desired: comparison 2. Its control is
   # run's commitment of step 3's plan with no publication between (ER choice §10.24).
@@ -616,6 +625,7 @@ restores() {
   check "$ref, desired" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
   check "$ref, desired" "the commitment refused by comparison 2, the machine's Desired release changed; no operation" \
     within 90 commit_refused "$p" 2 "the machine's Desired release changed"
+  outcome_bundle "$ref, desired" restores-desired
 
   # Cancelled after the commitment, with no attempt: unresolved, then cancelled (ER §9.2).
   from_step4 cancelled dispatch-committed
@@ -629,6 +639,7 @@ restores() {
   result PASS "$ref, cancelled" 'C released, told to stall after an attempt instead'
   check "$ref, cancelled" 'the attempt refused by comparison 1, the plan is cancelled; the operation committed to unresolved, then cancelled, on the timeline; no attempt' \
     within 90 settled_cancelled 'the plan is cancelled'
+  outcome_bundle "$ref, cancelled" restores-cancelled
 
   result SKIP "$ref" 'a revocation started while a commitment holds the approval waits for it, and the control without the lock does not (DS row 003): the Go check TestCommitmentRevocationsWait and the DS re-run'
 
@@ -649,6 +660,7 @@ restores() {
   result PASS "$ref, identity before" 'C released, told to stall after an attempt instead'
   check "$ref, identity before" "the commitment refused by comparison 1, the approver's identity is revoked; no operation" \
     within 90 commit_refused "$p" 1 "the approver's identity is revoked"
+  outcome_bundle "$ref, identity before" restores-identity-before
 
   # Revoked after the commitment, with no attempt: unresolved, its scope held, then cancelled (ER §3.3).
   from_step4 identity-after dispatch-committed
@@ -662,6 +674,7 @@ restores() {
   result PASS "$ref, identity after" 'C released, told to stall after an attempt instead'
   check "$ref, identity after" "the attempt refused by comparison 1, the approver's identity is revoked; the operation committed to unresolved, then cancelled, on the timeline; no attempt" \
     within 90 settled_cancelled "the approver's identity is revoked"
+  outcome_bundle "$ref, identity after" restores-identity-after
 
   # OpenBao paused holds the commitment; a role removed at the issuer afterwards does not stop it
   # (PA choice §17.23). S3's approval revocation before commitment, which refuses, is the contrast.
@@ -696,17 +709,16 @@ restores() {
   # on S3's step-4 snapshots, with no approved plan, and is paused while step 3's are restored under
   # it, its split kept: started on step 3's, C could dispatch its plan before the split is back.
   ref='S4 restores handoff'
-  check "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
-  check "$ref" 'inject kill C' "$bin/inject" kill C
-  check "$ref" 'inject db-restore s3-step4' "$bin/inject" db-restore s3-step4
-  check "$ref" 'inject bao-restore s3-step4' "$bin/inject" bao-restore s3-step4
-  check "$ref" "C's control file removed" interrupt -
-  # A prerequisite: C unpaused on step 3's approved plan without its split would apply it.
-  "$bin/inject" start C || die "s4: C not started with its link to the worker cut; step 3 is not restored"
-  result PASS "$ref" 'inject start C, its link to the worker cut'
+  # Prerequisites up to the pause: C started or unpaused on an approved plan without its split
+  # would apply it.
+  must "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
+  must "$ref" 'inject kill C' "$bin/inject" kill C
+  must "$ref" 'inject db-restore s3-step4' "$bin/inject" db-restore s3-step4
+  must "$ref" 'inject bao-restore s3-step4' "$bin/inject" bao-restore s3-step4
+  must "$ref" "C's control file removed" interrupt -
+  must "$ref" 'inject start C, its link to the worker cut' "$bin/inject" start C
   check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
-  "$bin/inject" pause C || die "s4: C not paused; step 3 is not restored under it"
-  result PASS "$ref" 'inject pause C'
+  must "$ref" 'inject pause C' "$bin/inject" pause C
   check "$ref" 'inject db-restore s3-step3' "$bin/inject" db-restore s3-step3
   check "$ref" 'inject bao-restore s3-step3' "$bin/inject" bao-restore s3-step3
   check "$ref" 'inject unpause A, B and C' servers unpause
