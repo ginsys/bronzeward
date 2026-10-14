@@ -278,11 +278,12 @@ func (a *API) attemptAndSend(ctx context.Context, operation string, gen int64, m
 }
 
 // respond records the attempt's response. The response is held only in this process, so a lost
-// database connection is retried after each lease until the record commits (DS row 016); the
-// owner token refuses it once another controller took the operation over. A retry that finds the
-// response already recorded met a COMMIT that succeeded after its reply was lost: the loop carries
-// the operation on from its recorded state. Any other failure leaves the operation sending until a
-// controller start takes it over (§3.4): no timer does.
+// database connection is retried after each lease until the record commits (DS row 016). One that
+// commits after another controller took the operation over is a late response: it accounts for
+// the attempt and leaves the operation to its new owner. A retry that finds the response already
+// recorded met a COMMIT that succeeded after its reply was lost: the loop carries the operation on
+// from its recorded state. Any other failure leaves the operation sending until a controller start
+// takes it over (§3.4): no timer does.
 func (a *API) respond(ctx context.Context, attempt, operation string, gen int64, machine, plan string, resp talos.Response) error {
 	r, err := a.recordResponse(ctx, attempt, resp)
 	for err != nil && connLost(err) {
@@ -295,6 +296,7 @@ func (a *API) respond(ctx context.Context, attempt, operation string, gen int64,
 		r, err = a.recordResponse(ctx, attempt, resp)
 		var ref *outcomeRefused
 		if errors.As(err, &ref) && ref.Cause == alreadyResponded {
+			seam.At("dispatch-responded")
 			return nil
 		}
 	}
