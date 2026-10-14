@@ -104,6 +104,7 @@ type options struct {
 	noEpochTerm    bool                                                                                 // the epoch-term control at ingestion start (§5.1, §16)
 	noMachineLock  bool                                                                                 // the machine-lock control at commitment (choice §10.24, §3.2 comparison 2)
 	readThenWrite  bool                                                                                 // the owner-token control at an attempt (§3.3 comparison 7, DS row 018)
+	noPlanCheck    bool                                                                                 // the in-transaction plan-check control at an attempt (§3.3 comparison 1, DS row 006)
 	afterEffect    func()                                                                               // runs in the transaction, after the effect, act and record
 	beforeRead     func()                                                                               // runs when a read route starts, after routing
 	beforeCommit   func(attempt int) error                                                              // fails an attempt before COMMIT

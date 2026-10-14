@@ -499,7 +499,8 @@ changed, and nothing sent; this step's commitment of the same plan with no publi
 the control (ER choice §10.24); the publication racing the commitment itself is a *check* (§7.1).
 A plan cancelled after commitment with no attempt: the operation goes `unresolved`, then
 `cancelled`, and nothing is sent (ER §9.2). A revocation started while a commitment holds the
-approval waits for it, and the control that inserts without the lock does not wait (DS row 003).
+approval waits for it (DS row 003); it also waits on the machine row and plan state the
+commitment holds, so no unlocked control applies (PA §16).
 The approver's identity revoked before commitment, and after it with no attempt: the plan cannot
 commit; or its operation goes `unresolved` with its scope held, each transition on the timeline,
 then `cancelled`, and nothing is sent (ER §3.3). OpenBao paused (`bin/inject pause openbao`) so that
@@ -868,7 +869,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | C §15: SR and SP matrices through the compiler's path, with import-base references and SP's oracle over Bronzeward's own log and support formats; fidelity check | S2 precondition and negative controls | #23 |
 | C §15 and PA §16: every refusal of C §13, every walk-through of PA §13 and refusal of PA §14 | the scenario of each clause's issue, plus *check* for the rest | #21 to #29 |
 | ER §9.2: DS rows 001–023 through the implementation over the worker's endpoint, with controls 006, 008, 011 and row 013's early accounting refused; if the executor's fallback is taken, the rows through it and the leak scan of its channel | S4 precondition plus *check* for the scan | #26 |
-| ER §9.2: sending only after the attempt commits; each §3.2 and §3.3 lock with its unlocked control | S4 and its negative controls (DS rows 003 and 011) plus *check* | #25, #26 |
+| ER §9.2: sending only after the attempt commits; each §3.2 and §3.3 lock with its unlocked control | S4 and its negative controls (DS rows 003 and 011; row 003's lock has no unlocked control, PA §16) plus *check* | #25, #26 |
 | ER §9.2: expiry, observation age, a contradicting newer observation, the attempt bound, each refusing; the bound exhausted after a lost response leaves no further attempt and ends `failed` | S3, S4 negative controls; *check* for the last two | #25, #26, #28 |
 | ER §9.2: plan cancellation before commitment and after it with no attempt | S3 negative controls (before), S4 negative controls (after) | #25, #26 |
 | ER §9.2: a plan for a release that is not the machine's `Desired` refused at creation; a commitment refused after a publication that changed `Desired`, with S4's commitment as the control; a publication racing the commitment waits for it or precedes it, with the unlocked control; a publication after commitment leaves the attempt admitted (ER §3.3) | S3 negative controls (the refusal at creation), S4 negative controls (the refused commitment) plus *check* for the race and the attempt | #25, #26 |

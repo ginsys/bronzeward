@@ -181,7 +181,7 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 	if err != nil {
 		return r, machine, plan, err
 	}
-	if cause != "" {
+	if cause != "" && !a.o.noPlanCheck {
 		return r, machine, plan, refuseAttempt("1", cause)
 	}
 	// 2: the assignment head and the baseline revision are the bound ones. Desired is not compared:

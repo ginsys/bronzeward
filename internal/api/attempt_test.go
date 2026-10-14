@@ -611,6 +611,39 @@ func TestAttemptReadsItsOwnCommitment(t *testing.T) {
 	}
 }
 
+// Comparison 1 is checked inside the attempt's transaction (§3.3, DS row 004): an approval revoked
+// after the commitment refuses the attempt. The control (DS row 006) skips that check, as a
+// controller relying on its early check alone would: it records the attempt, which is then sent.
+func TestAttemptRevokedControl(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		control bool
+	}{{"checked", false}, {"control", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ae := newAttemptEnv(t, "")
+			ae.a.o.noPlanCheck = c.control
+			if rec := ae.revokeApproval(ae.human("h-recovery"), ae.key(), ae.approval, `{"reason":"wrong"}`); rec.Code != http.StatusCreated {
+				t.Fatalf("%d %s", rec.Code, rec.Body)
+			}
+			_, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
+			if c.control {
+				if err != nil {
+					t.Fatalf("control: %v", err)
+				}
+				if n := count(t, ae.db, `SELECT count(*) FROM attempt a JOIN operation o ON o.id = a.operation
+					WHERE a.operation = $1 AND o.state = 'sending'`, ae.op); n != 1 {
+					t.Fatal("control: no attempt recorded after the revocation")
+				}
+				return
+			}
+			ae.wantAttemptRefused(t, err, "1", "the approval is revoked", "", "committed",
+				settled{"unresolved", "1", "the approval is revoked"}, settled{"cancelled", "1", "the approval is revoked"})
+		})
+	}
+}
+
 // Comparison 7 is checked inside the write that moves the operation to sending (§3.3, DS row 018):
 // a takeover that commits while the attempt waits on the operation row, standing in for one that
 // holds no machine lock, refuses the attempt. The control reads the owner token first and writes

@@ -2997,8 +2997,11 @@ each (design §7.7 consequences):
 - two requests with one idempotency key in flight together, with a control
   that drops the key lock;
 - an approval revocation and an identity revocation each started while a
-  commitment holds the approval, waiting for it, with a control that inserts
-  the revocation without the lock and does not wait (DS row 003);
+  commitment holds the approval, waiting for it (DS row 003); no unlocked
+  control applies, since each revocation also takes the machine row
+  `FOR UPDATE` (T5b, T5c), and an approval revocation the plan state
+  `FOR UPDATE`, both of which the commitment holds, so one without the
+  approval's lock still waits;
 - an identity revocation appending its entry to the timeline of every machine
   with a plan that identity approved whose plan or operation is not terminal,
   and of no other machine, and an inventory started while it waits on a
