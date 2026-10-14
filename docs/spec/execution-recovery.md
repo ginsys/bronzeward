@@ -579,9 +579,13 @@ the same condition: the same rows re-run through it, and compilation §15's
 leak scan applied to its descriptor channel over successful, rejected and
 interrupted dispatches. If either fails there too, dispatch is not accepted and
 the selection returns to the owner. The machinery client met the condition
-([AP S4](acceptance-plan.md#s4-safe-apply)'s precondition), with the rows
-choice §10.32 names run as the Go checks it describes, so
-the fallback is not built.
+([AP S4](acceptance-plan.md#s4-safe-apply)'s precondition), so the fallback is
+not built. Two of the condition's rows do not run through the controller, as
+choice §10.32 records: row 003's revocation refuses the attempt before any Talos
+call, so its outcome, nothing sent, does not depend on the client, and its Go
+check uses a Talos stand-in; row 022's invalid configuration is sent by the
+machinery client to the worker's own endpoint directly, since no plan carries
+one.
 
 Both clients are built from the cluster's one talosconfig, which carries
 `os:admin` ([persistence and API §3.3](persistence-api.md#33-talos-access)). Every observation (§4.1), whether
@@ -2181,7 +2185,9 @@ conservative option; those that do not say so. Each is marked in place as
     retry's classification (023), and the unchecked or unlocked variants (006,
     008). This is the selected test route, not a claim that no fault
     could reach them: a Go check fixes the interleaving that a live run would
-    have to arrange across processes. Each is a Go check driving
+    have to arrange across processes. Row 003 is also one of §3.5's condition
+    rows; its attempt is refused before any Talos call, so a stand-in meets it
+    (§3.5). Each is a Go check driving
     the implementation's transactions, or its executor with a Talos stand-in,
     against PostgreSQL. Row 011's control is the schema's, not a transaction's:
     with both scope indexes dropped, a second plan's operation rows insert
