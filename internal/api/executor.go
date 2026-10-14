@@ -20,7 +20,7 @@ type dispatchCandidate struct {
 type heldOperation struct {
 	id, machine, cluster, plan, state string
 	gen                               int64
-	retryAccess                       int
+	retryAccess                       string // accessKey of the retry's observation
 	sent, unaccounted, retry          bool
 }
 
@@ -221,8 +221,8 @@ func (a *API) foreignOperations(ctx context.Context) ([]heldOperation, error) {
 // it, as no timer does (§3.4). sent marks an operation with a recorded attempt. retry marks an
 // unresolved operation whose latest classification is this token's safe-to-retry, its observation
 // still within the plan's age, with no attempt, response, takeover or classification since: one
-// that has aged out is observed and classified again. retryAccess is the Talos access version that
-// observation read.
+// that has aged out is observed and classified again. retryAccess is the Talos access version
+// identity (path, version, created_time) that observation read.
 func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 	current, err := a.currentEpoch(ctx)
 	if err != nil {
@@ -232,7 +232,7 @@ func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 			EXISTS (SELECT FROM attempt WHERE operation = o.id),
 			EXISTS (SELECT FROM attempt t WHERE t.operation = o.id
 				AND NOT EXISTS (SELECT FROM attempt_accounting c WHERE c.attempt = t.id)),
-			(SELECT ob.access_version FROM operation_classification c JOIN observation ob ON ob.id = c.observation
+			(SELECT ob.access_path || '@' || ob.access_version || '@' || ob.access_created FROM operation_classification c JOIN observation ob ON ob.id = c.observation
 					JOIN machine_event se ON se.machine = ob.machine AND se.revision = ob.basis
 				WHERE c.operation = o.id AND c.outcome = 'safe-to-retry'
 					AND c.owner = o.owner AND c.owner_gen = o.owner_gen AND c.owner_epoch = o.owner_epoch
@@ -251,12 +251,12 @@ func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 	var ops []heldOperation
 	for rows.Next() {
 		var op heldOperation
-		var retryAccess sql.NullInt64
+		var retryAccess sql.NullString
 		if err := rows.Scan(&op.id, &op.machine, &op.cluster, &op.plan, &op.state, &op.gen, &op.sent, &op.unaccounted,
 			&retryAccess); err != nil {
 			return nil, err
 		}
-		op.retry, op.retryAccess = retryAccess.Valid, int(retryAccess.Int64)
+		op.retry, op.retryAccess = retryAccess.Valid, retryAccess.String
 		ops = append(ops, op)
 	}
 	return ops, rows.Err()

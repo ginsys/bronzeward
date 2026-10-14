@@ -15,6 +15,12 @@ import (
 	"github.com/ginsys/bronzeward/internal/talos"
 )
 
+// accessKey is v's whole version identity (PA §16: path, version and created_time), in the form
+// heldOperations reads it from the observation a retry rests on.
+func accessKey(v provider.TalosAccessVersion) string {
+	return fmt.Sprintf("%s@%d@%s", v.Path, v.Version, createdText(v.CreatedTime))
+}
+
 // observeFor is what an observation is taken for (execution-recovery.md §4.1): its purpose, and
 // the plan and operation it is taken for, if any. access, when set, is the Talos access a dispatch
 // read once for this observation and the attempt made on it (§3.1 item 2); it is not read again.
@@ -242,7 +248,7 @@ func (a *API) recordObservation(ctx context.Context, machine string, f observeFo
 	var path, version, created, smbios, nodeID, clusterID any
 	var digest []byte
 	if o.Access != nil {
-		path, version, created = o.Access.Path, int64(o.Access.Version), o.Access.CreatedTime.UTC().Format(time.RFC3339Nano)
+		path, version, created = o.Access.Path, int64(o.Access.Version), createdText(o.Access.CreatedTime)
 	}
 	if o.Identity != nil {
 		smbios, nodeID, clusterID = nullable(o.Identity.SMBIOSUUID), o.Identity.NodeID, o.Identity.ClusterID

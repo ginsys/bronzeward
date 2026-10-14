@@ -101,14 +101,15 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 	if err == nil {
 		have = &acc
 	}
-	if op.retry && (have == nil || have.Version().Version == op.retryAccess) {
-		// A classified retry rests on its observation, which read this access version; one made
-		// against another version is observed and classified again below.
+	if op.retry && (have == nil || accessKey(have.Version()) == op.retryAccess) {
+		// A classified retry rests on its observation, which read this access version identity; one
+		// made against another (a version number, or a created_time after the metadata was written
+		// again) is observed and classified again below.
 		u, err := a.useTimeCheck(ctx, op.machine, op.cluster, op.plan, op.id, have, began)
 		if err != nil {
 			return err
 		}
-		if u.access.Version().Version != op.retryAccess {
+		if accessKey(u.access.Version()) != op.retryAccess {
 			return fmt.Errorf("operation %s: %w", op.id, errAccessMoved)
 		}
 		return a.attemptAndSend(ctx, op.id, op.gen, op.machine, op.plan, u)

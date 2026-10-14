@@ -2217,7 +2217,7 @@ conservative option; those that do not say so. Each is marked in place as
     as `none-bound`, and §9.2's bound-health cases (a failing check inside the
     convergence window, at or after the verification deadline, unreadable at
     it) apply to the first operation class that binds one, such as the
-    upgrades §18.2 excludes. The contradicting-digest case and its immediate
+    upgrades §18.2 excludes, and are tracked by ginsys/bronzeward#188. The contradicting-digest case and its immediate
     `failed` hold now; the drift record that outcome opens arrives with drift
     records (ginsys/bronzeward#27). Agent decision, 2026-10-14
     (ginsys/bronzeward#26). Alternatives: binding a Talos health check to the
