@@ -533,11 +533,14 @@ func (p *publishEnv) refused(status int, code string) *refusal {
 	if n := p.count(`SELECT count(*) FROM dependency_status`); n != statuses {
 		p.t.Fatalf("%d statuses; want %d", n, statuses)
 	}
-	var state, typ, entry string
+	var state, typ, title, entry string
 	var owner sql.NullString
-	if err := p.db.QueryRow(`SELECT state, error->>'type', owner FROM operation WHERE id = $1`, p.job.op).
-		Scan(&state, &typ, &owner); err != nil {
+	if err := p.db.QueryRow(`SELECT state, error->>'type', error->>'title', owner FROM operation WHERE id = $1`, p.job.op).
+		Scan(&state, &typ, &title, &owner); err != nil {
 		p.t.Fatal(err)
+	}
+	if title == "" {
+		p.t.Fatalf("problem %s has no title", code)
 	}
 	if err := p.db.QueryRow(`SELECT entry::text FROM operation_event WHERE operation = $1 AND number = 1`, p.job.op).
 		Scan(&entry); err != nil {
