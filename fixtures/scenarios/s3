@@ -691,6 +691,13 @@ deps_retained() {
   answers_with '(.items | length) > 0 and ([.items[] | select(.class != "retained" or .stale)] == [])' \
     200 - GET '/api/v1/dependencies?limit=500' "$tok"
 }
+# dispatched_only_approved <approved> <unapproved> <revision>: the worker's timeline holds a
+# use-time check of the approved plan after <revision>, and none ever of the unapproved plan.
+dispatched_only_approved() {
+  [ "$(sql "SELECT (count(*) FILTER (WHERE entry->>'plan' = '$1' AND revision > $3) > 0)
+      || ' ' || count(*) FILTER (WHERE entry->>'plan' = '$2')
+      FROM machine_event WHERE machine = '$machine_w' AND kind = 'use-time-check'")" = 'true 0' ]
+}
 # worker_has_only_the_handover: the worker has no plan but the handover's, committed, and no
 # operation but its adopt operation.
 worker_has_only_the_handover() {
@@ -813,6 +820,8 @@ approval_part() {
   # The controller dispatches an approved plan: with every instance cut from the worker, its
   # evidence observation fails and nothing commits. S4 joins the links again.
   check 'S3 precondition' 'inject linksplit A, B and C from the worker: no approved plan of this part commits' worker_links linksplit
+  # With a link left open, an approved plan of this part would commit and apply.
+  counted 3 '^[ABC] worker$' "$STATE/linksplits" || die "s3: not every link to the worker is cut; nothing after it can run"
 
   # Step 1: three heartbeats (5 s) of the controller's loop have passed since S2 ended, and it has
   # made no plan and no operation. A pass with no candidate records nothing, so the interval is the
@@ -898,9 +907,15 @@ approval_part() {
   # The monitors pass every 60 s: S2's last restore put OpenBao back, and each status is read again.
   check "$ref" 'the monitors classify every dependency retained' within 240 deps_classified
   check "$ref" 'every dependency retained, none stale, as served' deps_retained
+  # With the links cut no plan reaches an operation, approved or not: what tells the unapproved plan
+  # apart is that dispatch never begins for it. Step 3's approved plan is retried every lease, each
+  # time with a use-time check; once one is recorded after this point, the unapproved plan has none.
+  rev_u=$(sql "SELECT coalesce(max(revision), 0) FROM machine_event WHERE machine = '$machine_w'") || die "s3: cannot read the worker's timeline"
   sleep 16
   check "$ref" 'every dependency retained and a plan unapproved, three heartbeats on: no operation, the plan still proposed' \
     same "$(sql "SELECT (SELECT state FROM plan_state WHERE plan = '$pu') || ' ' || (SELECT count(*) FROM operation WHERE seq > $ops0 AND kind = 'apply-config')")" 'proposed 0'
+  check "$ref" "the controller dispatching meanwhile: a use-time check of step 3's approved plan after that point, none ever of the unapproved plan" \
+    within 40 dispatched_only_approved "$p2" "$pu" "$rev_u"
   check "$ref" 'no operation exists for any plan of this part: every one proposed, approved, expired, cancelled or revoked' \
     same "$(sql "SELECT count(*) FROM plan p JOIN operation o ON o.plan = p.id WHERE p.kind = 'apply-config'")" 0
   outcome_bundle "$ref" controls
