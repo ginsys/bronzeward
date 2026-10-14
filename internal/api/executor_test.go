@@ -914,10 +914,15 @@ func retryFollowsAccessRotation(t *testing.T, move func(*provider.TalosAccessVer
 		return xe.entries(t, "use-time-check") > 0 && count(t, xe.db, `SELECT count(*) FROM operation_classification
 			WHERE outcome = 'safe-to-retry'`) > 0
 	})
+	// The access moves while the provider is still sealed, and a pass ends before it unseals: a
+	// pass that read the earlier access, in flight when until returned, is held back too.
 	xe.x.mu.Lock()
 	v := xe.x.access.Version()
 	move(&v)
 	xe.x.access = provider.NewTalosAccess(v, xe.x.access.Talosconfig())
+	xe.x.mu.Unlock()
+	passEnds(t, a, idle)
+	xe.x.mu.Lock()
 	xe.x.decryptErr = nil
 	xe.x.mu.Unlock()
 	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
