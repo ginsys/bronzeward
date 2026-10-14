@@ -74,8 +74,18 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 		return a.verify(ctx, op.id, op.gen, op.machine, op.plan, "completion")
 	}
 	// An attempt nobody accounted for is accounted by a decision (§5.2) before any observation can
-	// settle the operation (row 020): the loop takes none meanwhile.
+	// settle the operation (rows 012-015, 020). The decision names recovery observations as its
+	// settle's start and end, so the loop takes them, paced, and settles nothing on them.
 	if op.unaccounted {
+		due, err := a.recoveryReadDue(ctx, op.id)
+		if err != nil || !due {
+			return err
+		}
+		o, err := a.observe(ctx, op.machine, observeFor{purpose: "recovery", plan: op.plan, operation: op.id})
+		if err != nil {
+			return err
+		}
+		a.o.logf("operation %s: recovery observation %s: an attempt is not accounted for", op.id, o.ID)
 		return nil
 	}
 	// Unresolved: the access is read once for the observation and, if it classifies the operation
@@ -124,6 +134,21 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 		return err
 	}
 	return a.attemptAndSend(ctx, op.id, op.gen, op.machine, op.plan, u)
+}
+
+// recoveryReadDue is whether the loop takes a recovery observation of an operation with an
+// unaccounted attempt (§5.2): once its attempts' latest transport deadline has passed, and then once
+// per settle floor, so that a decision finds the first successful read after that deadline and one
+// begun after the floor, with no read on every pass.
+func (a *API) recoveryReadDue(ctx context.Context, operation string) (bool, error) {
+	var due bool
+	err := a.db.QueryRowContext(ctx, `WITH d AS (SELECT max(transport_deadline) AS at FROM attempt WHERE operation = $1)
+		SELECT clock_timestamp() > d.at AND NOT EXISTS (SELECT FROM observation_start s
+				JOIN machine_event e ON e.machine = s.machine AND e.revision = s.revision
+			WHERE s.operation = $1 AND s.purpose = 'recovery' AND e.at > d.at
+				AND e.at > clock_timestamp() - make_interval(secs => $2))
+		FROM d`, operation, a.d.exec.SettleFloor.Seconds()).Scan(&due)
+	return due, err
 }
 
 // useTimeCheck is §3.1 item 2: the cluster's Talos access, unless the caller read it, and the

@@ -921,6 +921,11 @@ only when all of these hold and are recorded with it:
    (DS §2.3); a change during the settle is recorded, and the decision states
    how it is explained.
 
+The owner of an operation with an unaccounted attempt takes these recovery
+observations: none before the attempts' latest transport deadline, then one,
+and one more each time a settle floor has passed since its last. They settle
+nothing, since the attempt is unaccounted (§4); the decision names two of them.
+
 The decision records that it is a judgement, not evidence that the request can
 no longer land. The residual is explicit: if the request lands after the
 decision, it can overwrite work that the released scope then admitted, which is
