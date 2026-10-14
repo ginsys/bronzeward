@@ -263,6 +263,21 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 			heads[i].key, heads[i].actual = read[heads[i].head].key, read[heads[i].head].actual
 		}
 	}
+	// The operations holding a covered machine's scope, read after the machine and head locks: a
+	// commitment holds the machine FOR UPDATE and the assignment head FOR SHARE, so one that held
+	// either has committed by now and its operation is visible to this statement (§1.2 item 2).
+	held := map[string]string{}
+	err = eachRow(ctx, tx, `SELECT machine, id FROM operation WHERE machine = ANY ($1) AND kind = 'apply-config'
+		AND state IN ('committed', 'sending', 'verifying', 'unresolved')`, covered,
+		func(row *sql.Rows) error {
+			var m, op string
+			err := row.Scan(&m, &op)
+			held[m] = op
+			return err
+		})
+	if err != nil {
+		return "", nil, err
+	}
 	var draftState string
 	var draftRev int
 	if err := tx.QueryRowContext(ctx, `SELECT state, revision FROM draft WHERE id = $1 FOR UPDATE`, j.draft).
@@ -309,7 +324,7 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	case !errors.Is(err, sql.ErrNoRows):
 		return "", nil, err
 	}
-	if ref, err := checkInputs(j, u, draftState, draftRev, heads, locked, bases, scopes, recovery); ref != nil || err != nil {
+	if ref, err := checkInputs(j, u, draftState, draftRev, heads, locked, bases, scopes, held, recovery); ref != nil || err != nil {
 		return "", ref, err
 	}
 
@@ -395,11 +410,12 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 
 // checkInputs compares what the commit read under its locks with what the draft and the
 // compilation bound (§6.2): the draft open at the bound revision; stale input in its three forms
-// (§4.2), heads in id order, then machines; and, for an assignment change in recovery mode, the
-// machine's scope released (§12.2). A changed assignment of a machine the release does not cover
-// is the unit's defect, and an error (ruling R13).
+// (§4.2), heads in id order, then machines; for an assignment change, no operation holding the
+// machine's scope (execution-recovery §8 invariant 9) and, in recovery mode, the scope released
+// (§12.2). A changed assignment of a machine the release does not cover is the unit's defect, and
+// an error (ruling R13).
 func checkInputs(j publishJob, u releaseUnit, draftState string, draftRev int, heads, locked []sourceHead,
-	bases, scopes map[string]string, recovery bool) (*refusal, error) {
+	bases, scopes, held map[string]string, recovery bool) (*refusal, error) {
 	switch {
 	case draftState != "open":
 		return refuse(http.StatusConflict, "conflict", "the draft is no longer open").with("draft", j.draft), nil
@@ -445,6 +461,9 @@ func checkInputs(j publishJob, u releaseUnit, draftState string, draftRev int, h
 		switch {
 		case !covered:
 			return nil, fmt.Errorf("the draft changes the assignment of machine %s, which the release does not cover", h.key)
+		case held[h.key] != "":
+			return refuse(http.StatusConflict, "scope-busy", "an operation holds the machine scope; its assignment cannot change").
+				with("scope", h.key).with("operation", held[h.key]), nil
 		case recovery && scope != "released":
 			return refuse(http.StatusConflict, "recovery-mode-active",
 				"recovery mode refuses an assignment change on a scope not released in the current epoch").with("scope", h.key), nil

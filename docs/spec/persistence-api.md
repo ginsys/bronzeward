@@ -1015,7 +1015,11 @@ covered meanwhile. Two publications seeding one KV version meet at the
 version's unique index, as two introducing one name do: the second waits for
 the first, keeps its row and reads its creation time. The machine-scope check is
 the rule execution and recovery states for any assignment change; §1.2 item 2
-makes it race-free. A name the draft introduces has no row to lock: two
+makes it race-free. T3 reads the `apply-config` operations of the covered
+machines after its machine and head locks, so a commitment holding either has
+committed first, and refuses an assignment change on a machine whose scope one
+of them holds (`committed`, `sending`, `verifying` or `unresolved`) `409
+scope-busy`, naming the scope and the operation. A name the draft introduces has no row to lock: two
 publications introducing the same name meet at the unique index, where the
 second insert waits for the first transaction and fails once it commits, so
 the second publication fails `409 stale-input` with the head's expected
