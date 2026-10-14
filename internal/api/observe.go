@@ -86,6 +86,8 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 	var err error
 	if f.access != nil {
 		acc = *f.access
+	} else if a.o.staleAccess != nil {
+		acc = *a.o.staleAccess
 	} else {
 		acc, err = a.d.exe.TalosAccess(ctx, cluster)
 	}

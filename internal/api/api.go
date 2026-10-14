@@ -106,6 +106,8 @@ type options struct {
 	noReadLock     string                                                                               // the named lock's control at commitment and attempt (§3.2, §9.2): "installation state", "assignment head", "plan state" or "rollout"
 	readThenWrite  bool                                                                                 // the owner-token control at an attempt (§3.3 comparison 7, DS row 018)
 	noPlanCheck    bool                                                                                 // the in-transaction plan-check control at an attempt (§3.3 comparison 1, DS row 006)
+	latestAccess   bool                                                                                 // the control that sends with the Talos access read again at send (PA §16)
+	staleAccess    *provider.TalosAccess                                                                // the stale-credential control: an observation uses this access instead of reading the latest (PA §16)
 	afterEffect    func()                                                                               // runs in the transaction, after the effect, act and record
 	beforeRead     func()                                                                               // runs when a read route starts, after routing
 	beforeCommit   func(attempt int) error                                                              // fails an attempt before COMMIT

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -360,8 +361,8 @@ func TestSettle(t *testing.T) {
 		ae.reach(t, "verifying")
 		return ae, ae.a, 1
 	}
-	lost := func(t *testing.T) (*attemptEnv, *API, int64) {
-		ae := newAttemptEnv(t, "")
+	lostWith := func(t *testing.T, extra string) (*attemptEnv, *API, int64) {
+		ae := newAttemptEnv(t, extra)
 		att := ae.sent(t)
 		if _, err := ae.a.recordResponse(context.Background(), att.Attempt, answer(talos.ClassTransport)); err != nil {
 			t.Fatal(err)
@@ -373,6 +374,15 @@ func TestSettle(t *testing.T) {
 			t.Fatal(err)
 		}
 		return ae, next, 2
+	}
+	lost := func(t *testing.T) (*attemptEnv, *API, int64) { return lostWith(t, "") }
+	// preDispatch is an observation showing the plan's pre-dispatch configuration.
+	preDispatch := func(t *testing.T, ae *attemptEnv) string {
+		return ae.observed(t, func(c *cobs) {
+			if err := ae.db.QueryRow(`SELECT expected_digest FROM plan WHERE id = $1`, ae.pid).Scan(&c.digest); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 	t.Run("completed", func(t *testing.T) {
 		t.Parallel()
@@ -487,6 +497,81 @@ func TestSettle(t *testing.T) {
 				AND c.relied = `+reliedSQL+` AND e.entry->'relied' = c.relied AND jsonb_array_length(c.relied) >= 3
 				AND c.owner_gen = 2 AND e.entry->>'outcome' = 'safe-to-retry'`, ae.op, obs, r.Revision); n != 1 {
 			t.Fatal("no classification record and entry as recorded")
+		}
+	})
+	// ER §9.2: the bound exhausted after a lost response leaves no further attempt and ends failed,
+	// on the completion observation that would otherwise classify it safe to retry.
+	t.Run("bound exhausted after a lost response", func(t *testing.T) {
+		t.Parallel()
+		ae, a, gen := lostWith(t, `,"maxAttempts":1`)
+		obs := preDispatch(t, ae)
+		r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.State != "failed" || r.Outcome != "failed" {
+			t.Fatalf("settled %+v", r)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM operation_classification WHERE operation = $1 AND outcome = 'safe-to-retry'`,
+			ae.op); n != 0 {
+			t.Fatalf("%d safe-to-retry classifications", n)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM attempt WHERE operation = $1`, ae.op); n != 1 {
+			t.Fatalf("%d attempts", n)
+		}
+	})
+	// ER §9.2, PA §16: an identity revocation after an attempt refuses its retry by comparison 1,
+	// though the operation was classified safe to retry before it.
+	t.Run("identity revoked after an attempt", func(t *testing.T) {
+		t.Parallel()
+		ae, a, gen := lost(t)
+		if r, err := a.settleOperation(context.Background(), ae.op, gen, preDispatch(t, ae)); err != nil || r.Outcome != "safe-to-retry" {
+			t.Fatalf("settled %+v: %v", r, err)
+		}
+		rec := revoke(ae.env, ae.human("h-recovery"), "k-revoke-identity-0123",
+			`{"identity":"`+ae.principalOf("h-approver")+`","reason":"left"}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("revocation: %d %s", rec.Code, rec.Body)
+		}
+		_, err := a.recordAttempt(context.Background(), ae.op, gen)
+		var refused *attemptRefused
+		if !errors.As(err, &refused) || refused.Comparison != "1" || refused.Cause != "the approver's identity is revoked" {
+			t.Fatalf("retry after the revocation: %v", err)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM attempt WHERE operation = $1`, ae.op); n != 1 {
+			t.Fatalf("%d attempts", n)
+		}
+	})
+	// ER §9.2: a retry's attempt is refused by comparison 3, nothing recorded, when an observation
+	// after its classification's shows another machine identity; the control is a matching one, after
+	// which the retry is recorded.
+	t.Run("retry evidence identity", func(t *testing.T) {
+		t.Parallel()
+		for _, match := range []bool{false, true} {
+			ae, a, gen := lost(t)
+			if r, err := a.settleOperation(context.Background(), ae.op, gen, preDispatch(t, ae)); err != nil || r.Outcome != "safe-to-retry" {
+				t.Fatalf("settled %+v: %v", r, err)
+			}
+			ae.evidence(t, ae.pid, func(s *evSeed) {
+				s.controller = a.d.owner.ID
+				if !match {
+					s.uuid = "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b"
+				}
+			})
+			_, err := a.recordAttempt(context.Background(), ae.op, gen)
+			if match {
+				if err != nil {
+					t.Fatalf("the retry on matching evidence: %v", err)
+				}
+				continue
+			}
+			var refused *attemptRefused
+			if !errors.As(err, &refused) || refused.Comparison != "3" || refused.Cause != "a newer observation contradicts the evidence" {
+				t.Fatalf("the retry on another identity: %v", err)
+			}
+			if n := count(t, ae.db, `SELECT count(*) FROM attempt WHERE operation = $1`, ae.op); n != 1 {
+				t.Fatalf("%d attempts", n)
+			}
 		}
 	})
 	t.Run("safe to retry on a recovery observation", func(t *testing.T) {

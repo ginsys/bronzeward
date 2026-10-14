@@ -23,6 +23,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/talos"
 	"github.com/ginsys/bronzeward/internal/talos/talostest"
 	"github.com/jackc/pgx/v5/pgconn"
+	"google.golang.org/grpc/codes"
 )
 
 // execEnv is a commitEnv whose machine is served by a stand-in node at the plan's route: the node
@@ -66,9 +67,10 @@ func newExecEnv(t *testing.T) *execEnv {
 		ce.target.rel, ce.machine, after[:])
 	mustExec(t, ce.db, `ALTER TABLE release_machine ENABLE TRIGGER immutable_rows`)
 	node.AcceptApply(t)
+	// The talosconfig's own endpoints and nodes, unroutable, are ignored: the machine's endpoint is dialled (PA §16).
 	return &execEnv{commitEnv: ce, node: node, artifact: artifact, x: &fakeExecutor{artifact: artifact,
 		access: provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + ce.cluster, Version: 1,
-			CreatedTime: accessCreated}, pki.Talosconfig("", "", ""))}}
+			CreatedTime: accessCreated}, pki.Talosconfig("192.0.2.1", "192.0.2.2", ""))}}
 }
 
 // executor is a controller of the current epoch over xe's database whose executor loop, once
@@ -201,6 +203,14 @@ func TestExecutorCompletes(t *testing.T) {
 		AND entry->'dependencies'->'artifact'->>'key' = 'bw-artifact' AND entry->>'plan' = $3`, xe.machine, evidence, xe.pid); n != 1 {
 		t.Fatalf("use-time check %s, evidence read access version %d", entry, evidence)
 	}
+	// PA §16 Talos access, executor: the read at dispatch is recorded as its path, version and
+	// created_time, those the evidence observation recorded.
+	if n := count(t, xe.db, `SELECT count(*) FROM machine_event e JOIN observation o ON o.machine = e.machine
+			JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis AND s.purpose = 'evidence'
+		WHERE e.machine = $1 AND e.kind = 'use-time-check' AND e.entry->'dependencies'->'access'->>'path' = o.access_path
+			AND (e.entry->'dependencies'->'access'->>'created')::timestamptz = o.access_created::timestamptz`, xe.machine); n != 1 {
+		t.Fatalf("use-time check %s names another access path or created_time than its evidence", entry)
+	}
 	if strings.Contains(entry, "hostname") || strings.Contains(entry, "cluster:") {
 		t.Fatalf("the check holds a value: %s", entry)
 	}
@@ -222,7 +232,8 @@ func TestExecutorCompletes(t *testing.T) {
 
 // ER §3.1 item 2: a dependency the dispatch itself needs that cannot be used stops it before
 // anything is committed or sent, and records the check with its failed result and cause; once the
-// dependency is back the same plan is dispatched and completes.
+// dependency is back the same plan is dispatched and completes. The artifact key is classified
+// `retained` throughout: a retained class admits no dispatch (DM §8, §10.1 item 8).
 func TestExecutorUseTimeCheckFailure(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -236,10 +247,20 @@ func TestExecutorUseTimeCheckFailure(t *testing.T) {
 		{"another key", "key-mismatch", func(x *fakeExecutor) { x.keyName = "other-key" }, func(x *fakeExecutor) { x.keyName = "" }, 0},
 		{"unreadable access", "denied", func(x *fakeExecutor) { x.err = fmt.Errorf("no: %w", provider.ErrDenied) },
 			func(x *fakeExecutor) { x.err = nil }, 1},
+		{"absent access", "absent", func(x *fakeExecutor) { x.err = fmt.Errorf("no: %w", provider.ErrAbsent) },
+			func(x *fakeExecutor) { x.err = nil }, 1},
+		{"malformed access", "malformed", func(x *fakeExecutor) { x.err = fmt.Errorf("no: %w", provider.ErrProtocol) },
+			func(x *fakeExecutor) { x.err = nil }, 1},
+		{"sealed access", "provider-unavailable", func(x *fakeExecutor) { x.err = fmt.Errorf("sealed: %w", provider.ErrUnavailable) },
+			func(x *fakeExecutor) { x.err = nil }, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			xe := newExecEnv(t)
+			if n := count(t, xe.db, `SELECT count(*) FROM dependency_status WHERE provider = 'transit' AND object = $1
+				AND class = 'retained'`, artifactKeyName); n < 1 {
+				t.Fatal("the artifact key is not classified retained")
+			}
 			tc.fail(xe.x)
 			life, stop := context.WithCancel(t.Context())
 			idle := make(chan struct{})
@@ -263,6 +284,165 @@ func TestExecutorUseTimeCheckFailure(t *testing.T) {
 			until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
 			if n := len(xe.node.AppliedRequests()); n != 1 {
 				t.Fatalf("%d requests", n)
+			}
+		})
+	}
+}
+
+// ER §9.2 and PA §3.3, against a stubbed Talos node: a commitment is refused by comparison 3, nothing
+// sent, when the evidence shows an SMBIOS UUID for a machine recorded by node ID or another node ID
+// for one recorded by it; a failed systeminformation read leaves the identity unread, which is no
+// evidence (choice §10.28): nothing is committed or sent. The controls admit a machine recorded by
+// node ID whose systeminformation read returns no resource, and one recorded by SMBIOS UUID showing
+// another node ID with its UUID and cluster ID.
+func TestExecutorCommitmentIdentityKeys(t *testing.T) {
+	t.Parallel()
+	byNodeID := func(t *testing.T, xe *execEnv) {
+		mustExec(t, xe.db, `ALTER TABLE machine DISABLE TRIGGER identity`)
+		mustExec(t, xe.db, `UPDATE machine SET smbios_uuid = NULL, talos_node_id = 'node-a' WHERE id = $1`, xe.machine)
+		mustExec(t, xe.db, `ALTER TABLE machine ENABLE TRIGGER identity`)
+		xe.node.SetSMBIOSUUID(t, "", false)
+		xe.node.SetNodeID(t, "node-a")
+	}
+	for name, c := range map[string]struct {
+		set      func(t *testing.T, xe *execEnv)
+		admitted bool
+	}{
+		"recorded by node ID, no systeminformation resource (control)": {byNodeID, true},
+		"recorded by SMBIOS UUID, another node ID (control)": {func(t *testing.T, xe *execEnv) {
+			xe.node.SetNodeID(t, "node-other")
+		}, true},
+		"recorded by node ID, an SMBIOS UUID shown": {func(t *testing.T, xe *execEnv) {
+			byNodeID(t, xe)
+			xe.node.SetSMBIOSUUID(t, "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b", true)
+		}, false},
+		"recorded by node ID, another node ID": {func(t *testing.T, xe *execEnv) {
+			byNodeID(t, xe)
+			xe.node.SetNodeID(t, "node-z")
+		}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			xe := newExecEnv(t)
+			c.set(t, xe)
+			life, stop := context.WithCancel(t.Context())
+			idle := make(chan struct{})
+			a := xe.executor(t, life, idle, options{nodeTimeout: 500 * time.Millisecond})
+			a.startExecutor()
+			defer stopping(a, stop)
+			waitIdle(t, idle, 1)
+			xe.approveThrough(t, a)
+			if c.admitted {
+				until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+				return
+			}
+			until(t, a, idle, "a refused commitment", func() bool {
+				return count(t, xe.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'refusal'
+					AND entry->>'comparison' = '3'`, xe.machine) > 0
+			})
+			xe.wantNothingSent(t)
+		})
+	}
+	t.Run("a failed systeminformation read", func(t *testing.T) {
+		t.Parallel()
+		xe := newExecEnv(t)
+		xe.node.Fail(talostest.SystemInformationType, codes.Internal)
+		life, stop := context.WithCancel(t.Context())
+		idle := make(chan struct{})
+		a := xe.executor(t, life, idle, options{nodeTimeout: 500 * time.Millisecond})
+		a.startExecutor()
+		defer stopping(a, stop)
+		waitIdle(t, idle, 1)
+		xe.approveThrough(t, a)
+		until(t, a, idle, "evidence with the identity unread", func() bool {
+			return count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine
+				AND s.revision = o.basis WHERE o.machine = $1 AND s.purpose = 'evidence' AND o.unread ? 'identity'`, xe.machine) > 0
+		})
+		xe.wantNothingSent(t)
+		if xe.entries(t, "commitment") != 0 {
+			t.Fatal("a commitment on evidence with the identity unread")
+		}
+	})
+}
+
+// PA §3.3 and §16 Talos access, executor: a node-side cause (a talosconfig the client cannot use, a
+// credential Talos refuses) fails the dispatch's fresh observation, which records its cause; no
+// operation is committed and nothing is sent, and once the access is repaired the plan completes.
+func TestExecutorNodeSideAccessFailure(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		access func(t *testing.T, old provider.TalosAccess) []byte
+		cause  string
+	}{
+		"malformed talosconfig": {func(_ *testing.T, old provider.TalosAccess) []byte {
+			return []byte(strings.Replace(string(old.Talosconfig()), "ca: ", "ca: not-base64-", 1))
+		}, "talosconfig"},
+		"a credential Talos refuses": {func(t *testing.T, _ provider.TalosAccess) []byte {
+			return talostest.NewPKI(t).Talosconfig("", "", "")
+		}, "node-unreachable"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			xe := newExecEnv(t)
+			good := xe.x.access
+			xe.x.access = provider.NewTalosAccess(good.Version(), c.access(t, good))
+			life, stop := context.WithCancel(t.Context())
+			idle := make(chan struct{})
+			a := xe.executor(t, life, idle, options{nodeTimeout: 500 * time.Millisecond})
+			a.startExecutor()
+			defer stopping(a, stop)
+			waitIdle(t, idle, 1)
+			xe.approveThrough(t, a)
+			until(t, a, idle, "a failed evidence observation", func() bool {
+				return count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine
+					AND s.revision = o.basis WHERE o.machine = $1 AND s.purpose = 'evidence' AND o.unread::text LIKE '%' || $2 || '%'`,
+					xe.machine, c.cause) > 0
+			})
+			xe.wantNothingSent(t)
+			if xe.entries(t, "commitment") != 0 {
+				t.Fatal("a commitment after a failed observation")
+			}
+			xe.x.mu.Lock()
+			xe.x.access = good
+			xe.x.mu.Unlock()
+			until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+		})
+	}
+}
+
+// PA §16 Talos access, executor: a failed access read at dispatch records its cause, never the
+// provider's error text, in the timeline or the log; the control logs that text.
+func TestExecutorAccessErrorTextControl(t *testing.T) {
+	t.Parallel()
+	const canary = "bw-access-error-canary-7q4z"
+	for _, quote := range []bool{false, true} {
+		t.Run(fmt.Sprint("quoteErrors=", quote), func(t *testing.T) {
+			t.Parallel()
+			xe := newExecEnv(t)
+			xe.x.err = fmt.Errorf("%s: %w", canary, provider.ErrDenied)
+			var mu sync.Mutex
+			var logged strings.Builder
+			logf := func(format string, args ...any) {
+				mu.Lock()
+				defer mu.Unlock()
+				fmt.Fprintf(&logged, format+"\n", args...)
+			}
+			life, stop := context.WithCancel(t.Context())
+			idle := make(chan struct{})
+			a := xe.executor(t, life, idle, options{logf: logf, quoteErrors: quote})
+			a.startExecutor()
+			defer stopping(a, stop)
+			waitIdle(t, idle, 1)
+			xe.approveThrough(t, a)
+			until(t, a, idle, "a failed use-time check", func() bool { return xe.entries(t, "use-time-check") > 0 })
+			xe.wantNothingSent(t)
+			if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE entry::text LIKE '%' || $1 || '%'`, canary); n != 0 {
+				t.Fatalf("%d timeline entries hold the error text", n)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if got := strings.Contains(logged.String(), canary); got != quote {
+				t.Fatalf("logged the error text %v with quoteErrors %v", got, quote)
 			}
 		})
 	}
@@ -712,6 +892,60 @@ func TestExecutorRetryFollowsAccessRotation(t *testing.T) {
 	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation WHERE o.access_version = $1`,
 		v.Version); n != 1 {
 		t.Fatalf("the attempt does not rest on an observation read with access version %d", v.Version)
+	}
+}
+
+// PA §16 Talos access, executor: a rotation between the evidence observation and the attempt
+// leaves the attempt sending with the version the observation read; the control reads the latest
+// version at send.
+func TestExecutorSendsWithTheObservedAccess(t *testing.T) {
+	t.Parallel()
+	for _, latest := range []bool{false, true} {
+		t.Run(fmt.Sprint("latestAccess=", latest), func(t *testing.T) {
+			t.Parallel()
+			xe := newExecEnv(t)
+			old := xe.x.access
+			v := old.Version()
+			v.Version++
+			rotated := provider.NewTalosAccess(v, append(old.Talosconfig(), "\n# rotated\n"...))
+			var once sync.Once
+			xe.x.onRead = func() { // the first read returns old; every later one rotated
+				once.Do(func() {
+					xe.x.mu.Lock()
+					xe.x.access = rotated
+					xe.x.mu.Unlock()
+				})
+			}
+			var mu sync.Mutex
+			var sent []byte
+			dial := func(ctx context.Context, tc []byte, endpoint string) (talos.Applier, error) {
+				mu.Lock()
+				sent = bytes.Clone(tc)
+				mu.Unlock()
+				return talos.DialApplier(ctx, old.Talosconfig(), endpoint)
+			}
+			life, stop := context.WithCancel(t.Context())
+			idle := make(chan struct{})
+			a := xe.executor(t, life, idle, options{dialApply: dial, latestAccess: latest})
+			a.startExecutor()
+			defer stopping(a, stop)
+			waitIdle(t, idle, 1)
+			xe.approveThrough(t, a)
+			until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+			if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
+				WHERE a.plan = $1 AND o.access_version = $2`, xe.pid, old.Version().Version); n != 1 {
+				t.Fatalf("the attempt does not rest on an observation read with access version %d", old.Version().Version)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			want := old.Talosconfig()
+			if latest {
+				want = rotated.Talosconfig()
+			}
+			if !bytes.Equal(sent, want) {
+				t.Fatalf("sent with %q, want %q", sent, want)
+			}
+		})
 	}
 }
 

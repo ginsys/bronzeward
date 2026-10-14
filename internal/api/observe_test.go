@@ -545,6 +545,44 @@ func lockWaited(ctx context.Context, db *sql.DB) <-chan struct{} {
 	return ch
 }
 
+// PA §3.3 and §16 Talos access, observations: each purpose reads the access's latest version at
+// use and records it; the stale-credential control observes with an earlier version and records
+// that one instead.
+func TestObservationRecordsTheAccessItRead(t *testing.T) {
+	t.Parallel()
+	ae := newAttemptEnv(t, "")
+	path := "access/talos/" + ae.cluster
+	stale := provider.NewTalosAccess(provider.TalosAccessVersion{Path: path, Version: 1, CreatedTime: accessCreated}, []byte("context: a\n"))
+	for i, f := range []observeFor{
+		{purpose: "evidence", plan: ae.pid},
+		{purpose: "completion", plan: ae.pid, operation: ae.op},
+		{purpose: "recovery", plan: ae.pid, operation: ae.op},
+		{purpose: "restoration"},
+		{purpose: "drift"},
+	} {
+		for _, control := range []bool{false, true} {
+			v := provider.TalosAccessVersion{Path: path, Version: 10*i + 2, CreatedTime: accessCreated.Add(time.Duration(i) * time.Second)}
+			x := &fakeExecutor{access: provider.NewTalosAccess(v, []byte("context: a\n"))}
+			o := options{}
+			if control {
+				o.staleAccess = &stale
+			}
+			got, err := observer(t, ae.env, x, o).observe(t.Context(), ae.machine, f)
+			if err != nil {
+				t.Fatalf("%s: %v", f.purpose, err)
+			}
+			want := v
+			if control {
+				want = stale.Version()
+			}
+			if n := count(t, ae.db, `SELECT count(*) FROM observation WHERE id = $1 AND access_path = $2 AND access_version = $3
+				AND access_created::timestamptz = $4`, got.ID, want.Path, want.Version, want.CreatedTime); n != 1 {
+				t.Fatalf("%s (control %v): the observation does not record access version %d", f.purpose, control, want.Version)
+			}
+		}
+	}
+}
+
 // Machine revisions are allocated in commit order under concurrent writers to one scope (PA §5 T7,
 // §16): a writer allocating while another holds an uncommitted revision waits for it, so the later
 // revision commits later. The control allocates without the machine row's lock, from a sequence:

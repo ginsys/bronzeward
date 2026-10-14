@@ -181,6 +181,7 @@ func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operatio
 			return u, ctx.Err()
 		}
 		fail("access", accessCause(err))
+		a.quoteObservation("use-time check of "+plan, accessCause(err), err)
 	} else {
 		u.access = acc
 	}
@@ -297,8 +298,18 @@ func (a *API) attemptAndSend(ctx context.Context, operation string, gen int64, m
 		return err
 	}
 	seam.At("dispatch-attempted") // the attempt recorded, nothing sent
+	acc := u.access
+	if a.o.latestAccess {
+		var cluster string
+		if err := a.db.QueryRowContext(ctx, `SELECT cluster FROM machine WHERE id = $1`, machine).Scan(&cluster); err != nil {
+			return err
+		}
+		if acc, err = a.d.exe.TalosAccess(ctx, cluster); err != nil {
+			return err
+		}
+	}
 	sctx, cancel := context.WithDeadline(ctx, at.Deadline)
-	resp := a.send(sctx, u.access.Talosconfig(), at.Route, u.artifact)
+	resp := a.send(sctx, acc.Talosconfig(), at.Route, u.artifact)
 	cancel()
 	seam.At("dispatch-sent") // the request made, no response recorded
 	return a.respond(ctx, at.Attempt, operation, gen, machine, plan, resp)
