@@ -542,28 +542,34 @@ func TestSettle(t *testing.T) {
 			t.Fatalf("%d attempts", n)
 		}
 	})
-	// ER §9.2: a retry's attempt is refused by comparison 3, nothing recorded, when an observation
-	// after its classification's shows another machine identity; the control is a matching one, after
-	// which the retry is recorded.
-	t.Run("retry evidence identity", func(t *testing.T) {
-		t.Parallel()
-		for _, match := range []bool{false, true} {
+	// ER §9.2: a retry's attempt on a machine recorded by SMBIOS UUID is refused by comparison 3,
+	// nothing recorded, when an observation after its classification's shows another UUID, none, or
+	// another Talos cluster ID; the control is a matching one, after which the retry is recorded.
+	// The node-ID cases share the commitment's identityMatch expression (TestExecutorCommitmentIdentityKeys).
+	for name, c := range map[string]func(*evSeed){
+		"another SMBIOS UUID":      func(s *evSeed) { s.uuid = "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b" },
+		"no SMBIOS UUID":           func(s *evSeed) { s.uuid = nil },
+		"another Talos cluster":    func(s *evSeed) { s.clusterID = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" },
+		"a matching one (control)": nil,
+	} {
+		t.Run("retry evidence identity: "+name, func(t *testing.T) {
+			t.Parallel()
 			ae, a, gen := lost(t)
 			if r, err := a.settleOperation(context.Background(), ae.op, gen, preDispatch(t, ae)); err != nil || r.Outcome != "safe-to-retry" {
 				t.Fatalf("settled %+v: %v", r, err)
 			}
 			ae.evidence(t, ae.pid, func(s *evSeed) {
 				s.controller = a.d.owner.ID
-				if !match {
-					s.uuid = "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b"
+				if c != nil {
+					c(s)
 				}
 			})
 			_, err := a.recordAttempt(context.Background(), ae.op, gen)
-			if match {
+			if c == nil {
 				if err != nil {
 					t.Fatalf("the retry on matching evidence: %v", err)
 				}
-				continue
+				return
 			}
 			var refused *attemptRefused
 			if !errors.As(err, &refused) || refused.Comparison != "3" || refused.Cause != "a newer observation contradicts the evidence" {
@@ -572,8 +578,8 @@ func TestSettle(t *testing.T) {
 			if n := count(t, ae.db, `SELECT count(*) FROM attempt WHERE operation = $1`, ae.op); n != 1 {
 				t.Fatalf("%d attempts", n)
 			}
-		}
-	})
+		})
+	}
 	t.Run("safe to retry on a recovery observation", func(t *testing.T) {
 		t.Parallel()
 		ae, a, gen := lost(t)
