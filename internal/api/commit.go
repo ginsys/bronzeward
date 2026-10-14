@@ -73,14 +73,22 @@ func (a *API) commitPlan(ctx context.Context, plan string) (committed, error) {
 	return committed{}, err
 }
 
+// share answers the FOR SHARE clause of the named read, dropped by its control (options.noReadLock).
+func (a *API) share(lock string) string {
+	if a.o.noReadLock == lock {
+		return ``
+	}
+	return ` FOR SHARE`
+}
+
 // commitTx is commitPlan's transaction. It answers the plan's machine once known, so a refusal can
 // be recorded on its timeline.
 func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed, string, error) {
 	r := committed{Plan: plan}
 	var current string
 	var recovery bool
-	if err := tx.QueryRowContext(ctx, `SELECT epoch, recovery_mode FROM installation_state FOR SHARE`).Scan(&current,
-		&recovery); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT epoch, recovery_mode FROM installation_state`+a.share("installation state")).Scan(
+		&current, &recovery); err != nil {
 		return r, "", err
 	}
 	if current != a.d.owner.Epoch {
@@ -121,7 +129,8 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 		return r, machine, err
 	}
 	var head sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT head_revision_id FROM assignment WHERE machine = $1 FOR SHARE`, machine).Scan(&head)
+	err = tx.QueryRowContext(ctx, `SELECT head_revision_id FROM assignment WHERE machine = $1`+a.share("assignment head"),
+		machine).Scan(&head)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return r, machine, err
 	}
@@ -154,9 +163,11 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	// The cluster's rollout lock, which only commitments take, last: another machine's commitment
 	// holding the rollout scope uncommitted is waited for here, before the time is read, not at the
 	// operation's insert after it.
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`, rolloutLockClass,
-		cluster); err != nil {
-		return r, machine, err
+	if a.o.noReadLock != "rollout" {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`, rolloutLockClass,
+			cluster); err != nil {
+			return r, machine, err
+		}
 	}
 	// PA §5 rule 4: the commitment's time, and the expiry and age judged against it, follow every
 	// lock. The plan's state is the one §8.1 reads at that time, so a refusal names what a reader sees.

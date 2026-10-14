@@ -526,3 +526,100 @@ func TestObservePlanRoute(t *testing.T) {
 		t.Fatalf("%d starts recorded on the other machine", n)
 	}
 }
+
+// lockWaited closes its channel once a session of db's database waits on a lock, polling until ctx
+// ends.
+func lockWaited(ctx context.Context, db *sql.DB) <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		for ctx.Err() == nil {
+			var n int
+			if db.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity
+				WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n) == nil && n > 0 {
+				close(ch)
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	return ch
+}
+
+// Machine revisions are allocated in commit order under concurrent writers to one scope (PA §5 T7,
+// §16): a writer allocating while another holds an uncommitted revision waits for it, so the later
+// revision commits later. The control allocates without the machine row's lock, from a sequence:
+// the second writer commits the higher revision first and the first a lower one after it, which a
+// reader taking the highest committed revision as its basis misses (DS §7).
+func TestRevisionsInCommitOrder(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		control bool
+	}{{"locked", false}, {"control", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			p := newPlanEnv(t)
+			if c.control {
+				mustExec(t, p.db, `CREATE SEQUENCE revision_control`)
+				mustExec(t, p.db, `SELECT setval('revision_control', revision_counter + 1, false) FROM machine WHERE id = $1`,
+					p.machine)
+			}
+			allocate := func(tx *sql.Tx) (int64, error) {
+				var rev int64
+				if c.control {
+					return rev, tx.QueryRow(`SELECT nextval('revision_control')`).Scan(&rev)
+				}
+				_, err := nextEntry(context.Background(), tx, p.machine, &rev)
+				return rev, err
+			}
+			first, err := p.db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = first.Rollback() }()
+			r1, err := allocate(first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			type result struct {
+				rev int64
+				err error
+			}
+			second := make(chan result, 1)
+			go func() {
+				tx, err := p.db.Begin()
+				if err != nil {
+					second <- result{err: err}
+					return
+				}
+				defer func() { _ = tx.Rollback() }()
+				rev, err := allocate(tx)
+				if err == nil {
+					err = tx.Commit()
+				}
+				second <- result{rev, err}
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var r2 result
+			var order []int64
+			select {
+			case r2 = <-second: // committed while the first held its revision
+				order = []int64{r2.rev, r1}
+				err = first.Commit()
+			case <-lockWaited(ctx, p.db):
+				err = first.Commit()
+				r2 = <-second
+				order = []int64{r1, r2.rev}
+			case <-ctx.Done():
+				t.Fatal("the second writer neither committed nor waited")
+			}
+			if err != nil || r2.err != nil {
+				t.Fatal(err, r2.err)
+			}
+			if inOrder := order[0] < order[1]; inOrder == c.control {
+				t.Fatalf("revisions in commit order: %v", order)
+			}
+		})
+	}
+}

@@ -852,3 +852,157 @@ func TestCommitmentRolloutWaitPrecedesTime(t *testing.T) {
 	}
 	ce.wantRefused(t, <-done, "1", "the plan has expired", "")
 }
+
+// standIn takes lock with arg in its own transaction, giving up after 2 s, then answers what read
+// reads with readArg, or "lock not granted".
+func standIn(db *sql.DB, lock string, arg any, read string, readArg any) string {
+	stand, err := db.Begin()
+	if err != nil {
+		return err.Error()
+	}
+	defer func() { _ = stand.Rollback() }()
+	if _, err := stand.Exec(`SET LOCAL lock_timeout = '2s'`); err != nil {
+		return err.Error()
+	}
+	if _, err := stand.Exec(lock, arg); err != nil {
+		return "lock not granted"
+	}
+	var s string
+	if err := stand.QueryRow(read, readArg).Scan(&s); err != nil {
+		return err.Error()
+	}
+	return s
+}
+
+// The controls of TestCommitmentHoldsItsReads (§3.2, §9.2): without the commitment's lock on the
+// installation state or the assignment head, the stand-in is not held, and reads the plan before
+// the commitment commits it. The approval and principal locks have none (choice §10.31).
+func TestCommitmentReadLockControls(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, lock string
+		arg        func(*commitEnv) any
+	}{
+		{"installation state", `SELECT FROM installation_state WHERE $1::text IS NOT NULL FOR UPDATE`,
+			func(*commitEnv) any { return "" }},
+		{"assignment head", `SELECT FROM assignment WHERE machine = $1 FOR UPDATE`, func(ce *commitEnv) any { return ce.machine }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ce := newCommitEnv(t, "")
+			ce.ready(t)
+			arg := c.arg(ce)
+			read := make(chan string, 1)
+			ce.a = observer(t, ce.env, &fakeExecutor{}, options{noReadLock: c.name, commit: func(tx *sql.Tx) error {
+				read <- standIn(ce.db, c.lock, arg, `SELECT state FROM plan_state WHERE plan = $1`, ce.pid)
+				return tx.Commit()
+			}})
+			ce.evidence(t, ce.pid, nil)
+			if _, err := ce.a.commitPlan(context.Background(), ce.pid); err != nil {
+				t.Fatal(err)
+			}
+			if state := <-read; state != "approved" {
+				t.Fatalf("the stand-in read the plan %s", state)
+			}
+		})
+	}
+}
+
+// The control of TestCommitmentRolloutWaitPrecedesTime (choice §10.29): without the rollout lock,
+// the commitment reads its time before it waits, at the rollout scope's index, for the other
+// machine's commitment, and commits a plan that expired during that wait.
+func TestCommitmentRolloutLockControl(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, `,"expiresInSeconds":4`)
+	ce.ready(t)
+	ce.second(t)
+	ce.a = observer(t, ce.env, &fakeExecutor{}, options{noReadLock: "rollout"})
+	ce.evidence(t, ce.pid, nil)
+	done := make(chan error, 1)
+	first := observer(t, ce.env, &fakeExecutor{}, options{commit: func(tx *sql.Tx) error {
+		go func() {
+			_, err := ce.a.commitPlan(context.Background(), ce.pid)
+			done <- err
+		}()
+		waitForLockWaits(t, ce.db, 1)
+		time.Sleep(time.Until(ce.expires.Add(100 * time.Millisecond)))
+		if err := tx.Rollback(); err != nil {
+			return err
+		}
+		return errors.New("rolled back")
+	}})
+	ce.evidence(t, ce.plan2, func(s *evSeed) { s.controller = first.d.owner.ID })
+	if _, err := first.commitPlan(context.Background(), ce.plan2); err == nil {
+		t.Fatal("the stand-in commitment committed")
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("control: %v", err)
+	}
+}
+
+// Comparison 6 under the machine row's lock (§3.2): a freeze committed while the commitment waits
+// for the machine refuses it. The control reads the freeze without the machine's lock: it commits
+// the plan on a scope frozen before its commit.
+func TestCommitmentFreezeRace(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		control bool
+	}{{"locked", false}, {"control", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ce := newCommitEnv(t, "")
+			ce.a = observer(t, ce.env, &fakeExecutor{}, options{noMachineLock: c.control})
+			ce.ready(t)
+			freeze, err := ce.db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = freeze.Rollback() }()
+			mustExec(t, freeze, `UPDATE machine SET frozen = true WHERE id = $1`, ce.machine)
+			done := make(chan error, 1)
+			go func() {
+				_, err := ce.a.commitPlan(context.Background(), ce.pid)
+				done <- err
+			}()
+			waitForLockWaits(t, ce.db, 1)
+			if err := freeze.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			err = <-done
+			if c.control {
+				if err != nil {
+					t.Fatalf("control: %v", err)
+				}
+				return
+			}
+			ce.wantRefused(t, err, "6", "the machine scope is frozen", "")
+		})
+	}
+}
+
+// A publication that selects the machine while the commitment holds it waits for the commitment
+// (§3.2 comparison 2, §3.3): it changes Desired after the plan is committed, and the operation's
+// attempt is still admitted (TestAttemptAccepts "Desired changed"). TestCommitmentPublicationRace
+// holds the other order and the control.
+func TestCommitmentPublicationWaits(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, "")
+	ce.ready(t)
+	read := make(chan string, 1)
+	ce.a = observer(t, ce.env, &fakeExecutor{}, options{commit: func(tx *sql.Tx) error {
+		go func() {
+			read <- standIn(ce.db, `SELECT FROM machine WHERE id = $1 FOR SHARE`, ce.machine,
+				`SELECT state FROM plan_state WHERE plan = $1`, ce.pid)
+		}()
+		waitForLockWaits(t, ce.db, 1)
+		return tx.Commit()
+	}})
+	ce.evidence(t, ce.pid, nil)
+	if _, err := ce.a.commitPlan(context.Background(), ce.pid); err != nil {
+		t.Fatal(err)
+	}
+	if state := <-read; state != "committed" {
+		t.Fatalf("the publication's selection read the plan %s", state)
+	}
+}
