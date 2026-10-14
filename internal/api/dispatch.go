@@ -277,13 +277,31 @@ func (a *API) attemptAndSend(ctx context.Context, operation string, gen int64, m
 	return a.respond(ctx, at.Attempt, operation, gen, machine, plan, resp)
 }
 
-// respond records the attempt's response. An in-process failure to record it leaves the operation
-// sending until a controller start takes it over (§3.4): no timer does.
+// respond records the attempt's response. The response is held only in this process, so a lost
+// database connection is retried after each lease until the record commits (DS row 016); the
+// owner token refuses it once another controller took the operation over. A retry that finds the
+// response already recorded met a COMMIT that succeeded after its reply was lost: the loop carries
+// the operation on from its recorded state. Any other failure leaves the operation sending until a
+// controller start takes it over (§3.4): no timer does.
 func (a *API) respond(ctx context.Context, attempt, operation string, gen int64, machine, plan string, resp talos.Response) error {
 	r, err := a.recordResponse(ctx, attempt, resp)
+	for err != nil && connLost(err) {
+		a.o.logf("operation %s: response of attempt %s not recorded: %v; retried after %s", operation, attempt, err, a.d.timers.Lease)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(a.d.timers.Lease):
+		}
+		r, err = a.recordResponse(ctx, attempt, resp)
+		var ref *outcomeRefused
+		if errors.As(err, &ref) && ref.Cause == alreadyResponded {
+			return nil
+		}
+	}
 	if err != nil {
 		return err
 	}
+	seam.At("dispatch-responded") // the response recorded, no completion observation
 	if r.State != "verifying" {
 		return nil
 	}
@@ -296,6 +314,7 @@ func (a *API) verify(ctx context.Context, operation string, gen int64, machine, 
 	if err != nil {
 		return err
 	}
+	seam.At("dispatch-observed") // the observation recorded, the operation not settled on it
 	s, err := a.settleOperation(ctx, operation, gen, o.ID)
 	if err != nil {
 		return err

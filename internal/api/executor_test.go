@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"net/http"
@@ -404,6 +405,61 @@ func TestExecutorCompletesATakenOverAcceptedAttempt(t *testing.T) {
 	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
 	if n := len(xe.node.AppliedRequests()); n != 0 {
 		t.Fatalf("%d requests after an attempt this process did not make", n)
+	}
+}
+
+// DS row 016: the database lost while the node's response is recorded. The response is held in
+// process and its record retried after a lease until it commits, so the one request completes the
+// operation; a COMMIT that succeeded after its reply was lost is found recorded on the retry, and
+// the loop carries the operation on. The control is the same plan with no loss.
+func TestExecutorRetriesALostResponseRecord(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		losses    int32
+		committed bool // the lost COMMIT did commit
+	}{
+		"lost before the commit": {losses: 2},
+		"lost after the commit":  {losses: 1, committed: true},
+		"control":                {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			xe := newExecEnv(t)
+			var left atomic.Int32
+			left.Store(c.losses)
+			life, stop := context.WithCancel(t.Context())
+			idle := make(chan struct{})
+			a := xe.executor(t, life, idle, options{commit: func(tx *sql.Tx) error {
+				var response bool
+				if err := tx.QueryRow(`SELECT EXISTS (SELECT FROM attempt_response)`).Scan(&response); err != nil || !response ||
+					left.Add(-1) < 0 {
+					return tx.Commit()
+				}
+				if c.committed {
+					if err := tx.Commit(); err != nil {
+						return err
+					}
+				} else {
+					_ = tx.Rollback()
+				}
+				return fmt.Errorf("the connection closed: %w", driver.ErrBadConn)
+			}})
+			a.startExecutor()
+			defer stopping(a, stop)
+			waitIdle(t, idle, 1)
+			xe.approveThrough(t, a)
+			until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+			if n := len(xe.node.AppliedRequests()); n != 1 {
+				t.Fatalf("%d requests reached the node", n)
+			}
+			if n := count(t, xe.db, `SELECT count(*) FROM attempt_response r JOIN attempt a ON a.id = r.attempt WHERE a.plan = $1`,
+				xe.pid); n != 1 {
+				t.Fatalf("%d responses recorded", n)
+			}
+			if retried := xe.logged("not recorded"); retried != (c.losses > 0) || left.Load() > 0 {
+				t.Fatalf("retried %v, %d losses left", retried, left.Load())
+			}
+		})
 	}
 }
 
