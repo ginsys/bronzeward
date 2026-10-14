@@ -346,6 +346,10 @@ func TestExecutorRevokedControl(t *testing.T) {
 				t.Fatalf("revocation %d", code)
 			}
 			if c.control {
+				got := xe.node.AppliedRequests()
+				if got[0].Mode != "NO_REBOOT" || got[0].DryRun || !bytes.Equal(got[0].Data, xe.artifact) {
+					t.Fatalf("control: request %+v", got[0])
+				}
 				if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN machine_event v ON v.machine = a.machine
 					AND v.kind = 'approval-revocation' AND v.revision < a.revision WHERE a.plan = $1`, xe.pid); n != 1 {
 					t.Fatal("control: the attempt is not recorded after the revocation")
@@ -354,6 +358,16 @@ func TestExecutorRevokedControl(t *testing.T) {
 			}
 			if n := len(xe.node.AppliedRequests()); n != 0 || count(t, xe.db, `SELECT count(*) FROM attempt WHERE plan = $1`, xe.pid) != 0 {
 				t.Fatalf("%d requests after the revocation", n)
+			}
+			// Comparison 1 refused it, and that refusal moved it committed, unresolved, cancelled.
+			var states sql.NullString
+			if err := xe.db.QueryRow(`SELECT string_agg(e.entry->>'to', ',' ORDER BY e.revision) FROM machine_event r
+				JOIN machine_event e ON e.machine = r.machine AND e.revision > r.revision AND e.kind = 'operation-state'
+					AND e.entry->>'comparison' = '1' AND e.entry->>'cause' = 'the approval is revoked'
+				WHERE r.machine = $1 AND r.kind = 'refusal' AND r.entry->>'transaction' = 'T6' AND r.entry->>'comparison' = '1'
+					AND r.entry->>'cause' = 'the approval is revoked'`, xe.machine).Scan(&states); err != nil ||
+				states.String != "unresolved,cancelled" {
+				t.Fatalf("states after comparison 1's refusal %q: %v", states.String, err)
 			}
 		})
 	}
