@@ -745,10 +745,18 @@ restores() {
 # The DS re-run (mode ds). before: the bundle captured before the row; taker: the owner token that
 # took the row's operation over; ds_failed: the failure count at the table's last line.
 before='' taker='' ds_failed=0
+# s4_applied: S3's step 3 plan, the first apply-config plan, committed to an operation that completed
+# (s4 run's safe apply; after s3 handover, s2 or s3 run no apply-config operation exists).
+s4_applied() {
+  same "$(sql "SELECT s.state || ' ' || o.state FROM plan p JOIN plan_state s ON s.plan = p.id
+    JOIN operation o ON o.id = s.operation WHERE p.kind = 'apply-config' ORDER BY p.created_at, p.id LIMIT 1")" \
+    'committed completed'
+}
 ds_preconditions() {
   local ref='S4 DS precondition'
   machines
-  check "$ref" "S4's safe apply done: no apply-config operation holds the worker's scope or the cluster's rollout slot" scope_released
+  check "$ref" "S4's safe apply done: S3's step 3 plan, the first apply-config plan, committed to an operation that completed" s4_applied
+  check "$ref" 'no apply-config operation holds the worker'"'"'s scope or the cluster'"'"'s rollout slot' scope_released
   check "$ref" "the worker's Desired is its Applied" \
     same "$(sql "SELECT desired = applied_release FROM machine_state WHERE machine = '$machine_w'")" t
   check "$ref" 'no link to the worker is recorded cut' worker_joined
