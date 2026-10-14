@@ -108,8 +108,9 @@ func TestLiveRead(t *testing.T) {
 // TestLiveApply sends the worker's own configuration back to it in no-reboot mode: an accepted
 // apply of an unchanged document, after which the read is byte-identical. It then sends the same
 // document with an unknown machine type, which the node refuses as validation (E4 row 022): the
-// class is a rejection, and the read is unchanged again. The unrecognised-InvalidArgument and
-// transport classes have no live trigger and stay on the stand-in node.
+// class is a rejection, and the read is unchanged again, its resource version too. The
+// unrecognised-InvalidArgument and transport classes have no live trigger and stay on the stand-in
+// node.
 func TestLiveApply(t *testing.T) {
 	tc, ep := liveTarget(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
@@ -140,6 +141,11 @@ func TestLiveApply(t *testing.T) {
 	if got := send(before.Bytes()); got.Class != ClassAccepted || !got.Accounts() {
 		t.Fatalf("an unchanged configuration: %+v", got)
 	}
+	// The resource version the rejection must leave alone is the one after the accepted apply.
+	accepted, err := r.MachineConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bogus := bytes.Replace(before.Bytes(), []byte("type: worker"), []byte("type: bogus"), 1)
 	if bytes.Equal(bogus, before.Bytes()) {
 		t.Fatal("control: the configuration holds no `type: worker` to corrupt")
@@ -160,6 +166,9 @@ func TestLiveApply(t *testing.T) {
 	}
 	if !bytes.Equal(before.Bytes(), after.Bytes()) {
 		t.Fatalf("the node's configuration changed: digest %s, then %s", digest(before.Bytes()), digest(after.Bytes()))
+	}
+	if after.ResourceVersion() != accepted.ResourceVersion() || after.ResourceVersion() == "" {
+		t.Fatalf("the rejection moved the resource version: %q, then %q", accepted.ResourceVersion(), after.ResourceVersion())
 	}
 }
 
