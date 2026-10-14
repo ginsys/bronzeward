@@ -2148,7 +2148,11 @@ conservative option; those that do not say so. Each is marked in place as
     principal's row unlocked therefore still waits, and §9.2's
     unlocked control is not constructible for these two locks. The verification
     is the race itself: a revocation started while the commitment holds its
-    locks waits for it. The `FOR SHARE` reads stay as the contract's stated
+    locks waits for it, and the attempt is then refused (DS row 003). DS row
+    006's control places the revocation after the commitment, before the
+    attempt: before the commitment, the plan's state, `revoked`, is terminal
+    (§2) and the database refuses moving it to `committed`, so no controller
+    commits it with or without comparison 1. The `FOR SHARE` reads stay as the contract's stated
     order for a writer that does not take the machine row. Agent decision,
     2026-10-14 (ginsys/bronzeward#26). Alternatives: a control dropping the
     machine and plan-state locks as well, which would no longer test the
