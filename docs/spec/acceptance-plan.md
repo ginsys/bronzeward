@@ -443,8 +443,9 @@ through the implementation's own controller and Talos client over the worker's o
 reaching DS's outcomes, with rows 012–014 as the direct-route variants of ER §3.5: 012 and 014
 reach row 015's outcome, and 013's accounting at the executor's exit is refused before it succeeds
 after the settle floor (the proxy's late landings are S6.2's). Rows 003, 009, 010, 022 and 023
-and the controls run as Go checks of the implementation's own transactions, the test route
-[ER choice §10.32](execution-recovery.md#10-choices-for-owner-review) selects.
+and the controls run as Go checks, the test route
+[ER choice §10.32](execution-recovery.md#10-choices-for-owner-review) selects; it names what each
+drives (row 011's control is the schema's indexes, not a transaction).
 Together they meet the condition
 of [ER §3.5](execution-recovery.md#35-talos-client-and-route) and the first item of
 [ER §9.2](execution-recovery.md#92-required-verification).
