@@ -1791,9 +1791,10 @@ fail:
 - a commitment and a retry's attempt each refused, with nothing sent, when the
   §3.1 evidence shows an SMBIOS UUID other than the bound one, none for a
   machine recorded by SMBIOS UUID, one for a machine recorded by Talos node
-  ID, another Talos node ID for such a machine or another Talos cluster ID,
-  or when its identity read fails, a failed `systeminformation` read
-  included; with the controls that a machine recorded by node ID whose
+  ID, another Talos node ID for such a machine or another Talos cluster ID;
+  nothing committed or sent when its identity read fails, a failed
+  `systeminformation` read included, which leaves the identity unread and
+  so is missing evidence (choice §10.28); with the controls that a machine recorded by node ID whose
   `systeminformation` read returns no resource is admitted, and that a
   machine recorded by SMBIOS UUID whose node shows a matching UUID and
   cluster ID but another node ID is admitted;
@@ -2050,7 +2051,10 @@ conservative option; those that do not say so. Each is marked in place as
       has accepted is a failed read, and refuses whichever key the machine is
       recorded by. A credential the node refuses, or an endpoint that does not
       answer, fails before any read, as the access failure
-      `persistence-api.md` defines.
+      `persistence-api.md` defines. At a commitment, a failed read leaves
+      the identity unread, which choice §10.28 treats as missing evidence:
+      nothing is committed, sent or recorded as a refusal, and fresh
+      evidence decides; a failing read still never admits a commitment.
     - **The cluster is compared by its Talos cluster ID**, the value the
       cluster record holds (see `persistence-api.md`), against the node's
       `Infos.cluster.talos.dev` resource. Talos describes it as the cluster's
