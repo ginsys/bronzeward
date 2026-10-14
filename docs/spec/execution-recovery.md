@@ -1782,7 +1782,8 @@ fail:
 - a bound health check failing in a completion observation before the
   verification deadline and passing in a later one: `completed`; still failing
   at or after the deadline: `failed`; unreadable at the deadline: `unresolved`;
-  and a contradicting digest before the deadline: `failed` at once (§4);
+  and a contradicting digest before the deadline: `failed` at once (§4); the
+  health cases wait for an operation class that binds a check (choice §10.33);
 - plan creation refusing an `apply-config` plan whose release is not the
   machine's `Desired`, a commitment refused when another release was published
   after plan creation, a publication racing a commitment waiting for it or
@@ -2208,6 +2209,21 @@ conservative option; those that do not say so. Each is marked in place as
     the store's transactions reachable from a running controller, which ship
     test-only code on the production path; a compilation bypass to publish an
     invalid artifact, which removes the boundary row 022 stays behind.
+33. **The PoC's `apply-config` plans bind no health check** (§3.1, §4; choice
+    §10.25). Design §18.2's working configuration-control PoC verifies the
+    result by identity, assignment revision and configuration digest; §3.1
+    binds a health check only where an operation class names one, and the
+    `no-reboot` apply names none. Every observation therefore records health
+    as `none-bound`, and §9.2's bound-health cases (a failing check inside the
+    convergence window, at or after the verification deadline, unreadable at
+    it) apply to the first operation class that binds one, such as the
+    upgrades §18.2 excludes. The contradicting-digest case and its immediate
+    `failed` hold now; the drift record that outcome opens arrives with drift
+    records (ginsys/bronzeward#27). Agent decision, 2026-10-14
+    (ginsys/bronzeward#26). Alternatives: binding a Talos health check to the
+    PoC's apply, a new precondition and fixture surface no PoC acceptance row
+    asks for; leaving the cases open against #26, which would make an
+    unbound check a closure blocker.
 
 ## 11. Traceability
 
