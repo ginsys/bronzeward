@@ -70,7 +70,6 @@ c_live() {
   call_port=$SERVER_A_PORT
   [ "$got" = 204 ]
 }
-both() { "$bin/inject" "$1" A && "$bin/inject" "$1" B; }
 
 # The machines S1 recorded, by their Talos endpoints. S1's node-ID case also leaves a stranger at
 # the control plane's endpoint, with a node ID no node has; it is no machine of the cluster's.
@@ -117,8 +116,7 @@ publish_import() {
 }
 
 # make_plan <machine> <name> [extra body fields as a JSON object]: an adopt plan of the release for
-# the machine, created as h-publisher; 201, its id in plan_id.
-plan_id=''
+# the machine, created as h-publisher; 201, its id in plan_id (common.sh's).
 make_plan() {
   local body extra=${3:-'{}'}
   plan_id=''
@@ -133,8 +131,6 @@ approve_plan() {
   fresh_approver
   answers 201 - POST "/api/v1/plans/$1/approvals" "$approver" '{}' "$(key "approval-$2")"
 }
-# plan_state_is <plan> <state>
-plan_state_is() { [ "$(sql "SELECT state FROM plan_state WHERE plan = '$1'")" = "$2" ]; }
 # plans_committed <n> <plan>...: exactly n of the plans are committed.
 plans_committed() {
   local n=$1 ids
@@ -178,8 +174,6 @@ unadopted() {
     || (SELECT count(*) FROM operation WHERE machine = '$1' AND kind = 'adopt') || ' '
     || (SELECT count(*) FROM adoption_record WHERE machine = '$1')")" = '1 0 0' ]
 }
-# refusals <plan>: how many refusal entries name the plan.
-refusals() { sql "SELECT count(*) FROM machine_event WHERE kind = 'refusal' AND entry->>'plan' = '$1'"; }
 # unchanged_node <ip>: the node's configuration digest and resource version in the latest bundle
 # are the pre-state's.
 unchanged_node() {
@@ -316,25 +310,8 @@ refused_once() {
 # refusal_seen <plan>: a refusal entry names the plan.
 refusal_seen() { [ "$(refusals "$1")" -ge 1 ]; }
 
-# The age control's pieces. started_at: the plan's first evidence observation's start entry time.
-obs_started() {
-  [ -n "$(sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
-    WHERE s.plan = '$1' AND s.purpose = 'evidence'")" ]
-}
-# first_observation <plan>: the id of the plan's first recorded evidence observation.
-first_observation() {
-  sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
-    WHERE s.plan = '$1' AND s.purpose = 'evidence' ORDER BY o.basis LIMIT 1"
-}
-# observation_stale <plan> <seconds>: the plan's first evidence observation began more than that
-# long ago, by the database's clock.
-observation_stale() {
-  [ "$(sql "SELECT clock_timestamp() > e.at + interval '$2 seconds' FROM observation o
-    JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
-    JOIN machine_event e ON e.machine = s.machine AND e.revision = s.revision
-    WHERE s.plan = '$1' AND s.purpose = 'evidence' ORDER BY o.basis LIMIT 1")" = t ]
-}
-# relied_on_later <plan> <stalled observation> <instant>: the adoption relied on another
+# The age control's other pieces (obs_started, first_observation and observation_stale are
+# common.sh's). relied_on_later <plan> <stalled observation> <instant>: the adoption relied on another
 # observation than the stalled one, whose start entry is after the instant.
 relied_on_later() {
   [ "$(sql "SELECT r.observation <> '$2' AND e.at > '$3'::timestamptz FROM adoption_record r
@@ -426,72 +403,8 @@ controls() {
   no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
 }
 
-# The approval part (mode run). Every identity's token is minted again once the last is three
-# minutes old (the issuer's tokens live five); the automation identity's is bin/seed's.
-declare -A tok_val=() tok_at=()
-tok=''
-robot='' robot_id='' s2_rel='' applied_rel='' ops0=0 act_seq=0 snap=s3-step4
-# fresh <human|robot>: the identity's token in tok. Not a command substitution: the cache and the
-# secrets list it updates would be lost with its subshell.
-fresh() {
-  local h=$1
-  if [ "$h" = robot ]; then
-    tok=$robot
-    return 0
-  fi
-  if [ -z "${tok_val[$h]:-}" ] || [ $((SECONDS - tok_at[$h])) -ge 180 ]; then
-    tok_val[$h]=$(mint "$h") || die "cannot mint a $h token"
-    keep_secret "${tok_val[$h]}"
-    tok_at[$h]=$SECONDS
-  fi
-  tok=${tok_val[$h]}
-}
-# who_id <human|robot>: the identity's principal ID.
-who_id() {
-  if [ "$1" = robot ]; then printf '%s\n' "$robot_id"; else sql "SELECT id FROM principal WHERE kind = 'human' AND sub = '$1'"; fi
-}
-# plan_body [extra JSON object]: an apply-config plan of the worker's Desired: no-reboot, a route
-# (the machine's own), the deadlines, the attempt limit, the expiry and the age bound.
-plan_body() {
-  local extra=${1:-}
-  [ -n "$extra" ] || extra='{}'
-  jq -nc --arg r "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" --arg m "$machine_w" --argjson x "$extra" \
-    '{releaseId: $r, machine: $m, operation: "apply-config", mode: "no-reboot", expiresInSeconds: 3600,
-      maxObservationAgeSeconds: 300, checkValiditySeconds: 600, transportDeadlineSeconds: 120,
-      verificationDeadlineSeconds: 300, maxAttempts: 2} + $x'
-}
-# plan_by <who> <name> [extra JSON]: an apply-config plan of the worker's Desired created as that
-# identity: 201, its id in plan_id.
-plan_by() {
-  local body
-  plan_id=''
-  fresh "$1"
-  body=$(plan_body "${3:-}") || return 1
-  answers 201 - POST /api/v1/plans "$tok" "$body" "$(key "plan-$2")" || return 1
-  plan_id=$(jq -er '.id' "$EV/last.body")
-}
-# approve_by <who> <plan> <name>: 201 naming the plan, the approver, its role and the current
-# epoch; the approval in approval_id, its self-approval reasons as a JSON array in
-# approval_reasons, the values it was checked against in approval_plan, approval_by and
-# approval_epoch.
-approval_id='' approval_reasons='' approval_plan='' approval_by='' approval_epoch=''
-approve_by() {
-  approval_id='' approval_reasons='' approval_plan='' approval_by='' approval_epoch=''
-  fresh "$1"
-  answers 201 - POST "/api/v1/plans/$2/approvals" "$tok" '{}' "$(key "approval-$3")" || return 1
-  # After the request: a principal's row is made by its first authenticated one.
-  approval_by=$(who_id "$1") && [ -n "$approval_by" ] || return 1
-  approval_epoch=$(sql "SELECT epoch FROM installation_state") && [ -n "$approval_epoch" ] || return 1
-  approval_plan=$2
-  jq -e --arg p "$approval_plan" --arg a "$approval_by" --arg e "$approval_epoch" \
-    '.plan == $p and .approver.principal == $a and .approver.role == "approver" and .epoch == $e
-      and .selfApproval.marked == ((.selfApproval.reasons | length) > 0)' "$EV/last.body" >/dev/null || {
-    echo "s3: $2: the approval answered does not name the plan, the approver, its role and the current epoch" >&2
-    return 1
-  }
-  approval_id=$(jq -er '.id' "$EV/last.body") || return 1
-  approval_reasons=$(jq -ce '.selfApproval.reasons' "$EV/last.body")
-}
+# The approval part (mode run). The tokens, plan_body, plan_by and approve_by are common.sh's.
+s2_rel='' applied_rel='' ops0=0 act_seq=0 snap=s3-step4
 # approval_names <approver human> <plan>: the approval the 201 answered names the plan, the
 # approver, its role and an epoch (the last approve_by's), and is the plan's only approval; its
 # act is the approver's plan.approve under that role, naming the approval, the plan and the machine.
@@ -522,18 +435,6 @@ reasons_are() {
   answers_with ".id == \"$approval_id\" and .plan == \"$approval_plan\" and .approver.principal == \"$approval_by\"
       and .approver.role == \"approver\" and .epoch == \"$approval_epoch\" and .selfApproval == {marked: $2, reasons: $want}" \
     200 - GET "/api/v1/approvals/$approval_id" "$tok"
-}
-# plan_is_stored <plan> <state> <approval or none>: the plan's stored state and approval, and no
-# operation.
-plan_is_stored() {
-  [ "$(sql "SELECT s.state || ' ' || coalesce(s.approval, 'none') || ' ' || coalesce(s.operation, 'none')
-    FROM plan_state s WHERE s.plan = '$1'")" = "$2 $3 none" ] &&
-    [ "$(sql "SELECT count(*) FROM operation WHERE plan = '$1'")" = 0 ]
-}
-# plan_reads <plan> <state>: a viewer reads the plan in that state.
-plan_reads() {
-  fresh h-viewer
-  answers_with ".id == \"$1\" and .state == \"$2\" and .committedOperation == null" 200 - GET "/api/v1/plans/$1" "$tok"
 }
 # no_dispatch_since <operation seq>: no apply-config operation exists since that sequence number
 # (a publication, which step 4 makes, is an operation of another kind).
@@ -712,14 +613,6 @@ release_holds_automation_revision() {
   [ "$(sql "SELECT count(*) FROM release_source s JOIN fragment_revision f ON f.id = s.fragment_revision
     WHERE s.release = '$s2_rel' AND f.author = '$robot_id'")" -ge 1 ]
 }
-# draft_by <who> <name>: POST /drafts as that identity; draft, etag.
-draft_by() {
-  fresh "$1"
-  answers 201 - POST /api/v1/drafts "$tok" "$(jq -nc --arg c "$cluster" --arg t "S3 $2" '{cluster: $c, title: $t}')" "$(key "draft-$2")" || return 1
-  draft=$(jq -er '.id' "$EV/last.body") || return 1
-  etag=$(etag_of_last)
-  [ -n "$etag" ]
-}
 # fragment_by <who> <name> <fragment> [layer]: a fragment of one node label, under the draft's ETag:
 # 200, the ETag replaced; its revision in frag_rev. A cluster fragment is selected by no machine's
 # profile, so the release compiled from its draft names it as a changed head and no machine's
@@ -763,8 +656,6 @@ publish_by() {
   [ -n "$new_release" ] &&
     [ "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" = "$new_release" ]
 }
-# servers pause|unpause: A, B and C.
-servers() { both "$1" && "$bin/inject" "$1" C; }
 # db_reads: A answers a database read again after a restore swapped the database under it.
 db_reads() {
   fresh_author

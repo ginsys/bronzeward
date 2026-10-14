@@ -195,9 +195,6 @@ pub_draft() {
   ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')" "pub-$1" || return 1
   pub_ready=1
 }
-# both pause|unpause: that inject action on A and on B.
-both() { "$bin/inject" "$1" A && "$bin/inject" "$1" B; }
-servers() { both "$1" && "$bin/inject" "$1" C; }
 # publish_on_c <name> <statuses ERE>: the publication of the draft, sent to C as h-publisher under
 # the draft's ETag, gets one of the statuses (000 when C exits before it answers). Its operation,
 # found by the draft, in pub_op: one publish operation of the draft, and the one a 202 names.
