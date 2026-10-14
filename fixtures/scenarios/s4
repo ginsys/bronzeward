@@ -17,10 +17,19 @@
 # approved plan waits, and a publication changing the worker's assignment fails 409 scope-busy. The
 # database is dumped, then both s3-step3 snapshots are restored with C's link cut again: the state
 # `run` starts from.
+# `restores`: the commitment-level controls, each from a restore of S3's step-4 snapshots with the S2
+# release planned on C alone, A and B paused and C told to stall before anything could be sent. The
+# worker's assignment changed after planning, and a later release published before the approval:
+# comparison 2 refuses the commitment. The plan cancelled, or the approver's identity revoked, once
+# the operation is committed with no attempt: the attempt is refused, the operation goes unresolved,
+# then cancelled. The identity revoked after the evidence and before the commitment: comparison 1
+# refuses it. OpenBao paused while C checks the plan, h-approver's next approval under a token
+# without the approver group 403, then OpenBao unpaused: the plan commits and its attempt is
+# admitted. The run ends restored to the s3-step3 snapshots, as controls does.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s4.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s4 controls|run   (after scenarios/s1 run, s3 handover, s2 run and s3 run on the
-# same up; controls, when run, before run)
+# Usage: scenarios/s4 controls|restores|run   (after scenarios/s1 run, s3 handover, s2 run and s3 run
+# on the same up; controls and restores, when run, before run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -28,7 +37,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s4_mode=${1:-}
-case $s4_mode in controls | run) ;; *) die "usage: scenarios/s4 controls|run" ;; esac
+case $s4_mode in controls | restores | run) ;; *) die "usage: scenarios/s4 controls|restores|run" ;; esac
 need docker curl jq timeout id sleep date awk wc
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -335,12 +344,12 @@ waits() {
     [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND entry->>'plan' = '$1'
       AND kind IN ('use-time-check', 'commitment', 'refusal')")" = 0 ]
 }
-# reassign: the worker's assignment in the draft changed to the handover's cluster fragment alone,
-# under the draft's ETag: 200.
+# reassign <name>: the worker's assignment in the draft changed to the handover's cluster fragment
+# alone, under the draft's ETag: 200.
 reassign() {
   fresh h-author
   answers 200 - PUT "/api/v1/drafts/$draft/assignments/$machine_w" "$tok" \
-    '{"profiles": [], "fragments": {"cluster": ["s3-handover"]}}' "$(key assignment-busy)" "$etag" || return 1
+    '{"profiles": [], "fragments": {"cluster": ["s3-handover"]}}' "$(key "assignment-$1")" "$etag" || return 1
   etag=$(etag_of_last)
   [ -n "$etag" ]
 }
@@ -359,10 +368,11 @@ busy_refused() {
     [ "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" = 0 ] &&
     [ "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" = "$rel" ]
 }
-# db_reads: A answers a database read again after a restore swapped the database under it.
+# db_reads: the instance answers a database read again after a restore swapped the database under
+# it: the worker, which every snapshot holds.
 db_reads() {
   fresh h-viewer
-  [ "$(call GET "/api/v1/plans/$plan" "$tok")" = 200 ]
+  [ "$(call GET "/api/v1/machines/$machine_w" "$tok")" = 200 ]
 }
 # restored: the database is the snapshot's: no act after the controls began, step 3's plan the only
 # apply-config plan, approved by its approval, unexpired for ten minutes more, and no apply-config
@@ -452,7 +462,7 @@ controls() {
     waits "$second" "$sa"
   check "$ref" 'the first operation still holds the scope: committed, no attempt' still_held
   check "$ref" 'h-author opens a draft: 201' draft_by h-author busy
-  check "$ref" "h-author changes the worker's assignment in it: 200" reassign
+  check "$ref" "h-author changes the worker's assignment in it: 200" reassign busy
   check "$ref" 'h-publisher publishes it: 202' publish_busy
   check "$ref" "the publication fails 409 scope-busy naming the worker and the holding operation, no release, the worker's Desired unchanged" \
     within 120 busy_refused
@@ -484,12 +494,221 @@ controls() {
   check "$ref" "A's, B's and C's links to the worker are cut" worker_cut
 }
 
+# The restores (mode restores). act4: the last act the first restore of S3's step-4 snapshots holds.
+act4=''
+# restored_step4: the database is S3's step-4 snapshot's: no apply-config plan or operation, the
+# worker's Desired the S2 release, and, after the first restore, the act sequence it held.
+restored_step4() {
+  [ -n "$act4" ] || act4=$(sql "SELECT coalesce(max(seq), 0) FROM act") || return 1
+  [ "$(sql "SELECT coalesce(max(seq), 0) FROM act")" = "$act4" ] &&
+    [ "$(sql "SELECT count(*) FROM plan WHERE kind = 'apply-config'")" = 0 ] && nothing_since 0 &&
+    [ "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" = "$rel" ]
+}
+# from_step4 <case> <stall step>: C, its link cut and A and B paused, killed; S3's step-4 snapshots
+# restored; C told to stall at the step and started; then an apply-config plan of the S2 release as
+# h-publisher on C, its id in plan_id. The stall is a prerequisite: nothing after it may send.
+from_step4() {
+  local ref="S4 negative controls, $1"
+  check "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
+  check "$ref" 'inject kill C' "$bin/inject" kill C
+  check "$ref" 'inject db-restore s3-step4' "$bin/inject" db-restore s3-step4
+  check "$ref" 'inject bao-restore s3-step4' "$bin/inject" bao-restore s3-step4
+  interrupt "$2" stall || die "s4: C's stall not installed; nothing after it can run"
+  result PASS "$ref" "C told to stall at $2"
+  check "$ref" 'inject start C, its link to the worker cut' "$bin/inject" start C
+  check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
+  check "$ref" 'C reads the restored database' within 60 db_reads
+  check "$ref" "restored to S3's step-4 snapshots: no apply-config plan or operation, the worker's Desired the S2 release, the first restore's last act" \
+    restored_step4
+  ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s4: cannot read the operations"
+  check "$ref" "an apply-config plan of the S2 release as h-publisher on C: 201" plan_by h-publisher "$1"
+  [ -n "$plan_id" ] || die "s4: no plan for $1; nothing after it can run"
+}
+# commit_refused <plan> <comparison> <cause>: one refusal entry names the plan, a commitment's (it
+# names no operation), by the comparison with the cause; the plan has no operation.
+commit_refused() {
+  [ "$(sql "SELECT count(*) || ' ' || string_agg((entry->>'comparison') || ':' || (entry->>'cause'), ',')
+    || ' ' || bool_and(NOT entry ? 'operation') FROM machine_event
+    WHERE machine = '$machine_w' AND kind = 'refusal' AND entry->>'plan' = '$1'")" = "1 $2:$3 true" ] &&
+    [ "$(sql "SELECT count(*) FROM operation WHERE plan = '$1'")" = 0 ]
+}
+# settled_cancelled <cause>: held is cancelled with no attempt; its entries, in timeline order, are
+# the attempt's refusal by comparison 1 with the cause, then committed to unresolved and unresolved
+# to cancelled, each with it.
+settled_cancelled() {
+  [ "$(sql "SELECT o.state || ' ' || count(a.id) FROM operation o LEFT JOIN attempt a ON a.operation = o.id
+    WHERE o.id = '$held' GROUP BY o.state")" = 'cancelled 0' ] &&
+    [ "$(sql "SELECT string_agg(CASE kind WHEN 'refusal' THEN 'refusal ' || (entry->>'comparison')
+        ELSE (entry->>'from') || '>' || (entry->>'to') || ' ' || (entry->>'comparison') END || ': ' || (entry->>'cause'), ', '
+        ORDER BY revision)
+      FROM machine_event WHERE machine = '$machine_w' AND entry->>'operation' = '$held' AND kind IN ('refusal', 'operation-state')")" = \
+      "refusal 1: $1, committed>unresolved 1: $1, unresolved>cancelled 1: $1" ]
+}
+# revoke_approver <name>: h-recovery revokes h-approver's identity: 201.
+revoke_approver() {
+  fresh h-recovery
+  answers 201 - POST /api/v1/identity-revocations "$tok" \
+    '{"iss":"http://issuer:5556","sub":"h-approver","reason":"S4 negative controls"}' "$(key "revoke-$1")"
+}
+# cancel_plan <plan> <name>: h-publisher, its creator, cancels the plan: 200.
+cancel_plan() {
+  fresh h-publisher
+  answers 200 - POST "/api/v1/plans/$1/cancellations" "$tok" '{"reason": "S4 negative controls"}' "$(key "cancel-$2")"
+}
+# approve_without_role <plan>: h-approver, removed from bw-approvers at the issuer, approves under a
+# fresh token without it: 403 forbidden, and the plan is still proposed.
+approve_without_role() {
+  local t
+  t=$(mint_without h-approver bw-approvers) || return 1
+  keep_secret "$t"
+  answers 403 forbidden POST "/api/v1/plans/$1/approvals" "$t" '{}' "$(key approval-without-role)" &&
+    plan_state_is "$1" proposed
+}
+# attempt_admitted <plan> <stalls before>: the plan committed, its operation sending with one
+# attempt and no response, its id in held; C stalled once more after the attempt, so nothing is sent.
+attempt_admitted() {
+  held=$(sql "SELECT operation FROM plan_state WHERE plan = '$1' AND state = 'committed'") && [ -n "$held" ] &&
+    [ "$(sql "SELECT o.state || ' ' || count(a.id) || ' ' || count(r.attempt) FROM operation o
+      LEFT JOIN attempt a ON a.operation = o.id LEFT JOIN attempt_response r ON r.attempt = a.id
+      WHERE o.id = '$held' GROUP BY o.state")" = 'sending 1 0' ] &&
+    [ "$(stalls_at dispatch-attempted)" -gt "$2" ]
+}
+# untaken <plan>: no operation since ops0, and no commitment entry names the plan.
+untaken() {
+  nothing_since "$ops0" && [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w'
+    AND kind = 'commitment' AND entry->>'plan' = '$1'")" = 0 ]
+}
+
+restores() {
+  local ref='S4 negative controls' p n rev w_after cp_after
+  approval0=$(sql "SELECT approval FROM plan_state WHERE plan = '$plan'") || die "s4: cannot read step 3's approval"
+  act0=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s4: cannot read the acts"
+  [ "$(sql "SELECT expires_at > now() + interval '25 minutes' FROM plan WHERE id = '$plan'")" = t ] ||
+    die "s4: step 3's plan expires within 25 minutes; run scenarios/s3 run again on a fresh up"
+  pre_state
+  # C alone dispatches from here on; each case kills it, so a stall left by the last one ends there.
+  check "$ref" 'inject pause A and B' both pause
+  call_port=$SERVER_C_PORT
+
+  # The assignment changed after planning and the approval: comparison 2.
+  from_step4 assignment dispatch-attempted
+  p=$plan_id
+  check "$ref, assignment" 'approved as h-approver: 201' approve_by h-approver "$p" assignment
+  check "$ref, assignment" 'h-author opens a draft: 201' draft_by h-author assignment
+  check "$ref, assignment" "h-author changes the worker's assignment in it: 200" reassign assignment
+  check "$ref, assignment" 'h-publisher publishes it: 202, one release, the worker'"'"'s Desired' publish_by h-publisher assignment
+  check "$ref, assignment" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
+  check "$ref, assignment" "the commitment refused by comparison 2, the machine's assignment revision changed; no operation" \
+    within 90 commit_refused "$p" 2 "the machine's assignment revision changed"
+
+  # A later release, then the approval, which does not compare Desired: comparison 2. Its control is
+  # run's commitment of step 3's plan with no publication between (ER choice §10.24).
+  from_step4 desired dispatch-attempted
+  p=$plan_id
+  check "$ref, desired" 'h-author opens a draft: 201' draft_by h-author desired
+  check "$ref, desired" 'h-author drafts an unrelated change, a fragment: 200' fragment_by h-author desired desired
+  check "$ref, desired" 'h-publisher publishes it as a later release: 202, one release, the worker'"'"'s Desired' publish_by h-publisher desired
+  check "$ref, desired" 'then approved as h-approver: 201' approve_by h-approver "$p" desired
+  check "$ref, desired" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
+  check "$ref, desired" "the commitment refused by comparison 2, the machine's Desired release changed; no operation" \
+    within 90 commit_refused "$p" 2 "the machine's Desired release changed"
+
+  # Cancelled after the commitment, with no attempt: unresolved, then cancelled (ER §9.2).
+  from_step4 cancelled dispatch-committed
+  p=$plan_id
+  check "$ref, cancelled" 'approved as h-approver: 201' approve_by h-approver "$p" cancelled
+  n=$(stalls_at dispatch-committed)
+  check "$ref, cancelled" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
+  check "$ref, cancelled" 'the plan committed, its operation committed with no attempt; C stalls there' within 120 committed_held "$p" "$n"
+  check "$ref, cancelled" 'h-publisher cancels the committed plan: 200' cancel_plan "$p" cancelled
+  interrupt dispatch-attempted stall || die "s4: C's stall not moved; nothing after it can run"
+  result PASS "$ref, cancelled" 'C released, told to stall after an attempt instead'
+  check "$ref, cancelled" 'the attempt refused by comparison 1, the plan is cancelled; the operation committed to unresolved, then cancelled, on the timeline; no attempt' \
+    within 90 settled_cancelled 'the plan is cancelled'
+
+  result SKIP "$ref" 'a revocation started while a commitment holds the approval waits for it, and the control without the lock does not (DS row 003): the Go check TestCommitmentRevocationsWait and the DS re-run'
+
+  # The approver's identity revoked before the commitment: comparison 1. Revoked before the
+  # controller reads the plan, it is no candidate at all, so the revocation comes once the evidence is.
+  from_step4 identity-before dispatch-evidence
+  p=$plan_id
+  check "$ref, identity before" 'approved as h-approver: 201' approve_by h-approver "$p" identity-before
+  n=$(stalls_at dispatch-evidence)
+  rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
+  check "$ref, identity before" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
+  check "$ref, identity before" 'the use-time check passes and the evidence is recorded; C stalls there, nothing committed' \
+    within 120 evidence_stalled "$p" "$rev" "$n"
+  check "$ref, identity before" "h-recovery revokes h-approver's identity: 201" revoke_approver identity-before
+  interrupt dispatch-attempted stall || die "s4: C's stall not moved; nothing after it can run"
+  result PASS "$ref, identity before" 'C released, told to stall after an attempt instead'
+  check "$ref, identity before" "the commitment refused by comparison 1, the approver's identity is revoked; no operation" \
+    within 90 commit_refused "$p" 1 "the approver's identity is revoked"
+
+  # Revoked after the commitment, with no attempt: unresolved, its scope held, then cancelled (ER §3.3).
+  from_step4 identity-after dispatch-committed
+  p=$plan_id
+  check "$ref, identity after" 'approved as h-approver: 201' approve_by h-approver "$p" identity-after
+  n=$(stalls_at dispatch-committed)
+  check "$ref, identity after" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
+  check "$ref, identity after" 'the plan committed, its operation committed with no attempt; C stalls there' within 120 committed_held "$p" "$n"
+  check "$ref, identity after" "h-recovery revokes h-approver's identity: 201" revoke_approver identity-after
+  interrupt dispatch-attempted stall || die "s4: C's stall not moved; nothing after it can run"
+  result PASS "$ref, identity after" 'C released, told to stall after an attempt instead'
+  check "$ref, identity after" "the attempt refused by comparison 1, the approver's identity is revoked; the operation committed to unresolved, then cancelled, on the timeline; no attempt" \
+    within 90 settled_cancelled "the approver's identity is revoked"
+
+  # OpenBao paused holds the commitment; a role removed at the issuer afterwards does not stop it
+  # (PA choice §17.23). S3's approval revocation before commitment, which refuses, is the contrast.
+  from_step4 openbao dispatch-attempted
+  p=$plan_id
+  check "$ref, openbao" 'a second plan as h-publisher: 201' plan_by h-publisher openbao-second
+  check "$ref, openbao" 'inject linkjoin C worker' "$bin/inject" linkjoin C worker
+  check "$ref, openbao" 'inject pause openbao' "$bin/inject" pause openbao
+  check "$ref, openbao" 'the first plan approved as h-approver: 201' approve_by h-approver "$p" openbao
+  sleep 16
+  check "$ref, openbao" 'three heartbeats on: no operation, no commitment entry names the plan' untaken "$p"
+  check "$ref, openbao" "h-approver, removed from bw-approvers at the issuer, approves the second plan under a fresh token: 403 forbidden, still proposed" \
+    approve_without_role "$plan_id"
+  check "$ref, openbao" 'still no operation, no commitment entry names the plan' untaken "$p"
+  n=$(stalls_at dispatch-attempted)
+  check "$ref, openbao" 'inject unpause openbao' "$bin/inject" unpause openbao
+  check "$ref, openbao" 'the plan commits and its attempt is admitted, no response; C stalls before sending' \
+    within 120 attempt_admitted "$p" "$n"
+
+  ref='S4 negative controls'
+  outcome_bundle "$ref" restores
+  check "$ref" "the worker's digest and resource version are the pre-state's" unchanged_node "$TALOS_WORKER_IP"
+  check "$ref" "the control plane's digest and resource version are the pre-state's" unchanged_node "$TALOS_CONTROLPLANE_IP"
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_log" "$w_after"
+  no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
+  check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the restores' "$bin/inject" db-snapshot "$backup_name"
+
+  # Back to what run starts from. C, stalled after its attempt, is killed with its link cut: the
+  # attempt is never sent, and the restore removes it.
+  ref='S4 restores handoff'
+  check "$ref" 'inject linksplit C worker' "$bin/inject" linksplit C worker
+  check "$ref" 'inject kill C' "$bin/inject" kill C
+  check "$ref" 'inject db-restore s3-step3' "$bin/inject" db-restore s3-step3
+  check "$ref" 'inject bao-restore s3-step3' "$bin/inject" bao-restore s3-step3
+  check "$ref" "C's control file removed" interrupt -
+  check "$ref" 'inject start C, its link to the worker cut' "$bin/inject" start C
+  check "$ref" 'inject unpause A and B' both unpause
+  call_port=$SERVER_A_PORT
+  check "$ref" 'A reads the restored database' within 60 db_reads
+  check "$ref" "restored: no act after the restores began, step 3's plan the only apply-config plan, approved by its approval and unexpired for ten minutes more, no apply-config operation" \
+    restored
+  check "$ref" "A's, B's and C's links to the worker are cut" worker_cut
+}
+
 backup_name=s4-$run_key
 run() {
   preconditions
   withheld+=("$BW_CANARY")
   case $s4_mode in
     controls) controls ;;
+    restores) restores ;;
     run)
       safe_apply
       check 'S4 backups' 'inject db-snapshot: a dump of the bronzeward database after the apply' "$bin/inject" db-snapshot "$backup_name"
@@ -514,8 +733,8 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
     result PASS 'S4 evidence' 'the bundle is complete: bin/evidence captured every source'
   fi
   # The scan above covers the dump only if the bundle holds it expanded: the attempt's (run's) or
-  # the held operation's (controls') own row inside its COPY block, whose first column is the ID.
-  # The controls' row is in the dump only: the restore after it removed it from the database.
+  # the held operation's (controls' or restores') own row inside its COPY block, whose first column
+  # is the ID. That row is in the dump only: the restore after it removed it from the database.
   if [ "$s4_mode" = run ]; then
     dump_table=attempt dump_row='the attempt'
     dump_id=$(sql "SELECT id FROM attempt WHERE operation = '${op:-none}'") || dump_id=

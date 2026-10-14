@@ -64,6 +64,9 @@ mint() {
   [ -z "${2:-}" ] || defect=(-defect "$2")
   oidc mint -key /etc/oidc/key.json -issuer http://issuer:5556 -human "$1" "${defect[@]}"
 }
+# mint_without <human> <group>: a valid token whose groups claim lacks one of the human's groups, as
+# if the human had been removed from it at the issuer.
+mint_without() { oidc mint -key /etc/oidc/key.json -issuer http://issuer:5556 -human "$1" -without-group "$2"; }
 
 # call <method> <path> <token> [body] [idempotency key] [if-match]: the status of a request to the
 # instance on port $call_port (A's unless the scenario sets it), 000 when nothing answers; the
@@ -525,12 +528,13 @@ who_id() {
 both() { "$bin/inject" "$1" A && "$bin/inject" "$1" B; }
 servers() { both "$1" && "$bin/inject" "$1" C; }
 # plan_body [extra JSON object]: an apply-config plan of the worker's Desired: no-reboot, a route
-# (the machine's own), the deadlines, the attempt limit, the expiry and the age bound.
+# (the machine's own), the deadlines, the attempt limit, the expiry and the age bound. Two hours:
+# S3 step 3's plan must outlive s3 run, s4 controls, s4 restores and s4 run.
 plan_body() {
   local extra=${1:-}
   [ -n "$extra" ] || extra='{}'
   jq -nc --arg r "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" --arg m "$machine_w" --argjson x "$extra" \
-    '{releaseId: $r, machine: $m, operation: "apply-config", mode: "no-reboot", expiresInSeconds: 3600,
+    '{releaseId: $r, machine: $m, operation: "apply-config", mode: "no-reboot", expiresInSeconds: 7200,
       maxObservationAgeSeconds: 300, checkValiditySeconds: 600, transportDeadlineSeconds: 120,
       verificationDeadlineSeconds: 300, maxAttempts: 2} + $x'
 }
@@ -589,6 +593,39 @@ draft_by() {
   draft=$(jq -er '.id' "$EV/last.body") || return 1
   etag=$(etag_of_last)
   [ -n "$etag" ]
+}
+# fragment_by <who> <name> <fragment> [layer]: a fragment of one node label, under the draft's ETag:
+# 200, the ETag replaced; its revision in frag_rev. A cluster fragment is selected by no machine's
+# profile, so the release compiled from its draft names it as a changed head and no machine's
+# configuration changes: it is an unrelated change. A role fragment is one a profile lists (s3's
+# profile_by).
+frag_rev=''
+fragment_by() {
+  local body
+  fresh "$1"
+  body=$(jq -nc --arg n "$3" --arg l "${4:-cluster}" --arg s "$scenario" \
+    '{layer: $l, document: ("machine:\n  nodeLabels:\n    bw-" + $s + "-" + $n + ": \"yes\"\n"), marks: []}') || return 1
+  answers 200 - PUT "/api/v1/drafts/$draft/fragments/$scenario-$3" "$tok" "$body" "$(key "fragment-$2")" "$etag" || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
+  frag_rev=$(jq -er '.entry.revision' "$EV/last.body")
+}
+# publish_by <who> <name>: the draft published under its current ETag: 202, the operation
+# succeeded with one release, which is then the worker's Desired; its id in new_release.
+new_release='' pub_op=''
+pub_succeeded() {
+  [ "$(sql "SELECT state FROM operation WHERE id = '$pub_op'")" = succeeded ] &&
+    [ "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" = 1 ]
+}
+publish_by() {
+  new_release=''
+  fresh "$1"
+  answers 202 - POST "/api/v1/drafts/$draft/publications" "$tok" '{}' "$(key "publication-$2")" "$etag" || return 1
+  pub_op=$(jq -er '.id' "$EV/last.body") || return 1
+  within 120 pub_succeeded || return 1
+  new_release=$(sql "SELECT id FROM release WHERE operation = '$pub_op'")
+  [ -n "$new_release" ] &&
+    [ "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" = "$new_release" ]
 }
 
 # The age control's pieces, for an adopt or an apply-config plan alike.

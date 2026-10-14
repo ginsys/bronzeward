@@ -30,4 +30,15 @@ func TestKeygenMintDefects(t *testing.T) {
 	if err := run([]string{"mint", "-key", key, "-issuer", "http://issuer.test", "-human", "h-author", "-defect", "bogus"}, io.Discard); err == nil {
 		t.Fatal("unknown defect accepted")
 	}
+	out.Reset()
+	if err := run([]string{"mint", "-key", key, "-issuer", "http://issuer.test", "-human", "h-approver", "-without-group", "bw-approvers"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(strings.TrimSpace(out.String()), "."); n != 2 {
+		t.Fatalf("mint -without-group printed %q", out.String())
+	}
+	if err := run([]string{"mint", "-key", key, "-issuer", "http://issuer.test", "-human", "h-approver", "-without-group", "bw-approvers",
+		"-defect", "expired"}, io.Discard); err == nil {
+		t.Fatal("-without-group with a defect accepted")
+	}
 }

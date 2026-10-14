@@ -82,10 +82,6 @@ one_line() { [ -n "$1" ] && [ "$(wc -l <<<"$1")" = 1 ]; }
 
 # publish_import: the S1 import draft, both machines imported into it, published as h-publisher
 # under its current ETag; the release in $release, which covers both machines.
-pub_succeeded() {
-  [ "$(sql "SELECT state FROM operation WHERE id = '$pub_op'")" = succeeded ] &&
-    [ "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" = 1 ]
-}
 publish_import() {
   fresh_author
   fresh_publisher
@@ -453,7 +449,7 @@ plan_bound() {
       || ' ' || (p.assignment_revision = rm.assignment_revision) || ' ' || (p.baseline_revision = s.baseline_revision)
       || ' ' || (p.expected_digest = s.applied_digest) || ' ' || (p.route::text = m.talos_endpoint::text)
       || ' ' || (p.transport_deadline = interval '120 seconds') || ' ' || (p.verification_deadline = interval '300 seconds')
-      || ' ' || (p.max_attempts = 2) || ' ' || (p.expires_at - p.created_at = interval '3600 seconds')
+      || ' ' || (p.max_attempts = 2) || ' ' || (p.expires_at - p.created_at = interval '7200 seconds')
       || ' ' || (p.max_observation_age = interval '300 seconds') || ' ' || (p.check_validity = interval '600 seconds')
       || ' ' || (p.created_by = '$(who_id h-publisher)') || ' ' || (p.created_role = 'publisher')
       FROM plan p JOIN machine_state s ON s.machine = p.machine JOIN machine m ON m.id = p.machine
@@ -613,22 +609,6 @@ release_holds_automation_revision() {
   [ "$(sql "SELECT count(*) FROM release_source s JOIN fragment_revision f ON f.id = s.fragment_revision
     WHERE s.release = '$s2_rel' AND f.author = '$robot_id'")" -ge 1 ]
 }
-# fragment_by <who> <name> <fragment> [layer]: a fragment of one node label, under the draft's ETag:
-# 200, the ETag replaced; its revision in frag_rev. A cluster fragment is selected by no machine's
-# profile, so the release compiled from its draft names it as a changed head and no machine's
-# configuration changes: it is an unrelated change. A role fragment is one a profile lists
-# (profile_by).
-frag_rev=''
-fragment_by() {
-  local body
-  fresh "$1"
-  body=$(jq -nc --arg n "$3" --arg l "${4:-cluster}" \
-    '{layer: $l, document: ("machine:\n  nodeLabels:\n    bw-s3-" + $n + ": \"yes\"\n"), marks: []}') || return 1
-  answers 200 - PUT "/api/v1/drafts/$draft/fragments/s3-$3" "$tok" "$body" "$(key "fragment-$2")" "$etag" || return 1
-  differ "$(etag_of_last)" "$etag" || return 1
-  etag=$(etag_of_last)
-  frag_rev=$(jq -er '.entry.revision' "$EV/last.body")
-}
 # profile_by <who> <name>: the workers profile, under the draft's ETag, listing the fragment
 # revisions its head lists and frag_rev: the release compiled from the draft selects that fragment
 # through the worker's assignment, and a later release carries it unchanged.
@@ -642,19 +622,6 @@ profile_by() {
   answers 200 - PUT "/api/v1/drafts/$draft/profiles/workers" "$tok" "$body" "$(key "profile-$2")" "$etag" || return 1
   differ "$(etag_of_last)" "$etag" || return 1
   etag=$(etag_of_last)
-}
-# publish_by <who> <name>: the draft published under its current ETag: 202, the operation
-# succeeded with one release, which is then the worker's Desired; its id in new_release.
-new_release=''
-publish_by() {
-  new_release=''
-  fresh "$1"
-  answers 202 - POST "/api/v1/drafts/$draft/publications" "$tok" '{}' "$(key "publication-$2")" "$etag" || return 1
-  pub_op=$(jq -er '.id' "$EV/last.body") || return 1
-  within 120 pub_succeeded || return 1
-  new_release=$(sql "SELECT id FROM release WHERE operation = '$pub_op'")
-  [ -n "$new_release" ] &&
-    [ "$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")" = "$new_release" ]
 }
 # db_reads: A answers a database read again after a restore swapped the database under it.
 db_reads() {

@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -133,6 +134,23 @@ func (i *Issuer) Mint(human, defect string, now time.Time) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("issuer: unknown human %q", human)
 	}
+	return i.mint(human, groups, defect, now)
+}
+
+// MintWithoutGroup returns a valid access token for human whose groups claim lacks group, as if
+// the human had been removed from that group at the issuer (acceptance-plan.md S4).
+func (i *Issuer) MintWithoutGroup(human, group string, now time.Time) (string, error) {
+	groups, ok := Humans[human]
+	if !ok {
+		return "", fmt.Errorf("issuer: unknown human %q", human)
+	}
+	if !slices.Contains(groups, group) {
+		return "", fmt.Errorf("issuer: %s is not in group %q", human, group)
+	}
+	return i.mint(human, slices.DeleteFunc(slices.Clone(groups), func(g string) bool { return g == group }), "", now)
+}
+
+func (i *Issuer) mint(human string, groups []string, defect string, now time.Time) (string, error) {
 	at := func(d time.Duration) int64 { return now.Add(d).Unix() }
 	c := map[string]any{
 		"iss": i.URL, "aud": i.Audience, "sub": human, "groups": groups,
