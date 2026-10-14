@@ -2142,9 +2142,10 @@ conservative option; those that do not say so. Each is marked in place as
 31. **The approval and principal locks of comparison 1 have no unlocked
     control** (§3.2, §9.2; DS row 003). A commitment or attempt also holds the
     machine row `FOR UPDATE`, and a commitment the plan state `FOR UPDATE`.
-    An approval revocation takes both before the approval, and an identity
-    revocation takes every machine row before the principal. A revocation
-    without the approval's or principal's lock therefore still waits, and §9.2's
+    An approval revocation takes the machine row before the approval and the
+    plan state after it, and an identity revocation takes every machine row
+    before the principal. A revocation that finds the approval's or
+    principal's row unlocked therefore still waits, and §9.2's
     unlocked control is not constructible for these two locks. The verification
     is the race itself: a revocation started while the commitment holds its
     locks waits for it. The `FOR SHARE` reads stay as the contract's stated
