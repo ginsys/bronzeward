@@ -138,15 +138,17 @@ func (a *API) advance(ctx context.Context, op heldOperation) error {
 
 // recoveryReadDue is whether the loop takes a recovery observation of an operation with an
 // unaccounted attempt (§5.2): once its attempts' latest transport deadline has passed, and then once
-// per settle floor, so that a decision finds the first successful read after that deadline and one
-// begun after the floor, with no read on every pass.
+// per settle floor after the last read was recorded (the decision measures the floor from there), so
+// that a decision finds the first successful read after that deadline and one begun after the floor,
+// with no read on every pass. A read still in progress counts from its start.
 func (a *API) recoveryReadDue(ctx context.Context, operation string) (bool, error) {
 	var due bool
 	err := a.db.QueryRowContext(ctx, `WITH d AS (SELECT max(transport_deadline) AS at FROM attempt WHERE operation = $1)
 		SELECT clock_timestamp() > d.at AND NOT EXISTS (SELECT FROM observation_start s
 				JOIN machine_event e ON e.machine = s.machine AND e.revision = s.revision
+				LEFT JOIN observation o ON o.machine = s.machine AND o.basis = s.revision
 			WHERE s.operation = $1 AND s.purpose = 'recovery' AND e.at > d.at
-				AND e.at > clock_timestamp() - make_interval(secs => $2))
+				AND coalesce(o.at, e.at) > clock_timestamp() - make_interval(secs => $2))
 		FROM d`, operation, a.d.exec.SettleFloor.Seconds()).Scan(&due)
 	return due, err
 }
