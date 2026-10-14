@@ -363,10 +363,12 @@ db_reads() {
   [ "$(call GET "/api/v1/plans/$plan" "$tok")" = 200 ]
 }
 # restored: the database is the snapshot's: no act after the controls began, step 3's plan the only
-# apply-config plan, approved by its approval, and no apply-config operation.
+# apply-config plan, approved by its approval, unexpired for ten minutes more, and no apply-config
+# operation.
 restored() {
   [ "$(sql "SELECT coalesce(max(seq), 0) FROM act")" = "$act0" ] &&
     [ "$(sql "SELECT count(*) FROM plan WHERE kind = 'apply-config'")" = 1 ] &&
+    [ "$(sql "SELECT expires_at > now() + interval '10 minutes' FROM plan WHERE id = '$plan'")" = t ] &&
     plan_is_stored "$plan" approved "$approval0" && nothing_since 0
 }
 
@@ -375,16 +377,27 @@ controls() {
   approval0=$(sql "SELECT approval FROM plan_state WHERE plan = '$plan'") || die "s4: cannot read step 3's approval"
   act0=$(sql "SELECT coalesce(max(seq), 0) FROM act") || die "s4: cannot read the acts"
   ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s4: cannot read the operations"
+  # The restore keeps the plan's absolute expiry: run needs ten minutes of it after the controls,
+  # whose waits can take fifteen.
+  [ "$(sql "SELECT expires_at > now() + interval '25 minutes' FROM plan WHERE id = '$plan'")" = t ] ||
+    die "s4: step 3's plan expires within 25 minutes; run scenarios/s3 run again on a fresh up"
   pre_state
   check "$ref" "a plan body naming the control plane's endpoint as the worker's route: 400 invalid-request, no plan created (ER §10.9: a plan binds its machine's own endpoint)" \
     route_refused
   # Step 3's plan is set aside, with every link still cut: the restore at the end puts it back.
   check "$ref" "step 3's plan cancelled by its creator, h-publisher" cancel_step3
 
-  # C alone dispatches, told to stall once its evidence is recorded, so nothing is ever sent.
+  # C alone dispatches, told to stall once its evidence is recorded, so nothing is ever sent. C is
+  # restarted first, its link still cut: a dispatch of step 3's plan begun before the cancellation
+  # would otherwise reach the stall and hold C's loop. The stall is a prerequisite: without it the
+  # join below would let C send.
   check "$ref" 'inject pause A and B' both pause
+  check "$ref" 'inject kill C' "$bin/inject" kill C
+  check "$ref" 'inject start C, its link to the worker still cut' "$bin/inject" start C
   call_port=$SERVER_C_PORT
-  check "$ref" 'C told to stall once the evidence is recorded' interrupt dispatch-evidence stall
+  check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
+  interrupt dispatch-evidence stall || die "s4: C's stall not installed; nothing after it can run"
+  result PASS "$ref" 'C told to stall once the evidence is recorded'
   check "$ref" 'inject linkjoin C worker: C alone may dispatch' "$bin/inject" linkjoin C worker
   check "$ref" 'inject seal openbao' "$bin/inject" seal openbao
   rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
@@ -397,13 +410,14 @@ controls() {
     within 90 check_failed "$pa" "$rev"
   sleep 16
   check "$ref" 'three heartbeats on, still sealed: no passed check, no operation' check_failed "$pa" "$rev"
-  check "$ref" 'inject kill openbao' "$bin/inject" kill openbao
   rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
+  check "$ref" 'inject kill openbao' "$bin/inject" kill openbao
   check "$ref" "OpenBao stopped: a later use-time check fails, recorded with its access provider-unavailable; none passes, no operation" \
     within 90 check_failed "$pa" "$rev"
+  # Read before the start: C may pass its check and stall before the start returns.
   n=$(stalls_at dispatch-evidence)
-  check "$ref" 'inject start openbao: started and unsealed' "$bin/inject" start openbao
   rev=$(worker_rev) || die "s4: cannot read the worker's timeline"
+  check "$ref" 'inject start openbao: started and unsealed' "$bin/inject" start openbao
   check "$ref" 'OpenBao started: the use-time check passes and the evidence is recorded; C stalls there, nothing committed' \
     within 120 evidence_stalled "$pa" "$rev" "$n"
 
@@ -414,7 +428,8 @@ controls() {
   check "$ref" 'while stalled: the plan approved, no operation, no refusal entry' idle "$pa" "$approval_id"
   released_at=$(sql "SELECT clock_timestamp()") || die "s4: cannot read the database clock"
   n=$(stalls_at dispatch-committed)
-  check "$ref" 'C told to stall after the commitment instead' interrupt dispatch-committed stall
+  interrupt dispatch-committed stall || die "s4: C's second stall not installed; nothing after it can run"
+  result PASS "$ref" 'C told to stall after the commitment instead'
   check "$ref" 'the plan committed, its operation committed with no attempt; C stalls there' within 120 committed_held "$pa" "$n"
   check "$ref" "C's log records the stalled evidence as older than the plan allows, retried after a lease" older_logged "$pa"
   check "$ref" 'the commitment names another observation than the stalled one, begun after its release' \
@@ -462,7 +477,7 @@ controls() {
   check "$ref" "C's control file removed" interrupt -
   check "$ref" 'inject unpause A, B and C' servers unpause
   check "$ref" 'A reads the restored database' within 60 db_reads
-  check "$ref" "restored: no act after the controls began, step 3's plan the only apply-config plan and approved by its approval, no apply-config operation" \
+  check "$ref" "restored: no act after the controls began, step 3's plan the only apply-config plan, approved by its approval and unexpired for ten minutes more, no apply-config operation" \
     restored
   check "$ref" "A's, B's and C's links to the worker are cut" worker_cut
 }
