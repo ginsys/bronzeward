@@ -164,7 +164,8 @@ func (a *API) run(ctx context.Context, q *request) (rec *record, fresh bool, err
 
 // connLost reports the database connection lost or refused (§9.4's dependency-unavailable): a
 // connection-exception class, an administrator's or the server's shutdown, a broken or closed
-// connection, a timeout. A COMMIT it interrupts is resolved by resolveCommit before this is asked.
+// connection, a timeout, or a statement pgx did not send because its connection was already closed
+// (pgconn.SafeToRetry). A COMMIT it interrupts is resolved by resolveCommit before this is asked.
 func connLost(err error) bool {
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) {
@@ -172,7 +173,7 @@ func connLost(err error) bool {
 	}
 	var ne net.Error
 	return errors.Is(err, driver.ErrBadConn) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
-		pgconn.Timeout(err) || errors.As(err, &ne)
+		pgconn.Timeout(err) || pgconn.SafeToRetry(err) || errors.As(err, &ne)
 }
 
 func isDeadlock(err error) bool {

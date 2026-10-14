@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/ginsys/bronzeward/internal/talos"
 	"github.com/ginsys/bronzeward/internal/talos/talostest"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // execEnv is a commitEnv whose machine is served by a stand-in node at the plan's route: the node
@@ -537,20 +539,27 @@ func TestExecutorCompletesATakenOverAcceptedAttempt(t *testing.T) {
 // DS row 016: the database lost while the node's response is recorded. The response is held in
 // process and its record retried after a lease until it commits, so the one request completes the
 // operation; a COMMIT that succeeded after its reply was lost is found recorded on the retry, and
-// the loop carries the operation on. The control is the same plan with no loss.
+// the loop carries the operation on. A statement on a connection pgx already closed fails with its
+// own error, not a network one: the live run met that one. The control is the same plan with no loss.
 func TestExecutorRetriesALostResponseRecord(t *testing.T) {
 	t.Parallel()
 	for name, c := range map[string]struct {
 		losses    int32
 		committed bool // the lost COMMIT did commit
+		closed    bool // the loss is pgx's error for a closed connection
 	}{
-		"lost before the commit": {losses: 2},
-		"lost after the commit":  {losses: 1, committed: true},
-		"control":                {},
+		"lost before the commit":      {losses: 2},
+		"lost after the commit":       {losses: 1, committed: true},
+		"lost on a closed connection": {losses: 1, closed: true},
+		"control":                     {},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			xe := newExecEnv(t)
+			lost := fmt.Errorf("the connection closed: %w", driver.ErrBadConn)
+			if c.closed {
+				lost = closedConnErr(t)
+			}
 			var left atomic.Int32
 			left.Store(c.losses)
 			life, stop := context.WithCancel(t.Context())
@@ -568,7 +577,7 @@ func TestExecutorRetriesALostResponseRecord(t *testing.T) {
 				} else {
 					_ = tx.Rollback()
 				}
-				return fmt.Errorf("the connection closed: %w", driver.ErrBadConn)
+				return lost
 			}})
 			a.startExecutor()
 			defer stopping(a, stop)
@@ -587,6 +596,23 @@ func TestExecutorRetriesALostResponseRecord(t *testing.T) {
 			}
 		})
 	}
+}
+
+// closedConnErr is the error pgx returns for a statement on a connection it already closed.
+func closedConnErr(t *testing.T) error {
+	t.Helper()
+	c, err := pgconn.Connect(t.Context(), os.Getenv("BW_TEST_PG_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Exec(t.Context(), "SELECT 1").ReadAll()
+	if err == nil {
+		t.Fatal("a closed connection ran a statement")
+	}
+	return err
 }
 
 // ER §3.4: a takeover that failed at start is retried after the lease, from the generation the

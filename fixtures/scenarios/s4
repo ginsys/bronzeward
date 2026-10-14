@@ -949,6 +949,12 @@ accounted_by_decision() {
 }
 # stalled_at <step> <stalls before>: C stalled at the step once more.
 stalled_at() { [ "$(stalls_at "$1")" -gt "$2" ]; }
+# deadline_ahead <seconds>: held's attempt's transport deadline is at least that far away, so a
+# request released now still meets the fault rather than an already expired deadline.
+deadline_ahead() {
+  [ "$(sql "SELECT count(*) FROM attempt WHERE operation = '$held' AND number = 1
+    AND transport_deadline > clock_timestamp() + make_interval(secs => $1)")" = 1 ]
+}
 # fault_row <row> <fault> <heal>: 012, 014 and 015. C stalls once the attempt is recorded; the fault
 # (inject's action and target, one word each) cuts the worker off and C is released, so its request
 # ends with no response accounting for it. Healed, C's paced recovery observations read the worker,
@@ -966,6 +972,7 @@ fault_row() {
   check "$ref" 'the plan commits and its attempt is recorded, no response; C stalls before sending' \
     within 120 attempt_admitted "$plan" "$n"
   must "$ref" "inject $2" "$bin/inject" "${fault[@]}"
+  check "$ref" 'the fault holds with the transport deadline at least 10 s away' deadline_ahead 10
   must "$ref" "C released, its control file removed" interrupt -
   check "$ref" 'the request ends with no response accounting for the attempt: the operation unresolved, unaccounted' \
     within 90 op_unaccounted
