@@ -364,8 +364,10 @@ func TestExecutorRevokedControl(t *testing.T) {
 			if err := xe.db.QueryRow(`SELECT string_agg(e.entry->>'to', ',' ORDER BY e.revision) FROM machine_event r
 				JOIN machine_event e ON e.machine = r.machine AND e.revision > r.revision AND e.kind = 'operation-state'
 					AND e.entry->>'comparison' = '1' AND e.entry->>'cause' = 'the approval is revoked'
+					AND e.entry->>'operation' = r.entry->>'operation'
 				WHERE r.machine = $1 AND r.kind = 'refusal' AND r.entry->>'transaction' = 'T6' AND r.entry->>'comparison' = '1'
-					AND r.entry->>'cause' = 'the approval is revoked'`, xe.machine).Scan(&states); err != nil ||
+					AND r.entry->>'cause' = 'the approval is revoked' AND r.entry->>'plan' = $2
+					AND r.entry->>'operation' = (SELECT id FROM operation WHERE plan = $2)`, xe.machine, xe.pid).Scan(&states); err != nil ||
 				states.String != "unresolved,cancelled" {
 				t.Fatalf("states after comparison 1's refusal %q: %v", states.String, err)
 			}
