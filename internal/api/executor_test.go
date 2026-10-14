@@ -320,6 +320,12 @@ func TestExecutorCommitmentIdentityKeys(t *testing.T) {
 		"recorded by SMBIOS UUID, another node ID (control)": {func(t *testing.T, xe *execEnv) {
 			xe.node.SetNodeID(t, "node-other")
 		}, true},
+		"recorded by SMBIOS UUID, another SMBIOS UUID shown": {func(t *testing.T, xe *execEnv) {
+			xe.node.SetSMBIOSUUID(t, "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b", true)
+		}, false},
+		"recorded by SMBIOS UUID, no systeminformation resource": {func(t *testing.T, xe *execEnv) {
+			xe.node.SetSMBIOSUUID(t, "", false)
+		}, false},
 		"recorded by node ID, an SMBIOS UUID shown": {func(t *testing.T, xe *execEnv) {
 			byNodeID(t, xe)
 			xe.node.SetSMBIOSUUID(t, "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b", true)
@@ -870,11 +876,25 @@ func TestExecutorReclassifiesExpiredRetryEvidence(t *testing.T) {
 	}
 }
 
-// ER §3.1 and §3.3: a retry is made with the access its evidence read. When the access moved to
-// another version while the retry was held back, the operation is observed and classified again
-// with the new one, and the attempt rests on that observation.
+// ER §3.1 and §3.3, PA §16: a retry is made with the access its evidence read. When the access
+// moved to another version identity while the retry was held back (another version number, or the
+// same number with another created_time after the metadata was deleted and written again), the
+// operation is observed and classified again with the new one, and the attempt rests on that
+// observation.
 func TestExecutorRetryFollowsAccessRotation(t *testing.T) {
 	t.Parallel()
+	for name, move := range map[string]func(*provider.TalosAccessVersion){
+		"another version":                        func(v *provider.TalosAccessVersion) { v.Version++ },
+		"the same version, another created time": func(v *provider.TalosAccessVersion) { v.CreatedTime = v.CreatedTime.Add(time.Hour) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			retryFollowsAccessRotation(t, move)
+		})
+	}
+}
+
+func retryFollowsAccessRotation(t *testing.T, move func(*provider.TalosAccessVersion)) {
 	xe := newExecEnv(t)
 	xe.ready(t)
 	if _, err := xe.a.commitPlan(context.Background(), xe.pid); err != nil {
@@ -894,14 +914,14 @@ func TestExecutorRetryFollowsAccessRotation(t *testing.T) {
 	})
 	xe.x.mu.Lock()
 	v := xe.x.access.Version()
-	v.Version++
+	move(&v)
 	xe.x.access = provider.NewTalosAccess(v, xe.x.access.Talosconfig())
 	xe.x.decryptErr = nil
 	xe.x.mu.Unlock()
 	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
-	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation WHERE o.access_version = $1`,
-		v.Version); n != 1 {
-		t.Fatalf("the attempt does not rest on an observation read with access version %d", v.Version)
+	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
+		WHERE o.access_path = $1 AND o.access_version = $2 AND o.access_created = $3`, v.Path, v.Version, v.CreatedTime.UTC().Format(time.RFC3339Nano)); n != 1 {
+		t.Fatalf("the attempt does not rest on an observation read with access %+v", v)
 	}
 }
 
