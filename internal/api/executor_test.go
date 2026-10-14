@@ -451,6 +451,8 @@ func TestExecutorAccessErrorTextControl(t *testing.T) {
 			waitIdle(t, idle, 1)
 			xe.approveThrough(t, a)
 			until(t, a, idle, "a failed use-time check", func() bool { return xe.entries(t, "use-time-check") > 0 })
+			// The entry commits before the pass logs the failure; the log is read once that pass ends.
+			passEnds(t, a, idle)
 			xe.wantNothingSent(t)
 			if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE entry::text LIKE '%' || $1 || '%'`, canary); n != 0 {
 				t.Fatalf("%d timeline entries hold the error text", n)
