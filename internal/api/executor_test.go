@@ -732,10 +732,12 @@ func TestDispatchOfAPlanCancelledWhileQueuedReadsNoDependency(t *testing.T) {
 	xe.wantNothingSent(t)
 }
 
-// ER §3.4, §5.2 and row 020: an operation unresolved with an attempt nobody accounted for waits for
-// its accounting decision, which refuses a completion observation until then, so the loop takes
-// none on any pass.
-func TestExecutorTakesNoObservationWhileAnAttemptIsUnaccounted(t *testing.T) {
+// ER §3.4, §5.2 and rows 012-015, 020: an operation unresolved with an attempt nobody accounted for
+// is settled by nothing until its accounting decision, which names a recovery observation as the
+// start of its settle and one begun after the floor as the end. The loop takes them: none before the
+// attempt's transport deadline, then one, then one more once a settle floor has passed since it; it
+// sends nothing and leaves the operation unresolved.
+func TestExecutorPacesRecoveryReadsWhileAnAttemptIsUnaccounted(t *testing.T) {
 	t.Parallel()
 	xe := newExecEnv(t)
 	xe.ready(t)
@@ -743,22 +745,50 @@ func TestExecutorTakesNoObservationWhileAnAttemptIsUnaccounted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := xe.a.recordAttempt(context.Background(), cm.Operation, 1); err != nil {
+	at, err := xe.a.recordAttempt(context.Background(), cm.Operation, 1)
+	if err != nil {
 		t.Fatal(err)
 	}
 	life, stop := context.WithCancel(t.Context())
 	idle := make(chan struct{})
 	a := xe.executor(t, life, idle, options{})
+	const floor = 2 * time.Second
+	a.d.exec.SettleFloor = floor
 	a.startExecutor()
 	defer stopping(a, stop)
 	until(t, a, idle, "the taken-over operation is unresolved", func() bool { return xe.opState(t) == "unresolved" })
-	before := xe.entries(t, "observation-started")
-	for range 3 {
-		a.wakeExecutor()
-		waitIdle(t, idle, 1)
+	reads := func() int {
+		return count(t, xe.db, `SELECT count(*) FROM observation_start WHERE machine = $1 AND operation = $2 AND purpose = 'recovery'`,
+			xe.machine, cm.Operation)
 	}
-	if after := xe.entries(t, "observation-started"); after != before {
-		t.Fatalf("%d observations started while the attempt was unaccounted", after-before)
+	passes := func() {
+		for range 3 {
+			a.wakeExecutor()
+			waitIdle(t, idle, 1)
+		}
+	}
+	passes()
+	if n := reads(); n != 0 {
+		t.Fatalf("%d recovery observations before the transport deadline", n)
+	}
+	mustExec(t, xe.db, `ALTER TABLE attempt DISABLE TRIGGER immutable_rows`)
+	mustExec(t, xe.db, `UPDATE attempt SET at = clock_timestamp() - interval '2 seconds',
+		transport_deadline = clock_timestamp() - interval '1 second' WHERE id = $1`, at.Attempt)
+	mustExec(t, xe.db, `ALTER TABLE attempt ENABLE TRIGGER immutable_rows`)
+	passes()
+	if n := reads(); n != 1 {
+		t.Fatalf("%d recovery observations after the transport deadline, within one settle floor; want 1", n)
+	}
+	time.Sleep(floor)
+	passes()
+	if n := reads(); n != 2 {
+		t.Fatalf("%d recovery observations a settle floor later; want 2", n)
+	}
+	if s := xe.opState(t); s != "unresolved" {
+		t.Fatalf("the operation is %s", s)
+	}
+	if n := len(xe.node.AppliedRequests()); n != 0 || count(t, xe.db, `SELECT count(*) FROM attempt WHERE operation = $1`, cm.Operation) != 1 {
+		t.Fatalf("%d requests", n)
 	}
 }
 

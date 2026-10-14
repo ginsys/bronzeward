@@ -34,8 +34,17 @@
 # recovery-admin's request while C holds it committed (007): C's attempt is refused by comparison 7,
 # and A retries and completes. C killed once its evidence is recorded (018): no operation, and C
 # started again runs the plan; killed after the commitment (019): C started again takes it over,
-# retries and completes. The rows no request reaches are their Go checks, run in a clone. The table
-# is ds.tsv: row, result, source, outcome.
+# retries and completes. The worker detached (012), paused (014) or cut from C (015) while the
+# attempt is sent: no response accounts for it, and once healed h-recovery takes the operation over
+# and accounts for it by decision on C's paced recovery observations, refused before the takeover
+# and with an end inside the settle floor (013); nothing landed, so it is retried and completes.
+# PostgreSQL killed before the response is recorded (016): retried each lease until it answers. The
+# worker detached before the completion observation (017): unread, then read and completed. C
+# killed once the request is made (020): started again, it takes the operation over, h-recovery
+# accounts for the attempt, and the observation completes it; killed after the completion
+# observation (021): started again, it takes it over and completes it. The rows no request reaches,
+# node validation (022) among them, are their Go checks, run in a clone after the live rows. The
+# table is ds.tsv: row, result, source, outcome.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s4.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
 # Usage: scenarios/s4 controls|restores|run|ds   (after scenarios/s1 run, s3 handover, s2 run and s3
@@ -789,23 +798,24 @@ ds_publish() {
   rel=$new_release
   must "$ref" "the release changes the worker's configuration digest" changes_worker
 }
-# ds_plan <row>: the worker's baseline revision and apid log, the last operation and the last
-# bundle, read; then a plan of the worker's Desired as h-publisher, its id in plan.
+# ds_plan <row> [extra JSON]: the worker's baseline revision and apid log, the last operation and the
+# last bundle, read; then a plan of the worker's Desired as h-publisher, its id in plan.
 ds_plan() {
   baseline=$(sql "SELECT baseline_revision FROM machine_state WHERE machine = '$machine_w'") || die "s4: cannot read the worker's state"
   ops0=$(sql "SELECT coalesce(max(seq), 0) FROM operation") || die "s4: cannot read the operations"
   w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
   before=$bundle
   plan_id=''
-  must "S4 DS row $1" 'a plan of the release as h-publisher: 201' plan_by h-publisher "ds$1"
+  must "S4 DS row $1" 'a plan of the release as h-publisher: 201' plan_by h-publisher "ds$1" "${2:-}"
   plan=$plan_id
 }
-# ds_completed <attempts>: the plan's operation completed, its id in op, with that many attempts, one
-# accepted; Applied the release from the operation, the baseline revision one more.
+# ds_completed <attempts> <accepted>: the plan's operation completed, its id in op, with that many
+# attempts, that many of them accepted; Applied the release from the operation, the baseline
+# revision one more.
 ds_completed() {
   completed || return 1
-  [ "$(sql "SELECT count(*) || ' ' || bool_or(r.class = 'accepted') FROM attempt a
-    LEFT JOIN attempt_response r ON r.attempt = a.id WHERE a.operation = '$op'")" = "$1 true" ] &&
+  [ "$(sql "SELECT count(*) || ' ' || count(*) FILTER (WHERE r.class = 'accepted') FROM attempt a
+    LEFT JOIN attempt_response r ON r.attempt = a.id WHERE a.operation = '$op'")" = "$1 $2" ] &&
     [ "$(sql "SELECT applied_release || ' ' || applied_source || ' ' || baseline_revision FROM machine_state
       WHERE machine = '$machine_w'")" = "$rel operation $((baseline + 1))" ]
 }
@@ -823,13 +833,13 @@ none_sent() {
   local w
   w=$(apid_log "$TALOS_WORKER_IP") && [[ "$w" == "$w_log"* ]] && [ "$(run_mutations "$w_log" "$w")" = 0 ]
 }
-# ds_done <row> <attempts>: the row's operation completed with that many attempts, one
-# ApplyConfiguration on the worker since the row began, and its bundle: clean, the worker's digest
-# the artifact's and its resource version moved.
+# ds_done <row> <attempts> [accepted, 1]: the row's operation completed with that many attempts and
+# accepted responses, one ApplyConfiguration on the worker since the row began, and its bundle:
+# clean, the worker's digest the artifact's and its resource version moved.
 ds_done() {
   local ref="S4 DS row $1" w_after
-  check "$ref" "the plan's operation completed within four minutes with $2 attempt(s), one accepted; Applied the release from the operation, the baseline revision one more" \
-    within 240 ds_completed "$2"
+  check "$ref" "the plan's operation completed within four minutes with $2 attempt(s), ${3:-1} accepted; Applied the release from the operation, the baseline revision one more" \
+    within 240 ds_completed "$2" "${3:-1}"
   w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
   check "$ref" "the worker's apid log records exactly one mutating request since the row began, ApplyConfiguration" \
     one_apply "$w_log" "$w_after"
@@ -847,14 +857,14 @@ revoked_in_flight() {
     WHERE a.operation = '$op' AND v.machine = '$machine_w' AND v.kind = 'approval-revocation'
       AND v.entry->>'approval' = '$approval_id' AND v.revision > a.revision AND v.revision < r.revision")" = 1 ]
 }
-# take_over: h-recovery asks A to take held over at generation 1: 201, unresolved at generation 2;
-# the new owner token in taker.
+# take_over <operation> <row>: h-recovery asks the instance on call_port to take the operation over
+# at generation 1: 201, unresolved at generation 2; the new owner token in taker.
 take_over() {
   fresh h-recovery
-  answers 201 - POST "/api/v1/operations/$held/takeovers" "$tok" '{"generation": 1, "reason": "S4 DS row 007"}' \
-    "$(key takeover-007)" || return 1
+  answers 201 - POST "/api/v1/operations/$1/takeovers" "$tok" "{\"generation\": 1, \"reason\": \"S4 DS row $2\"}" \
+    "$(key "takeover-$2")" || return 1
   jq -e '.state == "unresolved" and .generation == 2' "$EV/last.body" >/dev/null || return 1
-  taker=$(sql "SELECT owner FROM operation WHERE id = '$held'")
+  taker=$(sql "SELECT owner FROM operation WHERE id = '$1'")
   [ -n "$taker" ]
 }
 # owner_refused: one refusal of held by comparison 7, the owner token not the refusing controller's,
@@ -877,26 +887,176 @@ started_takeover() {
   one_line "$taker" && [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w'
     AND kind = 'ownership-transition' AND entry->>'operation' = '$op'")" = 1 ]
 }
-# retried_by_taker: op's one attempt, number 1, is taker's at generation 2, after a classification
-# safe to retry by the same token, the operation's latest before it.
+# retried_by_taker: op's one attempt, number 1, is taker's at generation 2 and names as its
+# classification one safe to retry by the same token, resting on the same observation.
 retried_by_taker() {
   [ "$(sql "SELECT count(*) || ' ' || bool_and(a.number = 1 AND a.owner = '$taker' AND a.owner_gen = 2
-      AND c.outcome = 'safe-to-retry' AND c.owner = '$taker' AND c.owner_gen = 2)
-    FROM attempt a JOIN operation_classification c ON c.operation = a.operation
-    WHERE a.operation = '$op' AND c.revision = (SELECT max(revision) FROM operation_classification
-      WHERE operation = a.operation AND revision < a.revision)")" = '1 true' ]
+      AND c.outcome = 'safe-to-retry' AND c.owner = '$taker' AND c.owner_gen = 2 AND a.observation = c.observation)
+    FROM attempt a JOIN operation_classification c ON c.machine = a.machine AND c.revision = a.classification
+      AND c.operation = a.operation
+    WHERE a.operation = '$op'")" = '1 true' ]
+}
+# The transport and kill rows (012-017, 020, 021): attempts no response accounts for, settled by a
+# recovery-admin's accounting decision (ER §5.2), and faults at the response and the completion.
+# start and end: the decision's observations. The plans bind a 30 s transport deadline.
+start='' end='' fast='{"transportDeadlineSeconds": 30}'
+# op_unaccounted: the plan's operation, its id in op, unresolved, with one attempt and no accounting.
+op_unaccounted() {
+  op=$(sql "SELECT operation FROM plan_state WHERE plan = '$plan' AND state = 'committed'") && [ -n "$op" ] &&
+    [ "$(sql "SELECT o.state || ' ' || count(a.id) || ' ' || count(c.attempt) FROM operation o JOIN attempt a ON a.operation = o.id
+      LEFT JOIN attempt_accounting c ON c.attempt = a.id WHERE o.id = '$op' GROUP BY o.state")" = 'unresolved 1 0' ]
+}
+# first_read: in start, the first successful read of the worker (one that read a node value) begun
+# after the transport deadline of op's attempt: where the decision's settle starts.
+first_read() {
+  start=$(sql "SELECT o.id FROM observation o JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis
+    JOIN attempt a ON a.operation = '$op' AND a.number = 1 WHERE o.machine = '$machine_w' AND se.at > a.transport_deadline
+      AND (o.unread->'identity' IS NULL OR o.unread->'runningVersion' IS NULL OR o.unread->'configuration' IS NULL)
+    ORDER BY o.basis LIMIT 1")
+  [ -n "$start" ]
+}
+# recovery_read [SQL instant]: in end, the first recovery observation of op that read the worker's
+# resource version, begun after start was recorded and not before the instant.
+recovery_read() {
+  local from=${1:-"'-infinity'"}
+  end=$(sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis
+    WHERE s.operation = '$op' AND s.purpose = 'recovery' AND o.resource_version IS NOT NULL
+      AND se.at > (SELECT at FROM observation WHERE id = '$start') AND se.at >= $from ORDER BY o.basis LIMIT 1")
+  [ -n "$end" ]
+}
+# floor_read: recovery_read from the fixture's settle floor (30 s, server.yaml.in) after the latest
+# of the transport deadline, op's last takeover and start.
+floor_read() {
+  recovery_read "(SELECT greatest(a.transport_deadline, s.at, (SELECT max(at) FROM machine_event WHERE machine = '$machine_w'
+    AND kind = 'ownership-transition' AND entry->>'operation' = '$op')) + interval '30 seconds'
+    FROM attempt a, observation s WHERE a.operation = '$op' AND a.number = 1 AND s.id = '$start')"
+}
+# account <name> <status> <problem code or -> <jq filter>: h-recovery asks C to account for op's
+# first attempt by decision on start and end.
+account() {
+  local attempt
+  attempt=$(sql "SELECT id FROM attempt WHERE operation = '$op' AND number = 1") && [ -n "$attempt" ] || return 1
+  fresh h-recovery
+  answers_with "$4" "$2" "$3" POST "/api/v1/operations/$op/attempts/$attempt/accountings" "$tok" \
+    "$(jq -nc --arg s "$start" --arg e "$end" '{start: $s, end: $e, facts: {explanation: "S4 DS re-run: the node was cut off"}}')" \
+    "$(key "accounting-$1")"
+}
+# accounted_by_decision: op's first attempt accounted by a decision on start and end.
+accounted_by_decision() {
+  [ "$(sql "SELECT count(*) FROM attempt_accounting c JOIN attempt a ON a.id = c.attempt WHERE a.operation = '$op'
+    AND a.number = 1 AND c.basis = 'decision' AND c.start_observation = '$start' AND c.end_observation = '$end'")" = 1 ]
+}
+# stalled_at <step> <stalls before>: C stalled at the step once more.
+stalled_at() { [ "$(stalls_at "$1")" -gt "$2" ]; }
+# fault_row <row> <fault> <heal>: 012, 014 and 015. C stalls once the attempt is recorded; the fault
+# (inject's action and target, one word each) cuts the worker off and C is released, so its request
+# ends with no response accounting for it. Healed, C's paced recovery observations read the worker,
+# h-recovery takes the operation over on C and accounts for the attempt on the first read and one a
+# settle floor later; the observation then finds nothing landed, and the retry completes.
+fault_row() {
+  local ref="S4 DS row $1" n fault heal
+  read -ra fault <<<"$2"
+  read -ra heal <<<"$3"
+  ds_publish "$1"
+  ds_plan "$1" "$fast"
+  n=$(stalls_at dispatch-attempted)
+  must "$ref" 'C told to stall after an attempt' interrupt dispatch-attempted stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" "ds$1"
+  check "$ref" 'the plan commits and its attempt is recorded, no response; C stalls before sending' \
+    within 120 attempt_admitted "$plan" "$n"
+  must "$ref" "inject $2" "$bin/inject" "${fault[@]}"
+  must "$ref" "C released, its control file removed" interrupt -
+  check "$ref" 'the request ends with no response accounting for the attempt: the operation unresolved, unaccounted' \
+    within 90 op_unaccounted
+  must "$ref" "inject $3" "$bin/inject" "${heal[@]}"
+  check "$ref" "C's paced recovery observations read the worker after the transport deadline" within 120 first_read
+  if [ "$1" = 012 ]; then
+    controls_013
+  else
+    check "$ref" 'h-recovery asks C to take the operation over at generation 1: 201, unresolved at generation 2' take_over "$op" "$1"
+  fi
+  check "$ref" 'a recovery observation begun a settle floor after the deadline, the takeover and the first read' within 120 floor_read
+  check "$ref" 'h-recovery accounts for the attempt by decision on the first read and that observation: 201' \
+    account "$1" 201 - '.attempt | type == "string"'
+  check "$ref" 'the attempt accounted by that decision' accounted_by_decision
+  ds_done "$1" 2
+  check "$ref" "the second attempt names taker's classification safe to retry, after the accounting" retried_after_accounting
+}
+# retried_after_accounting: op's second attempt names a classification safe to retry by taker,
+# recorded after the first attempt's accounting.
+retried_after_accounting() {
+  [ "$(sql "SELECT count(*) FROM attempt a JOIN attempt_accounting c ON c.attempt = (SELECT id FROM attempt
+      WHERE operation = '$op' AND number = 1) JOIN operation_classification k ON k.machine = a.machine
+      AND k.revision = a.classification AND k.operation = a.operation
+    WHERE a.operation = '$op' AND a.number = 2 AND k.outcome = 'safe-to-retry' AND k.owner = '$taker'
+      AND k.revision > c.revision")" = 1 ]
+}
+# controls_013: on 012's operation, with a recovery observation begun after the first read: the
+# decision refused while C's executor still holds the attempt; then, after the takeover, refused
+# with that observation as its end, begun before the settle floor elapsed. Its table line is judged
+# on its own checks; 012's covers them too.
+controls_013() {
+  local ref='S4 DS row 013' f0=$failed r=PASS
+  check "$ref" 'a recovery observation begun after the first read' within 60 recovery_read
+  check "$ref" "h-recovery's accounting while C still holds the attempt: 409 conflict, the executor not stopped or taken over" \
+    account 013-held 409 conflict '.detail | contains("not stopped or taken over")'
+  check "$ref" 'h-recovery asks C to take the operation over at generation 1: 201, unresolved at generation 2' take_over "$op" 013
+  check "$ref" 'the accounting with that observation as its end: 409 conflict, the settle floor had not elapsed' \
+    account 013-early 409 conflict '.detail | contains("settle floor")'
+  check "$ref" 'no accounting of the attempt' same "$(sql "SELECT count(*) FROM attempt_accounting c JOIN attempt a
+    ON a.id = c.attempt WHERE a.operation = '$op'")" 0
+  [ "$failed" = "$f0" ] || r=FAIL
+  printf '013\t%s\tlive, C (on 012'"'"'s operation)\t%s\n' "$r" \
+    'the decision refused before the takeover, and after it with an end before the settle floor' >>"$EV/ds-rows.tsv"
+}
+# retries_logged: how many times C's log says a response was not recorded and is retried.
+retries_logged() { c_log | grep --count --extended-regexp -- '^.*response of attempt [^ ]+ not recorded: .*; retried after ' || true; }
+# retried_more <count before>: C's log says so once more.
+retried_more() { [ "$(retries_logged)" -gt "$1" ]; }
+# plan_op: the plan's operation, its id in op.
+plan_op() {
+  op=$(sql "SELECT operation FROM plan_state WHERE plan = '$plan' AND state = 'committed'")
+  [ -n "$op" ]
+}
+# op_attempts <states>: op's state, attempts and responses, as 'state attempts responses'.
+op_attempts() {
+  [ "$(sql "SELECT o.state || ' ' || count(a.id) || ' ' || count(r.attempt) FROM operation o JOIN attempt a ON a.operation = o.id
+    LEFT JOIN attempt_response r ON r.attempt = a.id WHERE o.id = '$op' GROUP BY o.state")" = "$1" ]
+}
+# verifying_stalled <stalls before>: the plan's operation verifying, its one attempt answered, and C
+# stalled once more after recording the response.
+verifying_stalled() { plan_op && op_attempts 'verifying 1 1' && stalled_at dispatch-responded "$1"; }
+# completion_observations <unread predicate>: how many completion observations of op satisfy it.
+completion_observations() {
+  sql "SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    WHERE s.operation = '$op' AND s.purpose = 'completion' AND $1"
+}
+# completion_unread: a completion observation of op that read no configuration, and op verifying.
+completion_unread() { [ "$(completion_observations "o.unread->'configuration' IS NOT NULL")" -ge 1 ] && op_attempts 'verifying 1 1'; }
+# sending_unanswered: the plan's operation sending with one attempt and no response.
+sending_unanswered() { plan_op && op_attempts 'sending 1 0'; }
+# verifying_observed: the plan's operation verifying with its one attempt answered, a completion
+# observation of it recorded, and no classification of it.
+verifying_observed() {
+  plan_op && op_attempts 'verifying 1 1' && [ "$(completion_observations true)" -ge 1 ] &&
+    [ "$(sql "SELECT count(*) FROM operation_classification WHERE operation = '$op'")" = 0 ]
 }
 # The rows no request reaches, as their Go checks prove them, run in a clone of the image commit
 # against go-db's PostgreSQL and OpenBao, one package at a time.
 ds_go_tests='TestCommitmentRevocationsWait|TestCommitmentRefusals|TestAttemptStaleOwner|TestCommitmentSecond'
 ds_go_tests+='|TestCommitmentRolloutRace|TestPlanOperations|TestAttemptRetry|TestAttemptRetryRefusals|TestExecutorRevokedControl|TestExecutorRevocationHeld'
+ds_go_tests+='|TestLiveApply|TestRecordResponse'
+# TestLiveApply sends the worker its own configuration, then one with an unknown machine type, with
+# bin/up's talosconfig: after the live rows, so its requests stay outside theirs.
 ds_go_ran() {
   (
     export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
     export BW_TEST_BAO_ADDR="${BW_TEST_BAO_ADDR:-http://127.0.0.1:58201}"
     export BW_TEST_BAO_TOKEN="${BW_TEST_BAO_TOKEN:-bw-dev-root-token}"
+    export BW_TEST_TALOSCONFIG=$TALOSCONFIG BW_TEST_TALOS_ENDPOINT=$TALOS_WORKER_IP
     logged ds-go env BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 mise exec -- go test -count=1 -p 1 -v -run "^($ds_go_tests)\$" \
-      ./internal/api ./internal/migrate
+      ./internal/api ./internal/migrate ./internal/talos
   ) && ! grep --quiet -- '--- SKIP' "$EV/ds-go.log"
 }
 # go_passed <test>: the test's own top-level PASS line is in ds-go.log.
@@ -983,7 +1143,7 @@ ds() {
   must "$ref" 'inject unpause A' "$bin/inject" unpause A
   call_port=$SERVER_A_PORT
   check "$ref" 'A answers /livez' within 30 answers 204 - GET /livez ''
-  check "$ref" 'h-recovery asks A to take the operation over at generation 1: 201, unresolved at generation 2' take_over
+  check "$ref" 'h-recovery asks A to take the operation over at generation 1: 201, unresolved at generation 2' take_over "$held" 007
   must "$ref" "C released, its control file removed" interrupt -
   check "$ref" "C's attempt refused by comparison 7, the owner token not C's; no attempt" within 90 owner_refused
   check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
@@ -1030,6 +1190,81 @@ ds() {
   check "$ref" "the one attempt is the new process's at generation 2, after its classification safe to retry" retried_by_taker
   ds_row 019 'live, C killed, then started' 'C started again took it over and retried: completed, 1 attempt, 1 landing'
 
+  fault_row 012 'netsplit worker' 'netjoin worker'
+  ds_row 012 'live, C, the worker detached' 'no response accounted for the attempt; accounted by decision after the takeover and the settle floor, nothing landed: retried and completed, 2 attempts, 1 landing'
+  fault_row 014 'pause worker' 'unpause worker'
+  ds_row 014 'live, C, the worker paused' 'the request hung to the transport deadline; accounted by decision, nothing landed: retried and completed, 2 attempts, 1 landing'
+  fault_row 015 'linksplit C worker' 'linkjoin C worker'
+  ds_row 015 "live, C, C's route to the worker cut" 'no response accounted for the attempt; accounted by decision, nothing landed: retried and completed, 2 attempts, 1 landing'
+
+  ref='S4 DS row 016'
+  ds_publish 016
+  ds_plan 016
+  n=$(stalls_at dispatch-sent)
+  k=$(retries_logged)
+  must "$ref" 'C told to stall once the request is made' interrupt dispatch-sent stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds016
+  check "$ref" 'the request made, no response recorded; C stalls there' within 120 stalled_at dispatch-sent "$n"
+  must "$ref" 'inject kill postgres' "$bin/inject" kill postgres
+  must "$ref" "C released, its control file removed" interrupt -
+  check "$ref" "C's log: the response not recorded, retried after a lease" within 60 retried_more "$k"
+  must "$ref" 'inject start postgres' "$bin/inject" start postgres
+  ds_done 016 1
+  ds_row 016 'live, C, PostgreSQL killed' 'the response record retried each lease until the database answered: completed, 1 attempt, 1 landing'
+
+  ref='S4 DS row 017'
+  ds_publish 017
+  ds_plan 017
+  n=$(stalls_at dispatch-responded)
+  must "$ref" 'C told to stall once the response is recorded' interrupt dispatch-responded stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds017
+  check "$ref" 'the response recorded, the operation verifying; C stalls before the completion observation' \
+    within 120 verifying_stalled "$n"
+  must "$ref" 'inject netsplit worker' "$bin/inject" netsplit worker
+  must "$ref" "C released, its control file removed" interrupt -
+  check "$ref" "a completion observation that read no configuration; the operation still verifying" within 90 completion_unread
+  must "$ref" 'inject netjoin worker' "$bin/inject" netjoin worker
+  ds_done 017 1
+  ds_row 017 'live, C, the worker detached' 'the completion unread, the operation verifying; the next read matched: completed, 1 attempt, 1 landing'
+
+  ref='S4 DS row 020'
+  ds_publish 020
+  ds_plan 020 "$fast"
+  k=$(kills_at dispatch-sent)
+  must "$ref" 'C told to stop once the request is made' interrupt dispatch-sent kill
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds020
+  check "$ref" 'C killed once the request is made: not running, its log names one more kill there' \
+    within 120 c_killed_at dispatch-sent "$((k + 1))"
+  check "$ref" 'its operation sending, one attempt, no response' sending_unanswered
+  must "$ref" "C's control file removed" interrupt -
+  must "$ref" 'inject start C' "$bin/inject" start C
+  check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
+  check "$ref" "C's start took the operation over: unresolved, its attempt unaccounted" within 60 op_unaccounted
+  check "$ref" "one ownership transition, C's start, to generation 2" started_takeover
+  check "$ref" "C's paced recovery observations read the worker after the transport deadline" within 120 first_read
+  check "$ref" 'a recovery observation begun a settle floor after the deadline, the takeover and the first read' within 120 floor_read
+  check "$ref" 'h-recovery accounts for the attempt by decision on the first read and that observation: 201' \
+    account 020 201 - '.attempt | type == "string"'
+  check "$ref" 'the attempt accounted by that decision' accounted_by_decision
+  ds_done 020 1 0
+  ds_row 020 'live, C killed, then started' 'the request landed with no response; accounted by decision after the takeover, the completion observation matched: completed, 1 attempt, 1 landing'
+
+  ref='S4 DS row 021'
+  ds_publish 021
+  ds_plan 021
+  k=$(kills_at dispatch-observed)
+  must "$ref" 'C told to stop once its completion observation is recorded' interrupt dispatch-observed kill
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" ds021
+  check "$ref" 'C killed once the completion observation is recorded: not running, its log names one more kill there' \
+    within 120 c_killed_at dispatch-observed "$((k + 1))"
+  check "$ref" 'its operation verifying, the completion observation recorded and nothing classified' verifying_observed
+  must "$ref" "C's control file removed" interrupt -
+  must "$ref" 'inject start C' "$bin/inject" start C
+  check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
+  ds_done 021 1
+  check "$ref" "one ownership transition, C's start, to generation 2" started_takeover
+  ds_row 021 'live, C killed, then started' 'C started again took it over; the next observation matched: completed, 1 attempt, 1 landing'
+
   ref='S4 DS'
   check "$ref" 'inject unpause A and B' both unpause
   call_port=$SERVER_A_PORT
@@ -1050,11 +1285,7 @@ ds() {
   ds_go 010 'TestCommitmentRefusals TestCommitmentRolloutRace' 'a second plan refused by the machine scope (comparison 4) and the rollout slot (comparison 5)'
   ds_go 011 TestPlanOperations 'control: without both scope indexes a second plan commits'
   ds_go 023 'TestAttemptRetry TestAttemptRetryRefusals' 'a retry follows its classification; refused by comparisons 7 and 8 otherwise'
-  for n in 012 013 014 015 016 017 020 021 022; do
-    printf '%s\tSKIP\tnot yet re-run\ttransport, database and response faults, kills at the response and the completion, node validation\n' \
-      "$n" >>"$EV/ds-rows.tsv"
-  done
-  result SKIP "$ref" 'DS rows 012-017 and 020-022: not yet re-run'
+  ds_go 022 'TestLiveApply TestRecordResponse' 'the worker refuses an unknown machine type as validation, classified rejected, its configuration unchanged; a rejection moves the operation to rejected (no live plan: compilation validates the artifact first)'
   { printf 'row\tresult\tsource\toutcome\n' && sort -- "$EV/ds-rows.tsv"; } >"$EV/ds.tsv"
   rm -f -- "$EV/ds-rows.tsv"
 
