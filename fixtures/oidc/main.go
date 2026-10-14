@@ -21,7 +21,7 @@ import (
 
 const usage = `usage: oidc keygen  -out <key file>
        oidc serve   -key <key file> -issuer <url> [-listen 127.0.0.1:5556]
-       oidc mint    -key <key file> -issuer <url> [-audience bronzeward] -human <name> [-defect <name>]
+       oidc mint    -key <key file> -issuer <url> [-audience bronzeward] -human <name> [-defect <name> | -without-group <group>]
        oidc defects`
 
 func main() {
@@ -43,6 +43,7 @@ func run(args []string, stdout io.Writer) error {
 	listen := fs.String("listen", "127.0.0.1:5556", "listen address (serve)")
 	human := fs.String("human", "", "synthetic human (mint): "+strings.Join(slices.Sorted(maps.Keys(issuer.Humans)), ", "))
 	defect := fs.String("defect", "", "defect to put in the token (mint): see oidc defects")
+	withoutGroup := fs.String("without-group", "", "group of the human's left out of a valid token (mint)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -73,7 +74,15 @@ func run(args []string, stdout io.Writer) error {
 		if args[0] == "serve" {
 			return serve(iss, *listen)
 		}
-		tok, err := iss.Mint(*human, *defect, time.Now())
+		var tok string
+		switch {
+		case *withoutGroup == "":
+			tok, err = iss.Mint(*human, *defect, time.Now())
+		case *defect != "":
+			return errors.New("mint takes -defect or -without-group, not both")
+		default:
+			tok, err = iss.MintWithoutGroup(*human, *withoutGroup, time.Now())
+		}
 		if err != nil {
 			return err
 		}

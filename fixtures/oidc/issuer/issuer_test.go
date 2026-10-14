@@ -77,6 +77,48 @@ func TestMintValid(t *testing.T) {
 	}
 }
 
+// A group removed at the issuer: the token is valid and its groups claim lacks only that group,
+// an empty array (not a missing claim) when it was the human's only one.
+func TestMintWithoutGroup(t *testing.T) {
+	iss, key := testIssuer(t)
+	now := time.Now()
+	for _, c := range []struct {
+		human, group string
+		want         []string
+	}{
+		{"h-approver", "bw-approvers", []string{}},
+		{"h-all", "bw-approvers", []string{"bw-authors", "bw-publishers"}},
+	} {
+		tok, err := iss.MintWithoutGroup(c.human, c.group, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := jwt.ParseSigned(tok, []jose.SignatureAlgorithm{jose.ES256})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var claims jwt.Claims
+		var extra struct {
+			Groups *[]string `json:"groups"`
+		}
+		if err := parsed.Claims(key.Public(), &claims, &extra); err != nil {
+			t.Fatal(err)
+		}
+		if claims.Subject != c.human || extra.Groups == nil || !slices.Equal(*extra.Groups, c.want) {
+			t.Errorf("%s without %s: sub %s, groups %v", c.human, c.group, claims.Subject, extra.Groups)
+		}
+	}
+	if !slices.Equal(Humans["h-approver"], []string{"bw-approvers"}) {
+		t.Error("MintWithoutGroup changed Humans")
+	}
+	if _, err := iss.MintWithoutGroup("h-viewer", "bw-approvers", now); err == nil {
+		t.Error("a group the human is not in accepted")
+	}
+	if _, err := iss.MintWithoutGroup("h-nobody", "bw-approvers", now); err == nil {
+		t.Error("unknown human accepted")
+	}
+}
+
 func TestDefects(t *testing.T) {
 	// persistence-api.md §10.1 and §16 name these; the list may grow, never lose one.
 	for _, d := range []string{"malformed", "alg-none", "alg-hs256", "unknown-kid", "wrong-key", "bad-signature",
