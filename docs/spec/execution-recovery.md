@@ -580,7 +580,7 @@ leak scan applied to its descriptor channel over successful, rejected and
 interrupted dispatches. If either fails there too, dispatch is not accepted and
 the selection returns to the owner. The machinery client met the condition
 ([AP S4](acceptance-plan.md#s4-safe-apply)'s precondition), with the rows
-choice §10.32 names run as checks of the implementation's own transactions, so
+choice §10.32 names run as the Go checks it describes, so
 the fallback is not built.
 
 Both clients are built from the cluster's one talosconfig, which carries
@@ -1738,7 +1738,7 @@ fail:
 - DS's rows 001–023 re-run through the implementation's own controller and
   Talos client over the worker's own endpoint, rows 012–014 as the §3.5
   direct-route variants, including its controls 006, 008 and 011, with the
-  rows choice §10.32 names run as checks of its own transactions; if the
+  rows choice §10.32 names run as the Go checks it describes; if the
   fallback is taken, the same rows through it and the §3.5 scan of its channel;
 - that it sends only after its attempt transaction commits, on every path;
 - each lock of §3.2 and §3.3, with the unlocked control showing the race
@@ -2169,9 +2169,9 @@ conservative option; those that do not say so. Each is marked in place as
     machine and plan-state locks as well, which would no longer test the
     approval's lock; dropping the `FOR SHARE` reads as redundant, which
     couples comparison 1's ordering to every revocation's lock order.
-32. **DS rows that need an interleaving inside a transaction run as checks of
-    the implementation's own transactions** (§3.5, §9.2). Rows 003, 009, 010
-    and 023 and the controls of rows 006, 008 and 011 act inside a commitment
+32. **DS rows that need an interleaving inside a transaction run as Go
+    checks** (§3.5, §9.2). Rows 003, 009, 010
+    and 023 and the controls of rows 006 and 008 act inside a commitment
     or attempt transaction, need two executors ordered at a point inside one,
     or remove a guard the production path keeps: a revocation waiting on the
     commitment's locks (003), a second executor inside the commitment (009),
@@ -2179,11 +2179,15 @@ conservative option; those that do not say so. Each is marked in place as
     live, it needs two controllers that selected different plans, one held
     between its evidence and its commitment while the other commits), a
     retry's classification (023), and the unchecked or unlocked variants (006,
-    008, 011). This is the selected test route, not a claim that no fault
+    008). This is the selected test route, not a claim that no fault
     could reach them: a Go check fixes the interleaving that a live run would
     have to arrange across processes. Each is a Go check driving
     the implementation's transactions, or its executor with a Talos stand-in,
-    against PostgreSQL. Row 022 needs an artifact the node refuses as invalid,
+    against PostgreSQL. Row 011's control is the schema's, not a transaction's:
+    with both scope indexes dropped, a second plan's operation rows insert
+    directly; it shows the indexes are the database's guard, while the
+    commitment transaction's own comparison 4 refuses that plan independently
+    (row 010's check). Row 022 needs an artifact the node refuses as invalid,
     and compilation validates every artifact before publication, so no plan
     carries one: the machinery client sends such a configuration to the
     fixture's worker directly, and a check records its classification as
