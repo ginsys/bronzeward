@@ -300,10 +300,93 @@ func TestExecutorAttemptNotRecordedSendsNothing(t *testing.T) {
 	}
 }
 
-// DS rows 004 and 006 through the executor and a Talos node: the approval revoked once the
-// commitment has committed, before the attempt. The attempt transaction's comparison 1 refuses it:
-// the operation is cancelled and nothing reaches the node. The control skips that comparison, as a
-// controller relying on its early check alone would: the artifact is sent after the revocation.
+// revokeAtCommitment runs the executor on the plan and revokes its approval at the commitment: while
+// the commitment transaction holds its locks (held, DS row 003), the revocation waiting for it, or
+// once it has committed (row 004). With control, the attempt transaction's comparison 1 is skipped.
+// Checked, comparison 1 refuses the attempt: the operation is cancelled and nothing reaches the node.
+func revokeAtCommitment(t *testing.T, held, control bool) {
+	xe := newExecEnv(t)
+	token, k := xe.human("h-recovery"), xe.key()
+	var armed atomic.Bool
+	armed.Store(true)
+	revoked := make(chan int, 1)
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{noPlanCheck: control, commit: func(tx *sql.Tx) error {
+		var ops, attempts int
+		var approval sql.NullString
+		if err := tx.QueryRow(`SELECT (SELECT count(*) FROM operation WHERE plan = $1), (SELECT count(*) FROM attempt WHERE plan = $1),
+			(SELECT approval FROM plan_state WHERE plan = $1)`, xe.pid).Scan(&ops, &attempts, &approval); err != nil || ops == 0 ||
+			attempts != 0 || !armed.CompareAndSwap(true, false) {
+			return tx.Commit()
+		}
+		revoke := func() { revoked <- xe.revokeApproval(token, k, approval.String, `{"reason":"wrong"}`).Code }
+		if held {
+			go revoke()
+			waitForLockWaits(t, xe.db, 1)
+			return tx.Commit()
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		revoke()
+		return nil
+	}})
+	a.startExecutor()
+	defer stopping(a, stop)
+	waitIdle(t, idle, 1)
+	xe.approveThrough(t, a)
+	if control {
+		until(t, a, idle, "the artifact is sent", func() bool { return len(xe.node.AppliedRequests()) == 1 })
+	} else {
+		until(t, a, idle, "the operation is cancelled", func() bool { return xe.opState(t) == "cancelled" })
+	}
+	if code := <-revoked; code != http.StatusCreated {
+		t.Fatalf("revocation %d", code)
+	}
+	if n := count(t, xe.db, `SELECT count(*) FROM machine_event c JOIN machine_event v ON v.machine = c.machine
+		AND v.kind = 'approval-revocation' AND v.revision > c.revision WHERE c.machine = $1 AND c.kind = 'commitment'`, xe.machine); n != 1 {
+		t.Fatal("the revocation is not recorded after the commitment")
+	}
+	if control {
+		got := xe.node.AppliedRequests()
+		if got[0].Mode != "NO_REBOOT" || got[0].DryRun || !bytes.Equal(got[0].Data, xe.artifact) {
+			t.Fatalf("control: request %+v", got[0])
+		}
+		if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN machine_event v ON v.machine = a.machine
+			AND v.kind = 'approval-revocation' AND v.revision < a.revision WHERE a.plan = $1`, xe.pid); n != 1 {
+			t.Fatal("control: the attempt is not recorded after the revocation")
+		}
+		return
+	}
+	if n := len(xe.node.AppliedRequests()); n != 0 || count(t, xe.db, `SELECT count(*) FROM attempt WHERE plan = $1`, xe.pid) != 0 {
+		t.Fatalf("%d requests after the revocation", n)
+	}
+	// Comparison 1 refused it, and that refusal moved it committed, unresolved, cancelled.
+	var states sql.NullString
+	if err := xe.db.QueryRow(`SELECT string_agg(e.entry->>'to', ',' ORDER BY e.revision) FROM machine_event r
+		JOIN machine_event e ON e.machine = r.machine AND e.revision > r.revision AND e.kind = 'operation-state'
+			AND e.entry->>'comparison' = '1' AND e.entry->>'cause' = 'the approval is revoked'
+			AND e.entry->>'operation' = r.entry->>'operation'
+		WHERE r.machine = $1 AND r.kind = 'refusal' AND r.entry->>'transaction' = 'T6' AND r.entry->>'comparison' = '1'
+			AND r.entry->>'cause' = 'the approval is revoked' AND r.entry->>'plan' = $2
+			AND r.entry->>'operation' = (SELECT id FROM operation WHERE plan = $2)`, xe.machine, xe.pid).Scan(&states); err != nil ||
+		states.String != "unresolved,cancelled" {
+		t.Fatalf("states after comparison 1's refusal %q: %v", states.String, err)
+	}
+}
+
+// DS row 003 through the executor and a Talos node: a revocation started while the commitment holds
+// its locks waits for it, and the attempt transaction's comparison 1 then refuses the attempt.
+func TestExecutorRevocationHeld(t *testing.T) {
+	t.Parallel()
+	revokeAtCommitment(t, true, false)
+}
+
+// DS rows 004 and 006: the approval revoked after the commitment, before the attempt, refused by
+// the attempt's comparison 1. The control skips it, as a controller relying on its early check alone
+// would: the artifact is sent after the revocation. Row 006's revocation before the commitment
+// cannot reach a send here: the plan state refuses committing a revoked plan (choice §10.31).
 func TestExecutorRevokedControl(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -312,65 +395,7 @@ func TestExecutorRevokedControl(t *testing.T) {
 	}{{"checked", false}, {"control", true}} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			xe := newExecEnv(t)
-			token, k := xe.human("h-recovery"), xe.key()
-			var armed atomic.Bool
-			armed.Store(true)
-			revoked := make(chan int, 1)
-			life, stop := context.WithCancel(t.Context())
-			idle := make(chan struct{})
-			a := xe.executor(t, life, idle, options{noPlanCheck: c.control, commit: func(tx *sql.Tx) error {
-				var ops, attempts int
-				var approval sql.NullString
-				if err := tx.QueryRow(`SELECT (SELECT count(*) FROM operation WHERE plan = $1), (SELECT count(*) FROM attempt WHERE plan = $1),
-					(SELECT approval FROM plan_state WHERE plan = $1)`, xe.pid).Scan(&ops, &attempts, &approval); err != nil || ops == 0 ||
-					attempts != 0 || !armed.CompareAndSwap(true, false) {
-					return tx.Commit()
-				}
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				revoked <- xe.revokeApproval(token, k, approval.String, `{"reason":"wrong"}`).Code
-				return nil
-			}})
-			a.startExecutor()
-			defer stopping(a, stop)
-			waitIdle(t, idle, 1)
-			xe.approveThrough(t, a)
-			if c.control {
-				until(t, a, idle, "the artifact is sent", func() bool { return len(xe.node.AppliedRequests()) == 1 })
-			} else {
-				until(t, a, idle, "the operation is cancelled", func() bool { return xe.opState(t) == "cancelled" })
-			}
-			if code := <-revoked; code != http.StatusCreated {
-				t.Fatalf("revocation %d", code)
-			}
-			if c.control {
-				got := xe.node.AppliedRequests()
-				if got[0].Mode != "NO_REBOOT" || got[0].DryRun || !bytes.Equal(got[0].Data, xe.artifact) {
-					t.Fatalf("control: request %+v", got[0])
-				}
-				if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN machine_event v ON v.machine = a.machine
-					AND v.kind = 'approval-revocation' AND v.revision < a.revision WHERE a.plan = $1`, xe.pid); n != 1 {
-					t.Fatal("control: the attempt is not recorded after the revocation")
-				}
-				return
-			}
-			if n := len(xe.node.AppliedRequests()); n != 0 || count(t, xe.db, `SELECT count(*) FROM attempt WHERE plan = $1`, xe.pid) != 0 {
-				t.Fatalf("%d requests after the revocation", n)
-			}
-			// Comparison 1 refused it, and that refusal moved it committed, unresolved, cancelled.
-			var states sql.NullString
-			if err := xe.db.QueryRow(`SELECT string_agg(e.entry->>'to', ',' ORDER BY e.revision) FROM machine_event r
-				JOIN machine_event e ON e.machine = r.machine AND e.revision > r.revision AND e.kind = 'operation-state'
-					AND e.entry->>'comparison' = '1' AND e.entry->>'cause' = 'the approval is revoked'
-					AND e.entry->>'operation' = r.entry->>'operation'
-				WHERE r.machine = $1 AND r.kind = 'refusal' AND r.entry->>'transaction' = 'T6' AND r.entry->>'comparison' = '1'
-					AND r.entry->>'cause' = 'the approval is revoked' AND r.entry->>'plan' = $2
-					AND r.entry->>'operation' = (SELECT id FROM operation WHERE plan = $2)`, xe.machine, xe.pid).Scan(&states); err != nil ||
-				states.String != "unresolved,cancelled" {
-				t.Fatalf("states after comparison 1's refusal %q: %v", states.String, err)
-			}
+			revokeAtCommitment(t, false, c.control)
 		})
 	}
 }
