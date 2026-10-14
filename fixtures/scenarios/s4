@@ -698,9 +698,12 @@ restores() {
   check "$ref" 'inject db-restore s3-step4' "$bin/inject" db-restore s3-step4
   check "$ref" 'inject bao-restore s3-step4' "$bin/inject" bao-restore s3-step4
   check "$ref" "C's control file removed" interrupt -
-  check "$ref" 'inject start C, its link to the worker cut' "$bin/inject" start C
+  # A prerequisite: C unpaused on step 3's approved plan without its split would apply it.
+  "$bin/inject" start C || die "s4: C not started with its link to the worker cut; step 3 is not restored"
+  result PASS "$ref" 'inject start C, its link to the worker cut'
   check "$ref" 'C answers /livez again' within 30 answers 204 - GET /livez ''
-  check "$ref" 'inject pause C' "$bin/inject" pause C
+  "$bin/inject" pause C || die "s4: C not paused; step 3 is not restored under it"
+  result PASS "$ref" 'inject pause C'
   check "$ref" 'inject db-restore s3-step3' "$bin/inject" db-restore s3-step3
   check "$ref" 'inject bao-restore s3-step3' "$bin/inject" bao-restore s3-step3
   check "$ref" 'inject unpause A, B and C' servers unpause
