@@ -3001,7 +3001,7 @@ each (design §7.7 consequences):
   control applies, since each revocation also takes the machine row
   `FOR UPDATE` (T5b, T5c), and an approval revocation the plan state
   `FOR UPDATE`, both of which the commitment holds, so one without the
-  approval's lock still waits;
+  approval's lock still waits (execution and recovery choice §10.31);
 - an identity revocation appending its entry to the timeline of every machine
   with a plan that identity approved whose plan or operation is not terminal,
   and of no other machine, and an inventory started while it waits on a

@@ -1731,7 +1731,8 @@ fail:
   fallback is taken, the same rows through it and the §3.5 scan of its channel;
 - that it sends only after its attempt transaction commits, on every path;
 - each lock of §3.2 and §3.3, with the unlocked control showing the race
-  (design §7.7 consequences);
+  (design §7.7 consequences); comparison 1's approval and principal locks
+  have none, and their race is shown alone (choice §10.31);
 - plan expiry, observation age, a contradicting newer observation and the
   attempt bound, each refusing;
 - plan cancellation before commitment and after it with no attempt;
@@ -2138,6 +2139,20 @@ conservative option; those that do not say so. Each is marked in place as
     the time before the operation's lock, which judges expiry and evidence age
     before a takeover holding that row has committed; settling inside the
     refused transaction, which its rollback would undo.
+31. **The approval and principal locks of comparison 1 have no unlocked
+    control** (§3.2, §9.2; DS row 003). A commitment or attempt also holds the
+    machine row `FOR UPDATE`, and a commitment the plan state `FOR UPDATE`.
+    An approval revocation takes both before the approval, and an identity
+    revocation takes every machine row before the principal. A revocation
+    without the approval's or principal's lock therefore still waits, and §9.2's
+    unlocked control is not constructible for these two locks. The verification
+    is the race itself: a revocation started while the commitment holds its
+    locks waits for it. The `FOR SHARE` reads stay as the contract's stated
+    order for a writer that does not take the machine row. Agent decision,
+    2026-10-14 (ginsys/bronzeward#26). Alternatives: a control dropping the
+    machine and plan-state locks as well, which would no longer test the
+    approval's lock; dropping the `FOR SHARE` reads as redundant, which
+    couples comparison 1's ordering to every revocation's lock order.
 
 ## 11. Traceability
 

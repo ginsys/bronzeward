@@ -300,6 +300,65 @@ func TestExecutorAttemptNotRecordedSendsNothing(t *testing.T) {
 	}
 }
 
+// DS rows 004 and 006 through the executor and a Talos node: the approval revoked once the
+// commitment has committed, before the attempt. The attempt transaction's comparison 1 refuses it:
+// the operation is cancelled and nothing reaches the node. The control skips that comparison, as a
+// controller relying on its early check alone would: the artifact is sent after the revocation.
+func TestExecutorRevokedControl(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		control bool
+	}{{"checked", false}, {"control", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			xe := newExecEnv(t)
+			token, k := xe.human("h-recovery"), xe.key()
+			var armed atomic.Bool
+			armed.Store(true)
+			revoked := make(chan int, 1)
+			life, stop := context.WithCancel(t.Context())
+			idle := make(chan struct{})
+			a := xe.executor(t, life, idle, options{noPlanCheck: c.control, commit: func(tx *sql.Tx) error {
+				var ops, attempts int
+				var approval sql.NullString
+				if err := tx.QueryRow(`SELECT (SELECT count(*) FROM operation WHERE plan = $1), (SELECT count(*) FROM attempt WHERE plan = $1),
+					(SELECT approval FROM plan_state WHERE plan = $1)`, xe.pid).Scan(&ops, &attempts, &approval); err != nil || ops == 0 ||
+					attempts != 0 || !armed.CompareAndSwap(true, false) {
+					return tx.Commit()
+				}
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				revoked <- xe.revokeApproval(token, k, approval.String, `{"reason":"wrong"}`).Code
+				return nil
+			}})
+			a.startExecutor()
+			defer stopping(a, stop)
+			waitIdle(t, idle, 1)
+			xe.approveThrough(t, a)
+			if c.control {
+				until(t, a, idle, "the artifact is sent", func() bool { return len(xe.node.AppliedRequests()) == 1 })
+			} else {
+				until(t, a, idle, "the operation is cancelled", func() bool { return xe.opState(t) == "cancelled" })
+			}
+			if code := <-revoked; code != http.StatusCreated {
+				t.Fatalf("revocation %d", code)
+			}
+			if c.control {
+				if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN machine_event v ON v.machine = a.machine
+					AND v.kind = 'approval-revocation' AND v.revision < a.revision WHERE a.plan = $1`, xe.pid); n != 1 {
+					t.Fatal("control: the attempt is not recorded after the revocation")
+				}
+				return
+			}
+			if n := len(xe.node.AppliedRequests()); n != 0 || count(t, xe.db, `SELECT count(*) FROM attempt WHERE plan = $1`, xe.pid) != 0 {
+				t.Fatalf("%d requests after the revocation", n)
+			}
+		})
+	}
+}
+
 // ER §3.2 comparison 3: a use-time check older than the plan's validity window at the commitment is
 // no check: nothing is committed or sent, and a new check, once the window holds, is dispatched.
 func TestExecutorCheckValidityBoundsDispatch(t *testing.T) {
