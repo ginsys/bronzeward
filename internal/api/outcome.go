@@ -19,6 +19,9 @@ type outcomeRefused struct {
 
 func (r *outcomeRefused) Error() string { return r.Transaction + " refused: " + r.Cause }
 
+// alreadyResponded is the response transaction's refusal of an attempt whose response is recorded.
+const alreadyResponded = "the attempt's response is already recorded"
+
 func refuseOutcome(transaction, cause string) error {
 	return &outcomeRefused{Transaction: transaction, Cause: cause}
 }
@@ -275,7 +278,7 @@ func (a *API) recordResponse(ctx context.Context, attempt string, resp talos.Res
 			return err
 		}
 		if recorded {
-			return refuseOutcome("response", "the attempt's response is already recorded")
+			return refuseOutcome("response", alreadyResponded)
 		}
 		entry := map[string]any{"operation": operation, "attempt": attempt, "number": number, "class": string(resp.Class),
 			"code": int(resp.Code), "text": resp.Text, "controller": a.d.owner.ID, "generation": gen}
