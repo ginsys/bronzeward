@@ -593,27 +593,46 @@ func TestAttemptSettleTimeFollowsLocks(t *testing.T) {
 }
 
 // The attempt reads the machine under its lock: a freeze that holds the machine when the attempt
-// begins, and commits while the attempt waits, closes the gate for it (comparison 6).
+// begins, and commits while the attempt waits, closes the gate for it (comparison 6). The control
+// reads the machine unlocked: it reads the scope before the freeze commits, waits only at its
+// revision's write, and is admitted on the frozen machine.
 func TestAttemptWaitsForTheMachine(t *testing.T) {
 	t.Parallel()
-	ae := newAttemptEnv(t, "")
-	stand, err := ae.db.Begin()
-	if err != nil {
-		t.Fatal(err)
+	for _, c := range []struct {
+		name    string
+		control bool
+	}{{"locked", false}, {"control", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ae := newAttemptEnv(t, "")
+			if c.control {
+				ae.a.o.noReadLock = "machine"
+			}
+			stand, err := ae.db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = stand.Rollback() }()
+			mustExec(t, stand, `UPDATE machine SET frozen = true WHERE id = $1`, ae.machine)
+			errs := make(chan error, 1)
+			go func() {
+				_, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
+				errs <- err
+			}()
+			waitForLockWaits(t, ae.db, 1)
+			if err := stand.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			if c.control {
+				if err := <-errs; err != nil {
+					t.Fatalf("control: %v", err)
+				}
+				return
+			}
+			ae.wantAttemptRefused(t, <-errs, "6", "the machine scope is frozen", "", "committed",
+				settled{"unresolved", "6", "the machine scope is frozen"})
+		})
 	}
-	defer func() { _ = stand.Rollback() }()
-	mustExec(t, stand, `UPDATE machine SET frozen = true WHERE id = $1`, ae.machine)
-	errs := make(chan error, 1)
-	go func() {
-		_, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
-		errs <- err
-	}()
-	waitForLockWaits(t, ae.db, 1)
-	if err := stand.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	ae.wantAttemptRefused(t, <-errs, "6", "the machine scope is frozen", "", "committed",
-		settled{"unresolved", "6", "the machine scope is frozen"})
 }
 
 // The attempt relies on its own operation's commitment: an earlier commitment entry on the
