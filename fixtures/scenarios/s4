@@ -1292,7 +1292,7 @@ ds() {
   ds_go 010 'TestCommitmentRefusals TestCommitmentRolloutRace' 'a second plan refused by the machine scope (comparison 4) and the rollout slot (comparison 5)'
   ds_go 011 TestPlanOperations 'control: without both scope indexes a second plan commits'
   ds_go 023 'TestAttemptRetry TestAttemptRetryRefusals' 'a retry follows its classification; refused by comparisons 7 and 8 otherwise'
-  ds_go 022 'TestLiveApply TestRecordResponse' 'the worker refuses an unknown machine type as validation, classified rejected, its configuration unchanged; a rejection moves the operation to rejected (no live plan: compilation validates the artifact first)'
+  ds_go 022 'TestLiveApply TestRecordResponse' 'the worker refuses an unknown machine type as validation, classified rejected, its configuration and resource version unchanged; a rejection moves the operation to rejected (no live plan: compilation validates the artifact first)'
   { printf 'row\tresult\tsource\toutcome\n' && sort -- "$EV/ds-rows.tsv"; } >"$EV/ds.tsv"
   rm -f -- "$EV/ds-rows.tsv"
 
