@@ -486,8 +486,8 @@ operation commits and nothing is sent until OpenBao is unsealed or started. An o
 evidence, so no commitment rests on it and no refusal is recorded; the commitment rests on a later
 observation (ER choice §10.28). A second plan for the worker while the first holds the scope: the
 controller does not take it up while the scope is held, and comparison 4 refuses it when its
-transaction runs anyway (a Go check, since the controller never reaches it); without the unique
-index both commit (DS row 011). An assignment change while the scope is held: its publication fails
+transaction runs anyway (a Go check, the route ER choice §10.32 selects); with both scope indexes
+dropped, the second plan's operation rows insert directly (DS row 011's control, the schema's). An assignment change while the scope is held: its publication fails
 `409 scope-busy`. A frozen scope: refused (the freeze route is S5's; a Go check until it lands).
 An artifact failing node validation: `InvalidArgument`, `rejected`,
 resource version unchanged (DS row 022). The ownership check moved out of the attempt's `UPDATE`: a
