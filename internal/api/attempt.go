@@ -74,8 +74,8 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 	r := attempted{Operation: operation}
 	var current string
 	var recovery bool
-	if err := tx.QueryRowContext(ctx, `SELECT epoch, recovery_mode FROM installation_state FOR SHARE`).Scan(&current,
-		&recovery); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT epoch, recovery_mode FROM installation_state`+a.share("installation state")).Scan(
+		&current, &recovery); err != nil {
 		return r, "", "", err
 	}
 	if current != a.d.owner.Epoch {
@@ -107,7 +107,8 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 		return r, machine, plan, err
 	}
 	var head sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT head_revision_id FROM assignment WHERE machine = $1 FOR SHARE`, machine).Scan(&head)
+	err = tx.QueryRowContext(ctx, `SELECT head_revision_id FROM assignment WHERE machine = $1`+a.share("assignment head"),
+		machine).Scan(&head)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return r, machine, plan, err
 	}
@@ -129,7 +130,7 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 		}
 	}
 	var committedTo sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT operation FROM plan_state WHERE plan = $1 FOR SHARE`, plan).Scan(
+	if err := tx.QueryRowContext(ctx, `SELECT operation FROM plan_state WHERE plan = $1`+a.share("plan state"), plan).Scan(
 		&committedTo); err != nil {
 		return r, machine, plan, err
 	}

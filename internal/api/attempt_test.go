@@ -446,6 +446,42 @@ func TestAttemptHoldsItsReads(t *testing.T) {
 	}
 }
 
+// The controls of TestAttemptHoldsItsReads (§3.3, §9.2): without the attempt's lock on the
+// installation state, the assignment head or the plan's state, the stand-in is not held, and reads
+// the operation before the attempt commits. The attempt writes the machine row, and the approval
+// and principal locks have none (choice §10.31).
+func TestAttemptReadLockControls(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, lock string
+		arg        func(*attemptEnv) any
+	}{
+		{"installation state", `SELECT FROM installation_state WHERE $1::text IS NOT NULL FOR UPDATE`,
+			func(*attemptEnv) any { return "" }},
+		{"assignment head", `SELECT FROM assignment WHERE machine = $1 FOR UPDATE`, func(ae *attemptEnv) any { return ae.machine }},
+		{"plan state", `SELECT FROM plan_state WHERE plan = $1 FOR UPDATE`, func(ae *attemptEnv) any { return ae.pid }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			read := make(chan string, 1)
+			var arg any
+			ae, armed := hookedAttemptEnv(t, func(ae *attemptEnv, tx *sql.Tx) error {
+				read <- standIn(ae.db, c.lock, arg, `SELECT state FROM operation WHERE id = $1`, ae.op)
+				return tx.Commit()
+			})
+			arg = c.arg(ae)
+			ae.a.o.noReadLock = c.name
+			armed.Store(true)
+			if _, err := ae.a.recordAttempt(context.Background(), ae.op, 1); err != nil {
+				t.Fatal(err)
+			}
+			if state := <-read; state != "committed" {
+				t.Fatalf("the stand-in read the operation %s", state)
+			}
+		})
+	}
+}
+
 // A cancellation, or a revocation of the approval or the approver's identity, that arrives while
 // the attempt holds its locks waits for it, and is recorded after the attempt.
 func TestAttemptRevocationsWait(t *testing.T) {
