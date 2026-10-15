@@ -134,6 +134,9 @@ names (before `control-after` was added). Times are from `captures.tsv`; "after 
 
 In every capture machined logged exactly one `ApplyConfiguration` when the version moved and none
 when it did not. No version moved after a capture's window closed: there is no `after-window.tsv`.
+Each landing is the capture's own: every capture's starting configuration (`base.yaml`, kept with
+the run's outputs because it holds the fixture's secrets) carries the node label of the last capture
+recorded as landed before it, in all 60 captures here and all 15 of the socket run.
 
 The 20 s landings are tight. The worker's `updated` time (whole seconds) is 26.4-27.1 s after the
 send in all five, and the harness first saw the new version 27.5-27.6 s after it. The heal came at
@@ -141,7 +144,7 @@ send in all five, and the harness first saw the new version 27.5-27.6 s after it
 
 ### 5.2 The socket run
 
-Six cells of three captures each, 23:15-23:37 UTC on 15 October, on a second fresh fixture, with
+Five cells of three captures each, 23:15-23:37 UTC on 15 October, on a second fresh fixture, with
 `E4M_SOCKETS=1`. The landings repeat the full run, with one exception: one 20 s netsplit did not
 land.
 
@@ -157,8 +160,9 @@ the request was lost on the worker, not in transport: the race §2 predicted.
 
 ### 5.3 What the source shows about the departures
 
-Three results departed from §2: no netsplit of 45 or 90 s landed, no pause landed, and the cold
-dial failed fast instead of being cancelled. What follows was read after the full run, then checked
+Four results departed from §2: no netsplit of 45 or 90 s landed, no pause of the worker landed,
+a pause of the control plane never let the request leave `talosctl`, and the cold dial failed fast
+instead of being cancelled. What follows was read after the full run, then checked
 against the socket run (§5.2).
 
 **The worker's apid is a second proxy.** A request for a node arrives at that node's apid, which
@@ -188,43 +192,56 @@ more; ASSUMPTION: it answers with a reset, and the control plane closes its end.
 plane's at the first retransmission after the heal, its send queue still holding the request and
 the 35 bytes the cancellation added.
 
-**A pause keeps the connection alive, and the cancellation arrives first.** A frozen container's
-kernel still acknowledges, so in a pause neither end times out and the request is delivered into
-the frozen process's receive buffer; the socket run's paused captures show both, with nothing left
-to send on the control plane. Every pause here outlasts the 15 s deadline, so by the time the
-process resumes, the cancellation is in the buffer too: the control plane's `RST_STREAM` behind the
-request on the worker (ASSUMPTION: the 35 bytes in §5.2 are that frame in its TLS record), or
-`talosctl`'s closed connection behind the request on the control plane. Hypothesis, not proven by
-the source: the resumed process reads both at once and cancels the stream before it forwards
+**A pause of the worker keeps the connection alive, and the cancellation arrives first.** A frozen
+container's kernel still acknowledges, so in a pause neither end times out and the request is
+delivered into the frozen process's receive buffer; the socket run's paused captures show both,
+with nothing left to send on the control plane. Every pause here outlasts the 15 s deadline, so by
+the time apid resumes, the control plane's `RST_STREAM` is in the buffer behind the request
+(ASSUMPTION: the 35 bytes in §5.2 are that frame in its TLS record). Hypothesis, not proven by the
+source: the resumed process reads both at once and cancels the stream before it forwards
 anything. In a netsplit both also wait in the control plane's send queue, but after the heal the
 retransmission restarts from one segment (ASSUMPTION: Linux's congestion window after a timeout),
 so the request can reach the worker's apid ahead of its cancellation. That would be why most 20 s
 captures land and one did not.
 
+**A pause of the control plane stops the request in `talosctl`.** The harness pauses the control
+plane before it starts `talosctl`, so `talosctl` opens a fresh connection to a frozen apid. The
+frozen apid cannot answer the TLS handshake, and grpc-go sends a call only on a ready transport
+(`picker_wrapper.go:97-105`; ASSUMPTION for the kernel's part: the TCP handshake itself completes in the frozen
+container's listen queue). The request therefore never leaves `talosctl`, and when `talosctl` is
+killed there is nothing in flight. §2's prediction for this cell assumed a request already with
+apid; this measured a request that never reached it.
+
 **The cold dial failed on address resolution.** The restarted control plane had no address for the
 worker; ASSUMPTION: Linux gives up resolving after about 3 s and the dial fails with
 `EHOSTUNREACH`, as four captures show. In the fifth, the dial was still waiting when `talosctl` was
-killed. Neither opened a connection, so nothing was sent. The control plane's apid logs the call as
-a success, because in its one-to-many mode an error from one node is carried inside the response.
+killed. Killing `talosctl` cancels the forwarded call, not the proxy's cached connection, whose dial
+has its own lifetime (`clientconn.go:918` in grpc-go). The call cannot be sent before a connection
+exists, and once cancelled it no longer waits for one, so whichever way the dial ended, nothing was
+sent for it. The control plane's apid logs the call as a success, because in its one-to-many mode
+an error from one node is carried inside the response.
 
 ## 6. What this decides
 
 S6.2's pass criterion is a recorded distribution with its method and prediction, whichever way it
 falls. This is it. What it supports:
 
-- **A netsplit has a bound on this fixture, and it comes from transport defaults, not from the
-  proxy.** A request abandoned during a partition of the worker landed only when the partition
-  healed in time for the control plane's retransmission at about 26 s, and then within about 28 s
-  of the send (7 of 8 at 20 s). After a 45 s or 90 s partition nothing landed, because the worker's end of the
-  connection had already been aborted, about 30 s after it last heard from the control plane. That
-  bound rests on grpc-go's server default, Go's keepalive default and Linux's keepalive and
-  retransmission behaviour. Talos configures none of them, a version change to any of the three can
-  move it, and a connection that was idle before the send reaches its 30 s sooner.
-- **A pause has no such bound.** The connection stays up for as long as the process is frozen, and
-  the request waits in a buffer. No paused capture landed (0 of 30 in the full run, 0 of 3 in the socket run), but the reason
-  is a hypothesis about the order in which buffered frames are read, not a guarantee in the source.
-- **A dial that fails sends nothing.** Over the worker's own endpoint and on the cold route, no
-  connection was opened and nothing landed (0 of 10). This answers S6.2 step 3 for a dial that
+- **After a netsplit, the latest landing seen was 28 s after the send.** Requests abandoned during
+  a 20 s partition of the worker landed in 7 of 8 captures, 26-28 s after the send; after a 45 s or
+  90 s partition none of 13 did, and in every 45 s socket sample the worker's end of the connection
+  was gone about 30 s after the split began. The explanation in §5.3 rests on grpc-go's server
+  default and Go's keepalive default, read from source, and on Linux's keepalive and retransmission
+  behaviour, assumed. If it holds, delivery stops once the worker's socket is gone, but that bounds
+  delivery, not completion: a request delivered before then still runs to the end. Talos configures
+  none of these defaults, a version change to any of them can move the cut-off, and a connection
+  idle before the send would reach it sooner.
+- **A pause of the worker has no such cut-off.** The connection stays up for as long as the process
+  is frozen, and the request waits in a buffer. No paused worker capture landed (0 of 15 in the
+  full run, 0 of 3 in the socket run), but the reason is a hypothesis about the order in which
+  buffered frames are read, not a guarantee in the source. A pause of the control plane before the
+  send kept the request in `talosctl` (0 of 15).
+- **A dial that fails sends nothing.** Over the worker's own endpoint and on the cold route, the
+  request was never sent and nothing landed (0 of 10). This answers S6.2 step 3 for a dial that
   fails before the connection exists; it says nothing about a connection that fails after it
   opened.
 
@@ -232,9 +249,10 @@ So this measurement does not supply a bound that [ER §5.2](../../spec/execution
 can adopt. Nothing changes in the contract: accounting a lost response stays a `recovery-admin`
 decision after the settle floor, a late landing is detected as drift, not prevented, and the
 proxied route stays out of the PoC's dispatch (choice §10.9). The settle floor of 30 s (choice
-§10.11) happens to sit at the abort this fixture showed; that agreement is not a reason to rely on
-it. An amendment that re-admits the route would have to configure the keepalive and user timeout
-it depends on, on both ends, and close the pause case, which no default here bounds.
+§10.11) happens to sit at the socket abort this fixture showed; that agreement is not a reason to
+rely on it. An amendment that re-admits the route would have to configure the keepalive and user
+timeout it depends on, on both ends, establish the kernel behaviour assumed here, and close the
+pause case, which no default here bounds.
 
 ## 7. Limits
 
@@ -251,10 +269,16 @@ it depends on, on both ends, and close the pause case, which no default here bou
 - **Five captures per cell** state a distribution, not a probability small enough to rely on.
   The socket run adds three per cell it covers.
 - **Partitions and pauses of 20, 45 and 90 s only.** Between 20 and 45 s the transport schedule
-  in §5.3 predicts the change, but no capture tested where it falls. A partition or pause shorter
-  than the 15 s deadline is not an abandoned request: `talosctl` would have had its answer.
+  in §5.3 predicts the change, but no capture tested where it falls. Faults shorter than the 15 s
+  deadline were not measured; under the same schedule, a partition healed at 14 s would still wait
+  for the retransmission at about 26 s, after `talosctl` was killed.
+- **Pauses of the control plane began before the send**, so they measured a request that never
+  left `talosctl`, not a pause with a request already at the proxy.
 - **Every warm capture sent on a connection the harness had just used.** A connection idle for
   longer before the send reaches the worker's abort sooner (§5.3); none was measured.
 - **The full run predates the closing control.** Its last cells (cold, direct) are not followed
   by a control; the socket run's `control-after` landed (§5.2).
 - **`run.txt` names the branch commit the run was made from**, which a rebase merge does not keep.
+  After both runs, `run/measure` was corrected on paths neither run reached: an undo armed before
+  each fault rather than after it, and a failed last read now recorded as `unknown`. In both runs
+  every capture's `landed` agrees with its version change and no read failed.

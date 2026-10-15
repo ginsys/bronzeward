@@ -29,7 +29,7 @@ dest=${E4D_EVIDENCE:-$E4D_DIR/evidence}
 # A partial run never stands in for a whole one: a run/measure subset goes only to a directory of
 # its own.
 if grep -q '^only' -- "$E4D_OUT/run.txt"; then
-  [ "$measure" = 1 ] && [ "$dest" != "$E4D_DIR/evidence-latelanding" ] ||
+  [ "$measure" = 1 ] && [ "$dest" != "$E4D_DIR/evidence-latelanding" ] && [ "$dest" != "$E4D_DIR/evidence" ] ||
     die "$E4D_OUT is a partial run (E4D_ONLY or E4M_ONLY was set); run it whole, or collect a run/measure subset with E4D_EVIDENCE=$E4D_DIR/evidence-<name>"
 fi
 incoming=$(mktemp -d "$E4D_DIR/.evidence-incoming.XXXXXX")
