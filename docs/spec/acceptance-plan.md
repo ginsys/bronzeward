@@ -543,8 +543,10 @@ ends: S1 to S4 run with none observing.
 4. **Adopt.** `h-author` opens a new draft (`POST /drafts`), since the import draft is published,
    and ingests the drifted configuration into it as a drift adoption (`POST /ingestions` with
    `"kind": "drift-adoption"` and `"source": "machine"`, naming that draft, with `If-Match` its
-   ETag), marking the new password, S1's file content and S2's node label of it. After the ingestion
-   succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
+   ETag), marking the new password, S1's file content and S2's node label of it. The adopted import
+   base then holds that label as a reference, which S2's label fragment would override (refused,
+   C choice §16.20), so `h-author` takes the fragment out of the `workers` profile in the same
+   draft. After the ingestion succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
    `adopt` plan binding the drift record; `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
    record commits under the freeze.
 5. Measure whether an artifact compiled from the unchanged import base reproduces the baseline

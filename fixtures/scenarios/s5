@@ -4,7 +4,8 @@
 # password, a new synthetic secret; the next drift observation opens a drift record, the scope not
 # frozen; the database and OpenBao snapshotted (s5-step3, step 7's restore point); h-author freezes
 # the scope, and an approved revert plan is never committed while it is frozen; h-author ingests
-# the drifted configuration into a new draft as a drift adoption, marking both secrets;
+# the drifted configuration into a new draft as a drift adoption, marking both secrets, and takes
+# S2's label fragment out of the workers profile, the adopted base now holding that reference;
 # h-publisher publishes it and creates an adopt plan binding the record, h-approver approves, and
 # the adoption commits under the freeze: Applied the release with the baseline's digest, the
 # baseline revision one more, the record closed adopted. Bronzeward sends the worker no mutating
@@ -361,6 +362,27 @@ unchanged_since_patch() {
     same "$(digest_of "$bundle/talos-config-version.txt" "$1")" "$(digest_of "$EV/patched-talos-config-version.txt" "$1")"
 }
 
+# profile_drops <who> <name> <fragment>: the workers profile, under the draft's ETag, listing its
+# head's fragment revisions but <fragment>'s, which it lists once: 200, the ETag replaced. The
+# adopted import base holds S2's label as a reference, and a fragment overriding an import-base
+# reference refuses publication (base-override, compilation choice §16.20), so the label's
+# fragment leaves the profile; the label stays, from the base.
+profile_drops() {
+  local body
+  fresh "$1"
+  [ "$(sql "SELECT count(*) FROM profile p JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
+    JOIN fragment_revision r ON r.id = f.fragment_revision
+    WHERE p.cluster = '$cluster' AND p.name = 'workers' AND r.name = '$3'")" = 1 ] || return 1
+  body=$(sql "SELECT coalesce(jsonb_agg(f.fragment_revision ORDER BY f.position), '[]'::jsonb)
+    FROM profile p JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
+      JOIN fragment_revision r ON r.id = f.fragment_revision
+    WHERE p.cluster = '$cluster' AND p.name = 'workers' AND r.name <> '$3'") || return 1
+  body=$(jq -nc --argjson l "$body" '{fragments: $l}') || return 1
+  answers 200 - PUT "/api/v1/drafts/$draft/profiles/workers" "$tok" "$body" "$(key "profile-$2")" "$etag" || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
+}
+
 adopt() {
   local ref='S5 step 4' plan_body_json w_after cp_after
   check "$ref" 'h-author opens a new draft: 201' draft_by h-author adopt
@@ -370,6 +392,8 @@ adopt() {
     ingest "$machine_w" "$(jq -nc --arg a "$WORKER_MARK" --arg l "$LABEL_MARK" --arg b "$REGISTRY_MARK" '[$a, $l, $b]')" adopt
   ingest_kind=import
   outcome_bundle "$ref" adoption-ingestion
+  check "$ref" "h-author takes S2's label fragment out of the workers profile, the adopted base holding that reference: 200, the ETag replaced" \
+    profile_drops h-author adopt s2-labels
   check "$ref" 'h-publisher publishes the draft under its new ETag: 202, one release, the worker'"'"'s Desired' publish_by h-publisher adopt
   [ -n "$new_release" ] || die "s5: no release; nothing after it can run"
   plan_body_json=$(jq -nc --arg r "$new_release" --arg m "$machine_w" '{releaseId: $r, machine: $m, operation: "adopt"}')
