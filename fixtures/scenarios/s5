@@ -13,10 +13,17 @@
 # baseline revision one more, the record closed adopted. Bronzeward sends the worker no mutating
 # request after the patch, nor the control plane at all. Step 5 measures whether the artifact
 # compiled from the unchanged import base reproduces the baseline digest, and records it either
-# way. The interval is set back and the instances restarted at the end, or on any earlier exit.
+# way. Step 6: the worker patched out of band again with a registry mirror, a new record opened;
+# h-publisher's revert plan binding it, approved by h-approver as an unseen overwrite; h-publisher's
+# unfreeze refused, h-approver's taking effect; the revert completes, the record closed reverted,
+# the worker running the artifact, its one mutating request the revert. The interval is set back
+# and the instances restarted at the end, or on any earlier exit.
+# `roles`, step 7, outside the integrated run: step 3's snapshots restored, h-publisher,
+# h-approver, h-recovery and the automation identity each freeze the scope, h-approver unfreezing
+# it after each.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s5.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s5 run   (after scenarios/s4 run and s4 ds on the same up)
+# Usage: scenarios/s5 run|roles   (run after scenarios/s4 run and s4 ds on the same up; roles after run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -24,7 +31,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s5_mode=${1:-}
-case $s5_mode in run) ;; *) die "usage: scenarios/s5 run" ;; esac
+case $s5_mode in run | roles) ;; *) die "usage: scenarios/s5 run|roles" ;; esac
 need docker curl jq timeout id sleep date awk wc od head tr
 need_state
 umask 077
@@ -213,12 +220,12 @@ registry_patch() {
   [ ! -e "$patch_file" ] || rc=1
   return "$rc"
 }
-# record_opened: one drift record open on the worker, naming a drift observation that read the
-# patched digest, Applied's digest and that observed one; its opening entry, the alert, on the
-# worker's timeline names it.
+# record_opened <state>: one drift record open on the worker, naming a drift observation that read
+# that state's digest, Applied's digest and that observed one; its opening entry, the alert, on the
+# worker's timeline names it. Its revision in opened.
 record_opened() {
   local want
-  want=$(digest_of "$EV/patched-talos-config-sha256.txt" "$TALOS_WORKER_IP")
+  want=$(digest_of "$EV/$1-talos-config-sha256.txt" "$TALOS_WORKER_IP")
   [ -n "$want" ] && [ "$(open_records)" = 1 ] || return 1
   opened=$(sql "SELECT opened FROM drift_record WHERE machine = '$machine_w' AND closed IS NULL")
   [ "$(sql "SELECT (r.applied_digest = s.applied_digest) || ' ' || encode(r.observed_digest, 'hex') || ' '
@@ -238,11 +245,13 @@ mutations_are() {
   got=$(run_mutations "$2" "$3") || return 1
   [ "$got" = "$1" ]
 }
-patched_state() {
-  evidence_to patched || return 1
-  cp -- "$bundle/talos-config-sha256.txt" "$EV/patched-talos-config-sha256.txt" &&
-    cp -- "$bundle/talos-config-version.txt" "$EV/patched-talos-config-version.txt" &&
-    scan_clean patched
+# state_kept <state>: a bundle of that name, its digests and resource versions kept as
+# <state>-talos-config-*.txt, scanned clean.
+state_kept() {
+  evidence_to "$1" || return 1
+  cp -- "$bundle/talos-config-sha256.txt" "$EV/$1-talos-config-sha256.txt" &&
+    cp -- "$bundle/talos-config-version.txt" "$EV/$1-talos-config-version.txt" &&
+    scan_clean "$1"
 }
 # moved_by_patch: the worker's digest and resource version moved with the patch; the control
 # plane's did not.
@@ -264,11 +273,11 @@ detect() {
   [ -n "$secret" ] || die "s5: no secret was patched; nothing after it can run"
   w_patched=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
   check "$ref" "the worker's apid log records one mutating request past the pre-state: the patch" mutations_are 1 "$w_log" "$w_patched"
-  check "$ref" 'the patched-state bundle: complete, no fixture secret but the scan control' patched_state
+  check "$ref" 'the patched-state bundle: complete, no fixture secret but the scan control' state_kept patched
   check "$ref" "the worker's digest and resource version moved with the patch, the control plane's did not" moved_by_patch
   ref='S5 step 2'
   check "$ref" "within a minute a drift observation opens one record naming it, Applied's digest and the patched one; its opening entry, the alert, names the record and the observation" \
-    within 60 record_opened
+    within 60 record_opened patched
   [ -n "$opened" ] || die "s5: no drift record opened; nothing after it can run"
   check "$ref" 'the scope is not frozen by detection' same "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" f
   check "$ref" 'served: the open record, not frozen; Desired and Applied the release, Observed an observation that read the patched digest and matched neither' \
@@ -279,17 +288,22 @@ detect() {
   check "$ref" 'inject bao-snapshot s5-step3, before step 3' "$bin/inject" bao-snapshot s5-step3
 }
 
-# freeze_by <who>: POST /machines/{id}/freezes as that identity: 201 naming the machine, frozen,
-# the principal and the role; one freeze entry records them.
-freeze_by() {
-  local role=$2
-  fresh "$1"
-  answers_with ".machine == \"$machine_w\" and .frozen == true and .role == \"$role\"" \
-    201 - POST "/api/v1/machines/$machine_w/freezes" "$tok" '{"reason": "S5 drift"}' "$(key "freeze-$1")" || return 1
-  [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ] &&
-    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'freeze'
-      AND entry->>'principal' = '$(who_id "$1")' AND entry->>'role' = '$role' AND entry->>'reason' = 'S5 drift'")" = 1 ]
+# set_freeze <freezes|unfreezes> <who> <role> [reason]: POST /machines/{id}/<route> as that
+# identity: 201 naming the machine, the frozen state, the principal and the role; the scope frozen
+# or not; one freeze or unfreeze entry records them.
+set_freeze() {
+  local route=$1 role=$3 reason=${4:-S5 drift} frozen=true kind=freeze
+  [ "$route" = freezes ] || frozen=false kind=unfreeze
+  fresh "$2"
+  answers_with ".machine == \"$machine_w\" and .frozen == $frozen and .role == \"$role\"" \
+    201 - POST "/api/v1/machines/$machine_w/$route" "$tok" "$(jq -nc --arg r "$reason" '{reason: $r}')" \
+    "$(key "$kind-$2-${reason//[^A-Za-z0-9]/-}")" || return 1
+  [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = "${frozen:0:1}" ] &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = '$kind'
+      AND entry->>'principal' = '$(who_id "$2")' AND entry->>'role' = '$role' AND entry->>'reason' = '$reason'")" = 1 ]
 }
+# freeze_by <who> <role> [reason]: set_freeze freezes.
+freeze_by() { set_freeze freezes "$@"; }
 # frozen_unselected <plan>: the plan's approval is 30 s old and still the plan is approved with no
 # observation begun for it and no operation. The approval wakes the controller and its 5 s heartbeat
 # wakes it again, so a live controller has passed over the plan; an idle pass records nothing, so a
@@ -691,6 +705,136 @@ measure() {
   fi
 }
 
+# mirror_patch: step 6's out-of-band patch, a registry mirror, nothing secret, applied without a
+# reboot as step 1's is. The patch file is removed at once, and by on_exit on any other way out.
+MIRROR=mirror.s5.invalid
+mirror_patch() {
+  local rc=0
+  printf 'machine:\n  registries:\n    mirrors:\n      %s:\n        endpoints:\n          - https://%s\n' \
+    "$MIRROR" "$MIRROR" >"$patch_file" || rc=1
+  [ "$rc" -ne 0 ] || node_talos "$TALOS_WORKER_IP" patch machineconfig --mode no-reboot --patch "@$patch_file" >/dev/null 2>&1 || rc=$?
+  rm -f -- "$patch_file" || rc=1
+  return "$rc"
+}
+# moved_from <state> <earlier state>: the worker's digest and resource version differ between them.
+moved_from() {
+  local f
+  for f in sha256 version; do
+    [ -n "$(digest_of "$EV/$2-talos-config-$f.txt" "$TALOS_WORKER_IP")" ] &&
+      differ "$(digest_of "$EV/$1-talos-config-$f.txt" "$TALOS_WORKER_IP")" "$(digest_of "$EV/$2-talos-config-$f.txt" "$TALOS_WORKER_IP")" ||
+      return 1
+  done
+}
+# approved_unseen <plan>: the approval answered last, and its timeline entry, mark it as approving an
+# unseen overwrite.
+approved_unseen() {
+  jq -e --arg p "$1" '.plan == $p and .unseenOverwrite == true' "$EV/last.body" >/dev/null &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
+      AND entry->>'plan' = '$1' AND (entry->>'unseenOverwrite')::boolean")" = 1 ]
+}
+# unfreeze_refused <who>: an unfreeze by that identity, holding no approver role: 403, still frozen.
+unfreeze_refused() {
+  fresh "$1"
+  answers 403 - POST "/api/v1/machines/$machine_w/unfreezes" "$tok" '{"reason": "S5 revert"}' "$(key "unfreeze-$1")" &&
+    [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ]
+}
+# reverted: the revert plan committed to one completed apply-config operation; Applied the adopted
+# release from source operation with its artifact's digest; the new record closed reverted by one
+# closing entry, none open.
+redrift='' rplan='' rop=''
+reverted() {
+  rop=$(sql "SELECT o.id FROM plan_state s JOIN operation o ON o.id = s.operation
+    WHERE s.plan = '$rplan' AND s.state = 'committed' AND o.kind = 'apply-config' AND o.state = 'completed'")
+  [ -n "$rop" ] &&
+    [ "$(sql "SELECT s.applied_release || ' ' || s.applied_source || ' ' || (s.applied_digest = rm.configuration_digest)
+      FROM machine_state s JOIN release_machine rm ON rm.release = s.applied_release AND rm.machine = s.machine
+      WHERE s.machine = '$machine_w'")" = "$new_release operation true" ] &&
+    [ "$(sql "SELECT resolution FROM drift_record WHERE machine = '$machine_w' AND opened = $redrift")" = reverted ] &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'drift'
+      AND (entry->>'record')::bigint = $redrift AND entry->>'change' = 'closed' AND entry->>'resolution' = 'reverted'")" = 1 ] &&
+    [ "$(open_records)" = 0 ]
+}
+# artifact_running: in the reverted state the worker's digest is the revert artifact's, and its
+# resource version moved from the repatched state's.
+artifact_running() {
+  local want
+  want=$(sql "SELECT encode(configuration_digest, 'hex') FROM release_machine WHERE release = '$new_release' AND machine = '$machine_w'")
+  [ -n "$want" ] && same "$(digest_of "$EV/reverted-talos-config-sha256.txt" "$TALOS_WORKER_IP")" "$want" &&
+    moved_from reverted repatched
+}
+
+# Step 6: drifted again, the scope still frozen from step 3, then an approved revert, unfrozen.
+revert_step() {
+  local ref='S5 step 6' adopted_rec=$opened w_before w_repatched w_reverted cp_before cp_now
+  w_before=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  cp_before=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  check "$ref" 'the worker patched out of band again with the pinned talosctl, no reboot: a registry mirror' mirror_patch
+  w_repatched=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  check "$ref" "the worker's apid log records one mutating request past the adoption: the patch" mutations_are 1 "$w_before" "$w_repatched"
+  check "$ref" 'the repatched-state bundle: complete, no fixture secret but the scan control' state_kept repatched
+  check "$ref" "the worker's digest and resource version moved with the patch" moved_from repatched patched
+  check "$ref" "within a minute a drift observation opens a new record naming it, Applied's digest and the repatched one; its opening entry, the alert, names the record and the observation" \
+    within 60 record_opened repatched
+  redrift=$opened opened=$adopted_rec
+  [ -n "$redrift" ] && [ "$redrift" != "$opened" ] || die "s5: no new drift record opened; nothing after it can run"
+  check "$ref" 'a plan for the drifted worker as h-publisher, a revert binding the new record: 201' plan_by h-publisher revert
+  rplan=$plan_id
+  [ -n "$rplan" ] || die "s5: no revert plan; nothing after it can run"
+  check "$ref" 'the plan binds the new record' same "$(sql "SELECT drift_record FROM plan WHERE id = '$rplan'")" "$redrift"
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$rplan" revert
+  check "$ref" 'the approval is recorded as approving an unseen overwrite, as answered and on the timeline' approved_unseen "$rplan"
+  check 'S5 negative controls' 'unfreezing by h-publisher, not an approver: 403, the scope still frozen' unfreeze_refused h-publisher
+  check "$ref" 'h-approver unfreezes the scope: 201, the unfreeze recorded under the approver role' \
+    set_freeze unfreezes h-approver approver 'S5 revert'
+  check "$ref" "the revert runs as S4: committed to a completed apply-config operation, Applied the adopted release from source operation with its artifact's digest, the new record closed reverted" \
+    within 180 reverted
+  [ -n "$rop" ] || die "s5: the revert did not complete; nothing after it can run"
+  check "$ref" 'served: Desired and Applied the release, not frozen, no open record' \
+    served ".desired == \"$new_release\" and .applied.release == \"$new_release\" and .frozen == false and .openDrift == null"
+  check "$ref" 'the reverted-state bundle: complete, no fixture secret but the scan control' state_kept reverted
+  check "$ref" "the worker's digest is the revert artifact's and its resource version moved" artifact_running
+  w_reverted=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  cp_now=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  check 'S5 pass' "the worker's apid log records one mutating request past the second patch: the revert" \
+    mutations_are 1 "$w_repatched" "$w_reverted"
+  no_mutation 'the control plane, through step 6,' "$TALOS_CONTROLPLANE_IP" "$cp_before" "$cp_now"
+}
+
+# Step 7 (mode roles), outside the integrated run: S5 step 3's snapshots restored, each other role
+# that may freeze the scope freezes it, the automation identity's recorded as author (its first
+# qualifying role), h-approver unfreezing it after each.
+restored_step3() {
+  [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = f ] && [ "$(open_records)" = 1 ] &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'freeze'
+      AND entry->>'reason' = 'S5 drift'")" = 0 ]
+}
+db_reads() {
+  fresh h-viewer
+  [ "$(call GET "/api/v1/machines/$machine_w" "$tok")" = 200 ]
+}
+roles() {
+  local ref='S5 step 7' who role
+  robot=$(cat -- "$STATE/automation-token") || die "no automation token in $STATE"
+  redact_automation_token "$robot"
+  robot_id=$(sed -n 's/^identity \(idn_[a-z2-7]*\):.*/\1/p' "$STATE/automation-identity")
+  [ -n "$robot_id" ] || die "s5: no automation identity in $STATE"
+  cluster=$(sql "SELECT id FROM cluster WHERE name = 'bw-fixture'") || die "s5: cannot read the cluster"
+  machine_w=$(machine_at "$TALOS_WORKER_IP") || die "s5: cannot read the worker's machine"
+  one_line "$machine_w" || die "s5: not one machine at the worker's endpoint: run scenarios/s1 run first"
+  check "$ref" 'inject pause A, B and C' servers pause
+  check "$ref" 'inject db-restore s5-step3' "$bin/inject" db-restore s5-step3
+  check "$ref" 'inject bao-restore s5-step3' "$bin/inject" bao-restore s5-step3
+  check "$ref" 'inject unpause A, B and C' servers unpause
+  check "$ref" 'A reads the restored database' within 60 db_reads
+  check "$ref" "restored: step 2's record open, the scope not frozen, step 3's freeze not yet made" restored_step3
+  for who in h-publisher:publisher h-approver:approver h-recovery:recovery-admin robot:author; do
+    role=${who#*:} who=${who%%:*}
+    check "$ref" "$who freezes the scope: 201, the freeze recorded under the $role role" freeze_by "$who" "$role" "S5 step 7 $who"
+    check "$ref" "h-approver unfreezes it: 201, the unfreeze recorded under the approver role" \
+      set_freeze unfreezes h-approver approver "S5 step 7 after $who"
+  done
+}
+
 # Back to the interval every other scenario runs at.
 restore_interval() {
   local ref='S5 handoff' before=$failed
@@ -708,6 +852,7 @@ run() {
   freeze
   adopt
   measure
+  revert_step
   check 'S5 retained evidence' "the worker's timeline, every page, as served" keep timeline "/api/v1/machines/$machine_w/timeline"
   check 'S5 retained evidence' "the kept timeline holds the record's opening and closing entries, the freeze, the frozen-scope plan's cancellation, the adoption and the Applied change naming the adopted release" \
     kept timeline "any(.[]; .kind == \"drift\" and (.entry.record | tostring) == \"$opened\" and .entry.change == \"opened\")
@@ -716,6 +861,12 @@ run() {
       and any(.[]; .kind == \"plan-cancellation\" and .entry.plan == \"$revert\" and .entry.reason == \"S5 frozen-scope control\")
       and any(.[]; .kind == \"adoption\" and .entry.plan == \"$plan\" and .entry.operation == \"$op\")
       and any(.[]; .kind == \"applied-change\" and .entry.plan == \"$plan\" and .entry.operation == \"$op\" and (tostring | contains(\"$new_release\")))"
+  check 'S5 retained evidence' "the kept timeline holds step 6's record opening and closing reverted, the unseen-overwrite approval, the unfreeze and the revert's Applied change" \
+    kept timeline "any(.[]; .kind == \"drift\" and (.entry.record | tostring) == \"$redrift\" and .entry.change == \"opened\")
+      and any(.[]; .kind == \"drift\" and (.entry.record | tostring) == \"$redrift\" and .entry.change == \"closed\" and .entry.resolution == \"reverted\")
+      and any(.[]; .kind == \"approval\" and .entry.plan == \"$rplan\" and .entry.unseenOverwrite == true)
+      and any(.[]; .kind == \"unfreeze\" and .entry.reason == \"S5 revert\" and .entry.role == \"approver\")
+      and any(.[]; .kind == \"applied-change\" and .entry.plan == \"$rplan\" and .entry.operation == \"$rop\")"
   check 'S5 retained evidence' "the worker's observation records, every page, as served" keep observations "/api/v1/machines/$machine_w/observations"
   check 'S5 retained evidence' "the kept observations hold the drift record's and the adoption's" \
     kept observations "([.[].id] | index(\"$(sql "SELECT observation FROM drift_record WHERE machine = '$machine_w' AND opened = $opened")\") != null)
@@ -724,7 +875,12 @@ run() {
   restore_interval
 }
 
-run
+if [ "$s5_mode" = run ]; then
+  run
+else
+  withheld+=("$BW_CANARY")
+  roles
+fi
 rm -f -- "$EV/last.body" "$EV/last.headers"
 # The final bundle: the evidence directory and the run directory scanned, as S4's does.
 ev_log=$(mktemp)
@@ -741,8 +897,10 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
     result PASS 'S5 evidence' 'the bundle is complete: bin/evidence captured every source'
   fi
   # The scan above covers the dump only if the bundle holds it expanded: the adopt operation's own
-  # row inside its COPY block, whose first column is the ID.
-  if [ -n "$op" ] &&
+  # row inside its COPY block, whose first column is the ID. Mode roles takes no dump.
+  if [ "$s5_mode" = roles ]; then
+    :
+  elif [ -n "$op" ] &&
     awk -v id="$op" '
       index($0, "COPY public.operation ") == 1 { block = 1; next }
       block && /^\\\.$/ { block = 0 }
