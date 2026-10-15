@@ -1079,7 +1079,7 @@ state is being accepted (design §12.1).
    for a machine with no `Applied`), the machine's `Desired` release at plan creation (or none), the
    open drift record (none for a handover), the adopted release, the baseline's
    configuration digest, a maximum observation age, its expiry, the approval
-   policy, and its creator. It has the plan states of
+   policy, and its creator **(choice §10.38)**. It has the plan states of
    §2, and any change to a bound value needs a new plan.
 4. **Record.** The adopt plan's commitment is the **adoption record**
    transaction. It locks the machine row as §3.2 does, so it is ordered against
@@ -2284,6 +2284,20 @@ conservative option; those that do not say so. Each is marked in place as
     (ginsys/bronzeward#27). Alternatives: no kind, an import of a drifted
     machine, which leaves the ingestion's purpose unrecorded; binding the
     record at ingestion, which the record re-checks anyway.
+38. **An adopt plan of a machine with an `Applied` needs an open drift record,
+    which it binds with the baseline revision** (§6.3 steps 3 and 4). Plan
+    creation for such a machine with no open record is `409 conflict`; with
+    one, the plan binds the record by its opening entry's revision and the
+    machine's baseline revision, and still no expected digest, since the
+    adoption record compares with the baseline's. The record checks the bound
+    record still open under the machine lock, advances the baseline revision,
+    names the previous `Applied` release in its `applied-change` entry, and
+    then appends a `drift` entry closing the record as `adopted`, resting on
+    the observation the record relied on. Agent decision, 2026-10-15
+    (ginsys/bronzeward#27). Alternatives: binding no record and closing
+    whichever is open at the record, which could adopt over a later drift a
+    revert had already resolved; refusing the record instead of the plan when
+    no record is open, which admits plans that can never be recorded.
 
 ## 11. Traceability
 

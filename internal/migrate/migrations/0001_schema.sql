@@ -1037,7 +1037,8 @@ CREATE TABLE machine_state (
 -- (the endpoint, the assignment revision, the desired release, the baseline revision and the
 -- expected pre-dispatch configuration digest) it copies. An apply-config plan carries its mode,
 -- its deadlines and attempt limit, and the baseline it was planned against; an adopt plan (§6.3)
--- carries none of them. The PoC's approval policy is one approver and its rollout limit one
+-- carries none of them, except that a drifted machine's binds its baseline revision with its open
+-- drift record. The PoC's approval policy is one approver and its rollout limit one
 -- (choice §10.5). Each plan is exactly one plan entry on its machine's timeline.
 CREATE TABLE plan (
   id                    text PRIMARY KEY CHECK (id ~ '^pln_[a-z2-7]{26}$'),
@@ -1049,6 +1050,8 @@ CREATE TABLE plan (
   assignment_revision   text NOT NULL,
   desired_release       text,
   baseline_revision     integer CHECK (baseline_revision >= 1),
+  -- The open drift record an adopt plan of a drifted machine binds, by its opening entry's revision.
+  drift_record          bigint,
   expected_digest       bytea CHECK (length(expected_digest) = 32),
   route                 talos_endpoint NOT NULL,
   max_observation_age   interval NOT NULL CHECK (max_observation_age > interval '0'),
@@ -1075,8 +1078,8 @@ CREATE TABLE plan (
     (kind <> 'apply-config' OR (mode IS NOT NULL AND desired_release IS NOT NULL AND desired_release = release
       AND baseline_revision IS NOT NULL AND expected_digest IS NOT NULL AND transport_deadline IS NOT NULL
       AND verification_deadline IS NOT NULL AND transport_deadline <= verification_deadline
-      AND max_attempts IS NOT NULL)) AND
-    (kind <> 'adopt' OR (mode IS NULL AND baseline_revision IS NULL AND expected_digest IS NULL
+      AND max_attempts IS NOT NULL AND drift_record IS NULL)) AND
+    (kind <> 'adopt' OR (mode IS NULL AND (baseline_revision IS NULL) = (drift_record IS NULL) AND expected_digest IS NULL
       AND transport_deadline IS NULL AND verification_deadline IS NULL AND max_attempts IS NULL))),
   UNIQUE (created_by, idempotency_key),
   UNIQUE (id, kind, machine, cluster),
@@ -1336,6 +1339,7 @@ CREATE TABLE drift_record (
   FOREIGN KEY (late_landing, machine) REFERENCES operation (id, machine)
 );
 CREATE UNIQUE INDEX drift_record_open ON drift_record (machine) WHERE closed IS NULL;
+ALTER TABLE plan ADD FOREIGN KEY (machine, drift_record) REFERENCES drift_record (machine, opened);
 
 -- An adoption record (§6.3): an adopt plan's completed operation, the approval it ran under and
 -- the observation it relied on. It is one adoption entry on the machine's timeline. The record,

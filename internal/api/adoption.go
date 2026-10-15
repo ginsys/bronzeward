@@ -99,11 +99,13 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	// A plan row is immutable, so its binding is read before the machine's lock.
 	var machine, cluster, kind, release, assignment string
 	var desired sql.NullString
+	var baselineRev, driftRecord sql.NullInt64
 	var maxAge time.Duration
 	var maxAgeMicros int64
 	err := tx.QueryRowContext(ctx, `SELECT machine, cluster, kind, release, assignment_revision, desired_release,
-			(extract(epoch FROM max_observation_age) * 1000000)::bigint
-		FROM plan WHERE id = $1`, plan).Scan(&machine, &cluster, &kind, &release, &assignment, &desired, &maxAgeMicros)
+			baseline_revision, drift_record, (extract(epoch FROM max_observation_age) * 1000000)::bigint
+		FROM plan WHERE id = $1`, plan).Scan(&machine, &cluster, &kind, &release, &assignment, &desired, &baselineRev,
+		&driftRecord, &maxAgeMicros)
 	if err != nil {
 		return r, "", fmt.Errorf("adoption of plan %s: %w", plan, err)
 	}
@@ -119,9 +121,19 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	// The machine state is written below; a publication holds every machine state of its cluster
 	// (publish.go), so it is taken here, before the time is read, not at the write.
 	var applied, msDesired sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT applied_release, desired FROM machine_state WHERE machine = $1 FOR UPDATE`,
-		machine).Scan(&applied, &msDesired); err != nil {
+	var msBaselineRev sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT applied_release, desired, baseline_revision FROM machine_state
+		WHERE machine = $1 FOR UPDATE`, machine).Scan(&applied, &msDesired, &msBaselineRev); err != nil {
 		return r, machine, err
+	}
+	// The bound drift record, read after the machine's lock: a revert or a return closing it holds
+	// the machine first.
+	var driftOpen bool
+	if driftRecord.Valid {
+		if err := tx.QueryRowContext(ctx, `SELECT closed IS NULL FROM drift_record WHERE machine = $1 AND opened = $2`,
+			machine, driftRecord.Int64).Scan(&driftOpen); err != nil {
+			return r, machine, err
+		}
 	}
 	var head sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT head_revision_id FROM assignment WHERE machine = $1 FOR SHARE`, machine).Scan(&head)
@@ -197,15 +209,19 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 	case approvalEpoch != current:
 		return r, machine, refuseAdoption("4.2", "the approval is of an earlier epoch")
 	}
-	// 4.3: the assignment revision and Desired equal the bound ones; a handover machine still has
-	// no Applied.
+	// 4.3: the assignment revision, baseline revision and Desired equal the bound ones; the bound
+	// drift record is still open, or a handover machine still has no Applied.
 	switch {
 	case !head.Valid || head.String != assignment:
 		return r, machine, refuseAdoption("4.3", "the machine's assignment revision changed")
 	case msDesired != desired:
 		return r, machine, refuseAdoption("4.3", "the machine's Desired release changed")
-	case applied.Valid:
+	case !driftRecord.Valid && applied.Valid:
 		return r, machine, refuseAdoption("4.3", "the machine has an Applied release")
+	case driftRecord.Valid && !driftOpen:
+		return r, machine, refuseAdoption("4.3", "the bound drift record is closed")
+	case msBaselineRev != baselineRev:
+		return r, machine, refuseAdoption("4.3", "the machine's baseline revision changed")
 	}
 	// 4.4: the recorded observation with the highest basis, of any purpose: begun after the
 	// approval, no older than the plan binds (measured from its start entry, when the read began),
@@ -295,14 +311,27 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 		return r, machine, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE machine_state SET desired = $2, applied_release = $2, applied_digest = $3,
-		applied_source = 'adoption', baseline_revision = 1, revision = revision + 1 WHERE machine = $1`,
-		machine, release, baseline); err != nil {
+		applied_source = 'adoption', baseline_revision = COALESCE(baseline_revision, 0) + 1, revision = revision + 1
+		WHERE machine = $1`, machine, release, baseline); err != nil {
 		return r, machine, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
-		VALUES ($1, $2, $3, 'applied-change', jsonb_build_object('from', NULL::text, 'to', $4::text, 'digest', $5::text,
+	if _, err := tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+		VALUES ($1, $2, $3, 'applied-change', jsonb_build_object('from', $9::text, 'to', $4::text, 'digest', $5::text,
 			'source', 'adoption', 'plan', $6::text, 'operation', $8::text), $7)`,
-		machine, r.Revision+1, current, release, hex.EncodeToString(baseline), plan, at, r.Operation)
+		machine, r.Revision+1, current, release, hex.EncodeToString(baseline), plan, at, r.Operation, applied); err != nil {
+		return r, machine, err
+	}
+	if !driftRecord.Valid {
+		return r, machine, nil
+	}
+	// The adoption resolves the bound drift record (§6.5), in a drift entry after it resting on the
+	// observation the record relied on.
+	rev, err := driftEntry(ctx, tx, machine, current, driftRecord.Int64, "closed", "adopted", r.Observation, "")
+	if err != nil {
+		return r, machine, err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE drift_record SET closed = $3, resolution = 'adopted' WHERE machine = $1 AND opened = $2`,
+		machine, driftRecord.Int64, rev)
 	return r, machine, err
 }
 

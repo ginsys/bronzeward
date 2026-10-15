@@ -73,7 +73,7 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 	}
 	switch {
 	case differs && !open.Valid:
-		rev, err := driftEntry(ctx, tx, machine, epoch, 0, driftOpened, observation, late.String)
+		rev, err := driftEntry(ctx, tx, machine, epoch, 0, driftOpened, "", observation, late.String)
 		if err != nil {
 			return "", err
 		}
@@ -82,7 +82,7 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 			VALUES ($1, $2, $3, $4, $5, $3, NULLIF($6, ''))`, machine, rev, observation, applied, digest, late.String)
 		return driftOpened, err
 	case differs:
-		if _, err := driftEntry(ctx, tx, machine, epoch, open.Int64, driftObserved, observation, late.String); err != nil {
+		if _, err := driftEntry(ctx, tx, machine, epoch, open.Int64, driftObserved, "", observation, late.String); err != nil {
 			return "", err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE drift_record SET observed_digest = $3, last_observation = $4,
@@ -90,7 +90,7 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 			WHERE machine = $1 AND opened = $2`, machine, open.Int64, digest, observation, late.String)
 		return driftObserved, err
 	case open.Valid && !failing:
-		rev, err := driftEntry(ctx, tx, machine, epoch, open.Int64, "closed", observation, "")
+		rev, err := driftEntry(ctx, tx, machine, epoch, open.Int64, "closed", driftReturned, observation, "")
 		if err != nil {
 			return "", err
 		}
@@ -102,10 +102,10 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 }
 
 // driftEntry records one drift entry on machine's timeline: the record it changes (its own revision
-// when it opens one), the change, the observation it rests on, a returned closing's resolution and
-// a differing digest's possible late landing.
-func driftEntry(ctx context.Context, tx *sql.Tx, machine, epoch string, record int64, change, observation, late string) (int64,
-	error) {
+// when it opens one), the change, the observation it rests on, a closing's resolution and a
+// differing digest's possible late landing.
+func driftEntry(ctx context.Context, tx *sql.Tx, machine, epoch string, record int64, change, resolution, observation,
+	late string) (int64, error) {
 	var rev int64
 	at, err := nextEntry(ctx, tx, machine, &rev)
 	if err != nil {
@@ -115,8 +115,8 @@ func driftEntry(ctx context.Context, tx *sql.Tx, machine, epoch string, record i
 		record = rev
 	}
 	entry := map[string]any{"record": record, "change": change, "observation": observation}
-	if change == "closed" {
-		entry["resolution"] = driftReturned
+	if resolution != "" {
+		entry["resolution"] = resolution
 	}
 	if late != "" {
 		entry["lateLanding"] = late

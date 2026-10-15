@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"testing"
@@ -69,6 +70,87 @@ func closeDriftOn(t *testing.T, db *sql.DB, machine string, opened int64) {
 		machine, opened, rev)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Execution and recovery §6.3 step 3: an adopt plan for a machine with an Applied and an open drift
+// record binds the record and the machine's baseline revision, and still no expected digest; without
+// an open record it is refused as before (TestPlanCreationRefusals).
+func TestDriftedAdoptPlan(t *testing.T) {
+	t.Parallel()
+	ae := newDriftedAdoptEnv(t, "")
+	b := decode[planBody](t, ae.do(ae.api, call{method: "GET", path: prefix + "/plans/" + ae.pid, token: ae.human("h-viewer")}),
+		http.StatusOK)
+	if b.Operation != "adopt" || b.BaselineRevision == nil || *b.BaselineRevision != 4 || b.DriftRecord == nil ||
+		*b.DriftRecord != ae.drift || b.Evidence.Baseline == nil || b.Evidence.Diff != nil {
+		t.Fatalf("adopt %+v", b)
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM plan WHERE id = $1 AND baseline_revision = 4 AND drift_record = $2
+		AND expected_digest IS NULL`, ae.pid, ae.drift); n != 1 {
+		t.Fatalf("%d stored", n)
+	}
+}
+
+// Execution and recovery §6.3 step 4 and its effects: the adoption record of a drifted machine sets
+// Applied to the adopted release with the baseline's digest, advances the baseline revision, names
+// the previous Applied in its Applied-change entry and closes the bound drift record as adopted, in
+// a drift entry after it, resting on the observation the record relied on.
+func TestDriftedAdoption(t *testing.T) {
+	t.Parallel()
+	ae := newDriftedAdoptEnv(t, "")
+	ae.approveIt(t)
+	obs := ae.observed(t, nil)
+	r, err := ae.a.commitAdoption(context.Background(), ae.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM machine_state WHERE machine = $1 AND applied_release = $2 AND desired = $2
+		AND applied_digest = $3 AND applied_source = 'adoption' AND baseline_revision = 5`, ae.machine, ae.target.rel,
+		ae.baseline); n != 1 {
+		t.Fatal("Applied, Desired or the baseline revision not set")
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND revision = $2 AND kind = 'applied-change'
+		AND entry->>'from' = $3 AND entry->>'to' = $4`, ae.machine, r.Revision+1, ae.applied.rel, ae.target.rel); n != 1 {
+		t.Fatal("no Applied-change entry from the previous Applied")
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND revision = $2 AND kind = 'drift'
+		AND entry = jsonb_build_object('record', $3::bigint, 'change', 'closed', 'observation', $4::text, 'resolution', 'adopted')`,
+		ae.machine, r.Revision+2, ae.drift, obs); n != 1 {
+		t.Fatal("no drift entry closing the record as adopted")
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM drift_record WHERE machine = $1 AND opened = $2 AND closed = $3
+		AND resolution = 'adopted'`, ae.machine, ae.drift, r.Revision+2); n != 1 {
+		t.Fatal("the drift record is not closed as adopted")
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM machine WHERE id = $1 AND revision_counter = $2`, ae.machine, r.Revision+2); n != 1 {
+		t.Fatal("the revision counter is not the drift entry's")
+	}
+}
+
+// Requirement 4.3 for a drifted machine: the bound drift record still open (a revert or a return
+// closed it first) and the baseline revision unchanged, or the record is refused.
+func TestDriftedAdoptionRefusals(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, cause string
+		setup       func(*testing.T, *adoptEnv)
+	}{
+		{"record closed", "the bound drift record is closed", func(t *testing.T, ae *adoptEnv) {
+			closeDriftOn(t, ae.db, ae.machine, ae.drift)
+		}},
+		{"baseline revision advanced", "the machine's baseline revision changed", func(t *testing.T, ae *adoptEnv) {
+			mustExec(t, ae.db, `UPDATE machine_state SET baseline_revision = 5 WHERE machine = $1`, ae.machine)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ae := newDriftedAdoptEnv(t, "")
+			ae.approveIt(t)
+			ae.observed(t, nil)
+			c.setup(t, ae)
+			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
+			ae.wantRefused(t, err, 0, "4.3", c.cause)
+		})
 	}
 }
 
