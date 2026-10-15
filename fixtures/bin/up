@@ -567,11 +567,11 @@ network_id=$(attached_network Talos talos.cluster.name "$FIXTURE_NAME" \
 printf '%s\n' "$network_id" >"$STATE/down-node-networks.partial"
 mv --no-target-directory -- "$STATE/down-node-networks.partial" "$STATE/down-node-networks"
 # Instances A, B and C reach the Talos nodes on the cluster's network, the one just recorded, by its
-# ID and each by the ID verified under its name. Connected while created: each takes an address
-# when it starts.
-for name in "$BW_A" "$BW_B" "$BW_C"; do
-  docker network connect "$network_id" "${verified_container_ids[$name]}" ||
-    die "could not connect $name to the Talos network"
+# ID and each by the ID verified under its name. Connected while created, each on its fixed
+# address: a dynamic one could be a detached Talos node's, which the node then could not rejoin on.
+for name in "$BW_A:$BW_A_TALOS_IP" "$BW_B:$BW_B_TALOS_IP" "$BW_C:$BW_C_TALOS_IP"; do
+  docker network connect --ip "${name#*:}" "$network_id" "${verified_container_ids[${name%%:*}]}" ||
+    die "could not connect ${name%%:*} to the Talos network"
 done
 unset network_id name
 rm -- "$STATE/down-node-volumes-incomplete" || die "could not clear the unrecorded-cluster marker in $STATE"
