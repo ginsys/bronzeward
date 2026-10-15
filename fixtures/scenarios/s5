@@ -3,8 +3,10 @@
 # instances restarted with a short drift interval; the worker patched out of band with a registry
 # password, a new synthetic secret; the next drift observation opens a drift record, the scope not
 # frozen; the database and OpenBao snapshotted (s5-step3, step 7's restore point); h-author freezes
-# the scope, and an approved revert plan is never committed while it is frozen; h-author ingests
-# the drifted configuration into a new draft as a drift adoption, marking both secrets, and takes
+# the scope, and an approved revert plan is never committed while it is frozen; in a new draft, a
+# drift adoption leaving a copy unmarked is refused, and one sent to C is killed at each of the
+# pipeline's steps, each outcome scanned; h-author ingests the drifted configuration into the draft
+# as a drift adoption, marking both secrets, and takes
 # S2's label fragment out of the workers profile, the adopted base now holding that reference;
 # h-publisher publishes it and creates an adopt plan binding the record, h-approver approves, and
 # the adoption commits under the freeze: Applied the release with the baseline's digest, the
@@ -388,11 +390,11 @@ profile_drops() {
   etag=$(etag_of_last)
 }
 
-# reference_at <path>: the !bwref name at that path of the first document on stdin, nothing when
-# the node is absent or not a reference. The path is a mark's without its doc[0]/, sequence
-# elements by index. Reads the block style Bronzeward writes: a key per line, sequence items
-# "- " indented under their key.
-reference_at() {
+# node_at <path>: the inline value at that path of the first document on stdin, a trailing comment
+# and plain quotes removed; nothing when the node is absent or its value is not on its key's line. The path is a mark's without its doc[0]/,
+# sequence elements by index. Reads the block style Bronzeward and Talos write: a key per line,
+# sequence items "- " indented under their key.
+node_at() {
   awk -v want="$1" '
     function path(  i, p) { p = k[1]; for (i = 2; i <= n; i++) p = p "/" k[i]; return p }
     function key(ind, t,  name, v) {
@@ -401,7 +403,9 @@ reference_at() {
       v = t; if (!sub(/^[^:]*: /, "", v)) v = ""
       while (n > 0 && ki[n] >= ind) n--
       k[++n] = name; ki[n] = ind
-      if (path() == want) { if (v ~ /^!bwref [^ ]+$/) print substr(v, 8); exit }
+      sub(/[ \t]+#.*$/, "", v)
+      if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+      if (path() == want) { if (v !~ /^[|>][-+0-9]*$/) print v; exit }
       if (v ~ /^[|>][-+0-9]*$/) skip = ind
     }
     BEGIN { skip = -1 }
@@ -419,10 +423,19 @@ reference_at() {
       key(ind + 2, substr(t, 3))
     }'
 }
+# reference_at <path>: the !bwref name at that path of the first document on stdin, nothing when
+# the node is absent or not a reference.
+reference_at() {
+  local v
+  v=$(node_at "$1") || return 1
+  if [[ $v =~ ^!bwref\ ([^ ]+)$ ]]; then printf '%s\n' "${BASH_REMATCH[1]}"; fi
+}
 # adopted_references: the release's import base for the worker holds the registry password, S1's
 # file content and S2's label, at their marks' paths, as !bwref references, each with its reference
 # row, whose generation lies under the drift adoption's claim and is read by the metadata identity
-# at version 1 (create-only). The document goes from the database to the reader, never printed.
+# at version 1 (create-only); each generation in gens, by mark. The document goes from the database
+# to the reader, never printed.
+declare -A gens=()
 adopted_references() {
   local rev mark name g v
   rev=$(sql "SELECT import_base_revision FROM release_machine WHERE release = '$new_release' AND machine = '$machine_w'") || return 1
@@ -439,7 +452,137 @@ adopted_references() {
       say "s5: $g is at version $v, not a create-only generation"
       return 1
     }
+    gens[$mark]=$g
   done
+}
+# adopted_values: each mark's generation holds, as a string, the value the decrypted adopted
+# baseline holds at the mark's path, and the registry password's is step 1's secret: a reference
+# resolving to a wrong value fails here. Read by the OpenBao administrator; the values stay in the
+# shell and its pipes, never printed or written.
+adopted_values() {
+  local ct plain mark want data
+  [ "${#gens[@]}" = 3 ] || return 1
+  ct=$(sql "SELECT encode(b.baseline_ciphertext, 'escape') FROM release_machine rm
+    JOIN import_base_revision b ON b.id = rm.import_base_revision
+    WHERE rm.release = '$new_release' AND rm.machine = '$machine_w'") || return 1
+  [ -n "$ct" ] && plain=$(bao write -field=plaintext transit/decrypt/bw-baseline ciphertext="$ct" | base64 -d) || return 1
+  for mark in "${!gens[@]}"; do
+    want=$(printf '%s\n' "$plain" | node_at "${mark#'doc[0]/'}") || return 1
+    data=$(bao kv get -format=json -mount=secret "${gens[$mark]}" | jq -c '.data.data') || return 1
+    [ -n "$want" ] && [ "$(printf '%s' "$data" | jq -r '.kind')" = string ] &&
+      [ "$(printf '%s' "$data" | jq -r '.value')" = "$want" ] || {
+      say "s5: the generation of $mark does not hold the adopted baseline's value at that path as a string"
+      return 1
+    }
+    [ "$mark" != "$REGISTRY_MARK" ] || [ "$want" = "$secret" ] || {
+      say "s5: the adopted baseline's registry password is not step 1's secret"
+      return 1
+    }
+  done
+}
+
+# The drift adoption's refusal and interruptions (compilation §15, the acceptance plan's S5 pass
+# criteria), each in the adoption's draft before the one that succeeds, the record open throughout.
+ADOPT_MARKS=$(jq -nc --arg a "$WORKER_MARK" --arg l "$LABEL_MARK" --arg b "$REGISTRY_MARK" '[$a, $l, $b]')
+# adoption_body <marks JSON array>: a drift adoption of the worker into the draft, source machine,
+# transient.
+adoption_body() {
+  jq -nc --arg m "$machine_w" --arg d "$draft" --argjson marks "$1" \
+    '{kind: "drift-adoption", source: "machine", staging: "transient", machine: $m, draft: $d, marks: $marks}'
+}
+# adoption_refused: the file content and the password marked, S2's label of the file content not:
+# 202, then the claim abandoned without a payload and the operation failed 422 validation-failed,
+# guard-value naming the label's path, its problem holding neither secret; the draft's ETag, the
+# import base revisions and the claim's generations unchanged, the record still open.
+adoption_refused() {
+  local revisions ing op n state
+  revisions=$(sql 'SELECT count(*) FROM import_base_revision') || return 1
+  answers 202 - POST /api/v1/ingestions "$author" \
+    "$(adoption_body "$(jq -nc --arg a "$WORKER_MARK" --arg b "$REGISTRY_MARK" '[$a, $b]')")" "$(key adoption-refused)" "$etag" || return 1
+  ing=$(jq -er '.ingestion' "$EV/last.body") && op=$(jq -er '.operation' "$EV/last.body") || return 1
+  for ((n = 0; n < 60; n++)); do
+    state=$(sql "SELECT state FROM staging_claim WHERE id = '$ing' AND kind = 'drift-adoption' AND payload IS NULL")
+    case $state in released | abandoned) break ;; esac
+    sleep 1
+  done
+  [ "$state" = abandoned ] || { say "s5: the refused drift adoption's claim is '$state'"; return 1; }
+  answers_with ".state == \"failed\" and .error.status == 422 and .error.type == \"urn:bronzeward:problem:validation-failed\"
+    and .error.rule == \"guard-value\" and .error.paths == [\"$LABEL_MARK\"]" 200 - GET "/api/v1/operations/$op" "$author" || return 1
+  # 1 is the only clean answer: 0 found a secret, and 2 read no pattern file or no body.
+  n=0
+  grep --quiet --fixed-strings --file=<(printf '%s\n' "$secret") --file="$STATE/scan-patterns.txt" -- "$EV/last.body" || n=$?
+  [ "$n" = 1 ] || {
+    say "s5: the refused drift adoption's problem holds a secret or could not be scanned (grep exit $n)"
+    return 1
+  }
+  [ "$(sql 'SELECT count(*) FROM import_base_revision')" = "$revisions" ] && [ "$(claim_generations "$ing")" = 0 ] &&
+    [ "$(open_records)" = 1 ] && draft_etag_is "$etag"
+}
+# The kill points: compilation §2.3's steps 0 to 8, as internal/seam names them. A kill from the
+# generation step on leaves every generation of the three marks created.
+kill_points='claim read parse identify substitute guard generation construct baseline'
+generations_made() {
+  case $1 in
+    generation | construct | baseline) printf '3\n' ;;
+    *) printf '0\n' ;;
+  esac
+}
+# generations_kept <step>: tk_ing lists as many generations as a kill at the step leaves.
+generations_kept() {
+  local got
+  got=$(claim_generations) || return 1
+  [ "$got" = "$(generations_made "$1")" ] || {
+    say "s5: killed at $1: $got generation(s) listed under the claim, want $(generations_made "$1")"
+    return 1
+  }
+}
+# c_adoption <step>: the drift adoption of the worker, its three marks, POSTed to C under the
+# draft's ETag: 202, its claim and operation in tk_ing and tk_op. A kill at the claim can end C
+# after its COMMIT but before the 202 is sent; A then replays the committed answer under the key.
+tk_op=''
+c_adoption() {
+  local body rc=0
+  tk_ing='' tk_op=''
+  body=$(adoption_body "$ADOPT_MARKS")
+  call_port=$SERVER_C_PORT
+  answers 202 - POST /api/v1/ingestions "$author" "$body" "$(key "adoption-kill-$1")" "$etag" || rc=1
+  call_port=$SERVER_A_PORT
+  if [ "$rc" -ne 0 ] && [ "$last_status" = 000 ]; then
+    answers 202 - POST /api/v1/ingestions "$author" "$body" "$(key "adoption-kill-$1")" "$etag" &&
+      grep --quiet --ignore-case '^Idempotent-Replayed: true' "$EV/last.headers" && rc=0
+  fi
+  [ "$rc" -eq 0 ] || return 1
+  tk_ing=$(jq -er '.ingestion' "$EV/last.body") && tk_op=$(jq -er '.operation' "$EV/last.body")
+}
+# killed_at <step> <kills before>: C exited at the step, the claim held at generation 1 without a
+# payload (a transient claim).
+killed_at() { c_killed_at "$1" "$(($2 + 1))" && claim_is held 1 none; }
+# abandoned_after_kill: the sweep failed tk_op ingestion-abandoned; the record still open.
+abandoned_after_kill() {
+  [ "$(sql "SELECT state || ' ' || (error->>'type') FROM operation WHERE id = '$tk_op'")" = 'failed urn:bronzeward:problem:ingestion-abandoned' ] &&
+    [ "$(open_records)" = 1 ]
+}
+# adoption_kill <step>: C exits at once at the step. Once the lease lapses the sweep abandons the
+# claim and fails the operation; every generation created before the kill is still listed; the
+# draft's ETag is unchanged. The bundle is captured while C is still stopped, so its writable layer
+# is what the kill left; C is started again after.
+adoption_kill() {
+  local step=$1 kills ref='S5 step 4, C §15'
+  fresh_author
+  kills=$(kills_at "$step")
+  check "$ref" "C told to exit at once at $step" interrupt "$step" kill
+  check "$ref" "drift adoption of the worker on C: 202" c_adoption "$step"
+  [ -n "$tk_op" ] || die "s5: the drift adoption on C was not accepted; nothing after it can run"
+  check "$ref" "C exits at $step: the claim held at generation 1 without a payload" \
+    within 60 killed_at "$step" "$kills"
+  check "$ref" "C's control file removed" interrupt -
+  check "$ref" "killed at $step: the sweep abandons the claim once its lease lapses, not before" swept_after_lapse 45
+  check "$ref" "killed at $step: the operation failed ingestion-abandoned, the record still open" within 45 abandoned_after_kill
+  check "$ref" "killed at $step: every generation created before the kill still listed under the claim, none deleted" \
+    generations_kept "$step"
+  check "$ref" "killed at $step: the draft's ETag unchanged" draft_etag_is "$etag"
+  outcome_bundle "$ref" "adoption-kill-$step"
+  check "$ref" 'inject start C' "$bin/inject" start C
 }
 # adopted_baseline: the OpenBao administrator decrypts the release's import base baseline for the
 # worker outside Bronzeward; its configuration digest is the one recorded and the patched state's.
@@ -460,14 +603,28 @@ adopted_baseline() {
   }
 }
 
+# adoption_kind: the last ingestion's claim is stored as a drift adoption, and served as one.
+adoption_kind() {
+  [ "$(sql "SELECT kind FROM staging_claim WHERE id = '${ingested[-1]}'")" = drift-adoption ] &&
+    answers_with '.kind == "drift-adoption"' 200 - GET "/api/v1/ingestions/${ingested[-1]}" "$author"
+}
+
 adopt() {
-  local ref='S5 step 4' plan_body_json w_after cp_after
+  local ref='S5 step 4' plan_body_json w_after cp_after step
   check "$ref" 'h-author opens a new draft: 201' draft_by h-author adopt
+  fresh_author
+  check "$ref, C §15" "a drift adoption marking the file content and the password, not S2's label of it: the claim abandoned, the operation failed 422 guard-value naming the label, no secret in its problem; the draft's ETag, the revisions and gen/ unchanged, the record open" \
+    adoption_refused
+  outcome_bundle "$ref, C §15" adoption-refused
+  for step in $kill_points; do adoption_kill "$step"; done
   fresh_author
   ingest_kind=drift-adoption
   check "$ref" "h-author ingests the drifted configuration into it as a drift adoption, If-Match its ETag, marking the S1 file's content, S2's label of it and the registry password: 202, the claim released, the operation succeeded, the ETag moved" \
-    ingest "$machine_w" "$(jq -nc --arg a "$WORKER_MARK" --arg l "$LABEL_MARK" --arg b "$REGISTRY_MARK" '[$a, $l, $b]')" adopt
+    ingest "$machine_w" "$ADOPT_MARKS" adopt
   ingest_kind=import
+  check "$ref" 'the ingestion is stored and served as a drift adoption' adoption_kind
+  check "$ref, C §15" "control: the drift adoption made $(generations_made baseline) generations, as many as a kill after the generation step keeps" \
+    same "$(claim_generations "${ingested[-1]}")" "$(generations_made baseline)"
   outcome_bundle "$ref" adoption-ingestion
   check "$ref" "h-author takes S2's label fragment out of the workers profile, the adopted base holding that reference: 200, the ETag replaced" \
     profile_drops h-author adopt s2-labels
@@ -477,6 +634,8 @@ adopt() {
     adopted_references
   check "$ref" "the release's import base baseline, decrypted by the administrator, has the recorded configuration digest, the patched state's" \
     adopted_baseline
+  check "$ref" "each of those generations holds, as a string, the decrypted baseline's value at its mark's path; the password's is step 1's secret" \
+    adopted_values
   plan_body_json=$(jq -nc --arg r "$new_release" --arg m "$machine_w" '{releaseId: $r, machine: $m, operation: "adopt"}')
   fresh h-publisher
   check "$ref" 'h-publisher creates an adopt plan of the release: 201, binding the open record' \
