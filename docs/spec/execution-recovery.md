@@ -2245,9 +2245,10 @@ conservative option; those that do not say so. Each is marked in place as
     opening entry is the digest-mismatch alert** (§6.1, §6.5). Each change of
     the record is one `drift` entry naming the record (by its opening entry's
     revision), the change (`opened`, `observed`, `closed`) and the observation
-    it rests on; an opening names a possible late landing, a closing its
-    resolution. The record keeps the opening observation, `Applied`'s digest,
-    the latest differing observation and digest, and the closing. Design §15.3
+    it rests on; an opening or a later differing observation names a possible
+    late landing, a closing its resolution. The record keeps the opening
+    observation, `Applied`'s digest, the latest differing observation, its
+    digest and possible late landing, and the closing. Design §15.3
     lists the digest-mismatch alert but no delivery channel, so the PoC raises
     it as the opening entry on the machine's timeline, and serves
     the open record as the machine resource's `openDrift` (persistence-api.md
