@@ -39,6 +39,8 @@ func TestS0DeniedWalk(t *testing.T) {
 		{"h-recovery", h["h-recovery"], "POST", "/machines/{id}/unfreezes"},
 		{"h-approver", h["h-approver"], "POST", "/recovery/scopes/{machine}/releases"},
 		{"h-approver", h["h-approver"], "POST", "/operations/{id}/resolutions"},
+		{"h-approver", h["h-approver"], "POST", "/operations/{id}/takeovers"},
+		{"h-approver", h["h-approver"], "POST", "/operations/{id}/attempts/{attempt}/accountings"},
 		{"automation", robot, "POST", "/recovery/entries"},
 		{"automation", robot, "POST", "/recovery/exits"},
 	}

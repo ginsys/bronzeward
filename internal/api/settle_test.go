@@ -29,6 +29,7 @@ type cobs struct {
 	atPlan     bool          // a start naming the plan though its purpose needs none
 	unreached  bool          // access was obtained but no node value was read
 	node       string        // the Talos node ID the observation read, when it is not the machine's
+	uuid       string        // the SMBIOS UUID the observation read, when it is not the machine's
 }
 
 // observed records o's observation and answers its id.
@@ -82,6 +83,9 @@ func (ae *attemptEnv) observed(t *testing.T, change func(*cobs)) string {
 	}
 	if s.node != "" {
 		nodeID = sql.NullString{String: s.node, Valid: true}
+	}
+	if s.uuid != "" {
+		uuid = sql.NullString{String: s.uuid, Valid: true}
 	}
 	vals := []any{uuid, nodeID, cluster, asg, s.version, s.digest, s.resource}
 	if s.unreached {
@@ -574,6 +578,37 @@ func TestSettle(t *testing.T) {
 			t.Fatalf("%d attempts", n)
 		}
 	})
+	// ER §9.2, the §5 precedence: a completion observation that would classify a lost response safe
+	// to retry fails the operation, with no retry classified, when the approval no longer passes or the
+	// scope gate is closed. The bound exhausted is the case above; a definitive rejection is terminal
+	// at its response (TestRecordResponse).
+	for name, block := range map[string]func(*testing.T, *attemptEnv){
+		"approval revoked": func(t *testing.T, ae *attemptEnv) {
+			if rec := ae.revokeApproval(ae.human("h-recovery"), "k-revoke-approval-0123", ae.approval, `{"reason":"wrong"}`); rec.Code != http.StatusCreated {
+				t.Fatalf("revocation: %d %s", rec.Code, rec.Body)
+			}
+		},
+		"scope frozen": func(t *testing.T, ae *attemptEnv) {
+			mustExec(t, ae.db, `UPDATE machine SET frozen = true WHERE id = $1`, ae.machine)
+		},
+	} {
+		t.Run("no retry: "+name, func(t *testing.T) {
+			t.Parallel()
+			ae, a, gen := lost(t)
+			block(t, ae)
+			r, err := a.settleOperation(context.Background(), ae.op, gen, preDispatch(t, ae))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.State != "failed" || r.Outcome != "failed" {
+				t.Fatalf("settled %+v", r)
+			}
+			if n := count(t, ae.db, `SELECT count(*) FROM operation_classification WHERE operation = $1 AND outcome = 'safe-to-retry'`,
+				ae.op); n != 0 {
+				t.Fatalf("%d safe-to-retry classifications", n)
+			}
+		})
+	}
 	// ER §9.2, PA §16: an identity revocation after an attempt refuses its retry by comparison 1,
 	// though the operation was classified safe to retry before it.
 	t.Run("identity revoked after an attempt", func(t *testing.T) {
@@ -731,19 +766,46 @@ func TestSettle(t *testing.T) {
 				t.Fatalf("settled %+v", r)
 			}
 		})
-		t.Run("a later observation disagrees", func(t *testing.T) {
-			t.Parallel()
-			ae, a, gen := verifying(t)
-			obs := ae.observed(t, nil)
-			ae.observed(t, func(c *cobs) { c.purpose, c.digest = "drift", bytes.Repeat([]byte{0xee}, 32) })
-			r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if r.Outcome != "pending" || r.State != "verifying" {
-				t.Fatalf("settled %+v", r)
-			}
-		})
+		// ER §4, §9.2: a recorded higher-basis read differing on a bound postcondition blocks the
+		// completion read, for the digest, the identity and the assignment revision (the PoC binds no
+		// health check, choice §10.33).
+		for name, differ := range map[string]func(*cobs){
+			"a later observation disagrees":                 func(c *cobs) { c.digest = bytes.Repeat([]byte{0xee}, 32) },
+			"a later observation of another machine":        func(c *cobs) { c.uuid = "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b" },
+			"a later observation of another assignment rev": func(c *cobs) { c.assignment = "999" },
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				ae, a, gen := verifying(t)
+				obs := ae.observed(t, nil)
+				ae.observed(t, func(c *cobs) { c.purpose = "drift"; differ(c) })
+				r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if r.Outcome != "pending" || r.State != "verifying" {
+					t.Fatalf("settled %+v", r)
+				}
+			})
+		}
+	})
+	// ER §4, §9.2: higher-basis reads agreeing with a completion read that contradicts the
+	// postconditions block nothing, so repeated reads confirming the failure let the operation fail.
+	t.Run("a failure confirmed by later agreeing reads", func(t *testing.T) {
+		t.Parallel()
+		ae, a, gen := verifying(t)
+		other := func(c *cobs) { c.digest = bytes.Repeat([]byte{0xee}, 32) }
+		obs := ae.observed(t, other)
+		for range 2 {
+			ae.observed(t, func(c *cobs) { c.purpose = "drift"; other(c) })
+		}
+		r, err := a.settleOperation(context.Background(), ae.op, gen, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Outcome != "failed" || r.State != "failed" {
+			t.Fatalf("settled %+v", r)
+		}
 	})
 	// A later observation disagrees on the identity under the machine's own key (§3.3 comparison 3):
 	// a machine keyed by its SMBIOS UUID is not another machine for reading another Talos node ID.

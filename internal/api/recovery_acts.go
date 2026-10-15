@@ -278,7 +278,10 @@ func resolveByDecision(ctx context.Context, a *API, tx *sql.Tx, q *request) (res
 			return conflictOf(refuseOutcome("resolution", "the operation is "+l.state))
 		}
 		var attempted bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT FROM attempt WHERE operation = $1)`, operation).Scan(&attempted); err != nil {
+		var latest *string
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT FROM attempt WHERE operation = $1),
+				(SELECT id FROM observation WHERE machine = $2 ORDER BY revision DESC LIMIT 1)`, operation, machine).Scan(&attempted,
+			&latest); err != nil {
 			return err
 		}
 		// Cancelled is never proof that nothing was sent, so an operation with an attempt is not one.
@@ -290,7 +293,10 @@ func resolveByDecision(ctx context.Context, a *API, tx *sql.Tx, q *request) (res
 		}
 		b.Revision, b.At, err = a.appendEntry(ctx, tx, l, "operation-state", map[string]any{"operation": operation, "from": "unresolved",
 			"to": "cancelled", "controller": l.owner.String, "generation": l.gen, "decidedBy": a.d.owner.ID, "cause": "resolution",
-			"resolvedBy": b.ResolvedBy, "role": b.Role, "reason": b.Reason, "act": b.Act})
+			"resolvedBy": b.ResolvedBy, "role": b.Role, "reason": b.Reason, "act": b.Act,
+			// The evidence relied on (§4): what this resolution checked, no attempt recorded, and the
+			// machine's latest recorded observation, none if it was never read.
+			"evidence": map[string]any{"attempts": 0, "observation": latest}})
 		return err
 	}
 	return result{status: http.StatusCreated, body: b, subjects: []string{operation, machine}, atActOrder: write}, nil
