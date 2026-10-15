@@ -489,7 +489,7 @@ observation (ER choice §10.28). A second plan for the worker while the first ho
 controller does not take it up while the scope is held, and comparison 4 refuses it when its
 transaction runs anyway (a Go check, the route ER choice §10.32 selects); with both scope indexes
 dropped, the second plan's operation rows insert directly (DS row 011's control, the schema's). An assignment change while the scope is held: its publication fails
-`409 scope-busy`. A frozen scope: refused (the freeze route is S5's; a Go check until it lands).
+`409 scope-busy`. A frozen scope: refused (a Go check; S5 shows the controller passing over such a plan).
 An artifact failing node validation: `InvalidArgument`, `rejected`,
 resource version unchanged (DS row 022). The ownership check moved out of the attempt's `UPDATE`: a
 stale attempt is recorded (DB row 018).
