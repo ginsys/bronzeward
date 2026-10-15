@@ -60,16 +60,18 @@ committed_after() {
   [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'commitment'
     AND entry->>'plan' = '$plan' AND at > '$1'::timestamptz")" = 1 ]
 }
-# completed_by_observation [taker]: op's entry to completed names a completion observation of op;
-# with taker, one that controller began after op's ownership transition.
+# completed_by_observation [taker]: op's classification completed rests on a completion observation
+# of op, and the result names the same one; with taker, one that controller began after op's
+# ownership transition.
 completed_by_observation() {
   local by=''
   [ -z "${1:-}" ] || by="AND s.controller = '$1' AND s.revision > (SELECT revision FROM machine_event
     WHERE machine = '$machine_w' AND kind = 'ownership-transition' AND entry->>'operation' = '$op')"
-  [ "$(sql "SELECT count(*) FROM machine_event e JOIN observation o ON o.machine = e.machine AND o.id = e.entry->>'observation'
+  [ "$(sql "SELECT count(*) FROM operation_classification c JOIN operation p ON p.id = c.operation
+    JOIN observation o ON o.machine = c.machine AND o.id = c.observation
     JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
-    WHERE e.machine = '$machine_w' AND e.kind = 'operation-state' AND e.entry->>'operation' = '$op'
-      AND e.entry->>'to' = 'completed' AND s.operation = '$op' AND s.purpose = 'completion' $by")" = 1 ]
+    WHERE c.operation = '$op' AND c.outcome = 'completed' AND p.result->>'observation' = c.observation
+      AND s.operation = '$op' AND s.purpose = 'completion' $by")" = 1 ]
 }
 # waits <plan> <approval>: the plan approved by the approval with no operation, and no use-time
 # check, commitment or refusal entry names it: no controller takes it up.
