@@ -161,7 +161,7 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 		switch open, err := openDrift(ctx, tx, in.Machine); {
 		case err != nil:
 			return result{}, err
-		case !open:
+		case !open.Valid:
 			return result{}, refuse(http.StatusConflict, "conflict", "the machine has no open drift record").with("machine", in.Machine)
 		}
 	}

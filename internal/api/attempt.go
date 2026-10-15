@@ -84,19 +84,20 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 	// An operation's plan and the plan row are immutable, so their bindings are read before the
 	// machine's lock.
 	var plan, machine, assignment string
-	var baseline sql.NullInt64
+	var baseline, bound sql.NullInt64
 	var maxAgeMicros int64
 	var maxAttempts sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT p.id, p.machine, p.assignment_revision, p.baseline_revision,
+	err := tx.QueryRowContext(ctx, `SELECT p.id, p.machine, p.assignment_revision, p.baseline_revision, p.drift_record,
 			(extract(epoch FROM p.max_observation_age) * 1000000)::bigint, p.max_attempts
 		FROM operation o JOIN plan p ON p.id = o.plan WHERE o.id = $1 AND o.kind = 'apply-config'`, operation).Scan(&plan,
-		&machine, &assignment, &baseline, &maxAgeMicros, &maxAttempts)
+		&machine, &assignment, &baseline, &bound, &maxAgeMicros, &maxAttempts)
 	if err != nil {
 		return r, "", "", fmt.Errorf("attempt of operation %s: %w", operation, err)
 	}
 	maxAge := time.Duration(maxAgeMicros) * time.Microsecond
 	var scope string
-	var frozen, drift bool
+	var frozen bool
+	var drift sql.NullInt64
 	lock := ` FOR UPDATE`
 	if a.o.noReadLock == "machine" {
 		lock = ``
@@ -257,7 +258,7 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 		return r, machine, plan, refused("a newer observation contradicts the evidence", newer.String)
 	}
 	// 6: the scope gate.
-	if cause := scopeGate(frozen, drift, scope, recovery); cause != "" {
+	if cause := scopeGate(frozen, drift, bound, scope, recovery); cause != "" {
 		return r, machine, plan, refuseAttempt("6", cause)
 	}
 	// 7: the operation was committed and owned by this process's token, as its write read it.

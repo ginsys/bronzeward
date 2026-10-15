@@ -1038,7 +1038,8 @@ CREATE TABLE machine_state (
 -- expected pre-dispatch configuration digest) it copies. An apply-config plan carries its mode,
 -- its deadlines and attempt limit, and the baseline it was planned against; an adopt plan (§6.3)
 -- carries none of them, except that a drifted machine's binds its baseline revision with its open
--- drift record. The PoC's approval policy is one approver and its rollout limit one
+-- drift record. An apply-config plan binding a drift record is a revert (§6.4), expecting the
+-- drifted digest. The PoC's approval policy is one approver and its rollout limit one
 -- (choice §10.5). Each plan is exactly one plan entry on its machine's timeline.
 CREATE TABLE plan (
   id                    text PRIMARY KEY CHECK (id ~ '^pln_[a-z2-7]{26}$'),
@@ -1050,7 +1051,8 @@ CREATE TABLE plan (
   assignment_revision   text NOT NULL,
   desired_release       text,
   baseline_revision     integer CHECK (baseline_revision >= 1),
-  -- The open drift record an adopt plan of a drifted machine binds, by its opening entry's revision.
+  -- The open drift record an adopt plan of a drifted machine or a revert binds, by its opening
+  -- entry's revision.
   drift_record          bigint,
   expected_digest       bytea CHECK (length(expected_digest) = 32),
   route                 talos_endpoint NOT NULL,
@@ -1078,7 +1080,7 @@ CREATE TABLE plan (
     (kind <> 'apply-config' OR (mode IS NOT NULL AND desired_release IS NOT NULL AND desired_release = release
       AND baseline_revision IS NOT NULL AND expected_digest IS NOT NULL AND transport_deadline IS NOT NULL
       AND verification_deadline IS NOT NULL AND transport_deadline <= verification_deadline
-      AND max_attempts IS NOT NULL AND drift_record IS NULL)) AND
+      AND max_attempts IS NOT NULL)) AND
     (kind <> 'adopt' OR (mode IS NULL AND (baseline_revision IS NULL) = (drift_record IS NULL) AND expected_digest IS NULL
       AND transport_deadline IS NULL AND verification_deadline IS NULL AND max_attempts IS NULL))),
   UNIQUE (created_by, idempotency_key),

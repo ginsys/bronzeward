@@ -13,6 +13,7 @@ const (
 	driftOpened   = "opened"
 	driftObserved = "observed"
 	driftReturned = "returned"
+	driftReverted = "reverted"
 )
 
 // applyDrift applies §6.1 and §6.5 to observation of machine, in epoch, under the machine's lock the
@@ -130,13 +131,16 @@ func driftEntry(ctx context.Context, tx *sql.Tx, machine, epoch string, record i
 	return rev, err
 }
 
-// openDrift answers whether a drift record is open on machine. A caller holding the machine's lock
-// reads it in a statement after the locking one, so its snapshot includes a record opened by the
-// transaction it waited for.
-func openDrift(ctx context.Context, tx *sql.Tx, machine string) (bool, error) {
-	var open bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT FROM drift_record WHERE machine = $1 AND closed IS NULL)`,
+// openDrift answers the drift record open on machine, by its opening revision, if any. A caller
+// holding the machine's lock reads it in a statement after the locking one, so its snapshot
+// includes a record opened by the transaction it waited for.
+func openDrift(ctx context.Context, tx *sql.Tx, machine string) (sql.NullInt64, error) {
+	var open sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT opened FROM drift_record WHERE machine = $1 AND closed IS NULL`,
 		machine).Scan(&open)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
 	return open, err
 }
 

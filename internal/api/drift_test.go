@@ -68,9 +68,6 @@ func TestCommitmentDrift(t *testing.T) {
 	equal := ce.evidence(t, ce.pid, nil)
 	_, err = ce.a.commitPlan(context.Background(), ce.pid)
 	ce.wantRefused(t, err, "6", "a drift record is open on the machine", "")
-	// §2: a plan made now would bind the open record, as a revert does; no ordinary plan is made.
-	wantProblem(t, ce.plan(ce.robot, "k-plan-drifted-0123456", applyBody(ce.target.rel, ce.machine, "")),
-		http.StatusConflict, "conflict")
 
 	if change := ce.applyDriftNow(t, equal); change != driftReturned {
 		t.Fatalf("drift change %q", change)

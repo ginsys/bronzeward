@@ -337,12 +337,14 @@ func (a *API) safeToRetry(ctx context.Context, tx *sql.Tx, l operationLock, plan
 	}
 	var max sql.NullInt64
 	var scope string
-	var frozen, drift, recovery bool
+	var frozen, recovery bool
+	var drift, bound sql.NullInt64
 	var at time.Time
 	if err := tx.QueryRowContext(ctx, `SELECT p.max_attempts, m.scope_state, m.frozen,
-			EXISTS (SELECT FROM drift_record d WHERE d.machine = m.id AND d.closed IS NULL), i.recovery_mode, clock_timestamp()
+			(SELECT d.opened FROM drift_record d WHERE d.machine = m.id AND d.closed IS NULL), p.drift_record, i.recovery_mode,
+			clock_timestamp()
 		FROM plan p JOIN machine m ON m.id = p.machine, installation_state i WHERE p.id = $1`, plan).Scan(&max, &scope, &frozen,
-		&drift, &recovery, &at); err != nil {
+		&drift, &bound, &recovery, &at); err != nil {
 		return false, "", err
 	}
 	if !max.Valid || int64(attempts) >= max.Int64 {
@@ -355,7 +357,7 @@ func (a *API) safeToRetry(ctx context.Context, tx *sql.Tx, l operationLock, plan
 	if cause != "" {
 		return false, cause, nil
 	}
-	if cause := scopeGate(frozen, drift, scope, recovery); cause != "" {
+	if cause := scopeGate(frozen, drift, bound, scope, recovery); cause != "" {
 		return false, cause, nil
 	}
 	return true, "", nil
@@ -393,6 +395,28 @@ func (a *API) complete(ctx context.Context, tx *sql.Tx, l *operationLock, plan, 
 	}
 	rev, _, err := a.appendEntry(ctx, tx, *l, "applied-change", map[string]any{"from": was, "to": release,
 		"digest": fmt.Sprintf("%x", digest), "source": "operation", "plan": plan, "operation": l.id})
+	if err != nil {
+		return err
+	}
 	r.State, r.Outcome, r.Cause, r.Revision = l.state, "completed", cause, rev
-	return err
+	// A completed revert closes the drift record it binds as reverted, after the Applied change
+	// (execution-recovery.md §6.4, §6.5); comparison 6 kept that record the open one.
+	var bound sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT p.drift_record FROM plan p JOIN drift_record d ON d.machine = p.machine
+		AND d.opened = p.drift_record AND d.closed IS NULL WHERE p.id = $1 FOR UPDATE OF d`, plan).Scan(&bound); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	closed, err := driftEntry(ctx, tx, l.machine, l.current, bound.Int64, "closed", driftReverted, observation, "")
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE drift_record SET closed = $3, resolution = 'reverted' WHERE machine = $1 AND opened = $2`,
+		l.machine, bound.Int64, closed); err != nil {
+		return err
+	}
+	r.Drift = driftReverted
+	return nil
 }
