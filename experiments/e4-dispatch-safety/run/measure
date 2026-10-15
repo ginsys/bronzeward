@@ -5,7 +5,8 @@
 # already in place, kills talosctl at the transport deadline as e4x does (talos.go), heals the fault
 # after the cell's partition length, then reads the worker's machine-configuration resource version
 # once a second for the window. The version is the landing signal: it moves on every apply that
-# lands and not on a refused one (the dispatch-safety report §3).
+# lands and not on a refused one (the dispatch-safety report §3). A capture is landed yes, no, or
+# unknown when the window's last read failed with no change seen.
 #
 # Cells (fault x partition length x connection state):
 #   control-none: no fault, so the apply lands; the positive control of the landing signal;
@@ -127,8 +128,10 @@ capture() {
   if [ "$route" = cold ]; then
     # A restarted control plane holds no proxy connection to the worker. Nothing below reaches
     # the worker through it before the send: the artifact and the reads go straight to the worker.
+    HEAL=("start controlplane")
     inject_logged kill controlplane || die "capture $ROW_N: could not kill the control plane"
     inject_logged start controlplane || die "capture $ROW_N: could not start the control plane"
+    HEAL=()
   fi
   # The artifact: the worker's configuration with a node label unique to this capture.
   d_talos get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$ROW_PARTS/base.yaml" ||
@@ -158,8 +161,9 @@ capture() {
     spids+=($!)
   fi
   if [ "$action" != none ]; then
-    inject_logged "$action" "$target" || die "capture $ROW_N: could not $action $target"
+    # Armed first: an injection that fails halfway, or an interruption, still gets its undo.
     HEAL=("$undo $target")
+    inject_logged "$action" "$target" || die "capture $ROW_N: could not $action $target"
   fi
   start=$SECONDS
   send_at=$(now_ms)
@@ -189,7 +193,15 @@ capture() {
     fi
     sleep 1
   done
-  read -r v u < <(d_resource) || { v=$last_v u=unknown; }
+  # The last read counts like the others; with it unreadable, the result is unknown, not no.
+  if read -r v u < <(d_resource); then
+    printf '%s version=%s updated=%s\n' "$(now_ms)" "$v" "$u" >>"$LOG"
+    if [ -z "$first" ] && [ "$v" != "$pre_v" ]; then first=$(now_ms) landed=yes; fi
+  else
+    printf '%s unreadable\n' "$(now_ms)" >>"$LOG"
+    v=$last_v u=unknown
+    [ "$landed" = yes ] || landed=unknown
+  fi
   if applies=$(d_applies_since "$since"); then
     printf 'machined ApplyConfiguration since %s:\n%s\n' "$since" "$applies" >>"$LOG"
     ok=$(grep -c ' OK \[' <<<"$applies")
