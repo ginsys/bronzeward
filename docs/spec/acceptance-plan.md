@@ -572,9 +572,7 @@ scope frozen, Bronzeward sends no Talos request that changes the machine, only t
 observations and the drift adoption's ingestion make: the resource version changes only with the out-of-band patches
 and the revert. After step 4, `Applied` is the adopted release with the baseline's digest, the
 baseline revision has advanced and the record is closed `adopted`; the new secret is found nowhere
-outside OpenBao after the ingestion succeeds. A drift adoption runs the import's staged pipeline
-(C [§2.3](compilation.md#23-pipeline)), so S2's rejected and interrupted ingestions are its
-rejection and interruption runs. After step 6, the
+outside OpenBao, on success, rejection and each interruption of the ingestion. After step 6, the
 record is closed `reverted` and the digest is the revert artifact's. Step 5's result is recorded
 whichever way it falls. Each of step 7's freezes and unfreezes takes effect and is recorded under
 the role that permits it, as step 3's freeze is.

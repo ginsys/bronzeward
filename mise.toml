@@ -171,6 +171,13 @@ for _ in $(seq 30); do
       -p 127.0.0.1:55433:5432 "$image" -c max_locks_per_transaction=256 >/dev/null || true
   elif [ -n "$(docker ps -q --filter 'name=^bw-dev-pg$' --filter status=running)" ] &&
     docker exec bw-dev-pg pg_isready -q -h 127.0.0.1 -U bronzeward; then
+    # A container started by an older task keeps the default; it may serve another checkout, so
+    # it is reported, not replaced.
+    locks=$(docker exec bw-dev-pg psql -h 127.0.0.1 -U bronzeward -Atc 'SHOW max_locks_per_transaction')
+    if [ "$locks" != 256 ]; then
+      echo "dev-db: bw-dev-pg runs max_locks_per_transaction=$locks, not 256; run mise run dev-down, then mise run dev-db" >&2
+      exit 1
+    fi
     echo "postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable"
     exit 0
   fi
