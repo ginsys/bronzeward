@@ -388,19 +388,45 @@ profile_drops() {
   etag=$(etag_of_last)
 }
 
+# reference_at <path>: the !bwref name at that path of the first document on stdin, nothing when
+# the node is absent or not a reference. The path is a mark's without its doc[0]/, sequence
+# elements by index. Reads the block style Bronzeward writes: a key per line, sequence items
+# "- " indented under their key.
+reference_at() {
+  awk -v want="$1" '
+    function path(  i, p) { p = k[1]; for (i = 2; i <= n; i++) p = p "/" k[i]; return p }
+    function key(ind, t,  name, v) {
+      if (t !~ /^[^ :][^:]*:( |$)/) return
+      name = t; sub(/:( .*)?$/, "", name)
+      v = t; if (!sub(/^[^:]*: /, "", v)) v = ""
+      while (n > 0 && ki[n] >= ind) n--
+      k[++n] = name; ki[n] = ind
+      if (path() == want) { if (v ~ /^!bwref [^ ]+$/) print substr(v, 8); exit }
+    }
+    /^---/ { exit }
+    /^ *(#.*)?$/ { next }
+    {
+      match($0, /^ */); ind = RLENGTH; t = substr($0, ind + 1)
+      if (substr(t, 1, 2) != "- ") { key(ind, t); next }
+      while (n > 0 && ki[n] >= ind) n--
+      p = n ? path() : ""
+      k[++n] = cnt[p]++; ki[n] = ind
+      key(ind + 2, substr(t, 3))
+    }'
+}
 # adopted_references: the release's import base for the worker holds the registry password, S1's
-# file content and S2's label as !bwref references, each with its reference row, whose generation
-# lies under the drift adoption's claim and is read by the metadata identity at version 1 (create-
-# only). The document is matched in the database, never printed.
+# file content and S2's label, at their marks' paths, as !bwref references, each with its reference
+# row, whose generation lies under the drift adoption's claim and is read by the metadata identity
+# at version 1 (create-only). The document goes from the database to the reader, never printed.
 adopted_references() {
-  local rev key name g v
+  local rev mark name g v
   rev=$(sql "SELECT import_base_revision FROM release_machine WHERE release = '$new_release' AND machine = '$machine_w'") || return 1
   [ -n "$rev" ] && [ "${#ingested[@]}" -ge 1 ] || return 1
-  for key in password content bw-s2; do
-    name=$(sql "SELECT substring(document FROM '\\y$key: !bwref ([a-z0-9-]+)') FROM import_base_revision WHERE id = '$rev'") || return 1
+  for mark in "$REGISTRY_MARK" "$WORKER_MARK" "$LABEL_MARK"; do
+    name=$(sql "SELECT document FROM import_base_revision WHERE id = '$rev'" | reference_at "${mark#'doc[0]/'}") || return 1
     g=$(sql "SELECT generation FROM import_base_reference WHERE revision = '$rev' AND name = '$name'") || return 1
     [ -n "$name" ] && [ "${g#"gen/$cluster/${ingested[-1]}/"}" != "$g" ] || {
-      say "s5: the adopted base's $key is not a reference to a generation of the drift adoption"
+      say "s5: the adopted base's $mark is not a reference to a generation of the drift adoption"
       return 1
     }
     v=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN bao kv metadata get -format=json -mount=secret "$g" | jq -er '.data.current_version') || return 1
