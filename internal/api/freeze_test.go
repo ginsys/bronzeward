@@ -122,6 +122,9 @@ func TestFreezeRefusals(t *testing.T) {
 		t.Fatalf("after refusals: events %d, facts %d, acts %d, counter %d", ev, f, acts, ctr)
 	}
 	mustExec(t, e.db, `UPDATE machine SET scope_state = 'pre-restore-unaccounted' WHERE id = $1`, m)
+	// The recovery refusal comes before the no-op one: an unfrozen pre-restore scope is not "not frozen".
+	wantProblem(t, e.do(e.api, scopeAct(approver, "k-unfreeze-unfrozen-0123456789", "unfreezes", m, `{"reason":"x"}`)), 409,
+		"recovery-mode-active")
 	if rec := e.do(e.api, scopeAct(author, "k-freeze-0123456789", "freezes", m, `{"reason":"x"}`)); rec.Code != http.StatusCreated {
 		t.Fatalf("freeze on a pre-restore scope: %d %s", rec.Code, rec.Body)
 	}

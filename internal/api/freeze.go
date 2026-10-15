@@ -59,20 +59,23 @@ func setFreeze(ctx context.Context, tx *sql.Tx, q *request, freeze bool) (result
 		return result{}, refuse(http.StatusNotFound, "not-found", "no such machine").with("machine", m)
 	case err != nil:
 		return result{}, err
-	case frozen == freeze && freeze:
-		return result{}, refuse(http.StatusConflict, "conflict", "the machine scope is already frozen").with("machine", m)
-	case frozen == freeze:
-		return result{}, refuse(http.StatusConflict, "conflict", "the machine scope is not frozen").with("machine", m)
-	case !freeze && scope == "pre-restore-unaccounted":
-		return result{}, refuse(http.StatusConflict, "recovery-mode-active",
-			"the machine's scope is still pre-restore unaccounted").with("machine", m).with("scope", scope)
 	}
+	// The acting principal's revocation is checked before any refusal that depends on the scope's
+	// state, and the recovery refusal before the no-op one.
 	var revoked bool
 	if err := tx.QueryRowContext(ctx, `SELECT revoked FROM principal WHERE id = $1 FOR SHARE`, b.Principal).Scan(&revoked); err != nil {
 		return result{}, err
 	}
-	if revoked {
+	switch {
+	case revoked:
 		return result{}, refuse(http.StatusForbidden, "identity-revoked", "")
+	case !freeze && scope == "pre-restore-unaccounted":
+		return result{}, refuse(http.StatusConflict, "recovery-mode-active",
+			"the machine's scope is still pre-restore unaccounted").with("machine", m).with("scope", scope)
+	case frozen == freeze && freeze:
+		return result{}, refuse(http.StatusConflict, "conflict", "the machine scope is already frozen").with("machine", m)
+	case frozen == freeze:
+		return result{}, refuse(http.StatusConflict, "conflict", "the machine scope is not frozen").with("machine", m)
 	}
 	kind := map[bool]string{true: "freeze", false: "unfreeze"}[freeze]
 	if err := tx.QueryRowContext(ctx, `UPDATE machine SET frozen = $2, revision_counter = revision_counter + 1
