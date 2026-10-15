@@ -272,6 +272,16 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 			return result{}, refuse(http.StatusConflict, "conflict",
 				"the machine has no Applied configuration to plan an apply-config from; adopt it first").with("machine", in.Machine)
 		}
+		// A plan made on a drifted machine binds its open drift record and is a revert
+		// (execution-recovery.md §2, §6.4); an ordinary plan is not made.
+		drifted, err := openDrift(ctx, tx, in.Machine)
+		if err != nil {
+			return result{}, err
+		}
+		if drifted {
+			return result{}, refuse(http.StatusConflict, "conflict",
+				"a drift record is open on the machine; only a revert plan binds it").with("machine", in.Machine)
+		}
 		b.BaselineRevision = &baselineRev.Int64
 		d, err := planDiffFrom(ctx, tx, in.Machine, appliedRelease.String, in.ReleaseID, appliedDigest, redacted)
 		if err != nil {
