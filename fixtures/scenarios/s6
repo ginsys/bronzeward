@@ -1,0 +1,409 @@
+#!/usr/bin/env bash
+# Acceptance plan S6.1, interruption points and takeover, against the fixture, after S4. S6's
+# instance A is the fixture's C, the one interruption build; B is B; the fixture's A stays paused.
+# Each point of ER §5.3 on a release of its own: C killed at it (018 before the commitment, 019
+# after it with no attempt, 020 once the request is made, 021 once its completion observation is
+# recorded), then B started: it takes over what C owned at its start and resolves the point as the
+# table says; then B stopped and C started for the next. The stale owner: C stalls after the
+# commitment, B started with its link to the worker cut takes the operation over, and C released
+# is refused by comparison 7 and sends nothing; B's link joined, it retries and completes. The
+# lost response: the worker detached while C's request is in flight, B started takes the operation
+# over, and once the worker is back h-approver's accounting is refused and h-recovery's, after the
+# settle floor, completes it with a retry; a newer plan approved meanwhile waits and is revoked.
+# Step 7: C killed after the commitment, B started with its link cut cannot classify the operation,
+# and h-recovery resolves it cancelled. The settle-floor, fence and scope-index controls are S4's
+# DS rows, read from the last s4 ds table. The table is s6-points.tsv: row, result, C's kill time,
+# operation, state, classifications, scope, outcome.
+# Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s6.tsv
+# in the evidence directory and to stdout. Exit 1 on any FAIL.
+# Usage: scenarios/s6 run   (after scenarios/s4 run and s4 ds on the same up)
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+[ "${1:-}" = run ] || die "usage: scenarios/s6 run"
+need docker curl jq timeout id sleep date awk wc
+need_state
+# No fixture lock of its own: inject and evidence each take the one they need.
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+EV=$STATE/evidence/s6-run-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV" "$EV/http"
+scenario=s6
+# shellcheck source-path=SCRIPTDIR source=common.sh
+. "$here/common.sh"
+run_key=$(date -u +%s%N)
+mutation_ref='S6.1'
+ds_ref='S6.1'
+# shellcheck source-path=SCRIPTDIR source=dispatch.sh
+. "$here/dispatch.sh"
+
+cluster='' machine_cp='' machine_w='' plan='' rel='' baseline='' op='' held=''
+cp_log='' w_log=''
+
+# s4_applied: S4's safe apply done: the first apply-config plan committed to an operation that
+# completed.
+s4_applied() {
+  same "$(sql "SELECT s.state || ' ' || o.state FROM plan p JOIN plan_state s ON s.plan = p.id
+    JOIN operation o ON o.id = s.operation WHERE p.kind = 'apply-config' ORDER BY p.created_at, p.id LIMIT 1")" \
+    'committed completed'
+}
+# c_finished: when C last stopped, as the daemon recorded it.
+c_finished() { docker inspect --format '{{.State.FinishedAt}}' "${verified_container_ids[$BW_C]}"; }
+# c_stopped: C is not running.
+c_stopped() { [ "$(docker inspect --format '{{.State.Running}}' "${verified_container_ids[$BW_C]}")" = false ]; }
+# committed_after <instant>: the plan's commitment entry is recorded after the instant.
+committed_after() {
+  [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'commitment'
+    AND entry->>'plan' = '$plan' AND at > '$1'::timestamptz")" = 1 ]
+}
+# completed_by_observation [taker]: op's entry to completed names a completion observation of op;
+# with taker, one that controller began after op's ownership transition.
+completed_by_observation() {
+  local by=''
+  [ -z "${1:-}" ] || by="AND s.controller = '$1' AND s.revision > (SELECT revision FROM machine_event
+    WHERE machine = '$machine_w' AND kind = 'ownership-transition' AND entry->>'operation' = '$op')"
+  [ "$(sql "SELECT count(*) FROM machine_event e JOIN observation o ON o.machine = e.machine AND o.id = e.entry->>'observation'
+    JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+    WHERE e.machine = '$machine_w' AND e.kind = 'operation-state' AND e.entry->>'operation' = '$op'
+      AND e.entry->>'to' = 'completed' AND s.operation = '$op' AND s.purpose = 'completion' $by")" = 1 ]
+}
+# waits <plan> <approval>: the plan approved by the approval with no operation, and no use-time
+# check, commitment or refusal entry names it: no controller takes it up.
+waits() {
+  plan_is_stored "$1" approved "$2" &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND entry->>'plan' = '$1'
+      AND kind IN ('use-time-check', 'commitment', 'refusal')")" = 0 ]
+}
+# never_ran <plan>: the plan revoked, and no operation of it.
+never_ran() { plan_state_is "$1" revoked && [ "$(sql "SELECT count(*) FROM operation WHERE plan = '$1'")" = 0 ]; }
+# unclassified: held unresolved, no attempt and no classification.
+unclassified() {
+  [ "$(sql "SELECT o.state || ' ' || (SELECT count(*) FROM attempt WHERE operation = o.id) || ' '
+    || (SELECT count(*) FROM operation_classification WHERE operation = o.id) FROM operation o WHERE o.id = '$held'")" = 'unresolved 0 0' ]
+}
+# resolve <reason>: h-recovery asks B to resolve held cancelled: 201, cancelled, by h-recovery as
+# recovery-admin on the reason.
+resolve() {
+  local who
+  fresh h-recovery
+  answers 201 - POST "/api/v1/operations/$held/resolutions" "$tok" \
+    "$(jq -nc --arg r "$1" '{to: "cancelled", reason: $r}')" "$(key resolution)" || return 1
+  who=$(who_id h-recovery) && [ -n "$who" ] || return 1
+  jq -e --arg o "$held" --arg w "$who" --arg r "$1" \
+    '.operation == $o and .state == "cancelled" and .resolvedBy == $w and .role == "recovery-admin" and .reason == $r' \
+    "$EV/last.body" >/dev/null
+}
+# resolution_recorded <reason>: held cancelled with no attempt; its entry to cancelled names the
+# resolution by h-recovery as recovery-admin, the reason, and the evidence relied on: no attempt,
+# and the worker's latest observation.
+resolution_recorded() {
+  [ "$(sql "SELECT o.state || ' ' || (SELECT count(*) FROM attempt WHERE operation = o.id) FROM operation o
+    WHERE o.id = '$held'")" = 'cancelled 0' ] &&
+    [ "$(sql "SELECT count(*) FROM machine_event e WHERE e.machine = '$machine_w' AND e.kind = 'operation-state'
+      AND e.entry->>'operation' = '$held' AND e.entry->>'from' = 'unresolved' AND e.entry->>'to' = 'cancelled'
+      AND e.entry->>'cause' = 'resolution' AND e.entry->>'resolvedBy' = (SELECT id FROM principal WHERE kind = 'human' AND sub = 'h-recovery')
+      AND e.entry->>'role' = 'recovery-admin' AND e.entry->>'reason' = '$1'
+      AND e.entry->'evidence'->>'attempts' = '0' AND e.entry->'evidence' ? 'observation'")" = 1 ]
+}
+# start_b_detached: B started with the worker detached, so that no route reaches the worker before
+# B's recorded link split is put back (ginsys/bronzeward#178); B answers on call_port.
+start_b_detached() {
+  "$bin/inject" netsplit worker && "$bin/inject" start B && "$bin/inject" netjoin worker || return 1
+  call_port=$SERVER_B_PORT
+  answers 204 - GET /livez ''
+}
+# to_c: B stopped, C started; C answers on call_port.
+to_c() {
+  interrupt - && "$bin/inject" kill B && "$bin/inject" start C || return 1
+  call_port=$SERVER_C_PORT
+  answers 204 - GET /livez ''
+}
+# point_row <row> <C's kill time or -> <outcome>: the table's line, PASS when no check failed since
+# the last line; op's state and classifications, and the scope, read now.
+s6_failed=0
+point_row() {
+  local r=PASS state cls scope=held
+  [ "$failed" = "$s6_failed" ] || r=FAIL
+  s6_failed=$failed
+  state=$(sql "SELECT state FROM operation WHERE id = '${op:-none}'") || state=unread
+  cls=$(sql "SELECT coalesce(string_agg(outcome, ',' ORDER BY revision), 'none') FROM operation_classification
+    WHERE operation = '${op:-none}'") || cls=unread
+  ! scope_released || scope=released
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$r" "$2" "${op:-none}" "${state:-none}" "$cls" "$scope" "$3" >>"$EV/s6-rows.tsv"
+}
+# ds_table: the last s4 ds table of this up; ds_passed <row>: its line for the row says PASS.
+ds_table=''
+last_ds_table() {
+  local t=("$STATE"/evidence/s4-ds-*/ds.tsv)
+  ds_table=${t[-1]}
+  [ -f "$ds_table" ]
+}
+ds_passed() { awk -F '\t' -v r="$1" '$1 == r && $2 == "PASS" { f = 1 } END { exit !f }' "$ds_table"; }
+
+preconditions() {
+  local ref='S6 precondition'
+  machines
+  check "$ref" "S4 passed: its safe apply's plan, the first apply-config plan, committed to an operation that completed" s4_applied
+  check "$ref" 'no apply-config operation holds the worker'"'"'s scope or the cluster'"'"'s rollout slot' scope_released
+  check "$ref" "the worker's Desired is its Applied" \
+    same "$(sql "SELECT desired = applied_release FROM machine_state WHERE machine = '$machine_w'")" t
+  check "$ref" 'no link to the worker is recorded cut' worker_joined
+  check "$ref" 'A answers /livez' answers 204 - GET /livez ''
+  check "$ref" "the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all" \
+    methods_counted
+  # C is S6's A, running; B stopped; the fixture's A paused, so that it takes up no plan.
+  must "$ref" 'inject pause A' "$bin/inject" pause A
+  must "$ref" 'inject kill B' "$bin/inject" kill B
+  call_port=$SERVER_C_PORT
+  check "$ref" 'C answers /livez' answers 204 - GET /livez ''
+  evidence_to pre || die "no pre-state: bin/evidence failed"
+  check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean pre
+  cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+}
+
+# point <row> <step>: steps 1 and 2 for one point: a release and its plan, C killed at the step once
+# approved, its state and bundle, then B started.
+killed=''
+point() {
+  local ref="S6.1 $1" k
+  ds_publish "$1"
+  ds_plan "$1" "${3:-}"
+  k=$(kills_at "$2")
+  must "$ref" "C told to stop at $2" interrupt "$2" kill
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" "s6$1"
+  check "$ref" "C killed at $2: not running, its log names one more kill there" within 120 c_killed_at "$2" "$((k + 1))"
+  killed=$(c_finished) || killed=unread
+}
+# b_takes_over <row>: C's control file removed and B started: B answers.
+b_takes_over() {
+  must "S6.1 $1" "C's control file removed" interrupt -
+  must "S6.1 $1" 'inject start B' "$bin/inject" start B
+  call_port=$SERVER_B_PORT
+  check "S6.1 $1" 'B answers /livez' within 30 answers 204 - GET /livez ''
+}
+
+s6() {
+  local ref n newer newer_approval reason
+
+  ref='S6.1 018'
+  point 018 dispatch-evidence
+  check "$ref" 'the plan still approved, no operation' plan_is_stored "$plan" approved "$approval_id"
+  check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
+  outcome_bundle "$ref" s6-018-killed
+  b_takes_over 018
+  ds_done 018 1
+  check "$ref" "another controller ran the plan: committed after C's kill, C still stopped" committed_after "$killed"
+  check "$ref" 'C is still stopped' c_stopped
+  check "$ref" "its completion names a completion observation" completed_by_observation
+  point_row 018 "$killed" 'no operation; B ran the plan: completed, 1 attempt, 1 landing'
+  must "$ref" 'B stopped, C started' to_c
+
+  ref='S6.1 019'
+  point 019 dispatch-committed
+  check "$ref" 'its operation committed with no attempt' killed_committed
+  check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
+  outcome_bundle "$ref" s6-019-killed
+  b_takes_over 019
+  ds_done 019 1
+  check "$ref" "B took the operation over at its start, one ownership transition to generation 2" started_takeover
+  check "$ref" "the one attempt is B's at generation 2, after its classification safe to retry" retried_by_taker
+  check "$ref" "its completion names a completion observation" completed_by_observation
+  point_row 019 "$killed" 'committed, no attempt; B took it over and retried: completed, 1 attempt, 1 landing'
+  must "$ref" 'B stopped, C started' to_c
+
+  ref='S6.1 020'
+  point 020 dispatch-sent "$fast"
+  check "$ref" 'its operation sending, one attempt, no response' sending_unanswered
+  outcome_bundle "$ref" s6-020-killed
+  b_takes_over 020
+  check "$ref" "B took the operation over at its start: unresolved, its attempt unaccounted" within 60 op_unaccounted
+  check "$ref" "one ownership transition, B's start, to generation 2" started_takeover
+  check "$ref" "B's paced recovery observations read the worker after the transport deadline" within 120 first_read
+  check "$ref" 'a recovery observation begun a settle floor after the deadline, the takeover and the first read' within 120 floor_read
+  check "$ref" 'the request landed, yet the operation is still unresolved and its attempt unaccounted: the scope held until the decision' \
+    op_unaccounted
+  check "$ref" 'h-recovery accounts for the attempt by decision on the first read and that observation: 201' \
+    account 020 201 - '.attempt | type == "string"'
+  check "$ref" 'the attempt accounted by that decision' accounted_by_decision
+  ds_done 020 1 0
+  check "$ref" "its completion names a completion observation" completed_by_observation
+  point_row 020 "$killed" 'sending, no response; B took it over, h-recovery accounted by decision: completed, 1 attempt, 1 landing'
+  must "$ref" 'B stopped, C started' to_c
+
+  ref='S6.1 021'
+  point 021 dispatch-observed
+  check "$ref" 'its operation verifying, the completion observation recorded and nothing classified' verifying_observed
+  outcome_bundle "$ref" s6-021-killed
+  b_takes_over 021
+  ds_done 021 1
+  check "$ref" "one ownership transition, B's start, to generation 2" started_takeover
+  check "$ref" "its completion names a new completion observation, B's, begun after the takeover" completed_by_observation "$taker"
+  point_row 021 "$killed" 'verifying; B took it over, a new completion observation: completed, 1 attempt, 1 landing'
+  # B's link cut while it runs (a split lives in its namespace), for the stale owner's start.
+  must "$ref" 'inject linksplit B worker' "$bin/inject" linksplit B worker
+  must "$ref" 'B stopped, C started' to_c
+
+  # Steps 1 to 3, the stale owner: C holds the operation committed while B takes it over.
+  ref='S6.1 stale'
+  ds_publish stale
+  ds_plan stale
+  n=$(stalls_at dispatch-committed)
+  must "$ref" 'C told to stall after the commitment' interrupt dispatch-committed stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" s6stale
+  check "$ref" 'the plan committed, its operation committed with no attempt; C stalls there' within 120 committed_held "$plan" "$n"
+  op=$held
+  must "$ref" 'B started, its link to the worker cut' start_b_detached
+  check "$ref" "B took the operation over at its start, one ownership transition to generation 2" within 60 started_takeover
+  must "$ref" "C released, its control file removed" interrupt -
+  check "$ref" "C's attempt refused by comparison 7, the owner token not C's; no attempt" within 90 owner_refused
+  check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
+  must "$ref" 'inject linkjoin B worker' "$bin/inject" linkjoin B worker
+  ds_done stale 1
+  check "$ref" "the one attempt is B's at generation 2, after its classification safe to retry" retried_by_taker
+  point_row stale - "C refused by comparison 7 after B's takeover, nothing sent; B retried: completed, 1 attempt, 1 landing"
+
+  # Steps 4 to 6: the worker detached while C's request is in flight; B restarted takes it over.
+  ref='S6.1 send'
+  must "$ref" 'inject kill B' "$bin/inject" kill B
+  call_port=$SERVER_C_PORT
+  ds_publish send
+  ds_plan send "$fast"
+  n=$(stalls_at dispatch-attempted)
+  must "$ref" 'C told to stall after an attempt' interrupt dispatch-attempted stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" s6send
+  check "$ref" 'the plan commits and its attempt is recorded, no response; C stalls before sending' \
+    within 120 attempt_admitted "$plan" "$n"
+  must "$ref" 'inject netsplit worker' "$bin/inject" netsplit worker
+  check "$ref" 'the partition holds with the transport deadline at least 10 s away' deadline_ahead 10
+  must "$ref" "C released, its control file removed" interrupt -
+  check "$ref" 'the response is lost: the operation unresolved, its attempt unaccounted' within 90 op_unaccounted
+  must "$ref" 'inject start B' "$bin/inject" start B
+  call_port=$SERVER_B_PORT
+  check "$ref" 'B answers /livez' within 30 answers 204 - GET /livez ''
+  check "$ref" "B took the operation over at its start, one ownership transition to generation 2" within 60 started_takeover
+  must "$ref" 'inject netjoin worker' "$bin/inject" netjoin worker
+  check "$ref" "B's paced recovery observations read the worker after the transport deadline" within 120 first_read
+  # Step 6, while the operation is unresolved.
+  must "$ref" 'step 6: a newer plan of the worker as h-publisher: 201' plan_by h-publisher newer
+  newer=$plan_id
+  must "$ref" 'step 6: approved as h-approver: 201' approve_by h-approver "$newer" s6newer
+  newer_approval=$approval_id
+  sleep 16
+  check "$ref" 'step 6: three heartbeats on, the newer plan waits: approved, no operation, no use-time check, commitment or refusal entry names it (comparison 4 refusing it is DS row 010, below)' \
+    waits "$newer" "$newer_approval"
+  check "$ref" 'step 6: the first operation still unresolved, its attempt unaccounted' op_unaccounted
+  check "$ref" "step 6: h-approver revokes the newer plan's approval: 201" revoke_approval s6newer
+  check "$ref" 'a recovery observation begun a settle floor after the deadline, the takeover and the first read' within 120 floor_read
+  check "$ref" "negative control: h-approver's accounting of the attempt: 403 forbidden" account send-approver 403 forbidden true h-approver
+  check "$ref" 'h-recovery accounts for the attempt by decision on the first read and that observation: 201' \
+    account send 201 - '.attempt | type == "string"'
+  check "$ref" 'the attempt accounted by that decision' accounted_by_decision
+  ds_done send 2
+  check "$ref" "the second attempt names B's classification safe to retry, after the accounting" retried_after_accounting
+  check "$ref" "its completion names a completion observation" completed_by_observation
+  check "$ref" 'step 6: the newer plan revoked, never run' never_ran "$newer"
+  point_row send - 'the response lost; B took it over, h-approver refused, h-recovery accounted after the settle floor, nothing landed: retried and completed, 2 attempts, 1 landing; the newer plan waited'
+
+  # Step 7: C killed after the commitment; B, its link cut, takes it over and cannot classify it.
+  ref='S6.1 cancel'
+  must "$ref" 'inject linksplit B worker' "$bin/inject" linksplit B worker
+  must "$ref" 'inject kill B' "$bin/inject" kill B
+  call_port=$SERVER_C_PORT
+  ds_publish cancel
+  ds_plan cancel
+  n=$(kills_at dispatch-committed)
+  must "$ref" 'C told to stop after the commitment' interrupt dispatch-committed kill
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" s6cancel
+  check "$ref" 'C killed after the commitment: not running, its log names one more kill there' \
+    within 120 c_killed_at dispatch-committed "$((n + 1))"
+  killed=$(c_finished) || killed=unread
+  check "$ref" 'its operation committed with no attempt' killed_committed
+  op=$held
+  must "$ref" "C's control file removed" interrupt -
+  must "$ref" 'B started, its link to the worker cut' start_b_detached
+  check "$ref" "B took the operation over at its start, one ownership transition to generation 2" within 60 started_takeover
+  sleep 16
+  check "$ref" 'three heartbeats on, B has not classified it: unresolved, no attempt, no classification' unclassified
+  reason='S6.1 step 7: the worker cannot be read, and the release is not needed'
+  check "$ref" 'h-recovery resolves it cancelled on a recorded reason: 201, by h-recovery as recovery-admin' resolve "$reason"
+  check "$ref" "cancelled with no attempt; the entry names h-recovery, recovery-admin, the reason and the evidence relied on" \
+    resolution_recorded "$reason"
+  check "$ref" 'the scope released' scope_released
+  check "$ref" 'nothing sent: no mutating request in the worker'"'"'s apid log since the row began' none_sent
+  must "$ref" 'inject linkjoin B worker' "$bin/inject" linkjoin B worker
+  outcome_bundle "$ref" s6-cancelled
+  point_row cancel "$killed" "committed, no attempt; B, cut from the worker, took it over and could not classify it; h-recovery resolved it cancelled"
+
+  # The negative controls no request reaches, and the settle floor, are S4's DS rows on this up.
+  ref='S6.1 negative control'
+  if last_ds_table; then
+    check "$ref" "accounting before the settle floor refused (DS row 013, live)" ds_passed 013
+    check "$ref" "the fence without its owner and generation comparison: the stale owner records an attempt (DS row 008)" ds_passed 008
+    check "$ref" "the newer plan refused by comparison 4 (DS row 010)" ds_passed 010
+    check "$ref" "the scope index removed: the newer plan commits while the old one is uncertain (DS row 011)" ds_passed 011
+    check "$ref" "a retry follows its classification, refused by comparisons 7 and 8 otherwise (DS row 023)" ds_passed 023
+  else
+    result FAIL "$ref" 'no s4 ds table on this up: run scenarios/s4 ds first'
+  fi
+  { printf 'row\tresult\tkilled\toperation\tstate\tclassifications\tscope\toutcome\n' && cat -- "$EV/s6-rows.tsv"; } >"$EV/s6-points.tsv"
+  rm -f -- "$EV/s6-rows.tsv"
+
+  ref='S6 restore'
+  must "$ref" 'inject start C' "$bin/inject" start C
+  must "$ref" 'inject unpause A' "$bin/inject" unpause A
+  call_port=$SERVER_A_PORT
+  check "$ref" 'A answers /livez' within 30 answers 204 - GET /livez ''
+  check "$ref" 'no link to the worker is recorded cut' worker_joined
+  no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$(apid_log "$TALOS_CONTROLPLANE_IP")"
+}
+
+withheld+=("$BW_CANARY")
+preconditions
+s6
+rm -f -- "$EV/last.body" "$EV/last.headers"
+# The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
+ev_log=$(mktemp)
+if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
+  cat -- "$ev_log" >&2
+  if grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$ev_log"; then
+    result PASS 'S6 evidence' 'bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret'
+  else
+    result FAIL 'S6 evidence' "the leak scan reports fixture secrets: $final/leak-scan.txt"
+  fi
+  if [ -e "$final/unavailable.txt" ]; then
+    result FAIL 'S6 evidence' "the bundle is incomplete: $final/unavailable.txt names what was not captured"
+  else
+    result PASS 'S6 evidence' 'the bundle is complete: bin/evidence captured every source'
+  fi
+  # The tokens this run minted, searched in the run directory, the final bundle and every bundle the
+  # run captured before it, with a control holding the last of them that must be the one file
+  # listed (as s4 does).
+  local_ctl=$STATE/s6-token-control
+  trap 'rm -f -- "$local_ctl"' EXIT
+  if [ "${#secrets[@]}" -gt 0 ]; then printf 'x %s x\n' "${secrets[-1]}" >"$local_ctl"; else : >"$local_ctl"; fi
+  earlier=()
+  for f in "$EV"/*-bundle; do
+    [ -e "$f" ] || continue
+    earlier+=("$(cat -- "$f")")
+  done
+  hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
+    "$EV" "$final" "${earlier[@]}" "$local_ctl") || hits=
+  rm -f -- "$local_ctl"
+  trap - EXIT
+  if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
+    result PASS 'S6 evidence' "none of the ${#secrets[@]} tokens this run minted is in any bundle of the run or the run directory (control found)"
+  else
+    printf 's6: files holding a token of this run: %s\n' "${hits:-none, not even the control}" >&2
+    result FAIL 'S6 evidence' "the tokens this run minted: ${#secrets[@]} searched, the listing is not the control alone"
+  fi
+else
+  cat -- "$ev_log" >&2
+  result FAIL 'S6 evidence' 'bin/evidence failed'
+fi
+rm -f -- "$ev_log"
+say "s6 run: $failed failed; evidence in $EV, bundle ${final:-none}"
+[ "$failed" -eq 0 ]

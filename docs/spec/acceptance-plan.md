@@ -599,6 +599,8 @@ for each adoption run; step 5's measurement; the resource version series.
 [§12.5](../design/Talos_Configuration_and_Machine_Management_Design.md#125-durable-operations-and-uncertain-outcomes).
 
 **Preconditions.** S4 passed; instance A running and B stopped; an approved plan for the worker.
+In the fixture, S6's A is instance C, the one build with the interruption seam, and the fixture's A
+is paused throughout; in step 4 A sends and B is started.
 
 #### S6.1 Interruption points and takeover
 
@@ -613,7 +615,7 @@ for each adoption run; step 5's measurement; the resource version series.
 3. Unpause A; let it try to record its attempt. A restarted instance would not do: it takes over
    at its start (ER §3.4) and its attempts are then legitimate.
 4. Partition the worker during a send over its own endpoint, the only dispatch route (ER §10.9):
-   the response is lost. Restart B: it takes the operation over at its start (ER §3.4), so the
+   the response is lost. Start B: it takes the operation over at its start (ER §3.4), so the
    executor that sent can record no further attempt (ER §5.2 item 1). Then heal the partition,
    so the worker is readable again.
 5. After the takeover and the heal, `h-recovery` records the accounting decision after the settle floor, with a recovery observation
@@ -641,14 +643,18 @@ for each adoption run; step 5's measurement; the resource version series.
 path marks an operation successful without a completion observation. A's attempt after the
 takeover is refused inside the attempt `UPDATE`, and A sends nothing. A lost response keeps the
 operation `unresolved` with its scope held until the decision, however well the digest matches, and
-step 6's plan is refused by comparison 4. A retry is admitted only with attempts left, the approval
+step 6's plan waits: no controller takes up a plan whose scope is held, so no use-time check,
+commitment or refusal names it (comparison 4 refusing it is DS row 010, a Go check, ER choice
+§10.32). A retry is admitted only with attempts left, the approval
 passing and the gate open, and never after a newer timeline fact. Step 7's operation ends
 `cancelled` with no attempt recorded, the resolution recorded with `h-recovery`, its role
 `recovery-admin`, the reason and the evidence relied on (ER §4), and its scope released.
 
-**Negative controls.** Accounting before the settle floor, or by `h-approver`: refused. The fence
-without its owner and generation comparison: the stale owner records an attempt (DS row 008). The
-scope index removed: the newer plan commits while the old one is uncertain (DS row 011).
+**Negative controls.** Accounting by `h-approver`: refused. Accounting before the settle floor:
+refused (DS row 013; in S6 a takeover at B's start precedes the first read, so no live request ends
+inside the floor). The fence without its owner and generation comparison: the stale owner records
+an attempt (DS row 008). The scope index removed: the newer plan commits while the old one is
+uncertain (DS row 011).
 
 #### S6.2 Late-landing bound measurement
 
