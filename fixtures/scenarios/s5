@@ -428,7 +428,8 @@ run() {
       and any(.[]; .kind == \"drift\" and (.entry.record | tostring) == \"$opened\" and .entry.change == \"closed\")
       and any(.[]; .kind == \"freeze\" and .entry.reason == \"S5 drift\")
       and any(.[]; .kind == \"refusal\" and .entry.plan == \"$revert\" and (.entry.comparison | tostring) == \"6\")
-      and any(.[]; .kind == \"adoption\") and any(.[]; .kind == \"applied-change\" and (tostring | contains(\"$new_release\")))"
+      and any(.[]; .kind == \"adoption\" and .entry.plan == \"$plan\" and .entry.operation == \"$op\")
+      and any(.[]; .kind == \"applied-change\" and .entry.plan == \"$plan\" and .entry.operation == \"$op\" and (tostring | contains(\"$new_release\")))"
   check 'S5 retained evidence' "the worker's observation records, every page, as served" keep observations "/api/v1/machines/$machine_w/observations"
   check 'S5 retained evidence' "the kept observations hold the drift record's and the adoption's" \
     kept observations "([.[].id] | index(\"$(sql "SELECT observation FROM drift_record WHERE machine = '$machine_w' AND opened = $opened")\") != null)
