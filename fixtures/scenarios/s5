@@ -3,8 +3,8 @@
 # instances restarted with a short drift interval; the worker patched out of band with a registry
 # password, a new synthetic secret; the next drift observation opens a drift record, the scope not
 # frozen; the database and OpenBao snapshotted (s5-step3, step 7's restore point); h-author freezes
-# the scope, and an approved revert plan is refused by comparison 6 while it is frozen; h-author
-# ingests the drifted configuration into a new draft as a drift adoption, marking both secrets;
+# the scope, and an approved revert plan is never committed while it is frozen; h-author ingests
+# the drifted configuration into a new draft as a drift adoption, marking both secrets;
 # h-publisher publishes it and creates an adopt plan binding the record, h-approver approves, and
 # the adoption commits under the freeze: Applied the release with the baseline's digest, the
 # baseline revision one more, the record closed adopted. Bronzeward sends the worker no mutating
@@ -37,6 +37,9 @@ mutation_ref='S5 pass'
 
 # The S1 file secret, still in the worker's configuration, and the registry password step 1 adds.
 WORKER_MARK='doc[0]/machine/files/0/content'
+# S2's node label is a reference to that secret, so the node carries its value there too, and an
+# unmarked copy of a marked value is refused (compilation's guard).
+LABEL_MARK='doc[0]/machine/nodeLabels/bw-s2'
 REGISTRY=registry.s5.invalid
 REGISTRY_MARK="doc[0]/machine/registries/config/$REGISTRY/auth/password"
 # The interval S5 observes at, and the one every other scenario runs at (server.yaml.in).
@@ -279,11 +282,15 @@ freeze_by() {
     [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'freeze'
       AND entry->>'principal' = '$(who_id "$1")' AND entry->>'role' = '$role' AND entry->>'reason' = 'S5 drift'")" = 1 ]
 }
-# frozen_refused <plan>: a refusal entry names the plan, of comparison 6 and the frozen scope, and
-# no operation exists for it.
-frozen_refused() {
-  [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'refusal' AND entry->>'plan' = '$1'
-    AND entry->>'comparison' = '6' AND entry->>'cause' = 'the machine scope is frozen'")" -ge 1 ] &&
+# frozen_unselected <plan>: two drift observations of the worker completed after the plan's
+# approval, so the controller passed over it at least once, and still the plan is approved with no
+# observation begun for it and no operation. The controller selects no plan on a frozen scope;
+# comparison 6, which refuses one that reaches commitment, is a Go check (commit_test.go).
+frozen_unselected() {
+  [ "$(sql "SELECT count(*) FROM observation_start s JOIN observation o ON o.machine = s.machine AND o.basis = s.revision
+    JOIN approval a ON a.plan = '$1' WHERE s.machine = '$machine_w' AND s.purpose = 'drift' AND s.revision > a.revision")" -ge 2 ] &&
+    plan_state_is "$1" approved &&
+    [ "$(sql "SELECT count(*) FROM observation_start WHERE plan = '$1'")" = 0 ] &&
     [ "$(sql "SELECT count(*) FROM operation WHERE plan = '$1'")" = 0 ]
 }
 cancel_by_creator() {
@@ -296,18 +303,18 @@ revert=''
 freeze() {
   local ref='S5 step 3'
   check "$ref" 'h-author freezes the scope: 201, the freeze recorded under the author role' freeze_by h-author author
-  # Without the freeze, the approved revert below would pass comparison 6 and mutate the worker.
+  # Without the freeze, the approved revert below would be committed and mutate the worker.
   [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ] || die "s5: the scope is not frozen; nothing after it can run"
   # The frozen-scope control: a revert plan of the worker's Desired, which binds the open record and
-  # expects its drifted digest, so that comparison 3 passes and comparison 6 is the one reached.
+  # expects its drifted digest, so that only the freeze holds it back.
   ref='S5 negative controls'
   check "$ref" "a plan for the drifted worker as h-publisher, a revert binding the open record: 201" plan_by h-publisher frozen
   revert=$plan_id
   [ -n "$revert" ] || die "s5: no revert plan; nothing after it can run"
   check "$ref" 'the plan binds the open record' same "$(sql "SELECT drift_record FROM plan WHERE id = '$revert'")" "$opened"
   check "$ref" 'approved as h-approver: 201' approve_by h-approver "$revert" frozen
-  check "$ref" 'an approved plan on the frozen scope: its commitment refused by comparison 6, the scope frozen; no operation' \
-    within 120 frozen_refused "$revert"
+  check "$ref" 'an approved plan on the frozen scope: passed over by the controller, still approved, nothing observed for it and no operation' \
+    within 120 frozen_unselected "$revert"
   check "$ref" 'the plan cancelled by its creator, h-publisher' cancel_by_creator "$revert" frozen
 }
 
@@ -358,8 +365,8 @@ adopt() {
   check "$ref" 'h-author opens a new draft: 201' draft_by h-author adopt
   fresh_author
   ingest_kind=drift-adoption
-  check "$ref" "h-author ingests the drifted configuration into it as a drift adoption, If-Match its ETag, marking the S1 file's content and the registry password: 202, the claim released, the operation succeeded, the ETag moved" \
-    ingest "$machine_w" "$(jq -nc --arg a "$WORKER_MARK" --arg b "$REGISTRY_MARK" '[$a, $b]')" adopt
+  check "$ref" "h-author ingests the drifted configuration into it as a drift adoption, If-Match its ETag, marking the S1 file's content, S2's label of it and the registry password: 202, the claim released, the operation succeeded, the ETag moved" \
+    ingest "$machine_w" "$(jq -nc --arg a "$WORKER_MARK" --arg l "$LABEL_MARK" --arg b "$REGISTRY_MARK" '[$a, $l, $b]')" adopt
   ingest_kind=import
   outcome_bundle "$ref" adoption-ingestion
   check "$ref" 'h-publisher publishes the draft under its new ETag: 202, one release, the worker'"'"'s Desired' publish_by h-publisher adopt
