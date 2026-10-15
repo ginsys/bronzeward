@@ -166,8 +166,9 @@ silently substitutes a newer artifact. The immutable plan binds:
   revert therefore expects a configuration that `Applied` does not describe,
   and any other such configuration that dispatch finds is drift (§3.2)
   **(choice §10.23)**;
-- the open drift record, if the machine has one; such a plan is a revert
-  (§6.4);
+- the open drift record, if the machine has one; such an `apply-config` plan
+  is a revert (§6.4), and such an adopt plan adopts the drifted configuration
+  (§6.3, **choice §10.38**);
 - operation `apply-config`, mode `no-reboot`, the transport route (§3.5) and
   every other parameter value that reaches the Talos request;
 - expected preconditions: the machine identity, the node's running Talos
