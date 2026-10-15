@@ -543,7 +543,7 @@ ends: S1 to S4 run with none observing.
 4. **Adopt.** `h-author` opens a new draft (`POST /drafts`), since the import draft is published,
    and ingests the drifted configuration into it as a drift adoption (`POST /ingestions` with
    `"kind": "drift-adoption"` and `"source": "machine"`, naming that draft, with `If-Match` its
-   ETag), marking the new password and S1's file content. After the ingestion
+   ETag), marking the new password, S1's file content and S2's node label of it. After the ingestion
    succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
    `adopt` plan binding the drift record; `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
    record commits under the freeze.
@@ -577,8 +577,9 @@ record is closed `reverted` and the digest is the revert artifact's. Step 5's re
 whichever way it falls. Each of step 7's freezes and unfreezes takes effect and is recorded under
 the role that permits it, as step 3's freeze is.
 
-**Negative controls.** An approved revert plan while the scope is frozen (step 3): refused by
-comparison 6, then cancelled. An approved ordinary plan while the record is open: refused by comparison 6.
+**Negative controls.** An approved revert plan while the scope is frozen (step 3): the controller
+passes over it, so nothing is observed for it and no operation exists, then cancelled; comparison
+6, which refuses a frozen scope's plan that reaches commitment, is a Go check. An approved ordinary plan while the record is open: refused by comparison 6.
 A plan expecting `Applied`'s digest while the machine runs another: commitment refused on its
 evidence, and the refusal's transaction opens a drift record (ER choice §10.23). Unfreezing by a
 non-`approver`: `403`. No adoption record on a stale observation, which is no evidence and refuses
