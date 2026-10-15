@@ -358,9 +358,10 @@ has no plan but the handover's completed `adopt` plan.
 1. After the adoption controller has observed the worker at least three times following S2 (its
    heartbeat is the fixture's 5 s), confirm that no plan and no operation but `publish` exists
    for it besides the handover's completed `adopt` plan and operation: publication alone
-   dispatches nothing. No caller schedules a `drift` observation before S5
-   ([ginsys/bronzeward#27](https://github.com/ginsys/bronzeward/issues/27)), which joins it to
-   this check.
+   dispatches nothing. The fixture's drift interval is longer than any run, so no `drift`
+   observation joins this check before S5
+   ([ginsys/bronzeward#27](https://github.com/ginsys/bronzeward/issues/27)) sets the interval it
+   observes at.
 2. `h-publisher` creates an `apply-config` plan from the S2 release: `no-reboot`, a bound route,
    deadlines, maximum attempts, expiry and maximum observation age; `h-viewer` reads its
    evidence. The worker holds the import base's configuration, which has no redacted whole form,

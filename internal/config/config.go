@@ -129,10 +129,11 @@ type OIDC struct {
 	PlainHTTPHosts []string `yaml:"plainHTTPHosts"`
 }
 
-// Execution is execution-recovery.md §5.2's settings.
+// Execution is execution-recovery.md §5.2's settings and §6.1's drift interval.
 type Execution struct {
 	SettleFloor          time.Duration `yaml:"settleFloor"`          // default and minimum 30s
 	MaxTransportDeadline time.Duration `yaml:"maxTransportDeadline"` // required, no default
+	DriftInterval        time.Duration `yaml:"driftInterval"`        // default 5m, at least 1s (choice §10.36)
 	PlanDefaults         PlanDefaults  `yaml:"planDefaults"`
 }
 
@@ -166,6 +167,12 @@ func (e *Execution) validate() error {
 	// refused here, not through the default derived from it.
 	if e.MaxTransportDeadline < time.Second || e.MaxTransportDeadline%time.Second != 0 {
 		return errors.New("config: execution.maxTransportDeadline is required, in whole seconds of at least 1s")
+	}
+	switch {
+	case e.DriftInterval == 0:
+		e.DriftInterval = 5 * time.Minute
+	case e.DriftInterval < time.Second:
+		return errors.New("config: execution.driftInterval must be at least 1s")
 	}
 	return e.PlanDefaults.validate(e.MaxTransportDeadline)
 }
