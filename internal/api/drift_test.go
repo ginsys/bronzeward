@@ -100,6 +100,14 @@ func TestDriftExcluded(t *testing.T) {
 				ce.machine)
 		}},
 		{name: "scope taken", after: func(t *testing.T, ce *commitEnv) { ce.commitAs(t, ce.pid) }},
+		{name: "scope held and released", after: func(t *testing.T, ce *commitEnv) { // no operation holds it now
+			mustExec(t, ce.db, `WITH r AS (UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1
+					RETURNING revision_counter)
+				INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+				SELECT $1, r.revision_counter, epoch, 'operation-state',
+					'{"operation":"op_aaaaaaaaaaaaaaaaaaaaaaaaaa","from":"verifying","to":"failed"}', now() FROM r, installation_state`,
+				ce.machine)
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

@@ -59,10 +59,10 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 		return "", err
 	}
 	differs := !bytes.Equal(digest, applied)
-	switch {
-	case differs && !open.Valid:
-		// A digest that is the artifact of an operation accounted by decision may be its late landing.
-		var late sql.NullString
+	// A differing digest that is the artifact of an operation accounted by decision may be its late
+	// landing, whether it opens the record or is recorded on it.
+	var late sql.NullString
+	if differs {
 		if err := tx.QueryRowContext(ctx, `SELECT op.id FROM operation op JOIN plan p ON p.id = op.plan
 				JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine
 			WHERE op.machine = $1 AND rm.configuration_digest = $2 AND EXISTS (SELECT FROM attempt a
@@ -70,6 +70,9 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 			ORDER BY op.seq DESC LIMIT 1`, machine, digest).Scan(&late); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return "", err
 		}
+	}
+	switch {
+	case differs && !open.Valid:
 		rev, err := driftEntry(ctx, tx, machine, epoch, 0, driftOpened, observation, late.String)
 		if err != nil {
 			return "", err
@@ -79,11 +82,12 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 			VALUES ($1, $2, $3, $4, $5, $3, NULLIF($6, ''))`, machine, rev, observation, applied, digest, late.String)
 		return driftOpened, err
 	case differs:
-		if _, err := driftEntry(ctx, tx, machine, epoch, open.Int64, driftObserved, observation, ""); err != nil {
+		if _, err := driftEntry(ctx, tx, machine, epoch, open.Int64, driftObserved, observation, late.String); err != nil {
 			return "", err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE drift_record SET observed_digest = $3, last_observation = $4
-			WHERE machine = $1 AND opened = $2`, machine, open.Int64, digest, observation)
+		_, err := tx.ExecContext(ctx, `UPDATE drift_record SET observed_digest = $3, last_observation = $4,
+				late_landing = COALESCE(NULLIF($5, ''), late_landing)
+			WHERE machine = $1 AND opened = $2`, machine, open.Int64, digest, observation, late.String)
 		return driftObserved, err
 	case open.Valid && !failing:
 		rev, err := driftEntry(ctx, tx, machine, epoch, open.Int64, "closed", observation, "")
@@ -99,7 +103,7 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 
 // driftEntry records one drift entry on machine's timeline: the record it changes (its own revision
 // when it opens one), the change, the observation it rests on, a returned closing's resolution and
-// an opening's possible late landing.
+// a differing digest's possible late landing.
 func driftEntry(ctx context.Context, tx *sql.Tx, machine, epoch string, record int64, change, observation, late string) (int64,
 	error) {
 	var rev int64
