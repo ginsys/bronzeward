@@ -245,9 +245,14 @@ patched_state() {
 # moved_by_patch: the worker's digest and resource version moved with the patch; the control
 # plane's did not.
 moved_by_patch() {
+  local cp_digest cp_version
+  cp_digest=$(digest_of "$EV/pre-talos-config-sha256.txt" "$TALOS_CONTROLPLANE_IP")
+  cp_version=$(digest_of "$EV/pre-talos-config-version.txt" "$TALOS_CONTROLPLANE_IP")
   differ "$(digest_of "$EV/patched-talos-config-sha256.txt" "$TALOS_WORKER_IP")" "$(digest_of "$EV/pre-talos-config-sha256.txt" "$TALOS_WORKER_IP")" &&
     differ "$(digest_of "$EV/patched-talos-config-version.txt" "$TALOS_WORKER_IP")" "$(digest_of "$EV/pre-talos-config-version.txt" "$TALOS_WORKER_IP")" &&
-    same "$(digest_of "$EV/patched-talos-config-sha256.txt" "$TALOS_CONTROLPLANE_IP")" "$(digest_of "$EV/pre-talos-config-sha256.txt" "$TALOS_CONTROLPLANE_IP")"
+    [ -n "$cp_digest" ] && [ -n "$cp_version" ] &&
+    same "$(digest_of "$EV/patched-talos-config-sha256.txt" "$TALOS_CONTROLPLANE_IP")" "$cp_digest" &&
+    same "$(digest_of "$EV/patched-talos-config-version.txt" "$TALOS_CONTROLPLANE_IP")" "$cp_version"
 }
 
 detect() {
@@ -383,6 +388,47 @@ profile_drops() {
   etag=$(etag_of_last)
 }
 
+# adopted_references: the release's import base for the worker holds the registry password, S1's
+# file content and S2's label as !bwref references, each with its reference row, whose generation
+# lies under the drift adoption's claim and is read by the metadata identity at version 1 (create-
+# only). The document is matched in the database, never printed.
+adopted_references() {
+  local rev key name g v
+  rev=$(sql "SELECT import_base_revision FROM release_machine WHERE release = '$new_release' AND machine = '$machine_w'") || return 1
+  [ -n "$rev" ] && [ "${#ingested[@]}" -ge 1 ] || return 1
+  for key in password content bw-s2; do
+    name=$(sql "SELECT substring(document FROM '\\y$key: !bwref ([a-z0-9-]+)') FROM import_base_revision WHERE id = '$rev'") || return 1
+    g=$(sql "SELECT generation FROM import_base_reference WHERE revision = '$rev' AND name = '$name'") || return 1
+    [ -n "$name" ] && [ "${g#"gen/$cluster/${ingested[-1]}/"}" != "$g" ] || {
+      say "s5: the adopted base's $key is not a reference to a generation of the drift adoption"
+      return 1
+    }
+    v=$(BAO_TOKEN=$BW_BAO_METADATA_TOKEN bao kv metadata get -format=json -mount=secret "$g" | jq -er '.data.current_version') || return 1
+    [ "$v" = 1 ] || {
+      say "s5: $g is at version $v, not a create-only generation"
+      return 1
+    }
+  done
+}
+# adopted_baseline: the OpenBao administrator decrypts the release's import base baseline for the
+# worker outside Bronzeward; its configuration digest is the one recorded and the patched state's.
+# The plaintext stays in the pipe.
+adopted_baseline() {
+  local row ct recorded got want
+  row=$(sql "SELECT encode(b.baseline_ciphertext, 'escape') || ' ' || encode(b.configuration_digest, 'hex')
+    FROM release_machine rm JOIN import_base_revision b ON b.id = rm.import_base_revision
+    WHERE rm.release = '$new_release' AND rm.machine = '$machine_w'") || return 1
+  ct=${row%% *} recorded=${row##* }
+  [ -n "$ct" ] || return 1
+  got=$(printf '%s\n' "$(bao write -field=plaintext transit/decrypt/bw-baseline ciphertext="$ct" | base64 -d)" |
+    sha256sum | cut -d' ' -f1) || return 1
+  want=$(digest_of "$EV/patched-talos-config-sha256.txt" "$TALOS_WORKER_IP")
+  [ -n "$want" ] && [ "$got" = "$recorded" ] && [ "$got" = "$want" ] || {
+    say "s5: decrypted adopted baseline $got, recorded $recorded, patched $want"
+    return 1
+  }
+}
+
 adopt() {
   local ref='S5 step 4' plan_body_json w_after cp_after
   check "$ref" 'h-author opens a new draft: 201' draft_by h-author adopt
@@ -396,6 +442,10 @@ adopt() {
     profile_drops h-author adopt s2-labels
   check "$ref" 'h-publisher publishes the draft under its new ETag: 202, one release, the worker'"'"'s Desired' publish_by h-publisher adopt
   [ -n "$new_release" ] || die "s5: no release; nothing after it can run"
+  check "$ref" "the release's import base for the worker: the registry password, S1's file content and S2's label are references to create-only generations of the drift adoption" \
+    adopted_references
+  check "$ref" "the release's import base baseline, decrypted by the administrator, has the recorded configuration digest, the patched state's" \
+    adopted_baseline
   plan_body_json=$(jq -nc --arg r "$new_release" --arg m "$machine_w" '{releaseId: $r, machine: $m, operation: "adopt"}')
   fresh h-publisher
   check "$ref" 'h-publisher creates an adopt plan of the release: 201, binding the open record' \
