@@ -282,9 +282,10 @@ freeze_by() {
     [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'freeze'
       AND entry->>'principal' = '$(who_id "$1")' AND entry->>'role' = '$role' AND entry->>'reason' = 'S5 drift'")" = 1 ]
 }
-# frozen_unselected <plan>: the plan's approval is 30 s old, six of the controller's passes at the
-# fixture's 5 s heartbeat (an idle pass records nothing), and still the plan is approved with no
-# observation begun for it and no operation. Unfrozen, S4's plans are taken up within a pass. The
+# frozen_unselected <plan>: the plan's approval is 30 s old and still the plan is approved with no
+# observation begun for it and no operation. The approval wakes the controller and its 5 s heartbeat
+# wakes it again, so a live controller has passed over the plan; an idle pass records nothing, so a
+# stalled one is not told apart here (the apid log's no-mutation check holds either way). The
 # controller selects no plan on a frozen scope; comparison 6, which refuses one that reaches
 # commitment, is a Go check (commit_test.go).
 frozen_unselected() {
