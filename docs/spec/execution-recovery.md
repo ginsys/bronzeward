@@ -1039,6 +1039,14 @@ succeeds until an `approver` lifts it (§3.3). A freeze does not stop an attempt
 already recorded, and it is independent of drift: it may be placed without a
 drift record and outlives the record's resolution until lifted.
 
+`POST /machines/{id}/freezes` and `POST /machines/{id}/unfreezes` each take a
+`reason` (1 to 1024 bytes, not blank) and record one immutable freeze or
+unfreeze fact with its principal, role, reason, epoch and act, as one
+`freeze` or `unfreeze` entry at the machine's next revision (§4.1), under the
+machine row's lock that comparison 6 reads under. Freezing a frozen scope, or
+unfreezing one that is not frozen, is `409 conflict` and writes nothing
+(choice §10.34).
+
 ### 6.3 Adopt
 
 Adoption accepts the configuration the machine now runs. It sends nothing to
@@ -2224,6 +2232,15 @@ conservative option; those that do not say so. Each is marked in place as
     PoC's apply, a new precondition and fixture surface no PoC acceptance row
     asks for; leaving the cases open against #26, which would make an
     unbound check a closure blocker.
+34. **A freeze and an unfreeze record a required reason and refuse a no-op**
+    (§6.2). Design §13.7 asks for recorded operator intent; the routes had no
+    body, and §9.1 refuses unknown fields, so the contract names one: a
+    `reason`, as an approval revocation takes. A freeze on a frozen scope, or an
+    unfreeze on one that is not frozen, is `409 conflict`, so the timeline
+    holds only acts that changed the scope. Agent decision, 2026-10-15
+    (ginsys/bronzeward#27). Alternatives: an empty body, which records who but
+    not why; an idempotent no-op answering `201`, which writes timeline
+    entries that change nothing.
 
 ## 11. Traceability
 

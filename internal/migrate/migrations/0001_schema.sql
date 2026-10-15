@@ -524,7 +524,8 @@ CREATE TABLE machine_event (
   kind     text NOT NULL CONSTRAINT machine_event_kind CHECK (kind IN ('endpoint-change', 'plan', 'approval',
              'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
              'observation', 'adoption', 'applied-change', 'commitment', 'refusal', 'attempt', 'operation-state',
-             'response', 'accounting', 'classification', 'ownership-transition', 'use-time-check')),
+             'response', 'accounting', 'classification', 'ownership-transition', 'use-time-check', 'freeze',
+             'unfreeze')),
   -- A use-time check names the plan it was made for and the result of each dependency (§3.1, §4.1).
   CONSTRAINT machine_event_use_time_check CHECK (kind <> 'use-time-check'
     OR (jsonb_typeof(entry->'plan') IS NOT DISTINCT FROM 'string'
@@ -591,6 +592,26 @@ CREATE TABLE machine_endpoint_change (
   CONSTRAINT machine_endpoint_change_changes CHECK (previous_endpoint <> new_endpoint)
 );
 CALL make_immutable('machine_endpoint_change');
+
+-- A freeze or an unfreeze of a machine scope (execution and recovery §6.2; §3): who, in which role,
+-- why, and the act. It is exactly one freeze or unfreeze entry on the machine's timeline, keyed by
+-- that entry's revision; the machine's frozen column projects the latest one.
+CREATE TABLE machine_freeze (
+  machine    text NOT NULL,
+  revision   bigint NOT NULL,
+  entry_kind text NOT NULL CHECK (entry_kind IN ('freeze', 'unfreeze')),
+  frozen     boolean NOT NULL CHECK (frozen = (entry_kind = 'freeze')),
+  principal  text NOT NULL REFERENCES principal (id),
+  role       text NOT NULL CHECK (role IN ('author', 'publisher', 'approver', 'recovery-admin')
+               AND (frozen OR role = 'approver')),
+  reason     text NOT NULL CHECK (btrim(reason) <> '' AND octet_length(reason) <= 1024),
+  act        text NOT NULL UNIQUE REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  epoch      text NOT NULL REFERENCES recovery_epoch (epoch),
+  at         timestamptz NOT NULL,
+  PRIMARY KEY (machine, revision),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('machine_freeze');
 
 -- Sources (§3, §3.1, choice §17.31) --------------------------------------------------------------
 
