@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"net/http"
@@ -49,8 +50,8 @@ func openDriftOn(t *testing.T, db *sql.DB, machine string) int64 {
 	return rev
 }
 
-// closeDriftOn closes machine's drift record opened at revision opened, as returned.
-func closeDriftOn(t *testing.T, db *sql.DB, machine string, opened int64) {
+// closeDriftOn closes machine's drift record opened at revision opened, with resolution.
+func closeDriftOn(t *testing.T, db *sql.DB, machine string, opened int64, resolution string) {
 	t.Helper()
 	tx, err := db.Begin()
 	if err != nil {
@@ -64,10 +65,10 @@ func closeDriftOn(t *testing.T, db *sql.DB, machine string, opened int64) {
 	}
 	mustExec(t, tx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		SELECT $1, $2, epoch, 'drift', jsonb_build_object('record', $3::bigint, 'change', 'closed', 'observation',
-			(SELECT observation FROM drift_record WHERE machine = $1 AND opened = $3), 'resolution', 'returned'), now()
-		FROM installation_state`, machine, rev, opened)
-	mustExec(t, tx, `UPDATE drift_record SET closed = $3, resolution = 'returned' WHERE machine = $1 AND opened = $2`,
-		machine, opened, rev)
+			(SELECT observation FROM drift_record WHERE machine = $1 AND opened = $3), 'resolution', $4::text), now()
+		FROM installation_state`, machine, rev, opened, resolution)
+	mustExec(t, tx, `UPDATE drift_record SET closed = $3, resolution = $4 WHERE machine = $1 AND opened = $2`,
+		machine, opened, rev, resolution)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -127,29 +128,51 @@ func TestDriftedAdoption(t *testing.T) {
 	}
 }
 
-// Requirement 4.3 for a drifted machine: the bound drift record still open (a revert or a return
-// closed it first) and the baseline revision unchanged, or the record is refused.
+// The adoption record of a drifted machine refused on each stale input (acceptance plan S5 negative
+// controls): requirement 4.3, the bound drift record still open (a revert or a return closed it
+// first), the baseline revision and Desired unchanged; 4.2, the approval not revoked; 4.4, the
+// latest observation, after the approval, showing the machine with the baseline's digest, not a
+// machine changed again or another machine identity with that digest.
 func TestDriftedAdoptionRefusals(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
-		name, cause string
-		setup       func(*testing.T, *adoptEnv)
+		name, comparison, cause string
+		change                  func(*obsSeed)
+		setup                   func(*testing.T, *adoptEnv)
 	}{
-		{"record closed", "the bound drift record is closed", func(t *testing.T, ae *adoptEnv) {
-			closeDriftOn(t, ae.db, ae.machine, ae.drift)
+		{"record returned", "4.3", "the bound drift record is closed", nil, func(t *testing.T, ae *adoptEnv) {
+			closeDriftOn(t, ae.db, ae.machine, ae.drift, "returned")
 		}},
-		{"baseline revision advanced", "the machine's baseline revision changed", func(t *testing.T, ae *adoptEnv) {
+		{"record reverted", "4.3", "the bound drift record is closed", nil, func(t *testing.T, ae *adoptEnv) {
+			closeDriftOn(t, ae.db, ae.machine, ae.drift, "reverted")
+		}},
+		{"baseline revision advanced", "4.3", "the machine's baseline revision changed", nil, func(t *testing.T, ae *adoptEnv) {
 			mustExec(t, ae.db, `UPDATE machine_state SET baseline_revision = 5 WHERE machine = $1`, ae.machine)
 		}},
+		{"Desired changed", "4.3", "the machine's Desired release changed", nil, func(t *testing.T, ae *adoptEnv) {
+			// The plan binds Desired as the target release (planEnv); it moves back to Applied's.
+			mustExec(t, ae.db, `UPDATE machine_state SET desired = $2 WHERE machine = $1`, ae.machine, ae.applied.rel)
+		}},
+		{"approval revoked", "4.2", "the plan is revoked", nil, func(t *testing.T, ae *adoptEnv) {
+			if rec := ae.revokeApproval(ae.human("h-recovery"), ae.key(), ae.approval, `{"reason":"wrong"}`); rec.Code != http.StatusCreated {
+				t.Fatalf("%d %s", rec.Code, rec.Body)
+			}
+		}},
+		{"changed again", "4.4", "the latest observation's configuration digest is not the baseline's",
+			func(s *obsSeed) { s.digest = bytes.Repeat([]byte{7}, 32) }, nil},
+		{"another machine", "4.4", "the latest observation shows another machine identity",
+			func(s *obsSeed) { s.uuid = "1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b" }, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			ae := newDriftedAdoptEnv(t, "")
 			ae.approveIt(t)
-			ae.observed(t, nil)
-			c.setup(t, ae)
+			ae.observed(t, c.change)
+			if c.setup != nil {
+				c.setup(t, ae)
+			}
 			_, err := ae.a.commitAdoption(context.Background(), ae.pid)
-			ae.wantRefused(t, err, 0, "4.3", c.cause)
+			ae.wantRefused(t, err, 0, c.comparison, c.cause)
 		})
 	}
 }
@@ -202,7 +225,7 @@ func TestDriftAdoptionRefusals(t *testing.T) {
 	if doc := start("k-drift-none-0123456"); doc["machine"] != ie.machine {
 		t.Fatalf("the refusal names %v; want %s", doc["machine"], ie.machine)
 	}
-	closeDriftOn(t, ie.db, ie.machine, openDriftOn(t, ie.db, ie.machine))
+	closeDriftOn(t, ie.db, ie.machine, openDriftOn(t, ie.db, ie.machine), "returned")
 	start("k-drift-closed-01234")
 	// Another machine's open record does not admit this one.
 	openDriftOn(t, ie.db, ie.otherMachine)

@@ -885,7 +885,8 @@ s6_regressions() {
 # so the comparison stands only when no pass committed between the database's first read and its
 # last: every status row the same, compared whole, not by the latest recorded-at, since a pass
 # stamps its rows before it commits and a later commit can carry an earlier time. Otherwise it is
-# taken again, at most three times. A psql error fails it, never reads as no difference.
+# taken again, at most three times, 2 s after the collision: the instances' monitors can pass
+# within a second of each other. A psql error fails it, never reads as no difference.
 s6_served() {
   local want before after bad attempt
   for attempt in 1 2 3; do
@@ -900,7 +901,7 @@ s6_served() {
       200 - GET '/api/v1/dependencies?limit=500' "$author" || return 1
     bad=$(s6_times_differ) || return 1
     after=$(s6_status_rows) || return 1
-    [ "$before" = "$after" ] || continue
+    [ "$before" = "$after" ] || { sleep 2; continue; }
     [ -z "$bad" ] || { say "s2: GET /dependencies serves other times than recorded for $bad"; return 1; }
     return 0
   done

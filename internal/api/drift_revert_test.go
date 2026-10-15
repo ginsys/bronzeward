@@ -158,11 +158,11 @@ func TestRevertRefusals(t *testing.T) {
 		{name: "manual return", comparison: "3", cause: "the evidence shows a configuration digest other than the plan's",
 			digest: applied, want: `resolution = 'returned'`},
 		{name: "record closed", comparison: "6", cause: "the drift record the plan binds is closed",
-			setup: func(t *testing.T, ae *attemptEnv, drift int64) { closeDriftOn(t, ae.db, ae.machine, drift) },
+			setup: func(t *testing.T, ae *attemptEnv, drift int64) { closeDriftOn(t, ae.db, ae.machine, drift, "returned") },
 			want:  `resolution = 'returned'`},
 		{name: "another record", comparison: "6", cause: "a drift record is open on the machine",
 			setup: func(t *testing.T, ae *attemptEnv, drift int64) {
-				closeDriftOn(t, ae.db, ae.machine, drift)
+				closeDriftOn(t, ae.db, ae.machine, drift, "returned")
 				openDriftOn(t, ae.db, ae.machine)
 			},
 			want: `resolution = 'returned'`},
