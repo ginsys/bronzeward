@@ -15,7 +15,6 @@ need grep sed find sort sha256sum cut
 [ -s "$E4D_MARK" ] || die "$E4D_OUT is not an E4 dispatch-safety run directory ($E4D_MARK is missing)"
 [ -s "$E4D_OUT/complete" ] || die "$E4D_OUT/complete is missing: the run did not finish"
 [ -s "$E4D_PATTERNS" ] || die "$E4D_PATTERNS is missing or empty"
-! grep -q '^only' -- "$E4D_OUT/run.txt" || die "$E4D_OUT is a partial run (E4D_ONLY or E4M_ONLY was set); run it whole"
 # A run/measure output has captures.tsv in place of the matrix's cells.tsv, and its own default
 # directory, so that it never replaces the matrix's evidence.
 measure=0
@@ -27,6 +26,12 @@ dest=${E4D_EVIDENCE:-$E4D_DIR/evidence}
 # One path component, evidence or evidence-<letters and digits>: nothing that can climb out.
 [[ $dest == "$E4D_DIR"/* && ${dest#"$E4D_DIR"/} =~ ^evidence(-[A-Za-z0-9]+)?$ ]] ||
   die "E4D_EVIDENCE ($dest) must be $E4D_DIR/evidence or $E4D_DIR/evidence-<name>"
+# A partial run never stands in for a whole one: a run/measure subset goes only to a directory of
+# its own.
+if grep -q '^only' -- "$E4D_OUT/run.txt"; then
+  [ "$measure" = 1 ] && [ "$dest" != "$E4D_DIR/evidence-latelanding" ] ||
+    die "$E4D_OUT is a partial run (E4D_ONLY or E4M_ONLY was set); run it whole, or collect a run/measure subset with E4D_EVIDENCE=$E4D_DIR/evidence-<name>"
+fi
 incoming=$(mktemp -d "$E4D_DIR/.evidence-incoming.XXXXXX")
 trap 'rm -rf -- "$incoming"' EXIT
 
@@ -113,7 +118,7 @@ while IFS= read -r group; do
   {
     while IFS= read -r -d '' f; do
       printf '==> %s <==\n' "$(basename -- "$f" .txt)"
-      placeholders "$f"
+      placeholders "$f" | sed 's/[[:space:]]*$//'
       [ -z "$(tail -c 1 -- "$f")" ] || printf '\n'
     done < <(find "$E4D_T" -type f -name "$name" -print0 | sort -z)
     printf '==> end <==\n'

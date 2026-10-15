@@ -1,0 +1,9 @@
+commit	0ba832952d43d5bcbd3cf3d384ce7d1f047d8ef7
+uncommitted inputs	0
+started	2026-10-15T21:04:54Z
+talosctl	Client: Talos v1.13.6
+talos worker	Client: Talos v1.13.6 Server: 	NODE:        10.55.0.3 	Tag:         v1.13.6 	SHA:         04318854 	Built:        	Go version:  go1.26.5 	OS/Arch:     linux/amd64 	Enabled:     RBAC
+captures per cell	5
+transport deadline	15s
+window	60s
+finished	2026-10-15T22:47:48Z
