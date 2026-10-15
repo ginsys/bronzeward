@@ -327,8 +327,8 @@ CREATE TABLE staging_claim (
   created_at      timestamptz NOT NULL,
   cluster         text NOT NULL REFERENCES cluster (id),
   machine         text,
-  -- Drift adoption (execution and recovery §6) arrives with its own issue.
-  kind            text NOT NULL CONSTRAINT staging_claim_kind CHECK (kind IN ('import', 'draft-update')),
+  -- A drift adoption (execution and recovery §6.3) ingests a machine's node as an import does.
+  kind            text NOT NULL CONSTRAINT staging_claim_kind CHECK (kind IN ('import', 'drift-adoption', 'draft-update')),
   payload_digest  bytea CHECK (octet_length(payload_digest) = 32),
   draft           text,
   -- The operator review (compilation §3.6): requested at the start, `continued` once the operator
@@ -344,8 +344,8 @@ CREATE TABLE staging_claim (
   CHECK ((payload IS NULL) = (payload_digest IS NULL)),
   FOREIGN KEY (machine, cluster) REFERENCES machine (id, cluster),
   FOREIGN KEY (draft, cluster) REFERENCES draft (id, cluster),
-  -- An import names its machine, a draft update its draft; neither names the other.
-  CONSTRAINT staging_claim_subject CHECK ((kind = 'import') = (machine IS NOT NULL)
+  -- An import or a drift adoption names its machine, a draft update its draft; neither names the other.
+  CONSTRAINT staging_claim_subject CHECK ((kind IN ('import', 'drift-adoption')) = (machine IS NOT NULL)
     AND (kind = 'draft-update') = (draft IS NOT NULL)),
   -- A draft update answers its request: no review outlives its process (compilation §3.1).
   CONSTRAINT staging_claim_draft_update_transient CHECK (kind <> 'draft-update' OR mode = 'transient')

@@ -33,6 +33,22 @@ func (f fixture) markWith(t *testing.T, o Owner, claim string, opts takeoverOpti
 	return tk, err
 }
 
+// A drift adoption's paused claim (execution and recovery §6.3) is marked as a drift adoption.
+func TestMarkDriftAdoption(t *testing.T) {
+	f := setup(t)
+	_, c := f.paused(t)
+	exec(t, f.db, `UPDATE staging_claim SET kind = 'drift-adoption' WHERE id = $1`, c.ID)
+	var tk Taken
+	err := inTx(t.Context(), f.db, func(tx *sql.Tx) error {
+		var err error
+		tk, err = Mark(t.Context(), tx, f.taker(t), timers.Lease, c.ID)
+		return err
+	})
+	if err != nil || tk.Claim.Kind != "drift-adoption" {
+		t.Fatalf("marked %+v, %v", tk.Claim, err)
+	}
+}
+
 // Compilation §3.6 item 3, persistence-api T11: a mark takes a paused claim: the serving
 // instance becomes its owner at the next generation with a new lease, the state held, the
 // review still pending, and the claim's running ingest operation moves with it. The payload

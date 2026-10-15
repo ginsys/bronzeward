@@ -75,7 +75,7 @@ func takeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, cla
 	if opts.afterLock != nil {
 		opts.afterLock()
 	}
-	tk := Taken{Claim: Claim{ID: claim, Kind: "import", Mode: "encrypted"}} // only an import stages encrypted (staging_claim_draft_update_transient)
+	tk := Taken{Claim: Claim{ID: claim, Mode: "encrypted"}} // a draft update never stages encrypted (staging_claim_draft_update_transient)
 	var until time.Time
 	var digest []byte
 	// A claim with no payload is abandoned by this same write: eligibility was settled here, under
@@ -84,9 +84,9 @@ func takeOver(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, cla
 		state = CASE WHEN payload IS NULL THEN 'abandoned' ELSE 'resumed' END,
 		lease_until = least(clock_timestamp() + $4::bigint * interval '1 microsecond', expires_at)
 		WHERE id = $1 AND $3 = (SELECT epoch FROM installation_state) AND `+pred+`
-		RETURNING owner_gen, cluster, machine, coalesce(review, ''), lease_until, payload, payload_digest`,
-		claim, o.ID, o.Epoch, lease.Microseconds()).Scan(&tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine, &tk.Claim.Review, &until,
-		&tk.Payload, &digest)
+		RETURNING kind, owner_gen, cluster, machine, coalesce(review, ''), lease_until, payload, payload_digest`,
+		claim, o.ID, o.Epoch, lease.Microseconds()).Scan(&tk.Claim.Kind, &tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine,
+		&tk.Claim.Review, &until, &tk.Payload, &digest)
 	if opts.afterWrite != nil {
 		opts.afterWrite()
 	}

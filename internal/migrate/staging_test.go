@@ -26,7 +26,8 @@ func TestStagingSubject(t *testing.T) {
 		{"no machine", []any{"transient", nil, nil, a.cluster, nil, "import"}, "23514"}, // staging_claim_subject
 		{"no cluster", []any{"transient", nil, nil, nil, a.machine, "import"}, "23502"},
 		{"no kind", []any{"transient", nil, nil, a.cluster, a.machine, nil}, "23502"},
-		{"kind drift-adoption", []any{"transient", nil, nil, a.cluster, a.machine, "drift-adoption"}, "23514"},
+		{"unknown kind", []any{"transient", nil, nil, a.cluster, a.machine, "drift"}, "23514"},
+		{"drift adoption with no machine", []any{"transient", nil, nil, a.cluster, nil, "drift-adoption"}, "23514"},
 		{"payload without its digest", []any{"encrypted", []byte{1}, nil, a.cluster, a.machine, "import"}, "23514"},
 		{"digest without a payload", []any{"encrypted", nil, digest(5), a.cluster, a.machine, "import"}, "23514"},
 		{"31-byte payload digest", []any{"encrypted", []byte{1}, digest(5)[:31], a.cluster, a.machine, "import"}, "23514"},
@@ -36,9 +37,11 @@ func TestStagingSubject(t *testing.T) {
 			t.Errorf("%s: %v; want SQLSTATE %s", c.name, err, c.want)
 		}
 	}
-	// Positive controls: a transient claim with neither, an encrypted one with both.
+	// Positive controls: a transient claim with neither, an encrypted one with both, and a drift
+	// adoption (execution and recovery §6.3), which names its machine as an import does.
 	mustExec(t, db, insertSubjectClaim, id.New(id.Ingestion), "transient", nil, nil, a.cluster, a.machine, "import")
 	mustExec(t, db, insertSubjectClaim, id.New(id.Ingestion), "encrypted", []byte{1}, digest(5), a.cluster, a.machine, "import")
+	mustExec(t, db, insertSubjectClaim, id.New(id.Ingestion), "encrypted", []byte{1}, digest(5), a.cluster, a.machine, "drift-adoption")
 	// Clearing the payload clears its digest with it, as release and abandonment do.
 	enc := id.New(id.Ingestion)
 	mustExec(t, db, insertSubjectClaim, enc, "encrypted", []byte{1}, digest(5), a.cluster, a.machine, "import")
@@ -70,7 +73,8 @@ func TestDraftUpdateClaimSubject(t *testing.T) {
 		{"import without a machine", []any{"transient", a.cluster, nil, nil, "import"}, "23514"},
 		{"encrypted draft update", []any{"encrypted", a.cluster, nil, a.draft, "draft-update"}, "23514"},
 		{"draft of another cluster", []any{"transient", a.other, nil, a.draft, "draft-update"}, "23503"},
-		{"unknown kind", []any{"transient", a.cluster, nil, a.draft, "drift-adoption"}, "23514"},
+		{"drift adoption with a draft", []any{"transient", a.cluster, a.machine, a.draft, "drift-adoption"}, "23514"},
+		{"unknown kind", []any{"transient", a.cluster, nil, a.draft, "drift"}, "23514"},
 	} {
 		args := append([]any{id.New(id.Ingestion)}, c.args...)
 		if _, err := db.Exec(insertDraftClaim, args...); sqlState(err) != c.want {

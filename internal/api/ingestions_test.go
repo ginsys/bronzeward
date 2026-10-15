@@ -242,7 +242,8 @@ func TestIngestionStartRefusals(t *testing.T) {
 	}{
 		{"automation", ie.body(nil), ie.etag, ie.robot, http.StatusForbidden, "forbidden"},
 		{"document with source machine", ie.body(map[string]any{"source": "machine"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
-		{"drift kind", ie.body(map[string]any{"kind": "drift-adoption"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"unknown kind", ie.body(map[string]any{"kind": "drift"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
+		{"drift adoption of a document", ie.body(map[string]any{"kind": "drift-adoption"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"staging mode", ie.body(map[string]any{"staging": "disk"}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"bad mark", ie.body(map[string]any{"marks": []string{"~"}}), ie.etag, author, http.StatusBadRequest, "invalid-request"},
 		{"declared references", ie.body(map[string]any{"declarations": map[string]any{"references": map[string]any{

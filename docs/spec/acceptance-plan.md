@@ -537,8 +537,9 @@ run: **drift freeze, sanitized adoption and approved revert**
    is not frozen by detection.
 3. `h-author` freezes the scope.
 4. **Adopt.** `h-author` opens a new draft (`POST /drafts`), since the import draft is published,
-   and ingests the drifted configuration into it as a drift adoption (`POST /ingestions` naming
-   that draft, with `If-Match` its ETag), marking the new file's content. After the ingestion
+   and ingests the drifted configuration into it as a drift adoption (`POST /ingestions` with
+   `"kind": "drift-adoption"` and `"source": "machine"`, naming that draft, with `If-Match` its
+   ETag), marking the new file's content. After the ingestion
    succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
    `adopt` plan binding the drift record; `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
    record commits under the freeze.
