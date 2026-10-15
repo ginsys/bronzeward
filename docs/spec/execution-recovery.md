@@ -1856,6 +1856,12 @@ closed.
    with enough captures to state a distribution rather than one landing; and
    whether a dial failure proves no send. Until then accounting is an operator
    decision (§5.2), and a late landing is detected as drift, not prevented.
+   The measurement is recorded in the
+   [late-landing report](../design/research/20261016-late-landing.md): a
+   partition's bound on that fixture comes from grpc-go, Go and Linux transport
+   defaults Talos does not configure, a pause has none, and a failed dial sent
+   nothing. It supplies no bound for §5.2, so this item stays open and accounting
+   stays as above.
 3. **Recovery-mode entry and executor quiescence after restoration** (item 4).
    Closed by a restoration run on the fixture: a database restored to a
    snapshot older than a takeover, an approval, a revocation and a held

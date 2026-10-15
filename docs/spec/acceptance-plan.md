@@ -679,6 +679,9 @@ falls. A bound enters [ER §5.2](execution-recovery.md#52-accounting-a-lost-resp
 an accepted contract change; until then accounting stays a `recovery-admin` decision, and a late
 landing is detected as drift, not prevented.
 
+The measurement and its distribution are in the
+[late-landing report](../design/research/20261016-late-landing.md); it adopts no bound.
+
 **Retained evidence (S6).** Per point: the kill time, the timeline, the classification and scope
 state. Per capture: partition timing, the resource version series and the landing time.
 

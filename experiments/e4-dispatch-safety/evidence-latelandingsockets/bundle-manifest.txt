@@ -1,0 +1,26 @@
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./fixtures-diff.txt
+8d8aacc947f62ca3b377b89dacb511301e3eb22a42ce6c28ddbce2c1542cda97  ./injections.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./layers/bw-fixture-bronzeward-a.diff
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./layers/bw-fixture-bronzeward-a.paths
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./layers/bw-fixture-bronzeward-b.diff
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./layers/bw-fixture-bronzeward-b.paths
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./layers/bw-fixture-bronzeward-c.diff
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./layers/bw-fixture-bronzeward-c.paths
+d4db9aac392eb38248a9a1bdeb473eff7152a88f35251b8afbe47033f5cf75ef  ./leak-scan.txt
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./logs/bw-fixture-bronzeward-a.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./logs/bw-fixture-bronzeward-b.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./logs/bw-fixture-bronzeward-c.log
+8f638120b7b539bda422b2da1aaf192b96b6b146b0c2c2e91aa950de5ee1b1bd  ./logs/bw-fixture-controlplane-1.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./logs/bw-fixture-issuer.log
+6443e20bea8edc65b1f47a8c736eaf6ba53647be1b163d20341b09283f194e16  ./logs/bw-fixture-openbao.log
+dcb052dc24caf4cda766ca0787c26c2073decdc2285fff8eda82da9fabdba3b0  ./logs/bw-fixture-postgres.log
+4a6f07dfb33c3b68194bbcd29efbb3366e8e09ec1dc00c91d18821533cf4635d  ./logs/bw-fixture-worker-1.log
+bbd289738770598a99103fcc8236fa843529a650351aca0cf0244e4ebf4514cd  ./openbao-client-view.txt
+7bd363dd94a689ebafaf90b7ad138747ad0626970b42d55d115067a22812dfe4  ./openbao-metadata.jsonl
+4fde026d2c89f1a4db35f472e681aef6eeedfec3342bc427107e76fd9583c8d4  ./postgres.sql
+c2bf4265e0fd98d483c5b5823727d97e558699ed95b43cd70d201e8dba50391e  ./talos-config-sha256.txt
+475e519a0fafdfa88cd0d06a27781ab2b7a7e95ca3619c0d13beee5b4ddccd16  ./talos-config-version.txt
+5ab62b9c869da9ff38a0ef6c777f7243e0bf9b7701dcdcf3a4c0495750935e88  ./up-build.txt
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./up-fixtures-diff.txt
+66fc8523f451ff8520ff0e727631e3040cc883fbc718b047e583c4e9750a48d2  ./versions.txt
+61e14f717e95f34ad3dd75e518c0f80d32dd37fd741e10f9c187e53095b64260  ./postgres-data/ (1272 files: the sha256 of their lines in the full manifest, kept in E4D_OUT)
