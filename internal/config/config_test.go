@@ -190,21 +190,24 @@ func longName(n int) string {
 }
 
 // execution-recovery.md §5.2: the settle floor defaults to, and may not go under, 30s; the
-// maximum transport deadline has no default.
+// maximum transport deadline has no default. The drift interval (choice §10.36) defaults to 5m
+// and may not go under 1s.
 func TestExecution(t *testing.T) {
 	c, err := Load(strings.NewReader(base + authBlock))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Execution.SettleFloor != 30*time.Second || c.Execution.MaxTransportDeadline != 5*time.Minute {
+	if c.Execution.SettleFloor != 30*time.Second || c.Execution.MaxTransportDeadline != 5*time.Minute ||
+		c.Execution.DriftInterval != 5*time.Minute {
 		t.Fatalf("%+v", c.Execution)
 	}
 	noExec := strings.Replace(base, execBlock, "", 1)
 	for name, in := range map[string]string{
-		"settle floor under 30s": noExec + "execution: {settleFloor: 29s, maxTransportDeadline: 5m}\n" + authBlock,
-		"deadline negative":      noExec + "execution: {maxTransportDeadline: -1s}\n" + authBlock,
-		"deadline missing":       noExec + "execution: {settleFloor: 30s}\n" + authBlock,
-		"no execution block":     noExec + authBlock,
+		"drift interval under 1s": noExec + "execution: {maxTransportDeadline: 5m, driftInterval: 500ms}\n" + authBlock,
+		"settle floor under 30s":  noExec + "execution: {settleFloor: 29s, maxTransportDeadline: 5m}\n" + authBlock,
+		"deadline negative":       noExec + "execution: {maxTransportDeadline: -1s}\n" + authBlock,
+		"deadline missing":        noExec + "execution: {settleFloor: 30s}\n" + authBlock,
+		"no execution block":      noExec + authBlock,
 	} {
 		if _, err := Load(strings.NewReader(in)); err == nil {
 			t.Errorf("%s: accepted", name)

@@ -116,6 +116,7 @@ type options struct {
 	onPublish      func()                                                                               // runs instead of waking the publish worker
 	onIdle         func()                                                                               // runs when the publish worker found no job, before it waits
 	onAdoptIdle    func()                                                                               // runs after each pass of the adoption loop, before it waits
+	onDriftIdle    func()                                                                               // runs after each pass of the drift loop, before it waits
 	onExecIdle     func()                                                                               // runs after each pass of the executor loop, before it waits
 	dialApply      applyDialer                                                                          // talos.DialApplier by default (sender.go)
 	afterStage     func()                                                                               // runs when a job is staged, before T1
@@ -150,8 +151,8 @@ func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*
 
 // New returns the /api/v1 handler. ing, pub, exe and ic are nil without a provider. epoch is the
 // one this process read at its start: it owns claims and jobs under it, and under no later one
-// (§5.1). With a provider, it starts the publish worker and the adoption loop. The ingest
-// runners, the worker and the loop stop when life ends.
+// (§5.1). With a provider, it starts the publish worker and the adoption and drift loops. The
+// ingest runners, the worker and the loops stop when life ends.
 func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
 	exe Executor, ic *config.Ingestion, epoch string) http.Handler {
 	d := deps{ing: ing, exe: exe, life: life, exec: ex}
@@ -165,6 +166,7 @@ func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex 
 	api := newAPI(db, a, cfg, d, options{})
 	api.startPublisher()
 	api.startAdopter()
+	api.startDrifter()
 	api.startExecutor()
 	return api
 }

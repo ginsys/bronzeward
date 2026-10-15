@@ -20,7 +20,7 @@ import (
 // testExecution is a deployment's execution block at its defaults, with a five-minute transport
 // maximum.
 func testExecution() config.Execution {
-	return config.Execution{SettleFloor: 30 * time.Second, MaxTransportDeadline: 5 * time.Minute,
+	return config.Execution{SettleFloor: 30 * time.Second, MaxTransportDeadline: 5 * time.Minute, DriftInterval: 5 * time.Minute,
 		PlanDefaults: config.PlanDefaults{Expiry: 24 * time.Hour, MaxObservationAge: 5 * time.Minute, CheckValidity: 5 * time.Minute,
 			TransportDeadline: time.Minute, VerificationDeadline: 10 * time.Minute, MaxAttempts: 3}}
 }

@@ -986,8 +986,8 @@ digest while no operation on that machine is `committed`, `sending`,
 - A digest mismatch while an operation holds the machine scope is evidence for
   that operation's classification (§5).
 
-The controller observes each managed machine periodically (purpose `drift`);
-the interval is open. A mismatch in a `drift` observation, in a
+The controller observes each managed machine periodically (purpose `drift`),
+every configured drift interval **(choice §10.36)**. A mismatch in a `drift` observation, in a
 `restoration` observation after a restore (§7.3 step 4), or in the `evidence`
 observation of a commitment that comparison 3 refused on its digest (§3.2),
 opens a **drift record** on the machine's
@@ -2257,6 +2257,20 @@ conservative option; those that do not say so. Each is marked in place as
     a separate alert table or notifier, a delivery surface no PoC acceptance
     row asks for; one entry kind per change, which triples the kinds a
     timeline reader must know.
+36. **The drift interval is one configured period** (§6.1). Every controller
+    with an executor runs a drift loop: one interval after it starts and every
+    `execution.driftInterval` after that (default 5 minutes, at least 1
+    second), it takes a plan-less `drift` observation of each machine that has
+    an `Applied`, whose scope no operation holds and that recovery mode leaves
+    open, as the adoption loop reads that scope. The transaction recording the
+    observation applies §6.1 and §6.5 to it. The loop skips the machines whose
+    observation the basis rules would exclude anyway, and a pass does not run
+    at startup, so a restart reads no machine sooner than an interval later. A
+    failed read is logged and retried at the next pass. Agent decision,
+    2026-10-15 (ginsys/bronzeward#27). Alternatives: a per-machine schedule
+    spreading the reads, which the PoC's machine count does not need; a pass
+    at startup, which would read every machine on each restart of a fixture
+    run.
 
 ## 11. Traceability
 
