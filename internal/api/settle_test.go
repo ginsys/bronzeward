@@ -473,6 +473,19 @@ func TestSettle(t *testing.T) {
 				AND ms.baseline_revision = p.baseline_revision`, ae.pid, ae.machine); n != 1 {
 			t.Fatal("Applied changed")
 		}
+		// ER §4, §6.1: releasing the scope on a digest other than Applied's opens a drift record in
+		// the same transaction, with its opening entry.
+		if r.Drift != driftOpened {
+			t.Fatalf("drift change %q", r.Drift)
+		}
+		if n := count(t, ae.db, `SELECT count(*) FROM drift_record d JOIN machine_state s ON s.machine = d.machine
+				JOIN machine_event e ON e.machine = d.machine AND e.revision = d.opened AND e.kind = 'drift'
+			WHERE d.machine = $1 AND d.closed IS NULL AND d.observation = $2 AND d.last_observation = $2
+				AND d.applied_digest = s.applied_digest AND d.observed_digest = $3 AND d.late_landing IS NULL
+				AND e.entry->>'change' = 'opened' AND (e.entry->>'record')::bigint = d.opened AND e.entry->>'observation' = $2`,
+			ae.machine, obs, bytes.Repeat([]byte{0xee}, 32)); n != 1 {
+			t.Fatal("no open drift record with its opening entry")
+		}
 	})
 	t.Run("safe to retry", func(t *testing.T) {
 		t.Parallel()

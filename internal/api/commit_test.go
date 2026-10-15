@@ -252,8 +252,10 @@ func (ce *commitEnv) wantRefused(t *testing.T, err error, comparison, cause, obs
 	if observation != "" {
 		obs = observation
 	}
-	if n := count(t, ce.db, `SELECT count(*) FROM machine_event e JOIN machine m ON m.id = e.machine AND m.revision_counter = e.revision
+	// A drift entry the refusal's evidence makes follows it (TestCommitmentDrift).
+	if n := count(t, ce.db, `SELECT count(*) FROM machine_event e
 		WHERE e.machine = $1 AND e.kind = 'refusal' AND e.epoch = (SELECT epoch FROM installation_state)
+			AND e.revision = (SELECT max(revision) FROM machine_event WHERE machine = $1 AND kind <> 'drift')
 			AND e.entry = jsonb_strip_nulls(jsonb_build_object('transaction', 'T6', 'comparison', $2::text, 'plan', $3::text,
 				'cause', $4::text, 'controller', $5::text, 'observation', $6::text))`,
 		ce.machine, comparison, ce.pid, cause, ce.a.d.owner.ID, obs); n != 1 {

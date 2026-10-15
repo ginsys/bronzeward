@@ -1969,6 +1969,12 @@ HTTP/1.1 200 OK
  "frozen": false, "scopeState": "normal", "openDrift": null}
 ```
 
+A machine's `openDrift` is its open drift record (execution-recovery.md §6.1,
+choice §10.35), or null: `{"revision", "observation", "lastObservation",
+"lateLanding"}`, the revision of its opening timeline entry, the observation
+that opened it, the latest one recorded on it and the operation it may be a
+late landing of, or null. Its digests are not served.
+
 `source` is `machine` to read the configuration from the node, at the
 machine's Talos endpoint with its cluster's Talos access (§3.3), or `document`
 with the text in a `document` field. The ingestion resource is its staging

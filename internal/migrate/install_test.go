@@ -177,6 +177,7 @@ func TestEveryTableClassified(t *testing.T) {
 		"schema_migrations"}
 	// plan_state is updated only along its transitions and never deleted (TestPlanStateTransitions).
 	mutable := []string{"assignment", "automation_token", "cluster", "dependency_monitor", "dependency_status", "draft", "draft_entry",
+		"drift_record",
 		"draft_source_entry", "fragment", "installation_state", "machine", "machine_state", "operation", "plan_state",
 		"principal", "profile", "staging_claim"}
 	rows, err := db.Query("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")

@@ -153,6 +153,7 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 type settlement struct {
 	Operation, State, Outcome, Cause string
 	Revision                         int64
+	Drift                            string // the change a failure made to the machine's drift record (§6.5)
 }
 
 // settleOperation is the completion observation's decision (execution-recovery.md §4, §5, §5.1,
@@ -164,8 +165,8 @@ type settlement struct {
 // them, is ordered before the last accounting, is not tied to the operation or is contradicted by a
 // recorded observation of a higher basis settles nothing. Past the verification deadline, a
 // verifying operation that is neither established nor contradicted becomes unresolved. Completion
-// records `Applied` and its entry in the same transaction. A drift record opened by a failure is
-// ginsys/bronzeward#27's.
+// records `Applied` and its entry in the same transaction, and failure the drift record its
+// observation opens or is recorded on (§6.1).
 func (a *API) settleOperation(ctx context.Context, operation string, generation int64, observation string) (settlement, error) {
 	if a.d.owner.ID == "" {
 		return settlement{}, errNotController
@@ -305,6 +306,10 @@ func (a *API) settleOperation(ctx context.Context, operation string, generation 
 			"observation": observation, "attempts": attempts}); err != nil {
 			return err
 		}
+		// Releasing the scope makes a digest other than Applied's drift (§4, §6.1).
+		if r.Drift, err = applyDrift(ctx, tx, l.machine, l.current, observation, true); err != nil {
+			return err
+		}
 		r.State = l.state
 		return stay("failed", cause)
 	})
@@ -332,11 +337,12 @@ func (a *API) safeToRetry(ctx context.Context, tx *sql.Tx, l operationLock, plan
 	}
 	var max sql.NullInt64
 	var scope string
-	var frozen, recovery bool
+	var frozen, drift, recovery bool
 	var at time.Time
-	if err := tx.QueryRowContext(ctx, `SELECT p.max_attempts, m.scope_state, m.frozen, i.recovery_mode, clock_timestamp()
+	if err := tx.QueryRowContext(ctx, `SELECT p.max_attempts, m.scope_state, m.frozen,
+			EXISTS (SELECT FROM drift_record d WHERE d.machine = m.id AND d.closed IS NULL), i.recovery_mode, clock_timestamp()
 		FROM plan p JOIN machine m ON m.id = p.machine, installation_state i WHERE p.id = $1`, plan).Scan(&max, &scope, &frozen,
-		&recovery, &at); err != nil {
+		&drift, &recovery, &at); err != nil {
 		return false, "", err
 	}
 	if !max.Valid || int64(attempts) >= max.Int64 {
@@ -349,7 +355,7 @@ func (a *API) safeToRetry(ctx context.Context, tx *sql.Tx, l operationLock, plan
 	if cause != "" {
 		return false, cause, nil
 	}
-	if cause := scopeGate(frozen, scope, recovery); cause != "" {
+	if cause := scopeGate(frozen, drift, scope, recovery); cause != "" {
 		return false, cause, nil
 	}
 	return true, "", nil
