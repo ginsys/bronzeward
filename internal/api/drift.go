@@ -60,7 +60,7 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 	}
 	differs := !bytes.Equal(digest, applied)
 	// A differing digest that is the artifact of an operation accounted by decision may be its late
-	// landing, whether it opens the record or is recorded on it.
+	// landing, whether it opens the record or is recorded on it; the record links the latest one's.
 	var late sql.NullString
 	if differs {
 		if err := tx.QueryRowContext(ctx, `SELECT op.id FROM operation op JOIN plan p ON p.id = op.plan
@@ -86,7 +86,7 @@ func applyDrift(ctx context.Context, tx *sql.Tx, machine, epoch, observation str
 			return "", err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE drift_record SET observed_digest = $3, last_observation = $4,
-				late_landing = COALESCE(NULLIF($5, ''), late_landing)
+				late_landing = NULLIF($5, '')
 			WHERE machine = $1 AND opened = $2`, machine, open.Int64, digest, observation, late.String)
 		return driftObserved, err
 	case open.Valid && !failing:

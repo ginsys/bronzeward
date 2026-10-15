@@ -488,7 +488,8 @@ func TestSettle(t *testing.T) {
 		}
 	})
 	// ER §6.1: a failure accounted by decision opens a record on its contradicting digest; a later
-	// observation of its artifact is recorded on that record as its possible late landing.
+	// observation of its artifact is recorded on that record as its possible late landing, and a
+	// further unrelated digest replaces the record's link with none.
 	t.Run("late landing on an open record", func(t *testing.T) {
 		t.Parallel()
 		ae, a, gen := lost(t)
@@ -496,25 +497,35 @@ func TestSettle(t *testing.T) {
 		if r, err := a.settleOperation(context.Background(), ae.op, gen, failing); err != nil || r.Drift != driftOpened {
 			t.Fatalf("settled %+v: %v", r, err)
 		}
+		observe := func(obs string) {
+			t.Helper()
+			tx, err := ae.db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			mustExec(t, tx, `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, ae.machine)
+			if change, err := applyDrift(context.Background(), tx, ae.machine, epoch(t, ae.db), obs, false); err != nil ||
+				change != driftObserved {
+				t.Fatalf("drift change %q: %v", change, err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+		}
 		landed := ae.observed(t, nil)
-		tx, err := ae.db.Begin()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		mustExec(t, tx, `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, ae.machine)
-		if change, err := applyDrift(context.Background(), tx, ae.machine, epoch(t, ae.db), landed, false); err != nil ||
-			change != driftObserved {
-			t.Fatalf("drift change %q: %v", change, err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatal(err)
-		}
+		observe(landed)
 		if n := count(t, ae.db, `SELECT count(*) FROM drift_record d JOIN machine_event e ON e.machine = d.machine AND e.kind = 'drift'
 				AND e.entry->>'change' = 'observed' AND e.entry->>'lateLanding' = $3
 			WHERE d.machine = $1 AND d.observation = $2 AND d.last_observation = $4 AND d.late_landing = $3`,
 			ae.machine, failing, ae.op, landed); n != 1 {
 			t.Fatal("the late landing is not recorded on the open record")
+		}
+		unrelated := ae.observed(t, func(c *cobs) { c.digest = bytes.Repeat([]byte{0xdd}, 32) })
+		observe(unrelated)
+		if n := count(t, ae.db, `SELECT count(*) FROM drift_record WHERE machine = $1 AND last_observation = $2
+			AND late_landing IS NULL`, ae.machine, unrelated); n != 1 {
+			t.Fatal("the record keeps a late landing its latest observation cannot be")
 		}
 	})
 	t.Run("safe to retry", func(t *testing.T) {
