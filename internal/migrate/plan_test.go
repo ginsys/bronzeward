@@ -84,7 +84,7 @@ func (p plans) planRow(planID string, rev int) record {
 	now := time.Now()
 	return newRecord("plan", "id", planID, "cluster", p.cluster, "machine", p.machine, "kind", "apply-config",
 		"mode", "no-reboot", "release", p.rel, "assignment_revision", p.asr, "desired_release", p.rel,
-		"baseline_revision", 1, "expected_digest", digest(5), "route", "10.55.0.3:50000",
+		"baseline_revision", 1, "drift_record", nil, "expected_digest", digest(5), "route", "10.55.0.3:50000",
 		"max_observation_age", "5 minutes", "check_validity", "10 minutes", "transport_deadline", "1 minute",
 		"verification_deadline", "5 minutes", "max_attempts", 3, "rollout_limit", 1, "expires_at", now.Add(time.Hour),
 		"idempotency_key", "plan-"+planID[4:20], "approval_policy", "one-approver", "created_by", p.human,
@@ -253,6 +253,11 @@ func TestPlanConstraints(t *testing.T) {
 	plan("apply-config not desiring its release", "23514/plan_kind_bindings", apply.with("desired_release", nil))
 	plan("apply-config with no baseline revision", "23514/plan_kind_bindings", apply.with("baseline_revision", nil))
 	plan("adopt with a baseline revision", "23514/plan_kind_bindings", adopt.with("baseline_revision", 1))
+	// A drifted machine's adopt plan binds its drift record and baseline revision together; an
+	// apply-config plan binds no drift record (execution and recovery §6.3 step 3).
+	plan("adopt with a drift record and no baseline revision", "23514/plan_kind_bindings", adopt.with("drift_record", 7))
+	plan("apply-config with a drift record", "23514/plan_kind_bindings", apply.with("drift_record", 7))
+	plan("adopt bound to no drift record", "23503", adopt.with("baseline_revision", 1, "drift_record", 7))
 	plan("apply-config with no expected digest", "23514/plan_kind_bindings", apply.with("expected_digest", nil))
 	plan("adopt with an expected digest", "23514/plan_kind_bindings", adopt.with("expected_digest", digest(5)))
 	plan("apply-config with no transport deadline", "23514/plan_kind_bindings", apply.with("transport_deadline", nil))

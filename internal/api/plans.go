@@ -183,6 +183,7 @@ type planBody struct {
 	AssignmentRevision          string       `json:"assignmentRevision"`
 	DesiredRelease              *string      `json:"desiredRelease"`
 	BaselineRevision            *int64       `json:"baselineRevision"`
+	DriftRecord                 *int64       `json:"driftRecord"`
 	Route                       string       `json:"route"`
 	MaxObservationAgeSeconds    int64        `json:"maxObservationAgeSeconds"`
 	CheckValiditySeconds        int64        `json:"checkValiditySeconds"`
@@ -289,9 +290,21 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 		}
 		b.Evidence.Diff = d
 	case "adopt":
+		// A machine with an Applied is adopted only while drifted: the plan binds its open drift record
+		// and its baseline revision (execution-recovery.md §6.3 step 3); a handover binds neither.
 		if appliedRelease.Valid {
-			return result{}, refuse(http.StatusConflict, "conflict",
-				"the machine already has an Applied configuration; adopt only a machine with none").with("machine", in.Machine)
+			var opened int64
+			err := tx.QueryRowContext(ctx, `SELECT opened FROM drift_record WHERE machine = $1 AND closed IS NULL`,
+				in.Machine).Scan(&opened)
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				return result{}, refuse(http.StatusConflict, "conflict",
+					"the machine has an Applied configuration and no open drift record; adopt only a drifted machine or one with none").
+					with("machine", in.Machine)
+			case err != nil:
+				return result{}, err
+			}
+			b.DriftRecord, b.BaselineRevision = &opened, &baselineRev.Int64
 		}
 		appliedDigest = nil
 		b.Evidence.Baseline = &planBaseline{ImportBaseRevision: ibr.String, PendingConvergence: !bytes.Equal(artifact, baseline)}
@@ -350,15 +363,16 @@ func insertPlan(ctx context.Context, tx *sql.Tx, q *request, in *planInput, b *p
 	if err := tx.QueryRowContext(ctx, `INSERT INTO plan (id, cluster, machine, kind, mode, release, assignment_revision,
 			desired_release, baseline_revision, expected_digest, route, max_observation_age, check_validity, transport_deadline,
 			verification_deadline, max_attempts, expires_at, idempotency_key, approval_policy, created_by, created_by_kind,
-			created_role, epoch, created_at, evidence, revision)
+			created_role, epoch, created_at, evidence, revision, drift_record)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, make_interval(secs => $12), make_interval(secs => $13),
 			make_interval(secs => $14), make_interval(secs => $15), $16, $24::timestamptz + make_interval(secs => $17), $18,
-			'one-approver', $19, $20, 'publisher', $21, $24, $22, $23)
+			'one-approver', $19, $20, 'publisher', $21, $24, $22, $23, $25)
 		RETURNING created_at, expires_at`,
 		b.ID, b.Cluster, in.Machine, in.Operation, in.Mode, in.ReleaseID, b.AssignmentRevision, b.DesiredRelease,
 		b.BaselineRevision, appliedDigest, b.Route, b.MaxObservationAgeSeconds, b.CheckValiditySeconds,
 		b.TransportDeadlineSeconds, b.VerificationDeadlineSeconds, b.MaxAttempts, *in.ExpiresInSeconds, q.key,
-		b.CreatedBy.Principal, string(q.principal.Kind), q.epoch, evidence, b.TimelineRevision, at).Scan(&b.CreatedAt, &b.ExpiresAt); err != nil {
+		b.CreatedBy.Principal, string(q.principal.Kind), q.epoch, evidence, b.TimelineRevision, at, b.DriftRecord).Scan(&b.CreatedAt,
+		&b.ExpiresAt); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO plan_state (plan, state, updated_at) VALUES ($1, 'proposed', $2)`, b.ID, at); err != nil {
@@ -377,7 +391,8 @@ const selectPlan = `SELECT p.id, s.revision,
 		CASE WHEN s.state = 'approved' AND ap.revoked AND (r.at IS NULL OR r.at < p.expires_at) THEN 'revoked'
 			WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= c.t THEN 'expired' ELSE s.state END,
 		s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
-		p.assignment_revision, p.desired_release, p.baseline_revision, p.route, extract(epoch FROM p.max_observation_age)::bigint,
+		p.assignment_revision, p.desired_release, p.baseline_revision, p.drift_record, p.route,
+		extract(epoch FROM p.max_observation_age)::bigint,
 		extract(epoch FROM p.check_validity)::bigint, extract(epoch FROM p.transport_deadline)::bigint,
 		extract(epoch FROM p.verification_deadline)::bigint, p.max_attempts, p.rollout_limit, p.approval_policy, p.created_by,
 		p.created_role, p.epoch, p.revision, p.created_at, p.expires_at, p.evidence
@@ -389,7 +404,7 @@ func scanPlan(r interface{ Scan(...any) error }) (*planBody, error) {
 	b := &planBody{}
 	var evidence []byte
 	if err := r.Scan(&b.ID, &b.Revision, &b.State, &b.CommittedOperation, &b.Approval, &b.Cluster, &b.Machine, &b.Release,
-		&b.Operation, &b.Mode, &b.AssignmentRevision, &b.DesiredRelease, &b.BaselineRevision, &b.Route,
+		&b.Operation, &b.Mode, &b.AssignmentRevision, &b.DesiredRelease, &b.BaselineRevision, &b.DriftRecord, &b.Route,
 		&b.MaxObservationAgeSeconds, &b.CheckValiditySeconds, &b.TransportDeadlineSeconds, &b.VerificationDeadlineSeconds,
 		&b.MaxAttempts, &b.RolloutLimit, &b.ApprovalPolicy, &b.CreatedBy.Principal, &b.CreatedBy.Role, &b.Epoch,
 		&b.TimelineRevision, &b.CreatedAt, &b.ExpiresAt, &evidence); err != nil {

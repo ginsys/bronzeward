@@ -26,6 +26,7 @@ type adoptEnv struct {
 	baseline                  []byte
 	expires                   time.Time
 	keys                      int
+	drift                     int64 // the drift record the plan binds, by its opening entry's revision; 0 for a handover
 }
 
 func newAdoptEnv(t *testing.T, extra string, before ...func(*planEnv)) *adoptEnv {
@@ -36,6 +37,21 @@ func newAdoptEnv(t *testing.T, extra string, before ...func(*planEnv)) *adoptEnv
 	}
 	mustExec(t, ae.db, `UPDATE machine_state SET applied_release = NULL, applied_digest = NULL, applied_source = NULL,
 		baseline_revision = NULL, desired = NULL WHERE machine = $1`, ae.machine)
+	return ae.planned(t, extra)
+}
+
+// newDriftedAdoptEnv is an adoptEnv whose machine keeps its Applied, baseline revision 4 and Desired,
+// and has an open drift record that its adopt plan binds (execution-recovery.md §6.3).
+func newDriftedAdoptEnv(t *testing.T, extra string) *adoptEnv {
+	t.Helper()
+	ae := &adoptEnv{planEnv: newPlanEnv(t)}
+	ae.drift = openDriftOn(t, ae.db, ae.machine)
+	return ae.planned(t, extra)
+}
+
+// planned creates the adopt plan of the target release and reads what it binds.
+func (ae *adoptEnv) planned(t *testing.T, extra string) *adoptEnv {
+	t.Helper()
 	b := decode[planBody](t, ae.plan(ae.robot, "k-adopt-0123456789", adoptBody(ae.target.rel, ae.machine,
 		`,"maxObservationAgeSeconds":60`+extra)), http.StatusCreated)
 	ae.pid, ae.expires = b.ID, b.ExpiresAt
