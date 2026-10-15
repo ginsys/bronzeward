@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# The late-landing measurement (acceptance plan S6.2): how often, and when, a configuration apply
+# abandoned by its client still lands on the fixture's worker. Each capture makes a fresh artifact
+# (a node label unique to the capture), starts `talosctl apply-config --mode=no-reboot` with a fault
+# already in place, kills talosctl at the transport deadline as e4x does (talos.go), heals the fault
+# after the cell's partition length, then reads the worker's machine-configuration resource version
+# once a second for the window. The version is the landing signal: it moves on every apply that
+# lands and not on a refused one (the dispatch-safety report §3).
+#
+# Cells (fault x partition length x connection state):
+#   control-none: no fault, so the apply lands; the positive control of the landing signal;
+#   netsplit-worker, pause-worker, pause-controlplane at 20, 45 and 90 s, sent through the control
+#     plane's API proxy on a warm connection (the harness has just read the worker through it);
+#   cold: the control plane restarted before the capture and the worker reached only directly, so
+#     the proxy has no connection to the worker and must dial it during the partition;
+#   direct: talosctl straight to the worker's endpoint, partitioned before the dial (step 3).
+# Every read the window makes goes straight to the worker, never through the proxy, so the series
+# does not share the connection it measures.
+#
+# Needs the fixture up (fixtures/bin/up); E4D_OUT names a new, empty directory outside the checkout.
+# E4M_N=<captures per cell> (5 by default); E4M_ONLY=<extended regex> runs only the matching cells,
+# for development, and is recorded in run.txt.
+#
+# Evidence for ginsys/bronzeward issue 28 (S6.2). Not v1 tooling.
+set -uo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+E4M_N=${E4M_N:-5}
+[[ $E4M_N =~ ^[1-9][0-9]*$ ]] || die "E4M_N must be a positive integer"
+# e4x's transport deadline in the dispatch-safety rows, and the window after the heal.
+E4M_DEADLINE=15
+E4M_WINDOW=60
+E4M_CAPTURES=$E4D_OUT/captures.tsv
+
+e4d_init
+e4d_need_fixture
+
+# Straight to the worker, for every read of a capture: bounded short, so a read that cannot get
+# through costs a second of the window, not the window.
+d_talos() { talosctl_timed "${D_LIMIT:-3}" -e "$TALOS_WORKER_IP" -n "$TALOS_WORKER_IP" "$@"; }
+d_resource() {
+  local yaml v u
+  yaml=$(d_talos get machineconfig v1alpha1 -o yaml) || return 1
+  v=$(awk '$1 == "version:" { print $2; exit }' <<<"$yaml")
+  u=$(awk '$1 == "updated:" { print $2; exit }' <<<"$yaml")
+  [[ $v =~ ^[0-9]+$ ]] || return 1
+  printf '%s %s\n' "$v" "${u:-unknown}"
+}
+# d_applies_since <YYYY/MM/DD HH:MM:SS>: machined's ApplyConfiguration lines logged at or after that
+# time (UTC, the worker's clock, the host's). The log talosctl returns is a bounded buffer, so a
+# count over all of it is not monotonic; the lines themselves carry each request's status.
+d_applies_since() {
+  local log
+  log=$(D_LIMIT=10 d_talos logs machined) || return 1
+  awk -v since="$1" '/\[\/machine\.MachineService\/ApplyConfiguration\]/ && $2 " " $3 >= since' <<<"$log"
+}
+
+# A fault left in place by an interrupted run would make every later capture meaningless.
+HEAL=()
+heal_all() {
+  local h a
+  for h in "${HEAL[@]}"; do
+    read -ra a <<<"$h"
+    "$FIXTURES_DIR/bin/inject" "${a[@]}" >/dev/null 2>&1 || true
+  done
+  HEAL=()
+}
+trap heal_all EXIT
+
+now_ms() { date -u +%FT%T.%3NZ; }
+
+# inject_logged <action> <target>: the fixture's injection; its output goes to the capture's log.
+inject_logged() {
+  printf '%s $ inject %s\n' "$(now_ms)" "$*" >>"$LOG"
+  "$FIXTURES_DIR/bin/inject" "$@" >>"$LOG" 2>&1
+}
+
+# capture <cell> <n> <fault> <length> <route>: one capture; one line in captures.tsv.
+#   fault: netsplit-worker | pause-worker | pause-controlplane; route: warm | cold | direct
+capture() {
+  local cell=$1 n=$2 fault=$3 length=$4 route=$5 action target undo endpoint
+  local pre_v pre_u since send_at kill_at heal_at rc v u first='' last_v start i applies ok other
+  local landed=no
+  ROW_N=$(printf '%s-%02d' "$cell" "$n") ROW_ID=$ROW_N ROW_PARTS=$E4D_PARTS/$ROW_N
+  mkdir -p -- "$ROW_PARTS"
+  LOG=$E4D_T/$ROW_N.txt
+  : >"$LOG"
+  action=${fault%%-*} target=${fault#*-}
+  case $action in
+    netsplit) undo=netjoin ;;
+    pause) undo=unpause ;;
+    none) undo=none ;;
+    *) die "capture $ROW_N: unknown fault $fault" ;;
+  esac
+  endpoint=$TALOS_CONTROLPLANE_IP
+  [ "$route" = direct ] && endpoint=$TALOS_WORKER_IP
+
+  if [ "$route" = cold ]; then
+    # A restarted control plane holds no proxy connection to the worker. Nothing below reaches
+    # the worker through it before the send: the artifact and the reads go straight to the worker.
+    inject_logged kill controlplane || die "capture $ROW_N: could not kill the control plane"
+    inject_logged start controlplane || die "capture $ROW_N: could not start the control plane"
+  fi
+  # The artifact: the worker's configuration with a node label unique to this capture.
+  d_talos get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$ROW_PARTS/base.yaml" ||
+    die "capture $ROW_N: could not read the worker's configuration"
+  talosctl_timed 20 machineconfig patch "$ROW_PARTS/base.yaml" --output "$ROW_PARTS/art.yaml" \
+    --patch "{\"machine\":{\"nodeLabels\":{\"bronzeward.test/e4m\":\"$ROW_N\"}}}" >/dev/null ||
+    die "capture $ROW_N: could not make the artifact"
+  read -r pre_v pre_u < <(d_resource) || die "capture $ROW_N: could not read the worker's resource"
+  # A landing after the previous capture's window shows here, as a version it did not end on.
+  if [ -n "${PREV_V:-}" ] && [ "$pre_v" != "$PREV_V" ]; then
+    printf '%s\tlanded after its window: version %s at the next capture, %s at its window end\n' \
+      "$PREV_ID" "$pre_v" "$PREV_V" >>"$E4D_OUT/after-window.tsv"
+  fi
+  # Warm: the harness's own read through the proxy, so it holds a live connection to the worker.
+  if [ "$route" = warm ]; then
+    w_talos version --short >>"$LOG" 2>&1 || die "capture $ROW_N: the worker is not readable through the control plane"
+  fi
+  printf 'pre version=%s updated=%s\n' "$pre_v" "$pre_u" >>"$LOG"
+
+  # Whole seconds: an apply logged in the second the fault went in is counted, not lost.
+  since=$(date -u '+%Y/%m/%d %H:%M:%S')
+  if [ "$action" != none ]; then
+    inject_logged "$action" "$target" || die "capture $ROW_N: could not $action $target"
+    HEAL=("$undo $target")
+  fi
+  start=$SECONDS
+  send_at=$(now_ms)
+  rc=0
+  timeout --signal=KILL "$E4M_DEADLINE" "$CACHE/talosctl" -e "$endpoint" -n "$TALOS_WORKER_IP" \
+    apply-config --mode=no-reboot --file "$ROW_PARTS/art.yaml" >>"$LOG" 2>&1 || rc=$?
+  kill_at=$(now_ms)
+  printf '%s talosctl exited %s\n' "$kill_at" "$rc" >>"$LOG"
+  if [ "$action" != none ]; then
+    i=$((length - (SECONDS - start)))
+    [ "$i" -le 0 ] || sleep "$i"
+    inject_logged "$undo" "$target" || die "capture $ROW_N: could not $undo $target"
+    HEAL=()
+  fi
+  heal_at=$(now_ms)
+
+  # The window: one read a second, straight to the worker.
+  last_v=$pre_v
+  start=$SECONDS
+  while [ $((SECONDS - start)) -lt "$E4M_WINDOW" ]; do
+    if read -r v u < <(d_resource); then
+      printf '%s version=%s updated=%s\n' "$(now_ms)" "$v" "$u" >>"$LOG"
+      last_v=$v
+      if [ -z "$first" ] && [ "$v" != "$pre_v" ]; then first=$(now_ms) landed=yes; fi
+    else
+      printf '%s unreadable\n' "$(now_ms)" >>"$LOG"
+    fi
+    sleep 1
+  done
+  read -r v u < <(d_resource) || { v=$last_v u=unknown; }
+  if applies=$(d_applies_since "$since"); then
+    printf 'machined ApplyConfiguration since %s:\n%s\n' "$since" "$applies" >>"$LOG"
+    ok=$(grep -c ' OK \[' <<<"$applies")
+    other=$(grep -c . <<<"$applies")
+    other=$((other - ok))
+  else
+    printf 'machined log unreadable\n' >>"$LOG"
+    ok=unknown other=unknown
+  fi
+  PREV_V=$v PREV_ID=$ROW_N
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$ROW_N" "$fault" "$length" \
+    "$route" "$send_at" "$rc" "$kill_at" "$heal_at" "$pre_v" "$v" "$landed" "${first:--}" \
+    "$([ "$v" != "$pre_v" ] && printf '%s' "$u" || printf -- '-')" "$ok" "$other" \
+    "$(git -C "$REPO_DIR" rev-parse --short HEAD)" "transcripts/$ROW_N.txt" >>"$E4M_CAPTURES"
+  say "capture $ROW_N: talosctl rc=$rc landed=$landed${first:+ first seen $first}"
+}
+
+uncommitted=$(git -C "$REPO_DIR" status --porcelain -- experiments/e4-dispatch-safety fixtures \
+  ':!experiments/e4-dispatch-safety/evidence*')
+{
+  printf 'commit\t%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD)"
+  printf 'uncommitted inputs\t%s\n' "$(printf '%s' "$uncommitted" | grep -c .)"
+  [ -z "$uncommitted" ] || printf '%s\n' "$uncommitted" | sed 's/^/uncommitted\t/'
+  [ -z "${E4M_ONLY:-}" ] || printf 'only\t%s\n' "$E4M_ONLY"
+  printf 'started\t%s\n' "$(date -u +%FT%TZ)"
+  printf 'talosctl\t%s\n' "$(talosctl_timed 10 version --client --short | tr '\n' ' ')"
+  printf 'talos worker\t%s\n' "$(w_talos version --short | tr '\n' ' ')"
+  printf 'captures per cell\t%s\n' "$E4M_N"
+  printf 'transport deadline\t%ss\n' "$E4M_DEADLINE"
+  printf 'window\t%ss\n' "$E4M_WINDOW"
+} >"$E4D_OUT/run.txt"
+printf 'capture\tfault\tlength\troute\tsent\ttalosctl_rc\tkilled\thealed\tpre_version\tend_version\tlanded\tfirst_seen\tworker_updated\tmachined_ok\tmachined_other\tcommit\ttranscript\n' \
+  >"$E4M_CAPTURES"
+
+# The control first: with no fault the apply lands, the version moves and machined logs one OK, or
+# a no-landing result below would prove nothing about the signal.
+cells=("control-none:none-none:0:warm")
+for fault in netsplit-worker pause-worker pause-controlplane; do
+  for length in 20 45 90; do cells+=("$fault-$length:$fault:$length:warm"); done
+done
+cells+=("cold-netsplit-worker-20:netsplit-worker:20:cold" "direct-netsplit-worker-20:netsplit-worker:20:direct")
+for c in "${cells[@]}"; do
+  IFS=: read -r cell fault length route <<<"$c"
+  [[ -z ${E4M_ONLY:-} || $cell =~ $E4M_ONLY ]] || continue
+  for ((k = 1; k <= E4M_N; k++)); do capture "$cell" "$k" "$fault" "$length" "$route"; done
+done
+
+install -m 600 -- "$STATE/scan-patterns.txt" "$E4D_PATTERNS"
+cp -- "$STATE/injections.log" "$E4D_OUT/injections.log"
+count=$(($(wc -l <"$E4M_CAPTURES") - 1))
+landed=$(awk -F'\t' 'NR > 1 && $11 == "yes"' "$E4M_CAPTURES" | wc -l)
+printf 'finished\t%s\n' "$(date -u +%FT%TZ)" >>"$E4D_OUT/run.txt"
+printf 'captures %s, landed %s\n' "$count" "$landed" >"$E4D_OUT/complete"
+say "measure: $count captures, $landed landed, in $E4M_CAPTURES"
