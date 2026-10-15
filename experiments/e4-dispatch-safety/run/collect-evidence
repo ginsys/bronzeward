@@ -13,12 +13,17 @@ set -euo pipefail
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 need grep sed find sort sha256sum cut
 [ -s "$E4D_MARK" ] || die "$E4D_OUT is not an E4 dispatch-safety run directory ($E4D_MARK is missing)"
-[ -s "$E4D_OUT/complete" ] || die "$E4D_OUT/complete is missing: run/all did not finish"
+[ -s "$E4D_OUT/complete" ] || die "$E4D_OUT/complete is missing: the run did not finish"
 [ -s "$E4D_PATTERNS" ] || die "$E4D_PATTERNS is missing or empty"
-! grep -q '^only' -- "$E4D_OUT/run.txt" || die "$E4D_OUT is a partial run (E4D_ONLY was set); run the whole matrix"
+! grep -q '^only' -- "$E4D_OUT/run.txt" || die "$E4D_OUT is a partial run (E4D_ONLY or E4M_ONLY was set); run it whole"
+# A run/measure output has captures.tsv in place of the matrix's cells.tsv, and its own default
+# directory, so that it never replaces the matrix's evidence.
+measure=0
+[ ! -s "$E4D_OUT/captures.tsv" ] || measure=1
 
 # E4D_EVIDENCE names another directory of this experiment for an earlier capture kept alongside.
 dest=${E4D_EVIDENCE:-$E4D_DIR/evidence}
+[ "$measure" = 0 ] || dest=${E4D_EVIDENCE:-$E4D_DIR/evidence-latelanding}
 # One path component, evidence or evidence-<letters and digits>: nothing that can climb out.
 [[ $dest == "$E4D_DIR"/* && ${dest#"$E4D_DIR"/} =~ ^evidence(-[A-Za-z0-9]+)?$ ]] ||
   die "E4D_EVIDENCE ($dest) must be $E4D_DIR/evidence or $E4D_DIR/evidence-<name>"
@@ -30,16 +35,31 @@ rewrite() { # rewrite <in> <out>; trailing whitespace (talosctl's version lines 
   mkdir -p -- "$(dirname -- "$2")"
   placeholders "$1" | sed 's/[[:space:]]*$//' >"$2"
 }
-for f in run.txt cells.tsv injections.log; do
-  rewrite "$E4D_OUT/$f" "$incoming/$f"
-done
-# The transcript column names each row's section in its group's pack (below), not the per-row file
-# run/all wrote, which is not committed.
-awk -F'\t' -v OFS='\t' 'NR > 1 {
-  if ($7 != "transcripts/" $1 "-" $2 "-" $3 ".txt") { print "unexpected transcript " $7 > "/dev/stderr"; exit 1 }
-  $7 = "transcripts/" $2 ".txt#" $1 "-" $2 "-" $3
-} { print }' "$incoming/cells.tsv" >"$incoming/cells.tsv.new" || die "cannot point cells.tsv at the packed transcripts"
-mv -- "$incoming/cells.tsv.new" "$incoming/cells.tsv"
+if [ "$measure" = 0 ]; then
+  for f in run.txt cells.tsv injections.log; do
+    rewrite "$E4D_OUT/$f" "$incoming/$f"
+  done
+  # The transcript column names each row's section in its group's pack (below), not the per-row file
+  # run/all wrote, which is not committed.
+  awk -F'\t' -v OFS='\t' 'NR > 1 {
+    if ($7 != "transcripts/" $1 "-" $2 "-" $3 ".txt") { print "unexpected transcript " $7 > "/dev/stderr"; exit 1 }
+    $7 = "transcripts/" $2 ".txt#" $1 "-" $2 "-" $3
+  } { print }' "$incoming/cells.tsv" >"$incoming/cells.tsv.new" || die "cannot point cells.tsv at the packed transcripts"
+  mv -- "$incoming/cells.tsv.new" "$incoming/cells.tsv"
+else
+  for f in run.txt captures.tsv injections.log; do
+    rewrite "$E4D_OUT/$f" "$incoming/$f"
+  done
+  [ ! -s "$E4D_OUT/after-window.tsv" ] || rewrite "$E4D_OUT/after-window.tsv" "$incoming/after-window.tsv"
+  # As for the matrix: each capture's section in its cell's pack. A capture is <cell>-<nn>.
+  awk -F'\t' -v OFS='\t' 'NR > 1 {
+    if ($17 != "transcripts/" $1 ".txt") { print "unexpected transcript " $17 > "/dev/stderr"; exit 1 }
+    cell = $1; sub(/-[0-9][0-9]$/, "", cell)
+    $17 = "transcripts/" cell ".txt#" $1
+  } { print }' "$incoming/captures.tsv" >"$incoming/captures.tsv.new" ||
+    die "cannot point captures.tsv at the packed transcripts"
+  mv -- "$incoming/captures.tsv.new" "$incoming/captures.tsv"
+fi
 
 # The fixture's evidence bundle, copied to E4D_OUT/bundle before teardown (README), stays there.
 # What is committed is its summary and a manifest of what was copied.
@@ -79,20 +99,28 @@ rewrite "$E4D_OUT/bundle-manifest-committed.txt" "$incoming/bundle-manifest.txt"
 # diff limit. Each row's transcript follows a `==> <row> <==` line, in row order; the pack ends
 # with `==> end <==`.
 packs=0
+if [ "$measure" = 0 ]; then
+  groups=$(awk -F'\t' 'NR > 1 { print $2 }' "$E4D_CELLS" | sort -u)
+else
+  groups=$(awk -F'\t' 'NR > 1 { cell = $1; sub(/-[0-9][0-9]$/, "", cell); print cell }' "$E4D_OUT/captures.tsv" | sort -u)
+fi
 while IFS= read -r group; do
+  [ -n "$group" ] || continue
   out=$incoming/transcripts/$group.txt
+  name="[0-9][0-9][0-9]-$group-*.txt"
+  [ "$measure" = 0 ] || name="$group-[0-9][0-9].txt"
   mkdir -p -- "$(dirname -- "$out")"
   {
     while IFS= read -r -d '' f; do
       printf '==> %s <==\n' "$(basename -- "$f" .txt)"
       placeholders "$f"
       [ -z "$(tail -c 1 -- "$f")" ] || printf '\n'
-    done < <(find "$E4D_T" -type f -name "[0-9][0-9][0-9]-$group-*.txt" -print0 | sort -z)
+    done < <(find "$E4D_T" -type f -name "$name" -print0 | sort -z)
     printf '==> end <==\n'
   } >"$out"
   packs=$((packs + 1))
-done < <(awk -F'\t' 'NR > 1 { print $2 }' "$E4D_CELLS" | sort -u)
-[ "$packs" -gt 0 ] || die "no rows in $E4D_CELLS"
+done <<<"$groups"
+[ "$packs" -gt 0 ] || die "no rows or captures to collect"
 
 # scan <fixed-strings-file> [dir]: the files under dir (incoming by default) that hold any of the
 # strings. grep exits 1 for no match; any other failure (an unreadable file) ends the run rather

@@ -78,6 +78,38 @@ of its part of the full manifest.
 inputs, collected with `E4D_EVIDENCE=<this directory>/evidence-capture1`; the report says why it is
 kept.
 
+### The late-landing measurement
+
+`run/measure` is the [acceptance plan's S6.2](../../docs/spec/acceptance-plan.md#s62-late-landing-bound-measurement)
+measurement. It does not use `e4x` or the database. Each capture applies a fresh artifact with
+`talosctl apply-config --mode=no-reboot` while a fault is in place, and kills `talosctl` at the
+15 s transport deadline, as `e4x` does. It heals the fault after the cell's partition length, then
+reads the worker's resource version straight from the worker once a second for 60 s. The cells
+are:
+
+- a control with no fault, which must land, or a result of no landing proves nothing;
+- a netsplit of the worker, a pause of the worker and a pause of the control plane, held for 20,
+  45 and 90 s, sent through the control plane on a warm proxy connection;
+- a cold proxy connection: the control plane is restarted first, and nothing reaches the worker
+  through it before the send;
+- the worker's own endpoint, partitioned before the dial (the dial-failure test).
+
+There are five captures per cell (`E4M_N`). The run needs a fresh fixture and takes about two
+hours:
+
+```sh
+fixtures/bin/up
+E4D_OUT=<a new directory> experiments/e4-dispatch-safety/run/measure
+fixtures/bin/evidence <the same directory>
+cp -a fixtures/.state/evidence/<bundle> <the same directory>/bundle
+E4D_OUT=<the same directory> experiments/e4-dispatch-safety/run/collect-evidence
+fixtures/bin/down
+```
+
+`run/collect-evidence` recognizes the output by its `captures.tsv` and writes
+[`evidence-latelanding/`](evidence-latelanding/). The
+[late-landing report](../../docs/design/research/20261016-late-landing.md) reads it.
+
 The unit tests need no fixture for the Talos parsing. The store tests skip unless
 `E4X_TEST_PG_DSN=<dsn>` names a PostgreSQL database they may reset.
 
