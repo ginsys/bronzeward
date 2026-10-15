@@ -1184,9 +1184,14 @@ pre-dispatch digest, the drifted digest, so if the machine drifts again before
 commitment, comparison 3 fails and the plan must be made again. Its approval
 is recorded as approving the overwrite of configuration that no reviewer has
 seen: the drifted configuration has no sanitized form unless adopted
-**(choice §10.16)**. Normal approval applies, and a freeze must be lifted by an
-`approver` before it can commit. A revert ends through the normal path: it
-advances `Applied` when it reaches `completed`, which closes the drift record.
+**(choice §10.16)**. The approval and its timeline entry carry that mark as
+`unseenOverwrite` (persistence and API §9.3), derived from the immutable plan.
+Normal approval applies, and a freeze must be lifted by an
+`approver` before it can commit. Comparison 6 admits the record the revert
+binds and no other (§3.2). A revert ends through the normal path: it
+advances `Applied` when it reaches `completed`, and the same transaction closes
+the drift record `reverted` with a drift entry after the `Applied` change,
+resting on the completion observation.
 
 ### 6.5 Drift states
 

@@ -100,12 +100,12 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	// A plan row and its release are immutable, so their bindings are read before the machine's lock.
 	var machine, cluster, kind, assignment, contract string
 	var desired sql.NullString
-	var baseline sql.NullInt64
+	var baseline, bound sql.NullInt64
 	var maxAgeMicros int64
 	err := tx.QueryRowContext(ctx, `SELECT p.machine, p.cluster, p.kind, p.assignment_revision, p.desired_release,
-			p.baseline_revision, (extract(epoch FROM p.max_observation_age) * 1000000)::bigint, r.contract
+			p.baseline_revision, p.drift_record, (extract(epoch FROM p.max_observation_age) * 1000000)::bigint, r.contract
 		FROM plan p JOIN release r ON r.id = p.release WHERE p.id = $1`, plan).Scan(&machine, &cluster, &kind, &assignment,
-		&desired, &baseline, &maxAgeMicros, &contract)
+		&desired, &baseline, &bound, &maxAgeMicros, &contract)
 	if err != nil {
 		return r, "", fmt.Errorf("commitment of plan %s: %w", plan, err)
 	}
@@ -120,7 +120,8 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 		lock = ``
 	}
 	var scope string
-	var frozen, drift bool
+	var frozen bool
+	var drift sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `SELECT scope_state, frozen FROM machine WHERE id = $1`+lock, machine).Scan(&scope,
 		&frozen); err != nil {
 		return r, machine, err
@@ -302,7 +303,7 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 		return r, machine, refuseCommitment("5", rolloutCause)
 	}
 	// 6: the scope gate.
-	if cause := scopeGate(frozen, drift, scope, recovery); cause != "" {
+	if cause := scopeGate(frozen, drift, bound, scope, recovery); cause != "" {
 		return r, machine, refuseCommitment("6", cause)
 	}
 
@@ -364,15 +365,17 @@ func newerContradiction(ctx context.Context, tx *sql.Tx, machine, plan string, b
 	return newer, err
 }
 
-// scopeGate is §3.2 and §3.3 comparison 6's cause, or "" when the gate passes. drift is a drift
-// record open on the machine; no plan binds one before a revert does (§6.4), so any open record
-// closes the gate.
-func scopeGate(frozen, drift bool, scope string, recovery bool) string {
+// scopeGate is §3.2 and §3.3 comparison 6's cause, or "" when the gate passes. open is the drift
+// record open on the machine and bound the one the plan binds: a revert (§6.4) passes only while
+// its own record is open, every other plan only while none is.
+func scopeGate(frozen bool, open, bound sql.NullInt64, scope string, recovery bool) string {
 	switch {
 	case frozen:
 		return "the machine scope is frozen"
-	case drift:
+	case open.Valid && open != bound:
 		return "a drift record is open on the machine"
+	case bound.Valid && !open.Valid:
+		return "the drift record the plan binds is closed"
 	case scope != "normal" && scope != "released":
 		return "the machine scope is " + scope
 	case recovery && scope != "released":

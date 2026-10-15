@@ -35,14 +35,20 @@ type selfApproval struct {
 	Reasons []string `json:"reasons"`
 }
 
-// approvalBody is §9.3's approval resource.
+// approvalBody is §9.3's approval resource. UnseenOverwrite marks the approval of a revert, which
+// overwrites a drifted configuration no reviewer has seen (execution-recovery.md §6.4, choice §10.16).
 type approvalBody struct {
-	ID           string       `json:"id"`
-	Plan         string       `json:"plan"`
-	Approver     approvalBy   `json:"approver"`
-	Epoch        string       `json:"epoch"`
-	SelfApproval selfApproval `json:"selfApproval"`
+	ID              string       `json:"id"`
+	Plan            string       `json:"plan"`
+	Approver        approvalBy   `json:"approver"`
+	Epoch           string       `json:"epoch"`
+	SelfApproval    selfApproval `json:"selfApproval"`
+	UnseenOverwrite bool         `json:"unseenOverwrite"`
 }
+
+// unseenOverwrite is the SQL deriving, from plan p, whether approving it approves an unseen
+// overwrite: a revert's. A plan is immutable, so the mark needs no column of its own.
+const unseenOverwrite = `(p.kind = 'apply-config' AND p.drift_record IS NOT NULL)`
 
 // approvePlan is T5a (persistence-api.md §5): the plan's machine FOR UPDATE, its scope not
 // pre-restore unaccounted; the approver's principal FOR SHARE, not revoked (rule 2); the plan's
@@ -58,7 +64,8 @@ func approvePlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, e
 		Epoch: q.epoch, SelfApproval: selfApproval{Reasons: []string{}}}
 	// A plan row is immutable, so its machine is read before the machine's lock.
 	var machine, scope string
-	err := tx.QueryRowContext(ctx, `SELECT machine FROM plan WHERE id = $1`, plan).Scan(&machine)
+	err := tx.QueryRowContext(ctx, `SELECT machine, `+unseenOverwrite+` FROM plan p WHERE id = $1`, plan).Scan(&machine,
+		&b.UnseenOverwrite)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return result{}, refuse(http.StatusNotFound, "not-found", "no such plan").with("plan", plan)
@@ -143,8 +150,8 @@ func approvePlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, e
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 			VALUES ($1, $2, $3, 'approval', jsonb_build_object('plan', $4::text, 'approval', $5::text, 'principal', $6::text,
-				'role', $7::text, 'selfApproval', $8::jsonb), $9)`,
-			machine, rev, q.epoch, plan, b.ID, b.Approver.Principal, b.Approver.Role, mark, at); err != nil {
+				'role', $7::text, 'selfApproval', $8::jsonb, 'unseenOverwrite', $10::boolean), $9)`,
+			machine, rev, q.epoch, plan, b.ID, b.Approver.Principal, b.Approver.Role, mark, at, b.UnseenOverwrite); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO approval (id, plan, machine, approver, role, epoch, self_approval, act, at, revision)
@@ -166,9 +173,10 @@ func approvePlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, e
 var getApproval = item(id.Approval, func(ctx context.Context, tx *sql.Tx, v string) (string, any, error) {
 	b := approvalBody{SelfApproval: selfApproval{Reasons: []string{}}}
 	var reasons string
-	if err := tx.QueryRowContext(ctx, `SELECT id, plan, approver, role, epoch, array_to_string(self_approval, ',')
-		FROM approval WHERE id = $1`, v).Scan(&b.ID, &b.Plan, &b.Approver.Principal, &b.Approver.Role, &b.Epoch,
-		&reasons); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT a.id, a.plan, a.approver, a.role, a.epoch, array_to_string(a.self_approval, ','),
+			`+unseenOverwrite+`
+		FROM approval a JOIN plan p ON p.id = a.plan WHERE a.id = $1`, v).Scan(&b.ID, &b.Plan, &b.Approver.Principal,
+		&b.Approver.Role, &b.Epoch, &reasons, &b.UnseenOverwrite); err != nil {
 		return "", nil, err
 	}
 	if reasons != "" {

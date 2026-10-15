@@ -273,15 +273,17 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 			return result{}, refuse(http.StatusConflict, "conflict",
 				"the machine has no Applied configuration to plan an apply-config from; adopt it first").with("machine", in.Machine)
 		}
-		// A plan made on a drifted machine binds its open drift record and is a revert
-		// (execution-recovery.md §2, §6.4); an ordinary plan is not made.
-		drifted, err := openDrift(ctx, tx, in.Machine)
-		if err != nil {
+		// A plan made on a drifted machine is a revert (execution-recovery.md §2, §6.4): it binds the
+		// open drift record and expects, before dispatch, the drifted digest the record names.
+		var drifted []byte
+		var opened int64
+		err := tx.QueryRowContext(ctx, `SELECT opened, observed_digest FROM drift_record WHERE machine = $1 AND closed IS NULL`,
+			in.Machine).Scan(&opened, &drifted)
+		switch {
+		case err == nil:
+			b.DriftRecord = &opened
+		case !errors.Is(err, sql.ErrNoRows):
 			return result{}, err
-		}
-		if drifted {
-			return result{}, refuse(http.StatusConflict, "conflict",
-				"a drift record is open on the machine; only a revert plan binds it").with("machine", in.Machine)
 		}
 		b.BaselineRevision = &baselineRev.Int64
 		d, err := planDiffFrom(ctx, tx, in.Machine, appliedRelease.String, in.ReleaseID, appliedDigest, redacted)
@@ -289,6 +291,9 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 			return result{}, err
 		}
 		b.Evidence.Diff = d
+		if b.DriftRecord != nil {
+			appliedDigest = drifted
+		}
 	case "adopt":
 		// A machine with an Applied is adopted only while drifted: the plan binds its open drift record
 		// and its baseline revision (execution-recovery.md §6.3 step 3); a handover binds neither.

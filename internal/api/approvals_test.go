@@ -151,7 +151,7 @@ func TestApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantEntry := map[string]any{"plan": plan.ID, "approval": b.ID, "principal": approver, "role": "approver",
-		"selfApproval": map[string]any{"marked": false, "reasons": []any{}}}
+		"selfApproval": map[string]any{"marked": false, "reasons": []any{}}, "unseenOverwrite": false}
 	if !reflect.DeepEqual(got, wantEntry) {
 		t.Fatalf("timeline entry %v, want %v", got, wantEntry)
 	}

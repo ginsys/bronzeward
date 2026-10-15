@@ -253,10 +253,10 @@ func TestPlanConstraints(t *testing.T) {
 	plan("apply-config not desiring its release", "23514/plan_kind_bindings", apply.with("desired_release", nil))
 	plan("apply-config with no baseline revision", "23514/plan_kind_bindings", apply.with("baseline_revision", nil))
 	plan("adopt with a baseline revision", "23514/plan_kind_bindings", adopt.with("baseline_revision", 1))
-	// A drifted machine's adopt plan binds its drift record and baseline revision together; an
-	// apply-config plan binds no drift record (execution and recovery §6.3 step 3).
+	// A drifted machine's adopt plan binds its drift record and baseline revision together, and a
+	// revert binds the record as well (execution and recovery §6.3 step 3, §6.4).
 	plan("adopt with a drift record and no baseline revision", "23514/plan_kind_bindings", adopt.with("drift_record", 7))
-	plan("apply-config with a drift record", "23514/plan_kind_bindings", apply.with("drift_record", 7))
+	plan("apply-config bound to no drift record", "23503", apply.with("drift_record", 7))
 	plan("adopt bound to no drift record", "23503", adopt.with("baseline_revision", 1, "drift_record", 7))
 	plan("apply-config with no expected digest", "23514/plan_kind_bindings", apply.with("expected_digest", nil))
 	plan("adopt with an expected digest", "23514/plan_kind_bindings", adopt.with("expected_digest", digest(5)))
