@@ -528,18 +528,22 @@ run: **drift freeze, sanitized adoption and approved revert**
 ([ER §9.3](execution-recovery.md#93-gaps-carried-and-what-would-close-them) item 1).
 
 **Preconditions.** S4 passed; no drift record is open and no operation holds the worker's scope.
+The instances are restarted with a `driftInterval` of seconds, set back to the fixture's when S5
+ends: S1 to S4 run with none observing.
 
 **Steps.**
 
-1. With the fixture's pinned `talosctl`, patch the worker out of band, adding a file whose content
-   is a new synthetic secret.
+1. With the fixture's pinned `talosctl`, patch the worker out of band in no-reboot mode, adding a
+   registry auth password (`machine.registries.config.<host>.auth.password`) that is a new synthetic
+   secret. The pinned Talos applies a registries change immediately but not a new file, and the
+   executor sends only no-reboot applies, so step 6's revert of a file would be refused.
 2. The next `drift` observation opens a drift record and raises the digest-mismatch alert; the scope
    is not frozen by detection.
 3. `h-author` freezes the scope.
 4. **Adopt.** `h-author` opens a new draft (`POST /drafts`), since the import draft is published,
    and ingests the drifted configuration into it as a drift adoption (`POST /ingestions` with
    `"kind": "drift-adoption"` and `"source": "machine"`, naming that draft, with `If-Match` its
-   ETag), marking the new file's content. After the ingestion
+   ETag), marking the new password and S1's file content. After the ingestion
    succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
    `adopt` plan binding the drift record; `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
    record commits under the freeze.
@@ -566,15 +570,19 @@ scope frozen, Bronzeward sends no Talos request that changes the machine, only t
 observations and the drift adoption's ingestion make: the resource version changes only with the out-of-band patches
 and the revert. After step 4, `Applied` is the adopted release with the baseline's digest, the
 baseline revision has advanced and the record is closed `adopted`; the new secret is found nowhere
-outside OpenBao, on success, rejection and each interruption of the ingestion. After step 6, the
+outside OpenBao after the ingestion succeeds. A drift adoption runs the import's staged pipeline
+(C [§2.3](compilation.md#23-pipeline)), so S2's rejected and interrupted ingestions are its
+rejection and interruption runs. After step 6, the
 record is closed `reverted` and the digest is the revert artifact's. Step 5's result is recorded
 whichever way it falls. Each of step 7's freezes and unfreezes takes effect and is recorded under
 the role that permits it, as step 3's freeze is.
 
-**Negative controls.** An approved ordinary plan while the record is open: refused by comparison 6.
+**Negative controls.** An approved revert plan while the scope is frozen (step 3): refused by
+comparison 6, then cancelled. An approved ordinary plan while the record is open: refused by comparison 6.
 A plan expecting `Applied`'s digest while the machine runs another: commitment refused on its
 evidence, and the refusal's transaction opens a drift record (ER choice §10.23). Unfreezing by a
-non-`approver`: `403`. The adoption record refused on a stale observation, a machine changed again,
+non-`approver`: `403`. No adoption record on a stale observation, which is no evidence and refuses
+nothing (ER choice §10.28). The adoption record refused on a machine changed again,
 a post-approval observation showing another machine identity with a matching digest, a revoked
 approval, a changed baseline revision, a changed `Desired` and a record already closed by
 a revert. A revert refused by re-drift before commitment, and one refused after a manual return,
