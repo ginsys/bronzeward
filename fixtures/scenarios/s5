@@ -4,10 +4,10 @@
 # password, a new synthetic secret; the next drift observation opens a drift record, the scope not
 # frozen; the database and OpenBao snapshotted (s5-step3, step 7's restore point); h-author freezes
 # the scope, and an approved revert plan is never committed while it is frozen; in a new draft, a
-# drift adoption leaving a copy unmarked is refused, and one sent to C is killed at each of the
-# pipeline's steps, each outcome scanned; h-author ingests the drifted configuration into the draft
-# as a drift adoption, marking both secrets, and takes
-# S2's label fragment out of the workers profile, the adopted base now holding that reference;
+# drift adoption leaving a copy unmarked is refused; h-author ingests the drifted configuration into
+# the draft as a drift adoption, marking both secrets, after which one sent to C is killed at each of
+# the pipeline's steps, each outcome scanned; h-author takes S2's label fragment out of the workers
+# profile, the adopted base now holding that reference;
 # h-publisher publishes it and creates an adopt plan binding the record, h-approver approves, and
 # the adoption commits under the freeze: Applied the release with the baseline's digest, the
 # baseline revision one more, the record closed adopted. Bronzeward sends the worker no mutating
@@ -482,7 +482,8 @@ adopted_values() {
 }
 
 # The drift adoption's refusal and interruptions (compilation §15, the acceptance plan's S5 pass
-# criteria), each in the adoption's draft before the one that succeeds, the record open throughout.
+# criteria), each in the adoption's draft, the refusal before the one that succeeds and the
+# interruptions after it, the record open throughout.
 ADOPT_MARKS=$(jq -nc --arg a "$WORKER_MARK" --arg l "$LABEL_MARK" --arg b "$REGISTRY_MARK" '[$a, $l, $b]')
 # adoption_body <marks JSON array>: a drift adoption of the worker into the draft, source machine,
 # transient.
@@ -519,13 +520,21 @@ adoption_refused() {
     [ "$(open_records)" = 1 ] && draft_etag_is "$etag"
 }
 # The kill points: compilation §2.3's steps 0 to 8, as internal/seam names them. A kill from the
-# generation step on leaves every generation of the three marks created.
+# generation step on leaves every generation the drift adoption makes created: the three marks' and
+# the Talos schema secrets' (internal/ingest/identify.go), gen_count, read off the successful
+# adoption's import base revision before the kills.
 kill_points='claim read parse identify substitute guard generation construct baseline'
+gen_count=''
 generations_made() {
   case $1 in
-    generation | construct | baseline) printf '3\n' ;;
+    generation | construct | baseline) printf '%s\n' "$gen_count" ;;
     *) printf '0\n' ;;
   esac
+}
+# adoption_generations: gen_count is at least the three marks', and the successful adoption's claim
+# lists that many generations.
+adoption_generations() {
+  [ "$gen_count" -ge 3 ] && same "$(claim_generations "${ingested[-1]}")" "$gen_count"
 }
 # generations_kept <step>: tk_ing lists as many generations as a kill at the step leaves.
 generations_kept() {
@@ -616,16 +625,21 @@ adopt() {
   check "$ref, C §15" "a drift adoption marking the file content and the password, not S2's label of it: the claim abandoned, the operation failed 422 guard-value naming the label, no secret in its problem; the draft's ETag, the revisions and gen/ unchanged, the record open" \
     adoption_refused
   outcome_bundle "$ref, C §15" adoption-refused
-  for step in $kill_points; do adoption_kill "$step"; done
   fresh_author
   ingest_kind=drift-adoption
   check "$ref" "h-author ingests the drifted configuration into it as a drift adoption, If-Match its ETag, marking the S1 file's content, S2's label of it and the registry password: 202, the claim released, the operation succeeded, the ETag moved" \
     ingest "$machine_w" "$ADOPT_MARKS" adopt
   ingest_kind=import
   check "$ref" 'the ingestion is stored and served as a drift adoption' adoption_kind
-  check "$ref, C §15" "control: the drift adoption made $(generations_made baseline) generations, as many as a kill after the generation step keeps" \
-    same "$(claim_generations "${ingested[-1]}")" "$(generations_made baseline)"
   outcome_bundle "$ref" adoption-ingestion
+  gen_count=$(sql "SELECT count(*) FROM import_base_reference WHERE revision =
+    (SELECT id FROM import_base_revision WHERE machine = '$machine_w' ORDER BY created_at DESC LIMIT 1)") ||
+    die "s5: cannot count the adopted revision's references"
+  check "$ref, C §15" "control: the drift adoption made $gen_count generations, one per reference of its revision and at least its three marks', as many as a kill after the generation step keeps" \
+    adoption_generations
+  # The interruptions follow the success, into the same draft under its new ETag: each is a drift
+  # adoption the open record admits, and the draft and the record are unchanged by each.
+  for step in $kill_points; do adoption_kill "$step"; done
   check "$ref" "h-author takes S2's label fragment out of the workers profile, the adopted base holding that reference: 200, the ETag replaced" \
     profile_drops h-author adopt s2-labels
   check "$ref" 'h-publisher publishes the draft under its new ETag: 202, one release, the worker'"'"'s Desired' publish_by h-publisher adopt
