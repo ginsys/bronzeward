@@ -360,13 +360,15 @@ draft_etag_is() { answers 200 - GET "/api/v1/drafts/$draft" "$author" && [ "$(et
 
 # The claims of the imports that succeeded.
 ingested=()
+# ingest_kind: the kind ingest asks for, import unless the scenario sets drift-adoption (S5).
+ingest_kind=import
 # ingest <machine id> <marks JSON array> [key suffix]: POST /ingestions with If-Match the draft's
 # ETag, then the claim to its end, the operation's state and the draft's new ETag. A machine's
 # second import takes a suffix: its Idempotency-Key is its own.
 ingest() {
   local m=$1 marks=$2 body ing op claim n next
-  body=$(jq -nc --arg m "$m" --arg d "$draft" --argjson marks "$marks" \
-    '{kind: "import", source: "machine", staging: "transient", machine: $m, draft: $d, marks: $marks}')
+  body=$(jq -nc --arg k "$ingest_kind" --arg m "$m" --arg d "$draft" --argjson marks "$marks" \
+    '{kind: $k, source: "machine", staging: "transient", machine: $m, draft: $d, marks: $marks}')
   answers 202 - POST /api/v1/ingestions "$author" "$body" "$(key "ingestion-$m${3:+-$3}")" "$etag" || return 1
   if ! ing=$(jq -er '.ingestion' "$EV/last.body") || ! op=$(jq -er '.operation' "$EV/last.body"); then
     say "$scenario: POST /ingestions: no ingestion or operation in the 202"
