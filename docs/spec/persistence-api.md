@@ -1610,7 +1610,10 @@ the act together:
   not hold, and a second accounting of the attempt, is `409 conflict`.
 - `POST /operations/{id}/resolutions` takes `to` and `reason`. `to` is
   `cancelled` only, and only an `unresolved` operation with no recorded attempt
-  qualifies (§4): any other state or an attempt is `409 conflict`. Completing or
+  qualifies (§4): any other state or an attempt is `409 conflict`. Its
+  operation state entry records the evidence relied on (execution and recovery
+  §4): no attempt recorded and the machine's latest recorded observation, if
+  any. Completing or
   failing an operation by decision is not a request this API accepts, since
   absence of evidence classifies nothing (execution and recovery invariants 6
   and 11).

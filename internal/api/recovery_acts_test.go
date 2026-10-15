@@ -185,6 +185,14 @@ func TestResolutionRequest(t *testing.T) {
 		ae.machine, b.Revision, ae.op, b.ResolvedBy, b.Act); n != 1 {
 		t.Fatal("no operation state entry naming the resolution")
 	}
+	// The evidence relied on (§4) is what the resolution checked: no attempt recorded, and the
+	// machine's latest recorded observation.
+	if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND revision = $2
+			AND entry->'evidence' = jsonb_build_object('attempts', 0, 'observation',
+				(SELECT id FROM observation WHERE machine = $1 ORDER BY revision DESC LIMIT 1))`,
+		ae.machine, b.Revision); n != 1 {
+		t.Fatal("the resolution entry does not record the evidence relied on")
+	}
 	if n := ae.actRow(t, b.Act, "operation.resolve", ae.op, ae.machine); n != 1 {
 		t.Fatal("no act of the request")
 	}
