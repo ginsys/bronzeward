@@ -256,19 +256,19 @@ type observedBody struct {
 	Release     *string   `json:"release"`
 }
 
-// machineBody is §9.3's machine resource. openDrift stays null until drift records exist.
+// machineBody is §9.3's machine resource; openDrift is the machine's open drift record, or null.
 type machineBody struct {
-	ID            string        `json:"id"`
-	Cluster       string        `json:"cluster"`
-	Hardware      hardware      `json:"hardware"`
-	Platform      string        `json:"platform"`
-	TalosEndpoint string        `json:"talosEndpoint"`
-	Desired       *string       `json:"desired"`
-	Applied       *applied      `json:"applied"`
-	Observed      *observedBody `json:"observed"`
-	Frozen        bool          `json:"frozen"`
-	ScopeState    string        `json:"scopeState"`
-	OpenDrift     *struct{}     `json:"openDrift"`
+	ID            string         `json:"id"`
+	Cluster       string         `json:"cluster"`
+	Hardware      hardware       `json:"hardware"`
+	Platform      string         `json:"platform"`
+	TalosEndpoint string         `json:"talosEndpoint"`
+	Desired       *string        `json:"desired"`
+	Applied       *applied       `json:"applied"`
+	Observed      *observedBody  `json:"observed"`
+	Frozen        bool           `json:"frozen"`
+	ScopeState    string         `json:"scopeState"`
+	OpenDrift     *openDriftBody `json:"openDrift"`
 }
 
 // inventoryMachine records a machine with its MachineState. The unique indexes on the SMBIOS UUID and

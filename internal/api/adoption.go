@@ -311,15 +311,16 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 // once, by whichever attempt locks first (choice §10.27).
 func (a *API) recordRefusal(ctx context.Context, machine, plan string, refused *adoptionRefused) error {
 	return a.recordRefusalEntry(ctx, machine, plan, "adoption", refused.Comparison, refused.Cause, "",
-		errAlreadyAdopted, true)
+		errAlreadyAdopted, true, false)
 }
 
 // recordRefusalEntry records a refused T6's refusal entry (execution-recovery.md §4.1) after the
 // refused transaction rolled back, under the same epoch check and machine lock (T7). The entry names
 // the comparison, its cause, this controller and, when one showed it, the observation. A plan given
-// its operation since answers already; once records at most one refusal entry for the plan.
+// its operation since answers already; once records at most one refusal entry for the plan; drift
+// applies §6.1 and §6.5 to the observation after the entry (execution-recovery.md §3.2).
 func (a *API) recordRefusalEntry(ctx context.Context, machine, plan, what, comparison, cause, observation string,
-	already error, once bool) error {
+	already error, once, drift bool) error {
 	return a.inTx(ctx, func(tx *sql.Tx) error {
 		var current string
 		if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&current); err != nil {
@@ -355,6 +356,10 @@ func (a *API) recordRefusalEntry(ctx context.Context, machine, plan, what, compa
 			VALUES ($1, $2, $3, 'refusal', jsonb_strip_nulls(jsonb_build_object('transaction', 'T6', 'comparison', $4::text,
 				'plan', $5::text, 'cause', $6::text, 'controller', $7::text, 'observation', NULLIF($8::text, ''))), $9)`,
 			machine, rev, current, comparison, plan, cause, a.d.owner.ID, observation, at)
+		if err != nil || !drift {
+			return err
+		}
+		_, err = applyDrift(ctx, tx, machine, current, observation, false)
 		return err
 	})
 }

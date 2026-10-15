@@ -96,13 +96,16 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 	}
 	maxAge := time.Duration(maxAgeMicros) * time.Microsecond
 	var scope string
-	var frozen bool
+	var frozen, drift bool
 	lock := ` FOR UPDATE`
 	if a.o.noReadLock == "machine" {
 		lock = ``
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT scope_state, frozen FROM machine WHERE id = $1`+lock, machine).Scan(&scope,
 		&frozen); err != nil {
+		return r, machine, plan, err
+	}
+	if drift, err = openDrift(ctx, tx, machine); err != nil {
 		return r, machine, plan, err
 	}
 	var msBaseline sql.NullInt64
@@ -254,7 +257,7 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 		return r, machine, plan, refused("a newer observation contradicts the evidence", newer.String)
 	}
 	// 6: the scope gate.
-	if cause := scopeGate(frozen, scope, recovery); cause != "" {
+	if cause := scopeGate(frozen, drift, scope, recovery); cause != "" {
 		return r, machine, plan, refuseAttempt("6", cause)
 	}
 	// 7: the operation was committed and owned by this process's token, as its write read it.

@@ -158,18 +158,27 @@ var (
 const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.talos_node_id, m.serial, m.platform, m.talos_endpoint, m.frozen, m.scope_state, s.desired,
 		s.applied_release, s.applied_source, ob.id, ob.at,
 		CASE WHEN ob.configuration_digest = s.applied_digest THEN s.applied_release
-			WHEN ob.configuration_digest = rd.configuration_digest THEN s.desired END
+			WHEN ob.configuration_digest = rd.configuration_digest THEN s.desired END,
+		d.opened, d.observation, d.last_observation, d.late_landing
 	FROM machine m JOIN machine_state s ON s.machine = m.id
 	LEFT JOIN release_machine rd ON rd.release = s.desired AND rd.machine = m.id
+	LEFT JOIN drift_record d ON d.machine = m.id AND d.closed IS NULL
 	LEFT JOIN LATERAL (SELECT o.id, o.at, o.configuration_digest FROM observation o
 		WHERE o.machine = m.id AND o.configuration_digest IS NOT NULL ORDER BY o.basis DESC LIMIT 1) ob ON true`
 
 func scanMachine(r interface{ Scan(...any) error }) (machineBody, error) {
 	var b machineBody
-	var rel, source, obs, observedRelease sql.NullString
+	var rel, source, obs, observedRelease, driftObs, driftLast, late sql.NullString
 	var observedAt sql.NullTime
+	var opened sql.NullInt64
 	err := r.Scan(&b.ID, &b.Cluster, &b.Hardware.SMBIOSUUID, &b.Hardware.TalosNodeID, &b.Hardware.Serial, &b.Platform, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source,
-		&obs, &observedAt, &observedRelease)
+		&obs, &observedAt, &observedRelease, &opened, &driftObs, &driftLast, &late)
+	if opened.Valid {
+		b.OpenDrift = &openDriftBody{Revision: opened.Int64, Observation: driftObs.String, LastObservation: driftLast.String}
+		if late.Valid {
+			b.OpenDrift.LateLanding = &late.String
+		}
+	}
 	if rel.Valid {
 		b.Applied = &applied{Release: rel.String, Source: source.String}
 	}

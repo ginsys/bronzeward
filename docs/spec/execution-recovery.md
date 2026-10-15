@@ -992,7 +992,8 @@ the interval is open. A mismatch in a `drift` observation, in a
 observation of a commitment that comparison 3 refused on its digest (§3.2),
 opens a **drift record** on the machine's
 timeline, naming the observation, the `Applied` digest and the observed digest,
-and raises the design §15.3 digest-mismatch alert. So does the completion
+and raises the design §15.3 digest-mismatch alert, as its opening entry
+**(choice §10.35)**. So does the completion
 observation that makes an operation `failed`, in the transaction that releases
 the scope (§4). The definition above holds
 for a `restoration` observation too: while a restored operation on the scope is
@@ -2225,9 +2226,8 @@ conservative option; those that do not say so. Each is marked in place as
     as `none-bound`, and §9.2's bound-health cases (a failing check inside the
     convergence window, at or after the verification deadline, unreadable at
     it) apply to the first operation class that binds one, such as the
-    upgrades §18.2 excludes, and are tracked by ginsys/bronzeward#188. The contradicting-digest case and its immediate
-    `failed` hold now; the drift record that outcome opens arrives with drift
-    records (ginsys/bronzeward#27). Agent decision, 2026-10-14
+    upgrades §18.2 excludes, and are tracked by ginsys/bronzeward#188. The contradicting-digest case, its immediate
+    `failed` and the drift record that outcome opens hold now. Agent decision, 2026-10-14
     (ginsys/bronzeward#26). Alternatives: binding a Talos health check to the
     PoC's apply, a new precondition and fixture surface no PoC acceptance row
     asks for; leaving the cases open against #26, which would make an
@@ -2241,6 +2241,21 @@ conservative option; those that do not say so. Each is marked in place as
     (ginsys/bronzeward#27). Alternatives: an empty body, which records who but
     not why; an idempotent no-op answering `201`, which writes timeline
     entries that change nothing.
+35. **A drift record is a projection of `drift` timeline entries, and its
+    opening entry is the digest-mismatch alert** (§6.1, §6.5). Each change of
+    the record is one `drift` entry naming the record (by its opening entry's
+    revision), the change (`opened`, `observed`, `closed`) and the observation
+    it rests on; an opening names a possible late landing, a closing its
+    resolution. The record keeps the opening observation, `Applied`'s digest,
+    the latest differing observation and digest, and the closing. Design §15.3
+    lists the digest-mismatch alert but no delivery channel, so the PoC raises
+    it as the opening entry on the machine's timeline, and serves
+    the open record as the machine resource's `openDrift` (persistence-api.md
+    §9.3): its opening revision, observation, latest observation and late
+    landing. Agent decision, 2026-10-15 (ginsys/bronzeward#27). Alternatives:
+    a separate alert table or notifier, a delivery surface no PoC acceptance
+    row asks for; one entry kind per change, which triples the kinds a
+    timeline reader must know.
 
 ## 11. Traceability
 

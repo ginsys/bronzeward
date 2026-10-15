@@ -525,7 +525,13 @@ CREATE TABLE machine_event (
              'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
              'observation', 'adoption', 'applied-change', 'commitment', 'refusal', 'attempt', 'operation-state',
              'response', 'accounting', 'classification', 'ownership-transition', 'use-time-check', 'freeze',
-             'unfreeze')),
+             'unfreeze', 'drift')),
+  -- A drift entry names the record it changes, by the revision of its opening entry, the change and
+  -- the observation it rests on (§6.1, §6.5).
+  CONSTRAINT machine_event_drift CHECK (kind <> 'drift'
+    OR (jsonb_typeof(entry->'record') IS NOT DISTINCT FROM 'number'
+      AND entry->>'change' IN ('opened', 'observed', 'closed')
+      AND jsonb_typeof(entry->'observation') IS NOT DISTINCT FROM 'string')),
   -- A use-time check names the plan it was made for and the result of each dependency (§3.1, §4.1).
   CONSTRAINT machine_event_use_time_check CHECK (kind <> 'use-time-check'
     OR (jsonb_typeof(entry->'plan') IS NOT DISTINCT FROM 'string'
@@ -1302,6 +1308,34 @@ CREATE TABLE observation (
   FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
 );
 CALL make_immutable('observation');
+
+-- A drift record (execution and recovery §6.1, §6.5): an observed configuration digest other than
+-- Applied's while no operation held the machine scope. It names the observation that opened it,
+-- Applied's digest and the observed one, and the latest differing observation recorded on it; a
+-- drift whose digest is the artifact of an operation accounted by decision names that operation as
+-- a possible late landing (§5.2). Its opening, each further observation and its closing, with the
+-- resolution that closed it, are drift entries on the machine's timeline; the record is their
+-- projection, not an entry of its own, and holds at most one open record per machine.
+CREATE TABLE drift_record (
+  machine          text NOT NULL REFERENCES machine (id),
+  opened           bigint NOT NULL,
+  drift_kind       text NOT NULL GENERATED ALWAYS AS ('drift') STORED,
+  observation      text NOT NULL,
+  applied_digest   bytea NOT NULL CHECK (length(applied_digest) = 32),
+  observed_digest  bytea NOT NULL CHECK (length(observed_digest) = 32 AND observed_digest <> applied_digest),
+  last_observation text NOT NULL,
+  late_landing     text,
+  closed           bigint,
+  resolution       text CHECK (resolution IN ('adopted', 'reverted', 'returned')),
+  CHECK ((closed IS NULL) = (resolution IS NULL) AND (closed IS NULL OR closed > opened)),
+  PRIMARY KEY (machine, opened),
+  FOREIGN KEY (machine, opened, drift_kind) REFERENCES machine_event (machine, revision, kind),
+  FOREIGN KEY (machine, closed, drift_kind) REFERENCES machine_event (machine, revision, kind),
+  FOREIGN KEY (observation, machine) REFERENCES observation (id, machine),
+  FOREIGN KEY (last_observation, machine) REFERENCES observation (id, machine),
+  FOREIGN KEY (late_landing, machine) REFERENCES operation (id, machine)
+);
+CREATE UNIQUE INDEX drift_record_open ON drift_record (machine) WHERE closed IS NULL;
 
 -- An adoption record (§6.3): an adopt plan's completed operation, the approval it ran under and
 -- the observation it relied on. It is one adoption entry on the machine's timeline. The record,
