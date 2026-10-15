@@ -92,7 +92,8 @@ are:
   45 and 90 s, sent through the control plane on a warm proxy connection;
 - a cold proxy connection: the control plane is restarted first, and nothing reaches the worker
   through it before the send;
-- the worker's own endpoint, partitioned before the dial (the dial-failure test).
+- the worker's own endpoint, partitioned before the dial (the dial-failure test);
+- the control again, last, so that no landing in between is not a path the faults broke.
 
 There are five captures per cell (`E4M_N`). The run needs a fresh fixture and takes about two
 hours:
@@ -109,6 +110,21 @@ fixtures/bin/down
 `run/collect-evidence` recognizes the output by its `captures.tsv` and writes
 [`evidence-latelanding/`](evidence-latelanding/). The
 [late-landing report](../../docs/design/research/20261016-late-landing.md) reads it.
+
+`E4M_SOCKETS=1` adds, to every capture's transcript, a once-a-second sample of the TCP connection
+between the control plane and the worker's API port, as both nodes list it. `E4M_ONLY=<regex>`
+runs only the matching cells. A subset is collected only into a directory of its own, never over
+the whole run's. The report's socket evidence is
+[`evidence-latelandingsockets/`](evidence-latelandingsockets/), made on a fresh fixture with the
+same evidence-bundle steps as above around these two:
+
+```sh
+E4D_OUT=<a new directory> E4M_N=3 E4M_SOCKETS=1 \
+  E4M_ONLY='^(control-none|netsplit-worker-(20|45)|pause-worker-20|control-after)$' \
+  experiments/e4-dispatch-safety/run/measure
+E4D_OUT=<the same directory> E4D_EVIDENCE=$PWD/experiments/e4-dispatch-safety/evidence-latelandingsockets \
+  experiments/e4-dispatch-safety/run/collect-evidence
+```
 
 The unit tests need no fixture for the Talos parsing. The store tests skip unless
 `E4X_TEST_PG_DSN=<dsn>` names a PostgreSQL database they may reset.
