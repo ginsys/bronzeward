@@ -1977,7 +1977,10 @@ observation may be a late landing of, or null. Its digests are not served.
 
 `source` is `machine` to read the configuration from the node, at the
 machine's Talos endpoint with its cluster's Talos access (§3.3), or `document`
-with the text in a `document` field. The ingestion resource is its staging
+with the text in a `document` field. `kind` is `import`, or `drift-adoption`
+for a machine with an open drift record, whose source is `machine` only; with
+no open record it is `409 conflict` (execution-recovery.md §6.3, choice
+§10.37). The ingestion resource is its staging
 claim as a read treats it (compilation §3.5): `state` is `abandoned` once the
 claim is past its absolute expiry, or a transient one past its lease, whether
 or not the sweep has written it. It never carries the owner string, the

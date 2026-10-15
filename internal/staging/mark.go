@@ -55,15 +55,15 @@ func mark(ctx context.Context, tx *sql.Tx, o Owner, lease time.Duration, claim, 
 	if opts.afterLock != nil {
 		opts.afterLock()
 	}
-	tk := Taken{Claim: Claim{ID: claim, Kind: "import", Mode: "encrypted"}} // only an import stages encrypted, and only encrypted pauses
+	tk := Taken{Claim: Claim{ID: claim, Mode: "encrypted"}} // only encrypted pauses
 	var until time.Time
 	var digest []byte
 	err := tx.QueryRowContext(ctx, `UPDATE staging_claim SET owner = $2, owner_gen = owner_gen + 1, owner_epoch = $3, state = 'held', review = $6,
 		lease_until = least(clock_timestamp() + $4::bigint * interval '1 microsecond', expires_at)
 		WHERE id = $1 AND $3 = (SELECT epoch FROM installation_state) AND `+markable+`
-		RETURNING owner_gen, cluster, machine, review, lease_until, payload, payload_digest`,
-		claim, o.ID, o.Epoch, lease.Microseconds(), gen, review).Scan(&tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine, &tk.Claim.Review,
-		&until, &tk.Payload, &digest)
+		RETURNING kind, owner_gen, cluster, machine, review, lease_until, payload, payload_digest`,
+		claim, o.ID, o.Epoch, lease.Microseconds(), gen, review).Scan(&tk.Claim.Kind, &tk.Claim.Gen, &tk.Claim.Cluster, &tk.Claim.Machine,
+		&tk.Claim.Review, &until, &tk.Payload, &digest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Taken{}, notMarkable(ctx, tx, o, claim)
 	}

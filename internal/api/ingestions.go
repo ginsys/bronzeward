@@ -43,10 +43,10 @@ type ingestionInput struct {
 
 func (in *ingestionInput) check(*API) error {
 	switch {
-	case in.Kind == "drift-adoption":
-		return errors.New("kind drift-adoption is not served yet")
-	case in.Kind != "import":
-		return errors.New("kind must be import")
+	case in.Kind != "import" && in.Kind != "drift-adoption":
+		return errors.New("kind must be import or drift-adoption")
+	case in.Kind == "drift-adoption" && in.Source != "machine":
+		return errors.New("a drift adoption's source must be machine")
 	case in.Source != "machine" && in.Source != "document":
 		return errors.New("source must be machine or document")
 	case in.Staging != "transient" && in.Staging != "encrypted":
@@ -155,6 +155,16 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 		return result{}, refuse(http.StatusUnprocessableEntity, "validation-failed", "the machine is not in the draft's cluster").
 			with("machine", in.Machine).with("draft", in.Draft)
 	}
+	// A drift adoption ingests a drifted machine (execution and recovery §6.3, choice §10.37). It binds
+	// no drift record: the adopt plan does, and its record requires that record still open.
+	if in.Kind == "drift-adoption" {
+		switch open, err := openDrift(ctx, tx, in.Machine); {
+		case err != nil:
+			return result{}, err
+		case !open:
+			return result{}, refuse(http.StatusConflict, "conflict", "the machine has no open drift record").with("machine", in.Machine)
+		}
+	}
 	// §7.3's natural key, under the draft's lock: one running ingest per draft revision. A running
 	// operation whose claim is due is abandoned here first, as the sweep would: a late sweep
 	// delays only the clearing of ciphertext, never a start (compilation §3.5). A claim another
@@ -174,7 +184,7 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	case !errors.Is(err, sql.ErrNoRows):
 		return result{}, err
 	}
-	c := staging.Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: in.Staging, Cluster: cluster, Machine: in.Machine, Gen: 1}
+	c := staging.Claim{ID: id.New(id.Ingestion), Kind: in.Kind, Mode: in.Staging, Cluster: cluster, Machine: in.Machine, Gen: 1}
 	if in.Review {
 		c.Review = "pending"
 	}

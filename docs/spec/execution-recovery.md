@@ -2271,6 +2271,19 @@ conservative option; those that do not say so. Each is marked in place as
     spreading the reads, which the PoC's machine count does not need; a pass
     at startup, which would read every machine on each restart of a fixture
     run.
+37. **A drift adoption is an ingestion of kind `drift-adoption` that needs an
+    open drift record** (§6.3 step 1). `POST /ingestions` takes `"kind":
+    "drift-adoption"` with `"source": "machine"` only, since the configuration
+    adopted is the one the node runs; a request for a machine with no open
+    drift record when the ingestion starts is `409 conflict` naming the
+    machine. Otherwise it runs as an import does, and its claim and ingestion
+    resource carry the kind. The ingestion binds no drift record and compares
+    no digest: the adopt plan binds the record, and the adoption record
+    requires it still open and the observed digest equal to the baseline's
+    (requirements 4.3 and 4.4). Agent decision, 2026-10-15
+    (ginsys/bronzeward#27). Alternatives: no kind, an import of a drifted
+    machine, which leaves the ingestion's purpose unrecorded; binding the
+    record at ingestion, which the record re-checks anyway.
 
 ## 11. Traceability
 

@@ -23,8 +23,8 @@ type Owner struct {
 // Timers are the claim's lease and absolute expiry (compilation §3.2), from the configuration.
 type Timers struct{ Lease, AbsoluteExpiry time.Duration }
 
-// Claim is one claim as its owner knows it. Kind is import, with its Machine, or draft-update,
-// with its Draft (persistence-api §9.3). Review is the operator review its creation requests,
+// Claim is one claim as its owner knows it. Kind is import or drift-adoption, with its Machine, or
+// draft-update, with its Draft (persistence-api §9.3). Review is the operator review its creation requests,
 // pending, or empty (compilation §3.6).
 type Claim struct {
 	ID, Kind, Mode, Cluster, Machine, Draft, Review string

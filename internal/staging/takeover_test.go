@@ -135,6 +135,12 @@ func TestTakeOver(t *testing.T) {
 	if op := f.opOwner(t, c.ID); op.gen != 3 {
 		t.Errorf("operation generation %d; want 3", op.gen)
 	}
+	// A drift adoption's claim (execution and recovery §6.3) is taken over as a drift adoption.
+	exec(t, f.db, `UPDATE staging_claim SET kind = 'drift-adoption', expires_at = now() + interval '1 hour' WHERE id = $1`, c.ID)
+	f.lapse(t, c.ID)
+	if drift, err := f.take(t, b, c.ID); err != nil || drift.Claim.Kind != "drift-adoption" {
+		t.Fatalf("drift adoption takeover: %+v, %v", drift.Claim, err)
+	}
 }
 
 // Compilation §3.4: each precondition refuses on its own, naming its reason, and the claim and its
