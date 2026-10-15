@@ -402,15 +402,20 @@ reference_at() {
       while (n > 0 && ki[n] >= ind) n--
       k[++n] = name; ki[n] = ind
       if (path() == want) { if (v ~ /^!bwref [^ ]+$/) print substr(v, 8); exit }
+      if (v ~ /^[|>][-+0-9]*$/) skip = ind
     }
+    BEGIN { skip = -1 }
     /^---/ { exit }
     /^ *(#.*)?$/ { next }
     {
       match($0, /^ */); ind = RLENGTH; t = substr($0, ind + 1)
+      # A block scalar'"'"'s body, more indented than its key or item, is text, not keys.
+      if (skip >= 0) { if (ind > skip) next; skip = -1 }
       if (substr(t, 1, 2) != "- ") { key(ind, t); next }
       while (n > 0 && ki[n] >= ind) n--
       p = n ? path() : ""
       k[++n] = cnt[p]++; ki[n] = ind
+      if (substr(t, 3) ~ /^[|>][-+0-9]*$/) { skip = ind; next }
       key(ind + 2, substr(t, 3))
     }'
 }
