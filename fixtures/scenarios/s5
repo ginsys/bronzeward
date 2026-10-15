@@ -282,13 +282,13 @@ freeze_by() {
     [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'freeze'
       AND entry->>'principal' = '$(who_id "$1")' AND entry->>'role' = '$role' AND entry->>'reason' = 'S5 drift'")" = 1 ]
 }
-# frozen_unselected <plan>: two drift observations of the worker completed after the plan's
-# approval, so the controller passed over it at least once, and still the plan is approved with no
-# observation begun for it and no operation. The controller selects no plan on a frozen scope;
-# comparison 6, which refuses one that reaches commitment, is a Go check (commit_test.go).
+# frozen_unselected <plan>: the plan's approval is 30 s old, six of the controller's passes at the
+# fixture's 5 s heartbeat (an idle pass records nothing), and still the plan is approved with no
+# observation begun for it and no operation. Unfrozen, S4's plans are taken up within a pass. The
+# controller selects no plan on a frozen scope; comparison 6, which refuses one that reaches
+# commitment, is a Go check (commit_test.go).
 frozen_unselected() {
-  [ "$(sql "SELECT count(*) FROM observation_start s JOIN observation o ON o.machine = s.machine AND o.basis = s.revision
-    JOIN approval a ON a.plan = '$1' WHERE s.machine = '$machine_w' AND s.purpose = 'drift' AND s.revision > a.revision")" -ge 2 ] &&
+  [ "$(sql "SELECT count(*) FROM approval WHERE plan = '$1' AND at <= clock_timestamp() - interval '30 seconds'")" = 1 ] &&
     plan_state_is "$1" approved &&
     [ "$(sql "SELECT count(*) FROM observation_start WHERE plan = '$1'")" = 0 ] &&
     [ "$(sql "SELECT count(*) FROM operation WHERE plan = '$1'")" = 0 ]
@@ -430,11 +430,11 @@ run() {
   adopt
   measure
   check 'S5 retained evidence' "the worker's timeline, every page, as served" keep timeline "/api/v1/machines/$machine_w/timeline"
-  check 'S5 retained evidence' "the kept timeline holds the record's opening and closing entries, the freeze, the frozen-scope refusal, the adoption and the Applied change naming the adopted release" \
+  check 'S5 retained evidence' "the kept timeline holds the record's opening and closing entries, the freeze, the frozen-scope plan's cancellation, the adoption and the Applied change naming the adopted release" \
     kept timeline "any(.[]; .kind == \"drift\" and (.entry.record | tostring) == \"$opened\" and .entry.change == \"opened\")
       and any(.[]; .kind == \"drift\" and (.entry.record | tostring) == \"$opened\" and .entry.change == \"closed\")
       and any(.[]; .kind == \"freeze\" and .entry.reason == \"S5 drift\")
-      and any(.[]; .kind == \"refusal\" and .entry.plan == \"$revert\" and (.entry.comparison | tostring) == \"6\")
+      and any(.[]; .kind == \"plan-cancellation\" and .entry.plan == \"$revert\" and .entry.reason == \"S5 frozen-scope control\")
       and any(.[]; .kind == \"adoption\" and .entry.plan == \"$plan\" and .entry.operation == \"$op\")
       and any(.[]; .kind == \"applied-change\" and .entry.plan == \"$plan\" and .entry.operation == \"$op\" and (tostring | contains(\"$new_release\")))"
   check 'S5 retained evidence' "the worker's observation records, every page, as served" keep observations "/api/v1/machines/$machine_w/observations"
