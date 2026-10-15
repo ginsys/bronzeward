@@ -56,7 +56,7 @@ func (a *API) driftPass(ctx context.Context) bool {
 		return true
 	}
 	for _, m := range ms {
-		_, err := a.observe(ctx, m, observeFor{purpose: "drift"})
+		o, err := a.observe(ctx, m, observeFor{purpose: "drift"})
 		switch {
 		case ctx.Err() != nil:
 			return false
@@ -65,6 +65,9 @@ func (a *API) driftPass(ctx context.Context) bool {
 			return false
 		case err != nil:
 			a.o.logf("drift observation of machine %s: %v", m, err)
+		case o.Digest == nil:
+			// The recorded cause only: the error's text is quoted under the pass-through control alone.
+			a.o.logf("drift observation %s of machine %s read no configuration: %s", o.ID, m, o.Unread["configuration"].Cause)
 		}
 	}
 	return true

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
+	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
@@ -149,6 +150,33 @@ func TestDrifterSkips(t *testing.T) {
 				t.Fatalf("%d drift observations", all)
 			}
 		})
+	}
+}
+
+// A drift observation that reads no configuration is logged with its machine, observation and
+// cause, with the error text quoted nowhere (choice §10.36), and the next pass observes again.
+func TestDrifterLogsUnread(t *testing.T) {
+	t.Parallel()
+	le := newLoopEnv(t, "")
+	le.appliedIsNode(t)
+	le.x.err = provider.ErrUnavailable
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := le.drifter(t, life, 20*time.Millisecond, idle)
+	a.startDrifter()
+	defer stopping(a, stop)
+	waitIdle(t, idle, 2)
+	if all, _ := le.driftStarts(t); all < 2 {
+		t.Fatalf("%d drift observations after two passes", all)
+	}
+	var obs string
+	if err := le.db.QueryRow(`SELECT id FROM observation WHERE machine = $1 ORDER BY revision LIMIT 1`, le.machine).Scan(&obs); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{le.machine, obs, "provider-unavailable"} {
+		if !le.logged(want) {
+			t.Fatalf("no log line names %q", want)
+		}
 	}
 }
 
