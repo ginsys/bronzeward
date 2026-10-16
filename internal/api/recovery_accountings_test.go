@@ -123,6 +123,14 @@ func TestRecoveryAccounting(t *testing.T) {
 	} {
 		wantProblem(t, ae.account(r, key, bad), http.StatusBadRequest, "invalid-request")
 	}
+	// A recovery entry commits after this controller's: it decides nothing in the new epoch
+	// (persistence-api.md §5.1), and records nothing.
+	before := count(t, ae.db, `SELECT count(*) FROM act`)
+	newEpoch(t, ae.db)
+	wantProblem(t, ae.account(r, "superseded", again), http.StatusServiceUnavailable, "epoch-superseded")
+	if n := count(t, ae.db, `SELECT count(*) FROM act`); n != before {
+		t.Fatalf("a superseded controller's decision recorded %d acts", n-before)
+	}
 }
 
 // The recovery start's reads (execution-recovery.md §7.3 step 1, ruling S3): a pass takes a recovery

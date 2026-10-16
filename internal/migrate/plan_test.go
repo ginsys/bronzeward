@@ -776,7 +776,7 @@ func TestPlanEntriesUnique(t *testing.T) {
 	// The query found the tables it is about, so a renamed column cannot make it pass empty.
 	want := []string{"adoption_record", "approval", "approval_revocation", "attempt", "attempt_accounting", "attempt_response",
 		"machine_freeze", "observation", "observation_start", "operation_classification", "plan", "plan_cancellation",
-		"scope_accounting"}
+		"scope_accounting", "scope_release"}
 	if !slices.Equal(tables, want) {
 		t.Errorf("timeline record tables %v; want %v", tables, want)
 	}

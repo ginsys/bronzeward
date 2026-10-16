@@ -91,6 +91,9 @@ type scopeAccountingBody struct {
 // accounted under the decision's act, then the scope state entry is written last.
 func accountScopes(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*scopeAccountingRequest)
+	if q.epoch != a.d.owner.Epoch { // an entry committed after this controller's: it decides nothing in the new epoch
+		return result{}, errNotController
+	}
 	var stopped sql.NullTime
 	if err := tx.QueryRowContext(ctx, `SELECT stopped_at FROM recovery_epoch WHERE epoch = $1`, q.epoch).Scan(&stopped); err != nil {
 		return result{}, err

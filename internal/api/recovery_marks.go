@@ -215,13 +215,19 @@ func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, err
 	for k, v := range q.input.(*scopeMarkRequest).Facts {
 		facts[k] = v
 	}
+	// The Desired release the dependencies were checked for, null for none: a release compares it (ruling G4).
+	var checked any
+	if ev.release != "" {
+		checked = ev.release
+	}
 	write := func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE machine SET scope_state = $2 WHERE id = $1`, ev.machine, b.State); err != nil {
 			return err
 		}
 		rev, when, err := a.appendEntry(ctx, tx, operationLock{machine: ev.machine, current: q.epoch}, "scope-state", map[string]any{
 			"from": state, "to": b.State, "cause": "restoration-mark", "markedBy": b.MarkedBy, "role": b.Role, "act": b.Act,
-			"observation": ev.observation, "missing": slices.Clone(b.Missing), "dependencies": ev.deps, "facts": facts})
+			"observation": ev.observation, "release": checked, "missing": slices.Clone(b.Missing), "dependencies": ev.deps,
+			"facts": facts})
 		b.Revision, b.At = rev, when
 		return err
 	}
