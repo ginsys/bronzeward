@@ -136,6 +136,11 @@ func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, err
 	if !q.recovery {
 		return result{}, refuse(http.StatusConflict, "conflict", "recovery mode is not in effect")
 	}
+	// The lock is its own statement: a statement that waits on it keeps the snapshot it started with,
+	// so Desired, which publication moves under the machine FOR SHARE, is read by the next one.
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, ev.machine); err != nil {
+		return result{}, err
+	}
 	var state string
 	var desired sql.NullString
 	var read, matches, accounted bool
@@ -144,7 +149,7 @@ func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, err
 		FROM machine m JOIN cluster c ON c.id = m.cluster JOIN machine_state s ON s.machine = m.id
 		JOIN observation o ON o.id = $2 AND o.machine = m.id
 		LEFT JOIN scope_accounting sa ON sa.machine = m.id AND sa.epoch = $3
-		WHERE m.id = $1 FOR UPDATE OF m`, ev.machine, ev.observation, q.epoch).Scan(&state, &desired, &read, &matches, &accounted)
+		WHERE m.id = $1`, ev.machine, ev.observation, q.epoch).Scan(&state, &desired, &read, &matches, &accounted)
 	if err != nil {
 		return result{}, err
 	}

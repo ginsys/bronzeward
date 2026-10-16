@@ -119,6 +119,9 @@ func TestRecoveryScopeMark(t *testing.T) {
 			accounted = s.Revision
 		}
 	}
+	if accounted == 0 {
+		t.Fatalf("the accounting answered no scope of %s: %+v", m2, acct.Scopes)
+	}
 
 	human := ae.principalOf("h-recovery")
 	for _, c := range []struct {
@@ -168,6 +171,52 @@ func TestRecoveryScopeMark(t *testing.T) {
 		}
 	}
 
+	// A publication moves Desired while the mark waits on the machine's lock: the mark reads the
+	// Desired its lock admits, not its statement's snapshot, and refuses (ruling M3).
+	var desired string
+	if err := ae.db.QueryRow(`SELECT desired FROM machine_state WHERE machine = $1`, m2).Scan(&desired); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := ae.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = moved.Rollback() }()
+	committed := make(chan error, 1)
+	var once sync.Once
+	me.x.onDecrypt = func() {
+		once.Do(func() {
+			mustExec(t, moved, `SELECT FROM machine WHERE id = $1 FOR SHARE`, m2)
+			mustExec(t, moved, `UPDATE machine_state SET desired = NULL WHERE machine = $1`, m2)
+			go func() {
+				for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+					var waiting int
+					if err := ae.db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+						AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil || waiting > 0 || time.Now().After(deadline) {
+						if err == nil && waiting == 0 {
+							err = errors.New("the mark never waited on the machine's lock")
+						}
+						if err != nil {
+							_ = moved.Rollback()
+							committed <- err
+							return
+						}
+						committed <- moved.Commit()
+						return
+					}
+				}
+			}()
+		})
+	}
+	wantProblem(t, me.mark(ctl, m2, "moved"), http.StatusConflict, "conflict")
+	if err := <-committed; err != nil {
+		t.Fatal(err)
+	}
+	me.x.mu.Lock()
+	me.x.onDecrypt = nil
+	me.x.mu.Unlock()
+	mustExec(t, ae.db, `UPDATE machine_state SET desired = $2 WHERE machine = $1`, m2, desired)
+
 	// A restored operation holds the attempt's scope: it is marked unresolved whatever the evidence.
 	me.report(me.recordedIdentity(t, ae.machine))
 	if b := decode[scopeMarkBody](t, me.mark(ctl, ae.machine, "held"), http.StatusCreated); b.State != "unresolved" {
@@ -188,6 +237,16 @@ func TestRecoveryScopeMark(t *testing.T) {
 	}
 	if n := count(t, ae.db, `SELECT count(*) FROM drift_record WHERE machine = $1 AND closed IS NULL AND observation = $2`, m2, o.ID); n != 1 {
 		t.Fatal("a restoration observation of a digest Applied does not explain opened no drift record")
+	}
+	// A scope the current epoch has no accounting of is blocked on its observation, the rest of the
+	// evidence being present.
+	me.report(me.recordedIdentity(t, m2))
+	mustExec(t, ae.db, `ALTER TABLE scope_accounting DISABLE TRIGGER immutable_rows`)
+	mustExec(t, ae.db, `DELETE FROM scope_accounting WHERE machine = $1`, m2)
+	mustExec(t, ae.db, `ALTER TABLE scope_accounting ENABLE TRIGGER immutable_rows`)
+	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "no-accounting"), http.StatusCreated); b.State != "blocked" ||
+		len(b.Missing) != 1 || b.Missing[0] != "observation" {
+		t.Fatalf("a scope with no accounting in the epoch was marked %s missing %v", b.State, b.Missing)
 	}
 	mustExec(t, ae.db, `UPDATE machine SET scope_state = 'released' WHERE id = $1`, m2)
 	before := me.restorations(t, m2)
