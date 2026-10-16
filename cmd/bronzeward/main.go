@@ -125,9 +125,17 @@ func serve(args []string) error {
 	return serveContext(ctx, args)
 }
 
-// serveContext is serve until ctx ends.
+// serveContext is serve until ctx ends. With -recovery-start, the process is persistence-api §12.2's
+// recovery start: it runs no sweep, dependency monitor, publish worker, adoption or drift loop or
+// executor, and serves only the recovery entry until its entry commits.
 func serveContext(ctx context.Context, args []string) error {
-	cfg, err := loadConfig("serve", args)
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	path := fs.String("config", "", "deployment configuration file")
+	recovery := fs.Bool("recovery-start", false, "start after a restore: serve only the recovery entry until it commits")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := readConfig(*path)
 	if err != nil {
 		return err
 	}
@@ -166,18 +174,23 @@ func serveContext(ctx context.Context, args []string) error {
 	if cfg.Ingestion != nil {
 		every = cfg.Ingestion.Sweep
 	}
-	startSweep(startCtx, ctx, db, every, log.Printf)
+	// A recovery start records nothing in the restored epoch before its entry: reads already treat a
+	// due claim as abandoned, and the entry abandons every earlier-epoch claim itself (compilation
+	// §3.5, execution-recovery §7.2).
+	if !*recovery {
+		startSweep(startCtx, ctx, db, every, log.Printf)
+	}
 	// The dependency monitor passes under the metadata identity until the signal; every instance
 	// runs one, and the per-dependency lock keeps two from classifying the same dependency
-	// (dependency-monitor §6.1).
-	if pub != nil {
+	// (dependency-monitor §6.1). A recovery start runs none (§6.1).
+	if pub != nil && !*recovery {
 		go monitor.New(db, pub.Meta, monitor.Defaults(), log.Printf, os.Stderr).Run(ctx)
 	}
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners and the publish worker stop with the signal; a claim or job left held
 	// lapses with its lease.
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, cfg.Ingestion, epoch)))
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, cfg.Ingestion, epoch, *recovery)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {

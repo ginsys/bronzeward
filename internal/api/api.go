@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/auth"
@@ -91,6 +92,9 @@ type deps struct {
 	adopt    chan struct{}
 	dispatch chan struct{}    // tells the executor loop a plan was approved
 	exec     config.Execution // the plan defaults and the transport maximum (execution-recovery.md §5.2)
+	// preEntry is true while a process started with the recovery-start flag has not committed its
+	// entry: every route but the entry is refused (§12.2).
+	preEntry *atomic.Bool
 }
 
 // options are nil or false in production; tests set them.
@@ -152,10 +156,13 @@ func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*
 // New returns the /api/v1 handler. ing, pub, exe and ic are nil without a provider. epoch is the
 // one this process read at its start: it owns claims and jobs under it, and under no later one
 // (§5.1). With a provider, it starts the publish worker and the adoption and drift loops. The
-// ingest runners, the worker and the loops stop when life ends.
+// ingest runners, the worker and the loops stop when life ends. A recovery start (recovery is
+// true) starts none of them and serves only the entry until its entry commits (§12.2); the loops
+// start at the normal restart that entry allows (execution-recovery.md §7.2).
 func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
-	exe Executor, ic *config.Ingestion, epoch string) http.Handler {
-	d := deps{ing: ing, exe: exe, life: life, exec: ex}
+	exe Executor, ic *config.Ingestion, epoch string, recovery bool) http.Handler {
+	d := deps{ing: ing, exe: exe, life: life, exec: ex, preEntry: new(atomic.Bool)}
+	d.preEntry.Store(recovery)
 	if pub != nil {
 		d.pub = &publishClients{meta: pub.Meta, reader: pub.Compiler, encrypter: pub.Compiler}
 	}
@@ -164,6 +171,9 @@ func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex 
 		d.owner = staging.Owner{ID: ic.Instance + "/" + strconv.Itoa(os.Getpid()) + "/" + rand.Text(), Epoch: epoch}
 	}
 	api := newAPI(db, a, cfg, d, options{})
+	if recovery {
+		return api
+	}
 	api.startPublisher()
 	api.startAdopter()
 	api.startDrifter()
@@ -195,6 +205,9 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 	}
 	if d.dispatch == nil {
 		d.dispatch = make(chan struct{}, 1)
+	}
+	if d.preEntry == nil {
+		d.preEntry = new(atomic.Bool)
 	}
 	api := &API{db: db, authn: a, denied: auth.NewDenied(cfg.DeniedSubjects), issuer: cfg.OIDC.Issuer, mux: http.NewServeMux(), d: d, o: o}
 	for _, rt := range append(routes(), o.extra...) {
@@ -284,6 +297,13 @@ func (a *API) handle(rt *route) http.HandlerFunc {
 		q.r, q.route = r, rt
 		if ref := authorize(q); ref != nil {
 			a.problem(w, q, ref)
+			return
+		}
+		// Before its entry commits, a recovery start serves the entry only: the restored epoch is
+		// still current, so nothing else is recorded or disclosed (§12.2).
+		if a.d.preEntry.Load() && rt.pattern != entryPattern {
+			a.problem(w, q, refuse(http.StatusConflict, "recovery-mode-active",
+				"this process started with the recovery-start flag serves only the recovery entry until it commits"))
 			return
 		}
 		if rt.mutating() {

@@ -246,3 +246,31 @@ func TestServeSweepsWithoutIngestion(t *testing.T) {
 	after := dueClaim(t, db, human, cluster, machine)
 	waitAbandoned(t, db, after, "the claim another instance left after startup")
 }
+
+// A recovery start records nothing in the restored epoch before its entry (persistence-api §12.2):
+// it does not sweep, at startup or later, so a due claim keeps its recorded state.
+func TestRecoveryStartDoesNotSweep(t *testing.T) {
+	db, dsn, human, cluster, machine := sweepFixtureDSN(t)
+	due := dueClaim(t, db, human, cluster, machine)
+	old := fallbackSweep
+	fallbackSweep = 20 * time.Millisecond
+	t.Cleanup(func() { fallbackSweep = old })
+	cfg := configFile(t, dsn)
+	ctx, cancel := context.WithCancel(t.Context())
+	errc := make(chan error, 1)
+	go func() { errc <- serveContext(ctx, []string{"-config", cfg, "-recovery-start"}) }()
+	// Ten sweep intervals: a sweep, had it run, would have abandoned the claim by then.
+	select {
+	case err := <-errc:
+		cancel()
+		t.Fatalf("serve ended early: %v", err)
+	case <-time.After(10 * fallbackSweep):
+	}
+	cancel()
+	if err := <-errc; err != nil {
+		t.Errorf("serve: %v", err)
+	}
+	if s := claimState(t, db, due); s == "abandoned" {
+		t.Fatal("a recovery start swept the due claim")
+	}
+}
