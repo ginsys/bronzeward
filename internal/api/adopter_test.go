@@ -380,7 +380,7 @@ func TestNewStartsAdopter(t *testing.T) {
 			}
 			life, stop := context.WithCancel(t.Context())
 			h := New(life, le.db, auth.NewVerifier(le.cfg, le.db, auth.Discover(le.cfg.OIDC)), le.cfg, testExecution(), nil, nil, x,
-				&config.Ingestion{Instance: "a", Heartbeat: 20 * time.Millisecond, Lease: time.Minute}, epoch(t, le.db), false)
+				&config.Ingestion{Instance: "a", Heartbeat: 20 * time.Millisecond, Lease: time.Minute}, epoch(t, le.db), false, nil)
 			defer stopping(h.(*API), stop)
 			le.approveThrough(t, h.(*API))
 			deadline := time.Now().Add(2 * time.Second)

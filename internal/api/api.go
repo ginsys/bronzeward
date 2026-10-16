@@ -95,6 +95,12 @@ type deps struct {
 	// preEntry is true while a process started with the recovery-start flag has not committed its
 	// entry: every route but the entry is refused (§12.2).
 	preEntry *atomic.Bool
+	// recoveryStart marks a process started with the flag, the only one that serves the entry;
+	// start is the epoch it read at its start, which its entry compares (§12.2 T9 step 1); onEntry
+	// runs once its entry has committed.
+	recoveryStart bool
+	start         string
+	onEntry       func()
 }
 
 // options are nil or false in production; tests set them.
@@ -158,10 +164,12 @@ func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*
 // (§5.1). With a provider, it starts the publish worker and the adoption and drift loops. The
 // ingest runners, the worker and the loops stop when life ends. A recovery start (recovery is
 // true) starts none of them and serves only the entry until its entry commits (§12.2); the loops
-// start at the normal restart that entry allows (execution-recovery.md §7.2).
+// start at the normal restart that entry allows (execution-recovery.md §7.2). onEntry runs once a
+// recovery start's entry has committed, after it owns under the new epoch.
 func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
-	exe Executor, ic *config.Ingestion, epoch string, recovery bool) http.Handler {
-	d := deps{ing: ing, exe: exe, life: life, exec: ex, preEntry: new(atomic.Bool)}
+	exe Executor, ic *config.Ingestion, epoch string, recovery bool, onEntry func()) http.Handler {
+	d := deps{ing: ing, exe: exe, life: life, exec: ex, preEntry: new(atomic.Bool), recoveryStart: recovery, start: epoch,
+		onEntry: onEntry}
 	d.preEntry.Store(recovery)
 	if pub != nil {
 		d.pub = &publishClients{meta: pub.Meta, reader: pub.Compiler, encrypter: pub.Compiler}

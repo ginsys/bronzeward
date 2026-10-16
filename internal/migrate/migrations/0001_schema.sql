@@ -55,13 +55,26 @@ CREATE UNIQUE INDEX principal_service_name ON principal (name);
 -- Installation (§11, §12.1) ------------------------------------------------------------------
 
 -- One row per epoch (§12.1): the installation's, then one per recovery-mode entry. entered_by
--- is NULL for the installation epoch. Entry's restored-backup rows arrive with recovery mode.
+-- and reason are NULL for the installation epoch, and given for every entry.
 CREATE TABLE recovery_epoch (
   epoch      text PRIMARY KEY CHECK (epoch ~ '^ep_[a-z2-7]{26}$'),
   entered_at timestamptz NOT NULL,
-  entered_by text REFERENCES principal (id)
+  entered_by text REFERENCES principal (id),
+  reason     text CHECK (btrim(reason) <> '' AND octet_length(reason) <= 1024),
+  CHECK ((entered_by IS NULL) = (reason IS NULL))
 );
 CALL make_immutable('recovery_epoch');
+
+-- The backups an entry names as restored (§12.1): each family at most once, with the backup's
+-- identity and the time it was taken, so that design §7.7's pairing duties can be checked.
+CREATE TABLE recovery_restore (
+  epoch    text NOT NULL REFERENCES recovery_epoch (epoch),
+  family   text NOT NULL CHECK (family IN ('database', 'provider', 'credential-store')),
+  backup   text NOT NULL CHECK (btrim(backup) <> '' AND octet_length(backup) <= 256 AND backup !~ '[[:cntrl:]]'),
+  taken_at timestamptz NOT NULL,
+  PRIMARY KEY (epoch, family)
+);
+CALL make_immutable('recovery_restore');
 
 -- The single installation row (§12.1): the current epoch, recovery mode, the schema version.
 CREATE TABLE installation_state (
@@ -525,7 +538,13 @@ CREATE TABLE machine_event (
              'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
              'observation', 'adoption', 'applied-change', 'commitment', 'refusal', 'attempt', 'operation-state',
              'response', 'accounting', 'classification', 'ownership-transition', 'use-time-check', 'freeze',
-             'unfreeze', 'drift')),
+             'unfreeze', 'drift', 'scope-state')),
+  -- A scope state change names the states it moved between and its cause (execution and recovery
+  -- §7.4): an entry's marks every scope pre-restore unaccounted.
+  CONSTRAINT machine_event_scope_state CHECK (kind <> 'scope-state'
+    OR (jsonb_typeof(entry->'from') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'to') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'cause') IS NOT DISTINCT FROM 'string')),
   -- A drift entry names the record it changes, by the revision of its opening entry, the change and
   -- the observation it rests on (§6.1, §6.5).
   CONSTRAINT machine_event_drift CHECK (kind <> 'drift'

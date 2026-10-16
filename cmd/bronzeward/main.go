@@ -182,15 +182,23 @@ func serveContext(ctx context.Context, args []string) error {
 	}
 	// The dependency monitor passes under the metadata identity until the signal; every instance
 	// runs one, and the per-dependency lock keeps two from classifying the same dependency
-	// (dependency-monitor §6.1). A recovery start runs none (§6.1).
-	if pub != nil && !*recovery {
-		go monitor.New(db, pub.Meta, monitor.Defaults(), log.Printf, os.Stderr).Run(ctx)
+	// (dependency-monitor §6.1). A recovery start runs none until its entry has committed (§6.1).
+	runMonitor := func() {
+		if pub != nil {
+			go monitor.New(db, pub.Meta, monitor.Defaults(), log.Printf, os.Stderr).Run(ctx)
+		}
+	}
+	var onEntry func()
+	if *recovery {
+		onEntry = runMonitor
+	} else {
+		runMonitor()
 	}
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners and the publish worker stop with the signal; a claim or job left held
 	// lapses with its lease.
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, cfg.Ingestion, epoch, *recovery)))
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, cfg.Ingestion, epoch, *recovery, onEntry)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {

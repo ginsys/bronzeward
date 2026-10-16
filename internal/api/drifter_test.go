@@ -213,7 +213,7 @@ func TestNewStartsDrifter(t *testing.T) {
 	ex.DriftInterval = 20 * time.Millisecond
 	life, stop := context.WithCancel(t.Context())
 	h := New(life, le.db, auth.NewVerifier(le.cfg, le.db, auth.Discover(le.cfg.OIDC)), le.cfg, ex, nil, nil, le.x,
-		&config.Ingestion{Instance: "a", Heartbeat: time.Hour, Lease: 2 * time.Hour}, epoch(t, le.db), false)
+		&config.Ingestion{Instance: "a", Heartbeat: time.Hour, Lease: 2 * time.Hour}, epoch(t, le.db), false, nil)
 	defer stopping(h.(*API), stop)
 	deadline := time.Now().Add(5 * time.Second)
 	for all, _ := le.driftStarts(t); all == 0; all, _ = le.driftStarts(t) {
