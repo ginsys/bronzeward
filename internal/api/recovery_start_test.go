@@ -7,7 +7,7 @@ import (
 
 // §12.2: before its entry commits, a recovery start serves the entry only. A read and a mutating
 // act are refused 409 recovery-mode-active after their role check and before any transaction, so
-// no principal row is created; the entry passes the gate (it answers 501 until it is built). The
+// no principal row is created; the entry passes the gate (its empty body is then refused). The
 // role check still comes first: a role the route does not admit is refused 403.
 func TestRecoveryStartServesOnlyTheEntry(t *testing.T) {
 	e := newEnv(t, options{})
@@ -34,7 +34,7 @@ func TestRecoveryStartServesOnlyTheEntry(t *testing.T) {
 	wantProblem(t, e.do(e.api, call{method: "POST", path: path(entryPattern), token: viewer, key: key, body: `{}`}),
 		http.StatusForbidden, "forbidden")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: path(entryPattern), token: rec, key: key, body: `{}`}),
-		http.StatusNotImplemented, "not-implemented")
+		http.StatusBadRequest, "invalid-request")
 	if n := count(t, e.db, "SELECT count(*) FROM principal WHERE sub IN ('h-viewer', 'h-author', 'h-recovery')"); n != 0 {
 		t.Fatalf("a recovery start before entry created %d principal rows", n)
 	}

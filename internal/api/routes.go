@@ -122,7 +122,7 @@ func routes() []*route {
 		approvalRevocation().on(m(post, "/approvals/{id}/revocations", approver, recovery)),
 		machineFreeze().on(m(post, "/machines/{id}/freezes", author, publisher, approver, recovery)),
 		machineUnfreeze().on(m(post, "/machines/{id}/unfreezes", approver)),
-		human(m(post, entryPattern, recovery)), human(m(post, "/recovery/exits", recovery)),
+		recoveryEntry(), human(m(post, "/recovery/exits", recovery)),
 		human(m(post, "/recovery/scopes/{machine}/marks", recovery)),
 		human(m(post, "/recovery/scopes/{machine}/releases", recovery)),
 		human(m(post, "/recovery/accountings", recovery)),

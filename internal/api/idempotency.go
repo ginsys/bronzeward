@@ -58,6 +58,10 @@ func lookup(ctx context.Context, db querier, q *request, exclusive bool) (*recor
 // request's 422, and the same request's is its stored response, marked replayed unless this
 // request committed it.
 func (a *API) answer(w http.ResponseWriter, q *request, rec *record, replayed bool) {
+	if ref := a.entryReplay(q, rec); ref != nil {
+		a.problem(w, q, ref)
+		return
+	}
 	if !rec.current {
 		a.problem(w, q, refuse(http.StatusConflict, "conflict", "the key's record is from an earlier recovery epoch; retry under a new key").
 			with("request", rec.requestID).with("epoch", rec.epoch))

@@ -2560,10 +2560,13 @@ item 4).
 
 `InstallationState` is a single row: the current epoch's identity, whether
 recovery mode is in effect, and the schema version. `RecoveryEpoch` rows are
-immutable: identity, entry time, entering principal and, for an entry after a
-restore, each restored backup family with the backup's identity and age, so
-that the pairing duties of design §7.7 can be checked (execution and recovery,
-entry).
+immutable: identity, entry time, entering principal, the operator's reason and,
+for an entry after a restore, each restored backup family with the backup's
+identity and the time it was taken, so that the pairing duties of design §7.7
+can be checked (execution and recovery, entry). The families are design §7.7
+duty 1's three: `database`, `provider` and `credential-store`. An entry names
+at least one, each at most once, and a reason; the installation's own epoch,
+minted at installation, has neither.
 
 An epoch is an **identity**: 128 random bits (§2), minted at installation and
 at every recovery-mode entry, never issued again, and compared by equality
