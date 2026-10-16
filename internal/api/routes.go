@@ -123,7 +123,7 @@ func routes() []*route {
 		machineFreeze().on(m(post, "/machines/{id}/freezes", author, publisher, approver, recovery)),
 		machineUnfreeze().on(m(post, "/machines/{id}/unfreezes", approver)),
 		recoveryEntry(), human(m(post, "/recovery/exits", recovery)),
-		human(m(post, "/recovery/scopes/{machine}/marks", recovery)),
+		scopeMarkRoute().on(human(m(post, "/recovery/scopes/{machine}/marks", recovery))),
 		human(m(post, "/recovery/scopes/{machine}/releases", recovery)),
 		scopeAccountingRoute().on(human(m(post, "/recovery/accountings", recovery))),
 		accountingDecisionRoute().on(human(m(post, "/operations/{id}/attempts/{attempt}/accountings", recovery))),

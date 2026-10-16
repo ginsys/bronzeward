@@ -1408,7 +1408,11 @@ which the recovery start does not run (see `persistence-api.md`).
    that shows another
    identity leaves the scope `blocked` on that mismatch **(choice §10.26)**.
    An observed digest that the restored `Applied` does not explain is drift (§6), not grounds for an apply, even when
-   it matches a restored release's artifact (§7.1 item 3).
+   it matches a restored release's artifact (§7.1 item 3): the `restoration`
+   observation's own record applies §6.1's drift rules, as a `drift`
+   observation's does. A `recovery-admin`'s mark request takes the scope's
+   `restoration` observation and its step 3 check itself, then marks the
+   scope from that evidence; it names no state.
 7. **Release.** `recovery-admin` releases eligible scopes explicitly. The
    release is recorded in the current epoch and opens the scope gate for that
    scope only. It is not approval: a plan for the scope still needs an approval
