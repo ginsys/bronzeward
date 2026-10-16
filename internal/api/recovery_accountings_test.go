@@ -175,18 +175,58 @@ func TestRecoveryReadsPaceTheMachine(t *testing.T) {
 		transport_deadline = clock_timestamp() - interval '10 seconds' WHERE id = $1`, att.Attempt)
 	mustExec(t, ae.db, `ALTER TABLE attempt ENABLE TRIGGER immutable_rows`)
 	ae.enterStopped(t, time.Now().Add(-time.Hour))
-	r := observer(t, ae.env, &fakeExecutor{err: errors.New("no access in this test")}, options{})
+	noAccess := &fakeExecutor{err: errors.New("no access in this test")}
+	r := observer(t, ae.env, noAccess, options{})
+	reads := func(m string) int {
+		return count(t, ae.db, `SELECT count(*) FROM observation_start WHERE machine = $1 AND purpose = 'recovery'`, m)
+	}
+
+	// Two controllers both found the other scope due: their reads wait on its lock, held here.
+	held, err := ae.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Rollback() }()
+	mustExec(t, held, `SELECT FROM machine WHERE id = $1 FOR UPDATE`, ae.target.machine2)
+	errs := make(chan error, 2)
+	for _, c := range []*API{r, observer(t, ae.env, noAccess, options{})} {
+		go func() {
+			_, err := c.observe(t.Context(), ae.target.machine2, observeFor{purpose: "recovery", paced: true})
+			errs <- err
+		}()
+	}
+	for deadline := time.Now().Add(10 * time.Second); count(t, ae.db, `SELECT count(*) FROM pg_stat_activity
+		WHERE datname = current_database() AND wait_event_type = 'Lock'`) < 2; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the two reads never waited on the machine's lock")
+		}
+	}
+	if err := held.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var read, refused int
+	for range 2 {
+		switch err := <-errs; {
+		case err == nil:
+			read++
+		case errors.Is(err, errReadNotDue):
+			refused++
+		default:
+			t.Fatal(err)
+		}
+	}
+	if read != 1 || refused != 1 || reads(ae.target.machine2) != 1 {
+		t.Fatalf("two controllers: %d read, %d refused, %d recorded; want 1, 1, 1", read, refused, reads(ae.target.machine2))
+	}
+
 	if !r.recoveryReadPass(t.Context()) {
 		t.Fatal("the loop ended with scopes pre-restore unaccounted")
 	}
 	if due, err := r.recoveryReadDue(t.Context(), ae.op); err != nil || due {
 		t.Fatalf("the executor's read is due (%v, %v) within the floor of the scope's", due, err)
 	}
-	if _, err := r.observe(t.Context(), ae.machine, observeFor{purpose: "recovery", paced: true}); !errors.Is(err, errReadNotDue) {
-		t.Fatalf("a second controller's paced read: %v, want errReadNotDue", err)
-	}
-	if n := count(t, ae.db, `SELECT count(*) FROM observation_start WHERE machine = $1 AND purpose = 'recovery'`, ae.machine); n != 1 {
-		t.Fatalf("%d recovery reads of the machine, want 1", n)
+	if reads(ae.machine) != 1 || reads(ae.target.machine2) != 1 {
+		t.Fatalf("read the attempt's scope %d times, the other %d; want 1 and 1", reads(ae.machine), reads(ae.target.machine2))
 	}
 }
 
