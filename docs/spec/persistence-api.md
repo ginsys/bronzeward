@@ -1633,7 +1633,8 @@ the act together:
   that changed during the check is `409 conflict`; a scope still pre-restore
   unaccounted is `409 recovery-mode-active`, and nothing is observed; an unknown
   machine is `404 not-found`. After these, a controller with no executor
-  answers `503 dependency-unavailable`.
+  answers `503 dependency-unavailable`, and one whose epoch an entry committed
+  after its observation superseded answers `503 epoch-superseded` (§5.1).
 - `POST /operations/{id}/resolutions` takes `to` and `reason`. `to` is
   `cancelled` only, and only an `unresolved` operation with no recorded attempt
   qualifies (§4): any other state or an attempt is `409 conflict`. Its

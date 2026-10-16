@@ -321,4 +321,21 @@ func TestRecoveryScopeMark(t *testing.T) {
 	if me.restorations(t, m2) != before {
 		t.Fatal("a refused mark of a released scope observed the machine")
 	}
+	// A recovery entry commits after the mark's observation: the controller of the earlier epoch
+	// marks nothing in the new one (persistence-api.md §5.1).
+	mustExec(t, ae.db, `UPDATE machine SET scope_state = 'blocked' WHERE id = $1`, m2)
+	var rev int64
+	if err := ae.db.QueryRow(`SELECT revision_counter FROM machine WHERE id = $1`, m2).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	var entered sync.Once
+	me.x.onDecrypt = func() { entered.Do(func() { newEpoch(t, ae.db) }) }
+	wantProblem(t, me.mark(ctl, m2, "superseded"), http.StatusServiceUnavailable, "epoch-superseded")
+	me.x.mu.Lock()
+	me.x.onDecrypt = nil
+	me.x.mu.Unlock()
+	if n := count(t, ae.db, `SELECT count(*) FROM machine m WHERE m.id = $1 AND m.scope_state = 'blocked' AND NOT EXISTS (
+			SELECT FROM machine_event e WHERE e.machine = m.id AND e.revision > $2 AND e.kind = 'scope-state')`, m2, rev); n != 1 {
+		t.Fatal("a controller of a superseded epoch marked the scope")
+	}
 }
