@@ -422,10 +422,10 @@ recorded state ([persistence and API §6.4](persistence-api.md#64-orphans));
 an ingestion-identity sweep then writes the state
 and clears the payload, at startup and periodically. A late sweep therefore
 delays only the clearing of ciphertext, never a refusal. A process started
-with the recovery-start flag runs no sweep, since it records nothing before
-its entry ([persistence and API §12.2](persistence-api.md#122-entry)), and the
-entry abandons every claim of an earlier epoch itself. The sweep interval is
-open.
+with the recovery-start flag runs no sweep before its entry, since it records
+nothing before then ([persistence and API §12.2](persistence-api.md#122-entry)),
+and the entry abandons every claim of an earlier epoch itself; it sweeps once
+its entry has committed. The sweep interval is open.
 
 Every comparison with a claim's lease or absolute expiry, a new claim's lease
 and expiry, and a heartbeat's new lease, use the database's current time,

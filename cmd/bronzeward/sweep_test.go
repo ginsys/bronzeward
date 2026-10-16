@@ -313,3 +313,19 @@ func TestRecoveryStartDoesNotSweep(t *testing.T) {
 		t.Fatalf("after a normal start the due claim is %s", s)
 	}
 }
+
+// Once its entry has committed, a recovery start sweeps (compilation §3.5): requests after entry
+// can create claims, and a due one must not keep its state and payload until a normal restart.
+// The dependency monitor starts with it.
+func TestRecoveryStartSweepsAfterEntry(t *testing.T) {
+	db, human, cluster, machine := sweepFixture(t)
+	due := dueClaim(t, db, human, cluster, machine)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	monitored := false
+	afterEntry(ctx, db, 20*time.Millisecond, func() { monitored = true })()
+	if !monitored {
+		t.Fatal("entry started no dependency monitor")
+	}
+	waitAbandoned(t, db, due, "the due claim after entry")
+}
