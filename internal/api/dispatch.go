@@ -167,62 +167,21 @@ func (a *API) recoveryReadDue(ctx context.Context, operation string) (bool, erro
 // check itself makes every read, the caller's own when it read the access first.
 func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operation string, have *provider.TalosAccess,
 	started time.Time) (useTime, error) {
-	var u useTime
 	if started.IsZero() {
 		var err error
 		if started, err = a.dbClock(ctx); err != nil {
-			return u, err
+			return useTime{}, err
 		}
 	}
-	deps := map[string]any{}
-	failed := false
-	fail := func(name, cause string) {
-		deps[name] = map[string]any{"result": "failed", "cause": cause}
-		failed = true
-	}
-	if have != nil {
-		u.access = *have
-	} else if acc, err := a.d.exe.TalosAccess(ctx, cluster); err != nil {
-		if ctx.Err() != nil {
-			return u, ctx.Err()
-		}
-		fail("access", accessCause(err))
-		a.quoteObservation("use-time check of "+plan, accessCause(err), err)
-	} else {
-		u.access = acc
-	}
-	if !failed {
-		v := u.access.Version()
-		deps["access"] = map[string]any{"result": "passed", "path": v.Path, "version": v.Version,
-			"created": v.CreatedTime.UTC().Format(time.RFC3339Nano)}
-	}
-	var ct, key string
-	var version int
+	var art boundArtifact
 	if err := a.db.QueryRowContext(ctx, `SELECT rm.ciphertext, rm.key_version, rm.key_name FROM plan p
-		JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine WHERE p.id = $1`, plan).Scan(&ct, &version,
-		&key); err != nil {
-		return u, err
+		JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine WHERE p.id = $1`, plan).Scan(&art.ciphertext,
+		&art.version, &art.key); err != nil {
+		return useTime{}, err
 	}
-	switch {
-	case key != a.d.exe.ArtifactKey():
-		fail("artifact", "key-mismatch") // the bound key is not the one the executor decrypts under
-	default:
-		art, err := a.d.exe.DecryptArtifact(ctx, provider.Ciphertext(ct), version)
-		switch {
-		case err == nil:
-			u.artifact = art
-			deps["artifact"] = map[string]any{"result": "passed", "key": key, "version": version}
-		case ctx.Err() != nil:
-			return u, ctx.Err()
-		case errors.Is(err, provider.ErrUnavailable):
-			fail("artifact", "provider-unavailable")
-		default:
-			c := accessCause(err)
-			if c == "provider-unavailable" { // not a provider status: the ciphertext or the version was refused
-				c = "refused"
-			}
-			fail("artifact", c)
-		}
+	u, deps, failed, err := a.checkDependencies(ctx, cluster, "use-time check of "+plan, &art, have)
+	if err != nil {
+		return u, err
 	}
 	result := "passed"
 	if failed {
@@ -240,6 +199,68 @@ func (a *API) useTimeCheck(ctx context.Context, machine, cluster, plan, operatio
 		return useTime{}, fmt.Errorf("plan %s: %w", plan, errUseTime)
 	}
 	return u, nil
+}
+
+// boundArtifact is a release's artifact for one machine as its release_machine row binds it: the
+// ciphertext and the key name and version it is encrypted under.
+type boundArtifact struct {
+	ciphertext, key string
+	version         int
+}
+
+// checkDependencies is §3.1 item 2's two reads, shared by the use-time check and the restoration
+// mark's dependency check (§7.3 step 3, choice §10.20): the cluster's Talos access, unless have
+// holds the one the caller read, and the decryption of art under the executor identity, when art is
+// set. It answers each dependency's result as an entry records it, never the values, and whether
+// one failed; quoted names the reads in the pass-through log.
+func (a *API) checkDependencies(ctx context.Context, cluster, quoted string, art *boundArtifact,
+	have *provider.TalosAccess) (useTime, map[string]any, bool, error) {
+	var u useTime
+	deps := map[string]any{}
+	failed := false
+	fail := func(name, cause string) {
+		deps[name] = map[string]any{"result": "failed", "cause": cause}
+		failed = true
+	}
+	if have != nil {
+		u.access = *have
+	} else if acc, err := a.d.exe.TalosAccess(ctx, cluster); err != nil {
+		if ctx.Err() != nil {
+			return u, nil, false, ctx.Err()
+		}
+		fail("access", accessCause(err))
+		a.quoteObservation(quoted, accessCause(err), err)
+	} else {
+		u.access = acc
+	}
+	if !failed {
+		v := u.access.Version()
+		deps["access"] = map[string]any{"result": "passed", "path": v.Path, "version": v.Version,
+			"created": v.CreatedTime.UTC().Format(time.RFC3339Nano)}
+	}
+	switch {
+	case art == nil:
+	case art.key != a.d.exe.ArtifactKey():
+		fail("artifact", "key-mismatch") // the bound key is not the one the executor decrypts under
+	default:
+		plain, err := a.d.exe.DecryptArtifact(ctx, provider.Ciphertext(art.ciphertext), art.version)
+		switch {
+		case err == nil:
+			u.artifact = plain
+			deps["artifact"] = map[string]any{"result": "passed", "key": art.key, "version": art.version}
+		case ctx.Err() != nil:
+			return u, nil, false, ctx.Err()
+		case errors.Is(err, provider.ErrUnavailable):
+			fail("artifact", "provider-unavailable")
+		default:
+			c := accessCause(err)
+			if c == "provider-unavailable" { // not a provider status: the ciphertext or the version was refused
+				c = "refused"
+			}
+			fail("artifact", c)
+		}
+	}
+	return u, deps, failed, nil
 }
 
 // dbClock is the database's current time, the one clock the use-time check, the evidence and every

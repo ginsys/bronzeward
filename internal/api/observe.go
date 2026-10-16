@@ -258,8 +258,8 @@ func (a *API) startObservation(ctx context.Context, tx *sql.Tx, machine string, 
 }
 
 // recordObservation is the observation entry's transaction (T7), under the same epoch check and
-// machine lock as its start. A drift observation's transaction also applies the drift rules to it
-// (execution-recovery.md §6.1, §6.5).
+// machine lock as its start. A drift or restoration observation's transaction also applies the drift
+// rules to it (execution-recovery.md §6.1, §6.5, §7.3 step 6).
 func (a *API) recordObservation(ctx context.Context, machine string, f observeFor, o *observed) error {
 	unread, err := json.Marshal(o.Unread)
 	if err != nil {
@@ -303,7 +303,7 @@ func (a *API) recordObservation(ctx context.Context, machine string, f observeFo
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10, $11, $12, $13, $14, NULL, $15, $16)`,
 			o.ID, machine, o.Basis, o.Revision, path, version, created, smbios, nodeID, clusterID, assignment, running, digest, resource,
 			unread, at)
-		if err != nil || f.purpose != "drift" {
+		if err != nil || (f.purpose != "drift" && f.purpose != "restoration") {
 			return err
 		}
 		_, err = applyDrift(ctx, tx, machine, current, o.ID, false)

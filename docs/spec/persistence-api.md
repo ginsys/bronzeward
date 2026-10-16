@@ -1616,6 +1616,21 @@ the act together:
   restore, a scope not pre-restore unaccounted, or any scope failing §5.2, is
   `409 conflict` naming that machine and records nothing; an observation not of
   its scope's machine, or an unknown machine, is `404 not-found`.
+- `POST /recovery/scopes/{machine}/marks` takes `facts` as above and names no
+  state: the evidence decides it. Before its transaction the serving controller
+  takes a `restoration` observation of the machine and checks the dependencies
+  that apply its `Desired` release (execution and recovery §7.3 steps 3, 4 and
+  6, choice §10.20); a machine with no `Desired` release has only its Talos
+  access checked. The transaction marks the scope `unresolved` while a
+  non-terminal operation holds it, `blocked` naming each item missing (the
+  observation when it read no identity, the identity when it is not the
+  machine record's, each failed dependency), and `ready` otherwise, as one
+  scope state entry naming the observation and the act. The answer names the
+  state moved from and to, the observation and what is missing. A scope may be
+  marked again. Outside recovery mode, a released scope, or a `Desired` release
+  that changed during the check is `409 conflict`; a scope still pre-restore
+  unaccounted is `409 recovery-mode-active`, and nothing is observed; an unknown
+  machine is `404 not-found`.
 - `POST /operations/{id}/resolutions` takes `to` and `reason`. `to` is
   `cancelled` only, and only an `unresolved` operation with no recorded attempt
   qualifies (§4): any other state or an attempt is `409 conflict`. Its
