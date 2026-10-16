@@ -61,7 +61,10 @@ CREATE TABLE recovery_epoch (
   entered_at timestamptz NOT NULL,
   entered_by text REFERENCES principal (id),
   reason     text CHECK (btrim(reason) <> '' AND octet_length(reason) <= 1024),
-  CHECK ((entered_by IS NULL) = (reason IS NULL))
+  -- When every pre-restoration instance was stopped, or established as stopped (execution and
+  -- recovery §7.3 step 1): the stop the post-restore accounting decision counts its floor from.
+  stopped_at timestamptz CHECK (stopped_at <= entered_at),
+  CHECK ((entered_by IS NULL) = (reason IS NULL) AND (entered_by IS NULL) = (stopped_at IS NULL))
 );
 CALL make_immutable('recovery_epoch');
 
@@ -1598,7 +1601,8 @@ CALL make_immutable('attempt_response');
 -- the start and at the end of the settle, and the settle floor, its instants and how a change of
 -- the machine-configuration resource version is explained. The act is written after the effect in
 -- the same transaction, so its reference is checked at commit. It is one accounting entry on the
--- machine's timeline.
+-- machine's timeline. One post-restore accounting decision accounts every restored attempt of its
+-- scopes under its one act (execution and recovery §7.3 step 1).
 CREATE TABLE attempt_accounting (
   attempt              text PRIMARY KEY,
   machine              text NOT NULL,
@@ -1607,7 +1611,7 @@ CREATE TABLE attempt_accounting (
   decided_by           text,
   decided_by_kind      text GENERATED ALWAYS AS (CASE WHEN decided_by IS NOT NULL THEN 'human' END) STORED,
   role                 text CHECK (role = 'recovery-admin'),
-  act                  text UNIQUE REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  act                  text REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
   start_observation    text,
   end_observation      text,
   facts                jsonb CHECK (jsonb_typeof(facts) = 'object'),
@@ -1629,6 +1633,32 @@ CREATE TABLE attempt_accounting (
   FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
 );
 CALL make_immutable('attempt_accounting');
+
+-- The post-restore accounting decision for one scope (execution and recovery §7.3 step 1, §5.2), once
+-- per epoch: the recovery-admin who decided it under its act, the observations read at the start and
+-- at the end of the settle, and its facts. It is the scope state entry that moves the scope out of
+-- pre-restore unaccounted.
+CREATE TABLE scope_accounting (
+  machine           text NOT NULL REFERENCES machine (id),
+  epoch             text NOT NULL REFERENCES recovery_epoch (epoch),
+  decided_by        text NOT NULL,
+  decided_by_kind   text NOT NULL GENERATED ALWAYS AS ('human') STORED,
+  role              text NOT NULL CHECK (role = 'recovery-admin'),
+  act               text NOT NULL REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  start_observation text NOT NULL,
+  end_observation   text NOT NULL,
+  facts             jsonb NOT NULL CHECK (jsonb_typeof(facts) = 'object'),
+  at                timestamptz NOT NULL,
+  revision          bigint NOT NULL,
+  entry_kind        text NOT NULL GENERATED ALWAYS AS ('scope-state') STORED,
+  PRIMARY KEY (machine, epoch),
+  UNIQUE (machine, revision),
+  FOREIGN KEY (decided_by, decided_by_kind) REFERENCES principal (id, kind),
+  FOREIGN KEY (start_observation, machine) REFERENCES observation (id, machine),
+  FOREIGN KEY (end_observation, machine) REFERENCES observation (id, machine),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('scope_accounting');
 
 -- The scope and rollout slot are released only on a terminal state, and never while a recorded
 -- attempt is unaccounted for (execution and recovery §8 invariant 5): an operation reaches

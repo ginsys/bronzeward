@@ -125,7 +125,7 @@ func routes() []*route {
 		recoveryEntry(), human(m(post, "/recovery/exits", recovery)),
 		human(m(post, "/recovery/scopes/{machine}/marks", recovery)),
 		human(m(post, "/recovery/scopes/{machine}/releases", recovery)),
-		human(m(post, "/recovery/accountings", recovery)),
+		scopeAccountingRoute().on(human(m(post, "/recovery/accountings", recovery))),
 		accountingDecisionRoute().on(human(m(post, "/operations/{id}/attempts/{attempt}/accountings", recovery))),
 		operationTakeover().on(human(m(post, "/operations/{id}/takeovers", recovery))),
 		operationResolution().on(human(m(post, "/operations/{id}/resolutions", recovery))),

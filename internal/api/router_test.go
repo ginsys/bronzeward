@@ -244,12 +244,12 @@ func TestNotImplemented(t *testing.T) {
 	e := newEnv(t, options{})
 	pub := e.human("h-publisher")
 	rec := e.human("h-recovery")
-	accountings := path("/recovery/accountings")
-	wantProblem(t, e.do(e.api, call{method: "POST", path: accountings, token: rec}), http.StatusPreconditionRequired, "idempotency-key-required")
-	wantProblem(t, e.do(e.api, call{method: "POST", path: accountings, token: rec, key: "short"}), http.StatusBadRequest, "invalid-request")
+	exits := path("/recovery/exits")
+	wantProblem(t, e.do(e.api, call{method: "POST", path: exits, token: rec}), http.StatusPreconditionRequired, "idempotency-key-required")
+	wantProblem(t, e.do(e.api, call{method: "POST", path: exits, token: rec, key: "short"}), http.StatusBadRequest, "invalid-request")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: path("/drafts/{id}/publications"), token: pub, key: "k0123456789abcdef"}),
 		http.StatusPreconditionRequired, "precondition-required")
-	wantProblem(t, e.do(e.api, call{method: "POST", path: accountings, token: rec, key: key, body: `{}`}),
+	wantProblem(t, e.do(e.api, call{method: "POST", path: exits, token: rec, key: key, body: `{}`}),
 		http.StatusNotImplemented, "not-implemented")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/recovery", token: e.human("h-viewer")}),
 		http.StatusNotImplemented, "not-implemented")
