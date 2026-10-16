@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -84,17 +85,15 @@ func notRecoveryStart() *refusal {
 	return refuse(http.StatusConflict, "conflict", "only a process started with the recovery-start flag serves the recovery entry")
 }
 
-// entryReplay is §12.4's refusal of an entry record a request would replay, or nil to replay it. A
-// process not started with the flag replays none. A recovery start replays only its own entry: a
-// record in the epoch it started in is an earlier entry the restored database holds, and replaying
-// it would answer 201 with no epoch minted and no scope closed. A current record of this process's
-// own entry, whose COMMIT reply was lost, completes the entry before it is replayed.
+// entryReplay is §12.4's refusal of an entry record a request would replay, or nil to replay it. Only
+// a recovery start reaches it, and it replays only its own entry: a record in the epoch it started
+// in is an earlier entry the restored database holds, and replaying it would answer 201 with no
+// epoch minted and no scope closed. A current record of this process's own entry, whose COMMIT reply
+// was lost, completes the entry before it is replayed.
 func (a *API) entryReplay(q *request, rec *record) *refusal {
 	switch {
 	case q.route.pattern != entryPattern:
 		return nil
-	case !a.d.recoveryStart:
-		return notRecoveryStart()
 	case rec.epoch == a.d.start:
 		return refuse(http.StatusConflict, "conflict", "the key's record is an entry from before this start; retry under a new key").
 			with("request", rec.requestID).with("epoch", rec.epoch)
@@ -104,20 +103,23 @@ func (a *API) entryReplay(q *request, rec *record) *refusal {
 	return nil
 }
 
-// takeover is a non-terminal apply-config operation as entry takes it over.
+// takeover is an operation entry ends or takes over: a non-terminal apply-config operation, a
+// queued or running publish job, or a running ingest operation of a live staging claim.
 type takeover struct {
-	id, machine, state, from, fromEpoch string
-	gen                                 int64
+	id, kind, machine, state, from, fromEpoch string
+	gen                                       int64
 }
 
-// enterRecovery is T9 steps 1, 2, 5 and 6. Step 1 compares the installation's epoch, read FOR UPDATE,
-// with the one this process started in: another means an entry committed since, and this one is
-// refused naming it, so entries under different keys mint one epoch between them.
+// liveClaim is a staging claim not yet released or abandoned (compilation §3.5).
+const liveClaim = `state IN ('held', 'paused', 'resumed')`
+
+// enterRecovery is T9. Step 1 compares the installation's epoch, read FOR UPDATE, with the one this
+// process started in: another means an entry committed since, and this one is refused naming it, so
+// entries under different keys mint one epoch between them. Every live staging claim is locked after
+// the machines, and every operation entry ends or takes over in one pass in id order (§5 rule 5).
 func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*entryRequest)
 	switch {
-	case !a.d.recoveryStart:
-		return result{}, notRecoveryStart()
 	case q.epoch != a.d.start:
 		return result{}, refuse(http.StatusConflict, "conflict", "a recovery-mode entry has committed since this process started").
 			with("epoch", q.epoch)
@@ -142,6 +144,9 @@ func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result,
 	if err := rows.Close(); err != nil {
 		return result{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM staging_claim WHERE `+liveClaim+` ORDER BY id FOR UPDATE`); err != nil {
+		return result{}, err
+	}
 	var revoked bool
 	if err := tx.QueryRowContext(ctx, `SELECT revoked FROM principal WHERE id = $1 FOR SHARE`, q.principal.ID).Scan(&revoked); err != nil {
 		return result{}, err
@@ -150,14 +155,18 @@ func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result,
 		return result{}, refuse(http.StatusForbidden, "identity-revoked", "")
 	}
 	var ops []takeover
-	rows, err = tx.QueryContext(ctx, `SELECT id, machine, state, owner, owner_gen, owner_epoch FROM operation
-		WHERE kind = 'apply-config' AND state IN ('committed', 'sending', 'verifying', 'unresolved') ORDER BY id FOR UPDATE`)
+	rows, err = tx.QueryContext(ctx, `SELECT id, kind, coalesce(machine, ''), state, coalesce(owner, ''), owner_gen,
+			coalesce(owner_epoch, '') FROM operation
+		WHERE (kind = 'apply-config' AND state IN ('committed', 'sending', 'verifying', 'unresolved'))
+			OR (kind = 'publish' AND state IN ('queued', 'running'))
+			OR (kind = 'ingest' AND state = 'running' AND ingestion IN (SELECT id FROM staging_claim WHERE `+liveClaim+`))
+		ORDER BY id FOR UPDATE`)
 	if err != nil {
 		return result{}, err
 	}
 	for rows.Next() {
 		var o takeover
-		if err := rows.Scan(&o.id, &o.machine, &o.state, &o.from, &o.gen, &o.fromEpoch); err != nil {
+		if err := rows.Scan(&o.id, &o.kind, &o.machine, &o.state, &o.from, &o.gen, &o.fromEpoch); err != nil {
 			_ = rows.Close()
 			return result{}, err
 		}
@@ -171,8 +180,9 @@ func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result,
 	b := &entryBody{Epoch: ep, PreviousEpoch: q.epoch, EnteredBy: q.principal.ID, Role: q.role, Reason: in.Reason,
 		Restored: in.Restored, Machines: len(machines), Operations: []string{}, Act: q.actID}
 	write := func(ctx context.Context, tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, `INSERT INTO recovery_epoch (epoch, entered_at, entered_by, reason) VALUES ($1, now(), $2, $3)
-			RETURNING entered_at`, ep, b.EnteredBy, b.Reason).Scan(&b.At); err != nil {
+		// The entry time is read after the lock waits, as an identity revocation's is (§5 rule 4).
+		if err := tx.QueryRowContext(ctx, `INSERT INTO recovery_epoch (epoch, entered_at, entered_by, reason)
+			VALUES ($1, clock_timestamp(), $2, $3) RETURNING entered_at`, ep, b.EnteredBy, b.Reason).Scan(&b.At); err != nil {
 			return err
 		}
 		for _, r := range in.Restored {
@@ -184,9 +194,21 @@ func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result,
 		if _, err := tx.ExecContext(ctx, `UPDATE installation_state SET epoch = $1, recovery_mode = true`, ep); err != nil {
 			return err
 		}
-		// Step 5: every non-terminal operation into the new epoch, then every scope's gate closed by
-		// marking it pre-restore unaccounted, each last on its machine's timeline.
+		// Step 3: every live claim abandoned with its payload cleared; the loop below fails its running
+		// ingest operation (step 3) and every queued or running publish job (step 4).
+		if _, err := tx.ExecContext(ctx, `UPDATE staging_claim SET state = 'abandoned', payload = NULL, payload_digest = NULL
+			WHERE `+liveClaim); err != nil {
+			return err
+		}
+		// Step 5: every non-terminal apply-config operation into the new epoch, then every scope's gate
+		// closed by marking it pre-restore unaccounted, each last on its machine's timeline.
 		for _, o := range ops {
+			if o.kind != "apply-config" {
+				if err := failOnEntry(ctx, tx, o, ep); err != nil {
+					return err
+				}
+				continue
+			}
 			if _, err := tx.ExecContext(ctx, `UPDATE operation SET state = 'unresolved', owner = $2, owner_gen = owner_gen + 1,
 					owner_epoch = $3 WHERE id = $1`, o.id, a.d.owner.ID, ep); err != nil {
 				return err
@@ -221,6 +243,32 @@ func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result,
 	}
 	return result{status: http.StatusCreated, location: prefix + "/recovery", body: b, subjects: []string{ep}, atActOrder: write,
 		afterCommit: func() { a.entered(ep) }}, nil
+}
+
+// failOnEntry fails a publish job recovery-mode-entered, or an ingest operation whose claim entry
+// abandoned ingestion-abandoned, with its terminal event in the epoch entry minted (§8.2, §12.2). A
+// running job's owner is fenced by that epoch, so its late commit writes nothing.
+func failOnEntry(ctx context.Context, tx *sql.Tx, o takeover, epoch string) error {
+	ref := refuse(http.StatusConflict, "recovery-mode-entered", "recovery-mode entry ended the job before it published")
+	if o.kind == "ingest" {
+		ref = refuse(http.StatusConflict, "ingestion-abandoned", "recovery-mode entry abandoned the staging claim; ingest the input again")
+	}
+	doc, err := json.Marshal(problemDoc(o.id, ref))
+	if err != nil {
+		return err
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `UPDATE operation SET state = 'failed', error = $2::jsonb, owner = NULL, owner_epoch = NULL,
+		lease_until = NULL, last_event = last_event + 1 WHERE id = $1 RETURNING last_event`, o.id, string(doc)).Scan(&n); err != nil {
+		return err
+	}
+	entry, err := json.Marshal(map[string]any{"type": "failed", "code": ref.code})
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO operation_event (operation, number, epoch, kind, entry, at)
+		VALUES ($1, $2, $3, $4, $5, now())`, o.id, n, epoch, o.kind, string(entry))
+	return err
 }
 
 // entryState is the epoch a recovery start's entry minted, and whether the process has made it its

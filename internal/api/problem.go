@@ -20,6 +20,7 @@ var titles = map[string]string{
 	"recovery-mode-active":      "Recovery mode refuses the act on this scope",
 	"scope-busy":                "An operation holds the machine scope",
 	"ingestion-abandoned":       staging.AbandonedTitle,
+	"recovery-mode-entered":     "Recovery-mode entry ended the job",
 	"idempotency-key-reused":    "The idempotency key was used for another request",
 	"idempotency-key-required":  "An Idempotency-Key header is required",
 	"precondition-required":     "An If-Match header is required",

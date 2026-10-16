@@ -330,6 +330,12 @@ func (a *API) handle(rt *route) http.HandlerFunc {
 			a.problem(w, q, preEntryRefusal())
 			return
 		}
+		// A process started without the flag refuses the entry before it records anything, its
+		// principal included, and replays no entry record (§12.2, §12.4).
+		if rt.pattern == entryPattern && !a.d.recoveryStart {
+			a.problem(w, q, notRecoveryStart())
+			return
+		}
 		if rt.mutating() {
 			if ref := preconditions(q); ref != nil {
 				a.problem(w, q, ref)
