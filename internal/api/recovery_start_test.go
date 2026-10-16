@@ -21,11 +21,13 @@ func TestRecoveryStartServesOnlyTheEntry(t *testing.T) {
 		http.StatusConflict, "recovery-mode-active")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/recovery", token: viewer}),
 		http.StatusConflict, "recovery-mode-active")
+	wantProblem(t, e.do(e.api, call{method: "POST", path: path("/drafts"), token: viewer, key: key, body: `{}`}),
+		http.StatusForbidden, "forbidden")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: path(entryPattern), token: viewer, key: key, body: `{}`}),
 		http.StatusForbidden, "forbidden")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: path(entryPattern), token: rec, key: key, body: `{}`}),
 		http.StatusNotImplemented, "not-implemented")
-	if n := count(t, e.db, "SELECT count(*) FROM principal WHERE sub IN ('h-author', 'h-recovery')"); n != 0 {
+	if n := count(t, e.db, "SELECT count(*) FROM principal WHERE sub IN ('h-viewer', 'h-author', 'h-recovery')"); n != 0 {
 		t.Fatalf("a recovery start before entry created %d principal rows", n)
 	}
 	// Without the flag the same read is served.
