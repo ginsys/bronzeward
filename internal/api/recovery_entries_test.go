@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -130,7 +131,8 @@ func TestRecoveryEntry(t *testing.T) {
 // Entry ends what the earlier epoch left running (§12.2 T9 steps 3 and 4, §8.2): every live staging
 // claim is abandoned with its payload cleared and its running ingest operation failed
 // ingestion-abandoned, and every queued or running publish job is failed recovery-mode-entered, each
-// with its terminal event in the new epoch. A released claim and a finished job stay as they are.
+// with its terminal event in the new epoch, dated no earlier than the epoch (§5 rule 4). A released
+// claim and a finished job stay as they are.
 func TestRecoveryEntryEndsJobsAndClaims(t *testing.T) {
 	t.Parallel()
 	d := newDraftEnv(t)
@@ -172,7 +174,8 @@ func TestRecoveryEntryEndsJobsAndClaims(t *testing.T) {
 			if n := count(t, d.db, `SELECT count(*) FROM operation o JOIN operation_event e ON e.operation = o.id AND e.number = o.last_event
 					WHERE o.id = $1 AND o.state = 'failed' AND o.owner IS NULL AND o.lease_until IS NULL AND o.last_event = 3
 					AND o.error->>'type' = 'urn:bronzeward:problem:' || $2 AND o.error->>'instance' = o.id
-					AND e.epoch = $3 AND e.entry->>'type' = 'failed' AND e.entry->>'code' = $2`, o, code, b.Epoch); n != 1 {
+					AND e.epoch = $3 AND e.entry->>'type' = 'failed' AND e.entry->>'code' = $2
+					AND e.at >= (SELECT entered_at FROM recovery_epoch WHERE epoch = $3)`, o, code, b.Epoch); n != 1 {
 				t.Errorf("operation %s is not failed %s with its terminal event in the new epoch", o, code)
 			}
 		}
@@ -215,6 +218,36 @@ func TestRecoveryEntryTimeFollowsItsWaits(t *testing.T) {
 	}
 	if at.Before(released) || !b.At.Equal(at) {
 		t.Fatalf("entered at %s (answered %s); the wait ended at %s", at, b.At, released)
+	}
+}
+
+// gateWriter records whether the pre-entry gate was still closed when the reply's status was written.
+type gateWriter struct {
+	*httptest.ResponseRecorder
+	gate   *atomic.Bool
+	closed bool
+}
+
+func (w *gateWriter) WriteHeader(code int) {
+	w.closed = w.gate.Load()
+	w.ResponseRecorder.WriteHeader(code)
+}
+
+// The gate opens before the entry answers (§12.2): a request sent once the 201 arrives must find the
+// process past entry, not refused recovery-mode-active.
+func TestRecoveryEntryOpensTheGateBeforeItAnswers(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, options{})
+	var entered atomic.Int32
+	r := recoveryStart(t, e, &entered)
+	req := httptest.NewRequest("POST", path(entryPattern), strings.NewReader(entryBodyText))
+	req.Header.Set("Authorization", "Bearer "+e.human("h-recovery"))
+	req.Header.Set("Idempotency-Key", "k-entry-gate-0123456789")
+	req.Header.Set("Content-Type", "application/json")
+	w := &gateWriter{ResponseRecorder: httptest.NewRecorder(), gate: r.d.preEntry}
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated || w.closed {
+		t.Fatalf("answered %d %s with the gate closed: %t", w.Code, w.Body, w.closed)
 	}
 }
 

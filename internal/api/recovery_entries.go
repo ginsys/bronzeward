@@ -89,8 +89,9 @@ func notRecoveryStart() *refusal {
 // a recovery start reaches it, and it replays only its own entry, whose record is in the epoch it
 // minted: any other is an earlier entry the restored database holds, or another start's, and
 // replaying it would answer 201 with no epoch minted by this process and its gate still closed. A
-// current record of this process's own entry, whose COMMIT reply was lost, completes the entry
-// before it is replayed.
+// current record of this process's own entry completes the entry before it is answered: the
+// committing request's, so the gate is open before its 201 is written, and a retry's, whose COMMIT
+// reply was lost.
 func (a *API) entryReplay(q *request, rec *record) *refusal {
 	if q.route.pattern != entryPattern {
 		return nil
@@ -243,8 +244,9 @@ func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result,
 		q.epoch, q.recovery = ep, true
 		return nil
 	}
-	return result{status: http.StatusCreated, location: prefix + "/recovery", body: b, subjects: []string{ep}, atActOrder: write,
-		afterCommit: func() { a.entered(ep) }}, nil
+	// The committing request's own answer passes entryReplay, which completes the entry before the
+	// reply is written.
+	return result{status: http.StatusCreated, location: prefix + "/recovery", body: b, subjects: []string{ep}, atActOrder: write}, nil
 }
 
 // failOnEntry fails a publish job recovery-mode-entered, or an ingest operation whose claim entry
@@ -269,7 +271,7 @@ func failOnEntry(ctx context.Context, tx *sql.Tx, o takeover, epoch string) erro
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO operation_event (operation, number, epoch, kind, entry, at)
-		VALUES ($1, $2, $3, $4, $5, now())`, o.id, n, epoch, o.kind, string(entry))
+		VALUES ($1, $2, $3, $4, $5, clock_timestamp())`, o.id, n, epoch, o.kind, string(entry))
 	return err
 }
 
