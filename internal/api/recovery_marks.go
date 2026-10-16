@@ -137,8 +137,8 @@ func prepareMark(ctx context.Context, a *API, q *request) error {
 // while a non-terminal operation holds the scope; otherwise blocked naming each missing item — the
 // observation, when it did not read the identity, does not follow the step 1 decision, is followed
 // by an operation change (§6.1 excludes it from drift) or used another access version than the check; the
-// identity, when the one read is not the one the machine record binds (§3.2 comparison 3, choice
-// §10.26); each failed dependency — and ready when nothing is missing.
+// identity, when the one read is not the one the machine record binds or a later observation read
+// another (§3.2 comparison 3, choice §10.26); each failed dependency — and ready when nothing is missing.
 func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	ev := q.mark
 	if !q.recovery {
@@ -156,14 +156,19 @@ func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, err
 	var desired sql.NullString
 	// quiet is §6.1's exclusion read the other way: no commitment or operation state change at or
 	// after the observation's basis, so its drift rules applied to it.
-	var read, matches, accounted, quiet bool
+	// contradicted: a later observation, of any purpose and by any process (another mark's included),
+	// read an identity other than the record's (§3.2 comparison 3).
+	var read, matches, accounted, quiet, contradicted bool
 	err := tx.QueryRowContext(ctx, `SELECT m.scope_state, s.desired, o.unread->'identity' IS NULL, coalesce(`+identityMatch+`, false),
 			coalesce(o.basis > sa.revision, false), NOT EXISTS (SELECT FROM machine_event e WHERE e.machine = m.id
-				AND e.revision >= o.basis AND e.kind IN ('commitment', 'operation-state'))
+				AND e.revision >= o.basis AND e.kind IN ('commitment', 'operation-state')),
+			EXISTS (SELECT FROM observation o WHERE o.machine = m.id AND o.basis > (SELECT basis FROM observation WHERE id = $2)
+				AND o.unread->'identity' IS NULL AND NOT `+identityMatch+`)
 		FROM machine m JOIN cluster c ON c.id = m.cluster JOIN machine_state s ON s.machine = m.id
 		JOIN observation o ON o.id = $2 AND o.machine = m.id
 		LEFT JOIN scope_accounting sa ON sa.machine = m.id AND sa.epoch = $3
-		WHERE m.id = $1`, ev.machine, ev.observation, q.epoch).Scan(&state, &desired, &read, &matches, &accounted, &quiet)
+		WHERE m.id = $1`, ev.machine, ev.observation, q.epoch).Scan(&state, &desired, &read, &matches, &accounted, &quiet,
+		&contradicted)
 	if err != nil {
 		return result{}, err
 	}
@@ -192,7 +197,9 @@ func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, err
 	if !read || !accounted || !quiet || ev.otherAccess {
 		b.Missing = append(b.Missing, "observation")
 	}
-	if read && !matches { // an identity read and not the record's is missing whether or not the observation counts
+	// An identity read and not the record's is missing whether or not the observation counts, as is one
+	// a newer observation contradicts.
+	if (read && !matches) || contradicted {
 		b.Missing = append(b.Missing, "identity")
 	}
 	b.Missing = append(b.Missing, ev.missing...)
