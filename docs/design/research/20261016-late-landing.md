@@ -91,7 +91,8 @@ container (`fixtures/bin/inject kill|start controlplane`).
 4. sleeps until the cell's fault length, undoes the fault, then reads the worker's resource version
    once a second for 60 s, recording the first change;
 5. records machined's `ApplyConfiguration` log lines since the capture's start time, and one line
-   in `captures.tsv`.
+   in `captures.tsv`. Its `killed` column is when `talosctl` ended, whether killed or exited on its
+   own; `talosctl_rc` tells which (137 is the kill).
 
 Before the next capture it checks whether the previous capture's version moved after its window
 closed (`after-window.tsv`). The control cell, with no fault, must land, or a run without landings

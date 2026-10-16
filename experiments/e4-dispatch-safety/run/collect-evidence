@@ -26,10 +26,18 @@ dest=${E4D_EVIDENCE:-$E4D_DIR/evidence}
 # One path component, evidence or evidence-<letters and digits>: nothing that can climb out.
 [[ $dest == "$E4D_DIR"/* && ${dest#"$E4D_DIR"/} =~ ^evidence(-[A-Za-z0-9]+)?$ ]] ||
   die "E4D_EVIDENCE ($dest) must be $E4D_DIR/evidence or $E4D_DIR/evidence-<name>"
+# Neither kind of output replaces the other's default evidence.
+if [ "$measure" = 1 ]; then
+  [ "$dest" != "$E4D_DIR/evidence" ] || die "a run/measure output never replaces the matrix's evidence ($dest)"
+  producer=run/measure
+else
+  [ "$dest" != "$E4D_DIR/evidence-latelanding" ] || die "a run/all output never replaces the late-landing evidence ($dest)"
+  producer=run/all
+fi
 # A partial run never stands in for a whole one: a run/measure subset goes only to a directory of
 # its own.
 if grep -q '^only' -- "$E4D_OUT/run.txt"; then
-  [ "$measure" = 1 ] && [ "$dest" != "$E4D_DIR/evidence-latelanding" ] && [ "$dest" != "$E4D_DIR/evidence" ] ||
+  [ "$measure" = 1 ] && [ "$dest" != "$E4D_DIR/evidence-latelanding" ] ||
     die "$E4D_OUT is a partial run (E4D_ONLY or E4M_ONLY was set); run it whole, or collect a run/measure subset with E4D_EVIDENCE=$E4D_DIR/evidence-<name>"
 fi
 incoming=$(mktemp -d "$E4D_DIR/.evidence-incoming.XXXXXX")
@@ -71,7 +79,7 @@ fi
 bundle=$E4D_OUT/bundle
 [ -s "$bundle/versions.txt" ] || die "$bundle/versions.txt is missing: copy the fixture's bundle there first"
 {
-  printf '# fixtures/bin/evidence bundle, captured after run/all with E4D_OUT as an extra scan path\n'
+  printf '# fixtures/bin/evidence bundle, captured after %s with E4D_OUT as an extra scan path\n' "$producer"
   printf '## versions.txt\n'
   cat -- "$bundle/versions.txt"
   printf '## leak-scan.txt (files matched; canary-control files are the planted positive controls, scan-patterns.txt is the pattern list itself)\n'

@@ -1,4 +1,4 @@
-# fixtures/bin/evidence bundle, captured after run/all with E4D_OUT as an extra scan path
+# fixtures/bin/evidence bundle, captured after run/measure with E4D_OUT as an extra scan path
 ## versions.txt
 captured        2026-10-15T23:37:59Z
 manifest commit 5f2702887f5b55aa25d1064de20d52a9f4f6ec27
