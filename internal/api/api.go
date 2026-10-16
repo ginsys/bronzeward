@@ -97,10 +97,11 @@ type deps struct {
 	preEntry *atomic.Bool
 	// recoveryStart marks a process started with the flag, the only one that serves the entry;
 	// start is the epoch it read at its start, which its entry compares (§12.2 T9 step 1); onEntry
-	// runs once its entry has committed.
+	// runs once its entry has committed; entry is the epoch its entry minted.
 	recoveryStart bool
 	start         string
 	onEntry       func()
+	entry         *entryState
 }
 
 // options are nil or false in production; tests set them.
@@ -169,7 +170,7 @@ func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*
 func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
 	exe Executor, ic *config.Ingestion, epoch string, recovery bool, onEntry func()) http.Handler {
 	d := deps{ing: ing, exe: exe, life: life, exec: ex, preEntry: new(atomic.Bool), recoveryStart: recovery, start: epoch,
-		onEntry: onEntry}
+		onEntry: onEntry, entry: new(entryState)}
 	d.preEntry.Store(recovery)
 	if pub != nil {
 		d.pub = &publishClients{meta: pub.Meta, reader: pub.Compiler, encrypter: pub.Compiler}
