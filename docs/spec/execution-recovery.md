@@ -1416,7 +1416,9 @@ which the recovery start does not run (see `persistence-api.md`).
 7. **Release.** `recovery-admin` releases eligible scopes explicitly. The
    release is recorded in the current epoch and opens the scope gate for that
    scope only. It is not approval: a plan for the scope still needs an approval
-   recorded in the current epoch (design §14.6, §13.7 item 5).
+   recorded in the current epoch (design §14.6, §13.7 item 5). A release
+   needs the scope's `Desired` release to be the one its mark checked the
+   dependencies for; a `Desired` moved since needs a new mark.
 8. **Leave** recovery mode (§7.6).
 
 A restored desired state is never proof of current machine state, and a scope

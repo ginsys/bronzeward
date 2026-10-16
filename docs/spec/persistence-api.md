@@ -1615,7 +1615,9 @@ the act together:
   under its act, then the scope's state entry. Outside recovery mode after a
   restore, a scope not pre-restore unaccounted, or any scope failing §5.2, is
   `409 conflict` naming that machine and records nothing; an observation not of
-  its scope's machine, or an unknown machine, is `404 not-found`.
+  its scope's machine, or an unknown machine, is `404 not-found`. A controller
+  whose epoch an entry superseded answers `503 epoch-superseded` (§5.1) before
+  these.
 - `POST /recovery/scopes/{machine}/marks` takes `facts` as above and names no
   state: the evidence decides it. Before its transaction the serving controller
   takes a `restoration` observation of the machine and checks the dependencies
@@ -1635,7 +1637,19 @@ the act together:
   unaccounted is `409 recovery-mode-active`, and nothing is observed; an unknown
   machine is `404 not-found`. After these, a controller with no executor
   answers `503 dependency-unavailable`, and one whose epoch an entry committed
-  after its observation superseded answers `503 epoch-superseded` (§5.1).
+  after its observation superseded answers `503 epoch-superseded` (§5.1). The
+  scope state entry also names the `Desired` release the check was for, null
+  for none.
+- `POST /recovery/scopes/{machine}/releases` takes `facts` as above and
+  releases a `ready` scope in the current epoch (execution and recovery §7.3
+  step 7), as one scope state entry and a scope release record naming the mark
+  it rests on and the act. It checks no dependency again: every plan repeats
+  the check at use time. Outside recovery mode, a scope in any other state, or
+  a `Desired` release other than the one its mark's entry names is `409
+  conflict`, the last asking for a new mark; a scope still pre-restore
+  unaccounted is `409 recovery-mode-active`; an unknown machine is `404
+  not-found`; a controller whose epoch an entry superseded answers `503
+  epoch-superseded`.
 - `POST /operations/{id}/resolutions` takes `to` and `reason`. `to` is
   `cancelled` only, and only an `unresolved` operation with no recorded attempt
   qualifies (§4): any other state or an attempt is `409 conflict`. Its

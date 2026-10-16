@@ -1660,6 +1660,30 @@ CREATE TABLE scope_accounting (
 );
 CALL make_immutable('scope_accounting');
 
+-- A scope's release in one epoch (execution and recovery §7.3 step 7, §7.4): the recovery-admin who
+-- released it under its act, the restoration mark it rests on, and its facts. It is the scope state
+-- entry that opens comparison 6 for that scope in the epoch; an earlier epoch's authorizes nothing.
+CREATE TABLE scope_release (
+  machine          text NOT NULL REFERENCES machine (id),
+  epoch            text NOT NULL REFERENCES recovery_epoch (epoch),
+  released_by      text NOT NULL,
+  released_by_kind text NOT NULL GENERATED ALWAYS AS ('human') STORED,
+  role             text NOT NULL CHECK (role = 'recovery-admin'),
+  act              text NOT NULL REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  mark_revision    bigint NOT NULL,
+  facts            jsonb NOT NULL CHECK (jsonb_typeof(facts) = 'object'),
+  at               timestamptz NOT NULL,
+  revision         bigint NOT NULL,
+  entry_kind       text NOT NULL GENERATED ALWAYS AS ('scope-state') STORED,
+  PRIMARY KEY (machine, epoch),
+  UNIQUE (machine, revision),
+  CHECK (mark_revision < revision),
+  FOREIGN KEY (released_by, released_by_kind) REFERENCES principal (id, kind),
+  FOREIGN KEY (machine, mark_revision, entry_kind) REFERENCES machine_event (machine, revision, kind),
+  FOREIGN KEY (machine, revision, entry_kind) REFERENCES machine_event (machine, revision, kind)
+);
+CALL make_immutable('scope_release');
+
 -- The scope and rollout slot are released only on a terminal state, and never while a recorded
 -- attempt is unaccounted for (execution and recovery §8 invariant 5): an operation reaches
 -- completed, failed or rejected only with every attempt accounted. The accounting is written in
