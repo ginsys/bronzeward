@@ -187,6 +187,7 @@ func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex 
 	api.startAdopter()
 	api.startDrifter()
 	api.startExecutor()
+	api.startRecoveryReads()
 	return api
 }
 

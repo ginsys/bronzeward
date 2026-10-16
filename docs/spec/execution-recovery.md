@@ -1349,11 +1349,12 @@ which the recovery start does not run (see `persistence-api.md`).
    mark: it may be raised but never lowered, because a plan made under a higher
    value may be the one whose attempt the restore erased. One decision may cover many
    scopes, each with its own recovery observations, and refuses all of them when
-   one fails a condition. The entry records the stop. After entry the recovery
-   start takes those observations itself (purpose `recovery`, naming no plan or
-   operation): one of each pre-restore unaccounted scope once that scope's
+   one fails a condition. The entry records the stop. The controller takes
+   those observations itself (purpose `recovery`, naming no plan or operation),
+   the recovery start after entry and every start while recovery mode is in
+   effect: one of each pre-restore unaccounted scope once that scope's
    transport deadline has passed, then one per settle floor after the last was
-   recorded, until no scope is pre-restore unaccounted. The decision accounts
+   recorded, a machine inventoried later included. The decision accounts
    every restored unaccounted attempt on the scope under its one act, then moves
    the scope to `unresolved` where a restored operation holds it, and to
    `blocked` otherwise, until its `restoration` observation and the

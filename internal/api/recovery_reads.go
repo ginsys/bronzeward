@@ -6,10 +6,11 @@ import (
 	"time"
 )
 
-// startRecoveryReads starts, once entry has committed, the loop taking the recovery observations
-// the post-restore accounting decision names as each scope's settle (execution-recovery.md §7.3
-// step 1, ruling S3): no observation route exists, so the recovery start takes them. A process with
-// no executor, or no controller identity, takes none.
+// startRecoveryReads starts the loop taking the recovery observations the post-restore accounting
+// decision names as each scope's settle (execution-recovery.md §7.3 step 1, ruling S3): no
+// observation route exists, so the controller takes them, the recovery start once its entry has
+// committed and every normal start, since the normal restart entry allows (§7.2) must take them
+// too. A process with no executor, or no controller identity, takes none.
 func (a *API) startRecoveryReads() {
 	if a.d.exe == nil || a.d.owner.ID == "" {
 		return
@@ -22,7 +23,8 @@ func (a *API) startRecoveryReads() {
 }
 
 // recoveryReadLoop runs a pass every third of the settle floor until life ends, the epoch is
-// superseded or no scope is pre-restore unaccounted.
+// superseded or recovery mode is not in effect. It does not end when no scope is pre-restore
+// unaccounted: a machine inventoried later in recovery mode starts so (§7.4).
 func (a *API) recoveryReadLoop(ctx context.Context) {
 	t := time.NewTicker(max(a.d.exec.SettleFloor/3, time.Second))
 	defer t.Stop()
@@ -71,18 +73,22 @@ func (a *API) recoveryReadPass(ctx context.Context) bool {
 }
 
 // recoveryReadsDue reads the pre-restore unaccounted scopes due a recovery observation, and whether
-// any scope is pre-restore unaccounted. One is due once the transport deadline the decision counts
+// recovery mode is in effect. One is due once the transport deadline the decision counts
 // from has passed (the stop recorded at entry plus the maximum transport deadline, or a restored
 // unaccounted attempt's later one), and then once per settle floor after the last read was recorded,
 // as recoveryReadDue paces an operation's; a read still in progress counts from its start. It
 // answers errNotController when the epoch is not this process's.
 func (a *API) recoveryReadsDue(ctx context.Context) ([]string, bool, error) {
 	var current string
-	if err := a.db.QueryRowContext(ctx, `SELECT epoch FROM installation_state`).Scan(&current); err != nil {
+	var recovery bool
+	if err := a.db.QueryRowContext(ctx, `SELECT epoch, recovery_mode FROM installation_state`).Scan(&current, &recovery); err != nil {
 		return nil, false, err
 	}
 	if current != a.d.owner.Epoch {
 		return nil, false, errNotController
+	}
+	if !recovery {
+		return nil, false, nil
 	}
 	rows, err := a.db.QueryContext(ctx, `WITH d AS (SELECT m.id, greatest(r.stopped_at + make_interval(secs => $2),
 				(SELECT max(a.transport_deadline) FROM attempt a WHERE a.machine = m.id
@@ -99,17 +105,15 @@ func (a *API) recoveryReadsDue(ctx context.Context) ([]string, bool, error) {
 	}
 	defer func() { _ = rows.Close() }()
 	var ms []string
-	more := false
 	for rows.Next() {
 		var m string
 		var due bool
 		if err := rows.Scan(&m, &due); err != nil {
 			return nil, false, err
 		}
-		more = true
 		if due {
 			ms = append(ms, m)
 		}
 	}
-	return ms, more, rows.Err()
+	return ms, true, rows.Err()
 }

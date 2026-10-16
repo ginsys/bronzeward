@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ginsys/bronzeward/internal/auth"
+	"github.com/ginsys/bronzeward/internal/config"
 )
 
 // enterStopped enters recovery mode on ae's database through a recovery start, every pre-restoration
@@ -124,7 +128,9 @@ func TestRecoveryAccounting(t *testing.T) {
 // The recovery start's reads (execution-recovery.md §7.3 step 1, ruling S3): a pass takes a recovery
 // observation, naming no plan or operation, of each pre-restore unaccounted scope whose deadline has
 // passed, none of a scope before its restored attempt's transport deadline, and none again within the
-// settle floor; the loop ends when no scope is pre-restore unaccounted, or under a superseded epoch.
+// settle floor. The loop runs on while no scope is pre-restore unaccounted, since a machine
+// inventoried later starts so (§7.4), and ends when recovery mode is not in effect, or under a
+// superseded epoch.
 func TestRecoveryReads(t *testing.T) {
 	t.Parallel()
 	ae := newAttemptEnv(t, "")
@@ -148,8 +154,35 @@ func TestRecoveryReads(t *testing.T) {
 		t.Fatal("a superseded epoch's loop did not end")
 	}
 	mustExec(t, ae.db, `UPDATE machine SET scope_state = 'blocked' WHERE scope_state = 'pre-restore-unaccounted'`)
+	if !r.recoveryReadPass(t.Context()) {
+		t.Fatal("the loop ended in recovery mode with no scope pre-restore unaccounted")
+	}
+	mustExec(t, ae.db, `UPDATE installation_state SET recovery_mode = false`)
 	if r.recoveryReadPass(t.Context()) {
-		t.Fatal("the loop did not end with no scope pre-restore unaccounted")
+		t.Fatal("the loop did not end once recovery mode was not in effect")
+	}
+}
+
+// The normal restart that entry allows (execution-recovery.md §7.2) takes the recovery reads too:
+// New starts them in a controller with an executor.
+func TestNewStartsRecoveryReads(t *testing.T) {
+	t.Parallel()
+	ae := newAttemptEnv(t, "")
+	ae.enterStopped(t, time.Now().Add(-time.Hour))
+	ex := testExecution()
+	ex.SettleFloor = 3 * time.Second
+	life, stop := context.WithCancel(t.Context())
+	h := New(life, ae.db, auth.NewVerifier(ae.cfg, ae.db, auth.Discover(ae.cfg.OIDC)), ae.cfg, ex, nil, nil,
+		&fakeExecutor{err: errors.New("no access in this test")}, &config.Ingestion{Instance: "a", Heartbeat: time.Hour, Lease: 2 * time.Hour},
+		epoch(t, ae.db), false, nil)
+	defer stopping(h.(*API), stop)
+	deadline := time.Now().Add(10 * time.Second)
+	for count(t, ae.db, `SELECT count(*) FROM observation_start WHERE machine = $1 AND purpose = 'recovery' AND operation IS NULL`,
+		ae.target.machine2) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no recovery observation after a normal restart")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
