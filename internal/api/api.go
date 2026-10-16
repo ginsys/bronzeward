@@ -214,9 +214,25 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 		api.mux.Handle(rt.method+" "+prefix+rt.pattern, api.handle(rt))
 	}
 	api.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		api.problem(w, requestOf(r), refuse(http.StatusNotFound, "not-found", "no route"))
+		api.problem(w, requestOf(r), api.unrouted(refuse(http.StatusNotFound, "not-found", "no route")))
 	})
 	return api
+}
+
+// preEntryRefusal is §12.2's refusal of every request but liveness and the entry before a
+// recovery start's entry commits.
+func preEntryRefusal() *refusal {
+	return refuse(http.StatusConflict, "recovery-mode-active",
+		"this process started with the recovery-start flag serves only the recovery entry until it commits")
+}
+
+// unrouted is the refusal of a request no route takes: ref, or before a recovery start's entry
+// commits, preEntryRefusal (§12.2: every request but liveness and the entry).
+func (a *API) unrouted(ref *refusal) *refusal {
+	if a.d.preEntry.Load() {
+		return preEntryRefusal()
+	}
+	return ref
 }
 
 // ServeHTTP authenticates first, then reads the installation state for the epoch headers, then
@@ -243,7 +259,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ServeMux would answer an unclean path with a redirect, skipping the problem document, its
 	// log line and the route's role check: no route answers one.
 	if p := r.URL.Path; p != cleanPath(p) {
-		a.problem(w, q, refuse(http.StatusNotFound, "not-found", "the path is not in clean form"))
+		a.problem(w, q, a.unrouted(refuse(http.StatusNotFound, "not-found", "the path is not in clean form")))
 		return
 	}
 	a.mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, q)))
@@ -302,8 +318,7 @@ func (a *API) handle(rt *route) http.HandlerFunc {
 		// Before its entry commits, a recovery start serves the entry only: the restored epoch is
 		// still current, so nothing else is recorded or disclosed (§12.2).
 		if a.d.preEntry.Load() && rt.pattern != entryPattern {
-			a.problem(w, q, refuse(http.StatusConflict, "recovery-mode-active",
-				"this process started with the recovery-start flag serves only the recovery entry until it commits"))
+			a.problem(w, q, preEntryRefusal())
 			return
 		}
 		if rt.mutating() {
