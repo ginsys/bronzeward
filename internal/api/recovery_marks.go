@@ -186,10 +186,10 @@ func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, err
 	}
 	b := &scopeMarkBody{Machine: ev.machine, From: state, Observation: ev.observation, Missing: []string{}, Dependencies: ev.deps,
 		MarkedBy: q.principal.ID, Role: string(q.role), Act: q.actID, Epoch: q.epoch}
-	switch {
-	case !read || !accounted || !quiet || ev.otherAccess:
+	if !read || !accounted || !quiet || ev.otherAccess {
 		b.Missing = append(b.Missing, "observation")
-	case !matches:
+	}
+	if read && !matches { // an identity read and not the record's is missing whether or not the observation counts
 		b.Missing = append(b.Missing, "identity")
 	}
 	b.Missing = append(b.Missing, ev.missing...)
