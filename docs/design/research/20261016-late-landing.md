@@ -27,8 +27,9 @@ S6.2 asks for three things:
 
 ## 2. What the source predicts
 
-This section is the prediction as written before the measurement ran. Three cells departed from it;
-§5.3 gives what the source shows about why.
+This section is the prediction as written before the measurement ran. Four of its predictions,
+covering nine of the eleven fault cells, departed from what was measured; §5.3 gives what the
+source shows about why.
 
 Talos v1.13.6 pins `github.com/siderolabs/grpc-proxy` v0.5.1 and `google.golang.org/grpc` v1.81.0
 (`go.mod:157`, `:191`), and its nodes report Go 1.26.5. Paths below are in those trees.
@@ -214,11 +215,13 @@ apid; this measured a request that never reached it.
 
 **The cold dial failed on address resolution.** The restarted control plane had no address for the
 worker; ASSUMPTION: Linux gives up resolving after about 3 s and the dial fails with
-`EHOSTUNREACH`, as four captures show. In the fifth, the dial was still waiting when `talosctl` was
-killed. Killing `talosctl` cancels the forwarded call, not the proxy's cached connection, whose dial
-has its own lifetime (`clientconn.go:918` in grpc-go). The call cannot be sent before a connection
-exists, and once cancelled it no longer waits for one, so whichever way the dial ended, nothing was
-sent for it. The control plane's apid logs the call as a success, because in its one-to-many mode
+`EHOSTUNREACH`, as four captures show. The fifth (`cold-netsplit-worker-20-01`) records no dial
+error: `talosctl` was killed at 15 s like a warm request. The split came 2.8 s after the control
+plane was started; whether its dial was still waiting, the restarted control plane was not yet
+serving, or a connection had opened before the split is not in the evidence. For the four that
+failed, killing `talosctl` cancels the forwarded call, not the proxy's cached connection, whose dial
+has its own lifetime (`clientconn.go:918` in grpc-go); the call cannot be sent before a connection
+exists, so nothing was sent for it. The control plane's apid logs the call as a success, because in its one-to-many mode
 an error from one node is carried inside the response.
 
 ## 6. What this decides
@@ -240,10 +243,12 @@ falls. This is it. What it supports:
   full run, 0 of 3 in the socket run), but the reason is a hypothesis about the order in which
   buffered frames are read, not a guarantee in the source. A pause of the control plane before the
   send kept the request in `talosctl` (0 of 15).
-- **A dial that fails sends nothing.** Over the worker's own endpoint and on the cold route, the
-  request was never sent and nothing landed (0 of 10). This answers S6.2 step 3 for a dial that
-  fails before the connection exists; it says nothing about a connection that fails after it
-  opened.
+- **A dial that fails sends nothing.** Over the worker's own endpoint the partition was in place
+  before `talosctl` dialled, so no connection could open, and on the cold route four dials failed
+  with `no route to host`; none of these nine landed. The tenth, the cold capture with no dial
+  error, did not land either, but whether it had a connection is unknown, so it is not counted here.
+  This answers S6.2 step 3 for a dial that fails before the connection exists; it says nothing about
+  a connection that fails after it opened.
 
 So this measurement does not supply a bound that [ER §5.2](../../spec/execution-recovery.md#52-accounting-a-lost-response)
 can adopt. Nothing changes in the contract: accounting a lost response stays a `recovery-admin`

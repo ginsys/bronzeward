@@ -21,7 +21,7 @@
 # does not share the connection it measures.
 #
 # Needs the fixture up (fixtures/bin/up); E4D_OUT names a new, empty directory outside the checkout.
-# E4M_N=<captures per cell> (5 by default); E4M_ONLY=<extended regex> runs only the matching cells
+# E4M_N=<captures per cell, 1-99> (5 by default); E4M_ONLY=<extended regex> runs only the matching cells
 # and is recorded in run.txt. E4M_SOCKETS=1 also samples, once a second through each capture, the
 # TCP connection between the control plane and the worker's API port from both nodes' network
 # namespaces (/proc/net/tcp and tcp6: state, queues, timer, retransmissions), into its transcript.
@@ -32,7 +32,8 @@ set -uo pipefail
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
 E4M_N=${E4M_N:-5}
-[[ $E4M_N =~ ^[1-9][0-9]*$ ]] || die "E4M_N must be a positive integer"
+# Capture IDs carry a two-digit number, which collect-evidence relies on.
+[[ $E4M_N =~ ^[1-9][0-9]?$ ]] || die "E4M_N must be an integer from 1 to 99"
 # e4x's transport deadline in the dispatch-safety rows, and the window after the heal.
 E4M_DEADLINE=15
 E4M_WINDOW=60
