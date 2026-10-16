@@ -243,6 +243,25 @@ func TestRecoveryScopeMark(t *testing.T) {
 	me.x.mu.Lock()
 	me.x.access = v2
 	me.x.mu.Unlock()
+	// An observation that is not evidence still names the other identity it read: each item is missing.
+	other := me.recordedIdentity(t, m2)
+	other.NodeID, other.SMBIOSUUID = "another-node", ""
+	me.report(other)
+	me.x.onRead = func() {
+		me.x.mu.Lock()
+		defer me.x.mu.Unlock()
+		me.x.onRead = nil
+		me.x.access = provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + ae.cluster, Version: 3,
+			CreatedTime: time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)}, []byte("tc3"))
+	}
+	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated-identity"), http.StatusCreated); b.State != "blocked" ||
+		len(b.Missing) != 2 || b.Missing[0] != "observation" || b.Missing[1] != "identity" {
+		t.Fatalf("a mark on an observation that is not evidence and read another identity was marked %s missing %v", b.State, b.Missing)
+	}
+	me.x.mu.Lock()
+	me.x.access = v2
+	me.x.mu.Unlock()
+	me.report(me.recordedIdentity(t, m2))
 
 	// An operation changes state after the observation's basis (here a resolution recorded while the
 	// dependencies are checked): §6.1 excludes the observation from drift, so it is not the mark's
