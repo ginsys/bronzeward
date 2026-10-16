@@ -34,7 +34,7 @@ func recoveryStart(t *testing.T, e *env, entered *atomic.Int32, o ...options) *A
 }
 
 const entryBodyText = `{"restored":[{"family":"database","backup":"pg-2026-09-25T02:00Z","takenAt":"2026-09-25T02:00:00Z"}],` +
-	`"reason":"database restored after storage failure"}`
+	`"stoppedAt":"2026-09-25T03:00:00Z","reason":"database restored after storage failure"}`
 
 // enter is h-recovery's entry request on a under key.
 func (e *env) enter(a *API, key, body string) *httptest.ResponseRecorder {
@@ -67,7 +67,7 @@ func TestRecoveryEntry(t *testing.T) {
 			}
 			human := ae.principalOf("h-recovery")
 			if b.PreviousEpoch != before || b.EnteredBy != human || b.Role != "recovery-admin" || len(b.Operations) != 1 ||
-				b.Operations[0] != ae.op {
+				b.Operations[0] != ae.op || !b.StoppedAt.Equal(time.Date(2026, 9, 25, 3, 0, 0, 0, time.UTC)) {
 				t.Fatalf("answered %+v", b)
 			}
 			if n := count(t, ae.db, `SELECT count(*) FROM installation_state WHERE recovery_mode`); n != 1 {
@@ -75,7 +75,7 @@ func TestRecoveryEntry(t *testing.T) {
 			}
 			if n := count(t, ae.db, `SELECT count(*) FROM recovery_epoch e JOIN recovery_restore r USING (epoch)
 					WHERE e.epoch = $1 AND e.entered_by = $2 AND e.reason = 'database restored after storage failure'
-					AND r.family = 'database' AND r.backup = 'pg-2026-09-25T02:00Z' AND r.taken_at = '2026-09-25T02:00:00Z'`,
+					AND e.stopped_at = '2026-09-25T03:00:00Z' AND r.family = 'database' AND r.backup = 'pg-2026-09-25T02:00Z' AND r.taken_at = '2026-09-25T02:00:00Z'`,
 				b.Epoch, human); n != 1 {
 				t.Fatal("the epoch does not record its entry and the restored backup")
 			}
@@ -305,15 +305,18 @@ func TestRecoveryEntryRefusals(t *testing.T) {
 	var entered atomic.Int32
 	r := recoveryStart(t, e, &entered)
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	const db, stop = `{"family":"database","backup":"b","takenAt":"2026-09-25T02:00:00Z"}`, `"stoppedAt":"2026-09-25T03:00:00Z"`
 	for i, body := range []string{
-		`{"restored":[],"reason":"x"}`,
-		`{"restored":[{"family":"etcd","backup":"b","takenAt":"2026-09-25T02:00:00Z"}],"reason":"x"}`,
+		`{"restored":[],` + stop + `,"reason":"x"}`,
+		`{"restored":[{"family":"etcd","backup":"b","takenAt":"2026-09-25T02:00:00Z"}],` + stop + `,"reason":"x"}`,
 		`{"restored":[{"family":"provider","backup":"b","takenAt":"2026-09-25T02:00:00Z"},` +
-			`{"family":"provider","backup":"c","takenAt":"2026-09-25T02:00:00Z"}],"reason":"x"}`,
-		`{"restored":[{"family":"database","backup":"","takenAt":"2026-09-25T02:00:00Z"}],"reason":"x"}`,
-		`{"restored":[{"family":"database","backup":"b"}],"reason":"x"}`,
-		`{"restored":[{"family":"database","backup":"b","takenAt":"` + future + `"}],"reason":"x"}`,
-		`{"restored":[{"family":"database","backup":"b","takenAt":"2026-09-25T02:00:00Z"}],"reason":" "}`,
+			`{"family":"provider","backup":"c","takenAt":"2026-09-25T02:00:00Z"}],` + stop + `,"reason":"x"}`,
+		`{"restored":[{"family":"database","backup":"","takenAt":"2026-09-25T02:00:00Z"}],` + stop + `,"reason":"x"}`,
+		`{"restored":[{"family":"database","backup":"b"}],` + stop + `,"reason":"x"}`,
+		`{"restored":[{"family":"database","backup":"b","takenAt":"` + future + `"}],` + stop + `,"reason":"x"}`,
+		`{"restored":[` + db + `],` + stop + `,"reason":" "}`,
+		`{"restored":[` + db + `],"reason":"x"}`,
+		`{"restored":[` + db + `],"stoppedAt":"` + future + `","reason":"x"}`,
 	} {
 		wantProblem(t, e.enter(r, "bad-"+string(rune('a'+i)), body), http.StatusBadRequest, "invalid-request")
 	}

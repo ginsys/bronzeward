@@ -1608,6 +1608,14 @@ the act together:
   accounts for a changed machine-configuration resource version). It records
   §5.2's decision accounting by the requester; any condition of §5.2 that does
   not hold, and a second accounting of the attempt, is `409 conflict`.
+- `POST /recovery/accountings` takes `scopes` (1 to 256, each a distinct
+  `machine` with the `start` and `end` recovery observations of its settle) and
+  `facts` as above, held for every scope. It records execution and recovery
+  §7.3 step 1's decision: each scope's restored unaccounted attempts accounted
+  under its act, then the scope's state entry. Outside recovery mode after a
+  restore, a scope not pre-restore unaccounted, or any scope failing §5.2, is
+  `409 conflict` naming that machine and records nothing; an observation not of
+  its scope's machine, or an unknown machine, is `404 not-found`.
 - `POST /operations/{id}/resolutions` takes `to` and `reason`. `to` is
   `cancelled` only, and only an `unresolved` operation with no recorded attempt
   qualifies (§4): any other state or an attempt is `409 conflict`. Its
@@ -2093,6 +2101,7 @@ Idempotency-Key: 3a9f0d71-c6e2-4b85-8f14-72d0b5a9e6c3
     "takenAt": "2026-09-25T02:00:00Z"},
    {"family": "provider", "backup": "bao-2026-09-25T02:30Z",
     "takenAt": "2026-09-25T02:30:00Z"}],
+ "stoppedAt": "2026-09-25T03:00:00Z",
  "reason": "database restored after storage failure"}
 
 HTTP/1.1 201 Created
@@ -2566,8 +2575,10 @@ for an entry after a restore, each restored backup family with the backup's
 identity and the time it was taken, so that the pairing duties of design §7.7
 can be checked (execution and recovery, entry). The families are design §7.7
 duty 1's three: `database`, `provider` and `credential-store`. An entry names
-at least one, each at most once, and a reason; the installation's own epoch,
-minted at installation, has neither.
+at least one, each at most once, a reason and `stoppedAt`, the time every
+pre-restoration instance was stopped (execution and recovery §7.3 step 1),
+which may not be in the future; the installation's own epoch, minted at
+installation, has none of them.
 
 An epoch is an **identity**: 128 random bits (§2), minted at installation and
 at every recovery-mode entry, never issued again, and compared by equality

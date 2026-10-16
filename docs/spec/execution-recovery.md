@@ -1348,7 +1348,16 @@ which the recovery start does not run (see `persistence-api.md`).
    creation refuses a transport deadline above it. The setting is a high-water
    mark: it may be raised but never lowered, because a plan made under a higher
    value may be the one whose attempt the restore erased. One decision may cover many
-   scopes, each with its own recovery observation.
+   scopes, each with its own recovery observations, and refuses all of them when
+   one fails a condition. The entry records the stop. After entry the recovery
+   start takes those observations itself (purpose `recovery`, naming no plan or
+   operation): one of each pre-restore unaccounted scope once that scope's
+   transport deadline has passed, then one per settle floor after the last was
+   recorded, until no scope is pre-restore unaccounted. The decision accounts
+   every restored unaccounted attempt on the scope under its one act, then moves
+   the scope to `unresolved` where a restored operation holds it, and to
+   `blocked` otherwise, until its `restoration` observation and the
+   dependency check re-mark it (step 6).
 2. **Verify** schema, revisions, releases, operation journals and provider and
    key references from the restored state. Re-record, from the operator's
    records, every identity revocation made after the restored backup, which the
@@ -1409,7 +1418,7 @@ release is not blanket approval for pending mutations.
 
 | State | Meaning | Leaves by |
 | --- | --- | --- |
-| pre-restore unaccounted | set at entry; a request sent before the restore may still land | the step 1 accounting decision, to one of the next three |
+| pre-restore unaccounted | set at entry; a request sent before the restore may still land | the step 1 accounting decision: to `unresolved` where a restored operation holds the scope, otherwise to `blocked` until step 6 re-marks it |
 | `unresolved` | a restored operation on the scope is `unresolved` | its resolution under §4 and §5, then re-marking |
 | `blocked` | the `restoration` observation failed or showed a machine identity other than the machine record's (choice §10.26), or a dependency to apply the machine's `Desired` release is missing: its release record, its artifact's key version at or above the decryption floor and decryptable by the executor identity, or the executor's operation credentials (§3.1 item 2) | a later successful `restoration` observation whose identity matches, for a failed or mismatched one; the dependency restored or repaired, or a newly published release selected as `Desired` whose dependencies are present; then re-marking |
 | `ready` | accounted, no operation holds the scope, the dependencies above present, a `restoration` observation whose basis (§4.1) follows step 1 and whose machine identity matches the machine record (choice §10.26) | release |

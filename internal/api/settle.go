@@ -69,8 +69,7 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 	// 2: the settle floor, from the latest of the transport deadline, the takeover and the first
 	// successful read after the deadline, to the end observation's start.
 	anchor := transport
-	var takeover, firstRead sql.NullTime
-	var firstReadID sql.NullString
+	var takeover sql.NullTime
 	if err := tx.QueryRowContext(ctx, `SELECT max(e.at) FROM machine_event e WHERE e.machine = $1 AND e.kind = 'ownership-transition'
 		AND e.entry->>'operation' = $2`, l.machine, operation).Scan(&takeover); err != nil {
 		return r, err
@@ -78,60 +77,13 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 	if takeover.Valid && takeover.Time.After(anchor) {
 		anchor = takeover.Time
 	}
-	// A successful read of the machine is one that read a node value; access obtained and the node
-	// unreachable is not one.
-	// It is also where the settle starts: a start observation later than it would hide a change of the
-	// version between the two.
-	// Observations are ordered by their start (basis), not by when they were recorded.
-	if err := tx.QueryRowContext(ctx, `SELECT o.at, o.id FROM observation o
-		JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis WHERE o.machine = $1 AND se.at > $2
-		AND (o.unread->'identity' IS NULL OR o.unread->'runningVersion' IS NULL OR o.unread->'configuration' IS NULL)
-		ORDER BY o.basis LIMIT 1`, l.machine, transport).Scan(&firstRead, &firstReadID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return r, err
-	}
-	if firstReadID.Valid && d.Start != firstReadID.String {
-		return refuse("the start observation is not the first successful read of the machine after the transport deadline")
-	}
-	if firstRead.Valid && firstRead.Time.After(anchor) {
-		anchor = firstRead.Time
-	}
-	floor := a.d.exec.SettleFloor
-	var startRecorded, endBegan time.Time
-	var startVersion, endVersion sql.NullString
-	var purpose string
-	if err := tx.QueryRowContext(ctx, `SELECT o.at, o.resource_version FROM observation o WHERE o.id = $1 AND o.machine = $2`,
-		d.Start, l.machine).Scan(&startRecorded, &startVersion); err != nil {
-		return r, fmt.Errorf("accounting of attempt %s: its start observation: %w", d.Attempt, err)
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT se.at, o.resource_version, s.purpose FROM observation o
-		JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis
-		JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis WHERE o.id = $1 AND o.machine = $2`,
-		d.End, l.machine).Scan(&endBegan, &endVersion, &purpose); err != nil {
-		return r, fmt.Errorf("accounting of attempt %s: its end observation: %w", d.Attempt, err)
-	}
+	facts, cause, err := a.settled(ctx, tx, l.machine, transport, anchor, d.Start, d.End, d.Facts)
 	switch {
-	case purpose != "recovery":
-		return refuse("the end observation is not a recovery observation")
-	case !startVersion.Valid || !endVersion.Valid:
-		return refuse("the machine-configuration resource version was not read at both ends of the settle")
-	case d.Start == d.End || !endBegan.After(startRecorded):
-		return refuse("the end observation did not begin after the start observation was recorded")
-	case endBegan.Before(anchor.Add(floor)):
-		return refuse(fmt.Sprintf("the end observation began before the settle floor of %s had elapsed since %s", floor,
-			anchor.UTC().Format(time.RFC3339Nano)))
+	case err != nil:
+		return r, fmt.Errorf("accounting of attempt %s: %w", d.Attempt, err)
+	case cause != "":
+		return refuse(cause)
 	}
-	moved := startVersion.String != endVersion.String
-	if moved {
-		if text, ok := d.Facts["explanation"].(string); !ok || strings.TrimSpace(text) == "" {
-			return refuse("the machine-configuration resource version changed during the settle and no explanation is recorded")
-		}
-	}
-	facts := map[string]any{}
-	maps.Copy(facts, d.Facts)
-	facts["judgement"] = true
-	facts["settleFloor"] = floor.String()
-	facts["anchor"] = anchor.UTC().Format(time.RFC3339Nano)
-	facts["startVersion"], facts["endVersion"] = startVersion.String, endVersion.String
 	body, err := json.Marshal(facts)
 	if err != nil {
 		return r, err
@@ -146,6 +98,69 @@ func (a *API) accountByDecision(ctx context.Context, tx *sql.Tx, d accountingDec
 			end_observation, facts, epoch, at, revision) VALUES ($1, $2, 'decision', $3, 'recovery-admin', $4, $5, $6, $7::jsonb, $8, $9, $10)`,
 		d.Attempt, l.machine, d.DecidedBy, d.Act, d.Start, d.End, string(body), l.current, at, rev)
 	return r, err
+}
+
+// settled is §5.2 conditions 2 and 3 on machine, read in tx: the settle starts at start, which must
+// be the first successful read of the machine after deadline (one that read a node value; access
+// obtained and the node unreachable is not one), since a later start would hide a change of the
+// version between the two; the end observation is a recovery observation begun after start was
+// recorded and at least the settle floor after the latest of anchor and that first read; both read
+// the machine-configuration resource version, and when it moved given holds a nonblank explanation.
+// It answers the facts to record, given with the decision's own, or the cause of a refusal.
+// Observations are ordered by their start (basis), not by when they were recorded.
+func (a *API) settled(ctx context.Context, tx *sql.Tx, machine string, deadline, anchor time.Time, start, end string,
+	given map[string]any) (map[string]any, string, error) {
+	var firstRead sql.NullTime
+	var firstReadID sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT o.at, o.id FROM observation o
+		JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis WHERE o.machine = $1 AND se.at > $2
+		AND (o.unread->'identity' IS NULL OR o.unread->'runningVersion' IS NULL OR o.unread->'configuration' IS NULL)
+		ORDER BY o.basis LIMIT 1`, machine, deadline).Scan(&firstRead, &firstReadID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, "", err
+	}
+	if firstReadID.Valid && start != firstReadID.String {
+		return nil, "the start observation is not the first successful read of the machine after the transport deadline", nil
+	}
+	if firstRead.Valid && firstRead.Time.After(anchor) {
+		anchor = firstRead.Time
+	}
+	floor := a.d.exec.SettleFloor
+	var startRecorded, endBegan time.Time
+	var startVersion, endVersion sql.NullString
+	var purpose string
+	if err := tx.QueryRowContext(ctx, `SELECT o.at, o.resource_version FROM observation o WHERE o.id = $1 AND o.machine = $2`,
+		start, machine).Scan(&startRecorded, &startVersion); err != nil {
+		return nil, "", fmt.Errorf("its start observation: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT se.at, o.resource_version, s.purpose FROM observation o
+		JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis
+		JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis WHERE o.id = $1 AND o.machine = $2`,
+		end, machine).Scan(&endBegan, &endVersion, &purpose); err != nil {
+		return nil, "", fmt.Errorf("its end observation: %w", err)
+	}
+	switch {
+	case purpose != "recovery":
+		return nil, "the end observation is not a recovery observation", nil
+	case !startVersion.Valid || !endVersion.Valid:
+		return nil, "the machine-configuration resource version was not read at both ends of the settle", nil
+	case start == end || !endBegan.After(startRecorded):
+		return nil, "the end observation did not begin after the start observation was recorded", nil
+	case endBegan.Before(anchor.Add(floor)):
+		return nil, fmt.Sprintf("the end observation began before the settle floor of %s had elapsed since %s", floor,
+			anchor.UTC().Format(time.RFC3339Nano)), nil
+	}
+	if startVersion.String != endVersion.String {
+		if text, ok := given["explanation"].(string); !ok || strings.TrimSpace(text) == "" {
+			return nil, "the machine-configuration resource version changed during the settle and no explanation is recorded", nil
+		}
+	}
+	facts := map[string]any{}
+	maps.Copy(facts, given)
+	facts["judgement"] = true
+	facts["settleFloor"] = floor.String()
+	facts["anchor"] = anchor.UTC().Format(time.RFC3339Nano)
+	facts["startVersion"], facts["endVersion"] = startVersion.String, endVersion.String
+	return facts, "", nil
 }
 
 // settlement is what a settle decided: the operation's state after, the outcome (completed, failed,

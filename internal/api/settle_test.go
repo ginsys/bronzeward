@@ -27,6 +27,7 @@ type cobs struct {
 	shift      time.Duration // the observation's start and record, from now
 	began      time.Duration // the observation's start alone, from now, when it is not shift
 	atPlan     bool          // a start naming the plan though its purpose needs none
+	scope      bool          // a recovery observation of the scope, naming no plan or operation (§7.3 step 1)
 	unreached  bool          // access was obtained but no node value was read
 	node       string        // the Talos node ID the observation read, when it is not the machine's
 	uuid       string        // the SMBIOS UUID the observation read, when it is not the machine's
@@ -66,6 +67,9 @@ func (ae *attemptEnv) observed(t *testing.T, change func(*cobs)) string {
 	var startOperation any
 	if s.purpose == "completion" || s.purpose == "recovery" {
 		startOperation = s.operation
+	}
+	if s.scope {
+		startPlan, startOperation = nil, nil
 	}
 	tx, err := ae.db.Begin()
 	if err != nil {

@@ -145,10 +145,16 @@ func (in *accountingRequest) check(*API) error {
 	if id.MustHave(in.Start, id.Observation) != nil || id.MustHave(in.End, id.Observation) != nil {
 		return errors.New("start and end must be observation identifiers")
 	}
-	if len(in.Facts) > maxFacts {
+	return checkFacts(in.Facts)
+}
+
+// checkFacts bounds a decision's facts: at most maxFacts members, each a short name and a nonblank
+// text.
+func checkFacts(facts map[string]string) error {
+	if len(facts) > maxFacts {
 		return fmt.Errorf("facts holds at most %d members", maxFacts)
 	}
-	for k, v := range in.Facts {
+	for k, v := range facts {
 		if err := text("a facts member name", k, 64); err != nil {
 			return err
 		}

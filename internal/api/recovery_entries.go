@@ -33,10 +33,13 @@ type restoredBackup struct {
 	TakenAt time.Time `json:"takenAt"`
 }
 
-// entryRequest names each restored backup family once, and why the operator enters (§9.3).
+// entryRequest names each restored backup family once, when every pre-restoration controller
+// instance was stopped or established as stopped (execution-recovery.md §7.3 step 1), and why the
+// operator enters (§9.3).
 type entryRequest struct {
-	Restored []restoredBackup `json:"restored"`
-	Reason   string           `json:"reason"`
+	Restored  []restoredBackup `json:"restored"`
+	StoppedAt time.Time        `json:"stoppedAt"`
+	Reason    string           `json:"reason"`
 }
 
 // backupFamilies are design §7.7 duty 1's three: the database, the provider and the credential
@@ -62,6 +65,9 @@ func (in *entryRequest) check(*API) error {
 			return err
 		}
 	}
+	if in.StoppedAt.IsZero() || in.StoppedAt.After(time.Now()) {
+		return errors.New("stoppedAt must be given, and not in the future")
+	}
 	return text("reason", in.Reason, maxReason)
 }
 
@@ -74,6 +80,7 @@ type entryBody struct {
 	Role          auth.Role        `json:"role"`
 	Reason        string           `json:"reason"`
 	Restored      []restoredBackup `json:"restored"`
+	StoppedAt     time.Time        `json:"stoppedAt"`
 	Machines      int              `json:"machines"`
 	Operations    []string         `json:"operations"`
 	Act           string           `json:"act"`
@@ -181,11 +188,11 @@ func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result,
 	ep := id.New(id.Epoch)
 	a.d.entry.mint(ep)
 	b := &entryBody{Epoch: ep, PreviousEpoch: q.epoch, EnteredBy: q.principal.ID, Role: q.role, Reason: in.Reason,
-		Restored: in.Restored, Machines: len(machines), Operations: []string{}, Act: q.actID}
+		Restored: in.Restored, StoppedAt: in.StoppedAt, Machines: len(machines), Operations: []string{}, Act: q.actID}
 	write := func(ctx context.Context, tx *sql.Tx) error {
 		// The entry time is read after the lock waits, as an identity revocation's is (§5 rule 4).
-		if err := tx.QueryRowContext(ctx, `INSERT INTO recovery_epoch (epoch, entered_at, entered_by, reason)
-			VALUES ($1, clock_timestamp(), $2, $3) RETURNING entered_at`, ep, b.EnteredBy, b.Reason).Scan(&b.At); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO recovery_epoch (epoch, entered_at, entered_by, reason, stopped_at)
+			VALUES ($1, clock_timestamp(), $2, $3, $4) RETURNING entered_at`, ep, b.EnteredBy, b.Reason, b.StoppedAt).Scan(&b.At); err != nil {
 			return err
 		}
 		for _, r := range in.Restored {
@@ -298,9 +305,9 @@ func (s *entryState) mintedEpoch() string {
 }
 
 // entered makes the epoch this process's entry minted its own (§5.1), then ends the pre-entry gate:
-// a request that finds the gate open reads that owner (§12.2). onEntry then starts what a recovery
-// start runs after entry, the dependency monitor (dependency-monitor.md §6.1). It acts once, and
-// only for the epoch this process minted.
+// a request that finds the gate open reads that owner (§12.2). It then starts the recovery reads
+// (startRecoveryReads), and onEntry what else a recovery start runs after entry, the dependency
+// monitor (dependency-monitor.md §6.1). It acts once, and only for the epoch this process minted.
 func (a *API) entered(epoch string) {
 	s := a.d.entry
 	s.mu.Lock()
@@ -312,6 +319,7 @@ func (a *API) entered(epoch string) {
 	a.d.owner.Epoch = epoch
 	a.d.preEntry.Store(false)
 	s.mu.Unlock()
+	a.startRecoveryReads()
 	if a.d.onEntry != nil {
 		a.d.onEntry()
 	}
