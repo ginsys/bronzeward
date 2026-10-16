@@ -27,7 +27,12 @@ func accessKey(v provider.TalosAccessVersion) string {
 type observeFor struct {
 	purpose, plan, operation string
 	access                   *provider.TalosAccess
+	paced                    bool
 }
+
+// errReadNotDue is a paced recovery read refused under the machine's lock: a recovery read of the
+// machine was recorded within the settle floor, so nothing is recorded and nothing is read.
+var errReadNotDue = errors.New("a recovery read of the machine is within the settle floor")
 
 // observed is what observe recorded: the observation's id, its basis (the start entry's revision)
 // and revision, the endpoint dialled, and each value read; Unread names each value not read and
@@ -210,6 +215,20 @@ func (a *API) startObservation(ctx context.Context, tx *sql.Tx, machine string, 
 	if err := tx.QueryRowContext(ctx, `SELECT cluster, talos_endpoint FROM machine WHERE id = $1 FOR UPDATE`, machine).Scan(&cluster,
 		&o.Endpoint); err != nil {
 		return "", head, fmt.Errorf("observation of machine %s: %w", machine, err)
+	}
+	if f.paced { // the loops found it due outside this lock: another controller may have read it since
+		var recent bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT FROM observation_start s
+				JOIN machine_event e ON e.machine = s.machine AND e.revision = s.revision
+				LEFT JOIN observation o ON o.machine = s.machine AND o.basis = s.revision
+			WHERE s.machine = $1 AND s.purpose = 'recovery'
+				AND coalesce(o.at, e.at) > clock_timestamp() - make_interval(secs => $2))`,
+			machine, a.d.exec.SettleFloor.Seconds()).Scan(&recent); err != nil {
+			return "", head, err
+		}
+		if recent {
+			return "", head, errReadNotDue
+		}
 	}
 	if f.plan != "" { // a plan is immutable: its route needs no lock
 		if err := tx.QueryRowContext(ctx, `SELECT route FROM plan WHERE id = $1 AND machine = $2`, f.plan, machine).Scan(&o.Endpoint); err != nil {

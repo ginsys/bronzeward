@@ -163,6 +163,33 @@ func TestRecoveryReads(t *testing.T) {
 	}
 }
 
+// Recovery reads are paced per machine: the executor's read of a restored unaccounted attempt is not
+// due within the settle floor of the scope loop's read of its machine, and a paced read rechecks the
+// floor under the machine's lock, so two controllers that both found it due read it once.
+func TestRecoveryReadsPaceTheMachine(t *testing.T) {
+	t.Parallel()
+	ae := newAttemptEnv(t, "")
+	att := ae.sent(t)
+	mustExec(t, ae.db, `ALTER TABLE attempt DISABLE TRIGGER immutable_rows`)
+	mustExec(t, ae.db, `UPDATE attempt SET at = clock_timestamp() - interval '11 seconds',
+		transport_deadline = clock_timestamp() - interval '10 seconds' WHERE id = $1`, att.Attempt)
+	mustExec(t, ae.db, `ALTER TABLE attempt ENABLE TRIGGER immutable_rows`)
+	ae.enterStopped(t, time.Now().Add(-time.Hour))
+	r := observer(t, ae.env, &fakeExecutor{err: errors.New("no access in this test")}, options{})
+	if !r.recoveryReadPass(t.Context()) {
+		t.Fatal("the loop ended with scopes pre-restore unaccounted")
+	}
+	if due, err := r.recoveryReadDue(t.Context(), ae.op); err != nil || due {
+		t.Fatalf("the executor's read is due (%v, %v) within the floor of the scope's", due, err)
+	}
+	if _, err := r.observe(t.Context(), ae.machine, observeFor{purpose: "recovery", paced: true}); !errors.Is(err, errReadNotDue) {
+		t.Fatalf("a second controller's paced read: %v, want errReadNotDue", err)
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM observation_start WHERE machine = $1 AND purpose = 'recovery'`, ae.machine); n != 1 {
+		t.Fatalf("%d recovery reads of the machine, want 1", n)
+	}
+}
+
 // The normal restart that entry allows (execution-recovery.md §7.2) takes the recovery reads too:
 // New starts them in a controller with an executor.
 func TestNewStartsRecoveryReads(t *testing.T) {

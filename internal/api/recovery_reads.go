@@ -56,10 +56,11 @@ func (a *API) recoveryReadPass(ctx context.Context) bool {
 		return true
 	}
 	for _, m := range ms {
-		o, err := a.observe(ctx, m, observeFor{purpose: "recovery"})
+		o, err := a.observe(ctx, m, observeFor{purpose: "recovery", paced: true})
 		switch {
 		case ctx.Err() != nil:
 			return false
+		case errors.Is(err, errReadNotDue):
 		case errors.Is(err, errNotController):
 			a.o.logf("recovery reads: the epoch is superseded")
 			return false
