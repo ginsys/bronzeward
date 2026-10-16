@@ -298,13 +298,20 @@ func TestRecoveryEntryRefusals(t *testing.T) {
 	if epoch(t, e.db) != start || entered.Load() != 0 || !r.d.preEntry.Load() {
 		t.Fatal("a refused entry changed the epoch or ended the pre-entry gate")
 	}
-	// A first entry commits; then the database is as a restore of a backup taken after it leaves it:
-	// its record is in the current epoch. A process started on it refuses that key, and enters under
-	// a new one.
+	// A first entry commits. A second recovery start of the same restore, which has no entry of its
+	// own, refuses that entry's key and stays gated: the record is current, but not its entry.
+	var twinEntered atomic.Int32
+	twin := recoveryStart(t, e, &twinEntered)
 	first := decode[entryBody](t, e.enter(r, "cycle", entryBodyText), http.StatusCreated)
+	doc := wantProblem(t, e.enter(twin, "cycle", entryBodyText), http.StatusConflict, "conflict")
+	if doc["epoch"] != first.Epoch || doc["request"] == nil || twinEntered.Load() != 0 || !twin.d.preEntry.Load() {
+		t.Fatalf("another start's entry record: %v, %d callbacks, preEntry %t", doc, twinEntered.Load(), twin.d.preEntry.Load())
+	}
+	// Then the database is as a restore of a backup taken after the entry leaves it: its record is
+	// in the current epoch. A process started on it refuses that key, and enters under a new one.
 	var again atomic.Int32
 	next := recoveryStart(t, e, &again)
-	doc := wantProblem(t, e.enter(next, "cycle", entryBodyText), http.StatusConflict, "conflict")
+	doc = wantProblem(t, e.enter(next, "cycle", entryBodyText), http.StatusConflict, "conflict")
 	if doc["epoch"] != first.Epoch || doc["request"] == nil || again.Load() != 0 || epoch(t, e.db) != first.Epoch {
 		t.Fatalf("a restored entry's record: %v, %d callbacks, epoch %s", doc, again.Load(), epoch(t, e.db))
 	}

@@ -86,18 +86,20 @@ func notRecoveryStart() *refusal {
 }
 
 // entryReplay is §12.4's refusal of an entry record a request would replay, or nil to replay it. Only
-// a recovery start reaches it, and it replays only its own entry: a record in the epoch it started
-// in is an earlier entry the restored database holds, and replaying it would answer 201 with no
-// epoch minted and no scope closed. A current record of this process's own entry, whose COMMIT reply
-// was lost, completes the entry before it is replayed.
+// a recovery start reaches it, and it replays only its own entry, whose record is in the epoch it
+// minted: any other is an earlier entry the restored database holds, or another start's, and
+// replaying it would answer 201 with no epoch minted by this process and its gate still closed. A
+// current record of this process's own entry, whose COMMIT reply was lost, completes the entry
+// before it is replayed.
 func (a *API) entryReplay(q *request, rec *record) *refusal {
-	switch {
-	case q.route.pattern != entryPattern:
+	if q.route.pattern != entryPattern {
 		return nil
-	case rec.epoch == a.d.start:
-		return refuse(http.StatusConflict, "conflict", "the key's record is an entry from before this start; retry under a new key").
+	}
+	if rec.epoch != a.d.entry.mintedEpoch() {
+		return refuse(http.StatusConflict, "conflict", "the key's record is not this process's entry; retry under a new key").
 			with("request", rec.requestID).with("epoch", rec.epoch)
-	case rec.current:
+	}
+	if rec.current {
 		a.entered(rec.epoch)
 	}
 	return nil
@@ -284,6 +286,13 @@ func (s *entryState) mint(epoch string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.minted = epoch
+}
+
+// mintedEpoch is the epoch this process's entry minted, or "" before it has one.
+func (s *entryState) mintedEpoch() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.minted
 }
 
 // entered makes the epoch this process's entry minted its own (§5.1), then ends the pre-entry gate:

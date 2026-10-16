@@ -126,8 +126,8 @@ func serve(args []string) error {
 }
 
 // serveContext is serve until ctx ends. With -recovery-start, the process is persistence-api §12.2's
-// recovery start: it runs no sweep, dependency monitor, publish worker, adoption or drift loop or
-// executor, and serves only the recovery entry until its entry commits.
+// recovery start: it runs no publish worker, adoption or drift loop or executor, and until its
+// entry commits it runs no sweep or dependency monitor and serves only the recovery entry.
 func serveContext(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	path := fs.String("config", "", "deployment configuration file")
@@ -176,7 +176,7 @@ func serveContext(ctx context.Context, args []string) error {
 	}
 	// A recovery start records nothing in the restored epoch before its entry: reads already treat a
 	// due claim as abandoned, and the entry abandons every earlier-epoch claim itself (compilation
-	// §3.5, execution-recovery §7.2).
+	// §3.5, execution-recovery §7.2). It sweeps once its entry has committed (afterEntry).
 	if !*recovery {
 		startSweep(startCtx, ctx, db, every, log.Printf)
 	}
@@ -190,7 +190,7 @@ func serveContext(ctx context.Context, args []string) error {
 	}
 	var onEntry func()
 	if *recovery {
-		onEntry = runMonitor
+		onEntry = afterEntry(ctx, db, every, runMonitor)
 	} else {
 		runMonitor()
 	}
@@ -260,6 +260,16 @@ func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, api.Exe
 		return nil, nil, nil, err
 	}
 	return ing, &api.Publishers{Meta: meta, Compiler: compiler}, exe, nil
+}
+
+// afterEntry is what a recovery start runs once its entry has committed: the staging sweep, which
+// it skipped before entry (compilation §3.5), and the dependency monitor (dependency-monitor §6.1).
+// Its first sweep runs beside the entry's reply, which a slow sweep must not delay.
+func afterEntry(life context.Context, db *sql.DB, every time.Duration, runMonitor func()) func() {
+	return func() {
+		go startSweep(life, life, db, every, log.Printf)
+		runMonitor()
+	}
 }
 
 // fallbackSweep is the sweep interval of a server without an ingestion block, which names its
