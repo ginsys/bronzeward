@@ -11,6 +11,7 @@ import (
 // role check still comes first: a role the route does not admit is refused 403.
 func TestRecoveryStartServesOnlyTheEntry(t *testing.T) {
 	e := newEnv(t, options{})
+	e.api.d.recoveryStart = true
 	e.api.d.preEntry.Store(true)
 	viewer, author, rec := e.human("h-viewer"), e.human("h-author"), e.human("h-recovery")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: path("/clusters"), token: viewer}),
