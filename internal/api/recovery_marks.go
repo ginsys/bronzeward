@@ -39,6 +39,7 @@ type markEvidence struct {
 	machine, observation, release string
 	deps                          map[string]any
 	missing                       []string // the dependencies that failed, in order
+	otherAccess                   bool     // the observation used another Talos access version than the check passed
 }
 
 // scopeMarkBody is a mark's answer: the state the scope moved from and to, the restoration
@@ -82,9 +83,6 @@ func prepareMark(ctx context.Context, a *API, q *request) error {
 	if id.MustHave(m, id.Machine) != nil {
 		return refuse(http.StatusNotFound, "not-found", "no such machine")
 	}
-	if a.d.exe == nil || a.d.owner.ID == "" {
-		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "no executor is configured; nothing was recorded")
-	}
 	var recovery bool
 	var cluster, state string
 	var desired, ct, key sql.NullString
@@ -104,6 +102,9 @@ func prepareMark(ctx context.Context, a *API, q *request) error {
 	if ref := markRefusal(m, state); ref != nil {
 		return ref
 	}
+	if a.d.exe == nil || a.d.owner.ID == "" { // after the refusals, which hold in every deployment
+		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "no executor is configured; nothing was recorded")
+	}
 	obs, err := a.observe(ctx, m, observeFor{purpose: "restoration"})
 	if err != nil {
 		return err
@@ -113,9 +114,15 @@ func prepareMark(ctx context.Context, a *API, q *request) error {
 	if desired.Valid { // the Desired release's record for the machine exists: machine_state references it
 		art = &boundArtifact{ciphertext: ct.String, key: key.String, version: int(version.Int64)}
 	}
-	_, ev.deps, _, err = a.checkDependencies(ctx, cluster, "restoration mark of "+m, art, nil)
+	var u useTime
+	u, ev.deps, _, err = a.checkDependencies(ctx, cluster, "restoration mark of "+m, art, nil)
 	if err != nil {
 		return err
+	}
+	// The check read the access itself: an observation made with another version of it is not evidence
+	// of the credential the check passed.
+	if d, ok := ev.deps["access"].(map[string]any); ok && d["result"] == "passed" && obs.Access != nil {
+		ev.otherAccess = accessKey(*obs.Access) != accessKey(u.access.Version())
 	}
 	for _, name := range []string{"access", "artifact"} {
 		if d, ok := ev.deps[name].(map[string]any); ok && d["result"] == "failed" {
@@ -128,7 +135,8 @@ func prepareMark(ctx context.Context, a *API, q *request) error {
 
 // markScope is step 6's mark under the locks above, from the evidence prepareMark took: unresolved
 // while a non-terminal operation holds the scope; otherwise blocked naming each missing item — the
-// observation, when it did not read the identity or does not follow the step 1 decision; the
+// observation, when it did not read the identity, does not follow the step 1 decision, is followed
+// by an operation change (§6.1 excludes it from drift) or used another access version than the check; the
 // identity, when the one read is not the one the machine record binds (§3.2 comparison 3, choice
 // §10.26); each failed dependency — and ready when nothing is missing.
 func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
@@ -143,13 +151,16 @@ func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, err
 	}
 	var state string
 	var desired sql.NullString
-	var read, matches, accounted bool
+	// quiet is §6.1's exclusion read the other way: no commitment or operation state change at or
+	// after the observation's basis, so its drift rules applied to it.
+	var read, matches, accounted, quiet bool
 	err := tx.QueryRowContext(ctx, `SELECT m.scope_state, s.desired, o.unread->'identity' IS NULL, coalesce(`+identityMatch+`, false),
-			coalesce(o.basis > sa.revision, false)
+			coalesce(o.basis > sa.revision, false), NOT EXISTS (SELECT FROM machine_event e WHERE e.machine = m.id
+				AND e.revision >= o.basis AND e.kind IN ('commitment', 'operation-state'))
 		FROM machine m JOIN cluster c ON c.id = m.cluster JOIN machine_state s ON s.machine = m.id
 		JOIN observation o ON o.id = $2 AND o.machine = m.id
 		LEFT JOIN scope_accounting sa ON sa.machine = m.id AND sa.epoch = $3
-		WHERE m.id = $1`, ev.machine, ev.observation, q.epoch).Scan(&state, &desired, &read, &matches, &accounted)
+		WHERE m.id = $1`, ev.machine, ev.observation, q.epoch).Scan(&state, &desired, &read, &matches, &accounted, &quiet)
 	if err != nil {
 		return result{}, err
 	}
@@ -176,7 +187,7 @@ func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, err
 	b := &scopeMarkBody{Machine: ev.machine, From: state, Observation: ev.observation, Missing: []string{}, Dependencies: ev.deps,
 		MarkedBy: q.principal.ID, Role: string(q.role), Act: q.actID, Epoch: q.epoch}
 	switch {
-	case !read || !accounted:
+	case !read || !accounted || !quiet || ev.otherAccess:
 		b.Missing = append(b.Missing, "observation")
 	case !matches:
 		b.Missing = append(b.Missing, "identity")

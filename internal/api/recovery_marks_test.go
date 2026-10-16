@@ -99,10 +99,15 @@ func TestRecoveryScopeMark(t *testing.T) {
 	me.report(me.recordedIdentity(t, m2))
 
 	wantProblem(t, me.mark(me.controller(t), m2, "normal"), http.StatusConflict, "conflict")
+	wantProblem(t, me.mark(observer(t, me.env, nil, options{}), m2, "bare-normal"), http.StatusConflict, "conflict")
 	r := ae.enterStopped(t, time.Now().Add(-time.Minute))
 	ctl := me.controller(t)
-	wantProblem(t, me.mark(ctl, m2, "unaccounted"), http.StatusConflict, "recovery-mode-active")
-	wantProblem(t, me.mark(ctl, "mch_aaaaaaaaaaaaaaaaaaaaaaaaaa", "unknown"), http.StatusNotFound, "not-found")
+	// A controller with no executor refuses as one with an executor does, until a mark needs it.
+	bare := observer(t, me.env, nil, options{})
+	for _, a := range []*API{ctl, bare} {
+		wantProblem(t, me.mark(a, m2, "unaccounted"), http.StatusConflict, "recovery-mode-active")
+		wantProblem(t, me.mark(a, "mch_aaaaaaaaaaaaaaaaaaaaaaaaaa", "unknown"), http.StatusNotFound, "not-found")
+	}
 	if n := me.restorations(t, m2); n != 0 {
 		t.Fatalf("a refused mark observed the machine %d times", n)
 	}
@@ -121,6 +126,10 @@ func TestRecoveryScopeMark(t *testing.T) {
 	}
 	if accounted == 0 {
 		t.Fatalf("the accounting answered no scope of %s: %+v", m2, acct.Scopes)
+	}
+	wantProblem(t, me.mark(bare, m2, "bare"), http.StatusServiceUnavailable, "dependency-unavailable")
+	if n := me.restorations(t, m2); n != 0 {
+		t.Fatalf("a mark with no executor observed the machine %d times", n)
 	}
 
 	human := ae.principalOf("h-recovery")
@@ -216,6 +225,45 @@ func TestRecoveryScopeMark(t *testing.T) {
 	me.x.onDecrypt = nil
 	me.x.mu.Unlock()
 	mustExec(t, ae.db, `UPDATE machine_state SET desired = $2 WHERE machine = $1`, m2, desired)
+
+	// The Talos access rotates between the observation's read and the dependency check's: the check
+	// passed a credential the observation was not made with, so the observation is missing.
+	v2 := me.x.access
+	me.x.onRead = func() {
+		me.x.mu.Lock()
+		defer me.x.mu.Unlock()
+		me.x.onRead = nil
+		me.x.access = provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + ae.cluster, Version: 3,
+			CreatedTime: time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)}, []byte("tc3"))
+	}
+	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated"), http.StatusCreated); b.State != "blocked" ||
+		len(b.Missing) != 1 || b.Missing[0] != "observation" {
+		t.Fatalf("a mark checking access the observation was not made with was marked %s missing %v", b.State, b.Missing)
+	}
+	me.x.mu.Lock()
+	me.x.access = v2
+	me.x.mu.Unlock()
+
+	// An operation changes state after the observation's basis (here a resolution recorded while the
+	// dependencies are checked): §6.1 excludes the observation from drift, so it is not the mark's
+	// evidence either, and the scope stays blocked on it.
+	var changed sync.Once
+	me.x.onDecrypt = func() {
+		changed.Do(func() {
+			mustExec(t, ae.db, `WITH r AS (UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1
+				RETURNING revision_counter)
+				INSERT INTO machine_event (machine, revision, epoch, kind, entry, at) SELECT $1, r.revision_counter, $2, 'operation-state',
+				'{"operation": "op_aaaaaaaaaaaaaaaaaaaaaaaaaa", "from": "unresolved", "to": "cancelled"}', clock_timestamp() FROM r`,
+				m2, epoch(t, ae.db))
+		})
+	}
+	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "changed"), http.StatusCreated); b.State != "blocked" ||
+		len(b.Missing) != 1 || b.Missing[0] != "observation" {
+		t.Fatalf("a mark on an observation an operation change follows was marked %s missing %v", b.State, b.Missing)
+	}
+	me.x.mu.Lock()
+	me.x.onDecrypt = nil
+	me.x.mu.Unlock()
 
 	// A restored operation holds the attempt's scope: it is marked unresolved whatever the evidence.
 	me.report(me.recordedIdentity(t, ae.machine))

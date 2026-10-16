@@ -1623,14 +1623,17 @@ the act together:
   6, choice §10.20); a machine with no `Desired` release has only its Talos
   access checked. The transaction marks the scope `unresolved` while a
   non-terminal operation holds it, `blocked` naming each item missing (the
-  observation when it read no identity, the identity when it is not the
-  machine record's, each failed dependency), and `ready` otherwise, as one
+  observation when it read no identity, when a commitment or operation state
+  change follows its start, or when it used another Talos access version than
+  the check passed; the identity when it is not the machine record's; each
+  failed dependency), and `ready` otherwise, as one
   scope state entry naming the observation and the act. The answer names the
   state moved from and to, the observation and what is missing. A scope may be
   marked again. Outside recovery mode, a released scope, or a `Desired` release
   that changed during the check is `409 conflict`; a scope still pre-restore
   unaccounted is `409 recovery-mode-active`, and nothing is observed; an unknown
-  machine is `404 not-found`.
+  machine is `404 not-found`. After these, a controller with no executor
+  answers `503 dependency-unavailable`.
 - `POST /operations/{id}/resolutions` takes `to` and `reason`. `to` is
   `cancelled` only, and only an `unresolved` operation with no recorded attempt
   qualifies (§4): any other state or an attempt is `409 conflict`. Its
