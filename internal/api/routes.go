@@ -30,6 +30,10 @@ type route struct {
 
 func (rt *route) mutating() bool { return rt.method != http.MethodGet }
 
+// entryPattern is recovery-mode entry's route, the one a recovery start serves before its entry
+// commits (§12.2).
+const entryPattern = "/recovery/entries"
+
 // effectFunc is a mutating route's work inside its transaction (§5): after the key lock and the
 // installation state, before the act and the record.
 type effectFunc func(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error)
@@ -118,7 +122,7 @@ func routes() []*route {
 		approvalRevocation().on(m(post, "/approvals/{id}/revocations", approver, recovery)),
 		machineFreeze().on(m(post, "/machines/{id}/freezes", author, publisher, approver, recovery)),
 		machineUnfreeze().on(m(post, "/machines/{id}/unfreezes", approver)),
-		human(m(post, "/recovery/entries", recovery)), human(m(post, "/recovery/exits", recovery)),
+		human(m(post, entryPattern, recovery)), human(m(post, "/recovery/exits", recovery)),
 		human(m(post, "/recovery/scopes/{machine}/marks", recovery)),
 		human(m(post, "/recovery/scopes/{machine}/releases", recovery)),
 		human(m(post, "/recovery/accountings", recovery)),
