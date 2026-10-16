@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -9,12 +10,15 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/staging"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // recoveryStart is a process started with the recovery-start flag over e's database (§12.2): it
 // owns under the epoch it read at its start, serves only the entry until its entry commits, and
 // counts the entry callbacks it runs.
-func recoveryStart(t *testing.T, e *env, entered *atomic.Int32) *API {
+func recoveryStart(t *testing.T, e *env, entered *atomic.Int32, o ...options) *API {
 	t.Helper()
 	d := e.d
 	ep := epoch(t, e.db)
@@ -23,7 +27,8 @@ func recoveryStart(t *testing.T, e *env, entered *atomic.Int32) *API {
 	d.preEntry = new(atomic.Bool)
 	d.preEntry.Store(true)
 	d.onEntry = func() { entered.Add(1) }
-	return e.buildWith(d, options{})
+	d.entry = new(entryState)
+	return e.buildWith(d, append(o, options{})[0])
 }
 
 const entryBodyText = `{"restored":[{"family":"database","backup":"pg-2026-09-25T02:00Z","takenAt":"2026-09-25T02:00:00Z"}],` +
@@ -118,6 +123,49 @@ func TestRecoveryEntry(t *testing.T) {
 				t.Fatalf("a second entry: %v, %d callbacks, epoch %s", doc, entered.Load(), epoch(t, ae.db))
 			}
 		})
+	}
+}
+
+// An entry whose COMMIT succeeded but whose reply was lost, and whose read-back failed too, answers
+// its outcome unknown and leaves the process gated. Its retry under the same key finds the record
+// of the epoch this process minted, completes the entry once, and replays it (§12.2, §12.4).
+func TestRecoveryEntryLostCommitReply(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, options{})
+	cfg, err := pgx.ParseConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := stdlib.OpenDB(*cfg)
+	if err := dead.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var entered atomic.Int32
+	var r *API
+	r = recoveryStart(t, e, &entered, options{commit: func(tx *sql.Tx) error {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		r.db = dead // the read-back cannot reach the database
+		return &pgconn.PgError{Code: "08006", Message: "connection lost at COMMIT (test)"}
+	}})
+	wantProblem(t, e.enter(r, "lost", entryBodyText), http.StatusInternalServerError, "internal-error")
+	r.db, r.o.commit = e.db, nil
+	minted := epoch(t, e.db)
+	if minted == r.d.start || entered.Load() != 0 || !r.d.preEntry.Load() {
+		t.Fatalf("after a lost reply: epoch %s, %d callbacks, preEntry %t", minted, entered.Load(), r.d.preEntry.Load())
+	}
+	for range 2 {
+		rec := e.enter(r, "lost", entryBodyText)
+		if b := decode[entryBody](t, rec, http.StatusCreated); b.Epoch != minted || rec.Header().Get("Idempotent-Replayed") != "true" {
+			t.Fatalf("the retry: %+v %v", b, rec.Header())
+		}
+	}
+	if entered.Load() != 1 || r.d.preEntry.Load() || r.d.owner.Epoch != minted {
+		t.Fatalf("after the retries: %d callbacks, preEntry %t, owning under %s", entered.Load(), r.d.preEntry.Load(), r.d.owner.Epoch)
+	}
+	if rec := e.do(r, call{method: "GET", path: path("/clusters"), token: e.human("h-viewer")}); rec.Code != http.StatusOK {
+		t.Fatalf("a read after the retry: %d %s", rec.Code, rec.Body)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/auth"
@@ -86,7 +87,8 @@ func notRecoveryStart() *refusal {
 // entryReplay is §12.4's refusal of an entry record a request would replay, or nil to replay it. A
 // process not started with the flag replays none. A recovery start replays only its own entry: a
 // record in the epoch it started in is an earlier entry the restored database holds, and replaying
-// it would answer 201 with no epoch minted and no scope closed.
+// it would answer 201 with no epoch minted and no scope closed. A current record of this process's
+// own entry, whose COMMIT reply was lost, completes the entry before it is replayed.
 func (a *API) entryReplay(q *request, rec *record) *refusal {
 	switch {
 	case q.route.pattern != entryPattern:
@@ -96,6 +98,8 @@ func (a *API) entryReplay(q *request, rec *record) *refusal {
 	case rec.epoch == a.d.start:
 		return refuse(http.StatusConflict, "conflict", "the key's record is an entry from before this start; retry under a new key").
 			with("request", rec.requestID).with("epoch", rec.epoch)
+	case rec.current:
+		a.entered(rec.epoch)
 	}
 	return nil
 }
@@ -163,6 +167,7 @@ func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result,
 		return result{}, err
 	}
 	ep := id.New(id.Epoch)
+	a.d.entry.mint(ep)
 	b := &entryBody{Epoch: ep, PreviousEpoch: q.epoch, EnteredBy: q.principal.ID, Role: q.role, Reason: in.Reason,
 		Restored: in.Restored, Machines: len(machines), Operations: []string{}, Act: q.actID}
 	write := func(ctx context.Context, tx *sql.Tx) error {
@@ -218,12 +223,36 @@ func enterRecovery(ctx context.Context, a *API, tx *sql.Tx, q *request) (result,
 		afterCommit: func() { a.entered(ep) }}, nil
 }
 
+// entryState is the epoch a recovery start's entry minted, and whether the process has made it its
+// own. A committed entry whose COMMIT reply was lost answers its outcome unknown; its retry finds
+// the record in the epoch minted here, and adopts it then.
+type entryState struct {
+	mu      sync.Mutex
+	minted  string
+	adopted bool
+}
+
+func (s *entryState) mint(epoch string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.minted = epoch
+}
+
 // entered makes the epoch this process's entry minted its own (§5.1), then ends the pre-entry gate:
 // a request that finds the gate open reads that owner (§12.2). onEntry then starts what a recovery
-// start runs after entry, the dependency monitor (dependency-monitor.md §6.1).
+// start runs after entry, the dependency monitor (dependency-monitor.md §6.1). It acts once, and
+// only for the epoch this process minted.
 func (a *API) entered(epoch string) {
+	s := a.d.entry
+	s.mu.Lock()
+	if s.adopted || epoch != s.minted {
+		s.mu.Unlock()
+		return
+	}
+	s.adopted = true
 	a.d.owner.Epoch = epoch
 	a.d.preEntry.Store(false)
+	s.mu.Unlock()
 	if a.d.onEntry != nil {
 		a.d.onEntry()
 	}

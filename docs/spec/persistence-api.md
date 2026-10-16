@@ -2742,7 +2742,9 @@ remembers the epoch its own entry minted. Until it has one, an entry request
 whose key has a stored record is not replayed: it is refused with
 `409 conflict`, naming the stored entry and its epoch, and the operator
 retries under a new key. Once this process's entry has committed, a retry of
-that entry replays as usual.
+that entry replays as usual; if the entry's reply was lost and its outcome
+answered unknown, the retry that finds its record first makes the epoch the
+process's own (§5.1) and ends the pre-entry gate, as the entry would have.
 
 ## 13. Worked examples
 
