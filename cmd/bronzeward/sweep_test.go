@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"net"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -247,30 +249,67 @@ func TestServeSweepsWithoutIngestion(t *testing.T) {
 	waitAbandoned(t, db, after, "the claim another instance left after startup")
 }
 
+// serveUntilLive starts serve on a free port with extra flags and returns once it answers /livez,
+// so its startup, the startup sweep included, has completed; stop ends it.
+func serveUntilLive(t *testing.T, dsn string, extra ...string) (stop func()) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	cfg := configFileAt(t, dsn, addr)
+	ctx, cancel := context.WithCancel(t.Context())
+	errc := make(chan error, 1)
+	go func() { errc <- serveContext(ctx, append([]string{"-config", cfg}, extra...)) }()
+	stop = func() {
+		cancel()
+		if err := <-errc; err != nil {
+			t.Errorf("serve: %v", err)
+		}
+	}
+	for deadline := time.Now().Add(15 * time.Second); ; {
+		if r, err := http.Get("http://" + addr + "/livez"); err == nil {
+			_ = r.Body.Close()
+			if r.StatusCode == http.StatusNoContent {
+				return stop
+			}
+		}
+		select {
+		case err := <-errc:
+			cancel()
+			t.Fatalf("serve ended before it answered /livez: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			stop()
+			t.Fatal("serve never answered /livez")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // A recovery start records nothing in the restored epoch before its entry (persistence-api §12.2):
-// it does not sweep, at startup or later, so a due claim keeps its recorded state.
+// it does not sweep, at startup or later, so a due claim keeps its recorded state. The control: a
+// normal start on the same database abandons that claim before it serves.
 func TestRecoveryStartDoesNotSweep(t *testing.T) {
 	db, dsn, human, cluster, machine := sweepFixtureDSN(t)
 	due := dueClaim(t, db, human, cluster, machine)
 	old := fallbackSweep
 	fallbackSweep = 20 * time.Millisecond
 	t.Cleanup(func() { fallbackSweep = old })
-	cfg := configFile(t, dsn)
-	ctx, cancel := context.WithCancel(t.Context())
-	errc := make(chan error, 1)
-	go func() { errc <- serveContext(ctx, []string{"-config", cfg, "-recovery-start"}) }()
-	// Ten sweep intervals: a sweep, had it run, would have abandoned the claim by then.
-	select {
-	case err := <-errc:
-		cancel()
-		t.Fatalf("serve ended early: %v", err)
-	case <-time.After(10 * fallbackSweep):
-	}
-	cancel()
-	if err := <-errc; err != nil {
-		t.Errorf("serve: %v", err)
-	}
+	stop := serveUntilLive(t, dsn, "-recovery-start")
+	// Startup is complete, and ten sweep intervals pass: a sweep, had it run, would have abandoned
+	// the claim by then.
+	time.Sleep(10 * fallbackSweep)
+	stop()
 	if s := claimState(t, db, due); s == "abandoned" {
 		t.Fatal("a recovery start swept the due claim")
+	}
+	stop = serveUntilLive(t, dsn)
+	defer stop()
+	if s := claimState(t, db, due); s != "abandoned" {
+		t.Fatalf("after a normal start the due claim is %s", s)
 	}
 }

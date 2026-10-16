@@ -18,8 +18,14 @@ import (
 
 func configFile(t *testing.T, dsn string) string {
 	t.Helper()
+	return configFileAt(t, dsn, "127.0.0.1:0")
+}
+
+// configFileAt is configFile listening on listen.
+func configFileAt(t *testing.T, dsn, listen string) string {
+	t.Helper()
 	p := filepath.Join(t.TempDir(), "bronzeward.yaml")
-	body := "listen: 127.0.0.1:0\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: https://idp.test\n    audience: bronzeward\n" +
+	body := "listen: " + listen + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: https://idp.test\n    audience: bronzeward\n" +
 		"execution: {maxTransportDeadline: 5m}\n"
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
