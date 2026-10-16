@@ -1354,7 +1354,10 @@ which the recovery start does not run (see `persistence-api.md`).
    the recovery start after entry and every start while recovery mode is in
    effect: one of each pre-restore unaccounted scope once that scope's
    transport deadline has passed, then one per settle floor after the last was
-   recorded, a machine inventoried later included. The decision accounts
+   recorded, a machine inventoried later included. The floor is the machine's:
+   any recovery observation of it paces the next, whichever loop or controller
+   took it, and the observation's start rechecks it under the machine's lock.
+   The decision accounts
    every restored unaccounted attempt on the scope under its one act, then moves
    the scope to `unresolved` where a restored operation holds it, and to
    `blocked` otherwise, until its `restoration` observation and the
