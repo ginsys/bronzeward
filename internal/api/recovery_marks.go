@@ -144,6 +144,9 @@ func markScope(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, err
 	if !q.recovery {
 		return result{}, refuse(http.StatusConflict, "conflict", "recovery mode is not in effect")
 	}
+	if q.epoch != a.d.owner.Epoch { // an entry committed after the observation: a superseded controller marks nothing
+		return result{}, errNotController
+	}
 	// The lock is its own statement: a statement that waits on it keeps the snapshot it started with,
 	// so Desired, which publication moves under the machine FOR SHARE, is read by the next one.
 	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, ev.machine); err != nil {
