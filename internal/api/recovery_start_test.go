@@ -21,6 +21,14 @@ func TestRecoveryStartServesOnlyTheEntry(t *testing.T) {
 		http.StatusConflict, "recovery-mode-active")
 	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/recovery", token: viewer}),
 		http.StatusConflict, "recovery-mode-active")
+	// A request no route matches, by path, by method or by an unclean path, is refused too.
+	for _, c := range []call{
+		{method: "GET", path: path("/no-such-route"), token: viewer},
+		{method: "GET", path: path(entryPattern), token: rec},
+		{method: "GET", path: prefix + "//clusters", token: viewer},
+	} {
+		wantProblem(t, e.do(e.api, c), http.StatusConflict, "recovery-mode-active")
+	}
 	wantProblem(t, e.do(e.api, call{method: "POST", path: path("/drafts"), token: viewer, key: key, body: `{}`}),
 		http.StatusForbidden, "forbidden")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: path(entryPattern), token: viewer, key: key, body: `{}`}),
@@ -30,9 +38,11 @@ func TestRecoveryStartServesOnlyTheEntry(t *testing.T) {
 	if n := count(t, e.db, "SELECT count(*) FROM principal WHERE sub IN ('h-viewer', 'h-author', 'h-recovery')"); n != 0 {
 		t.Fatalf("a recovery start before entry created %d principal rows", n)
 	}
-	// Without the flag the same read is served.
+	// Without the flag the same read is served, and an unmatched request is not found.
 	e.api.d.preEntry.Store(false)
 	if r := e.do(e.api, call{method: "GET", path: path("/clusters"), token: viewer}); r.Code != http.StatusOK {
 		t.Fatalf("GET /clusters without the flag: %d %s", r.Code, r.Body)
 	}
+	wantProblem(t, e.do(e.api, call{method: "GET", path: path("/no-such-route"), token: viewer}),
+		http.StatusNotFound, "not-found")
 }
