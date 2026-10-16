@@ -1625,8 +1625,9 @@ the act together:
   non-terminal operation holds it, `blocked` naming each item missing (the
   observation when it read no identity, when a commitment or operation state
   change follows its start, or when it used another Talos access version than
-  the check passed; the identity when it is not the machine record's; each
-  failed dependency), and `ready` otherwise, as one
+  the check passed; the identity when it is not the machine record's or a later
+  observation, another mark's included, read another; each failed dependency),
+  and `ready` otherwise, as one
   scope state entry naming the observation and the act. The answer names the
   state moved from and to, the observation and what is missing. A scope may be
   marked again. Outside recovery mode, a released scope, or a `Desired` release

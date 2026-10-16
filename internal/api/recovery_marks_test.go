@@ -283,6 +283,24 @@ func TestRecoveryScopeMark(t *testing.T) {
 	me.x.mu.Lock()
 	me.x.onDecrypt = nil
 	me.x.mu.Unlock()
+	// Two marks overlap: while the first checks its dependencies, the second observes another identity
+	// and marks the scope blocked. The first's own observation matched, but a newer one contradicts its
+	// identity, so it does not mark the scope ready over the second's evidence.
+	var overlapped *scopeMarkBody
+	me.x.onDecrypt = func() {
+		me.x.mu.Lock()
+		me.x.onDecrypt = nil
+		me.x.mu.Unlock()
+		me.report(other)
+		nb := decode[scopeMarkBody](t, me.mark(ctl, m2, "overlapping"), http.StatusCreated)
+		overlapped = &nb
+		me.report(me.recordedIdentity(t, m2))
+	}
+	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "overlapped"), http.StatusCreated); overlapped == nil ||
+		overlapped.State != "blocked" || b.State != "blocked" || len(b.Missing) != 1 || b.Missing[0] != "identity" {
+		t.Fatalf("a mark a newer observation of another identity contradicts was marked %s missing %v (the newer: %+v)",
+			b.State, b.Missing, overlapped)
+	}
 
 	// A restored operation holds the attempt's scope: it is marked unresolved whatever the evidence.
 	me.report(me.recordedIdentity(t, ae.machine))
