@@ -59,11 +59,21 @@ s4_applied() {
 both_applied() {
   same "$(sql "SELECT count(*) FROM machine_state WHERE machine IN ('$machine_cp', '$machine_w') AND applied_release IS NOT NULL")" 2
 }
-# running <container>: the container runs, by the ID need_state verified.
-running() { [ "$(docker inspect --format '{{.State.Running}}' "${verified_container_ids[$1]}")" = true ]; }
-stopped() { ! running "$1"; }
-# kill_if_up <A|B|C|B-recovery> <container>: the instance killed, if it runs.
-kill_if_up() { stopped "$2" || "$bin/inject" kill "$1"; }
+# running_is <true|false> <container>: docker answers that state for the ID need_state verified. A
+# failed inspection is neither state.
+running_is() {
+  local id state
+  id=$(container_id "$2") || return 2
+  state=$(docker inspect --format '{{.State.Running}}' "$id") || return 2
+  [ "$state" = "$1" ]
+}
+running() { running_is true "$1"; }
+stopped() { running_is false "$1"; }
+# kill_if_up <A|B|C|B-recovery> <container>: the instance killed if it runs, then read stopped.
+kill_if_up() {
+  if ! stopped "$2"; then "$bin/inject" kill "$1" || return 1; fi
+  stopped "$2"
+}
 # b_stalls_at <step>: how many times B's log says the seam stalled it at the step.
 b_stalls_at() {
   docker logs "${verified_container_ids[$BW_B]}" 2>&1 | grep --count --line-regexp --fixed-strings -- "fixture interrupt: stall at $1" || true
@@ -181,7 +191,8 @@ preconditions() {
   must "$ref" 'B stopped' kill_if_up B "$BW_B"
   must "$ref" "C's control file removed" interrupt -
   must "$ref" "B's control file removed" interrupt_of b -
-  stopped "$BW_C" || must "$ref" 'inject start C' "$bin/inject" start C
+  running "$BW_C" || must "$ref" 'inject start C' "$bin/inject" start C
+  must "$ref" 'C running' running "$BW_C"
   call_port=$SERVER_C_PORT
   check "$ref" 'C answers /livez' within 30 answers 204 - GET /livez ''
   evidence_to pre || die "no pre-state: bin/evidence failed"
@@ -252,8 +263,10 @@ s7() {
   ref='S7 step 1'
   must "$ref" 'inject kill B' "$bin/inject" kill B
   must "$ref" 'inject kill C' "$bin/inject" kill C
-  check "$ref" 'B is not running' stopped "$BW_B"
-  check "$ref" 'C is not running' stopped "$BW_C"
+  must "$ref" 'B is not running' stopped "$BW_B"
+  must "$ref" 'C is not running' stopped "$BW_C"
+  must "$ref" "the fixture's A is not running" stopped "$BW_A"
+  must "$ref" 'B-recovery is not running' stopped "$BW_B_RECOVERY"
   stopped_at=$(now_utc)
   must "$ref" "B's control file removed" interrupt_of b -
   must "$ref" "C's control file removed" interrupt -
