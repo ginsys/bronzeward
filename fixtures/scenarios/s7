@@ -16,28 +16,36 @@
 # paused, the worker marked ready (its mark opens the landing's drift record) and the control plane
 # blocked. Step 8 releases the worker; step 9 restarts B without the flag, which runs step 3's
 # publication, and a revert of the landing, approved in the new epoch, runs as S4; step 10 unpauses
-# the control plane, marks and releases it; step 11 exits recovery mode. The step 4 controls, step
-# 9's link cut and A's attempts belong to the closing run. The run leaves recovery mode off and B
-# running; the reissued automation token is kept nowhere, so .state/automation-token holds the seed
-# token the restore made unusable. The served timelines and GET /recovery are kept.
+# the control plane, marks and releases it; step 11 exits recovery mode. The run leaves recovery
+# mode off and B running; the reissued automation token is kept nowhere, so .state/automation-token
+# holds the seed token the restore made unusable. The served timelines and GET /recovery are kept.
+# The closing run (ER §9.3 item 3) runs the same steps from a fresh up, outside the integrated run,
+# with C as the missed stale instance: step 1 pauses C, stalled before its attempt, instead of
+# stopping it, and step 4 releases and unpauses it. C's executor and publish worker end at their
+# first epoch refusal and record nothing (PA §5.1); its takeover and ingestion start answer 503
+# epoch-superseded. The refusals that leave no state run inline: plan and approval on an unaccounted
+# scope, a second entry, a release of the blocked scope, an exit with it unreleased. The controls
+# that drop a comparison are Go checks, named in SKIP lines.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s7.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s7 run   (after scenarios/s5 run on the same up, as in the integrated run, or
-# directly after scenarios/s4 run; S6 runs outside the integrated run)
+# Usage: scenarios/s7 run       (after scenarios/s5 run on the same up, as in the integrated run, or
+#                                directly after scenarios/s4 run; S6 runs outside the integrated run)
+#        scenarios/s7 closing   (after scenarios/s4 run on a fresh up, outside the integrated run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
-[ "${1:-}" = run ] || die "usage: scenarios/s7 run"
+s7_mode=${1:-}
+case $s7_mode in run | closing) ;; *) die "usage: scenarios/s7 run|closing" ;; esac
 need docker curl jq timeout id sleep date awk wc sha256sum
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
 umask 077
 image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
 image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
-EV=$STATE/evidence/s7-run-$(date -u +%Y%m%dT%H%M%SZ)
+EV=$STATE/evidence/s7-$s7_mode-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p -- "$EV" "$EV/http"
 scenario=s7
 # shellcheck source-path=SCRIPTDIR source=common.sh
@@ -57,6 +65,7 @@ cp_log='' w_log=''
 pre_plan='' pre_approval='' post_plan='' restored_epoch='' epoch=''
 t_at='' bao_at='' stopped_at='' db_backup='' bao_backup='' entry_draft='' second_draft='' second_etag=''
 robot_new='' ing_epoch='' s_start='' s_end='' cp_start='' cp_end='' w_start='' w_end='' marked='' w_mark='' drift_rec=''
+c_owner='' w_pre=''
 
 # s4_applied: S4's safe apply done: the first apply-config plan committed to an operation that
 # completed.
@@ -79,6 +88,17 @@ running_is() {
 }
 running() { running_is true "$1"; }
 stopped() { running_is false "$1"; }
+# paused <container>: docker answers it paused, for the ID need_state verified.
+paused() {
+  local id state
+  id=$(container_id "$1") || return 2
+  state=$(docker inspect --format '{{.State.Paused}}' "$id") || return 2
+  [ "$state" = true ]
+}
+# c_logged <line>: C's log holds the line at least once.
+c_logged() {
+  docker logs "${verified_container_ids[$BW_C]}" 2>&1 | grep --quiet --fixed-strings -- "$1"
+}
 # kill_if_up <A|B|C|B-recovery> <container>: the instance killed if it runs, then read stopped.
 kill_if_up() {
   if ! stopped "$2"; then "$bin/inject" kill "$1" || return 1; fi
@@ -121,15 +141,20 @@ backup_id() {
 }
 # now_utc: the time, to the second, never ahead of the server's clock it shares.
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-# enter: h-recovery records the entry on call_port, naming both backups, the stop and a reason:
-# 201, a new epoch fencing the restored one, by h-recovery as recovery-admin, every machine marked
-# and held among the operations taken over; the new epoch in epoch.
+# entry_body: the entry's request, naming both backups with the times they were taken, the stop and
+# a reason.
+entry_body() {
+  jq -nc --arg db "$db_backup" --arg dt "$t_at" --arg pb "$bao_backup" --arg pt "$bao_at" --arg s "$stopped_at" \
+    '{restored: [{family: "database", backup: $db, takenAt: $dt}, {family: "provider", backup: $pb, takenAt: $pt}],
+      stoppedAt: $s, reason: "S7 step 3: the database restored to T and OpenBao to its later snapshot"}'
+}
+# enter: h-recovery records the entry on call_port: 201, a new epoch fencing the restored one, by
+# h-recovery as recovery-admin, every machine marked and held among the operations taken over; the
+# new epoch in epoch.
 enter() {
   local who body
   fresh h-recovery
-  body=$(jq -nc --arg db "$db_backup" --arg dt "$t_at" --arg pb "$bao_backup" --arg pt "$bao_at" --arg s "$stopped_at" \
-    '{restored: [{family: "database", backup: $db, takenAt: $dt}, {family: "provider", backup: $pb, takenAt: $pt}],
-      stoppedAt: $s, reason: "S7 step 3: the database restored to T and OpenBao to its later snapshot"}') || return 1
+  body=$(entry_body) || return 1
   answers 201 - POST /api/v1/recovery/entries "$tok" "$body" "$(key entry)" || return 1
   who=$(who_id h-recovery) && [ -n "$who" ] || return 1
   jq -e --arg p "$restored_epoch" --arg w "$who" --arg h "$held" --argjson n "$(sql "SELECT count(*) FROM machine")" \
@@ -308,6 +333,74 @@ recovery_kept() {
   done < <(jq -r '.entry.restored[] | "\(.family) \(.takenAt)"' "$EV/recovery.json")
 }
 
+# The closing run's checks of C, the missed stale instance, after step 4's unpause.
+# c_superseded: C's executor and publish worker each logged its epoch superseded, and ended.
+c_superseded() {
+  c_logged 'executor: the epoch is superseded; it dispatches nothing until restarted' &&
+    c_logged 'publish worker: the epoch is superseded; it claims nothing until restarted'
+}
+# held_under_entry: held still unresolved at generation 2 in the new epoch, under another owner than
+# C's, its journal holding no attempt: C's attempt wrote nothing.
+held_under_entry() {
+  same "$(sql "SELECT o.state || ' ' || o.owner_gen || ' ' || o.owner_epoch || ' ' || (o.owner <> '$c_owner') || ' ' || count(a.id)
+    FROM operation o LEFT JOIN attempt a ON a.operation = o.id WHERE o.id = '$held'
+    GROUP BY o.state, o.owner_gen, o.owner_epoch, o.owner")" "unresolved 2 $epoch true 0"
+}
+# stale_takeover: h-recovery's takeover of held from generation 2 on call_port: 503 epoch-superseded.
+stale_takeover() {
+  fresh h-recovery
+  answers 503 epoch-superseded POST "/api/v1/operations/$held/takeovers" "$tok" \
+    '{"generation": 2, "reason": "S7 step 4: through the missed stale instance"}' "$(key takeover-stale)"
+}
+# stale_ingestion: h-author's import of the worker into the second draft on call_port, under step 3's
+# ETag: 503 epoch-superseded.
+stale_ingestion() {
+  local body
+  fresh_author
+  body=$(jq -nc --arg m "$machine_w" --arg d "$second_draft" --arg p "$WORKER_MARK" \
+    '{kind: "import", source: "machine", staging: "transient", machine: $m, draft: $d, marks: [$p]}') || return 1
+  answers 503 epoch-superseded POST /api/v1/ingestions "$author" "$body" "$(key ingestion-stale)" "$second_etag"
+}
+# unaccounted_plan: a plan of the worker as h-publisher on call_port: 409 recovery-mode-active,
+# naming the worker and its pre-restore unaccounted scope.
+unaccounted_plan() {
+  local body
+  fresh h-publisher
+  body=$(plan_body) || return 1
+  answers_with ".machine == \"$machine_w\" and .scope == \"pre-restore-unaccounted\"" 409 recovery-mode-active \
+    POST /api/v1/plans "$tok" "$body" "$(key plan-unaccounted)"
+}
+# unaccounted_approval: h-approver's approval of the pre-entry plan on call_port: 409
+# recovery-mode-active, naming the worker's pre-restore unaccounted scope.
+unaccounted_approval() {
+  fresh h-approver
+  answers_with '.scope == "pre-restore-unaccounted"' 409 recovery-mode-active \
+    POST "/api/v1/plans/$pre_plan/approvals" "$tok" '{}' "$(key approval-unaccounted)"
+}
+# second_entry: another entry under another key in the same recovery start, on call_port: 409 conflict.
+second_entry() {
+  local body
+  fresh h-recovery
+  body=$(entry_body) || return 1
+  answers 409 conflict POST /api/v1/recovery/entries "$tok" "$body" "$(key entry-second)"
+}
+# release_refused <machine>: h-recovery releases the scope on call_port: 409 conflict, as it is not ready.
+release_refused() {
+  fresh h-recovery
+  answers 409 conflict POST "/api/v1/recovery/scopes/$1/releases" "$tok" '{"facts": {}}' "$(key "release-refused-$1")"
+}
+# exit_refused: h-recovery exits recovery mode on call_port with the control plane's scope
+# unreleased: 409 conflict, naming it.
+exit_refused() {
+  fresh h-recovery
+  answers_with ".machine == \"$machine_cp\"" 409 conflict POST /api/v1/recovery/exits "$tok" '{"facts": {}}' "$(key exit-early)"
+}
+# not_by_c <plan>: the plan's operation owned by another controller than C.
+not_by_c() {
+  same "$(sql "SELECT count(*) FROM plan_state s JOIN operation o ON o.id = s.operation
+    WHERE s.plan = '$1' AND o.owner <> '$c_owner'")" 1
+}
+
 preconditions() {
   local ref='S7 precondition'
   machines
@@ -390,16 +483,23 @@ after_t() {
 s7() {
   local ref
 
-  # Step 1: B and C (S7's A) stopped and established stopped before either restore.
+  # Step 1: B and C (S7's A) stopped and established stopped before either restore; in the closing
+  # run C, the missed stale instance, is paused where it stalled, before its attempt, instead.
   ref='S7 step 1'
   must "$ref" 'inject kill B' "$bin/inject" kill B
-  must "$ref" 'inject kill C' "$bin/inject" kill C
   must "$ref" 'B is not running' stopped "$BW_B"
-  must "$ref" 'C is not running' stopped "$BW_C"
+  if [ "$s7_mode" = closing ]; then
+    must "$ref" 'inject pause C' "$bin/inject" pause C
+    must "$ref" 'C is paused' paused "$BW_C"
+  else
+    must "$ref" 'inject kill C' "$bin/inject" kill C
+    must "$ref" 'C is not running' stopped "$BW_C"
+  fi
   must "$ref" "the fixture's A is not running" stopped "$BW_A"
   must "$ref" 'B-recovery is not running' stopped "$BW_B_RECOVERY"
   stopped_at=$(now_utc)
   must "$ref" "B's control file removed" interrupt_of b -
+  # A paused C reads it only once step 4 unpauses it: its stall then ends.
   must "$ref" "C's control file removed" interrupt -
   must "$ref" 'inject db-restore s7-t' "$bin/inject" db-restore s7-t
   must "$ref" 'inject bao-restore s7-provider' "$bin/inject" bao-restore s7-provider
@@ -408,6 +508,7 @@ s7() {
   check "$ref" 'the database is at T: the restored epoch, not in recovery mode' \
     same "$(sql "SELECT epoch || ' ' || recovery_mode FROM installation_state")" "$restored_epoch false"
   check "$ref" "held as at T: committed, no attempt, at generation 1 in the restored epoch, no ownership transition" held_restored
+  c_owner=$(sql "SELECT owner FROM operation WHERE id = '$held'") && [ -n "$c_owner" ] || die "cannot read held's owner, C"
   check "$ref" "the pre-entry plan's approval as at T: approved, no operation" plan_is_stored "$pre_plan" approved "$pre_approval"
   check "$ref" 'the second plan, made after T, is gone' same "$(sql "SELECT count(*) FROM plan WHERE id = '$post_plan'")" 0
   check "$ref" "h-all's revocation, made after T, is gone" revoked_identity false
@@ -451,6 +552,37 @@ s7() {
   second_draft=$draft second_etag=$etag
   printf 'entry-draft\t%s\nsecond-draft\t%s\t%s\npublish\t%s\nheld\t%s\nepoch\t%s\n' \
     "$entry_draft" "$second_draft" "$second_etag" "$pub_op" "$held" "$epoch" >"$EV/s7-state.tsv"
+
+  if [ "$s7_mode" = closing ]; then
+    check 'S7 negative controls' 'a second entry under another key in the same recovery start: 409 conflict' second_entry
+
+    # Step 4: C, unpaused, tries its attempt, a claim of step 3's publish job and the pre-entry plan's
+    # commitment; through C, a takeover of held and an import into the second draft.
+    ref='S7 step 4'
+    w_pre=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+    must "$ref" 'inject unpause C' "$bin/inject" unpause C
+    must "$ref" 'C running, not paused' running "$BW_C"
+    check "$ref" "C's executor and publish worker each end at their first epoch refusal: both log the epoch superseded" \
+      within 60 c_superseded
+    check "$ref" "C's attempt, refused by the fence, wrote nothing: held unresolved at generation 2 under the entry's owner, no attempt" \
+      held_under_entry
+    no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_pre" "$(apid_log "$TALOS_WORKER_IP")"
+    check "$ref" "C's job claim, refused by the process-epoch comparison, took nothing: step 3's publish job still queued, no release" \
+      pub_queued
+    check "$ref" "C committed nothing: the pre-entry plan waits, approved, no operation, no commitment or refusal entry" \
+      waits "$pre_plan" "$pre_approval"
+    call_port=$SERVER_C_PORT
+    check "$ref" 'C answers /livez' within 30 answers 204 - GET /livez ''
+    check "$ref" "through C, h-recovery's takeover of held, refused by the process-epoch comparison: 503 epoch-superseded" \
+      stale_takeover
+    check "$ref" "through C, h-author's import into the second draft under step 3's ETag, refused by the process-epoch comparison: 503 epoch-superseded" \
+      stale_ingestion
+    check 'S7 negative controls' "through C, a plan of the worker, its scope pre-restore unaccounted: 409 recovery-mode-active naming the scope" \
+      unaccounted_plan
+    check 'S7 negative controls' "through C, an approval of the pre-entry plan, its scope pre-restore unaccounted: 409 recovery-mode-active naming the scope" \
+      unaccounted_approval
+    call_port=$SERVER_B_PORT
+  fi
 
   # Step 5: the held request landed before B was stopped.
   ref='S7 step 5'
@@ -497,10 +629,16 @@ s7() {
   check "$ref" "the control plane's mark, its node paused: 201, blocked on the observation" \
     mark_as "$machine_cp" '.state == "blocked" and (.missing | index("observation")) != null' controlplane-paused
   call_limit=10
+  if [ "$s7_mode" = closing ]; then
+    check 'S7 negative controls' "a release of the control plane's scope, blocked, not ready: 409 conflict" release_refused "$machine_cp"
+  fi
 
   # Step 8.
   ref='S7 step 8'
   must "$ref" 'h-recovery releases the worker scope: 201, released' release_scope "$machine_w" worker
+  if [ "$s7_mode" = closing ]; then
+    check 'S7 negative controls' "an exit with the control plane's scope unreleased: 409 conflict naming it" exit_refused
+  fi
 
   # Step 9: B without the flag runs step 3's publication; a revert of the landing in the new epoch.
   ref='S7 step 9'
@@ -522,6 +660,11 @@ s7() {
   check "$ref" "the worker's apid log records exactly one mutating request since the row began, ApplyConfiguration" \
     one_apply "$w_log" "$w_after"
   check "$ref" 'the drift record closed reverted' same "$(sql "SELECT resolution FROM drift_record WHERE machine = '$machine_w' AND opened = $drift_rec")" reverted
+  if [ "$s7_mode" = closing ]; then
+    # C's executor ended in step 4 (PA §5.1), so it makes no commitment attempt here; the
+    # process-epoch comparison's refusal of one is the Go control named below.
+    check "$ref" "the plan's operation is B's, not C's: C, its executor ended in step 4, committed nothing" not_by_c "$plan"
+  fi
 
   # Step 10.
   ref='S7 step 10'
@@ -539,6 +682,14 @@ s7() {
     same "$(sql "SELECT count(*) || ' ' || count(*) FILTER (WHERE recovery_mode) || ' ' ||
       (SELECT count(*) FROM machine WHERE scope_state <> 'normal') FROM installation_state")" '1 0 0'
   check "$ref" "no restored operation was retried: held's journal holds no attempt" held_cancelled
+
+  if [ "$s7_mode" = closing ]; then
+    # The controls that drop a comparison need a server built without it: Go checks.
+    ref='S7 negative controls'
+    result SKIP "$ref" "a plan approved in the new epoch on the ready, unreleased worker scope waits for the release, and commits with the scope gate dropped (comparison 6): B-recovery runs no executor to show the wait; the Go check TestCommitmentScopeGateControl (refused_until_the_release, without_the_scope_gate, the_dispatch_filter_waits_for_the_release; internal/api)"
+    result SKIP "$ref" "DB row 027's collision in the new epoch, A's write refused with the epoch term and passing with it dropped: the Go check TestFenceEpochTermRow027 (internal/staging)"
+    result SKIP "$ref" "the process-epoch comparison dropped, A's job claim, takeover, ingestion start and commitment pass: the Go check TestProcessEpochControl (internal/api; without_the_process-epoch_comparison: job-claim, takeover, ingestion-start, commitment)"
+  fi
 
   # Retained evidence: both served timelines, every page, and the entry record.
   ref='S7 retained evidence'
@@ -609,5 +760,5 @@ else
   result FAIL 'S7 evidence' 'bin/evidence failed'
 fi
 rm -f -- "$ev_log"
-say "s7 run: $failed failed; recovery mode exited, B running; evidence in $EV, bundle ${final:-none}"
+say "s7 $s7_mode: $failed failed; recovery mode exited, B running; evidence in $EV, bundle ${final:-none}"
 [ "$failed" -eq 0 ]
