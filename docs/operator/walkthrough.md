@@ -310,7 +310,14 @@ call POST /machines/$machine_w/unfreezes "$approver" '{"reason": "S5 revert"}' w
 
 *On your deployment:* a real drift is whatever changed the node. Decide from the timeline whether
 to adopt it into a release or revert it, and mark every secret the drifted configuration holds
-before adopting.
+before adopting. Stop selecting any fragment that overrides a value the adopted base now holds as
+a reference; remove it from its profile when the profile keeps another fragment.
+
+This stage departs from `fixtures/scenarios/s5 run` in one place. The script removes `s2-labels`
+from the `workers` profile, which by then lists the fragments `s4 ds` added as well. This
+walkthrough skips `s4 ds`, so `workers` lists only `s2-labels`, and a profile listing no fragment
+is refused. It reassigns the worker instead. Until a reviewer has run this page on the fixture,
+that step is unverified.
 
 ## Where next
 
