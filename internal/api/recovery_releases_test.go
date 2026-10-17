@@ -80,7 +80,8 @@ func TestRecoveryStartReclassifies(t *testing.T) {
 	decode[entryBody](t, xe.enter(r, "reclassify", entryBodyText), http.StatusCreated)
 	// Two recovery reads: the pass of the first ran in full. The scope is still pre-restore
 	// unaccounted, so the operation is not reclassified before the decision accounts it (§7.3 step 1).
-	deadline := time.Now().Add(10 * time.Second)
+	// The bounds are generous: on a loaded runner two paced reads took over ten seconds.
+	deadline := time.Now().Add(time.Minute)
 	for count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s
 		ON s.machine = o.machine AND s.revision = o.basis WHERE o.machine = $1 AND s.purpose = 'recovery'`, xe.machine) < 2 {
 		if time.Now().After(deadline) {
@@ -92,7 +93,7 @@ func TestRecoveryStartReclassifies(t *testing.T) {
 		t.Fatalf("before the accounting, the recovery start left the operation %s", s)
 	}
 	mustExec(t, xe.db, `UPDATE machine SET scope_state = 'unresolved' WHERE id = $1`, xe.machine)
-	deadline = time.Now().Add(10 * time.Second)
+	deadline = time.Now().Add(time.Minute)
 	for xe.opState(t) != "cancelled" {
 		if time.Now().After(deadline) {
 			t.Fatalf("the recovery start left the operation %s", xe.opState(t))
