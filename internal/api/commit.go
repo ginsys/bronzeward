@@ -84,6 +84,13 @@ func (a *API) share(lock string) string {
 	return ` FOR SHARE`
 }
 
+// superseded reports whether current, the installation's epoch, is not this process's: such a
+// process issues no ownership (persistence-api.md §5.1). Its control (options.noProcessEpoch)
+// drops the comparison.
+func (a *API) superseded(current string) bool {
+	return current != a.d.owner.Epoch && !a.o.noProcessEpoch
+}
+
 // commitTx is commitPlan's transaction. It answers the plan's machine once known, so a refusal can
 // be recorded on its timeline.
 func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed, string, error) {
@@ -94,7 +101,7 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 		&current, &recovery); err != nil {
 		return r, "", err
 	}
-	if current != a.d.owner.Epoch {
+	if a.superseded(current) {
 		return r, "", errNotController
 	}
 	// A plan row and its release are immutable, so their bindings are read before the machine's lock.
@@ -302,8 +309,8 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	case rolloutHeld:
 		return r, machine, refuseCommitment("5", rolloutCause)
 	}
-	// 6: the scope gate.
-	if cause := scopeGate(frozen, drift, bound, scope, recovery); cause != "" {
+	// 6: the scope gate, which its control (options.noScopeGate) drops.
+	if cause := scopeGate(frozen, drift, bound, scope, recovery); cause != "" && !a.o.noScopeGate {
 		return r, machine, refuseCommitment("6", cause)
 	}
 

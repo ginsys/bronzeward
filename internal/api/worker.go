@@ -28,7 +28,7 @@ func (a *API) claimPublish(ctx context.Context) (publishJob, bool, error) {
 		if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&current); err != nil {
 			return err
 		}
-		if current != a.d.owner.Epoch {
+		if a.superseded(current) {
 			return staging.ErrEpochSuperseded
 		}
 		// The oldest eligible job is locked first: an UPDATE forms its new row, the lease

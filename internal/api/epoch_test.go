@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/staging"
 )
 
 // §7.2: a recovery-mode entry that commits while a replay is being decided makes the record an
@@ -77,4 +79,153 @@ func TestServiceTokenEpochRecheckedInTransaction(t *testing.T) {
 	if acts, records := rows(t, e); acts != 0 || records != 0 {
 		t.Fatalf("acts %d, records %d", acts, records)
 	}
+}
+
+// PA §5.1's process-epoch comparison and its control (AP S7 "Negative controls"): a process started
+// before a recovery-mode entry claims no publish job, takes over no operation, starts no ingestion
+// and commits no plan after it; the control that drops `$my_epoch = $current_epoch` lets each pass.
+// The commitment's plan is approved in the new epoch, so the comparison is the only one refusing it.
+func TestProcessEpochControl(t *testing.T) {
+	t.Parallel()
+	for _, control := range []bool{false, true} {
+		name := "as shipped"
+		if control {
+			name = "without the process-epoch comparison"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			o := options{noProcessEpoch: control}
+			t.Run("job-claim", func(t *testing.T) {
+				t.Parallel()
+				d := newDraftEnv(t)
+				a := d.publisher(o)
+				op := d.queuePublish(1)
+				newEpoch(t, d.db)
+				_, ok, err := a.claimPublish(t.Context())
+				want := "queued"
+				switch {
+				case control && (err != nil || !ok):
+					t.Fatalf("the claim with the control: %v, %v", ok, err)
+				case control:
+					want = "running"
+				case !errors.Is(err, staging.ErrEpochSuperseded):
+					t.Fatalf("the claim in a superseded epoch: %v", err)
+				}
+				var state string
+				if err := d.db.QueryRow(`SELECT state FROM operation WHERE id = $1`, op).Scan(&state); err != nil || state != want {
+					t.Fatalf("operation %s, %v; want %s", state, err, want)
+				}
+			})
+			t.Run("takeover", func(t *testing.T) {
+				t.Parallel()
+				ae := newAttemptEnv(t, "")
+				pre := observer(t, ae.env, &fakeExecutor{}, o)
+				newEpoch(t, ae.db)
+				rec := ae.post(pre, "take-1", "/takeovers", `{"generation":1,"reason":"the controller was lost"}`)
+				state, gen, owner := ae.state(t)
+				if !control {
+					wantProblem(t, rec, http.StatusServiceUnavailable, "epoch-superseded")
+					if state == "unresolved" || gen != 1 {
+						t.Fatalf("a superseded process moved the operation to %s at generation %d", state, gen)
+					}
+					return
+				}
+				decode[takeoverBody](t, rec, http.StatusCreated)
+				if state != "unresolved" || gen != 2 || owner != pre.d.owner.ID {
+					t.Fatalf("the operation is %s at generation %d owned by %s", state, gen, owner)
+				}
+			})
+			t.Run("ingestion-start", func(t *testing.T) {
+				t.Parallel()
+				ie := newIngestEnv(t, o)
+				newEpoch(t, ie.db)
+				rec := ie.do(ie.api, ingestCall(ie.human("h-author"), key, ie.etag, ie.body(nil)))
+				if !control {
+					wantProblem(t, rec, http.StatusServiceUnavailable, "epoch-superseded")
+				} else if rec.Code != http.StatusAccepted {
+					t.Fatalf("the ingestion start with the control: %d %s", rec.Code, rec.Body)
+				}
+			})
+			t.Run("commitment", func(t *testing.T) {
+				t.Parallel()
+				ce := newCommitEnv(t, "")
+				pre := observer(t, ce.env, &fakeExecutor{}, o)
+				newEpoch(t, ce.db)
+				ce.a = observer(t, ce.env, &fakeExecutor{}, options{})
+				ce.approveIt(t)
+				ce.evidence(t, ce.pid, func(s *evSeed) { s.controller = pre.d.owner.ID })
+				_, err := pre.commitPlan(context.Background(), ce.pid)
+				switch {
+				case control && err != nil:
+					t.Fatalf("the commitment with the control: %v", err)
+				case !control && !errors.Is(err, errNotController):
+					t.Fatalf("the commitment by a superseded process: %v", err)
+				}
+				want := 0
+				if control {
+					want = 1
+				}
+				if n := count(t, ce.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND state = 'committed'`, ce.pid); n != want {
+					t.Fatalf("%d committed plans, want %d", n, want)
+				}
+				if !control {
+					if n := count(t, ce.db, `SELECT count(*) FROM machine_event WHERE kind IN ('refusal', 'commitment')`); n != 0 {
+						t.Fatalf("%d refusal or commitment entries by a superseded process", n)
+					}
+				}
+			})
+		})
+	}
+}
+
+// Comparison 6's scope gate and its control (execution-recovery.md §7.5, AP S7 "Negative controls"):
+// in recovery mode a plan approved in the new epoch on a `ready` scope is refused until the scope's
+// release, and committed with the gate removed. The executor's dispatch filter waits for the release
+// rather than have the commitment refused, so the gate is reached by committing the plan directly.
+func TestCommitmentScopeGateControl(t *testing.T) {
+	t.Parallel()
+	setup := func(t *testing.T, o options) *commitEnv {
+		ce := newCommitEnv(t, "")
+		newEpoch(t, ce.db)
+		ce.a = observer(t, ce.env, &fakeExecutor{}, o)
+		ce.ready(t)
+		mustExec(t, ce.db, `UPDATE installation_state SET recovery_mode = true`)
+		mustExec(t, ce.db, `UPDATE machine SET scope_state = 'ready' WHERE id = $1`, ce.machine)
+		return ce
+	}
+	committed := func(t *testing.T, ce *commitEnv, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := count(t, ce.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND state = 'committed'`, ce.pid); n != 1 {
+			t.Fatal("the plan was not committed")
+		}
+	}
+	t.Run("refused until the release", func(t *testing.T) {
+		t.Parallel()
+		ce := setup(t, options{})
+		_, err := ce.a.commitPlan(context.Background(), ce.pid)
+		ce.wantRefused(t, err, "6", "the machine scope is ready", "")
+		mustExec(t, ce.db, `UPDATE machine SET scope_state = 'released' WHERE id = $1`, ce.machine)
+		_, err = ce.a.commitPlan(context.Background(), ce.pid)
+		committed(t, ce, err)
+	})
+	t.Run("without the scope gate", func(t *testing.T) {
+		t.Parallel()
+		ce := setup(t, options{noScopeGate: true})
+		_, err := ce.a.commitPlan(context.Background(), ce.pid)
+		committed(t, ce, err)
+	})
+	t.Run("the dispatch filter waits for the release", func(t *testing.T) {
+		t.Parallel()
+		ce := setup(t, options{})
+		if cs, err := ce.a.dispatchCandidates(context.Background(), ce.pid); err != nil || len(cs) != 0 {
+			t.Fatalf("candidates on a ready scope: %v, %v", cs, err)
+		}
+		mustExec(t, ce.db, `UPDATE machine SET scope_state = 'released' WHERE id = $1`, ce.machine)
+		if cs, err := ce.a.dispatchCandidates(context.Background(), ce.pid); err != nil || len(cs) != 1 {
+			t.Fatalf("candidates on the released scope: %v, %v", cs, err)
+		}
+	})
 }
