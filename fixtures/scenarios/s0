@@ -29,16 +29,8 @@ scenario=s0
 # count_principals: how many principal rows the database holds.
 count_principals() { pg psql -U bronzeward -d bronzeward -Atc 'select count(*) from principal'; }
 
-# set_denied <YAML flow sequence>: A's deniedSubjects, through a partial name. The configuration
-# directory is bind-mounted: A reads it at its next start.
-set_denied() {
-  local cfg=$STATE/server/a/config.yaml line
-  while IFS= read -r line; do
-    if [[ $line == '  deniedSubjects:'* ]]; then printf '  deniedSubjects: %s\n' "$1"; else printf '%s\n' "$line"; fi
-  done <"$cfg" >"$cfg.partial"
-  grep --quiet --line-regexp --fixed-strings -- "  deniedSubjects: $1" "$cfg.partial" || die "no deniedSubjects line in $cfg"
-  mv --no-target-directory -- "$cfg.partial" "$cfg"
-}
+# set_denied <YAML flow sequence>: A's deniedSubjects (common.sh set_denied_of).
+set_denied() { set_denied_of a "$1"; }
 restart_a() { "$bin/inject" kill A >/dev/null && "$bin/inject" start A >/dev/null; }
 
 # migrate_twice: two bw migrate at once; between them each migration the image embeds is applied

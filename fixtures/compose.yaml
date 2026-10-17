@@ -71,6 +71,8 @@ services:
     volumes:
       - ${BW_STATE}/server/a:/etc/bronzeward:ro
 
+  # B runs the interruption build like C (below), for S7's held request: it is held after its
+  # send only while server/b/interrupt names that step, and no other scenario writes the file.
   bronzeward-b:
     image: ${BW_IMAGE}
     pull_policy: never
@@ -78,7 +80,24 @@ services:
     labels:
       bronzeward.fixture.run: ${BW_RUN_ID}
     user: "${BW_UID}:${BW_GID}"
+    entrypoint: ["/bronzeward-interrupt"]
     command: ["serve", "-config", "/etc/bronzeward/config.yaml"]
+    ports:
+      - "127.0.0.1:${SERVER_B_PORT}:8080"
+    volumes:
+      - ${BW_STATE}/server/b:/etc/bronzeward:ro
+
+  # B started with -recovery-start (acceptance plan S7): B's configuration, identity and published
+  # port, so a client reaches it where it reached B. Created, not started; bin/inject start
+  # B-recovery brings it up only while B is stopped, and the port refuses a second listener anyway.
+  bronzeward-b-recovery:
+    image: ${BW_IMAGE}
+    pull_policy: never
+    container_name: ${FIXTURE_NAME}-bronzeward-b-recovery
+    labels:
+      bronzeward.fixture.run: ${BW_RUN_ID}
+    user: "${BW_UID}:${BW_GID}"
+    command: ["serve", "-config", "/etc/bronzeward/config.yaml", "-recovery-start"]
     ports:
       - "127.0.0.1:${SERVER_B_PORT}:8080"
     volumes:
@@ -86,7 +105,7 @@ services:
 
   # C: the image's other binary, the server built with the fixtureinterrupt tag, whose ingestion
   # runs stop where server/c/interrupt says (internal/seam, acceptance plan S1's interruptions). A
-  # and B never run it. Created, not started, like them.
+  # and B-recovery never run it. Created, not started, like them.
   bronzeward-c:
     image: ${BW_IMAGE}
     pull_policy: never

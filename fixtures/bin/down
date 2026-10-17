@@ -426,7 +426,7 @@ exact() {
 # and the two networks (Compose names its default network after the project; the Talos
 # provisioner names its network after the cluster), then the node volumes and the declared
 # Compose volumes.
-for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$BW_C" "$ISSUER" "$CP" "$WORKER"; do
+for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$BW_C" "$BW_B_RECOVERY" "$ISSUER" "$CP" "$WORKER"; do
   probe container exact container "$name"
 done
 for name in "${FIXTURE_NAME}_default" "$FIXTURE_NAME"; do

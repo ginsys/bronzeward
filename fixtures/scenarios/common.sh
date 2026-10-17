@@ -260,18 +260,30 @@ outcome_bundle() {
 }
 
 # interrupt <step> kill|stall, or interrupt -: C's control file, written whole under another name
-# and moved into place, so that C never reads half of it; - removes it.
-interrupt() {
-  local control=$STATE/server/c/interrupt tmp
+# and moved into place, so that C never reads half of it; - removes it. interrupt_of b ... is B's.
+interrupt() { interrupt_of c "$@"; }
+interrupt_of() {
+  local control=$STATE/server/$1/interrupt tmp
+  shift
   if [ "$1" = - ]; then
     rm -f -- "$control"
     return
   fi
-  tmp=$(mktemp -- "$STATE/server/c/interrupt.XXXXXX") || return 1
+  tmp=$(mktemp -- "$control.XXXXXX") || return 1
   if ! printf '%s %s\n' "$1" "$2" >"$tmp" || ! mv -f -- "$tmp" "$control"; then
     rm -f -- "$tmp"
     return 1
   fi
+}
+# set_denied_of <a|b> <YAML flow sequence>: that instance's deniedSubjects, through a partial name.
+# The configuration directory is bind-mounted: the instance reads it at its next start.
+set_denied_of() {
+  local cfg=$STATE/server/$1/config.yaml line
+  while IFS= read -r line; do
+    if [[ $line == '  deniedSubjects:'* ]]; then printf '  deniedSubjects: %s\n' "$2"; else printf '%s\n' "$line"; fi
+  done <"$cfg" >"$cfg.partial"
+  grep --quiet --line-regexp --fixed-strings -- "  deniedSubjects: $2" "$cfg.partial" || die "no deniedSubjects line in $cfg"
+  mv --no-target-directory -- "$cfg.partial" "$cfg"
 }
 # c_log: instance C's log, by the container ID need_state verified.
 c_log() { docker logs "${verified_container_ids[$BW_C]}" 2>&1; }

@@ -170,7 +170,7 @@ fi
   printf 'postgres        %s\n' "$(reported pg psql -U bronzeward -d bronzeward -Atc 'show server_version')"
   printf 'sops            %s\n' "$(reported "$CACHE/sops" --version --disable-version-check)"
   printf 'age             %s\n' "$(reported "$CACHE/age" --version)"
-  for c in "$PG" "$BAO" "$CP" "$WORKER" "$BW_A" "$BW_B" "$BW_C" "$ISSUER"; do
+  for c in "$PG" "$BAO" "$CP" "$WORKER" "$BW_A" "$BW_B" "$BW_C" "$BW_B_RECOVERY" "$ISSUER"; do
     if id=$(container_id "$c" 2>/dev/null); then
       # shellcheck disable=SC2016  # $name is a Go template variable, not a shell one
       printf 'image          %s %s\n' "$c" "$(reported docker inspect --format '{{.Config.Image}} -> {{.Image}} running={{.State.Running}} paused={{.State.Paused}} networks=[{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}]' "$id")"
@@ -181,7 +181,7 @@ fi
 } >"$out/versions.txt"
 
 # Logs survive a kill, so they are read from stopped containers too.
-for c in "$PG" "$BAO" "$CP" "$WORKER" "$BW_A" "$BW_B" "$BW_C" "$ISSUER"; do
+for c in "$PG" "$BAO" "$CP" "$WORKER" "$BW_A" "$BW_B" "$BW_C" "$BW_B_RECOVERY" "$ISSUER"; do
   { id=$(container_id "$c" 2>/dev/null) && docker logs "$id" >"$out/logs/$c.log" 2>&1; } || unavailable "logs of $c"
 done
 unset id
@@ -277,7 +277,7 @@ copy_layer() { # copy_layer <container name>
   done
 }
 mkdir "$out/layers"
-for c in "$BW_A" "$BW_B" "$BW_C"; do
+for c in "$BW_A" "$BW_B" "$BW_C" "$BW_B_RECOVERY"; do
   copy_layer "$c" ||
     unavailable "writable layer of $c (container gone, its storage unreadable, a path it lists not one to copy, or a tmpfs mounted): what the instance wrote outside its log NOT scanned"
 done

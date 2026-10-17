@@ -599,7 +599,8 @@ for each adoption run; step 5's measurement; the resource version series.
 [§12.5](../design/Talos_Configuration_and_Machine_Management_Design.md#125-durable-operations-and-uncertain-outcomes).
 
 **Preconditions.** S4 passed; instance A running and B stopped; an approved plan for the worker.
-In the fixture, S6's A is instance C, the one build with the interruption seam, and the fixture's A
+In the fixture, S6's A is instance C, which runs the build with the interruption seam (B runs it
+too, for S7's held request, and is not interrupted here), and the fixture's A
 is paused throughout; in step 4 A sends and B is started.
 
 #### S6.1 Interruption points and takeover
@@ -698,8 +699,9 @@ Closing run: **a restoration run with a missed stale instance**
 taken, a worker plan is approved but not committed (the pre-entry plan; ER §1 supports no
 control-plane `apply-config` plan), and A commits another worker plan and is paused before its attempt (S6.1's stale owner). At *T*:
 `bin/inject db-snapshot s7-t`. After *T*: B starts, takes the operation over, classifies it safe to retry
-on a recovery observation and records an attempt whose request is held by pausing the worker; a
-second worker plan is approved; an approval is revoked; `h-all`'s subject is added to
+on a recovery observation, records an attempt and sends its request, and is held after the send
+with the response unrecorded, so the request lands and the scope stays held (the fixture's B also
+runs the build with the interruption seam, as S6's A does); a second worker plan is approved; an approval is revoked; `h-all`'s subject is added to
 `deniedSubjects` and then its identity is revoked, leaving `h-approver` for step 9; then
 `bin/inject bao-snapshot s7-provider`.
 
@@ -727,10 +729,11 @@ run: it breaks quiescence on purpose, to show the fences refusing what an operat
    `publish` job, and its executor tries to commit the approved pre-entry plan. Through A,
    `h-recovery` requests a takeover of the restored operation and `h-author` starts an ingestion
    into the second draft with its ETag.
-5. Unpause the worker and read its configuration digest until it shows the held request's
-   artifact. The closing run must show that landing detected (ER §9.3 item 3), and the settle
-   floor is not a bound (ER §5.2), so a run in which the request has not landed by step 7's
-   accounting is repeated, not passed.
+5. Read the worker's configuration digest: it shows the held request's artifact, which landed
+   before B was stopped. The closing run must show that landing detected (ER §9.3 item 3), and the
+   settle floor is not a bound (ER §5.2): a request landing after step 7's accounting is not seen
+   by the marking, so the request is held after it landed, not by pausing the worker, which in the
+   [late-landing report](../design/research/20261016-late-landing.md) never let one land.
 6. `h-recovery` re-records the identity revocation; the automation token is reissued with the
    server-side tool. Through B, `h-recovery` requests a takeover of the restored operation, which
    entry's takeover already gave B: it stays `unresolved`, and its generation advances with the new

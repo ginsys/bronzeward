@@ -66,7 +66,7 @@ versions_env=$(cat -- "$FIXTURES/versions.env") || {
 versions_keys=(TALOS_VERSION TALOSCTL_URL TALOSCTL_SHA256 TALOS_IMAGE KUBERNETES_VERSION OPENBAO_IMAGE
   CURL_IMAGE POSTGRES_IMAGE SOPS_VERSION SOPS_URL SOPS_SHA256 AGE_VERSION AGE_URL AGE_SHA256 AGE_BINARY_SHA256
   AGE_KEYGEN_SHA256 FIXTURE_NAME TALOS_SUBNET TALOS_CONTROLPLANE_IP TALOS_WORKER_IP BW_A_TALOS_IP BW_B_TALOS_IP
-  BW_C_TALOS_IP POSTGRES_PORT OPENBAO_PORT SERVER_A_PORT SERVER_B_PORT SERVER_C_PORT)
+  BW_C_TALOS_IP BW_B_RECOVERY_TALOS_IP POSTGRES_PORT OPENBAO_PORT SERVER_A_PORT SERVER_B_PORT SERVER_C_PORT)
 unset -v "${versions_keys[@]}"
 # Parsed, never sourced: sourced, a value that is an expansion (`$RANDOM`, `${X:-58200}`) would
 # be evaluated, and the same bytes could give another value at another command, with the record
@@ -198,10 +198,13 @@ BAO=$FIXTURE_NAME-openbao
 CP=$FIXTURE_NAME-controlplane-1
 WORKER=$FIXTURE_NAME-worker-1
 # The server under test, two instances of the image bin/up builds, and the OIDC issuer they trust.
-# C runs the image's other binary, the server built with the interruption seam (internal/seam).
+# B and C run the image's other binary, the server built with the interruption seam (internal/seam).
 BW_A=$FIXTURE_NAME-bronzeward-a
 BW_B=$FIXTURE_NAME-bronzeward-b
 BW_C=$FIXTURE_NAME-bronzeward-c
+# B started with the recovery-start flag (acceptance plan S7): B's configuration, identity and port,
+# so only one of the two runs at a time.
+BW_B_RECOVERY=$FIXTURE_NAME-bronzeward-b-recovery
 ISSUER=$FIXTURE_NAME-issuer
 # On the containers a command runs for a moment from the recorded image or the pinned client image
 # (a token minted, a route or a port tried from inside a namespace): bin/down removes one left
@@ -280,7 +283,7 @@ state_files_own() {
     server/a/openbao-compiler.token server/b/openbao-compiler.token server/c/openbao-compiler.token \
     server/a/openbao-metadata.token server/b/openbao-metadata.token server/c/openbao-metadata.token \
     server/a/openbao-executor.token server/b/openbao-executor.token server/c/openbao-executor.token \
-    server/c/interrupt issuer/key.json; do
+    server/b/interrupt server/c/interrupt issuer/key.json; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
       die "$STATE/$file is not the regular file bin/up writes, with that one name; the fixture never makes anything else there"
@@ -331,7 +334,7 @@ containers_own() {
   local name answer
   # shellcheck disable=SC2034  # read by bin/inject
   verified_container_ids=()
-  for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$BW_C" "$ISSUER"; do
+  for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$BW_C" "$BW_B_RECOVERY" "$ISSUER"; do
     if ! answer=$(docker inspect --type container --format \
       '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
       "$name" 2>&1); then
@@ -1141,8 +1144,9 @@ container() {
     A) printf '%s\n' "$BW_A" ;;
     B) printf '%s\n' "$BW_B" ;;
     C) printf '%s\n' "$BW_C" ;;
+    B-recovery) printf '%s\n' "$BW_B_RECOVERY" ;;
     issuer) printf '%s\n' "$ISSUER" ;;
-    *) die "unknown target '$1' (postgres, openbao, controlplane, worker, A, B, C, issuer)" ;;
+    *) die "unknown target '$1' (postgres, openbao, controlplane, worker, A, B, C, B-recovery, issuer)" ;;
   esac
 }
 
