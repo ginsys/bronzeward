@@ -707,10 +707,12 @@ runs the build with the interruption seam, as S6's A does); a second worker plan
 
 **Two runs.** The **nominal run**, part of the integrated run (§2), follows ER §7.2 and §7.3 step 1:
 at step 1, A is stopped as well as B and established stopped before either restore, and stays
-stopped; step 4, the step 9 link cut and A's commitment attempt in step 9 are skipped, and the
-pass criteria and controls about A do not apply. The **closing run** that ER §9.3 item 3 names, with
-a missed stale instance, runs the steps as written, from a fresh `bin/up` outside the integrated
-run: it breaks quiescence on purpose, to show the fences refusing what an operator missed.
+stopped; step 4 is skipped, and the pass criteria and controls about A do not apply. The **closing
+run** that ER §9.3 item 3 names, with a missed stale instance, runs the steps as written, from a
+fresh `bin/up` outside the integrated run: it breaks quiescence on purpose, to show the fences
+refusing what an operator missed. A stale process records no refusal entry, so the closing run
+shows each of A's refusals by what it leaves and what A logs: no attempt, the queued job still
+queued, the pre-entry plan waiting, `503 epoch-superseded`, the second draft's ETag unchanged.
 
 **Steps.**
 
@@ -725,10 +727,11 @@ run: it breaks quiescence on purpose, to show the fences refusing what an operat
    (PA §12.2). Through B, `h-author` opens a draft with a worker change and `h-publisher` publishes
    it; B's recovery start runs no job worker, so the new-epoch `publish` job stays queued.
    `h-author` opens a second draft through B and keeps its ETag.
-4. Unpause A: it tries the attempt it was paused before, its job worker tries to claim that
-   `publish` job, and its executor tries to commit the approved pre-entry plan. Through A,
-   `h-recovery` requests a takeover of the restored operation and `h-author` starts an ingestion
-   into the second draft with its ETag.
+4. Unpause A: it tries the attempt it was paused before, and its executor and job worker each find
+   the epoch superseded, log it and stop until restarted, so A claims no `publish` job and commits
+   no plan; the pre-entry plan waits. Through A, `h-recovery` requests a takeover of the restored
+   operation and `h-author` starts an ingestion into the second draft with its ETag; both answer
+   `503 epoch-superseded`.
 5. Read the worker's configuration digest: it shows the held request's artifact, which landed
    before B was stopped. The closing run must show that landing detected (ER §9.3 item 3), and the
    settle floor is not a bound (ER §5.2): a request landing after step 7's accounting is not seen
@@ -748,12 +751,10 @@ run: it breaks quiescence on purpose, to show the fences refusing what an operat
 9. **Restart** B without the flag: the recovery start runs no executor and no job worker, and entry
    has committed. B's job worker runs the `publish` job queued in step 3, whose worker change T3
    admits only because the worker scope is released (PA §12.2); it changes the worker's
-   assignment and `Desired`. Cut B's link to the worker (`bin/inject linksplit B worker`, §2), so
-   that B's executor cannot gather the ER §3.1 evidence a commitment needs while B still serves
-   the API from the database; through B, `h-publisher` and `h-approver` plan and approve, from that
+   assignment and `Desired`. Through B, `h-publisher` and `h-approver` plan and approve, from that
    release, a worker change in the new epoch: a revert binding the drift record the held request's
-   landing opened, as in S5 step 6. A's executor tries to commit that plan; once A's refusal is on
-   the timeline, `bin/inject linkjoin B worker`, and B commits it and applies it as S4.
+   landing opened, as in S5 step 6. B commits it and applies it as S4; A, whose executor stopped
+   in step 4, takes no part in it.
 10. Unpause the control plane; after a successful `restoration` observation, re-mark and release
     its scope.
 11. **Exit** recovery mode.
@@ -775,10 +776,12 @@ run: it breaks quiescence on purpose, to show the fences refusing what an operat
 unaccounted, every non-terminal operation is `unresolved` under B, and the ingestion claim is
 abandoned. A's attempt, under its pre-entry fence token, is refused by the fence: entry's takeover moved
 the owner, generation and epoch; its job
-claim, takeover and ingestion start are refused by the process-epoch comparison (PA §5.1). Its
-commitment of the pre-entry plan is refused, by comparisons 1 and 6 among others. In step 9 its commitment of
-the new-epoch plan on the released scope, which passes every other comparison, is refused by the
-process-epoch comparison. In step 6 B, after its own entry, takes over with the new epoch as the
+claim, takeover and ingestion start are refused by the process-epoch comparison (PA §5.1). No
+plan is committed by A: the pre-entry plan, its approval in the old epoch on a scope not released
+(comparisons 1 and 6), is never a dispatch candidate and waits. A stale process's commitment of a
+new-epoch plan on a released scope, which passes every other comparison, is refused by the
+process-epoch comparison, a *check* (negative controls), since A's executor stops at its first
+superseded epoch. In step 6 B, after its own entry, takes over with the new epoch as the
 owner epoch and starts an ingestion in the new epoch (PA §16). The restored operation, whose
 journal holds no attempt, ends `cancelled`; the held request's landing is recorded as drift at
 the scope's marking, not applied over, and reverted only by the step 9 plan. The revoked approver is refused before and after entry, and
@@ -789,15 +792,17 @@ restored operation was retried.
 
 **Negative controls.** A plan created and approved in the new epoch on the worker scope once it is
 `ready` but before its release: its commitment refused by comparison 6 until the release, and
-committed with the scope gate removed (ER §7.5). Plan creation and approval on a pre-restore
+committed with the scope gate removed (ER §7.5), as *checks*, since B's recovery start runs no
+executor. Plan creation and approval on a pre-restore
 unaccounted scope, and release
-of a scope not `ready`: refused. A pre-entry approval: refused by comparison 1. A second entry under
+of a scope not `ready`: refused. A pre-entry approval: refused by comparison 1, shown as the plan waiting and as a *check* of the
+comparison. A second entry under
 another key in the same recovery start: `409`. Exit with a scope unreleased: refused. Entry's
 takeover also advances the generation, so the epoch term is isolated by a separate *check* that reproduces
 DB row 027's collision in the new epoch: A's pre-restore token was issued by takeovers after the
 snapshot, and takeovers after entry reissue the same owner and generation (DB §4.7), so only the
-epoch term tells them apart. A's write is refused with the epoch term and passes with it dropped. The process-epoch comparison dropped: A's job claim, takeover and ingestion start in step 4 and
-its commitment in step 9 pass.
+epoch term tells them apart. A's write is refused with the epoch term and passes with it dropped. The process-epoch comparison dropped, as *checks*: a stale process's job claim, takeover,
+ingestion start and commitment of a new-epoch plan pass.
 The same restore started normally, with no entry: A's token passes; this residual is stated (PA
 §14, last row) and shown, not claimed closed. A variant deleting the Transit key the `Desired`
 releases name: each scope is `blocked` on it and leaves only through a newly published release
