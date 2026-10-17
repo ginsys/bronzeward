@@ -708,6 +708,39 @@ review() {
     "$bin/inject" db-snapshot "$backup_name"
 }
 
+# pre_state: the pre-state bundle, both nodes' configuration digests and resource versions, and both
+# nodes' apid logs in cp_log and w_log.
+pre_state() {
+  evidence_to pre || die "no pre-state: bin/evidence failed"
+  cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"
+  cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
+  check 'S1 precondition' 'pre-state: both nodes have a configuration digest' \
+    counted 2 '^[0-9a-f]{64} ' "$EV/pre-talos-config-sha256.txt"
+  check 'S1 precondition' 'pre-state: both nodes have a machine-configuration resource version' \
+    counted 2 '^[0-9]+ ' "$EV/pre-talos-config-version.txt"
+  cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+}
+# post_state: the post-state bundle compared with pre_state's, and no mutation in either apid log
+# since it.
+post_state() {
+  local cp_after w_after
+  evidence_to post || die "no post-state: bin/evidence failed"
+  cp -- "$bundle/talos-config-sha256.txt" "$EV/post-talos-config-sha256.txt"
+  cp -- "$bundle/talos-config-version.txt" "$EV/post-talos-config-version.txt"
+  check 'S1 pass' "neither node's configuration digest changed" \
+    same_file "$EV/pre-talos-config-sha256.txt" "$EV/post-talos-config-sha256.txt"
+  check 'S1 pass' "neither node's machine-configuration resource version changed" \
+    same_file "$EV/pre-talos-config-version.txt" "$EV/post-talos-config-version.txt"
+  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  # The positive control, after the post-state and on each node for its own row: a dry-run apply
+  # is a mutation method, and the same query must find it on that node, or its log does not
+  # record methods and the row proves nothing.
+  no_mutation "the control plane" "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
+  no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_log" "$w_after"
+}
+
 # node-id: the one Talos access refusal that leaves a record behind, a machine with a node ID no
 # node has, at the control plane's endpoint. It runs on an up of its own: a negative control leaves
 # no state a later scenario relies on (acceptance plan §2), and that machine's scope, which no
@@ -715,6 +748,7 @@ review() {
 node-id() {
   preconditions
   fresh_author
+  pre_state
   cluster_draft
   record 'S1 access' 'POST /machines with a node ID no node has, at the control plane endpoint: 201' /api/v1/machines \
     "$(jq -nc --arg c "$cluster" --arg n "s1-no-such-node-$run_key" --arg e "$TALOS_CONTROLPLANE_IP:50000" \
@@ -722,6 +756,7 @@ node-id() {
   check 'S1 access' 'a machine recorded with another node ID: abandoned, 409 machine-identity-mismatch, cause node-id, nothing kept' \
     access_case node-id "$recorded" 409 machine-identity-mismatch node-id
   outcome_bundle 'S1 access' access-node-id
+  post_state
 }
 
 run() {
@@ -780,16 +815,7 @@ run() {
   check 'S1 precondition' 'the mutation matcher gives no count, not 0, when grep fails extracting the methods or counting them' \
     matcher_fails_closed
   fresh_author
-  evidence_to pre || die "no pre-state: bin/evidence failed"
-  cp -- "$bundle/talos-config-sha256.txt" "$EV/pre-talos-config-sha256.txt"
-  cp -- "$bundle/talos-config-version.txt" "$EV/pre-talos-config-version.txt"
-  check 'S1 precondition' 'pre-state: both nodes have a configuration digest' \
-    counted 2 '^[0-9a-f]{64} ' "$EV/pre-talos-config-sha256.txt"
-  check 'S1 precondition' 'pre-state: both nodes have a machine-configuration resource version' \
-    counted 2 '^[0-9]+ ' "$EV/pre-talos-config-version.txt"
-  local cp_log w_log
-  cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
-  w_log=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  pre_state
 
   cluster_draft
   # Step 4: each node in turn under the draft's current ETag.
@@ -878,21 +904,7 @@ run() {
     "$bin/inject" db-snapshot "$backup_name"
 
   # Step 5: the post-state, compared with the pre-state.
-  evidence_to post || die "no post-state: bin/evidence failed"
-  cp -- "$bundle/talos-config-sha256.txt" "$EV/post-talos-config-sha256.txt"
-  cp -- "$bundle/talos-config-version.txt" "$EV/post-talos-config-version.txt"
-  check 'S1 pass' "neither node's configuration digest changed" \
-    same_file "$EV/pre-talos-config-sha256.txt" "$EV/post-talos-config-sha256.txt"
-  check 'S1 pass' "neither node's machine-configuration resource version changed" \
-    same_file "$EV/pre-talos-config-version.txt" "$EV/post-talos-config-version.txt"
-  local cp_after w_after
-  cp_after=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
-  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
-  # The positive control, after the post-state and on each node for its own row: a dry-run apply
-  # is a mutation method, and the same query must find it on that node, or its log does not
-  # record methods and the row proves nothing.
-  no_mutation "the control plane" "$TALOS_CONTROLPLANE_IP" "$cp_log" "$cp_after"
-  no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_log" "$w_after"
+  post_state
 }
 
 "$s1_mode"
