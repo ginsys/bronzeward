@@ -10,7 +10,8 @@ usage() {
   cat >&2 <<'EOF'
 usage: inject <action> [args]
 
-  targets: postgres | openbao | controlplane | worker | A | B | C | issuer
+  targets: postgres | openbao | controlplane | worker | A | B | C | B-recovery | issuer
+           (B-recovery: B with -recovery-start, on B's configuration and port; one of the two at a time)
 
   kill <target>                 SIGKILL the container (crash, no shutdown hooks)
   start <target>                start it again and wait until it answers; openbao comes back
@@ -132,7 +133,8 @@ case $action in
       *)
         [ $# -eq 1 ] || usage
         case $action:$1 in
-          netsplit:A | netsplit:B | netsplit:C | netsplit:issuer | netjoin:A | netjoin:B | netjoin:C | netjoin:issuer)
+          netsplit:A | netsplit:B | netsplit:C | netsplit:B-recovery | netsplit:issuer | \
+            netjoin:A | netjoin:B | netjoin:C | netjoin:B-recovery | netjoin:issuer)
             die "no scenario netsplits an instance; use linksplit" ;;
         esac
         ;;
@@ -497,6 +499,18 @@ case $action in
     docker kill --signal KILL "$target_id" >/dev/null
     ;;
   start)
+    # B and B-recovery share B's configuration and published port: one of them at a time. Refused
+    # before the start, since the other's /livez would answer the wait below for this one.
+    case $1 in
+      B | B-recovery)
+        other=$BW_B_RECOVERY
+        [ "$1" = B-recovery ] && other=$BW_B
+        other_id=$(container_id "$other") || die "$other was not recorded under its name"
+        [ "$(docker inspect --type container --format '{{.State.Running}}' "$other_id")" = false ] ||
+          die "$other is running; kill it before starting $1, which shares its configuration and port"
+        unset other other_id
+        ;;
+    esac
     docker_expect='Running true'
     docker_dispatched=1
     docker start "$target_id" >/dev/null
@@ -532,8 +546,8 @@ case $action in
         ;;
       # Asked on the published port, as a client would: /livez is the one route that needs no
       # token. --disable: the caller's curlrc is not read.
-      A | B | C)
-        case $1 in A) port=$SERVER_A_PORT ;; B) port=$SERVER_B_PORT ;; C) port=$SERVER_C_PORT ;; esac
+      A | B | C | B-recovery)
+        case $1 in A) port=$SERVER_A_PORT ;; B | B-recovery) port=$SERVER_B_PORT ;; C) port=$SERVER_C_PORT ;; esac
         instance_live() { timeout "$REQUEST_LIMIT" curl --disable --noproxy '*' --fail --silent -o /dev/null "http://127.0.0.1:$port/livez"; }
         # Asked once more by finish after a signal: answering is not enough, the recorded splits
         # must be back too.

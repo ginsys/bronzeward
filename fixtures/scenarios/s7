@@ -1,0 +1,366 @@
+#!/usr/bin/env bash
+# Acceptance plan S7's nominal run, its preconditions and steps 1, 2, 3 and 5, against the fixture,
+# after S6. S7's A is the fixture's C, the interruption build, as S6's is; B is B, which runs that
+# build too, so that its request can be held after it is sent; B-recovery is B started with
+# -recovery-start. The fixture's A is stopped and stays stopped. Before T: an ingestion claim paused
+# for review on C, C stalled after committing a worker plan (S6.1's stale owner), and a pre-entry
+# plan approved that waits on the held scope. At T: the database snapshot. After T: B takes the
+# operation over, retries it and is held after its request is sent, so the request lands and the
+# scope stays held; a second plan approved; the pre-entry plan's approval revoked; h-all listed in
+# B's deniedSubjects, then revoked; the OpenBao snapshot. Step 1 stops B and C, then restores both;
+# step 2 starts B-recovery, which serves only the entry; step 3 records the entry and, through
+# B-recovery, queues a publication and opens a second draft; step 5 finds the held request's
+# landing on the worker. The run leaves recovery mode on and B-recovery running, the state the later
+# steps start from.
+# Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s7.tsv
+# in the evidence directory and to stdout. Exit 1 on any FAIL.
+# Usage: scenarios/s7 run   (after scenarios/s6 run on the same up)
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+[ "${1:-}" = run ] || die "usage: scenarios/s7 run"
+need docker curl jq timeout id sleep date awk wc sha256sum
+need_state
+# No fixture lock of its own: inject and evidence each take the one they need.
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+EV=$STATE/evidence/s7-run-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV" "$EV/http"
+scenario=s7
+# shellcheck source-path=SCRIPTDIR source=common.sh
+. "$here/common.sh"
+run_key=$(date -u +%s%N)
+mutation_ref='S7'
+ds_ref='S7'
+# shellcheck source-path=SCRIPTDIR source=dispatch.sh
+. "$here/dispatch.sh"
+# review.sh's marks name the worker's file secret, as s1's do; s7's import takes none.
+WORKER_MARK='doc[0]/machine/files/0/content'
+# shellcheck source-path=SCRIPTDIR source=review.sh
+. "$here/review.sh"
+
+cluster='' machine_cp='' machine_w='' plan='' rel='' baseline='' op='' held=''
+cp_log='' w_log=''
+pre_plan='' pre_approval='' post_plan='' restored_epoch='' epoch=''
+t_at='' bao_at='' stopped_at='' db_backup='' bao_backup='' entry_draft='' second_draft='' second_etag=''
+
+# s4_applied: S4's safe apply done: the first apply-config plan committed to an operation that
+# completed.
+s4_applied() {
+  same "$(sql "SELECT s.state || ' ' || o.state FROM plan p JOIN plan_state s ON s.plan = p.id
+    JOIN operation o ON o.id = s.operation WHERE p.kind = 'apply-config' ORDER BY p.created_at, p.id LIMIT 1")" \
+    'committed completed'
+}
+# both_applied: the control plane and the worker each have an Applied release.
+both_applied() {
+  same "$(sql "SELECT count(*) FROM machine_state WHERE machine IN ('$machine_cp', '$machine_w') AND applied_release IS NOT NULL")" 2
+}
+# running <container>: the container runs, by the ID need_state verified.
+running() { [ "$(docker inspect --format '{{.State.Running}}' "${verified_container_ids[$1]}")" = true ]; }
+stopped() { ! running "$1"; }
+# kill_if_up <A|B|C|B-recovery> <container>: the instance killed, if it runs.
+kill_if_up() { stopped "$2" || "$bin/inject" kill "$1"; }
+# b_stalls_at <step>: how many times B's log says the seam stalled it at the step.
+b_stalls_at() {
+  docker logs "${verified_container_ids[$BW_B]}" 2>&1 | grep --count --line-regexp --fixed-strings -- "fixture interrupt: stall at $1" || true
+}
+# b_held <stalls before>: op sending with one attempt and no response, and B stalled once more after
+# the send.
+b_held() { op_attempts 'sending 1 0' && [ "$(b_stalls_at dispatch-sent)" -gt "$1" ]; }
+# waits <plan> <approval>: the plan approved by the approval with no operation, and no use-time
+# check, commitment or refusal entry names it: no controller takes it up.
+waits() {
+  plan_is_stored "$1" approved "$2" &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND entry->>'plan' = '$1'
+      AND kind IN ('use-time-check', 'commitment', 'refusal')")" = 0 ]
+}
+# revoked_identity <true|false>: h-all's principal is recorded revoked, or not.
+revoked_identity() { same "$(sql "SELECT revoked FROM principal WHERE kind = 'human' AND sub = 'h-all'")" "${1:0:1}"; }
+# revoke_h_all: h-recovery records h-all's revocation on the instance on call_port: 201, naming h-all.
+revoke_h_all() {
+  fresh h-recovery
+  answers_with '.identity | type == "string"' 201 - POST /api/v1/identity-revocations "$tok" \
+    '{"iss":"http://issuer:5556","sub":"h-all","reason":"S7 after T"}' "$(key revoke-h-all)"
+}
+# held_restored: held committed with no attempt, owned by C at generation 1 in the restored epoch,
+# and no ownership transition of it on the timeline.
+held_restored() {
+  still_held && same "$(sql "SELECT owner_gen || ' ' || owner_epoch FROM operation WHERE id = '$held'")" "1 $restored_epoch" &&
+    same "$(sql "SELECT count(*) FROM machine_event WHERE kind = 'ownership-transition' AND entry->>'operation' = '$held'")" 0
+}
+# backup_id <file under backups>: the backup's identity, its name and digest.
+backup_id() {
+  local h
+  h=$(sha256sum -- "$STATE/backups/$1") || return 1
+  printf '%s sha256:%s' "$1" "${h%% *}"
+}
+# now_utc: the time, to the second, never ahead of the server's clock it shares.
+now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+# enter: h-recovery records the entry on call_port, naming both backups, the stop and a reason:
+# 201, a new epoch fencing the restored one, by h-recovery as recovery-admin, every machine marked
+# and held among the operations taken over; the new epoch in epoch.
+enter() {
+  local who body
+  fresh h-recovery
+  body=$(jq -nc --arg db "$db_backup" --arg dt "$t_at" --arg pb "$bao_backup" --arg pt "$bao_at" --arg s "$stopped_at" \
+    '{restored: [{family: "database", backup: $db, takenAt: $dt}, {family: "provider", backup: $pb, takenAt: $pt}],
+      stoppedAt: $s, reason: "S7 step 3: the database restored to T and OpenBao to its later snapshot"}') || return 1
+  answers 201 - POST /api/v1/recovery/entries "$tok" "$body" "$(key entry)" || return 1
+  who=$(who_id h-recovery) && [ -n "$who" ] || return 1
+  jq -e --arg p "$restored_epoch" --arg w "$who" --arg h "$held" --argjson n "$(sql "SELECT count(*) FROM machine")" \
+    '.previousEpoch == $p and .epoch != $p and .enteredBy == $w and .role == "recovery-admin" and .machines == $n
+      and (.restored | map(.family) | sort) == ["database", "provider"] and (.operations | index($h)) != null' \
+    "$EV/last.body" >/dev/null || return 1
+  epoch=$(jq -er '.epoch' "$EV/last.body")
+}
+# entry_recorded: the installation in the new epoch in recovery mode, its entry record naming the
+# stop and the two restored backups.
+entry_recorded() {
+  same "$(sql "SELECT epoch || ' ' || recovery_mode FROM installation_state")" "$epoch true" &&
+    same "$(sql "SELECT count(*) FROM recovery_epoch WHERE epoch = '$epoch' AND stopped_at = '$stopped_at'::timestamptz")" 1 &&
+    same "$(sql "SELECT string_agg(family || ' ' || backup, ',' ORDER BY family) FROM recovery_restore WHERE epoch = '$epoch'")" \
+      "database $db_backup,provider $bao_backup"
+}
+# every_scope_unaccounted: every machine's scope pre-restore unaccounted.
+every_scope_unaccounted() {
+  same "$(sql "SELECT count(*) FILTER (WHERE scope_state <> 'pre-restore-unaccounted') || ' ' || (count(*) > 1) FROM machine")" '0 true'
+}
+# held_taken_over: held unresolved at generation 2 in the new epoch, under another owner than C's,
+# by one ownership transition of reason recovery-entry; and no apply-config operation committed,
+# sending or verifying.
+held_taken_over() {
+  same "$(sql "SELECT o.state || ' ' || o.owner_gen || ' ' || o.owner_epoch || ' ' || (o.owner <> e.entry->>'from')
+    FROM operation o JOIN machine_event e ON e.kind = 'ownership-transition' AND e.entry->>'operation' = o.id
+    WHERE o.id = '$held' AND e.entry->>'reason' = 'recovery-entry' AND e.entry->>'epoch' = '$epoch'
+      AND e.entry->>'generation' = '2'")" "unresolved 2 $epoch true" &&
+    same "$(sql "SELECT count(*) FROM operation WHERE kind = 'apply-config' AND state IN ('committed', 'sending', 'verifying')")" 0
+}
+# claim_abandoned_by_entry: tk_ing abandoned at generation 1 without its payload, committed before its
+# absolute expiry; its ingestion operation failed.
+claim_abandoned_by_entry() {
+  claim_is abandoned 1 none &&
+    same "$(sql "SELECT pg_xact_commit_timestamp(xmin) < expires_at FROM staging_claim WHERE id = '$tk_ing'")" t &&
+    same "$(sql "SELECT state FROM operation WHERE id = '$tk_op'")" failed
+}
+# reassign_entry: the worker's assignment in the draft, the workers profile and the draft's cluster
+# fragment, under the draft's ETag: 200.
+reassign_entry() {
+  fresh h-author
+  answers 200 - PUT "/api/v1/drafts/$draft/assignments/$machine_w" "$tok" \
+    '{"profiles": ["workers"], "fragments": {"cluster": ["s7-entry"]}}' "$(key assignment-entry)" "$etag" || return 1
+  etag=$(etag_of_last)
+  [ -n "$etag" ]
+}
+# publish_queued: the draft published as h-publisher under its ETag: 202, its operation in pub_op.
+publish_queued() {
+  fresh h-publisher
+  answers 202 - POST "/api/v1/drafts/$draft/publications" "$tok" '{}' "$(key publication-entry)" "$etag" || return 1
+  pub_op=$(jq -er '.id' "$EV/last.body")
+}
+# pub_queued: pub_op a publish job still queued, with no release.
+pub_queued() {
+  same "$(sql "SELECT kind || ' ' || state FROM operation WHERE id = '$pub_op'")" 'publish queued' &&
+    same "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" 0
+}
+
+preconditions() {
+  local ref='S7 precondition'
+  machines
+  check "$ref" "S4 passed: its safe apply's plan, the first apply-config plan, committed to an operation that completed" s4_applied
+  check "$ref" 'both machines have Applied' both_applied
+  check "$ref" 'no apply-config operation holds the worker'"'"'s scope or the cluster'"'"'s rollout slot' scope_released
+  check "$ref" 'no link to the worker is recorded cut' worker_joined
+  check "$ref" "the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all" \
+    methods_counted
+  # C is S7's A, running; the fixture's A and B stopped; neither seam told to act.
+  must "$ref" 'the fixture'"'"'s A stopped' kill_if_up A "$BW_A"
+  must "$ref" 'B stopped' kill_if_up B "$BW_B"
+  must "$ref" "C's control file removed" interrupt -
+  must "$ref" "B's control file removed" interrupt_of b -
+  stopped "$BW_C" || must "$ref" 'inject start C' "$bin/inject" start C
+  call_port=$SERVER_C_PORT
+  check "$ref" 'C answers /livez' within 30 answers 204 - GET /livez ''
+  evidence_to pre || die "no pre-state: bin/evidence failed"
+  check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean pre
+  cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
+}
+
+before_t() {
+  local ref='S7 before T' n
+  # S6.1's stale owner: C commits a worker plan and stalls before its attempt.
+  ds_publish held
+  ds_plan held
+  n=$(stalls_at dispatch-committed)
+  must "$ref" 'C told to stall after the commitment' interrupt dispatch-committed stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" s7held
+  check "$ref" 'the plan committed, its operation committed with no attempt; C stalls there' within 120 committed_held "$plan" "$n"
+  op=$held
+  # The pre-entry plan: approved, not committed, since held holds the scope.
+  must "$ref" 'the pre-entry plan of the worker as h-publisher: 201' plan_by h-publisher pre
+  pre_plan=$plan_id
+  must "$ref" 'the pre-entry plan approved as h-approver: 201' approve_by h-approver "$pre_plan" s7pre
+  pre_approval=$approval_id
+  sleep 16
+  check "$ref" 'three heartbeats on, the pre-entry plan waits: approved, no operation, no use-time check, commitment or refusal entry names it' \
+    waits "$pre_plan" "$pre_approval"
+  # The ingestion claim last, so that its absolute expiry (10 min, server.yaml.in) is still ahead at
+  # the entry.
+  fresh_author
+  check "$ref" 'an import of the worker on C, review: true: 202' review_import s7 C
+  call_port=$SERVER_C_PORT
+  check "$ref" 'its claim paused for review at generation 1 with its envelope, its operation running' within 60 paused_at 1
+}
+
+at_t() {
+  local ref='S7 at T'
+  t_at=$(now_utc)
+  must "$ref" 'inject db-snapshot s7-t' "$bin/inject" db-snapshot s7-t
+  restored_epoch=$(sql "SELECT epoch FROM installation_state") && [ -n "$restored_epoch" ] || die "cannot read the epoch at T"
+}
+
+after_t() {
+  local ref='S7 after T' n
+  # B, its seam told to hold it after its send, takes held over, retries it and is held.
+  n=$(b_stalls_at dispatch-sent)
+  must "$ref" 'B told to stall after its request is sent' interrupt_of b dispatch-sent stall
+  must "$ref" 'inject start B' "$bin/inject" start B
+  call_port=$SERVER_B_PORT
+  check "$ref" "B took the operation over at its start, one ownership transition to generation 2" within 60 started_takeover
+  check "$ref" 'B sent its request and is held after the send: sending, one attempt, no response recorded' within 120 b_held "$n"
+  check "$ref" "the one attempt is B's at generation 2, after its classification safe to retry" retried_by_taker
+  # The other acts after T, all of which the restore erases.
+  must "$ref" 'a second plan of the worker as h-publisher: 201' plan_by h-publisher post
+  post_plan=$plan_id
+  check "$ref" 'the second plan approved as h-approver: 201' approve_by h-approver "$post_plan" s7post
+  approval_id=$pre_approval
+  check "$ref" "h-approver revokes the pre-entry plan's approval: 201" revoke_approval s7pre
+  must "$ref" "h-all listed in B's deniedSubjects" set_denied_of b '[{iss: "http://issuer:5556", sub: h-all}]'
+  check "$ref" 'h-recovery revokes h-all: 201' revoke_h_all
+  check "$ref" "h-all's identity recorded revoked" revoked_identity true
+  bao_at=$(now_utc)
+  must "$ref" 'inject bao-snapshot s7-provider' "$bin/inject" bao-snapshot s7-provider
+}
+
+s7() {
+  local ref
+
+  # Step 1: B and C (S7's A) stopped and established stopped before either restore.
+  ref='S7 step 1'
+  must "$ref" 'inject kill B' "$bin/inject" kill B
+  must "$ref" 'inject kill C' "$bin/inject" kill C
+  check "$ref" 'B is not running' stopped "$BW_B"
+  check "$ref" 'C is not running' stopped "$BW_C"
+  stopped_at=$(now_utc)
+  must "$ref" "B's control file removed" interrupt_of b -
+  must "$ref" "C's control file removed" interrupt -
+  must "$ref" 'inject db-restore s7-t' "$bin/inject" db-restore s7-t
+  must "$ref" 'inject bao-restore s7-provider' "$bin/inject" bao-restore s7-provider
+  db_backup=$(backup_id pg-s7-t.dump) || die "cannot read the database backup"
+  bao_backup=$(backup_id bao-s7-provider.snap) || die "cannot read the OpenBao backup"
+  check "$ref" 'the database is at T: the restored epoch, not in recovery mode' \
+    same "$(sql "SELECT epoch || ' ' || recovery_mode FROM installation_state")" "$restored_epoch false"
+  check "$ref" "held as at T: committed, no attempt, at generation 1 in the restored epoch, no ownership transition" held_restored
+  check "$ref" "the pre-entry plan's approval as at T: approved, no operation" plan_is_stored "$pre_plan" approved "$pre_approval"
+  check "$ref" 'the second plan, made after T, is gone' same "$(sql "SELECT count(*) FROM plan WHERE id = '$post_plan'")" 0
+  check "$ref" "h-all's revocation, made after T, is gone" revoked_identity false
+  check "$ref" 'the claim as at T: paused at generation 1 with its envelope' claim_is paused 1 payload
+
+  # Step 2: B-recovery, B's configuration and port with the recovery-start flag.
+  ref='S7 step 2'
+  must "$ref" 'inject start B-recovery' "$bin/inject" start B-recovery
+  call_port=$SERVER_B_PORT
+  check "$ref" 'B-recovery answers /livez' within 30 answers 204 - GET /livez ''
+  fresh h-viewer
+  check "$ref" 'before entry, a read: 409 recovery-mode-active' answers 409 recovery-mode-active GET /api/v1/acts "$tok"
+  fresh h-publisher
+  check "$ref" 'before entry, a plan: 409 recovery-mode-active' \
+    answers 409 recovery-mode-active POST /api/v1/plans "$tok" "$(plan_body)" "$(key plan-pre-entry)"
+  fresh h-all
+  check "$ref" "h-all, listed in deniedSubjects, its recorded revocation erased by the restore: 403 identity-revoked" \
+    answers 403 identity-revoked GET /api/v1/acts "$tok"
+  sleep 16
+  check "$ref" 'three heartbeats on, no executor ran: held still committed with no attempt' still_held
+  check "$ref" 'the pre-entry plan still approved, no operation' plan_is_stored "$pre_plan" approved "$pre_approval"
+
+  # Step 3: the entry, then a publication queued and a second draft opened through B-recovery.
+  ref='S7 step 3'
+  check "$ref" 'h-recovery records the entry naming the database and provider backups: 201, a new epoch, every machine, held taken over' enter
+  [ -n "$epoch" ] || die "s7: S7 step 3: no entry; nothing after it can run"
+  check "$ref" 'the installation in the new epoch, in recovery mode; the entry records the stop and both backups' entry_recorded
+  check "$ref" 'every scope pre-restore unaccounted' every_scope_unaccounted
+  check "$ref" "held unresolved at generation 2 in the new epoch, taken from C by the entry; no operation committed, sending or verifying" \
+    held_taken_over
+  check "$ref" 'the claim abandoned without its payload before its absolute expiry; its ingestion failed' claim_abandoned_by_entry
+  fresh_author
+  must "$ref" 'h-author opens a draft through B-recovery: 201' draft_by h-author entry
+  entry_draft=$draft
+  must "$ref" "h-author drafts a cluster fragment, a node label of its own: 200" fragment_by h-author entry entry
+  check "$ref" "h-author assigns it to the worker beside the workers profile: 200" reassign_entry
+  check "$ref" 'h-publisher publishes it: 202' publish_queued
+  sleep 16
+  check "$ref" "three heartbeats on, its publish job is still queued with no release: B-recovery runs no job worker" pub_queued
+  must "$ref" 'h-author opens a second draft through B-recovery: 201' draft_by h-author second
+  second_draft=$draft second_etag=$etag
+  printf 'entry-draft\t%s\nsecond-draft\t%s\t%s\npublish\t%s\nheld\t%s\nepoch\t%s\n' \
+    "$entry_draft" "$second_draft" "$second_etag" "$pub_op" "$held" "$epoch" >"$EV/s7-state.tsv"
+
+  # Step 5: the held request landed before B was stopped.
+  ref='S7 step 5'
+  outcome_bundle "$ref" s7-step5
+  check "$ref" "the worker's digest is the held release's artifact and its resource version moved since the pre-state" ds_landed
+  no_mutation 'the control plane' "$TALOS_CONTROLPLANE_IP" "$cp_log" "$(apid_log "$TALOS_CONTROLPLANE_IP")"
+}
+
+withheld+=("$BW_CANARY")
+preconditions
+before_t
+at_t
+after_t
+s7
+rm -f -- "$EV/last.body" "$EV/last.headers"
+# The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
+ev_log=$(mktemp)
+if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
+  cat -- "$ev_log" >&2
+  if grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$ev_log"; then
+    result PASS 'S7 evidence' 'bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret'
+  else
+    result FAIL 'S7 evidence' "the leak scan reports fixture secrets: $final/leak-scan.txt"
+  fi
+  if [ -e "$final/unavailable.txt" ]; then
+    result FAIL 'S7 evidence' "the bundle is incomplete: $final/unavailable.txt names what was not captured"
+  else
+    result PASS 'S7 evidence' 'the bundle is complete: bin/evidence captured every source'
+  fi
+  # The tokens this run minted, searched in the run directory, the final bundle and every bundle the
+  # run captured before it, with a control holding the last of them that must be the one file
+  # listed (as s6 does).
+  local_ctl=$STATE/s7-token-control
+  trap 'rm -f -- "$local_ctl"' EXIT
+  if [ "${#secrets[@]}" -gt 0 ]; then printf 'x %s x\n' "${secrets[-1]}" >"$local_ctl"; else : >"$local_ctl"; fi
+  earlier=()
+  for f in "$EV"/*-bundle; do
+    [ -e "$f" ] || continue
+    earlier+=("$(cat -- "$f")")
+  done
+  hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
+    "$EV" "$final" "${earlier[@]}" "$local_ctl") || hits=
+  rm -f -- "$local_ctl"
+  trap - EXIT
+  if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
+    result PASS 'S7 evidence' "none of the ${#secrets[@]} tokens this run minted is in any bundle of the run or the run directory (control found)"
+  else
+    printf 's7: files holding a token of this run: %s\n' "${hits:-none, not even the control}" >&2
+    result FAIL 'S7 evidence' "the tokens this run minted: ${#secrets[@]} searched, the listing is not the control alone"
+  fi
+else
+  cat -- "$ev_log" >&2
+  result FAIL 'S7 evidence' 'bin/evidence failed'
+fi
+rm -f -- "$ev_log"
+say "s7 run: $failed failed; recovery mode left on, B-recovery running; evidence in $EV, bundle ${final:-none}"
+[ "$failed" -eq 0 ]

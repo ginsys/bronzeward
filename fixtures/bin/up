@@ -381,16 +381,16 @@ for instance in a b c; do
 done
 unset dsn instance rendered server_template
 
-say "starting postgres, openbao and the issuer; creating instances A, B and C"
+say "starting postgres, openbao and the issuer; creating instances A, B, B-recovery and C"
 compose up --detach --quiet-pull --wait postgres
 compose up --detach --quiet-pull openbao issuer
-compose create bronzeward-a bronzeward-b bronzeward-c
+compose create bronzeward-a bronzeward-b bronzeward-b-recovery bronzeward-c
 # The Compose containers carry the project's labels, which any container can be given under the
 # fixed names once the real one is gone by hand. Recorded by ID under each name, as the Talos
 # nodes are below: containers_own (lib.sh) holds the name to the ID before inject or evidence act
 # on it, and bin/down holds every labelled container to the record before removing any. This run
 # acts on them by these IDs too (bao and pg in lib.sh take the ID the name was verified under).
-for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$BW_C" "$ISSUER"; do
+for name in "$PG" "$BAO" "$BW_A" "$BW_B" "$BW_C" "$BW_B_RECOVERY" "$ISSUER"; do
   # The one Compose made, told by its labels, as containers_own tells it: the name and the project
   # labels alone could be a replacement's, made under the fixed name once the real one was gone
   # between compose up and this look, since any container can carry them; this run's own value,
@@ -566,10 +566,12 @@ network_id=$(attached_network Talos talos.cluster.name "$FIXTURE_NAME" \
   "${verified_container_ids[$CP]}" "${verified_container_ids[$WORKER]}") || exit 1
 printf '%s\n' "$network_id" >"$STATE/down-node-networks.partial"
 mv --no-target-directory -- "$STATE/down-node-networks.partial" "$STATE/down-node-networks"
-# Instances A, B and C reach the Talos nodes on the cluster's network, the one just recorded, by its
-# ID and each by the ID verified under its name. Connected while created, each on its fixed
-# address: a dynamic one could be a detached Talos node's, which the node then could not rejoin on.
-for name in "$BW_A:$BW_A_TALOS_IP" "$BW_B:$BW_B_TALOS_IP" "$BW_C:$BW_C_TALOS_IP"; do
+# Instances A, B, B-recovery and C reach the Talos nodes on the cluster's network, the one just
+# recorded, by its ID and each by the ID verified under its name. Connected while created, each on
+# its fixed address: a dynamic one could be a detached Talos node's, which the node then could not
+# rejoin on.
+for name in "$BW_A:$BW_A_TALOS_IP" "$BW_B:$BW_B_TALOS_IP" "$BW_C:$BW_C_TALOS_IP" \
+  "$BW_B_RECOVERY:$BW_B_RECOVERY_TALOS_IP"; do
   docker network connect --ip "${name#*:}" "$network_id" "${verified_container_ids[${name%%:*}]}" ||
     die "could not connect ${name%%:*} to the Talos network"
 done
@@ -606,8 +608,8 @@ for c in "$PG" "$BAO" "$ISSUER" "$CP" "$WORKER"; do
     *) die "$c stopped while the fixture was starting (see 'Known limits' in fixtures/README.md)" ;;
   esac
 done
-# A, B and C are created and never started: S0 starts A and B, S1 C.
-for c in "$BW_A" "$BW_B" "$BW_C"; do
+# A, B, B-recovery and C are created and never started: S0 starts A and B, S1 C, S7 B-recovery.
+for c in "$BW_A" "$BW_B" "$BW_C" "$BW_B_RECOVERY"; do
   id=$(container_id "$c") || die "$c was not recorded under its name; the fixture is not known to be up"
   [ "$(docker inspect --type container --format '{{.State.Status}}' "$id")" = created ] ||
     die "$c is no longer created-and-not-started; something started or removed it while the fixture was starting"
@@ -637,6 +639,7 @@ fixture is up
                 TALOSCONFIG=$TALOSCONFIG
   local stores  $STATE/data (SQLite files, age/SOPS stores)
   bronzeward    A http://127.0.0.1:$SERVER_A_PORT, B http://127.0.0.1:$SERVER_B_PORT, C (interruption build)
-                http://127.0.0.1:$SERVER_C_PORT (created, not started:
-                fixtures/bin/inject start A|B|C); issuer http://issuer:5556 on the Compose network only
+                http://127.0.0.1:$SERVER_C_PORT, B-recovery (B with -recovery-start) on B's port
+                (created, not started: fixtures/bin/inject start A|B|C|B-recovery);
+                issuer http://issuer:5556 on the Compose network only
 EOF
