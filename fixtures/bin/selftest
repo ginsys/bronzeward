@@ -34,9 +34,12 @@ put_back() {
 }
 trap 'rc=$?; put_back; exit $rc' EXIT
 # release_hold <hold file> <pid>: a start held at <hold file> (BW_INJECT_HOLD) let go, and waited for.
+# Kept registered until the start's own wait returns, so a signal during that wait still waits for
+# it. Its status is the test's to judge, not the put-back's: a start already reaped, or failed, is
+# no put-back failure.
 release_hold() {
   : >"$1"
-  wait "$2"
+  wait "$2" || :
 }
 trap 'exit 143' TERM
 trap 'exit 129' HUP
@@ -866,8 +869,8 @@ unset member
 a_cut "$TALOS_WORKER_IP" || fail "A reaches the worker while it starts, before its split is back"
 a_cut "$TALOS_CONTROLPLANE_IP" || fail "A is on the Talos network while it starts, before its split is back"
 : >"$hold"
-undefer
 wait "$starting" || fail "inject start A failed after its hold"
+undefer
 rm -f -- "$hold" "$hold.held"
 undefer
 unset hold starting
