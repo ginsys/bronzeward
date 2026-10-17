@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Acceptance plan S7's nominal run, its preconditions and steps 1, 2, 3 and 5, against the fixture,
-# after S6. S7's A is the fixture's C, the interruption build, as S6's is; B is B, which runs that
+# after S4 (and S5). S7's A is the fixture's C, the interruption build, as S6's is; B is B, which runs that
 # build too, so that its request can be held after it is sent; B-recovery is B started with
 # -recovery-start. The fixture's A is stopped and stays stopped. Before T: an ingestion claim paused
 # for review on C, C stalled after committing a worker plan (S6.1's stale owner), and a pre-entry
@@ -14,7 +14,8 @@
 # steps start from.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s7.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s7 run   (after scenarios/s6 run on the same up)
+# Usage: scenarios/s7 run   (after scenarios/s5 run on the same up, as in the integrated run, or
+# directly after scenarios/s4 run; S6 runs outside the integrated run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -128,12 +129,13 @@ enter() {
   epoch=$(jq -er '.epoch' "$EV/last.body")
 }
 # entry_recorded: the installation in the new epoch in recovery mode, its entry record naming the
-# stop and the two restored backups.
+# stop and the two restored backups, each with the time it was taken.
 entry_recorded() {
   same "$(sql "SELECT epoch || ' ' || recovery_mode FROM installation_state")" "$epoch true" &&
     same "$(sql "SELECT count(*) FROM recovery_epoch WHERE epoch = '$epoch' AND stopped_at = '$stopped_at'::timestamptz")" 1 &&
-    same "$(sql "SELECT string_agg(family || ' ' || backup, ',' ORDER BY family) FROM recovery_restore WHERE epoch = '$epoch'")" \
-      "database $db_backup,provider $bao_backup"
+    same "$(sql "SELECT string_agg(family || ' ' || backup || ' ' || (taken_at = CASE family WHEN 'database' THEN '$t_at'
+      WHEN 'provider' THEN '$bao_at' END::timestamptz), ',' ORDER BY family) FROM recovery_restore WHERE epoch = '$epoch'")" \
+      "database $db_backup true,provider $bao_backup true"
 }
 # every_scope_unaccounted: every machine's scope pre-restore unaccounted.
 every_scope_unaccounted() {
