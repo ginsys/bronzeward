@@ -86,8 +86,8 @@ const (
 	MetadataTokenEnv = "BW_BAO_METADATA_TOKEN"
 )
 
-// DefaultAddr is where the fixtures publish OpenBao (fixtures/versions.env, OPENBAO_PORT=58200).
-const DefaultAddr = "http://127.0.0.1:58200"
+// DefaultAddr is where the fixtures publish OpenBao (fixtures/versions.env, OPENBAO_PORT=28200).
+const DefaultAddr = "http://127.0.0.1:28200"
 
 // TransitKey is the key the fixtures create for artifact encryption.
 const TransitKey = "bw-artifact"

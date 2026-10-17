@@ -14,7 +14,10 @@ Linux on x86-64, Docker Engine with the compose v2 plugin, and `bash`, `curl`, `
 `find`, `awk`, `cmp` and GNU coreutils (`sha256sum`, `timeout`, `install`, `stat`, `mktemp`), plus Go at the
 version `mise.toml` pins (`up` refuses another; run it under `mise exec --`): `up` builds the server image from this checkout's commit, exported with `git archive`. Each command checks for what
 it needs before doing anything. The user must be able to run `docker` without `sudo`. About 4 GiB
-of free memory and 1.5 GiB of image downloads on first run. No other tool is taken from the host: `talosctl`, `sops`
+of free memory and 1.5 GiB of image downloads on first run. The host ports `fixtures/versions.env`
+publishes on 127.0.0.1 (25432, 28200, 28080-28082) must be free, and stay below the kernel's ephemeral
+range (`/proc/sys/net/ipv4/ip_local_port_range`): scenarios restart these services, and a port inside
+that range can be taken by any outbound connection while its service is stopped. No other tool is taken from the host: `talosctl`, `sops`
 and `age` are downloaded into `fixtures/.cache/` and refused on a checksum mismatch; since the cache is
 writable, each is checked against the manifest's digest again before use (`talosctl` before its first
 run in any command, bounded calls included, all four by `evidence` before it runs any and by `up` once

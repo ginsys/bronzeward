@@ -47,7 +47,7 @@ import (
 var schema string
 
 // Environment and defaults. The fixtures publish the password in their state directory and expose
-// PostgreSQL on the host (fixtures/versions.env, POSTGRES_PORT=55432).
+// PostgreSQL on the host (fixtures/versions.env, POSTGRES_PORT=25432).
 const (
 	// PasswordEnv is where the password is read from. It is never a flag: argv is world-readable
 	// and is captured by the evidence bundles this program's own runs produce.
@@ -56,7 +56,7 @@ const (
 	DSNEnv = "BW_POSTGRES_DSN"
 
 	defaultHost     = "127.0.0.1"
-	defaultPort     = "55432"
+	defaultPort     = "25432"
 	defaultUser     = "bronzeward"
 	defaultDatabase = "bronzeward"
 )
