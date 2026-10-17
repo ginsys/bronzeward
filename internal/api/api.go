@@ -113,7 +113,8 @@ type options struct {
 	shareExit      bool                                                                                 // the exit's installation-lock control: FOR SHARE in place of FOR UPDATE (T11, §16)
 	noActOrder     bool                                                                                 // the act-order lock control (GET /acts)
 	noDraftLock    bool                                                                                 // the draft read-lock control (GET /drafts)
-	noEpochTerm    bool                                                                                 // the epoch-term control at ingestion start (§5.1, §16)
+	noProcessEpoch bool                                                                                 // the process-epoch control: drops `$my_epoch = $current_epoch` at a job claim, a takeover, an ingestion start and a commitment (§5.1, §16)
+	noScopeGate    bool                                                                                 // the scope-gate control at commitment (execution-recovery.md §3.2 comparison 6, §7.5)
 	noMachineLock  bool                                                                                 // the machine-lock control at commitment (choice §10.24, §3.2 comparison 2)
 	noReadLock     string                                                                               // the named lock's control at commitment and attempt (§3.2, §9.2): "installation state", "assignment head", "plan state", "rollout" or, at an attempt, "machine"
 	readThenWrite  bool                                                                                 // the owner-token control at an attempt (§3.3 comparison 7, DS row 018)

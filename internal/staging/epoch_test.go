@@ -129,6 +129,43 @@ func TestSweepHoldsTheEpoch(t *testing.T) {
 	}
 }
 
+// The fence's epoch term against DB row 027's collision, isolated as AP S7's negative controls
+// require: the restore rewound A's claim and takeovers after entry reissued A's owner and
+// generation under the new epoch, so A's pre-restore token (A, gen 3, the old epoch) differs from
+// the row only by its epoch. With the process-epoch comparison dropped, the epoch term alone
+// refuses A's write; with both dropped, the write lands, which is row 027. The restore is staged
+// in SQL here; AP S7's fixture run is the one across a real pg_dump restore.
+func TestFenceEpochTermRow027(t *testing.T) {
+	for _, tc := range []struct {
+		name                        string
+		noEpochTerm, noProcessEpoch bool
+		lands                       bool
+	}{
+		{"as shipped", false, false, false},
+		{"without the epoch term", true, false, false},
+		{"without the process-epoch comparison", false, true, false},
+		{"without both", true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			o, c := f.create(t, "encrypted")
+			newEpoch(t, f.db)
+			exec(t, f.db, `UPDATE staging_claim SET owner_gen = 3, owner_epoch = $2 WHERE id = $1`, c.ID, currentEpoch(t, f.db))
+			c.Gen = 3
+			o.noEpochTerm, o.noProcessEpoch = tc.noEpochTerm, tc.noProcessEpoch
+			before := f.row(t, c.ID)
+			err := Heartbeat(t.Context(), f.db, o, c, timers.Lease)
+			after := f.row(t, c.ID)
+			switch {
+			case tc.lands && (err != nil || !after.lease.After(before.lease)):
+				t.Fatalf("A's write did not land: %v, lease %v -> %v", err, before.lease, after.lease)
+			case !tc.lands && (!errors.Is(err, ErrEpochSuperseded) || !after.lease.Equal(before.lease)):
+				t.Fatalf("A's write was not refused: %v, lease %v -> %v", err, before.lease, after.lease)
+			}
+		})
+	}
+}
+
 // A refused owner statement whose epoch read fails reports that failure, not a fence refusal.
 func TestRefusedReportsTheEpochRead(t *testing.T) {
 	f := setup(t)

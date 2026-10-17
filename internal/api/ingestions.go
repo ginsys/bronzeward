@@ -190,7 +190,7 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	}
 	timers := staging.Timers{Lease: a.d.timers.Lease, AbsoluteExpiry: a.d.timers.AbsoluteExpiry}
 	owner := a.d.owner
-	if a.o.noEpochTerm { // the control: the process takes the current epoch as its own, so the term always holds
+	if a.o.noProcessEpoch { // the control: the process takes the current epoch as its own, so staging.Create's comparison always holds
 		owner.Epoch = q.epoch
 	}
 	if err := staging.Create(ctx, tx, owner, timers, c, q.principal.ID, q.key); err != nil {

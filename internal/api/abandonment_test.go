@@ -121,23 +121,6 @@ func TestAbandonmentStopsRunner(t *testing.T) {
 	ie.wantFailed(t, op, j.claim.ID, http.StatusConflict, "ingestion-abandoned")
 }
 
-// PA §5.1 and its epoch-term control: a process started before a recovery-mode entry starts no
-// ingestion after it; the control that drops `$my_epoch = $current_epoch` lets it start one.
-func TestEpochTermRefusesPreEntryProcess(t *testing.T) {
-	for _, control := range []bool{false, true} {
-		ie := newIngestEnv(t, options{noEpochTerm: control})
-		newEpoch(t, ie.db)
-		rec := ie.do(ie.api, ingestCall(ie.human("h-author"), key, ie.etag, ie.body(nil)))
-		if control {
-			if rec.Code != http.StatusAccepted {
-				t.Fatalf("control: %d %s", rec.Code, rec.Body)
-			}
-			continue
-		}
-		wantProblem(t, rec, http.StatusServiceUnavailable, "epoch-superseded")
-	}
-}
-
 // A recovery-mode entry while a job runs: the next heartbeat is refused and stops the run, and
 // nothing of the draft is written.
 func TestEpochTermStopsRunningJob(t *testing.T) {

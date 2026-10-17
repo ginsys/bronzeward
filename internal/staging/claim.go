@@ -18,6 +18,9 @@ import (
 type Owner struct {
 	ID    string
 	Epoch string
+	// The fence's controls (persistence-api §16), false in production; this package's tests set
+	// them. noEpochTerm drops `owner_epoch = $4`, noProcessEpoch `$4 = $current_epoch`.
+	noEpochTerm, noProcessEpoch bool
 }
 
 // Timers are the claim's lease and absolute expiry (compilation §3.2), from the configuration.
@@ -42,10 +45,22 @@ var (
 // fence is the owner predicate every statement after creation carries, over $1 claim, $2 owner,
 // $3 owner generation and $4 owner epoch, after lock. It compares the deadlines with the current
 // time, not the transaction's start (compilation §3.5): a claim that lapsed while its transaction
-// ran is no longer this owner's.
-const fence = `id = $1 AND owner = $2 AND owner_gen = $3 AND owner_epoch = $4
-	AND $4 = (SELECT epoch FROM installation_state FOR SHARE)
+// ran is no longer this owner's. The epoch term and the process-epoch comparison are o's to drop
+// (their controls).
+func fence(o Owner) string {
+	f := `id = $1 AND owner = $2 AND owner_gen = $3`
+	if !o.noEpochTerm {
+		f += ` AND owner_epoch = $4`
+	}
+	if !o.noProcessEpoch {
+		f += ` AND $4 = (SELECT epoch FROM installation_state FOR SHARE)`
+	}
+	if o.noEpochTerm && o.noProcessEpoch {
+		f += ` AND $4::text IS NOT NULL` // $4 unused would leave its type unknown
+	}
+	return f + `
 	AND state IN ('held', 'resumed') AND lease_until > clock_timestamp() AND expires_at > clock_timestamp()`
+}
 
 // lock takes the installation state FOR SHARE, then the claim's row FOR UPDATE, in the caller's
 // transaction and the order every claim transaction takes them. The installation state is held
@@ -116,7 +131,7 @@ func Heartbeat(ctx context.Context, db *sql.DB, o Owner, c Claim, lease time.Dur
 	var n int
 	err = tx.QueryRowContext(ctx, `WITH c AS (
 		UPDATE staging_claim SET lease_until = least(clock_timestamp() + $5::bigint * interval '1 microsecond', expires_at)
-		WHERE `+fence+` RETURNING id, lease_until),
+		WHERE `+fence(o)+` RETURNING id, lease_until),
 	op AS (
 		UPDATE operation SET lease_until = c.lease_until FROM c
 		WHERE operation.ingestion = c.id AND operation.state = 'running' AND operation.owner = $2 RETURNING 1)
@@ -176,7 +191,7 @@ func StorePayload(ctx context.Context, tx *sql.Tx, o Owner, c Claim, ct []byte, 
 		return fmt.Errorf("staging: store the payload: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE staging_claim SET payload = $5, payload_digest = $6
-		WHERE `+fence, c.ID, o.ID, c.Gen, o.Epoch, ct, sum[:])
+		WHERE `+fence(o), c.ID, o.ID, c.Gen, o.Epoch, ct, sum[:])
 	if err != nil {
 		return fmt.Errorf("staging: store the payload: %w", err)
 	}
@@ -203,7 +218,7 @@ func Pause(ctx context.Context, tx *sql.Tx, o Owner, c Claim, ct []byte, sum [32
 	err := tx.QueryRowContext(ctx, `WITH c AS (
 		UPDATE staging_claim SET state = 'paused', lease_until = clock_timestamp(),
 			payload = coalesce($5, payload), payload_digest = coalesce($6, payload_digest)
-		WHERE `+fence+` AND review = 'pending' RETURNING id, lease_until),
+		WHERE `+fence(o)+` AND review = 'pending' RETURNING id, lease_until),
 	op AS (
 		UPDATE operation SET lease_until = c.lease_until FROM c
 		WHERE operation.ingestion = c.id AND operation.state = 'running' AND operation.owner = $2 RETURNING 1)
@@ -222,7 +237,7 @@ func Hold(ctx context.Context, tx *sql.Tx, o Owner, c Claim) error {
 		return fmt.Errorf("staging: hold: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE staging_claim SET lease_until = lease_until
-		WHERE `+fence, c.ID, o.ID, c.Gen, o.Epoch)
+		WHERE `+fence(o), c.ID, o.ID, c.Gen, o.Epoch)
 	if err != nil {
 		return fmt.Errorf("staging: hold: %w", err)
 	}
@@ -245,7 +260,7 @@ func end(ctx context.Context, tx *sql.Tx, o Owner, c Claim, state string) error 
 		return fmt.Errorf("staging: %s: %w", state, err)
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE staging_claim SET state = $5, payload = NULL, payload_digest = NULL
-		WHERE `+fence, c.ID, o.ID, c.Gen, o.Epoch, state)
+		WHERE `+fence(o), c.ID, o.ID, c.Gen, o.Epoch, state)
 	if err != nil {
 		return fmt.Errorf("staging: %s: %w", state, err)
 	}

@@ -42,7 +42,7 @@ func (a *API) lockOperation(ctx context.Context, tx *sql.Tx, operation string) (
 	if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&l.current); err != nil {
 		return l, err
 	}
-	if l.current != a.d.owner.Epoch {
+	if a.superseded(l.current) {
 		return l, errNotController
 	}
 	// An operation's machine and plan never change, so they are read before the machine's lock.
