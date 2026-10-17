@@ -26,9 +26,11 @@
 # epoch-superseded. The refusals that leave no state run inline: plan and approval on an unaccounted
 # scope, a second entry, a release of the blocked scope, an exit with it unreleased. The controls
 # that drop a comparison are Go checks, named in SKIP lines.
-# Two variants follow the run on the same up. The no-entry variant restores the database alone and
+# Three variants follow the run on the same up. The no-entry variant restores the database alone and
 # records no entry: C, stalled before its attempt with the owner token B's later takeover replaced,
-# makes its attempt once unpaused, and it passes (PA §14's last row, shown, not closed). The
+# makes its attempt once unpaused, and it passes (PA §14's last row, shown, not closed). The Transit
+# variant deletes the key the Desired releases name after a restore: both scopes blocked on it until a
+# release published under a rotated key is Desired; it leaves B configured with that key. The
 # older-OpenBao variant restores OpenBao to a snapshot taken before a publication that pinned new KV
 # generations, and the database to after it: after the entry the monitor reads 404 for those
 # generations and alerts at once, and a publication pinning them is refused (PA §13.3).
@@ -38,7 +40,8 @@
 #                                directly after scenarios/s4 run; S6 runs outside the integrated run)
 #        scenarios/s7 closing   (after scenarios/s4 run on a fresh up, outside the integrated run)
 #        scenarios/s7 no-entry  (after scenarios/s7 run on the same up)
-#        scenarios/s7 old-bao   (after scenarios/s7 no-entry on the same up; it leaves recovery mode on)
+#        scenarios/s7 transit   (after scenarios/s7 no-entry on the same up)
+#        scenarios/s7 old-bao   (after scenarios/s7 transit on the same up; it leaves recovery mode on)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -46,7 +49,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s7_mode=${1:-}
-case $s7_mode in run | closing | no-entry | old-bao) ;; *) die "usage: scenarios/s7 run|closing|no-entry|old-bao" ;; esac
+case $s7_mode in run | closing | no-entry | transit | old-bao) ;; *) die "usage: scenarios/s7 run|closing|no-entry|transit|old-bao" ;; esac
 need docker curl jq timeout id sleep date awk wc sha256sum
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -945,10 +948,139 @@ old_bao() {
   end_state='recovery mode on, B running'
 }
 
+# The Transit variant's checks. The rotation's key, made by this variant on this up only.
+tr_key=bw-artifact-2 tr_a0=''
+# tr_bound <key>: both machines' Desired releases bind their artifacts to the key.
+tr_bound() {
+  same "$(sql "SELECT count(*) FROM machine_state s JOIN release_machine rm ON rm.release = s.desired AND rm.machine = s.machine
+    WHERE s.machine IN ('$machine_cp', '$machine_w') AND rm.key_name = '$1'")" 2
+}
+# key_gone: OpenBao reads no Transit key bw-artifact.
+key_gone() { ! bao read transit/keys/bw-artifact >/dev/null 2>&1; }
+# tr_alerted: since tr_a0, one alert of bw-artifact's status, a regression, unknown, absent, naming
+# both machines' Desired releases.
+tr_alerted() {
+  same "$(sql "SELECT count(*) FILTER (WHERE kind = 'regression' AND class = 'unknown' AND reason = 'absent'
+      AND (SELECT array_agg(desired) FROM machine_state WHERE machine IN ('$machine_cp', '$machine_w')) <@ releases) || ' ' || count(*)
+    FROM dependency_alert WHERE seq > $tr_a0 AND provider = 'transit' AND object = 'bw-artifact'")" '1 1'
+}
+# account_blocked: h-recovery accounts both scopes with one decision on call_port: 201, both blocked,
+# no operation holding either, each on the observations sent.
+account_blocked() {
+  local body
+  fresh h-recovery
+  body=$(jq -nc --arg c "$machine_cp" --arg cs "$cp_start" --arg ce "$cp_end" --arg w "$machine_w" --arg ws "$w_start" --arg we "$w_end" \
+    '{scopes: [{machine: $c, start: $cs, end: $ce}, {machine: $w, start: $ws, end: $we}], facts: {}}') || return 1
+  answers 201 - POST /api/v1/recovery/accountings "$tok" "$body" "$(key accounting)" || return 1
+  jq -e --arg c "$machine_cp" --arg cs "$cp_start" --arg ce "$cp_end" --arg w "$machine_w" --arg ws "$w_start" --arg we "$w_end" \
+    '(.scopes | map({(.machine): [.state, .start, .end]}) | add) == {($c): ["blocked", $cs, $ce], ($w): ["blocked", $ws, $we]}' \
+    "$EV/last.body" >/dev/null
+}
+# new_key: tr_key created, and the compiler's and the executor's policies rewritten as their tracked
+# files plus the same grant on it: an operator's rotation of the artifact key.
+new_key() {
+  bao write -force "transit/keys/$tr_key" >/dev/null || return 1
+  { cat -- "$FIXTURES/openbao/policies/bw-compiler.hcl" &&
+    printf '\npath "transit/encrypt/%s" {\n  capabilities = ["update"]\n}\n' "$tr_key"; } | bao_stdin policy write bw-compiler - >/dev/null || return 1
+  { cat -- "$FIXTURES/openbao/policies/bw-executor.hcl" &&
+    printf '\npath "transit/decrypt/%s" {\n  capabilities = ["update"]\n}\n' "$tr_key"; } | bao_stdin policy write bw-executor - >/dev/null
+}
+# set_artifact_of <a|b|c> <key>: that instance's provider.keys.artifact, through a partial name, as
+# set_denied_of writes deniedSubjects; read at its next start.
+set_artifact_of() {
+  local cfg=$STATE/server/$1/config.yaml line
+  while IFS= read -r line; do
+    if [[ $line == '  keys: {'* ]]; then printf '%s\n' "${line%artifact: *}artifact: $2}"; else printf '%s\n' "$line"; fi
+  done <"$cfg" >"$cfg.partial"
+  grep --quiet --fixed-strings -- "artifact: $2}" "$cfg.partial" || { rm -f -- "$cfg.partial"; return 1; }
+  mv --no-target-directory -- "$cfg.partial" "$cfg"
+}
+
+# transit: AP S7's variant deleting the Transit key the Desired releases name. Both stores restored to
+# T and the entry recorded through B-recovery; then bw-artifact deleted. The monitor alerts once, both
+# scopes are accounted blocked and each mark finds the artifact missing. The key is rotated: a new one,
+# both role policies granting it, B's configuration naming it and B restarted normally. The mark still
+# finds the old Desired's artifact missing until a publication compiles under the new key and becomes
+# both machines' Desired; then each mark is ready, both scopes are released and recovery mode exited.
+transit() {
+  local ref='S7 Transit key'
+  machines
+  must "$ref" 'C stopped' kill_if_up C "$BW_C"
+  must "$ref" 'B-recovery stopped' kill_if_up B-recovery "$BW_B_RECOVERY"
+  must "$ref" "the fixture's A stopped" kill_if_up A "$BW_A"
+  must "$ref" "B's control file removed" interrupt_of b -
+  must "$ref" "C's control file removed" interrupt -
+  running "$BW_B" || must "$ref" 'inject start B' "$bin/inject" start B
+  must "$ref" 'B running' running "$BW_B"
+  call_port=$SERVER_B_PORT
+  check "$ref" 'B answers /livez' within 30 answers 204 - GET /livez ''
+  check "$ref" 'the installation out of recovery mode' same "$(sql "SELECT recovery_mode FROM installation_state")" f
+  must "$ref" "both machines' Desired releases bind bw-artifact" tr_bound bw-artifact
+
+  # T: both snapshots; both restored; the entry through B-recovery.
+  bao_at=$(now_utc)
+  must "$ref" 'inject bao-snapshot s7-tr' "$bin/inject" bao-snapshot s7-tr
+  t_at=$(now_utc)
+  must "$ref" 'inject db-snapshot s7-tr' "$bin/inject" db-snapshot s7-tr
+  restored_epoch=$(sql "SELECT epoch FROM installation_state") && [ -n "$restored_epoch" ] || die "cannot read the epoch at T"
+  must "$ref" 'inject kill B' "$bin/inject" kill B
+  must "$ref" 'B is not running' stopped "$BW_B"
+  stopped_at=$(now_utc)
+  must "$ref" 'inject db-restore s7-tr' "$bin/inject" db-restore s7-tr
+  must "$ref" 'inject bao-restore s7-tr' "$bin/inject" bao-restore s7-tr
+  db_backup=$(backup_id pg-s7-tr.dump) || die "cannot read the database backup"
+  bao_backup=$(backup_id bao-s7-tr.snap) || die "cannot read the OpenBao backup"
+  must "$ref" 'inject start B-recovery' "$bin/inject" start B-recovery
+  check "$ref" 'B-recovery answers /livez' within 30 answers 204 - GET /livez ''
+  held=''
+  entry_reason='S7 Transit key: the database and OpenBao restored to T'
+  check "$ref" 'h-recovery records the entry naming the database and provider backups: 201, a new epoch, every machine' enter
+  [ -n "$epoch" ] || die "s7: $ref: no entry; nothing after it can run"
+  check "$ref" 'the installation in the new epoch, in recovery mode; the entry records the stop and both backups' entry_recorded
+
+  # The key the Desired releases name deleted.
+  tr_a0=$(sql "SELECT coalesce(max(seq), 0) FROM dependency_alert") && [ -n "$tr_a0" ] || die "cannot read the alerts"
+  must "$ref" 'inject bao-delete-key bw-artifact' "$bin/inject" bao-delete-key bw-artifact
+  check "$ref" 'OpenBao holds no key bw-artifact' key_gone
+  check "$ref" "within two monitor intervals, one alert of its status: a regression, unknown, absent, naming both Desired releases" \
+    within 150 tr_alerted
+  must "$ref" "each scope's settle reads: a first read after the stop plus the maximum transport deadline, a recovery read a settle floor after it" \
+    within 600 both_settled
+  must "$ref" 'h-recovery accounts both scopes with one decision: 201, both blocked' account_blocked
+  check "$ref" "the worker's mark: 201, blocked, the artifact alone missing" mark_as "$machine_w" '.state == "blocked" and .missing == ["artifact"]' w-deleted
+  check "$ref" "the control plane's mark: 201, blocked, the artifact alone missing" mark_as "$machine_cp" '.state == "blocked" and .missing == ["artifact"]' cp-deleted
+
+  # The rotation; the old Desired still names the deleted key.
+  must "$ref" "a new key $tr_key, the compiler's and the executor's policies granting it" new_key
+  must "$ref" "B's configuration names $tr_key the artifact key" set_artifact_of b "$tr_key"
+  must "$ref" 'inject kill B-recovery' "$bin/inject" kill B-recovery
+  must "$ref" 'inject start B' "$bin/inject" start B
+  check "$ref" 'B answers /livez' within 30 answers 204 - GET /livez ''
+  check "$ref" "rotated, the Desired release unchanged: the worker's mark 201, blocked, the artifact alone missing" \
+    mark_as "$machine_w" '.state == "blocked" and .missing == ["artifact"]' w-rotated
+
+  # A new release under the new key leaves the scopes blocked no longer.
+  must "$ref" 'h-author opens a draft: 201' draft_by h-author tr
+  check "$ref" "h-publisher publishes it unchanged: 202, one release, the worker's Desired" publish_by h-publisher tr
+  check "$ref" "both machines' Desired is that release, its artifacts under $tr_key" \
+    same "$(sql "SELECT count(DISTINCT desired) || ' ' || bool_and(desired = '$new_release') FROM machine_state WHERE machine IN ('$machine_cp', '$machine_w')")" '1 true'
+  check "$ref" "both bound to $tr_key" tr_bound "$tr_key"
+  must "$ref" "the worker's mark: 201, ready, nothing missing" mark_as "$machine_w" '.state == "ready" and .missing == []' w-ready
+  must "$ref" "the control plane's mark: 201, ready, nothing missing" mark_as "$machine_cp" '.state == "ready" and .missing == []' cp-ready
+  must "$ref" 'h-recovery releases the worker scope: 201, released' release_scope "$machine_w" worker
+  must "$ref" 'h-recovery releases the control plane scope: 201, released' release_scope "$machine_cp" controlplane
+  check "$ref" 'h-recovery exits recovery mode: 201, naming both scopes' exited
+  check "$ref" 'the installation out of recovery mode, every scope normal' \
+    same "$(sql "SELECT count(*) || ' ' || count(*) FILTER (WHERE recovery_mode) || ' ' ||
+      (SELECT count(*) FROM machine WHERE scope_state <> 'normal') FROM installation_state")" '1 0 0'
+  end_state="recovery mode exited, B running under $tr_key"
+}
+
 withheld+=("$BW_CANARY")
 end_state='recovery mode exited, B running'
 case $s7_mode in
   no-entry) no_entry ;;
+  transit) transit ;;
   old-bao) old_bao ;;
   *)
     preconditions
