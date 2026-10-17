@@ -858,6 +858,11 @@ profile_drops() {
   differ "$(etag_of_last)" "$etag" || return 1
   etag=$(etag_of_last)
 }
+# old_applied: plan's operation completed and the worker's Applied is rel_old.
+old_applied() {
+  same "$(sql "SELECT o.state || ' ' || st.applied_release FROM plan_state s JOIN operation o ON o.id = s.operation
+    JOIN machine_state st ON st.machine = '$machine_w' WHERE s.plan = '$plan'")" "completed $rel_old"
+}
 old_pinned() {
   old_deps=$(sql "SELECT string_agg(DISTINCT s.id, ' ' ORDER BY s.id) FROM dependency d
     JOIN dependency_status s USING (provider, object, version, created)
@@ -883,7 +888,8 @@ old_alerted() {
 pub_failed() { same "$(sql "SELECT state FROM operation WHERE id = '$pub_op'")" failed; }
 # old_refused: a new draft, changing nothing, published as h-publisher on call_port: 202, then the
 # operation failed 503 dependency-unavailable naming one of the import's generations, unknown,
-# absent; nothing released.
+# absent; nothing released. The worker compiles from its Applied release, rel_old, so the
+# publication pins its generations.
 old_refused() {
   local deps
   draft_by h-author old-refused || return 1
@@ -901,7 +907,8 @@ old_refused() {
 
 # old_bao: AP S7's variant with the OpenBao snapshot older than the database (PA §13.3). OpenBao's
 # snapshot first; then an import of the worker, whose marked file content becomes new KV
-# generations, published, so its release pins them; then the database snapshot at T. Both restored
+# generations, published, so its release pins them, and applied to the worker; then the database
+# snapshot at T. Both restored
 # and the entry recorded through B-recovery, whose monitor runs once the entry commits: each pinned
 # generation reads 404 and alerts at once, once. B, restarted normally with recovery mode still on,
 # refuses a publication pinning them. The run ends in recovery mode with B running.
@@ -933,6 +940,13 @@ old_bao() {
   must "$ref" "h-publisher publishes the draft: 202, one release, the worker's Desired" publish_by h-publisher old
   rel_old=$new_release
   must "$ref" "the release pins the import's KV generations, each retained" old_pinned
+  # Applied, so a later draft changing nothing compiles the worker from this release's import base
+  # and pins the same generations (a machine with no draft entry compiles from its Applied
+  # release's, PA §3.2).
+  must "$ref" "a plan of the release as h-publisher: 201" plan_by h-publisher old
+  plan=$plan_id
+  must "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" s7old
+  must "$ref" "the plan's operation completed within four minutes; the worker's Applied that release" within 240 old_applied
   t_at=$(now_utc)
   must "$ref" 'inject db-snapshot s7-old' "$bin/inject" db-snapshot s7-old
   restored_epoch=$(sql "SELECT epoch FROM installation_state") && [ -n "$restored_epoch" ] || die "cannot read the epoch at T"
