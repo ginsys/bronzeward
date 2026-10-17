@@ -120,7 +120,9 @@ jobs:
     # container cannot start there (this job's first run failed initializing it, at
     # `docker version`). A hosted runner is also the more isolated place for PR code.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Above mise run go-db's 25 min package timeout plus setup, so that timeout fires first and
+    # names the slow package.
+    timeout-minutes: 30
     services:
       postgres:
         image: docker.io/library/postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
