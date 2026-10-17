@@ -16,7 +16,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s1_mode=${1:-}
-case $s1_mode in run | review) ;; *) die "usage: scenarios/s1 run|review" ;; esac
+case $s1_mode in run | review | node-id) ;; *) die "usage: scenarios/s1 run|review|node-id" ;; esac
 need docker curl jq timeout id sleep git date sha256sum base64 head tr
 need_state
 # No fixture lock of its own: bw, seed, inject and evidence each take the one they need.
@@ -708,6 +708,22 @@ review() {
     "$bin/inject" db-snapshot "$backup_name"
 }
 
+# node-id: the one Talos access refusal that leaves a record behind, a machine with a node ID no
+# node has, at the control plane's endpoint. It runs on an up of its own: a negative control leaves
+# no state a later scenario relies on (acceptance plan §2), and that machine's scope, which no
+# restoration observation can ever make ready, would hold S7's recovery mode open (ER §7.6).
+node-id() {
+  preconditions
+  fresh_author
+  cluster_draft
+  record 'S1 access' 'POST /machines with a node ID no node has, at the control plane endpoint: 201' /api/v1/machines \
+    "$(jq -nc --arg c "$cluster" --arg n "s1-no-such-node-$run_key" --arg e "$TALOS_CONTROLPLANE_IP:50000" \
+      '{cluster: $c, talosNodeId: $n, platform: "container", talosEndpoint: $e}')" stranger
+  check 'S1 access' 'a machine recorded with another node ID: abandoned, 409 machine-identity-mismatch, cause node-id, nothing kept' \
+    access_case node-id "$recorded" 409 machine-identity-mismatch node-id
+  outcome_bundle 'S1 access' access-node-id
+}
+
 run() {
   # Preconditions, then the pre-state.
   preconditions
@@ -841,12 +857,7 @@ run() {
   check 'S1 access' "the worker's endpoint silent to A (link split): abandoned, 503 talos-access-unavailable, cause node-unreachable, nothing kept" \
     access_case silent "$machine_w" 503 talos-access-unavailable node-unreachable
   outcome_bundle 'S1 access' access-silent
-  record 'S1 access' 'POST /machines with a node ID no node has, at the control plane endpoint: 201' /api/v1/machines \
-    "$(jq -nc --arg c "$cluster" --arg n "s1-no-such-node-$run_key" --arg e "$TALOS_CONTROLPLANE_IP:50000" \
-      '{cluster: $c, talosNodeId: $n, platform: "container", talosEndpoint: $e}')" stranger
-  check 'S1 access' 'a machine recorded with another node ID: abandoned, 409 machine-identity-mismatch, cause node-id, nothing kept' \
-    access_case node-id "$recorded" 409 machine-identity-mismatch node-id
-  outcome_bundle 'S1 access' access-node-id
+  # Another node ID is node-id's, on an up of its own.
   check 'S1 access' 'the cluster recorded with another Talos cluster ID: abandoned, 409 machine-identity-mismatch, cause cluster-id, nothing kept' \
     access_case cluster-id "$machine_w" 409 machine-identity-mismatch cluster-id
   outcome_bundle 'S1 access' access-cluster-id
@@ -903,7 +914,10 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   # The scan above covers the dump only if the bundle holds it expanded, with the database's rows
   # in it: an interrupted claim's own row, the line keyed by its id inside the staging_claim COPY
   # block (other tables carry the id too, so a bare match would not show the claim row is there).
-  if [ "${#interrupted[@]}" -gt 0 ] &&
+  # node-id takes no dump.
+  if [ "$s1_mode" = node-id ]; then
+    :
+  elif [ "${#interrupted[@]}" -gt 0 ] &&
     awk -v id="${interrupted[0]%% *}" '
       /^COPY public\.staging_claim / { block = 1; next }
       block && /^\\\.$/ { block = 0 }

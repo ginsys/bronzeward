@@ -165,13 +165,14 @@ revoked_in_flight() {
     WHERE a.operation = '$op' AND v.machine = '$machine_w' AND v.kind = 'approval-revocation'
       AND v.entry->>'approval' = '$approval_id' AND v.revision > a.revision AND v.revision < r.revision")" = 1 ]
 }
-# take_over <operation> <row>: h-recovery asks the instance on call_port to take the operation over
-# at generation 1: 201, unresolved at generation 2; the new owner token in taker.
+# take_over <operation> <row> [generation, 1]: h-recovery asks the instance on call_port to take the
+# operation over at that generation: 201, unresolved at the next; the new owner token in taker.
 take_over() {
+  local g=${3:-1}
   fresh h-recovery
-  answers 201 - POST "/api/v1/operations/$1/takeovers" "$tok" "{\"generation\": 1, \"reason\": \"$ds_ref $2\"}" \
+  answers 201 - POST "/api/v1/operations/$1/takeovers" "$tok" "{\"generation\": $g, \"reason\": \"$ds_ref $2\"}" \
     "$(key "takeover-$2")" || return 1
-  jq -e '.state == "unresolved" and .generation == 2' "$EV/last.body" >/dev/null || return 1
+  jq -e --argjson n "$((g + 1))" '.state == "unresolved" and .generation == $n' "$EV/last.body" >/dev/null || return 1
   taker=$(sql "SELECT owner FROM operation WHERE id = '$1'")
   [ -n "$taker" ]
 }
