@@ -2,7 +2,7 @@
 
 Bronzeward is a proposed self-hosted Talos configuration and machine management platform. It aims to give operators custody of native configuration and secrets, reusable fragments and profiles, immutable publication, explicit approval, provenance and controlled drift through direct Talos access.
 
-The project is at the feasibility and specification stage. The [current design](docs/design/Talos_Configuration_and_Machine_Management_Design.md) describes intended behavior; it is not evidence of implemented guarantees or passing experiments. The [historical discussion](docs/design/research/20260906-design-discussion-and-peer-review.md) preserves context, and the [design transition review](docs/design/Design_Review_v0.4_to_v0.5.md) records the reconciliation.
+The project's proof of concept is under implementation. The [operator guide](docs/operator/README.md) shows how to build and start it and walks one cluster from adoption to drift handling on the disposable fixture. The [current design](docs/design/Talos_Configuration_and_Machine_Management_Design.md) describes intended behavior; it is not evidence of implemented guarantees or passing experiments. The [historical discussion](docs/design/research/20260906-design-discussion-and-peer-review.md) preserves context, and the [design transition review](docs/design/Design_Review_v0.4_to_v0.5.md) records the reconciliation.
 
 The design, specification, research reports and experiment READMEs are also published as a browsable site at <https://ginsys.github.io/bronzeward/>, rebuilt from `main` (see [Documentation site](CONTRIBUTING.md#documentation-site)).
 
