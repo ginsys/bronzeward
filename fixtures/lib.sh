@@ -990,22 +990,75 @@ route_has() {
   done <<<"$routes"
   return 1
 }
-# linksplits_reapply <A|B>: every split .state/linksplits records for the instance, put back in its
-# namespace and read back. Run by a start: the routes died with the namespace the kill ended. Fails
-# on the first split it cannot put back; the start is then not done.
-linksplits_reapply() {
-  local id instance node ip has
+# instance_talos_ip <A|B|C|B-recovery>: the instance's fixed address on the Talos network (bin/up).
+instance_talos_ip() {
+  case $1 in
+    A) printf '%s\n' "$BW_A_TALOS_IP" ;;
+    B) printf '%s\n' "$BW_B_TALOS_IP" ;;
+    C) printf '%s\n' "$BW_C_TALOS_IP" ;;
+    B-recovery) printf '%s\n' "$BW_B_RECOVERY_TALOS_IP" ;;
+    *) return 1 ;;
+  esac
+}
+# talos_network: the ID of the Talos network bin/up recorded. By its ID, not its name: whatever
+# network carries the name by then is not the fixture's.
+talos_network() {
+  local network
+  network=$(cat -- "$STATE/down-node-networks") || return 1
+  [ -n "$network" ] || return 1
+  printf '%s\n' "$network"
+}
+# talos_address <container id>: the container's address on the Talos network, or nothing when it is
+# not on it; fails when it cannot be read.
+talos_address() {
+  local network
+  network=$(talos_network) || return 1
+  # shellcheck disable=SC2016  # a Go template, not a shell expansion
+  docker inspect --type container --format \
+    "{{range \$n, \$e := .NetworkSettings.Networks}}{{if eq \$e.NetworkID \"$network\"}}{{\$e.IPAddress}}{{end}}{{end}}" "$1"
+}
+# linksplits_of <A|B|C|B-recovery>: 0 when .state/linksplits records a split for the instance.
+linksplits_of() {
+  [ -f "$STATE/linksplits" ] || return 1
+  grep --quiet -- "^$1 " "$STATE/linksplits"
+}
+# linksplits_check <A|B|C|B-recovery> <container id> <put|read>: every split .state/linksplits
+# records for the instance, in place in its namespace; with put, one missing is added first.
+linksplits_check() {
+  local instance node ip has
   [ -f "$STATE/linksplits" ] || return 0
-  id=$(container_id "$(container "$1")") || return 1
   while read -r instance node; do
     [ "$instance" = "$1" ] || continue
     ip=$(node_ip "$node") || { say "fixtures: $STATE/linksplits names an unknown node '$node'"; return 1; }
     has=0
-    route_has "$id" "$ip" || has=$?
+    route_has "$2" "$ip" || has=$?
     [ "$has" -ne 2 ] || { say "fixtures: cannot read the routes of $1"; return 1; }
-    [ "$has" -eq 0 ] || route_in "$id" add "$ip" || { say "fixtures: cannot put back the split $1 $node"; return 1; }
-    route_has "$id" "$ip" || { say "fixtures: the split $1 $node is not in place after it was put back"; return 1; }
+    [ "$has" -eq 0 ] && continue
+    [ "$3" = put ] || { say "fixtures: the split $1 $node is not in place"; return 1; }
+    route_in "$2" add "$ip" || { say "fixtures: cannot put back the split $1 $node"; return 1; }
+    route_has "$2" "$ip" || { say "fixtures: the split $1 $node is not in place after it was put back"; return 1; }
   done <"$STATE/linksplits"
+}
+# linksplits_reapply <A|B|C|B-recovery>: every split .state/linksplits records for the instance, put
+# back in its namespace and read back, then the instance on the Talos network at its fixed address.
+# Run by a start: the routes died with the namespace the kill ended. A start with a split recorded
+# runs the instance off the Talos network (inject start), so it reaches no node before the splits are
+# back; the network is joined only after, and the splits are read again, since a /32 blackhole is
+# what keeps the joined subnet's route from reaching the cut node. Fails on the first split it cannot
+# put back, or a join it cannot make; the start is then not done.
+linksplits_reapply() {
+  local id network self address
+  id=$(container_id "$(container "$1")") || return 1
+  self=$(instance_talos_ip "$1") || { say "fixtures: $1 has no address on the Talos network"; return 1; }
+  linksplits_check "$1" "$id" put || return 1
+  address=$(talos_address "$id") || { say "fixtures: cannot read $1's address on the Talos network"; return 1; }
+  if [ -z "$address" ]; then
+    network=$(talos_network) || { say "fixtures: no Talos network is recorded in $STATE"; return 1; }
+    docker network connect --ip "$self" "$network" "$id" || { say "fixtures: cannot put $1 back on the Talos network"; return 1; }
+    address=$(talos_address "$id") || { say "fixtures: cannot read $1's address on the Talos network"; return 1; }
+  fi
+  [ "$address" = "$self" ] || { say "fixtures: $1 is on the Talos network at '$address', not at its $self"; return 1; }
+  linksplits_check "$1" "$id" read
 }
 
 # claim_take [attempt]: fails when any checkout on this daemon already holds the claim. The image

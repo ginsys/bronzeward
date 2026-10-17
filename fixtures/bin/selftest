@@ -831,13 +831,33 @@ defer "$here/inject" linkjoin A worker
 a_reaches "$TALOS_CONTROLPLANE_IP" || fail "linksplit A worker cut A from the control plane too"
 grep --quiet --line-regexp 'A worker' "$STATE/linksplits" || fail "linksplit A worker is not recorded"
 "$here/inject" kill A
-"$here/inject" start A
+# Started with the split recorded and held once the process runs (BW_INJECT_HOLD, under BW_SELFTEST=1
+# only): before the split is back, A is off the Talos network and reaches neither node.
+hold=$STATE/selftest-hold
+rm -f -- "$hold" "$hold.held"
+defer rm -f -- "$hold" "$hold.held"
+BW_SELFTEST=1 BW_INJECT_HOLD=$hold "$here/inject" start A &
+starting=$!
+for _ in $(seq 60); do
+  [ -e "$hold.held" ] && break
+  sleep 1
+done
+[ -e "$hold.held" ] || fail "inject start A never reached its hold"
+[ "$(docker inspect --format '{{.State.Running}}' "$(container_id "$BW_A")")" = true ] || fail "A is not running at the hold"
+! a_reaches "$TALOS_WORKER_IP" || fail "A reaches the worker while it starts, before its split is back"
+! a_reaches "$TALOS_CONTROLPLANE_IP" || fail "A is on the Talos network while it starts, before its split is back"
+: >"$hold"
+wait "$starting" || fail "inject start A failed after its hold"
+rm -f -- "$hold" "$hold.held"
+undefer
+unset hold starting
 ! a_reaches "$TALOS_WORKER_IP" || fail "A reaches the worker after kill and start: the split was not put back"
+a_reaches "$TALOS_CONTROLPLANE_IP" || fail "A does not reach the control plane after a start with the worker split"
 "$here/inject" linkjoin A worker
 undefer
 a_reaches "$TALOS_WORKER_IP" || fail "A does not reach the worker after linkjoin"
 [ ! -s "$STATE/linksplits" ] || fail "linkjoin left a recorded split"
-ok "linksplit / linkjoin A worker: the worker alone is cut, the split survives kill and start, and is joined again"
+ok "linksplit / linkjoin A worker: the worker alone is cut, the split survives kill and start (A reaches no node until it is back), and is joined again"
 
 # Interrupted between the route and its record, and a start between its wait and the re-apply
 # (BW_INJECT_STOP_AFTER, honoured under BW_SELFTEST=1 only): an action the log records as done is
@@ -858,6 +878,7 @@ out=$(BW_SELFTEST=1 BW_INJECT_STOP_AFTER=live "$here/inject" start A 2>&1) || tr
 grep --quiet ' done start A$' <(tail -n 1 "$STATE/injections.log") ||
   fail "a start of A interrupted after its wait is not recorded done: $(tail -n 1 "$STATE/injections.log")"
 ! a_reaches "$TALOS_WORKER_IP" || fail "a start recorded done left A reaching the worker: the recorded split was not put back"
+a_reaches "$TALOS_CONTROLPLANE_IP" || fail "a start recorded done left A off the Talos network"
 out=$(BW_SELFTEST=1 BW_INJECT_STOP_AFTER=route "$here/inject" linkjoin A worker 2>&1) || true
 [[ $out == *'stopped after the route, before its record (selftest)'* && $out == *'the record is completed; recorded as done'* ]] ||
   fail "a linkjoin stopped after its route was not completed by finish: $(tail -n 2 <<<"$out")"

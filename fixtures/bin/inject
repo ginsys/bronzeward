@@ -511,6 +511,28 @@ case $action in
         unset other other_id
         ;;
     esac
+    # A route lives in the container's network namespace, which the start makes: put back after the
+    # start, a split would leave the process a moment to reach the cut node. An instance with a split
+    # recorded is started off the Talos network, where it reaches no node, and joins it only once
+    # its splits are back (linksplits_reapply). A stopped container can be disconnected; one left so
+    # by a start that failed is joined by the next start.
+    case $1 in
+      A | B | C | B-recovery)
+        if linksplits_of "$1"; then
+          address=$(talos_address "$target_id") || die "cannot read $1's address on the Talos network"
+          if [ -n "$address" ]; then
+            network=$(talos_network) || die "no Talos network is recorded in $STATE"
+            docker network disconnect "$network" "$target_id" || die "cannot take $1 off the Talos network before its start"
+          fi
+          unset address network
+        fi
+        if [ "${BW_SELFTEST:-}" = 1 ] && [ -n "${BW_INJECT_HOLD:-}" ]; then
+          # Selftest: held after the start until the file exists, so the namespace can be read
+          # while the process runs and before the splits are back.
+          hold=1
+        fi
+        ;;
+    esac
     docker_expect='Running true'
     docker_dispatched=1
     docker start "$target_id" >/dev/null
@@ -518,6 +540,13 @@ case $action in
     # failed for a container the daemon started.
     started=1
     docker_dispatched=0
+    if [ "${hold:-0}" = 1 ]; then
+      : >"$BW_INJECT_HOLD.held"
+      for _ in $(seq 60); do
+        [ -e "$BW_INJECT_HOLD" ] && break
+        sleep 1
+      done
+    fi
     case $1 in
       # An authenticated query on the fixture's database, not pg_isready, which answers as soon as
       # the server accepts connections, whatever the parameters: a database dropped or a password
