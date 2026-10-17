@@ -1643,8 +1643,9 @@ Evidence gaps this contract carries rather than closes:
   each resumed by takeover, and abandons a claim by request and by its
   absolute expiry, every outcome scanned
   ([acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)).
-  Not measured: entering recovery mode with a paused claim, since no route
-  enters recovery mode before the recovery work.
+  Recovery-mode entry with a paused claim is measured in a Go check only
+  ([persistence and API §16](persistence-api.md#16-verification-and-evidence-limits)),
+  not on the fixture.
 - **Schema detector coverage**: `schema-covers-base-secrets` was never seen to
   fail and ran on control-plane bases only; disk-encryption, installer and disk
   configuration were absent from the environment; the list's precision was not
