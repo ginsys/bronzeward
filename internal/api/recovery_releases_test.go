@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,7 +15,8 @@ import (
 )
 
 // §7.3 step 5 (ruling G5): restored pending operations are reclassified by the executor of the normal
-// restart entry allows, never by an act and never by retrying: one with no attempt ends cancelled, its
+// restart entry allows (one with no attempt, by the recovery start too: TestRecoveryStartReclassifies),
+// never by an act and never by retrying: one with no attempt ends cancelled, its
 // approval's epoch no longer current, and one whose attempt its recorded response accounted completes
 // on a completion observation. Neither is rejected, and nothing is sent again.
 func TestRecoveryRestartReclassifies(t *testing.T) {
@@ -55,6 +57,36 @@ func TestRecoveryRestartReclassifies(t *testing.T) {
 				t.Fatalf("%d requests after the restore", n)
 			}
 		})
+	}
+}
+
+// §7.3 step 5 in the recovery start (ruling R8b-1): once its entry commits, the recovery start, which
+// runs no executor, ends a restored operation with no attempt cancelled itself, so that its scope can
+// be marked and released before the normal restart; nothing is sent.
+func TestRecoveryStartReclassifies(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.ready(t)
+	if _, err := xe.a.commitPlan(context.Background(), xe.pid); err != nil {
+		t.Fatal(err)
+	}
+	life, stop := context.WithCancel(t.Context())
+	xe.env.d.exe, xe.env.d.life, xe.env.d.runs = xe.x, life, &sync.WaitGroup{}
+	xe.env.d.exec = testExecution()
+	xe.env.d.exec.SettleFloor = 3 * time.Second
+	var entered atomic.Int32
+	r := recoveryStart(t, xe.env, &entered)
+	defer stopping(r, stop)
+	decode[entryBody](t, xe.enter(r, "reclassify", entryBodyText), http.StatusCreated)
+	deadline := time.Now().Add(10 * time.Second)
+	for xe.opState(t) != "cancelled" {
+		if time.Now().After(deadline) {
+			t.Fatalf("the recovery start left the operation %s", xe.opState(t))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if n := len(xe.node.AppliedRequests()); n != 0 {
+		t.Fatalf("%d requests after the restore", n)
 	}
 }
 
