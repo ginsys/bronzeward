@@ -68,6 +68,9 @@ ds_ref='S7'
 . "$here/dispatch.sh"
 # review.sh's marks name the worker's file secret, as s1's do; s7's import takes none.
 WORKER_MARK='doc[0]/machine/files/0/content'
+# S2's label on the worker holds the file secret's value (s2's !bwref), so an import that must
+# release its claim marks it too, as s5's adoption does; marking the file alone is refused there.
+LABEL_MARK='doc[0]/machine/nodeLabels/bw-s2'
 # shellcheck source-path=SCRIPTDIR source=review.sh
 . "$here/review.sh"
 
@@ -901,8 +904,8 @@ old_bao() {
   must "$ref" 'inject bao-snapshot s7-old' "$bin/inject" bao-snapshot s7-old
   must "$ref" 'h-author opens a draft: 201' draft_by h-author old
   fresh_author
-  must "$ref" "h-author imports the worker into it, its file secret marked: the claim released, the draft's ETag moved" \
-    ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')" old
+  must "$ref" "h-author imports the worker into it, its file secret and S2's label holding it marked: the claim released, the draft's ETag moved" \
+    ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" --arg l "$LABEL_MARK" '[$p, $l]')" old
   ing_old=${ingested[-1]}
   must "$ref" "the import's generations written to OpenBao after its snapshot" differ "$(claim_generations "$ing_old")" 0
   must "$ref" "h-publisher publishes the draft: 202, one release, the worker's Desired" publish_by h-publisher old
