@@ -272,17 +272,23 @@ func (a *API) dbClock(ctx context.Context) (time.Time, error) {
 }
 
 // useTimeCheckCause is why the latest use-time check this controller recorded for the plan does not
-// hold at time at, or "" when it does (§3.2 comparison 3, §3.3 comparison 3): the check failed, or
-// the plan's validity window, measured from before its dependency reads, has run out. A dispatch
-// always records its check before its evidence,
-// so a plan with none is not one this controller dispatched, and nothing here refuses it.
-func (a *API) useTimeCheckCause(ctx context.Context, tx *sql.Tx, machine, plan string, at time.Time) (string, error) {
+// hold at time at, or "" when it does (§3.2 comparison 3, §3.3 comparison 3): the check failed, it
+// read another Talos access version identity than the evidence observation did, or the plan's
+// validity window, measured from before its dependency reads, has run out. The attempt is sent with
+// the check's access, so one made again after its attempt transaction failed, with the access read
+// again, does not rest on evidence another version read. A dispatch always records its check before
+// its evidence, so a plan with none is not one this controller dispatched, and nothing here refuses it.
+func (a *API) useTimeCheckCause(ctx context.Context, tx *sql.Tx, machine, plan, evidence string, at time.Time) (string, error) {
 	var cause string
 	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN e.entry->>'result' <> 'passed' THEN 'the use-time check failed'
+				WHEN (e.entry #>> '{dependencies,access,path}', (e.entry #>> '{dependencies,access,version}')::bigint,
+						e.entry #>> '{dependencies,access,created}')
+					IS DISTINCT FROM (o.access_path, o.access_version, o.access_created)
+					THEN 'the use-time check read another Talos access than the evidence'
 				WHEN $4::timestamptz - LEAST(e.at, (e.entry->>'started')::timestamptz) > p.check_validity THEN 'the use-time check is older than the plan allows' ELSE '' END
-			FROM machine_event e JOIN plan p ON p.id = $2
+			FROM machine_event e JOIN plan p ON p.id = $2 LEFT JOIN observation o ON o.id = $5
 			WHERE e.machine = $1 AND e.kind = 'use-time-check' AND e.entry->>'plan' = $2 AND e.entry->>'controller' = $3
-			ORDER BY e.revision DESC LIMIT 1`, machine, plan, a.d.owner.ID, at).Scan(&cause)
+			ORDER BY e.revision DESC LIMIT 1`, machine, plan, a.d.owner.ID, at, evidence).Scan(&cause)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
