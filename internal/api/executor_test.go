@@ -467,19 +467,28 @@ func TestExecutorAccessErrorTextControl(t *testing.T) {
 }
 
 // ER §3.3: an attempt whose transaction failed was never recorded, so nothing is sent for it; the
-// operation stays committed under its owner and the next pass records it and sends once.
+// operation stays committed under its owner and the next pass records it and sends once. A wake
+// left pending by the approval or by until starts that next pass at once, so the commit holding an
+// attempt waits, before it commits, until the state between the two passes has been checked.
 func TestExecutorAttemptNotRecordedSendsNothing(t *testing.T) {
 	t.Parallel()
 	xe := newExecEnv(t)
 	var armed atomic.Bool
 	armed.Store(true)
+	checked := make(chan struct{})
 	life, stop := context.WithCancel(t.Context())
 	idle := make(chan struct{})
 	a := xe.executor(t, life, idle, options{commit: func(tx *sql.Tx) error {
 		var n int
-		if err := tx.QueryRow(`SELECT count(*) FROM attempt`).Scan(&n); err == nil && n > 0 && armed.CompareAndSwap(true, false) {
-			_ = tx.Rollback()
-			return errors.New("the attempt's commit failed")
+		if err := tx.QueryRow(`SELECT count(*) FROM attempt`).Scan(&n); err == nil && n > 0 {
+			if armed.CompareAndSwap(true, false) {
+				_ = tx.Rollback()
+				return errors.New("the attempt's commit failed")
+			}
+			select {
+			case <-checked:
+			case <-life.Done():
+			}
 		}
 		return tx.Commit()
 	}})
@@ -494,6 +503,7 @@ func TestExecutorAttemptNotRecordedSendsNothing(t *testing.T) {
 	if n := len(xe.node.AppliedRequests()); n != 0 || count(t, xe.db, `SELECT count(*) FROM attempt`) != 0 {
 		t.Fatalf("%d requests after an attempt that was not recorded", n)
 	}
+	close(checked)
 	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
 	if n := len(xe.node.AppliedRequests()); n != 1 || count(t, xe.db, `SELECT count(*) FROM attempt WHERE number = 1`) != 1 {
 		t.Fatalf("%d requests", n)
