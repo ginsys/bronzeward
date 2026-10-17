@@ -173,7 +173,7 @@ func TestEveryTableClassified(t *testing.T) {
 		"dependency", "fragment_reference", "fragment_revision", "identity_revocation", "idempotency_record",
 		"import_base_reference", "import_base_revision", "machine_endpoint_change", "machine_event", "machine_freeze", "observation",
 		"observation_start", "operation_event", "plan", "plan_cancellation",
-		"profile_revision", "profile_revision_fragment", "recovery_epoch", "recovery_restore", "release", "release_machine", "release_source",
+		"profile_revision", "profile_revision_fragment", "recovery_epoch", "recovery_exit", "recovery_restore", "release", "release_machine", "release_source",
 		"schema_migrations", "scope_accounting", "scope_release"}
 	// plan_state is updated only along its transitions and never deleted (TestPlanStateTransitions).
 	mutable := []string{"assignment", "automation_token", "cluster", "dependency_monitor", "dependency_status", "draft", "draft_entry",

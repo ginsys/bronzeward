@@ -1494,8 +1494,13 @@ clears it (§7.4, choice §10.26). The PoC specifies
 no decommission or exclusion act for either; that is a gap (§9.3), and until one
 exists the scopes outside its rollout scope stay fully usable because they are
 released individually. Leaving
-never reopens a scope that was not checked. Leaving ends the recovery
-timeline; the epoch stays current until the next entry.
+never reopens a scope that was not checked. Leaving returns every released
+scope to `normal`, each with a scope state entry naming the exit, and ends the
+recovery timeline; the epoch stays current until the next entry. Leaving reads
+the installation state for update, so an inventory request that holds it in
+recovery mode commits first and its new scope, `pre-restore-unaccounted`,
+refuses the exit
+([persistence and API §5](persistence-api.md#5-transaction-boundaries), T11).
 
 ## 8. Invariants and worked interleavings
 

@@ -193,7 +193,8 @@ func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, er
 	if err := a.lockKey(ctx, tx, q); err != nil {
 		return nil, false, err
 	}
-	if rec, err := lookup(ctx, tx, q, q.route.exclusive); err != nil || rec != nil {
+	exclusive := q.route.exclusive && !(a.o.shareExit && q.route.pattern == exitPattern)
+	if rec, err := lookup(ctx, tx, q, exclusive); err != nil || rec != nil {
 		return rec, false, err
 	}
 	q.actID = id.New(id.Act)

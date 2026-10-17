@@ -239,19 +239,21 @@ func TestForbidden(t *testing.T) {
 }
 
 // Decision 1: an unbuilt route is authenticated and role-checked, then answers 501; a mutating
-// one checks its headers first. Nothing is written.
+// one checks its headers first. Nothing is written. Every §9.2 route has landed, so two unbuilt
+// routes stand in.
 func TestNotImplemented(t *testing.T) {
-	e := newEnv(t, options{})
+	e := newEnv(t, options{extra: []*route{{method: http.MethodPost, pattern: "/unbuilt", roles: []auth.Role{auth.RecoveryAdmin}},
+		{method: http.MethodGet, pattern: "/unbuilt", roles: anyRole}}})
 	pub := e.human("h-publisher")
 	rec := e.human("h-recovery")
-	exits := path("/recovery/exits")
+	exits := path("/unbuilt")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: exits, token: rec}), http.StatusPreconditionRequired, "idempotency-key-required")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: exits, token: rec, key: "short"}), http.StatusBadRequest, "invalid-request")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: path("/drafts/{id}/publications"), token: pub, key: "k0123456789abcdef"}),
 		http.StatusPreconditionRequired, "precondition-required")
 	wantProblem(t, e.do(e.api, call{method: "POST", path: exits, token: rec, key: key, body: `{}`}),
 		http.StatusNotImplemented, "not-implemented")
-	wantProblem(t, e.do(e.api, call{method: "GET", path: prefix + "/recovery", token: e.human("h-viewer")}),
+	wantProblem(t, e.do(e.api, call{method: "GET", path: exits, token: e.human("h-viewer")}),
 		http.StatusNotImplemented, "not-implemented")
 	if n := count(t, e.db, "SELECT count(*) FROM principal WHERE sub IN ('h-publisher', 'h-recovery')"); n != 0 {
 		t.Fatal("an unbuilt route created a principal row")

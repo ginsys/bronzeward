@@ -1650,6 +1650,17 @@ the act together:
   unaccounted is `409 recovery-mode-active`; an unknown machine is `404
   not-found`; a controller whose epoch an entry superseded answers `503
   epoch-superseded`.
+- `POST /recovery/exits` takes `facts` as above and leaves recovery mode
+  (execution and recovery §7.6) once every machine scope is released: it
+  records the exit with its act in the current epoch and returns each scope to
+  `normal`, as one scope state entry per machine. A scope not released is
+  `409 conflict` naming one; outside recovery mode is `409 conflict`; a
+  controller whose epoch an entry superseded answers `503 epoch-superseded`.
+- `GET /recovery` answers the current epoch, whether recovery mode is in
+  effect, the entry that minted the epoch (null for the installation's) with
+  its restored backups, the exit that ended its recovery mode (null before
+  one), and every machine's scope state. Each scope's recovery timeline is the
+  scope state entries on its machine's timeline.
 - `POST /operations/{id}/resolutions` takes `to` and `reason`. `to` is
   `cancelled` only, and only an `unresolved` operation with no recorded attempt
   qualifies (§4): any other state or an attempt is `409 conflict`. Its
@@ -2257,7 +2268,7 @@ counter, not the ETag token, so the token is not named.
 | 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
 | 409 | `recovery-mode-entered` | the error of a failed `publish` operation that was `queued` or `running` when recovery-mode entry committed (§8.2, §12.2); nothing it compiled was published |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
-| 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry (§12.2); the body names the scope |
+| 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry, and plan creation, approval or unfreezing under it after entry (§12.2); the body names the scope |
 | 412 | `precondition-failed` | `If-Match` does not match |
 | 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). Also a publication refused by T3's re-check: a version's status recorded not before publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
@@ -2663,7 +2674,9 @@ startup", and design §13.7 item 5 and §14.6 give entering it to
   backup is valid in the restored epoch until entry mints the new one (§12.3).
   After entry, still under the flag and with the epoch its entry minted as its
   own (§5.1), it serves what execution and recovery's recovery start serves (observation, the recovery routes and the
-  installation-wide acts of its §7.5). The dispatch gates therefore stay closed
+  installation-wide acts of its §7.5). Plan creation, approval and unfreezing
+  are refused `409 recovery-mode-active` until the service is restarted
+  without the flag. The dispatch gates therefore stay closed
   before entry, whatever the restored database says.
 - Entry itself is an API act by `recovery-admin`, human only:
   `POST /recovery/entries`, whose body names each restored backup family with
