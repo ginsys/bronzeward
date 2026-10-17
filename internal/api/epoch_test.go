@@ -134,16 +134,32 @@ func TestProcessEpochControl(t *testing.T) {
 				if state != "unresolved" || gen != 2 || owner != pre.d.owner.ID {
 					t.Fatalf("the operation is %s at generation %d owned by %s", state, gen, owner)
 				}
+				// The control is the takeover's alone: every other act on the operation still compares.
+				tx, err := ae.db.BeginTx(t.Context(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = tx.Rollback() }()
+				if _, err := pre.lockOperation(t.Context(), tx, ae.op); !errors.Is(err, errNotController) {
+					t.Fatalf("another act's lock by a superseded process: %v", err)
+				}
 			})
 			t.Run("ingestion-start", func(t *testing.T) {
 				t.Parallel()
 				ie := newIngestEnv(t, o)
+				old := epoch(t, ie.db)
 				newEpoch(t, ie.db)
 				rec := ie.do(ie.api, ingestCall(ie.human("h-author"), key, ie.etag, ie.body(nil)))
 				if !control {
 					wantProblem(t, rec, http.StatusServiceUnavailable, "epoch-superseded")
-				} else if rec.Code != http.StatusAccepted {
+					return
+				}
+				if rec.Code != http.StatusAccepted {
 					t.Fatalf("the ingestion start with the control: %d %s", rec.Code, rec.Body)
+				}
+				// The superseded process's write: the claim is owned under its own, earlier epoch.
+				if n := count(t, ie.db, `SELECT count(*) FROM staging_claim WHERE owner_epoch = $1`, old); n != 1 {
+					t.Fatalf("%d claims under the superseded epoch", n)
 				}
 			})
 			t.Run("commitment", func(t *testing.T) {
