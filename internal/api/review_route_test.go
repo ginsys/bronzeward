@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ginsys/bronzeward/internal/id"
@@ -241,6 +243,62 @@ func TestReviewRouteFailuresLeaveClaim(t *testing.T) {
 
 	if ie.f.decrypts != 3 {
 		t.Fatalf("%d decryptions, want 3", ie.f.decrypts)
+	}
+	assertAbsent(t, ie, reviewSentinel)
+}
+
+// Compilation §3.6 item 7, §3.5; PA §12.2 T9 step 3, §16: recovery-mode entry abandons a paused
+// claim of the earlier epoch. Its envelope and digest are cleared and its running ingest operation
+// fails ingestion-abandoned, with its terminal event in the new epoch after the pause's. Afterwards
+// the review, a mark and a continuation are each 409 conflict without a decryption, the resource
+// reads abandoned, and the unmarked sentinel the review would have answered reaches no body, log
+// or table.
+func TestRecoveryEntryAbandonsPausedClaim(t *testing.T) {
+	ie := newIngestEnv(t, options{})
+	claim := ie.pausedReview(t)
+	var op string
+	if err := ie.db.QueryRow(`SELECT id FROM operation WHERE ingestion = $1`, claim).Scan(&op); err != nil {
+		t.Fatal(err)
+	}
+	var entered atomic.Int32
+	r := recoveryStart(t, ie.env, &entered)
+	b := decode[entryBody](t, ie.enter(r, "paused", entryBodyText), http.StatusCreated)
+	if st, _, payload := claimRow(t, ie.db, claim); st != "abandoned" || payload {
+		t.Fatalf("after entry the claim is %s, payload kept %t", st, payload)
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM staging_claim WHERE id = $1 AND payload_digest IS NULL`, claim); n != 1 {
+		t.Fatal("entry kept the envelope's digest")
+	}
+	if o := readOp(t, ie.db, op); o.state != "failed" || o.error["type"] != "urn:bronzeward:problem:ingestion-abandoned" {
+		t.Fatalf("operation %+v", o)
+	}
+	evs := events(t, ie.db, op)
+	if !slices.Equal(eventTypes(evs), []string{"started", "staged", "paused", "failed"}) || evs[3]["code"] != "ingestion-abandoned" {
+		t.Fatalf("events %v", evs)
+	}
+	if n := count(t, ie.db, `SELECT count(*) FROM operation_event WHERE operation = $1 AND number = 4 AND epoch = $2`, op, b.Epoch); n != 1 {
+		t.Fatal("the terminal event is not in the epoch entry minted")
+	}
+	author := ie.human("h-author")
+	decrypts := ie.f.decrypts
+	for name, c := range map[string]call{
+		"review":       reviewCall(author, claim),
+		"mark":         markCall(author, "k-mark-after-entry-01", claim, zoneMark),
+		"continuation": continueCall(author, "k-continue-after-entry", claim),
+	} {
+		rec := ie.do(r, c)
+		ie.bodies = append(ie.bodies, rec.Body.String())
+		if p := wantProblem(t, rec, http.StatusConflict, "conflict"); p["ingestion"] != claim {
+			t.Errorf("%s after entry: problem %v", name, p)
+		}
+	}
+	if ie.f.decrypts != decrypts {
+		t.Fatalf("%d decryptions after entry", ie.f.decrypts-decrypts)
+	}
+	rec := ie.do(r, call{method: "GET", path: prefix + "/ingestions/" + claim, token: author})
+	ie.bodies = append(ie.bodies, rec.Body.String())
+	if res := decode[map[string]any](t, rec, http.StatusOK); res["state"] != "abandoned" {
+		t.Fatalf("resource %v", res)
 	}
 	assertAbsent(t, ie, reviewSentinel)
 }
