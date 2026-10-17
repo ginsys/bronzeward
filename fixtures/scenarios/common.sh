@@ -72,8 +72,8 @@ mint_without() { oidc mint -key /etc/oidc/key.json -issuer http://issuer:5556 -h
 # instance on port $call_port (A's unless the scenario sets it), 000 when nothing answers; the
 # response headers and body are left in $EV/last.headers and $EV/last.body, both emptied first.
 # The token goes over stdin and the body through a file only the user reads: a command line is
-# readable by any local user.
-call_port=$SERVER_A_PORT
+# readable by any local user. call_limit bounds the request, in seconds.
+call_port=$SERVER_A_PORT call_limit=10
 call() {
   local method=$1 path=$2 token=$3 body=${4:-} key=${5:-} match=${6:-} args=() sent=$STATE/$scenario-request-body
   : >"$EV/last.headers"
@@ -85,7 +85,7 @@ call() {
   [ -z "$key" ] || args+=(--header "Idempotency-Key: $key")
   [ -z "$match" ] || args+=(--header "If-Match: $match")
   { [ -z "$token" ] || printf 'Authorization: Bearer %s\n' "$token"; } |
-    command curl --disable --noproxy '*' --silent --max-time 10 --output "$EV/last.body" \
+    command curl --disable --noproxy '*' --silent --max-time "$call_limit" --output "$EV/last.body" \
       --dump-header "$EV/last.headers" --write-out '%{http_code}' \
       --header @- --request "$method" "${args[@]}" "http://127.0.0.1:$call_port$path" || true
   rm -f -- "$sent"
@@ -584,6 +584,30 @@ approve_by() {
   approval_id=$(jq -er '.id' "$EV/last.body") || return 1
   approval_reasons=$(jq -ce '.selfApproval.reasons' "$EV/last.body")
 }
+# approved_unseen <plan>: the approval answered last, and its timeline entry, mark it as approving an
+# unseen overwrite.
+approved_unseen() {
+  jq -e --arg p "$1" '.plan == $p and .unseenOverwrite == true' "$EV/last.body" >/dev/null &&
+    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
+      AND entry->>'plan' = '$1' AND (entry->>'unseenOverwrite')::boolean")" = 1 ]
+}
+# keep <name> <collection path>: h-viewer's read of every page of the collection, 500 items at a
+# time, following each next cursor, kept in the evidence directory as one array of its items.
+keep() {
+  local next='' n=0 pages=()
+  fresh h-viewer
+  while :; do
+    n=$((n + 1))
+    answers 200 - GET "$2?limit=500${next:+&cursor=$next}" "$tok" || return 1
+    cp -- "$EV/last.body" "$EV/$1.page$n" && pages+=("$EV/$1.page$n") || return 1
+    next=$(jq -r '.next // empty' "$EV/last.body") || return 1
+    [ -n "$next" ] || break
+    [[ $next =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+  done
+  jq -s '[.[].items[]]' "${pages[@]}" >"$EV/$1.json" && rm -f -- "${pages[@]}"
+}
+# kept <name> <jq filter>: the kept array satisfies the filter.
+kept() { jq -e "$2" "$EV/$1.json" >/dev/null; }
 # plan_is_stored <plan> <state> <approval or none>: the plan's stored state and approval, and no
 # operation.
 plan_is_stored() {

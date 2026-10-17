@@ -76,23 +76,6 @@ served_observed() {
     [ "$(sql "SELECT count(*) FROM observation WHERE id = '$o' AND machine = '$machine_w'
       AND encode(configuration_digest, 'hex') = '$want'")" = 1 ]
 }
-# keep <name> <collection path>: h-viewer's read of every page of the collection, 500 items at a
-# time, following each next cursor, kept in the evidence directory as one array of its items.
-keep() {
-  local next='' n=0 pages=()
-  fresh h-viewer
-  while :; do
-    n=$((n + 1))
-    answers 200 - GET "$2?limit=500${next:+&cursor=$next}" "$tok" || return 1
-    cp -- "$EV/last.body" "$EV/$1.page$n" && pages+=("$EV/$1.page$n") || return 1
-    next=$(jq -r '.next // empty' "$EV/last.body") || return 1
-    [ -n "$next" ] || break
-    [[ $next =~ ^[A-Za-z0-9_-]+$ ]] || return 1
-  done
-  jq -s '[.[].items[]]' "${pages[@]}" >"$EV/$1.json" && rm -f -- "${pages[@]}"
-}
-# kept <name> <jq filter>: the kept array satisfies the filter.
-kept() { jq -e "$2" "$EV/$1.json" >/dev/null; }
 # open_records: how many drift records are open on the worker.
 open_records() { sql "SELECT count(*) FROM drift_record WHERE machine = '$machine_w' AND closed IS NULL"; }
 
@@ -724,13 +707,6 @@ moved_from() {
       differ "$(digest_of "$EV/$1-talos-config-$f.txt" "$TALOS_WORKER_IP")" "$(digest_of "$EV/$2-talos-config-$f.txt" "$TALOS_WORKER_IP")" ||
       return 1
   done
-}
-# approved_unseen <plan>: the approval answered last, and its timeline entry, mark it as approving an
-# unseen overwrite.
-approved_unseen() {
-  jq -e --arg p "$1" '.plan == $p and .unseenOverwrite == true' "$EV/last.body" >/dev/null &&
-    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
-      AND entry->>'plan' = '$1' AND (entry->>'unseenOverwrite')::boolean")" = 1 ]
 }
 # unfreeze_refused <who>: an unfreeze by that identity, holding no approver role: 403, still frozen.
 unfreeze_refused() {
