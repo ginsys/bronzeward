@@ -262,7 +262,7 @@ func TestNotImplemented(t *testing.T) {
 
 // §9.4: a problem's instance is also written to the server log, whichever check refused.
 func TestEveryProblemIsLogged(t *testing.T) {
-	e := newEnv(t, options{extra: []*route{testRoute(nil)}})
+	e := newEnv(t, options{extra: []*route{testRoute(nil), {method: http.MethodGet, pattern: "/unbuilt", roles: anyRole}}})
 	author, viewer := e.human("h-author"), e.human("h-viewer")
 	e.do(e.api, post(author, key, `{"note":"a"}`))
 	for name, c := range map[string]call{
@@ -271,7 +271,7 @@ func TestEveryProblemIsLogged(t *testing.T) {
 		"404":        {method: "GET", path: prefix + "/nowhere", token: viewer},
 		"428":        {method: "POST", path: prefix + "/plans", token: e.human("h-publisher")},
 		"400 body":   post(author, "k-other-0123456789", `{"note":1}`),
-		"501":        {method: "GET", path: prefix + "/recovery", token: viewer},
+		"501":        {method: "GET", path: prefix + "/unbuilt", token: viewer},
 		"422 reused": post(author, key, `{"note":"b"}`),
 		"400 cursor": {method: "GET", path: prefix + "/acts?cursor=x", token: viewer},
 	} {
