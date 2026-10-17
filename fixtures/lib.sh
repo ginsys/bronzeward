@@ -973,22 +973,37 @@ node_ip() {
 }
 # route_in <container id> <add|del> <ip>: a blackhole route to <ip> inside the container's network
 # namespace, by a one-off curl-image container that joins it (the instance image has no ip). The
-# route is the namespace's, and dies with it: a killed instance comes back without it.
+# route is the namespace's, and dies with it: a killed instance comes back without it. It sits in
+# table SPLIT_TABLE, looked up for <ip> by a rule ahead of the main table: Docker refuses to give an
+# interface an address whose subnet a main-table route overlaps, so a split put back while the
+# instance is off the Talos network would make its join fail. busybox ip takes no rule type, hence
+# the table. A second rule for the same address is refused, so add removes any first.
+SPLIT_TABLE=100
 route_in() {
+  local script
+  # shellcheck disable=SC2016  # expanded by the sh inside the container
+  case $2 in
+    add) script='ip route replace blackhole "$1/32" table "$2" && { ip rule del to "$1/32" lookup "$2" pref "$2" 2>/dev/null; ip rule add to "$1/32" lookup "$2" pref "$2"; }' ;;
+    del) script='ip rule del to "$1/32" lookup "$2" pref "$2" && ip route del blackhole "$1/32" table "$2"' ;;
+    *) return 1 ;;
+  esac
   timeout "$REQUEST_LIMIT" docker run --rm --pull never --network "container:$1" --cap-add NET_ADMIN --user 0 \
-    --label "$TOOL_LABEL" --entrypoint ip "$CURL_IMAGE" route "$2" blackhole "$3/32"
+    --label "$TOOL_LABEL" --entrypoint sh "$CURL_IMAGE" -c "$script" sh "$3" "$SPLIT_TABLE"
 }
-# route_has <container id> <ip>: 0 when the namespace holds a blackhole route to <ip>, 1 when it
-# does not, 2 when it cannot be read (the container stopped, gone or not answering). Read from
-# `ip route`: busybox ignores `ip route show type blackhole` and lists every route.
+# route_has <container id> <ip>: 0 when the namespace holds both the rule and the blackhole route
+# to <ip> (route_in), 1 when it does not, 2 when it cannot be read (the container stopped, gone or
+# not answering). Read from `ip rule` and the table's `ip route`: busybox ignores `ip route show
+# type blackhole` and lists every route.
 route_has() {
-  local routes line
-  routes=$(timeout "$REQUEST_LIMIT" docker run --rm --pull never --network "container:$1" \
-    --label "$TOOL_LABEL" --entrypoint ip "$CURL_IMAGE" route) || return 2
+  local out line rule=1 route=1 ip=${2//./\\.}
+  # shellcheck disable=SC2016  # expanded by the sh inside the container
+  out=$(timeout "$REQUEST_LIMIT" docker run --rm --pull never --network "container:$1" \
+    --label "$TOOL_LABEL" --entrypoint sh "$CURL_IMAGE" -c 'ip rule && ip route show table "$1"' sh "$SPLIT_TABLE") || return 2
   while IFS= read -r line; do
-    [[ $line =~ ^blackhole\ ${2//./\\.}(/32)?(\ |$) ]] && return 0
-  done <<<"$routes"
-  return 1
+    [[ $line =~ ^$SPLIT_TABLE:[[:space:]]+from\ all\ to\ $ip(/32)?\ lookup\ $SPLIT_TABLE(\ |$) ]] && rule=0
+    [[ $line =~ ^blackhole\ $ip(/32)?(\ |$) ]] && route=0
+  done <<<"$out"
+  [ "$rule" -eq 0 ] && [ "$route" -eq 0 ]
 }
 # instance_talos_ip <A|B|C|B-recovery>: the instance's fixed address on the Talos network (bin/up).
 instance_talos_ip() {
@@ -1054,8 +1069,8 @@ linksplits_check() {
 # back in its namespace and read back, then the instance on the Talos network at its fixed address.
 # Run by a start: the routes died with the namespace the kill ended. A start with a split recorded
 # runs the instance off the Talos network (inject start), so it reaches no node before the splits are
-# back; the network is joined only after, and the splits are read again, since a /32 blackhole is
-# what keeps the joined subnet's route from reaching the cut node. Fails on the first split it cannot
+# back; the network is joined only after, and the splits are read again, since the rule's blackhole
+# is what keeps the joined subnet's route from reaching the cut node. Fails on the first split it cannot
 # put back, or a join it cannot make; the start is then not done.
 linksplits_reapply() {
   local id network self address member
