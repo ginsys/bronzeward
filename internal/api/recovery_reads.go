@@ -79,7 +79,9 @@ func (a *API) recoveryReadPass(ctx context.Context) bool {
 // reclassifyRestored is §7.3 step 5 in a recovery start, which runs no executor (ruling R8b-1): each
 // operation this process owns with no attempt, whose approval can never pass comparison 1 again, ends
 // cancelled, as the executor would end it, so that its scope can be marked and released before the
-// normal restart. Nothing is sent. One with an attempt waits for the normal restart's executor.
+// normal restart. Nothing is sent. Only once step 1's decision has accounted its scope, which covers
+// an attempt the restore erased; a scope never returns to pre-restore unaccounted, so the unlocked
+// read can only defer it to a later pass. One with an attempt waits for the normal restart's executor.
 func (a *API) reclassifyRestored(ctx context.Context) {
 	ops, err := a.heldOperations(ctx)
 	if err != nil {
@@ -88,6 +90,16 @@ func (a *API) reclassifyRestored(ctx context.Context) {
 	}
 	for _, op := range ops {
 		if op.sent || op.state == "verifying" {
+			continue
+		}
+		var scope string
+		if err := a.db.QueryRowContext(ctx, `SELECT scope_state FROM machine WHERE id = $1`, op.machine).Scan(&scope); err != nil {
+			if ctx.Err() == nil {
+				a.o.logf("recovery reclassification of operation %s: the scope: %v", op.id, err)
+			}
+			continue
+		}
+		if scope == "pre-restore-unaccounted" {
 			continue
 		}
 		if _, err := a.cancelUnattempted(ctx, op); err != nil && ctx.Err() == nil {
