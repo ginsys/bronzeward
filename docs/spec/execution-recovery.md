@@ -1393,7 +1393,10 @@ which the recovery start does not run (see `persistence-api.md`).
    its approval's epoch is not the current one (§5). One with no attempt ends
    `cancelled`, which claims only that the restored journal records none: an
    attempt the restore erased is covered by step 1's decision, and a landing of
-   it is drift at step 6. One with an attempt is accounted, by its recorded response or
+   it is drift at step 6. The recovery start ends such an operation `cancelled`
+   itself once entry has committed, sending nothing, so that its scope can be
+   marked and released before the normal restart; the executor of that restart
+   classifies one with an attempt. One with an attempt is accounted, by its recorded response or
    by a §5.2 decision such as step 1's, and is classified by the §5.1 table:
    `completed` or `failed` by a completion observation taken after that
    accounting, and otherwise `unresolved`, which holds the scope until a later

@@ -70,7 +70,30 @@ func (a *API) recoveryReadPass(ctx context.Context) bool {
 			a.o.logf("recovery observation %s of machine %s: the scope is pre-restore unaccounted", o.ID, m)
 		}
 	}
+	if more && a.d.recoveryStart {
+		a.reclassifyRestored(ctx)
+	}
 	return more
+}
+
+// reclassifyRestored is §7.3 step 5 in a recovery start, which runs no executor (ruling R8b-1): each
+// operation this process owns with no attempt, whose approval can never pass comparison 1 again, ends
+// cancelled, as the executor would end it, so that its scope can be marked and released before the
+// normal restart. Nothing is sent. One with an attempt waits for the normal restart's executor.
+func (a *API) reclassifyRestored(ctx context.Context) {
+	ops, err := a.heldOperations(ctx)
+	if err != nil {
+		a.o.logf("recovery reclassification: the operations: %v", err)
+		return
+	}
+	for _, op := range ops {
+		if op.sent || op.state == "verifying" {
+			continue
+		}
+		if _, err := a.cancelUnattempted(ctx, op); err != nil && ctx.Err() == nil {
+			a.o.logf("recovery reclassification of operation %s: %v", op.id, err)
+		}
+	}
 }
 
 // recoveryReadsDue reads the pre-restore unaccounted scopes due a recovery observation, and whether
