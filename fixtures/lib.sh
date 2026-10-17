@@ -1017,6 +1017,17 @@ talos_address() {
   docker inspect --type container --format \
     "{{range \$n, \$e := .NetworkSettings.Networks}}{{if eq \$e.NetworkID \"$network\"}}{{\$e.IPAddress}}{{end}}{{end}}" "$1"
 }
+# talos_member <container id>: 0 when the container is attached to the Talos network, 1 when not; 2
+# when that cannot be read. By the attachment's network ID, not its address: a stopped container
+# keeps its attachments with an empty address, and docker start brings each one up.
+talos_member() {
+  local network member
+  network=$(talos_network) || return 2
+  # shellcheck disable=SC2016  # a Go template, not a shell expansion
+  member=$(docker inspect --type container --format \
+    "{{range \$n, \$e := .NetworkSettings.Networks}}{{if eq \$e.NetworkID \"$network\"}}x{{end}}{{end}}" "$1") || return 2
+  [ -n "$member" ]
+}
 # linksplits_of <A|B|C|B-recovery>: 0 when .state/linksplits records a split for the instance.
 linksplits_of() {
   [ -f "$STATE/linksplits" ] || return 1
@@ -1047,16 +1058,18 @@ linksplits_check() {
 # what keeps the joined subnet's route from reaching the cut node. Fails on the first split it cannot
 # put back, or a join it cannot make; the start is then not done.
 linksplits_reapply() {
-  local id network self address
+  local id network self address member
   id=$(container_id "$(container "$1")") || return 1
   self=$(instance_talos_ip "$1") || { say "fixtures: $1 has no address on the Talos network"; return 1; }
   linksplits_check "$1" "$id" put || return 1
-  address=$(talos_address "$id") || { say "fixtures: cannot read $1's address on the Talos network"; return 1; }
-  if [ -z "$address" ]; then
+  member=0
+  talos_member "$id" || member=$?
+  [ "$member" -ne 2 ] || { say "fixtures: cannot read whether $1 is on the Talos network"; return 1; }
+  if [ "$member" -eq 1 ]; then
     network=$(talos_network) || { say "fixtures: no Talos network is recorded in $STATE"; return 1; }
     docker network connect --ip "$self" "$network" "$id" || { say "fixtures: cannot put $1 back on the Talos network"; return 1; }
-    address=$(talos_address "$id") || { say "fixtures: cannot read $1's address on the Talos network"; return 1; }
   fi
+  address=$(talos_address "$id") || { say "fixtures: cannot read $1's address on the Talos network"; return 1; }
   [ "$address" = "$self" ] || { say "fixtures: $1 is on the Talos network at '$address', not at its $self"; return 1; }
   linksplits_check "$1" "$id" read
 }

@@ -519,12 +519,19 @@ case $action in
     case $1 in
       A | B | C | B-recovery)
         if linksplits_of "$1"; then
-          address=$(talos_address "$target_id") || die "cannot read $1's address on the Talos network"
-          if [ -n "$address" ]; then
+          # By the attachment, not the address: a stopped container keeps its attachments with
+          # an empty address, and docker start would bring them up.
+          member=0
+          talos_member "$target_id" || member=$?
+          [ "$member" -ne 2 ] || die "cannot read whether $1 is on the Talos network"
+          if [ "$member" -eq 0 ]; then
             network=$(talos_network) || die "no Talos network is recorded in $STATE"
             docker network disconnect "$network" "$target_id" || die "cannot take $1 off the Talos network before its start"
+            member=0
+            talos_member "$target_id" || member=$?
+            [ "$member" -eq 1 ] || die "$1 is still on the Talos network after its disconnect"
           fi
-          unset address network
+          unset member network
         fi
         if [ "${BW_SELFTEST:-}" = 1 ] && [ -n "${BW_INJECT_HOLD:-}" ]; then
           # Selftest: held after the start until the file exists, so the namespace can be read
