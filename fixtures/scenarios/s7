@@ -838,6 +838,26 @@ no_entry() {
 # snapshot: their dependency statuses' ids, space-separated, in old_deps.
 old_deps='' ing_old='' rel_old='' old_a0=''
 # old_pinned: rel_old pins the import's KV generations, at least one, each retained.
+# profile_drops <who> <name> <fragment>: s5's step of the same name. The workers profile, under the
+# draft's ETag, listing its head's fragment revisions but <fragment>'s: 200, the ETag replaced. The
+# import base now holds S2's label as a reference, and a fragment overriding an import-base
+# reference refuses publication (base-override, compilation choice §16.20), so the label's fragment
+# leaves the profile; the label stays, from the base.
+profile_drops() {
+  local body
+  fresh "$1"
+  [ "$(sql "SELECT count(*) FROM profile p JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
+    JOIN fragment_revision r ON r.id = f.fragment_revision
+    WHERE p.cluster = '$cluster' AND p.name = 'workers' AND r.name = '$3'")" = 1 ] || return 1
+  body=$(sql "SELECT coalesce(jsonb_agg(f.fragment_revision ORDER BY f.position), '[]'::jsonb)
+    FROM profile p JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
+      JOIN fragment_revision r ON r.id = f.fragment_revision
+    WHERE p.cluster = '$cluster' AND p.name = 'workers' AND r.name <> '$3'") || return 1
+  body=$(jq -nc --argjson l "$body" '{fragments: $l}') || return 1
+  answers 200 - PUT "/api/v1/drafts/$draft/profiles/workers" "$tok" "$body" "$(key "profile-$2")" "$etag" || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
+}
 old_pinned() {
   old_deps=$(sql "SELECT string_agg(DISTINCT s.id, ' ' ORDER BY s.id) FROM dependency d
     JOIN dependency_status s USING (provider, object, version, created)
@@ -908,6 +928,8 @@ old_bao() {
     ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" --arg l "$LABEL_MARK" '[$p, $l]')" old
   ing_old=${ingested[-1]}
   must "$ref" "the import's generations written to OpenBao after its snapshot" differ "$(claim_generations "$ing_old")" 0
+  must "$ref" "h-author takes S2's label fragment out of the workers profile, the import base holding that reference: 200, the ETag replaced" \
+    profile_drops h-author old s2-labels
   must "$ref" "h-publisher publishes the draft: 202, one release, the worker's Desired" publish_by h-publisher old
   rel_old=$new_release
   must "$ref" "the release pins the import's KV generations, each retained" old_pinned
