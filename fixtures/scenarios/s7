@@ -65,7 +65,7 @@ cp_log='' w_log=''
 pre_plan='' pre_approval='' post_plan='' restored_epoch='' epoch=''
 t_at='' bao_at='' stopped_at='' db_backup='' bao_backup='' entry_draft='' second_draft='' second_etag=''
 robot_new='' ing_epoch='' s_start='' s_end='' cp_start='' cp_end='' w_start='' w_end='' marked='' w_mark='' drift_rec=''
-c_owner='' w_pre=''
+c_owner='' w_pre='' c_commits=''
 
 # s4_applied: S4's safe apply done: the first apply-config plan committed to an operation that
 # completed.
@@ -208,9 +208,11 @@ publish_queued() {
   answers 202 - POST "/api/v1/drafts/$draft/publications" "$tok" '{}' "$(key publication-entry)" "$etag" || return 1
   pub_op=$(jq -er '.id' "$EV/last.body")
 }
-# pub_queued: pub_op a publish job still queued, with no release.
+# pub_queued: pub_op a publish job still queued, never claimed (generation 0, no claimed event),
+# with no release.
 pub_queued() {
-  same "$(sql "SELECT kind || ' ' || state FROM operation WHERE id = '$pub_op'")" 'publish queued' &&
+  same "$(sql "SELECT kind || ' ' || state || ' ' || owner_gen FROM operation WHERE id = '$pub_op'")" 'publish queued 0' &&
+    same "$(sql "SELECT count(*) FROM operation_event WHERE operation = '$pub_op' AND entry->>'type' = 'claimed'")" 0 &&
     same "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" 0
 }
 # reissue: the seed automation token reissued with the server-side tool under h-recovery, the new
@@ -340,7 +342,7 @@ c_superseded() {
     c_logged 'publish worker: the epoch is superseded; it claims nothing until restarted'
 }
 # held_under_entry: held still unresolved at generation 2 in the new epoch, under another owner than
-# C's, its journal holding no attempt: C's attempt wrote nothing.
+# C's, its journal holding no attempt: C made none.
 held_under_entry() {
   same "$(sql "SELECT o.state || ' ' || o.owner_gen || ' ' || o.owner_epoch || ' ' || (o.owner <> '$c_owner') || ' ' || count(a.id)
     FROM operation o LEFT JOIN attempt a ON a.operation = o.id WHERE o.id = '$held'
@@ -395,10 +397,15 @@ exit_refused() {
   fresh h-recovery
   answers_with ".machine == \"$machine_cp\"" 409 conflict POST /api/v1/recovery/exits "$tok" '{"facts": {}}' "$(key exit-early)"
 }
-# not_by_c <plan>: the plan's operation owned by another controller than C.
+# c_commitments: how many commitment entries name C as their controller, on any machine and plan.
+c_commitments() { sql "SELECT count(*) FROM machine_event WHERE kind = 'commitment' AND entry->>'controller' = '$c_owner'"; }
+# c_committed_none: no commitment entry names C since c_commits was read, before step 4's unpause.
+c_committed_none() { same "$(c_commitments)" "$c_commits"; }
+# not_by_c <plan>: the plan's one commitment entry names another controller than C, and C has
+# committed nothing since step 4's unpause.
 not_by_c() {
-  same "$(sql "SELECT count(*) FROM plan_state s JOIN operation o ON o.id = s.operation
-    WHERE s.plan = '$1' AND o.owner <> '$c_owner'")" 1
+  same "$(sql "SELECT count(*) FILTER (WHERE entry->>'controller' <> '$c_owner') || ' ' || count(*) FROM machine_event
+    WHERE kind = 'commitment' AND entry->>'plan' = '$1'")" '1 1' && c_committed_none
 }
 
 preconditions() {
@@ -560,16 +567,18 @@ s7() {
     # commitment; through C, a takeover of held and an import into the second draft.
     ref='S7 step 4'
     w_pre=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+    c_commits=$(c_commitments) && [ -n "$c_commits" ] || die "cannot count C's commitment entries"
     must "$ref" 'inject unpause C' "$bin/inject" unpause C
     must "$ref" 'C running, not paused' running "$BW_C"
     check "$ref" "C's executor and publish worker each end at their first epoch refusal: both log the epoch superseded" \
       within 60 c_superseded
-    check "$ref" "C's attempt, refused by the fence, wrote nothing: held unresolved at generation 2 under the entry's owner, no attempt" \
+    check "$ref" "C, its executor ended at its epoch check, made no attempt: held unresolved at generation 2 under the entry's owner, no attempt" \
       held_under_entry
     no_mutation 'the worker' "$TALOS_WORKER_IP" "$w_pre" "$(apid_log "$TALOS_WORKER_IP")"
-    check "$ref" "C's job claim, refused by the process-epoch comparison, took nothing: step 3's publish job still queued, no release" \
+    check "$ref" "C's job claim, refused by the process-epoch comparison, took nothing: step 3's publish job still queued, never claimed, no release" \
       pub_queued
-    check "$ref" "C committed nothing: the pre-entry plan waits, approved, no operation, no commitment or refusal entry" \
+    check "$ref" "C committed nothing: no commitment entry names C since the unpause" c_committed_none
+    check "$ref" "the pre-entry plan waits: approved, no operation, no use-time check, commitment or refusal entry" \
       waits "$pre_plan" "$pre_approval"
     call_port=$SERVER_C_PORT
     check "$ref" 'C answers /livez' within 30 answers 204 - GET /livez ''
@@ -663,7 +672,7 @@ s7() {
   if [ "$s7_mode" = closing ]; then
     # C's executor ended in step 4 (PA §5.1), so it makes no commitment attempt here; the
     # process-epoch comparison's refusal of one is the Go control named below.
-    check "$ref" "the plan's operation is B's, not C's: C, its executor ended in step 4, committed nothing" not_by_c "$plan"
+    check "$ref" "the plan's one commitment entry names another controller than C, and C committed nothing since step 4: its executor ended there" not_by_c "$plan"
   fi
 
   # Step 10.
