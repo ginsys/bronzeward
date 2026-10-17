@@ -17,8 +17,9 @@
 # blocked. Step 8 releases the worker; step 9 restarts B without the flag, which runs step 3's
 # publication, and a revert of the landing, approved in the new epoch, runs as S4; step 10 unpauses
 # the control plane, marks and releases it; step 11 exits recovery mode. The step 4 controls, step
-# 9's link cut and A's attempts belong to the closing run. The run leaves recovery mode off, B
-# running and the seed automation token reissued; the served timelines and GET /recovery are kept.
+# 9's link cut and A's attempts belong to the closing run. The run leaves recovery mode off and B
+# running; the reissued automation token is kept nowhere, so .state/automation-token holds the seed
+# token the restore made unusable. The served timelines and GET /recovery are kept.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s7.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
 # Usage: scenarios/s7 run   (after scenarios/s5 run on the same up, as in the integrated run, or
@@ -222,9 +223,11 @@ claim_ended() {
 scope_reads() {
   local d="(SELECT stopped_at + interval '5 minutes' FROM recovery_epoch WHERE epoch = '$epoch')"
   s_start=$(sql "SELECT o.id FROM observation o JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis
-    WHERE o.machine = '$1' AND se.at > $d AND o.resource_version IS NOT NULL
+    WHERE o.machine = '$1' AND se.at > $d
       AND (o.unread->'identity' IS NULL OR o.unread->'runningVersion' IS NULL OR o.unread->'configuration' IS NULL)
     ORDER BY o.basis LIMIT 1") && [ -n "$s_start" ] || return 1
+  # The settle needs the resource version at its start: a first read without one can never start it.
+  [ "$(sql "SELECT count(*) FROM observation WHERE id = '$s_start' AND resource_version IS NOT NULL")" = 1 ] || return 1
   s_end=$(sql "SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
     JOIN machine_event se ON se.machine = o.machine AND se.revision = o.basis, observation st
     WHERE st.id = '$s_start' AND o.machine = '$1' AND s.purpose = 'recovery' AND o.resource_version IS NOT NULL
@@ -285,16 +288,24 @@ exited() {
     '{"facts": {}}' "$(key exit)"
 }
 # recovery_kept: GET /recovery, kept: the epoch out of recovery mode, its entry record naming both
-# backups, each with the time it was taken (entry_recorded compares those), its exit, every scope
-# normal.
+# backups, each with the time recorded as taken, its exit the recorded exit act, both scopes and
+# only those normal.
 recovery_kept() {
+  local exit_act exit_by family at
   fresh h-viewer
   answers 200 - GET /api/v1/recovery "$tok" || return 1
   cp -- "$EV/last.body" "$EV/recovery.json" || return 1
-  jq -e --arg e "$epoch" --arg db "$db_backup" --arg pb "$bao_backup" \
-    '.epoch == $e and .recoveryMode == false and .exit != null and all(.entry.restored[]; .takenAt != null)
+  exit_act=$(sql "SELECT act || ' ' || exited_by FROM recovery_exit WHERE epoch = '$epoch'") && [ -n "$exit_act" ] || return 1
+  exit_by=${exit_act#* } exit_act=${exit_act%% *}
+  jq -e --arg e "$epoch" --arg db "$db_backup" --arg pb "$bao_backup" --arg act "$exit_act" --arg by "$exit_by" \
+    --arg c "$machine_cp" --arg w "$machine_w" \
+    '.epoch == $e and .recoveryMode == false and .exit.act == $act and .exit.exitedBy == $by
       and (.entry.restored | map([.family, .backup]) | sort) == [["database", $db], ["provider", $pb]]
-      and (.scopes | length) > 1 and all(.scopes[]; .state == "normal")' "$EV/recovery.json" >/dev/null
+      and (.scopes | map([.machine, .state]) | sort) == ([[$c, "normal"], [$w, "normal"]] | sort)' "$EV/recovery.json" >/dev/null || return 1
+  while read -r family at; do
+    [ "$(sql "SELECT count(*) FROM recovery_restore WHERE epoch = '$epoch' AND family = '$family' AND taken_at = '$at'::timestamptz")" = 1 ] ||
+      return 1
+  done < <(jq -r '.entry.restored[] | "\(.family) \(.takenAt)"' "$EV/recovery.json")
 }
 
 preconditions() {
@@ -474,14 +485,14 @@ s7() {
   # Step 7: both scopes accounted with one decision after the settle floor; held reclassified; the
   # control plane paused, then both scopes marked.
   ref='S7 step 7'
-  check "$ref" "each scope's settle reads: a first read after the stop plus the maximum transport deadline, a recovery read a settle floor after it" \
+  must "$ref" "each scope's settle reads: a first read after the stop plus the maximum transport deadline, a recovery read a settle floor after it" \
     within 600 both_settled
-  check "$ref" "h-recovery accounts both scopes with one decision: 201, the control plane's blocked, the worker's unresolved" account_both
-  check "$ref" "held, its journal holding no attempt, reclassified: cancelled with no attempt" within 120 held_cancelled
+  must "$ref" "h-recovery accounts both scopes with one decision: 201, the control plane's blocked, the worker's unresolved" account_both
+  must "$ref" "held, its journal holding no attempt, reclassified: cancelled with no attempt" within 120 held_cancelled
   must "$ref" 'inject pause controlplane' "$bin/inject" pause controlplane
-  check "$ref" "the worker's mark: 201, ready, nothing missing" mark_as "$machine_w" '.state == "ready" and .missing == []' worker
+  must "$ref" "the worker's mark: 201, ready, nothing missing" mark_as "$machine_w" '.state == "ready" and .missing == []' worker
   w_mark=$marked
-  check "$ref" "its restoration observation opened the worker's one open drift record, of the held release's artifact" landing_drift
+  must "$ref" "its restoration observation opened the worker's one open drift record, of the held release's artifact" landing_drift
   call_limit=90
   check "$ref" "the control plane's mark, its node paused: 201, blocked on the observation" \
     mark_as "$machine_cp" '.state == "blocked" and (.missing | index("observation")) != null' controlplane-paused
@@ -489,7 +500,7 @@ s7() {
 
   # Step 8.
   ref='S7 step 8'
-  check "$ref" 'h-recovery releases the worker scope: 201, released' release_scope "$machine_w" worker
+  must "$ref" 'h-recovery releases the worker scope: 201, released' release_scope "$machine_w" worker
 
   # Step 9: B without the flag runs step 3's publication; a revert of the landing in the new epoch.
   ref='S7 step 9'
@@ -503,21 +514,30 @@ s7() {
   check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" s7revert
   check "$ref" 'as an unseen overwrite' approved_unseen "$plan"
   check "$ref" 'the approval is of the new epoch' same "$approval_epoch" "$epoch"
-  ds_done 9 1
+  # ds_done's checks but its bundle, which cannot be complete while the control plane is paused: the
+  # bundle and the digest read from it follow step 10's unpause.
+  check "$ref" "the plan's operation completed within four minutes with 1 attempt, 1 accepted; Applied the release from the operation, the baseline revision one more" \
+    within 240 ds_completed 1 1
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  check "$ref" "the worker's apid log records exactly one mutating request since the row began, ApplyConfiguration" \
+    one_apply "$w_log" "$w_after"
   check "$ref" 'the drift record closed reverted' same "$(sql "SELECT resolution FROM drift_record WHERE machine = '$machine_w' AND opened = $drift_rec")" reverted
 
   # Step 10.
   ref='S7 step 10'
   must "$ref" 'inject unpause controlplane' "$bin/inject" unpause controlplane
-  check "$ref" "the control plane's Talos API answers" within 120 node_talos "$TALOS_CONTROLPLANE_IP" version
-  check "$ref" "the control plane's mark: 201, ready, nothing missing" mark_as "$machine_cp" '.state == "ready" and .missing == []' controlplane
-  check "$ref" 'h-recovery releases the control plane scope: 201, released' release_scope "$machine_cp" controlplane
+  must "$ref" "the control plane's Talos API answers" within 120 node_talos "$TALOS_CONTROLPLANE_IP" version
+  outcome_bundle 'S7 step 9' ds-9
+  check 'S7 step 9' "the worker's digest is the release's artifact and its resource version moved" ds_landed
+  must "$ref" "the control plane's mark: 201, ready, nothing missing" mark_as "$machine_cp" '.state == "ready" and .missing == []' controlplane
+  must "$ref" 'h-recovery releases the control plane scope: 201, released' release_scope "$machine_cp" controlplane
 
   # Step 11.
   ref='S7 step 11'
   check "$ref" 'h-recovery exits recovery mode: 201, naming both scopes' exited
   check "$ref" 'the installation out of recovery mode, every scope normal' \
-    same "$(sql "SELECT recovery_mode || ' ' || (SELECT count(*) FROM machine WHERE scope_state <> 'normal') FROM installation_state")" 'f 0'
+    same "$(sql "SELECT count(*) || ' ' || count(*) FILTER (WHERE recovery_mode) || ' ' ||
+      (SELECT count(*) FROM machine WHERE scope_state <> 'normal') FROM installation_state")" '1 0 0'
   check "$ref" "no restored operation was retried: held's journal holds no attempt" held_cancelled
 
   # Retained evidence: both served timelines, every page, and the entry record.
