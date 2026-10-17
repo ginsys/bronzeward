@@ -26,11 +26,19 @@
 # epoch-superseded. The refusals that leave no state run inline: plan and approval on an unaccounted
 # scope, a second entry, a release of the blocked scope, an exit with it unreleased. The controls
 # that drop a comparison are Go checks, named in SKIP lines.
+# Two variants follow the run on the same up. The no-entry variant restores the database alone and
+# records no entry: C, stalled before its attempt with the owner token B's later takeover replaced,
+# makes its attempt once unpaused, and it passes (PA §14's last row, shown, not closed). The
+# older-OpenBao variant restores OpenBao to a snapshot taken before a publication that pinned new KV
+# generations, and the database to after it: after the entry the monitor reads 404 for those
+# generations and alerts at once, and a publication pinning them is refused (PA §13.3).
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s7.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
 # Usage: scenarios/s7 run       (after scenarios/s5 run on the same up, as in the integrated run, or
 #                                directly after scenarios/s4 run; S6 runs outside the integrated run)
 #        scenarios/s7 closing   (after scenarios/s4 run on a fresh up, outside the integrated run)
+#        scenarios/s7 no-entry  (after scenarios/s7 run on the same up)
+#        scenarios/s7 old-bao   (after scenarios/s7 no-entry on the same up; it leaves recovery mode on)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -38,7 +46,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s7_mode=${1:-}
-case $s7_mode in run | closing) ;; *) die "usage: scenarios/s7 run|closing" ;; esac
+case $s7_mode in run | closing | no-entry | old-bao) ;; *) die "usage: scenarios/s7 run|closing|no-entry|old-bao" ;; esac
 need docker curl jq timeout id sleep date awk wc sha256sum
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -143,15 +151,16 @@ backup_id() {
 # now_utc: the time, to the second, never ahead of the server's clock it shares.
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # entry_body: the entry's request, naming both backups with the times they were taken, the stop and
-# a reason.
+# entry_reason.
+entry_reason='S7 step 3: the database restored to T and OpenBao to its later snapshot'
 entry_body() {
-  jq -nc --arg db "$db_backup" --arg dt "$t_at" --arg pb "$bao_backup" --arg pt "$bao_at" --arg s "$stopped_at" \
+  jq -nc --arg db "$db_backup" --arg dt "$t_at" --arg pb "$bao_backup" --arg pt "$bao_at" --arg s "$stopped_at" --arg r "$entry_reason" \
     '{restored: [{family: "database", backup: $db, takenAt: $dt}, {family: "provider", backup: $pb, takenAt: $pt}],
-      stoppedAt: $s, reason: "S7 step 3: the database restored to T and OpenBao to its later snapshot"}'
+      stoppedAt: $s, reason: $r}'
 }
 # enter: h-recovery records the entry on call_port: 201, a new epoch fencing the restored one, by
-# h-recovery as recovery-admin, every machine marked and held among the operations taken over; the
-# new epoch in epoch.
+# h-recovery as recovery-admin, every machine marked and held, when set, among the operations taken
+# over; the new epoch in epoch.
 enter() {
   local who body
   fresh h-recovery
@@ -160,7 +169,7 @@ enter() {
   who=$(who_id h-recovery) && [ -n "$who" ] || return 1
   jq -e --arg p "$restored_epoch" --arg w "$who" --arg h "$held" --argjson n "$(sql "SELECT count(*) FROM machine")" \
     '.previousEpoch == $p and .epoch != $p and .enteredBy == $w and .role == "recovery-admin" and .machines == $n
-      and (.restored | map(.family) | sort) == ["database", "provider"] and (.operations | index($h)) != null' \
+      and (.restored | map(.family) | sort) == ["database", "provider"] and ($h == "" or (.operations | index($h)) != null)' \
     "$EV/last.body" >/dev/null || return 1
   epoch=$(jq -er '.epoch' "$EV/last.body")
 }
@@ -723,12 +732,232 @@ s7() {
       and any(.[]; .kind == \"scope-state\" and .entry.cause == \"exit\" and .entry.to == \"normal\")"
 }
 
+# The no-entry variant's checks.
+# b_attempted <stalls before>: held sending with one attempt and no response, and B stalled once more
+# after recording it, before sending.
+b_attempted() { op_attempts 'sending 1 0' && [ "$(b_stalls_at dispatch-attempted)" -gt "$1" ]; }
+# c_attempted: held's one attempt is C's, by its pre-restore owner token at generation 1 in the
+# restored epoch, and no ownership transition of held is recorded.
+c_attempted() {
+  same "$(sql "SELECT count(*) || ' ' || bool_and(owner = '$c_owner' AND owner_gen = 1 AND owner_epoch = '$restored_epoch')
+    FROM attempt WHERE operation = '$held'")" '1 true' &&
+    same "$(sql "SELECT count(*) FROM machine_event WHERE kind = 'ownership-transition' AND entry->>'operation' = '$held'")" 0
+}
+# not_entered: the installation in the restored epoch, out of recovery mode, and no recovery epoch
+# entered after it.
+not_entered() {
+  same "$(sql "SELECT epoch || ' ' || recovery_mode FROM installation_state")" "$restored_epoch false" &&
+    same "$(sql "SELECT count(*) FROM recovery_epoch
+      WHERE entered_at > (SELECT entered_at FROM recovery_epoch WHERE epoch = '$restored_epoch')")" 0
+}
+
+# no_entry: AP S7's "the same restore started normally, with no entry". C commits a worker plan and
+# stalls before its attempt; at T the database snapshot; after T, B takes the operation over at its
+# start and records its attempt, stalled before it sends. B is then stopped, C paused, the database
+# alone restored to T, and nothing started with -recovery-start: no entry is recorded. C, unpaused,
+# makes its attempt with the owner token B's takeover had replaced, and it passes.
+no_entry() {
+  local ref='S7 no-entry' n w_after
+  ds_ref='S7 no-entry'
+  machines
+  must "$ref" 'B stopped' kill_if_up B "$BW_B"
+  must "$ref" 'B-recovery stopped' kill_if_up B-recovery "$BW_B_RECOVERY"
+  must "$ref" "the fixture's A stopped" kill_if_up A "$BW_A"
+  must "$ref" "C's control file removed" interrupt -
+  must "$ref" "B's control file removed" interrupt_of b -
+  running "$BW_C" || must "$ref" 'inject start C' "$bin/inject" start C
+  must "$ref" 'C running' running "$BW_C"
+  call_port=$SERVER_C_PORT
+  check "$ref" 'C answers /livez' within 30 answers 204 - GET /livez ''
+  check "$ref" 'the installation out of recovery mode' same "$(sql "SELECT recovery_mode FROM installation_state")" f
+  check "$ref" 'no apply-config operation holds the worker'"'"'s scope or the cluster'"'"'s rollout slot' scope_released
+  evidence_to ne-pre || die "no pre-state: bin/evidence failed"
+  check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean ne-pre
+
+  # C commits a worker plan and stalls before its attempt.
+  ds_publish ne
+  ds_plan ne
+  n=$(stalls_at dispatch-committed)
+  must "$ref" 'C told to stall after the commitment' interrupt dispatch-committed stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" s7ne
+  must "$ref" 'the plan committed, its operation committed with no attempt; C stalls there' within 120 committed_held "$plan" "$n"
+  op=$held
+  c_owner=$(sql "SELECT owner FROM operation WHERE id = '$held'") && [ -n "$c_owner" ] || die "cannot read held's owner, C"
+
+  # At T.
+  t_at=$(now_utc)
+  must "$ref" 'inject db-snapshot s7-ne' "$bin/inject" db-snapshot s7-ne
+  restored_epoch=$(sql "SELECT epoch FROM installation_state") && [ -n "$restored_epoch" ] || die "cannot read the epoch at T"
+
+  # After T: B takes held over and records its attempt, stalled before it sends.
+  n=$(b_stalls_at dispatch-attempted)
+  must "$ref" 'B told to stall after its attempt is recorded' interrupt_of b dispatch-attempted stall
+  must "$ref" 'inject start B' "$bin/inject" start B
+  check "$ref" 'B took the operation over at its start, one ownership transition to generation 2' within 60 started_takeover
+  check "$ref" 'B recorded its attempt and stalls before sending: sending, one attempt, no response' within 120 b_attempted "$n"
+  check "$ref" "the one attempt is B's at generation 2, after its classification safe to retry" retried_by_taker
+
+  # The restore, started normally: B stopped, C paused where it stalled, the database alone restored.
+  must "$ref" 'inject pause C' "$bin/inject" pause C
+  must "$ref" 'C is paused' paused "$BW_C"
+  must "$ref" 'inject kill B' "$bin/inject" kill B
+  must "$ref" 'B is not running' stopped "$BW_B"
+  must "$ref" 'B-recovery is not running' stopped "$BW_B_RECOVERY"
+  must "$ref" "B's control file removed" interrupt_of b -
+  must "$ref" "C's control file removed" interrupt -
+  check "$ref" 'B sent nothing: no mutating request on the worker since the plan' none_sent
+  must "$ref" 'inject db-restore s7-ne, OpenBao left as it is' "$bin/inject" db-restore s7-ne
+  check "$ref" 'the database is at T: the restored epoch, not in recovery mode' not_entered
+  check "$ref" "held as at T: committed, no attempt, C's at generation 1 in the restored epoch, no ownership transition" held_restored
+  check "$ref" "held's owner token is C's, which B's takeover had replaced" \
+    same "$(sql "SELECT owner FROM operation WHERE id = '$held'")" "$c_owner"
+
+  # No entry: C's pre-restore token passes.
+  w_pre=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  must "$ref" 'inject unpause C' "$bin/inject" unpause C
+  must "$ref" 'C running, not paused' running "$BW_C"
+  check "$ref" "C's pre-restore owner token passes: held's one attempt is C's at generation 1 in the restored epoch" within 120 c_attempted
+  check "$ref" "the plan's operation completed within four minutes with 1 attempt, 1 accepted; Applied the release from the operation, the baseline revision one more" \
+    within 240 ds_completed 1 1
+  w_after=$(apid_log "$TALOS_WORKER_IP") || die "cannot read the worker's apid log"
+  check "$ref" "the worker's apid log records exactly one mutating request since the restore, C's ApplyConfiguration" \
+    one_apply "$w_pre" "$w_after"
+  check "$ref" 'no entry was recorded: the restored epoch, out of recovery mode' not_entered
+  outcome_bundle "$ref" s7-ne
+  check "$ref" "the worker's digest is the release's artifact and its resource version moved" ds_landed
+  end_state='no entry, C running'
+}
+
+# The older-OpenBao variant's checks. The KV generations the import extracted after OpenBao's
+# snapshot: their dependency statuses' ids, space-separated, in old_deps.
+old_deps='' ing_old='' rel_old='' old_a0=''
+# old_pinned: rel_old pins the import's KV generations, at least one, each retained.
+old_pinned() {
+  old_deps=$(sql "SELECT string_agg(DISTINCT s.id, ' ' ORDER BY s.id) FROM dependency d
+    JOIN dependency_status s USING (provider, object, version, created)
+    WHERE d.release = '$rel_old' AND d.provider = 'kv' AND s.object LIKE 'gen/$cluster/$ing_old/%'") && [ -n "$old_deps" ] &&
+    same "$(sql "SELECT count(*) FILTER (WHERE class <> 'retained') FROM dependency_status
+      WHERE id = ANY (string_to_array('$old_deps', ' '))")" 0
+}
+# old_absent: each of old_deps observed since the entry, unknown, absent.
+old_absent() {
+  same "$(sql "SELECT count(*) FILTER (WHERE s.class = 'unknown' AND s.reason = 'absent' AND s.observed_from > e.entered_at) || ' ' || count(*)
+    FROM dependency_status s, recovery_epoch e WHERE e.epoch = '$epoch' AND s.id = ANY (string_to_array('$old_deps', ' '))")" \
+    "$(wc -w <<<"$old_deps") $(wc -w <<<"$old_deps")"
+}
+# old_alerted: since old_a0, one alert of each of old_deps, a regression of reason absent naming
+# rel_old, and no other alert of them.
+old_alerted() {
+  same "$(sql "SELECT count(*) FILTER (WHERE kind = 'regression' AND reason = 'absent' AND '$rel_old' = ANY (releases))
+      || ' ' || count(*) || ' ' || count(DISTINCT dependency)
+    FROM dependency_alert WHERE seq > $old_a0 AND dependency = ANY (string_to_array('$old_deps', ' '))")" \
+    "$(wc -w <<<"$old_deps") $(wc -w <<<"$old_deps") $(wc -w <<<"$old_deps")"
+}
+# pub_failed: pub_op failed.
+pub_failed() { same "$(sql "SELECT state FROM operation WHERE id = '$pub_op'")" failed; }
+# old_refused: a new draft, changing nothing, published as h-publisher on call_port: 202, then the
+# operation failed 503 dependency-unavailable naming one of the import's generations, unknown,
+# absent; nothing released.
+old_refused() {
+  local deps
+  draft_by h-author old-refused || return 1
+  fresh h-publisher
+  answers 202 - POST "/api/v1/drafts/$draft/publications" "$tok" '{}' "$(key publication-old-refused)" "$etag" || return 1
+  pub_op=$(jq -er '.id' "$EV/last.body") || return 1
+  within 150 pub_failed || return 1
+  same "$(sql "SELECT count(*) FROM release WHERE operation = '$pub_op'")" 0 || return 1
+  deps=$(sql "SELECT json_agg(object) FROM dependency_status WHERE id = ANY (string_to_array('$old_deps', ' '))") || return 1
+  fresh h-viewer
+  answers_with ".state == \"failed\" and .error.status == 503 and .error.type == \"urn:bronzeward:problem:dependency-unavailable\"
+      and .error.dependency.provider == \"kv\" and .error.dependency.class == \"unknown\" and .error.dependency.reason == \"absent\"
+      and ($deps | index(.error.dependency.object)) != null" 200 - GET "/api/v1/operations/$pub_op" "$tok"
+}
+
+# old_bao: AP S7's variant with the OpenBao snapshot older than the database (PA §13.3). OpenBao's
+# snapshot first; then an import of the worker, whose marked file content becomes new KV
+# generations, published, so its release pins them; then the database snapshot at T. Both restored
+# and the entry recorded through B-recovery, whose monitor runs once the entry commits: each pinned
+# generation reads 404 and alerts at once, once. B, restarted normally with recovery mode still on,
+# refuses a publication pinning them. The run ends in recovery mode with B running.
+old_bao() {
+  local ref='S7 older OpenBao'
+  machines
+  must "$ref" 'C stopped' kill_if_up C "$BW_C"
+  must "$ref" 'B-recovery stopped' kill_if_up B-recovery "$BW_B_RECOVERY"
+  must "$ref" "the fixture's A stopped" kill_if_up A "$BW_A"
+  must "$ref" "B's control file removed" interrupt_of b -
+  must "$ref" "C's control file removed" interrupt -
+  running "$BW_B" || must "$ref" 'inject start B' "$bin/inject" start B
+  must "$ref" 'B running' running "$BW_B"
+  call_port=$SERVER_B_PORT
+  check "$ref" 'B answers /livez' within 30 answers 204 - GET /livez ''
+  check "$ref" 'the installation out of recovery mode' same "$(sql "SELECT recovery_mode FROM installation_state")" f
+
+  # OpenBao's snapshot, then the publication pinning generations it does not hold, then T.
+  bao_at=$(now_utc)
+  must "$ref" 'inject bao-snapshot s7-old' "$bin/inject" bao-snapshot s7-old
+  must "$ref" 'h-author opens a draft: 201' draft_by h-author old
+  fresh_author
+  must "$ref" "h-author imports the worker into it, its file secret marked: the claim released, the draft's ETag moved" \
+    ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')" old
+  ing_old=${ingested[-1]}
+  must "$ref" "the import's generations written to OpenBao after its snapshot" differ "$(claim_generations "$ing_old")" 0
+  must "$ref" "h-publisher publishes the draft: 202, one release, the worker's Desired" publish_by h-publisher old
+  rel_old=$new_release
+  must "$ref" "the release pins the import's KV generations, each retained" old_pinned
+  t_at=$(now_utc)
+  must "$ref" 'inject db-snapshot s7-old' "$bin/inject" db-snapshot s7-old
+  restored_epoch=$(sql "SELECT epoch FROM installation_state") && [ -n "$restored_epoch" ] || die "cannot read the epoch at T"
+
+  # Both restored, OpenBao to the older snapshot; the entry through B-recovery.
+  must "$ref" 'inject kill B' "$bin/inject" kill B
+  must "$ref" 'B is not running' stopped "$BW_B"
+  must "$ref" 'C is not running' stopped "$BW_C"
+  must "$ref" "the fixture's A is not running" stopped "$BW_A"
+  stopped_at=$(now_utc)
+  must "$ref" 'inject db-restore s7-old' "$bin/inject" db-restore s7-old
+  must "$ref" 'inject bao-restore s7-old' "$bin/inject" bao-restore s7-old
+  db_backup=$(backup_id pg-s7-old.dump) || die "cannot read the database backup"
+  bao_backup=$(backup_id bao-s7-old.snap) || die "cannot read the OpenBao backup"
+  check "$ref" "OpenBao is older than the database: the import's generations are gone from it, the release still recorded" \
+    same "$(claim_generations "$ing_old") $(sql "SELECT count(*) FROM release WHERE id = '$rel_old'")" '0 1'
+  must "$ref" 'inject start B-recovery' "$bin/inject" start B-recovery
+  call_port=$SERVER_B_PORT
+  check "$ref" 'B-recovery answers /livez' within 30 answers 204 - GET /livez ''
+  old_a0=$(sql "SELECT coalesce(max(seq), 0) FROM dependency_alert") && [ -n "$old_a0" ] || die "cannot read the alerts"
+  held=''
+  entry_reason='S7 older OpenBao: the database restored to T and OpenBao to a snapshot taken before it'
+  check "$ref" 'h-recovery records the entry naming the database and provider backups: 201, a new epoch, every machine' enter
+  [ -n "$epoch" ] || die "s7: $ref: no entry; nothing after it can run"
+  check "$ref" 'the installation in the new epoch, in recovery mode; the entry records the stop and both backups' entry_recorded
+  check "$ref" "within two monitor intervals of the entry, each pinned generation observed since it: unknown, absent (OpenBao's 404)" \
+    within 150 old_absent
+  check "$ref" 'one alert of each, at once: a regression, absent, naming the release' old_alerted
+  sleep 70
+  check "$ref" 'a monitor interval later, still one alert of each: unknown alerts again only after 15 minutes' old_alerted
+
+  # B, started normally with recovery mode on, runs the publish job and refuses it.
+  must "$ref" 'inject kill B-recovery' "$bin/inject" kill B-recovery
+  must "$ref" 'inject start B' "$bin/inject" start B
+  check "$ref" 'B answers /livez' within 30 answers 204 - GET /livez ''
+  check "$ref" "a publication pinning them, a new draft changing nothing: failed 503 dependency-unavailable naming one, unknown, absent; nothing released" \
+    old_refused
+  end_state='recovery mode on, B running'
+}
+
 withheld+=("$BW_CANARY")
-preconditions
-before_t
-at_t
-after_t
-s7
+end_state='recovery mode exited, B running'
+case $s7_mode in
+  no-entry) no_entry ;;
+  old-bao) old_bao ;;
+  *)
+    preconditions
+    before_t
+    at_t
+    after_t
+    s7
+    ;;
+esac
 rm -f -- "$EV/last.body" "$EV/last.headers"
 # The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
 ev_log=$(mktemp)
@@ -770,5 +999,5 @@ else
   result FAIL 'S7 evidence' 'bin/evidence failed'
 fi
 rm -f -- "$ev_log"
-say "s7 $s7_mode: $failed failed; recovery mode exited, B running; evidence in $EV, bundle ${final:-none}"
+say "s7 $s7_mode: $failed failed; $end_state; evidence in $EV, bundle ${final:-none}"
 [ "$failed" -eq 0 ]
