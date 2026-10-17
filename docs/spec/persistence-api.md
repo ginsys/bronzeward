@@ -416,7 +416,10 @@ They are held apart **(choice §17.29)**.
   committed. A retry gathers new evidence (execution and recovery §3.3),
   which reads it again, and the retry's attempt uses that new version: each
   version binds one evidence observation and the attempt made on it, so a
-  rotation before a retry is picked up by that retry. An ingestion records it,
+  rotation before a retry is picked up by that retry. An attempt made again
+  after its attempt transaction failed reads it again too; when that read is
+  not the version the commitment's evidence read, comparison 3 refuses the
+  attempt and the operation is observed again before anything is sent. An ingestion records it,
   with the endpoint dialled, as an event of its `ingest` operation (T7, read
   through `GET /operations/{id}/events`), committed once the read returns a
   version and before the node is dialled, so it is kept whether the
@@ -3274,7 +3277,10 @@ each (design §7.7 consequences):
   and its attempt, the attempt still using the version the observation used,
   with a control that reads the latest version at send and must then fail,
   and a rotation before a retry, the retry's evidence and attempt both using
-  the new version;
+  the new version, and a rotation before an attempt made again after its
+  transaction failed (another version number, or the same number with another
+  `created_time`), refused by comparison 3 and sent once on a new observation
+  read with the new version;
   `TestLiveRoleProbe` asserting `PermissionDenied` for `os:reader` and
   `os:operator` on `MachineConfig`, with a control that probes the `os:admin`
   configuration in the `os:reader` slot and must then fail; the executor's observation client held to its read

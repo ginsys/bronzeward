@@ -510,6 +510,66 @@ func TestExecutorAttemptNotRecordedSendsNothing(t *testing.T) {
 	}
 }
 
+// ER §3.2 and §3.3 comparison 3, PA §3.3: an attempt made again after its transaction failed reads
+// the access again. When it moved since the commitment's evidence was observed (another version
+// number, or the same number with another created_time after the metadata was deleted and written
+// again), comparison 3 refuses the attempt, the operation is observed and classified again with the
+// new access, and the one request rests on that observation, not on the earlier evidence.
+func TestExecutorAttemptAfterAccessRotation(t *testing.T) {
+	t.Parallel()
+	for name, move := range map[string]func(*provider.TalosAccessVersion){
+		"another version":                        func(v *provider.TalosAccessVersion) { v.Version++ },
+		"the same version, another created time": func(v *provider.TalosAccessVersion) { v.CreatedTime = v.CreatedTime.Add(time.Hour) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			attemptAfterAccessRotation(t, move)
+		})
+	}
+}
+
+func attemptAfterAccessRotation(t *testing.T, move func(*provider.TalosAccessVersion)) {
+	xe := newExecEnv(t)
+	var armed atomic.Bool
+	armed.Store(true)
+	var moved provider.TalosAccessVersion // set under xe.x.mu
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{commit: func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRow(`SELECT count(*) FROM attempt`).Scan(&n); err == nil && n > 0 && armed.CompareAndSwap(true, false) {
+			_ = tx.Rollback()
+			xe.x.mu.Lock()
+			moved = xe.x.access.Version()
+			move(&moved)
+			xe.x.access = provider.NewTalosAccess(moved, xe.x.access.Talosconfig())
+			xe.x.mu.Unlock()
+			return errors.New("the attempt's commit failed")
+		}
+		return tx.Commit()
+	}})
+	a.startExecutor()
+	defer stopping(a, stop)
+	waitIdle(t, idle, 1)
+	xe.approveThrough(t, a)
+	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+	if n := len(xe.node.AppliedRequests()); n != 1 {
+		t.Fatalf("%d requests", n)
+	}
+	xe.x.mu.Lock()
+	v := moved
+	xe.x.mu.Unlock()
+	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
+		WHERE o.access_path = $1 AND o.access_version = $2 AND o.access_created = $3`, v.Path, v.Version,
+		v.CreatedTime.UTC().Format(time.RFC3339Nano)); n != 1 {
+		t.Fatalf("the attempt does not rest on an observation read with access %+v", v)
+	}
+	if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE kind = 'refusal' AND entry->>'comparison' = '3'
+		AND entry->>'cause' = 'the use-time check read another Talos access than the evidence'`); n != 1 {
+		t.Fatalf("%d comparison 3 refusals for the moved access", n)
+	}
+}
+
 // revokeAtCommitment runs the executor on the plan and revokes its approval at the commitment: while
 // the commitment transaction holds its locks (held, DS row 003), the revocation waiting for it, or
 // once it has committed (row 004). With control, the attempt transaction's comparison 1 is skipped.

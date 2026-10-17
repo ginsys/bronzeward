@@ -258,7 +258,7 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	}
 	// The use-time check recorded with the evidence holds for the plan's validity window at this
 	// commitment, or the dispatch checks again.
-	if cause, err := a.useTimeCheckCause(ctx, tx, machine, plan, at); err != nil {
+	if cause, err := a.useTimeCheckCause(ctx, tx, machine, plan, obs.String, at); err != nil {
 		return r, machine, err
 	} else if cause != "" {
 		return r, machine, fmt.Errorf("commitment of plan %s: %s: %w", plan, cause, errNoEvidence)

@@ -371,7 +371,12 @@ persistence's (see `persistence-api.md`).
    operation, it may instead equal the bound artifact's digest (DS row 023,
    `TestEvidenceMayShowArtifactOnlyOnRetry`). A commitment whose evidence
    shows another digest is refused, and §6.1 is applied to that evidence
-   (below);
+   (below). The latest use-time check must have read the Talos access version
+   the evidence read (path, version and `created_time`, §3.1 item 2): an
+   attempt made again after its attempt transaction failed to commit reads the
+   access again, and one that moved since the evidence is refused, so the
+   operation is observed and classified again (§5) with the new version and
+   never sends on evidence another version read;
 4. this operation takes the machine's coordination scope, and no other
    operation on that scope is `committed`, `sending`, `verifying` or
    `unresolved` (on PostgreSQL, a partial unique index; DS row 010, control row

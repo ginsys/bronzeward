@@ -235,8 +235,9 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 	if err != nil {
 		return r, machine, plan, err
 	}
-	// The use-time check this dispatch recorded holds for the plan's validity window.
-	checkCause, err := a.useTimeCheckCause(ctx, tx, machine, plan, at)
+	// The use-time check this dispatch recorded holds for the plan's validity window and read the
+	// evidence's access.
+	checkCause, err := a.useTimeCheckCause(ctx, tx, machine, plan, obs, at)
 	if err != nil {
 		return r, machine, plan, err
 	}
