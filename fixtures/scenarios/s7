@@ -95,9 +95,10 @@ paused() {
   state=$(docker inspect --format '{{.State.Paused}}' "$id") || return 2
   [ "$state" = true ]
 }
-# c_logged <line>: C's log holds the line at least once.
+# c_logged <line>: C's log holds the line at least once. grep reads the whole log (--count, not
+# --quiet), so docker logs is never cut off by a closed pipe, which pipefail would read as a failure.
 c_logged() {
-  docker logs "${verified_container_ids[$BW_C]}" 2>&1 | grep --quiet --fixed-strings -- "$1"
+  [ "$(docker logs "${verified_container_ids[$BW_C]}" 2>&1 | grep --count --fixed-strings -- "$1" || true)" -gt 0 ]
 }
 # kill_if_up <A|B|C|B-recovery> <container>: the instance killed if it runs, then read stopped.
 kill_if_up() {
