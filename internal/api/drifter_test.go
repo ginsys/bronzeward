@@ -41,12 +41,15 @@ func (le *loopEnv) appliedIsNode(t *testing.T) {
 		FROM plan p WHERE s.machine = $1 AND p.id = $2`, le.machine, le.pid, digest[:])
 }
 
-// driftStarts counts the machine's drift observations begun, and those begun for no plan.
+// driftStarts counts the machine's drift observations begun, and those begun for no plan. One
+// statement takes both, so a pass of a running loop cannot fall between the two counts.
 func (le *loopEnv) driftStarts(t *testing.T) (all, planless int) {
 	t.Helper()
-	return count(t, le.db, `SELECT count(*) FROM observation_start WHERE machine = $1 AND purpose = 'drift'`, le.machine),
-		count(t, le.db, `SELECT count(*) FROM observation_start WHERE machine = $1 AND purpose = 'drift' AND plan IS NULL
-			AND operation IS NULL`, le.machine)
+	if err := le.db.QueryRow(`SELECT count(*), count(*) FILTER (WHERE plan IS NULL AND operation IS NULL)
+		FROM observation_start WHERE machine = $1 AND purpose = 'drift'`, le.machine).Scan(&all, &planless); err != nil {
+		t.Fatal(err)
+	}
+	return all, planless
 }
 
 // passUntil waits for passes of the loop until cond holds.
