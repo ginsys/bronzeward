@@ -1684,6 +1684,21 @@ CREATE TABLE scope_release (
 );
 CALL make_immutable('scope_release');
 
+-- The exit from recovery mode (execution and recovery §7.6): at most one per epoch, by the
+-- recovery-admin who left it under its act, with its facts. Leaving ends the recovery timeline; the
+-- epoch stays current until the next entry.
+CREATE TABLE recovery_exit (
+  epoch          text PRIMARY KEY REFERENCES recovery_epoch (epoch),
+  exited_by      text NOT NULL,
+  exited_by_kind text NOT NULL GENERATED ALWAYS AS ('human') STORED,
+  role           text NOT NULL CHECK (role = 'recovery-admin'),
+  act            text NOT NULL UNIQUE REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  facts          jsonb NOT NULL CHECK (jsonb_typeof(facts) = 'object'),
+  at             timestamptz NOT NULL,
+  FOREIGN KEY (exited_by, exited_by_kind) REFERENCES principal (id, kind)
+);
+CALL make_immutable('recovery_exit');
+
 -- The scope and rollout slot are released only on a terminal state, and never while a recorded
 -- attempt is unaccounted for (execution and recovery §8 invariant 5): an operation reaches
 -- completed, failed or rejected only with every attempt accounted. The accounting is written in

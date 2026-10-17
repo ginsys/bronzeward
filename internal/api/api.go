@@ -110,6 +110,7 @@ type options struct {
 	extra          []*route                                                                             // routes beyond §9.2
 	noKeyLock      bool                                                                                 // the key-lock control (§7.2, §16)
 	noRevokerCheck bool                                                                                 // T5c's revoking-human lock control
+	shareExit      bool                                                                                 // the exit's installation-lock control: FOR SHARE in place of FOR UPDATE (T11, §16)
 	noActOrder     bool                                                                                 // the act-order lock control (GET /acts)
 	noDraftLock    bool                                                                                 // the draft read-lock control (GET /drafts)
 	noEpochTerm    bool                                                                                 // the epoch-term control at ingestion start (§5.1, §16)
@@ -330,6 +331,11 @@ func (a *API) handle(rt *route) http.HandlerFunc {
 		// still current, so nothing else is recorded or disclosed (§12.2).
 		if a.d.preEntry.Load() && rt.pattern != entryPattern {
 			a.problem(w, q, preEntryRefusal())
+			return
+		}
+		// After it, the acts a recovery start does not serve wait for the normal restart (§12.2).
+		if a.d.recoveryStart && rt.normalStartOnly {
+			a.problem(w, q, normalStartRefusal())
 			return
 		}
 		// A process started without the flag refuses the entry before it records anything, its

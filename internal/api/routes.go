@@ -15,6 +15,7 @@ type route struct {
 	humanOnly       bool        // automation is refused whatever its roles (§10.3)
 	ifMatch         bool        // If-Match is required
 	exclusive       bool        // the transaction takes the installation state FOR UPDATE (§5)
+	normalStartOnly bool        // a recovery start refuses it after its entry too (ruling X3, §12.2)
 	action          string      // the act's action (§10.5)
 	// keyed names the body member that carries unextracted input: the request is fingerprinted
 	// with the digest key (§7.1), its input implements keyedInput, and that member is left out
@@ -67,6 +68,8 @@ func routes() []*route {
 	}
 	human := func(rt *route) *route { rt.humanOnly = true; return rt }
 	ifm := func(rt *route) *route { rt.ifMatch = true; return rt }
+	exclusive := func(rt *route) *route { rt.exclusive = true; return rt }
+	normal := func(rt *route) *route { rt.normalStartOnly = true; return rt }
 	const post, put, del = http.MethodPost, http.MethodPut, http.MethodDelete
 	author, publisher, approver, recovery := auth.Author, auth.Publisher, auth.Approver, auth.RecoveryAdmin
 
@@ -88,7 +91,7 @@ func routes() []*route {
 		read(g("/releases/{id}/machines/{m}/review"), getReview),
 		read(g("/plans"), listPlans), read(g("/plans/{id}"), getPlan), read(g("/approvals/{id}"), getApproval), read(g("/operations"), listOperations),
 		read(g("/operations/{id}"), getOperation), read(g("/operations/{id}/events"), getOperationEvents),
-		read(g("/acts"), listActs), g("/recovery"),
+		read(g("/acts"), listActs), read(g("/recovery"), getRecovery),
 		read(g("/dependencies"), listDependencies), read(g("/dependencies/{id}"), getDependency),
 		read(g("/dependencies/{id}/releases"), dependencyReleases), read(g("/dependencies/{id}/alerts"), listAlerts(true)),
 		read(g("/dependency-alerts"), listAlerts(false)),
@@ -114,15 +117,15 @@ func routes() []*route {
 	rs = append(rs,
 		draftDiscard().on(ifm(m(post, "/drafts/{id}/discard", author))),
 		publicationRequest().on(ifm(m(post, "/drafts/{id}/publications", publisher))),
-		planCreation().on(m(post, "/plans", publisher)),
+		normal(planCreation().on(m(post, "/plans", publisher))),
 		// The creator is a publisher (choice §17.22); whether this one created the plan is the
 		// handler's check, in its transaction (§10.3).
 		planCancellation().on(m(post, "/plans/{id}/cancellations", publisher, approver, recovery)),
-		planApproval().on(human(m(post, "/plans/{id}/approvals", approver))),
+		normal(planApproval().on(human(m(post, "/plans/{id}/approvals", approver)))),
 		approvalRevocation().on(m(post, "/approvals/{id}/revocations", approver, recovery)),
 		machineFreeze().on(m(post, "/machines/{id}/freezes", author, publisher, approver, recovery)),
-		machineUnfreeze().on(m(post, "/machines/{id}/unfreezes", approver)),
-		recoveryEntry(), human(m(post, "/recovery/exits", recovery)),
+		normal(machineUnfreeze().on(m(post, "/machines/{id}/unfreezes", approver))),
+		recoveryEntry(), exclusive(exitRoute().on(human(m(post, exitPattern, recovery)))),
 		scopeMarkRoute().on(human(m(post, "/recovery/scopes/{machine}/marks", recovery))),
 		scopeReleaseRoute().on(human(m(post, "/recovery/scopes/{machine}/releases", recovery))),
 		scopeAccountingRoute().on(human(m(post, "/recovery/accountings", recovery))),
