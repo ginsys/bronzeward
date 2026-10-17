@@ -23,6 +23,13 @@ type Owner struct {
 	noEpochTerm, noProcessEpoch bool
 }
 
+// WithoutProcessEpoch is o with its process-epoch comparison dropped: that comparison's control
+// (persistence-api §16), never used in production. internal/api's control reaches it.
+func (o Owner) WithoutProcessEpoch() Owner {
+	o.noProcessEpoch = true
+	return o
+}
+
 // Timers are the claim's lease and absolute expiry (compilation §3.2), from the configuration.
 type Timers struct{ Lease, AbsoluteExpiry time.Duration }
 
@@ -86,7 +93,7 @@ type execer interface {
 // expiry t.AbsoluteExpiry from now (T11's claim half), in the caller's transaction. Both run from
 // the database's clock at the insert, not the transaction's start, so a lock wait before it does
 // not consume the lease. The INSERT selects from installation_state, so a process whose epoch is
-// not current creates nothing.
+// not current creates nothing, unless o's control dropped that comparison.
 func Create(ctx context.Context, tx *sql.Tx, o Owner, t Timers, c Claim, principal, key string) error {
 	if o.ID == "" || o.Epoch == "" || c.Gen != 1 {
 		return errors.New("staging: a claim is created by an owner with its epoch, at generation 1")
@@ -94,11 +101,15 @@ func Create(ctx context.Context, tx *sql.Tx, o Owner, t Timers, c Claim, princip
 	if t.Lease <= 0 || t.Lease >= t.AbsoluteExpiry {
 		return errors.New("staging: the lease must be positive and shorter than the absolute expiry")
 	}
+	current := `epoch = $4`
+	if o.noProcessEpoch {
+		current = `$4::text IS NOT NULL` // $4 is still the claim's owner epoch
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until,
 		expires_at, principal, idempotency_key, cluster, machine, draft, kind, review, created_at)
 		SELECT $1, $2, 'held', $3, 1, $4, at.t + $5::bigint * interval '1 microsecond',
 		at.t + $6::bigint * interval '1 microsecond', $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), at.t
-		FROM installation_state, (SELECT clock_timestamp() AS t) at WHERE epoch = $4`,
+		FROM installation_state, (SELECT clock_timestamp() AS t) at WHERE `+current,
 		c.ID, c.Mode, o.ID, o.Epoch, t.Lease.Microseconds(), t.AbsoluteExpiry.Microseconds(), principal, key, c.Cluster, c.Machine,
 		c.Draft, c.Kind, c.Review)
 	if err != nil {

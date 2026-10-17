@@ -38,11 +38,17 @@ type operationLock struct {
 
 // lockOperation takes those locks for operation, which must be an apply-config operation.
 func (a *API) lockOperation(ctx context.Context, tx *sql.Tx, operation string) (operationLock, error) {
+	return a.lockOperationAs(ctx, tx, operation, false)
+}
+
+// lockOperationAs is lockOperation; takeover is the takeover's, the one caller whose process-epoch
+// comparison its control (options.noProcessEpoch) drops.
+func (a *API) lockOperationAs(ctx context.Context, tx *sql.Tx, operation string, takeover bool) (operationLock, error) {
 	l := operationLock{id: operation}
 	if err := tx.QueryRowContext(ctx, `SELECT epoch FROM installation_state FOR SHARE`).Scan(&l.current); err != nil {
 		return l, err
 	}
-	if a.superseded(l.current) {
+	if l.current != a.d.owner.Epoch && !(takeover && a.o.noProcessEpoch) {
 		return l, errNotController
 	}
 	// An operation's machine and plan never change, so they are read before the machine's lock.
@@ -198,7 +204,7 @@ func (a *API) takeOverTx(ctx context.Context, tx *sql.Tx, operation string, gene
 	if a.d.owner.ID == "" {
 		return r, errNotController
 	}
-	l, err := a.lockOperation(ctx, tx, operation)
+	l, err := a.lockOperationAs(ctx, tx, operation, true)
 	if err != nil {
 		return r, err
 	}

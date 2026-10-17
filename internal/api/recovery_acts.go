@@ -49,8 +49,8 @@ func operationMachine(ctx context.Context, tx *sql.Tx, operation string) (string
 }
 
 // lockRecoveryAct takes the machine FOR UPDATE, the requesting identity's principal FOR SHARE and
-// then the operation FOR UPDATE, answering the operation's lock.
-func (a *API) lockRecoveryAct(ctx context.Context, tx *sql.Tx, q *request, operation, machine string) (operationLock, error) {
+// then the operation FOR UPDATE, answering the operation's lock; takeover is lockOperationAs's.
+func (a *API) lockRecoveryAct(ctx context.Context, tx *sql.Tx, q *request, operation, machine string, takeover bool) (operationLock, error) {
 	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM machine WHERE id = $1 FOR UPDATE`, machine); err != nil {
 		return operationLock{}, err
 	}
@@ -61,7 +61,7 @@ func (a *API) lockRecoveryAct(ctx context.Context, tx *sql.Tx, q *request, opera
 	if revoked {
 		return operationLock{}, refuse(http.StatusForbidden, "identity-revoked", "")
 	}
-	return a.lockOperation(ctx, tx, operation)
+	return a.lockOperationAs(ctx, tx, operation, takeover)
 }
 
 // conflictOf answers a transaction's refusal as 409 conflict naming the transaction.
@@ -112,7 +112,7 @@ func requestTakeover(ctx context.Context, a *API, tx *sql.Tx, q *request) (resul
 	if err != nil {
 		return result{}, err
 	}
-	if _, err := a.lockRecoveryAct(ctx, tx, q, operation, machine); err != nil {
+	if _, err := a.lockRecoveryAct(ctx, tx, q, operation, machine, true); err != nil {
 		return result{}, err
 	}
 	b := &takeoverBody{Operation: operation, RequestedBy: q.principal.ID, Role: string(q.role), Reason: in.Reason, Act: q.actID,
@@ -209,7 +209,7 @@ func decideAccounting(ctx context.Context, a *API, tx *sql.Tx, q *request) (resu
 		return result{}, refuse(http.StatusNotFound, "not-found", "no such observation of the operation's machine").
 			with("operation", operation)
 	}
-	if _, err := a.lockRecoveryAct(ctx, tx, q, operation, machine); err != nil {
+	if _, err := a.lockRecoveryAct(ctx, tx, q, operation, machine, false); err != nil {
 		return result{}, err
 	}
 	b := &accountingBody{Operation: operation, Attempt: attempt, DecidedBy: q.principal.ID, Role: string(q.role), Start: in.Start,
@@ -273,7 +273,7 @@ func resolveByDecision(ctx context.Context, a *API, tx *sql.Tx, q *request) (res
 	if err != nil {
 		return result{}, err
 	}
-	l, err := a.lockRecoveryAct(ctx, tx, q, operation, machine)
+	l, err := a.lockRecoveryAct(ctx, tx, q, operation, machine, false)
 	if err != nil {
 		return result{}, err
 	}
