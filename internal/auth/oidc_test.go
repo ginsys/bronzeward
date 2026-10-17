@@ -137,6 +137,24 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) verifier() *Verifier { return NewVerifier(f.cfg, f.db, Discover(f.cfg.OIDC)) }
 
+// recovered authenticates h until it succeeds or ctx ends, returning the last error. go-oidc
+// (v3.21.0 jwks.go:213-225) wakes a key set fetch's waiters before it frees that fetch, so a
+// request arriving in between is answered with the finished fetch's error without fetching; a
+// later request fetches again.
+func recovered(ctx context.Context, v *Verifier, h string) error {
+	for {
+		_, err := v.Authenticate(ctx, h)
+		if err == nil || ctx.Err() != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func (f *fixture) bearer(t *testing.T, human, defect string) string {
 	t.Helper()
 	tok, err := f.iss.Mint(human, defect, time.Now())
@@ -298,7 +316,7 @@ func TestStalledKeySetFetchRecovers(t *testing.T) {
 	f.stallJWKS.Store(false)
 	ctx, cancel = context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
-	if _, err := v.Authenticate(ctx, h); err != nil {
+	if err := recovered(ctx, v, h); err != nil {
 		t.Fatalf("key set endpoint answering again: %v", err)
 	}
 }
@@ -336,8 +354,9 @@ func TestKeySetRefetchIsRateLimited(t *testing.T) {
 	}
 }
 
-// A key set answer go-oidc rejects is a failed fetch: it starts no refetch interval, so the next
-// request fetches again once the issuer answers properly.
+// A key set answer go-oidc rejects is a failed fetch: it starts no refetch interval, so a request
+// fetches again once the issuer answers properly. The retries end within seconds, well inside the
+// minute a limit would refuse every fetch for.
 func TestUndecodableKeySetSetsNoLimit(t *testing.T) {
 	for name, body := range map[string]string{
 		"truncated":          `{"keys":[`,
@@ -353,7 +372,9 @@ func TestUndecodableKeySetSetsNoLimit(t *testing.T) {
 				t.Fatal("accepted with an undecodable key set")
 			}
 			f.jwksBody.Store("")
-			if _, err := v.Authenticate(t.Context(), h); err != nil {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			if err := recovered(ctx, v, h); err != nil {
 				t.Fatalf("after the key set recovered: %v", err)
 			}
 		})
