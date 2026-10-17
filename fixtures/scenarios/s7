@@ -836,7 +836,7 @@ no_entry() {
 
 # The older-OpenBao variant's checks. The KV generations the import extracted after OpenBao's
 # snapshot: their dependency statuses' ids, space-separated, in old_deps.
-old_deps='' ing_old='' rel_old='' old_a0=''
+old_deps='' ing_old='' rel_old='' old_a0='' old_seen=''
 # old_pinned: rel_old pins the import's KV generations, at least one, each retained.
 # profile_drops <who> <name> <fragment>: s5's step of the same name. The workers profile, under the
 # draft's ETag, listing its head's fragment revisions but <fragment>'s: 200, the ETag replaced. The
@@ -876,6 +876,22 @@ old_absent() {
     FROM dependency_status s, recovery_epoch e WHERE e.epoch = '$epoch' AND s.id = ANY (string_to_array('$old_deps', ' '))")" \
     "$(wc -w <<<"$old_deps") $(wc -w <<<"$old_deps")"
 }
+# old_reobserved: each of old_deps recorded by a monitor pass after old_seen, still unknown, absent.
+old_reobserved() {
+  same "$(sql "SELECT count(*) FILTER (WHERE recorded_at > '$old_seen' AND class = 'unknown' AND reason = 'absent')
+    FROM dependency_status WHERE id = ANY (string_to_array('$old_deps', ' '))")" "$(wc -w <<<"$old_deps")"
+}
+# has_generations <claim>: claim_generations read, a count above zero.
+has_generations() {
+  local n
+  n=$(claim_generations "$1") && [[ $n =~ ^[0-9]+$ ]] && [ "$n" -gt 0 ]
+}
+# fragment_count <fragment>: how many times the workers profile's head lists <fragment>.
+fragment_count() {
+  sql "SELECT count(*) FROM profile p JOIN profile_revision_fragment f ON f.revision = p.head_revision_id
+    JOIN fragment_revision r ON r.id = f.fragment_revision
+    WHERE p.cluster = '$cluster' AND p.name = 'workers' AND r.name = '$1'"
+}
 # old_alerted: since old_a0, one alert of each of old_deps, a regression of reason absent naming
 # rel_old, and no other alert of them.
 old_alerted() {
@@ -902,7 +918,7 @@ old_refused() {
   fresh h-viewer
   answers_with ".state == \"failed\" and .error.status == 503 and .error.type == \"urn:bronzeward:problem:dependency-unavailable\"
       and .error.dependency.provider == \"kv\" and .error.dependency.class == \"unknown\" and .error.dependency.reason == \"absent\"
-      and ($deps | index(.error.dependency.object)) != null" 200 - GET "/api/v1/operations/$pub_op" "$tok"
+      and (.error.dependency.object as \$o | $deps | index(\$o)) != null" 200 - GET "/api/v1/operations/$pub_op" "$tok"
 }
 
 # old_bao: AP S7's variant with the OpenBao snapshot older than the database (PA §13.3). OpenBao's
@@ -934,9 +950,13 @@ old_bao() {
   must "$ref" "h-author imports the worker into it, its file secret and S2's label holding it marked: the claim released, the draft's ETag moved" \
     ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" --arg l "$LABEL_MARK" '[$p, $l]')" old
   ing_old=${ingested[-1]}
-  must "$ref" "the import's generations written to OpenBao after its snapshot" differ "$(claim_generations "$ing_old")" 0
-  must "$ref" "h-author takes S2's label fragment out of the workers profile, the import base holding that reference: 200, the ETag replaced" \
-    profile_drops h-author old s2-labels
+  must "$ref" "the import's generations written to OpenBao after its snapshot" has_generations "$ing_old"
+  if [ "$(fragment_count s2-labels)" = 0 ]; then
+    must "$ref" "S2's label fragment already out of the workers profile (s5 run took it out)" same "$(fragment_count s2-labels)" 0
+  else
+    must "$ref" "h-author takes S2's label fragment out of the workers profile, the import base holding that reference: 200, the ETag replaced" \
+      profile_drops h-author old s2-labels
+  fi
   must "$ref" "h-publisher publishes the draft: 202, one release, the worker's Desired" publish_by h-publisher old
   rel_old=$new_release
   must "$ref" "the release pins the import's KV generations, each retained" old_pinned
@@ -975,8 +995,11 @@ old_bao() {
   check "$ref" "within two monitor intervals of the entry, each pinned generation observed since it: unknown, absent (OpenBao's 404)" \
     within 150 old_absent
   check "$ref" 'one alert of each, at once: a regression, absent, naming the release' old_alerted
-  sleep 70
-  check "$ref" 'a monitor interval later, still one alert of each: unknown alerts again only after 15 minutes' old_alerted
+  old_seen=$(sql "SELECT max(recorded_at) FROM dependency_status WHERE id = ANY (string_to_array('$old_deps', ' '))") &&
+    [ -n "$old_seen" ] || die "cannot read the observations' times"
+  check "$ref" "each observed again by a later monitor pass, within 150 s, well inside the 15 minutes before an unknown alerts again" \
+    within 150 old_reobserved
+  check "$ref" 'after that pass, still one alert of each' old_alerted
 
   # B, started normally with recovery mode on, runs the publish job and refuses it.
   must "$ref" 'inject kill B-recovery' "$bin/inject" kill B-recovery
@@ -994,8 +1017,14 @@ tr_bound() {
   same "$(sql "SELECT count(*) FROM machine_state s JOIN release_machine rm ON rm.release = s.desired AND rm.machine = s.machine
     WHERE s.machine IN ('$machine_cp', '$machine_w') AND rm.key_name = '$1'")" 2
 }
-# key_gone: OpenBao reads no Transit key bw-artifact.
-key_gone() { ! bao read transit/keys/bw-artifact >/dev/null 2>&1; }
+# key_gone: OpenBao answers that it holds no Transit key bw-artifact (the CLI's no-value message,
+# as in experiments/e5-key-loss-restoration's transcripts); a denied, failed or timed-out read is
+# not that.
+key_gone() {
+  local out rc=0
+  out=$(bao read transit/keys/bw-artifact 2>&1) || rc=$?
+  [ "$rc" -ne 0 ] && [[ $out == *'No value found at transit/keys/bw-artifact'* ]]
+}
 # tr_alerted: since tr_a0, one alert of bw-artifact's status, a regression, unknown, absent, naming
 # both machines' Desired releases.
 tr_alerted() {
