@@ -33,6 +33,11 @@ put_back() {
   undo=()
 }
 trap 'rc=$?; put_back; exit $rc' EXIT
+# release_hold <hold file> <pid>: a start held at <hold file> (BW_INJECT_HOLD) let go, and waited for.
+release_hold() {
+  : >"$1"
+  wait "$2"
+}
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 trap 'exit 130' INT
@@ -845,6 +850,9 @@ rm -f -- "$hold" "$hold.held"
 defer rm -f -- "$hold" "$hold.held"
 BW_SELFTEST=1 BW_INJECT_HOLD=$hold "$here/inject" start A &
 starting=$!
+# The held start holds the fixture lock: a failure before its release lets it go and waits for it,
+# so the put-backs registered before it (the linkjoin) can take the lock.
+defer release_hold "$hold" "$starting"
 for _ in $(seq 60); do
   [ -e "$hold.held" ] && break
   sleep 1
@@ -858,6 +866,7 @@ unset member
 a_cut "$TALOS_WORKER_IP" || fail "A reaches the worker while it starts, before its split is back"
 a_cut "$TALOS_CONTROLPLANE_IP" || fail "A is on the Talos network while it starts, before its split is back"
 : >"$hold"
+undefer
 wait "$starting" || fail "inject start A failed after its hold"
 rm -f -- "$hold" "$hold.held"
 undefer
