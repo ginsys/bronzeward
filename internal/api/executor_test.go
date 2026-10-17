@@ -710,6 +710,11 @@ func TestExecutorCheckValidityBoundsDispatch(t *testing.T) {
 	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
 }
 
+// checkedAccess is a seeded use-time check's dependencies: the access the evidence observation o
+// read, so that comparison 3's access term passes and the check's time alone decides.
+const checkedAccess = `jsonb_build_object('access', jsonb_build_object('path', o.access_path,
+	'version', o.access_version, 'created', o.access_created))`
+
 // ER §3.3: an attempt whose use-time check is older than the plan's validity window at its time is
 // refused by comparison 3 and sends nothing.
 func TestAttemptRefusesAnExpiredUseTimeCheck(t *testing.T) {
@@ -722,8 +727,8 @@ func TestAttemptRefusesAnExpiredUseTimeCheck(t *testing.T) {
 	}
 	mustExec(t, ae.db, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		SELECT $1, $2, epoch, 'use-time-check', jsonb_build_object('plan', $3::text, 'controller', $4::text, 'result', 'passed',
-			'dependencies', '{}'::jsonb), now() - interval '1 hour'
-		FROM installation_state`, ae.machine, rev, ae.pid, ae.a.d.owner.ID)
+			'dependencies', `+checkedAccess+`), now() - interval '1 hour'
+		FROM installation_state, observation o WHERE o.id = $5`, ae.machine, rev, ae.pid, ae.a.d.owner.ID, ae.obs)
 	_, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
 	ae.wantAttemptRefused(t, err, "3", "the use-time check is older than the plan allows", ae.obs, "committed",
 		settled{"unresolved", "3", "the use-time check is older than the plan allows"})
@@ -757,8 +762,8 @@ func TestAttemptMeasuresCheckValidityFromBeforeItsReads(t *testing.T) {
 	}
 	mustExec(t, ae.db, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		SELECT $1, $2, epoch, 'use-time-check', jsonb_build_object('plan', $3::text, 'controller', $4::text, 'result', 'passed',
-			'started', to_char(now() - interval '1 hour', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'dependencies', '{}'::jsonb), now()
-		FROM installation_state`, ae.machine, rev, ae.pid, ae.a.d.owner.ID)
+			'started', to_char(now() - interval '1 hour', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), 'dependencies', `+checkedAccess+`), now()
+		FROM installation_state, observation o WHERE o.id = $5`, ae.machine, rev, ae.pid, ae.a.d.owner.ID, ae.obs)
 	_, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
 	ae.wantAttemptRefused(t, err, "3", "the use-time check is older than the plan allows", ae.obs, "committed",
 		settled{"unresolved", "3", "the use-time check is older than the plan allows"})
