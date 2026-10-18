@@ -4,9 +4,13 @@
 # by a link: the operation names its plan and machine, the timeline's entries name the operation,
 # the plan or an observation, an observation names the start it rests on. scenarios/s8 checks the
 # answers; this program only reads.
-# instant: a served time as Unix seconds and microseconds, whatever its offset and precision.
+# instant: a served time as Unix seconds and microseconds, whatever its offset and precision; a
+# time it cannot parse is an error, so no attempt drops out of a comparison.
 def instant:
-  if . == null then null else
+  if . == null then null
+  elif (type != "string") or (test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$") | not) then
+    error("unparsable time: \(tojson)")
+  else
     capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$") as $c |
     (if $c.z == "Z" then 0 else ($c.z[1:3] | tonumber) * 3600 + ($c.z[4:6] | tonumber) * 60 end) as $off |
     "\(($c.d + "Z" | fromdateiso8601) - (if $c.z[0:1] == "+" then $off else -$off end)).\((($c.f // ".")[1:] + "000000")[0:6])"
@@ -52,13 +56,19 @@ $o.subject.plan as $plan |
   # What was observed for it: the observations resting on a start taken for it or its plan, and those
   # its entries name, each with what the read returned or which values it could not read and why.
   observed: $observed,
-  # Every observation its entries name is served, and each served one is its timeline entry.
+  # Every observation its entries name is served; each timeline observation entry is served, and
+  # each observed one is its timeline entry (same id, purpose, basis and revision).
   observationsResolve: ($links - [$os[].id] == []),
   observedIsTimeline: ([$os[] | {id, purpose, basis, revision}] as $s |
-    all($t[] | select(.kind == "observation"); {id: .entry.observation, purpose: .entry.purpose, basis: .entry.basis, revision} as $x |
-      $s | index([$x]) != null)),
-  # Each observed one returned a reading or names the values it could not read.
-  observedRead: all($observed[]; .runningVersion != null or .resourceVersion != null or ((.unread // {}) | length) > 0),
+    [$t[] | select(.kind == "observation") | {id: .entry.observation, purpose: .entry.purpose, basis: .entry.basis, revision}] as $x |
+    all($x[]; . as $e | $s | index([$e]) != null) and
+    all($observed[]; {id: .observation, purpose, basis, revision} as $e | $x | index([$e]) != null)),
+  # Each observed value was read, or is named unread with its cause: identity (the node id),
+  # running version, configuration (the resource version), assignment evidence, health.
+  observedRead: all($observed[]; . as $v |
+    all(["identity", "talosNodeId"], ["runningVersion", "runningVersion"], ["configuration", "resourceVersion"],
+        ["assignmentEvidence", "assignmentEvidence"], ["health", "health"];
+      $v[.[1]] != null or ((($v.unread // {})[.[0]].cause // "") != ""))),
   # Why the scope was held, and by whom: its ownership and state changes, and the scope states
   # recorded between its first and last entry.
   held: [$mine[] | select(.kind == "ownership-transition" or .kind == "operation-state") |
