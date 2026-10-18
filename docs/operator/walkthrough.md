@@ -215,7 +215,7 @@ the exact renderer:
 
 ```sh
 call GET /releases/$release/machines/$machine_w/review "$author" | jq .provenance
-call GET /releases/$release "$author" | jq .sources
+call GET /releases/$release "$author" | jq '{sources, renderer}'
 call GET /dependencies "$viewer" | jq '.items[] | {id, class, stale}'    # every dependency retained
 ```
 
@@ -361,8 +361,9 @@ a reference; remove it from its profile when the profile keeps another fragment.
 This stage departs from `fixtures/scenarios/s5 run` in one place. The script removes `s2-labels`
 from the `workers` profile, which by then lists the fragments `s4 ds` added as well. This
 walkthrough skips `s4 ds`, so `workers` lists only `s2-labels`, and a profile listing no fragment
-is refused. It reassigns the worker instead. Until a reviewer has run this page on the fixture,
-that step is unverified.
+is refused. It reassigns the worker instead. A reviewer's run of this page on the fixture, from
+a fresh checkout, confirmed that step: the adoption and the revert each ended with `openDrift`
+null.
 
 ## Where next
 
