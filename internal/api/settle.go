@@ -245,12 +245,16 @@ func (a *API) settleOperation(ctx context.Context, operation string, generation 
 		if err != nil {
 			return err
 		}
+		order := basis // when its read began (ER §4.1)
+		if a.o.recordOrder {
+			order = revision
+		}
 		switch {
 		case purpose != "completion" && purpose != "recovery":
 			return stay("pending", "the observation is not a completion or recovery observation")
 		case purpose == "completion" && forOperation.String != operation:
 			return stay("pending", "the observation is not tied to this operation")
-		case lastAccountingRev.Valid && basis < lastAccountingRev.Int64:
+		case lastAccountingRev.Valid && order < lastAccountingRev.Int64:
 			return stay("pending", "the observation is ordered before the last accounting")
 		}
 		var blocking sql.NullString
