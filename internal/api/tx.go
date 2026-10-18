@@ -193,7 +193,8 @@ func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, er
 	if err := a.lockKey(ctx, tx, q); err != nil {
 		return nil, false, err
 	}
-	exclusive := q.route.exclusive && !(a.o.shareExit && q.route.pattern == exitPattern)
+	exclusive := q.route.exclusive && !(a.o.shareExit && q.route.pattern == exitPattern) &&
+		!(a.o.shareRevoke && q.route.action == "identity.revoke")
 	if rec, err := lookup(ctx, tx, q, exclusive); err != nil || rec != nil {
 		return rec, false, err
 	}

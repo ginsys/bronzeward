@@ -111,6 +111,7 @@ type options struct {
 	noKeyLock      bool                                                                                 // the key-lock control (§7.2, §16)
 	noRevokerCheck bool                                                                                 // T5c's revoking-human lock control
 	shareExit      bool                                                                                 // the exit's installation-lock control: FOR SHARE in place of FOR UPDATE (T11, §16)
+	shareRevoke    bool                                                                                 // the identity revocation's installation-lock control: FOR SHARE in place of FOR UPDATE (T5c, §16)
 	noActOrder     bool                                                                                 // the act-order lock control (GET /acts)
 	noDraftLock    bool                                                                                 // the draft read-lock control (GET /drafts)
 	noProcessEpoch bool                                                                                 // the process-epoch control: drops `$my_epoch = $current_epoch` at a job claim, a takeover, an ingestion start, a commitment and an attempt (§5.1, §16)
