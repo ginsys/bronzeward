@@ -143,6 +143,38 @@ func (w *world) reference(t *testing.T, tx *sql.Tx, path string) {
 		VALUES ($1, $2, 'string', 1, NULL, $3)`, base, "n"+strings.ToLower(provider.NewValueID()), path)
 }
 
+// fragmentReference names path from a new fragment revision in cluster a, written with it in tx, as
+// a fragment's draft transaction writes a revision and its reference rows (internal/api/fragments.go).
+func (w *world) fragmentReference(t *testing.T, tx *sql.Tx, path string) {
+	t.Helper()
+	frv := id.New(id.FragmentRevision)
+	exec(t, tx, `INSERT INTO fragment_revision (id, cluster, name, layer, document, author, created_at, embedded)
+		VALUES ($1, $2, 'base', 'cluster', 'machine: {}', (SELECT min(id) FROM principal), now(), '[]')`, frv, w.a)
+	exec(t, tx, `INSERT INTO fragment_reference (revision, name, kind, version, encoding, generation)
+		VALUES ($1, $2, 'string', 1, NULL, $3)`, frv, "n"+strings.ToLower(provider.NewValueID()), path)
+}
+
+// commitReference names path through a fragment revision's reference rows or an import base
+// revision's, and releases claim if one is given, in one committed transaction.
+func (w *world) commitReference(t *testing.T, fragment bool, path, claim string) {
+	t.Helper()
+	tx, err := w.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fragment {
+		w.fragmentReference(t, tx, path)
+	} else {
+		w.reference(t, tx, path)
+	}
+	if claim != "" {
+		exec(t, tx, `UPDATE staging_claim SET state = 'released' WHERE id = $1`, claim)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func paths(es []Entry) []string {
 	var out []string
 	for _, e := range es {
@@ -160,22 +192,21 @@ type matrix struct {
 	abandoned, referenced, released, absent, held, resumed string
 	heldExpired, resumedExpired, transientLapsed           string
 	encryptedLapsed, removed                               string
+	// Named only by a fragment revision's reference row: of the abandoned claim, of a released one.
+	fragmentReferenced, fragmentReleased string
 }
 
 func newMatrix(t *testing.T) *matrix {
 	w := newWorld(t)
 	m := &matrix{w: w}
 	ab := w.claim(t, "encrypted", "abandoned", "-1 hour", "-1 minute")
-	m.abandoned, m.referenced = w.gen(w.a, ab), w.gen(w.a, ab)
-	tx, err := w.db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.reference(t, tx, m.referenced)
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
+	m.abandoned, m.referenced, m.fragmentReferenced = w.gen(w.a, ab), w.gen(w.a, ab), w.gen(w.a, ab)
+	w.commitReference(t, false, m.referenced, "")
+	w.commitReference(t, true, m.fragmentReferenced, "")
 	m.released = w.gen(w.a, w.claim(t, "transient", "released", "1 minute", "1 hour"))
+	fr := w.claim(t, "encrypted", "held", "1 minute", "1 hour")
+	m.fragmentReleased = w.gen(w.a, fr)
+	w.commitReference(t, true, m.fragmentReleased, fr)
 	m.absent = w.gen(w.a, id.New(id.Ingestion))
 	m.held = w.gen(w.a, w.claim(t, "encrypted", "held", "1 minute", "1 hour"))
 	m.resumed = w.gen(w.a, w.claim(t, "encrypted", "resumed", "1 minute", "1 hour"))
@@ -210,8 +241,11 @@ func TestSelection(t *testing.T) {
 	if got := paths(r.Expired); !slices.Equal(got, wantExpired) {
 		t.Fatalf("expired %q, want %q", got, wantExpired)
 	}
-	if r.Listed != 11 {
-		t.Fatalf("listed %d, want 11", r.Listed)
+	if r.Listed != 13 {
+		t.Fatalf("listed %d, want 13", r.Listed)
+	}
+	if sr, _ := m.run(t, "", options{split: true}); !slices.Equal(paths(sr.Orphans), wantOrphans) {
+		t.Fatalf("the two-statement read reports %q, want %q", paths(sr.Orphans), wantOrphans)
 	}
 	for _, e := range r.Orphans {
 		if e.Path == m.absent || e.Path == m.removed {
@@ -227,14 +261,20 @@ func TestSelection(t *testing.T) {
 			t.Fatalf("an expired entry lacks its fields: %+v", e)
 		}
 	}
-	t.Logf("orphans: abandoned, released, absent claim row, restore-removed cluster; listed apart: two past expiry, one transient past lease")
+	t.Logf("orphans: abandoned, released, absent claim row, restore-removed cluster; listed apart: two past expiry, one transient past lease; " +
+		"not reported: generations named by an import base or a fragment revision's reference row; the two-statement read agrees")
 
+	fragmentOrphan := func(r Report) bool {
+		return slices.Contains(paths(r.Orphans), m.fragmentReferenced) && slices.Contains(paths(r.Orphans), m.fragmentReleased)
+	}
 	controls := []struct {
 		name string
 		o    options
 		bad  func(Report) bool
 	}{
 		{"select by claim state alone", options{stateOnly: true}, func(r Report) bool { return slices.Contains(paths(r.Orphans), m.referenced) }},
+		{"read one kind of reference row only", options{oneKind: true}, fragmentOrphan},
+		{"read one kind of reference row only, two statements", options{oneKind: true, split: true}, fragmentOrphan},
 		{"read-time abandonment", options{readTimeAbandon: true}, func(r Report) bool { return slices.Contains(paths(r.Orphans), m.heldExpired) }},
 		{"omit every held or resumed claim", options{omitLive: true}, func(r Report) bool { return len(r.Expired) == 0 }},
 		{"every lapsed lease abandons", options{lapsedLease: true}, func(r Report) bool { return slices.Contains(paths(r.Expired), m.encryptedLapsed) }},
@@ -267,34 +307,26 @@ func TestClusterScope(t *testing.T) {
 // TestReleaseDuringRun: a draft transaction releasing a claim, its reference rows committed with
 // it, while the report runs: one statement sees it before or after, never half.
 func TestReleaseDuringRun(t *testing.T) {
-	for _, split := range []bool{false, true} {
-		w := newWorld(t)
-		c := w.claim(t, "encrypted", "held", "1 minute", "1 hour")
-		p := w.gen(w.a, c)
-		commit := func() {
-			tx, err := w.db.Begin()
+	for _, fragment := range []bool{false, true} {
+		for _, split := range []bool{false, true} {
+			w := newWorld(t)
+			c := w.claim(t, "encrypted", "held", "1 minute", "1 hour")
+			p := w.gen(w.a, c)
+			commit := func() { w.commitReference(t, fragment, p, c) }
+			r, err := collect(t.Context(), &fakeLister{tree: w.tree}, w.db, "", options{split: split, between: commit})
 			if err != nil {
 				t.Fatal(err)
 			}
-			w.reference(t, tx, p)
-			exec(t, tx, `UPDATE staging_claim SET state = 'released' WHERE id = $1`, c)
-			if err := tx.Commit(); err != nil {
-				t.Fatal(err)
+			reported := slices.Contains(paths(r.Orphans), p)
+			switch {
+			case !split && reported:
+				t.Fatalf("fragment %v: a generation released with its reference rows was reported", fragment)
+			case split && !reported:
+				t.Fatalf("fragment %v: control: two statements with the release committed between them did not report it", fragment)
 			}
 		}
-		r, err := collect(t.Context(), &fakeLister{tree: w.tree}, w.db, "", options{split: split, between: commit})
-		if err != nil {
-			t.Fatal(err)
-		}
-		reported := slices.Contains(paths(r.Orphans), p)
-		switch {
-		case !split && reported:
-			t.Fatal("a generation released with its reference rows was reported")
-		case split && !reported:
-			t.Fatal("control: two statements with the release committed between them did not report it")
-		}
 	}
-	t.Logf("one statement: not reported; control (two statements, release between): reported")
+	t.Logf("import base or fragment reference rows, one statement: not reported; control (two statements, release between): reported")
 }
 
 // TestHeldPastExpiryUnderLock: a claim past its expiry, still recorded held while a draft
@@ -391,12 +423,12 @@ func TestWrite(t *testing.T) {
 			t.Fatalf("output lacks %s:\n%s", p, out)
 		}
 	}
-	for _, p := range []string{m.referenced, m.held, m.resumed, m.encryptedLapsed} {
+	for _, p := range []string{m.referenced, m.fragmentReferenced, m.fragmentReleased, m.held, m.resumed, m.encryptedLapsed} {
 		if strings.Contains(out, p) {
 			t.Fatalf("output names %s:\n%s", p, out)
 		}
 	}
-	if !strings.Contains(lines[len(lines)-1], "4 orphans, 3 expired and not yet abandoned, 11 generations listed") {
+	if !strings.Contains(lines[len(lines)-1], "4 orphans, 3 expired and not yet abandoned, 13 generations listed") {
 		t.Fatalf("summary %q", lines[len(lines)-1])
 	}
 	t.Logf("output:\n%s", out)

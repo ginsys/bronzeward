@@ -95,6 +95,7 @@ func Collect(ctx context.Context, l Lister, db *sql.DB, cluster string) (Report,
 // production runs none of them.
 type options struct {
 	stateOnly       bool   // select by claim state alone, ignoring reference rows
+	oneKind         bool   // read import base reference rows only, ignoring fragment revisions'
 	readTimeAbandon bool   // treat a due claim as abandoned (an orphan) at read time
 	omitLive        bool   // omit every live claim's generations
 	lapsedLease     bool   // treat every lapsed lease as abandonment, encrypted claims included
@@ -184,8 +185,8 @@ type row struct {
 	due bool
 }
 
-// read returns the listed paths no committed reference row names, each with its claim, in path
-// order. One statement in a read-only transaction: reference rows and claims from one snapshot
+// read returns the listed paths no committed reference row names, an import base revision's or a
+// fragment revision's, each with its claim, in path order. One statement in a read-only transaction: reference rows and claims from one snapshot
 // under read committed (§5 rule 3), so a draft transaction releasing a claim with its reference
 // rows is seen whole or not at all.
 func read(ctx context.Context, db *sql.DB, listed []string, o options) ([]row, error) {
@@ -200,7 +201,7 @@ func read(ctx context.Context, db *sql.DB, listed []string, o options) ([]row, e
 	defer tx.Rollback()
 	var out []row
 	if o.split {
-		out, err = readSplit(ctx, tx, listed, due, o.between)
+		out, err = readSplit(ctx, tx, listed, due, o)
 	} else {
 		if o.between != nil {
 			o.between()
@@ -211,6 +212,9 @@ func read(ctx context.Context, db *sql.DB, listed []string, o options) ([]row, e
 			LEFT JOIN staging_claim c ON c.id = split_part(l.path, '/', 3)`
 		if !o.stateOnly {
 			q += ` WHERE NOT EXISTS (SELECT 1 FROM import_base_reference r WHERE r.generation = l.path)`
+			if !o.oneKind {
+				q += ` AND NOT EXISTS (SELECT 1 FROM fragment_reference f WHERE f.generation = l.path)`
+			}
 		}
 		out, err = scan(tx.QueryContext(ctx, q+` ORDER BY l.path`, listed))
 	}
@@ -239,8 +243,12 @@ func scan(rows *sql.Rows, err error) ([]row, error) {
 }
 
 // readSplit is the two-statement control: the reference rows, then the claims.
-func readSplit(ctx context.Context, tx *sql.Tx, listed []string, due string, between func()) ([]row, error) {
-	refs, err := tx.QueryContext(ctx, `SELECT generation FROM import_base_reference WHERE generation = ANY($1::text[])`, listed)
+func readSplit(ctx context.Context, tx *sql.Tx, listed []string, due string, o options) ([]row, error) {
+	q := `SELECT generation FROM import_base_reference WHERE generation = ANY($1::text[])`
+	if !o.oneKind {
+		q += ` UNION SELECT generation FROM fragment_reference WHERE generation = ANY($1::text[])`
+	}
+	refs, err := tx.QueryContext(ctx, q, listed)
 	if err != nil {
 		return nil, err
 	}
@@ -254,8 +262,11 @@ func readSplit(ctx context.Context, tx *sql.Tx, listed []string, due string, bet
 		referenced[g] = true
 	}
 	refs.Close()
-	if between != nil {
-		between()
+	if err := refs.Err(); err != nil {
+		return nil, err
+	}
+	if o.between != nil {
+		o.between()
 	}
 	all, err := scan(tx.QueryContext(ctx, `SELECT l.path, split_part(l.path, '/', 3), coalesce(c.state, ''), coalesce(c.mode, ''),
 		c.created_at, c.expires_at, c.lease_until, coalesce(`+due+`, false)
