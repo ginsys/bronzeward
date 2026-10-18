@@ -274,8 +274,9 @@ scenario runs.
 7. From one restore of snapshots taken before step 1 (`bin/inject db-snapshot s2-step1`,
    `bao-snapshot s2-step1`; restored with `db-restore s2-step1`, `bao-restore s2-step1`), the
    automation identity repeats steps 1 to 3 as itself, holding `author` and `publisher`
-   (design §13.7's automation Publish row). This step stays out of the integrated run, whose later
-   scenarios plan from step 3's release.
+   (design §13.7's automation Publish row). The integrated run includes this step: its release is
+   the one later scenarios plan from, and S3's approval part relies on its automation-authored
+   revision.
 
 **Clauses exercised.** C [§5.1](compilation.md#51-syntax),
 [§6](compilation.md#6-resolution-order-and-composition), [§7](compilation.md#7-validation-stages),

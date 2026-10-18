@@ -3,12 +3,14 @@
 # preconditions, steps 1 to 5, the pass criteria, the refusal set, the Talos access refusals, and
 # takeover, lease and interruption on instance C, and the orphan report over the interrupted
 # claims, the operator review (review.sh). `review`: the preconditions, steps 1 to 3 and the
-# operator review rows alone, with their orphan report and dump, for developing those rows. Each
-# check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s1.tsv in
-# the evidence directory and to stdout; the directory is then scanned by bin/evidence. Exit 1 on
-# any FAIL.
-# Usage: scenarios/s1 run|review   (on a fresh fixtures/bin/up, with mise run dev-db and mise run
-# dev-bao up for run's Go tests)
+# operator review rows alone, with their orphan report and dump, for developing those rows.
+# `pass`, the integrated run's: `run` without the Go rows and the negative controls (the refusal
+# set through the orphan rows). `node-id`: the Talos access refusal for another node ID, on its own
+# up. Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to
+# s1.tsv in the evidence directory and to stdout; the directory is then scanned by bin/evidence.
+# Exit 1 on any FAIL.
+# Usage: scenarios/s1 run|pass|review|node-id   (on a fresh fixtures/bin/up, with mise run dev-db
+# and mise run dev-bao up for run's Go tests)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -16,7 +18,8 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s1_mode=${1:-}
-case $s1_mode in run | review | node-id) ;; *) die "usage: scenarios/s1 run|review|node-id" ;; esac
+pass_only=''
+case $s1_mode in run | review | node-id) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s1 run|pass|review|node-id" ;; esac
 need docker curl jq timeout id sleep git date sha256sum base64 head tr
 need_state
 # No fixture lock of its own: bw, seed, inject and evidence each take the one they need.
@@ -768,7 +771,9 @@ run() {
   # are the server's own commit's; removed again once they have run. They run before the apid
   # logs are read below: the role probe's GenerateClientConfiguration on the control plane is the
   # scenario's own mutation request, not the system's, and stays out of step 5's interval.
-  if clone_made go-rows-clone; then
+  if ! controls_run 'S1 Go tests' 'the Go rows (lease, takeover, interruption, access and inventory refusals)'; then
+    :
+  elif clone_made go-rows-clone; then
     check 'S1 precondition' "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's, so the tests run on the server's build (clone HEAD $clone_head)" go_env_clean
     check 'S1 Go tests' 'the tests below ran against PostgreSQL and OpenBao and passed, none skipped (go-rows.log)' go_rows_ran
     check 'S1 lease extension, C §3.3' "a heartbeat from another ingestion principal, one of an older generation, and the owner's own after its lease lapsed: each refused, the claim unchanged (TestOwnerFenceMatrix)" \
@@ -844,6 +849,21 @@ run() {
   check 'S1 pass' "the executor identity's decryption of the worker's baseline: refused" executor_refused "$machine_w"
   check 'S1 pass' "control: the same executor token reads the cluster's Talos access" access_read "$cluster"
 
+  if controls_run 'S1 negative controls' 'the refusal set, the Talos access refusals, takeover, the interruption matrix, the review, expiry and orphan rows'; then
+    controls "$claims_before"
+  fi
+  check 'S1 backups, PA §16' 'inject db-snapshot: a dump of the bronzeward database after the imports and whatever controls ran' \
+    "$bin/inject" db-snapshot "$backup_name"
+
+  # Step 5: the post-state, compared with the pre-state.
+  post_state
+}
+pass() { run; }
+
+# controls: the refusal set, the access refusals, takeover, the interruption matrix and the review,
+# expiry and orphan rows, after the imports.
+controls() {
+  local claims_before=$1
   fresh_author
   # The refusal set (C §13): each refused before any provider write, one bundle each. The control
   # for "no claim under gen/": the two imports above listed theirs.
@@ -901,11 +921,6 @@ run() {
   review_rows
   expiry_rows
   orphan_rows
-  check 'S1 backups, PA §16' 'inject db-snapshot: a dump of the bronzeward database after the imports, refusals and interruptions' \
-    "$bin/inject" db-snapshot "$backup_name"
-
-  # Step 5: the post-state, compared with the pre-state.
-  post_state
 }
 
 "$s1_mode"
@@ -927,16 +942,18 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   # The scan above covers the dump only if the bundle holds it expanded, with the database's rows
   # in it: an interrupted claim's own row, the line keyed by its id inside the staging_claim COPY
   # block (other tables carry the id too, so a bare match would not show the claim row is there).
-  # node-id takes no dump.
+  # node-id takes no dump. The pass mode interrupts nothing: the worker's machine row instead.
+  dump_table=staging_claim dump_id=${interrupted[0]:-} dump_row='an interrupted claim'
+  [ "$s1_mode" != pass ] || dump_table=machine dump_id=$machine_w dump_row="the worker's machine"
   if [ "$s1_mode" = node-id ]; then
     :
-  elif [ "${#interrupted[@]}" -gt 0 ] &&
-    awk -v id="${interrupted[0]%% *}" '
-      /^COPY public\.staging_claim / { block = 1; next }
+  elif [ -n "${dump_id%% *}" ] &&
+    awk -v id="${dump_id%% *}" -v table="$dump_table" '
+      index($0, "COPY public." table " ") == 1 { block = 1; next }
       block && /^\\\.$/ { block = 0 }
       block && index($0, id "\t") == 1 { found = 1 }
       END { exit !found }' "$final/backups/pg-$backup_name.dump.sql"; then
-    result PASS 'S1 step 5, PA §16' 'the scanned bundle holds the database dump expanded, an interrupted claim among its rows (control)'
+    result PASS 'S1 step 5, PA §16' "the scanned bundle holds the database dump expanded, $dump_row among its rows (control)"
   else
     result FAIL 'S1 step 5, PA §16' 'the scanned bundle does not hold the database dump expanded with the run'"'"'s rows: the backup went unscanned'
   fi

@@ -611,6 +611,13 @@ keep_body() {
   fresh h-viewer
   answers 200 - GET "$2" "$tok" && cp -- "$EV/last.body" "$EV/$1.json"
 }
+# controls_run <ref> <what>: true unless the scenario runs in its pass mode, the pass paths alone (the
+# integrated run, acceptance plan §2); then a SKIP row names what its full mode runs instead.
+controls_run() {
+  [ "${pass_only:-}" = 1 ] || return 0
+  result SKIP "$1" "$2: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up"
+  return 1
+}
 # served_epoch: the Bronzeward-Epoch header of the last response, empty without one.
 served_epoch() { tr -d '\r' <"$EV/last.headers" | awk -F': *' 'tolower($1) == "bronzeward-epoch" { v = $2 } END { print v }'; }
 # kept <name> <jq filter>: the kept array satisfies the filter.

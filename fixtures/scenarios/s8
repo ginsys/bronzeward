@@ -6,14 +6,16 @@
 #               from the one s7 kept before T. Step 2: s8-answers.jq answers the step's questions for each
 #               from what was served, and for S6.1's lost response from the timeline, events and
 #               resource a separate s6 run kept (S8_S6_KEPT, its s6-run evidence directory, from
-#               another up); answers.json holds them. Step 3, last, since h-viewer stays revoked:
+#               another up); answers.json holds them, and the control: the stored response entries of
+#               S4 and S5 carry the text the served ones withhold. Step 3, last, since h-viewer stays revoked:
 #               an operation B holds committed, its event stream held open past the token's exp,
 #               resumed with a fresh token (the control), then h-viewer listed in B's deniedSubjects
 #               and its revocation recorded by h-recovery: the resumption refused. B, restarted,
 #               takes the operation over and completes it.
 #   controls:   after scenarios/s1 run on a fresh up, on A. h-viewer's mutations refused, the
-#               served-response Go checks (redaction of Talos error text, the timeline and events
-#               reads, the stream's end at the token's exp) in a clone of the image commit against
+#               served-response Go checks (a Talos error text kept out of the response recorded, a
+#               stored text withheld from the timeline and events reads, the stream's end at the
+#               token's exp) in a clone of the image commit against
 #               go-db's PostgreSQL and OpenBao, and the leak scan's positive control: a copy of a
 #               served timeline with a synthetic secret appended, reported.
 #   revocation: after controls on the same up, on A, as the disposable environment: h-viewer's
@@ -78,6 +80,12 @@ all_answers() {
 }
 # answered <name> <jq filter>: that operation's answers satisfy the filter.
 answered() { jq -e "$2" "$EV/answers-$1.json" >/dev/null; }
+# stored_text <operation>: the database holds a response entry of the operation with a text.
+stored_text() {
+  local n
+  n=$(sql "SELECT count(*) FROM machine_event WHERE kind = 'response' AND entry->>'operation' = '$1' AND entry ? 'text'") &&
+    [ "$n" -gt 0 ]
+}
 
 # The structure every answer rests on: entries in commit order, the events the operation's own
 # timeline entries, the resource's attempts the timeline's, and no response text served.
@@ -141,7 +149,7 @@ resume_refused() {
 # call_port: 201, naming an identity, deniedSubjectsListed as given.
 revoke_viewer() {
   fresh h-recovery
-  answers_with ".identity | type == \"string\" and .deniedSubjectsListed == $2" 201 - POST /api/v1/identity-revocations "$tok" \
+  answers_with "(.identity | type == \"string\") and .deniedSubjectsListed == $2" 201 - POST /api/v1/identity-revocations "$tok" \
     "$(jq -nc '{iss: "http://issuer:5556", sub: "h-viewer", reason: "S8 step 3: the subject revoked"}')" "$(key "$1")"
 }
 # b_restarted: B, killed and started again, answers on call_port.
@@ -200,9 +208,14 @@ run_steps() {
   check "$ref" "S6.1's lost response's answers, from what h-viewer was served in the s6 run (S8_S6_KEPT)" \
     answer s6 "$S8_S6_KEPT/s6-send-operation.json" "$S8_S6_KEPT/s6-send-events.json" "$S8_S6_KEPT/s6-send-timeline.json"
   check "$ref" 'answers.json holds the four' all_answers
+  result SKIP 'S8 step 1' "the reads following the operator walkthrough of issue #30, by a person: issue #31's review record"
+  result SKIP 'S8 pass criteria' "a second reviewer reaching the same answers from the timeline: issue #31's review record"
   for x in s4 s5 s6 s7; do
     check 'S8 pass criteria' "$x: entries in commit order, its events its timeline entries, its attempts the timeline's, no response text served" \
       answered "$x" "$linked"
+  done
+  for x in s4 s5; do
+    check 'S8 pass criteria' "control: the $x operation's stored response entries carry a text the served ones withhold" stored_text "${s8_ops[$x]}"
   done
   for x in s4 s5; do
     check "$ref" "$x: approved by an approver whose approval the commitment names; each attempt's route, observation, deadlines and time, its sending known; accepted; observed; completed" \
@@ -211,14 +224,17 @@ run_steps() {
   # shellcheck disable=SC2016  # a jq program
   check "$ref" 's5: the committed approval approves an unseen overwrite' \
     answered s5 '.commitment[-1].approval as $a | any(.approved[]; .approval == $a and .unseenOverwrite == true)'
-  check "$ref" "s6: two attempts; the first's sending known from h-recovery's accounting by decision, as recovery-admin; the second answered; held by B's takeover at its start; completed" \
+  check "$ref" "s6: two attempts; the first's sending known from h-recovery's accounting by decision, as recovery-admin, on a start and an end observation; the second answered; held by B's takeover at its start; completed" \
     answered s6 '(.attempts | length) == 2 and .attempts[0].sending == "accounting:decision"
       and .attempts[0].accounting.role == "recovery-admin" and (.attempts[0].accounting.decidedBy | type == "string" and . != "")
+      and .attempts[0].accounting.start != null and .attempts[0].accounting.end != null
       and .attempts[1].response != null and any(.held[]; .kind == "ownership-transition" and .why == "controller-start")
       and .ended == "completed" and .state == "completed"'
-  check "$ref" "s7: its commitment approved; held by the recovery entry; the scope's post-restore accounting recorded while it was held; no attempt; cancelled" \
+  check "$ref" "s7: its commitment approved; held by the recovery entry; the scope's post-restore accounting recorded while it was held, by a recovery-admin on a start and an end observation with its facts; no attempt; cancelled" \
     answered s7 '.commitmentApproved and any(.held[]; .kind == "ownership-transition" and .why == "recovery-entry")
-      and any(.scope[]; .why == "post-restore-accounting") and (.attempts | length) == 0
+      and any(.scope[]; .why == "post-restore-accounting" and .role == "recovery-admin"
+        and (.decidedBy | type == "string" and . != "") and .start != null and .end != null and .facts != null)
+      and (.attempts | length) == 0
       and .ended == "cancelled" and .state == "cancelled"'
 
   # Step 3: an operation B holds committed, its stream held open past the token's exp.
@@ -267,13 +283,15 @@ controls() {
     result FAIL "$ref" 'no clone of the image commit (s8-go-clone.log): the Go checks did not run'
   fi
   rm -rf -- "$clone_dir"
+  check "$ref" "a Talos error text quoting a configuration value, in every class and both shapes, is kept out of the response recorded: TestApplyClasses passed" \
+    go_passed TestApplyClasses
+  result SKIP "$ref" "the same error from a live node: S4's InvalidArgument case (DS row 022, scenarios/s4 ds), not repeated here"
   local t
-  for t in TestLiveApply TestRecordResponse; do
-    check "$ref" "a Talos error text embedding configuration is served redacted or withheld (as S4's InvalidArgument case): $t passed" go_passed "$t"
+  for t in TestOperationEvents TestMachineTimelineAndObserved; do
+    check "$ref" "a stored entry's text is withheld from the served events and timeline: $t passed" go_passed "$t"
   done
-  for t in TestOperationEvents TestMachineTimelineAndObserved TestEventStreamEndsAtTokenExpiry \
-    TestEventStreamFirstReadEndsAtTokenExpiry TestEventStreamWritesNothingAfterTokenExpiry; do
-    check 'S8 pass criteria' "the served timeline, events and stream: $t passed" go_passed "$t"
+  for t in TestEventStreamEndsAtTokenExpiry TestEventStreamFirstReadEndsAtTokenExpiry TestEventStreamWritesNothingAfterTokenExpiry; do
+    check 'S8 pass criteria' "the event stream ends at the token's exp: $t passed" go_passed "$t"
   done
   [ "$failed" = "$before_go" ] || say "s8: the Go checks failed: $EV/s8-go.log"
 
@@ -297,7 +315,7 @@ scan_reports_copy() {
   grep --quiet --fixed-strings -- 'positive control found; 1 other file(s) contain' "$EV/scan-control-evidence.log" &&
     grep --quiet --fixed-strings -- 'scan-control/timeline-with-secret.json' "$EV/scan-control-evidence.log"
 }
-s8_go_tests='TestLiveApply|TestRecordResponse|TestOperationEvents|TestMachineTimelineAndObserved'
+s8_go_tests='TestApplyClasses|TestOperationEvents|TestMachineTimelineAndObserved'
 s8_go_tests+='|TestEventStreamEndsAtTokenExpiry|TestEventStreamFirstReadEndsAtTokenExpiry|TestEventStreamWritesNothingAfterTokenExpiry'
 # s8_go_ran: the Go checks in the clone, against go-db's PostgreSQL and OpenBao, none skipped.
 s8_go_ran() {
@@ -305,7 +323,6 @@ s8_go_ran() {
     export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
     export BW_TEST_BAO_ADDR="${BW_TEST_BAO_ADDR:-http://127.0.0.1:58201}"
     export BW_TEST_BAO_TOKEN="${BW_TEST_BAO_TOKEN:-bw-dev-root-token}"
-    export BW_TEST_TALOSCONFIG=$TALOSCONFIG BW_TEST_TALOS_ENDPOINT=$TALOS_WORKER_IP
     logged s8-go env BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 mise exec -- go test -count=1 -p 1 -v -run "^($s8_go_tests)\$" \
       ./internal/api ./internal/talos
   ) && ! grep --quiet -- '--- SKIP' "$EV/s8-go.log"

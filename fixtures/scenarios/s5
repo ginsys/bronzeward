@@ -23,7 +23,10 @@
 # it after each.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s5.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s5 run|roles   (run after scenarios/s4 run and s4 ds on the same up; roles after run)
+# `pass`, the integrated run's: `run` without its negative controls (the frozen-scope revert plan,
+# the non-approver unfreeze) and without the interruption matrix of the drift adoption. It keeps
+# step 4's refused drift adoption: S5's pass criteria name the secret absent on rejection too.
+# Usage: scenarios/s5 run|pass|roles   (run or pass after scenarios/s4 run on the same up; roles after run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -31,7 +34,8 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s5_mode=${1:-}
-case $s5_mode in run | roles) ;; *) die "usage: scenarios/s5 run|roles" ;; esac
+pass_only=''
+case $s5_mode in run | roles) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s5 run|pass|roles" ;; esac
 need docker curl jq timeout id sleep date awk wc od head tr
 need_state
 umask 077
@@ -314,6 +318,7 @@ freeze() {
   # The frozen-scope control: a revert plan of the worker's Desired, which binds the open record and
   # expects its drifted digest, so that only the freeze holds it back.
   ref='S5 negative controls'
+  controls_run "$ref" 'an approved revert plan on the frozen scope, passed over and cancelled' || return 0
   check "$ref" "a plan for the drifted worker as h-publisher, a revert binding the open record: 201" plan_by h-publisher frozen
   revert=$plan_id
   [ -n "$revert" ] || die "s5: no revert plan; nothing after it can run"
@@ -629,14 +634,16 @@ adopt() {
   ingest_kind=import
   check "$ref" 'the ingestion is stored and served as a drift adoption' adoption_kind
   outcome_bundle "$ref" adoption-ingestion
-  gen_count=$(sql "SELECT count(*) FROM import_base_reference WHERE revision =
-    (SELECT id FROM import_base_revision WHERE machine = '$machine_w' ORDER BY created_at DESC LIMIT 1)") ||
-    die "s5: cannot count the adopted revision's references"
-  check "$ref, C §15" "control: the drift adoption made $gen_count generations, one per reference of its revision and at least its three marks', as many as a kill after the generation step keeps" \
-    adoption_generations
   # The interruptions follow the success, into the same draft under its new ETag: each is a drift
   # adoption the open record admits, and the draft and the record are unchanged by each.
-  for step in $kill_points; do adoption_kill "$step"; done
+  if controls_run "$ref, C §15" "the drift adoption's interruption matrix, killed at each pipeline step, with its generation-count control"; then
+    gen_count=$(sql "SELECT count(*) FROM import_base_reference WHERE revision =
+      (SELECT id FROM import_base_revision WHERE machine = '$machine_w' ORDER BY created_at DESC LIMIT 1)") ||
+      die "s5: cannot count the adopted revision's references"
+    check "$ref, C §15" "control: the drift adoption made $gen_count generations, one per reference of its revision and at least its three marks', as many as a kill after the generation step keeps" \
+      adoption_generations
+    for step in $kill_points; do adoption_kill "$step"; done
+  fi
   check "$ref" "h-author takes S2's label fragment out of the workers profile, the adopted base holding that reference: 200, the ETag replaced" \
     profile_drops h-author adopt s2-labels
   check "$ref" 'h-publisher publishes the draft under its new ETag: 202, one release, the worker'"'"'s Desired' publish_by h-publisher adopt
@@ -759,7 +766,9 @@ revert_step() {
   check "$ref" 'the plan binds the new record' same "$(sql "SELECT drift_record FROM plan WHERE id = '$rplan'")" "$redrift"
   check "$ref" 'approved as h-approver: 201' approve_by h-approver "$rplan" revert
   check "$ref" 'the approval is recorded as approving an unseen overwrite, as answered and on the timeline' approved_unseen "$rplan"
-  check 'S5 negative controls' 'unfreezing by h-publisher, not an approver: 403, the scope still frozen' unfreeze_refused h-publisher
+  if controls_run 'S5 negative controls' 'unfreezing by h-publisher, not an approver'; then
+    check 'S5 negative controls' 'unfreezing by h-publisher, not an approver: 403, the scope still frozen' unfreeze_refused h-publisher
+  fi
   check "$ref" 'h-approver unfreezes the scope: 201, the unfreeze recorded under the approver role' \
     set_freeze unfreezes h-approver approver 'S5 revert'
   check "$ref" "the revert runs as S4: committed to a completed apply-config operation, Applied the adopted release from source operation with its artifact's digest, the new record closed reverted" \
@@ -830,11 +839,17 @@ run() {
   measure
   revert_step
   check 'S5 retained evidence' "the worker's timeline, every page, as served" keep timeline "/api/v1/machines/$machine_w/timeline"
-  check 'S5 retained evidence' "the kept timeline holds the record's opening and closing entries, the freeze, the frozen-scope plan's cancellation, the adoption and the Applied change naming the adopted release" \
+  # The frozen-scope plan exists only where its control ran (not in the pass mode).
+  local cancelled=true cancelled_text=''
+  if [ -n "$revert" ]; then
+    cancelled="any(.[]; .kind == \"plan-cancellation\" and .entry.plan == \"$revert\" and .entry.reason == \"S5 frozen-scope control\")"
+    cancelled_text=", the frozen-scope plan's cancellation"
+  fi
+  check 'S5 retained evidence' "the kept timeline holds the record's opening and closing entries, the freeze$cancelled_text, the adoption and the Applied change naming the adopted release" \
     kept timeline "any(.[]; .kind == \"drift\" and (.entry.record | tostring) == \"$opened\" and .entry.change == \"opened\")
       and any(.[]; .kind == \"drift\" and (.entry.record | tostring) == \"$opened\" and .entry.change == \"closed\")
       and any(.[]; .kind == \"freeze\" and .entry.reason == \"S5 drift\")
-      and any(.[]; .kind == \"plan-cancellation\" and .entry.plan == \"$revert\" and .entry.reason == \"S5 frozen-scope control\")
+      and $cancelled
       and any(.[]; .kind == \"adoption\" and .entry.plan == \"$plan\" and .entry.operation == \"$op\")
       and any(.[]; .kind == \"applied-change\" and .entry.plan == \"$plan\" and .entry.operation == \"$op\" and (tostring | contains(\"$new_release\")))"
   check 'S5 retained evidence' "the kept timeline holds step 6's record opening and closing reverted, the unseen-overwrite approval, the unfreeze and the revert's Applied change" \
@@ -851,7 +866,7 @@ run() {
   restore_interval
 }
 
-if [ "$s5_mode" = run ]; then
+if [ "$s5_mode" != roles ]; then
   run
 else
   withheld+=("$BW_CANARY")
