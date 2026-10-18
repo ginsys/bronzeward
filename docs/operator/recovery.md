@@ -218,7 +218,10 @@ as `fixtures/scenarios/s7` does before the last release. The installation stays 
 until the exit (step 6): no plan commits on a scope that is not yet released. The recovery instance
 runs no executor or job worker, so the normal restart is what settles a restored operation that
 has an attempt and runs any publication you queued. Without it, such an operation stays
-`unresolved`, its scope can never be released, and the exit is refused.
+`unresolved`, its scope can never be released, and the exit is refused. A queued publication that
+changes a machine's assignment fails with `409 recovery-mode-active` while that machine's scope is
+not released. Release that scope before this restart, as s7 does with the worker, or submit the
+publication again after the release.
 
 ```sh
 bin/bronzeward serve -config bronzeward.yaml     # fixture: fixtures/bin/inject kill B-recovery, then inject start B

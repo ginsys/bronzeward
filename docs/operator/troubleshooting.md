@@ -6,7 +6,8 @@ Start from the refusal, then read the machine's timeline. The commands use the
 ## Reading a refusal
 
 Every refusal is `application/problem+json`. Its `type` is `urn:bronzeward:problem:<code>`, and
-`detail` says which check refused. The response carries no deeper cause: a node or provider failure
+`detail`, when present, says which check refused. A `401` and an `identity-revoked` carry no
+`detail`: go by the code. The response carries no deeper cause: a node or provider failure
 behind it is recorded in the operation's events, a `use-time-check` timeline entry or an
 observation's `unread`. The response headers are in `$H`.
 
