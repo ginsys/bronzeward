@@ -59,14 +59,16 @@ the interruption seam, and B takes over. What each point leaves:
 
 ### Read it first
 
-Lists are oldest first, at most 500 per page, so what you need is often past the first page. `items`
-follows `next` and prints every item, one per line:
+Lists hold at most 500 items per page, and the timeline is oldest first, so what you need is often
+past the first page. `items` follows `next` and prints every item, one per line. It fails, rather
+than stopping early, on any page that is not a list, such as a refusal:
 
 ```sh
 items() {   # items <path> <token>
   local page next=
   while :; do
     page=$(call GET "$1?limit=500${next:+&cursor=$next}" "$2") || return
+    jq -e '.items | arrays' <<<"$page" >/dev/null || { printf 'items: %s\n' "$page" >&2; return 1; }
     jq -c '.items[]' <<<"$page"
     next=$(jq -r '.next // empty' <<<"$page")
     [ -n "$next" ] || return 0
@@ -89,11 +91,11 @@ the operation's last `ownership-transition` timeline entry, or in its `commitmen
 was never taken over. An instance start or a recovery entry has usually moved it past 1 already.
 
 ```sh
-gen=$(items "/machines/$machine_w/timeline" "$viewer" | jq -s --arg op "$op" '[.[] |
+gen=$(set -o pipefail; items "/machines/$machine_w/timeline" "$viewer" | jq -es --arg op "$op" '[.[] |
   select((.kind == "commitment" or .kind == "ownership-transition") and .entry.operation == $op) |
-  .entry.generation] | last')
-call POST /operations/$op/takeovers "$recovery" "{\"generation\": $gen, \"reason\": \"the owner was stopped\"}" \
-  recovery-takeover-1 | jq '{state, generation}'   # unresolved, generation $gen + 1
+  .entry.generation] | last') &&
+  call POST /operations/$op/takeovers "$recovery" "{\"generation\": $gen, \"reason\": \"the owner was stopped\"}" \
+    recovery-takeover-1 | jq '{state, generation}'   # unresolved, generation $gen + 1
 ```
 
 A stale generation, or an operation already `completed`, `failed`, `rejected` or `cancelled`, gets
@@ -113,8 +115,8 @@ not guess. You decide, from two observations of the machine:
   observations itself, one per settle floor.
 
 ```sh
-items "/machines/$machine_w/observations" "$viewer" |
-  jq -c '{id, purpose, startedAt, at, resourceVersion, unread}'
+items "/machines/$machine_w/observations" "$viewer" |    # listed by id, not time: sorted here
+  jq -sc 'sort_by(.startedAt)[] | {id, purpose, startedAt, at, resourceVersion, unread}'
 call POST /operations/$op/attempts/$attempt/accountings "$recovery" \
   "$(jq -nc --arg s "$start" --arg e "$end" '{start: $s, end: $e, facts: {explanation: "the node was cut off"}}')" \
   recovery-accounting-1
