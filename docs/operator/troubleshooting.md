@@ -42,8 +42,9 @@ call GET "/machines/$machine_w/timeline?limit=500" "$viewer" | jq -c '.items[] |
 ```
 
 Pages hold 50 entries by default and at most 500, oldest first, so recent entries are on the last
-page: follow `next` with `&cursor=<next>`, or use the [`items` helper](recovery.md#read-it-first). Responses never
-carry configuration text or secrets.
+page: follow `next` with `&cursor=<next>`, or use the [`items` helper](recovery.md#read-it-first).
+Other lists, such as observations, page the same way but are in id order, not time order. Responses
+never carry configuration text or secrets.
 
 From it, for any operation, you can answer:
 
