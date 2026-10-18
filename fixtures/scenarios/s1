@@ -640,7 +640,8 @@ orphan_rows() {
 # that exist, and nothing else in S1 takes one.
 backup_name=s1-$run_key
 
-# preconditions: S0's migrate and seed, the three instances up.
+# preconditions: S0's migrate and seed, the three instances up. After s0 run on the same up, as in
+# the integrated run, bin/seed has run already and is not run again (it refuses a second run).
 preconditions() {
   check 'S1 precondition' 'bw migrate' "$bin/bw" migrate
   check 'S1 precondition' 'inject start A' "$bin/inject" start A
@@ -648,7 +649,7 @@ preconditions() {
   interrupt - || die "cannot remove C's control file"
   check 'S1 precondition' 'inject start C (the interruption build, no interruption named)' "$bin/inject" start C
   check 'S1 precondition' 'A answers /livez' answers 204 - GET /livez ''
-  "$bin/seed" >/dev/null || die "bin/seed failed"
+  [ -s "$STATE/automation-token" ] || "$bin/seed" >/dev/null || die "bin/seed failed"
   redact_automation_token "$(cat -- "$STATE/automation-token")"
 }
 

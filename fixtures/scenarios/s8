@@ -1,0 +1,389 @@
+#!/usr/bin/env bash
+# Acceptance plan S8, operational visibility, against the fixture.
+#   run:        after scenarios/s7 run on the same up, on B. Step 1: h-viewer reads the worker's
+#               timeline and the events and resource of S4's safe apply, S5's revert (the first
+#               approved as an unseen overwrite) and S7's held operation; the epoch served differs
+#               from the one s7 kept before T. Step 2: s8-answers.jq answers the step's questions for each
+#               from what was served, and for S6.1's lost response from the timeline, events and
+#               resource a separate s6 run kept (S8_S6_KEPT, its s6-run evidence directory, from
+#               another up); answers.json holds them. Step 3, last, since h-viewer stays revoked:
+#               an operation B holds committed, its event stream held open past the token's exp,
+#               resumed with a fresh token (the control), then h-viewer listed in B's deniedSubjects
+#               and its revocation recorded by h-recovery: the resumption refused. B, restarted,
+#               takes the operation over and completes it.
+#   controls:   after scenarios/s1 run on a fresh up, on A. h-viewer's mutations refused, the
+#               served-response Go checks (redaction of Talos error text, the timeline and events
+#               reads, the stream's end at the token's exp) in a clone of the image commit against
+#               go-db's PostgreSQL and OpenBao, and the leak scan's positive control: a copy of a
+#               served timeline with a synthetic secret appended, reported.
+#   revocation: after controls on the same up, on A, as the disposable environment: h-viewer's
+#               revocation recorded with no deniedSubjects entry refuses the resumption alone.
+# Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s8.tsv
+# in the evidence directory and to stdout. Exit 1 on any FAIL.
+# Usage: scenarios/s8 run|controls|revocation
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+case ${1:-} in run | controls | revocation) s8_mode=$1 ;; *) die "usage: scenarios/s8 run|controls|revocation" ;; esac
+need docker curl jq timeout id sleep date awk wc grep head tail sed tr cp
+need_state
+# No fixture lock of its own: inject and evidence each take the one they need.
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+EV=$STATE/evidence/s8-$s8_mode-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV" "$EV/http"
+scenario=s8
+# shellcheck source-path=SCRIPTDIR source=common.sh
+. "$here/common.sh"
+run_key=$(date -u +%s%N)
+mutation_ref='S8'
+ds_ref='S8'
+# shellcheck source-path=SCRIPTDIR source=dispatch.sh
+. "$here/dispatch.sh"
+
+cluster='' machine_cp='' machine_w='' plan='' rel='' baseline='' op='' held='' w_log=''
+declare -A s8_ops=()
+
+# b_stalls_at <step>: how many times B's log says the seam stalled it at the step.
+b_stalls_at() {
+  docker logs "${verified_container_ids[$BW_B]}" 2>&1 | grep --count --line-regexp --fixed-strings -- "fixture interrupt: stall at $1" || true
+}
+# b_committed_held <plan> <stalls before>: the plan committed to an operation still committed with no
+# attempt, its id in held, and B stalled after the commitment once more.
+b_committed_held() {
+  held=$(sql "SELECT operation FROM plan_state WHERE plan = '$1' AND state = 'committed'") || return 1
+  [ -n "$held" ] && still_held && [ "$(b_stalls_at dispatch-committed)" -gt "$2" ]
+}
+# epoch_moved: the Bronzeward-Epoch header of the last response is the installation's epoch, and not
+# the one served before S7's T.
+epoch_moved() {
+  local served
+  served=$(served_epoch) && [ -n "$served" ] || return 1
+  differ "$served" "$(cat -- "$STATE/s7-epoch-before-t")" && same "$served" "$(sql "SELECT epoch FROM installation_state")"
+}
+# answer <name> <operation file> <events file> <timeline file>: s8-answers.jq's answers for one operation,
+# from what was served, in $EV/answers-<name>.json.
+answer() {
+  jq -n --slurpfile op "$2" --slurpfile ev "$3" --slurpfile tl "$4" -f "$here/../s8-answers.jq" >"$EV/answers-$1.json"
+}
+# all_answers: the four operations' answers in $EV/answers.json, one object keyed by scenario.
+all_answers() {
+  jq -n --slurpfile s4 "$EV/answers-s4.json" --slurpfile s5 "$EV/answers-s5.json" \
+    --slurpfile s6 "$EV/answers-s6.json" --slurpfile s7 "$EV/answers-s7.json" \
+    '{s4: $s4[0], s5: $s5[0], s6: $s6[0], s7: $s7[0]}' >"$EV/answers.json"
+}
+# answered <name> <jq filter>: that operation's answers satisfy the filter.
+answered() { jq -e "$2" "$EV/answers-$1.json" >/dev/null; }
+
+# The structure every answer rests on: entries in commit order, the events the operation's own
+# timeline entries, the resource's attempts the timeline's, and no response text served.
+linked='.ordered and .eventsAreTimeline and .attemptsLinked and (.textServed | not)'
+# A safe apply's answers: its commitment names an approval of its plan by an approver; every attempt
+# carries its route, observation and deadlines, recorded at a time, its sending known; the last one
+# answered accepted; something observed for it; completed.
+# shellcheck disable=SC2016  # a jq program
+applied='.commitmentApproved
+  and (.commitment[-1].approval as $a | any(.approved[]; .approval == $a and .role == "approver" and (.by | type == "string" and . != "")))
+  and (.attempts | length) >= 1
+  and all(.attempts[]; .route != null and .observation != null and .transportDeadline != null and .recordedAt != null and .sending != "unknown")
+  and .attempts[-1].response.class == "accepted"
+  and (.observed | length) >= 1
+  and .ended == "completed" and .state == "completed"'
+
+# stream <name> <seconds> [last event ID]: h-viewer's event stream of s8_op on call_port, with the
+# token in stream_tok, over stdin; its body in $EV/<name>.txt and its headers in
+# $EV/<name>.headers. Its status in stream_status, curl's exit status in stream_rc and the time it
+# ended, in Unix seconds, in stream_end.
+s8_op='' stream_tok='' stream_status='' stream_rc=0 stream_end=0 stream_exp=0
+stream() {
+  local resume=()
+  [ -z "${3:-}" ] || resume=(--header "Last-Event-ID: $3")
+  stream_rc=0
+  stream_status=$(printf 'Authorization: Bearer %s\n' "$stream_tok" |
+    command curl --disable --noproxy '*' --silent --no-buffer --max-time "$2" --output "$EV/$1.txt" \
+      --dump-header "$EV/$1.headers" --write-out '%{http_code}' --header @- \
+      --header 'Accept: text/event-stream' "${resume[@]}" \
+      "http://127.0.0.1:$call_port/api/v1/operations/$s8_op/events") || stream_rc=$?
+  stream_end=$(date +%s)
+}
+# viewer_token: a token for h-viewer minted now, in stream_tok, its exp in stream_exp.
+viewer_token() {
+  stream_tok=$(mint h-viewer) && [ -n "$stream_tok" ] || return 1
+  keep_secret "$stream_tok"
+  stream_exp=$(jq -Rr 'split(".")[1] | gsub("-"; "+") | gsub("_"; "/") | . + ("=" * ((4 - length % 4) % 4))
+    | @base64d | fromjson | .exp' <<<"$stream_tok") && [[ $stream_exp =~ ^[0-9]+$ ]]
+}
+# last_event <name>: the last event ID the stream sent.
+last_event() { tr -d '\r' <"$EV/$1.txt" | sed -n 's/^id: *//p' | tail -n 1; }
+# held_past_exp <name>: the stream, held open for longer than its token lives, answered 200, sent an
+# event, and ended by itself, not by curl's limit, within 15 s before the token's exp and 5 s after.
+held_past_exp() {
+  stream "$1" 420
+  [ "$stream_status" = 200 ] && [ "$stream_rc" != 28 ] && [ -n "$(last_event "$1")" ] &&
+    [ "$stream_end" -ge $((stream_exp - 15)) ] && [ "$stream_end" -le $((stream_exp + 5)) ]
+}
+# resumed <name> <last event ID>: the stream resumed after the ID answers 200 (curl's own 5 s limit
+# ends one that stays open).
+resumed() {
+  stream "$1" 5 "$2"
+  [ "$stream_status" = 200 ] && { [ "$stream_rc" = 0 ] || [ "$stream_rc" = 28 ] || [ "$stream_rc" = 18 ]; }
+}
+# resume_refused <name> <last event ID>: the resumption answers 403 identity-revoked.
+resume_refused() {
+  stream "$1" 10 "$2"
+  [ "$stream_status" = 403 ] && jq -e '.type == "urn:bronzeward:problem:identity-revoked"' "$EV/$1.txt" >/dev/null
+}
+# revoke_viewer <key name> <listed>: h-recovery records h-viewer's revocation on the instance on
+# call_port: 201, naming an identity, deniedSubjectsListed as given.
+revoke_viewer() {
+  fresh h-recovery
+  answers_with ".identity | type == \"string\" and .deniedSubjectsListed == $2" 201 - POST /api/v1/identity-revocations "$tok" \
+    "$(jq -nc '{iss: "http://issuer:5556", sub: "h-viewer", reason: "S8 step 3: the subject revoked"}')" "$(key "$1")"
+}
+# b_restarted: B, killed and started again, answers on call_port.
+b_restarted() {
+  "$bin/inject" kill B && interrupt_of b - && "$bin/inject" start B || return 1
+  call_port=$SERVER_B_PORT
+  within 30 answers 204 - GET /livez ''
+}
+
+run_pre() {
+  local ref='S8 precondition' states
+  machines
+  [ -s "$STATE/s7-epoch-before-t" ] || die "s8: no epoch kept before S7's T in $STATE: run scenarios/s7 run first"
+  states=("$STATE"/evidence/s7-run-*/s7-state.tsv)
+  [ -f "${states[-1]}" ] || die "s8: no s7 run state on this up: run scenarios/s7 run first"
+  s8_ops[s7]=$(awk -F '\t' '$1 == "held" { print $2 }' "${states[-1]}")
+  [[ ${s8_ops[s7]} =~ ^op_[a-z2-7]{26}$ ]] || die "s8: no held operation in ${states[-1]}"
+  [ -n "${S8_S6_KEPT:-}" ] || die "s8: S8_S6_KEPT must name the s6-run evidence directory of a separate s6 run"
+  local f
+  for f in s6-send-timeline s6-send-events s6-send-operation; do
+    [ -s "$S8_S6_KEPT/$f.json" ] || die "s8: no $f.json in S8_S6_KEPT"
+  done
+  s8_ops[s4]=$(sql "SELECT s.operation FROM plan p JOIN plan_state s ON s.plan = p.id
+    WHERE p.kind = 'apply-config' AND p.machine = '$machine_w' ORDER BY p.created_at, p.id LIMIT 1")
+  s8_ops[s5]=$(sql "SELECT o.id FROM operation o JOIN plan_state s ON s.operation = o.id
+    WHERE o.kind = 'apply-config' AND o.machine = '$machine_w' AND o.state = 'completed'
+      AND EXISTS (SELECT 1 FROM machine_event e WHERE e.machine = o.machine AND e.kind = 'approval'
+        AND e.entry->>'plan' = s.plan AND (e.entry->>'unseenOverwrite')::boolean)
+    ORDER BY o.seq LIMIT 1")
+  check "$ref" "S4's safe apply: the first apply-config plan of the worker committed to an operation" \
+    one_line "${s8_ops[s4]}"
+  check "$ref" "S5's revert: the first completed operation of the worker whose plan was approved as an unseen overwrite" \
+    one_line "${s8_ops[s5]}"
+  call_port=$SERVER_B_PORT
+  check "$ref" 'B answers /livez' answers 204 - GET /livez ''
+  check "$ref" 'no link to the worker is recorded cut' worker_joined
+  evidence_to pre || die "no pre-state: bin/evidence failed"
+  check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean pre
+}
+
+run_steps() {
+  local ref x n last
+  ref='S8 step 1'
+  check "$ref" "h-viewer reads the worker's timeline, every page" keep s8-worker-timeline "/api/v1/machines/$machine_w/timeline"
+  check 'S8 pass criteria' "after S7 the Bronzeward-Epoch header served differs from the one served before T, and is the installation's epoch" epoch_moved
+  for x in s4 s5 s7; do
+    check "$ref" "h-viewer reads the $x operation's events, every page" keep "s8-$x-events" "/api/v1/operations/${s8_ops[$x]}/events"
+    check "$ref" "h-viewer reads the $x operation" keep_body "s8-$x-operation" "/api/v1/operations/${s8_ops[$x]}"
+  done
+
+  ref='S8 step 2'
+  for x in s4 s5 s7; do
+    check "$ref" "the $x operation's answers, from what h-viewer was served" \
+      answer "$x" "$EV/s8-$x-operation.json" "$EV/s8-$x-events.json" "$EV/s8-worker-timeline.json"
+  done
+  check "$ref" "S6.1's lost response's answers, from what h-viewer was served in the s6 run (S8_S6_KEPT)" \
+    answer s6 "$S8_S6_KEPT/s6-send-operation.json" "$S8_S6_KEPT/s6-send-events.json" "$S8_S6_KEPT/s6-send-timeline.json"
+  check "$ref" 'answers.json holds the four' all_answers
+  for x in s4 s5 s6 s7; do
+    check 'S8 pass criteria' "$x: entries in commit order, its events its timeline entries, its attempts the timeline's, no response text served" \
+      answered "$x" "$linked"
+  done
+  for x in s4 s5; do
+    check "$ref" "$x: approved by an approver whose approval the commitment names; each attempt's route, observation, deadlines and time, its sending known; accepted; observed; completed" \
+      answered "$x" "$applied"
+  done
+  # shellcheck disable=SC2016  # a jq program
+  check "$ref" 's5: the committed approval approves an unseen overwrite' \
+    answered s5 '.commitment[-1].approval as $a | any(.approved[]; .approval == $a and .unseenOverwrite == true)'
+  check "$ref" "s6: two attempts; the first's sending known from h-recovery's accounting by decision, as recovery-admin; the second answered; held by B's takeover at its start; completed" \
+    answered s6 '(.attempts | length) == 2 and .attempts[0].sending == "accounting:decision"
+      and .attempts[0].accounting.role == "recovery-admin" and (.attempts[0].accounting.decidedBy | type == "string" and . != "")
+      and .attempts[1].response != null and any(.held[]; .kind == "ownership-transition" and .why == "controller-start")
+      and .ended == "completed" and .state == "completed"'
+  check "$ref" "s7: its commitment approved; held by the recovery entry; the scope's post-restore accounting recorded while it was held; no attempt; cancelled" \
+    answered s7 '.commitmentApproved and any(.held[]; .kind == "ownership-transition" and .why == "recovery-entry")
+      and any(.scope[]; .why == "post-restore-accounting") and (.attempts | length) == 0
+      and .ended == "cancelled" and .state == "cancelled"'
+
+  # Step 3: an operation B holds committed, its stream held open past the token's exp.
+  ref='S8 step 3'
+  ds_publish s8
+  ds_plan s8
+  n=$(b_stalls_at dispatch-committed)
+  must "$ref" 'B told to stall after the commitment' interrupt_of b dispatch-committed stall
+  check "$ref" 'approved as h-approver: 201' approve_by h-approver "$plan" s8
+  must "$ref" 'the plan committed, its operation committed with no attempt; B stalls there' within 120 b_committed_held "$plan" "$n"
+  s8_op=$held
+  must "$ref" "a token for h-viewer minted now, its exp read" viewer_token
+  check "$ref" "the stream, held open longer than the token lives, sent an event and ended by itself within 15 s before the token's exp and 5 s after (s8-stream.txt)" \
+    held_past_exp s8-stream
+  last=$(last_event s8-stream)
+  must "$ref" 'a fresh unexpired token for h-viewer' viewer_token
+  check 'S8 pass criteria' "control: the resumption with Last-Event-ID and the fresh token before the revocation: 200" \
+    resumed s8-resume-control "$last"
+  must "$ref" "h-viewer listed in B's deniedSubjects beside h-all" \
+    set_denied_of b '[{iss: "http://issuer:5556", sub: h-all}, {iss: "http://issuer:5556", sub: h-viewer}]'
+  must "$ref" "B restarted to read it, its control file removed: B answers" b_restarted
+  check "$ref" "h-recovery records h-viewer's revocation: 201, deniedSubjects listing it" revoke_viewer revoke-viewer true
+  check 'S8 pass criteria' "the resumption with the same unexpired token, the subject revoked: 403 identity-revoked" \
+    resume_refused s8-resume-revoked "$last"
+  ds_done s8 1
+  check "$ref" "B took the operation over at its start, one ownership transition to generation 2" started_takeover
+}
+
+controls() {
+  local ref='S8 negative controls' before_go
+  machines
+  call_port=$SERVER_A_PORT
+  check "$ref" 'A answers /livez' answers 204 - GET /livez ''
+  fresh h-viewer
+  check "$ref" 'h-viewer opening a draft: 403 forbidden' answers 403 forbidden POST /api/v1/drafts "$tok" \
+    "$(jq -nc --arg c "$cluster" '{cluster: $c, title: "S8 viewer"}')" "$(key draft-viewer)"
+  check "$ref" 'h-viewer creating a plan: 403 forbidden' answers 403 forbidden POST /api/v1/plans "$tok" "$(plan_body)" "$(key plan-viewer)"
+  check "$ref" 'h-viewer freezing the worker: 403 forbidden' answers 403 forbidden POST "/api/v1/machines/$machine_w/freezes" "$tok" \
+    '{"reason": "S8"}' "$(key freeze-viewer)"
+
+  before_go=$failed
+  if clone_made s8-go-clone; then
+    check "$ref" "GOFLAGS, GOEXPERIMENT and GOWORK are unset and the Go version is the image's (clone HEAD $clone_head)" go_env_clean
+    check "$ref" 'the Go checks below ran against PostgreSQL and OpenBao and passed, none skipped (s8-go.log)' s8_go_ran
+  else
+    result FAIL "$ref" 'no clone of the image commit (s8-go-clone.log): the Go checks did not run'
+  fi
+  rm -rf -- "$clone_dir"
+  local t
+  for t in TestLiveApply TestRecordResponse; do
+    check "$ref" "a Talos error text embedding configuration is served redacted or withheld (as S4's InvalidArgument case): $t passed" go_passed "$t"
+  done
+  for t in TestOperationEvents TestMachineTimelineAndObserved TestEventStreamEndsAtTokenExpiry \
+    TestEventStreamFirstReadEndsAtTokenExpiry TestEventStreamWritesNothingAfterTokenExpiry; do
+    check 'S8 pass criteria' "the served timeline, events and stream: $t passed" go_passed "$t"
+  done
+  [ "$failed" = "$before_go" ] || say "s8: the Go checks failed: $EV/s8-go.log"
+
+  # The scan's positive control: a copy of a served timeline with a synthetic secret appended.
+  check "$ref" "h-viewer reads the worker's timeline, every page" keep s8c-timeline "/api/v1/machines/$machine_w/timeline"
+  check "$ref" "a copy of it with a synthetic secret appended" secret_copy
+  if evidence_to scan-control; then
+    check "$ref" "the scan reports the copy: one other file, that one" scan_reports_copy
+  else
+    result FAIL "$ref" 'bin/evidence failed on the scan control (scan-control-evidence.log)'
+  fi
+  rm -rf -- "$EV/scan-control"
+}
+# secret_copy: s8c-timeline.json copied under scan-control, the first scan pattern appended.
+secret_copy() {
+  mkdir -p -- "$EV/scan-control" && cp -- "$EV/s8c-timeline.json" "$EV/scan-control/timeline-with-secret.json" &&
+    head -n 1 -- "$STATE/scan-patterns.txt" >>"$EV/scan-control/timeline-with-secret.json"
+}
+# scan_reports_copy: the scan-control capture's log reports one file but its control, the copy.
+scan_reports_copy() {
+  grep --quiet --fixed-strings -- 'positive control found; 1 other file(s) contain' "$EV/scan-control-evidence.log" &&
+    grep --quiet --fixed-strings -- 'scan-control/timeline-with-secret.json' "$EV/scan-control-evidence.log"
+}
+s8_go_tests='TestLiveApply|TestRecordResponse|TestOperationEvents|TestMachineTimelineAndObserved'
+s8_go_tests+='|TestEventStreamEndsAtTokenExpiry|TestEventStreamFirstReadEndsAtTokenExpiry|TestEventStreamWritesNothingAfterTokenExpiry'
+# s8_go_ran: the Go checks in the clone, against go-db's PostgreSQL and OpenBao, none skipped.
+s8_go_ran() {
+  (
+    export BW_TEST_PG_DSN="${BW_TEST_PG_DSN:-postgres://bronzeward@127.0.0.1:55433/bronzeward?sslmode=disable}"
+    export BW_TEST_BAO_ADDR="${BW_TEST_BAO_ADDR:-http://127.0.0.1:58201}"
+    export BW_TEST_BAO_TOKEN="${BW_TEST_BAO_TOKEN:-bw-dev-root-token}"
+    export BW_TEST_TALOSCONFIG=$TALOSCONFIG BW_TEST_TALOS_ENDPOINT=$TALOS_WORKER_IP
+    logged s8-go env BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 mise exec -- go test -count=1 -p 1 -v -run "^($s8_go_tests)\$" \
+      ./internal/api ./internal/talos
+  ) && ! grep --quiet -- '--- SKIP' "$EV/s8-go.log"
+}
+# go_passed <test>: the test's own top-level PASS line is in s8-go.log.
+go_passed() { grep --quiet -- "^--- PASS: $1 (" "$EV/s8-go.log"; }
+
+# first_event: in first, the ID of s8_op's first event as h-viewer reads it.
+first=''
+first_event() {
+  fresh h-viewer
+  answers 200 - GET "/api/v1/operations/$s8_op/events?limit=1" "$tok" || return 1
+  first=$(jq -er '.items[0].id' "$EV/last.body") && [[ $first =~ ^[^:]+:[0-9]+$ ]]
+}
+revocation() {
+  local ref='S8 revocation alone'
+  machines
+  call_port=$SERVER_A_PORT
+  check "$ref" 'A answers /livez' answers 204 - GET /livez ''
+  s8_op=$(sql "SELECT operation FROM operation_event GROUP BY operation HAVING count(*) >= 2 ORDER BY max(at) DESC LIMIT 1")
+  one_line "$s8_op" || die "s8: no operation with two events on this up: run scenarios/s1 run first"
+  must "$ref" "the first event of the latest operation with two events, as h-viewer reads it" first_event
+  must "$ref" 'a token for h-viewer minted now' viewer_token
+  check "$ref" "control: the resumption after the first event with that token: 200" resumed s8-revocation-control "$first"
+  check "$ref" "h-recovery records h-viewer's revocation, deniedSubjects not listing it: 201" revoke_viewer revoke-viewer-alone false
+  check "$ref" "the resumption with the same unexpired token, revoked by the record alone: 403 identity-revoked" \
+    resume_refused s8-revocation-refused "$first"
+}
+
+withheld+=("$BW_CANARY")
+case $s8_mode in
+  run)
+    run_pre
+    run_steps
+    ;;
+  controls) controls ;;
+  revocation) revocation ;;
+esac
+rm -f -- "$EV/last.body" "$EV/last.headers"
+# The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
+ev_log=$(mktemp)
+if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
+  cat -- "$ev_log" >&2
+  if grep --quiet --fixed-strings -- 'positive control found; 0 other file(s) contain' "$ev_log"; then
+    result PASS 'S8 evidence' 'bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret'
+  else
+    result FAIL 'S8 evidence' "the leak scan reports fixture secrets: $final/leak-scan.txt"
+  fi
+  if [ -e "$final/unavailable.txt" ]; then
+    result FAIL 'S8 evidence' "the bundle is incomplete: $final/unavailable.txt names what was not captured"
+  else
+    result PASS 'S8 evidence' 'the bundle is complete: bin/evidence captured every source'
+  fi
+  # The tokens this run minted, searched in the run directory, the final bundle and every bundle the
+  # run captured before it, with a control holding the last of them that must be the one file
+  # listed (as s4 does).
+  local_ctl=$STATE/s8-token-control
+  trap 'rm -f -- "$local_ctl"' EXIT
+  if [ "${#secrets[@]}" -gt 0 ]; then printf 'x %s x\n' "${secrets[-1]}" >"$local_ctl"; else : >"$local_ctl"; fi
+  earlier=()
+  for f in "$EV"/*-bundle; do
+    [ -e "$f" ] || continue
+    earlier+=("$(cat -- "$f")")
+  done
+  hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
+    "$EV" "$final" "${earlier[@]}" "$local_ctl") || hits=
+  rm -f -- "$local_ctl"
+  trap - EXIT
+  if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
+    result PASS 'S8 evidence' "none of the ${#secrets[@]} tokens this run minted is in any bundle of the run or the run directory (control found)"
+  else
+    printf 's8: files holding a token of this run: %s\n' "${hits:-none, not even the control}" >&2
+    result FAIL 'S8 evidence' "the tokens this run minted: ${#secrets[@]} searched, the listing is not the control alone"
+  fi
+else
+  cat -- "$ev_log" >&2
+  result FAIL 'S8 evidence' 'bin/evidence failed'
+fi
+rm -f -- "$ev_log"
+say "s8 $s8_mode:$failed failed; evidence in $EV, bundle ${final:-none}"
+[ "$failed" -eq 0 ]

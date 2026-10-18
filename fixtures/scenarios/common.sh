@@ -606,6 +606,13 @@ keep() {
   done
   jq -s '[.[].items[]]' "${pages[@]}" >"$EV/$1.json" && rm -f -- "${pages[@]}"
 }
+# keep_body <name> <path>: h-viewer's read of one resource, kept in the evidence directory.
+keep_body() {
+  fresh h-viewer
+  answers 200 - GET "$2" "$tok" && cp -- "$EV/last.body" "$EV/$1.json"
+}
+# served_epoch: the Bronzeward-Epoch header of the last response, empty without one.
+served_epoch() { tr -d '\r' <"$EV/last.headers" | awk -F': *' 'tolower($1) == "bronzeward-epoch" { v = $2 } END { print v }'; }
 # kept <name> <jq filter>: the kept array satisfies the filter.
 kept() { jq -e "$2" "$EV/$1.json" >/dev/null; }
 # plan_is_stored <plan> <state> <approval or none>: the plan's stored state and approval, and no

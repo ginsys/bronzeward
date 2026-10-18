@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Acceptance plan §2's integrated run against the fixture, and the scenarios it runs separately,
+# each step's output and the fixture's evidence directories copied after every step to a record
+# directory outside the fixture state, which bin/down removes. A preset or a list of steps, run in
+# order from a fresh up; it stops at the first step that fails and leaves the fixture up for
+# inspection, its evidence already copied.
+#   run: up, s0 run, s1 run, s3 handover, s2 run, s3 run, s4 run, s5 run, s7 run, s8 run, down.
+#        s8 run reads S6.1's retained timeline from S8_S6_KEPT: the s6-run evidence directory a
+#        separate s6 preset copied into its record.
+#   s6:  up, s1 run, s3 handover, s2 run, s3 run, s4 run, s4 ds, s6 run, down.
+# Steps: up down s0 s0walk s1 s3h s2 s3r s4 s4ds s5 s6 s7 s8 s8controls s8revocation.
+# The record: <record dir>/<preset>-<utc>/chain.log (checkout, start, end and exit status of each
+# step), <step>.log, evidence/ (a copy of the fixture's evidence directories).
+# Usage: scenarios/integrated <record dir> run|s6|<step>...
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+usage="usage: scenarios/integrated <record dir> run|s6|<step>..."
+[ "$#" -ge 2 ] || die "$usage"
+need git date cp mkdir tail tee wc realpath
+record=$1
+shift
+[ -d "$record" ] || die "integrated: no record directory $record"
+case $(realpath -- "$record")/ in "$(realpath -- "$STATE")"/* | "$(realpath -- "$FIXTURES")"/*)
+  die "integrated: the record directory must be outside the fixture: bin/down removes its state" ;;
+esac
+case $1 in
+  run)
+    [ "$#" = 1 ] || die "$usage"
+    [ -n "${S8_S6_KEPT:-}" ] && [ -s "$S8_S6_KEPT/s6-send-timeline.json" ] ||
+      die "integrated: S8_S6_KEPT must name the s6-run evidence directory of a separate s6 preset"
+    set -- up s0 s1 s3h s2 s3r s4 s5 s7 s8 down
+    preset=run ;;
+  s6)
+    [ "$#" = 1 ] || die "$usage"
+    set -- up s1 s3h s2 s3r s4 s4ds s6 down
+    preset=s6 ;;
+  *) preset=steps ;;
+esac
+# command_of <step>: the step's command in cmd.
+cmd=()
+command_of() {
+  case $1 in
+    up) cmd=("$bin/up") ;;
+    down) cmd=("$bin/down") ;;
+    s0) cmd=("$here/s0" run) ;;
+    s0walk) cmd=("$here/s0" walk) ;;
+    s1) cmd=("$here/s1" run) ;;
+    s3h) cmd=("$here/s3" handover) ;;
+    s2) cmd=("$here/s2" run) ;;
+    s3r) cmd=("$here/s3" run) ;;
+    s4) cmd=("$here/s4" run) ;;
+    s4ds) cmd=("$here/s4" ds) ;;
+    s5) cmd=("$here/s5" run) ;;
+    s6) cmd=("$here/s6" run) ;;
+    s7) cmd=("$here/s7" run) ;;
+    s8) cmd=("$here/s8" run) ;;
+    s8controls) cmd=("$here/s8" controls) ;;
+    s8revocation) cmd=("$here/s8" revocation) ;;
+    *) return 1 ;;
+  esac
+}
+for s in "$@"; do command_of "$s" || die "integrated: unknown step $s; $usage"; done
+
+out=$record/$preset-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$out/evidence"
+log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$out/chain.log"; }
+keep_evidence() { [ ! -d "$STATE/evidence" ] || cp -a -- "$STATE/evidence/." "$out/evidence/"; }
+log "checkout $(git -C "$here" rev-parse HEAD), $(git -C "$here" status --porcelain | wc -l) changed paths; steps: $*"
+for s in "$@"; do
+  command_of "$s"
+  log "start $s: ${cmd[*]##*/}"
+  rc=0
+  "${cmd[@]}" >"$out/$s.log" 2>&1 || rc=$?
+  [ "$s" = down ] || keep_evidence
+  log "end $s: exit $rc; $(tail -n 1 -- "$out/$s.log")"
+  [ "$rc" = 0 ] || { log "stopped at $s; the fixture is left as it is"; exit "$rc"; }
+done
+log "done"
