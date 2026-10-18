@@ -7,8 +7,9 @@ owned by the [specification review](https://github.com/ginsys/bronzeward/issues/
 implementation of [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21) to
 [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30). For each behaviour §18.2
 requires it names the run that shows it, the contract clauses that run exercises, what passes, what
-must be refused and what is kept. It is a plan: nothing here has been executed, and a pass under it
-is a pass on the fixture within its limits (§9), never a production claim.
+must be refused and what is kept. It is a plan: its results are recorded not here but in the
+evidence E6 lands and in the reports a scenario names (S6.2's), and a pass under it is a pass on the
+fixture within its limits (§9), never a production claim.
 
 Contracts are cited by short name: **C** is the [compilation contract](compilation.md), **PA** the
 [persistence and API contract](persistence-api.md), **ER** the
