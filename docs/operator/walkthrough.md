@@ -15,7 +15,7 @@ root.
 ```sh
 set -a; . fixtures/versions.env; set +a
 A=http://127.0.0.1:$SERVER_A_PORT
-H=fixtures/.state/walk-headers
+H=fixtures/.state/walk-headers B=fixtures/.state/walk-body
 
 # mint <human>: a five-minute token from the fixture issuer's key. Mint again when one expires.
 mint() {
@@ -24,12 +24,17 @@ mint() {
     mint -key /etc/oidc/key.json -issuer http://issuer:5556 -human "$1"
 }
 # call <method> <path> <token> [body] [idempotency key] [etag]: the response body on stdout.
+# The token goes over stdin and the body through a file only you can read, never on curl's
+# command line.
 call() {
-  local args=(-sS -D "$H" -X "$1" -H "Authorization: Bearer $3")
-  [ -z "${4:-}" ] || args+=(-H 'Content-Type: application/json' --data-binary "$4")
+  local args=(-sS -D "$H" -X "$1" -H @-)
+  if [ -n "${4:-}" ]; then
+    (umask 077 && printf '%s' "$4" >"$B")
+    args+=(-H 'Content-Type: application/json' --data-binary "@$B")
+  fi
   [ -z "${5:-}" ] || args+=(-H "Idempotency-Key: $5")
   [ -z "${6:-}" ] || args+=(-H "If-Match: $6")
-  curl "${args[@]}" "$A/api/v1$2"
+  printf 'Authorization: Bearer %s\n' "$3" | curl "${args[@]}" "$A/api/v1$2"
 }
 etag() { sed -n 's/^[Ee][Tt][Aa][Gg]: *//p' "$H" | tr -d '\r'; }
 
@@ -41,8 +46,8 @@ returns the first answer instead of acting twice. Every change to a draft carrie
 the draft's current ETag; a stale one gets `412` and nothing is written.
 
 *On your deployment:* tokens come from your identity provider, and `A` is your server's address.
-The scripts send the token on stdin, not on the command line, since a command line is readable by
-any local user; do the same with real tokens.
+`call` keeps the token and the body off the command line, which any local user can read; keep that
+when you adapt it, since a draft body can carry values that become secrets.
 
 ## S0: the empty installation
 
