@@ -8,7 +8,8 @@ more token:
 recovery=$(mint h-recovery)
 ```
 
-Every route here is `recovery-admin`, human-only, and needs an `Idempotency-Key`. The full contracts
+Every route here is `recovery-admin`, human-only, and needs an `Idempotency-Key` of 16 to 128
+characters of `[A-Za-z0-9_-]`; a shorter key gets `400 invalid-request`. The full contracts
 are [execution and recovery](../spec/execution-recovery.md) and
 [persistence and API §12](../spec/persistence-api.md).
 
@@ -73,7 +74,7 @@ operation to the instance you are talking to, take it over from its current gene
 generation is in the operation's last `ownership-transition` timeline entry.
 
 ```sh
-call POST /operations/$op/takeovers "$recovery" '{"generation": 1, "reason": "the owner was stopped"}' takeover-1 |
+call POST /operations/$op/takeovers "$recovery" '{"generation": 1, "reason": "the owner was stopped"}' recovery-takeover-1 |
   jq '{state, generation}'                       # unresolved, generation 2
 ```
 
@@ -85,17 +86,20 @@ A stale generation, or an operation already `completed`, `failed`, `rejected` or
 When an attempt was sent and no response came back, nobody knows whether it landed. Bronzeward does
 not guess. You decide, from two observations of the machine:
 
-- `start`: the first observation, begun after the attempt's transport deadline, that read the node
-  and has a `resourceVersion`.
-- `end`: a `recovery` observation, with a `resourceVersion`, begun after `start` and at least the
-  settle floor (`execution.settleFloor`, 30 s by default) later.
+- `start`: the first observation, begun after the attempt's transport deadline, that read anything
+  from the node. It must be that one, not a later one, and it must have a `resourceVersion`; if the
+  first read lacks one, the server refuses the decision.
+- `end`: a `recovery` observation, with a `resourceVersion`, begun after `start` was recorded (its
+  `at`) and at least the settle floor (`execution.settleFloor`, 30 s by default) after the latest
+  of the transport deadline, the last takeover, and `start`'s `at`. The server takes `recovery`
+  observations itself, one per settle floor.
 
 ```sh
 call GET "/machines/$machine_w/observations?limit=500" "$viewer" |
-  jq '.items[] | {id, purpose, startedAt, resourceVersion, unread}'
+  jq '.items[] | {id, purpose, startedAt, at, resourceVersion, unread}'
 call POST /operations/$op/attempts/$attempt/accountings "$recovery" \
   "$(jq -nc --arg s "$start" --arg e "$end" '{start: $s, end: $e, facts: {explanation: "the node was cut off"}}')" \
-  accounting-1
+  recovery-accounting-1
 ```
 
 If the resource version moved between the two, say why in `facts.explanation`. The server refuses
@@ -110,7 +114,7 @@ still is found as drift.
 When the outcome cannot be read and no attempt was made, cancel the operation:
 
 ```sh
-call POST /operations/$op/resolutions "$recovery" '{"to": "cancelled", "reason": "never sent"}' resolution-1 | jq .state
+call POST /operations/$op/resolutions "$recovery" '{"to": "cancelled", "reason": "never sent"}' recovery-resolution-1 | jq .state
 ```
 
 Only `cancelled` is accepted, only from `unresolved`, and only when the operation has no attempt.
@@ -158,7 +162,7 @@ A=http://127.0.0.1:$SERVER_B_PORT     # from here on, every call goes to the rec
 call POST /recovery/entries "$recovery" "$(jq -nc --arg s "$stopped_at" '{
   restored: [{family: "database", backup: "pg-t.dump sha256:...", takenAt: "2026-10-18T08:00:00Z"},
              {family: "provider", backup: "bao-t.snap sha256:...", takenAt: "2026-10-18T08:00:05Z"}],
-  stoppedAt: $s, reason: "database and OpenBao restored"}')" entry-1 |
+  stoppedAt: $s, reason: "database and OpenBao restored"}')" recovery-entry-1 |
   jq '{previousEpoch, epoch, machines, operations}'
 ```
 
@@ -174,7 +178,20 @@ Then, through the recovery instance:
 - Reissue every automation token with `bronzeward token rotate`. A token issued before the entry
   is from an earlier epoch and gets `401`.
 
-### 4. Account, mark and release each machine
+### 4. Restart normally, still in recovery mode
+
+Once the entry is recorded, stop the recovery instance and start the instances without the flag,
+as `fixtures/scenarios/s7` does before the last release. The installation stays in recovery mode
+until the exit (step 6): no plan commits on a scope that is not yet released. The recovery instance
+runs no executor or job worker, so the normal restart is what settles a restored operation that
+has an attempt and runs any publication you queued. Without it, such an operation stays
+`unresolved`, its scope can never be released, and the exit is refused.
+
+```sh
+bin/bronzeward serve -config bronzeward.yaml     # fixture: fixtures/bin/inject kill B-recovery, then inject start B
+```
+
+### 5. Account, mark and release each machine
 
 Each machine goes `pre-restore-unaccounted`, then `unresolved` or `blocked`, then `ready`, then
 `released`. `GET /recovery` shows every scope's state.
@@ -185,34 +202,35 @@ Each machine goes `pre-restore-unaccounted`, then `unresolved` or `blocked`, the
 
    ```sh
    call POST /recovery/accountings "$recovery" "$(jq -nc --arg m "$machine_w" --arg s "$start" --arg e "$end" \
-     '{scopes: [{machine: $m, start: $s, end: $e}], facts: {}}')" accounting-scopes | jq .scopes
+     '{scopes: [{machine: $m, start: $s, end: $e}], facts: {}}')" recovery-accounting-scopes | jq .scopes
    ```
 
    A scope a restored operation still holds is `unresolved`; otherwise `blocked` until marked. A
-   restored operation with no attempt is then cancelled by the server. One with an attempt is
-   settled as in [interrupted operations](#interrupted-operations).
+   restored operation with no attempt is then cancelled by the server, sending nothing. One with an
+   attempt is classified by the normal instance's executor from an observation after the
+   accounting: `completed`, `failed`, or `unresolved` until you resolve it. It is never retried.
 2. **Mark.** The server observes the machine. `ready` with `missing: []` means it can be
    released. `blocked` names what is missing, such as an observation of an unreachable node.
 
    ```sh
-   call POST /recovery/scopes/$machine_w/marks "$recovery" '{"facts": {}}' mark-worker | jq '{state, missing}'
+   call POST /recovery/scopes/$machine_w/marks "$recovery" '{"facts": {}}' recovery-mark-worker | jq '{state, missing}'
    ```
 
-   If the node holds a configuration the restored Desired does not, the mark opens a drift record.
-   Handle it after exit as in [S5](walkthrough.md#s5-drift-adopted-or-reverted).
+   If the node's configuration digest is not what the restored Applied explains, the mark opens a
+   drift record, even when it matches a restored release's artifact. Handle it once the scope is
+   released, as in [S5](walkthrough.md#s5-drift-adopted-or-reverted).
 3. **Release.** Only a `ready` scope; anything else is `409 conflict`.
 
    ```sh
-   call POST /recovery/scopes/$machine_w/releases "$recovery" '{"facts": {}}' release-worker | jq .state
+   call POST /recovery/scopes/$machine_w/releases "$recovery" '{"facts": {}}' recovery-release-worker | jq .state
    ```
 
-### 5. Exit, then start normally
+### 6. Exit recovery mode
 
 ```sh
-call POST /recovery/exits "$recovery" '{"facts": {}}' exit-1 | jq .scopes
+call POST /recovery/exits "$recovery" '{"facts": {}}' recovery-exit-first | jq .scopes
 ```
 
-The exit is refused with `409 conflict` while any scope is unreleased. After it, stop the recovery
-instance and start the others without the flag. Restored operations are never retried. An
-approval recorded before the entry is refused at commitment (`the approval is of an earlier
-epoch`): plan and approve again.
+The exit is refused with `409 conflict` while any scope is unreleased. Restored operations are never
+retried. An approval recorded before the entry is refused at commitment (`the approval is of an
+earlier epoch`): plan and approve again.
