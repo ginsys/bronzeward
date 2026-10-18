@@ -81,7 +81,11 @@ new recovery epoch: read the events again from the start.
 - **A machine is frozen.** Its last `freeze` entry says who froze it, in which role and why. An
   approver unfreezes it with `POST /machines/$machine/unfreezes` and a body `{"reason": "..."}`.
 - **Every call answers `409 recovery-mode-active`.** The instance was started with
-  `-recovery-start` and no entry is recorded, or the installation is still in recovery mode:
+  `-recovery-start` and no entry is recorded. Until [the entry](recovery.md#3-record-the-entry)
+  commits it serves only `/livez` and `POST /recovery/entries`, `GET /recovery` included; the
+  `detail` says so.
+- **Acts on one machine answer `409 recovery-mode-active`.** The installation is in recovery mode
+  and that machine's scope is not released. On any instance past the entry:
   `call GET /recovery "$viewer" | jq '{recoveryMode, scopes}'`.
 - **`serve` exits at start.** An unmigrated or differently migrated database: stop every server,
   run `migrate` ([migrate, then serve](README.md#migrate-then-serve)).
