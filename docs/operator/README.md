@@ -52,7 +52,14 @@ go build -o bin/oidc-fixture ./fixtures/oidc
 ## Configure
 
 Start from [`examples/bronzeward.yaml`](../../examples/bronzeward.yaml), whose comments name each
-setting and its contract. The blocks:
+setting and its contract. The DSN carries a password, so make your copy readable only by the user
+that runs Bronzeward before filling it in:
+
+```sh
+install -m 600 examples/bronzeward.yaml bronzeward.yaml
+```
+
+The blocks:
 
 | Block | What you set |
 |---|---|
