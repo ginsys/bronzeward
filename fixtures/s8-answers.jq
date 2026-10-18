@@ -1,13 +1,28 @@
 # S8 step 2's answers for one operation, from what h-viewer was served: the operation ($op, GET
-# /operations/{id}), its events ($ev) and its machine's timeline ($tl), each a one-element array
-# from --slurpfile. Every answer is reached by a link: the operation names its plan and machine,
-# the timeline's entries name the operation or the plan, an observation names the start it rests
-# on. scenarios/s8 checks the answers; this program only reads.
-($op[0]) as $o | ($ev[0]) as $e | ($tl[0]) as $t |
+# /operations/{id}), its events ($ev), its machine's timeline ($tl) and observations ($obs, GET
+# /machines/{id}/observations), each a one-element array from --slurpfile. Every answer is reached
+# by a link: the operation names its plan and machine, the timeline's entries name the operation,
+# the plan or an observation, an observation names the start it rests on. scenarios/s8 checks the
+# answers; this program only reads.
+# instant: a served time as Unix seconds and microseconds, whatever its offset and precision.
+def instant:
+  if . == null then null else
+    capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$") as $c |
+    (if $c.z == "Z" then 0 else ($c.z[1:3] | tonumber) * 3600 + ($c.z[4:6] | tonumber) * 60 end) as $off |
+    "\(($c.d + "Z" | fromdateiso8601) - (if $c.z[0:1] == "+" then $off else -$off end)).\((($c.f // ".")[1:] + "000000")[0:6])"
+  end;
+($op[0]) as $o | ($ev[0]) as $e | ($tl[0]) as $t | ($obs[0]) as $os |
 $o.subject.plan as $plan |
 [$t[] | select(.entry.operation == $o.id)] as $mine |
 ($mine | map(.revision)) as $revs |
-[$t[] | select(.kind == "observation-started" and .entry.operation == $o.id) | .revision] as $starts |
+# The starts taken for it, the plan's evidence included, and the observations its entries name.
+[$t[] | select(.kind == "observation-started" and (.entry.operation == $o.id or .entry.plan == $plan)) | .revision] as $starts |
+(if $revs == [] then [] else [$t[] | select(.kind == "scope-state" and .revision > $revs[0] and .revision < $revs[-1])] end) as $scoped |
+([$t[] | select(.entry.plan == $plan and .kind == "commitment")] + $mine + $scoped |
+  [.[] | .entry | (.observation, .start, .end) | select(type == "string" and startswith("obs_"))] | unique) as $links |
+[$os[] | select(((.basis as $b | $starts | index($b)) != null) or ((.id as $i | $links | index($i)) != null)) |
+  {observation: .id, revision, purpose, basis, at, access, talosNodeId, assignmentEvidence, runningVersion,
+   resourceVersion, health, unread}] as $observed |
 {
   operation: $o.id,
   kind: $o.kind,
@@ -34,9 +49,16 @@ $o.subject.plan as $plan |
         start: .entry.start, end: .entry.end}] | first)} |
     # Known only once accounted: a response that does not account (a transport failure) leaves it unknown.
     .sending = (if .accounting then "accounting:" + .accounting.basis else "unknown" end)],
-  # What was observed for it: the observations resting on a start that names it.
-  observed: [$t[] | select(.kind == "observation" and (.entry.basis as $b | $starts | index($b)) != null) |
-    {revision, observation: .entry.observation, purpose: .entry.purpose, basis: .entry.basis}],
+  # What was observed for it: the observations resting on a start taken for it or its plan, and those
+  # its entries name, each with what the read returned or which values it could not read and why.
+  observed: $observed,
+  # Every observation its entries name is served, and each served one is its timeline entry.
+  observationsResolve: ($links - [$os[].id] == []),
+  observedIsTimeline: ([$os[] | {id, purpose, basis, revision}] as $s |
+    all($t[] | select(.kind == "observation"); {id: .entry.observation, purpose: .entry.purpose, basis: .entry.basis, revision} as $x |
+      $s | index([$x]) != null)),
+  # Each observed one returned a reading or names the values it could not read.
+  observedRead: all($observed[]; .runningVersion != null or .resourceVersion != null or ((.unread // {}) | length) > 0),
   # Why the scope was held, and by whom: its ownership and state changes, and the scope states
   # recorded between its first and last entry.
   held: [$mine[] | select(.kind == "ownership-transition" or .kind == "operation-state") |
@@ -57,9 +79,12 @@ $o.subject.plan as $plan |
   eventsAreTimeline: (($e | map([(.id | split(":")[1] | tonumber), .type, .data])) ==
     ([$mine[] | select(.kind != "observation-started") | [.revision, .kind, .entry]])),
   # Each of the resource's attempts is its timeline entry, field by field where both carry it.
-  attemptsLinked: ((($o.attempts // []) | map({id, number, controller, generation, route, observation, revision})) ==
+  attemptsLinked: ((($o.attempts // []) | map({id, number, controller, generation, route, observation, revision,
+      transportDeadline: (.transportDeadline | instant), verificationDeadline: (.verificationDeadline | instant), at: (.at | instant)})) ==
     [$mine[] | select(.kind == "attempt") | {id: .entry.attempt, number: .entry.number, controller: .entry.controller,
-      generation: .entry.generation, route: .entry.route, observation: .entry.observation, revision}]),
+      generation: .entry.generation, route: .entry.route, observation: .entry.observation, revision,
+      transportDeadline: (.entry.transportDeadline | instant), verificationDeadline: (.entry.verificationDeadline | instant),
+      at: (.at | instant)}]),
   commitmentApproved: ([$mine[] | select(.kind == "commitment") | .entry.approval] as $c |
     $c != [] and all($c[]; . as $x | [$t[] | select(.kind == "approval" and .entry.plan == $plan) | .entry.approval] | index($x) != null)),
   textServed: ([$o, $e, $t] | [.. | objects | select(has("text"))] | length > 0)

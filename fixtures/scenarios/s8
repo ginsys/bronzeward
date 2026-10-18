@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Acceptance plan S8, operational visibility, against the fixture.
 #   run:        after scenarios/s7 run on the same up, on B. Step 1: h-viewer reads the worker's
-#               timeline and the events and resource of S4's safe apply, S5's revert (the first
+#               timeline and observations and the events and resource of S4's safe apply, S5's revert (the first
 #               approved as an unseen overwrite) and S7's held operation; the epoch served differs
 #               from the one s7 kept before T. Step 2: s8-answers.jq answers the step's questions for each
-#               from what was served, and for S6.1's lost response from the timeline, events and
-#               resource a separate s6 run kept (S8_S6_KEPT, its s6-run evidence directory, from
+#               from what was served, and for S6.1's lost response from the timeline, observations,
+#               events and resource a separate s6 run kept (S8_S6_KEPT, its s6-run evidence directory, from
 #               another up); answers.json holds them, and the control: the stored response entries of
 #               S4 and S5 carry the text the served ones withhold. Step 3, last, since h-viewer stays revoked:
 #               an operation B holds committed, its event stream held open past the token's exp,
@@ -67,10 +67,11 @@ epoch_moved() {
   served=$(served_epoch) && [ -n "$served" ] || return 1
   differ "$served" "$(cat -- "$STATE/s7-epoch-before-t")" && same "$served" "$(sql "SELECT epoch FROM installation_state")"
 }
-# answer <name> <operation file> <events file> <timeline file>: s8-answers.jq's answers for one operation,
-# from what was served, in $EV/answers-<name>.json.
+# answer <name> <operation file> <events file> <timeline file> <observations file>: s8-answers.jq's
+# answers for one operation, from what was served, in $EV/answers-<name>.json.
 answer() {
-  jq -n --slurpfile op "$2" --slurpfile ev "$3" --slurpfile tl "$4" -f "$here/../s8-answers.jq" >"$EV/answers-$1.json"
+  jq -n --slurpfile op "$2" --slurpfile ev "$3" --slurpfile tl "$4" --slurpfile obs "$5" \
+    -f "$here/../s8-answers.jq" >"$EV/answers-$1.json"
 }
 # all_answers: the four operations' answers in $EV/answers.json, one object keyed by scenario.
 all_answers() {
@@ -88,16 +89,24 @@ stored_text() {
 }
 
 # The structure every answer rests on: entries in commit order, the events the operation's own
-# timeline entries, the resource's attempts the timeline's, and no response text served.
-linked='.ordered and .eventsAreTimeline and .attemptsLinked and (.textServed | not)'
-# A safe apply's answers: its commitment names an approval of its plan by an approver; every attempt
-# carries its route, observation and deadlines, recorded at a time, its sending known; the last one
-# answered accepted; something observed for it; completed.
+# timeline entries, the resource's attempts the timeline's field by field, no response text served;
+# its commitment names a served approval of its plan, by a principal under a role; every observation
+# its entries name is served, each served one its timeline entry, each with a reading or the values
+# it could not read.
 # shellcheck disable=SC2016  # a jq program
-applied='.commitmentApproved
-  and (.commitment[-1].approval as $a | any(.approved[]; .approval == $a and .role == "approver" and (.by | type == "string" and . != "")))
+linked='.ordered and .eventsAreTimeline and .attemptsLinked and (.textServed | not)
+  and .commitmentApproved
+  and (.commitment[-1].approval as $a | any(.approved[]; .approval == $a
+    and (.by | type == "string" and . != "") and (.role | type == "string" and . != "")))
+  and .observationsResolve and .observedIsTimeline and .observedRead'
+# A safe apply's answers: its commitment's approval by an approver; every attempt carries its route,
+# observation and both deadlines, recorded at a time, its sending known; the last one answered
+# accepted; something observed for it; completed.
+# shellcheck disable=SC2016  # a jq program
+applied='(.commitment[-1].approval as $a | any(.approved[]; .approval == $a and .role == "approver"))
   and (.attempts | length) >= 1
-  and all(.attempts[]; .route != null and .observation != null and .transportDeadline != null and .recordedAt != null and .sending != "unknown")
+  and all(.attempts[]; .route != null and .observation != null and .transportDeadline != null
+    and .verificationDeadline != null and .recordedAt != null and .sending != "unknown")
   and .attempts[-1].response.class == "accepted"
   and (.observed | length) >= 1
   and .ended == "completed" and .state == "completed"'
@@ -169,7 +178,7 @@ run_pre() {
   [[ ${s8_ops[s7]} =~ ^op_[a-z2-7]{26}$ ]] || die "s8: no held operation in ${states[-1]}"
   [ -n "${S8_S6_KEPT:-}" ] || die "s8: S8_S6_KEPT must name the s6-run evidence directory of a separate s6 run"
   local f
-  for f in s6-send-timeline s6-send-events s6-send-operation; do
+  for f in s6-send-timeline s6-send-observations s6-send-events s6-send-operation; do
     [ -s "$S8_S6_KEPT/$f.json" ] || die "s8: no $f.json in S8_S6_KEPT"
   done
   s8_ops[s4]=$(sql "SELECT s.operation FROM plan p JOIN plan_state s ON s.plan = p.id
@@ -194,6 +203,7 @@ run_steps() {
   local ref x n last
   ref='S8 step 1'
   check "$ref" "h-viewer reads the worker's timeline, every page" keep s8-worker-timeline "/api/v1/machines/$machine_w/timeline"
+  check "$ref" "h-viewer reads the worker's observations, every page" keep s8-worker-observations "/api/v1/machines/$machine_w/observations"
   check 'S8 pass criteria' "after S7 the Bronzeward-Epoch header served differs from the one served before T, and is the installation's epoch" epoch_moved
   for x in s4 s5 s7; do
     check "$ref" "h-viewer reads the $x operation's events, every page" keep "s8-$x-events" "/api/v1/operations/${s8_ops[$x]}/events"
@@ -203,15 +213,17 @@ run_steps() {
   ref='S8 step 2'
   for x in s4 s5 s7; do
     check "$ref" "the $x operation's answers, from what h-viewer was served" \
-      answer "$x" "$EV/s8-$x-operation.json" "$EV/s8-$x-events.json" "$EV/s8-worker-timeline.json"
+      answer "$x" "$EV/s8-$x-operation.json" "$EV/s8-$x-events.json" "$EV/s8-worker-timeline.json" \
+      "$EV/s8-worker-observations.json"
   done
   check "$ref" "S6.1's lost response's answers, from what h-viewer was served in the s6 run (S8_S6_KEPT)" \
-    answer s6 "$S8_S6_KEPT/s6-send-operation.json" "$S8_S6_KEPT/s6-send-events.json" "$S8_S6_KEPT/s6-send-timeline.json"
+    answer s6 "$S8_S6_KEPT/s6-send-operation.json" "$S8_S6_KEPT/s6-send-events.json" "$S8_S6_KEPT/s6-send-timeline.json" \
+    "$S8_S6_KEPT/s6-send-observations.json"
   check "$ref" 'answers.json holds the four' all_answers
   result SKIP 'S8 step 1' "the reads following the operator walkthrough of issue #30, by a person: issue #31's review record"
   result SKIP 'S8 pass criteria' "a second reviewer reaching the same answers from the timeline: issue #31's review record"
   for x in s4 s5 s6 s7; do
-    check 'S8 pass criteria' "$x: entries in commit order, its events its timeline entries, its attempts the timeline's, no response text served" \
+    check 'S8 pass criteria' "$x: entries in commit order, its events its timeline entries, its attempts the timeline's with both deadlines and the time, no response text served; its commitment's approval served with principal and role; every observation it names served, its timeline entry, read or naming what it could not read" \
       answered "$x" "$linked"
   done
   for x in s4 s5; do
