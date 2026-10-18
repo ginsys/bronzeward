@@ -25,16 +25,18 @@ mint() {
 }
 # call <method> <path> <token> [body] [idempotency key] [etag]: the response body on stdout.
 # The token goes over stdin and the body through a file only you can read, never on curl's
-# command line.
+# command line. The file is removed once curl returns, whether or not it succeeded.
 call() {
-  local args=(-sS -D "$H" -X "$1" -H @-)
+  local args=(-sS -D "$H" -X "$1" -H @-) rc=0
   if [ -n "${4:-}" ]; then
     (umask 077 && printf '%s' "$4" >"$B")
     args+=(-H 'Content-Type: application/json' --data-binary "@$B")
   fi
   [ -z "${5:-}" ] || args+=(-H "Idempotency-Key: $5")
   [ -z "${6:-}" ] || args+=(-H "If-Match: $6")
-  printf 'Authorization: Bearer %s\n' "$3" | curl "${args[@]}" "$A/api/v1$2"
+  printf 'Authorization: Bearer %s\n' "$3" | curl "${args[@]}" "$A/api/v1$2" || rc=$?
+  rm -f -- "$B"
+  return "$rc"
 }
 etag() { sed -n 's/^[Ee][Tt][Aa][Gg]: *//p' "$H" | tr -d '\r'; }
 
