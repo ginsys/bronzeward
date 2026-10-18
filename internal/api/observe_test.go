@@ -479,7 +479,8 @@ func TestObserveRefusesStaleOwner(t *testing.T) {
 
 // PA §3.3 and its §16 check (AP §7.1, #25): after the machine's endpoint is replaced from A to
 // B, an evidence observation for a plan created at A dials A and records it, the plan's route; a
-// drift observation, for no plan, dials the machine's current endpoint B (the control).
+// drift observation, for no plan, dials the machine's current endpoint B. The control resolving
+// the plan's route at dispatch is refused; a plan created after the replacement is bound to B.
 func TestObservePlanRoute(t *testing.T) {
 	t.Parallel()
 	p := newPlanEnv(t)
@@ -524,6 +525,34 @@ func TestObservePlanRoute(t *testing.T) {
 	if len(nodeB.Seen()) == 0 || len(nodeA.Seen()) != seenA || drift.Endpoint != nodeB.Endpoint {
 		t.Fatalf("drift dialled %s: A %d requests, B %d", drift.Endpoint, len(nodeA.Seen())-seenA, len(nodeB.Seen()))
 	}
+	// The control resolves the route from the machine record at dispatch: the plan's evidence
+	// observation then names B, which its start's reference to the plan's route refuses before
+	// anything is dialled.
+	seenA, seenB := len(nodeA.Seen()), len(nodeB.Seen())
+	starts := count(t, p.db, `SELECT count(*) FROM observation_start WHERE machine = $1`, p.machine)
+	_, err = observer(t, p.env, x, options{dispatchRoute: true}).observe(t.Context(), p.machine,
+		observeFor{purpose: "evidence", plan: plan.ID})
+	if err == nil || !strings.Contains(err.Error(), "observation_start_plan_machine_endpoint_fkey") {
+		t.Fatalf("control: %v; want the plan-route reference refused", err)
+	}
+	if len(nodeA.Seen()) != seenA || len(nodeB.Seen()) != seenB ||
+		count(t, p.db, `SELECT count(*) FROM observation_start WHERE machine = $1`, p.machine) != starts {
+		t.Fatal("control: a node was dialled or a start recorded")
+	}
+	// A plan created after the replacement is bound to B, and its evidence observation dials B.
+	later := decode[planBody](t, p.plan(p.robot, "k-plan-later-0123456", applyBody(p.target.rel, p.machine, "")), 201)
+	if later.Route != nodeB.Endpoint {
+		t.Fatalf("later plan route %s; want %s", later.Route, nodeB.Endpoint)
+	}
+	seenA = len(nodeA.Seen())
+	lev, err := a.observe(t.Context(), p.machine, observeFor{purpose: "evidence", plan: later.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lev.Endpoint != nodeB.Endpoint || len(nodeA.Seen()) != seenA {
+		t.Fatalf("later plan's evidence dialled %s, A %d more requests", lev.Endpoint, len(nodeA.Seen())-seenA)
+	}
+	t.Logf("plan at A: evidence dials A; control (route resolved at dispatch): refused, nothing dialled; plan created after the replacement: bound to and dials B")
 	// A plan of another machine is refused before anything is recorded.
 	other := decode[machineBody](t, p.do(p.api, machineCall(p.human("h-author"), "k-machine-other-0123", p.cluster,
 		"1c6b7d2f-3a4e-4f60-9bac-1d2e3f4a5b6c")), 201).ID
