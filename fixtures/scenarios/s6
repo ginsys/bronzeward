@@ -308,8 +308,10 @@ s6() {
   check "$ref" "the second attempt names B's classification safe to retry, after the accounting" retried_after_accounting
   check "$ref" "its completion names a completion observation" completed_by_observation
   check "$ref" 'step 6: the newer plan revoked, never run' never_ran "$newer"
-  # Kept for S8 step 2: the timeline and events as served, read again from the record after down.
+  # Kept for S8 step 2: the timeline, observations and events as served, read again from the record
+  # after down.
   check "$ref" "kept: the worker's timeline, every page as h-viewer" keep s6-send-timeline "/api/v1/machines/$machine_w/timeline"
+  check "$ref" "kept: the worker's observations, every page as h-viewer" keep s6-send-observations "/api/v1/machines/$machine_w/observations"
   check "$ref" "kept: the send operation's events, every page as h-viewer" keep s6-send-events "/api/v1/operations/$op/events"
   check "$ref" "kept: the send operation as h-viewer reads it" keep_body s6-send-operation "/api/v1/operations/$op"
   point_row send - 'the response lost; B took it over, h-approver refused, h-recovery accounted after the settle floor, nothing landed: retried and completed, 2 attempts, 1 landing; the newer plan waited'
