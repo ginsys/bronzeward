@@ -188,12 +188,7 @@ func serveContext(ctx context.Context, args []string) error {
 			go monitor.New(db, pub.Meta, monitor.Defaults(), log.Printf, os.Stderr).Run(ctx)
 		}
 	}
-	var onEntry func()
-	if *recovery {
-		onEntry = afterEntry(ctx, db, every, runMonitor)
-	} else {
-		runMonitor()
-	}
+	onEntry := startMonitor(ctx, db, *recovery, every, runMonitor)
 	// Discovery is lazy: serve starts while the issuer is down, and requests answer 503 until it is up.
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners and the publish worker stop with the signal; a claim or job left held
@@ -260,6 +255,17 @@ func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, api.Exe
 		return nil, nil, nil, err
 	}
 	return ing, &api.Publishers{Meta: meta, Compiler: compiler}, exe, nil
+}
+
+// startMonitor starts the dependency monitor with a normal start. A recovery start records no
+// classification, alert or progress before its entry (dependency-monitor §10.1 item 13): the
+// monitor runs only from the returned onEntry, after the entry has committed.
+func startMonitor(life context.Context, db *sql.DB, recovery bool, every time.Duration, runMonitor func()) (onEntry func()) {
+	if recovery {
+		return afterEntry(life, db, every, runMonitor)
+	}
+	runMonitor()
+	return nil
 }
 
 // afterEntry is what a recovery start runs once its entry has committed: the staging sweep, which
